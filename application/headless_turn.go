@@ -56,7 +56,7 @@ func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust d
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
 
-	a.runTurn(run, provider, apiKey, bareModel, "", asstMsgID, false, modelCapabilities(provider, bareModel), "")
+	a.runTurn(run, provider, apiKey, bareModel, "", asstMsgID, false, modelCapabilities(provider, bareModel))
 
 	saved, err := a.Conversations.Get(convID)
 	if err != nil || saved == nil {

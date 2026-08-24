@@ -109,6 +109,24 @@ func TestBuildAskQuestionResult(t *testing.T) {
 			answer:  AskQuestionAnswer{Via: AskAnswerViaOption, OptionIDs: []string{"a", "b"}},
 			wantAns: "Option A, Option B",
 		},
+		{
+			name:    "multi-select + supplementary text",
+			req:     AskQuestionRequest{Question: "Q", Options: req.Options, AllowFreeText: true, MultiSelect: true},
+			answer:  AskQuestionAnswer{Via: AskAnswerViaOption, OptionIDs: []string{"a", "b"}, Text: "also maybe C"},
+			wantAns: "Option A, Option B — also maybe C",
+		},
+		{
+			name:    "single select + supplementary text",
+			req:     req,
+			answer:  AskQuestionAnswer{Via: AskAnswerViaOption, OptionIDs: []string{"b"}, Text: "but keep it short"},
+			wantAns: "Option B — but keep it short",
+		},
+		{
+			name:    "multi-select violation with text still rejected",
+			req:     req,
+			answer:  AskQuestionAnswer{Via: AskAnswerViaOption, OptionIDs: []string{"a", "b"}, Text: "note"},
+			wantErr: ErrAskMultiSelectViolation,
+		},
 	}
 
 	for _, c := range cases {

@@ -279,6 +279,7 @@
 }
 .learning-legend-skill { background: #58a6ff; }
 .learning-legend-memory { background: #f0883e; }
+.learning-legend-primary { background: #f85149; }
 .learning-legend-related { background: #1f6feb33; border: 1px solid #1f6feb; }
 .learning-legend-used { background: var(--accent-soft); border: 1px solid var(--accent); }
 

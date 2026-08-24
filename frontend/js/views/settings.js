@@ -119,10 +119,12 @@ function bindDiskSync() {
 }
 
 export async function refresh() {
-  const [settingsResult, infoResult, modelsResult] = await Promise.allSettled([
+  const [settingsResult, infoResult, modelsResult, sttStatusResult, ttsStatusResult] = await Promise.allSettled([
     rpc('settings.get'),
     rpc('app.info', {}, { timeoutMs: 4000 }),
     rpc('ai.models.list'),
+    rpc('settings.stt_install_status', {}, { timeoutMs: 4000 }),
+    rpc('settings.tts_install_status', {}, { timeoutMs: 4000 }),
   ]);
 
   if (settingsResult.status === 'fulfilled') {
@@ -184,6 +186,19 @@ export async function refresh() {
   renderTTSModelOptions(allModels);
   renderCompactionModelOptions(allModels);
   renderReviewModelOptions(allModels);
+
+  // Offline engine cards: paint the status line + populate the STT model
+  // picker from the installer snapshot. The picker only lists installed
+  // models, so a freshly installed whisper model appears here after the
+  // install dialog closes and the view refreshes.
+  if (sttStatusResult.status === 'fulfilled') {
+    renderSTTCard(sttStatusResult.value);
+    renderSTTModelOptions(sttStatusResult.value);
+  }
+  if (ttsStatusResult.status === 'fulfilled') {
+    renderTTSMatchState(ttsStatusResult.value);
+  }
+
   document.getElementById('settings-sidebar-compact').checked = localStorage.getItem('nusashell.sidebarMode') === 'icons';
   document.getElementById('settings-auto-reconnect').checked = autoReconnectEnabled();
 

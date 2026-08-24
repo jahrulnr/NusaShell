@@ -70,8 +70,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 		CreatedAt:  now,
 		ProviderID: provider.ID,
 	}
-	c.AddMessage(userMsg)
-	c.AddMessage(asstMsg)
+	a.addTurnMessages(c, userMsg, asstMsg)
 	c.Model = qualifiedModel
 	c.Effort = req.Effort
 	c.Status = "running"
@@ -91,7 +90,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	a.runsMu.Unlock()
 
 	a.goSafe("agent", func() {
-		a.runTurn(run, provider, apiKey, bareModel, req.Effort, asstMsg.ID, false, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams), "")
+		a.runTurn(run, provider, apiKey, bareModel, req.Effort, asstMsg.ID, false, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams))
 	})
 	a.log("info", "agent", "turn started: %s (model %s)", run.ID, bareModel)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
@@ -175,10 +174,53 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	a.runsMu.Unlock()
 
 	a.goSafe("agent", func() {
-		a.runTurn(run, provider, apiKey, bareModel, req.Effort, targetMsgID, continuation, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams), "")
+		a.runTurn(run, provider, apiKey, bareModel, req.Effort, targetMsgID, continuation, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams))
 	})
 	a.log("info", "agent", "turn retried: %s (model %s)", run.ID, bareModel)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
+}
+
+// shouldAnnounceRestart reports whether a persisted conversation predates
+// the current process (was used before the backend restarted) and therefore
+// gets a one-shot restart announcement on its next user message. Fresh
+// conversations (created after startup) and empty conversations never
+// qualify; a zero startedAt (tests, unusual composition) disables it.
+func shouldAnnounceRestart(c *domain.Conversation, startedAt time.Time) bool {
+	return !startedAt.IsZero() && startedAt.After(c.UpdatedAt) && len(c.Messages) > 0
+}
+
+// addTurnMessages appends the user message, an optional restart
+// announcement, and the assistant turn message, in that order. The
+// announcement decision is taken BEFORE AddMessage because AddMessage
+// touches UpdatedAt past startedAt — deciding after would defeat the
+// predates-restart check and break the one-shot-per-restart guarantee.
+func (a *App) addTurnMessages(c *domain.Conversation, userMsg, asstMsg domain.Message) {
+	announce := shouldAnnounceRestart(c, a.startedAt)
+	c.AddMessage(userMsg)
+	if announce {
+		c.AddMessage(a.restartAnnouncement())
+	}
+	c.AddMessage(asstMsg)
+}
+
+// restartAnnouncement builds the synthetic assistant message carrying the
+// `announcement` tool call with its result pre-filled. It is persisted
+// into the conversation so the model sees it in this turn and in later
+// turns (auto-continue), and the UI renders it as a normal tool card.
+func (a *App) restartAnnouncement() domain.Message {
+	return domain.Message{
+		ID:        domain.NewID("msg"),
+		Role:      domain.RoleAssistant,
+		CreatedAt: time.Now().UTC(),
+		Status:    domain.StatusDone,
+		ToolCalls: []domain.ToolCall{{
+			ID:     domain.AnnouncementToolCallPrefix + randomNonce(),
+			Name:   domain.AnnouncementToolName,
+			Args:   "{}",
+			Status: domain.ToolOK,
+			Output: domain.AnnouncementMessage,
+		}},
+	}
 }
 
 func (a *App) handleTurnsStop(req contracts.TurnStopRequest) (any, *contracts.RPCError) {
@@ -338,6 +380,8 @@ func (a *App) handleAskAnswer(req contracts.AskAnswerRequest) (any, *contracts.R
 		ToolCallID:     req.ToolCallID,
 		Answer:         result.Answer,
 		Via:            result.Via,
+		OptionIDs:      result.OptionIDs,
+		Text:           result.Text,
 	})
 	return contracts.AskAnswerResult{
 		OK:        result.OK,
@@ -432,7 +476,7 @@ func (a *App) handleTurnsCancelSteer(req contracts.TurnCancelSteerRequest) (any,
 	return map[string]any{"ok": true, "accepted": true}, nil
 }
 
-func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities, systemPromptSuffix string) {
+func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities) {
 	defer func() {
 		run.Cancel()
 		// Reject any pending ask_question calls for this run so the
@@ -450,7 +494,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		// gets a 409 "conversation is busy" on every new message.
 		a.recoverOrphanedTurn(run)
 	}()
-	a.runTurnChain(run, provider, apiKey, model, effort, asstMsgID, initialContinuation, caps, systemPromptSuffix, 0)
+	a.runTurnChain(run, provider, apiKey, model, effort, asstMsgID, initialContinuation, caps, 0)
 }
 
 // runTurnChain executes the turn and, on success, checks the auto-continue
@@ -463,15 +507,14 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 //   - the chain budget is exhausted
 //   - the user stops the turn, sends a message, or switches conversations
 //     (detected via run.Ctx cancellation)
-func (a *App) runTurnChain(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities, systemPromptSuffix string, autoContinueIndex int) {
+func (a *App) runTurnChain(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities, autoContinueIndex int) {
 	chainModel := model
 	chainEffort := effort
 	chainAsstMsgID := asstMsgID
 	chainContinuation := initialContinuation
-	chainSuffix := systemPromptSuffix
 	chainIndex := autoContinueIndex
 	for {
-		shouldContinue, nextAsstMsgID := a.runSingleTurn(run, provider, apiKey, chainModel, chainEffort, chainAsstMsgID, chainContinuation, caps, chainSuffix, chainIndex)
+		shouldContinue, nextAsstMsgID := a.runSingleTurn(run, provider, apiKey, chainModel, chainEffort, chainAsstMsgID, chainContinuation, caps, chainIndex)
 		if !shouldContinue {
 			return
 		}
@@ -489,7 +532,6 @@ func (a *App) runTurnChain(run *TurnRun, provider *domain.Provider, apiKey, mode
 		chainIndex++
 		chainAsstMsgID = nextAsstMsgID
 		chainContinuation = false
-		chainSuffix = "" // continue prompt is now injected as a user message
 		a.log("info", "agent", "auto-continue chain: starting turn %d for %s (open todos remain)", chainIndex, run.ConversationID)
 	}
 }
@@ -498,7 +540,7 @@ func (a *App) runTurnChain(run *TurnRun, provider *domain.Provider, apiKey, mode
 // (shouldAutoContinue, nextAssistantMessageID). The shouldAutoContinue flag
 // is true only when the turn succeeded and the auto-continue policy says
 // the chain should continue.
-func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities, systemPromptSuffix string, autoContinueIndex int) (bool, string) {
+func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities, autoContinueIndex int) (bool, string) {
 
 	// Codex sticky account: pick the account bound to this conversation
 	// so the Codex backend can reuse the prompt cache shard. If every
@@ -619,7 +661,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Round: round,
 		})
-		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, injectHydration, promptCache, caps, systemPromptSuffix)
+		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, injectHydration, promptCache, caps)
 		injectHydration = false // only the first round may create a missing checkpoint
 		continuation = false
 		totalUsage = mergeUsage(totalUsage, roundResult.Response.Usage)

@@ -54,11 +54,24 @@ When a subagent finishes (completed, failed, or cancelled):
    Writes are atomic and per-run, so parallel spawns finishing at the
    same time never contend on a shared file.
 2. The original `subagent` tool call is updated from `running` to
-   `ok`/`fail` with the subagent's last-turn text summary as output.
-3. A new parent-agent turn is triggered (tool injection) so the parent
+   `ok`/`fail` with a brief terminal status (the full output travels in
+   the synthetic `subagent_result` tool call below — old history is
+   never silently rewritten).
+3. A synthetic `subagent_result` tool call carrying the full result
+   (YAML frontmatter with `status` / `id` / `workspace` / `output_path`
+   plus the subagent's last-turn text summary) is injected into the
+   conversation, announcement-style. It is persisted as a normal
+   assistant tool call so the model sees it in fresh context and in
+   later turns (auto-continue) too.
+4. A new parent-agent turn is triggered (tool injection) so the parent
    processes the result without a user message. The parent agent sees
-   the completed tool call in its message history and acts on the
-   summary as if it had just called the tool.
+   the `subagent_result` tool call in its message history and acts on
+   the summary as if it had just called the tool.
+
+Runtime state (delegation config, continuation instructions, subagent
+results) is never appended to the system prompt — it travels as tool
+descriptions or tool hydration so the system prefix keeps its
+prompt-cache hits.
 
 While any subagent is running, the parent agent's auto-continue chain
 pauses with reason `awaiting-background-jobs` instead of ending the

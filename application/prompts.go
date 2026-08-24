@@ -54,8 +54,12 @@ func buildSystemPrompt(c *domain.Conversation, userPrompt string) string {
 
 var subagentDelegationPrompt = resources.Prompt("subagent-delegation")
 
-func (a *App) acpDelegationPrompt() string {
-	agents := a.enabledAcpAgents()
+// AcpDelegationDescription renders the subagent delegation guidance with
+// the enabled agent list filled in. It is attached to the `subagent` tool
+// description (never the system prompt) so the system prefix stays
+// cache-stable and runtime config lives with the tool it describes.
+// Returns "" when no agents are enabled or the template is empty.
+func AcpDelegationDescription(agents []*domain.AcpAgent) string {
 	if len(agents) == 0 || strings.TrimSpace(subagentDelegationPrompt) == "" {
 		return ""
 	}

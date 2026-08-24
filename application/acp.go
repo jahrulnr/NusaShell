@@ -736,8 +736,10 @@ func (a *App) wireAcpCallbacks() {
 
 // onAcpRunDone handles subagent completion: persists the transcript to
 // JSONL storage, updates the original `subagent` tool call from running
-// to ok/fail with a text summary, and triggers a new parent-agent turn
-// (tool injection) so the parent processes the result without blocking.
+// to ok/fail with a brief terminal status, injects a synthetic
+// `subagent_result` tool call carrying the full result, and triggers a
+// new parent-agent turn (tool injection) so the parent processes the
+// result without blocking.
 //
 // This is the async completion path. The spawn path returns immediately
 // with status "starting"; this callback fires when the subagent finishes
@@ -777,39 +779,45 @@ func (a *App) onAcpRunDone(run *domain.AcpRun) {
 	// 2. Untrack the pending subagent.
 	wasPending := a.untrackPendingSubagent(run.ConversationID, run.ID)
 
-	// 3. Update the original `subagent` tool call with the structured
-	// result (YAML frontmatter + markdown body). The tool call was marked
-	// "running" when spawned; now it transitions to ok/fail.
+	// 3. Update the original `subagent` tool call to a brief terminal
+	// status (the full result travels in the synthetic subagent_result
+	// tool call below, so old history is not silently rewritten) and
+	// inject the synthetic subagent_result message carrying the full
+	// result. The tool call was marked "running" when spawned; now it
+	// transitions to ok/fail.
 	if run.ParentToolCallID != "" {
-		result := domain.SubagentCompletionResult(run, outputPath)
 		status := domain.ToolOK
 		if run.Status == domain.AcpRunFailed || run.Status == domain.AcpRunCancelled {
 			status = domain.ToolFailed
 		}
-		a.updateSubagentToolCall(run.ConversationID, run.ParentToolCallID, status, result)
+		a.completeSubagentRun(run.ConversationID, run.ParentToolCallID, status, run, outputPath)
 	}
 
 	// 4. Trigger a new parent-agent turn (tool injection). Only trigger
 	// if this run was pending (not already completed) and no turn is
 	// currently active for the conversation — the agent loop will pick
-	// up the updated tool call and process the result.
+	// up the synthetic subagent_result tool call and process the result.
 	if wasPending {
 		a.triggerSubagentCompletionTurn(run.ConversationID)
 	}
 }
 
-// updateSubagentToolCall finds the original `subagent` tool call by its
-// ID and updates its status + output in the conversation store. Emits a
-// ToolCompleted event so the frontend re-renders the delegation card.
-func (a *App) updateSubagentToolCall(conversationID, toolCallID string, status domain.ToolCallStatus, output string) {
+// completeSubagentRun updates the original `subagent` tool call to its
+// brief terminal state and injects a synthetic assistant message carrying
+// the `subagent_result` tool call with the full result pre-filled
+// (announcement-style). Persisted so the model sees it in this turn and
+// in later turns (auto-continue), and the UI renders it as a normal tool
+// card. Keeps the cache-stable system prompt untouched.
+func (a *App) completeSubagentRun(conversationID, toolCallID string, status domain.ToolCallStatus, run *domain.AcpRun, outputPath string) {
 	conv, err := a.Conversations.Get(conversationID)
 	if err != nil {
-		a.log("error", "acp", "updateSubagentToolCall: conversation %s not found: %v", conversationID, err)
+		a.log("error", "acp", "completeSubagentRun: conversation %s not found: %v", conversationID, err)
 		return
 	}
-	conv = a.updateToolResult(conv, "", toolCallID, status, output, nil)
+	conv = a.updateToolResult(conv, "", toolCallID, status, domain.SubagentBriefResult(run), nil)
+	conv.AddMessage(a.subagentResultMessage(run, outputPath, status))
 	if err := a.Conversations.Save(conv); err != nil {
-		a.log("error", "acp", "updateSubagentToolCall: save failed: %v", err)
+		a.log("error", "acp", "completeSubagentRun: save failed: %v", err)
 		return
 	}
 	a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
@@ -817,19 +825,39 @@ func (a *App) updateSubagentToolCall(conversationID, toolCallID string, status d
 		ToolCallID:     toolCallID,
 		Name:           "subagent",
 		Status:         string(status),
-		Output:         output,
+		Output:         domain.SubagentBriefResult(run),
 	})
+}
+
+// subagentResultMessage builds the synthetic assistant message carrying
+// the `subagent_result` tool call with its result pre-filled. Mirrors
+// restartAnnouncement: persisted into the conversation so the model
+// processes the result like any freshly completed tool output.
+func (a *App) subagentResultMessage(run *domain.AcpRun, outputPath string, status domain.ToolCallStatus) domain.Message {
+	return domain.Message{
+		ID:        domain.NewID("msg"),
+		Role:      domain.RoleAssistant,
+		CreatedAt: time.Now().UTC(),
+		Status:    domain.StatusDone,
+		ToolCalls: []domain.ToolCall{{
+			ID:     domain.SubagentResultPrefix + randomNonce(),
+			Name:   domain.SubagentResultToolName,
+			Args:   domain.SubagentResultArgs(run.ID),
+			Status: status,
+			Output: domain.SubagentCompletionResult(run, outputPath),
+		}},
+	}
 }
 
 // triggerSubagentCompletionTurn starts a new agent turn for the
 // conversation to process the completed subagent's output. This is the
-// "tool injection" mechanism: the parent agent sees the updated tool
-// call in its message history and processes the result as if it had
-// just completed the tool call itself.
+// "tool injection" mechanism: the parent agent sees the synthetic
+// subagent_result tool call in its message history and processes the
+// result as if it had just completed the tool call itself.
 //
 // The turn is only started if the conversation is idle (no active turn).
-// If a turn is already running, the updated tool call will be visible
-// in the next round's context and processed naturally.
+// If a turn is already running, the synthetic subagent_result message is
+// already persisted, so the next round's context picks it up naturally.
 func (a *App) triggerSubagentCompletionTurn(conversationID string) {
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
@@ -887,7 +915,7 @@ func (a *App) triggerSubagentCompletionTurn(conversationID string) {
 	caps := modelCapabilities(provider, bareModel)
 
 	a.goSafe("agent", func() {
-		a.runTurn(run, provider, apiKey, bareModel, effort, asstMsg.ID, false, caps, "A subagent completed. Process its output and continue.")
+		a.runTurn(run, provider, apiKey, bareModel, effort, asstMsg.ID, false, caps)
 	})
 	a.log("info", "acp", "subagent completion turn triggered for %s (model %s)", conv.ID, bareModel)
 }

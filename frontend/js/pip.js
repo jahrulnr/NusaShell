@@ -3,10 +3,13 @@
 // Two strategies behind one title-bar button:
 //
 // 1. Document Picture-in-Picture (Chromium): an always-on-top mini window.
-//    The live #agent-thread element MOVES into the PiP window. Moving (not
-//    cloning) keeps every JS reference in views/agent alive, so streaming,
-//    markdown, and scroll pinning keep rendering into the very same nodes.
-//    When the PiP window closes, the thread moves back into the shell.
+//    The live #agent-thread AND #agent-composer-stack elements MOVE into
+//    the PiP window, so the mini window is a full chat surface: you can
+//    read the conversation and type/send from it. Moving (not cloning)
+//    keeps every JS reference in views/agent alive, so streaming,
+//    markdown, scroll pinning, and the composer handlers keep working on
+//    the very same nodes. When the PiP window closes, both elements move
+//    back into the shell.
 //
 // 2. Popup fallback (Firefox/Safari/everything else): a small independent
 //    browser window running the full app at #agent with ?mini=1 (shell
@@ -43,19 +46,26 @@ async function openDocumentPip() {
   copyStyleSheets(pipWin);
 
   const thread = document.getElementById('agent-thread');
+  const composer = document.getElementById('agent-composer-stack');
   const placeholder = document.createElement('div');
   placeholder.id = PLACEHOLDER_ID;
   placeholder.className = 'agent-thread-pip-note';
-  placeholder.textContent = 'Conversation lives in the mini window.';
+  placeholder.textContent = 'Conversation and composer live in the mini window.';
   thread.replaceWith(placeholder);
+  pipWin.document.body.classList.add('is-pip-window');
   pipWin.document.body.appendChild(thread);
+  if (composer) pipWin.document.body.appendChild(composer);
   document.body.classList.add('is-pip-source');
 
   const restore = () => {
     placeholder.replaceWith(thread);
+    if (composer) thread.insertAdjacentElement('afterend', composer);
     document.body.classList.remove('is-pip-source');
+    pipWin.document.body.classList.remove('is-pip-window');
   };
   pipWin.addEventListener('pagehide', restore);
+  // Put the caret in the composer so the user can type straight away.
+  pipWin.document.getElementById('composer-input')?.focus();
 }
 
 function copyStyleSheets(pipWin) {

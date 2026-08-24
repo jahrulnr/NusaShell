@@ -526,13 +526,16 @@ type AskCancelRequest struct {
 }
 
 // AskAnsweredEvent is emitted when the user answers an ask_question, so other
-// UI surfaces (e.g. the tool card) can update.
+// UI surfaces (e.g. the tool card) can update. OptionIDs and Text let the UI
+// show exactly what was picked, including a supplementary free-text note.
 type AskAnsweredEvent struct {
-	ConversationID string `json:"conversation_id"`
-	RunID          string `json:"run_id"`
-	ToolCallID     string `json:"tool_call_id"`
-	Answer         string `json:"answer"`
-	Via            string `json:"via"`
+	ConversationID string   `json:"conversation_id"`
+	RunID          string   `json:"run_id"`
+	ToolCallID     string   `json:"tool_call_id"`
+	Answer         string   `json:"answer"`
+	Via            string   `json:"via"`
+	OptionIDs      []string `json:"option_ids,omitempty"`
+	Text           string   `json:"text,omitempty"`
 }
 
 // AskCancelledEvent is emitted when an ask_question is cancelled (by the user
@@ -1306,7 +1309,8 @@ type LearningGraphResult struct {
 
 type LearningGraphNode struct {
 	ID   string `json:"id"`
-	Kind string `json:"kind"` // "skill" | "memory"
+	Kind string `json:"kind"`           // "skill" | "memory"
+	Tier string `json:"tier,omitempty"` // memory only: "primary" | "fragment"
 	Name string `json:"name,omitempty"`
 }
 

@@ -535,10 +535,39 @@ func (a *App) handleModelsList() (any, *contracts.RPCError) {
 		}
 		out = append(out, modelsDTO(p)...)
 	}
+	// Installed offline piper voices surface as speech models in the picker:
+	// once the one-click installer finishes, the user can select the voice
+	// directly in Settings → Speech generation (provider "piper") instead of
+	// relying on the automatic fallback alone.
+	out = append(out, offlineTTSModels(a.TTSInstaller)...)
 	if out == nil {
 		out = []contracts.ModelDTO{}
 	}
 	return contracts.ModelsListResult{Models: out}, nil
+}
+
+// offlineTTSModels maps installed piper voices to speech model entries so
+// the Settings model picker shows them after install. Returns nil when no
+// installer is wired or nothing is installed.
+func offlineTTSModels(inst TTSInstaller) []contracts.ModelDTO {
+	if inst == nil {
+		return nil
+	}
+	var out []contracts.ModelDTO
+	for _, v := range inst.Status().Voices {
+		if !v.Installed {
+			continue
+		}
+		out = append(out, contracts.ModelDTO{
+			ID:           v.ID,
+			ProviderID:   OfflineTTSProviderID,
+			ProviderName: "Offline piper",
+			DisplayName:  v.Label,
+			Kind:         string(domain.ModelKindTTS),
+			TTS:          true,
+		})
+	}
+	return out
 }
 
 // enrichProviderModelsAtRead fills in missing metadata from the catalog

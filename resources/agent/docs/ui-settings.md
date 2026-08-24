@@ -110,7 +110,7 @@ When the active chat model cannot hear audio, NusaShell can transcribe or descri
 
 ## Speech generation
 
-Pick the model used by the generate_speech tool (text-to-speech). Online models use an OpenAI-compatible /audio/speech endpoint. The offline piper engine can be installed with one click: the install button opens a dialog with a voice picker (Bahasa Indonesia news_tts medium, English US lessac high), downloads the piper binary plus the selected voice model into the data directory with live progress, and enables generate_speech automatically when it finishes — no offline-mode checkbox needed. The old manual checkbox stays for PIPER_BIN/PATH setups.
+Pick the model used by the generate_speech tool (text-to-speech). Online models use an OpenAI-compatible /audio/speech endpoint. The offline piper engine can be installed with one click: the install button opens a dialog with a voice picker (Bahasa Indonesia news_tts medium, English US lessac high), downloads the piper binary plus the selected voice model into the data directory with live progress, and the installed voice then appears as an option in the model picker (provider “piper”) so it can be selected directly — the automatic fallback works as soon as install finishes, no offline-mode checkbox needed. The old manual checkbox stays for PIPER_BIN/PATH setups.
 
 - **`#settings-tts-title`** (missing map entry)
 
@@ -148,7 +148,7 @@ Pick the model used by the generate_speech tool (text-to-speech). Online models 
 
 ## Offline speech-to-text
 
-Lets read_audio transcribe audio locally with whisper.cpp (whisper-cli) — no API key, no network. The engine binary is downloaded once during install; models land under models/stt/ in the data directory. The install button opens a requirements dialog: a checklist (platform support, whisper.cpp engine, GGML model, free disk), a per-OS guide (Linux/Windows auto-install from official releases, macOS via brew install whisper-cpp), a model picker over the multilingual catalog (tiny/base/small-q5_1/small default/large-v3-turbo variants; Indonesian and English supported; .en variants excluded), and live download progress with speed. After install the model appears in the Offline STT model select and read_audio uses it automatically.
+Lets read_media transcribe audio locally with whisper.cpp (whisper-cli) — no API key, no network. The engine binary is downloaded once during install; models land under models/stt/ in the data directory. The install button opens a requirements dialog: a checklist (platform support, whisper.cpp engine, GGML model, free disk), a per-OS guide (Linux/Windows auto-install from official releases, macOS via brew install whisper-cpp), a model picker over the multilingual catalog (tiny/base/small-q5_1/small default/large-v3-turbo variants; Indonesian and English supported; .en variants excluded), and live download progress with speed. After install the model appears in the Offline STT model select and read_media uses it automatically.
 
 - **`#settings-stt-title`** (missing map entry)
 

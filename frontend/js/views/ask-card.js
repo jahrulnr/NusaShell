@@ -18,10 +18,11 @@ function parseAskAnswer(output) {
         via: parsed.via || '',
         answer: parsed.answer || '',
         optionIds: Array.isArray(parsed.option_ids) ? parsed.option_ids : (Array.isArray(parsed.optionIds) ? parsed.optionIds : []),
+        text: parsed.text || '',
       };
     }
   } catch {}
-  return { via: '', answer: String(output), optionIds: [] };
+  return { via: '', answer: String(output), optionIds: [], text: '' };
 }
 
 // createAskCard builds the ask_question card DOM. When sealed=true, the card
@@ -46,9 +47,12 @@ export function createAskCard(callId, args, { sealed = false, output = '', ok = 
   card.append(header);
 
   const body = el('div', { class: 'agent-ask-body' });
+  const hintText = multiSelect
+    ? 'Choose one or more responses so I can continue the task.'
+    : 'Choose one response so I can continue the task.';
   body.append(
     el('div', { class: 'agent-ask-question', text: question }),
-    el('div', { class: 'agent-ask-hint', text: multiSelect ? 'Choose one or more responses so I can continue the task.' : 'Choose one response so I can continue the task.' }),
+    el('div', { class: 'agent-ask-hint', text: hintText }),
   );
 
   const optionsWrap = el('div', { class: 'agent-ask-options' });
@@ -109,10 +113,6 @@ export function createAskCard(callId, args, { sealed = false, output = '', ok = 
             node.classList.toggle('is-selected', node.dataset.optionId === id);
             node.setAttribute('aria-pressed', node.dataset.optionId === id ? 'true' : 'false');
           });
-          const custom = card.querySelector('.agent-ask-custom');
-          custom?.classList.remove('is-active');
-          const textarea = card.querySelector('.agent-ask-textarea');
-          if (textarea) textarea.value = '';
         }
         row.classList.toggle('is-selected', selected.has(id));
         row.setAttribute('aria-pressed', selected.has(id) ? 'true' : 'false');
@@ -123,29 +123,28 @@ export function createAskCard(callId, args, { sealed = false, output = '', ok = 
   }
   body.append(optionsWrap);
 
-  if (allowFreeText || (sealed && parsedAnswer?.via === 'text')) {
-    const custom = el('div', { class: `agent-ask-custom${sealed && parsedAnswer?.via === 'text' ? ' is-active' : ''}` });
-    const customToggle = el('button', { class: 'agent-ask-custom-toggle', type: 'button', text: sealed && parsedAnswer?.via === 'text' ? 'Custom answer' : 'Type answer...' });
+  // Free text is a *supplement* to the selected options (a note, a
+  // suggestion, a different direction), never a replacement — picking an
+  // option no longer clears the note and vice versa.
+  const customActive = sealed && (parsedAnswer?.via === 'text' || Boolean(parsedAnswer?.text));
+  if (allowFreeText || customActive) {
+    const custom = el('div', { class: `agent-ask-custom${customActive ? ' is-active' : ''}` });
+    const customToggle = el('button', { class: 'agent-ask-custom-toggle', type: 'button', text: customActive ? 'Custom answer' : 'Add a note…' });
     customToggle.disabled = sealed;
     const textarea = document.createElement('textarea');
     textarea.className = 'agent-ask-textarea';
     textarea.rows = 3;
-    textarea.placeholder = 'Type a different direction...';
+    textarea.placeholder = 'Type a note, suggestion, or different direction…';
     textarea.maxLength = 8000;
-    if (sealed && parsedAnswer?.via === 'text') {
-      textarea.value = parsedAnswer.answer || '';
+    if (sealed && customActive) {
+      textarea.value = parsedAnswer?.via === 'text'
+        ? (parsedAnswer.answer || parsedAnswer.text || '')
+        : (parsedAnswer.text || '');
       textarea.disabled = true;
     }
     if (!sealed) {
       customToggle.addEventListener('click', () => {
         custom.classList.add('is-active');
-        if (!multiSelect) {
-          selected.clear();
-          card.querySelectorAll('.agent-ask-option').forEach((node) => {
-            node.classList.remove('is-selected');
-            node.setAttribute('aria-pressed', 'false');
-          });
-        }
         textarea.focus();
         syncAskSendState(card, selected);
       });
@@ -223,7 +222,7 @@ async function submitAskCard(card, selected, onSubmit) {
 }
 
 // sealAskCard transitions a pending card to sealed state with the answer.
-export function sealAskCard(card, { ok = true, answer = '', via = '', optionIds = [], error = '' } = {}) {
+export function sealAskCard(card, { ok = true, answer = '', via = '', optionIds = [], text = '', error = '' } = {}) {
   card.classList.remove('is-pending', 'is-submitting');
   card.classList.add('is-sealed');
   card.classList.toggle('is-error', ok === false);
@@ -240,11 +239,14 @@ export function sealAskCard(card, { ok = true, answer = '', via = '', optionIds 
       node.classList.toggle('is-selected', chosen.has(node.dataset.optionId));
     });
   }
-  if (via === 'text') {
+  // A supplementary note shows alongside the selected options (via
+  // "option" + text); a pure custom answer fills the textarea alone.
+  const note = via === 'text' ? (answer || text) : text;
+  if (note) {
     const custom = card.querySelector('.agent-ask-custom');
     const textarea = card.querySelector('.agent-ask-textarea');
     custom?.classList.add('is-active');
-    if (textarea) textarea.value = answer || '';
+    if (textarea) textarea.value = note;
   }
 }
 

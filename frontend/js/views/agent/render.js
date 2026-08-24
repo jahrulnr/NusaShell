@@ -3,6 +3,7 @@ import { el, fmtTime, registerOverlayDismiss } from '../../ui.js';
 import { createAskCard } from '../ask-card.js';
 import { openDrawer, agentNameForId, firstVisibleRunId } from './subagents.js';
 import { renderArtifactCard, parseArtifactOutput } from '../../artifact-render.js';
+import { agentThread, composerInput, toolJobStrip } from './domrefs.js';
 
 export const STARTER_PROMPTS = [
   {
@@ -24,7 +25,7 @@ export const STARTER_PROMPTS = [
 ];
 
 export function applyStarterPrompt(prompt) {
-  const input = document.getElementById('composer-input');
+  const input = composerInput();
   if (!input || !prompt) return;
   input.value = prompt;
   const EventCtor = input.ownerDocument?.defaultView?.Event || globalThis.Event;
@@ -43,7 +44,7 @@ function starterChip(item) {
 }
 
 export function bindStarterPrompts() {
-  document.getElementById('agent-thread')?.addEventListener('click', (event) => {
+  agentThread()?.addEventListener('click', (event) => {
     const chip = event.target.closest?.('[data-starter-prompt]');
     if (!chip) return;
     applyStarterPrompt(chip.getAttribute('data-starter-prompt'));
@@ -51,7 +52,7 @@ export function bindStarterPrompts() {
 }
 
 export function renderEmptyThread() {
-  const thread = document.getElementById('agent-thread');
+  const thread = agentThread();
   thread.innerHTML = '';
   thread.append(el('div', { class: 'agent-empty' },
     el('div', { class: 'agent-empty-mark', text: '✦' }),
@@ -62,7 +63,7 @@ export function renderEmptyThread() {
     ),
     el('p', { class: 'agent-empty-hint', text: 'Ctrl+K search rooms · Ctrl+N new · Ctrl+Enter send' }),
   ));
-  document.getElementById('tool-job-strip').hidden = true;
+  toolJobStrip().hidden = true;
   const todoStrip = document.getElementById('agent-todo-strip');
   if (todoStrip) todoStrip.hidden = true;
 }
@@ -267,8 +268,9 @@ function totalUsage(messages) {
 // everything else renders as a tool terminal.
 export function renderToolCallCard(toolCall) {
   if (toolCall.name === 'ask_question') {
-    let parsedArgs = {};
-    try { parsedArgs = JSON.parse(toolCall.args || '{}'); } catch {}
+    // args arrives as a parsed object from the wire DTO (json.RawMessage);
+    // parseToolArgs tolerates both object and JSON-string shapes.
+    const parsedArgs = parseToolArgs(toolCall.args);
     return createAskCard(toolCall.id, parsedArgs, {
       sealed: true,
       output: toolCall.output || '',
@@ -294,8 +296,7 @@ export function renderToolCallCard(toolCall) {
 // output = YAML frontmatter (status, workspace, output_path) + markdown
 // body (summary). Card re-render via EventToolCompleted.
 export function renderSubagentCard(toolCall) {
-  let args = {};
-  try { args = JSON.parse(toolCall.args || '{}'); } catch {}
+  const args = parseToolArgs(toolCall.args);
   let runs = [];
   let meta = null;       // parsed YAML header
   let outputText = '';   // markdown body (summary)

@@ -25,6 +25,7 @@ import {
   toolTerminalOutput,
 } from './agent/render.js';
 import { bindSubagents, setSubagentConversation } from './agent/subagents.js';
+import { agentThread, composerInput, stopButton, attachmentsContainer, workspaceButton, workspaceLabel, providerStatus } from './agent/domrefs.js';
 import { renderMermaidDiagrams } from '../mermaid-render.js';
 import { renderArtifactCard, parseArtifactOutput } from '../artifact-render.js';
 import { createAskCard, sealAskCard, cancelAskCard } from './ask-card.js';
@@ -281,7 +282,7 @@ async function createConversation(title = '') {
     renderTodoStrip();
     updateComposerStatus();
     updateSendAvailability(state);
-    document.getElementById('composer-input').focus();
+    composerInput().focus();
     setRoomsOpen(false);
   } catch (err) {
     toast(err.message, 'error');
@@ -587,7 +588,7 @@ async function reattachActiveRunFromBackend() {
     messageId: hasLive ? (liveBuffer.messageId || active.message_id) : active.message_id,
   });
   flushPendingEvents(active.run_id);
-  document.getElementById('stop-btn').hidden = false;
+  stopButton().hidden = false;
   updateSendAvailability(state);
 }
 
@@ -668,7 +669,7 @@ function sealStaleRoomBuffer(convId, runningStatus) {
 // live streaming slot, or appends a fresh node when the snapshot does not
 // contain that message yet. Existing nodes are ADDED TO, never replaced.
 function ensureRunSlot(run) {
-  const thread = document.getElementById('agent-thread');
+  const thread = agentThread();
   if (!thread) return null;
   const existing = findMessageNode(thread, run.messageId);
   if (existing) {
@@ -740,7 +741,7 @@ function reattachActiveRun() {
 // — idea: auto-scroll when loaded); false respects the pin so a background
 // refresh never yanks a user who scrolled up to read history.
 function renderThread(messages, force = true) {
-  const thread = document.getElementById('agent-thread');
+  const thread = agentThread();
   if (!messages.length) {
     renderEmptyThread();
     return;
@@ -832,7 +833,7 @@ function expireCompletedBuffers() {
 function applyBufferedRunToDOM(convId) {
   const buffer = state.roomBuffers.get(convId);
   if (!buffer || buffer.done || buffer.lastEventAt === 0 || !buffer.runId) return;
-  const thread = document.getElementById('agent-thread');
+  const thread = agentThread();
   if (!thread) return;
   // Convert the snapshot node that owns this message into a streaming slot
   // (append-based). A capped buffer still overlays its retained tail — the
@@ -883,7 +884,7 @@ function applyBufferedRunToDOM(convId) {
 }
 
 function renderAttachments() {
-  const container = document.getElementById('agent-attachments');
+  const container = attachmentsContainer();
   container.innerHTML = '';
   for (const [index, attachment] of state.attachments.entries()) {
     container.append(attachmentChip(attachment, () => {
@@ -1016,10 +1017,10 @@ async function handleTodoDelete(itemId, btn) {
 }
 
 function beginTurn(runId, userText, attachments = []) {
-  document.getElementById('stop-btn').hidden = false;
+  stopButton().hidden = false;
   updateSendAvailability(state);
 
-  const thread = document.getElementById('agent-thread');
+  const thread = agentThread();
   // remove empty state
   const empty = thread.querySelector('.agent-empty');
   if (empty) empty.remove();
@@ -1067,10 +1068,10 @@ async function retryTurn(failedNode, failedMessageId) {
     toast(err.message, 'error');
     return;
   }
-  document.getElementById('stop-btn').hidden = false;
+  stopButton().hidden = false;
   updateSendAvailability(state);
 
-  const thread = document.getElementById('agent-thread');
+  const thread = agentThread();
   // Remove the failed message's error UI (error text + retry button) from
   // the turn node without wiping the entire turn — earlier successful
   // assistant messages in the same turn group must stay visible.
@@ -1188,7 +1189,7 @@ function wireSteerCancelStrip() {
     try {
       await rpc('agent.turns.cancel-steer', { conversation_id: state.activeId });
       clearSteerQueue();
-      const input = document.getElementById('composer-input');
+      const input = composerInput();
       if (input && !input.value.trim()) {
         input.value = state.steerDraft ?? '';
         state.steerDraft = '';
@@ -1292,7 +1293,7 @@ function endTurn(runId) {
   if (convId === state.activeId) {
     clearSteerQueue();
     if (!runForConversation(state.activeId)) {
-      document.getElementById('stop-btn').hidden = true;
+      stopButton().hidden = true;
     }
     updateSendAvailability(state);
     updateComposerStatus();
@@ -1309,7 +1310,7 @@ function endTurn(runId) {
 // user scrolls up, pinning is released so they can read history without being
 // yanked back down. Scrolling back to the bottom re-pins.
 function bindScrollPin() {
-  const thread = document.getElementById('agent-thread');
+  const thread = agentThread();
   if (!thread) return;
   thread.addEventListener('scroll', () => {
     state.pinned = isAtBottom(thread);
@@ -1334,7 +1335,7 @@ function hasOlderActiveMessages() {
 // the thread while older active messages remain windowed out. Clicking it
 // reveals one batch with a stable (anchored) scroll position.
 function updateOlderSentinel() {
-  const thread = document.getElementById('agent-thread');
+  const thread = agentThread();
   if (!thread) return;
   let btn = document.getElementById('agent-load-older');
   if (!hasOlderActiveMessages()) {
@@ -1359,7 +1360,7 @@ function updateOlderSentinel() {
 // momentum-scroll fighting the anchor). The active (streaming) run lives at the
 // tail, which this never touches, so no run rebinding is needed.
 function prependActiveBatch() {
-  const thread = document.getElementById('agent-thread');
+  const thread = agentThread();
   if (!thread || state.activeWindowStart <= 0 || state.loadingActiveBatch) return;
   state.loadingActiveBatch = true;
   try {
@@ -1398,7 +1399,7 @@ function isAtBottom(el) {
 // scroll-to-top loader until it settles so the transient scrollTop≈0 during
 // layout is not treated as the user scrolling up.
 function scrollThreadToBottomHard() {
-  const thread = document.getElementById('agent-thread');
+  const thread = agentThread();
   if (!thread) return;
   state.suppressTopLoad = true;
   const jump = () => {
@@ -1417,7 +1418,7 @@ function scrollThreadToBottomHard() {
 }
 
 function scrollToBottom(force = false) {
-  const thread = document.getElementById('agent-thread');
+  const thread = agentThread();
   if (!thread) return;
   if (!force && !state.pinned) return;
   thread.scrollTop = thread.scrollHeight;
@@ -1431,7 +1432,7 @@ function scrollToBottom(force = false) {
 // tool jobs, and reasoning blocks. Used to decide whether the active slice
 // is too sparse and an older chunk should be proactively loaded.
 function countThreadBubbles() {
-  const thread = document.getElementById('agent-thread');
+  const thread = agentThread();
   if (!thread) return 0;
   return thread.querySelectorAll(
     '.agent-message.user, .agent-message.assistant, .agent-tool-terminal, .agent-reasoning',
@@ -1457,7 +1458,7 @@ async function loadOlderChunk() {
   const chunkIndex = state.nextChunkIndex;
   const conversationId = state.activeId;
   const token = state.conversationLoadToken;
-  const thread = document.getElementById('agent-thread');
+  const thread = agentThread();
   // Save the scroll anchor so we can restore position after prepending.
   const prevHeight = thread?.scrollHeight ?? 0;
   const prevScroll = thread?.scrollTop ?? 0;
@@ -1634,7 +1635,7 @@ function bindEvents() {
     const { conversation_id, estimated_tokens } = payload;
     if (conversation_id !== state.activeId) return;
     state.contextEstimate = Number(estimated_tokens) || 0;
-    const status = document.getElementById('agent-provider-status');
+    const status = providerStatus();
     if (!status) return;
     if (!Number.isFinite(Number(estimated_tokens)) || Number(estimated_tokens) <= 0) return;
     const chosen = models.find((model) => `${model.provider_id}:${model.id}` === state.model) || models.find((model) => model.id === state.model);
@@ -1953,7 +1954,7 @@ function bindEvents() {
   on('agent.auto_continue', (payload) => {
     const { conversation_id, decision, continue_text } = payload;
     if (conversation_id !== state.activeId) return;
-    const status = document.getElementById('agent-provider-status');
+    const status = providerStatus();
     if (status) {
       const { continues_used, max_auto_continues } = decision || {};
       const label = max_auto_continues === 0
@@ -1969,7 +1970,7 @@ function bindEvents() {
       const continueMessage = { role: 'user', content: continue_text, auto_continue: true, created_at: new Date().toISOString() };
       state.messages.push(continueMessage);
       const node = renderMessage(continueMessage);
-      const thread = document.getElementById('agent-thread');
+      const thread = agentThread();
       if (thread && node) thread.append(node);
       thread?.scrollTo?.({ top: thread.scrollHeight, behavior: 'smooth' });
     }
@@ -2000,7 +2001,7 @@ function bindEvents() {
     // The ask card is stored in toolJobs (not in the bubble).
     const card = run.toolJobs.get(tool_call_id);
     if (!card || !card.classList?.contains('agent-ask-card')) return;
-    sealAskCard(card, { ok: true, answer, via, optionIds: payload.option_ids || [] });
+    sealAskCard(card, { ok: true, answer, via, optionIds: payload.option_ids || [], text: payload.text || '' });
   });
   on('agent.ask.cancelled', (payload) => {
     const { run_id, tool_call_id, reason } = payload;
@@ -2018,7 +2019,7 @@ function bindEvents() {
       refreshLiveDots();
       return;
     }
-    const thread = document.getElementById('agent-thread');
+    const thread = agentThread();
     thread.append(el('div', { class: 'agent-compaction-marker', text: 'Compacted · context summarized' }));
     scrollToBottom();
     refreshActiveConversation();
@@ -2046,7 +2047,7 @@ function bindEvents() {
     // new message. The steer was never applied — it was cancelled because the
     // turn ended without reaching a safe boundary to inject it.
     if (text) {
-      const input = document.getElementById('composer-input');
+      const input = composerInput();
       if (input && !input.value.trim()) {
         input.value = text;
         input.dispatchEvent(new Event('input'));
@@ -2105,7 +2106,7 @@ function promoteSteerToTranscript(text) {
   // appended at the end of the thread (after the streaming assistant) and
   // appear pushed down during live streaming.
   clearSteerQueue();
-  const thread = document.getElementById('agent-thread');
+  const thread = agentThread();
   if (!thread) return;
   const steerMessage = { role: 'user', content: text, steer: true, created_at: new Date().toISOString() };
   state.messages.push(steerMessage);
@@ -2252,13 +2253,13 @@ async function refreshStatus() {
 
 function updateComposerStatus() {
   const workspace = state.conversation?.workspace || '';
-  const workspaceLabel = document.getElementById('agent-workspace-label');
-  const workspaceButton = document.getElementById('agent-workspace-btn');
-  workspaceLabel.textContent = workspace ? workspace.split(/[\\/]/).filter(Boolean).pop() : 'Home';
-  workspaceButton.title = workspace || 'Home (user home directory)';
+  const wsLabel = workspaceLabel();
+  const wsBtn = workspaceButton();
+  if (wsLabel) wsLabel.textContent = workspace ? workspace.split(/[\\/]/).filter(Boolean).pop() : 'Home';
+  wsBtn.title = workspace || 'Home (user home directory)';
 
-  const status = document.getElementById('agent-provider-status');
-  const stopBtn = document.getElementById('stop-btn');
+  const status = providerStatus();
+  const stopBtn = stopButton();
   // Only consider a run that actually belongs to the room the user is
   // looking at; a turn running in another room should not flip this room's
   // header into "running". A live buffer for the active room counts as

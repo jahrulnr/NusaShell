@@ -52,21 +52,24 @@ func DefaultEdgeBuilderConfig() EdgeBuilderConfig {
 	}
 }
 
-// EdgeBuilder pre-computes learning edges between memory entries and skills.
+// EdgeBuilder pre-computes learning edges between memory fragments and
+// skills. Fragments are the graph's memory nodes (one node per fact);
+// primary memory is a single working-set document, not a graph node with
+// meaningful similarity edges, so it is intentionally excluded.
 type EdgeBuilder struct {
-	memory  MemoryStore
-	skills  SkillStore
-	graph   *LearningGraphService
-	embed   Embedder
-	cache   *jsonstore.EmbeddingCache
-	cfg     EdgeBuilderConfig
-	modelID string
+	fragments FragmentStore
+	skills    SkillStore
+	graph     *LearningGraphService
+	embed     Embedder
+	cache     *jsonstore.EmbeddingCache
+	cfg       EdgeBuilderConfig
+	modelID   string
 }
 
 // NewEdgeBuilder creates an edge builder. embed and cache may be nil —
 // in that case only token overlap (Layer 3) runs.
 func NewEdgeBuilder(
-	memory MemoryStore,
+	fragments FragmentStore,
 	skills SkillStore,
 	graph *LearningGraphService,
 	embed Embedder,
@@ -78,13 +81,13 @@ func NewEdgeBuilder(
 		cfg = DefaultEdgeBuilderConfig()
 	}
 	return &EdgeBuilder{
-		memory:  memory,
-		skills:  skills,
-		graph:   graph,
-		embed:   embed,
-		cache:   cache,
-		cfg:     cfg,
-		modelID: modelID,
+		fragments: fragments,
+		skills:    skills,
+		graph:     graph,
+		embed:     embed,
+		cache:     cache,
+		cfg:       cfg,
+		modelID:   modelID,
 	}
 }
 
@@ -105,17 +108,36 @@ func (b *EdgeBuilder) Build(ctx context.Context) error {
 	return nil
 }
 
-// buildTokenOverlapEdges creates edges between memory entries and skills
-// based on token Jaccard similarity. Zero API cost.
+// buildTokenOverlapEdges creates edges between memory fragments and
+// skills, and between related fragments, based on token Jaccard
+// similarity. Zero API cost.
+//
+// Fragment↔fragment edges are what make the graph read as a chain of
+// related facts (A relevant to B, B to C, …) instead of every memory
+// node clinging to the skill hubs; without them the token-overlap pass
+// only produces memory↔skill spokes.
 func (b *EdgeBuilder) buildTokenOverlapEdges() {
-	memories := b.memory.List()
+	memories := b.fragments.List(domain.FragmentSearchFilter{Limit: 500})
 	skills := b.skills.List()
 	minLen := b.cfg.MinTokenLen
 	if minLen <= 0 {
 		minLen = 3
 	}
 
-	// Pre-tokenize skills
+	// Pre-tokenize everything once so pairwise comparison is a cheap set
+	// intersection instead of re-splitting text per pair.
+	type memTokens struct {
+		id     string
+		tokens map[string]bool
+	}
+	memToks := make([]memTokens, 0, len(memories))
+	for _, m := range memories {
+		toks := tokenizeForOverlap(m.Content, minLen)
+		if len(toks) == 0 {
+			continue
+		}
+		memToks = append(memToks, memTokens{id: m.ID, tokens: toks})
+	}
 	type skillTokens struct {
 		id     string
 		tokens map[string]bool
@@ -128,19 +150,29 @@ func (b *EdgeBuilder) buildTokenOverlapEdges() {
 		}
 	}
 
-	for _, mem := range memories {
-		memToks := tokenizeForOverlap(mem.Content, minLen)
-		if len(memToks) == 0 {
-			continue
-		}
+	// Memory ↔ skill (existing spokes).
+	for _, mt := range memToks {
 		for _, st := range skillToks {
 			if len(st.tokens) == 0 {
 				continue
 			}
-			jaccard := jaccardSimilarity(memToks, st.tokens)
+			jaccard := jaccardSimilarity(mt.tokens, st.tokens)
 			if jaccard >= b.cfg.TokenOverlapThreshold {
 				weight := float64(jaccard) * 0.5 // cap at 0.5 for token overlap
-				_, _ = b.graph.AddEdge(mem.ID, st.id, domain.EdgeRelated, weight)
+				_, _ = b.graph.AddEdge(mt.id, st.id, domain.EdgeRelated, weight)
+			}
+		}
+	}
+
+	// Memory ↔ memory (neuron-like chains between related facts). Uses
+	// the same threshold; identical-fact fragments land on the same
+	// cluster and strengthen over time via CombineWeights.
+	for i := 0; i < len(memToks); i++ {
+		for j := i + 1; j < len(memToks); j++ {
+			jaccard := jaccardSimilarity(memToks[i].tokens, memToks[j].tokens)
+			if jaccard >= b.cfg.TokenOverlapThreshold {
+				weight := float64(jaccard) * 0.5
+				_, _ = b.graph.AddEdge(memToks[i].id, memToks[j].id, domain.EdgeRelated, weight)
 			}
 		}
 	}
@@ -149,7 +181,7 @@ func (b *EdgeBuilder) buildTokenOverlapEdges() {
 // buildEmbeddingEdges creates edges between entries with cosine similarity
 // above the threshold. Uses the embedding cache to avoid re-embedding.
 func (b *EdgeBuilder) buildEmbeddingEdges(ctx context.Context) error {
-	memories := b.memory.List()
+	memories := b.fragments.List(domain.FragmentSearchFilter{Limit: 500})
 	skills := b.skills.List()
 
 	// Collect all texts to embed

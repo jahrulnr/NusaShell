@@ -68,7 +68,7 @@ func TestHydrationCheckpointPersistsOnceUntilCompaction(t *testing.T) {
 	adapter := &reviewStubAdapter{}
 	callRound := func(messageID string) {
 		t.Helper()
-		if _, err := app.streamTurnRoundOnce(run, adapter, conversation, messageID, "model", "", nil, domain.Settings{}, false, 0, true, nil, ModelCapabilities{}, ""); err != nil {
+		if _, err := app.streamTurnRoundOnce(run, adapter, conversation, messageID, "model", "", nil, domain.Settings{}, false, 0, true, nil, ModelCapabilities{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -469,7 +469,7 @@ func TestRunTurnFailsWhenAllCodexAccountsBlocked(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	provider := &domain.Provider{ID: "prov", Kind: domain.ProviderCodex}
 
-	app.runTurn(run, provider, "active-token", "gpt-5.3-codex", "", "m1", false, ModelCapabilities{Vision: true}, "")
+	app.runTurn(run, provider, "active-token", "gpt-5.3-codex", "", "m1", false, ModelCapabilities{Vision: true})
 
 	if factoryCalled {
 		t.Fatal("factory must not run when every Codex account is blocked")
@@ -660,7 +660,7 @@ func TestEmergencyCompactionReinjectsHydration(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{Vision: true}, "")
+	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{Vision: true})
 
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
@@ -700,7 +700,7 @@ func TestEmergencyCompactionSkippedWhenEstimateBelowTrigger(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{Vision: true}, "")
+	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{Vision: true})
 
 	if adapter.completes != 0 {
 		t.Fatalf("Complete calls = %d, want 0 (must not compact a small transcript)", adapter.completes)
@@ -800,7 +800,7 @@ func TestMidTurnProactiveCompaction(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{}, "")
+	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{})
 
 	if adapter.completes == 0 {
 		t.Fatal("expected proactive compaction (Complete calls > 0), got 0 — mid-turn check did not fire before round 2")

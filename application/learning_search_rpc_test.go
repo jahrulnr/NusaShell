@@ -259,6 +259,61 @@ func (f *fakeSettingsStore) Set(s domain.Settings) error {
 	return nil
 }
 
+// fakePrimaryStore is a minimal PrimaryStore for tests.
+type fakePrimaryStore struct {
+	entries []domain.PrimaryEntry
+}
+
+func (f *fakePrimaryStore) Load() *domain.PrimaryMemory {
+	return &domain.PrimaryMemory{Entries: f.entries}
+}
+func (f *fakePrimaryStore) Update(entries []domain.PrimaryEntry) error {
+	f.entries = entries
+	return nil
+}
+func (f *fakePrimaryStore) Replace(oldText, content string) error { return nil }
+
+func TestHandleLearningGraphPrimaryNodeTierAndLabel(t *testing.T) {
+	primary := &fakePrimaryStore{entries: []domain.PrimaryEntry{
+		{ID: "prim_abc", Content: "You are a backend developer living in Jakarta.\nYou prefer Go and pragmatic solutions."},
+	}}
+	fragments := &fakeFragmentStore{frags: []*domain.MemoryFragment{
+		{ID: "frag_1", Content: "multi\nline fact", Category: domain.FragmentCategoryGeneral},
+	}}
+	app := &App{
+		Skills:    &fakeSkillStore{items: map[string]*domain.Skill{}},
+		Primary:   primary,
+		Fragments: fragments,
+		Settings:  &fakeSettingsStore{settings: domain.Settings{}},
+	}
+	resp, rpcErr := app.handleLearningGraph()
+	if rpcErr != nil {
+		t.Fatalf("handleLearningGraph: %v", rpcErr)
+	}
+	result := resp.(contracts.LearningGraphResult)
+	if len(result.Nodes) != 2 {
+		t.Fatalf("nodes = %d, want 2 (primary + fragment)", len(result.Nodes))
+	}
+	byID := map[string]contracts.LearningGraphNode{}
+	for _, n := range result.Nodes {
+		byID[n.ID] = n
+	}
+	pn, ok := byID["prim_abc"]
+	if !ok || pn.Tier != "primary" {
+		t.Fatalf("primary node missing or wrong tier: %+v", result.Nodes)
+	}
+	if pn.Name != "You are a backend developer living in Jakarta." {
+		t.Fatalf("primary label should be the first line, got %q", pn.Name)
+	}
+	fn, ok := byID["frag_1"]
+	if !ok || fn.Tier != "fragment" {
+		t.Fatalf("fragment node missing or wrong tier: %+v", result.Nodes)
+	}
+	if fn.Name != "multi line fact" {
+		t.Fatalf("fragment label should collapse newlines, got %q", fn.Name)
+	}
+}
+
 func TestHandleLearningGraphFiltersDanglingEdges(t *testing.T) {
 	skills := &fakeSkillStore{items: map[string]*domain.Skill{
 		"skill_1": {ID: "skill_1", Name: "Git", Content: "x"},

@@ -81,9 +81,9 @@ func (a *App) toolDefinitions() []ToolDef {
 	return definitions
 }
 
-func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities, systemPromptSuffix string) (streamedTurnRound, error) {
+func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
 	for retry := 1; ; retry++ {
-		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration, promptCache, caps, systemPromptSuffix)
+		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration, promptCache, caps)
 		if err == nil || retry >= maxProviderAttempts || roundResult.Content != "" || roundResult.Reasoning != "" {
 			return roundResult, err
 		}
@@ -147,21 +147,15 @@ func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *do
 	}
 }
 
-func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities, systemPromptSuffix string) (streamedTurnRound, error) {
+func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
 	var content strings.Builder
 	var reasoning strings.Builder
+	// The system prompt is deliberately cache-stable: identity, user
+	// instructions, system-level skill messages, and workspace only. No
+	// runtime state (delegation config, continuation instructions, async
+	// results) is appended here — those travel as tool hydration or tool
+	// descriptions so the system prefix keeps its prompt-cache hits.
 	system := buildSystemPrompt(conversation, settings.UserPrompt)
-	if a != nil {
-		if suffix := a.acpDelegationPrompt(); suffix != "" {
-			system += "\n\n" + suffix
-		}
-	}
-	if continuation {
-		system += "\n\nThe immediately preceding assistant response was interrupted by a transient upstream failure. Continue it from exactly where it stopped. Do not repeat prior text."
-	}
-	if systemPromptSuffix != "" {
-		system += "\n\n" + systemPromptSuffix
-	}
 	// Persist the synthetic runtime-hydration transcript (runtime_context,
 	// memory, skill, mcp_list, tool_list, todo_list) to the conversation
 	// store as an assistant message with hydration tool calls + matching tool
@@ -192,6 +186,15 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 		_ = a.Conversations.Save(conversation)
 	}
 	messages := a.chatMessagesForProvider(conversation, messageID, caps)
+	// Continuation rounds (partial-stream recovery, failed-message retry)
+	// inject the "continue from where you stopped" instruction as an
+	// ephemeral synthetic tool call + result instead of a system prompt
+	// mutation. The model processes it like any tool output and continues
+	// the interrupted response; nothing is persisted, so later rounds keep
+	// the cache-stable system prefix.
+	if continuation {
+		messages = appendContinuationTool(messages)
+	}
 	// Publish a lightweight server-side context estimate (system + messages +
 	// tool definitions as actually sent) so the UI badge is not just a guess
 	// from the transcript alone — and remember it on the conversation so the
@@ -236,6 +239,19 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 		})
 	})
 	return streamedTurnRound{Content: content.String(), Reasoning: reasoning.String(), Response: response}, err
+}
+
+// appendContinuationTool appends the synthetic continue_stream tool call
+// (with its result pre-filled, announcement-style) to the provider message
+// list for a continuation round. Ephemeral: it exists only in this
+// request, never persisted to the conversation store.
+func appendContinuationTool(messages []ChatMessage) []ChatMessage {
+	id := domain.ContinueStreamToolCallPrefix + randomNonce()
+	call := domain.ToolCall{ID: id, Name: domain.ContinueStreamToolName, Args: "{}", Status: domain.ToolOK, Output: domain.ContinueStreamMessage}
+	return append(messages,
+		ChatMessage{Role: "assistant", ToolCalls: []domain.ToolCall{call}},
+		ChatMessage{Role: "tool", ToolResult: &ToolResult{ToolCallID: id, Name: domain.ContinueStreamToolName, Content: domain.ContinueStreamMessage}},
+	)
 }
 
 // estimateRequestTokens approximates provider tokens from the real request

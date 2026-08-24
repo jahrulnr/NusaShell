@@ -26,6 +26,14 @@ func OfflineSpeechAvailable(dataDir string) bool {
 // as "offline TTS disabled").
 func NewOfflineSynthesizer(dataDir string) application.OfflineSynthesizer {
 	bin := os.Getenv("PIPER_BIN")
+	if bin != "" {
+		// PIPER_BIN takes precedence, but only when it points at an
+		// existing binary. A missing path falls through to the next
+		// resolution layer instead of wiring an engine that can never run.
+		if _, err := os.Stat(bin); err != nil {
+			bin = ""
+		}
+	}
 	if bin == "" {
 		if _, err := exec.LookPath("piper"); err != nil {
 			// Fall back to the managed install from the Settings one-click

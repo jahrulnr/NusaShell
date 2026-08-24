@@ -460,7 +460,8 @@
                 <div class="learning-graph" id="learning-graph"></div>
                 <div class="learning-graph-legend">
                   <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-skill"></span>Skill</span>
-                  <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-memory"></span>Memory</span>
+                  <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-memory"></span>Fragment</span>
+                  <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-primary"></span>Primary</span>
                   <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-related"></span>Related</span>
                   <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-used"></span>Used with</span>
                 </div>
@@ -752,7 +753,7 @@
               <select id="settings-tts-model">
                 <option value="">Disabled — generate_speech needs the offline piper engine</option>
               </select>
-              <small>Only speech models (tts-1, Kokoudo, etc.) appear here. Leave disabled to rely on the offline piper engine only.</small>
+              <small>Online speech models (tts-1, Kokoudo, etc.) plus any installed offline piper voice appear here. Select an offline voice to use the local engine directly; leave disabled to rely on automatic fallback only.</small>
             </label>
             <label class="settings-toggle" for="settings-tts-offline">
               <span><strong>Offline piper engine</strong><small>Synthesize speech locally without any API key. Requires the piper binary on PATH (or PIPER_BIN) and voice models under models/tts/. Also serves as automatic fallback when the online model fails.</small></span>

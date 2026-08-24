@@ -16,9 +16,18 @@ func TestStatusReadyThroughAnyVoiceFile(t *testing.T) {
 	withFakeBin(t, dataDir)
 	inst := New(dataDir, fakeBinaryServer(t, dataDir).URL)
 
-	// Fresh data dir: nothing installed, not ready.
+	// Stage a fake managed binary so engineUsable() is satisfied without
+	// depending on a host piper install (PIPER_BIN is cleared and PATH may
+	// not have piper).
+	if err := os.MkdirAll(inst.platformDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inst.binaryPath(), []byte("#!/bin/sh\necho fake-piper"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Fresh data dir (binary but no voice): not ready yet.
 	if st := inst.status(); st.Ready {
-		t.Error("fresh data dir must not report ready")
+		t.Error("data dir without voices must not report ready")
 	}
 
 	// Drop a voice outside the catalog, as a manual install would.

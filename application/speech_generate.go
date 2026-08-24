@@ -11,11 +11,18 @@ import (
 
 const (
 	ttsUnconfigured = "No speech generation model is configured. Ask the user to pick one in Settings → Speech generation, or install the offline piper model."
+
+	// OfflineTTSProviderID is the pseudo provider id under which installed
+	// piper voices appear in the Settings model picker. Selecting one sets
+	// settings TTSProviderID to this value and routes generate_speech
+	// straight to the local engine with the chosen voice.
+	OfflineTTSProviderID = "piper"
 )
 
 // executeGenerateSpeech handles the generate_speech tool call.
-// Route: configured online TTS first (explicit user choice), offline piper
-// as fallback, mirroring the read_media ladder.
+// Route: explicit offline voice (provider "piper") first when the user
+// picked an installed voice in Settings, then configured online TTS, then
+// offline piper as fallback — mirroring the read_media ladder.
 func (a *App) executeGenerateSpeech(run *TurnRun, toolCall domain.ToolCall, settings domain.Settings) (string, []domain.Attachment, error) {
 	var args struct {
 		Text   string  `json:"text"`
@@ -43,6 +50,18 @@ func (a *App) executeGenerateSpeech(run *TurnRun, toolCall domain.ToolCall, sett
 	}
 
 	req := TTSRequest{Text: text, Voice: strings.TrimSpace(args.Voice), Format: format, Speed: args.Speed}
+
+	// 0. Explicit offline voice: the user selected an installed piper voice
+	// in Settings (provider "piper"). The chosen voice wins over the tool
+	// arg so Settings stays authoritative.
+	if settings.TTSProviderID == OfflineTTSProviderID {
+		req.Voice = settings.TTSModelID
+		if out := a.synthesizeOfflineTTS(req); out != nil {
+			return a.persistTTSText(run, toolCall.ID, out)
+		}
+		msg := "The selected offline piper voice is not available (was it uninstalled?). Reinstall it in Settings → Speech generation → Install offline text-to-speech."
+		return msg, nil, fmt.Errorf("%s", msg)
+	}
 
 	// 1. Online route (explicit configuration wins).
 	if settings.TTSProviderID != "" && settings.TTSModelID != "" {

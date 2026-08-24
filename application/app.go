@@ -72,6 +72,12 @@ type App struct {
 	retrySleeper                RetrySleeper
 	imageGenSem                 chan struct{}
 
+	// startedAt is the wall-clock time this process came up. Conversations
+	// whose last activity predates it were used before the restart; the
+	// first user message after restart injects a restart announcement
+	// (see handleTurnsStart).
+	startedAt time.Time
+
 	// ttsInstallMu guards the single in-flight offline TTS install
 	// (settings.tts_install_start is single-flight).
 	ttsInstallMu     sync.Mutex
@@ -418,6 +424,7 @@ func NewApp(deps Deps) *App {
 		AcpRunStorage:               deps.AcpRunStorage,
 		retrySleeper:                deps.RetrySleeper,
 		imageGenSem:                 make(chan struct{}, maxConcurrentImageGens),
+		startedAt:                   time.Now().UTC(),
 		Logger:                      deps.Logger,
 		Automation:                  deps.Automation,
 		runs:                        map[string]*TurnRun{},
@@ -457,9 +464,9 @@ func NewApp(deps Deps) *App {
 		// Load persisted turn counters so review thresholds survive restarts.
 		app.loadTurnCounters(deps.DataDir)
 	}
-	if deps.Memory != nil && deps.Skills != nil {
+	if deps.Fragments != nil && deps.Skills != nil {
 		app.edgeBuilder = NewEdgeBuilder(
-			deps.Memory, deps.Skills, app.graph(),
+			deps.Fragments, deps.Skills, app.graph(),
 			nil, // embedder is resolved lazily via ResolveEmbedder
 			app.EmbeddingCache,
 			DefaultEdgeBuilderConfig(),

@@ -1,6 +1,7 @@
 import { rpc } from '../../rpc.js';
 import { el, toast } from '../../ui.js';
 import { inspectAttachmentContent, toDataURL } from '../../agent-ui.js';
+import { agentForm, composerInput, composerStack, sendButton } from './domrefs.js';
 
 export function bindComposer({ state, createConversation, beginTurn, refreshConversations, renderAttachments, updateComposerStatus, showSteerQueued, clearSteerQueue, promoteSteerToTranscript, stopActiveRun }) {
   const form = document.getElementById('agent-form');
@@ -324,15 +325,15 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
 }
 
 export function updateSendAvailability(state) {
-  const input = document.getElementById('composer-input');
-  const send = document.getElementById('send-btn');
+  const input = composerInput();
+  const send = sendButton();
   const hasContent = input.value.trim() || state.attachments.length;
   // Show steer mode when a turn is running — check both the in-memory run map
   // and the persisted conversation status (after refresh, state.runs may be
   // empty until reattachActiveRunFromBackend completes).
   const running = state.running || state.conversation?.status === 'running';
-  const form = document.getElementById('agent-form');
-  const stack = document.getElementById('agent-composer-stack');
+  const form = agentForm();
+  const stack = composerStack();
   form?.classList.toggle('is-steer', running);
   stack?.classList.toggle('is-steer', running);
   send.classList.toggle('is-steer', running);

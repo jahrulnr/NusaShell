@@ -927,32 +927,29 @@ func (a *App) handleLearningGraph() (any, *contracts.RPCError) {
 			Name: s.Name,
 		})
 	}
-	// Primary memory nodes.
+	// Primary memory nodes. Primary is a single prose document (one entry
+	// per whole document), not per-fact entries — the node label is the
+	// first line so it reads as the document's subject, and the tier marks
+	// it as primary in the UI (distinct shape/color from fragments).
 	if a.Primary != nil {
 		mem := a.Primary.Load()
 		for i := range mem.Entries {
-			name := mem.Entries[i].Content
-			if len(name) > 40 {
-				name = name[:40] + "…"
-			}
 			nodes = append(nodes, contracts.LearningGraphNode{
 				ID:   mem.Entries[i].ID,
 				Kind: "memory",
-				Name: name,
+				Tier: "primary",
+				Name: primaryNodeLabel(mem.Entries[i].Content),
 			})
 		}
 	}
-	// Fragment nodes.
+	// Fragment nodes (one node per fact).
 	if a.Fragments != nil {
 		for _, f := range a.Fragments.List(domain.FragmentSearchFilter{Limit: 500}) {
-			name := f.Content
-			if len(name) > 40 {
-				name = name[:40] + "…"
-			}
 			nodes = append(nodes, contracts.LearningGraphNode{
 				ID:   f.ID,
 				Kind: "memory",
-				Name: name,
+				Tier: "fragment",
+				Name: memoryNodeLabel(f.Content),
 			})
 		}
 	}
@@ -991,6 +988,32 @@ func (a *App) handleLearningGraph() (any, *contracts.RPCError) {
 		})
 	}
 	return contracts.LearningGraphResult{Nodes: nodes, Edges: edges}, nil
+}
+
+// memoryNodeLabel shortens a fragment's content to a single-line node
+// label (max 40 chars), collapsing whitespace so multi-line content does
+// not break the graph label.
+func memoryNodeLabel(content string) string {
+	oneLine := strings.Join(strings.Fields(content), " ")
+	if len(oneLine) > 40 {
+		return oneLine[:40] + "…"
+	}
+	return oneLine
+}
+
+// primaryNodeLabel labels the single primary-memory document node with
+// its first line (the document's subject), capped at 60 chars. The full
+// document stays in the node tooltip via the frontend's title fallback.
+func primaryNodeLabel(content string) string {
+	first := content
+	if idx := strings.IndexByte(first, '\n'); idx >= 0 {
+		first = first[:idx]
+	}
+	first = strings.TrimSpace(first)
+	if len(first) > 60 {
+		return first[:60] + "…"
+	}
+	return first
 }
 
 // handleLearningLog returns the autolearn activity feed: learning-layer

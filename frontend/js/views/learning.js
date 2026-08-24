@@ -715,6 +715,9 @@ function initGraph() {
     groups: {
       skill: { color: { background: '#58a6ff', border: '#1f6feb' }, size: 20 },
       memory: { color: { background: '#f0883e', border: '#db6d28' }, size: 14 },
+      // Primary memory is one document (not per-fact), so it gets a
+      // distinct shape + color instead of masquerading as a fragment.
+      'memory-primary': { color: { background: '#f85149', border: '#b62324' }, size: 16, shape: 'square' },
     },
     physics: {
       enabled: true,
@@ -755,12 +758,31 @@ async function loadGraph() {
     // so we don't need to compute anything client-side.
     const { nodes, edges } = await rpc('learning.graph');
 
-    const newNodes = (nodes || []).map((n) => ({
-      id: n.id,
-      label: n.name || n.id,
-      group: n.kind,
-      title: n.name || n.id,
-    }));
+    // Degree centrality: a node's size grows with how many edges touch
+    // it, so well-connected hubs (frequently-relevant memories, used
+    // skills) read as larger than isolated leaves — a neuron-style map
+    // instead of uniform dots.
+    const degree = new Map();
+    for (const e of edges || []) {
+      degree.set(e.from, (degree.get(e.from) || 0) + 1);
+      degree.set(e.to, (degree.get(e.to) || 0) + 1);
+    }
+    const nodeSize = (kind, deg) => {
+      if (kind === 'skill') return Math.round(14 + Math.sqrt(deg) * 4);
+      if (kind === 'memory-primary') return 16; // document node: fixed
+      return Math.round(10 + Math.sqrt(deg) * 3.5);
+    };
+
+    const newNodes = (nodes || []).map((n) => {
+      const group = n.kind === 'memory' && n.tier === 'primary' ? 'memory-primary' : n.kind;
+      return {
+        id: n.id,
+        label: n.name || n.id,
+        group,
+        size: nodeSize(group, degree.get(n.id) || 0),
+        title: group === 'memory-primary' ? `Primary memory: ${n.name || n.id}` : (n.name || n.id),
+      };
+    });
 
     const newEdges = (edges || []).map((e, i) => ({
       id: `edge_${i}`,
@@ -778,8 +800,9 @@ async function loadGraph() {
     state.edgeCount = newEdges.length;
     document.getElementById('learning-stat-edges').textContent =
       `${state.edgeCount} edge${state.edgeCount === 1 ? '' : 's'}`;
+    const memCount = newNodes.filter((n) => n.group === 'memory' || n.group === 'memory-primary').length;
     document.getElementById('learning-stat-memory').textContent =
-      `${newNodes.filter((n) => n.group === 'memory').length} memor${newNodes.filter((n) => n.group === 'memory').length === 1 ? 'y' : 'ies'}`;
+      `${memCount} memor${memCount === 1 ? 'y' : 'ies'}`;
     // Auto-fit after data load + render settled. Defer to next frame so
     // the container has its final dimensions (view switch, CSS layout).
     if (state.network && newNodes.length > 0) {
