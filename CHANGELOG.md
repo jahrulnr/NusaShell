@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **PWA-grade shell: installable, offline-capable, mini window.** The web
+  app now ships a web app manifest (standalone display, any + maskable
+  icons) and a service worker (`sw.js`, network-first with cache fallback;
+  never caches `/rpc`, `/ws`, `/local-file`, `/sounds`, `/plugins/*`), so the
+  shell boots from cache and shows a full-window offline state while the
+  local backend is down. The page also hands its own asset list (links and
+  module scripts parsed from the DOM, plus fonts parsed from fonts.css) to
+  the service worker on first visit, so offline reload works after a single
+  load — not only after a second load. The offline mascot moved out of the
+  Agent view into a body-level `#offline-screen` overlay covering every view:
+  an explicit offline verdict shows it immediately, persistent WS failure
+  states cover after a 10 s grace window (quick reconnects never flicker),
+  recovery hides it instantly. A title-bar install button appears only while
+  the browser offers installation (`beforeinstallprompt`). A title-bar
+  mini-window button opens picture-in-picture on Chromium by moving the live
+  agent thread into an always-on-top Document PiP window (moved back on
+  close; streaming keeps working because JS references are preserved), with
+  a universal popup fallback (`?mini=1#agent`, shell chrome hidden).
+  `.webmanifest` is now served as `application/manifest+json`.
+
 ### Changed
 
 - **Built-in tools deduplicated into dispatcher families.** `skill`,

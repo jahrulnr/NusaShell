@@ -26,18 +26,16 @@ type dispatchFamily struct {
 var dispatchFamilies = []dispatchFamily{
 	{
 		root:    "skill",
-		members: []string{"list", "search", "read", "files", "save"},
+		members: []string{"list", "search", "save"},
 		def: ToolInfo{
 			Name:        "skill",
-			Description: "Skill library; \"op\" selects: list {limit?}; search {query,limit?} name/description substring match; read {name,path?,offset?,max_chars?} SKILL.md or support file — always read a skill before relying on it; files {name} list folder contents; save {name,content,description?,id?,path?} create/update SKILL.md, or write a support file when path is set (skill must exist)",
+			Description: "Skill library; \"op\" selects: list {limit?} returns owned_by+shadowed flags for path resolution; search {query,limit?} name/description substring match; save {name,content,description?,id?,path?} create/update SKILL.md, or write a support file when path is set (skill must exist). Skill files live on disk — read SKILL.md and support files with file_read, list a skill folder with file_list. See docs(op=\"read\", id=\"skills\") for the path layout.",
 			InputSchema: objSchema(
-				pEnum("op", "Operation", "list", "search", "read", "files", "save"),
+				pEnum("op", "Operation", "list", "search", "save"),
 				pStr("query", "Search query (op=search)"),
 				pInt("limit", "Max results (list default 100, search default 50)"),
-				pStr("name", "Skill id (op=read/files) or skill name, lowercase-with-hyphens (op=save)"),
-				pStr("path", "Relative file path inside the skill folder; defaults to SKILL.md (read) or targets a support file the skill must already have (save)"),
-				pInt("offset", "Character offset for pagination (op=read, default 0)"),
-				pInt("max_chars", "Max characters to return (op=read, default 20000 max 100000)"),
+				pStr("name", "Skill name, lowercase-with-hyphens (op=save)"),
+				pStr("path", "Relative file path inside the skill folder; targets a support file the skill must already have (op=save)"),
 				pStr("id", "Existing skill id to update; omit to create (op=save without path)"),
 				pStr("description", "Short description up to 1024 chars (op=save SKILL.md mode)"),
 				pStr("content", "Full file content (op=save)"),
@@ -76,19 +74,6 @@ var dispatchFamilies = []dispatchFamily{
 				pStr("query", "Search query (op=search)"),
 				pInt("limit", "Max results (op=search, default 10)"),
 				pStr("id", "Documentation page id (op=read)"),
-			),
-		},
-	},
-	{
-		root:    "ci_pipeline",
-		members: []string{"list", "read", "validate"},
-		def: ToolInfo{
-			Name:        "ci_pipeline",
-			Description: "Workspace CI pipeline definition (.nusashell/pipeline.yaml); \"op\" selects: list {workspace?}; read {workspace?} read + validate the definition; validate {yaml,workspace?} structured errors for YAML text",
-			InputSchema: objSchema(
-				pEnum("op", "Operation", "list", "read", "validate"),
-				pStr("workspace", "Workspace path"),
-				pStr("yaml", "Pipeline YAML text (op=validate)"),
 			),
 		},
 	},

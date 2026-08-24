@@ -9,11 +9,11 @@ capability flag from the model catalog (models.dev / OpenRouter).
 - **Non-vision model:** images are stripped from the conversation history
   before sending to the provider. A text placeholder is appended to the
   user message that shows the absolute file path(s) of the stripped image(s)
-  and instructs the model to call the `read_image` tool with `file_path` to
+  and instructs the model to call the `read_media` tool with `file_path` to
   load the image.
   Example: `[image content omitted — this model does not support image
   input. Image file(s): /home/user/.config/nusashell/attachments/conv_1/cat.png.
-  Call the read_image tool with file_path set to one of the absolute paths
+  Call the read_media tool with file_path set to one of the absolute paths
   above to load the image into your context. To edit it or use it as a
   reference, pass its absolute path in referenced_image_paths when calling
   generate_image.]`. This prevents provider
@@ -35,36 +35,36 @@ later switch to a vision-capable model can still see it.
 If no fallback is configured, non-vision models receive the text placeholder
 described above.
 
-## read_image tool
+## read_media tool
 
-The `read_image` tool lets the model load any image from disk on demand.
-It accepts a `file_path` (any absolute path of an image file on disk —
-conversation attachments, generated images, or files elsewhere on the
-filesystem) and an optional `question`. Relative paths are rejected — only
-absolute paths are accepted. There is no conversation-history lookup: if
-the file exists and is readable at that absolute path, it loads; otherwise
-the tool returns a clear not-found error.
+The `read_media` tool lets the model load any media file (image, audio,
+video, or PDF document) from disk on demand. It accepts a `file_path`
+(any absolute path of a media file on disk — conversation attachments,
+generated images, or files elsewhere on the filesystem) and an optional
+`question`. Relative paths are rejected — only absolute paths are
+accepted. There is no conversation-history lookup: if the file exists
+and is readable at that absolute path, it loads; otherwise the tool
+returns a clear not-found error.
 
-File type is validated by **binary magic number**, not by file extension.
-Extensions can be lied about (e.g. a `.js` file renamed to `.png`); magic
-bytes cannot. If the file's leading bytes do not match a known image
-signature (JPEG, PNG, GIF, WebP, BMP, TIFF), the tool rejects it with a
-clear error. The same guard applies to `read_audio` and `read_video` —
-a file claiming to be audio by extension but containing video bytes is
-rejected.
+The media kind (image, audio, video, or document) is auto-detected from
+the file's **binary magic number** — no need to specify whether it's an
+image, audio, video, or PDF. Extensions can be lied about (e.g. a `.js`
+file renamed to `.png`); magic bytes cannot. If the file's leading bytes
+do not match any
+known media signature, the tool rejects it with a clear error.
 
 Use a real absolute path — never guess or invent one.
 
 Good example:
 
-    read_image(file_path="/home/user/.config/nusashell/attachments/conv_1/cat.png",
+    read_media(file_path="/home/user/.config/nusashell/attachments/conv_1/cat.png",
                question="What color is the cat?")
 
 Bad examples:
 
-    read_image(file_path="cat.png")  # relative path is rejected
+    read_media(file_path="cat.png")  # relative path is rejected
 
-    read_image(file_path="/home/user/Pictures/guess.png")  # not the attached file
+    read_media(file_path="/home/user/Pictures/guess.png")  # not the attached file
 
 - **Vision-capable model (native fast path):** the image is returned
   directly as a tool result attachment. The provider adapter serializes it
@@ -78,12 +78,22 @@ Bad examples:
   that the model cannot see images and no fallback is configured.
 
 The image attachment is preserved on the original user message, so
-`read_image` can re-load it even after compaction prunes it from the
+`read_media` can re-load it even after compaction prunes it from the
 visible context window.
 
-`read_audio` and `read_video` follow the same on-demand pattern (native
-attachment for a capable model, fallback-model description otherwise) for
-audio and video files respectively.
+Audio and video files follow the same on-demand pattern (native
+attachment for a capable model, fallback-model description otherwise) —
+`read_media` auto-detects the kind and routes accordingly.
+
+PDF documents follow the same pattern: `read_media` auto-detects the PDF
+magic bytes (`%PDF-`) and loads the file as a document attachment. The
+provider adapter sends it via the native document content part
+(`document` block for Anthropic, `input_file` for OpenAI Responses).
+Non-document-capable models get a placeholder note with the file path.
+Note: **PDF support is separate from vision** — many vision models
+(Llama, Qwen, Grok, Mistral) cannot read PDFs. Only models with the
+`Document` capability flag (Anthropic Claude, OpenAI GPT-4o+, Google
+Gemini, xAI Grok) receive PDF attachments natively.
 
 ### Wire format for media attachments
 
@@ -95,6 +105,7 @@ the upstream API expects for that modality:
 | Image | `image_url` | `input_image` | `image` source |
 | Audio | `input_audio` (base64 + format) | `input_audio` (base64 + format) | `image` source (no native audio) |
 | Video | `video_url` | `video_url` | `image` source (no native video) |
+| Document (PDF) | text placeholder (no native part) | `input_file` (base64) | `document` source (base64) |
 
 Audio and video MUST NOT be sent as `image_url`/`input_image`. Providers
 like Nvidia NIM and Stealth reject `data:audio/...` or `data:video/...`
@@ -117,16 +128,17 @@ block.
 
 Media attachments are stripped before they reach the provider adapter
 when the active chat model does not support the corresponding modality.
-This is the same handling for image, audio, and video:
+This is the same handling for image, audio, video, and document (PDF):
 
 1. **User-authored attachments** (`chatMessages`): the attachment is
    removed and a placeholder is injected telling the model to call
-   `read_image` / `read_audio` / `read_video` with the absolute file
+   `read_media` with the absolute file
    path if it wants the content.
 2. **Tool result attachments** (`filterToolAttachmentsByCaps`): the
    attachment is removed and a text note is appended (e.g.
    `[Video "clip.mp4" was loaded but cannot be shown to this model.
-   File path: /path/to/clip.mp4]`).
+   File path: /path/to/clip.mp4]` or `[Document "report.pdf" was loaded
+   but cannot be read by this model. File path: /path/to/report.pdf]`).
 3. **Proactive fallback** (`enrichWithAudioDescriptions` /
    `enrichWithVideoDescriptions`): when a fallback model is configured,
    the media is described via the fallback before the turn starts, so
@@ -134,8 +146,9 @@ This is the same handling for image, audio, and video:
 
 A model's capabilities are resolved from the provider catalog
 (`domain.ModelCapabilitiesOf`). Unknown models default to
-`Vision=true, Audio=false, Video=false` — vision is common enough to
-default on, but audio and video are rare capabilities that cause
+`Vision=true, Audio=false, Video=false, Document=false` — vision is
+common enough to default on, but audio, video, and document are rare
+capabilities that cause
 provider errors when sent to models that lack them.
 
 ## Generated images

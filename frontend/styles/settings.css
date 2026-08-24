@@ -76,3 +76,167 @@
 .settings-definition-list dt { color: var(--text-faint); }
 .settings-definition-list dd { min-width: 0; margin: 0; color: var(--text-dim); overflow-wrap: anywhere; text-align: right; }
 .settings-definition-list code { color: var(--text); font: inherit; }
+
+/* ---- Offline TTS one-click install (card row + dialog) ---- */
+
+.settings-tts-install-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.settings-tts-install-status { font-size: 0.85rem; opacity: 0.75; }
+
+.tts-install-dialog { width: min(30rem, calc(100vw - 2rem)); }
+
+.tts-install-body { display: flex; flex-direction: column; gap: 0.85rem; }
+
+.tts-install-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.tts-install-phase { font-size: 0.9rem; font-weight: 600; }
+
+.tts-install-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+
+.tts-install-bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border-soft);
+  overflow: hidden;
+}
+
+/* Indeterminate mode: the fill sweeps back and forth while byte totals are
+ * unknown (e.g. binary download before Content-Length is parsed). */
+.tts-install-bar-track.indeterminate .tts-install-bar {
+  animation: tts-install-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes tts-install-sweep {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(20%); }
+  100% { transform: translateX(100%); }
+}
+
+.tts-install-bytes {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Offline STT one-click install (card row + requirements dialog) ---- */
+
+.settings-stt-install-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.settings-stt-install-status { font-size: 0.85rem; opacity: 0.75; }
+
+.stt-requirements-dialog { width: min(34rem, calc(100vw - 2rem)); }
+
+.stt-requirements-body { display: flex; flex-direction: column; gap: 0.85rem; }
+
+/* Checklist rows: dot + text + detail code per requirement. */
+.stt-req-checklist { display: flex; flex-direction: column; gap: 0.35rem; }
+
+.stt-req-item {
+  display: grid;
+  grid-template-columns: 0.55rem 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.stt-req-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--border-soft);
+}
+
+.stt-req-item.ok .stt-req-dot { background: var(--green, #3fb950); }
+.stt-req-item.missing .stt-req-dot { background: var(--red, #f85149); }
+
+.stt-req-detail {
+  font-size: 0.72rem;
+  opacity: 0.7;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Per-OS guide with tab row. */
+.stt-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  font-size: 0.88rem;
+}
+
+.stt-guide-tabs { display: flex; gap: 0.4rem; }
+
+.stt-guide-tab.active { background: var(--accent); color: var(--text-on-accent, #fff); }
+
+.stt-guide-panel pre {
+  background: var(--bg-soft);
+  border-radius: 6px;
+  padding: 0.6rem;
+  overflow-x: auto;
+  font-size: 0.78rem;
+  margin: 0.3rem 0 0;
+}
+
+.stt-guide-panel code { font-size: 0.8rem; }
+
+/* Progress block mirrors the TTS dialog (.tts-install-progress). */
+.stt-install-progress { display: flex; flex-direction: column; gap: 0.4rem; }
+
+.stt-install-phase { font-size: 0.9rem; font-weight: 600; }
+
+.stt-install-bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border-soft);
+  overflow: hidden;
+}
+
+.stt-install-bar-fill {
+  height: 8px;
+  width: 0%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+
+/* Indeterminate: fill sweeps while a byte total is unknown. */
+.stt-install-bar-track.indeterminate .stt-install-bar-fill {
+  width: 100%;
+  animation: stt-install-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes stt-install-sweep {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(20%); }
+  100% { transform: translateX(100%); }
+}
+
+.stt-install-bytes {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}

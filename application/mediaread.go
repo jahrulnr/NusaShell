@@ -2,6 +2,7 @@ package application
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"mime"
 	"os"
@@ -14,6 +15,40 @@ import (
 // maxReadMediaBytes caps the size of a media file loaded by the read_*
 // tools into an inline data URL attachment. A var so tests can narrow it.
 var maxReadMediaBytes int64 = 100 << 20 // 100 MB
+
+// sniffMediaKind reads the file_path from args (JSON), opens the file,
+// reads the first 32 bytes, and returns the media kind detected by
+// domain.SniffMagic ("image", "audio", or "video"). Returns an error
+// when file_path is missing, the file cannot be read, or the magic
+// bytes do not match any known media format.
+func sniffMediaKind(argsJSON []byte) (string, error) {
+	var args struct {
+		FilePath string `json:"file_path"`
+	}
+	if err := json.Unmarshal(argsJSON, &args); err != nil {
+		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	path := strings.TrimSpace(args.FilePath)
+	if path == "" {
+		return "", fmt.Errorf("file_path is required")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	head := make([]byte, 32)
+	n, err := f.Read(head)
+	if err != nil && n == 0 {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	head = head[:n]
+	_, kind := domain.SniffMagic(head)
+	if kind == "" {
+		return "", fmt.Errorf("unrecognized media type: %s (binary magic number not recognized)", path)
+	}
+	return kind, nil
+}
 
 // loadMediaAttachment loads any media file directly from disk by absolute
 // path and wraps it as an inline data-URL attachment. The filesystem is the

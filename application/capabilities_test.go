@@ -19,6 +19,9 @@ func TestModelCapabilitiesUnknownModelDefaultsVisionOnly(t *testing.T) {
 	if caps.Video {
 		t.Errorf("unknown model should default Video=false (rare capability, causes provider errors), got %+v", caps)
 	}
+	if caps.Document {
+		t.Errorf("unknown model should default Document=false (rare capability, may silently drop PDF), got %+v", caps)
+	}
 }
 
 func TestModelCapabilitiesNilProviderDefaultsVisionOnly(t *testing.T) {
@@ -32,33 +35,37 @@ func TestModelCapabilitiesNilProviderDefaultsVisionOnly(t *testing.T) {
 	if caps.Video {
 		t.Errorf("nil provider should default Video=false, got %+v", caps)
 	}
+	if caps.Document {
+		t.Errorf("nil provider should default Document=false, got %+v", caps)
+	}
 }
 
 func TestModelCapabilitiesFromMetadata(t *testing.T) {
 	provider := &domain.Provider{
 		ID: "p1",
 		Models: []domain.Model{
-			{ID: "gemini-2.5-flash", Vision: true, Audio: true, Video: true},
-			{ID: "gpt-4o", Vision: true, Audio: false, Video: false},
-			{ID: "llama-3", Vision: false, Audio: false, Video: false},
+			{ID: "gemini-2.5-flash", Vision: true, Audio: true, Video: true, Document: true},
+			{ID: "gpt-4o", Vision: true, Audio: false, Video: false, Document: true},
+			{ID: "llama-3", Vision: false, Audio: false, Video: false, Document: false},
 		},
 	}
 
 	tests := []struct {
-		model      string
-		wantVision bool
-		wantAudio  bool
-		wantVideo  bool
+		model        string
+		wantVision   bool
+		wantAudio    bool
+		wantVideo    bool
+		wantDocument bool
 	}{
-		{"gemini-2.5-flash", true, true, true},
-		{"gpt-4o", true, false, false},
-		{"llama-3", false, false, false},
+		{"gemini-2.5-flash", true, true, true, true},
+		{"gpt-4o", true, false, false, true},
+		{"llama-3", false, false, false, false},
 	}
 	for _, tt := range tests {
 		caps := modelCapabilities(provider, tt.model)
-		if caps.Vision != tt.wantVision || caps.Audio != tt.wantAudio || caps.Video != tt.wantVideo {
-			t.Errorf("model %s: got %+v, want vision=%v audio=%v video=%v",
-				tt.model, caps, tt.wantVision, tt.wantAudio, tt.wantVideo)
+		if caps.Vision != tt.wantVision || caps.Audio != tt.wantAudio || caps.Video != tt.wantVideo || caps.Document != tt.wantDocument {
+			t.Errorf("model %s: got %+v, want vision=%v audio=%v video=%v document=%v",
+				tt.model, caps, tt.wantVision, tt.wantAudio, tt.wantVideo, tt.wantDocument)
 		}
 	}
 }
@@ -279,5 +286,84 @@ func TestModelCapabilitiesReasoningReplayPatternFallback(t *testing.T) {
 	caps := modelCapabilities(provider, "stealth/ox-alpha")
 	if !caps.ReasoningReplay {
 		t.Errorf("stealth/ox-alpha should match pattern fallback: ReasoningReplay = false, want true")
+	}
+}
+
+func TestChatMessagesDocumentPlaceholderForNonDocumentModel(t *testing.T) {
+	dir := t.TempDir()
+	pdfPath := testAbsPath(dir, "report.pdf")
+	conv := &domain.Conversation{Messages: []domain.Message{
+		{ID: "u1", Role: domain.RoleUser, Content: "read this", Attachments: []domain.Attachment{
+			{Type: "file", Name: "report.pdf", MediaType: "application/pdf", DataURL: "data:application/pdf;base64,abc", FilePath: pdfPath},
+		}},
+	}}
+
+	msgs := chatMessages(conv, "", ModelCapabilities{})
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	userMsg := msgs[0]
+	if !strings.Contains(userMsg.Content, "document content omitted") {
+		t.Errorf("content should contain document omission placeholder, got: %q", userMsg.Content)
+	}
+	if !strings.Contains(userMsg.Content, pdfPath) {
+		t.Errorf("placeholder should include absolute file path, got: %q", userMsg.Content)
+	}
+	if !strings.Contains(userMsg.Content, "read_media") {
+		t.Errorf("placeholder should mention read_media tool, got: %q", userMsg.Content)
+	}
+	if len(userMsg.Attachments) != 0 {
+		t.Errorf("expected 0 attachments (file stripped), got %d", len(userMsg.Attachments))
+	}
+}
+
+func TestChatMessagesDocumentKeptForDocumentModel(t *testing.T) {
+	dir := t.TempDir()
+	pdfPath := testAbsPath(dir, "report.pdf")
+	conv := &domain.Conversation{Messages: []domain.Message{
+		{ID: "u1", Role: domain.RoleUser, Content: "read", Attachments: []domain.Attachment{
+			{Type: "file", Name: "report.pdf", MediaType: "application/pdf", DataURL: "data:application/pdf;base64,abc", FilePath: pdfPath},
+		}},
+	}}
+
+	msgs := chatMessages(conv, "", ModelCapabilities{Document: true})
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	userMsg := msgs[0]
+	if strings.Contains(userMsg.Content, "document content omitted") {
+		t.Errorf("document-capable model should not get placeholder, got: %q", userMsg.Content)
+	}
+	if len(userMsg.Attachments) != 1 || userMsg.Attachments[0].Type != "file" {
+		t.Errorf("file attachment should be kept for document-capable model, got %d attachments", len(userMsg.Attachments))
+	}
+}
+
+func TestFilterToolAttachmentsByCapsStripsDocument(t *testing.T) {
+	atts := []domain.Attachment{
+		{Type: "file", Name: "report.pdf", FilePath: "/tmp/report.pdf"},
+	}
+	filtered, content := filterToolAttachmentsByCaps(atts, "Document loaded.", ModelCapabilities{})
+	if len(filtered) != 0 {
+		t.Errorf("file should be stripped for non-document model, got %d attachments", len(filtered))
+	}
+	if !strings.Contains(content, "cannot be read") {
+		t.Errorf("content should note document can't be read, got: %q", content)
+	}
+	if !strings.Contains(content, "/tmp/report.pdf") {
+		t.Errorf("content should include file path, got: %q", content)
+	}
+}
+
+func TestFilterToolAttachmentsByCapsKeepsDocumentForDocumentModel(t *testing.T) {
+	atts := []domain.Attachment{
+		{Type: "file", Name: "report.pdf", FilePath: "/tmp/report.pdf"},
+	}
+	filtered, content := filterToolAttachmentsByCaps(atts, "Document loaded.", ModelCapabilities{Document: true})
+	if len(filtered) != 1 || filtered[0].Type != "file" {
+		t.Errorf("file should be kept for document-capable model, got %d attachments", len(filtered))
+	}
+	if strings.Contains(content, "cannot be read") {
+		t.Errorf("content should not note document can't be read, got: %q", content)
 	}
 }

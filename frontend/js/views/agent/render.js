@@ -90,12 +90,6 @@ export function renderTodoItem(item, onDelete) {
   );
 }
 
-export function setAgentOfflineState(isOffline) {
-  document.getElementById('agent-offline-state').hidden = !isOffline;
-  document.getElementById('agent-thread').hidden = isOffline;
-  document.getElementById('agent-composer-stack').hidden = isOffline;
-}
-
 export function reasoningDisclosure(reasoning) {
   const content = el('div', { class: 'agent-reasoning-content' });
   content.innerHTML = renderMarkdown(reasoning);

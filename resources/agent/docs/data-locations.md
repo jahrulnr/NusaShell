@@ -37,14 +37,15 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `learning/turns.json` | turn counters for review agent scheduling | JSON |
 | `learning/reviews/` | background review agent transcripts (one JSON file per review run; viewable from the Learning log) | JSON |
 | `attachments/<conv_id>/` | user image/file attachments and generated images (`gen-<toolCallID>.<ext>`) | files |
+| `models/tts/<voice>.onnx(.json)` | offline TTS voice models (piper). Installed by the one-click Settings installer or placed manually; `PIPER_VOICES_DIR` overrides this location | binary + JSON |
+| `piper/<goos>-<goarch>/` | managed piper engine installed by the one-click Settings installer (binary, `espeak-ng-data/`, shared libs); `PIPER_BIN`/PATH binaries still take precedence at runtime | files |
 | `docs/` | optional user-supplied docs that extend the embedded corpus | markdown |
 | `logs.jsonl` | activity log (bounded ring) | JSONL |
 | `conversations/<conv_id>.acp/` | completed ACP subagent run transcripts (one JSON file per run, linked to the parent conversation); legacy global `acp_runs.jsonl` migrates here automatically on first use | JSON |
 | `credentials.db` | API keys per provider | SQLite |
 | `ci/automation.db` | workflows, runs, schedules, events, waits, locks | SQLite |
+| `ci/pipelines/` | pipeline definition YAML files (one per workflow, auto-discovered on boot) | YAML |
 | `ci/runs/` | local executor scratch directories | files |
-
-Workspace pipelines live in the project tree as `.nusashell/pipeline.yaml`, not under the data directory.
 
 Credentials never appear in the JSON/JSONL files. Deleting the data
 directory removes everything, including stored keys.

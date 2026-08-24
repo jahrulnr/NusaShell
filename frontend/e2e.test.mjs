@@ -298,11 +298,11 @@ test('embedded frontend completes one representative flow through the Go backend
 
     server.go.kill();
     await waitFor(
-      () => !document.getElementById('agent-offline-state')?.hidden,
-      'friendly agent offline state after the local backend stops',
+      () => !document.getElementById('offline-screen')?.hidden,
+      'full-window offline state after the local backend stops',
+      20000,
     );
-    assert.match(document.getElementById('agent-offline-state').textContent, /Sorry, it looks like your agent is offline\./);
-    assert.equal(document.getElementById('agent-composer-stack').hidden, true);
+    assert.match(document.getElementById('offline-screen').textContent, /Sorry, it looks like your agent is offline\./);
   } catch (error) {
     throw new Error(`${error.message}\nGo server output:\n${server.output()}`);
   }

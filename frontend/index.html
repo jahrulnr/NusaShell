@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#10181c" />
 <title>NusaShell</title>
+<link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./nusashell-mark.png" type="image/png">
 <link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="styles/global.css">
@@ -46,6 +48,12 @@
     <div class="titlebar-actions">
       <button class="icon-btn mobile-nav-toggle" id="mobile-nav-toggle" type="button" aria-label="Open navigation menu" aria-expanded="false" aria-controls="sidebar">
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+      <button class="icon-btn" id="mini-window-btn" type="button" aria-label="Open mini window" title="Mini window (picture-in-picture)">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><rect x="12" y="12" width="7" height="5" rx="1" fill="currentColor"/></svg>
+      </button>
+      <button class="icon-btn" id="pwa-install-btn" type="button" aria-label="Install NusaShell" title="Install NusaShell" hidden>
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true"><path d="M12 4v10m0 0l-4-4m4 4l4-4M5 19h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
       <button class="icon-btn" id="nav-settings-btn" type="button" aria-label="Settings" title="Settings">
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55v.09a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 17.76a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 13a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 7a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 3.13 1.7 1.7 0 0 0 10 1.6v-.09a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 3.13a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 7a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.2"/></svg>
@@ -165,12 +173,6 @@
               <span>Rooms</span>
             </button>
             <div class="agent-rooms-backdrop" id="agent-rooms-backdrop" hidden></div>
-            <section class="agent-offline-state" id="agent-offline-state" role="status" aria-live="polite" hidden>
-              <img class="agent-offline-mascot" src="./agent-offline-mascot.png" alt="" aria-hidden="true" width="1254" height="1254">
-              <h2>Sorry, it looks like your agent is offline.</h2>
-              <p>Start NusaShell again, then keep this page open. We’ll reconnect automatically.</p>
-              <span class="agent-offline-note">Your visible conversation stays on this device.</span>
-            </section>
 
             <section class="agent-room-info" id="agent-room-info" aria-label="Conversation diagnostics" hidden>
               <button class="agent-room-info-trigger" id="agent-room-info-trigger" type="button" aria-label="Room info" aria-expanded="false" aria-controls="agent-room-info-popover" title="Room info">
@@ -486,7 +488,7 @@
           <div>
             <div class="view-kicker"><span class="view-kicker-dot"></span>Automation</div>
             <h1>Pipelines &amp; schedules</h1>
-            <p>Run workspace pipelines, durable once/every/when automations, and inspect waiting or blocked runs.</p>
+            <p>Run durable once/every/when automations and inspect waiting or blocked runs.</p>
           </div>
           <div class="automation-header-stats">
             <span class="automation-stat" id="auto-stat-runnable">0 runnable</span>
@@ -503,8 +505,6 @@
               <button class="tab" type="button" id="auto-tab-events" data-auto-tab="events" role="tab" aria-selected="false">Events</button>
             </div>
             <div class="automation-toolbar-actions">
-              <input type="text" id="auto-workspace" placeholder="Workspace path for .nusashell/pipeline.yaml" autocomplete="off" spellcheck="false">
-              <button class="mini-btn ghost" id="auto-run-pipeline-btn" type="button">Run pipeline</button>
               <button class="mini-btn" id="auto-new-btn" type="button">New automation</button>
             </div>
           </div>
@@ -759,6 +759,33 @@
               <input id="settings-tts-offline" type="checkbox">
               <span class="toggle-slider" aria-hidden="true"></span>
             </label>
+            <div class="settings-tts-install-row">
+              <button class="mini-btn" id="settings-tts-install-btn" type="button">Install offline text-to-speech…</button>
+              <span class="settings-tts-install-status" id="settings-tts-install-status"></span>
+            </div>
+          </section>
+          <section class="settings-card settings-stt-card" aria-labelledby="settings-stt-title">
+            <div class="settings-card-title">Offline speech-to-text</div>
+            <h2 id="settings-stt-title" class="sr-only">Offline speech-to-text</h2>
+            <p class="settings-card-copy">Lets <code>read_media</code> transcribe audio locally with whisper.cpp (whisper-cli) — no API key, no network. The engine binary is downloaded once during install; models land under <code>models/stt/</code> in your data directory.</p>
+            <label class="settings-field" for="settings-stt-model">Offline STT model
+              <select id="settings-stt-model">
+                <option value="">Auto — first installed GGML model</option>
+              </select>
+              <small>Only installed GGML models appear here. Install one with the button below.</small>
+            </label>
+            <label class="settings-field" for="settings-stt-language">Audio language
+              <select id="settings-stt-language">
+                <option value="">Auto-detect</option>
+                <option value="id">Bahasa Indonesia</option>
+                <option value="en">English</option>
+              </select>
+              <small>Leave on auto-detect to handle mixed conversations.</small>
+            </label>
+            <div class="settings-stt-install-row">
+              <button class="mini-btn" id="settings-stt-install-btn" type="button">Install offline speech-to-text…</button>
+              <span class="settings-stt-install-status" id="settings-stt-install-status"></span>
+            </div>
           </section>
           <section class="settings-card settings-web-answer-card" aria-labelledby="settings-web-answer-title">
             <div class="settings-card-title">Web Answer</div>
@@ -948,6 +975,97 @@
     </div>
   </div>
 </div>
+<!-- ===== Offline TTS Install Dialog ===== -->
+<div class="ui-dialog-overlay" id="tts-install-overlay" aria-hidden="true" hidden>
+  <div class="ui-dialog tts-install-dialog" role="dialog" aria-modal="true" aria-labelledby="tts-install-title">
+    <div class="ui-dialog-header">
+      <h2 id="tts-install-title">Install offline text-to-speech</h2>
+      <button class="ui-dialog-close" id="tts-install-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="ui-dialog-body tts-install-body">
+      <p class="plugin-install-hint">Downloads the local piper engine and a voice model so <code>generate_speech</code> works without any API key. No online model needed afterwards.</p>
+      <div class="plugin-install-error" id="tts-install-error" role="alert" hidden></div>
+      <label class="ui-dialog-field" for="tts-install-voice">
+        Voice
+        <select id="tts-install-voice">
+          <option value="">Select a voice…</option>
+        </select>
+        <small id="tts-install-voice-hint">Voice models are stored under <code>models/tts/</code> in your data directory.</small>
+      </label>
+      <div class="tts-install-progress" id="tts-install-progress" hidden>
+        <div class="tts-install-phase" id="tts-install-phase">Preparing…</div>
+        <div class="tts-install-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="tts-install-bar-track">
+          <div class="tts-install-bar-fill" id="tts-install-bar"></div>
+        </div>
+        <div class="tts-install-bytes" id="tts-install-bytes"></div>
+      </div>
+    </div>
+    <div class="ui-dialog-actions">
+      <button class="mini-btn ghost" id="tts-install-cancel" type="button">Cancel</button>
+      <button class="mini-btn" id="tts-install-confirm" type="button">Install</button>
+    </div>
+  </div>
+</div>
+<!-- ===== Offline STT Requirements Dialog ===== -->
+<div class="ui-dialog-overlay" id="stt-requirements-overlay" aria-hidden="true" hidden>
+  <div class="ui-dialog stt-requirements-dialog" role="dialog" aria-modal="true" aria-labelledby="stt-requirements-title">
+    <div class="ui-dialog-header">
+      <h2 id="stt-requirements-title">Install offline speech-to-text</h2>
+      <button class="ui-dialog-close" id="stt-requirements-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="ui-dialog-body stt-requirements-body">
+      <p class="plugin-install-hint">Downloads the local whisper.cpp engine and a GGML model so <code>read_media</code> works offline — no API key needed afterwards.</p>
+      <div class="plugin-install-error" id="stt-requirements-error" role="alert" hidden></div>
+      <div class="stt-req-checklist" id="stt-req-checklist">
+        <div class="stt-req-item" id="stt-req-platform"><span class="stt-req-dot" aria-hidden="true"></span><span class="stt-req-text">Platform support</span><code class="stt-req-detail" id="stt-req-platform-detail"></code></div>
+        <div class="stt-req-item" id="stt-req-engine"><span class="stt-req-dot" aria-hidden="true"></span><span class="stt-req-text">whisper.cpp engine</span><code class="stt-req-detail" id="stt-req-engine-detail"></code></div>
+        <div class="stt-req-item" id="stt-req-model"><span class="stt-req-dot" aria-hidden="true"></span><span class="stt-req-text">GGML model</span><code class="stt-req-detail" id="stt-req-model-detail"></code></div>
+        <div class="stt-req-item" id="stt-req-disk"><span class="stt-req-dot" aria-hidden="true"></span><span class="stt-req-text">Free disk space</span><code class="stt-req-detail" id="stt-req-disk-detail"></code></div>
+      </div>
+      <div class="stt-guide" id="stt-guide" hidden>
+        <p>One or more requirements are missing. Follow the steps for your platform:</p>
+        <div class="stt-guide-tabs" role="tablist" aria-label="Platforms">
+          <button class="mini-btn ghost stt-guide-tab active" type="button" role="tab" id="stt-guide-tab-linux" aria-selected="true">Linux</button>
+          <button class="mini-btn ghost stt-guide-tab" type="button" role="tab" id="stt-guide-tab-windows" aria-selected="false">Windows</button>
+          <button class="mini-btn ghost stt-guide-tab" type="button" role="tab" id="stt-guide-tab-macos" aria-selected="false">macOS</button>
+        </div>
+        <div class="stt-guide-panel" id="stt-guide-linux" role="tabpanel">
+          <p>Automatic install is available on Linux — just click Install below. Manual alternative:</p>
+          <pre><code>git clone https://github.com/ggml-org/whisper.cpp
+cd whisper.cpp &#38;&#38; cmake -B build &#38;&#38; cmake --build build -j --config Release
+sudo cp build/bin/whisper-cli /usr/local/bin/</code></pre>
+        </div>
+        <div class="stt-guide-panel" id="stt-guide-windows" role="tabpanel" hidden>
+          <p>Automatic install is available on Windows (downloads the official release zip). Manual alternative: download <code>whisper-bin-x64.zip</code> from the whisper.cpp GitHub releases, extract it, and add the folder to PATH.</p>
+        </div>
+        <div class="stt-guide-panel" id="stt-guide-macos" role="tabpanel" hidden>
+          <p>On macOS there is no official CLI binary release — install the engine once via Homebrew, then let NusaShell install the model:</p>
+          <pre><code>brew install whisper-cpp</code></pre>
+          <p>Reopen this dialog afterwards — NusaShell will pick up <code>whisper-cli</code> from your PATH.</p>
+        </div>
+      </div>
+      <label class="ui-dialog-field" for="stt-install-model">
+        Whisper model
+        <select id="stt-install-model">
+          <option value="">Select a model…</option>
+        </select>
+        <small>GGML models are stored under <code>models/stt/</code> in your data directory. Multilingual models support Indonesian and English; the <code>.en</code> variants are excluded.</small>
+      </label>
+      <div class="stt-install-progress" id="stt-install-progress" hidden>
+        <div class="stt-install-phase" id="stt-install-phase">Preparing…</div>
+        <div class="stt-install-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="stt-install-bar-track">
+          <div class="stt-install-bar-fill" id="stt-install-bar"></div>
+        </div>
+        <div class="stt-install-bytes" id="stt-install-bytes"></div>
+      </div>
+    </div>
+    <div class="ui-dialog-actions">
+      <button class="mini-btn ghost" id="stt-install-stop" type="button" hidden>Stop</button>
+      <button class="mini-btn ghost" id="stt-requirements-cancel" type="button">Cancel</button>
+      <button class="mini-btn" id="stt-install-confirm" type="button">Install</button>
+    </div>
+  </div>
+</div>
 <!-- ===== Plugin Detail Drawer ===== -->
 <div class="drawer-overlay" id="plugin-drawer-overlay" aria-hidden="true"></div>
 <aside class="plugin-drawer" id="plugin-drawer" role="dialog" aria-modal="true" aria-labelledby="plugin-drawer-title" aria-hidden="true" inert hidden>
@@ -1052,7 +1170,16 @@
   </div>
 </div>
 
+<!-- ===== Full-window offline state (covers every view) ===== -->
+<div class="offline-screen" id="offline-screen" role="status" aria-live="polite" hidden>
+  <img class="offline-mascot" src="./agent-offline-mascot.png" alt="" aria-hidden="true" width="1254" height="1254">
+  <h2>Sorry, it looks like your agent is offline.</h2>
+  <p>The NusaShell backend isn’t reachable right now. Your visible conversation stays on this device — everything resumes automatically once the server is back.</p>
+  <button class="action-btn offline-retry-btn" id="offline-retry-btn" type="button">Try again</button>
+</div>
+
 <script src="vendor/chartjs/chart.umd.min.js"></script>
+<script type="module" src="js/pwa.js"></script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

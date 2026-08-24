@@ -1316,6 +1316,12 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if req.AudioModelID != nil {
 		s.AudioModelID = strings.TrimSpace(*req.AudioModelID)
 	}
+	if req.STTOfflineModel != nil {
+		s.STTOfflineModel = strings.TrimSpace(*req.STTOfflineModel)
+	}
+	if req.STTOfflineLanguage != nil {
+		s.STTOfflineLanguage = strings.TrimSpace(*req.STTOfflineLanguage)
+	}
 	if req.VideoProviderID != nil {
 		s.VideoProviderID = strings.TrimSpace(*req.VideoProviderID)
 	}

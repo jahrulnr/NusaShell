@@ -135,6 +135,7 @@ func TestSniffMagicKindMatches(t *testing.T) {
 		{"image", "\xff\xd8\xff"},
 		{"audio", "ID3"},
 		{"video", "\x00\x00\x00\x20ftypisom"},
+		{"document", "%PDF-1.4"},
 	}
 	for _, c := range cases {
 		t.Run(c.kind, func(t *testing.T) {
@@ -142,6 +143,32 @@ func TestSniffMagicKindMatches(t *testing.T) {
 			_, gotKind := SniffMagic(data)
 			if gotKind != c.kind {
 				t.Errorf("kind = %q, want %q", gotKind, c.kind)
+			}
+		})
+	}
+}
+
+func TestSniffMagicPDFFormats(t *testing.T) {
+	cases := []struct {
+		name     string
+		prefix   string
+		wantType string
+		wantKind string
+	}{
+		{"PDF 1.0", "%PDF-1.0", "application/pdf", "document"},
+		{"PDF 1.4", "%PDF-1.4", "application/pdf", "document"},
+		{"PDF 1.7", "%PDF-1.7", "application/pdf", "document"},
+		{"PDF 2.0", "%PDF-2.0", "application/pdf", "document"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			data := []byte(c.prefix + "\n%binary garbage" + strings.Repeat("\x00", 64))
+			gotType, gotKind := SniffMagic(data)
+			if gotType != c.wantType {
+				t.Errorf("SniffMagic(%s) type = %q, want %q", c.name, gotType, c.wantType)
+			}
+			if gotKind != c.wantKind {
+				t.Errorf("SniffMagic(%s) kind = %q, want %q", c.name, gotKind, c.wantKind)
 			}
 		})
 	}

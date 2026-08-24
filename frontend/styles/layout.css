@@ -167,3 +167,56 @@
   overflow-y: auto;
   position: relative;
 }
+
+/* ============ Full-window offline state ============ */
+/* Covers every view while the backend is unreachable. Lives at body level,
+ * outside .window, driven by js/offline-screen.js. */
+.offline-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 4px;
+  padding: 28px;
+  text-align: center;
+  background: var(--bg);
+}
+.offline-screen[hidden] { display: none; }
+.offline-mascot {
+  width: clamp(150px, 21vw, 250px);
+  height: auto;
+  max-height: 34vh;
+  margin-bottom: 14px;
+  object-fit: contain;
+  opacity: .94;
+  filter: drop-shadow(0 12px 20px rgba(3, 8, 5, .34));
+}
+.offline-screen h2 { max-width: 30ch; margin: 0; color: var(--text); font-size: 17px; line-height: 1.35; }
+.offline-screen p { max-width: 46ch; margin: 8px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.offline-retry-btn { margin-top: 16px; }
+
+/* ============ Mini window (PiP / popup) ============ */
+/* Placeholder left behind in the shell while #agent-thread lives in a
+ * Document Picture-in-Picture window (js/pip.js). */
+.agent-thread-pip-note {
+  flex: 1 1 auto;
+  display: grid;
+  place-content: center;
+  color: var(--text-faint);
+  font-size: 12px;
+  text-align: center;
+  padding: 28px;
+}
+
+/* Popup fallback mini windows open with ?mini=1: hide shell chrome so the
+ * small window stays chat-first, and drop the desktop window dressing. */
+body.mini-mode .titlebar,
+body.mini-mode .sidebar { display: none; }
+body.mini-mode .window {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+body.mini-mode .window::after { display: none; }

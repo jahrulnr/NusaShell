@@ -195,12 +195,23 @@ type Settings struct {
 	// to an audio-capable model.
 	AudioProviderID string `json:"audio_provider_id,omitempty"`
 	AudioModelID    string `json:"audio_model_id,omitempty"`
+	// OfflineSTT selects the local whisper.cpp transcription used by
+	// read_audio when no cloud fallback is configured (or as the offline
+	// rung of the degradation ladder). Fields: the ggml model file
+	// (bare name, e.g. "ggml-small.bin") and preferred language hint
+	// ("", "id", "en"); audio read_audio picks whichever engine is
+	// configured without changing its own logic. Install lives in
+	// Settings → Speech-to-Text (offline).
+	STTOfflineModel    string `json:"stt_offline_model,omitempty"`
+	STTOfflineLanguage string `json:"stt_offline_language,omitempty"`
 	// SpeechGeneration (TTS) selects the model used by the generate_speech
 	// tool. Online: an OpenAI-compatible /audio/speech endpoint
 	// (TTSProviderID + TTSModelID, resolved like the other fallbacks).
-	// Offline: piper via TTSOfflineEnabled + voice files under
-	// <data>/models/tts/. When both are unavailable, generate_speech is not
-	// advertised.
+	// Offline: piper with voice files under <data>/models/tts/ — live as
+	// soon as engine + voice are installed (one-click Settings installer
+	// or manual PIPER_BIN/PATH setup); TTSOfflineEnabled is legacy and no
+	// longer gates anything. When both routes are unavailable,
+	// generate_speech is not advertised.
 	TTSProviderID     string `json:"tts_provider_id,omitempty"`
 	TTSModelID        string `json:"tts_model_id,omitempty"`
 	TTSOfflineEnabled bool   `json:"tts_offline_enabled,omitempty"`

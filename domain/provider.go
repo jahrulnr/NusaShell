@@ -51,6 +51,7 @@ type Model struct {
 	Vision           bool   // supports image input (multimodal)
 	Audio            bool   // supports audio input (multimodal)
 	Video            bool   // supports video input (multimodal)
+	Document         bool   // supports PDF/document input (multimodal)
 	KnowledgeCutoff  string // knowledge cutoff date (e.g. "2025-05")
 	// InterleavedField names the wire field that carries interleaved
 	// reasoning on assistant messages — "reasoning_content" for DeepSeek

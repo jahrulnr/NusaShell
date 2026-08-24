@@ -33,7 +33,9 @@ import (
 	"nusashell/infrastructure/pluginruntime"
 	"nusashell/infrastructure/skillfs"
 	"nusashell/infrastructure/sqlitestore"
+	"nusashell/infrastructure/sttinstall"
 	"nusashell/infrastructure/tools"
+	"nusashell/infrastructure/ttsinstall"
 	"nusashell/infrastructure/workspacepicker"
 	"nusashell/transport"
 
@@ -249,9 +251,11 @@ func run() error {
 		Factory:                     ai.NewFactory(credentials),
 		ImageGeneratorFactory:       ai.NewImageGeneratorFactory(credentials),
 		SpeechTranscriberFactory:    ai.NewSpeechTranscriberFactory(),
-		OfflineTranscriberFactory:   ai.NewOfflineTranscriberFactory(dataDir),
+		OfflineTranscriberFactory:   ai.NewOfflineTranscriberFactory(&jsonstore.Settings{S: store}, dataDir),
 		SpeechSynthesizerFactory:    ai.NewSpeechSynthesizerFactory(),
 		OfflineSynthesizer:          ai.NewOfflineSynthesizer(dataDir),
+		TTSInstaller:                ttsinstall.New(dataDir, ""),
+		STTInstaller:                sttinstall.New(dataDir, "", ""),
 		ImageModelListerFactory:     ai.NewImageModelListerFactory(),
 		SpeechModelListerFactory:    ai.NewSpeechModelListerFactory(),
 		VideoGeneratorFactory:       ai.NewVideoGeneratorFactory(),
@@ -277,6 +281,11 @@ func run() error {
 		defer autoDB.Close()
 		tb.Automation = svc
 		svc.Exec.Agent = application.NewPipelineAgentRunner(tb, app)
+		if loaded, err := svc.DiscoverPipelines(context.Background()); err != nil {
+			slog.Warn("pipeline discovery failed", "error", err)
+		} else if len(loaded) > 0 {
+			slog.Info("pipelines discovered", "count", len(loaded))
+		}
 	}
 	// Wire Codex runtime + OAuth adapters (optional — nil-safe if unavailable)
 	if rt, err := codex.NewRuntimeAdapter(); err == nil {

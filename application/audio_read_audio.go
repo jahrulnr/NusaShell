@@ -99,10 +99,19 @@ func (a *App) transcribeAudioViaCloudRoute(run *TurnRun, caps ModelCapabilities,
 	return a.transcribeAudioViaChat(run, caps, settings, provider, apiKey, audio, question)
 }
 
-// transcribeAudioOffline runs the local engine when built and loaded.
-// ok=false means "no offline route" — callers keep their existing guidance.
+// transcribeAudioOffline runs the local engine when configured. The
+// OfflineTranscriberFactory is resolved per call (degradation contract:
+// availability decides per-read_audio, never per-boot); ok=false means
+// "no offline route" — callers keep their existing guidance.
 func (a *App) transcribeAudioOffline(audio domain.Attachment) (string, bool) {
-	if status, ok := a.OfflineTranscriber.(OfflineTranscriberStatus); !ok || !status.OfflineSTTAvailable() {
+	if a.OfflineTranscriberFactory == nil {
+		return "", false
+	}
+	eng, err := a.OfflineTranscriberFactory()
+	if err != nil || eng == nil {
+		return "", false
+	}
+	if status, ok := eng.(OfflineTranscriberStatus); !ok || !status.OfflineSTTAvailable() {
 		return "", false
 	}
 	data, err := decodeAttachmentDataURL(audio.DataURL)
@@ -110,7 +119,7 @@ func (a *App) transcribeAudioOffline(audio domain.Attachment) (string, bool) {
 		a.log("warn", "audio", "offline stt: decode audio bytes: %v", err)
 		return "", false
 	}
-	text, err := a.OfflineTranscriber.TranscribeOffline(context.Background(), OfflineSTTRequest{
+	text, err := eng.TranscribeOffline(context.Background(), OfflineSTTRequest{
 		Data: data, MaxSeconds: 600,
 	})
 	if err != nil {

@@ -257,12 +257,20 @@ func NewEmbedderFactory() application.EmbedderFactory {
 // exposing embeddings on a single endpoint, so the same lister works
 // regardless of which chat API the provider is configured to use.
 func NewEmbeddingModelListerFactory() application.EmbeddingModelListerFactory {
+	client := newProviderHTTPClient()
 	return func(p *domain.Provider) application.EmbeddingModelLister {
 		if p.Kind == domain.ProviderCodex {
 			return nil
 		}
+		// Ollama has no OpenAI-compatible /embeddings/models route. Its
+		// native /api/tags endpoint marks each installed model with a
+		// capabilities array ("embedding") — the authoritative embedding
+		// signal that works for any model name, no allowlist required.
+		if p.Kind == domain.ProviderOllama {
+			return embeddings.NewOllamaTagLister(p.BaseURL, client)
+		}
 		base := embeddingBaseURL(p.BaseURL)
-		return embeddings.NewModelLister(base, newProviderHTTPClient())
+		return embeddings.NewModelLister(base, client)
 	}
 }
 

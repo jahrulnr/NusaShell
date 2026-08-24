@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -343,29 +342,6 @@ func cloneRun(r *domain.WorkflowRun) *domain.WorkflowRun {
 	var out domain.WorkflowRun
 	_ = json.Unmarshal(b, &out)
 	return &out
-}
-
-// FilePipelineStore loads .nusashell/pipeline.yaml from a workspace.
-type FilePipelineStore struct{}
-
-func (FilePipelineStore) GetDefinition(_ context.Context, workspace string) (*domain.WorkflowDefinition, error) {
-	if strings.TrimSpace(workspace) == "" {
-		return nil, fmt.Errorf("workspace is required")
-	}
-	path := filepath.Join(workspace, ".nusashell", "pipeline.yaml")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	w, err := ParseYAML(raw)
-	if err != nil {
-		return nil, err
-	}
-	w.Source = domain.WorkflowSource{Kind: "file", Workspace: workspace, Path: path}
-	if w.ID == "" {
-		w.ID = "pipeline"
-	}
-	return w, nil
 }
 
 // FSArtifactStore writes tar-less files under data/ci/artifacts.

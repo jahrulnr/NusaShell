@@ -3,22 +3,19 @@ package contracts
 import "encoding/json"
 
 const (
-	MethodCIPipelinesList     = "ci.pipelines.list"
-	MethodCIPipelinesRead     = "ci.pipelines.read"
-	MethodCIPipelinesValidate = "ci.pipelines.validate"
-	MethodCIRunsStart         = "ci.runs.start"
-	MethodCIRunsList          = "ci.runs.list"
-	MethodCIRunsGet           = "ci.runs.get"
-	MethodCIRunsCancel        = "ci.runs.cancel"
-	MethodCIRunsSteer         = "ci.runs.steer"
-	MethodCIRunsRetry         = "ci.runs.retry"
-	MethodCIJobsGet           = "ci.jobs.get"
-	MethodCIJobsLogs          = "ci.jobs.logs"
-	MethodCIJobsCancel        = "ci.jobs.cancel"
-	MethodCIArtifactsList     = "ci.artifacts.list"
-	MethodCIRunnersList       = "ci.runners.list"
-	MethodCICacheList         = "ci.cache.list"
-	MethodCICacheClear        = "ci.cache.clear"
+	MethodCIRunsStart     = "ci.runs.start"
+	MethodCIRunsList      = "ci.runs.list"
+	MethodCIRunsGet       = "ci.runs.get"
+	MethodCIRunsCancel    = "ci.runs.cancel"
+	MethodCIRunsSteer     = "ci.runs.steer"
+	MethodCIRunsRetry     = "ci.runs.retry"
+	MethodCIJobsGet       = "ci.jobs.get"
+	MethodCIJobsLogs      = "ci.jobs.logs"
+	MethodCIJobsCancel    = "ci.jobs.cancel"
+	MethodCIArtifactsList = "ci.artifacts.list"
+	MethodCIRunnersList   = "ci.runners.list"
+	MethodCICacheList     = "ci.cache.list"
+	MethodCICacheClear    = "ci.cache.clear"
 
 	MethodAutomationList         = "automation.list"
 	MethodAutomationGet          = "automation.get"
@@ -159,6 +156,12 @@ type CIWorkspaceRequest struct {
 	Jobs      []string `json:"jobs,omitempty"`
 }
 
+// CIRunStartRequest starts a workflow run by workflow id.
+type CIRunStartRequest struct {
+	ID    string `json:"id"`
+	Async bool   `json:"async,omitempty"`
+}
+
 type CIRunIDRequest struct {
 	ID        string `json:"id"`
 	Workspace string `json:"workspace,omitempty"`
@@ -213,12 +216,6 @@ type AutomationListResult struct {
 
 type CIRunListResult struct {
 	Runs []CIRunDTO `json:"runs"`
-}
-
-type CIPipelineReadResult struct {
-	Pipeline   AutomationDTO `json:"pipeline"`
-	Validation ValidationDTO `json:"validation"`
-	YAML       string        `json:"yaml,omitempty"`
 }
 
 type ScheduleDTO struct {

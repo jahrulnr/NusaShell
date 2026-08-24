@@ -1,7 +1,7 @@
 // Settings workspace: native browser preferences plus the Go runtime controls.
 
 import { autoReconnectEnabled, on, rpc, setAutoReconnect } from '../rpc.js';
-import { toast, createSelect } from '../ui.js';
+import { toast, createSelect, el } from '../ui.js';
 
 let bound = false;
 const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', imageProviderId: '', imageModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', ttsProviderId: '', ttsModelId: '', webAnswerProvider: '', webAnswerModel: '', compactionModel: '', reviewModel: '' };
@@ -16,6 +16,7 @@ let videoSelect;
 let ttsSelect;
 let webAnswerProviderSelect;
 let contractModeSelect;
+let sttModelSelect;
 
 export async function initSettings() {
   if (!bound) {
@@ -68,6 +69,10 @@ export async function initSettings() {
         { text: 'Require — block MCP calls until the contract is read', value: 'require' },
       ],
     });
+    sttModelSelect = createSelect(document.getElementById('settings-stt-model'), {
+      placeholder: 'Auto — first installed GGML model',
+      search: true,
+    });
     webAnswerProviderSelect = createSelect(document.getElementById('settings-web-answer-provider'), {
       placeholder: 'Disabled — web_answer tool is not available',
       data: [
@@ -84,6 +89,8 @@ export async function initSettings() {
       if (location.hash === '#settings') void refresh();
     });
     bindDiskSync();
+    bindTTSInstall();
+    bindSTTInstall();
   }
   await refresh();
 }
@@ -155,6 +162,7 @@ export async function refresh() {
     state.webAnswerModel = settings.web_answer_model ?? '';
     state.compactionModel = settings.compaction_model ?? '';
     state.reviewModel = settings.review_model ?? '';
+    document.getElementById('settings-stt-language').value = ['id', 'en'].includes(settings.stt_offline_language) ? settings.stt_offline_language : '';
     document.getElementById('settings-learning-threshold').value = settings.learning_review_threshold ?? 10;
     document.getElementById('settings-skill-nudge-interval').value = settings.skill_nudge_interval ?? 15;
     document.getElementById('settings-auto-continues').value = settings.max_auto_continues ?? 10;
@@ -384,6 +392,200 @@ function optionalNumber(id) {
   return Number.isFinite(n) ? n : null;
 }
 
+// ---- Offline TTS one-click install ----
+//
+// Flow: button opens the dialog (voice picker fed by
+// settings.tts_install_status), Install starts settings.tts_install_start,
+// live progress arrives over WS via tts.install.* events. When the done
+// event lands the dialog closes, the view refreshes, and generate_speech
+// is immediately usable — no offline-mode checkbox involved.
+
+const ttsInstallState = { voiceSelect: null, running: false, returnFocus: null };
+
+function bindTTSInstall() {
+  document.getElementById('settings-tts-install-btn')?.addEventListener('click', openTTSInstallDialog);
+  document.getElementById('tts-install-close')?.addEventListener('click', closeTTSInstallDialog);
+  document.getElementById('tts-install-cancel')?.addEventListener('click', closeTTSInstallDialog);
+  document.getElementById('tts-install-confirm')?.addEventListener('click', confirmTTSInstall);
+
+  on('tts.install.progress', (payload) => {
+    if (!payload || !ttsInstallState.running) return;
+    renderTTSProgress(payload.phase, payload.bytes_fetched ?? 0, payload.bytes_total ?? 0, payload.message);
+  });
+  on('tts.install.done', async (payload) => {
+    if (!ttsInstallState.running) return;
+    ttsInstallState.running = false;
+    setTTSInstallBusy(false);
+    renderTTSProgress('done', 1, 1, payload?.message ?? 'Offline TTS ready');
+    closeTTSInstallDialog();
+    toast(`Offline TTS installed (${payload?.voice_id ?? 'voice'})`, 'success');
+    await refresh();
+  });
+  on('tts.install.error', (payload) => {
+    if (!ttsInstallState.running && !payload?.message) return;
+    ttsInstallState.running = false;
+    setTTSInstallBusy(false);
+    showTTSInstallError(payload?.message ?? 'Install failed.');
+  });
+}
+
+async function openTTSInstallDialog() {
+  ttsInstallState.returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const overlay = document.getElementById('tts-install-overlay');
+  const list = document.getElementById('tts-install-voice');
+  showTTSInstallError('');
+  document.getElementById('tts-install-progress').hidden = true;
+  document.getElementById('tts-install-confirm').disabled = false;
+  overlay.hidden = false;
+  overlay.setAttribute('aria-hidden', 'false');
+
+  let status;
+  try {
+    status = await rpc('settings.tts_install_status');
+  } catch (err) {
+    showTTSInstallError(err.message);
+    return;
+  }
+  renderTTSMatchState(status);
+  const data = [
+    { text: 'Select a voice…', value: '', placeholder: true },
+    ...(status.voices ?? []).map((v) => ({
+      text: `${v.label} · ${fmtBytes(v.size_bytes)}${v.installed ? ' ✓' : ''}`,
+      value: v.id,
+    })),
+  ];
+  if (!ttsInstallState.voiceSelect) {
+    ttsInstallState.voiceSelect = createSelect(list, { search: true });
+  }
+  ttsInstallState.voiceSelect.setData(data);
+  ttsInstallState.voiceSelect.setSelected(['']);
+  updateTTSConfirmLabel(status);
+  if (status.running) {
+    // A previous install is still in flight in the backend — reattach UI.
+    ttsInstallState.running = true;
+    setTTSInstallBusy(true);
+    renderTTSProgress('', 0, 0, 'An install is already running…');
+  }
+}
+
+function updateTTSConfirmLabel(status) {
+  const btn = document.getElementById('tts-install-confirm');
+  if (!btn) return;
+  const allInstalled = status.binary_installed && (status.voices ?? []).every((v) => v.installed);
+  btn.textContent = allInstalled ? 'Reinstall / add another voice' : 'Install';
+}
+
+// renderTTSMatchState paints the one-liner next to the install button so the
+// card shows at a glance whether offline speech is ready (no enable toggle).
+function renderTTSMatchState(status) {
+  const label = document.getElementById('settings-tts-install-status');
+  if (!label) return;
+  const voiceCount = (status?.voices ?? []).filter((v) => v.installed).length;
+  if (status?.ready) {
+    label.textContent = `Offline speech ready${voiceCount ? ` · ${voiceCount} voice${voiceCount > 1 ? 's' : ''} installed` : ''}`;
+    label.title = 'generate_speech will use the local piper engine automatically.';
+  } else if (status?.binary_installed) {
+    label.textContent = 'Engine installed — pick a voice above and install it.';
+    label.title = '';
+  } else {
+    label.textContent = 'Offline engine not installed yet.';
+    label.title = '';
+  }
+}
+
+async function confirmTTSInstall() {
+  const voiceId = ttsInstallState.voiceSelect?.getSelected()?.[0] ?? '';
+  if (!voiceId) {
+    toast('Pick a voice first', 'info');
+    return;
+  }
+  ttsInstallState.running = true;
+  setTTSInstallBusy(true);
+  showTTSInstallError('');
+  try {
+    const res = await rpc('settings.tts_install_start', { voice_id: voiceId }, { timeoutMs: 15000 });
+    if (!res.started) {
+      // Already-running: keep the dialog in progress mode and wait for events.
+      renderTTSProgress('', 0, 0, res.message || 'An install is already running…');
+      return;
+    }
+    renderTTSProgress('', 0, 0, 'Starting download…');
+  } catch (err) {
+    ttsInstallState.running = false;
+    setTTSInstallBusy(false);
+    showTTSInstallError(err.message);
+  }
+}
+
+function setTTSInstallBusy(busy) {
+  const confirmBtn = document.getElementById('tts-install-confirm');
+  const cancelBtn = document.getElementById('tts-install-cancel');
+  const closeBtn = document.getElementById('tts-install-close');
+  if (confirmBtn) confirmBtn.disabled = busy;
+  if (cancelBtn) cancelBtn.textContent = busy ? 'Hide' : 'Cancel';
+  if (closeBtn) closeBtn.disabled = busy;
+}
+
+function renderTTSProgress(phase, fetched, total, message) {
+  const wrap = document.getElementById('tts-install-progress');
+  if (!wrap) return;
+  wrap.hidden = false;
+  const phaseEl = document.getElementById('tts-install-phase');
+  const bar = document.getElementById('tts-install-bar');
+  const track = document.getElementById('tts-install-bar-track');
+  const bytesEl = document.getElementById('tts-install-bytes');
+  const labels = {
+    binary: 'Downloading piper engine…',
+    voice: 'Downloading voice model…',
+    verify: 'Verifying installation…',
+    done: 'Offline TTS ready ✓',
+  };
+  phaseEl.textContent = message || labels[phase] || 'Working…';
+  let pct = null;
+  if (phase === 'binary' && total > 0) pct = Math.round((fetched / total) * 100);
+  else if (phase === 'voice' && total > 0) pct = Math.round((fetched / total) * 100);
+  else if (phase === 'done' || phase === 'verify') pct = phase === 'done' ? 100 : null;
+  if (pct == null) {
+    track.classList.add('indeterminate');
+    bar.style.width = '100%';
+    track.setAttribute('aria-valuenow', '0');
+  } else {
+    track.classList.remove('indeterminate');
+    bar.style.width = `${pct}%`;
+    track.setAttribute('aria-valuenow', String(pct));
+  }
+  bytesEl.textContent = total > 0 ? `${fmtBytes(fetched)} / ${fmtBytes(total)}${pct != null ? ` · ${pct}%` : ''}` : '';
+}
+
+function showTTSInstallError(message) {
+  const banner = document.getElementById('tts-install-error');
+  if (!banner) return;
+  banner.textContent = message;
+  banner.hidden = !message;
+}
+
+function closeTTSInstallDialog() {
+  const overlay = document.getElementById('tts-install-overlay');
+  overlay.hidden = true;
+  overlay.setAttribute('aria-hidden', 'true');
+  document.getElementById('tts-install-progress').hidden = true;
+  if (!ttsInstallState.running) setTTSInstallBusy(false);
+  if (ttsInstallState.returnFocus?.isConnected) ttsInstallState.returnFocus.focus();
+  ttsInstallState.returnFocus = null;
+}
+
+function fmtBytes(n) {
+  if (!Number.isFinite(n) || n <= 0) return '';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = n;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
+
 function renderAppInfo(info) {
   document.getElementById('settings-version').textContent = info.version || 'development build';
   document.getElementById('settings-data-dir').textContent = info.data_dir || '—';
@@ -487,6 +689,8 @@ async function save() {
       image_model_id: imgModelId || null,
       audio_provider_id: audProviderId || null,
       audio_model_id: audModelId || null,
+      stt_offline_model: sttModelSelect.getSelected()?.[0] || null,
+      stt_offline_language: document.getElementById('settings-stt-language')?.value || null,
       video_provider_id: vidProviderId || null,
       video_model_id: vidModelId || null,
       web_answer_provider: webAnswerProvider || null,
@@ -547,4 +751,393 @@ function setConnectionStatus(message, isError = false) {
   const status = document.getElementById('settings-connection-status');
   status.textContent = message;
   status.style.color = isError ? 'var(--red)' : '';
+}
+
+// ---- Offline STT one-click install ----
+//
+// Mirrors the TTS flow with a requirements checklist: the card button opens
+// the requirements dialog (settings.stt_install_status feeds the checklist,
+// the per-OS guide, and the model picker). Install kicks off
+// settings.stt_install_start; progress rides stt.install.* events with a
+// slow status poll as a reattach fallback. Download speed is computed from
+// the event byte deltas. On success the dialog closes, the view refreshes,
+// and the new model appears in both selects — read_media can use it
+// immediately (degradation ladder resolves per call).
+
+const sttInstallState = {
+  running: false,
+  returnFocus: null,
+  pollTimer: null,
+  pollCount: 0,
+  lastStatus: null,
+  dialogSelect: null,
+  // speed probe: resets on phase change, EMA-smoothed otherwise
+  phase: '', fetched: 0, at: 0, speedEma: 0,
+};
+
+function bindSTTInstall() {
+  document.getElementById('settings-stt-install-btn')?.addEventListener('click', openSTTInstallDialog);
+  document.getElementById('stt-requirements-close')?.addEventListener('click', closeSTTInstallDialog);
+  document.getElementById('stt-requirements-cancel')?.addEventListener('click', closeSTTInstallDialog);
+  document.getElementById('stt-install-stop')?.addEventListener('click', stopSTTInstall);
+  document.getElementById('stt-install-confirm')?.addEventListener('click', confirmSTTInstall);
+  for (const os of ['linux', 'windows', 'macos']) {
+    document.getElementById(`stt-guide-tab-${os}`)?.addEventListener('click', () => setSTTGuideTab(os));
+  }
+  on('stt.install.progress', (payload) => {
+    if (!sttInstallState.running || !payload) return;
+    renderSTTProgress(payload.phase, payload.bytes_fetched ?? 0, payload.bytes_total ?? 0, payload.message);
+  });
+  on('stt.install.done', (payload) => {
+    finishSTTInstall(true, payload?.message ?? 'Offline STT ready');
+  });
+  on('stt.install.error', (payload) => {
+    if (!sttInstallState.running && !payload?.message) return;
+    finishSTTInstall(false, payload?.message ?? 'Install failed.');
+  });
+}
+
+async function openSTTInstallDialog() {
+  sttInstallState.returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const overlay = document.getElementById('stt-requirements-overlay');
+  showSTTDialogError('');
+  document.getElementById('stt-install-progress').hidden = true;
+  const confirmBtn = document.getElementById('stt-install-confirm');
+  confirmBtn.disabled = false;
+  overlay.hidden = false;
+  overlay.setAttribute('aria-hidden', 'false');
+
+  let status;
+  try {
+    status = await rpc('settings.stt_install_status');
+  } catch (err) {
+    showSTTDialogError(err.message);
+    return;
+  }
+  sttInstallState.lastStatus = status;
+  renderSTTChecklist(status);
+  renderSTTDialogModels(status);
+
+  // Guide shows whenever the engine is missing — supported platforms see
+  // "automatic install available" plus manual fallback steps; macOS sees
+  // the brew path (.experimental/offline-stt-assessment.md §2.3).
+  document.getElementById('stt-guide').hidden = !!status.engine_installed;
+
+  updateSTTConfirmLabel(status);
+  if (status.running) {
+    sttInstallState.running = true;
+    setSTTInstallBusy(true);
+    startSTTPolling();
+    renderSTTProgress('', 0, 0, 'An install is already running…');
+  }
+}
+
+function updateSTTConfirmLabel(status) {
+  const btn = document.getElementById('stt-install-confirm');
+  if (!btn) return;
+  const anyMissing = !(status?.models ?? []).every((m) => m.installed);
+  btn.textContent = status?.engine_installed && !anyMissing ? 'Reinstall / add another model' : 'Install';
+}
+
+// needsManualEngine: no engine anywhere AND no official release to
+// auto-download (macOS today). The Install button cannot help — point at
+// the guide instead of failing mid-download.
+function needsManualEngine(status) {
+  return !status?.engine_installed && !status?.supported;
+}
+
+async function confirmSTTInstall() {
+  const status = sttInstallState.lastStatus;
+  if (status && needsManualEngine(status)) {
+    document.getElementById('stt-guide').hidden = false;
+    setSTTGuideTab(guessOSTab());
+    toast('Engine must be installed manually on this platform — follow the guide.', 'info');
+    return;
+  }
+  const modelId = sttInstallState.dialogSelect?.getSelected()?.[0] ?? '';
+  if (!modelId) {
+    toast('Pick a model first', 'info');
+    return;
+  }
+  sttInstallState.running = true;
+  setSTTInstallBusy(true);
+  showSTTDialogError('');
+  try {
+    const res = await rpc('settings.stt_install_start', { model_id: modelId }, { timeoutMs: 15000 });
+    if (!res.started) {
+      renderSTTProgress('', 0, 0, res.message || 'An install is already running…');
+      return;
+    }
+    startSTTPolling();
+    renderSTTProgress('binary', 0, 0, 'Starting download…');
+  } catch (err) {
+    sttInstallState.running = false;
+    setSTTInstallBusy(false);
+    showSTTDialogError(err.message);
+  }
+}
+
+async function stopSTTInstall() {
+  try {
+    await rpc('settings.stt_install_cancel', {}, { timeoutMs: 15000 });
+  } catch {
+    // backend already finished or never started — either way we stop waiting
+  }
+  finishSTTInstall(false, 'Install cancelled.');
+}
+
+function finishSTTInstall(success, message) {
+  const wasRunning = sttInstallState.running;
+  sttInstallState.running = false;
+  stopSTTPolling();
+  setSTTInstallBusy(false);
+  resetSTTSpeedProbe();
+  if (success) {
+    renderSTTProgressIfOpen('done', 1, 1, message);
+    toast(`Offline STT installed (${message || 'ready'})`, 'success');
+    closeSTTInstallDialog();
+  } else {
+    renderSTTProgressIfOpen('', 0, 0, message);
+    const overlay = document.getElementById('stt-requirements-overlay');
+    if (overlay && !overlay.hidden) showSTTDialogError(message);
+    else toast(message, 'error');
+  }
+  void refresh();
+}
+
+function setSTTInstallBusy(busy) {
+  const confirmBtn = document.getElementById('stt-install-confirm');
+  const cancelBtn = document.getElementById('stt-requirements-cancel');
+  const closeBtn = document.getElementById('stt-requirements-close');
+  const stopBtn = document.getElementById('stt-install-stop');
+  if (confirmBtn) confirmBtn.disabled = busy;
+  if (cancelBtn) cancelBtn.textContent = busy ? 'Hide' : 'Cancel';
+  if (closeBtn) closeBtn.disabled = busy;
+  if (stopBtn) stopBtn.hidden = !busy;
+}
+
+function closeSTTInstallDialog() {
+  const overlay = document.getElementById('stt-requirements-overlay');
+  overlay.hidden = true;
+  overlay.setAttribute('aria-hidden', 'true');
+  document.getElementById('stt-install-progress').hidden = true;
+  stopSTTPolling();
+  if (!sttInstallState.running) setSTTInstallBusy(false);
+  if (sttInstallState.returnFocus?.isConnected) sttInstallState.returnFocus.focus();
+  sttInstallState.returnFocus = null;
+}
+
+function showSTTDialogError(message) {
+  const banner = document.getElementById('stt-requirements-error');
+  if (!banner) return;
+  banner.textContent = message;
+  banner.hidden = !message;
+}
+
+// ---- checklist + guide ----
+
+function renderSTTChecklist(status) {
+  const rows = [
+    ['stt-req-platform', !!status?.supported, status?.supported ? 'official release' : 'manual install required'],
+    ['stt-req-engine', !!status?.engine_installed, status?.engine_path ? `${status.engine_source} · ${shortPath(status.engine_path)}` : 'not found'],
+    ['stt-req-model', (status?.models ?? []).some((m) => m.installed), `${(status?.models ?? []).filter((m) => m.installed).length} installed`],
+    ['stt-req-disk', true, status?.disk_free_bytes > 0 ? `${fmtBytes(status.disk_free_bytes)} free` : 'unknown'],
+  ];
+  for (const [id, ok, detail] of rows) {
+    const row = document.getElementById(id);
+    if (!row) continue;
+    row.classList.toggle('ok', ok);
+    row.classList.toggle('missing', !ok);
+    const detailEl = row.querySelector('.stt-req-detail');
+    if (detailEl) detailEl.textContent = detail;
+  }
+}
+
+function setSTTGuideTab(os) {
+  for (const name of ['linux', 'windows', 'macos']) {
+    document.getElementById(`stt-guide-tab-${name}`)?.classList.toggle('active', name === os);
+    document.getElementById(`stt-guide-tab-${name}`)?.setAttribute('aria-selected', String(name === os));
+    const panel = document.getElementById(`stt-guide-${name}`);
+    if (panel) panel.hidden = name !== os;
+  }
+}
+
+function guessOSTab() {
+  const p = (navigator.platform || '').toLowerCase();
+  if (p.includes('win')) return 'windows';
+  if (p.includes('mac')) return 'macos';
+  return 'linux';
+}
+
+function shortPath(p) {
+  const parts = String(p || '').split(/[\\/]/);
+  return parts.slice(-2).join('/');
+}
+
+// ---- model picker (card + dialog) ----
+
+function renderSTTModelOptions(status) {
+  if (!sttModelSelect) return;
+  const models = status?.models ?? [];
+  const installed = models.filter((m) => m.installed);
+  const data = [
+    { text: 'Auto — first installed GGML model', value: '', placeholder: true },
+    ...installed.map((m) => ({
+      text: `${m.label} · ${fmtBytes(m.size_bytes)}${m.default ? ' (recommended)' : ''}`,
+      value: m.id,
+    })),
+  ];
+  sttModelSelect.setData(data);
+  const active = status?.active_model ?? '';
+  sttModelSelect.setSelected([installed.some((m) => m.id === active) ? active : '']);
+}
+
+function renderSTTCard(status) {
+  const label = document.getElementById('settings-stt-install-status');
+  if (!label) return;
+  if (!status) {
+    label.textContent = '';
+    return;
+  }
+  const installedCount = (status.models ?? []).filter((m) => m.installed).length;
+  if (status.ready) {
+    label.textContent = `Offline STT ready${status.active_model ? ` · ${status.active_model.replace(/^ggml-/, '')}` : ''}${installedCount > 1 ? ` · ${installedCount} models` : ''}`;
+    label.title = 'read_media transcribes locally via whisper.cpp.';
+  } else if (!status.supported) {
+    label.textContent = 'No official release for this platform — see the install guide.';
+    label.title = '';
+  } else if (status.engine_installed) {
+    label.textContent = 'whisper.cpp engine installed — install a model next.';
+    label.title = '';
+  } else {
+    label.textContent = 'Engine not installed yet.';
+    label.title = '';
+  }
+}
+
+function renderSTTDialogModels(status) {
+  const list = document.getElementById('stt-install-model');
+  if (!list) return;
+  if (!sttInstallState.dialogSelect) {
+    sttInstallState.dialogSelect = createSelect(list, { search: true });
+  }
+  const models = status?.models ?? [];
+  const activeModel = status?.active_model ?? '';
+  const data = [
+    { text: 'Select a model…', value: '', placeholder: true },
+    ...models.map((m) => ({
+      text: `${m.label} · ${fmtBytes(m.size_bytes)}${m.installed ? ' ✓' : ''}`,
+      value: m.id,
+    })),
+  ];
+  sttInstallState.dialogSelect.setData(data);
+  // Preselect: the recommended default that is not yet installed, else the
+  // active model, else empty.
+  const defaultMissing = models.find((m) => m.default && !m.installed);
+  const preselect = defaultMissing?.id ?? (models.some((m) => m.id === activeModel) ? activeModel : '');
+  sttInstallState.dialogSelect.setSelected([preselect]);
+}
+
+// ---- progress rendering with download-speed estimate ----
+
+const sttPhaseLabels = {
+  binary: 'Downloading whisper.cpp engine…',
+  model: 'Downloading Whisper model…',
+  verify: 'Verifying installation…',
+  done: 'Offline STT ready ✓',
+};
+
+function renderSTTProgress(phase, fetched, total, message) {
+  const wrap = document.getElementById('stt-install-progress');
+  if (!wrap) return;
+  wrap.hidden = false;
+  const phaseEl = document.getElementById('stt-install-phase');
+  const barFill = document.getElementById('stt-install-bar');
+  const track = document.getElementById('stt-install-bar-track');
+  const bytesEl = document.getElementById('stt-install-bytes');
+
+  phaseEl.textContent = message || sttPhaseLabels[phase] || 'Working…';
+
+  let pct = null;
+  if ((phase === 'binary' || phase === 'model') && total > 0) {
+    pct = Math.min(100, Math.round((fetched / total) * 100));
+  } else if (phase === 'done') {
+    pct = 100;
+  }
+
+  if (pct == null) {
+    track.classList.add('indeterminate');
+    barFill.style.width = '100%';
+    track.setAttribute('aria-valuenow', '0');
+  } else {
+    track.classList.remove('indeterminate');
+    barFill.style.width = `${pct}%`;
+    track.setAttribute('aria-valuenow', String(pct));
+  }
+
+  const speed = estimateSTTSpeed(phase, fetched);
+  const speedTxt = speed > 0 ? ` · ${fmtBytes(speed)}/s` : '';
+  bytesEl.textContent = total > 0
+    ? `${fmtBytes(fetched)} / ${fmtBytes(total)}${pct != null ? ` · ${pct}%` : ''}${speedTxt}`
+    : `${fmtBytes(fetched)}${speedTxt}`;
+}
+
+// renderSTTProgressIfOpen only paints when the dialog is visible.
+function renderSTTProgressIfOpen(phase, fetched, total, message) {
+  const overlay = document.getElementById('stt-requirements-overlay');
+  if (overlay && !overlay.hidden) renderSTTProgress(phase, fetched, total, message);
+}
+
+function estimateSTTSpeed(phase, fetched) {
+  const now = performance.now();
+  if (phase !== sttInstallState.phase) {
+    sttInstallState.phase = phase;
+    sttInstallState.fetched = fetched;
+    sttInstallState.at = now;
+    sttInstallState.speedEma = 0;
+    return 0;
+  }
+  const dt = (now - sttInstallState.at) / 1000;
+  if (dt < 0.25) return sttInstallState.speedEma;
+  const inst = Math.max(0, fetched - sttInstallState.fetched) / dt;
+  sttInstallState.speedEma = sttInstallState.speedEma > 0 ? sttInstallState.speedEma * 0.6 + inst * 0.4 : inst;
+  sttInstallState.fetched = fetched;
+  sttInstallState.at = now;
+  return Math.round(sttInstallState.speedEma);
+}
+
+function resetSTTSpeedProbe() {
+  sttInstallState.phase = '';
+  sttInstallState.fetched = 0;
+  sttInstallState.at = 0;
+  sttInstallState.speedEma = 0;
+}
+
+// ---- reattach polling (WS events remain the primary signal) ----
+
+function startSTTPolling() {
+  stopSTTPolling();
+  sttInstallState.pollCount = 0;
+  sttInstallState.pollTimer = setInterval(async () => {
+    sttInstallState.pollCount += 1;
+    try {
+      const status = await rpc('settings.stt_install_status');
+      sttInstallState.lastStatus = status;
+      renderSTTChecklist(status);
+      if (status.running && sttInstallState.pollCount === 2) {
+        // Reattached to an in-flight install without seeing events yet —
+        // paint an indeterminate bar so the dialog never looks dead.
+        renderSTTProgress('', 0, 0, 'Downloading…');
+      }
+    } catch {
+      // transient RPC hiccup — next tick retries
+    }
+  }, 1500);
+}
+
+function stopSTTPolling() {
+  if (sttInstallState.pollTimer) {
+    clearInterval(sttInstallState.pollTimer);
+    sttInstallState.pollTimer = null;
+  }
 }

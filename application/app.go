@@ -23,8 +23,6 @@ type App struct {
 	Version string
 	DataDir string
 
-	OfflineTranscriber OfflineTranscriber // local engine (nil when disabled/unavailable)
-
 	Conversations   ConversationStore
 	Providers       ProviderStore
 	Credentials     CredentialStore
@@ -59,6 +57,8 @@ type App struct {
 	EmbedderFactory             EmbedderFactory
 	EmbeddingModelListerFactory EmbeddingModelListerFactory
 	ModelCatalog                ModelCataloger
+	TTSInstaller                TTSInstaller
+	STTInstaller                STTInstaller
 	WorkspacePicker             WorkspacePicker
 	CodexRuntime                CodexRuntime
 	CodexOAuth                  CodexOAuth
@@ -71,6 +71,18 @@ type App struct {
 	AcpRunStorage               domain.AcpRunStorage
 	retrySleeper                RetrySleeper
 	imageGenSem                 chan struct{}
+
+	// ttsInstallMu guards the single in-flight offline TTS install
+	// (settings.tts_install_start is single-flight).
+	ttsInstallMu     sync.Mutex
+	ttsInstallActive bool
+
+	// sttInstallMu guards the single in-flight offline STT install plus
+	// its cancel handle (settings.stt_install_cancel).
+	sttInstallMu     sync.Mutex
+	sttInstallActive bool
+	sttInstallCancel context.CancelFunc
+	sttInstallDoneCh chan struct{}
 
 	// learningMu guards lazy init of learningSearcher and graphService,
 	// plus the per-conversation turn counter for threshold-based review.
@@ -341,6 +353,8 @@ type Deps struct {
 	EmbedderFactory             EmbedderFactory             // optional; nil = BM25-only search
 	EmbeddingModelListerFactory EmbeddingModelListerFactory // optional; nil = skip /embeddings/models fetch
 	ModelCatalog                ModelCataloger              // optional; nil = skip enrichment from models.dev
+	TTSInstaller                TTSInstaller                // optional; nil = one-click offline TTS install unavailable
+	STTInstaller                STTInstaller                // optional; nil = one-click offline STT install unavailable
 	WorkspacePicker             WorkspacePicker
 	RetrySleeper                RetrySleeper
 	AcpAgents                   AcpAgentStore
@@ -397,6 +411,8 @@ func NewApp(deps Deps) *App {
 		EmbeddingModelListerFactory: deps.EmbeddingModelListerFactory,
 		WorkspacePicker:             deps.WorkspacePicker,
 		ModelCatalog:                deps.ModelCatalog,
+		TTSInstaller:                deps.TTSInstaller,
+		STTInstaller:                deps.STTInstaller,
 		AcpAgents:                   deps.AcpAgents,
 		Acp:                         deps.Acp,
 		AcpRunStorage:               deps.AcpRunStorage,

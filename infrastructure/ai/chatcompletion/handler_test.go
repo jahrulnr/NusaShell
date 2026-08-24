@@ -3,6 +3,7 @@ package chatcompletion
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -366,6 +367,101 @@ func TestBuildRequestStripParamsCaseInsensitive(t *testing.T) {
 	r := buildRequest(req, false)
 	if r.Temperature != nil {
 		t.Errorf("case-insensitive strip failed: temperature = %v", r.Temperature)
+	}
+}
+
+// TestStreamCompletedEmptyFallsBackToComplete verifies that a streaming
+// response which terminates cleanly ([DONE]) but carries no content,
+// reasoning, or tool calls falls back to a non-streaming Complete request
+// instead of failing the turn with "provider returned empty content".
+// Unstable upstream gateways (e.g. proxies returning a 200 with an empty
+// SSE body) often serve non-streaming fine, so the fallback lets the turn
+// continue. This mirrors the existing incomplete-stream fallback path.
+func TestStreamCompletedEmptyFallsBackToComplete(t *testing.T) {
+	var streamCalls, completeCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Stream bool `json:"stream"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Stream {
+			streamCalls++
+			w.Header().Set("Content-Type", "text/event-stream")
+			// Completed but empty: only the terminator, no content chunks.
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			return
+		}
+		completeCalls++
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": "Hello from complete"}, "finish_reason": "stop"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := &Adapter{BaseURL: server.URL + "/v1", Client: server.Client()}
+	var got string
+	resp, err := adapter.Stream(context.Background(), application.ChatRequest{
+		Model:    "test-model",
+		Messages: []application.ChatMessage{{Role: "user", Content: "hi"}},
+	}, func(delta string) { got += delta }, nil)
+	if err != nil {
+		t.Fatalf("Stream returned error on completed-empty stream, want fallback to Complete: %v", err)
+	}
+	if streamCalls != 1 {
+		t.Errorf("stream request count = %d, want 1", streamCalls)
+	}
+	if completeCalls != 1 {
+		t.Errorf("non-streaming fallback count = %d, want 1", completeCalls)
+	}
+	if resp.Content != "Hello from complete" {
+		t.Errorf("Content = %q, want %q", resp.Content, "Hello from complete")
+	}
+	if got != "Hello from complete" {
+		t.Errorf("onDelta delivered %q, want %q", got, "Hello from complete")
+	}
+}
+
+// TestStreamCompletedEmptyFallbackAlsoEmptyReturnsRetryable verifies that
+// when both the streaming response and the non-streaming fallback return
+// empty content, the adapter surfaces a retryable UpstreamError so the
+// agent retry loop can re-request rather than silently ending the turn.
+func TestStreamCompletedEmptyFallbackAlsoEmptyReturnsRetryable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Stream bool `json:"stream"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": ""}, "finish_reason": "stop"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := &Adapter{BaseURL: server.URL + "/v1", Client: server.Client()}
+	_, err := adapter.Stream(context.Background(), application.ChatRequest{
+		Model:    "test-model",
+		Messages: []application.ChatMessage{{Role: "user", Content: "hi"}},
+	}, func(string) {}, nil)
+	if err == nil {
+		t.Fatalf("Stream with empty stream + empty fallback should return a retryable error, got nil")
+	}
+	var upstream *application.UpstreamError
+	if !errors.As(err, &upstream) {
+		t.Fatalf("error must be *application.UpstreamError, got %T: %v", err, err)
+	}
+	if !upstream.Temporary {
+		t.Errorf("UpstreamError.Temporary = false, want true (retryable)")
 	}
 }
 

@@ -6,7 +6,7 @@ Global chrome surrounding every NusaShell view: title bar, sidebar, connection s
 
 ## Title bar
 
-Identifies NusaShell with its brand mark and wordmark, followed by compact backend connection status and a settings shortcut.
+Identifies NusaShell with its brand mark and wordmark, followed by compact backend connection status, a mini-window shortcut, an install shortcut (visible only while the browser offers installation), and a settings shortcut.
 
 - **Connection status text** (`#conn-status`):
   - Section: Title bar
@@ -17,6 +17,16 @@ Identifies NusaShell with its brand mark and wordmark, followed by compact backe
   - Section: Title bar
   - Type: indicator
   - Notes: Color-coded connection state.
+
+- **Mini window** (`#mini-window-btn`):
+  - Section: Navigation
+  - Type: button
+  - Notes: Opens the picture-in-picture mini window (Document PiP on Chromium, popup fallback elsewhere) showing the live agent thread.
+
+- **Install NusaShell** (`#pwa-install-btn`):
+  - Section: Navigation
+  - Type: button
+  - Notes: Visible only while the browser offers installation (beforeinstallprompt); triggers the native install flow and hides after install/dismissal.
 
 - **Settings shortcut** (`#nav-settings-btn`):
   - Section: Title bar
@@ -40,3 +50,17 @@ Keyboard: Ctrl/Cmd+K or / focuses the search box on the current view. Escape dis
   - Action: Toggles icon-only sidebar mode (persisted locally).
 
 - **`#mobile-nav-toggle`** (missing map entry)
+
+## Offline screen
+
+Full-window overlay shown whenever the backend is unreachable. It covers every view so no half-broken UI stays interactive: an explicit offline verdict shows it immediately, while closed/error/reconnecting states only cover after a short persistence window so quick reconnects never flicker. Recovery hides it instantly and Try again reloads the shell (service worker serves the cached shell while the server is down).
+
+- **Offline screen** (`#offline-screen`):
+  - Section: Navigation
+  - Type: status
+  - Notes: Full-window overlay covering every view while the backend is unreachable; hidden again the moment the connection reopens.
+
+- **Try again** (`#offline-retry-btn`):
+  - Section: Navigation
+  - Type: button
+  - Notes: Reloads the shell; the service worker serves the cached app while the server is down.

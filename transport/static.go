@@ -2,8 +2,15 @@ package transport
 
 import (
 	"io/fs"
+	"mime"
 	"net/http"
 )
+
+// Browsers reject web app manifests served as application/octet-stream;
+// Go's MIME table does not know the .webmanifest extension by default.
+func init() {
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+}
 
 // StaticHandler serves the embedded frontend; in dev mode it serves the
 // frontend/ directory from disk for live reload without a build step.

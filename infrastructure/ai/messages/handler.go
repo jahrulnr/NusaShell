@@ -396,9 +396,20 @@ func (a *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDel
 		return result, emptyErr
 	}
 	// Stream completed but produced no content, reasoning, or tool calls.
-	// Treat as retryable so unstable upstream gateways get retried.
+	// Fall back to a non-streaming Complete request once — unstable upstream
+	// gateways that return a 200 with an empty SSE body often serve
+	// non-streaming fine, so the turn continues instead of failing. If
+	// Complete is also empty, surface a retryable transport error so the
+	// agent retry loop can re-request rather than silently ending the turn.
 	if result.Content == "" && result.Reasoning == "" && len(result.ToolCalls) == 0 {
-		return result, &application.UpstreamError{
+		resp, fallbackErr := aiutil.StreamFallbackToComplete(ctx, a, req, onDelta, onReasoning)
+		if fallbackErr != nil {
+			return resp, fallbackErr
+		}
+		if resp.Content != "" || resp.Reasoning != "" || len(resp.ToolCalls) != 0 {
+			return resp, nil
+		}
+		return resp, &application.UpstreamError{
 			Kind:      application.KindSSETransport,
 			Temporary: true,
 			Err:       fmt.Errorf("provider returned empty content"),

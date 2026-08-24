@@ -1,17 +1,12 @@
-//go:build stt
-
 package whisper
 
 import (
 	"context"
-	"math"
 	"strings"
 	"testing"
 )
 
-func float32FromBits(b uint32) float32 { return math.Float32frombits(b) }
-
-// minimal 16 kHz mono PCM WAV header + one sample
+// minimal 16 kHz mono PCM WAV header + one int16 sample
 func tinyWav() []byte {
 	h := []byte("RIFF")
 	h = append(h, 36, 0, 0, 0) // riff size (min)
@@ -51,11 +46,11 @@ func TestDecodeWavInProcessRejectsStereo(t *testing.T) {
 func TestDecodeTo16kMonoFallsThroughToFFmpeg(t *testing.T) {
 	// Garbage bytes are neither WAV nor decodable by ffmpeg; the error must
 	// mention ffmpeg when present (or its absence explicitly).
-	_, err := decodeTo16kMono(context.Background(), []byte("definitely not audio"))
+	_, err := normalizeTo16kMonoWav(context.Background(), []byte("definitely not audio"), 0)
 	if err == nil {
 		t.Fatal("expected error for garbage input")
 	}
 	if !strings.Contains(err.Error(), "ffmpeg") {
-		t.Errorf("error should reference ffmpeg path, got %v", err)
+		t.Errorf("error should reference the ffmpeg path, got %v", err)
 	}
 }

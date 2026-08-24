@@ -112,8 +112,6 @@ func TestAllAdvertisedFamilyOpsRoute(t *testing.T) {
 	cases := []struct{ name, args string }{
 		{"skill", `{"op":"list"}`},
 		{"skill", `{"op":"search","query":"git"}`},
-		{"skill", `{"op":"read","name":"s1"}`},
-		{"skill", `{"op":"files","name":"s1"}`},
 		{"skill", `{"op":"save","name":"probe","content":"c"}`},
 		{"memory", `{"op":"save","content":"User prefers Indonesian","category":"user"}`},
 		{"memory", `{"op":"replace","target":"fragment","id":"nope","content":"c"}`},
@@ -122,9 +120,6 @@ func TestAllAdvertisedFamilyOpsRoute(t *testing.T) {
 		{"memory", `{"op":"delete","id":"nope"}`},
 		{"docs", `{"op":"search","query":"automation"}`},
 		{"docs", `{"op":"read","id":"automation"}`},
-		{"ci_pipeline", `{"op":"list"}`},
-		{"ci_pipeline", `{"op":"read"}`},
-		{"ci_pipeline", `{"op":"validate","yaml":"jobs: []"}`},
 	}
 	for _, tc := range cases {
 		if _, err := tb.Execute(context.Background(), tc.name, []byte(tc.args)); err != nil && strings.Contains(err.Error(), "unknown") {
@@ -133,7 +128,7 @@ func TestAllAdvertisedFamilyOpsRoute(t *testing.T) {
 	}
 
 	// Retired per-op names stay unknown at the boundary — no alias door.
-	for _, name := range []string{"ci_pipeline_list", "memory_replace", "skill_save", "docs_read"} {
+	for _, name := range []string{"ci_pipeline_list", "ci_pipeline_read", "memory_replace", "skill_save", "docs_read"} {
 		if _, err := tb.Execute(context.Background(), name, []byte(`{}`)); err == nil || !strings.Contains(err.Error(), "unknown tool") {
 			t.Fatalf("retired name %q must fail as unknown tool, got: %v", name, err)
 		}

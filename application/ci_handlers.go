@@ -3,7 +3,6 @@ package application
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"strings"
 	"time"
 
@@ -17,39 +16,7 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 	}
 	auto := a.Automation
 	switch method {
-	case contracts.MethodCIPipelinesList:
-		var req contracts.CIWorkspaceRequest
-		_ = contracts.DecodePayload(payload, &req)
-		ws := req.Workspace
-		if ws == "" {
-			ws, _ = os.Getwd()
-		}
-		w, _, err := auto.ReadPipeline(ctx, ws)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return contracts.AutomationListResult{Workflows: []contracts.AutomationDTO{}}, nil
-			}
-			return nil, rpcInternal(err)
-		}
-		avail, reason := auto.AvailabilityOf(ctx, w)
-		return contracts.AutomationListResult{Workflows: []contracts.AutomationDTO{workflowDTO(w, avail, reason)}}, nil
-	case contracts.MethodCIPipelinesRead:
-		var req contracts.CIWorkspaceRequest
-		if err := contracts.DecodePayload(payload, &req); err != nil {
-			return nil, err
-		}
-		ws := req.Workspace
-		if ws == "" {
-			ws, _ = os.Getwd()
-		}
-		w, r, err := auto.ReadPipeline(ctx, ws)
-		if err != nil {
-			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
-		}
-		avail, reason := auto.AvailabilityOf(ctx, w)
-		raw, _ := os.ReadFile(w.Source.Path)
-		return contracts.CIPipelineReadResult{Pipeline: workflowDTO(w, avail, reason), Validation: validationDTO(r), YAML: string(raw)}, nil
-	case contracts.MethodCIPipelinesValidate, contracts.MethodAutomationValidate:
+	case contracts.MethodAutomationValidate:
 		var req contracts.CIWorkspaceRequest
 		if err := contracts.DecodePayload(payload, &req); err != nil {
 			return nil, err
@@ -58,25 +25,16 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 			r, _ := auto.ValidateYAML([]byte(req.YAML))
 			return validationDTO(r), nil
 		}
-		ws := req.Workspace
-		if ws == "" {
-			ws, _ = os.Getwd()
-		}
-		_, r, err := auto.ReadPipeline(ctx, ws)
-		if err != nil {
-			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
-		}
-		return validationDTO(r), nil
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "yaml is required"}
 	case contracts.MethodCIRunsStart:
-		var req contracts.CIWorkspaceRequest
+		var req contracts.CIRunStartRequest
 		if err := contracts.DecodePayload(payload, &req); err != nil {
 			return nil, err
 		}
-		ws := req.Workspace
-		if ws == "" {
-			ws, _ = os.Getwd()
+		if req.ID == "" {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "id is required"}
 		}
-		run, err := auto.StartPipeline(ctx, ws, "ui")
+		run, err := auto.RunWorkflow(ctx, req.ID, "ui")
 		if err != nil && run == nil {
 			return nil, rpcInternal(err)
 		}
@@ -85,9 +43,7 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 		}
 		return runDTO(run), nil
 	case contracts.MethodCIRunsList:
-		var req contracts.CIWorkspaceRequest
-		_ = contracts.DecodePayload(payload, &req)
-		runs, err := auto.Runs.List(ctx, RunFilter{Workspace: req.Workspace, Limit: 50})
+		runs, err := auto.Runs.List(ctx, RunFilter{Limit: 50})
 		if err != nil {
 			return nil, rpcInternal(err)
 		}

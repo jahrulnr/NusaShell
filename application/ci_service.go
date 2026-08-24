@@ -17,7 +17,7 @@ type YAMLParser func([]byte) (*domain.WorkflowDefinition, error)
 // Automation is the application facade for CI + automation.
 type Automation struct {
 	ParseYAML YAMLParser
-	Files     PipelineFileStore
+	Pipelines PipelineDiscoverer
 	Workflows WorkflowStore
 	Runs      PipelineRunStore
 	Schedules ScheduleStore
@@ -52,62 +52,6 @@ func (a *Automation) ValidateYAML(raw []byte) (domain.ValidationResult, *domain.
 		return a.Auto.Validate(context.Background(), w), w
 	}
 	return domain.ValidateSyntax(w), w
-}
-
-func (a *Automation) ReadPipeline(ctx context.Context, workspace string) (*domain.WorkflowDefinition, domain.ValidationResult, error) {
-	if a.Files == nil {
-		return nil, domain.NewValidationResult(), fmt.Errorf("pipeline store not configured")
-	}
-	w, err := a.Files.GetDefinition(ctx, workspace)
-	if err != nil {
-		return nil, domain.NewValidationResult(), err
-	}
-	var r domain.ValidationResult
-	if a.Auto != nil {
-		r = a.Auto.Validate(ctx, w)
-	} else {
-		r = domain.ValidateSyntax(w)
-	}
-	return w, r, nil
-}
-
-func (a *Automation) StartPipeline(ctx context.Context, workspace string, requestedBy string) (*domain.WorkflowRun, error) {
-	return a.startPipeline(ctx, workspace, requestedBy, false)
-}
-
-// StartPipelineAsync is like StartPipeline but schedules the run in a
-// background goroutine so the caller receives the run immediately.
-func (a *Automation) StartPipelineAsync(ctx context.Context, workspace string, requestedBy string) (*domain.WorkflowRun, error) {
-	return a.startPipeline(ctx, workspace, requestedBy, true)
-}
-
-func (a *Automation) startPipeline(ctx context.Context, workspace string, requestedBy string, async bool) (*domain.WorkflowRun, error) {
-	w, r, err := a.ReadPipeline(ctx, workspace)
-	if err != nil {
-		return nil, err
-	}
-	if r.Verdict() == "INVALID" {
-		return nil, fmt.Errorf("invalid pipeline: %s", r.Issues[0].Message)
-	}
-	if r.Verdict() == "BLOCKED" {
-		run := NewWorkflowRun(*w, requestedBy)
-		run.Status = domain.StatusBlocked
-		run.BlockedReason = r.Issues[len(r.Issues)-1].Message
-		if a.Exec != nil && a.Exec.Runs != nil {
-			_ = a.Exec.Runs.Create(ctx, run)
-		}
-		return run, nil
-	}
-	run := NewWorkflowRun(*w, requestedBy)
-	run.Workspace = workspace
-	startErr := a.Exec.StartRun(ctx, run)
-	if async {
-		startErr = a.Exec.StartRunAsync(ctx, run)
-	}
-	if startErr != nil {
-		return run, startErr
-	}
-	return a.Exec.Runs.Get(ctx, run.ID)
 }
 
 func (a *Automation) SaveWorkflow(ctx context.Context, w *domain.WorkflowDefinition) (*domain.WorkflowDefinition, domain.ValidationResult, error) {
@@ -305,4 +249,30 @@ func (a *Automation) ParseDefinition(src string) (*domain.WorkflowDefinition, er
 		return &w, nil
 	}
 	return a.ParseYAML([]byte(src))
+}
+
+// DiscoverPipelines scans the pipeline directory for YAML files, upserts
+// each into the WorkflowStore, and registers triggers with the scheduler.
+// It is idempotent: running it twice does not duplicate workflows or
+// schedules. Call once on boot after wiring is complete.
+func (a *Automation) DiscoverPipelines(ctx context.Context) ([]*domain.WorkflowDefinition, error) {
+	if a.Pipelines == nil {
+		return nil, nil
+	}
+	defs, err := a.Pipelines.Discover()
+	if err != nil {
+		return nil, fmt.Errorf("discover pipelines: %w", err)
+	}
+	loaded := make([]*domain.WorkflowDefinition, 0, len(defs))
+	for _, w := range defs {
+		w.Enabled = true
+		if err := a.Workflows.Put(ctx, w); err != nil {
+			continue
+		}
+		if a.Auto != nil {
+			_ = a.Auto.EnableWorkflow(ctx, w)
+		}
+		loaded = append(loaded, w)
+	}
+	return loaded, nil
 }

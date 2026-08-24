@@ -10,7 +10,6 @@ const state = {
   schedules: [],
   events: [],
   selected: null,
-  workspace: '',
   blockedProvider: '',
 };
 
@@ -22,10 +21,6 @@ export async function initAutomation() {
     refresh().catch((err) => toast(err.message || String(err), 'error'));
   });
   document.getElementById('auto-new-btn').addEventListener('click', () => createWizard());
-  document.getElementById('auto-run-pipeline-btn').addEventListener('click', runPipeline);
-  document.getElementById('auto-workspace').addEventListener('change', (e) => {
-    state.workspace = e.target.value.trim();
-  });
   document.getElementById('auto-enable-provider-btn').addEventListener('click', enableBlockedProvider);
   on('ci.run.created', () => refresh().catch(() => {}));
   on('ci.run.completed', () => refresh().catch(() => {}));
@@ -39,7 +34,7 @@ export async function refresh() {
   try {
     const [{ workflows }, { runs }, { schedules }, { events }] = await Promise.all([
       rpc('automation.list'),
-      rpc('ci.runs.list', { workspace: state.workspace }),
+      rpc('ci.runs.list'),
       rpc('automation.schedules'),
       rpc('automation.events'),
     ]);
@@ -136,7 +131,7 @@ function renderList() {
   if (!rows.length) {
     list.append(el('div', { class: 'automation-empty' },
       el('strong', { text: 'Nothing here yet' }),
-      el('span', { text: state.tab === 'workflows' ? 'Create an automation or run the workspace pipeline.' : 'Waiting for activity.' }),
+      el('span', { text: state.tab === 'workflows' ? 'Create an automation or discover pipeline files.' : 'Waiting for activity.' }),
     ));
     return;
   }
@@ -273,18 +268,6 @@ function renderRunDetail(run, detail, actions) {
       await refresh();
     });
     actions.append(retry);
-  }
-}
-
-async function runPipeline() {
-  const workspace = document.getElementById('auto-workspace').value.trim();
-  try {
-    await rpc('ci.runs.start', { workspace });
-    toast('Pipeline started', 'success');
-    setTab('runs');
-    await refresh();
-  } catch (err) {
-    toast(err.message || String(err), 'error');
   }
 }
 

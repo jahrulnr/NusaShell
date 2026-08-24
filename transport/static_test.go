@@ -111,6 +111,82 @@ func TestFrontendAssets(t *testing.T) {
 	}
 }
 
+// TestPWAServing verifies the PWA surface: the web app manifest is served
+// with its proper media type (browsers reject manifests served as
+// application/octet-stream), the service worker is reachable at the root
+// scope with a JavaScript MIME type, icons resolve, and index.html wires
+// everything together.
+func TestPWAServing(t *testing.T) {
+	h := newHarness(t, nil)
+
+	resp, err := http.Get(h.server.URL + "/manifest.webmanifest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /manifest.webmanifest = %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/manifest+json") {
+		t.Fatalf("manifest content type = %q, want application/manifest+json", ct)
+	}
+	manifestBody, _ := io.ReadAll(resp.Body)
+	for _, needle := range []string{`"display": "standalone"`, "icons/icon-192.png", "icons/icon-maskable-512.png"} {
+		if !strings.Contains(string(manifestBody), needle) {
+			t.Fatalf("manifest missing %s", needle)
+		}
+	}
+
+	resp, err = http.Get(h.server.URL + "/sw.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /sw.js = %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "text/javascript") && !strings.HasPrefix(ct, "application/javascript") {
+		t.Fatalf("sw.js content type = %q", ct)
+	}
+	swBody, _ := io.ReadAll(resp.Body)
+	for _, needle := range []string{"nusashell-shell-v1", "'fetch'", "/rpc/", "/plugins/", "./js/pip.js"} {
+		if !strings.Contains(string(swBody), needle) {
+			t.Fatalf("sw.js missing %s", needle)
+		}
+	}
+
+	for _, icon := range []string{"/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-192.png", "/icons/icon-maskable-512.png"} {
+		resp, err := http.Get(h.server.URL + icon)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s = %d", icon, resp.StatusCode)
+		}
+		if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "image/png") {
+			t.Fatalf("GET %s content type = %q", icon, got)
+		}
+		if len(body) < 1000 {
+			t.Fatalf("GET %s body too small: %d bytes", icon, len(body))
+		}
+	}
+
+	resp, err = http.Get(h.server.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	html, _ := io.ReadAll(resp.Body)
+	for _, needle := range []string{`rel="manifest"`, `"theme-color"`, "js/pwa.js", "offline-screen"} {
+		if !strings.Contains(string(html), needle) {
+			t.Fatalf("index.html missing %s", needle)
+		}
+	}
+}
+
 // TestSoundsEndpoint verifies that the embedded notification sounds are
 // served at /sounds/ with the correct MIME type so the frontend can play
 // them on turn-complete / turn-error events.

@@ -1487,9 +1487,10 @@ func toDomainUsage(u ChatUsage) *domain.Usage {
 // read_audio, read_video) and chatMessages can behave correctly without
 // re-querying the provider on every round.
 type ModelCapabilities struct {
-	Vision bool // image input
-	Audio  bool // audio input
-	Video  bool // video input
+	Vision   bool // image input
+	Audio    bool // audio input
+	Video    bool // video input
+	Document bool // PDF/document input
 	// ReasoningReplay is true when the upstream requires reasoning_content
 	// (Chat Completions) or reasoning items (Responses API) to be echoed
 	// back on every assistant message in subsequent turns. Resolved from
@@ -1518,7 +1519,7 @@ func modelCapabilities(provider *domain.Provider, model string) ModelCapabilitie
 // modalities. When cache is nil, no learned overrides are applied.
 func modelCapabilitiesWithLearned(provider *domain.Provider, model string, cache *learnedParamsCache) ModelCapabilities {
 	dc := domain.ModelCapabilitiesOf(provider, model)
-	caps := ModelCapabilities{Vision: dc.Vision, Audio: dc.Audio, Video: dc.Video}
+	caps := ModelCapabilities{Vision: dc.Vision, Audio: dc.Audio, Video: dc.Video, Document: dc.Document}
 	if provider != nil {
 		if m := provider.FindModel(model); m != nil {
 			caps.ReasoningReplay = domain.RequiresReasoningReplay(provider.ID, model, m.InterleavedField)
@@ -1542,6 +1543,8 @@ func modelCapabilitiesWithLearned(provider *domain.Provider, model string, cache
 			caps.Audio = false
 		case "video":
 			caps.Video = false
+		case "document":
+			caps.Document = false
 		}
 	}
 	return caps
@@ -1612,6 +1615,16 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 				if content == "" {
 					content = placeholder
 				} else if !containsOmissionNote(content, "video") {
+					content = content + "\n\n" + placeholder
+				}
+			}
+			if !caps.Document && hasAttachmentOfType(attachments, "file") {
+				fileAtts := filterAttachmentsByType(attachments, "file")
+				attachments = stripAttachmentsByType(attachments, "file")
+				placeholder := omittedPlaceholderFor("document", "read_media", fileAtts)
+				if content == "" {
+					content = placeholder
+				} else if !containsOmissionNote(content, "document") {
 					content = content + "\n\n" + placeholder
 				}
 			}
@@ -1703,6 +1716,11 @@ func filterToolAttachmentsByCaps(atts []domain.Attachment, content string, caps 
 		case "video":
 			if !caps.Video {
 				notes = append(notes, fmt.Sprintf("[Video %q was loaded but cannot be shown to this model. File path: %s]", att.Name, att.FilePath))
+				continue
+			}
+		case "file":
+			if !caps.Document {
+				notes = append(notes, fmt.Sprintf("[Document %q was loaded but cannot be read by this model. File path: %s]", att.Name, att.FilePath))
 				continue
 			}
 		}

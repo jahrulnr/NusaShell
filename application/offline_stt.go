@@ -28,6 +28,7 @@ type OfflineTranscriber interface {
 type OfflineSTTRequest struct {
 	Data       []byte // encoded audio bytes (wav/mp3/flac...); decoding is the engine adapter's job
 	Language   string // optional ISO-639-1 hint ("id", "en"); empty = engine default/auto
+	Model      string // optional: resolved ggml model file ("" = engine picks the first installed model in its model dir)
 	Translate  bool   // optional: transcribe-and-translate to English when the engine supports it
 	MaxSeconds int    // optional duration cap; 0 = engine default; protects against runaway jobs
 }

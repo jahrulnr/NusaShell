@@ -17,7 +17,6 @@ func TestDispatchOpRoutesOps(t *testing.T) {
 		{"memory", `{"op":"SAVE","content":"x"}`, "save"}, // op match is case-insensitive
 		{"memory", `{"op":" search ","query":"q"}`, "search"},
 		{"docs", `{"op":"search","query":"mcp"}`, "search"},
-		{"ci_pipeline", `{"op":"validate","yaml":"jobs: []"}`, "validate"},
 	}
 	for _, tc := range cases {
 		got, err := DispatchOp(tc.root, []byte(tc.args))
@@ -46,7 +45,7 @@ func TestDispatchOpRejectsBadOp(t *testing.T) {
 }
 
 func TestIsDispatchRoot(t *testing.T) {
-	for _, root := range []string{"skill", "memory", "docs", "ci_pipeline"} {
+	for _, root := range []string{"skill", "memory", "docs"} {
 		if !IsDispatchRoot(root) {
 			t.Fatalf("%q should be a dispatch root", root)
 		}
@@ -60,8 +59,8 @@ func TestIsDispatchRoot(t *testing.T) {
 
 func TestDispatcherToolInfosSchemaRequiresOp(t *testing.T) {
 	got := DispatcherToolInfos()
-	if len(got) != 4 {
-		t.Fatalf("family defs = %d, want 4", len(got))
+	if len(got) != 3 {
+		t.Fatalf("family defs = %d, want 3", len(got))
 	}
 	for _, def := range got {
 		req, ok := def.InputSchema["required"].([]string)

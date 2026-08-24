@@ -260,10 +260,18 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 		embLister := a.EmbeddingModelListerFactory(p)
 		if embLister != nil {
 			embIDs, _ := embLister.ListEmbeddingModels(ctx, key)
+			byID := make(map[string]int, len(models))
+			for i := range models {
+				byID[models[i].ID] = i
+			}
 			for _, id := range embIDs {
-				if seen[id] {
+				if i, ok := byID[id]; ok {
+					// Already imported via /models — just tag it so it
+					// shows up in the Embedding model picker.
+					models[i].Kind = domain.ModelKindEmbedding
 					continue
 				}
+				byID[id] = len(models)
 				seen[id] = true
 				models = append(models, domain.Model{ID: id, Kind: domain.ModelKindEmbedding})
 			}
@@ -395,6 +403,8 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 					models[i].Kind = domain.ModelKindImage
 				case "stt":
 					models[i].Kind = domain.ModelKindSTT
+				case "embedding":
+					models[i].Kind = domain.ModelKindEmbedding
 				}
 			}
 		}
@@ -514,6 +524,15 @@ func (a *App) handleModelsList() (any, *contracts.RPCError) {
 		if a.ModelCatalog != nil && a.ModelCatalog.Loaded() {
 			a.enrichProviderModelsAtRead(p)
 		}
+		// Read-time embedding tagging via the allowlist — runs even without
+		// the models.dev catalog so embedding models imported before their
+		// name entered the catalog (or before native capability detection)
+		// surface in the Embedding model picker without a re-import.
+		for i := range p.Models {
+			if p.Models[i].Kind == "" && config.IsKnownEmbeddingModel(p.Models[i].ID) {
+				p.Models[i].Kind = domain.ModelKindEmbedding
+			}
+		}
 		out = append(out, modelsDTO(p)...)
 	}
 	if out == nil {
@@ -574,18 +593,27 @@ func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
 		if config.IsKnownImageModel(p.Models[i].ID) {
 			p.Models[i].Kind = domain.ModelKindImage
 		}
-		// TTS/VIDEO tagging mirror the import path: models.dev catalog first
-		// (documented carve-outs for speech/video kinds), then the allowlist.
+		// TTS/VIDEO/EMBEDDING tagging mirrors the import path: models.dev
+		// catalog first (documented carve-outs for speech/video kinds), then
+		// the allowlists. Embedding is mirrored here so embedding models
+		// imported before the catalog grew (or before Ollama native capability
+		// detection existed) surface in Settings → Embedding model without a
+		// manual re-import.
 		if meta := a.ModelCatalog.Lookup(catalogHintFromModelID(p.Models[i].ID), p.Models[i].ID); meta != nil {
 			switch meta.Kind {
 			case "tts":
 				p.Models[i].Kind = domain.ModelKindTTS
 			case "video":
 				p.Models[i].Kind = domain.ModelKindVideo
+			case "embedding":
+				p.Models[i].Kind = domain.ModelKindEmbedding
 			}
 		}
 		if config.IsKnownTTSModel(p.Models[i].ID) {
 			p.Models[i].Kind = domain.ModelKindTTS
+		}
+		if p.Models[i].Kind != domain.ModelKindEmbedding && config.IsKnownEmbeddingModel(p.Models[i].ID) {
+			p.Models[i].Kind = domain.ModelKindEmbedding
 		}
 	}
 }

@@ -48,7 +48,7 @@ Lists conversations with a search filter and a New conversation button. The coun
 
 ## Thread
 
-Renders the active conversation. An empty thread offers starter prompt chips that fill the composer. An offline mascot appears when the backend is unreachable.
+Renders the active conversation. An empty thread offers starter prompt chips that fill the composer.
 
 Long conversations open showing only the most recent messages, scrolled to the bottom; a 'Load older messages' button at the top of the thread reveals earlier messages in batches (keeping the scroll position anchored). Live streaming auto-follows only while the view is pinned to the bottom.
 
@@ -59,11 +59,6 @@ Long conversations open showing only the most recent messages, scrolled to the b
 - **Active conversation** (`#agent-conversation`):
   - Section: Agent
   - Type: container
-
-- **Offline mascot** (`#agent-offline-state`):
-  - Section: Agent
-  - Type: status
-  - Notes: Shown when the backend is unreachable.
 
 - **Thread log** (`#agent-thread`):
   - Section: Agent

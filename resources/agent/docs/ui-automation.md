@@ -1,6 +1,6 @@
 # Automation
 
-Run workspace pipelines, manage durable once/every/when automations, inspect DAG runs, and see waiting or blocked states without occupying a runner.
+Manage durable once/every/when automations, inspect DAG runs, and see waiting or blocked states without occupying a runner.
 
 **How to open:** Click the Automation item in the left sidebar.
 
@@ -16,7 +16,7 @@ Counts of runnable, blocked, and waiting automations so provider outages are vis
 
 ## Toolbar
 
-Tabs switch between Workflows, Runs, Schedules, and Events. The workspace field is used when starting .nusashell/pipeline.yaml. New automation opens a once/every/when/manual wizard. Run pipeline starts the workspace file.
+Tabs switch between Workflows, Runs, Schedules, and Events. New automation opens a once/every/when/manual wizard. Pipeline files from the data directory appear alongside saved automations in the Workflows tab.
 
 - **`#auto-tabs`** (missing map entry)
 
@@ -27,10 +27,6 @@ Tabs switch between Workflows, Runs, Schedules, and Events. The workspace field 
 - **`#auto-tab-schedules`** (missing map entry)
 
 - **`#auto-tab-events`** (missing map entry)
-
-- **`#auto-workspace`** (missing map entry)
-
-- **`#auto-run-pipeline-btn`** (missing map entry)
 
 - **`#auto-new-btn`** (missing map entry)
 

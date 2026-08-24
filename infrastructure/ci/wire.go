@@ -41,7 +41,7 @@ func BuildAutomation(dataDir string, bus *application.Bus, plugins application.P
 	}
 	svc := &application.Automation{
 		ParseYAML: ParseYAML,
-		Files:     FilePipelineStore{},
+		Pipelines: DirPipelineStore{Root: filepath.Join(dataDir, PipelinesDir)},
 		Workflows: WorkflowSQL{store},
 		Runs:      RunSQL{store},
 		Schedules: ScheduleSQL{store},

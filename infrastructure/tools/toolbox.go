@@ -121,7 +121,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 	tools := []application.ToolInfo{
 		{Name: "todo", Description: "Manage the conversation task checklist. Two modes: `replace` (default, full-replace Claude TodoWrite style — empty items clears the list) and `patch` (merge by ID — update status/content of existing items, add new items, keep untouched items unchanged). Use `patch` to update a single item's status without re-emitting the full list (saves tokens). In patch mode, `content` may be empty (meaning \"don't change content, only update status\"). The user can delete items from the UI — treat deleted items as gone and do not re-add them. The optional `brief` argument is a living planning document that survives compaction and is re-injected via hydration. Format: markdown with required sections — `## Objective` (what the user asked for, in their words), `## Done when` (acceptance criteria — what the finished result looks like) — and optional sections that grow as the task progresses: `## Findings` (what you discovered during exploration: paths, line numbers, relevant files), `## Approach` (key steps/strategy). Set the brief at the start of a task; update it as findings emerge and the approach solidifies (e.g. after exploration, add concrete paths/lines to Findings; before execution, refine Approach). The current hydration checkpoint is reused until compaction; the brief remains in tool history and is included in the fresh post-compaction checkpoint. Legacy `goal` arg is accepted for backward compat and mapped to `brief`.", InputSchema: obj("object", props("items", arrObj("Todo items (max 50). In replace mode: full list. In patch mode: only items to update/add.", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars). Required in replace mode; optional in patch mode (empty = keep existing)."), "status", strEnum("Item status; prefer exactly one in_progress at a time", "pending", "in_progress", "completed")), "id", "content", "status"), "mode", strEnum("Update mode: replace (default, full-replace) or patch (merge by ID)", "replace", "patch"), "brief", str("Living planning document. Required markdown sections: `## Objective` (user intent in their words), `## Done when` (acceptance criteria). Optional, grows over time: `## Findings` (paths, line numbers, relevant files discovered), `## Approach` (key steps/strategy). Set at task start; update as findings emerge. Survives compaction. Max ~10000 tokens.")), "items")},
 		{Name: "ask_question", Description: "Pause and ask the user a structured clarifying question before continuing. Use only for genuine decisions the user must make — not for things you can figure out yourself. The user can answer via options or free text (when allowed). The turn blocks until the user answers or cancels.", InputSchema: obj("object", props("question", str("The question to show the user"), "options", arrObj("Selectable choices (1-8). Mark one default when possible.", props("id", str("Stable option id"), "label", str("Short option label"), "description", str("Optional one-line explanation"), "default", obj("boolean", nil), "icon", str("Optional emoji or short icon glyph"), "image", str("Optional image URL or compact data URI")), "id", "label"), "allow_free_text", obj("boolean", nil), "multi_select", obj("boolean", nil)), "question", "options")},
-		{Name: "ci_run", Description: "Start a pipeline or saved automation. Set async=true to return immediately with a run_id while the pipeline runs in the background; then use ci_wait or ci_run_status to check on it. Without async, the call blocks until the pipeline finishes.", InputSchema: obj("object", props("workspace", str("Workspace path for .nusashell/pipeline.yaml"), "workflow_id", str("Saved automation id"), "async", obj("boolean", nil)))},
+		{Name: "ci_run", Description: "Start a saved automation by workflow_id. Set async=true to return immediately with a run_id while the pipeline runs in the background; then use ci_wait or ci_run_status to check on it. Without async, the call blocks until the pipeline finishes.", InputSchema: obj("object", props("workflow_id", str("Automation id from automation_list"), "async", obj("boolean", nil)), "workflow_id")},
 		{Name: "ci_wait", Description: "Block until a pipeline run reaches a terminal state (done, failed, cancelled, blocked) or the timeout expires. Use after ci_run with async=true. Returns the final run status and summary.", InputSchema: obj("object", props("run_id", str("Run id"), "timeout_ms", intSchema("Max wait in milliseconds (default 300000 = 5 min, max 3600000 = 1 h)")), "run_id")},
 		{Name: "ci_run_status", Description: "Return run status, DAG summary, and failed jobs. Use this after ci_run; do not fetch full logs unless a job failed.", InputSchema: obj("object", props("run_id", str("Run id")), "run_id")},
 		{Name: "ci_logs", Description: "Retrieve job logs (tail 200 by default). Prefer failed jobs.", InputSchema: obj("object", props("job_id", str("Job run id"), "run_id", str("Run id"), "limit", intSchema("Max chunks")), "job_id")},
@@ -150,9 +150,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "mcp_unregister", Description: "Remove an MCP plugin entirely and delete its installed folder. Ask the user for confirmation first. Use mcp_disable when the plugin only needs to stop.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
 		{Name: "mcp_install", Description: "Install an MCP plugin from the curated catalog or a GitHub repository (owner/repo or URL). After install, call mcp_enable with the resulting plugin id to connect and load its tools.", InputSchema: obj("object", props("source", strEnum("Install source", "catalog", "github"), "id", str("Catalog plugin id (required when source=catalog)"), "url", str("GitHub repo URL or owner/repo shorthand (required when source=github)"), "subdir", str("Optional subdirectory inside a monorepo (github)"), "ref", str("Optional branch or tag to pin (github)")), "source")},
 		{Name: "mcp_server_add", Description: "Register a manual MCP server (no manifest needed) by command/args/env — e.g. npx servers. Use for generic MCP servers; use mcp_register for NusaShell plugin folders. After adding, call mcp_enable with the server id to connect and load its tools.", InputSchema: obj("object", props("name", str("Human-readable server name"), "command", str("Command to launch the server (e.g. npx, node, python)"), "args", arr("Arguments (e.g. -y @modelcontextprotocol/server-github)"), "env", obj("object", props("additional", str("KEY=VALUE entries")), "additional"), "id", str("Optional stable id (default auto-generated)")), "name", "command")},
-		{Name: "read_image", Description: "Load an image from disk into your context so you can see it. Pass file_path (any absolute path on disk). When your active model supports vision, the image is attached to your context directly. For non-vision models, the image is described using a vision fallback model and the text description is returned.", InputSchema: obj("object", props("file_path", str("Absolute path of the image file on disk (shown in the image placeholder)"), "question", str("Optional question about the image")), "file_path")},
-		{Name: "read_audio", Description: "Load an audio file from disk into your context so you can hear it. Pass file_path (any absolute path on disk). When your active model supports audio input, the audio is attached to your context directly. For non-audio models, the audio is transcribed/described using an audio fallback model and the text transcript is returned.", InputSchema: obj("object", props("file_path", str("Absolute path of the audio file on disk"), "question", str("Optional question about the audio")), "file_path")},
-		{Name: "read_video", Description: "Load a video file from disk into your context so you can see it. Pass file_path (any absolute path on disk). When your active model supports video input, the video is attached to your context directly. For non-video models, the video is described using a video fallback model and the text description is returned.", InputSchema: obj("object", props("file_path", str("Absolute path of the video file on disk"), "question", str("Optional question about the video")), "file_path")},
+		{Name: "read_media", Description: "Load a media file (image, audio, video, or PDF document) from disk into your context. The media type is auto-detected from the file's binary magic bytes — no need to specify whether it's an image, audio, video, or PDF. When your active model supports the detected media kind natively, the file is attached to your context directly. For non-capable models, a fallback model transcribes/describes the content and returns the text, or a placeholder note with the file path is returned for documents.", InputSchema: obj("object", props("file_path", str("Absolute path of the media file on disk"), "question", str("Optional question about the media content")), "file_path")},
 		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
 		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
 	}
@@ -326,94 +324,6 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			}
 		}
 		return yamlJSONL(map[string]any{"query": args.Query, "count": len(items)}, items), nil
-
-	case name == "skill_read":
-		var args struct {
-			Name     string `json:"name"`
-			Path     string `json:"path"`
-			Offset   int    `json:"offset"`
-			MaxChars int    `json:"max_chars"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return "", fmt.Errorf("invalid args: %w", err)
-		}
-		if strings.TrimSpace(args.Name) == "" {
-			return "", fmt.Errorf("name is required (use skill with op=list to see available skills)")
-		}
-		if r, ok := t.Skills.(interface {
-			ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error)
-		}); ok {
-			file, err := r.ReadFile(args.Name, "", args.Path, args.Offset, args.MaxChars)
-			if err != nil {
-				// Legacy stores without real skill folders report unsupported;
-				// fall back to SKILL.md Content so old behavior is preserved.
-				msg := err.Error()
-				if strings.Contains(msg, "not supported") || strings.Contains(msg, "unsupported") {
-					for _, s := range t.Skills.List() {
-						if s.Name == args.Name || s.ID == args.Name {
-							return s.Content, nil
-						}
-					}
-					return "", fmt.Errorf("skill %q not found; use skill with op=list or op=search to see available skills", args.Name)
-				}
-				return "", fmt.Errorf("skill read: %w", err)
-			}
-			var sb strings.Builder
-			if file.Editable {
-				sb.WriteString(file.Content)
-			} else {
-				sb.WriteString(fmt.Sprintf("[%s is not editable text; %d bytes]", file.Path, file.SizeBytes))
-			}
-			if file.Truncated {
-				sb.WriteString(fmt.Sprintf("\n… [truncated — continue with offset=%d]", file.NextOffset))
-			}
-			meta := map[string]any{
-				"skill":     args.Name,
-				"path":      file.Path,
-				"editable":  file.Editable,
-				"truncated": file.Truncated,
-			}
-			if file.Truncated {
-				meta["next_offset"] = file.NextOffset
-			}
-			return yamlMD(meta, sb.String()), nil
-		}
-		// Fallback: legacy Content-only stores (e.g. jsonstore or test stubs).
-		for _, s := range t.Skills.List() {
-			if s.Name == args.Name || s.ID == args.Name {
-				return yamlMD(map[string]any{"skill": s.Name, "source": "legacy"}, s.Content), nil
-			}
-		}
-		return "", fmt.Errorf("skill %q not found; use skill with op=list or op=search to see available skills", args.Name)
-
-	case name == "skill_files":
-		var args struct {
-			Name string `json:"name"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return "", fmt.Errorf("invalid args: %w", err)
-		}
-		if strings.TrimSpace(args.Name) == "" {
-			return "", fmt.Errorf("name is required")
-		}
-		if f, ok := t.Skills.(interface {
-			Files(id, ownedBy string) ([]domain.SkillFileEntry, error)
-		}); ok {
-			entries, err := f.Files(args.Name, "")
-			if err != nil {
-				msg := err.Error()
-				if strings.Contains(msg, "not supported") || strings.Contains(msg, "unsupported") {
-					return "", fmt.Errorf("skill store does not support file listing")
-				}
-				return "", fmt.Errorf("skill files: %w", err)
-			}
-			items := make([]any, 0, len(entries))
-			for _, e := range entries {
-				items = append(items, map[string]any{"type": e.Type, "path": e.Path, "size": e.SizeBytes, "editable": e.Editable})
-			}
-			return yamlJSONL(map[string]any{"skill": args.Name, "count": len(entries)}, items), nil
-		}
-		return "", fmt.Errorf("skill store does not support file listing")
 
 	case name == "skill_save":
 		var args struct {
@@ -683,12 +593,6 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		}
 		return yamlMD(map[string]any{"id": doc.ID, "title": doc.Title, "path": doc.Path}, doc.Content), nil
 
-	case strings.HasPrefix(name, "ci_pipeline_"):
-		// Hand over the bare op, not the resolved name: direct calls with
-		// resolved keys (e.g. "ci_pipeline_list") must stay unknown tools —
-		// the family root+op form is the only door (no alias machinery).
-		return t.executePipelineOp(ctx, strings.TrimPrefix(name, "ci_pipeline_"), argsJSON)
-
 	default:
 		return "", fmt.Errorf("unknown %s op %q", name, op)
 	}
@@ -697,40 +601,6 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 // executePipelineOp runs one validated ci_pipeline op (list|read|validate).
 // It lives outside executeAutomation so the automation switch never answers
 // to a resolved per-op name.
-func (t *Toolbox) executePipelineOp(ctx context.Context, op string, argsJSON []byte) (string, error) {
-	if t.Automation == nil {
-		return "", fmt.Errorf("automation is not configured")
-	}
-	var args map[string]any
-	_ = json.Unmarshal(argsJSON, &args)
-	str := func(k string) string {
-		v, _ := args[k].(string)
-		return v
-	}
-	a := t.Automation
-	switch op {
-	case "list", "read":
-		w, r, err := a.ReadPipeline(ctx, str("workspace"))
-		if err != nil {
-			return "", err
-		}
-		return yamlBlock(map[string]any{"name": w.Name, "jobs": w.JobIDs(), "validation": r.Verdict()}), nil
-	case "validate":
-		raw := []byte(str("yaml"))
-		if len(raw) == 0 && str("workspace") != "" {
-			_, r, err := a.ReadPipeline(ctx, str("workspace"))
-			if err != nil {
-				return "", err
-			}
-			return yamlBlock(r), nil
-		}
-		r, _ := a.ValidateYAML(raw)
-		return yamlBlock(r), nil
-	default:
-		return "", fmt.Errorf("unknown ci_pipeline op %q", op)
-	}
-}
-
 func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {
 	// Native built-ins first: file CRUD and the exec island.
 	if name == "exec" {
@@ -1718,14 +1588,6 @@ func strEnum(desc string, values ...string) map[string]any {
 // (<server>:<tool>) from mcp_search / tool_list.
 
 func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON []byte) (string, bool, error) {
-	// Resolved ci_pipeline_* keys are private routing inside executeFamily
-	// (handled by executePipelineOp). A direct call with such a name is a
-	// retired per-op verb: stay unhandled so Execute reports it as an
-	// unknown tool — no alias doors (docs/design/tool-dispatchers.md).
-	if strings.HasPrefix(name, "ci_pipeline_") {
-		return "", false, nil
-	}
-
 	if t.Automation == nil {
 		switch name {
 		case "ci_run", "ci_wait", "ci_run_status",
@@ -1753,30 +1615,20 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 	switch name {
 	case "automation_validate":
 		raw := []byte(str("yaml"))
-		if len(raw) == 0 && str("workspace") != "" {
-			_, r, err := a.ReadPipeline(ctx, str("workspace"))
-			return encode(r, err)
-		}
 		r, _ := a.ValidateYAML(raw)
 		return encode(r, nil)
 	case "ci_run":
 		async, _ := args["async"].(bool)
-		if id := str("workflow_id"); id != "" {
-			var run *domain.WorkflowRun
-			var err error
-			if async {
-				run, err = a.RunWorkflowAsync(ctx, id, "agent")
-			} else {
-				run, err = a.RunWorkflow(ctx, id, "agent")
-			}
-			return encode(run, err)
+		id := str("workflow_id")
+		if id == "" {
+			return "", true, fmt.Errorf("workflow_id is required (use automation_list to see available automations)")
 		}
 		var run *domain.WorkflowRun
 		var err error
 		if async {
-			run, err = a.StartPipelineAsync(ctx, str("workspace"), "agent")
+			run, err = a.RunWorkflowAsync(ctx, id, "agent")
 		} else {
-			run, err = a.StartPipeline(ctx, str("workspace"), "agent")
+			run, err = a.RunWorkflow(ctx, id, "agent")
 		}
 		return encode(run, err)
 	case "ci_wait":

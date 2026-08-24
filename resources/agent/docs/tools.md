@@ -18,7 +18,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `file_copy` | copy a file or directory recursively |
 | `file_exists` | check whether a path exists without erroring when missing (returns `exists`, `is_dir`) |
 | `file_info` | metadata for a path: size, mode, type, modified time |
-| `skill` | skill library dispatcher; `op` selects: `list`, `search`, `read`, `files`, `save` (same semantics as the legacy per-op names below) |
+| `skill` | skill library dispatcher; `op` selects: `list`, `search`, `save`. Skill files live on disk — read `SKILL.md` and support files with `file_read`, list a skill folder with `file_list` (see `docs(op="read", id="skills")` for the path layout) |
 | `memory` | long-term memory dispatcher; `op` selects: `save` (idempotent dedup), `replace` (primary substring/body rewrite or fragment update), `search` (BM25 ranked fragments), `list`, `delete` |
 | `docs` | product documentation dispatcher; `op` selects: `search {query}` (ranked page ids) and `read {id}` |
 | `todo` | manage the conversation task checklist. Two modes: `replace` (default) full-replaces Claude TodoWrite style (empty items clears the list); `patch` merges by ID — updates status/content of existing items, appends new ones, keeps untouched items unchanged (`content` optional in patch mode). Use `patch` to update a single item without re-emitting the full list. Item IDs are shown in the hydrated checklist so statuses can be patched after compaction. Max 50 items, 500 chars each; prefer exactly one `in_progress` at a time. The optional `brief` argument is a living planning document (max ~10k tokens) with required markdown sections `## Objective` and `## Done when`, plus optional `## Findings` and `## Approach` that grow as the task progresses. It stays available through conversation history and is re-injected with the fresh hydration checkpoint after compaction. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
@@ -35,10 +35,8 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `mcp_unregister` | permanently delete an installed plugin; ask first and use `mcp_disable` when it only needs to stop |
 | `mcp_install` | install a plugin from the curated catalog or GitHub |
 | `mcp_server_add` | register a manual MCP server from command, arguments, and environment entries |
-| `read_image` | load an image from disk by absolute path into the model's context — any path works, not just conversation attachments (vision models see it directly; non-vision models get a text description via the vision fallback) |
-| `read_audio` | load an audio file from disk by absolute path into the model's context — any path works, not just conversation attachments. Fallback ladder: configured cloud STT first (kind `stt` → `/audio/transcriptions`; audio chat models → `input_audio`), then the local offline whisper engine when built with `-tags stt` and a model is installed (`NUSASHELL_STT_MODEL` or `<data>/models/stt/ggml-base.bin`); each response's yaml meta discloses the route used (audio-capable models hear it directly; non-audio models get a text transcript) |
-| `read_video` | load a video file from disk by absolute path into the model's context — any path works, not just conversation attachments (video-capable models see it directly; non-video models get a text description via the video fallback) |
-| `generate_media` | generate media from a prompt and save it for the user: media_type=image (PNG/JPEG/WebP; referenced_image_paths enables editing), speech (mp3/wav/opus via OpenAI-compatible /audio/speech or offline piper fallback), or video (async /videos API; duration/resolution minimums reported verbatim on rejection). Only listed when at least one mode is configured; unconfigured modes are rejected with guidance |
+| `read_media` | load any media file (image, audio, video, or PDF document) from disk by absolute path into the model's context — the media kind is auto-detected from binary magic bytes, no need to specify image/audio/video/pdf. Any path works, not just conversation attachments. Vision/audio/video-capable models see/hear it directly; document-capable models receive the PDF natively (Anthropic `document`, OpenAI `input_file`); non-capable models get a text description/transcript via the configured fallback (vision fallback, cloud STT + offline whisper for audio, video fallback) or a placeholder note with the file path (document) |
+| `generate_media` | generate media from a prompt and save it for the user: media_type=image (PNG/JPEG/WebP; referenced_image_paths enables editing), speech (mp3/wav/opus via OpenAI-compatible /audio/speech or offline piper fallback), or video (async /videos API; duration/resolution minimums reported verbatim on rejection). Only listed when at least one mode is configured; unconfigured modes are rejected with guidance. Speech routing: configured online model first, offline piper fallback second; the offline route is live as soon as the engine is installed (one-click in Settings → Install offline text-to-speech, voices under `<data>/models/tts/`) — no enable/disable flag involved |
 | `web_search` | search the web across Brave, Startpage, Wikipedia, and GitHub; returns ranked results with title, URL, and snippet |
 | `web_fetch` | fetch a URL and return readable text; supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
@@ -47,8 +45,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `artifact_read` | read an existing artifact's full content by id |
 | `artifact_list` | list artifacts in the current conversation |
 | `artifact_delete` | delete an artifact by id |
-| `ci_pipeline` | workspace pipeline definition dispatcher; `op` selects: `list {workspace?}`, `read {workspace?}` (read + validate), `validate {yaml,workspace?}` |
-| `ci_run` | start a workspace pipeline or a saved automation; set `async: true` to return immediately with a `run_id` while the pipeline runs in the background |
+| `ci_run` | start a saved automation by `workflow_id`; set `async: true` to return immediately with a `run_id` while the pipeline runs in the background |
 | `ci_wait` | block until a run reaches a terminal state or the timeout expires; use after `ci_run` with `async: true` |
 | `ci_run_status` | DAG summary and status; use this after `ci_run` |
 | `ci_logs` | job log tail (prefer failed jobs) |
@@ -77,7 +74,7 @@ enabled.
 
 ### Dispatcher families
 
-`skill`, `memory`, `docs`, and `ci_pipeline` are **dispatcher tools**: one
+`skill`, `memory`, and `docs` are **dispatcher tools**: one
 advertised tool per family whose required `op` field selects the action.
 Root+op is the SINGLE naming layer — the roster, execution routing, persisted
 history, hydration checkpoints, and internal callers all use exactly this
@@ -86,9 +83,11 @@ form. There are no per-verb aliases: a call named like an old verb
 
 Ops per family:
 
-- `skill`: `list {limit?}`; `search {query,limit?}`; `read {name,path?,offset?,max_chars?}`;
-  `files {name}`; `save {name,content,description?,id?,path?}` — with `path`
-  set, writes a support file (`references/…`, `scripts/…`) inside an existing skill.
+- `skill`: `list {limit?}` (returns `owned_by`+`shadowed` flags for path
+  resolution); `search {query,limit?}`; `save {name,content,description?,id?,path?}`
+  — with `path` set, writes a support file (`references/…`, `scripts/…`)
+  inside an existing skill. Skill files are read with `file_read` and listed
+  with `file_list` (see `docs(op="read", id="skills")`).
 - `memory`: `save {content,category?,project?,task?,tags?}` is idempotent for
   exact normalized duplicates; `replace {target,content,old_text?,id?}` edits
   the primary document or one fragment; `search` is BM25-ranked with metadata
@@ -103,7 +102,8 @@ a TODO. Multi-step, asynchronous, or cross-turn work does.
 Good examples:
 
     docs(op="read", id="automation")
-    skill(op="read", name="release-checklist")
+    skill(op="search", query="release checklist")
+    file_read(file_path="/home/user/.config/nusashell/skills/release-checklist/SKILL.md")
     web_search(query="current Go release notes")
     web_fetch(url="<URL selected from web_search>")
     ask_question(question="Which deployment target should I use?", options=[...])

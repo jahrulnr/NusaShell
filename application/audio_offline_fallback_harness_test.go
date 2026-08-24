@@ -32,7 +32,7 @@ func newSttHarness(t *testing.T) *sttHarness {
 		}},
 		Credentials:              &memCreds{m: map[string]string{"p1": "sk-test"}},
 		SpeechTranscriberFactory: func(*domain.Provider, string) (SpeechTranscriber, error) { return cloud, nil },
-		OfflineTranscriber:       offline,
+		OfflineTranscriberFactory: func() (OfflineTranscriber, error) { return offline, nil },
 		Settings:                 &fakeSettingsStore{},
 	}
 	ctx, cancel := context.WithCancel(context.Background())

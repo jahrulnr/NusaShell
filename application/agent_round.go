@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -502,12 +503,26 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 	var outputAttachments []domain.Attachment
 	var err error
 	switch toolCall.Name {
-	case "read_image":
-		output, outputAttachments, err = a.executeReadImage(run, toolCall, caps, settings)
-	case "read_audio":
-		output, outputAttachments, err = a.executeReadAudio(run, toolCall, caps, settings)
-	case "read_video":
-		output, outputAttachments, err = a.executeReadVideo(run, toolCall, caps, settings)
+	case "read_media":
+		kind, sniffErr := sniffMediaKind([]byte(toolCall.Args))
+		if sniffErr != nil {
+			output = "error: " + sniffErr.Error()
+			err = sniffErr
+		} else {
+			switch kind {
+			case "image":
+				output, outputAttachments, err = a.executeReadImage(run, toolCall, caps, settings)
+			case "audio":
+				output, outputAttachments, err = a.executeReadAudio(run, toolCall, caps, settings)
+			case "video":
+				output, outputAttachments, err = a.executeReadVideo(run, toolCall, caps, settings)
+			case "document":
+				output, outputAttachments, err = a.executeReadDocument(run, toolCall, caps, settings)
+			default:
+				output = "error: unrecognized media type"
+				err = fmt.Errorf("unrecognized media type")
+			}
+		}
 	case "generate_media", "generate_image", "generate_speech", "generate_video":
 		output, outputAttachments, err = a.executeGenerateMedia(run, toolCall, settings)
 	default:

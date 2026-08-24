@@ -1,40 +1,42 @@
 package ai
 
 import (
-	"fmt"
 	"os"
-	"path/filepath"
+	"strings"
 
 	"nusashell/application"
 	"nusashell/infrastructure/stt/whisper"
 )
 
-// NewOfflineTranscriberFactory wires the offline STT engine selected in
-// .experimental/NusaShell-STT-Technical-Design.md §3 (whisper.cpp won the
-// id+en gate; see .experimental/stt-bench/RESULTS.md).
+// NewOfflineTranscriberFactory wires the offline STT runtime behind the
+// read_audio degradation ladder (.experimental/offline-stt-assessment.md).
+// Model resolution happens per call, entirely observable on disk:
 //
-// Model resolution order:
-//  1. NUSASHELL_STT_MODEL env var (absolute or relative path)
-//  2. <data-dir>/models/stt/ggml-base.bin   (doc §9 runtime layout)
+//  1. settings.stt_offline_model (bare file name) — set by the Settings UI
+//     after a one-click install
+//  2. NUSASHELL_STT_MODEL env var (path or bare name, doc §9 override)
+//  3. the first ggml-*.bin under <data>/models/stt/
 //
-// The returned factory never fails at wiring time — it fails per-call with
-// a clear reason when the model is missing, so a missing model degrades
-// read_audio to cloud STT instead of breaking startup (doc §15).
-func NewOfflineTranscriberFactory(dataDir string) application.OfflineTranscriberFactory {
-	return func() (application.OfflineTranscriber, error) {
-		modelPath := resolveModelPath(dataDir)
-		if _, err := os.Stat(modelPath); err != nil {
-			return nil, fmt.Errorf("offline STT unavailable: model not installed (%s)", modelPath)
+// The factory NEVER fails at wiring time: missing engine or model becomes a
+// per-call error, so read_audio degrades to the cloud rung or guidance
+// instead of the app refusing to start — the no-CGO external-binary runtime
+// is soft by contract (.experimental/offline-stt-assessment.md §3.b).
+func NewOfflineTranscriberFactory(settings application.SettingsStore, dataDir string) application.OfflineTranscriberFactory {
+	modelProbe := func() string {
+		if settings != nil {
+			if name := strings.TrimSpace(settings.Get().STTOfflineModel); name != "" {
+				return name
+			}
 		}
-		// initial_prompt biases decoding toward NusaShell vocabulary;
-		// benchmark showed "NusaShell" -> "Nusasial" without it.
-		return whisper.New(modelPath, "NusaShell")
+		return os.Getenv("NUSASHELL_STT_MODEL")
 	}
-}
-
-func resolveModelPath(dataDir string) string {
-	if env := os.Getenv("NUSASHELL_STT_MODEL"); env != "" {
-		return env
+	langProbe := func() string {
+		if settings != nil {
+			return settings.Get().STTOfflineLanguage
+		}
+		return ""
 	}
-	return filepath.Join(dataDir, "models", "stt", "ggml-base.bin")
+	return func() (application.OfflineTranscriber, error) {
+		return whisper.NewTranscriber(dataDir, modelProbe, langProbe), nil
+	}
 }

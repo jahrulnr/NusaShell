@@ -2,30 +2,34 @@ package domain
 
 // ModelCapabilities describes which input modalities the active chat model
 // supports. Unknown models (not in catalog) default to Vision=true (common
-// across modern multimodal models) but Audio=false and Video=false (rare
-// capabilities that cause provider errors when sent to models that lack
-// them — e.g. Nvidia rejects audio data URLs with a confusing "Failed to
-// load image" error). Users can add a model to the catalog with Audio=true
-// or Video=true to enable native audio/video input for that model.
+// across modern multimodal models) but Audio=false, Video=false, and
+// Document=false (rare capabilities that cause provider errors when sent to
+// models that lack them — e.g. Nvidia rejects audio data URLs with a
+// confusing "Failed to load image" error; non-document models may silently
+// drop PDF attachments). Users can add a model to the catalog with
+// Audio=true, Video=true, or Document=true to enable native input for that
+// model. Note: Document (PDF) support is separate from Vision — many vision
+// models (Llama, Qwen, Grok, Mistral) cannot read PDFs.
 type ModelCapabilities struct {
-	Vision bool // image input
-	Audio  bool // audio input
-	Video  bool // video input
+	Vision   bool // image input
+	Audio    bool // audio input
+	Video    bool // video input
+	Document bool // PDF/document input
 }
 
 // ModelCapabilities resolves the input modalities the given model on the
 // given provider supports. Unknown models (not in catalog) default to
-// Vision=true but Audio=false and Video=false — see the struct comment for
-// rationale.
+// Vision=true but Audio=false, Video=false, and Document=false — see the
+// struct comment for rationale.
 func ModelCapabilitiesOf(provider *Provider, model string) ModelCapabilities {
 	if provider == nil {
-		return ModelCapabilities{Vision: true, Audio: false, Video: false}
+		return ModelCapabilities{Vision: true, Audio: false, Video: false, Document: false}
 	}
 	m := provider.FindModel(model)
 	if m == nil {
-		return ModelCapabilities{Vision: true, Audio: false, Video: false}
+		return ModelCapabilities{Vision: true, Audio: false, Video: false, Document: false}
 	}
-	return ModelCapabilities{Vision: m.Vision, Audio: m.Audio, Video: m.Video}
+	return ModelCapabilities{Vision: m.Vision, Audio: m.Audio, Video: m.Video, Document: m.Document}
 }
 
 // ModelSupportsVision reports whether the given model on the given provider

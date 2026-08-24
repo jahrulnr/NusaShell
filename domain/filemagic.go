@@ -4,8 +4,8 @@ import "bytes"
 
 // SniffMagic inspects the leading bytes of a media file and returns the
 // detected media type (e.g. "image/png") and kind ("image", "audio",
-// "video"). Returns ("", "") when the bytes do not match any known media
-// magic number.
+// "video", "document"). Returns ("", "") when the bytes do not match any
+// known media magic number.
 //
 // This is the single source of truth for file-type validation in the
 // read_image / read_audio / read_video tools. Extension-based MIME
@@ -19,6 +19,15 @@ import "bytes"
 func SniffMagic(data []byte) (mediaType string, kind string) {
 	if len(data) < 2 {
 		return "", ""
+	}
+
+	// ── Document formats ───────────────────────────────────────────
+
+	// PDF: "%PDF-" (versions 1.0–1.7, 2.0). The signature is always at
+	// byte 0; the version number follows (e.g. "%PDF-1.4"). We match the
+	// 5-byte prefix "%PDF-" which covers all versions.
+	if len(data) >= 5 && bytes.Equal(data[:5], []byte("%PDF-")) {
+		return "application/pdf", "document"
 	}
 
 	// ── Image formats ───────────────────────────────────────────────

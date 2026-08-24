@@ -19,7 +19,6 @@ import {
   renderToolJob,
   renderGenerateImageCard,
   renderTodoItem,
-  setAgentOfflineState,
   setToolTerminalStatus,
   toolTerminalMeta,
   toolTerminalOutput,
@@ -131,24 +130,15 @@ export async function initAgent() {
     selectModel(event.detail?.model || '');
   });
   bindBackendAvailability();
-  if (backendIsOffline()) {
-    setAgentOfflineState(true);
-    return;
-  }
+  // A dead backend is covered by the full-window offline screen
+  // (js/offline-screen.js); the agent view only loads data once connected.
+  if (backendIsOffline()) return;
   await loadAgentData();
 }
 
 function bindBackendAvailability() {
   window.addEventListener('nusashell:connection-status', (event) => {
-    const status = event.detail?.status;
-    if (isOfflineStatus(status)) {
-      setAgentOfflineState(true);
-      return;
-    }
-    if (status === 'open') {
-      setAgentOfflineState(false);
-      void loadAgentData();
-    }
+    if (event.detail?.status === 'open') void loadAgentData();
   });
 }
 
@@ -172,9 +162,8 @@ async function loadAgentData() {
     const first = active ?? state.conversations[0];
     if (first) await openConversation(first.id);
     else updateComposerStatus();
-    setAgentOfflineState(false);
-  } catch {
-    setAgentOfflineState(true);
+  } catch (err) {
+    console.error('agent data load failed:', err);
   } finally {
     agentDataLoading = false;
   }

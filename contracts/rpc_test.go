@@ -60,7 +60,6 @@ func TestRosterUniqueness(t *testing.T) {
 		MethodDocsList, MethodDocsSearch, MethodDocsRead,
 		MethodLogsList, MethodLogsClear,
 		MethodSettingsGet, MethodSettingsSet,
-		MethodCIPipelinesList, MethodCIPipelinesRead, MethodCIPipelinesValidate,
 		MethodCIRunsStart, MethodCIRunsList, MethodCIRunsGet, MethodCIRunsCancel, MethodCIRunsRetry,
 		MethodCIJobsGet, MethodCIJobsLogs, MethodCIJobsCancel, MethodCIArtifactsList,
 		MethodCIRunnersList, MethodCICacheList, MethodCICacheClear,

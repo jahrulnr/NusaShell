@@ -84,6 +84,15 @@ const (
 	MethodSettingsGet = "settings.get"
 	MethodSettingsSet = "settings.set"
 
+	// Offline TTS one-click install (piper binary + voice models).
+	MethodSettingsTTSInstallStatus = "settings.tts_install_status"
+	MethodSettingsTTSInstallStart  = "settings.tts_install_start"
+
+	// Offline STT one-click install (whisper.cpp engine + ggml models).
+	MethodSettingsSTTInstallStatus = "settings.stt_install_status"
+	MethodSettingsSTTInstallStart  = "settings.stt_install_start"
+	MethodSettingsSTTInstallCancel = "settings.stt_install_cancel"
+
 	// ACP agents are spawn-only subagents (not user chat providers).
 	MethodAcpAgentsList           = "acp.agents.list"
 	MethodAcpAgentsSave           = "acp.agents.save"
@@ -130,6 +139,16 @@ const (
 
 	EventMemoryUpdated = "memory.updated"
 	EventSkillUpdated  = "skill.updated"
+
+	// Offline TTS install progress (settings.tts_install_start runs in the
+	// background; these events drive the install dialog).
+	EventTTSInstallProgress = "tts.install.progress"
+	EventTTSInstallDone     = "tts.install.done"
+	EventTTSInstallError    = "tts.install.error"
+
+	EventSTTInstallProgress = "stt.install.progress"
+	EventSTTInstallDone     = "stt.install.done"
+	EventSTTInstallError    = "stt.install.error"
 
 	EventAcpRunStarted          = "acp.run.started"
 	EventAcpRunUpdated          = "acp.run.updated"
@@ -1124,6 +1143,8 @@ type SettingsDTO struct {
 	VisionModelID              string   `json:"vision_model_id,omitempty"`
 	AudioProviderID            string   `json:"audio_provider_id,omitempty"`
 	AudioModelID               string   `json:"audio_model_id,omitempty"`
+	STTOfflineModel            string   `json:"stt_offline_model,omitempty"`
+	STTOfflineLanguage         string   `json:"stt_offline_language,omitempty"`
 	VideoProviderID            string   `json:"video_provider_id,omitempty"`
 	VideoModelID               string   `json:"video_model_id,omitempty"`
 	TTSProviderID              string   `json:"tts_provider_id,omitempty"`
@@ -1169,6 +1190,8 @@ type SettingsSetRequest struct {
 	VisionModelID              *string         `json:"vision_model_id,omitempty"`
 	AudioProviderID            *string         `json:"audio_provider_id,omitempty"`
 	AudioModelID               *string         `json:"audio_model_id,omitempty"`
+	STTOfflineModel            *string         `json:"stt_offline_model,omitempty"`
+	STTOfflineLanguage         *string         `json:"stt_offline_language,omitempty"`
 	VideoProviderID            *string         `json:"video_provider_id,omitempty"`
 	VideoModelID               *string         `json:"video_model_id,omitempty"`
 	TTSProviderID              *string         `json:"tts_provider_id,omitempty"`
@@ -1190,6 +1213,61 @@ type SettingsSetRequest struct {
 	SoundNotifications         *bool           `json:"sound_notifications,omitempty"`
 	UserPrompt                 *string         `json:"user_prompt,omitempty"`
 	PluginContractMode         *string         `json:"plugin_contract_mode,omitempty"`
+}
+
+// ---- offline TTS install ----
+
+// TTSVoiceDTO is one installable (or installed) offline voice.
+type TTSVoiceDTO struct {
+	ID        string `json:"id"`         // stable catalog id ("id_ID-news_tts-medium")
+	Label     string `json:"label"`      // human-readable ("Bahasa Indonesia — news_tts (medium)")
+	Language  string `json:"language"`   // BCP-47-ish ("id_ID")
+	SizeBytes int64  `json:"size_bytes"` // onnx model size, for the dialog
+	Installed bool   `json:"installed"`  // voice files present on disk
+}
+
+// TTSInstallProgressDTO rides the tts.install.* events.
+type TTSInstallProgressDTO struct {
+	VoiceID      string `json:"voice_id"`
+	Phase        string `json:"phase"`                   // binary | voice | verify
+	BytesFetched int64  `json:"bytes_fetched,omitempty"` // running counter within the phase
+	BytesTotal   int64  `json:"bytes_total,omitempty"`   // 0 = unknown (indeterminate)
+	Message      string `json:"message,omitempty"`       // short human-readable line
+}
+
+type TTSInstallStatusResult struct {
+	BinaryInstalled bool          `json:"binary_installed"`
+	Voices          []TTSVoiceDTO `json:"voices"`
+	Running         bool          `json:"running"`
+	// Ready mirrors the runtime gate used by the generate_speech tool:
+	// a usable piper engine (managed, PATH, or PIPER_BIN) can serve AND at
+	// least one voice is installed. When true, speech works immediately —
+	// no settings flag involved.
+	Ready bool `json:"ready"`
+}
+
+type TTSInstallStartRequest struct {
+	VoiceID string `json:"voice_id"`
+}
+
+type TTSInstallStartResult struct {
+	Started bool   `json:"started"`
+	Running bool   `json:"running"` // true when an install is already in flight
+	Message string `json:"message,omitempty"`
+}
+
+// OfflineTTSVoiceIDs mirrors the installer catalog for application-layer
+// validation without importing infrastructure.
+var OfflineTTSVoiceIDs = []string{"id_ID-news_tts-medium", "en_US-lessac-high"}
+
+// OfflineSTTModelIDs mirrors the sttinstall catalog the same way.
+var OfflineSTTModelIDs = []string{
+	"ggml-tiny",
+	"ggml-base",
+	"ggml-small-q5_1",
+	"ggml-small",
+	"ggml-large-v3-turbo-q5_0",
+	"ggml-large-v3-turbo",
 }
 
 // ---- learning ----

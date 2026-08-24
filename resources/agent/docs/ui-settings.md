@@ -108,6 +108,94 @@ When the active chat model cannot hear audio, NusaShell can transcribe or descri
   - Section: Settings
   - Type: select
 
+## Speech generation
+
+Pick the model used by the generate_speech tool (text-to-speech). Online models use an OpenAI-compatible /audio/speech endpoint. The offline piper engine can be installed with one click: the install button opens a dialog with a voice picker (Bahasa Indonesia news_tts medium, English US lessac high), downloads the piper binary plus the selected voice model into the data directory with live progress, and enables generate_speech automatically when it finishes — no offline-mode checkbox needed. The old manual checkbox stays for PIPER_BIN/PATH setups.
+
+- **`#settings-tts-title`** (missing map entry)
+
+- **`#settings-tts-model`** (missing map entry)
+
+- **`#settings-tts-offline`** (missing map entry)
+
+- **`#settings-tts-install-btn`** (missing map entry)
+
+- **`#settings-tts-install-status`** (missing map entry)
+
+- **`#tts-install-overlay`** (missing map entry)
+
+- **`#tts-install-title`** (missing map entry)
+
+- **`#tts-install-close`** (missing map entry)
+
+- **`#tts-install-error`** (missing map entry)
+
+- **`#tts-install-voice`** (missing map entry)
+
+- **`#tts-install-progress`** (missing map entry)
+
+- **`#tts-install-phase`** (missing map entry)
+
+- **`#tts-install-bar-track`** (missing map entry)
+
+- **`#tts-install-bar`** (missing map entry)
+
+- **`#tts-install-bytes`** (missing map entry)
+
+- **`#tts-install-cancel`** (missing map entry)
+
+- **`#tts-install-confirm`** (missing map entry)
+
+## Offline speech-to-text
+
+Lets read_audio transcribe audio locally with whisper.cpp (whisper-cli) — no API key, no network. The engine binary is downloaded once during install; models land under models/stt/ in the data directory. The install button opens a requirements dialog: a checklist (platform support, whisper.cpp engine, GGML model, free disk), a per-OS guide (Linux/Windows auto-install from official releases, macOS via brew install whisper-cpp), a model picker over the multilingual catalog (tiny/base/small-q5_1/small default/large-v3-turbo variants; Indonesian and English supported; .en variants excluded), and live download progress with speed. After install the model appears in the Offline STT model select and read_audio uses it automatically.
+
+- **`#settings-stt-title`** (missing map entry)
+
+- **`#settings-stt-model`** (missing map entry)
+
+- **`#settings-stt-language`** (missing map entry)
+
+- **`#settings-stt-install-btn`** (missing map entry)
+
+- **`#settings-stt-install-status`** (missing map entry)
+
+- **`#stt-requirements-overlay`** (missing map entry)
+
+- **`#stt-requirements-title`** (missing map entry)
+
+- **`#stt-requirements-close`** (missing map entry)
+
+- **`#stt-requirements-error`** (missing map entry)
+
+- **`#stt-req-checklist`** (missing map entry)
+
+- **`#stt-guide`** (missing map entry)
+
+- **`#stt-guide-tab-linux`** (missing map entry)
+
+- **`#stt-guide-tab-windows`** (missing map entry)
+
+- **`#stt-guide-tab-macos`** (missing map entry)
+
+- **`#stt-install-model`** (missing map entry)
+
+- **`#stt-install-progress`** (missing map entry)
+
+- **`#stt-install-phase`** (missing map entry)
+
+- **`#stt-install-bar-track`** (missing map entry)
+
+- **`#stt-install-bar`** (missing map entry)
+
+- **`#stt-install-bytes`** (missing map entry)
+
+- **`#stt-install-stop`** (missing map entry)
+
+- **`#stt-requirements-cancel`** (missing map entry)
+
+- **`#stt-install-confirm`** (missing map entry)
+
 ## Video fallback
 
 When the active chat model cannot see video, NusaShell can describe attached video files using a separate video-capable model so the conversation continues without errors. Pick any model that supports video input. Leave disabled if you always use video-capable chat models.

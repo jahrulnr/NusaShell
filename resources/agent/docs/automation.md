@@ -2,13 +2,17 @@
 
 NusaShell embeds a local CI runner and an automation engine in the same Go process. Humans use the **Automation** sidebar view. The agent uses structured tools. Do not invent shell `sleep` loops or scrape the UI for job IDs.
 
-## Workspace pipeline
+## Pipeline files
 
-A repository may include `.nusashell/pipeline.yaml`. `ci_pipeline` with `op=read` (permission path `ci.pipelines.read`) loads that file. `ci_run` with a `workspace` starts it. Jobs form a DAG via `needs`. Independent jobs run in parallel on the local executor (this machine, host access).
+Pipeline definitions live as YAML files under `<data-dir>/ci/pipelines/<name>.yaml`. NusaShell discovers them on boot, parses each into a workflow, and registers it in the automation registry (`ci/automation.db`). Triggers in pipeline files are activated immediately — there is no separate "register" step.
+
+The file name (without `.yaml`) becomes the workflow ID. For example `deploy.yaml` → workflow ID `deploy`. Edit the file with any text editor; restart NusaShell to pick up changes.
+
+Pipeline files use the same YAML schema as `automation_create` — `name`, `triggers`, `jobs`, `env`, `defaults`, etc. Jobs form a DAG via `needs`. Independent jobs run in parallel on the local executor (this machine, host access).
 
 ## Saved automations
 
-`automation_create` / `automation.save` persist a workflow in `ci/automation.db` (not conversation JSON). Triggers:
+`automation_create` / `automation.save` persist a workflow in `ci/automation.db` (not conversation JSON). They are the same concept as pipeline files, just created via the agent or UI instead of a file on disk. Triggers:
 
 - **once** — RFC3339 timestamp. Fires at most once. Survives restart.
 - **every** — `cron` (5-field calendar) or `interval` (elapsed duration such as `1h`). They are not equivalent.
@@ -25,9 +29,8 @@ A step may set `wait_until: <RFC3339>`. The run status becomes `waiting` and the
 
 | Tool | Use |
 | --- | --- |
-| `ci_pipeline` (`op` list/read/validate) | Workspace `.nusashell/pipeline.yaml` |
-| `ci_run` / `ci_run_status` / `ci_logs` / `ci_cancel` | Start and observe execution |
-| `automation_list` / `automation_read` / `automation_validate` / `automation_create` | Saved workflows |
+| `ci_run` / `ci_run_status` / `ci_logs` / `ci_cancel` | Start and observe execution by `workflow_id` |
+| `automation_list` / `automation_read` / `automation_validate` / `automation_create` | Saved workflows and pipeline files |
 | `automation_enable` / `automation_disable` / `automation_status` | Lifecycle |
 | `schedule_once` / `schedule_every` | Create durable schedules (NusaShell owns the timer) |
 | `wait_until` | How to park a run without occupying a runner |
@@ -41,14 +44,15 @@ immediately, continue other work, then `ci_wait` once for completion.
 
 Good example:
 
-    ci_run(workspace="/home/user/proj", async=true)      # → {run_id: "run_42", status: "queued"}
+    automation_list()                                    # → [{id: "deploy", ...}, ...]
+    ci_run(workflow_id="deploy", async=true)             # → {run_id: "run_42", status: "queued"}
     # … do other work …
     ci_wait(run_id="run_42", timeout_ms=300000)          # blocks until terminal or timeout
     ci_logs(job_id="run_42:job_1")                       # only if a job failed
 
 Bad examples:
 
-    ci_run(workspace="/home/user/proj")                  # blocks the turn for the whole pipeline
+    ci_run(workflow_id="deploy")                         # blocks the turn for the whole pipeline
 
     ci_run_status(run_id="run_42")                       # polled in a sleep loop
     sleep(seconds=5)                                     # instead of a single ci_wait
@@ -77,4 +81,4 @@ events, never blocks the run).
 
 ## UI
 
-Open **Automation** in the sidebar. Tabs: Workflows, Runs, Schedules, Events. New automation opens a once/every/when/manual wizard. Run pipeline starts the workspace YAML. Blocked automations show Enable provider. Running agent steps show a **Steer** button.
+Open **Automation** in the sidebar. Tabs: Workflows, Runs, Schedules, Events. New automation opens a once/every/when/manual wizard. Pipeline files from `<data-dir>/ci/pipelines/` appear alongside saved automations in the Workflows tab. Blocked automations show Enable provider. Running agent steps show a **Steer** button.

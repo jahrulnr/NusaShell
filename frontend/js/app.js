@@ -16,6 +16,7 @@ import { initTelemetry, refresh as refreshTelemetry } from './views/telemetry.js
 import { toast, dismissOpenDialogs } from './ui.js';
 import { bindShellShortcuts } from './shell-shortcuts.js';
 import { initMobileNav } from './mobile-nav.js';
+import { initOfflineScreen } from './offline-screen.js';
 
 async function initProviders() {
   await Promise.all([initLlmProviders(), initAcpProviders()]);
@@ -143,6 +144,23 @@ async function boot() {
   window.nusashell = { ...(window.nusashell || {}), setSidebarCompact };
   window.addEventListener('hashchange', route);
   initMobileNav();
+
+  // Full-window offline overlay + mini window button. Must be wired before
+  // the first connection status events fire so a dead backend is covered
+  // from the very start.
+  initOfflineScreen();
+  document.getElementById('mini-window-btn')?.addEventListener('click', async () => {
+    try {
+      const pip = await import('./pip.js');
+      await pip.openMiniWindow();
+    } catch (err) {
+      // Document PiP can reject (user gesture required, second PiP window,
+      // unsupported engine edge cases). The popup fallback already ran when
+      // pipSupported() was false, so anything here is a genuine failure.
+      console.error('mini window failed:', err);
+      toast('Mini window not available in this browser.', 'error');
+    }
+  });
 
   setConnection('connecting');
   // one transport per function: WS carries BE -> FE event triggers; the FE

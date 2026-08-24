@@ -33,9 +33,12 @@ type WorkflowStore interface {
 	Delete(ctx context.Context, id string) error
 }
 
-// PipelineFileStore loads `.nusashell/pipeline.yaml` from a workspace.
-type PipelineFileStore interface {
-	GetDefinition(ctx context.Context, workspace string) (*domain.WorkflowDefinition, error)
+// PipelineDiscoverer scans a directory for pipeline YAML files and
+// returns parsed workflow definitions. The directory is typically
+// <dataDir>/ci/pipelines/. Files are the source of truth for
+// file-sourced workflows; the WorkflowStore is the scheduler index.
+type PipelineDiscoverer interface {
+	Discover() ([]*domain.WorkflowDefinition, error)
 }
 
 // RunFilter lists workflow runs.

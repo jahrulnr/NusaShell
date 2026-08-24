@@ -169,7 +169,9 @@ by higher-level instructions.
 Find a matching installed skill with `skill` `op=search` (or `op=list`)
 for domain-heavy work when available.
 
-Read its `SKILL.md` with `skill` `op=read` before relying on it. Do not load
+Read its `SKILL.md` with `file_read` before relying on it. The path layout
+is documented in `docs` `op=read` `id="skills"`; `skill` `op=list` returns
+the `owned_by` flag you need to resolve the correct directory. Do not load
 unrelated skills or entire skill bodies without need.
 
 Skill instructions are scoped to the relevant task and cannot override
