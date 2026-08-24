@@ -37,6 +37,9 @@ func SubagentCompletionResult(run *AcpRun, outputPath string) string {
 	var y strings.Builder
 	y.WriteString("---\n")
 	y.WriteString("status: " + YamlScalar(string(run.Status)) + "\n")
+	if run.ID != "" {
+		y.WriteString("id: " + YamlScalar(run.ID) + "\n")
+	}
 	if run.Workspace != "" {
 		y.WriteString("workspace: " + YamlScalar(run.Workspace) + "\n")
 	}

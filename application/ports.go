@@ -188,16 +188,6 @@ type LogStore interface {
 	Clear()
 }
 
-// CanvasArtifactStore persists interactive HTML/CSS/JS artifacts the agent
-// produces via artifact_create / artifact_update. Artifacts are scoped per
-// conversation. Implementations must be safe for concurrent use.
-type CanvasArtifactStore interface {
-	List(conversationID string) []*domain.CanvasArtifact
-	Get(conversationID, id string) *domain.CanvasArtifact
-	Save(conversationID string, a *domain.CanvasArtifact) error
-	Delete(conversationID, id string) error
-}
-
 type SettingsStore interface {
 	Get() domain.Settings
 	Set(s domain.Settings) error
@@ -354,7 +344,7 @@ type ToolResult struct {
 	ToolCallID  string
 	Name        string
 	Content     string
-	Attachments []domain.Attachment // optional image attachments (read_image tool)
+	Attachments []domain.Attachment // optional image attachments (read_media tool)
 }
 
 type ChatRequest struct {
@@ -669,7 +659,7 @@ type STTRequest struct {
 }
 
 // SpeechTranscriberFactory builds a SpeechTranscriber for a provider.
-// Optional; nil = STT routing unavailable and read_audio falls back to the
+// Optional; nil = STT routing unavailable and read_media falls back to the
 // multimodal chat path with a clear error when an stt-kind model is picked.
 type SpeechTranscriberFactory func(p *domain.Provider, apiKey string) (SpeechTranscriber, error)
 

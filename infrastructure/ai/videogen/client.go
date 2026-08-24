@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	// MaxVideoBytes caps the downloaded clip (100 MB — mirrors read_video).
+	// MaxVideoBytes caps the downloaded clip (100 MB — mirrors read_media).
 	MaxVideoBytes = 100 << 20
 	// pollInterval is the fixed delay between job-status checks. Doctrine:
 	// no absolute wall-clock cap — polling ends on terminal status or ctx

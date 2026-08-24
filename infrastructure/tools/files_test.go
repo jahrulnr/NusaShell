@@ -37,16 +37,13 @@ func TestFileWriteReadRoundtrip(t *testing.T) {
 	}
 }
 
-func TestFileAppendAndPatch(t *testing.T) {
+func TestFileWriteAndPatch(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "log.txt")
 	jp := jsonPath(path)
 
-	if _, err := testTB.Execute(context.Background(), "file_append", []byte(`{"path":"`+jp+`","content":"line1\n"}`)); err != nil {
-		t.Fatalf("file_append: %v", err)
-	}
-	if _, err := testTB.Execute(context.Background(), "file_append", []byte(`{"path":"`+jp+`","content":"line2\n"}`)); err != nil {
-		t.Fatalf("file_append 2: %v", err)
+	if _, err := testTB.Execute(context.Background(), "file_write", []byte(`{"path":"`+jp+`","content":"line1\nline2\n"}`)); err != nil {
+		t.Fatalf("file_write: %v", err)
 	}
 
 	// Unique replace.
@@ -58,15 +55,19 @@ func TestFileAppendAndPatch(t *testing.T) {
 		t.Fatalf("patch not applied: %q", out)
 	}
 
-	// Ambiguous replace requires occurrence.
-	testTB.Execute(context.Background(), "file_append", []byte(`{"path":"`+jp+`","content":"dup dup\n"}`))
-	if _, err := testTB.Execute(context.Background(), "file_patch", []byte(`{"path":"`+jp+`","old_string":"dup","new_string":"x"}`)); err == nil || !strings.Contains(err.Error(), "occurrence") {
+	// Ambiguous replace requires occurrence — write a file with duplicates.
+	dupPath := filepath.Join(dir, "dups.txt")
+	jdp := jsonPath(dupPath)
+	if _, err := testTB.Execute(context.Background(), "file_write", []byte(`{"path":"`+jdp+`","content":"dup dup\n"}`)); err != nil {
+		t.Fatalf("file_write dups: %v", err)
+	}
+	if _, err := testTB.Execute(context.Background(), "file_patch", []byte(`{"path":"`+jdp+`","old_string":"dup","new_string":"x"}`)); err == nil || !strings.Contains(err.Error(), "occurrence") {
 		t.Fatalf("expected occurrence error, got: %v", err)
 	}
-	if _, err := testTB.Execute(context.Background(), "file_patch", []byte(`{"path":"`+jp+`","old_string":"dup","new_string":"x","occurrence":2}`)); err != nil {
+	if _, err := testTB.Execute(context.Background(), "file_patch", []byte(`{"path":"`+jdp+`","old_string":"dup","new_string":"x","occurrence":2}`)); err != nil {
 		t.Fatalf("file_patch occurrence=2: %v", err)
 	}
-	out, _ = testTB.Execute(context.Background(), "file_read", []byte(`{"path":"`+jp+`"}`))
+	out, _ = testTB.Execute(context.Background(), "file_read", []byte(`{"path":"`+jdp+`"}`))
 	if !strings.Contains(out, "dup x") {
 		t.Fatalf("occurrence=2 not honored: %q", out)
 	}
@@ -172,7 +173,7 @@ func TestFileToolInfosRegistered(t *testing.T) {
 	for _, ti := range tb.ListTools() {
 		names[ti.Name] = true
 	}
-	for _, want := range []string{"file_read", "file_write", "file_append", "file_patch", "file_list", "file_mkdir", "file_delete", "file_move", "file_copy", "file_exists", "file_info", "exec"} {
+	for _, want := range []string{"file_read", "file_write", "file_patch", "file_list", "file_mkdir", "file_delete", "file_move", "file_copy", "file_exists", "file_info", "grep", "find_file", "show", "exec"} {
 		if !names[want] {
 			t.Errorf("ListTools missing %q", want)
 		}

@@ -67,16 +67,16 @@ func TestContainsVisionImageNote(t *testing.T) {
 
 func TestOmittedPlaceholderIncludesImageEditHint(t *testing.T) {
 	atts := []Attachment{{Type: "image", Name: "cat.png", FilePath: "/x/cat.png"}}
-	note := OmittedPlaceholderFor("image", "read_image", atts)
+	note := OmittedPlaceholderFor("image", "read_media", atts)
 	if !strings.Contains(note, "referenced_image_paths") || !strings.Contains(note, "generate_image") {
 		t.Errorf("image omission placeholder should include the generate_image i2i hint, got %q", note)
 	}
-	if !strings.Contains(note, "read_image") {
-		t.Errorf("image omission placeholder should still mention read_image, got %q", note)
+	if !strings.Contains(note, "read_media") {
+		t.Errorf("image omission placeholder should still mention read_media, got %q", note)
 	}
 	// Audio/video placeholders stay free of the image-only hint.
 	for _, kind := range []string{"audio", "video"} {
-		p := OmittedPlaceholderFor(kind, "read_"+kind, []Attachment{{Type: kind, FilePath: "/x/f"}})
+		p := OmittedPlaceholderFor(kind, "read_media", []Attachment{{Type: kind, FilePath: "/x/f"}})
 		if strings.Contains(p, "generate_image") {
 			t.Errorf("%s placeholder must not contain the image-only i2i hint, got %q", kind, p)
 		}

@@ -152,7 +152,6 @@ func run() error {
 	bus := application.NewBus()
 	askService := application.NewAskQuestionService()
 	todoStore := jsonstore.NewTodoStore(filepath.Join(dataDir, "conversations", "todos.json"))
-	artifactStore := jsonstore.NewArtifactStore(filepath.Join(dataDir, "conversations", "artifacts.json"))
 	providerStore := &jsonstore.Providers{S: store}
 	searcher := searchwire.New(tools.SearchwireConfigFromProviders(providerStore, credentials))
 	// Seed builtin skills from the embedded resources/agent/skills/ tree
@@ -222,7 +221,6 @@ func run() error {
 		AskQuestions:           askService,
 		MCP:                    mcpManager,
 		Contracts:              tools.NewFileContractReader(),
-		Artifacts:              artifactStore,
 		SpeechOfflineAvailable: ai.OfflineSpeechAvailable(dataDir),
 	}
 	app := application.NewApp(application.Deps{

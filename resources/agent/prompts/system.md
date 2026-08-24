@@ -330,12 +330,12 @@ Keep user-facing progress useful:
 Use tables for comparisons and structured data when they materially
 improve scanability. Use Mermaid for architecture, workflows, state
 transitions, or relationships when it is clearer than prose. Use
-interactive artifacts (`artifact_create`; small edits via
-`artifact_update`) only when they add value beyond normal text, tables,
-or diagrams. When `generate_image` is listed, use it to generate images;
-the UI already shows the print — never re-embed it as Markdown, a data
-URL, or a file link. To edit a generated image, pass its absolute
-`file_path` in `referenced_image_paths`.
+interactive artifacts (`file_write` an HTML file, then `show(op="html",
+path=...)`; edit with `file_patch`) only when they add value beyond
+normal text, tables, or diagrams. When `generate_image` is listed, use
+it to generate images; the UI already shows the print — never re-embed
+it as Markdown, a data URL, or a file link. To edit a generated image,
+pass its absolute `file_path` in `referenced_image_paths`.
 
 Do not force a table, diagram, artifact, or verbose structure onto a
 simple answer.

@@ -56,12 +56,12 @@ func TestChatMessagesStripsImagesForNonVisionModel(t *testing.T) {
 		t.Errorf("content should contain image omission placeholder, got: %q", userMsg.Content)
 	}
 	// The placeholder must include the absolute file path and tell the model
-	// to call read_image with file_path.
+	// to call read_media with file_path.
 	if !strings.Contains(userMsg.Content, "/data/attachments/c1/cat.png") {
 		t.Errorf("placeholder should include absolute file path, got: %q", userMsg.Content)
 	}
-	if !strings.Contains(userMsg.Content, "read_image") {
-		t.Errorf("placeholder should mention read_image tool, got: %q", userMsg.Content)
+	if !strings.Contains(userMsg.Content, "read_media") {
+		t.Errorf("placeholder should mention read_media tool, got: %q", userMsg.Content)
 	}
 }
 

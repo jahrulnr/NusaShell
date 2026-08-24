@@ -30,17 +30,17 @@ func newSttHarness(t *testing.T) *sttHarness {
 				BaseURL: "https://api.example.com/v1",
 				Models:  []domain.Model{{ID: "m", Kind: domain.ModelKindSTT}}},
 		}},
-		Credentials:              &memCreds{m: map[string]string{"p1": "sk-test"}},
-		SpeechTranscriberFactory: func(*domain.Provider, string) (SpeechTranscriber, error) { return cloud, nil },
+		Credentials:               &memCreds{m: map[string]string{"p1": "sk-test"}},
+		SpeechTranscriberFactory:  func(*domain.Provider, string) (SpeechTranscriber, error) { return cloud, nil },
 		OfflineTranscriberFactory: func() (OfflineTranscriber, error) { return offline, nil },
-		Settings:                 &fakeSettingsStore{},
+		Settings:                  &fakeSettingsStore{},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	return &sttHarness{
 		app: app, run: run, cloud: cloud, offline: offline,
-		toolCall: domain.ToolCall{ID: "tc1", Name: "read_audio", Args: filePathArgs(audioPath, "")},
+		toolCall: domain.ToolCall{ID: "tc1", Name: "read_media", Args: filePathArgs(audioPath, "")},
 	}
 }
 

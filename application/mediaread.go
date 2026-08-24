@@ -12,8 +12,8 @@ import (
 	"nusashell/domain"
 )
 
-// maxReadMediaBytes caps the size of a media file loaded by the read_*
-// tools into an inline data URL attachment. A var so tests can narrow it.
+// maxReadMediaBytes caps the size of a media file loaded by the read_media
+// tool into an inline data URL attachment. A var so tests can narrow it.
 var maxReadMediaBytes int64 = 100 << 20 // 100 MB
 
 // sniffMediaKind reads the file_path from args (JSON), opens the file,

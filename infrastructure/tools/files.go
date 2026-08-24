@@ -32,7 +32,6 @@ func fileToolInfos() []application.ToolInfo {
 	return []application.ToolInfo{
 		{Name: "file_read", Description: "Read a text file from disk. Returns up to max_bytes (default 32768); continue with offset when truncated. Binary files are reported, not dumped.", InputSchema: obj("object", props("path", str("Absolute file path"), "offset", intSchema("Byte offset to start reading from (default 0)"), "max_bytes", intSchema("Maximum bytes returned (default 32768)")), "path")},
 		{Name: "file_write", Description: "Create or overwrite a text file atomically (temp file in the same directory, then rename). Parent directories are created automatically.", InputSchema: obj("object", props("path", str("Absolute file path"), "content", str("File content (UTF-8, max 10 MB)"), "encoding", strEnum("Content encoding: utf8 (default) or base64", "utf8", "base64")), "path", "content")},
-		{Name: "file_append", Description: "Append content to the end of a file, creating it (and its parents) if missing.", InputSchema: obj("object", props("path", str("Absolute file path"), "content", str("Content to append")), "path", "content")},
 		{Name: "file_patch", Description: "Replace an exact substring in a file. Fails unless old_string matches exactly once; disambiguate multiple matches with occurrence (1-based). Use preview=true to see the result without writing.", InputSchema: obj("object", props("path", str("Absolute file path"), "old_string", str("Exact text to replace"), "new_string", str("Replacement text (may be empty to delete)"), "occurrence", intSchema("1-based occurrence to replace when old_string appears multiple times"), "preview", obj("boolean", nil)), "path", "old_string", "new_string")},
 		{Name: "file_list", Description: "List a directory's entries with type, size, and modified time.", InputSchema: obj("object", props("path", str("Absolute directory path")))},
 		{Name: "file_mkdir", Description: "Create a directory including any missing parents.", InputSchema: obj("object", props("path", str("Absolute directory path")), "path")},
@@ -41,6 +40,9 @@ func fileToolInfos() []application.ToolInfo {
 		{Name: "file_copy", Description: "Copy a file or directory recursively.", InputSchema: obj("object", props("source", str("Absolute source path"), "destination", str("Absolute destination path")), "source", "destination")},
 		{Name: "file_exists", Description: "Check whether a path exists. Does NOT error on missing paths — returns exists=false.", InputSchema: obj("object", props("path", str("Absolute file or directory path")), "path")},
 		{Name: "file_info", Description: "Get metadata for a path (size, permissions, type, modification time).", InputSchema: obj("object", props("path", str("Absolute path")), "path")},
+		grepToolInfo(),
+		findFileToolInfo(),
+		showToolInfo(),
 	}
 }
 
@@ -51,6 +53,12 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 	_ = json.Unmarshal(argsJSON, &args)
 
 	switch name {
+	case "grep":
+		return executeGrep(argsJSON)
+	case "find_file":
+		return executeFindFile(argsJSON)
+	case "show":
+		return executeShow(argsJSON)
 	case "file_read":
 		path := fileArgStr(args, "path")
 		if strings.TrimSpace(path) == "" {
@@ -117,28 +125,6 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			return true, "", err
 		}
 		return true, yamlMD(map[string]any{"path": path, "bytes": len(data), "written": true}, ""), nil
-
-	case "file_append":
-		path := fileArgStr(args, "path")
-		if strings.TrimSpace(path) == "" {
-			return true, "", fmt.Errorf("path is required")
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return true, "", err
-		}
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-		if err != nil {
-			return true, "", err
-		}
-		_, werr := f.WriteString(fileArgStr(args, "content"))
-		cerr := f.Close()
-		if werr != nil {
-			return true, "", werr
-		}
-		if cerr != nil {
-			return true, "", cerr
-		}
-		return true, yamlMD(map[string]any{"path": path, "appended": true}, ""), nil
 
 	case "file_patch":
 		path := fileArgStr(args, "path")

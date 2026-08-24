@@ -9,7 +9,6 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `exec` | run a shell command as a child process; combined stdout/stderr with head/tail elision for huge output; default shell is POSIX `sh` on Unix/macOS, on Windows `auto` resolves Git Bash first (POSIX syntax works best) then PowerShell — `cmd` only via explicit `shell="cmd"`, plus optional kinds `bash`/`powershell`/`pwsh`/`wsl` (wsl maps cwd under /mnt); no absolute wall-clock limit — running commands keep producing, but silence longer than `idle_timeout_ms` (default 180000) fails the run; optional explicit `timeout_ms`; optional absolute `cwd`; the whole child tree dies on cancel/timeout; on Windows select shells via `shell=` instead of invoking cmd.exe/powershell.exe inside a bash command line (MSYS path conversion mangles drive-letter paths like `Z:/x`) |
 | `file_read` | read a text file by absolute path (up to `max_bytes`, default 32768; continue with `offset` when truncated; binary files are reported, not dumped) |
 | `file_write` | create or overwrite a text file atomically (temp file + rename); parent directories created automatically; `encoding` utf8 or base64; transient Windows file-lock errors during the rename are retried briefly |
-| `file_append` | append content to a file, creating it (and parents) if missing |
 | `file_patch` | exact substring replace; errors unless `old_string` matches exactly once — disambiguate repeated matches with 1-based `occurrence`; `preview=true` returns the result without writing |
 | `file_list` | list directory entries with name, type, size, modified time |
 | `file_mkdir` | create a directory including any missing parents |
@@ -18,6 +17,9 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `file_copy` | copy a file or directory recursively |
 | `file_exists` | check whether a path exists without erroring when missing (returns `exists`, `is_dir`) |
 | `file_info` | metadata for a path: size, mode, type, modified time |
+| `grep` | search file contents with regex (RE2 syntax); filters by `glob_pattern`, returns matching lines with optional `context_lines`; `output_mode`: content (default), files_with_matches, count; case-insensitive via `case_insensitive=true`; prefer this over exec+shell grep — structured output, no process spawn, works without rg installed |
+| `find_file` | find files by glob pattern with `**` recursive matching (e.g. `**/*.go`) and brace expansion (e.g. `*.{go,ts}`); skips .git/node_modules/vendor; returns matching paths sorted alphabetically |
+| `show` | render a file from disk in the UI. `op=html` reads an HTML file and displays it in a sandboxed iframe (write the file first with `file_write`, then `show` it — use `file_patch` for edits, `file_read` to inspect). `op=image` reads an image file and displays it inline. `width`/`height` control the iframe viewport (html only, default 720x400). Replaces the former `artifact_*` tools — file_* handles CRUD, `show` only handles display |
 | `skill` | skill library dispatcher; `op` selects: `list`, `search`, `save`. Skill files live on disk — read `SKILL.md` and support files with `file_read`, list a skill folder with `file_list` (see `docs(op="read", id="skills")` for the path layout) |
 | `memory` | long-term memory dispatcher; `op` selects: `save` (idempotent dedup), `replace` (primary substring/body rewrite or fragment update), `search` (BM25 ranked fragments), `list`, `delete` |
 | `docs` | product documentation dispatcher; `op` selects: `search {query}` (ranked page ids) and `read {id}` |
@@ -40,11 +42,6 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `web_search` | search the web across Brave, Startpage, Wikipedia, and GitHub; returns ranked results with title, URL, and snippet |
 | `web_fetch` | fetch a URL and return readable text; supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
-| `artifact_create` | create an interactive HTML/CSS/JS artifact rendered in a sandboxed iframe in the UI (prototypes, minigames, dashboards, visualizations); external resources and CDNs allowed |
-| `artifact_update` | partial update of an existing artifact by id (only the fields you pass are replaced) |
-| `artifact_read` | read an existing artifact's full content by id |
-| `artifact_list` | list artifacts in the current conversation |
-| `artifact_delete` | delete an artifact by id |
 | `ci_run` | start a saved automation by `workflow_id`; set `async: true` to return immediately with a `run_id` while the pipeline runs in the background |
 | `ci_wait` | block until a run reaches a terminal state or the timeout expires; use after `ci_run` with `async: true` |
 | `ci_run_status` | DAG summary and status; use this after `ci_run` |

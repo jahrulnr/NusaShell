@@ -10,7 +10,8 @@ import (
 	"nusashell/domain"
 )
 
-// executeReadVideo handles the read_video tool call. It loads the video
+// executeReadVideo handles the read_media tool call when the sniffed kind
+// is "video". It loads the video
 // directly from disk by absolute path, then either:
 //   - Native fast path (video-capable model): returns the video directly as
 //     a tool result attachment so the model can see it in the next round.
@@ -18,6 +19,12 @@ import (
 //     video via the video fallback model and returns the text description.
 //   - No fallback (non-video model, no fallback): returns an error message
 //     explaining that the model cannot see video and no fallback is configured.
+//
+// defaultDescribeVideoPrompt is the description request used when the video
+// read/fallback path has no explicit question. Kept as a single constant so
+// both call sites share one string.
+const defaultDescribeVideoPrompt = "Describe this video concisely. Focus on visible actions, people, settings, text on screen, and notable events. Keep it factual and under 300 words."
+
 func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps ModelCapabilities, settings domain.Settings) (string, []domain.Attachment, error) {
 	var args struct {
 		FilePath string `json:"file_path"`
@@ -72,7 +79,7 @@ func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps Mode
 
 	question := strings.TrimSpace(args.Question)
 	if question == "" {
-		question = "Describe this video concisely. Focus on visible actions, people, settings, text on screen, and notable events. Keep it factual and under 300 words."
+		question = defaultDescribeVideoPrompt
 	} else {
 		question = "Describe this video and answer the following question:\n" + question
 	}
@@ -99,7 +106,7 @@ func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps Mode
 func (a *App) describeOneVideo(ctx context.Context, adapter AIProvider, model string, video domain.Attachment, prompt string) (string, error) {
 	req := ChatRequest{
 		Model:  model,
-		System: "You are a video analysis assistant. Describe videos accurately and concisely for a text-only model that cannot see them.",
+		System: "Describe videos accurately and concisely for a text-only model that cannot see them.",
 		Messages: []ChatMessage{
 			{
 				Role:        "user",
@@ -165,7 +172,7 @@ func (a *App) describeVideosWithFallback(ctx context.Context, settings domain.Se
 	out = append(out, attachments...)
 	for _, idx := range videoIdxs {
 		vid := attachments[idx]
-		prompt := "Describe this video concisely. Focus on visible actions, people, settings, text on screen, and notable events. Keep it factual and under 300 words."
+		prompt := defaultDescribeVideoPrompt
 		description, err := a.describeOneVideo(ctx, adapter, settings.VideoModelID, vid, prompt)
 		if err != nil {
 			a.log("warn", "video", "video description failed for %q: %v", vid.Name, err)

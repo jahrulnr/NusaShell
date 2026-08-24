@@ -851,8 +851,16 @@ func TestReviewLoopCallsHydrationToolFirst(t *testing.T) {
 	if strings.Contains(capturedInitialContent, "[user]") || strings.Contains(capturedInitialContent, "[assistant]") {
 		t.Fatalf("initial user message looks like a transcript dump: %q", capturedInitialContent[:min(100, len(capturedInitialContent))])
 	}
-	if !strings.Contains(strings.ToLower(capturedInitialContent), "review_transcript") {
-		t.Fatalf("initial user message should instruct calling review_transcript, got: %q", capturedInitialContent[:min(100, len(capturedInitialContent))])
+	// The call-first instruction lives in the tool description (and the
+	// review.md system prompt Step 1), not the user message — the message
+	// stays a neutral task statement.
+	if strings.Contains(strings.ToLower(capturedInitialContent), "review_transcript") {
+		t.Fatalf("initial user message should stay neutral; the tool description instructs the call, got: %q", capturedInitialContent[:min(100, len(capturedInitialContent))])
+	}
+	for _, td := range agent.reviewTools() {
+		if td.Name == reviewTranscriptToolName && !strings.Contains(strings.ToLower(td.Description), "first") {
+			t.Fatalf("review_transcript description should instruct calling it FIRST, got: %q", td.Description)
+		}
 	}
 
 	// The hydration call must be answered with the transcript JSON from the

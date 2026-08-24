@@ -9,7 +9,7 @@ import (
 )
 
 // TestOfflineFillsGap pins the zero-config UX: with NO audio fallback
-// configured at all, read_audio still succeeds via the local engine (when
+// configured at all, read_media still succeeds via the local engine (when
 // available) instead of dead-ending, and discloses route=offline.
 func TestOfflineFillsGap(t *testing.T) {
 	s := newSttHarness(t)

@@ -15,7 +15,7 @@ const (
 
 // executeGenerateSpeech handles the generate_speech tool call.
 // Route: configured online TTS first (explicit user choice), offline piper
-// as fallback, mirroring the read_audio ladder.
+// as fallback, mirroring the read_media ladder.
 func (a *App) executeGenerateSpeech(run *TurnRun, toolCall domain.ToolCall, settings domain.Settings) (string, []domain.Attachment, error) {
 	var args struct {
 		Text   string  `json:"text"`
@@ -87,7 +87,7 @@ func (a *App) persistTTSText(run *TurnRun, toolCallID string, result *TTSResult)
 		"status": "completed", "provider": result.Provider, "model": result.Model,
 		"voice": result.Voice, "media_type": result.MediaType, "file_path": path,
 	}
-	body := fmt.Sprintf("Speech generated and saved to %s. The audio attachment is already delivered to the user in the UI.", path)
+	body := fmt.Sprintf("Speech generated and saved to %s.", path)
 	return yamlMDApp(meta, body), []domain.Attachment{att}, nil
 }
 

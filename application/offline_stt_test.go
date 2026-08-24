@@ -41,7 +41,7 @@ func TestOfflineSTTPortContract(t *testing.T) {
 
 // TestOfflineSTTUnavailableIsNotFatal pins doc §15: an unavailable local
 // engine surfaces a reason instead of crashing the app. Callers decide how
-// to degrade (e.g. read_audio falls back to cloud STT or chat).
+// to degrade (e.g. read_media falls back to cloud STT or chat).
 func TestOfflineSTTUnavailableIsNotFatal(t *testing.T) {
 	status := OfflineTranscriberStatus(&stubOffline{available: false, reason: "model not installed"})
 	if status.OfflineSTTAvailable() {

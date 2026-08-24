@@ -196,10 +196,10 @@ type Settings struct {
 	AudioProviderID string `json:"audio_provider_id,omitempty"`
 	AudioModelID    string `json:"audio_model_id,omitempty"`
 	// OfflineSTT selects the local whisper.cpp transcription used by
-	// read_audio when no cloud fallback is configured (or as the offline
+	// read_media when no cloud fallback is configured (or as the offline
 	// rung of the degradation ladder). Fields: the ggml model file
 	// (bare name, e.g. "ggml-small.bin") and preferred language hint
-	// ("", "id", "en"); audio read_audio picks whichever engine is
+	// ("", "id", "en"); audio read_media picks whichever engine is
 	// configured without changing its own logic. Install lives in
 	// Settings → Speech-to-Text (offline).
 	STTOfflineModel    string `json:"stt_offline_model,omitempty"`

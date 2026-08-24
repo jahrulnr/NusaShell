@@ -13,6 +13,10 @@ const state = {
   drawerRunId: '',
   popupRunId: '',
   bound: false,
+  // runId -> number of transcript chunks already rendered into the DOM.
+  // Lets live delta updates patch the panel in place instead of rebuilding
+  // it (which reset scroll and made the view jump around).
+  renderedChunks: new Map(),
 };
 
 // Agent name cache: agent_id → name. Hydrated lazily from acp.agents.list
@@ -86,7 +90,13 @@ export function bindSubagents({ getActiveConversationId } = {}) {
 export function setSubagentConversation(id) {
   state.conversationId = id || '';
   renderDock();
-  if (!document.getElementById('acp-drawer')?.hidden) renderDrawer();
+  if (!document.getElementById('acp-drawer')?.hidden) {
+    // A drawer showing a run from the previous room must not follow the
+    // user across rooms — reset to the new room's runs instead.
+    const run = state.runs.get(state.drawerRunId);
+    if (!run || (id && run.conversation_id !== id)) state.drawerRunId = '';
+    renderDrawer();
+  }
 }
 
 export function closeAcpOverlays() {
@@ -110,23 +120,46 @@ function upsertRun(run, { silent } = {}) {
   if (!silent) renderAll();
 }
 
-function visibleRuns() {
-  const now = Date.now();
-  const active = state.getActiveConversationId?.() || state.conversationId;
-  return [...state.runs.values()]
-    .filter((run) => {
-      if (LIVE.has(run.status)) return true;
-      if (active && run.conversation_id === active) {
-        const ended = Date.parse(run.ended_at || run.updated_at || '') || 0;
-        return ended && now - ended < RECENT_MS;
-      }
-      return false;
-    })
-    .sort((a, b) => Date.parse(b.updated_at || b.started_at || 0) - Date.parse(a.updated_at || a.started_at || 0));
+function activeConversationId() {
+  return state.getActiveConversationId?.() || state.conversationId;
 }
 
-function firstVisibleRunId() {
-  return visibleRuns()[0]?.id || [...state.runs.keys()][0] || '';
+// Dock chips: live runs of the active conversation plus runs that settled
+// within RECENT_MS. Sorted by start time (stable) — never by recency, so
+// live delta updates cannot reshuffle chips under the cursor.
+function visibleRuns() {
+  const now = Date.now();
+  const active = activeConversationId();
+  return [...state.runs.values()]
+    .filter((run) => {
+      if (active && run.conversation_id !== active) return false;
+      if (LIVE.has(run.status)) return true;
+      const ended = Date.parse(run.ended_at || run.updated_at || '') || 0;
+      return ended && now - ended < RECENT_MS;
+    })
+    .sort((a, b) => startedAtMs(a) - startedAtMs(b));
+}
+
+// Every run of the active conversation, settled included — the drawer's
+// switcher and the "open transcript" fallback must reach completed runs
+// as long as the conversation exists.
+function conversationRuns() {
+  const active = activeConversationId();
+  return [...state.runs.values()]
+    .filter((run) => !active || run.conversation_id === active)
+    .sort((a, b) => startedAtMs(a) - startedAtMs(b));
+}
+
+function startedAtMs(run) {
+  return Date.parse(run.started_at || run.updated_at || '') || 0;
+}
+
+export function firstVisibleRunId() {
+  const visible = visibleRuns();
+  if (visible.length) return visible[0].id;
+  // Fall back to any run of the active conversation (settled, not recent)
+  // so a completed subagent card can still open its transcript.
+  return conversationRuns()[0]?.id || '';
 }
 
 function renderAll() {
@@ -146,26 +179,55 @@ function renderDock() {
   const live = runs.filter((r) => LIVE.has(r.status)).length;
   title.textContent = `${runs.length} subagent${runs.length === 1 ? '' : 's'}`;
   meta.textContent = live ? `${live} live` : 'settled';
-  list.replaceChildren(...runs.map((run) => {
-    const chip = el('button', {
-      class: `acp-dock-chip is-${run.status}`,
-      type: 'button',
-      role: 'listitem',
-      title: `${run.agent_name || 'ACP'} · ${statusLabel(run.status)}`,
-    },
-      el('span', { class: 'acp-dock-chip-pulse', 'aria-hidden': 'true' }),
-      el('span', { class: 'acp-dock-chip-name', text: run.agent_name || 'ACP' }),
-      el('span', { class: 'acp-dock-chip-status', text: statusLabel(run.status) }),
-    );
-    chip.addEventListener('click', () => openDrawer(run.id));
-    const peek = el('button', { class: 'acp-dock-chip-peek', type: 'button', title: 'Peek in popup', 'aria-label': 'Peek', text: '↗' });
-    peek.addEventListener('click', (event) => {
-      event.stopPropagation();
-      openPopup(run.id);
-    });
-    chip.append(peek);
-    return chip;
-  }));
+  // Patch in place: existing chips keep their DOM node (hover/focus and
+  // position preserved across live deltas); only new runs are appended
+  // and settled runs removed. Runs are appended in spawn order, so the
+  // DOM order matches the stable sort without reshuffling.
+  const seen = new Set();
+  for (const run of runs) {
+    seen.add(run.id);
+    let chip = list.querySelector(`[data-run-id="${run.id}"]`);
+    if (!chip) {
+      chip = buildDockChip(run);
+      list.append(chip);
+    } else {
+      updateDockChip(chip, run);
+    }
+  }
+  for (const chip of [...list.querySelectorAll('[data-run-id]')]) {
+    if (!seen.has(chip.dataset.runId)) chip.remove();
+  }
+}
+
+function buildDockChip(run) {
+  const chip = el('button', {
+    class: `acp-dock-chip is-${run.status}`,
+    type: 'button',
+    role: 'listitem',
+    'data-run-id': run.id,
+    title: `${run.agent_name || 'ACP'} · ${statusLabel(run.status)}`,
+  },
+    el('span', { class: 'acp-dock-chip-pulse', 'aria-hidden': 'true' }),
+    el('span', { class: 'acp-dock-chip-name', text: run.agent_name || 'ACP' }),
+    el('span', { class: 'acp-dock-chip-status', text: statusLabel(run.status) }),
+  );
+  chip.addEventListener('click', () => openDrawer(run.id));
+  const peek = el('button', { class: 'acp-dock-chip-peek', type: 'button', title: 'Peek in popup', 'aria-label': 'Peek', text: '↗' });
+  peek.addEventListener('click', (event) => {
+    event.stopPropagation();
+    openPopup(run.id);
+  });
+  chip.append(peek);
+  return chip;
+}
+
+function updateDockChip(chip, run) {
+  chip.className = `acp-dock-chip is-${run.status}`;
+  chip.title = `${run.agent_name || 'ACP'} · ${statusLabel(run.status)}`;
+  const status = chip.querySelector('.acp-dock-chip-status');
+  if (status && status.textContent !== statusLabel(run.status)) {
+    status.textContent = statusLabel(run.status);
+  }
 }
 
 export function openDrawer(runId) {
@@ -208,22 +270,32 @@ function closePopup() {
 }
 
 function renderDrawer() {
-  const runs = visibleRuns();
-  const selected = state.runs.get(state.drawerRunId) || runs[0];
+  const runs = conversationRuns();
+  // When a specific run was requested (card/dock click) but its record
+  // hasn't hydrated yet, show a loading state instead of silently
+  // switching to a different run.
+  const selected = state.runs.get(state.drawerRunId) || (state.drawerRunId ? undefined : runs[0]);
   document.getElementById('acp-drawer-title').textContent = selected ? (selected.agent_name || 'Subagent') : 'Subagents';
   document.getElementById('acp-drawer-subtitle').textContent = selected
     ? `${statusLabel(selected.status)} · ${shortPath(selected.workspace)}`
-    : 'No live ACP sessions';
+    : 'No subagents in this conversation';
   const body = document.getElementById('acp-drawer-body');
   if (!selected) {
-    body.replaceChildren(el('p', { class: 'acp-empty', text: 'No subagents running. The parent agent can spawn them with the subagent tool.' }));
+    body.replaceChildren(el('p', { class: 'acp-empty', text: state.drawerRunId ? 'Loading transcript…' : 'No subagents in this conversation. The parent agent can spawn them with the subagent tool.' }));
     return;
   }
   state.drawerRunId = selected.id;
-  body.replaceChildren(
-    runSwitcher(runs, selected.id, (id) => { state.drawerRunId = id; renderDrawer(); }),
-    runPanel(selected),
-  );
+  const switcher = runSwitcher(runs, selected.id, (id) => { state.drawerRunId = id; renderDrawer(); });
+  // Same run: patch in place (status pill + transcript deltas) so the
+  // scroll position survives live updates. Different run: rebuild.
+  const existing = body.querySelector(`.acp-run-panel[data-run-id="${selected.id}"]`);
+  if (!existing) {
+    body.replaceChildren(switcher, buildRunPanel(selected));
+  } else {
+    const prevSwitcher = body.querySelector('.acp-run-switcher');
+    if (prevSwitcher) prevSwitcher.replaceWith(switcher);
+    patchRunPanel(existing, selected);
+  }
 }
 
 function renderPopup() {
@@ -236,7 +308,13 @@ function renderPopup() {
     return;
   }
   title.textContent = run.agent_name || 'Subagent';
-  body.replaceChildren(runPanel(run));
+  // Same run: patch in place so the popup transcript doesn't reset.
+  const existing = body.querySelector(`.acp-run-panel[data-run-id="${run.id}"]`);
+  if (!existing) {
+    body.replaceChildren(buildRunPanel(run));
+  } else {
+    patchRunPanel(existing, run);
+  }
 }
 
 function runSwitcher(runs, selectedId, onSelect) {
@@ -254,8 +332,8 @@ function runSwitcher(runs, selectedId, onSelect) {
   return row;
 }
 
-function runPanel(run) {
-  const panel = el('div', { class: 'acp-run-panel' },
+function buildRunPanel(run) {
+  const panel = el('div', { class: 'acp-run-panel', 'data-run-id': run.id },
     el('div', { class: 'acp-run-meta' },
       el('span', { class: `acp-status-pill is-${run.status}`, text: statusLabel(run.status) }),
       el('span', { class: `acp-risk-pill is-${run.risk_tier || 'read_only'}`, text: riskLabel(run.risk_tier) }),
@@ -267,7 +345,7 @@ function runPanel(run) {
     ),
     el('div', { class: 'acp-transcript', 'aria-label': 'Subagent transcript' },
       ...(run.transcript || []).length
-        ? (run.transcript || []).slice(-80).map(transcriptLine)
+        ? (run.transcript || []).map(transcriptLine)
         : [el('p', { class: 'acp-empty', text: 'Waiting for the first update…' })],
     ),
   );
@@ -275,7 +353,55 @@ function runPanel(run) {
   if (run.error) {
     panel.append(el('p', { class: 'acp-run-error', text: run.error }));
   }
+  state.renderedChunks.set(run.id, (run.transcript || []).length);
   return panel;
+}
+
+// patchRunPanel updates a live panel in place: status pill + model pill +
+// error, then appends only the transcript chunks that arrived since the
+// last render. Auto-follows the bottom only when the user is already at
+// the bottom — reading earlier output is never interrupted.
+function patchRunPanel(panel, run) {
+  const pill = panel.querySelector('.acp-status-pill');
+  if (pill) {
+    pill.className = `acp-status-pill is-${run.status}`;
+    pill.textContent = statusLabel(run.status);
+  }
+  const modelPill = panel.querySelector('.acp-model-pill');
+  if (run.current_model_id) {
+    if (modelPill) {
+      modelPill.textContent = modelLabel(run);
+    } else {
+      panel.querySelector('.acp-run-meta')?.append(el('span', { class: 'acp-model-pill', text: modelLabel(run) }));
+    }
+  }
+  const errEl = panel.querySelector('.acp-run-error');
+  if (run.error && !errEl) {
+    panel.append(el('p', { class: 'acp-run-error', text: run.error }));
+  }
+  appendTranscriptDeltas(panel, run);
+}
+
+// appendTranscriptDeltas appends chunks that are not yet in the DOM and
+// keeps the view pinned to the bottom only while the user is already
+// there (same auto-follow behavior as the conversation thread). The
+// transcript flows inside the drawer/popup body, so the scrollable
+// ancestor is the follow target.
+function appendTranscriptDeltas(panel, run) {
+  const box = panel.querySelector('.acp-transcript');
+  if (!box) return;
+  const chunks = run.transcript || [];
+  const rendered = state.renderedChunks.get(run.id) || 0;
+  if (chunks.length <= rendered) return;
+  const empty = box.querySelector('.acp-empty');
+  if (empty) empty.remove();
+  const scroller = box.closest('.drawer-body, .acp-popup');
+  const atBottom = !scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 60;
+  const frag = document.createDocumentFragment();
+  for (const c of chunks.slice(rendered)) frag.append(transcriptLine(c));
+  box.append(frag);
+  state.renderedChunks.set(run.id, chunks.length);
+  if (atBottom && scroller) scroller.scrollTop = scroller.scrollHeight;
 }
 
 function transcriptLine(chunk) {

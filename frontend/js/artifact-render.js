@@ -1,7 +1,7 @@
 // Artifact renderer for chat messages.
 //
 // Artifacts are interactive HTML/CSS/JS documents the agent produces via
-// the `artifact_create` / `artifact_update` tools. Unlike Mermaid diagrams
+// the `show` tool (op=html). Unlike Mermaid diagrams
 // (which render inline as SVG), artifacts render inside a sandboxed iframe
 // using srcdoc so the agent can ship interactive prototypes, minigames,
 // dashboards, and visualizations without touching the host page.
@@ -188,14 +188,13 @@ export function renderArtifactCard(toolCall, artifact) {
 // parseArtifactOutput extracts an artifact object from a tool call's output.
 // Returns null when the output is not a recognizable artifact result.
 export function parseArtifactOutput(toolCall) {
-  if (toolCall.name !== 'artifact_create' && toolCall.name !== 'artifact_update') {
+  if (toolCall.name !== 'show') {
     return null;
   }
   if (!toolCall.output) return null;
   try {
     const parsed = JSON.parse(toolCall.output);
     if (parsed && parsed.artifact) return parsed.artifact;
-    if (parsed && parsed.id && (parsed.html || parsed.css || parsed.js)) return parsed;
     return null;
   } catch {
     return null;

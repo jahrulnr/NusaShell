@@ -64,7 +64,7 @@ type responsesInputItem struct {
 	Summary []responsesReasoningSummary `json:"summary,omitempty"`
 	// Output is a JSON value: a string for text-only tool results, or an
 	// array of input_text / input_image items when the tool returned
-	// attachments (read_image, generate_image). RawMessage keeps both shapes.
+	// attachments (read_media, generate_image). RawMessage keeps both shapes.
 	Output json.RawMessage `json:"output,omitempty"`
 }
 

@@ -88,8 +88,8 @@ When adding, renaming, removing, or changing:
   update `resources/agent/docs/mcp.md`.
 - **ACP subagent delegation, async completion, or permissions** → update
   `resources/agent/docs/agent-subagents.md`.
-- **Image/audio/video attachments, vision fallback, read_image/read_audio/
-  read_video, or folder attachments** → update
+- **Image/audio/video/document attachments, vision fallback, read_media,
+  or folder attachments** → update
   `resources/agent/docs/agent-attachments.md`.
 - **Data files, data directory layout, or persisted artifacts** → update
   `resources/agent/docs/data-locations.md`.

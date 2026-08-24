@@ -1594,8 +1594,7 @@ func TestAgentToolsDocMatchesBuiltInRoster(t *testing.T) {
 	conditional := map[string]bool{
 		"web_answer": true, "subagent": true, "subagent_steer": true,
 		"subagent_stop": true, "subagent_wait": true,
-		"artifact_create": true, "artifact_update": true, "artifact_read": true,
-		"artifact_list": true, "artifact_delete": true, "generate_media": true,
+		"generate_media": true,
 	}
 	for name := range documented {
 		if !actual[name] && !conditional[name] {

@@ -77,6 +77,16 @@ func (s *AcpRunStore) runPath(conversationID, runID string) (string, error) {
 	return filepath.Join(dir, runID+".json"), nil
 }
 
+// Path resolves the file path a run's record is (or will be) stored at.
+// Returns "" for unsafe or unresolvable IDs.
+func (s *AcpRunStore) Path(conversationID, runID string) string {
+	path, err := s.runPath(conversationID, runID)
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
 // Save writes the record as its own JSON file, creating or replacing it
 // atomically. Saving the same run ID again replaces that run's file —
 // other runs are untouched by construction.

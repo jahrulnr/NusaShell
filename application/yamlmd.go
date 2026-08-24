@@ -9,7 +9,7 @@ import (
 
 // yamlBlockApp marshals v as YAML and wraps it in YAML front matter delimited
 // by --- lines. Application-package version of the tools.yamlBlock helper,
-// used by read_image / read_audio / read_video tool handlers.
+// used by read_media tool handlers.
 func yamlBlockApp(v any) string {
 	b, err := yaml.Marshal(v)
 	if err != nil {

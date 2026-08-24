@@ -120,6 +120,25 @@ func TestAcpRunStorePerConversationLayout(t *testing.T) {
 	}
 }
 
+func TestAcpRunStorePath(t *testing.T) {
+	dir := t.TempDir()
+	store := NewAcpRunStore(dir)
+
+	got := store.Path("conv_abc123", "acprun_path")
+	want := filepath.Join(dir, "conversations", "conv_abc123.acp", "acprun_path.json")
+	if got != want {
+		t.Fatalf("Path = %q, want %q", got, want)
+	}
+
+	// Unsafe IDs resolve to "" instead of an escaped path.
+	if p := store.Path("../escape", "run"); p != "" {
+		t.Fatalf("Path with traversal conversation = %q, want empty", p)
+	}
+	if p := store.Path("conv_ok", "run/../../x"); p != "" {
+		t.Fatalf("Path with traversal run id = %q, want empty", p)
+	}
+}
+
 func TestAcpRunStoreNoSharedGlobalFile(t *testing.T) {
 	dir := t.TempDir()
 	store := NewAcpRunStore(dir)

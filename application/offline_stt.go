@@ -18,7 +18,7 @@ import "context"
 
 // OfflineTranscriber converts recorded audio to text using a LOCAL engine
 // (no network). It is the offline sibling of SpeechTranscriber (the cloud
-// /audio/transcriptions route) — read_audio can prefer whichever is
+// /audio/transcriptions route) — read_media can prefer whichever is
 // configured without changing its own logic.
 type OfflineTranscriber interface {
 	TranscribeOffline(ctx context.Context, req OfflineSTTRequest) (string, error)

@@ -8,7 +8,7 @@ import "bytes"
 // known media magic number.
 //
 // This is the single source of truth for file-type validation in the
-// read_image / read_audio / read_video tools. Extension-based MIME
+// read_media tool (image, audio, video, and document/PDF). Extension-based MIME
 // detection is intentionally NOT used here — extensions can be lied about
 // (e.g. a .js file renamed to .png). Only the binary magic number is
 // trustworthy.

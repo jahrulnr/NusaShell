@@ -1,7 +1,7 @@
 import { renderMarkdown } from '../../markdown.js';
 import { el, fmtTime, registerOverlayDismiss } from '../../ui.js';
 import { createAskCard } from '../ask-card.js';
-import { openDrawer, agentNameForId } from './subagents.js';
+import { openDrawer, agentNameForId, firstVisibleRunId } from './subagents.js';
 import { renderArtifactCard, parseArtifactOutput } from '../../artifact-render.js';
 
 export const STARTER_PROMPTS = [
@@ -289,10 +289,11 @@ export function renderToolCallCard(toolCall) {
 }
 
 // renderSubagentCard builds a delegation card for the `subagent` tool.
-// Async flow: saat spawn, output = {"runs":[{"id":"...","status":"starting"}]}.
-// Saat selesai, output = YAML frontmatter (status, workspace, output_path)
-// + markdown body (summary). Card re-render via EventToolCompleted.
-function renderSubagentCard(toolCall) {
+// Async flow: saat spawn, output = YAML frontmatter
+// `runs: [{id, status, workspace}]` (status "starting"). Saat selesai,
+// output = YAML frontmatter (status, workspace, output_path) + markdown
+// body (summary). Card re-render via EventToolCompleted.
+export function renderSubagentCard(toolCall) {
   let args = {};
   try { args = JSON.parse(toolCall.args || '{}'); } catch {}
   let runs = [];
@@ -306,14 +307,27 @@ function renderSubagentCard(toolCall) {
     const parsed = parseSubagentResult(toolCall.output || '');
     meta = parsed.meta;
     outputText = parsed.body;
+    if (parsed.meta?.runs?.length) runs = parsed.meta.runs;
   }
 
   const agentName = agentNameForId(args.agent_id) || 'Subagent';
   const promptPreview = (args.prompt || '').split('\n')[0].slice(0, 120);
+  // Single-run spawn results are flat in the UI: merge the run's fields
+  // up so status/workspace/error reflect the actual spawn outcome (a
+  // failed spawn would otherwise look like a success — the tool call
+  // itself returns ok while the run item carries status: failed).
+  if (runs.length === 1) {
+    const first = runs[0];
+    if (!meta.status && first.status) meta.status = first.status;
+    if (!meta.workspace && first.workspace) meta.workspace = first.workspace;
+    if (!meta.error && first.error) meta.error = first.error;
+    if (!meta.id && first.id) meta.id = first.id;
+  }
+  const anyRunFailed = runs.some((r) => r.status === 'failed');
   const isRunning = toolCall.status === 'running' || !toolCall.output;
-  const isFailed = toolCall.status === 'fail' || meta?.status === 'failed';
+  const isFailed = toolCall.status === 'fail' || meta?.status === 'failed' || anyRunFailed;
   const isCancelled = meta?.status === 'cancelled';
-  const status = isRunning ? 'running' : (isFailed ? 'error' : 'success');
+  const status = isRunning ? 'running' : (isCancelled ? 'cancelled' : (isFailed ? 'error' : 'success'));
 
   const card = el('div', { class: `agent-subagent-card is-${status}`, role: 'button', tabindex: '0', 'aria-label': `Open ${agentName} transcript` });
   card._toolArgs = toolCall.args;
@@ -346,6 +360,10 @@ function renderSubagentCard(toolCall) {
     const summaryPreview = outputText.split('\n')[0].slice(0, 160);
     body.append(el('p', { class: 'agent-subagent-summary', text: summaryPreview }));
   }
+  // Spawn error message (single failed run with no summary body)
+  if (!isRunning && meta?.error) {
+    body.append(el('p', { class: 'agent-subagent-summary is-error', text: meta.error.slice(0, 200) }));
+  }
   if (runs.length > 1) {
     body.append(el('div', { class: 'agent-subagent-runs' },
       ...runs.map((r) => el('div', { class: `agent-subagent-run is-${r.status}`, 'data-run-id': r.id },
@@ -360,7 +378,7 @@ function renderSubagentCard(toolCall) {
 
   card.addEventListener('click', (event) => {
     const runRow = event.target.closest('[data-run-id]');
-    const runId = runRow?.dataset.runId || runs[0]?.id;
+    const runId = runRow?.dataset.runId || runs[0]?.id || meta?.id || firstVisibleRunId();
     if (runId) openDrawer(runId);
   });
   card.addEventListener('keydown', (event) => {
@@ -375,6 +393,12 @@ function renderSubagentCard(toolCall) {
 // parseSubagentResult splits a YAML frontmatter + markdown body tool
 // result into { meta, body }. Returns { meta: null, body: raw } if the
 // input is not in the expected format.
+//
+// The frontmatter is parsed line-wise, including YAML list items
+// (`- key: value` blocks, as produced by the spawn result's `runs:`),
+// which are collected into meta.runs as an array of { key: value }
+// objects. Indented continuation lines belong to the current list item;
+// unindented lines belong to the top-level meta.
 function parseSubagentResult(raw) {
   if (!raw.startsWith('---\n')) return { meta: null, body: raw };
   const end = raw.indexOf('\n---\n', 4);
@@ -382,18 +406,40 @@ function parseSubagentResult(raw) {
   const header = raw.slice(4, end);
   const body = raw.slice(end + 5);
   const meta = {};
+  const runs = [];
+  let currentRun = null;
   for (const line of header.split('\n')) {
-    const idx = line.indexOf(':');
-    if (idx < 0) continue;
-    const key = line.slice(0, idx).trim();
-    let val = line.slice(idx + 1).trim();
-    // strip surrounding quotes
-    if (val.startsWith('"') && val.endsWith('"')) {
-      val = val.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith('- ')) {
+      currentRun = {};
+      runs.push(currentRun);
+      assignSubagentKeyValue(currentRun, trimmed.slice(2));
+      continue;
     }
-    meta[key] = val;
+    if (currentRun && line.startsWith(' ')) {
+      assignSubagentKeyValue(currentRun, trimmed);
+      continue;
+    }
+    currentRun = null;
+    assignSubagentKeyValue(meta, line);
   }
+  if (runs.length) meta.runs = runs;
   return { meta, body };
+}
+
+// assignSubagentKeyValue sets target[key] = value from a "key: value"
+// line, stripping surrounding quotes from the value.
+function assignSubagentKeyValue(target, text) {
+  const idx = text.indexOf(':');
+  if (idx < 0) return;
+  const key = text.slice(0, idx).trim();
+  let val = text.slice(idx + 1).trim();
+  // strip surrounding quotes
+  if (val.startsWith('"') && val.endsWith('"')) {
+    val = val.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  }
+  target[key] = val;
 }
 
 function parseToolArgs(args) {

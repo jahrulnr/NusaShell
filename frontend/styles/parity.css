@@ -440,6 +440,7 @@ summary { outline: none; }
 .agent-subagent-card:focus-visible { outline: 1px solid #527edc; outline-offset: 2px; }
 .agent-subagent-card.is-running { border-color: #3a5274; }
 .agent-subagent-card.is-error { border-color: #5a3d44; }
+.agent-subagent-card.is-cancelled { border-color: #5a4d3d; }
 
 .agent-subagent-header {
   display: flex;
@@ -457,6 +458,7 @@ summary { outline: none; }
 }
 .agent-subagent-card.is-success .agent-subagent-icon { color: #66d59c; }
 .agent-subagent-card.is-error .agent-subagent-icon { color: #ff8f99; }
+.agent-subagent-card.is-cancelled .agent-subagent-icon { color: #d9b46a; }
 .agent-subagent-card.is-running .agent-subagent-icon { animation: agent-tool-terminal-pulse 1.2s ease-in-out infinite; }
 
 .agent-subagent-name {
@@ -477,6 +479,7 @@ summary { outline: none; }
 .agent-subagent-status.is-running { color: #7ab5d9; border-color: rgba(122, 181, 217, .3); }
 .agent-subagent-status.is-success { color: #66d59c; border-color: rgba(102, 213, 156, .3); }
 .agent-subagent-status.is-error { color: #ff8f99; border-color: rgba(255, 143, 153, .3); }
+.agent-subagent-status.is-cancelled { color: #d9b46a; border-color: rgba(217, 180, 106, .3); }
 
 .agent-subagent-body { padding: 8px 14px 12px; }
 .agent-subagent-prompt {

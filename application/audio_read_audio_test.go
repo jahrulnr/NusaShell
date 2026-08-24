@@ -17,7 +17,7 @@ func TestExecuteReadAudioNative(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_audio",
+		Name: "read_media",
 		Args: filePathArgs(audioPath, "what is being said?"),
 	}
 
@@ -51,7 +51,7 @@ func TestExecuteReadAudioNonAudioNoFallback(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_audio",
+		Name: "read_media",
 		Args: filePathArgs(audioPath, ""),
 	}
 
@@ -75,7 +75,7 @@ func TestExecuteReadAudioAudioNotFound(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_audio",
+		Name: "read_media",
 		Args: filePathArgs(testAbsPath(dir, "nonexistent.mp3"), ""),
 	}
 
@@ -95,7 +95,7 @@ func TestExecuteReadAudioMissingArgs(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_audio",
+		Name: "read_media",
 		Args: `{}`,
 	}
 
@@ -115,7 +115,7 @@ func TestExecuteReadAudioRejectsRelativePath(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_audio",
+		Name: "read_media",
 		Args: `{"file_path":"recording.mp3"}`,
 	}
 

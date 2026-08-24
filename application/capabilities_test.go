@@ -123,8 +123,8 @@ func TestChatMessagesAudioPlaceholderForNonAudioModel(t *testing.T) {
 	if !strings.Contains(userMsg.Content, audioPath) {
 		t.Errorf("placeholder should include absolute file path, got: %q", userMsg.Content)
 	}
-	if !strings.Contains(userMsg.Content, "read_audio") {
-		t.Errorf("placeholder should mention read_audio tool, got: %q", userMsg.Content)
+	if !strings.Contains(userMsg.Content, "read_media") {
+		t.Errorf("placeholder should mention read_media tool, got: %q", userMsg.Content)
 	}
 	// Audio attachment should be stripped (non-audio model)
 	if len(userMsg.Attachments) != 0 {
@@ -152,8 +152,8 @@ func TestChatMessagesVideoPlaceholderForNonVideoModel(t *testing.T) {
 	if !strings.Contains(userMsg.Content, videoPath) {
 		t.Errorf("placeholder should include absolute file path, got: %q", userMsg.Content)
 	}
-	if !strings.Contains(userMsg.Content, "read_video") {
-		t.Errorf("placeholder should mention read_video tool, got: %q", userMsg.Content)
+	if !strings.Contains(userMsg.Content, "read_media") {
+		t.Errorf("placeholder should mention read_media tool, got: %q", userMsg.Content)
 	}
 	// Video attachment should be stripped (non-video model)
 	if len(userMsg.Attachments) != 0 {
@@ -184,7 +184,7 @@ func TestChatMessagesAudioKeptForAudioModel(t *testing.T) {
 }
 
 // TestFilterToolAttachmentsByCapsStripsAudio: a non-audio model should not
-// receive audio attachments from tool results (e.g. read_audio). The audio
+// receive audio attachments from tool results (e.g. read_media). The audio
 // should be stripped and replaced with a text note.
 func TestFilterToolAttachmentsByCapsStripsAudio(t *testing.T) {
 	atts := []domain.Attachment{

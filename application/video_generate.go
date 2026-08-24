@@ -99,7 +99,7 @@ func (a *App) executeGenerateVideo(run *TurnRun, toolCall domain.ToolCall, setti
 	if result.CostUSD > 0 {
 		meta["cost_usd"] = result.CostUSD
 	}
-	body := fmt.Sprintf("Video saved to %s. The video attachment is already delivered to the user in the UI — do not re-render it as a Markdown link.", path)
+	body := fmt.Sprintf("Video saved to %s.", path)
 	return yamlMDApp(meta, body), []domain.Attachment{att}, nil
 }
 

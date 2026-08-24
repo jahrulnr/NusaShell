@@ -35,7 +35,7 @@ func TestAudioFallbackRoute(t *testing.T) {
 }
 
 // TestExecuteReadAudioRoutesSTTKindToTranscriptions verifies end to end:
-// when the configured audio fallback model is kind "stt", read_audio must
+// when the configured audio fallback model is kind "stt", read_media must
 // send a multipart POST to <base>/audio/transcriptions carrying the model
 // name and audio file, then return the transcript text.
 func TestExecuteReadAudioRoutesSTTKindToTranscriptions(t *testing.T) {
@@ -85,7 +85,7 @@ func TestExecuteReadAudioRoutesSTTKindToTranscriptions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	toolCall := domain.ToolCall{ID: "tc1", Name: "read_audio", Args: filePathArgs(audioPath, "")}
+	toolCall := domain.ToolCall{ID: "tc1", Name: "read_media", Args: filePathArgs(audioPath, "")}
 
 	output, atts, err := app.executeReadAudio(run, toolCall, ModelCapabilities{}, domain.Settings{
 		AudioProviderID: "sttprov", AudioModelID: "whisper-test",
@@ -131,7 +131,7 @@ func TestExecuteReadAudioSTTWithoutFactory(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	toolCall := domain.ToolCall{ID: "tc1", Name: "read_audio", Args: filePathArgs(audioPath, "")}
+	toolCall := domain.ToolCall{ID: "tc1", Name: "read_media", Args: filePathArgs(audioPath, "")}
 
 	output, _, err := app.executeReadAudio(run, toolCall, ModelCapabilities{}, domain.Settings{
 		AudioProviderID: "sttprov", AudioModelID: "whisper-test",

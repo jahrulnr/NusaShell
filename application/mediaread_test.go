@@ -104,12 +104,12 @@ func TestLoadMediaAttachmentRejectsNonMedia(t *testing.T) {
 }
 
 // TestLoadMediaAttachmentRejectsKindMismatch proves that a real audio
-// file passed to read_image is rejected — the magic bytes must match
-// the expected kind.
+// file passed to read_media (kind=image) is rejected — the magic bytes
+// must match the expected kind.
 func TestLoadMediaAttachmentRejectsKindMismatch(t *testing.T) {
 	dir := t.TempDir()
 	// A real MP3 file with .png extension — magic says audio, but
-	// read_image expects image.
+	// the caller expects image.
 	path := filepath.Join(dir, "trick.png")
 	if err := os.WriteFile(path, realMP3Header, 0o644); err != nil {
 		t.Fatal(err)

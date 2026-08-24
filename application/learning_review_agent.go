@@ -478,16 +478,17 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 	// and sometimes skipping the check entirely.
 	systemPrompt = r.injectPrimaryMemory(systemPrompt)
 	// The review agent gets the conversation via the review_transcript
-	// hydration tool, not as a flat user-message dump. The initial user
-	// message instructs the LLM to call the tool first; the tool returns
-	// structured JSON with proper roles, tool calls, and tool results.
+	// hydration tool, not as a flat user-message dump. The tool's own
+	// description says to call it FIRST, and the system prompt (review.md
+	// Step 1) instructs the call order — the user message only states the
+	// task.
 	if len(conversation.Messages) == 0 {
 		return nil, nil, nil
 	}
 
 	tools := r.reviewTools()
 	messages := []ChatMessage{
-		{Role: "user", Content: "Call review_transcript to see the conversation transcript, then decide what to save."},
+		{Role: "user", Content: "Review the conversation and decide what to save to memory."},
 	}
 
 	var mutations []ReviewMutation

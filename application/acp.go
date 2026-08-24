@@ -351,12 +351,49 @@ func (a *App) handleAcpRunsList(req contracts.AcpRunsListRequest) (any, *contrac
 	if a.Acp == nil {
 		return contracts.AcpRunsListResult{Runs: []contracts.AcpRunDTO{}}, nil
 	}
-	runs := a.Acp.List(req.ConversationID)
-	out := make([]contracts.AcpRunDTO, 0, len(runs))
-	for _, r := range runs {
+	// Live runtime runs first; persisted records fill in settled runs so
+	// the UI can reopen a completed subagent's transcript from the drawer
+	// even after it left the dock (or after a restart).
+	seen := make(map[string]bool)
+	out := make([]contracts.AcpRunDTO, 0, 8)
+	for _, r := range a.Acp.List(req.ConversationID) {
+		seen[r.ID] = true
 		out = append(out, acpRunDTO(r))
 	}
+	if a.AcpRunStorage != nil {
+		for _, rec := range a.AcpRunStorage.List(req.ConversationID) {
+			if seen[rec.ID] {
+				continue
+			}
+			seen[rec.ID] = true
+			out = append(out, acpRunDTO(acpRunFromRecord(rec)))
+		}
+	}
 	return contracts.AcpRunsListResult{Runs: out}, nil
+}
+
+// acpRunFromRecord rebuilds an in-memory AcpRun from a persisted record
+// so settled runs can be listed and served after the runtime forgets them.
+func acpRunFromRecord(rec domain.AcpRunRecord) *domain.AcpRun {
+	run := &domain.AcpRun{
+		ID:               rec.ID,
+		AgentID:          rec.AgentID,
+		AgentName:        rec.AgentName,
+		ConversationID:   rec.ConversationID,
+		ParentToolCallID: rec.ParentToolCallID,
+		Workspace:        rec.Workspace,
+		Prompt:           rec.Prompt,
+		Status:           rec.Status,
+		CurrentModelID:   rec.ModelID,
+		RiskTier:         rec.RiskTier,
+		StopReason:       rec.StopReason,
+		Error:            rec.Error,
+		Transcript:       rec.Transcript,
+		StartedAt:        rec.StartedAt,
+		EndedAt:          rec.EndedAt,
+		UpdatedAt:        rec.EndedAt,
+	}
+	return run
 }
 
 func (a *App) handleAcpRunsGet(req contracts.AcpRunIDRequest) (any, *contracts.RPCError) {
@@ -711,6 +748,7 @@ func (a *App) onAcpRunDone(run *domain.AcpRun) {
 	}
 
 	// 1. Persist the full transcript to JSONL storage.
+	outputPath := ""
 	if a.AcpRunStorage != nil {
 		record := domain.AcpRunRecord{
 			ID:               run.ID,
@@ -731,6 +769,8 @@ func (a *App) onAcpRunDone(run *domain.AcpRun) {
 		}
 		if err := a.AcpRunStorage.Save(record); err != nil {
 			a.log("error", "acp", "failed to persist run %s: %v", run.ID, err)
+		} else {
+			outputPath = a.AcpRunStorage.Path(run.ConversationID, run.ID)
 		}
 	}
 
@@ -741,7 +781,7 @@ func (a *App) onAcpRunDone(run *domain.AcpRun) {
 	// result (YAML frontmatter + markdown body). The tool call was marked
 	// "running" when spawned; now it transitions to ok/fail.
 	if run.ParentToolCallID != "" {
-		result := domain.SubagentCompletionResult(run, "")
+		result := domain.SubagentCompletionResult(run, outputPath)
 		status := domain.ToolOK
 		if run.Status == domain.AcpRunFailed || run.Status == domain.AcpRunCancelled {
 			status = domain.ToolFailed

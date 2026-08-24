@@ -34,11 +34,11 @@ type STTInstallStatusResult struct {
 	DiskFreeBytes   int64  `json:"disk_free_bytes,omitempty"`
 	ActiveModel     string `json:"active_model,omitempty"` // settings.stt_offline_model in effect
 	Running         bool   `json:"running"`
-	// Ready mirrors the runtime gate of read_audio: engine resolvable AND at
+	// Ready mirrors the runtime gate of read_media: engine resolvable AND at
 	// least one GGML model installed — no settings flag involved.
-	Ready   bool   `json:"ready"`
-	Reason  string `json:"reason,omitempty"` // next step for the user
-	Models  []STTModelDTO `json:"models"`
+	Ready  bool          `json:"ready"`
+	Reason string        `json:"reason,omitempty"` // next step for the user
+	Models []STTModelDTO `json:"models"`
 }
 
 // STTInstallStartRequest kicks off one model install (engine included when

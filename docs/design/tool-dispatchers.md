@@ -31,11 +31,9 @@ Root+op is the ONLY form of these tools anywhere in the system:
 ## Rules
 
 - Families must be CRUD/search-shaped with simple params. Hot-path tools
-  (`exec`, `file_*`, `web_*`, `mcp_call`), process-control verbs
-  (`ci_run/wait/cancel/steer`), invariant-enforcing writers with distinct
-  contracts (`artifact_create/update` — the frontend renders cards on those
-  exact names), and privileged gates (`mcp_register/install/server_add`)
-  stay as typed tools.
+  (`exec`, `file_*`, `grep`, `find_file`, `show`, `web_*`, `mcp_call`),
+  process-control verbs (`ci_run/wait/cancel/steer`), and privileged gates
+  (`mcp_register/install/server_add`) stay as typed tools.
 - Adding a verb: add the op to the family spec + its Execute case + tests.
 - `ci_pipeline` is the one family whose handlers live outside
   `executeFamily`: it resolves the op there, then calls `executePipelineOp`

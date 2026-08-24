@@ -17,7 +17,7 @@ func TestExecuteReadVideoNative(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_video",
+		Name: "read_media",
 		Args: filePathArgs(videoPath, "what happens in the video?"),
 	}
 
@@ -51,7 +51,7 @@ func TestExecuteReadVideoNonVideoNoFallback(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_video",
+		Name: "read_media",
 		Args: filePathArgs(videoPath, ""),
 	}
 
@@ -75,7 +75,7 @@ func TestExecuteReadVideoVideoNotFound(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_video",
+		Name: "read_media",
 		Args: filePathArgs(testAbsPath(dir, "nonexistent.mp4"), ""),
 	}
 
@@ -95,7 +95,7 @@ func TestExecuteReadVideoMissingArgs(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_video",
+		Name: "read_media",
 		Args: `{}`,
 	}
 
@@ -115,7 +115,7 @@ func TestExecuteReadVideoRejectsRelativePath(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_video",
+		Name: "read_media",
 		Args: `{"file_path":"clip.mp4"}`,
 	}
 

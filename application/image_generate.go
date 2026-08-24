@@ -162,7 +162,7 @@ func (a *App) executeGenerateImage(run *TurnRun, toolCall domain.ToolCall, setti
 	if len(paths) > 1 {
 		meta["file_paths"] = paths
 	}
-	body := fmt.Sprintf("Image saved to %s. It is already displayed to the user in the UI — do not re-render it as a Markdown image or file link. To edit this image, pass its file_path in referenced_image_paths.", paths[0])
+	body := fmt.Sprintf("Image saved to %s. To edit this image, pass its file_path in referenced_image_paths.", paths[0])
 	if len(paths) > 1 {
 		body = fmt.Sprintf("%d images saved (%s). They are already displayed to the user in the UI — do not re-render them as Markdown images or file links. To edit one, pass its file_path in referenced_image_paths.", len(paths), strings.Join(paths, ", "))
 	}

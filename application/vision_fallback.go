@@ -55,7 +55,7 @@ func (a *App) describeImagesWithFallback(ctx context.Context, settings domain.Se
 	out = append(out, attachments...)
 	for _, idx := range imageIdxs {
 		img := attachments[idx]
-		description, err := a.describeOneImage(ctx, adapter, settings.VisionModelID, img)
+		description, err := a.describeOneImage(ctx, adapter, settings.VisionModelID, img, defaultDescribeImagePrompt)
 		if err != nil {
 			a.log("warn", "vision", "image description failed for %q: %v", img.Name, err)
 			continue
@@ -149,11 +149,18 @@ func countImages(atts []domain.Attachment) int {
 	return countAttachmentsByType(atts, "image")
 }
 
-func (a *App) describeOneImage(ctx context.Context, adapter AIProvider, model string, image domain.Attachment) (string, error) {
-	prompt := "Describe this image concisely. Focus on visible objects, text, people, settings, and any notable details. Keep it factual and under 200 words."
+// defaultDescribeImagePrompt is the description request used when the image
+// read/fallback path has no explicit question. Kept as a single constant so
+// all call sites share one string.
+const defaultDescribeImagePrompt = "Describe this image concisely. Focus on visible objects, text, people, settings, and any notable details. Keep it factual and under 200 words."
+
+func (a *App) describeOneImage(ctx context.Context, adapter AIProvider, model string, image domain.Attachment, prompt string) (string, error) {
+	if strings.TrimSpace(prompt) == "" {
+		prompt = defaultDescribeImagePrompt
+	}
 	req := ChatRequest{
 		Model:  model,
-		System: "You are a vision assistant. Describe images accurately and concisely for a text-only model that cannot see them.",
+		System: "Describe the attached image accurately and concisely for a text-only model that cannot see it.",
 		Messages: []ChatMessage{
 			{
 				Role:        "user",

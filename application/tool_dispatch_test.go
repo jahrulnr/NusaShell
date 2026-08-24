@@ -50,7 +50,7 @@ func TestIsDispatchRoot(t *testing.T) {
 			t.Fatalf("%q should be a dispatch root", root)
 		}
 	}
-	for _, other := range []string{"memory_save", "exec", "artifact_create", "skills", "Memory", ""} {
+	for _, other := range []string{"memory_save", "exec", "show", "skills", "Memory", ""} {
 		if IsDispatchRoot(other) {
 			t.Fatalf("%q must not be a dispatch root", other)
 		}

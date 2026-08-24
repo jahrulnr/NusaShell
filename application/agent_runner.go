@@ -24,7 +24,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	}
 	// Save image/file attachments to disk so file-based tools can access
 	// them by absolute path. The path is stored on the attachment and
-	// surfaced to the model in the placeholder and read_image result.
+	// surfaced to the model in the placeholder and read_media result.
 	a.saveAttachmentsToDisk(req.ConversationID, attachments)
 	if text == "" && len(attachments) == 0 {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "message text is required"}
@@ -1483,8 +1483,8 @@ func toDomainUsage(u ChatUsage) *domain.Usage {
 
 // ModelCapabilities describes which input modalities the active chat model
 // accepts. It is resolved once per turn from the provider's model metadata
-// and threaded through the turn chain so tool dispatch (read_image,
-// read_audio, read_video) and chatMessages can behave correctly without
+// and threaded through the turn chain so tool dispatch (read_media)
+// and chatMessages can behave correctly without
 // re-querying the provider on every round.
 type ModelCapabilities struct {
 	Vision   bool // image input
@@ -1575,7 +1575,7 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 			if !caps.Vision && hasAttachmentOfType(attachments, "image") {
 				imageAtts := filterAttachmentsByType(attachments, "image")
 				attachments = stripAttachmentsByType(attachments, "image")
-				placeholder := omittedPlaceholderFor("image", "read_image", imageAtts)
+				placeholder := omittedPlaceholderFor("image", "read_media", imageAtts)
 				if content == "" {
 					content = placeholder
 				} else if !containsOmissionNote(content, "image") {
@@ -1601,7 +1601,7 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 			if !caps.Audio && hasAttachmentOfType(attachments, "audio") {
 				audioAtts := filterAttachmentsByType(attachments, "audio")
 				attachments = stripAttachmentsByType(attachments, "audio")
-				placeholder := omittedPlaceholderFor("audio", "read_audio", audioAtts)
+				placeholder := omittedPlaceholderFor("audio", "read_media", audioAtts)
 				if content == "" {
 					content = placeholder
 				} else if !containsOmissionNote(content, "audio") {
@@ -1611,7 +1611,7 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 			if !caps.Video && hasAttachmentOfType(attachments, "video") {
 				videoAtts := filterAttachmentsByType(attachments, "video")
 				attachments = stripAttachmentsByType(attachments, "video")
-				placeholder := omittedPlaceholderFor("video", "read_video", videoAtts)
+				placeholder := omittedPlaceholderFor("video", "read_media", videoAtts)
 				if content == "" {
 					content = placeholder
 				} else if !containsOmissionNote(content, "video") {
@@ -1656,7 +1656,7 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 				toolContent := wrapToolOutput(tc.Name, tc.Output)
 				toolAtts := tc.OutputAttachments
 				// Filter tool result attachments by model capability.
-				// read_image/read_audio/read_video return media
+				// read_media returns media
 				// attachments that are only useful to models that
 				// support the corresponding modality. Sending audio to
 				// a non-audio model causes provider errors (e.g. Nvidia

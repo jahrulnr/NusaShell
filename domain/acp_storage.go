@@ -37,6 +37,11 @@ type AcpRunStorage interface {
 	Save(record AcpRunRecord) error
 	Load(runID string) (AcpRunRecord, bool)
 	List(conversationID string) []AcpRunRecord
+	// Path returns the on-disk location where Save will write the run's
+	// record, or "" when the store cannot resolve one. The application
+	// layer surfaces it as the tool result's `output_path` so the parent
+	// agent can read the persisted transcript directly.
+	Path(conversationID, runID string) string
 }
 
 // SubagentResultToolName is the synthetic tool name injected into the

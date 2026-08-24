@@ -118,7 +118,7 @@ func TestSniffMagicUnknownOrEmpty(t *testing.T) {
 
 // TestSniffMagicRejectsMismatchedExtension proves that a file claiming to
 // be an image by extension but containing JavaScript is detected as
-// unknown — the guard that prevents read_image from loading non-media.
+// unknown — the guard that prevents read_media from loading non-media.
 func TestSniffMagicRejectsMismatchedExtension(t *testing.T) {
 	js := []byte(`const app = () => { console.log("pretending to be PNG"); };`)
 	gotType, gotKind := SniffMagic(js)

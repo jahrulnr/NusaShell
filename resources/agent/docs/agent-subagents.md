@@ -2,7 +2,8 @@
 
 ACP coding agents are spawn-only and always async. The user never chats
 with them in the composer. When the parent agent calls `subagent`, the
-tool returns immediately with `{"runs":[{"id":"…","status":"starting"}]}`
+tool returns immediately with YAML frontmatter listing the spawned runs
+(`runs:` entries with `id` / `status` / `workspace`; `status: starting`)
 and the tool call is marked `running` in the conversation. The parent
 agent is free to continue other work — it does not block on the
 subagent.
@@ -30,12 +31,18 @@ Bad example — delegating work the parent can do in one tool call:
     subagent(prompt="list the files in /home/user/proj/src")
 
 A dock appears above the composer: chips for every live run (and recent
-finishes in this room). Click a chip for the right-hand drawer (all
-parallel spawns), or peek one run in a popup. Both surfaces stream the
-transcript live. The user is an observer: steer, stop, mode change, and
-risk promotion are handled by the orchestrator (parent agent), not the
-user. Permissions are auto-allowed — the orchestrator delegates
-authority when it spawns a subagent.
+finishes in this room), in spawn order — live delta updates never
+reshuffle chips under the cursor. Click a chip for the right-hand drawer
+(all parallel spawns), or peek one run in a popup. Both surfaces stream
+the transcript live, patched in place like the conversation thread
+(auto-follows the bottom while you're at the bottom; your scroll
+position is never reset by incoming updates). Completed runs stay
+reopenable from their delegation card or the drawer for as long as the
+conversation exists — the drawer lists every run of the room, settled
+included. The user is an observer: steer, stop, mode change, and risk
+promotion are handled by the orchestrator (parent agent), not the user.
+Permissions are auto-allowed — the orchestrator delegates authority
+when it spawns a subagent.
 
 ## Async completion (tool injection)
 

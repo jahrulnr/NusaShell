@@ -177,8 +177,14 @@ func TestExecuteGenerateImageSavesWithoutPersistingDataURL(t *testing.T) {
 	if atts[0].MediaType != "image/png" {
 		t.Fatalf("media = %s", atts[0].MediaType)
 	}
-	if !strings.Contains(output, "already displayed to the user") {
-		t.Fatalf("missing UI hint: %s", output)
+	// The "already displayed, do not re-render" policy lives in the
+	// generate_media tool description (always visible to the model); the
+	// result body only carries the unique edit hint.
+	if !strings.Contains(output, "referenced_image_paths") {
+		t.Fatalf("missing edit hint: %s", output)
+	}
+	if strings.Contains(output, "already displayed") {
+		t.Fatalf("redundant UI hint must not be in the result body: %s", output)
 	}
 	if !strings.Contains(output, "status: completed") || !strings.Contains(output, "provider: openai") {
 		t.Fatalf("yaml meta: %s", output)

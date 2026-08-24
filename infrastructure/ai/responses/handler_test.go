@@ -75,15 +75,15 @@ func TestResponsesImageBlockIncludesDetailField(t *testing.T) {
 }
 
 // TestResponsesToolResultImageBlockIncludesDetailField: same requirement
-// applies to input_image blocks in tool result attachments (read_image,
+// applies to input_image blocks in tool result attachments (read_media,
 // generate_image tool outputs).
 func TestResponsesToolResultImageBlockIncludesDetailField(t *testing.T) {
 	req := application.ChatRequest{
 		Model: "test-model",
 		Messages: []application.ChatMessage{
-			{Role: "assistant", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "read_image", Args: `{}`}}},
+			{Role: "assistant", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "read_media", Args: `{}`}}},
 			{Role: "tool", ToolResult: &application.ToolResult{
-				ToolCallID: "c1", Name: "read_image", Content: "Image loaded.",
+				ToolCallID: "c1", Name: "read_media", Content: "Image loaded.",
 				Attachments: []domain.Attachment{
 					{Type: "image", Name: "gen-call_1.png", MediaType: "image/png",
 						DataURL: "data:image/png;base64,iVBORw0KGgo="},
@@ -153,14 +153,14 @@ func TestResponsesAudioAttachmentUsesInputAudio(t *testing.T) {
 }
 
 // TestResponsesToolResultAudioUsesInputAudio: audio attachments in tool
-// results (e.g. read_audio) must also use input_audio, not input_image.
+// results (e.g. read_media) must also use input_audio, not input_image.
 func TestResponsesToolResultAudioUsesInputAudio(t *testing.T) {
 	req := application.ChatRequest{
 		Model: "test-model",
 		Messages: []application.ChatMessage{
-			{Role: "assistant", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "read_audio", Args: `{}`}}},
+			{Role: "assistant", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "read_media", Args: `{}`}}},
 			{Role: "tool", ToolResult: &application.ToolResult{
-				ToolCallID: "c1", Name: "read_audio", Content: "Audio loaded.",
+				ToolCallID: "c1", Name: "read_media", Content: "Audio loaded.",
 				Attachments: []domain.Attachment{
 					{Type: "audio", Name: "rec.mp3", MediaType: "audio/mpeg", DataURL: "data:audio/mpeg;base64,//NkxAAAA"},
 				},
@@ -201,14 +201,14 @@ func TestResponsesVideoAttachmentUsesVideoURL(t *testing.T) {
 }
 
 // TestResponsesToolResultVideoUsesVideoURL: video attachments in tool
-// results (e.g. read_video) must also use video_url, not input_image.
+// results (e.g. read_media) must also use video_url, not input_image.
 func TestResponsesToolResultVideoUsesVideoURL(t *testing.T) {
 	req := application.ChatRequest{
 		Model: "test-model",
 		Messages: []application.ChatMessage{
-			{Role: "assistant", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "read_video", Args: `{}`}}},
+			{Role: "assistant", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "read_media", Args: `{}`}}},
 			{Role: "tool", ToolResult: &application.ToolResult{
-				ToolCallID: "c1", Name: "read_video", Content: "Video loaded.",
+				ToolCallID: "c1", Name: "read_media", Content: "Video loaded.",
 				Attachments: []domain.Attachment{
 					{Type: "video", Name: "clip.mp4", MediaType: "video/mp4", DataURL: "data:video/mp4;base64,AAAA"},
 				},

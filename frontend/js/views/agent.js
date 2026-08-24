@@ -17,6 +17,7 @@ import {
   renderConversation,
   renderMessage,
   renderToolJob,
+  renderSubagentCard,
   renderGenerateImageCard,
   renderTodoItem,
   setToolTerminalStatus,
@@ -1770,9 +1771,9 @@ function bindEvents() {
       const buffer = getOrCreateRoomBuffer(conversation_id);
       const job = buffer.toolJobs.get(tool_call_id);
       if (job) {
-        // artifact_create / artifact_update: swap terminal for artifact card
-        // in the buffer too, so a room switch-back shows the card directly.
-        if (name === 'artifact_create' || name === 'artifact_update') {
+        // show (op=html): swap terminal for artifact card in the buffer
+        // too, so a room switch-back shows the card directly.
+        if (name === 'show') {
           if (job._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
           const toolCall = { name, args: job._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
           const artifact = parseArtifactOutput(toolCall);
@@ -1782,6 +1783,15 @@ function bindEvents() {
             job.replaceWith(card);
             buffer.toolJobs.set(tool_call_id, card);
           }
+        } else if (name === 'subagent') {
+          // Re-render the delegation card with the completion output so a
+          // room switch-back shows the settled card, not a stuck "running".
+          if (job._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
+          const toolCall = { name, args: job._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
+          const card = renderSubagentCard(toolCall);
+          card._toolArgs = toolCall.args;
+          job.replaceWith(card);
+          buffer.toolJobs.set(tool_call_id, card);
         } else if (name === 'generate_image') {
           replaceGenerateImageJob(job, payload, (card) => buffer.toolJobs.set(tool_call_id, card));
         } else {
@@ -1809,11 +1819,11 @@ function bindEvents() {
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
       return;
     }
-    // artifact_create / artifact_update: replace the tool terminal with an
-    // artifact card once the tool settles. During execution the user sees a
-    // normal tool terminal (so they know something is running); after
-    // completion the terminal is swapped for the clickable artifact card.
-    if (name === 'artifact_create' || name === 'artifact_update') {
+    // show (op=html): replace the tool terminal with an artifact card once
+    // the tool settles. During execution the user sees a normal tool terminal
+    // (so they know something is running); after completion the terminal is
+    // swapped for the clickable artifact card.
+    if (name === 'show') {
       const job = run.toolJobs.get(tool_call_id);
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
       const toolCall = { name, args: job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
@@ -1823,6 +1833,25 @@ function bindEvents() {
         job.replaceWith(card);
         run.toolJobs.set(tool_call_id, card);
         card._toolArgs = toolCall.args;
+      }
+      return;
+    }
+    // subagent: re-render the delegation card with the completion output.
+    // Without this branch the card would keep showing "running" until a
+    // full conversation re-render (turn.done) — or forever if no turn
+    // follows the async completion.
+    if (name === 'subagent') {
+      const job = run.toolJobs.get(tool_call_id);
+      if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
+      const toolCall = { name, args: job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
+      const card = renderSubagentCard(toolCall);
+      if (job) {
+        job.replaceWith(card);
+        run.toolJobs.set(tool_call_id, card);
+        card._toolArgs = toolCall.args;
+      } else {
+        run.strip.append(card);
+        run.toolJobs.set(tool_call_id, card);
       }
       return;
     }

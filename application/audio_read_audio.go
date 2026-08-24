@@ -10,7 +10,8 @@ import (
 	"nusashell/domain"
 )
 
-// executeReadAudio handles the read_audio tool call. It loads the audio
+// executeReadAudio handles the read_media tool call when the sniffed kind
+// is "audio". It loads the audio
 // directly from disk by absolute path, then either:
 //   - Native fast path (audio-capable model): returns the audio directly as
 //     a tool result attachment so the model can hear it in the next round.
@@ -101,7 +102,7 @@ func (a *App) transcribeAudioViaCloudRoute(run *TurnRun, caps ModelCapabilities,
 
 // transcribeAudioOffline runs the local engine when configured. The
 // OfflineTranscriberFactory is resolved per call (degradation contract:
-// availability decides per-read_audio, never per-boot); ok=false means
+// availability decides per-read_media, never per-boot); ok=false means
 // "no offline route" — callers keep their existing guidance.
 func (a *App) transcribeAudioOffline(audio domain.Attachment) (string, bool) {
 	if a.OfflineTranscriberFactory == nil {

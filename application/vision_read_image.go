@@ -9,7 +9,8 @@ import (
 	"nusashell/domain"
 )
 
-// executeReadImage handles the read_image tool call. It loads the image
+// executeReadImage handles the read_media tool call when the sniffed kind
+// is "image". It loads the image
 // directly from disk by absolute path, then either:
 //   - Native fast path (vision model): returns the image directly as a tool
 //     result attachment so the model can see it in the next round.
@@ -70,13 +71,11 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps Mode
 	}
 
 	question := strings.TrimSpace(args.Question)
-	if question == "" {
-		question = "Describe this image concisely. Focus on visible objects, text, people, settings, and any notable details. Keep it factual and under 200 words."
-	} else {
+	if question != "" {
 		question = "Describe this image and answer the following question:\n" + question
 	}
 
-	description, err := a.describeOneImage(run.Ctx, adapter, settings.VisionModelID, image)
+	description, err := a.describeOneImage(run.Ctx, adapter, settings.VisionModelID, image, question)
 	if err != nil {
 		return "Image description failed: " + err.Error(), nil, err
 	}

@@ -9,7 +9,7 @@ import (
 )
 
 // NewOfflineTranscriberFactory wires the offline STT runtime behind the
-// read_audio degradation ladder (.experimental/offline-stt-assessment.md).
+// read_media degradation ladder (.experimental/offline-stt-assessment.md).
 // Model resolution happens per call, entirely observable on disk:
 //
 //  1. settings.stt_offline_model (bare file name) — set by the Settings UI
@@ -18,7 +18,7 @@ import (
 //  3. the first ggml-*.bin under <data>/models/stt/
 //
 // The factory NEVER fails at wiring time: missing engine or model becomes a
-// per-call error, so read_audio degrades to the cloud rung or guidance
+// per-call error, so read_media degrades to the cloud rung or guidance
 // instead of the app refusing to start — the no-CGO external-binary runtime
 // is soft by contract (.experimental/offline-stt-assessment.md §3.b).
 func NewOfflineTranscriberFactory(settings application.SettingsStore, dataDir string) application.OfflineTranscriberFactory {

@@ -13,7 +13,7 @@ import (
 // Nvidia NIM failure "Failed to load image from data:audio/mpeg;...": audio
 // attachments must be encoded as Chat Completions input_audio blocks
 // (base64 + format), never as image_url data URLs. This applies to both
-// user-message attachments and tool results returned by read_audio.
+// user-message attachments and tool results returned by read_media.
 func TestChatCompletionEncodesAudioAsInputAudio(t *testing.T) {
 	req := application.ChatRequest{
 		Model: "test-model",
@@ -27,12 +27,12 @@ func TestChatCompletionEncodesAudioAsInputAudio(t *testing.T) {
 			},
 			{
 				Role:      "assistant",
-				ToolCalls: []domain.ToolCall{{ID: "tc1", Name: "read_audio", Args: `{}`}},
+				ToolCalls: []domain.ToolCall{{ID: "tc1", Name: "read_media", Args: `{}`}},
 			},
 			{
 				Role: "tool",
 				ToolResult: &application.ToolResult{
-					ToolCallID: "tc1", Name: "read_audio", Content: "Audio loaded.",
+					ToolCallID: "tc1", Name: "read_media", Content: "Audio loaded.",
 					Attachments: []domain.Attachment{
 						{Type: "audio", Name: "clip.mp3", MediaType: "audio/mpeg", DataURL: "data:audio/mpeg;base64,QUJD"},
 					},

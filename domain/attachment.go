@@ -3,11 +3,11 @@ package domain
 import "strings"
 
 // OmittedPlaceholderFor builds a placeholder that tells the model to call
-// the matching read_* tool with the absolute file path to access the
+// the read_media tool with the absolute file path to access the
 // attachment. Only absolute paths are shown — relative paths are rejected
 // to avoid ambiguity between the model's working directory and the actual
-// file location. kind is "image" | "audio" | "video"; toolName is the
-// matching read_* tool.
+// file location. kind is "image" | "audio" | "video" | "document";
+// toolName is the matching tool (read_media).
 func OmittedPlaceholderFor(kind, toolName string, atts []Attachment) string {
 	if len(atts) == 0 {
 		return "[" + kind + " content omitted — this model does not support " + kind + " input]"
@@ -38,7 +38,7 @@ func OmittedPlaceholderFor(kind, toolName string, atts []Attachment) string {
 
 // VisionImagePathNote builds a path note for vision-capable models. Unlike
 // OmittedPlaceholderFor — which tells a non-vision model the image was
-// stripped and must be loaded via read_image — this note keeps the image
+// stripped and must be loaded via read_media — this note keeps the image
 // pixels visible in the message and only surfaces the absolute file path(s)
 // so the model can reference them for image-to-image editing via
 // generate_image's referenced_image_paths. The wording is deliberately

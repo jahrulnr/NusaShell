@@ -173,8 +173,7 @@ func toOpenAIMessages(req application.ChatRequest) []openAIMessage {
 }
 
 // openAIToolContent builds a multimodal content array for tool results that
-// carry image/audio/video attachments (e.g. read_image, read_audio,
-// read_video). Images use the image_url transport; audio uses input_audio;
+// carry image/audio/video attachments (e.g. read_media). Images use the image_url transport; audio uses input_audio;
 // video uses video_url (OpenRouter's dedicated video content type — OpenAI
 // does not support video natively, and sending video through image_url
 // causes providers to reject it with HTTP 400 because they attempt image

@@ -19,7 +19,7 @@ func testAbsPath(dir string, parts ...string) string {
 	return filepath.Join(append([]string{dir}, parts...)...)
 }
 
-// filePathArgs builds a read_image args JSON with the given file path.
+// filePathArgs builds a read_media args JSON with the given file path.
 // encoding/json escapes the path properly (backslashes on Windows).
 func filePathArgs(path string, question string) string {
 	m := map[string]string{"file_path": path}
@@ -91,7 +91,7 @@ func TestExecuteReadImageVisionModel(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_image",
+		Name: "read_media",
 		Args: filePathArgs(catPath, "what color is the cat?"),
 	}
 
@@ -133,7 +133,7 @@ func TestExecuteReadImageOutsideWorkspace(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_image",
+		Name: "read_media",
 		Args: filePathArgs(path, ""),
 	}
 
@@ -158,7 +158,7 @@ func TestExecuteReadImageNonVisionNoFallback(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_image",
+		Name: "read_media",
 		Args: filePathArgs(catPath, ""),
 	}
 
@@ -183,7 +183,7 @@ func TestExecuteReadImageImageNotFound(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_image",
+		Name: "read_media",
 		Args: filePathArgs(testAbsPath(dir, "nonexistent.png"), ""),
 	}
 
@@ -203,7 +203,7 @@ func TestExecuteReadImageMissingArgs(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_image",
+		Name: "read_media",
 		Args: `{}`,
 	}
 
@@ -223,7 +223,7 @@ func TestExecuteReadImageRejectsRelativePath(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
-		Name: "read_image",
+		Name: "read_media",
 		Args: `{"file_path":"cat.png"}`,
 	}
 
