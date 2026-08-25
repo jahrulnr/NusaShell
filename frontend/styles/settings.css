@@ -240,3 +240,12 @@
   opacity: 0.7;
   font-variant-numeric: tabular-nums;
 }
+
+/* Capability badges inside Slim Select option rows (image/video gen
+ * pickers). Rendered via the `html` data field so they appear inline
+ * next to the model label. */
+.settings-model-badges { display: inline-flex; gap: 3px; flex-wrap: wrap; margin-left: 4px; vertical-align: middle; }
+.settings-model-badge { font: 9px var(--font-mono); padding: 1px 5px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.03em; }
+.settings-badge-i2i { background: #123226; color: #56cf91; }
+.settings-badge-audio { background: #2a1f38; color: #b98cff; }
+.settings-badge-video { background: #382a14; color: #e8b853; }

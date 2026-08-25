@@ -150,10 +150,18 @@ func decodeImages(resp imagesResponse, provider, model string) (*application.Ima
 	for i, item := range resp.Data {
 		raw := strings.TrimSpace(item.B64JSON)
 		if raw == "" {
-			if item.URL != "" {
-				return nil, fmt.Errorf("image provider returned a URL instead of image bytes (item %d); use gpt-image-1 or a backend that returns b64_json", i)
+			if item.URL == "" {
+				return nil, fmt.Errorf("image provider returned empty b64_json (item %d)", i)
 			}
-			return nil, fmt.Errorf("image provider returned empty b64_json (item %d)", i)
+			// Download the signed URL. Most image routers return URLs
+			// (the default response_format); we always fetch the bytes
+			// so the rest of the pipeline has image data to persist.
+			data, media, err := fetchImageURL(context.Background(), item.URL)
+			if err != nil {
+				return nil, fmt.Errorf("download image url (item %d): %w", i, err)
+			}
+			out.Images = append(out.Images, application.GeneratedImage{Bytes: data, MediaType: media})
+			continue
 		}
 		data, err := base64.StdEncoding.DecodeString(raw)
 		if err != nil {
@@ -163,6 +171,37 @@ func decodeImages(resp imagesResponse, provider, model string) (*application.Ima
 		out.Images = append(out.Images, application.GeneratedImage{Bytes: data, MediaType: media})
 	}
 	return out, nil
+}
+
+// fetchImageURL downloads image bytes from a signed URL returned by an
+// image provider. The media type is derived from the Content-Type header
+// (falling back to image/png). A 30s timeout bounds the download so a
+// slow CDN cannot stall the agent turn indefinitely.
+func fetchImageURL(ctx context.Context, url string) ([]byte, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("User-Agent", aiutil.NusaShellUserAgent)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, "", fmt.Errorf("image url returned HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	media := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if media == "" {
+		media = "image/png"
+	}
+	return data, media, nil
 }
 
 func (c *Client) generateOpenAI(ctx context.Context, req application.ImageGenRequest) (*application.ImageGenResult, error) {
@@ -182,9 +221,6 @@ func (c *Client) generateOpenAI(ctx context.Context, req application.ImageGenReq
 	}
 	if background := omitAuto(req.Background); background != "" {
 		body["background"] = background
-	}
-	if wantsB64JSON(req.Model) {
-		body["response_format"] = "b64_json"
 	}
 	url := aiutil.JoinEndpoint(c.BaseURL, "/images/generations")
 	var decoded imagesResponse
@@ -208,9 +244,6 @@ func (c *Client) openaiEdits(ctx context.Context, req application.ImageGenReques
 	}
 	if background := omitAuto(req.Background); background != "" {
 		_ = writer.WriteField("background", background)
-	}
-	if wantsB64JSON(req.Model) {
-		_ = writer.WriteField("response_format", "b64_json")
 	}
 	for i, ref := range req.References {
 		ext := extForMedia(ref.MediaType)
@@ -308,8 +341,4 @@ func extForMedia(mediaType string) string {
 	default:
 		return ".png"
 	}
-}
-
-func wantsB64JSON(model string) bool {
-	return strings.Contains(strings.ToLower(model), "dall-e")
 }

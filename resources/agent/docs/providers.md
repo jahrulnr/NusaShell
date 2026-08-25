@@ -2,7 +2,7 @@
 
 Providers are the LLM backends the agent chats through. A provider is
 defined by its **API wire format**, not by a vendor: **Messages**,
-**Responses**, **Chat**, **Ollama**, or **Codex**.
+**Responses**, **Chat**, **Ollama**, **Codex**, or **Gemini**.
 
 ## Kinds
 
@@ -20,11 +20,19 @@ defined by its **API wire format**, not by a vendor: **Messages**,
   Uses OAuth (PKCE) login instead of a user-supplied API key; tokens are
   stored in the SQLite credential store under the provider ID and under
   `{providerID}:account:{accountID}` for multi-account failover.
+- `gemini` — Google's Gemini generateContent API
+  (`https://generativelanguage.googleapis.com/v1beta`). Uses a single
+  multimodal endpoint for both chat and image generation — the model returns
+  image bytes as `inlineData` parts in its response. Auth is via the
+  `x-goog-api-key` header (API key from Google AI Studio). Image models
+  (e.g. `gemini-3.1-flash-image-preview`) are available for image generation
+  via Settings → Image generation.
 
-**Base URL is required for `messages`, `responses`, and `chat`.** The UI
-suggests a per-kind default (`https://api.anthropic.com` for Messages,
-`https://api.openai.com/v1` for Responses and Chat) — replace it with any
-endpoint or AI gateway that speaks the format. The operation path is
+**Base URL is required for `messages`, `responses`, `chat`, and `gemini`.**
+The UI suggests a per-kind default (`https://api.anthropic.com` for Messages,
+`https://api.openai.com/v1` for Responses and Chat,
+`https://generativelanguage.googleapis.com/v1beta` for Gemini) — replace it
+with any endpoint or AI gateway that speaks the format. The operation path is
 appended to the Base URL **verbatim**: whatever version your endpoint uses
 (v1, v4, …) must live in the Base URL and is never injected. For Messages,
 a bare compat root (e.g. `https://open.bigmodel.cn/api/anthropic`) gets the
@@ -44,9 +52,9 @@ Chat      → https://gateway.example.com/v1     (→ /v1/chat/completions)
 
 ## API keys
 
-Only `messages` and `responses` require a user-supplied API key. `chat`
-works without a key against local endpoints that need no auth. `ollama`
-never needs a key (only set one when Ollama is behind an auth proxy).
+Only `messages`, `responses`, and `gemini` require a user-supplied API key.
+`chat` works without a key against local endpoints that need no auth.
+`ollama` never needs a key (only set one when Ollama is behind an auth proxy).
 `codex` uses OAuth tokens obtained via the Codex login flow — there is no
 manual key field. Keys are stored in the SQLite credential store
 (`credentials.db`) inside the data directory, never in the JSON files.

@@ -211,6 +211,7 @@ type ToolCallDTO struct {
 	Status            string          `json:"status,omitempty"`
 	Output            string          `json:"output,omitempty"`
 	OutputAttachments []AttachmentDTO `json:"output_attachments,omitempty"`
+	Opaque            map[string]any  `json:"opaque,omitempty"`
 }
 
 type MessageStepDTO struct {
@@ -1167,6 +1168,8 @@ type SettingsDTO struct {
 	TTSModelID                 string   `json:"tts_model_id,omitempty"`
 	ImageProviderID            string   `json:"image_provider_id,omitempty"`
 	ImageModelID               string   `json:"image_model_id,omitempty"`
+	VideoGenProviderID         string   `json:"video_gen_provider_id,omitempty"`
+	VideoGenModelID            string   `json:"video_gen_model_id,omitempty"`
 	WebAnswerProvider          string   `json:"web_answer_provider,omitempty"`
 	WebAnswerModel             string   `json:"web_answer_model,omitempty"`
 	Temperature                *float64 `json:"temperature,omitempty"`
@@ -1213,6 +1216,8 @@ type SettingsSetRequest struct {
 	TTSModelID                 *string         `json:"tts_model_id,omitempty"`
 	ImageProviderID            *string         `json:"image_provider_id,omitempty"`
 	ImageModelID               *string         `json:"image_model_id,omitempty"`
+	VideoGenProviderID         *string         `json:"video_gen_provider_id,omitempty"`
+	VideoGenModelID            *string         `json:"video_gen_model_id,omitempty"`
 	WebAnswerProvider          *string         `json:"web_answer_provider,omitempty"`
 	WebAnswerModel             *string         `json:"web_answer_model,omitempty"`
 	WebAnswerAPIKey            *string         `json:"web_answer_api_key,omitempty"`

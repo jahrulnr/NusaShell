@@ -73,8 +73,8 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 	if kind == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind is required"}
 	}
-	if kind != domain.ProviderMessages && kind != domain.ProviderResponses && kind != domain.ProviderChat && kind != domain.ProviderOllama && kind != domain.ProviderCodex {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses, chat, ollama, or codex"}
+	if kind != domain.ProviderMessages && kind != domain.ProviderResponses && kind != domain.ProviderChat && kind != domain.ProviderOllama && kind != domain.ProviderCodex && kind != domain.ProviderGemini {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses, chat, ollama, codex, or gemini"}
 	}
 	baseURL := strings.TrimSpace(req.BaseURL)
 
@@ -114,6 +114,8 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 			baseURL = "https://chatgpt.com/backend-api/codex"
 		case domain.ProviderOllama:
 			baseURL = "http://localhost:11434"
+		case domain.ProviderGemini:
+			baseURL = "https://generativelanguage.googleapis.com/v1beta"
 		default:
 			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "base url is required"}
 		}
@@ -520,6 +522,8 @@ func catalogHintForProvider(p *domain.Provider) string {
 		return "anthropic"
 	case domain.ProviderCodex:
 		return "openai"
+	case domain.ProviderGemini:
+		return "google"
 	}
 	// Chat-kind providers are fully dynamic: the hint is derived from the
 	// model ID prefix itself (e.g. "deepseek/deepseek-v4-flash" ->

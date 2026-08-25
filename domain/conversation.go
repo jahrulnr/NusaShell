@@ -65,6 +65,12 @@ type ToolCall struct {
 	// images visible. Generated images persist FilePath as the source of
 	// truth and omit DataURL to keep conversation JSON small.
 	OutputAttachments []Attachment
+	// Opaque stores provider-specific data that must be echoed back in
+	// subsequent requests but has no universal meaning across providers.
+	// Example: Gemini's thoughtSignature for thinking models — required
+	// in functionCall parts of the next turn or the API returns 400.
+	// Persisted with the conversation. nil for providers that don't use it.
+	Opaque map[string]any `json:"opaque,omitempty"`
 }
 
 // StepType identifies a temporal segment within a multi-round assistant turn.

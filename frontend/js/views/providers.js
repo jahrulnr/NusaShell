@@ -12,6 +12,7 @@ const KIND_META = {
   chat: { label: 'Chat', mark: 'CH', cls: 'accent-compatible', desc: 'Chat Completions API format' },
   ollama: { label: 'Ollama', mark: 'OL', cls: 'accent-compatible', desc: 'Local Ollama (chat + embeddings, no API key needed)' },
   codex: { label: 'Codex', mark: 'CX', cls: 'accent-codex', desc: 'ChatGPT Codex backend (OAuth, no API key needed)' },
+  gemini: { label: 'Gemini', mark: 'GM', cls: 'accent-gemini', desc: 'Google Gemini generateContent API (chat + image generation)' },
 };
 
 export async function initProviders() {
@@ -473,6 +474,7 @@ const KIND_DEFAULTS = {
   chat: 'https://api.openai.com/v1',
   ollama: 'http://localhost:11434',
   codex: 'https://chatgpt.com/backend-api/codex',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta',
 };
 
 async function addProvider(provider = null) {
@@ -496,6 +498,7 @@ async function addProvider(provider = null) {
           { value: 'chat', label: 'Chat' },
           { value: 'ollama', label: 'Ollama (local)' },
           { value: 'codex', label: 'Codex (ChatGPT)' },
+          { value: 'gemini', label: 'Gemini (Google)' },
         ],
         value: initialKind,
         // Codex is provider-specific (OAuth accounts, fixed backend URL):

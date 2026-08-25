@@ -1131,6 +1131,7 @@ func (a *App) handleLearningReviewTranscript(req contracts.LearningReviewTranscr
 				Args:   json.RawMessage(tc.Args),
 				Status: string(tc.Status),
 				Output: tc.Output,
+				Opaque: tc.Opaque,
 			})
 		}
 		if m.ToolResult != nil {
@@ -1363,6 +1364,12 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if req.ImageModelID != nil {
 		s.ImageModelID = strings.TrimSpace(*req.ImageModelID)
 	}
+	if req.VideoGenProviderID != nil {
+		s.VideoGenProviderID = strings.TrimSpace(*req.VideoGenProviderID)
+	}
+	if req.VideoGenModelID != nil {
+		s.VideoGenModelID = strings.TrimSpace(*req.VideoGenModelID)
+	}
 	if req.WebAnswerProvider != nil {
 		s.WebAnswerProvider = strings.TrimSpace(*req.WebAnswerProvider)
 	}
@@ -1454,6 +1461,8 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		TTSModelID:                 s.TTSModelID,
 		ImageProviderID:            s.ImageProviderID,
 		ImageModelID:               s.ImageModelID,
+		VideoGenProviderID:         s.VideoGenProviderID,
+		VideoGenModelID:            s.VideoGenModelID,
 		WebAnswerProvider:          s.WebAnswerProvider,
 		WebAnswerModel:             s.WebAnswerModel,
 		PluginContractMode:         s.PluginContractMode,

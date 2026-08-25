@@ -9,6 +9,7 @@ package videogen
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,12 +37,33 @@ type Client struct {
 }
 
 type submitRequest struct {
-	Model         string `json:"model"`
-	Prompt        string `json:"prompt"`
-	Duration      int    `json:"duration,omitempty"`
-	Resolution    string `json:"resolution,omitempty"`
-	AspectRatio   string `json:"aspect_ratio,omitempty"`
-	GenerateAudio *bool  `json:"generate_audio,omitempty"`
+	Model         string       `json:"model"`
+	Prompt        string       `json:"prompt"`
+	Duration      int          `json:"duration,omitempty"`
+	Resolution    string       `json:"resolution,omitempty"`
+	AspectRatio   string       `json:"aspect_ratio,omitempty"`
+	GenerateAudio *bool        `json:"generate_audio,omitempty"`
+	FrameImages   []frameImage `json:"frame_images,omitempty"`
+	InputRefs     []inputRef   `json:"input_references,omitempty"`
+}
+
+// frameImage is one entry in the OpenRouter frame_images array: an
+// image_url part tagged with frame_type "first_frame" or "last_frame".
+type frameImage struct {
+	Type      string   `json:"type"` // always "image_url"
+	ImageURL  imageURL `json:"image_url"`
+	FrameType string   `json:"frame_type"` // "first_frame" | "last_frame"
+}
+
+type imageURL struct {
+	URL string `json:"url"`
+}
+
+// inputRef is one entry in the OpenRouter input_references array, used
+// for reference-to-video (style/identity guidance, not exact frames).
+type inputRef struct {
+	Type     string   `json:"type"` // "image_url"
+	ImageURL imageURL `json:"image_url"`
 }
 
 func (c *Client) Generate(ctx context.Context, req application.VideoGenRequest) (*application.VideoGenResult, error) {
@@ -99,6 +121,16 @@ func (c *Client) do(ctx context.Context, httpClient *http.Client, method, url st
 	return data, resp.StatusCode, nil
 }
 
+// dataURL encodes image bytes as a base64 data URL for the OpenRouter
+// frame_images/input_references fields. The API accepts both URLs and
+// data URLs; data URLs avoid requiring a publicly hosted image.
+func dataURL(mediaType string, data []byte) string {
+	if mediaType == "" {
+		mediaType = "image/png"
+	}
+	return "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(data)
+}
+
 // apiError converts a non-2xx JSON body ({"error":{"message":…}}) into a
 // descriptive error, falling back to the raw body for non-JSON responses
 // (guardrail/data-policy rejections arrive this way).
@@ -119,6 +151,27 @@ func (c *Client) submit(ctx context.Context, httpClient *http.Client, req applic
 	body := submitRequest{
 		Model: req.Model, Prompt: req.Prompt,
 		Duration: req.DurationSec, Resolution: req.Resolution,
+	}
+	// Image-to-video: first reference becomes the first frame; any
+	// additional references are sent as input_references for style/
+	// identity guidance. OpenRouter auto-routes to the correct endpoint
+	// based on which field is populated.
+	if len(req.References) > 0 {
+		first := req.References[0]
+		body.FrameImages = []frameImage{{
+			Type:      "image_url",
+			ImageURL:  imageURL{URL: dataURL(first.MediaType, first.Data)},
+			FrameType: "first_frame",
+		}}
+		if len(req.References) > 1 {
+			body.InputRefs = make([]inputRef, 0, len(req.References)-1)
+			for _, ref := range req.References[1:] {
+				body.InputRefs = append(body.InputRefs, inputRef{
+					Type:     "image_url",
+					ImageURL: imageURL{URL: dataURL(ref.MediaType, ref.Data)},
+				})
+			}
+		}
 	}
 	buf, err := json.Marshal(body)
 	if err != nil {

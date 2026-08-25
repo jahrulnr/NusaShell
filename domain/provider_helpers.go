@@ -17,5 +17,5 @@ func SplitQualifiedModel(s string) (providerID, modelID string, ok bool) {
 // Local endpoints (Ollama, LM Studio via chat kind) work without a key, and
 // Codex uses OAuth tokens stored in CredentialStore, not a user-supplied key.
 func RequiresKey(kind ProviderKind) bool {
-	return kind == ProviderMessages || kind == ProviderResponses
+	return kind == ProviderMessages || kind == ProviderResponses || kind == ProviderGemini
 }

@@ -143,6 +143,7 @@ func toolCallDTO(tc domain.ToolCall) contracts.ToolCallDTO {
 		Args:   []byte(tc.Args),
 		Status: string(tc.Status),
 		Output: tc.Output,
+		Opaque: tc.Opaque,
 	}
 	for _, att := range tc.OutputAttachments {
 		dto.OutputAttachments = append(dto.OutputAttachments, contracts.AttachmentDTO{

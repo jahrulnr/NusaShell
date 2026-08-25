@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -64,6 +65,7 @@ func (c *ImagesClient) httpClient() *http.Client {
 
 func newImageHTTPClient() *http.Client {
 	return &http.Client{
+		Jar: SharedCloudflareCookieJar(),
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
@@ -222,7 +224,7 @@ func (c *ImagesClient) postJSON(ctx context.Context, url string, headers map[str
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", aiutil.NusaShellUserAgent)
+	req.Header.Set("User-Agent", CodexUserAgent)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -236,12 +238,23 @@ func (c *ImagesClient) postJSON(ctx context.Context, url string, headers map[str
 		return err
 	}
 	if resp.StatusCode >= 400 {
+		bodySnippet := strings.TrimSpace(string(raw[:min(len(raw), 4096)]))
+		// Log diagnostic details for 403/401 to help distinguish Cloudflare
+		// region blocks, plan restrictions, and policy violations — the
+		// raw body is often empty or HTML for Cloudflare blocks.
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+			cfRay := resp.Header.Get("cf-ray")
+			server := resp.Header.Get("Server")
+			contentType := resp.Header.Get("Content-Type")
+			fmt.Fprintf(os.Stderr, "[codex-images] HTTP %d: server=%s cf-ray=%s content-type=%s body_len=%d body=%q\n",
+				resp.StatusCode, server, cfRay, contentType, len(raw), bodySnippet)
+		}
 		return &application.UpstreamError{
 			Kind:       application.KindHTTPStatus,
 			StatusCode: resp.StatusCode,
 			RetryAfter: parseCodexImageRetryAfter(resp.Header, raw, time.Now()),
 			Temporary:  resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500,
-			Err:        fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw[:min(len(raw), 4096)]))),
+			Err:        fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, bodySnippet),
 		}
 	}
 	if out == nil {

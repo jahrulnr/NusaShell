@@ -113,6 +113,10 @@ export function createAskCard(callId, args, { sealed = false, output = '', ok = 
             node.classList.toggle('is-selected', node.dataset.optionId === id);
             node.setAttribute('aria-pressed', node.dataset.optionId === id ? 'true' : 'false');
           });
+          // In single-select, picking an option replaces any custom text —
+          // clear the textarea so the visual state matches the submission.
+          const ta = card.querySelector('.agent-ask-textarea');
+          if (ta) ta.value = '';
         }
         row.classList.toggle('is-selected', selected.has(id));
         row.setAttribute('aria-pressed', selected.has(id) ? 'true' : 'false');
@@ -123,9 +127,13 @@ export function createAskCard(callId, args, { sealed = false, output = '', ok = 
   }
   body.append(optionsWrap);
 
-  // Free text is a *supplement* to the selected options (a note, a
-  // suggestion, a different direction), never a replacement — picking an
-  // option no longer clears the note and vice versa.
+  // Free text behavior depends on the selection mode:
+  // - Multi-select: free text is a *supplement* to the selected options
+  //   (a note or extra direction); picking options and typing a note can
+  //   coexist and both are submitted.
+  // - Single-select: free text is the *sole answer* and replaces any
+  //   selected option; typing clears the option selection and vice versa,
+  //   so the model never receives both an option and custom text.
   const customActive = sealed && (parsedAnswer?.via === 'text' || Boolean(parsedAnswer?.text));
   if (allowFreeText || customActive) {
     const custom = el('div', { class: `agent-ask-custom${customActive ? ' is-active' : ''}` });
@@ -148,7 +156,19 @@ export function createAskCard(callId, args, { sealed = false, output = '', ok = 
         textarea.focus();
         syncAskSendState(card, selected);
       });
-      textarea.addEventListener('input', () => syncAskSendState(card, selected));
+      textarea.addEventListener('input', () => {
+        // In single-select, custom text is the sole answer — clear any
+        // selected option so the visual state matches what will be
+        // submitted (via='text', no option_ids).
+        if (!multiSelect && textarea.value.trim()) {
+          selected.clear();
+          card.querySelectorAll('.agent-ask-option').forEach((node) => {
+            node.classList.remove('is-selected');
+            node.setAttribute('aria-pressed', 'false');
+          });
+        }
+        syncAskSendState(card, selected);
+      });
     }
     custom.append(customToggle, textarea);
     body.append(custom);
@@ -160,7 +180,7 @@ export function createAskCard(callId, args, { sealed = false, output = '', ok = 
   } else {
     const actions = el('div', { class: 'agent-ask-actions' });
     const send = el('button', { class: 'agent-ask-send', type: 'button', html: `<span class="agent-ask-send-icon">✈</span><span>Send answer</span>` });
-    send.addEventListener('click', () => void submitAskCard(card, selected, onSubmit));
+    send.addEventListener('click', () => void submitAskCard(card, selected, multiSelect, onSubmit));
     actions.append(
       send,
       el('span', { class: 'agent-ask-dismiss-hint', text: 'Esc or Stop to cancel the turn' }),
@@ -190,7 +210,7 @@ function syncAskSendState(card, selected) {
   send.disabled = card.classList.contains('is-submitting') || (!hasOptions && !(customActive && hasText));
 }
 
-async function submitAskCard(card, selected, onSubmit) {
+async function submitAskCard(card, selected, multiSelect, onSubmit) {
   const callId = card.dataset.callId;
   const runId = card.dataset.runId;
   if (!callId || !runId) return;
@@ -202,7 +222,12 @@ async function submitAskCard(card, selected, onSubmit) {
   const hasText = customActive && text.length > 0;
   if (!hasOptions && !hasText) return;
 
-  const via = hasOptions ? 'option' : 'text';
+  // In single-select, custom text is the sole answer (via='text'); any
+  // lingering option selection is discarded so the model doesn't receive
+  // both the pre-selected option and the custom text. In multi-select,
+  // custom text supplements the selected options (option + note).
+  const via = (hasText && !multiSelect) ? 'text' : (hasOptions ? 'option' : 'text');
+  const sendOptionIds = via === 'option' && hasOptions;
   card.classList.add('is-submitting');
   syncAskSendState(card, selected);
   try {
@@ -210,7 +235,7 @@ async function submitAskCard(card, selected, onSubmit) {
       run_id: runId,
       tool_call_id: callId,
       via,
-      ...(hasOptions ? { option_ids: [...selected] } : {}),
+      ...(sendOptionIds ? { option_ids: [...selected] } : {}),
       ...(hasText ? { text } : {}),
     });
     card.querySelectorAll('button, textarea').forEach((node) => { node.disabled = true; });

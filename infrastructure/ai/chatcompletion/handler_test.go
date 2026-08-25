@@ -236,6 +236,98 @@ func TestCompleteExtractsReasoningContent(t *testing.T) {
 	}
 }
 
+// TestCompleteExtractsOpenRouterReasoningField proves that the non-streaming
+// path reads the "reasoning" field (OpenRouter's name) when
+// "reasoning_content" (native OpenAI/DeepSeek) is absent. Without this
+// fallback, thinking from OpenRouter-routed models is silently lost.
+func TestCompleteExtractsOpenRouterReasoningField(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{
+					"message": map[string]any{
+						"content":   "The answer is 491.",
+						"reasoning": "Adding 100 to 391 gives 491.",
+					},
+					"finish_reason": "stop",
+				},
+			},
+			"usage": map[string]any{
+				"prompt_tokens":     50,
+				"completion_tokens": 20,
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := &Adapter{BaseURL: server.URL + "/v1", Client: server.Client()}
+	resp, err := adapter.Complete(context.Background(), application.ChatRequest{
+		Model: "deepseek/deepseek-r1",
+		Messages: []application.ChatMessage{{
+			Role:    "user",
+			Content: "What is 391 + 100?",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Complete failed: %v", err)
+	}
+	if resp.Reasoning != "Adding 100 to 391 gives 491." {
+		t.Errorf("Reasoning = %q, want the thinking text from OpenRouter's 'reasoning' field", resp.Reasoning)
+	}
+	if resp.Content != "The answer is 491." {
+		t.Errorf("Content = %q, want the answer", resp.Content)
+	}
+}
+
+// TestStreamExtractsOpenRouterReasoningField proves that the streaming
+// path reads "reasoning" deltas (OpenRouter's field) when
+// "reasoning_content" is absent. OpenRouter routes thinking via
+// delta.reasoning, not delta.reasoning_content.
+func TestStreamExtractsOpenRouterReasoningField(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		// OpenRouter streaming: reasoning in delta.reasoning, NOT
+		// delta.reasoning_content.
+		chunks := []string{
+			`data: {"choices":[{"delta":{"role":"assistant","reasoning":"Thinking ","reasoning_details":[{"type":"reasoning.text","text":"Thinking "}]}}]}`,
+			`data: {"choices":[{"delta":{"reasoning":"about math"}}]}`,
+			`data: {"choices":[{"delta":{"content":"491"},"finish_reason":null}]}`,
+			`data: {"choices":[{"delta":{"content":""},"finish_reason":"stop"}]}`,
+			`data: [DONE]`,
+		}
+		for _, c := range chunks {
+			_, _ = w.Write([]byte(c + "\n\n"))
+		}
+	}))
+	defer server.Close()
+
+	adapter := &Adapter{BaseURL: server.URL + "/v1", Client: server.Client()}
+	var reasoningGot, contentGot string
+	resp, err := adapter.Stream(context.Background(), application.ChatRequest{
+		Model: "deepseek/deepseek-r1",
+		Messages: []application.ChatMessage{{
+			Role:    "user",
+			Content: "What is 391+100?",
+		}},
+	}, func(delta string) { contentGot += delta }, func(delta string) { reasoningGot += delta })
+	if err != nil {
+		t.Fatalf("Stream failed: %v", err)
+	}
+	if resp.Reasoning != "Thinking about math" {
+		t.Errorf("Reasoning = %q, want %q (from OpenRouter 'reasoning' field)", resp.Reasoning, "Thinking about math")
+	}
+	if reasoningGot != "Thinking about math" {
+		t.Errorf("onReasoning delivered %q, want %q", reasoningGot, "Thinking about math")
+	}
+	if resp.Content != "491" {
+		t.Errorf("Content = %q, want %q", resp.Content, "491")
+	}
+	if contentGot != "491" {
+		t.Errorf("onDelta delivered %q, want %q", contentGot, "491")
+	}
+}
+
 func containsAll(value string, want ...string) bool {
 	for _, item := range want {
 		if !strings.Contains(value, item) {

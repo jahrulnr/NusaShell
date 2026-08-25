@@ -17,6 +17,7 @@ import (
 	"nusashell/infrastructure/ai/chatcompletion"
 	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/embeddings"
+	"nusashell/infrastructure/ai/gemini"
 	"nusashell/infrastructure/ai/imagegen"
 	"nusashell/infrastructure/ai/messages"
 	"nusashell/infrastructure/ai/ollama"
@@ -56,6 +57,8 @@ func NewFactory(creds application.CredentialStore) application.ProviderFactory {
 			return &chatcompletion.Adapter{BaseURL: base, APIKey: apiKey, Client: client}, nil
 		case domain.ProviderCodex:
 			return newCodexAdapter(ctx, p, apiKey, client, creds)
+		case domain.ProviderGemini:
+			return &gemini.Adapter{BaseURL: p.BaseURL, APIKey: apiKey, Client: client}, nil
 		default:
 			return nil, &application.ErrUnsupportedProvider{Kind: string(p.Kind)}
 		}
@@ -103,7 +106,9 @@ func resolveCodexToken(ctx context.Context, p *domain.Provider, storedJSON strin
 }
 
 // newCodexAdapter parses the stored OAuth token, refreshes it if expired,
-// persists the refreshed token, and builds the Codex adapter.
+// persists the refreshed token, and builds the Codex adapter. The HTTP
+// client gets a Cloudflare cookie jar so Cloudflare challenges solved by
+// the image client are reused by chat and vice versa.
 func newCodexAdapter(ctx context.Context, p *domain.Provider, storedJSON string, client *http.Client, creds application.CredentialStore) (application.AIProvider, error) {
 	tok, err := resolveCodexToken(ctx, p, storedJSON, creds)
 	if err != nil {
@@ -114,7 +119,7 @@ func newCodexAdapter(ctx context.Context, p *domain.Provider, storedJSON string,
 		AccessToken:    tok.AccessToken,
 		AccountID:      tok.AccountID,
 		InstallationID: codexInstallationID,
-		Client:         client,
+		Client:         withCodexCookieJar(client),
 	}, nil
 }
 
@@ -135,6 +140,9 @@ func NewImageGeneratorFactory(creds application.CredentialStore) application.Ima
 				AccountID:      tok.AccountID,
 				InstallationID: codexInstallationID,
 			}, nil
+		}
+		if p != nil && p.Kind == domain.ProviderGemini {
+			return &gemini.ImagesClient{BaseURL: p.BaseURL, APIKey: apiKey, HTTP: newImageHTTPClient()}, nil
 		}
 		return openai(p, apiKey)
 	}
@@ -197,6 +205,41 @@ func newProviderHTTPClient() *http.Client {
 			ResponseHeaderTimeout: 60 * time.Second,
 			IdleConnTimeout:       90 * time.Second,
 		},
+	}
+}
+
+// newImageHTTPClient bounds dial and response headers with a longer
+// ResponseHeaderTimeout (180s) for image generation, which can take longer
+// than chat completions to produce the first byte.
+func newImageHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   15 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ForceAttemptHTTP2:     true,
+			TLSHandshakeTimeout:   15 * time.Second,
+			ResponseHeaderTimeout: 180 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+		},
+	}
+}
+
+// withCodexCookieJar returns a shallow copy of client with the shared
+// Cloudflare cookie jar attached. The transport is reused so connection
+// pooling is preserved. If the client already has a jar (e.g. the image
+// client built its own), it is left untouched.
+func withCodexCookieJar(client *http.Client) *http.Client {
+	if client == nil || client.Jar != nil {
+		return client
+	}
+	return &http.Client{
+		Transport:     client.Transport,
+		CheckRedirect: client.CheckRedirect,
+		Jar:           codex.SharedCloudflareCookieJar(),
+		Timeout:       client.Timeout,
 	}
 }
 

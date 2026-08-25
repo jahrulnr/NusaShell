@@ -35,6 +35,13 @@ const DefaultBaseURL = "https://chatgpt.com/backend-api/codex"
 // the official Codex CLI.
 const DefaultOriginator = "codex_cli_rs"
 
+// CodexUserAgent mirrors the User-Agent the official codex CLI sends
+// (codex-rs/login get_codex_user_agent). Cloudflare's WAF on
+// chatgpt.com/backend-api/codex/images/* rejects requests with a
+// non-matching User-Agent prefix with HTTP 403 {"detail":"Forbidden"}.
+// The format is: codex_cli_rs/{version} ({OS} {OS_VERSION}; {ARCH}) {terminal}
+const CodexUserAgent = "codex_cli_rs/0.1.0 (NusaShell; x86_64) generic"
+
 // serverIDPattern matches server-generated item IDs (rs_, fc_, resp_, msg_)
 // that Codex /responses cannot resolve when store=false.
 var serverIDPattern = regexp.MustCompile(`^(rs|fc|resp|msg)_`)
@@ -92,6 +99,7 @@ func (a *Adapter) headers() map[string]string {
 	h := map[string]string{
 		"Authorization": "Bearer " + a.AccessToken,
 		"originator":    a.originator(),
+		"User-Agent":    CodexUserAgent,
 	}
 	if a.AccountID != "" {
 		h["ChatGPT-Account-ID"] = a.AccountID

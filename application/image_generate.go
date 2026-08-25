@@ -118,6 +118,20 @@ func (a *App) executeGenerateImage(run *TurnRun, toolCall domain.ToolCall, setti
 		return failGenerateImage(err.Error())
 	}
 
+	// Validate i2i capability: if the user/agent passed reference images
+	// (image-to-image / edit request), the configured image model must
+	// accept image input. Most older image models are text-to-image only.
+	// Sending references to a t2i-only model wastes a billed API call and
+	// returns an opaque upstream error. Vision=true on an image-kind model
+	// means input_modalities includes "image" (i2i capable).
+	if len(refs) > 0 {
+		if m := provider.FindModel(settings.ImageModelID); m != nil && !m.Vision {
+			return failGenerateImage(fmt.Sprintf(
+				"Model %q does not support image-to-image (editing with reference images). It only supports text-to-image. Ask the user to switch to an i2i-capable image model in Settings → Image generation, or retry without referenced_image_paths.",
+				settings.ImageModelID))
+		}
+	}
+
 	req := ImageGenRequest{
 		Model:      settings.ImageModelID,
 		Prompt:     args.Prompt,

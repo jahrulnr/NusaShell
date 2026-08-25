@@ -4,7 +4,7 @@ import { autoReconnectEnabled, on, rpc, setAutoReconnect } from '../rpc.js';
 import { toast, createSelect, el } from '../ui.js';
 
 let bound = false;
-const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', imageProviderId: '', imageModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', ttsProviderId: '', ttsModelId: '', webAnswerProvider: '', webAnswerModel: '', compactionModel: '', reviewModel: '' };
+const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', imageProviderId: '', imageModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', videoGenProviderId: '', videoGenModelId: '', ttsProviderId: '', ttsModelId: '', webAnswerProvider: '', webAnswerModel: '', compactionModel: '', reviewModel: '' };
 let preferredSelect;
 let embeddingSelect;
 let visionSelect;
@@ -13,6 +13,7 @@ let compactionSelect;
 let reviewSelect;
 let audioSelect;
 let videoSelect;
+let videoGenSelect;
 let ttsSelect;
 let webAnswerProviderSelect;
 let contractModeSelect;
@@ -47,6 +48,10 @@ export async function initSettings() {
     });
     videoSelect = createSelect(document.getElementById('settings-video-model'), {
       placeholder: 'Disabled — non-video models get a text placeholder instead',
+      search: true,
+    });
+    videoGenSelect = createSelect(document.getElementById('settings-video-gen-model'), {
+      placeholder: 'Disabled — generate_video is not available',
       search: true,
     });
     ttsSelect = createSelect(document.getElementById('settings-tts-model'), {
@@ -157,6 +162,8 @@ export async function refresh() {
     state.audioModelId = settings.audio_model_id ?? '';
     state.videoProviderId = settings.video_provider_id ?? '';
     state.videoModelId = settings.video_model_id ?? '';
+    state.videoGenProviderId = settings.video_gen_provider_id ?? '';
+    state.videoGenModelId = settings.video_gen_model_id ?? '';
     state.ttsProviderId = settings.tts_provider_id ?? '';
     state.ttsModelId = settings.tts_model_id ?? '';
     state.webAnswerProvider = settings.web_answer_provider ?? '';
@@ -182,6 +189,7 @@ export async function refresh() {
   renderImageModelOptions(allModels);
   renderAudioModelOptions(allModels);
   renderVideoModelOptions(allModels);
+  renderVideoGenModelOptions(allModels);
   renderTTSModelOptions(allModels);
   renderCompactionModelOptions(allModels);
   renderReviewModelOptions(allModels);
@@ -270,8 +278,11 @@ function renderImageModelOptions(models) {
     { text: 'Disabled — generate_image is not available', value: '', placeholder: true },
     ...imageModels.map((m) => {
       const label = m.id;
+      const provider = m.provider_name ? ` · ${m.provider_name}` : '';
+      const badges = modelCapabilityBadges(m);
       return {
-        text: m.provider_name ? `${label} · ${m.provider_name}` : label,
+        text: `${label}${provider}`,
+        html: badges ? `${label}${badges}${provider}` : undefined,
         value: `${m.provider_id}:${m.id}`,
       };
     }),
@@ -287,6 +298,19 @@ function isImageGeneratorModel(model) {
   if (model?.kind === 'image') return true;
   const id = String(model?.id || '').toLowerCase();
   return /gpt-image|dall-e|stable-diffusion|seedream|ideogram|recraft|imagen-|riverflow|flash-image/.test(id);
+}
+
+// modelCapabilityBadges returns an HTML string of capability badges for a
+// model option in Slim Select. For image/video generation pickers, the
+// key badge is "i2i"/"i2v" (vision=true = accepts image input). Models
+// without modality info get no badge — they still appear in the picker
+// as best-effort (upstream will reject if unsupported).
+function modelCapabilityBadges(m) {
+  const badges = [];
+  if (m.vision) badges.push('<span class="settings-model-badge settings-badge-i2i" title="Accepts image input (image-to-image / image-to-video)">i2i</span>');
+  if (m.audio) badges.push('<span class="settings-model-badge settings-badge-audio" title="Accepts audio input">audio</span>');
+  if (m.video) badges.push('<span class="settings-model-badge settings-badge-video" title="Accepts video input">video</span>');
+  return badges.length ? ` <span class="settings-model-badges">${badges.join('')}</span>` : '';
 }
 
 function renderAudioModelOptions(models) {
@@ -327,6 +351,34 @@ function renderVideoModelOptions(models) {
     ? `${state.videoProviderId}:${state.videoModelId}`
     : '';
   if (selected) videoSelect.setSelected([selected]);
+}
+
+function renderVideoGenModelOptions(models) {
+  const videoGenModels = models.filter(isVideoGeneratorModel);
+  const data = [
+    { text: 'Disabled — generate_video is not available', value: '', placeholder: true },
+    ...videoGenModels.map((m) => {
+      const label = m.id;
+      const provider = m.provider_name ? ` · ${m.provider_name}` : '';
+      const badges = modelCapabilityBadges(m);
+      return {
+        text: `${label}${provider}`,
+        html: badges ? `${label}${badges}${provider}` : undefined,
+        value: `${m.provider_id}:${m.id}`,
+      };
+    }),
+  ];
+  videoGenSelect.setData(data);
+  const selected = state.videoGenProviderId && state.videoGenModelId
+    ? `${state.videoGenProviderId}:${state.videoGenModelId}`
+    : '';
+  if (selected) videoGenSelect.setSelected([selected]);
+}
+
+function isVideoGeneratorModel(model) {
+  if (model?.kind === 'video') return true;
+  const id = String(model?.id || '').toLowerCase();
+  return /video|veo|wan-|grok-imagine|sora|kling|hailuo|minimax|pika|runway|luma|cogvideo|animate|vidu/.test(id);
 }
 
 function renderTTSModelOptions(models) {
@@ -659,6 +711,8 @@ async function save() {
     const { providerId: audProviderId, modelId: audModelId } = splitProviderModel(audioValue);
     const videoValue = videoSelect.getSelected()?.[0] ?? '';
     const { providerId: vidProviderId, modelId: vidModelId } = splitProviderModel(videoValue);
+    const videoGenValue = videoGenSelect.getSelected()?.[0] ?? '';
+    const { providerId: vidGenProviderId, modelId: vidGenModelId } = splitProviderModel(videoGenValue);
     const ttsValue = ttsSelect.getSelected()?.[0] ?? '';
     const { providerId: ttsProviderId, modelId: ttsModelId } = splitProviderModel(ttsValue);
     const compactionValue = compactionSelect.getSelected()?.[0] ?? '';
@@ -709,6 +763,8 @@ async function save() {
       stt_offline_language: document.getElementById('settings-stt-language')?.value || null,
       video_provider_id: vidProviderId || null,
       video_model_id: vidModelId || null,
+      video_gen_provider_id: vidGenProviderId || null,
+      video_gen_model_id: vidGenModelId || null,
       tts_provider_id: ttsProviderId || null,
       tts_model_id: ttsModelId || null,
       web_answer_provider: webAnswerProvider || null,

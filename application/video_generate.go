@@ -3,6 +3,7 @@ package application
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"nusashell/domain"
@@ -21,9 +22,10 @@ var allowedVideoResolutions = []string{"", "480p", "720p", "768p", "1080p", "1k"
 // through run.Ctx, and there is deliberately no wall-clock timeout.
 func (a *App) executeGenerateVideo(run *TurnRun, toolCall domain.ToolCall, settings domain.Settings) (string, []domain.Attachment, error) {
 	var args struct {
-		Prompt      string `json:"prompt"`
-		DurationSec int    `json:"duration_seconds"`
-		Resolution  string `json:"resolution"`
+		Prompt               string   `json:"prompt"`
+		DurationSec          int      `json:"duration_seconds"`
+		Resolution           string   `json:"resolution"`
+		ReferencedImagePaths []string `json:"referenced_image_paths"`
 	}
 	if err := json.Unmarshal([]byte(toolCall.Args), &args); err != nil {
 		return "error: invalid arguments", nil, fmt.Errorf("invalid args: %w", err)
@@ -49,13 +51,24 @@ func (a *App) executeGenerateVideo(run *TurnRun, toolCall domain.ToolCall, setti
 	if args.DurationSec < 0 {
 		return "error: duration_seconds must be positive", nil, fmt.Errorf("negative duration")
 	}
+	if len(args.ReferencedImagePaths) > maxReferencedImages {
+		return failGenerateVideo(fmt.Sprintf("referenced_image_paths accepts at most %d paths", maxReferencedImages))
+	}
+	for i, p := range args.ReferencedImagePaths {
+		if strings.TrimSpace(p) == "" {
+			return failGenerateVideo(fmt.Sprintf("referenced_image_paths[%d] is empty", i))
+		}
+		if !filepath.IsAbs(p) {
+			return failGenerateVideo(fmt.Sprintf("referenced_image_paths must be absolute paths, got %q", p))
+		}
+	}
 
-	if strings.TrimSpace(settings.VideoProviderID) == "" || strings.TrimSpace(settings.VideoModelID) == "" {
+	if strings.TrimSpace(settings.VideoGenProviderID) == "" || strings.TrimSpace(settings.VideoGenModelID) == "" {
 		return videoUnconfiguredHint, nil, fmt.Errorf("%s", videoUnconfiguredHint)
 	}
-	provider, apiKey, ok := a.resolveFallbackProvider(settings.VideoProviderID)
+	provider, apiKey, ok := a.resolveFallbackProvider(settings.VideoGenProviderID)
 	if !ok {
-		msg := fmt.Sprintf("Video generation provider %q was not found or is disabled.", a.providerNameByID(settings.VideoProviderID))
+		msg := fmt.Sprintf("Video generation provider %q was not found or is disabled.", a.providerNameByID(settings.VideoGenProviderID))
 		return msg, nil, fmt.Errorf("%s", msg)
 	}
 	if a.VideoGeneratorFactory == nil {
@@ -66,9 +79,19 @@ func (a *App) executeGenerateVideo(run *TurnRun, toolCall domain.ToolCall, setti
 		return failGenerateVideo(err.Error())
 	}
 
+	// Load reference images for image-to-video (i2v). Best-effort: if
+	// the model doesn't support i2v, upstream will reject and the error
+	// is surfaced verbatim. The model picker badges i2i-capable models
+	// via Vision=true so the user/agent can check before calling.
+	refs, err := a.loadImageReferences(args.ReferencedImagePaths)
+	if err != nil {
+		return failGenerateVideo(err.Error())
+	}
+
 	result, err := generator.Generate(run.Ctx, VideoGenRequest{
-		Model: settings.VideoModelID, Prompt: prompt,
+		Model: settings.VideoGenModelID, Prompt: prompt,
 		DurationSec: args.DurationSec, Resolution: res,
+		References: refs,
 	})
 	if err != nil {
 		msg := err.Error()
@@ -99,7 +122,13 @@ func (a *App) executeGenerateVideo(run *TurnRun, toolCall domain.ToolCall, setti
 	if result.CostUSD > 0 {
 		meta["cost_usd"] = result.CostUSD
 	}
+	if len(refs) > 0 {
+		meta["reference_count"] = len(refs)
+	}
 	body := fmt.Sprintf("Video saved to %s.", path)
+	if len(refs) > 0 {
+		body = fmt.Sprintf("Video saved to %s (generated from %d reference image(s)).", path, len(refs))
+	}
 	return yamlMDApp(meta, body), []domain.Attachment{att}, nil
 }
 

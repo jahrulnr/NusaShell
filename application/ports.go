@@ -562,6 +562,12 @@ type VideoGenRequest struct {
 	Prompt      string
 	DurationSec int    // 0 = provider default; per-model minimums apply upstream
 	Resolution  string // e.g. "480p"/"720p"; empty = provider default
+	// References are optional source images for image-to-video generation.
+	// The first reference becomes the first frame; subsequent references
+	// are sent as additional input_references for style/identity guidance.
+	// Models that only support text-to-video will reject the request
+	// upstream — the picker badges i2i-capable models via Vision=true.
+	References []ImageReference
 }
 
 // VideoGenResult is the downloaded clip plus metadata for persistence.

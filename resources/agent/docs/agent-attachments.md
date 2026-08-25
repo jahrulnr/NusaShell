@@ -221,6 +221,16 @@ is preferred so playback works without an extra HTTP round trip, and
 `/local-file?path=<encoded absolute path>` is the fallback when the
 inline bytes are absent (e.g. after a snapshot reload).
 
+Image-to-video (i2v) is supported via `referenced_image_paths`: the
+first image becomes the first frame (sent as `frame_images` with
+`frame_type=first_frame`), and any additional images are sent as
+`input_references` for style/identity guidance. Models that only
+support text-to-video will reject the request upstream — the error is
+surfaced verbatim so the agent can retry without references or switch
+to an i2v-capable model. The Settings → Video generation model picker
+shows an `i2i` badge for models with `vision=true` (image input
+modality) so the user can check before calling.
+
 In addition to the bubble-path attachment renderer, the agent thread
 also renders a `generate_video` tool call as a dedicated
 `agent-genvideo-card` (paralel with `agent-genimage-card`) so the tool

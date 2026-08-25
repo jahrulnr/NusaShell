@@ -36,6 +36,7 @@
 .accent-openai .provider-mark { color: #7dd3fc; border-color: #36739a; background: #1e3a4f; }
 .accent-compatible .provider-mark { color: #61d0a7; border-color: #28735f; background: #10362f; }
 .accent-codex .provider-mark { color: #c9a0ff; border-color: #6b3fa0; background: #2a1a3e; }
+.accent-gemini .provider-mark { color: #669df6; border-color: #1a73e8; background: #1a2b4a; }
 .provider-state { margin-left: auto; color: var(--text-faint); font: 10px var(--font-mono); }
 .provider-enabled { margin-left: auto; }
 .provider-registry-card > p { min-height: 36px; margin: 14px 0; color: var(--text-dim); font-size: 12px; line-height: 1.45; }

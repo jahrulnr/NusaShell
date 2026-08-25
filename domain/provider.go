@@ -5,7 +5,8 @@ import "time"
 // ProviderKind names the wire API shape, not a vendor: Messages (Anthropic
 // Messages API), Responses (OpenAI Responses API), Chat (any OpenAI-compatible
 // Chat Completions endpoint), Ollama (local, OpenAI-compatible chat + native
-// embeddings), Codex (ChatGPT Codex backend, OAuth).
+// embeddings), Codex (ChatGPT Codex backend, OAuth), Gemini (Google Gemini
+// generateContent API — distinct from OpenAI-compatible shapes).
 type ProviderKind string
 
 const (
@@ -14,6 +15,7 @@ const (
 	ProviderChat      ProviderKind = "chat"
 	ProviderOllama    ProviderKind = "ollama"
 	ProviderCodex     ProviderKind = "codex"
+	ProviderGemini    ProviderKind = "gemini"
 )
 
 // ModelKind categorizes what a model produces, used to filter the model

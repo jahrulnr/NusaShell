@@ -82,9 +82,13 @@ type openAIRequest struct {
 type openAIChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content          *string          `json:"content"`
-			ReasoningContent *string          `json:"reasoning_content"`
-			ToolCalls        []openAIToolCall `json:"tool_calls"`
+			Content          *string `json:"content"`
+			ReasoningContent *string `json:"reasoning_content"`
+			// OpenRouter exposes thinking via "reasoning" (not
+			// "reasoning_content") in both streaming deltas and
+			// non-streaming messages. Fallback below merges the two.
+			Reasoning *string          `json:"reasoning"`
+			ToolCalls []openAIToolCall `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
@@ -102,6 +106,7 @@ type openAIResponse struct {
 		Message struct {
 			Content          *string          `json:"content"`
 			ReasoningContent *string          `json:"reasoning_content"`
+			Reasoning        *string          `json:"reasoning"`
 			ToolCalls        []openAIToolCall `json:"tool_calls"`
 		} `json:"message"`
 		FinishReason *string `json:"finish_reason"`
@@ -362,10 +367,16 @@ func (o *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDel
 			}
 			// reasoning models (DeepSeek, Qwen, …) stream thinking here;
 			// null deltas between segments must not append anything
-			if ch.Delta.ReasoningContent != nil {
+			// OpenRouter uses "reasoning" while native OpenAI/DeepSeek use
+			// "reasoning_content" — fall back to either field.
+			reasoningDelta := ch.Delta.ReasoningContent
+			if reasoningDelta == nil {
+				reasoningDelta = ch.Delta.Reasoning
+			}
+			if reasoningDelta != nil {
 				// Strip the internal replay placeholder from streamed
 				// reasoning — models may echo it (#9573-style echo loop).
-				cleaned := strings.ReplaceAll(*ch.Delta.ReasoningContent, domain.ReasoningPlaceholder, "")
+				cleaned := strings.ReplaceAll(*reasoningDelta, domain.ReasoningPlaceholder, "")
 				if cleaned != "" {
 					result.Reasoning += cleaned
 					if onReasoning != nil {
@@ -483,9 +494,15 @@ func (o *Adapter) responseFromOpenAI(out openAIResponse) (application.ChatRespon
 		return application.ChatResponse{}, fmt.Errorf("provider returned no choices")
 	}
 	ch := out.Choices[0]
+	// OpenRouter returns thinking via "reasoning"; native OpenAI/DeepSeek
+	// use "reasoning_content". Fall back to either field.
+	reasoningText := ch.Message.ReasoningContent
+	if reasoningText == nil {
+		reasoningText = ch.Message.Reasoning
+	}
 	resp := application.ChatResponse{
 		Content:    aiutil.Deref(ch.Message.Content),
-		Reasoning:  strings.ReplaceAll(aiutil.Deref(ch.Message.ReasoningContent), domain.ReasoningPlaceholder, ""),
+		Reasoning:  strings.ReplaceAll(aiutil.Deref(reasoningText), domain.ReasoningPlaceholder, ""),
 		StopReason: aiutil.Deref(ch.FinishReason),
 	}
 	if out.Usage != nil {

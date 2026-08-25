@@ -242,6 +242,78 @@ func TestExecuteGenerateImageLoadsReferencedPaths(t *testing.T) {
 	}
 }
 
+func TestExecuteGenerateImageRejectsI2IOnT2IOnlyModel(t *testing.T) {
+	png := png1x1(t)
+	dir := t.TempDir()
+	refPath := filepath.Join(dir, "prior.png")
+	if err := os.WriteFile(refPath, png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	conv := &domain.Conversation{ID: "c1"}
+	gen := &scriptedImageGen{result: &ImageGenResult{
+		Images:   []GeneratedImage{{Bytes: png, MediaType: "image/png"}},
+		Provider: "openrouter",
+		Model:    "t2i-only",
+	}}
+	app := imageGenApp(t, gen, conv)
+	// Override provider with a t2i-only model (Vision=false, Kind=image)
+	app.Providers = &fakeProviderStore{items: map[string]*domain.Provider{
+		"img": {ID: "img", Kind: domain.ProviderChat, Enabled: true, BaseURL: "https://api.openai.com/v1",
+			Models: []domain.Model{{ID: "t2i-only", Kind: domain.ModelKindImage, Vision: false}}},
+	}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
+	args, _ := jsonGenerateArgs(refPath)
+	msg, _, err := app.executeGenerateImage(run, domain.ToolCall{
+		ID: "tc_edit", Name: "generate_image", Args: args,
+	}, domain.Settings{ImageProviderID: "img", ImageModelID: "t2i-only"})
+	if err == nil {
+		t.Fatal("expected error for i2i on t2i-only model")
+	}
+	if !strings.Contains(msg, "does not support image-to-image") {
+		t.Errorf("error message = %q, want mention of image-to-image", msg)
+	}
+	if gen.hits > 0 {
+		t.Fatal("generator should not have been called")
+	}
+}
+
+func TestExecuteGenerateImageAllowsI2IOnVisionModel(t *testing.T) {
+	png := png1x1(t)
+	dir := t.TempDir()
+	refPath := filepath.Join(dir, "prior.png")
+	if err := os.WriteFile(refPath, png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	conv := &domain.Conversation{ID: "c1"}
+	gen := &scriptedImageGen{result: &ImageGenResult{
+		Images:   []GeneratedImage{{Bytes: png, MediaType: "image/png"}},
+		Provider: "openrouter",
+		Model:    "i2i-capable",
+	}}
+	app := imageGenApp(t, gen, conv)
+	app.Providers = &fakeProviderStore{items: map[string]*domain.Provider{
+		"img": {ID: "img", Kind: domain.ProviderChat, Enabled: true, BaseURL: "https://api.openai.com/v1",
+			Models: []domain.Model{{ID: "i2i-capable", Kind: domain.ModelKindImage, Vision: true}}},
+	}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
+	args, _ := jsonGenerateArgs(refPath)
+	_, _, err := app.executeGenerateImage(run, domain.ToolCall{
+		ID: "tc_edit", Name: "generate_image", Args: args,
+	}, domain.Settings{ImageProviderID: "img", ImageModelID: "i2i-capable"})
+	if err != nil {
+		t.Fatalf("expected success for i2i on vision model: %v", err)
+	}
+	if len(gen.got.References) != 1 {
+		t.Fatalf("references = %d, want 1", len(gen.got.References))
+	}
+}
+
 func jsonGenerateArgs(refPath string) (string, error) {
 	b, err := jsonMarshalPrompt(refPath)
 	return string(b), err

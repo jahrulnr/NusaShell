@@ -198,14 +198,14 @@ func TestFactoryRoutesOpenRouterByHost(t *testing.T) {
 	}
 }
 
-func TestOpenAIDallERequestsB64JSON(t *testing.T) {
+func TestOpenAINeverSendsResponseFormat(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body["response_format"] != "b64_json" {
-			t.Errorf("dall-e must request b64_json, body = %+v", body)
+		if _, ok := body["response_format"]; ok {
+			t.Errorf("response_format must never be sent, body = %+v", body)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -215,9 +215,45 @@ func TestOpenAIDallERequestsB64JSON(t *testing.T) {
 	defer server.Close()
 	client := &Client{Backend: backendOpenAI, BaseURL: server.URL + "/v1", HTTP: server.Client()}
 	if _, err := client.Generate(context.Background(), application.ImageGenRequest{
-		Model: "dall-e-3", Prompt: "a boat", N: 1,
+		Model: "hidream", Prompt: "a boat", N: 1,
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOpenAIFallsBackToURLDownload(t *testing.T) {
+	// image server: returns raw PNG bytes with image/png content-type
+	imgBytes := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}
+	imgServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(imgBytes)
+	}))
+	defer imgServer.Close()
+
+	// API server: returns a URL pointing to the image server
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"url": imgServer.URL + "/img.png"}},
+		})
+	}))
+	defer apiServer.Close()
+
+	client := &Client{Backend: backendOpenAI, BaseURL: apiServer.URL + "/v1", HTTP: apiServer.Client()}
+	res, err := client.Generate(context.Background(), application.ImageGenRequest{
+		Model: "hidream", Prompt: "a boat", N: 1,
+	})
+	if err != nil {
+		t.Fatalf("Generate error: %v", err)
+	}
+	if len(res.Images) != 1 {
+		t.Fatalf("images len = %d", len(res.Images))
+	}
+	if string(res.Images[0].Bytes) != string(imgBytes) {
+		t.Errorf("downloaded bytes mismatch: got %v", res.Images[0].Bytes)
+	}
+	if res.Images[0].MediaType != "image/png" {
+		t.Errorf("media type = %s, want image/png", res.Images[0].MediaType)
 	}
 }
 

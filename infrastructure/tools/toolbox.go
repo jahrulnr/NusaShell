@@ -185,7 +185,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 	if t.mediaGenerationAnyConfigured() {
 		tools = append(tools, application.ToolInfo{
 			Name:        "generate_media",
-			Description: "Generate media from a prompt and save it for the user to view/play. media_type selects the generator: \"image\" (text\u2192PNG/JPEG/WebP; referenced images enable editing), \"speech\" (text\u2192spoken audio), \"video\" (text\u2192short mp4 clip; async upstream \u2014 tens of seconds to minutes is expected). Only modes configured in Settings can serve a request. The result is already delivered to the user \u2014 do not re-render it as Markdown.",
+			Description: "Generate media from a prompt and save it for the user to view/play. media_type selects the generator: \"image\" (text\u2192PNG/JPEG/WebP; referenced images enable editing), \"speech\" (text\u2192spoken audio), \"video\" (text\u2192short mp4 clip; async upstream \u2014 tens of seconds to minutes is expected; referenced images enable image-to-video). Only modes configured in Settings can serve a request. The result is already delivered to the user \u2014 do not re-render it as Markdown.",
 			InputSchema: obj("object", props(
 				"media_type", strEnum("Which generator to use", "image", "speech", "video"),
 				"prompt", str("Text input for the chosen generator: scene description (image/video; max 4000 chars for video) or the text to speak aloud (max 20000 chars)."),
@@ -195,7 +195,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 				"n", map[string]any{"type": "integer", "description": "Image only: number of images to generate (1-4, default 1).", "minimum": 1, "maximum": 4},
 				"referenced_image_paths", map[string]any{
 					"type":        "array",
-					"description": "Image only: absolute paths of source images for image-to-image editing (from earlier results or attachments). Max 5.",
+					"description": "Image or video: absolute paths of source images. For image media_type, enables image-to-image editing. For video media_type, the first image becomes the first frame (image-to-video); additional images are style references. Models without i2i/i2v support will reject upstream — check the model picker badges. Max 5.",
 					"items":       map[string]any{"type": "string"},
 					"maxItems":    5,
 				},
@@ -255,7 +255,7 @@ func (t *Toolbox) videoGenerationConfigured() bool {
 		return false
 	}
 	s := t.Settings.Get()
-	return mediaGenerationConfigured(s.VideoProviderID, s.VideoModelID)
+	return mediaGenerationConfigured(s.VideoGenProviderID, s.VideoGenModelID)
 }
 
 // executeFamily routes an ADVERTISED dispatcher-root call (skill, memory,

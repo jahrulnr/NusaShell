@@ -725,6 +725,17 @@
               <small>Only image generators appear here (gpt-image, DALL·E, Flux, OpenRouter Image API, and Codex ChatGPT plan models). Import models on an OpenAI or OpenRouter provider, or use a signed-in Codex provider. Leave disabled if you do not want the agent to generate images.</small>
             </label>
           </section>
+          <section class="settings-card settings-video-gen-card" aria-labelledby="settings-video-gen-title">
+            <div class="settings-card-title">Video generation</div>
+            <h2 id="settings-video-gen-title" class="sr-only">Video generation</h2>
+            <p class="settings-card-copy">Pick the model used by the <code>generate_video</code> tool. This is separate from the chat model and the video fallback — any chat model can orchestrate, and the video backend is resolved here. OpenRouter's async <code>/videos</code> API is supported. Leave disabled until you want the agent to be able to generate videos.</p>
+            <label class="settings-field" for="settings-video-gen-model">Video generation model
+              <select id="settings-video-gen-model">
+                <option value="">Disabled — generate_video is not available</option>
+              </select>
+              <small>Only video generation models appear here (e.g. grok-imagine-video, wan-2.6). Import models on an OpenRouter provider. Leave disabled if you do not want the agent to generate videos.</small>
+            </label>
+          </section>
           <section class="settings-card settings-audio-card" aria-labelledby="settings-audio-title">
             <div class="settings-card-title">Audio fallback</div>
             <h2 id="settings-audio-title" class="sr-only">Audio fallback</h2>
