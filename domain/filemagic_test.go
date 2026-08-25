@@ -21,6 +21,9 @@ func TestSniffMagicImageFormats(t *testing.T) {
 		{"BMP", "BM\x00\x00", "image/bmp", "image"},
 		{"TIFF little-endian", "II\x2a\x00", "image/tiff", "image"},
 		{"TIFF big-endian", "MM\x00\x2a", "image/tiff", "image"},
+		{"SVG direct", `<svg xmlns="http://www.w3.org/2000/svg"`, "image/svg+xml", "image"},
+		{"SVG with XML prolog", `<?xml version="1.0"?>\n<svg width="100">`, "image/svg+xml", "image"},
+		{"SVG with doctype", `<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<svg>`, "image/svg+xml", "image"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

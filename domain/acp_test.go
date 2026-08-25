@@ -7,6 +7,43 @@ import (
 	"testing"
 )
 
+func TestAcpAgentTransportField(t *testing.T) {
+	// stdio is the default and current behavior. remote is the future
+	// cloud transport. Empty defaults to stdio for backward compatibility.
+	a := AcpAgent{ID: "a1", Name: "Cursor", Command: "cursor-agent"}
+	if got := a.EffectiveTransport(); got != AcpTransportStdio {
+		t.Errorf("empty transport = %q, want %q", got, AcpTransportStdio)
+	}
+	a.Transport = AcpTransportRemote
+	if got := a.EffectiveTransport(); got != AcpTransportRemote {
+		t.Errorf("remote transport = %q, want %q", got, AcpTransportRemote)
+	}
+	// Unknown values fall back to stdio (fail-safe).
+	a.Transport = "carrier-pigeon"
+	if got := a.EffectiveTransport(); got != AcpTransportStdio {
+		t.Errorf("unknown transport = %q, want %q", got, AcpTransportStdio)
+	}
+}
+
+func TestTrustLevelToRiskTierCap(t *testing.T) {
+	cases := []struct {
+		trust TrustLevel
+		want  RiskTier
+	}{
+		{TrustSafe, RiskReadOnly},
+		{TrustTrusted, RiskEditConfirmed},
+		{TrustPrivileged, RiskBypass},
+		{"", RiskReadOnly},        // default safe
+		{"unknown", RiskReadOnly}, // unknown falls to safe
+	}
+	for _, c := range cases {
+		got := TrustLevelToRiskTierCap(c.trust)
+		if got != c.want {
+			t.Errorf("TrustLevelToRiskTierCap(%q) = %q, want %q", c.trust, got, c.want)
+		}
+	}
+}
+
 func TestInferRiskTierExplicitMappingWins(t *testing.T) {
 	mappings := []ModeRiskMapping{
 		{ModeID: "code", Tier: RiskReadOnly},

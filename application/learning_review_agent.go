@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -134,19 +135,51 @@ func reviewAllowedOp(name string, argsJSON []byte) bool {
 // get the conversation transcript as structured JSON. It is NOT in Toolbox.
 const reviewTranscriptToolName = "review_transcript"
 
-// reviewTranscriptToolDef is the tool definition sent to the LLM so it knows
-// review_transcript exists and how to call it.
+// memoryPrimaryToolName is the synthetic tool that injects the current
+// primary memory content as a tool result. It is NOT in Toolbox and NOT
+// callable by the agent — the review loop pre-injects its result before
+// the first LLM call so the agent sees primary memory as factual ground
+// truth (tool output authority > system prompt authority).
+const memoryPrimaryToolName = "memory_primary"
+
+// reviewTranscriptToolDef is the tool definition sent to the LLM so it
+// knows review_transcript exists and how to call it. The path, start, and
+// end params are informational — the review loop pre-injects the result
+// before the first LLM call, so the agent does not need to call it. But
+// the definition is kept so the agent understands the tool result shape
+// and can optionally call it again for a different range if needed.
 var reviewTranscriptToolDef = ToolDef{
 	Name:        reviewTranscriptToolName,
-	Description: "Get the conversation transcript as structured JSON with proper roles, tool calls, and tool results. Call this FIRST to see what happened, then decide what to save.",
+	Description: "Get a bounded segment of the conversation transcript as structured JSON. The path field is the absolute path to the full conversation JSON file — use file_read on it if you need more context than the provided segment.",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"tail": map[string]any{
+			"path": map[string]any{
+				"type":        "string",
+				"description": "Absolute path to the full conversation JSON file. Use file_read on this path if the provided segment lacks context you need.",
+			},
+			"messages_start": map[string]any{
 				"type":        "integer",
-				"description": "Number of recent messages to include. Omit or 0 for the full configured tail window.",
+				"description": "Start message index (inclusive) of the segment to review. Omit to use the pre-injected segment.",
+			},
+			"messages_end": map[string]any{
+				"type":        "integer",
+				"description": "End message index (exclusive) of the segment to review. Omit to use the pre-injected segment.",
 			},
 		},
+	},
+}
+
+// memoryPrimaryToolDef is the synthetic tool definition for memory_primary.
+// The review loop pre-injects the current primary memory content as a tool
+// result for this tool, so the agent sees it as factual ground truth
+// before deciding what to save. The agent does not need to call it.
+var memoryPrimaryToolDef = ToolDef{
+	Name:        memoryPrimaryToolName,
+	Description: "Current content of primary memory (memory/primary.md). This is pre-injected as a tool result so you can see what is already saved before editing. Do not call this tool — its result is already provided.",
+	InputSchema: map[string]any{
+		"type":       "object",
+		"properties": map[string]any{},
 	},
 }
 
@@ -254,6 +287,21 @@ func (r *BackgroundReviewAgent) runReservedReview(ctx context.Context, conversat
 	// total work independently of wall-clock time.
 	mutations, messages, loopErr := r.runReviewLoop(ctx, adapter, bareModel, conversation)
 	reviewID := saveReviewTranscript(r.app.DataDir, conversationID, model, messages)
+	// Update the incremental review marker regardless of success or
+	// failure. On success this prevents the next review from re-reading
+	// the same segment. On failure this prevents a retry loop from
+	// re-reading the same segment repeatedly — the cooldown gate handles
+	// retry pacing. Only update when the loop actually processed messages
+	// (runReviewLoop returns nil messages when there is nothing new).
+	if messages != nil && r.app.Conversations != nil {
+		newMarker := len(r.transcriptMessages(conversation))
+		if newMarker > conversation.LastReviewedMsgCount {
+			conversation.LastReviewedMsgCount = newMarker
+			if err := r.app.Conversations.Save(conversation); err != nil {
+				r.app.log("warn", "learning", "failed to persist review marker: conv=%s err=%v", conversationID, err)
+			}
+		}
+	}
 	if loopErr != nil {
 		r.app.log("warn", "learning", "review failed mid-loop: conv=%s err=%v mutations=%d", conversationID, loopErr, len(mutations))
 		return loopErr
@@ -328,15 +376,18 @@ func (r *BackgroundReviewAgent) tryAcquireReview(conversationID string) bool {
 	return reserved
 }
 
-// releaseReview clears the active slot. Only failed reviews enter retry
-// cooldown; successful reviews may process later evidence. It returns whether
+// releaseReview clears the active slot. Both successful and failed reviews
+// enter the cooldown — this prevents the threshold trigger from launching a
+// redundant review immediately after a completed one (the incremental marker
+// prevents re-reading, but the cooldown prevents wasted reservation attempts
+// during the burst of turns that cross the threshold). It returns whether
 // new activity was coalesced while the review was active.
 func (r *BackgroundReviewAgent) releaseReview(conversationID string, failed ...bool) bool {
 	r.reviewMu.Lock()
 	defer r.reviewMu.Unlock()
 	pending := r.pending[conversationID]
 	delete(r.inFlight, conversationID)
-	if len(failed) > 0 && failed[0] && r.settings.ReviewCooldown > 0 {
+	if r.settings.ReviewCooldown > 0 {
 		r.lastReview[conversationID] = r.reviewNow()
 	} else {
 		delete(r.lastReview, conversationID)
@@ -471,24 +522,93 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 	if systemPrompt == "" {
 		return nil, nil, nil
 	}
-	// Inject the current primary memory content into the system prompt so
-	// the review agent can see what is already in primary.md before editing
-	// it (avoid duplicates, spot stale text). Without this, the agent would
-	// have to call memory op=list target=primary first, burning a tool round
-	// and sometimes skipping the check entirely.
-	systemPrompt = r.injectPrimaryMemory(systemPrompt)
-	// The review agent gets the conversation via the review_transcript
-	// hydration tool, not as a flat user-message dump. The tool's own
-	// description says to call it FIRST, and the system prompt (review.md
-	// Step 1) instructs the call order — the user message only states the
-	// task.
 	if len(conversation.Messages) == 0 {
 		return nil, nil, nil
 	}
 
+	// Compute the incremental message range [start:end) since the last
+	// review. LastReviewedMsgCount is the persistent marker — each review
+	// only processes messages from that index onward, avoiding re-reading
+	// and re-reasoning over already reviewed content.
+	start := conversation.LastReviewedMsgCount
+	if start < 0 {
+		start = 0
+	}
+	allMsgs := r.transcriptMessages(conversation)
+	end := len(allMsgs)
+	if start > end {
+		// Compaction shrank the merged array (transcriptMessages only
+		// includes the latest chunk, not all chunks). Reset to review
+		// from the beginning of the new array — compaction is a natural
+		// checkpoint, and the chunk content deserves a fresh pass since
+		// the compaction summary itself is new signal.
+		start = 0
+	}
+	if start >= end {
+		// No new messages since last review — nothing to do.
+		return nil, nil, nil
+	}
+
+	// Resolve the conversation JSON file path so the agent can file_read
+	// the full conversation if the bounded segment lacks context.
+	convPath := ""
+	if r.app != nil && r.app.Conversations != nil {
+		if store, ok := r.app.Conversations.(interface{ Path(string) string }); ok {
+			convPath = store.Path(conversation.ID)
+		}
+	}
+
 	tools := r.reviewTools()
+
+	// Build the opening message sequence:
+	//   user:    user/review.md (imperative instruction)
+	//   assistant: synthetic tool_call(review_transcript) + tool_call(memory_primary)
+	//   tool:    review_transcript result (bounded segment)
+	//   tool:    memory_primary result (current primary memory)
+	//
+	// Pre-injecting the synthetic tool results means the agent starts with
+	// both the transcript segment and the current primary memory as factual
+	// ground truth (tool output authority > system prompt authority). The
+	// agent does not need to call these tools — their results are already
+	// in the message stream.
+	userPrompt := resources.ReviewUserPrompt()
+	if userPrompt == "" {
+		userPrompt = "Review this conversation and manage your memories."
+	}
+
+	transcriptOutput := r.executeReviewTranscript(conversation, start, end, convPath)
+	memoryOutput := r.executeMemoryPrimary()
+
+	// Generate stable synthetic tool-call IDs so the tool results can
+	// reference them.
+	reviewTCID := "synthetic_review_transcript"
+	memoryTCID := "synthetic_memory_primary"
+
 	messages := []ChatMessage{
-		{Role: "user", Content: "Review the conversation and decide what to save to memory."},
+		{Role: "user", Content: userPrompt},
+		{
+			Role: "assistant",
+			ToolCalls: []domain.ToolCall{
+				{ID: reviewTCID, Name: reviewTranscriptToolName, Args: fmt.Sprintf(`{"path":%q,"messages_start":%d,"messages_end":%d}`, convPath, start, end)},
+				{ID: memoryTCID, Name: memoryPrimaryToolName, Args: "{}"},
+			},
+		},
+		{
+			Role: "tool",
+			ToolResult: &ToolResult{
+				ToolCallID: reviewTCID,
+				Name:       reviewTranscriptToolName,
+				Content:    transcriptOutput,
+			},
+		},
+		{
+			Role: "tool",
+			ToolResult: &ToolResult{
+				ToolCallID: memoryTCID,
+				Name:       memoryPrimaryToolName,
+				Content:    memoryOutput,
+			},
+		},
 	}
 
 	var mutations []ReviewMutation
@@ -557,13 +677,48 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 		})
 		// Execute each tool call and append results.
 		for _, tc := range resp.ToolCalls {
-			// The hydration tool is executed locally — it is NOT in
+			// The hydration tools are executed locally — they are NOT in
 			// Toolbox and NOT subject to reviewAllowedOp (which only
-			// gates dispatcher roots). Check it BEFORE the gate, or the
-			// whitelist rejects it first and every review dies on its
+			// gates dispatcher roots). Check them BEFORE the gate, or the
+			// whitelist rejects them first and every review dies on its
 			// mandatory opening call.
 			if tc.Name == reviewTranscriptToolName {
-				output := r.executeReviewTranscript(conversation)
+				// Parse optional start/end from the agent's call args.
+				// Default to the pre-injected range when omitted.
+				ts, te := start, end
+				var p string
+				if len(tc.Args) > 0 {
+					var args struct {
+						MessagesStart *int   `json:"messages_start"`
+						MessagesEnd   *int   `json:"messages_end"`
+						Path          string `json:"path"`
+					}
+					if json.Unmarshal([]byte(tc.Args), &args) == nil {
+						if args.MessagesStart != nil {
+							ts = *args.MessagesStart
+						}
+						if args.MessagesEnd != nil {
+							te = *args.MessagesEnd
+						}
+						p = args.Path
+					}
+				}
+				if p == "" {
+					p = convPath
+				}
+				output := r.executeReviewTranscript(conversation, ts, te, p)
+				messages = append(messages, ChatMessage{
+					Role: "tool",
+					ToolResult: &ToolResult{
+						ToolCallID: tc.ID,
+						Name:       tc.Name,
+						Content:    output,
+					},
+				})
+				continue
+			}
+			if tc.Name == memoryPrimaryToolName {
+				output := r.executeMemoryPrimary()
 				messages = append(messages, ChatMessage{
 					Role: "tool",
 					ToolResult: &ToolResult{
@@ -646,31 +801,36 @@ func isNothingToSave(content string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(content)), "nothing to save")
 }
 
-// injectPrimaryMemory reads the current primary memory from the PrimaryStore
-// and substitutes it into the review system prompt's {{primary_memory}}
-// placeholder. Each entry is rendered as a bullet line so the agent can
-// see what is already in primary memory. memory op=replace target=primary
-// (substring match), not IDs, so no ID prefix is needed. Returns the
-// prompt unchanged when no PrimaryStore is configured or the document is empty.
-func (r *BackgroundReviewAgent) injectPrimaryMemory(prompt string) string {
+// executeMemoryPrimary returns the current primary memory content as a
+// plain-text tool result for the synthetic memory_primary tool. This is
+// pre-injected by runReviewLoop before the first LLM call so the agent
+// sees primary memory as factual ground truth (tool output authority >
+// system prompt authority). Returns "(empty)" when no PrimaryStore is
+// configured or the document has no entries.
+func (r *BackgroundReviewAgent) executeMemoryPrimary() string {
 	if r.app == nil || r.app.Primary == nil {
-		return strings.ReplaceAll(prompt, resources.PrimaryMemoryPlaceholder(), "(unavailable)")
+		return "(unavailable)"
 	}
 	mem := r.app.Primary.Load()
 	if mem == nil || len(mem.Entries) == 0 {
-		return strings.ReplaceAll(prompt, resources.PrimaryMemoryPlaceholder(), "(empty)")
+		return "(empty)"
 	}
-	lines := make([]string, 0, len(mem.Entries))
+	var b strings.Builder
 	for _, e := range mem.Entries {
-		lines = append(lines, fmt.Sprintf("- %s", e.Content))
+		b.WriteString("- ")
+		b.WriteString(e.Content)
+		b.WriteString("\n")
 	}
-	return resources.SubstitutePrimaryMemory(prompt, lines)
+	return strings.TrimSpace(b.String())
 }
 
 // reviewTools returns the restricted tool definitions for the review agent.
+// The two synthetic tools (review_transcript, memory_primary) are listed
+// first so the LLM knows their schemas, but their results are pre-injected
+// by runReviewLoop before the first LLM call — the agent does not need to
+// call them to get the initial data.
 func (r *BackgroundReviewAgent) reviewTools() []ToolDef {
-	// The hydration tool is always first in the list and is NOT in Toolbox.
-	out := []ToolDef{reviewTranscriptToolDef}
+	out := []ToolDef{reviewTranscriptToolDef, memoryPrimaryToolDef}
 	all := append(r.app.Toolbox.ListTools(), DispatcherToolInfos()...)
 	for _, t := range all {
 		if reviewToolWhitelist()[t.Name] && t.Name != reviewTranscriptToolName {
@@ -732,13 +892,15 @@ func (r *BackgroundReviewAgent) buildTranscript(c *domain.Conversation) string {
 	return strings.Join(lines, "\n\n")
 }
 
-// transcriptMessages returns the messages to review. Compaction strips tool
-// calls and reasoning from retained messages (StripForRetention), so when the
-// conversation has archived chunks the latest chunk — which preserves the
-// full dropped window including tool calls — is prepended to restore the
-// tool-call evidence the review needs to spot skill-worthy patterns. Falls
-// back to the live messages alone when no store is configured or the chunk
-// is unavailable.
+// transcriptMessages returns the messages to review. Compaction retains real
+// user messages in the live transcript (they carry the user's goal) but
+// archives non-user messages (assistant responses, tool calls) that exceed
+// the keep-token budget. This means the chunk and live slices are
+// temporally interleaved, not contiguous — naively prepending the chunk
+// produces assistant responses before the user messages that triggered them.
+// To preserve the real conversation flow, chunk and live messages are merged
+// by CreatedAt timestamp. Falls back to the live messages alone when no
+// store is configured or the chunk is unavailable.
 func (r *BackgroundReviewAgent) transcriptMessages(c *domain.Conversation) []domain.Message {
 	msgs := c.Messages
 	if r.app == nil || r.app.Conversations == nil || c.ChunkCount <= 0 {
@@ -751,6 +913,12 @@ func (r *BackgroundReviewAgent) transcriptMessages(c *domain.Conversation) []dom
 	merged := make([]domain.Message, 0, len(chunk)+len(msgs))
 	merged = append(merged, chunk...)
 	merged = append(merged, msgs...)
+	// Sort by CreatedAt to restore chronological order. Compaction retains
+	// user messages in live and archives assistant messages to chunks, so
+	// without sorting the merged array has responses before questions.
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].CreatedAt.Before(merged[j].CreatedAt)
+	})
 	return merged
 }
 
@@ -794,33 +962,54 @@ type transcriptToolCallJSON struct {
 type transcriptEnvelope struct {
 	ConversationID string                  `json:"conversation_id"`
 	Model          string                  `json:"model,omitempty"`
+	Path           string                  `json:"path,omitempty"`
+	MessageStart   int                     `json:"message_start"`
+	MessageEnd     int                     `json:"message_end"`
 	MessageCount   int                     `json:"message_count"`
 	Messages       []transcriptMessageJSON `json:"messages"`
 }
 
-// executeReviewTranscript returns the conversation transcript as structured
-// JSON for the review agent. It is the local handler for the
-// review_transcript hydration tool — NOT dispatched via Toolbox.Execute.
+// executeReviewTranscript returns a bounded segment of the conversation
+// transcript as structured JSON for the review agent. It is the local
+// handler for the review_transcript hydration tool — NOT dispatched via
+// Toolbox.Execute.
+//
+// The start and end parameters define the message range [start:end) to
+// include. This is an incremental marker: each review only processes
+// messages since the last review, avoiding re-reading and re-reasoning
+// over already reviewed content. The path field exposes the absolute path
+// to the full conversation JSON file so the agent can file_read it if the
+// bounded segment lacks context.
 //
 // The JSON preserves role alternation (user/assistant), nests tool calls
 // inside the assistant message that produced them, and truncates per-message
 // content and per-tool-output to the same caps as buildTranscript. The total
 // output is bounded by MaxTranscriptTokens (chars = tokens*4) so tool-heavy
 // conversations cannot overflow the review model's context window.
-func (r *BackgroundReviewAgent) executeReviewTranscript(c *domain.Conversation) string {
-	tail := r.transcriptMessages(c)
-	if len(tail) > r.settings.TranscriptTailMsgs {
-		tail = tail[len(tail)-r.settings.TranscriptTailMsgs:]
+func (r *BackgroundReviewAgent) executeReviewTranscript(c *domain.Conversation, start, end int, path string) string {
+	all := r.transcriptMessages(c)
+	if start < 0 {
+		start = 0
 	}
+	if end <= 0 || end > len(all) {
+		end = len(all)
+	}
+	if start > end {
+		start = end
+	}
+	segment := all[start:end]
 
 	env := transcriptEnvelope{
 		ConversationID: c.ID,
 		Model:          c.Model,
-		MessageCount:   len(tail),
-		Messages:       make([]transcriptMessageJSON, 0, len(tail)),
+		Path:           path,
+		MessageStart:   start,
+		MessageEnd:     end,
+		MessageCount:   len(segment),
+		Messages:       make([]transcriptMessageJSON, 0, len(segment)),
 	}
 
-	for _, m := range tail {
+	for _, m := range segment {
 		content := m.Content
 		if len(content) > r.settings.MaxTranscriptChars {
 			content = content[:r.settings.MaxTranscriptChars] + "…[truncated]"
@@ -851,6 +1040,7 @@ func (r *BackgroundReviewAgent) executeReviewTranscript(c *domain.Conversation) 
 			break
 		}
 		env.Messages = env.Messages[1:]
+		env.MessageStart++
 		env.MessageCount = len(env.Messages)
 	}
 

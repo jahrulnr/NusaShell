@@ -81,7 +81,15 @@ turn. When all subagents complete, the chain resumes.
 
 `subagent` is always async. When you need the result before continuing,
 call `subagent_wait` with the run id; to adjust a live run use
-`subagent_steer`, and to cancel it use `subagent_stop`.
+`subagent_steer`, and to cancel it use `subagent_stop`. All three return
+the full run DTO (status, workspace, transcript) to the frontend
+transcript drawer, but the model only receives a short text summary: run
+id, status, the LAST text chunk (the agent's final message, truncated to
+2000 chars), or the last reasoning chunk if no text was produced, or the
+error/stop reason + last tool as fallback. Intermediate progress,
+thought, tool, plan, status, and usage chunks are stripped — the full
+transcript stays in the persisted JSON (`output_path`) for reference via
+`file_read`.
 
 Good example — wait with a bounded timeout:
 

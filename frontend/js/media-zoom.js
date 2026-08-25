@@ -351,3 +351,133 @@ export function attachZoomButtons(container) {
     wrapper.append(btn);
   }
 }
+
+// ─── Audio popup (fullscreen player, no zoom) ──────────────────────
+
+// openAudioLightbox opens a fullscreen overlay with a centered <audio>
+// element so the user can play the result without leaving the chat
+// thread. Mirrors openImageLightbox in shape (close button + caption +
+// Download affordance) but skips the zoom/pan controls — audio is a
+// temporal medium, not a spatial one, and the native controls already
+// cover the playback affordances.
+export function openAudioLightbox({ src, name, caption } = {}) {
+  if (!src) return;
+
+  const overlay = el('div', {
+    class: 'media-zoom-overlay agent-audio-lightbox',
+    role: 'dialog',
+    'aria-modal': 'true',
+    'aria-label': name || caption || 'Audio player',
+  });
+  const closeBtn = el('button', {
+    class: 'media-zoom-close',
+    type: 'button',
+    text: 'Close',
+    'aria-label': 'Close',
+  });
+  const bar = el('div', { class: 'media-zoom-bar agent-audio-bar' },
+    caption ? el('span', { class: 'media-zoom-caption', text: caption }) : null,
+    el('a', { class: 'media-zoom-download', href: src, download: name || 'audio', text: 'Download' }),
+  );
+  const frame = el('div', { class: 'agent-audio-lightbox-frame' });
+  const audio = el('audio', {
+    class: 'agent-audio-lightbox-player',
+    controls: true,
+    preload: 'metadata',
+    src,
+  });
+  audio.addEventListener('error', () => audio.classList.add('audio-load-error'));
+  frame.append(audio);
+  overlay.append(closeBtn, bar, frame);
+  document.body.append(overlay);
+
+  const onKey = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    }
+  };
+  const unregister = registerOverlayDismiss(close);
+  function close() {
+    unregister();
+    // Pause before removing so playback doesn't leak into the next mount.
+    try { audio.pause(); } catch { /* ignore */ }
+    document.removeEventListener('keydown', onKey, true);
+    overlay.remove();
+  }
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  closeBtn.addEventListener('click', close);
+  document.addEventListener('keydown', onKey, true);
+
+  // Autoplay inside the popup. Browser policies gate this on user gesture,
+  // but opening a modal IS a user gesture in every browser, so playback
+  // starts without prompting. If the policy blocks, the native controls
+  // are right there.
+  audio.play().catch(() => { /* blocked — controls remain usable */ });
+  closeBtn.focus();
+}
+
+// openVideoLightbox opens a fullscreen overlay with a centered <video>
+// element so the user can play the result without leaving the chat
+// thread. Mirrors openImageLightbox / openAudioLightbox in shape (close
+// button + caption + Download affordance). Native controls already cover
+// the playback affordances, so no zoom/pan controls are needed.
+export function openVideoLightbox({ src, name, caption } = {}) {
+  if (!src) return;
+
+  const overlay = el('div', {
+    class: 'media-zoom-overlay agent-video-lightbox',
+    role: 'dialog',
+    'aria-modal': 'true',
+    'aria-label': name || caption || 'Video player',
+  });
+  const closeBtn = el('button', {
+    class: 'media-zoom-close',
+    type: 'button',
+    text: 'Close',
+    'aria-label': 'Close',
+  });
+  const bar = el('div', { class: 'media-zoom-bar agent-video-bar' },
+    caption ? el('span', { class: 'media-zoom-caption', text: caption }) : null,
+    el('a', { class: 'media-zoom-download', href: src, download: name || 'video', text: 'Download' }),
+  );
+  const frame = el('div', { class: 'agent-video-lightbox-frame' });
+  const video = el('video', {
+    class: 'agent-video-lightbox-player',
+    controls: true,
+    autoplay: true,
+    preload: 'metadata',
+    src,
+  });
+  video.addEventListener('error', () => video.classList.add('video-load-error'));
+  frame.append(video);
+  overlay.append(closeBtn, bar, frame);
+  document.body.append(overlay);
+
+  const onKey = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    }
+  };
+  const unregister = registerOverlayDismiss(close);
+  function close() {
+    unregister();
+    // Pause before removing so playback doesn't leak into the next mount.
+    try { video.pause(); } catch { /* ignore */ }
+    document.removeEventListener('keydown', onKey, true);
+    overlay.remove();
+  }
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  closeBtn.addEventListener('click', close);
+  document.addEventListener('keydown', onKey, true);
+
+  // Autoplay inside the popup. Browser policies gate this on user gesture,
+  // but opening a modal IS a user gesture in every browser, so playback
+  // starts without prompting. If the policy blocks, the native controls
+  // are right there.
+  video.play().catch(() => { /* blocked — controls remain usable */ });
+  closeBtn.focus();
+}

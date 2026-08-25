@@ -11,7 +11,7 @@ func TestSubagentCompletionResultNormalText(t *testing.T) {
 		Workspace: "/tmp/proj",
 		Transcript: []AcpTranscriptChunk{
 			{Kind: "text", Text: "I fixed the bug by updating the handler."},
-			{Kind: "text", Text: " All tests pass."},
+			{Kind: "text", Text: "All tests pass."},
 		},
 	}
 	got := SubagentCompletionResult(run, "/data/acp_runs.jsonl")
@@ -27,8 +27,12 @@ func TestSubagentCompletionResultNormalText(t *testing.T) {
 	if !strings.Contains(got, "output_path: /data/acp_runs.jsonl") {
 		t.Fatalf("expected output_path in header, got %q", got)
 	}
-	if !strings.Contains(got, "I fixed the bug by updating the handler. All tests pass.") {
-		t.Fatalf("expected body text, got %q", got)
+	// Only the LAST text chunk should appear — not intermediate progress.
+	if !strings.Contains(got, "All tests pass.") {
+		t.Fatalf("expected last text chunk in body, got %q", got)
+	}
+	if strings.Contains(got, "I fixed the bug by updating the handler.") {
+		t.Fatalf("intermediate text must not leak into summary, got %q", got)
 	}
 }
 
@@ -66,6 +70,10 @@ func TestSubagentCompletionResultFailedNoText(t *testing.T) {
 	}
 	if !strings.Contains(got, "timeout") {
 		t.Fatalf("expected error reason, got %q", got)
+	}
+	// Last thought should appear as fallback when no text chunk exists.
+	if !strings.Contains(got, "thinking...") {
+		t.Fatalf("expected last thought as fallback, got %q", got)
 	}
 }
 
@@ -105,11 +113,9 @@ func TestSubagentCompletionResultThinkingOnly(t *testing.T) {
 		},
 	}
 	got := SubagentCompletionResult(run, "")
-	if strings.Contains(got, "I should consider the edge cases") {
-		t.Fatalf("thinking text must not leak into summary, got %q", got)
-	}
-	if !strings.Contains(got, "no text output") {
-		t.Fatalf("expected no-text-output fallback, got %q", got)
+	// Last thought should appear as fallback when no text chunk exists.
+	if !strings.Contains(got, "I should consider the edge cases...") {
+		t.Fatalf("expected last thought as fallback, got %q", got)
 	}
 }
 
@@ -140,6 +146,33 @@ func TestSubagentCompletionResultCancelledNoText(t *testing.T) {
 	}
 	if !strings.Contains(got, "cancelled") {
 		t.Fatalf("expected cancellation indicator, got %q", got)
+	}
+}
+
+// TestSubagentCompletionResultLastTextOnly verifies that when a run has
+// multiple text chunks (intermediate progress + final summary), only the
+// LAST text chunk appears in the body — the full transcript stays in the
+// persisted JSON output file.
+func TestSubagentCompletionResultLastTextOnly(t *testing.T) {
+	run := &AcpRun{
+		Status: AcpRunCompleted,
+		Transcript: []AcpTranscriptChunk{
+			{Kind: "text", Text: "Starting the refactor."},
+			{Kind: "tool", ToolTitle: "edit_file", ToolStatus: "completed"},
+			{Kind: "text", Text: "Halfway done, updating tests."},
+			{Kind: "tool", ToolTitle: "run_tests", ToolStatus: "completed"},
+			{Kind: "text", Text: "Refactor complete. All 42 tests pass."},
+		},
+	}
+	got := SubagentCompletionResult(run, "/data/run.json")
+	if !strings.Contains(got, "Refactor complete. All 42 tests pass.") {
+		t.Fatalf("expected last text chunk in body, got %q", got)
+	}
+	if strings.Contains(got, "Starting the refactor.") {
+		t.Fatalf("first text chunk must not leak, got %q", got)
+	}
+	if strings.Contains(got, "Halfway done, updating tests.") {
+		t.Fatalf("intermediate text chunk must not leak, got %q", got)
 	}
 }
 

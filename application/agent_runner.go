@@ -1227,7 +1227,7 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 				msgs = append(msgs, ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: calls})
 				for _, tc := range calls {
 					msgs = append(msgs, ChatMessage{Role: "tool", ToolResult: &ToolResult{
-						ToolCallID: tc.ID, Name: tc.Name, Content: wrapToolOutput(tc.Name, tc.Output),
+						ToolCallID: tc.ID, Name: tc.Name, Content: providerToolContent(tc.Name, tc.Output),
 					}})
 				}
 			}
@@ -1790,20 +1790,20 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 			cm := ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: m.ToolCalls}
 			out = append(out, cm)
 			for _, tc := range m.ToolCalls {
-				toolContent := wrapToolOutput(tc.Name, tc.Output)
+				// Summarize first (show/subagent get short summaries),
+				// then filter attachments by model capability (appends
+				// notes for unsupported media), then wrap the combined
+				// content in the untrusted envelope. This order ensures
+				// capability-filter notes land INSIDE the envelope —
+				// appending notes after wrapping would let a malicious
+				// tool craft a file path containing injection
+				// instructions that the model treats as trusted content.
+				toolContent := summarizeToolContent(tc.Name, tc.Output)
 				toolAtts := tc.OutputAttachments
-				// Filter tool result attachments by model capability.
-				// read_media returns media
-				// attachments that are only useful to models that
-				// support the corresponding modality. Sending audio to
-				// a non-audio model causes provider errors (e.g. Nvidia
-				// rejects audio data URLs with "Failed to load image").
-				// Strip unsupported media and append a text note so the
-				// model knows the content exists but can't be delivered
-				// to it directly.
 				if len(toolAtts) > 0 {
 					toolAtts, toolContent = filterToolAttachmentsByCaps(toolAtts, toolContent, caps)
 				}
+				toolContent = wrapToolOutput(tc.Name, toolContent)
 				out = append(out, ChatMessage{Role: "tool", ToolResult: &ToolResult{
 					ToolCallID: tc.ID, Name: tc.Name, Content: toolContent,
 					Attachments: toolAtts,

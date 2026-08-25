@@ -48,3 +48,25 @@ func TestLoadIgnoresLegacySidecarsAndUnparsableFiles(t *testing.T) {
 		t.Fatalf("want only conv_ok loaded, got %d conversations", len(convs))
 	}
 }
+
+// TestStorePath verifies the Path method returns the absolute file path for
+// a conversation ID and rejects unsafe path segments.
+func TestStorePath(t *testing.T) {
+	dir := t.TempDir()
+	s, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	got := s.Path("conv_abc123")
+	want := filepath.Join(dir, "conversations", "conv_abc123.json")
+	if got != want {
+		t.Errorf("Path = %q, want %q", got, want)
+	}
+	// Unsafe IDs must return "" to prevent path traversal.
+	if s.Path("../etc/passwd") != "" {
+		t.Error("Path should reject path traversal attempts")
+	}
+	if s.Path("") != "" {
+		t.Error("Path should reject empty ID")
+	}
+}

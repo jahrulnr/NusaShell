@@ -4,6 +4,7 @@ import { rpc } from '../../rpc.js';
 import { createAskCard } from '../ask-card.js';
 import { openDrawer, agentNameForId, firstVisibleRunId } from './subagents.js';
 import { renderArtifactCard, parseArtifactOutput } from '../../artifact-render.js';
+import { openAudioLightbox, openVideoLightbox } from '../../media-zoom.js';
 import { agentThread, composerInput, toolJobStrip } from './domrefs.js';
 
 export const STARTER_PROMPTS = [
@@ -238,7 +239,7 @@ function appendAssistantSteps(bubble, message) {
         textBox.innerHTML = renderMarkdown(step.content);
         bubble.append(textBox);
       } else if (step.type === 'tool_calls' && step.tool_calls?.length) {
-        bubble.append(el('div', { class: 'agent-tool-stack' }, step.tool_calls.map(renderToolCallCard)));
+        appendToolCards(bubble, step.tool_calls.map(renderToolCallCard));
       }
     }
   } else {
@@ -246,7 +247,27 @@ function appendAssistantSteps(bubble, message) {
     const textBox = el('div', { class: 'agent-bubble-text' });
     if (message.content) textBox.innerHTML = renderMarkdown(message.content);
     if (textBox.innerHTML) bubble.append(textBox);
-    if (message.tool_calls?.length) bubble.append(el('div', { class: 'agent-tool-stack' }, message.tool_calls.map(renderToolCallCard)));
+    if (message.tool_calls?.length) appendToolCards(bubble, message.tool_calls.map(renderToolCallCard));
+  }
+}
+
+// appendToolCards splits rendered tool cards into standalone cards (ask,
+// show, generate_*, artifact, subagent — anything with its own frame) and
+// tool terminals (exec, grep, file_read — plain collapsible rows). Standalone
+// cards append directly to the bubble so they render without the
+// .agent-tool-stack border-left lane; terminals are grouped inside a stack
+// so the border-left visual cue applies only to terminal-style output.
+function appendToolCards(bubble, cards) {
+  const terminals = [];
+  for (const card of cards) {
+    if (card.dataset.standalone === 'true') {
+      bubble.append(card);
+    } else {
+      terminals.push(card);
+    }
+  }
+  if (terminals.length) {
+    bubble.append(el('div', { class: 'agent-tool-stack' }, terminals));
   }
 }
 
@@ -267,44 +288,140 @@ function totalUsage(messages) {
 // name. ask_question renders as a sealed ask card (matching Electron's
 // toolActivity); subagent renders as a delegation card (clickable → drawer);
 // everything else renders as a tool terminal.
+//
+// Cards with their own border/frame (ask_question, subagent, generate_*,
+// show, artifact) are marked dataset.standalone="true" so the caller can
+// place them outside the .agent-tool-stack lane — the stack's border-left
+// is a visual cue for tool terminals (exec, grep, file_read) only, and
+// looks wrong around a media card or ask panel that already has its own
+// frame.
 export function renderToolCallCard(toolCall) {
   if (toolCall.name === 'ask_question') {
     // args arrives as a parsed object from the wire DTO (json.RawMessage);
     // parseToolArgs tolerates both object and JSON-string shapes.
     const parsedArgs = parseToolArgs(toolCall.args);
-    return createAskCard(toolCall.id, parsedArgs, {
+    const card = createAskCard(toolCall.id, parsedArgs, {
       sealed: true,
       output: toolCall.output || '',
       ok: toolCall.status !== 'fail',
     });
+    card.dataset.standalone = 'true';
+    return card;
   }
   if (toolCall.name === 'subagent') {
-    return renderSubagentCard(toolCall);
+    const card = renderSubagentCard(toolCall);
+    card.dataset.standalone = 'true';
+    return card;
   }
   if (toolCall.name === 'generate_image') {
-    return renderGenerateImageCard(toolCall);
+    const card = renderGenerateImageCard(toolCall);
+    card.dataset.standalone = 'true';
+    return card;
+  }
+  if (toolCall.name === 'generate_speech') {
+    const card = renderGenerateSpeechCard(toolCall);
+    card.dataset.standalone = 'true';
+    return card;
+  }
+  if (toolCall.name === 'generate_video') {
+    const card = renderGenerateVideoCard(toolCall);
+    card.dataset.standalone = 'true';
+    return card;
   }
   const artifact = parseArtifactOutput(toolCall);
   if (artifact) {
-    return renderArtifactCard(toolCall, artifact);
+    const card = renderArtifactCard(toolCall, artifact);
+    card.dataset.standalone = 'true';
+    return card;
   }
   const showImage = parseShowImageOutput(toolCall);
   if (showImage) {
-    return renderShowImageCard(toolCall, showImage);
+    const card = renderShowImageCard(toolCall, showImage);
+    card.dataset.standalone = 'true';
+    return card;
+  }
+  const showAudio = parseShowAudioOutput(toolCall);
+  if (showAudio) {
+    const card = renderShowAudioCard(toolCall, showAudio);
+    card.dataset.standalone = 'true';
+    return card;
+  }
+  const showVideo = parseShowVideoOutput(toolCall);
+  if (showVideo) {
+    const card = renderShowVideoCard(toolCall, showVideo);
+    card.dataset.standalone = 'true';
+    return card;
   }
   return renderToolJob(toolCall);
 }
 
 // parseShowImageOutput extracts a show(op=image) result from a tool call's
-// output. Returns { src, path } or null when the output is not a show image
-// result.
+// output. Returns { src, path, name } or null when the output is not a
+// show image result. The src field may be absent — the backend no longer
+// embeds a base64 data URL in the tool output (it bloats the conversation
+// JSON and is useless to the LLM). When src is missing, the frontend falls
+// back to /local-file?path= using the path field.
 export function parseShowImageOutput(toolCall) {
   if (toolCall.name !== 'show') return null;
   if (!toolCall.output) return null;
   try {
     const parsed = JSON.parse(toolCall.output);
-    if (parsed && parsed.show && parsed.show.type === 'image' && parsed.show.src) {
-      return { src: parsed.show.src, path: parsed.show.path || '' };
+    if (parsed && parsed.show && parsed.show.type === 'image' && parsed.show.path) {
+      const src = parsed.show.src || ('/local-file?path=' + encodeURIComponent(parsed.show.path));
+      return { src, path: parsed.show.path, name: parsed.show.name || '' };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// parseShowAudioOutput mirrors parseShowImageOutput for the audio variant.
+// The wire shape is { show: { type:"audio", path, name } }. The src field
+// may be absent — the backend no longer embeds a base64 data URL in the
+// tool output. When src is missing, the frontend falls back to
+// /local-file?path= using the path field. Returns null for any non-audio
+// show result so the dispatcher in renderToolCallCard can fall through to
+// the default tool terminal.
+export function parseShowAudioOutput(toolCall) {
+  if (toolCall.name !== 'show') return null;
+  if (!toolCall.output) return null;
+  try {
+    const parsed = JSON.parse(toolCall.output);
+    if (parsed && parsed.show && parsed.show.type === 'audio' && parsed.show.path) {
+      const src = parsed.show.src || ('/local-file?path=' + encodeURIComponent(parsed.show.path));
+      return {
+        src,
+        path: parsed.show.path,
+        name: parsed.show.name || '',
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// parseShowVideoOutput mirrors parseShowImageOutput / parseShowAudioOutput
+// for the video variant. The wire shape is { show: { type, path, name } }.
+// The src field may be absent — the backend no longer embeds a base64 data
+// URL in the tool output (a 4.5MB video becomes a 6MB base64 string that
+// bloats the conversation JSON and is useless to the LLM). When src is
+// missing, the frontend falls back to /local-file?path= using the path
+// field. Returns null for any non-video show result so the dispatcher in
+// renderToolCallCard can fall through to the default tool terminal.
+export function parseShowVideoOutput(toolCall) {
+  if (toolCall.name !== 'show') return null;
+  if (!toolCall.output) return null;
+  try {
+    const parsed = JSON.parse(toolCall.output);
+    if (parsed && parsed.show && parsed.show.type === 'video' && parsed.show.path) {
+      const src = parsed.show.src || ('/local-file?path=' + encodeURIComponent(parsed.show.path));
+      return {
+        src,
+        path: parsed.show.path,
+        name: parsed.show.name || '',
+      };
     }
     return null;
   } catch {
@@ -346,7 +463,79 @@ function renderShowImageCard(toolCall, showImage) {
   return card;
 }
 
-// renderSubagentCard builds a delegation card for the `subagent` tool.
+// renderShowAudioCard builds an inline audio card for a show(op=audio)
+// result. Mirrors renderShowImageCard layout: a header with the path
+// basename, a plate with a click-to-play button wrapping a hidden audio
+// element (controls surface on click via openAudioLightbox), and a
+// Download affordance. The inline data URL is the playback source so the
+// user hears the audio without an HTTP round trip when the tool result
+// was just delivered.
+function renderShowAudioCard(toolCall, showAudio) {
+  const card = el('div', { class: 'agent-genaudio-card is-done', 'data-tool': 'show' });
+  const title = showAudio.name || (showAudio.path ? showAudio.path.split(/[\\/]/).pop() : 'Audio');
+  const head = el('div', { class: 'agent-genaudio-head' },
+    el('span', { class: 'agent-genaudio-kicker', text: 'audio' }),
+    el('span', { class: 'agent-genaudio-title', text: title }),
+  );
+  card.append(head);
+  const plate = el('div', { class: 'agent-genaudio-plate' });
+  const audio = el('audio', { controls: true, preload: 'metadata', src: showAudio.src });
+  audio.addEventListener('error', () => audio.classList.add('audio-load-error'));
+  const open = () => openAudioLightbox({ src: showAudio.src, name: title, caption: showAudio.path });
+  const btn = el('button', { class: 'agent-genaudio-open', type: 'button', 'aria-label': 'Listen to ' + title });
+  btn.append(audio);
+  btn.addEventListener('click', open);
+  plate.append(btn);
+  card.append(plate);
+  const caption = el('div', { class: 'agent-genaudio-caption' });
+  if (showAudio.path) {
+    caption.append(el('a', {
+      class: 'agent-genaudio-download',
+      href: showAudio.src,
+      download: title,
+      text: 'Download',
+    }));
+  }
+  if (caption.children.length) card.append(caption);
+  return card;
+}
+
+// renderShowVideoCard builds an inline video card for a show(op=video)
+// result. Mirrors renderShowImageCard and renderShowAudioCard layout:
+// a header with the path basename, a plate with a click-to-play button
+// wrapping a hidden <video> element (controls surface on click via
+// openVideoLightbox), and a Download affordance. The inline data URL is
+// the playback source so the user can play the video without an HTTP
+// round trip when the tool result was just delivered.
+function renderShowVideoCard(toolCall, showVideo) {
+  const card = el('div', { class: 'agent-genvideo-card is-done', 'data-tool': 'show' });
+  const title = showVideo.name || (showVideo.path ? showVideo.path.split(/[\\/]/).pop() : 'Video');
+  const head = el('div', { class: 'agent-genvideo-head' },
+    el('span', { class: 'agent-genvideo-kicker', text: 'video' }),
+    el('span', { class: 'agent-genvideo-title', text: title }),
+  );
+  card.append(head);
+  const plate = el('div', { class: 'agent-genvideo-plate' });
+  const video = el('video', { controls: true, preload: 'metadata', src: showVideo.src });
+  video.addEventListener('error', () => video.classList.add('video-load-error'));
+  const open = () => openVideoLightbox({ src: showVideo.src, name: title, caption: showVideo.path });
+  const btn = el('button', { class: 'agent-genvideo-open', type: 'button', 'aria-label': 'Play ' + title });
+  btn.append(video);
+  btn.addEventListener('click', open);
+  plate.append(btn);
+  card.append(plate);
+  const caption = el('div', { class: 'agent-genvideo-caption' });
+  if (showVideo.path) {
+    caption.append(el('a', {
+      class: 'agent-genvideo-download',
+      href: showVideo.src,
+      download: title,
+      text: 'Download',
+    }));
+  }
+  if (caption.children.length) card.append(caption);
+  return card;
+}
 // Async flow: saat spawn, output = YAML frontmatter
 // `runs: [{id, status, workspace}]` (status "starting"). Saat selesai,
 // output = YAML frontmatter (status, workspace, output_path) + markdown
@@ -613,6 +802,197 @@ export function renderGenerateImageCard(toolCall) {
   return card;
 }
 
+// renderGenerateSpeechCard mirrors renderGenerateImageCard but for
+// generate_speech. Surfaces provider/model/voice/duration/cost parsed from
+// the YAML output frontmatter plus a click-to-play <audio> plate and a
+// Download link, so the speech tool has the same affordances the image
+// tool already has. Falls back to /local-file?path= when the inline data
+// URL is absent (large audio payloads, replayed history).
+function renderGenerateSpeechCard(toolCall) {
+  const args = parseToolArgs(toolCall.args);
+  const parsed = parseSubagentResult(toolCall.output || '');
+  const meta = parsed.meta || {};
+  // output_attachments is the wire field; older history may use
+  // .attachments. We accept either.
+  const attachments = [...(toolCall.output_attachments || toolCall.attachments || [])]
+    .filter((item) => !item.type || item.type === 'audio');
+  const isFailed = toolCall.status === 'fail' || meta.status === 'failed';
+  const isRunning = !isFailed && (toolCall.status === 'running' || !toolCall.output);
+  const status = isRunning ? 'running' : (isFailed ? 'error' : 'success');
+  const prompt = String(args.text || args.prompt || '').trim();
+  const promptPreview = prompt.split('\n')[0].slice(0, 140);
+
+  const card = el('div', { class: `agent-genaudio-card is-${status}`, 'data-tool': 'generate_speech' });
+  card._toolArgs = toolCall.args;
+  card._toolName = 'generate_speech';
+
+  const head = el('div', { class: 'agent-genaudio-head' },
+    el('span', { class: 'agent-genaudio-kicker', text: 'speech' }),
+    el('span', { class: 'agent-genaudio-title', text: isRunning ? 'Synthesizing' : (isFailed ? 'Did not synthesize' : 'Take') }),
+    el('span', { class: 'agent-tool-elapsed', text: '' }),
+  );
+  card.append(head);
+
+  const plate = el('div', { class: 'agent-genaudio-plate' });
+  if (isRunning) {
+    plate.append(el('div', { class: 'agent-genaudio-grain', 'aria-hidden': 'true' }));
+    plate.append(el('p', { class: 'agent-genaudio-wait', text: 'Voice warming up' }));
+  } else if (isFailed) {
+    const errText = (parsed.body || toolCall.output || 'Speech generation failed').replace(/^error:\s*/i, '').slice(0, 280);
+    plate.append(el('p', { class: 'agent-genaudio-error', text: errText }));
+  } else {
+    const audios = [...attachments];
+    if (!audios.length && meta.file_path) {
+      audios.push({ type: 'audio', name: meta.file_path.split(/[\\/]/).pop(), file_path: meta.file_path, media_type: meta.media_type });
+    }
+    if (!audios.length) {
+      plate.append(el('p', { class: 'agent-genaudio-wait', text: 'No audio bytes in this result' }));
+    } else {
+      const gallery = el('div', { class: 'agent-genaudio-gallery', 'data-count': String(audios.length) });
+      for (const attachment of audios) {
+        const src = attachment.data_url || (attachment.file_path ? '/local-file?path=' + encodeURIComponent(attachment.file_path) : '');
+        const label = attachment.name || promptPreview || 'Generated speech';
+        const audio = el('audio', { controls: true, preload: 'metadata', src });
+        audio.addEventListener('error', () => audio.classList.add('audio-load-error'));
+        const open = () => openAudioLightbox({
+          src,
+          name: attachment.name || 'generated-speech.wav',
+          caption: [meta.model, meta.voice, meta.provider].filter(Boolean).join(' · '),
+        });
+        const btn = el('button', { class: 'agent-genaudio-open', type: 'button', 'aria-label': 'Listen to ' + label });
+        btn.append(audio);
+        btn.addEventListener('click', open);
+        gallery.append(el('figure', { class: 'agent-genaudio-frame' }, btn));
+      }
+      plate.append(gallery);
+    }
+  }
+  card.append(plate);
+
+  const caption = el('div', { class: 'agent-genaudio-caption' });
+  if (promptPreview) {
+    caption.append(el('p', { class: 'agent-genaudio-prompt', text: promptPreview, title: prompt }));
+  }
+  const chips = el('div', { class: 'agent-genaudio-meta' });
+  const provider = meta.provider || '';
+  const model = meta.model || '';
+  const voice = meta.voice || '';
+  const cost = formatImageCost(meta.cost_usd);
+  if (provider) chips.append(el('span', { class: 'agent-genaudio-chip', text: provider }));
+  if (model) chips.append(el('span', { class: 'agent-genaudio-chip', text: model }));
+  if (voice) chips.append(el('span', { class: 'agent-genaudio-chip', text: 'voice: ' + voice }));
+  if (cost) chips.append(el('span', { class: 'agent-genaudio-chip', text: cost }));
+  if (chips.children.length) caption.append(chips);
+  const first = attachments[0] || (meta.file_path ? { name: meta.file_path.split(/[\\/]/).pop(), file_path: meta.file_path } : null);
+  const downloadSrc = first ? (first.data_url || (first.file_path ? '/local-file?path=' + encodeURIComponent(first.file_path) : '')) : '';
+  if (downloadSrc && !isRunning && !isFailed) {
+    caption.append(el('a', {
+      class: 'agent-genaudio-download',
+      href: downloadSrc,
+      download: first?.name || 'generated-speech.wav',
+      text: 'Download',
+    }));
+  }
+  if (caption.children.length) card.append(caption);
+  return card;
+}
+
+// renderGenerateVideoCard mirrors renderGenerateImageCard and
+// renderGenerateSpeechCard but for generate_video. Surfaces
+// provider/model/duration/resolution/cost metadata parsed from the YAML
+// output frontmatter plus a click-to-play <video> plate and a Download
+// link.
+function renderGenerateVideoCard(toolCall) {
+  const args = parseToolArgs(toolCall.args);
+  const parsed = parseSubagentResult(toolCall.output || '');
+  const meta = parsed.meta || {};
+  // output_attachments is the wire field; older history may use
+  // .attachments. We accept either.
+  const attachments = [...(toolCall.output_attachments || toolCall.attachments || [])]
+    .filter((item) => !item.type || item.type === 'video');
+  const isFailed = toolCall.status === 'fail' || meta.status === 'failed';
+  const isRunning = !isFailed && (toolCall.status === 'running' || !toolCall.output);
+  const status = isRunning ? 'running' : (isFailed ? 'error' : 'success');
+  const prompt = String(args.prompt || '').trim();
+  const promptPreview = prompt.split('\n')[0].slice(0, 140);
+
+  const card = el('div', { class: `agent-genvideo-card is-${status}`, 'data-tool': 'generate_video' });
+  card._toolArgs = toolCall.args;
+  card._toolName = 'generate_video';
+
+  const head = el('div', { class: 'agent-genvideo-head' },
+    el('span', { class: 'agent-genvideo-kicker', text: 'video' }),
+    el('span', { class: 'agent-genvideo-title', text: isRunning ? 'Rendering' : (isFailed ? 'Did not render' : 'Clip') }),
+    el('span', { class: 'agent-tool-elapsed', text: '' }),
+  );
+  card.append(head);
+
+  const plate = el('div', { class: 'agent-genvideo-plate' });
+  if (isRunning) {
+    plate.append(el('div', { class: 'agent-genvideo-grain', 'aria-hidden': 'true' }));
+    plate.append(el('p', { class: 'agent-genvideo-wait', text: 'Frames rendering' }));
+  } else if (isFailed) {
+    const errText = (parsed.body || toolCall.output || 'Video generation failed').replace(/^error:\s*/i, '').slice(0, 280);
+    plate.append(el('p', { class: 'agent-genvideo-error', text: errText }));
+  } else {
+    const videos = [...attachments];
+    if (!videos.length && meta.file_path) {
+      videos.push({ type: 'video', name: meta.file_path.split(/[\\/]/).pop(), file_path: meta.file_path, media_type: meta.media_type });
+    }
+    if (!videos.length) {
+      plate.append(el('p', { class: 'agent-genvideo-wait', text: 'No video bytes in this result' }));
+    } else {
+      const gallery = el('div', { class: 'agent-genvideo-gallery', 'data-count': String(videos.length) });
+      for (const attachment of videos) {
+        const src = attachment.data_url || (attachment.file_path ? '/local-file?path=' + encodeURIComponent(attachment.file_path) : '');
+        const label = attachment.name || promptPreview || 'Generated video';
+        const video = el('video', { controls: true, preload: 'metadata', src });
+        video.addEventListener('error', () => video.classList.add('video-load-error'));
+        const open = () => openVideoLightbox({
+          src,
+          name: attachment.name || 'generated-video.mp4',
+          caption: [meta.model, meta.resolution, meta.provider].filter(Boolean).join(' · '),
+        });
+        const btn = el('button', { class: 'agent-genvideo-open', type: 'button', 'aria-label': 'Play ' + label });
+        btn.append(video);
+        btn.addEventListener('click', open);
+        gallery.append(el('figure', { class: 'agent-genvideo-frame' }, btn));
+      }
+      plate.append(gallery);
+    }
+  }
+  card.append(plate);
+
+  const caption = el('div', { class: 'agent-genvideo-caption' });
+  if (promptPreview) {
+    caption.append(el('p', { class: 'agent-genvideo-prompt', text: promptPreview, title: prompt }));
+  }
+  const chips = el('div', { class: 'agent-genvideo-meta' });
+  const provider = meta.provider || '';
+  const model = meta.model || '';
+  const duration = meta.duration_seconds ? `${meta.duration_seconds}s` : '';
+  const resolution = meta.resolution || '';
+  const cost = formatImageCost(meta.cost_usd);
+  if (provider) chips.append(el('span', { class: 'agent-genvideo-chip', text: provider }));
+  if (model) chips.append(el('span', { class: 'agent-genvideo-chip', text: model }));
+  if (duration) chips.append(el('span', { class: 'agent-genvideo-chip', text: duration }));
+  if (resolution) chips.append(el('span', { class: 'agent-genvideo-chip', text: resolution }));
+  if (cost) chips.append(el('span', { class: 'agent-genvideo-chip', text: cost }));
+  if (chips.children.length) caption.append(chips);
+  const first = attachments[0] || (meta.file_path ? { name: meta.file_path.split(/[\\/]/).pop(), file_path: meta.file_path } : null);
+  const downloadSrc = first ? (first.data_url || (first.file_path ? '/local-file?path=' + encodeURIComponent(first.file_path) : '')) : '';
+  if (downloadSrc && !isRunning && !isFailed) {
+    caption.append(el('a', {
+      class: 'agent-genvideo-download',
+      href: downloadSrc,
+      download: first?.name || 'generated-video.mp4',
+      text: 'Download',
+    }));
+  }
+  if (caption.children.length) card.append(caption);
+  return card;
+}
+
 function openImageLightbox({ src, name, caption }) {
   if (!src) return;
   const overlay = el('div', {
@@ -802,6 +1182,8 @@ export function setToolTerminalStatus(card, status) {
 
 export function attachmentChip(attachment, onRemove) {
   const icon = attachment.type === 'image' ? 'IMG'
+    : attachment.type === 'audio' ? 'AUD'
+    : attachment.type === 'video' ? 'VID'
     : attachment.type === 'file' ? 'PDF'
     : attachment.type === 'folder' ? 'DIR'
     : 'TXT';
@@ -855,7 +1237,7 @@ function truncate(value, limit) {
   return value.length > limit ? `${value.slice(0, limit)}\n… (truncated)` : value;
 }
 
-function renderMessageAttachments(attachments) {
+export function renderMessageAttachments(attachments) {
   const gallery = el('div', {
     class: 'agent-message-attachments',
     'aria-label': `${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`,
@@ -874,6 +1256,18 @@ function renderMessageAttachments(attachments) {
       const video = el('video', { controls: true, preload: 'metadata', src });
       video.addEventListener('error', () => video.classList.add('video-load-error'));
       const fig = el('figure', { class: 'agent-message-attachment agent-message-video' }, video, el('figcaption', { text: attachment.name }));
+      gallery.append(fig);
+      continue;
+    }
+    if (attachment.type === 'audio') {
+      // Inline data URL wins so playback works before /local-file is
+      // resolvable (e.g. the server has not yet flushed the attachment);
+      // otherwise fall back to the local-file proxy path used for every
+      // other persisted media kind.
+      const src = attachment.data_url || (attachment.file_path ? '/local-file?path=' + encodeURIComponent(attachment.file_path) : '');
+      const audio = el('audio', { controls: true, preload: 'metadata', src });
+      audio.addEventListener('error', () => audio.classList.add('audio-load-error'));
+      const fig = el('figure', { class: 'agent-message-attachment agent-message-audio' }, audio, el('figcaption', { text: attachment.name }));
       gallery.append(fig);
       continue;
     }

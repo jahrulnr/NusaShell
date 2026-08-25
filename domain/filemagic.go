@@ -55,6 +55,19 @@ func SniffMagic(data []byte) (mediaType string, kind string) {
 		}
 	}
 
+	// SVG: text-based XML, not a binary magic number. SVG files may start
+	// with "<svg", "<?xml", or "<!DOCTYPE svg" (with optional BOM/whitespace).
+	// Scan the first 512 bytes for "<svg" to handle all prolog variants.
+	// This is safe from false positives — no other common media format starts
+	// with an XML document containing an <svg> element.
+	window := data
+	if len(window) > 512 {
+		window = window[:512]
+	}
+	if bytes.Contains(window, []byte("<svg")) {
+		return "image/svg+xml", "image"
+	}
+
 	// ── RIFF-based formats (WebP image, WAV audio, AVI video) ───────
 	//
 	// RIFF structure: "RIFF" + 4-byte size + 4-byte format tag.

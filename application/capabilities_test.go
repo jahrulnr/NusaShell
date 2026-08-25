@@ -367,3 +367,47 @@ func TestFilterToolAttachmentsByCapsKeepsDocumentForDocumentModel(t *testing.T) 
 		t.Errorf("content should not note document can't be read, got: %q", content)
 	}
 }
+
+// TestChatMessagesToolResultNoteInsideUntrustedEnvelope verifies that
+// capability-filter notes appended to tool results (e.g. "[Audio ... was
+// loaded but cannot be played]") land INSIDE the <untrusted_tool_result>
+// envelope, not after the closing tag. If notes land outside, a malicious
+// tool could craft an attachment file path containing injection instructions
+// that the model would treat as trusted/system-level content.
+func TestChatMessagesToolResultNoteInsideUntrustedEnvelope(t *testing.T) {
+	conv := &domain.Conversation{Messages: []domain.Message{
+		{ID: "a1", Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{
+			ID:     "tc",
+			Name:   "generate_media",
+			Output: "---\nfile_path: /tmp/speech.wav\nmedia_type: audio/wav\nstatus: completed\n---\n\nSpeech generated.",
+			OutputAttachments: []domain.Attachment{{
+				Type:     "audio",
+				Name:     "speech.wav",
+				FilePath: "/tmp/speech.wav",
+			}},
+		}}},
+	}}
+	msgs := chatMessages(conv, "", ModelCapabilities{}) // no audio cap
+	var tool *ChatMessage
+	for i := range msgs {
+		if msgs[i].Role == "tool" && msgs[i].ToolResult != nil {
+			tool = &msgs[i]
+			break
+		}
+	}
+	if tool == nil {
+		t.Fatal("expected a tool message, got none")
+	}
+	content := tool.ToolResult.Content
+	closeIdx := strings.Index(content, "</untrusted_tool_result>")
+	noteIdx := strings.Index(content, "[Audio")
+	if closeIdx < 0 {
+		t.Fatalf("missing untrusted envelope close tag in tool content:\n%s", content)
+	}
+	if noteIdx < 0 {
+		t.Fatalf("missing audio capability note in tool content:\n%s", content)
+	}
+	if noteIdx > closeIdx {
+		t.Fatalf("audio note is OUTSIDE the untrusted envelope (note at %d, close at %d):\n%s", noteIdx, closeIdx, content)
+	}
+}

@@ -1,6 +1,7 @@
 package application
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,6 +124,52 @@ func TestLoadMediaAttachmentRejectsKindMismatch(t *testing.T) {
 	}
 }
 
+// TestSniffMediaKindDetectsSVGWithXMLProlog verifies that sniffMediaKind
+// reads enough bytes to find "<svg" past an XML prolog. The old 32-byte
+// read window missed SVGs with <?xml version="1.0" encoding="UTF-8"?>
+// because "<svg" appears at byte 38+.
+func TestSniffMediaKindDetectsSVGWithXMLProlog(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "diagram.svg")
+	svg := `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+  <rect width="100" height="100"/>
+</svg>`
+	if err := os.WriteFile(path, []byte(svg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kind, err := sniffMediaKind(mustMarshal(t, map[string]any{"file_path": path}))
+	if err != nil {
+		t.Fatalf("sniffMediaKind failed for SVG with XML prolog: %v", err)
+	}
+	if kind != "image" {
+		t.Errorf("kind = %q, want image", kind)
+	}
+}
+
+// TestLoadMediaAttachmentRejectsSVGAsImageInput verifies that read_media
+// rejects SVG files with a clear error. Most providers (OpenAI, Anthropic)
+// do not support SVG as image input — they reject data:image/svg+xml
+// URLs. The error directs the user to show(op=image) for UI display.
+func TestLoadMediaAttachmentRejectsSVGAsImageInput(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "chart.svg")
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100"/></svg>`)
+	if err := os.WriteFile(path, svg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadMediaAttachment("image", path)
+	if err == nil {
+		t.Fatal("expected error for SVG via read_media, got nil")
+	}
+	if !strings.Contains(err.Error(), "svg") && !strings.Contains(err.Error(), "SVG") {
+		t.Fatalf("error should mention SVG, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "show") {
+		t.Fatalf("error should suggest show(op=image), got: %v", err)
+	}
+}
+
 // TestLoadMediaAttachmentAcceptsRealPNG proves that a real PNG file
 // passes magic validation and gets the sniffed media type (not the
 // extension-based one).
@@ -172,4 +219,13 @@ func TestLoadMediaAttachmentRejectsEmptyFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty file, got nil")
 	}
+}
+
+func mustMarshal(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

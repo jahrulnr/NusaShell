@@ -202,11 +202,7 @@ func TestReviewLoopRecordsMemoryReplaceMutation(t *testing.T) {
 	}
 }
 
-func TestReviewPromptInjectsPrimaryMemory(t *testing.T) {
-	prompt := resources.ReviewPrompt()
-	if prompt == "" {
-		t.Fatal("review prompt must be non-empty")
-	}
+func TestExecuteMemoryPrimaryInjectsContent(t *testing.T) {
 	app := &App{
 		Toolbox: &reviewStubToolbox{},
 		Logs:    &fakeLogStore{},
@@ -218,49 +214,38 @@ func TestReviewPromptInjectsPrimaryMemory(t *testing.T) {
 		}},
 	}
 	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
-	injected := agent.injectPrimaryMemory(prompt)
-	if !strings.Contains(injected, "User prefers Indonesian") {
-		t.Error("injected prompt should contain primary memory entry 'User prefers Indonesian'")
+	output := agent.executeMemoryPrimary()
+	if !strings.Contains(output, "User prefers Indonesian") {
+		t.Error("executeMemoryPrimary should contain primary memory entry 'User prefers Indonesian'")
 	}
-	if !strings.Contains(injected, "Repo uses Go + Clean Architecture") {
-		t.Error("injected prompt should contain primary memory entry 'Repo uses Go + Clean Architecture'")
-	}
-	if strings.Contains(injected, "{{primary_memory}}") {
-		t.Error("placeholder should be replaced, not left in the prompt")
+	if !strings.Contains(output, "Repo uses Go + Clean Architecture") {
+		t.Error("executeMemoryPrimary should contain primary memory entry 'Repo uses Go + Clean Architecture'")
 	}
 }
 
-func TestReviewPromptEmptyPrimaryMemory(t *testing.T) {
-	prompt := resources.ReviewPrompt()
+func TestExecuteMemoryPrimaryEmpty(t *testing.T) {
 	app := &App{
 		Toolbox: &reviewStubToolbox{},
 		Logs:    &fakeLogStore{},
 		Primary: &stubPrimaryStoreReview{mem: &domain.PrimaryMemory{Entries: nil}},
 	}
 	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
-	injected := agent.injectPrimaryMemory(prompt)
-	if strings.Contains(injected, "{{primary_memory}}") {
-		t.Error("placeholder should be replaced even when primary is empty")
-	}
-	if !strings.Contains(injected, "(empty)") {
-		t.Error("empty primary should show '(empty)' marker")
+	output := agent.executeMemoryPrimary()
+	if output != "(empty)" {
+		t.Errorf("empty primary should show '(empty)', got %q", output)
 	}
 }
 
-func TestReviewPromptNoPrimaryStore(t *testing.T) {
-	prompt := resources.ReviewPrompt()
+func TestExecuteMemoryPrimaryNoStore(t *testing.T) {
 	app := &App{
 		Toolbox: &reviewStubToolbox{},
 		Logs:    &fakeLogStore{},
 		// Primary not set
 	}
 	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
-	injected := agent.injectPrimaryMemory(prompt)
-	if strings.Contains(injected, "{{primary_memory}}") {
-		t.Error("placeholder should be replaced even when no PrimaryStore")
-	}
-	if !strings.Contains(injected, "(unavailable)") {
-		t.Error("missing PrimaryStore should show '(unavailable)' marker")
+	output := agent.executeMemoryPrimary()
+	if output != "(unavailable)" {
+		t.Errorf("missing PrimaryStore should show '(unavailable)', got %q", output)
 	}
 }
 
@@ -487,11 +472,18 @@ func TestBuildTranscriptTokenCapDropsOldest(t *testing.T) {
 }
 
 func TestBuildTranscriptUsesArchivedChunkWhenCompacted(t *testing.T) {
+	// Chunk messages are older (earlier timestamps) than live messages.
+	// transcriptMessages must merge by CreatedAt so the conversation flow
+	// stays chronological — without sorting, the chunk (archived assistant
+	// responses) would appear before the live user messages that triggered
+	// them, producing a temporally wrong transcript.
+	chunkTime := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	liveTime := time.Date(2026, 8, 25, 13, 0, 0, 0, time.UTC)
 	app := &App{
 		Toolbox: &reviewStubToolbox{},
 		Logs:    &fakeLogStore{},
 		Conversations: &chunkConversationStore{chunk: []domain.Message{
-			{Role: domain.RoleAssistant, Content: "old work", ToolCalls: []domain.ToolCall{
+			{Role: domain.RoleAssistant, Content: "old work", CreatedAt: chunkTime, ToolCalls: []domain.ToolCall{
 				{Name: "grep", Args: `{"pattern":"auth"}`, Output: "src/auth.go: 5 matches"},
 			}},
 		}},
@@ -502,8 +494,8 @@ func TestBuildTranscriptUsesArchivedChunkWhenCompacted(t *testing.T) {
 		ID:         "conv_compacted",
 		ChunkCount: 1,
 		Messages: []domain.Message{
-			{Role: domain.RoleUser, Content: "recent question"},
-			{Role: domain.RoleAssistant, Content: "recent answer"},
+			{Role: domain.RoleUser, Content: "recent question", CreatedAt: liveTime},
+			{Role: domain.RoleAssistant, Content: "recent answer", CreatedAt: liveTime.Add(30 * time.Second)},
 		},
 	}
 	transcript := agent.buildTranscript(conv)
@@ -512,6 +504,56 @@ func TestBuildTranscriptUsesArchivedChunkWhenCompacted(t *testing.T) {
 	}
 	if !strings.Contains(transcript, "recent question") {
 		t.Error("transcript should still include live messages")
+	}
+}
+
+// TestTranscriptMessagesChronologicalOrder verifies that chunk and live
+// messages are merged by CreatedAt timestamp, not naively prepended.
+// Compaction retains user messages in live and archives assistant messages
+// to chunks — without timestamp sorting, the merged array has assistant
+// responses before the user messages that triggered them.
+func TestTranscriptMessagesChronologicalOrder(t *testing.T) {
+	chunkTime := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	liveTime := time.Date(2026, 8, 25, 13, 0, 0, 0, time.UTC)
+	app := &App{
+		Toolbox: &reviewStubToolbox{},
+		Logs:    &fakeLogStore{},
+		Conversations: &chunkConversationStore{chunk: []domain.Message{
+			{Role: domain.RoleAssistant, Content: "response to heyyo", CreatedAt: chunkTime.Add(10 * time.Second)},
+			{Role: domain.RoleAssistant, Content: "response to show request", CreatedAt: chunkTime.Add(20 * time.Second)},
+		}},
+	}
+	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	conv := &domain.Conversation{
+		ID:         "conv_chrono",
+		ChunkCount: 1,
+		Messages: []domain.Message{
+			{Role: domain.RoleUser, Content: "heyyo", CreatedAt: chunkTime},
+			{Role: domain.RoleUser, Content: "coba show video", CreatedAt: chunkTime.Add(15 * time.Second)},
+			{Role: domain.RoleAssistant, Content: "post-compaction reply", CreatedAt: liveTime},
+		},
+	}
+	merged := agent.transcriptMessages(conv)
+	// Expected chronological order:
+	// [0] user "heyyo"               (chunkTime)
+	// [1] assistant "response to heyyo" (chunkTime+10s)
+	// [2] user "coba show video"      (chunkTime+15s)
+	// [3] assistant "response to show" (chunkTime+20s)
+	// [4] assistant "post-compaction"  (liveTime)
+	if len(merged) != 5 {
+		t.Fatalf("merged len = %d, want 5", len(merged))
+	}
+	if merged[0].Content != "heyyo" {
+		t.Errorf("merged[0] = %q, want 'heyyo' (user message before assistant response)", merged[0].Content)
+	}
+	if merged[1].Content != "response to heyyo" {
+		t.Errorf("merged[1] = %q, want 'response to heyyo'", merged[1].Content)
+	}
+	if merged[2].Content != "coba show video" {
+		t.Errorf("merged[2] = %q, want 'coba show video'", merged[2].Content)
+	}
+	if merged[3].Content != "response to show request" {
+		t.Errorf("merged[3] = %q, want 'response to show request'", merged[3].Content)
 	}
 }
 
@@ -566,12 +608,13 @@ func TestReviewLoopEndsOnNothingToSave(t *testing.T) {
 	if len(mutations) != 0 {
 		t.Errorf("expected 0 mutations for chit-chat, got %d", len(mutations))
 	}
-	// The loop now persists the terminal "Nothing to save." response as the
+	// The loop persists the terminal "Nothing to save." response as the
 	// review's conclusion, so the learning log UI can show what the agent
-	// decided even when it stored nothing (intentional behavior change;
-	// see TestReviewLoopPersistsReasoningAndFinalSummary).
-	if len(messages) != 2 {
-		t.Errorf("expected 2 messages (transcript + conclusion), got %d", len(messages))
+	// decided even when it stored nothing. With the synthetic-tool refactor,
+	// the message sequence is: user prompt, synthetic assistant tool calls,
+	// 2 tool results, and the final assistant conclusion = 5 messages.
+	if len(messages) != 5 {
+		t.Errorf("expected 5 messages (prompt + synthetic + 2 tools + conclusion), got %d", len(messages))
 	}
 	// Verify the adapter was called exactly once (no tool rounds).
 	if adapter.calls != 1 {
@@ -594,8 +637,10 @@ func TestReviewLoopEmptyResponseIsError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "empty response") {
 		t.Fatalf("err = %v, want empty response error", err)
 	}
-	if len(messages) != 1 {
-		t.Fatalf("messages = %d, want only the replayed transcript", len(messages))
+	// Pre-injected synthetic tools produce 4 messages before the first LLM
+	// call: user prompt, synthetic assistant tool calls, and 2 tool results.
+	if len(messages) != 4 {
+		t.Fatalf("messages = %d, want 4 (user + synthetic assistant + 2 tool results)", len(messages))
 	}
 }
 
@@ -657,7 +702,7 @@ func TestReviewReservationCoalescesActiveTriggers(t *testing.T) {
 	agent.releaseReview("conv_active")
 }
 
-func TestReviewSuccessDoesNotStartCooldown(t *testing.T) {
+func TestReviewSuccessAlsoEntersCooldown(t *testing.T) {
 	settings := DefaultReviewSettings()
 	settings.ReviewCooldown = time.Hour
 	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), settings)
@@ -665,10 +710,9 @@ func TestReviewSuccessDoesNotStartCooldown(t *testing.T) {
 		t.Fatal("first review should acquire")
 	}
 	agent.releaseReview("conv_success", false)
-	if !agent.tryAcquireReview("conv_success") {
-		t.Fatal("successful review should not be blocked by retry cooldown")
+	if agent.tryAcquireReview("conv_success") {
+		t.Fatal("successful review should be protected by cooldown (prevents redundant re-review)")
 	}
-	agent.releaseReview("conv_success", false)
 }
 
 func TestReviewFailureStartsCooldown(t *testing.T) {
@@ -744,7 +788,7 @@ func TestReviewTranscriptToolReturnsStructuredJSON(t *testing.T) {
 		},
 	}
 	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
-	jsonOut := agent.executeReviewTranscript(conv)
+	jsonOut := agent.executeReviewTranscript(conv, 0, 0, "/path/to/conv.json")
 
 	// Must be valid JSON with expected top-level fields.
 	var parsed map[string]any
@@ -785,6 +829,113 @@ func TestReviewTranscriptToolReturnsStructuredJSON(t *testing.T) {
 	}
 	if tc["output"] != "auth.go:5 matches" {
 		t.Errorf("tool_calls[0] output = %v, want auth.go:5 matches", tc["output"])
+	}
+}
+
+// TestExecuteReviewTranscriptBoundedRange verifies the incremental marker:
+// when start > 0, only messages [start:end) are included — not the full
+// conversation. This prevents re-reading already reviewed content.
+func TestExecuteReviewTranscriptBoundedRange(t *testing.T) {
+	conv := &domain.Conversation{
+		ID:    "conv_range",
+		Model: "prov_x:gpt-test",
+		Messages: []domain.Message{
+			{Role: domain.RoleUser, Content: "msg 0 (already reviewed)"},
+			{Role: domain.RoleAssistant, Content: "msg 1 (already reviewed)"},
+			{Role: domain.RoleUser, Content: "msg 2 (new)"},
+			{Role: domain.RoleAssistant, Content: "msg 3 (new)"},
+		},
+	}
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
+
+	// Simulate LastReviewedMsgCount=2: only messages [2:4) should appear.
+	jsonOut := agent.executeReviewTranscript(conv, 2, 0, "/path/to/conv.json")
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(jsonOut), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, jsonOut)
+	}
+	if parsed["message_start"].(float64) != 2 {
+		t.Errorf("message_start = %v, want 2", parsed["message_start"])
+	}
+	if parsed["message_end"].(float64) != 4 {
+		t.Errorf("message_end = %v, want 4", parsed["message_end"])
+	}
+	msgs, _ := parsed["messages"].([]any)
+	if len(msgs) != 2 {
+		t.Fatalf("messages len = %d, want 2 (only [2:4))", len(msgs))
+	}
+	first, _ := msgs[0].(map[string]any)
+	if first["content"] != "msg 2 (new)" {
+		t.Errorf("first message = %v, want 'msg 2 (new)'", first["content"])
+	}
+}
+
+// TestExecuteReviewTranscriptPathExposed verifies the path field is included
+// in the transcript JSON so the agent can file_read the full conversation.
+func TestExecuteReviewTranscriptPathExposed(t *testing.T) {
+	conv := &domain.Conversation{
+		ID:       "conv_path",
+		Model:    "prov_x:gpt-test",
+		Messages: []domain.Message{{Role: domain.RoleUser, Content: "hi"}},
+	}
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
+	jsonOut := agent.executeReviewTranscript(conv, 0, 0, "/abs/path/to/conv.json")
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(jsonOut), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if parsed["path"] != "/abs/path/to/conv.json" {
+		t.Errorf("path = %v, want /abs/path/to/conv.json", parsed["path"])
+	}
+}
+
+// TestReviewLoopCompactionResetsStaleMarker verifies that when compaction
+// shrinks the merged transcript array (transcriptMessages only includes the
+// latest chunk), a stale LastReviewedMsgCount that exceeds the new array
+// length is reset to 0 instead of skipping the review entirely. Without
+// this fix, multi-compaction conversations would never review again because
+// start >= end always returns nil.
+func TestReviewLoopCompactionResetsStaleMarker(t *testing.T) {
+	if resources.ReviewPrompt() == "" {
+		t.Fatal("review prompt must be non-empty")
+	}
+	// Simulate post-second-compaction state:
+	//   chunk-1 has 3 messages, live has 2 messages → merged = 5
+	//   LastReviewedMsgCount = 51 (set before compaction shrank the array)
+	//   51 > 5 → without the fix, runReviewLoop returns nil (no review)
+	conv := &domain.Conversation{
+		ID:                   "conv_multi_compact",
+		Model:                "prov_x:gpt-test",
+		LastReviewedMsgCount: 51,
+		ChunkCount:           2,
+		Messages: []domain.Message{
+			{Role: domain.RoleUser, Content: "post-compaction msg 1"},
+			{Role: domain.RoleAssistant, Content: "post-compaction reply 1"},
+		},
+	}
+	app := &App{
+		Toolbox: &reviewStubToolbox{},
+		Logs:    &fakeLogStore{},
+		Conversations: &chunkConversationStore{chunk: []domain.Message{
+			{Role: domain.RoleUser, Content: "chunk msg 1"},
+			{Role: domain.RoleAssistant, Content: "chunk msg 2"},
+			{Role: domain.RoleUser, Content: "chunk msg 3"},
+		}},
+	}
+	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	adapter := &reviewStubAdapter{terminalContent: "Nothing to save."}
+	_, messages, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	if err != nil {
+		t.Fatalf("runReviewLoop: %v", err)
+	}
+	// Without the fix, messages would be nil (start >= end → return nil).
+	// With the fix, start is reset to 0 and the review runs.
+	if messages == nil {
+		t.Fatal("expected review to run after marker reset, got nil messages (stale marker not reset)")
+	}
+	// 5 messages: user prompt + synthetic assistant + 2 tool results + conclusion
+	if len(messages) != 5 {
+		t.Errorf("messages = %d, want 5; got %+v", len(messages), messages)
 	}
 }
 
@@ -851,15 +1002,12 @@ func TestReviewLoopCallsHydrationToolFirst(t *testing.T) {
 	if strings.Contains(capturedInitialContent, "[user]") || strings.Contains(capturedInitialContent, "[assistant]") {
 		t.Fatalf("initial user message looks like a transcript dump: %q", capturedInitialContent[:min(100, len(capturedInitialContent))])
 	}
-	// The call-first instruction lives in the tool description (and the
-	// review.md system prompt Step 1), not the user message — the message
-	// stays a neutral task statement.
-	if strings.Contains(strings.ToLower(capturedInitialContent), "review_transcript") {
-		t.Fatalf("initial user message should stay neutral; the tool description instructs the call, got: %q", capturedInitialContent[:min(100, len(capturedInitialContent))])
-	}
 	for _, td := range agent.reviewTools() {
-		if td.Name == reviewTranscriptToolName && !strings.Contains(strings.ToLower(td.Description), "first") {
-			t.Fatalf("review_transcript description should instruct calling it FIRST, got: %q", td.Description)
+		if td.Name == reviewTranscriptToolName {
+			// The tool definition still describes the path/start/end params.
+			if !strings.Contains(td.Description, "path") {
+				t.Fatalf("review_transcript description should mention path param, got: %q", td.Description)
+			}
 		}
 	}
 
@@ -900,7 +1048,7 @@ func TestReviewTranscriptToolRespectsTokenCap(t *testing.T) {
 	settings := DefaultReviewSettings()
 	settings.MaxTranscriptTokens = 1000 // ~4000 chars cap
 	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), settings)
-	jsonOut := agent.executeReviewTranscript(conv)
+	jsonOut := agent.executeReviewTranscript(conv, 0, 0, "")
 
 	// The output must be under the char cap (~tokens*4) with some headroom
 	// for JSON overhead.

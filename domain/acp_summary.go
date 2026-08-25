@@ -53,10 +53,19 @@ func SubagentCompletionResult(run *AcpRun, outputPath string) string {
 
 // SubagentCompletionBody builds the markdown body of the tool result —
 // the human-readable summary the parent agent reads and acts on.
+//
+// The full transcript is persisted as JSON to the run's output_path
+// (conversations/<conv_id>.acp/acprun_<id>.json). The tool result only
+// carries the LAST meaningful content so the parent agent sees the final
+// result, not intermediate progress. Selection order:
+//  1. Last `text` chunk (the agent's final message/summary)
+//  2. Last `thought` chunk (reasoning — only when no text was produced)
+//  3. StructuredFallbackSummary (tool-only, empty, or cancelled runs)
+//
 // Handles: normal text, failed+text, tool-only/empty/thinking-only,
 // and cancelled.
 func SubagentCompletionBody(run *AcpRun) string {
-	textOut := transcriptText(run)
+	textOut := lastTranscriptText(run)
 
 	isFailed := run.Status == AcpRunFailed
 	isCancelled := run.Status == AcpRunCancelled
@@ -86,6 +95,26 @@ func SubagentCompletionBody(run *AcpRun) string {
 			return textOut[:4000] + "…"
 		}
 		return textOut
+	}
+
+	// No text chunk — fall back to the last thought (reasoning) so the
+	// parent agent has context when the subagent ended without a visible
+	// message (e.g. stopped mid-reasoning, tool-only run that produced
+	// thinking but no final text).
+	if thought := lastThoughtText(run); thought != "" {
+		if len(thought) > 3800 {
+			thought = thought[:3800] + "…"
+		}
+		if isFailed {
+			errPart := run.Error
+			if errPart == "" {
+				errPart = run.StopReason
+			}
+			if errPart != "" {
+				return thought + "\n\n[Subagent failed: " + errPart + "]"
+			}
+		}
+		return thought
 	}
 
 	return StructuredFallbackSummary(run)
@@ -154,15 +183,32 @@ func PermissionTitle(run *AcpRun) string {
 	return ""
 }
 
-// transcriptText extracts and concatenates all text chunks from a run.
-func transcriptText(run *AcpRun) string {
-	var b strings.Builder
-	for _, c := range run.Transcript {
-		if c.Kind == "text" && c.Text != "" {
-			b.WriteString(c.Text)
+// lastTranscriptText returns the LAST text chunk from a run's transcript
+// — the agent's final visible message/summary, not intermediate progress.
+// The full transcript is persisted in the run's JSON output file; the
+// tool result only carries this last chunk so the parent agent sees the
+// final result without context overflow from concatenating all progress.
+func lastTranscriptText(run *AcpRun) string {
+	for i := len(run.Transcript) - 1; i >= 0; i-- {
+		c := run.Transcript[i]
+		if c.Kind == "text" && strings.TrimSpace(c.Text) != "" {
+			return strings.TrimSpace(c.Text)
 		}
 	}
-	return strings.TrimSpace(b.String())
+	return ""
+}
+
+// lastThoughtText returns the LAST thought (reasoning) chunk from a run's
+// transcript. Used as a fallback when no text chunk was produced so the
+// parent agent still has context about what the subagent was doing.
+func lastThoughtText(run *AcpRun) string {
+	for i := len(run.Transcript) - 1; i >= 0; i-- {
+		c := run.Transcript[i]
+		if c.Kind == "thought" && strings.TrimSpace(c.Text) != "" {
+			return strings.TrimSpace(c.Text)
+		}
+	}
+	return ""
 }
 
 // yamlScalar quotes a string for YAML if it contains characters that

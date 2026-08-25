@@ -19,7 +19,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `file_info` | metadata for a path: size, mode, type, modified time |
 | `grep` | search file contents with regex (RE2 syntax); filters by `glob_pattern`, returns matching lines with optional `context_lines`; `output_mode`: content (default), files_with_matches, count; case-insensitive via `case_insensitive=true`; results are capped at ~200k chars with a truncation marker — for huge result sets narrow the pattern, reduce `context_lines`, or use `output_mode` files_with_matches/count; prefer this over exec+shell grep — structured output, no process spawn, works without rg installed |
 | `find_file` | find files by glob pattern with `**` recursive matching (e.g. `**/*.go`) and brace expansion (e.g. `*.{go,ts}`); skips .git/node_modules/vendor; returns matching paths sorted alphabetically |
-| `show` | render a file from disk in the UI. `op=html` reads an HTML file and displays it in a sandboxed iframe (write the file first with `file_write`, then `show` it — use `file_patch` for edits, `file_read` to inspect). `op=image` reads an image file and displays it inline. `width`/`height` control the iframe viewport (html only, default 720x400). Replaces the former `artifact_*` tools — file_* handles CRUD, `show` only handles display |
+| `show` | render a file from disk in the UI. `op=html` reads an HTML file and displays it in a sandboxed iframe (write the file first with `file_write`, then `show` it — use `file_patch` for edits, `file_read` to inspect). `op=image` reads an image file and displays it inline. `op=audio` reads an audio file (mp3, wav, ogg, m4a) and displays an inline player. `op=video` reads a video file (mp4, webm, mov, avi) and displays an inline player. `width`/`height` control the iframe viewport (html only, default 720x400). The tool result to the model is metadata only (path, name, media_type, size_bytes for media; path, width, height, title for html) — no file content or base64 payload is ever embedded in the tool output, so it does not bloat the conversation JSON or enter the provider request. The frontend loads the file via `/local-file?path=` on demand. Use `read_media` instead when the model needs to see the image/audio/video content. Replaces the former `artifact_*` tools — file_* handles CRUD, `show` only handles display |
 | `skill` | skill library dispatcher; `op` selects: `list`, `search`, `save`. Skill files live on disk — read `SKILL.md` and support files with `file_read`, list a skill folder with `file_list` (see `docs(op="read", id="skills")` for the path layout) |
 | `memory` | long-term memory dispatcher; `op` selects: `save` (idempotent dedup), `replace` (primary substring/body rewrite or fragment update), `search` (BM25 ranked fragments), `list`, `delete` |
 | `docs` | product documentation dispatcher; `op` selects: `search {query}` (ranked page ids) and `read {id}` |
@@ -172,6 +172,21 @@ conversation under `conversations/<conversation_id>.acp/`. Permissions are auto-
 (orchestrator delegates authority). The user can peek the transcript
 from the Agent dock / drawer / popup. Unattended pipeline agents never
 see these tools.
+
+`subagent_wait` blocks until a run reaches a terminal state (completed,
+failed, cancelled) or the timeout elapses. The tool returns the full run
+DTO (status, workspace, transcript) to the frontend for the transcript
+drawer, but the model only receives a short text summary: run id, status,
+the LAST text chunk (the agent's final message, truncated to 2000 chars),
+or the last reasoning chunk if no text was produced, or the error/stop
+reason + last tool as fallback. Intermediate progress, thought, tool,
+plan, status, and usage chunks are stripped — the full transcript stays
+in the persisted JSON (`output_path`) for reference via `file_read`.
+
+`subagent_steer` and `subagent_stop` return the same full run DTO shape
+to the frontend, and are likewise summarized for the model — the model
+only sees run id, status, the last text/reasoning chunk, and the
+workspace, not the full transcript history.
 
 ## Native web research (searchwire)
 

@@ -227,19 +227,27 @@
 .agent-message-meta { margin: auto 0; color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
 .agent-message-attachments { display: flex; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .agent-message-attachment { overflow: hidden; border: 1px solid #2c394a; border-radius: 11px; background: #0c131d; color: #9dabbd; }
-.agent-message-image { position: relative; flex: 0 1 230px; width: 230px; max-width: 100%; margin: 0; box-shadow: 0 10px 28px rgba(0, 0, 0, .18); }
+.agent-message-image,
+.agent-message-video,
+.agent-message-audio { position: relative; flex: 0 1 320px; width: 320px; max-width: 100%; margin: 0; box-shadow: 0 10px 28px rgba(0, 0, 0, .18); }
+.agent-message-image { flex-basis: 230px; width: 230px; }
 .agent-message-image img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; background: #070b10; }
-.agent-message-image figcaption { position: absolute; right: 6px; bottom: 6px; max-width: calc(100% - 12px); overflow: hidden; border-radius: 5px; padding: 3px 6px; background: rgba(5, 9, 14, .84); color: #c7d0dc; font: 8px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .agent-message-image img.img-load-error { aspect-ratio: auto; height: 80px; object-fit: contain; padding: 12px; opacity: .5; }
-.agent-message-video { position: relative; flex: 0 1 320px; width: 320px; max-width: 100%; margin: 0; box-shadow: 0 10px 28px rgba(0, 0, 0, .18); }
-.agent-message-video video { display: block; width: 100%; border-radius: 11px; background: #070b10; }
+.agent-message-video video { display: block; width: 100%; max-height: 50vh; object-fit: contain; border-radius: 11px; background: #070b10; }
 .agent-message-video video.video-load-error { height: 80px; opacity: .5; }
+.agent-message-image figcaption,
 .agent-message-video figcaption { position: absolute; right: 6px; bottom: 6px; max-width: calc(100% - 12px); overflow: hidden; border-radius: 5px; padding: 3px 6px; background: rgba(5, 9, 14, .84); color: #c7d0dc; font: 8px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.agent-message-audio audio { display: block; width: 100%; border-radius: 11px; background: #070b10; }
+.agent-message-audio audio.audio-load-error { height: 36px; opacity: .5; }
+.agent-message-audio figcaption { margin-top: 4px; overflow: hidden; color: var(--text-faint); font: 9px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .agent-bubble-text { font-size: 1rem; }
 /* Inline media in markdown (images and videos from ![alt](url) syntax) */
-.agent-bubble-text img { max-width: 100%; border-radius: 8px; margin: 4px 0; }
-.agent-bubble-text video { max-width: 100%; border-radius: 8px; margin: 4px 0; }
+.agent-bubble-text img { max-width: 100%; max-height: 50vh; width: auto; border-radius: 8px; margin: 4px 0; }
+.agent-bubble-text video { max-width: 100%; max-height: 50vh; width: auto; border-radius: 8px; margin: 4px 0; }
 .agent-bubble-text img.img-load-error { height: 60px; width: auto; opacity: .4; border: 1px dashed #42526a; border-radius: 4px; }
+/* Task list checkboxes (GFM) — styled span replaces native <input> per AGENTS.md */
+.agent-bubble-text .task-checkbox { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: 4px; border: 1px solid var(--border, #42526a); border-radius: 3px; font-size: 11px; line-height: 1; color: var(--accent, #a9c7ff); user-select: none; vertical-align: text-bottom; }
+.agent-bubble-text .task-checkbox[data-checked="true"] { background: var(--accent, #a9c7ff); color: var(--bg, #0d1117); border-color: var(--accent, #a9c7ff); }
 .agent-message-file { display: flex; flex: 0 1 230px; width: 230px; max-width: 100%; align-items: center; gap: 8px; padding: 10px; }
 .agent-message-file-kind { flex: none; border: 1px solid #42526a; border-radius: 5px; padding: 3px 5px; color: #a9c7ff; font: 9px var(--font-mono); }
 .agent-message-file-name { min-width: 0; overflow: hidden; color: #c6d1df; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -1155,6 +1163,7 @@
 }
 .mermaid-block svg {
   max-width: 100%;
+  max-height: 50vh;
   height: auto;
   display: inline-block;
 }
@@ -1316,7 +1325,7 @@
   margin: 10px 1rem;
   display: flex;
   flex-direction: column;
-  width: min(320px, 100%);
+  width: auto;
   overflow: hidden;
   border: 1px solid var(--border-soft);
   border-radius: 12px;
@@ -1407,6 +1416,8 @@
 .agent-genimage-frame img {
   display: block;
   width: 100%;
+  max-height: 30vh;
+  object-fit: contain;
   background: #070b10;
 }
 .agent-genimage-frame img.img-load-error {
@@ -1452,6 +1463,212 @@
 .agent-genimage-card.is-error {
   border-color: rgba(240, 122, 106, .45);
 }
+
+/* Audio + video tool cards — shared layout (mirrors .agent-genimage-card
+   conventions). The two cards are structurally identical; only the plate
+   height, gallery aspect, and media element differ. Shared rules are
+   grouped; variant-specific overrides follow. */
+.agent-genaudio-card,
+.agent-genvideo-card {
+  position: relative;
+  margin: 10px 1rem;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.agent-genaudio-card.is-running,
+.agent-genvideo-card.is-running { opacity: .85; }
+.agent-genaudio-card.is-error,
+.agent-genvideo-card.is-error { border-color: rgba(240, 122, 106, .45); }
+.agent-genaudio-card .agent-tool-elapsed,
+.agent-genvideo-card .agent-tool-elapsed {
+  color: var(--text-faint);
+  font: 9px var(--font-mono);
+}
+.agent-genaudio-head,
+.agent-genvideo-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.agent-genaudio-kicker,
+.agent-genvideo-kicker {
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: var(--text-faint);
+  font: 9px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.agent-genaudio-title,
+.agent-genvideo-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font: 600 13px var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-genaudio-plate,
+.agent-genvideo-plate {
+  position: relative;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: #070b10;
+  padding: 8px;
+}
+.agent-genaudio-grain,
+.agent-genvideo-grain {
+  position: absolute;
+  inset: 0;
+  border-radius: 9px;
+  background-image: repeating-linear-gradient(90deg, rgba(255,255,255,.04) 0 1px, transparent 1px 6px);
+  animation-duration: 1.2s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.agent-genaudio-grain { animation-name: agent-audio-grain; }
+.agent-genvideo-grain { animation-name: agent-genvideo-grain; }
+@keyframes agent-audio-grain {
+  from { background-position: 0 0; }
+  to { background-position: 60px 0; }
+}
+@keyframes agent-genvideo-grain {
+  from { background-position: 0 0; }
+  to { background-position: 60px 0; }
+}
+.agent-genaudio-wait,
+.agent-genaudio-error,
+.agent-genvideo-wait,
+.agent-genvideo-error {
+  margin: 0;
+  padding: 6px 4px;
+  color: var(--text-faint);
+  font: 11px var(--font-mono);
+  text-align: center;
+}
+.agent-genaudio-error,
+.agent-genvideo-error { color: var(--red); }
+.agent-genaudio-gallery,
+.agent-genvideo-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.agent-genaudio-frame,
+.agent-genvideo-frame { margin: 0; }
+.agent-genaudio-open,
+.agent-genvideo-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.agent-genaudio-open:focus-visible,
+.agent-genvideo-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.agent-genaudio-frame audio.audio-load-error,
+.agent-genvideo-frame video.video-load-error { opacity: .5; }
+.agent-genaudio-caption,
+.agent-genvideo-caption { margin-top: 8px; }
+.agent-genaudio-prompt,
+.agent-genvideo-prompt {
+  margin: 0 0 6px;
+  color: var(--text-soft);
+  font: 11px var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.agent-genaudio-meta,
+.agent-genvideo-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.agent-genaudio-chip,
+.agent-genvideo-chip {
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+.agent-genaudio-download,
+.agent-genvideo-download {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.agent-genaudio-download:hover,
+.agent-genvideo-download:hover { text-decoration: underline; }
+
+/* Audio-specific: narrower card, shorter plate, compact player. */
+.agent-genaudio-card { max-width: 420px; }
+.agent-genaudio-plate { min-height: 48px; }
+.agent-genaudio-frame audio { display: block; width: 100%; height: 36px; }
+
+/* Video-specific: taller plate, 16:9 gallery, full-bleed player. */
+.agent-genvideo-plate { min-height: 96px; }
+.agent-genvideo-plate video { max-height: 30vh; }
+.agent-genvideo-gallery { aspect-ratio: 16 / 9; max-height: 240px; }
+.agent-genvideo-frame { aspect-ratio: 16 / 9; }
+.agent-genvideo-open { height: 100%; }
+.agent-genvideo-frame video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #000;
+}
+
+/* Video + audio lightboxes: fullscreen overlays with centered media.
+   Shared layout — only the frame width, background, and player height
+   differ between video and audio. */
+.agent-video-lightbox,
+.agent-audio-lightbox {
+  /* Reuse .media-zoom-overlay backdrop; only the inner layout differs. */
+  padding: 28px;
+}
+.agent-video-lightbox-frame,
+.agent-audio-lightbox-frame {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+}
+.agent-video-lightbox-player,
+.agent-audio-lightbox-player {
+  display: block;
+  width: 100%;
+}
+.agent-video-lightbox-player.video-load-error,
+.agent-audio-lightbox-player.audio-load-error { opacity: .5; }
+.agent-video-bar,
+.agent-audio-bar {
+  margin-bottom: 12px;
+  justify-content: flex-end;
+  color: var(--text-faint);
+  font: 11px var(--font-mono);
+}
+.agent-video-bar .media-zoom-caption,
+.agent-audio-bar .media-zoom-caption {
+  margin-right: auto;
+  color: var(--text-soft);
+}
+
+/* Video-specific: wider frame, dark bg, taller player. */
+.agent-video-lightbox-frame { width: min(960px, 92vw); max-height: 80vh; background: #000; }
+.agent-video-lightbox-player { max-height: 70vh; }
+
+/* Audio-specific: narrower frame, surface bg, compact player. */
+.agent-audio-lightbox-frame { width: min(640px, 92vw); background: var(--surface-2); }
+.agent-audio-lightbox-player { height: 44px; }
 .agent-image-lightbox {
   position: fixed;
   inset: 0;

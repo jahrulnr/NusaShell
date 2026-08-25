@@ -295,24 +295,41 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			}
 		}
 	}
-	// Discovery-only listers for image/speech/video models. These hit
-	// dedicated endpoints (OpenRouter's /images/models, /videos/models) or
-	// filter queries (?output_modalities=speech) to find model IDs that
-	// plain /models hides. They append new IDs with Kind="" (default chat);
-	// classification is done by the catalog + hardcoded patterns pass below.
-	// This avoids misclassification when a provider ignores a filter and
-	// returns its full model list (e.g. OpenCode ignores
-	// output_modalities=speech).
+	// Discovery listers for image/speech/video models. These hit dedicated
+	// endpoints (OpenRouter's /images/models, /videos/models) or filter
+	// queries (?output_modalities=speech) to find model IDs that plain
+	// /models hides.
+	//
+	// The image lister is authoritative for classification: /images/models
+	// is a dedicated catalog endpoint (not a filter param), so every ID it
+	// returns is an image generator by the endpoint's contract. IDs are
+	// tagged Kind=image here, including upgrading an existing /models entry
+	// that also appears in the image catalog. This surfaces models the
+	// models.dev catalog doesn't carry yet (e.g. krea/krea-2-medium-turbo)
+	// without relying on name-pattern allowlists.
+	//
+	// The speech/video listers stay discovery-only: they use filter params
+	// (?output_modalities=speech) that providers may ignore and return their
+	// full chat roster, which would misclassify every chat model as TTS
+	// (e.g. OpenCode ignores output_modalities=speech). Their IDs keep
+	// Kind="" and are classified by the catalog + allowlist pass below.
 	if a.ImageModelListerFactory != nil && p.Kind != domain.ProviderCodex && p.Kind != domain.ProviderMessages {
 		imgLister := a.ImageModelListerFactory(p)
 		if imgLister != nil {
 			imgIDs, _ := imgLister.ListImageModels(ctx, key)
 			for _, id := range imgIDs {
 				if seen[id] {
+					// Upgrade an existing /models entry to image kind.
+					for j := range models {
+						if models[j].ID == id {
+							models[j].Kind = domain.ModelKindImage
+							break
+						}
+					}
 					continue
 				}
 				seen[id] = true
-				models = append(models, domain.Model{ID: id})
+				models = append(models, domain.Model{ID: id, Kind: domain.ModelKindImage})
 			}
 		}
 	}

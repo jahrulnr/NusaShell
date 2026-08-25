@@ -37,7 +37,7 @@ func sniffMediaKind(argsJSON []byte) (string, error) {
 		return "", err
 	}
 	defer f.Close()
-	head := make([]byte, 32)
+	head := make([]byte, 512)
 	n, err := f.Read(head)
 	if err != nil && n == 0 {
 		return "", fmt.Errorf("read %s: %w", path, err)
@@ -96,6 +96,16 @@ func loadMediaAttachment(kind, path string) (domain.Attachment, error) {
 		return domain.Attachment{}, fmt.Errorf(
 			"%s file %s is not a valid %s file: binary magic identifies it as %s (%s)",
 			kind, path, kind, sniffedKind, sniffedType)
+	}
+
+	// SVG is detected as image/svg+xml by SniffMagic, but most providers
+	// (OpenAI, Anthropic) do not accept SVG as image input — they reject
+	// data:image/svg+xml URLs with a decode error. Reject early with a
+	// clear message directing the user to show(op=image) for UI display.
+	if sniffedType == "image/svg+xml" {
+		return domain.Attachment{}, fmt.Errorf(
+			"SVG files are not supported as image input by most providers. "+
+				"Use show(op=\"image\", path=%q) to display the SVG in the UI instead.", path)
 	}
 
 	// Use the sniffed media type (from magic bytes) as the authoritative

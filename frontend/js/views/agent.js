@@ -28,6 +28,8 @@ import {
   bindToolStop,
   isStreamingTool,
   parseShowImageOutput,
+  parseShowAudioOutput,
+  parseShowVideoOutput,
 } from './agent/render.js';
 import { bindSubagents, setSubagentConversation } from './agent/subagents.js';
 import { agentThread, composerInput, stopButton, attachmentsContainer, workspaceButton, workspaceLabel, providerStatus } from './agent/domrefs.js';
@@ -37,6 +39,36 @@ import { attachZoomButtons } from '../media-zoom.js';
 import { renderArtifactCard, parseArtifactOutput } from '../artifact-render.js';
 import { createAskCard, sealAskCard, cancelAskCard } from './ask-card.js';
 import { playComplete, playError } from '../sounds.js';
+
+// placeToolCard appends a tool card to the right container: standalone cards
+// (ask_question, show, generate_*, artifact, subagent — anything with
+// dataset.standalone="true") go directly into the bubble so they render
+// without the .agent-tool-stack border-left lane; tool terminals go into
+// the strip so the border-left visual cue groups them.
+function placeToolCard(bubble, strip, card) {
+  if (card.dataset.standalone === 'true') {
+    bubble.append(card);
+  } else {
+    strip.append(card);
+    strip.hidden = false;
+  }
+}
+
+// swapToolCard replaces an existing card with a new one. When the new card
+// is standalone but the old one was a terminal inside the strip, the new
+// card moves to the bubble (not stay in the strip with border-left).
+function swapToolCard(oldCard, newCard, bubble, strip) {
+  if (oldCard) {
+    if (newCard.dataset.standalone === 'true' && oldCard.parentElement === strip) {
+      oldCard.replaceWith(newCard);
+      bubble.append(newCard); // move from strip to bubble
+    } else {
+      oldCard.replaceWith(newCard);
+    }
+  } else {
+    placeToolCard(bubble, strip, newCard);
+  }
+}
 
 const state = {
   conversations: [],
@@ -549,8 +581,7 @@ async function restorePendingAsks(conversationId, token) {
     const existing = cards.find((c) => c.dataset.callId === a.tool_call_id);
     if (existing) existing.replaceWith(card);
     else if (run.strip) {
-      run.strip.hidden = false;
-      run.strip.append(card);
+      placeToolCard(run.bubble, run.strip, card);
     }
     run.toolJobs.set(a.tool_call_id, card);
   }
@@ -728,10 +759,10 @@ function reattachActiveRun() {
     textBox.append(el('span', { class: 'agent-thinking-dots' },
       el('span'), el('span'), el('span')));
   }
-  // Render buffered tool jobs into the strip so a switch-back shows the
-  // tool cards that ran while this room was hidden.
-  for (const job of run.toolJobs.values()) strip.append(job);
-  if (run.toolJobs.size > 0) strip.hidden = false;
+  // Render buffered tool jobs so a switch-back shows the tool cards that
+  // ran while this room was hidden. Standalone cards go to the bubble;
+  // terminals go to the strip.
+  for (const job of run.toolJobs.values()) placeToolCard(bubble, strip, job);
   // Update the run entry with fresh DOM references.
   run.msgNode = msgNode;
   run.bubble = bubble;
@@ -872,8 +903,7 @@ function applyBufferedRunToDOM(convId) {
   if (source.raw) textBox.innerHTML = renderMarkdown(source.raw);
   else textBox.append(el('span', { class: 'agent-thinking-dots' }, el('span'), el('span'), el('span')));
   void renderMermaidDiagrams(textBox); void highlightCode(textBox); attachZoomButtons(textBox);
-  strip.hidden = source.toolJobs.size === 0;
-  for (const job of source.toolJobs.values()) strip.append(job);
+  for (const job of source.toolJobs.values()) placeToolCard(bubble, strip, job);
   // Write the slot refs back to the buffer: openConversation may re-register
   // a live run FROM this buffer right after, copying these DOM references.
   buffer.msgNode = slot.msgNode;
@@ -1529,8 +1559,7 @@ async function loadOlderChunk() {
             slot.textBox.append(el('span', { class: 'agent-thinking-dots' },
               el('span'), el('span'), el('span')));
           }
-          for (const job of prevRun.toolJobs.values()) slot.strip.append(job);
-          if (prevRun.toolJobs.size > 0) slot.strip.hidden = false;
+          for (const job of prevRun.toolJobs.values()) placeToolCard(slot.bubble, slot.strip, job);
           clearToolTimers(prevRun);
           prevRun.toolJobs = new Map();
         }
@@ -1760,13 +1789,12 @@ function bindEvents() {
       }
     }
     if (!run.strip) return;
-    run.strip.hidden = false;
     const job = name === 'generate_image'
       ? renderGenerateImageCard({ name, args: args ?? {}, status: 'running' })
       : renderToolJob({ name, args: args ?? {}, status: 'running' });
     if (isStreamingTool(name)) bindToolStop(job, () => run.runId);
     run.toolJobs.set(tool_call_id, job);
-    run.strip.append(job);
+    placeToolCard(run.bubble, run.strip, job);
     // Appending a tool card grows the thread; follow it if the user is pinned.
     // Without this, a burst of parallel tool.started events would leave the
     // view stranded above the latest activity until some later event scrolled.
@@ -1825,14 +1853,19 @@ function bindEvents() {
           if (artifact) {
             const card = renderArtifactCard(toolCall, artifact);
             card._toolArgs = toolCall.args;
-            job.replaceWith(card);
+            card.dataset.standalone = 'true';
+            swapToolCard(job, card, buffer.bubble, buffer.strip);
             buffer.toolJobs.set(tool_call_id, card);
           } else {
+            // show(op=image|audio|video): swap terminal for inline media
+            // card in the buffer too.
             const showImage = parseShowImageOutput(toolCall);
-            if (showImage) {
+            const showAudio = parseShowAudioOutput(toolCall);
+            const showVideo = parseShowVideoOutput(toolCall);
+            if (showImage || showAudio || showVideo) {
               const card = renderToolCallCard(toolCall);
               card._toolArgs = toolCall.args;
-              job.replaceWith(card);
+              swapToolCard(job, card, buffer.bubble, buffer.strip);
               buffer.toolJobs.set(tool_call_id, card);
             }
           }
@@ -1883,17 +1916,24 @@ function bindEvents() {
       const artifact = parseArtifactOutput(toolCall);
       if (artifact && job) {
         const card = renderArtifactCard(toolCall, artifact);
-        job.replaceWith(card);
-        run.toolJobs.set(tool_call_id, card);
         card._toolArgs = toolCall.args;
+        card.dataset.standalone = 'true';
+        swapToolCard(job, card, run.bubble, run.strip);
+        run.toolJobs.set(tool_call_id, card);
       } else if (job) {
-        // show(op=image): swap terminal for inline image card.
+        // show(op=image|audio|video): swap terminal for inline media card.
+        // renderToolCallCard dispatches to the correct card via the show
+        // parsers (parseShowImageOutput / parseShowAudioOutput /
+        // parseShowVideoOutput). Falls through to renderToolJob when the
+        // output doesn't match any show variant.
         const showImage = parseShowImageOutput(toolCall);
-        if (showImage) {
+        const showAudio = parseShowAudioOutput(toolCall);
+        const showVideo = parseShowVideoOutput(toolCall);
+        if (showImage || showAudio || showVideo) {
           const card = renderToolCallCard(toolCall);
-          job.replaceWith(card);
-          run.toolJobs.set(tool_call_id, card);
           card._toolArgs = toolCall.args;
+          swapToolCard(job, card, run.bubble, run.strip);
+          run.toolJobs.set(tool_call_id, card);
         }
       }
       return;
@@ -1907,12 +1947,13 @@ function bindEvents() {
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
       const toolCall = { name, args: job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
       const card = renderSubagentCard(toolCall);
+      card.dataset.standalone = 'true';
       if (job) {
-        job.replaceWith(card);
+        swapToolCard(job, card, run.bubble, run.strip);
         run.toolJobs.set(tool_call_id, card);
         card._toolArgs = toolCall.args;
       } else if (run.strip) {
-        run.strip.append(card);
+        placeToolCard(run.bubble, run.strip, card);
         run.toolJobs.set(tool_call_id, card);
       }
       return;
@@ -1921,7 +1962,7 @@ function bindEvents() {
       const job = run.toolJobs.get(tool_call_id);
       replaceGenerateImageJob(job, payload, (card) => {
         run.toolJobs.set(tool_call_id, card);
-        if (!job) run.strip.append(card);
+        if (!job) placeToolCard(run.bubble, run.strip, card);
       });
       return;
     }
@@ -1937,8 +1978,7 @@ function bindEvents() {
       if (isStreamingTool(name)) bindToolStop(card, () => run.runId);
       run.toolJobs.set(tool_call_id, card);
       if (run.strip) {
-        run.strip.append(card);
-        run.strip.hidden = false;
+        placeToolCard(run.bubble, run.strip, card);
       }
       scrollToBottom();
       return;
@@ -2061,14 +2101,14 @@ function bindEvents() {
     // Electron's createStreamingToolCard). It lives in the tool strip,
     // not nested inside a tool terminal <details>.
     if (!run.strip) return;
-    run.strip.hidden = false;
     const card = createAskCard(tool_call_id, { question, options, allow_free_text, multi_select }, {
       runId: run_id,
       onSubmit: (err) => toast(err instanceof Error ? err.message : 'Could not send answer', 'error'),
       onStop: () => rpc('agent.turns.stop', { run_id }).catch(() => {}),
     });
+    card.dataset.standalone = 'true';
     run.toolJobs.set(tool_call_id, card);
-    run.strip.append(card);
+    placeToolCard(run.bubble, run.strip, card);
     card.focus();
     scrollToBottom();
   });

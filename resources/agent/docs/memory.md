@@ -111,24 +111,33 @@ that belong in the always-injected working set. Primary is capped at ~1k
 tokens, so the agent rewrites or trims stale text before adding new
 content.
 
-The review agent sees the current primary document injected into its
-system prompt at the start of each review run, so it can avoid
-duplicates and spot stale text without needing to call
+The review agent sees the current primary document as a pre-injected
+`memory_primary` synthetic tool result at the start of each review run,
+so it can avoid duplicates and spot stale text without needing to call
 `memory(op="list", target="primary")` first. Reviews are bounded to a small number of
-tool rounds and coalesce concurrent threshold/skill/compaction triggers, so a burst cannot launch duplicate reviews or replay the same transcript repeatedly. Activity that arrives while a review is running is retained for one follow-up review. Retry cooldown is reserved for failed reviews; successful reviews do not suppress later evidence. Exact duplicate fragment writes are idempotent.
+tool rounds and coalesce concurrent threshold/skill/compaction triggers, so a burst cannot launch duplicate reviews or replay the same transcript repeatedly. Activity that arrives while a review is running is retained for one follow-up review. Both successful and failed reviews enter the cooldown period to prevent redundant re-review of the same window. Exact duplicate fragment writes are idempotent.
 
 ## How the review agent gets the transcript
 
-The review agent calls the `review_transcript` hydration tool to get the
-conversation as structured JSON. The JSON contains proper role alternation
-(user/assistant), nested tool calls with their arguments and outputs, and
-conversation metadata. This is NOT a flat text dump — the LLM sees the
-conversation semantically, the same way it would see a tool result from any
-other tool.
+The review agent receives the conversation transcript as a pre-injected
+`review_transcript` synthetic tool result. The JSON contains proper role
+alternation (user/assistant), nested tool calls with their arguments and
+outputs, conversation metadata, and the absolute path to the full
+conversation JSON file (use `file_read` on that path if the bounded
+segment lacks context). This is NOT a flat text dump — the LLM sees the
+conversation semantically, the same way it would see a tool result from
+any other tool.
 
-The hydration tool is review-only: it is not registered in the global
-Toolbox and is not available to the main agent. It is executed locally by
-the review loop, not via `Toolbox.Execute`.
+The transcript is **incrementally bounded**: each review only processes
+messages since the last review (tracked via `last_reviewed_msg_count` on
+the conversation). This prevents re-reading and re-reasoning over
+already reviewed content. The `review_transcript` and `memory_primary`
+tools are pre-injected before the first LLM call — the agent does not
+need to call them to get the initial data.
+
+The hydration tools are review-only: they are not registered in the
+global Toolbox and are not available to the main agent. They are executed
+locally by the review loop, not via `Toolbox.Execute`.
 
 ## Review triggers
 

@@ -105,13 +105,16 @@ function el(tag, attrs = {}, ...children) {
 
 // renderArtifactCard builds a card for an artifact tool call result.
 // `toolCall` is the tool call object: { name, args, output, status }.
-// `artifact` is parsed from toolCall.output: { id, title, html, css, js,
-// width, height }.
+// `artifact` is parsed from toolCall.output: { path, title, width, height }.
+// The HTML body is NOT embedded in the tool output — it is fetched
+// lazily via /local-file?path= when the user opens the iframe, so the
+// conversation JSON stays small.
 export function renderArtifactCard(toolCall, artifact) {
   const title = artifact.title || 'Artifact';
   const id = artifact.id || '';
   const width = artifact.width || 0;
   const height = artifact.height || 0;
+  const filePath = artifact.path || '';
 
   const card = el('div', {
     class: 'artifact-card',
@@ -140,9 +143,10 @@ export function renderArtifactCard(toolCall, artifact) {
   zoomBtn.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" aria-hidden="true">'
     + '<path d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
     + '<span>Expand</span>';
-  zoomBtn.addEventListener('click', (e) => {
+  zoomBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
-    openArtifactPopup({ srcDoc: buildSrcDoc(artifact), title, width, height });
+    const fetched = await fetchArtifactHTML(artifact);
+    openArtifactPopup({ srcDoc: buildSrcDoc(fetched), title, width, height });
   });
   header.append(zoomBtn);
 
@@ -157,7 +161,7 @@ export function renderArtifactCard(toolCall, artifact) {
   // Render the iframe lazily on first click. This keeps the thread light
   // and avoids spinning up iframes for artifacts the user never opens.
   let rendered = false;
-  const open = () => {
+  const open = async () => {
     if (rendered) {
       // Toggle collapse instead of re-rendering.
       preview.classList.toggle('is-collapsed');
@@ -165,13 +169,22 @@ export function renderArtifactCard(toolCall, artifact) {
     }
     rendered = true;
     preview.replaceChildren();
+    const loading = el('div', { class: 'artifact-placeholder', text: 'Loading…' });
+    preview.append(loading);
+    const fetched = await fetchArtifactHTML(artifact);
+    if (!fetched.html) {
+      loading.textContent = 'Failed to load artifact';
+      loading.classList.add('artifact-error');
+      return;
+    }
+    preview.replaceChildren();
     const iframe = document.createElement('iframe');
     iframe.className = 'artifact-frame';
     iframe.title = title;
     iframe.sandbox = 'allow-scripts allow-same-origin allow-popups allow-forms allow-modals';
     if (width) iframe.width = width;
     if (height) iframe.height = height;
-    const srcDoc = buildSrcDoc(artifact);
+    const srcDoc = buildSrcDoc(fetched);
     iframe.srcdoc = srcDoc;
     card.dataset.srcHash = hashCode(srcDoc);
     // Surface uncaught errors from inside the iframe.
@@ -205,8 +218,30 @@ export function renderArtifactCard(toolCall, artifact) {
   return card;
 }
 
+// fetchArtifactHTML loads the HTML body for an artifact from the backend
+// via /local-file?path= when the artifact output does not already contain
+// an inline html field (the new wire shape). For legacy outputs that still
+// embed html, the existing field is used as-is. Returns a new artifact
+// object with the html field populated (or empty on fetch failure).
+async function fetchArtifactHTML(artifact) {
+  if (artifact.html) return artifact;
+  if (!artifact.path) return artifact;
+  try {
+    const res = await fetch('/local-file?path=' + encodeURIComponent(artifact.path));
+    if (!res.ok) return { ...artifact, html: '' };
+    const html = await res.text();
+    return { ...artifact, html };
+  } catch {
+    return { ...artifact, html: '' };
+  }
+}
+
 // parseArtifactOutput extracts an artifact object from a tool call's output.
-// Returns null when the output is not a recognizable artifact result.
+// Returns null when the output is not a recognizable artifact result. The
+// artifact may or may not contain an inline html field — the new wire shape
+// (showHTML metadata-only) has just { path, title, width, height } and the
+// HTML body is fetched lazily by fetchArtifactHTML when the iframe opens.
+// Legacy outputs that still embed html/css/js are accepted as-is.
 export function parseArtifactOutput(toolCall) {
   if (toolCall.name !== 'show') {
     return null;
@@ -214,7 +249,9 @@ export function parseArtifactOutput(toolCall) {
   if (!toolCall.output) return null;
   try {
     const parsed = JSON.parse(toolCall.output);
-    if (parsed && parsed.artifact) return parsed.artifact;
+    if (parsed && parsed.artifact && (parsed.artifact.html || parsed.artifact.path)) {
+      return parsed.artifact;
+    }
     return null;
   } catch {
     return null;

@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-//go:embed agent/prompts/*.md
+//go:embed agent/prompts/*.md agent/prompts/user/*.md
 var PromptsFS embed.FS
 
 //go:embed agent/docs/*.md
@@ -55,6 +55,23 @@ func Prompt(name string) string {
 	return string(data)
 }
 
+// UserPrompt returns the content of a named user-role prompt file from
+// resources/agent/prompts/user/. These are short, imperative user
+// messages injected as the opening user turn for background agents
+// (e.g. the review agent). The .md extension is appended when omitted.
+// User prompts are treated by the LLM as direct instructions, which
+// models obey more reliably than system-prompt guidelines.
+func UserPrompt(name string) string {
+	if len(name) < 3 || name[len(name)-3:] != ".md" {
+		name += ".md"
+	}
+	data, err := PromptsFS.ReadFile("agent/prompts/user/" + name)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 const (
 	skillReviewRulesPlaceholder = "{{skill_review_rules}}"
 	primaryMemoryPlaceholder    = "{{primary_memory}}"
@@ -78,6 +95,16 @@ func ReviewPrompt() string {
 		return base
 	}
 	return strings.Replace(base, skillReviewRulesPlaceholder, strings.TrimSpace(rules), 1)
+}
+
+// ReviewUserPrompt loads the user-role review prompt
+// (prompts/user/review.md). This is injected as the opening user message
+// for the background review agent. Models treat user messages as direct
+// instructions, which they obey more reliably than system-prompt
+// guidelines — so the review trigger is a short imperative user message,
+// not a long system-prompt directive.
+func ReviewUserPrompt() string {
+	return UserPrompt("review")
 }
 
 // PrimaryMemoryPlaceholder returns the placeholder token used in review.md

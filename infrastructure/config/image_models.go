@@ -62,6 +62,8 @@ func looksLikeImageGenName(fullID, base string) bool {
 		return true
 	case strings.Contains(fullID, "flash-image"), strings.Contains(base, "flash-image"):
 		return true
+	case strings.Contains(fullID, "krea"), strings.HasPrefix(base, "krea"):
+		return true
 	case strings.Contains(fullID, "imagen-"), strings.HasPrefix(base, "imagen-"):
 		return true
 	case strings.Contains(fullID, "flux.1"), strings.Contains(fullID, "flux-1"), strings.HasPrefix(base, "flux"):

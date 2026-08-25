@@ -134,6 +134,12 @@ type Conversation struct {
 	// turn completes with provider usage (e.g. some local providers report
 	// none), in which case the UI falls back to EstimatedTokens.
 	ContextTokens int64
+	// LastReviewedMsgCount is the total message count at the time of the
+	// most recent background learning review. The review agent uses this as
+	// an incremental marker: each review only processes messages from
+	// LastReviewedMsgCount onward, avoiding re-reading already reviewed
+	// content. Zero means "never reviewed" (review from the start).
+	LastReviewedMsgCount int `json:"last_reviewed_msg_count,omitempty"`
 }
 
 // NewConversation creates an empty conversation.

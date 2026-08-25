@@ -53,6 +53,17 @@ file renamed to `.png`); magic bytes cannot. If the file's leading bytes
 do not match any
 known media signature, the tool rejects it with a clear error.
 
+SVG images are the one text-based exception: they are detected by scanning
+the first 512 bytes for `<svg` (handling `<?xml>` prologs and `<!DOCTYPE>`
+declarations). SVG files are supported by `show(op=image)` for UI display
+(the frontend renders SVG via `<img src>`, which strips embedded `<script>`
+tags — safe for agent-generated SVG).
+
+`read_media` rejects SVG with a clear error because most providers (OpenAI,
+Anthropic) do not accept SVG as image input — they reject
+`data:image/svg+xml` URLs with a decode error. Use `show(op=image)` to
+display SVGs in the UI instead.
+
 Use a real absolute path — never guess or invent one.
 
 Good example:
@@ -177,6 +188,44 @@ Bad examples:
 To edit a previous print, pass its absolute `file_path` in
 `referenced_image_paths`. Paths that are not in this conversation's
 attachments or earlier `generate_image` results are rejected.
+
+## Generated speech
+
+`generate_speech` writes files under
+`attachments/<conversationID>/speech_<timestamp>.<ext>` (mp3, wav, ogg, m4a).
+The attachment carries both a `file_path` (served through `/local-file`)
+and an inline `data_url` (base64) so the UI can play the audio before
+the server has flushed the file to disk. The frontend renders the
+attachment as a `<audio controls preload="metadata">` element inside a
+figure with class `agent-message-audio`; the inline `data_url` is
+preferred so playback works without an extra HTTP round trip, and
+`/local-file?path=<encoded absolute path>` is the fallback when the
+inline bytes are absent (e.g. after a snapshot reload).
+
+In addition to the bubble-path attachment renderer, the agent thread
+also renders a `generate_speech` tool call as a dedicated
+`agent-genaudio-card` (paralel with `agent-genimage-card`) so the
+tool call has the same affordances as generate_image and generate_video
+(provider/model/voice chips, prompt preview, Download link).
+
+## Generated video
+
+`generate_video` writes files under
+`attachments/<conversationID>/clip_<timestamp>.<ext>` (mp4, webm, mov,
+avi). Like the other media generators, the attachment carries both a
+`file_path` and an inline `data_url` so the UI can play the video
+before the server has flushed the file to disk. The frontend renders
+the attachment as a `<video controls preload="metadata">` element
+inside a figure with class `agent-message-video`; the inline `data_url`
+is preferred so playback works without an extra HTTP round trip, and
+`/local-file?path=<encoded absolute path>` is the fallback when the
+inline bytes are absent (e.g. after a snapshot reload).
+
+In addition to the bubble-path attachment renderer, the agent thread
+also renders a `generate_video` tool call as a dedicated
+`agent-genvideo-card` (paralel with `agent-genimage-card`) so the tool
+call has the same affordances (provider/model/duration/resolution
+chips, prompt preview, Download link).
 
 ## Folder attachments
 

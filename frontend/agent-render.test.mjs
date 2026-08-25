@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, bindToolStop, STARTER_PROMPTS } from './js/views/agent/render.js';
-
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS } from './js/views/agent/render.js';
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
   const previousDocument = globalThis.document;
@@ -197,6 +196,67 @@ test('generate_image renders a proof card instead of a tool terminal', () => {
   }
 });
 
+// Audio attachments returned by generate_speech (and any other tool that
+// delivers persisted + inline audio) MUST render a playable <audio> element,
+// not the generic TXT chip that image/video renderers explicitly avoid.
+// Falls back to /local-file?path= when the inline data URL is too large to
+// pass through history; inline wins when present so the chat thread can play
+// audio without an extra HTTP round trip.
+test('renderMessageAttachments renders an <audio> element for audio attachments', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const gallery = renderMessageAttachments([
+      {
+        type: 'audio',
+        name: 'speech_20260825.wav',
+        media_type: 'audio/wav',
+        file_path: '/home/user/.config/nusashell/attachments/conv_1/speech_20260825.wav',
+        data_url: 'data:audio/wav;base64,UklGRiQ=',
+      },
+    ]);
+    const audio = gallery.querySelector('audio');
+    assert.ok(audio, 'audio attachment renders an <audio> element');
+    assert.equal(audio.getAttribute('controls'), '');
+    assert.equal(audio.getAttribute('preload'), 'metadata');
+    // inline data URL wins so playback works even if /local-file is not yet
+    // resolvable (e.g. before the server has flushed the attachment).
+    assert.equal(audio.getAttribute('src'), 'data:audio/wav;base64,UklGRiQ=');
+    const fig = audio.closest('figure');
+    assert.ok(fig, 'audio is wrapped in a figure for layout parity with image/video');
+    assert.ok(fig.classList.contains('agent-message-audio'), 'audio figure carries the audio layout class');
+    assert.match(fig.querySelector('figcaption').textContent, /speech_20260825\.wav/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('renderMessageAttachments falls back to /local-file when audio has no data_url', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const gallery = renderMessageAttachments([
+      {
+        type: 'audio',
+        name: 'speech_20260825.wav',
+        media_type: 'audio/wav',
+        file_path: '/home/user/.config/nusashell/attachments/conv_1/speech_20260825.wav',
+      },
+    ]);
+    const audio = gallery.querySelector('audio');
+    assert.ok(audio);
+    assert.equal(
+      audio.getAttribute('src'),
+      '/local-file?path=' + encodeURIComponent('/home/user/.config/nusashell/attachments/conv_1/speech_20260825.wav'),
+      'audio src falls back to /local-file when inline data_url is missing',
+    );
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
 test('exec tool terminal renders a stop button only while running', () => {
   const dom = new JSDOM('<main id="thread"></main>', { url: 'http://localhost/' });
   const previousDocument = globalThis.document;
@@ -275,6 +335,211 @@ test('bindToolStop calls agent.turns.stop with the run id until satisfied', asyn
     assert.equal(payload.run_id, 'run-123');
   } finally {
     globalThis.fetch = originalFetch;
+    globalThis.document = previousDocument;
+  }
+});
+
+// show(op="audio") parallels show(op="image): the backend returns the same
+// wire shape { show: { type, src, path, name } } but with type="audio" and a
+// data:audio/...;base64,... src. The frontend parser should match type
+// === "audio" and the card should render an <audio controls> element with
+// a Download link, mirroring renderShowImageCard.
+test('parseShowAudioOutput matches show(op=audio) results', () => {
+  const out = JSON.stringify({
+    show: {
+      type: 'audio',
+      src: 'data:audio/wav;base64,UklGRiQ=',
+      path: '/tmp/speech.wav',
+      name: 'speech.wav',
+    },
+  });
+  assert.deepEqual(
+    parseShowAudioOutput({ name: 'show', output: out }),
+    { src: 'data:audio/wav;base64,UklGRiQ=', path: '/tmp/speech.wav', name: 'speech.wav' },
+  );
+  // Other tool names are ignored.
+  assert.equal(parseShowAudioOutput({ name: 'generate_speech', output: out }), null);
+  // Non-audio show results are ignored.
+  assert.equal(parseShowAudioOutput({ name: 'show', output: JSON.stringify({ show: { type: 'image', src: 'x' } }) }), null);
+  // Unparseable output is ignored.
+  assert.equal(parseShowAudioOutput({ name: 'show', output: 'not json' }), null);
+  // Missing output is ignored.
+  assert.equal(parseShowAudioOutput({ name: 'show', output: '' }), null);
+});
+
+test('renderToolCallCard renders an audio card for show(op=audio)', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const card = renderToolCallCard({
+      id: 'tc-audio',
+      name: 'show',
+      args: { op: 'audio', path: '/tmp/speech.wav' },
+      status: 'ok',
+      output: JSON.stringify({
+        show: {
+          type: 'audio',
+          src: 'data:audio/wav;base64,UklGRiQ=',
+          path: '/tmp/speech.wav',
+          name: 'speech.wav',
+        },
+      }),
+    });
+    assert.equal(card.classList.contains('agent-genaudio-card'), true,
+      'audio card carries its own class for parallel layout with image');
+    const audio = card.querySelector('audio');
+    assert.ok(audio, 'audio card renders an <audio> element');
+    assert.equal(audio.getAttribute('controls'), '');
+    assert.equal(audio.getAttribute('preload'), 'metadata');
+    assert.equal(audio.getAttribute('src'), 'data:audio/wav;base64,UklGRiQ=',
+      'audio src is the inline data URL');
+    assert.match(card.textContent, /speech\.wav/);
+    assert.equal(card.querySelectorAll('.agent-tool-terminal').length, 0,
+      'audio does NOT fall through to the generic tool terminal');
+    // Download affordance matches the image card.
+    assert.ok(card.querySelector('a[download]'), 'audio card exposes a Download link');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+// generate_speech: tool-card path mirrors generate_image. The card should
+// surface model/voice/duration/cost metadata parsed from the YAML output
+// frontmatter and a Download link, so users have the same affordances they
+// already get for images.
+test('renderToolCallCard renders a speech card for generate_speech', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const running = renderToolCallCard({
+      id: 'tc-sp', name: 'generate_speech', args: { text: 'hello' }, status: 'running',
+    });
+    assert.equal(running.classList.contains('agent-genaudio-card'), true);
+    assert.equal(running.classList.contains('is-running'), true);
+    assert.match(running.textContent, /Synthesizing|hello/);
+
+    const done = renderToolCallCard({
+      id: 'tc-sp', name: 'generate_speech', args: { text: 'hello' }, status: 'ok',
+      output: '---\nstatus: completed\nprovider: piper\nmodel: id_ID-news_tts-medium\nvoice: female\nmedia_type: audio/wav\nfile_path: /tmp/speech.wav\n---\nSpeech generated and saved to /tmp/speech.wav.',
+      output_attachments: [{
+        type: 'audio', name: 'speech.wav', media_type: 'audio/wav', file_path: '/tmp/speech.wav',
+      }],
+    });
+    assert.equal(done.classList.contains('is-success'), true);
+    const audio = done.querySelector('audio');
+    assert.ok(audio, 'speech card renders an <audio> element');
+    assert.equal(audio.getAttribute('controls'), '');
+    // Inline data URL is preferred so playback works without an HTTP round trip.
+    assert.match(audio.getAttribute('src') || '', /\/local-file\?path=/,
+      'speech card falls back to /local-file when only file_path is available');
+    assert.match(done.textContent, /piper|id_ID-news_tts-medium|female/);
+    assert.ok(done.querySelector('a[download]'), 'speech card has a Download link');
+    assert.equal(done.querySelectorAll('.agent-tool-terminal').length, 0);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+// show(op="video") parallels show(op=audio): the backend returns the same
+// wire shape { show: { type, src, path, name } } but with type="video" and
+// a data:video/...;base64,... src. The frontend parser should match type
+// === "video" and the card should render a <video controls> element with
+// a Download link, mirroring renderShowImageCard.
+test('parseShowVideoOutput matches show(op=video) results', () => {
+  const out = JSON.stringify({
+    show: {
+      type: 'video',
+      src: 'data:video/mp4;base64,AAAA',
+      path: '/tmp/clip.mp4',
+      name: 'clip.mp4',
+    },
+  });
+  assert.deepEqual(
+    parseShowVideoOutput({ name: 'show', output: out }),
+    { src: 'data:video/mp4;base64,AAAA', path: '/tmp/clip.mp4', name: 'clip.mp4' },
+  );
+  // Other tool names are ignored.
+  assert.equal(parseShowVideoOutput({ name: 'generate_video', output: out }), null);
+  // Non-video show results are ignored.
+  assert.equal(parseShowVideoOutput({ name: 'show', output: JSON.stringify({ show: { type: 'image', src: 'x' } }) }), null);
+  // Unparseable output is ignored.
+  assert.equal(parseShowVideoOutput({ name: 'show', output: 'not json' }), null);
+  // Missing output is ignored.
+  assert.equal(parseShowVideoOutput({ name: 'show', output: '' }), null);
+});
+
+test('renderToolCallCard renders a video card for show(op=video)', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const card = renderToolCallCard({
+      id: 'tc-vid',
+      name: 'show',
+      args: { op: 'video', path: '/tmp/clip.mp4' },
+      status: 'ok',
+      output: JSON.stringify({
+        show: {
+          type: 'video',
+          src: 'data:video/mp4;base64,AAAA',
+          path: '/tmp/clip.mp4',
+          name: 'clip.mp4',
+        },
+      }),
+    });
+    assert.equal(card.classList.contains('agent-genvideo-card'), true,
+      'video card carries its own class for parallel layout with image/audio');
+    const video = card.querySelector('video');
+    assert.ok(video, 'video card renders a <video> element');
+    assert.equal(video.getAttribute('controls'), '');
+    assert.equal(video.getAttribute('preload'), 'metadata');
+    assert.equal(video.getAttribute('src'), 'data:video/mp4;base64,AAAA',
+      'video src is the inline data URL');
+    assert.match(card.textContent, /clip\.mp4/);
+    assert.equal(card.querySelectorAll('.agent-tool-terminal').length, 0,
+      'video does NOT fall through to the generic tool terminal');
+    // Download affordance matches the image/audio cards.
+    assert.ok(card.querySelector('a[download]'), 'video card exposes a Download link');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+// generate_video: tool-card path mirrors generate_image and generate_speech.
+// Surfaces provider/model/duration/resolution/cost metadata parsed from
+// the YAML output frontmatter plus a click-to-play <video> plate and a
+// Download link.
+test('renderToolCallCard renders a video card for generate_video', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const running = renderToolCallCard({
+      id: 'tc-gv', name: 'generate_video', args: { prompt: 'a cat' }, status: 'running',
+    });
+    assert.equal(running.classList.contains('agent-genvideo-card'), true);
+    assert.equal(running.classList.contains('is-running'), true);
+    assert.match(running.textContent, /Rendering|a cat/);
+
+    const done = renderToolCallCard({
+      id: 'tc-gv', name: 'generate_video', args: { prompt: 'a cat' }, status: 'ok',
+      output: '---\nstatus: completed\nprovider: veo3\nmodel: veo-3\nmedia_type: video/mp4\nfile_path: /tmp/clip.mp4\n---\nVideo generated and saved to /tmp/clip.mp4.',
+      output_attachments: [{
+        type: 'video', name: 'clip.mp4', media_type: 'video/mp4', file_path: '/tmp/clip.mp4',
+      }],
+    });
+    assert.equal(done.classList.contains('is-success'), true);
+    const video = done.querySelector('video');
+    assert.ok(video, 'video card renders a <video> element');
+    assert.equal(video.getAttribute('controls'), '');
+    assert.match(video.getAttribute('src') || '', /\/local-file\?path=/,
+      'video card falls back to /local-file when only file_path is available');
+    assert.match(done.textContent, /veo3|veo-3/);
+    assert.ok(done.querySelector('a[download]'), 'video card has a Download link');
+    assert.equal(done.querySelectorAll('.agent-tool-terminal').length, 0);
+  } finally {
     globalThis.document = previousDocument;
   }
 });
