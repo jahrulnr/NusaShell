@@ -135,6 +135,16 @@ type codexInputItem struct {
 	Name    string          `json:"name,omitempty"`
 	Args    string          `json:"arguments,omitempty"`
 	Output  *string         `json:"output,omitempty"`
+	// Summary carries reasoning summary text for {type:"reasoning"} input
+	// items (reasoning replay). Each entry is {type:"summary_text",text:"..."}.
+	Summary []codexReasoningSummary `json:"summary,omitempty"`
+}
+
+// codexReasoningSummary is one entry in a reasoning item's summary
+// array, used for reasoning replay (mirrors Responses API shape).
+type codexReasoningSummary struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 type codexToolDef struct {
@@ -193,7 +203,7 @@ type codexNonStreamResponse struct {
 
 // ---- request building + normalization (ATM from 9router codex.js) ----
 
-func toCodexInput(msgs []application.ChatMessage) []codexInputItem {
+func toCodexInput(msgs []application.ChatMessage, reasoningReplay bool) []codexInputItem {
 	var out []codexInputItem
 	for _, m := range msgs {
 		switch m.Role {
@@ -208,6 +218,23 @@ func toCodexInput(msgs []application.ChatMessage) []codexInputItem {
 			// in cacheable prefix). Ported from 9router convertSystemToDeveloperRole.
 			out = append(out, codexInputItem{Role: "developer", Content: aiutil.StrJSON(m.Content)})
 		case "assistant":
+			// Reasoning replay: emit a {type:"reasoning"} item before the
+			// assistant message so the Codex backend can reconstruct
+			// thinking state across turns. Mirrors the Responses API
+			// handler's replay path. The summary text is the persisted
+			// reasoning from the prior turn; when empty, inject a
+			// non-empty placeholder — some providers reject an absent
+			// reasoning item, others reject an empty summary.
+			if reasoningReplay {
+				summaryText := m.Reasoning
+				if summaryText == "" || domain.IsReasoningPlaceholder(summaryText) {
+					summaryText = domain.ReasoningPlaceholder
+				}
+				out = append(out, codexInputItem{
+					Type:    "reasoning",
+					Summary: []codexReasoningSummary{{Type: "summary_text", Text: summaryText}},
+				})
+			}
 			if m.Content != "" {
 				out = append(out, codexInputItem{Role: "assistant", Content: aiutil.StrJSON(m.Content)})
 			}
@@ -305,7 +332,7 @@ func normalizeCodexTools(tools []application.ToolDef) []codexToolDef {
 }
 
 func buildCodexRequest(req application.ChatRequest) codexRequest {
-	input := toCodexInput(req.Messages)
+	input := toCodexInput(req.Messages, req.ReasoningReplay)
 	// Ensure input is non-empty (Codex API rejects empty input)
 	if len(input) == 0 {
 		placeholder := "..."

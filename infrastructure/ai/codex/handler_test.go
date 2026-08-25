@@ -111,6 +111,69 @@ func TestBuildCodexRequestNoneEffortSkipsInclude(t *testing.T) {
 	}
 }
 
+// TestToCodexInputReasoningReplay proves that when ReasoningReplay is
+// true, a {type:"reasoning"} item with a summary_text entry is emitted
+// before each assistant message. Without replay, no reasoning items
+// appear. Mirrors the Responses API handler's replay path.
+func TestToCodexInputReasoningReplay(t *testing.T) {
+	msgs := []application.ChatMessage{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there", Reasoning: "I should greet the user."},
+		{Role: "user", Content: "What is 2+2?"},
+	}
+
+	// Without replay: no reasoning items
+	got := toCodexInput(msgs, false)
+	for i, item := range got {
+		if item.Type == "reasoning" {
+			t.Errorf("item %d (no replay): unexpected reasoning item", i)
+		}
+	}
+
+	// With replay: reasoning item emitted before assistant message
+	got = toCodexInput(msgs, true)
+	var foundReasoning bool
+	for i, item := range got {
+		if item.Type == "reasoning" {
+			foundReasoning = true
+			if len(item.Summary) != 1 {
+				t.Fatalf("reasoning item %d: summary len = %d, want 1", i, len(item.Summary))
+			}
+			if item.Summary[0].Type != "summary_text" {
+				t.Errorf("summary type = %q, want summary_text", item.Summary[0].Type)
+			}
+			if item.Summary[0].Text != "I should greet the user." {
+				t.Errorf("summary text = %q, want persisted reasoning", item.Summary[0].Text)
+			}
+		}
+	}
+	if !foundReasoning {
+		t.Fatal("no reasoning item in output with replay=true")
+	}
+}
+
+// TestToCodexInputReasoningReplayPlaceholder proves that when
+// ReasoningReplay is true but the assistant message has no persisted
+// reasoning, a non-empty placeholder is injected (same behavior as
+// the Responses API handler).
+func TestToCodexInputReasoningReplayPlaceholder(t *testing.T) {
+	msgs := []application.ChatMessage{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there", Reasoning: ""},
+		{Role: "user", Content: "Bye"},
+	}
+	got := toCodexInput(msgs, true)
+	for _, item := range got {
+		if item.Type == "reasoning" {
+			if len(item.Summary) != 1 || item.Summary[0].Text != domain.ReasoningPlaceholder {
+				t.Fatalf("placeholder: summary = %v, want placeholder", item.Summary)
+			}
+			return
+		}
+	}
+	t.Fatal("no reasoning item in output with replay=true and empty reasoning")
+}
+
 func TestBuildCodexRequestPromptCacheKeyOnly(t *testing.T) {
 	req := application.ChatRequest{
 		Model:    "gpt-5.3-codex",
