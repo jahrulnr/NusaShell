@@ -114,3 +114,42 @@ func TestExecTailBuffer(t *testing.T) {
 		t.Fatalf("small buffer altered: %q", got)
 	}
 }
+
+// TestToolboxExecuteStreamedExec verifies the Toolbox streams exec output
+// chunks through ExecuteStreamed and still returns the combined result.
+func TestToolboxExecuteStreamedExec(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix shell syntax")
+	}
+	tb := &Toolbox{}
+	var chunks []string
+	out, err := tb.ExecuteStreamed(context.Background(), "exec",
+		[]byte(`{"command":"echo alpha; echo beta"}`),
+		func(text string) { chunks = append(chunks, text) })
+	if err != nil {
+		t.Fatalf("streamed exec: %v", err)
+	}
+	joined := strings.Join(chunks, "")
+	if !strings.Contains(joined, "alpha") || !strings.Contains(joined, "beta") {
+		t.Fatalf("missing streamed lines: %q", joined)
+	}
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "exit_code: 0") {
+		t.Fatalf("final output incomplete: %q", out)
+	}
+}
+
+// TestToolboxExecuteStreamedNonExec verifies non-exec tools fall back to the
+// plain Execute path when streamed (grep returns an error path, never
+// reaching the stream callback).
+func TestToolboxExecuteStreamedNonExec(t *testing.T) {
+	tb := &Toolbox{}
+	out, err := tb.ExecuteStreamed(context.Background(), "grep",
+		[]byte(`{"pattern":"x","path":"/nonexistent"}`),
+		func(string) { t.Fatal("non-exec tool must not stream") })
+	if err == nil || !strings.Contains(err.Error(), "path not found") {
+		t.Fatalf("expected grep to fail, err=%v", err)
+	}
+	if out != "" {
+		t.Fatalf("expected empty output, got %q", out)
+	}
+}

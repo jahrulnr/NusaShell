@@ -117,6 +117,7 @@ const (
 	EventContextEstimate  = "agent.context.estimate"
 	EventReasoningDelta   = "agent.reasoning.delta"
 	EventToolStarted      = "agent.tool.started"
+	EventToolDelta        = "agent.tool.delta"
 	EventToolCompleted    = "agent.tool.completed"
 	EventTurnDone         = "agent.turn.done"
 	EventTurnError        = "agent.turn.error"
@@ -369,6 +370,18 @@ type ToolStartedEvent struct {
 	ToolCallID     string          `json:"tool_call_id"`
 	Name           string          `json:"name"`
 	Args           json.RawMessage `json:"args,omitempty"`
+}
+
+// ToolDeltaEvent carries a live output chunk for a running tool call,
+// mirrored from the tool's stdout/stderr as it is produced (only emitted
+// for tools that stream, e.g. exec). The frontend appends `text` to the
+// tool terminal's output panel while the call is still running.
+type ToolDeltaEvent struct {
+	RunID          string `json:"run_id"`
+	ConversationID string `json:"conversation_id"`
+	ToolCallID     string `json:"tool_call_id"`
+	Name           string `json:"name"`
+	Text           string `json:"text"`
 }
 
 type ToolCompletedEvent struct {

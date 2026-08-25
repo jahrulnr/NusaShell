@@ -20,6 +20,11 @@ const (
 	grepDefaultMaxResults = 100
 	grepMaxFileBytes      = 10 << 20 // skip files larger than 10 MB
 	grepMaxContextLines   = 10
+	// grepMaxOutputChars caps the formatted result size. max_results caps the
+	// match count but not the bytes: a few matches on huge lines (minified
+	// JS, base64 blobs, giant JSON lines) can produce multi-megabyte output
+	// that alone exceeds the model's context window and defeats compaction.
+	grepMaxOutputChars = 200_000
 )
 
 func grepToolInfo() application.ToolInfo {
@@ -28,6 +33,7 @@ func grepToolInfo() application.ToolInfo {
 		Description: "Search file contents with regex. Built on Go regexp (RE2 syntax — no backreferences). " +
 			"Filters files by glob_pattern, returns matching lines with optional context_lines. " +
 			"output_mode: content (matching lines + context), files_with_matches (just filenames), count (match count per file). " +
+			"Results are capped at ~200k chars with a truncation marker — for huge result sets narrow the pattern, reduce context_lines, or use output_mode files_with_matches/count. " +
 			"Prefer this over exec+shell grep — structured output, no process spawn, works without rg installed.",
 		InputSchema: obj("object", props(
 			"pattern", str("Regular expression to search for (RE2 syntax)"),
@@ -117,7 +123,13 @@ func executeGrep(argsJSON []byte) (bool, string, error) {
 		matches = matches[:maxResults]
 	}
 
-	return true, formatGrepResults(matches, mode), nil
+	out := formatGrepResults(matches, mode)
+	if len(out) > grepMaxOutputChars {
+		omitted := len(out) - grepMaxOutputChars
+		out = truncateGrepOutput(out, grepMaxOutputChars)
+		out += fmt.Sprintf("\n... [output truncated: %d chars omitted — narrow the pattern, reduce context_lines, or use output_mode files_with_matches/count]", omitted)
+	}
+	return true, out, nil
 }
 
 type grepMatch struct {
@@ -253,6 +265,16 @@ func formatGrepResults(matches []grepMatch, mode string) string {
 		}
 		return yamlJSONL(map[string]any{"matches": len(matches)}, items)
 	}
+}
+
+// truncateGrepOutput keeps the first n runes of s without splitting a
+// multi-byte character (grep output is UTF-8 text).
+func truncateGrepOutput(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n])
 }
 
 // matchGlob checks if path matches a glob pattern. Supports ** for

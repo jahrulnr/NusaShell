@@ -108,7 +108,8 @@
         {
           "heading": "Tool call strip",
           "paragraphs": [
-            "Shows in-flight tool calls for the current turn, with one entry per MCP or built-in tool invocation."
+            "Shows in-flight tool calls for the current turn, with one entry per MCP or built-in tool invocation.",
+            "Streaming tools (exec) display their live output as it is produced and offer a per-call Stop button while running; the button cancels the underlying turn via agent.turns.stop (same as the composer Stop)."
           ],
           "controls": [
             "agent-composer-stack",
@@ -2060,6 +2061,14 @@
       "section": "Navigation",
       "type": "button",
       "notes": "Visible only while the browser offers installation (beforeinstallprompt); triggers the native install flow and hides after install/dismissal."
+    },
+    "tool-terminal-stop": {
+      "label": "Tool terminal stop",
+      "section": "Agent",
+      "type": "button",
+      "action": "Cancels the running turn for this tool call (agent.turns.stop). Shown only on streaming tools (exec) while the tool is running; the button hides once the tool settles.",
+      "notes": "Appears inside the tool terminal card's summary row (class agent-tool-stop), next to the elapsed timer.",
+      "selector": ".agent-tool-stop"
     }
   }
 }

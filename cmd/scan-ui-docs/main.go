@@ -132,6 +132,15 @@ func main() {
 		if c.Generated {
 			continue
 		}
+		// Controls mapped by CSS selector (not a static id, e.g. buttons
+		// created programmatically inside dynamic cards) pass the gate when
+		// the selector string appears in the frontend source.
+		if c.Selector != "" {
+			if !containsSelector(jsSources, c.Selector) {
+				errors = append(errors, fmt.Sprintf(`ui-map.json control %q selector %q is not found in the frontend source.`, id, c.Selector))
+			}
+			continue
+		}
 		if !sourceIDs[id] {
 			errors = append(errors, fmt.Sprintf(`ui-map.json control %q is not found in the frontend source.`, id))
 		}
@@ -252,6 +261,20 @@ func union(a, b map[string]bool) map[string]bool {
 		out[k] = true
 	}
 	return out
+}
+
+// containsSelector reports whether any JS source mentions the CSS selector
+// string (e.g. ".agent-tool-stop"), used for controls without a static id.
+func containsSelector(sources []string, selector string) bool {
+	if selector == "" {
+		return false
+	}
+	for _, src := range sources {
+		if strings.Contains(src, selector) {
+			return true
+		}
+	}
+	return false
 }
 
 func sortedKeys[V any](m map[string]V) []string {

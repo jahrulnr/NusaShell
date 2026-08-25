@@ -24,6 +24,9 @@ import {
   setToolTerminalStatus,
   toolTerminalMeta,
   toolTerminalOutput,
+  appendToolJobDelta,
+  bindToolStop,
+  isStreamingTool,
   parseShowImageOutput,
 } from './agent/render.js';
 import { bindSubagents, setSubagentConversation } from './agent/subagents.js';
@@ -1732,6 +1735,7 @@ function bindEvents() {
       const job = name === 'generate_image'
         ? renderGenerateImageCard({ name, args: args ?? {}, status: 'running' })
         : renderToolJob({ name, args: args ?? {}, status: 'running' });
+      if (isStreamingTool(name)) bindToolStop(job, () => run.runId);
       buffer.toolJobs.set(tool_call_id, job);
       touchRoomBuffer(buffer);
       refreshLiveDots();
@@ -1760,6 +1764,7 @@ function bindEvents() {
     const job = name === 'generate_image'
       ? renderGenerateImageCard({ name, args: args ?? {}, status: 'running' })
       : renderToolJob({ name, args: args ?? {}, status: 'running' });
+    if (isStreamingTool(name)) bindToolStop(job, () => run.runId);
     run.toolJobs.set(tool_call_id, job);
     run.strip.append(job);
     // Appending a tool card grows the thread; follow it if the user is pinned.
@@ -1781,6 +1786,25 @@ function bindEvents() {
       const secs = Math.floor((Date.now() - startTime) / 1000);
       elapsedEl.textContent = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
     }, 1000);
+  });
+  on('agent.tool.delta', (payload) => {
+    const { tool_call_id, text, conversation_id } = payload;
+    const run = getRunOrQueue('agent.tool.delta', payload);
+    if (!run || !text) return;
+    // Mirror streamed output into the non-active room buffer so a
+    // switch-back shows the accumulated tool output, not just the final
+    // snapshot.
+    if (conversation_id !== state.activeId) {
+      const buffer = getOrCreateRoomBuffer(conversation_id);
+      const job = buffer.toolJobs.get(tool_call_id);
+      if (job) appendToolJobDelta(job, text);
+      touchRoomBuffer(buffer);
+      return;
+    }
+    const job = run.toolJobs.get(tool_call_id);
+    if (job) appendToolJobDelta(job, text);
+    updateRoomInfo(state.conversation, state.messages);
+    scrollToBottom();
   });
   on('agent.tool.completed', (payload) => {
     const { tool_call_id, name, status, output, conversation_id } = payload;
@@ -1901,8 +1925,24 @@ function bindEvents() {
       });
       return;
     }
+    // When the job is missing — typically because a page refresh re-attached
+    // the active run but the in-flight tool card never made it into the
+    // buffer — synthesize a card from the completion payload so the final
+    // output still renders. The output here is the persisted snapshot, so
+    // reload-after-complete works the same as the live delta stream.
     const job = run.toolJobs.get(tool_call_id);
-    if (!job) return;
+    if (!job) {
+      const toolCall = { name, args: run.toolArgs?.get?.(tool_call_id) ?? {}, output: output ?? '', status: status || 'ok' };
+      const card = name === 'generate_image' ? renderGenerateImageCard(toolCall) : renderToolJob(toolCall);
+      if (isStreamingTool(name)) bindToolStop(card, () => run.runId);
+      run.toolJobs.set(tool_call_id, card);
+      if (run.strip) {
+        run.strip.append(card);
+        run.strip.hidden = false;
+      }
+      scrollToBottom();
+      return;
+    }
     // Write the final elapsed duration before clearing the timer so the
     // finished card keeps showing how long the tool ran.
     const elapsedEl = job.querySelector('.agent-tool-elapsed');

@@ -1,5 +1,6 @@
 import { renderMarkdown } from '../../markdown.js';
 import { el, fmtTime, registerOverlayDismiss } from '../../ui.js';
+import { rpc } from '../../rpc.js';
 import { createAskCard } from '../ask-card.js';
 import { openDrawer, agentNameForId, firstVisibleRunId } from './subagents.js';
 import { renderArtifactCard, parseArtifactOutput } from '../../artifact-render.js';
@@ -675,12 +676,14 @@ export function renderToolJob(toolCall) {
   const elapsed = toolCall.elapsed
     ? (() => { const t = Math.max(0, Math.floor(Number(toolCall.elapsed) || 0)); return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${t % 60}s`; })()
     : '';
+  const streaming = isStreamingTool(name);
   const summary = el('summary', {},
     el('span', { class: 'agent-tool-terminal-prompt', text: '›_' }),
     el('span', { class: 'agent-tool-terminal-title', text: displayName }),
     (isMcp || isMcpCall) ? el('span', { class: 'agent-tool-terminal-badge', text: 'MCP' }) : null,
     el('span', { class: 'agent-tool-terminal-meta', text: toolTerminalMeta(toolCall) }),
     el('span', { class: 'agent-tool-elapsed', text: elapsed }),
+    ...(streaming ? [el('button', { class: 'agent-tool-stop', type: 'button', title: 'Stop this tool', 'aria-label': 'Stop running tool', hidden: true }, '■ Stop')] : []),
     el('span', { class: 'agent-tool-terminal-chevron', text: '⌄' }),
   );
   const body = el('div', { class: 'agent-tool-terminal-body' },
@@ -692,6 +695,57 @@ export function renderToolJob(toolCall) {
   card.append(summary, body);
   setToolTerminalStatus(card, toolCall.status || 'running');
   return card;
+}
+
+// isStreamingTool reports whether a tool streams live output chunks
+// (agent.tool.delta events) and therefore offers a per-call stop button.
+export function isStreamingTool(name) {
+  return name === 'exec';
+}
+
+// bindToolStop wires the per-call stop button (shown while the tool is
+// running) to cancel the underlying turn via agent.turns.stop. The run_id
+// is resolved lazily from the owning run entry so the button works even
+// when the card was rendered before the run was registered.
+// Per-call stop button for streaming tools (exec): surfaced programmatically
+// inside the tool terminal card, so it has no static id in the HTML source.
+export function bindToolStop(card, getRunId) {
+  const btn = card?.querySelector('.agent-tool-stop');
+  if (!btn) return;
+  btn.hidden = false;
+  btn.addEventListener('click', () => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = 'Stopping…';
+    const runId = typeof getRunId === 'function' ? getRunId() : getRunId;
+    rpc('agent.turns.stop', { run_id: runId }).then(() => {
+      setTimeout(() => btn.remove(), 600);
+    }).catch(() => {
+      btn.disabled = false;
+      btn.textContent = '■ Stop';
+    });
+  });
+}
+
+// appendToolJobDelta appends a live output chunk to a running tool
+// terminal's output panel. The panel accumulates streamed text until the
+// tool completes, at which point the final output replaces it.
+export function appendToolJobDelta(card, text) {
+  if (!card || !text) return;
+  const outputEl = card.querySelector('.agent-tool-terminal-output');
+  if (!outputEl) return;
+  if (!card._streamStarted) {
+    // First live chunk replaces the placeholder ("… waiting for output").
+    card._streamStarted = true;
+    outputEl.textContent = '';
+  }
+  const MAX_TOOL_STREAM = 12000;
+  if (outputEl.textContent.length + text.length > MAX_TOOL_STREAM) {
+    outputEl.textContent = outputEl.textContent.slice(-MAX_TOOL_STREAM) + text;
+  } else {
+    outputEl.textContent += text;
+  }
+  outputEl.scrollTop = outputEl.scrollHeight;
 }
 
 // formatTokens renders a token count with a human unit suffix
@@ -721,15 +775,29 @@ export function toolTerminalMeta(toolCall) {
 
 export function toolTerminalOutput(toolCall) {
   if (toolCall.output !== undefined && toolCall.output !== null && toolCall.output !== '') return truncate(String(toolCall.output), 12000);
-  return toolCall.status === 'running' ? '…' : toolCall.status === 'fail' ? 'Tool failed.' : 'ok';
+  if (toolCall.status === 'running') {
+    // Streaming tools start with the placeholder, which live deltas replace.
+    return isStreamingTool(toolCall.name) ? '… waiting for output' : '…';
+  }
+  return toolCall.status === 'fail' ? 'Tool failed.' : 'ok';
 }
 
 export function setToolTerminalStatus(card, status) {
   const normalized = status || 'running';
-  card.classList.toggle('is-running', normalized === 'running');
-  card.classList.toggle('is-success', normalized === 'ok');
-  card.classList.toggle('is-error', normalized === 'fail');
+  const running = normalized === 'running';
+  const success = normalized === 'ok';
+  // Both 'fail' and 'interrupted' render the same error styling — the
+  // message and meta already distinguish them, and the data flow treats
+  // them as terminal (no further events) for the strip's purposes.
+  const errored = normalized === 'fail' || normalized === 'interrupted';
+  card.classList.toggle('is-running', running);
+  card.classList.toggle('is-success', success);
+  card.classList.toggle('is-error', errored);
   card.dataset.status = normalized;
+  // The per-call stop button lives on streaming tools only and disappears
+  // once the tool settles.
+  const stop = card.querySelector('.agent-tool-stop');
+  if (stop) stop.hidden = running ? false : true;
 }
 
 export function attachmentChip(attachment, onRemove) {

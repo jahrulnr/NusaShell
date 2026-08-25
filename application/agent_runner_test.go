@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -425,6 +426,47 @@ func TestExecuteTurnToolsStopsOnCancel(t *testing.T) {
 	}
 }
 
+// TestRunOneToolKeepsPartialOutputInError verifies that when a streaming
+// executor returns an error carrying the partial output received so far
+// (the same shape executeExecToolChunks produces on idle/timeout/cancel
+// paths), the runOneTool layer preserves the error text in the persisted
+// tool call result rather than collapsing it to a generic prefix. The
+// end-to-end "exec actually killed mid-stream" case is covered by
+// TestExecStreamedCancellation in infrastructure/tools; this test pins the
+// application-level contract so a reloaded conversation keeps the streamed
+// lines for any non-OK exit.
+func TestRunOneToolKeepsPartialOutputInError(t *testing.T) {
+	partialErr := fmt.Errorf("no output for 800ms (idle timeout); partial output:\nline-1\nline-2\n")
+	toolbox := &partialOutputToolbox{err: partialErr}
+	app := &App{Bus: NewBus(), Toolbox: toolbox}
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background(), Cancel: func() {}}
+	res := app.runOneTool(run, domain.ToolCall{ID: "t1", Name: "exec", Args: `{}`}, ModelCapabilities{}, domain.Settings{})
+	if res.status != domain.ToolFailed {
+		t.Fatalf("status = %s, want failed", res.status)
+	}
+	if !strings.Contains(res.output, "line-1") {
+		t.Fatalf("partial streamed output lost from persisted result: %q", res.output)
+	}
+	if !strings.HasPrefix(res.output, "error: ") {
+		t.Fatalf("non-cancellation errors must still carry the error: prefix; got %q", res.output)
+	}
+}
+
+// partialOutputToolbox implements the optional streaming capability and
+// always returns the supplied error, so the test can assert the App keeps
+// the rich error text verbatim in the tool result.
+type partialOutputToolbox struct {
+	err error
+}
+
+func (p *partialOutputToolbox) ListTools() []ToolInfo { return nil }
+func (p *partialOutputToolbox) Execute(context.Context, string, []byte) (string, error) {
+	return "", p.err
+}
+func (p *partialOutputToolbox) ExecuteStreamed(context.Context, string, []byte, func(string)) (string, error) {
+	return "", p.err
+}
+
 type recordingToolbox struct {
 	mu    sync.Mutex
 	names []string
@@ -436,6 +478,128 @@ func (r *recordingToolbox) Execute(ctx context.Context, name string, argsJSON []
 	r.names = append(r.names, name)
 	r.mu.Unlock()
 	return "ok", nil
+}
+
+// streamedRecordingToolbox records names and forwards output chunks for
+// streaming-capable calls, mirroring the real Toolbox behavior. Execute and
+// ExecuteStreamed are both pointer-receiver methods so embedding promotes
+// them onto *streamedRecordingToolbox (the type App.Toolbox holds).
+type streamedRecordingToolbox struct {
+	*recordingToolbox
+	chunks []string
+}
+
+func (s *streamedRecordingToolbox) ExecuteStreamed(ctx context.Context, name string, argsJSON []byte, onChunk func(string)) (string, error) {
+	s.recordingToolbox.mu.Lock()
+	s.recordingToolbox.names = append(s.recordingToolbox.names, name)
+	s.recordingToolbox.mu.Unlock()
+	if onChunk != nil {
+		onChunk("line-1\n")
+		onChunk("line-2\n")
+	}
+	if ctx.Err() != nil {
+		// Mirrors the real exec executor: the cancellation error carries the
+		// partial output received so far.
+		return "", fmt.Errorf("exec cancelled: %w\npartial output:\nline-1\nline-2\n", ctx.Err())
+	}
+	return "streamed-ok", nil
+}
+
+// Execute shadows the embedded recordingToolbox.Execute so a streamed call
+// still counts in the names log when the App falls through to the non-stream
+// path; in practice every call here hits ExecuteStreamed and never reaches it.
+func (s *streamedRecordingToolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {
+	return "streamed-ok", nil
+}
+
+// TestRunOneToolStreamsDeltas verifies that a streaming-capable toolbox
+// emits one agent.tool.delta event per output chunk during tool execution,
+// and that the final result is preserved.
+func TestRunOneToolStreamsDeltas(t *testing.T) {
+	var mu sync.Mutex
+	var deltas []contracts.ToolDeltaEvent
+	bus := NewBus()
+	subscribeEvents := func(ch <-chan contracts.Event, done func(), onDelta func(contracts.ToolDeltaEvent)) {
+		go func() {
+			defer done()
+			for ev := range ch {
+				if ev.Type == contracts.EventToolDelta {
+					var d contracts.ToolDeltaEvent
+					b, _ := json.Marshal(ev.Payload)
+					_ = json.Unmarshal(b, &d)
+					onDelta(d)
+				}
+			}
+		}()
+	}
+	_, ch, unsubscribe := bus.Subscribe()
+	done := make(chan struct{})
+	subscribeEvents(ch, func() { close(done) }, func(d contracts.ToolDeltaEvent) {
+		mu.Lock()
+		deltas = append(deltas, d)
+		mu.Unlock()
+	})
+	defer unsubscribe()
+
+	app := &App{Bus: bus, Toolbox: &streamedRecordingToolbox{recordingToolbox: &recordingToolbox{}}}
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background()}
+	res := app.runOneTool(run, domain.ToolCall{ID: "t1", Name: "exec", Args: `{"command":"echo hi"}`}, ModelCapabilities{}, domain.Settings{})
+	if res.output != "streamed-ok" {
+		t.Fatalf("output = %q", res.output)
+	}
+	unsubscribe()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("delta stream never closed")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(deltas) != 2 {
+		t.Fatalf("expected 2 deltas, got %d", len(deltas))
+	}
+	for _, d := range deltas {
+		if d.RunID != "r1" || d.ConversationID != "c1" || d.ToolCallID != "t1" || d.Name != "exec" {
+			t.Fatalf("bad delta metadata: %+v", d)
+		}
+	}
+	if deltas[0].Text != "line-1\n" || deltas[1].Text != "line-2\n" {
+		t.Fatalf("delta text order wrong: %+v", deltas)
+	}
+}
+
+// TestRunOneToolNoStreamFallback verifies toolboxes without the streaming
+// capability still execute normally and emit no deltas.
+func TestRunOneToolNoStreamFallback(t *testing.T) {
+	bus := NewBus()
+	var deltaCount int
+	_, ch, unsubscribe := bus.Subscribe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range ch {
+			if ev.Type == contracts.EventToolDelta {
+				deltaCount++
+			}
+		}
+	}()
+	defer unsubscribe()
+
+	app := &App{Bus: bus, Toolbox: &recordingToolbox{}}
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background()}
+	res := app.runOneTool(run, domain.ToolCall{ID: "t1", Name: "exec", Args: `{"command":"echo hi"}`}, ModelCapabilities{}, domain.Settings{})
+	if res.output != "ok" {
+		t.Fatalf("output = %q", res.output)
+	}
+	unsubscribe()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("event stream never closed")
+	}
+	if deltaCount != 0 {
+		t.Fatalf("expected no deltas, got %d", deltaCount)
+	}
 }
 
 func TestRunTurnFailsWhenAllCodexAccountsBlocked(t *testing.T) {
@@ -852,7 +1016,9 @@ func (a *recordingCompleteAdapter) Complete(_ context.Context, req ChatRequest) 
 }
 
 func TestCompactionPassBudgetShrinksWithRunningSummary(t *testing.T) {
-	const window = 50_000
+	// Window must leave room above the summary max-out floor
+	// (compactionSummaryMaxOut=64000) so the shrink is observable.
+	const window = 100_000
 	empty := compactionPassAvailable(window, "", compactionSummaryMaxOut)
 	grown := compactionPassAvailable(window, strings.Repeat("x", 8000), compactionSummaryMaxOut)
 	if grown >= empty {
@@ -1076,6 +1242,118 @@ func TestCompactionBudgetClampedToContextWindow(t *testing.T) {
 		if req.MaxTokens > maxBudget {
 			t.Fatalf("attempt %d: MaxTokens=%d exceeds maxBudget=%d", i, req.MaxTokens, maxBudget)
 		}
+	}
+}
+
+func TestCompactionStripsMediaAttachments(t *testing.T) {
+	// Compaction input must not carry media payloads: compaction models are
+	// often not vision/audio-capable and providers reject the request
+	// outright (OpenRouter HTTP 404 "No endpoints found that support image
+	// input"), which made compaction fail and the turn die with a
+	// context-overflow 400. Attachments are replaced with a text note.
+	var msgs []domain.Message
+	msgs = append(msgs, domain.Message{
+		ID: "img", Role: domain.RoleUser, Status: domain.StatusDone,
+		Content: "what do you think of this screenshot?",
+		Attachments: []domain.Attachment{{
+			Type: "image", Name: "shot.png", MediaType: "image/png",
+			DataURL: "data:image/png;base64,AAAA",
+		}},
+	})
+	body := strings.Repeat("abcdefghij", 100) // ~250 tokens each
+	for i := 0; i < 120; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("m%d", i), Role: domain.RoleUser, Content: body, Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c1", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	adapter := &recordingCompleteAdapter{
+		summaries: []string{strings.Repeat("handoff checkpoint with enough detail ", 10)},
+	}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	settings := domain.DefaultSettings()
+	summary, err := app.compactConversation(context.Background(), adapter, conv, "model", 20000, settings)
+	if err != nil {
+		t.Fatalf("compaction failed: %v", err)
+	}
+	if len(summary) < compactionSummaryMinChars {
+		t.Fatalf("summary too short: %d", len(summary))
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.requests) == 0 {
+		t.Fatal("no compaction requests recorded")
+	}
+	for i, req := range adapter.requests {
+		for _, m := range req.Messages {
+			if len(m.Attachments) > 0 {
+				t.Fatalf("request %d: message carries %d attachments, want stripped", i, len(m.Attachments))
+			}
+		}
+	}
+	noteSeen := false
+	for _, req := range adapter.requests {
+		for _, m := range req.Messages {
+			if strings.Contains(m.Content, "shot.png") {
+				noteSeen = true
+			}
+		}
+	}
+	if !noteSeen {
+		t.Fatal("attachment note missing from compaction input")
+	}
+}
+
+func TestCompactionCapsOversizedToolOutput(t *testing.T) {
+	// A single oversized tool result (e.g. grep over huge lines) must be
+	// truncated in the compaction input so the pass fits the compaction
+	// model's context window; otherwise compaction overflows and the turn
+	// dies with a context-overflow 400.
+	var msgs []domain.Message
+	bigOutput := strings.Repeat("tool-result-line ", 200_000) // ~3.4MB
+	msgs = append(msgs, domain.Message{
+		ID: "asst", Role: domain.RoleAssistant, Status: domain.StatusDone,
+		ToolCalls: []domain.ToolCall{{
+			ID: "call1", Name: "grep", Args: `{"pattern":"x","path":"."}`, Output: bigOutput, Status: domain.ToolOK,
+		}},
+	})
+	body := strings.Repeat("abcdefghij", 100)
+	for i := 0; i < 120; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("m%d", i), Role: domain.RoleUser, Content: body, Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c1", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	adapter := &recordingCompleteAdapter{
+		summaries: []string{strings.Repeat("handoff checkpoint with enough detail ", 10)},
+	}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	settings := domain.DefaultSettings()
+	// Small window keeps the per-call cap small so truncation is observable.
+	_, err := app.compactConversation(context.Background(), adapter, conv, "model", 2000, settings)
+	if err != nil {
+		t.Fatalf("compaction failed: %v", err)
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	truncated := false
+	for _, req := range adapter.requests {
+		for _, m := range req.Messages {
+			if m.ToolResult == nil {
+				continue
+			}
+			if len(m.ToolResult.Content) > 2200 {
+				t.Fatalf("tool result not capped: %d chars", len(m.ToolResult.Content))
+			}
+			if strings.Contains(m.ToolResult.Content, "[truncated:") {
+				truncated = true
+			}
+		}
+	}
+	if !truncated {
+		t.Fatal("oversized tool output was not truncated in compaction input")
 	}
 }
 

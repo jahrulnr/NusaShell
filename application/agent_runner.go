@@ -1032,7 +1032,7 @@ func (a *App) resolveContextWindow(provider *domain.Provider, model string, sett
 
 const (
 	compactionKeepTokenBudget = 64000 // retained recent messages token budget
-	compactionSummaryMaxOut   = 16000 // default max_output_tokens for compaction summarization
+	compactionSummaryMaxOut   = 64000 // default max_output_tokens for compaction summarization
 	compactionSystemReserve   = 300   // system prompt + framing overhead
 	// compactionSummaryMinChars is the minimum summary length for the quality
 	// guard. Summaries shorter than this are considered failed and retried.
@@ -1040,6 +1040,14 @@ const (
 	// compactionSummaryMaxRetries is the max number of retry attempts when the
 	// summary is too short. Each retry doubles the max_output_tokens budget.
 	compactionSummaryMaxRetries = 2
+	// compactionMaxToolCallChars caps a single tool call's args/output when
+	// building the compaction input. Tool results can be unbounded (grep over
+	// huge lines, mcp_call, file_write content), and one oversized call must
+	// still fit inside the compaction model's context window — otherwise the
+	// summarization pass overflows and compaction fails (the turn then dies
+	// with a context-overflow 400). Truncated payloads keep an omission marker
+	// so the summary model knows content was dropped.
+	compactionMaxToolCallChars = 200_000
 )
 
 // compactionSummaryToolName is the single tool advertised to the compaction
@@ -1178,6 +1186,13 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 		if len(chunk) == 0 {
 			break
 		}
+		// Cap each tool call's args/output so a single oversized call still
+		// fits the compaction model's window. The cap shrinks with the pass
+		// budget so small-window compaction models stay safe too.
+		toolCap := compactionMaxToolCallChars
+		if a2 := available * 2; a2 < toolCap {
+			toolCap = a2
+		}
 		var msgs []ChatMessage
 		if runningSummary != "" {
 			msgs = append(msgs, ChatMessage{
@@ -1188,13 +1203,29 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 		for _, m := range chunk {
 			switch m.Role {
 			case domain.RoleUser:
-				msgs = append(msgs, ChatMessage{Role: "user", Content: m.Content, Attachments: m.Attachments})
+				// Media/file attachments are stripped from the compaction
+				// input and replaced with a text note. Compaction models are
+				// often not vision/audio-capable, and providers reject the
+				// request outright (e.g. OpenRouter HTTP 404 "No endpoints
+				// found that support image input") — which made compaction
+				// fail and the turn die with a context-overflow 400. The
+				// summary only needs to know that content was attached.
+				content := m.Content
+				if note := compactionAttachmentNote(m); note != "" {
+					if content == "" {
+						content = note
+					} else {
+						content = content + "\n\n" + note
+					}
+				}
+				msgs = append(msgs, ChatMessage{Role: "user", Content: content})
 			case domain.RoleAssistant:
 				if m.Content == "" && len(m.ToolCalls) == 0 {
 					continue
 				}
-				msgs = append(msgs, ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: m.ToolCalls})
-				for _, tc := range m.ToolCalls {
+				calls := capCompactionToolCalls(m.ToolCalls, toolCap)
+				msgs = append(msgs, ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: calls})
+				for _, tc := range calls {
 					msgs = append(msgs, ChatMessage{Role: "tool", ToolResult: &ToolResult{
 						ToolCallID: tc.ID, Name: tc.Name, Content: wrapToolOutput(tc.Name, tc.Output),
 					}})
@@ -1250,6 +1281,63 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 	}
 
 	return runningSummary, a.persistCompactedConversation(c, runningSummary, effectiveKeepBudget)
+}
+
+// compactionAttachmentNote renders a short text note for message attachments
+// so the compaction summary knows media/files were attached without
+// receiving their bytes (see the stripping comment in compactConversation).
+func compactionAttachmentNote(m domain.Message) string {
+	if len(m.Attachments) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(m.Attachments))
+	for _, att := range m.Attachments {
+		label := att.Name
+		if label == "" {
+			label = att.Type
+		}
+		if label == "" {
+			label = "attachment"
+		}
+		if att.Type != "" && !strings.Contains(label, att.Type) {
+			label += " (" + att.Type + ")"
+		}
+		names = append(names, label)
+	}
+	return "[attachments: " + strings.Join(names, ", ") + "]"
+}
+
+// capCompactionToolCalls returns a copy of the tool calls whose args and
+// output are truncated to capChars with an omission marker, so one oversized
+// call (e.g. a grep over huge lines, a 10MB file_write content) cannot exceed
+// the compaction model's context window.
+func capCompactionToolCalls(calls []domain.ToolCall, capChars int) []domain.ToolCall {
+	if capChars <= 0 {
+		return calls
+	}
+	out := make([]domain.ToolCall, 0, len(calls))
+	for _, tc := range calls {
+		if len(tc.Args) > capChars {
+			tc.Args = truncateCompactionText(tc.Args, capChars)
+		}
+		if len(tc.Output) > capChars {
+			tc.Output = truncateCompactionText(tc.Output, capChars)
+		}
+		out = append(out, tc)
+	}
+	return out
+}
+
+// truncateCompactionText keeps the first n runes of s and appends an
+// omission marker with the number of characters dropped, so the summary
+// model can tell the payload was cut.
+func truncateCompactionText(s string, n int) string {
+	omitted := len(s) - n
+	head := []rune(s)
+	if len(head) > n {
+		head = head[:n]
+	}
+	return string(head) + fmt.Sprintf("\n\n[truncated: %d chars omitted]", omitted)
 }
 
 func effectiveCompactionKeepBudget(contextWindow int) int {
@@ -1456,6 +1544,13 @@ func (a *App) failStreamTurn(run *TurnRun, msgID, model string, round streamedTu
 			message.Error = err.Error()
 		})
 		c.Status = "idle"
+		// The provider-measured context fill was not refreshed by this turn
+		// (the request failed before usage came back), so it is stale and can
+		// massively understate the real conversation size — e.g. 401k shown
+		// while the history actually holds ~2M tokens. Clear it so the UI
+		// falls back to the server-side EstimatedTokens heuristic instead of
+		// showing a misleading number.
+		c.ContextTokens = 0
 		_ = a.Conversations.Save(c)
 	}
 	a.discardQueuedSteer(run)

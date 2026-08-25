@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, STARTER_PROMPTS } from './js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, bindToolStop, STARTER_PROMPTS } from './js/views/agent/render.js';
 
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
@@ -16,6 +16,54 @@ function renderTranscript(messages) {
     globalThis.document = previousDocument;
   }
 }
+
+// exec tool output persisted on the conversation is rendered verbatim when
+// the thread is reloaded from the snapshot (no live run in memory), so users
+// see the streamed output after a refresh / room switch.
+test('exec tool output is rendered from the persisted conversation', () => {
+  const thread = renderTranscript([
+    { role: 'user', content: 'Run a long command', created_at: '2026-08-25T00:00:00Z' },
+    {
+      role: 'assistant', model: 'deepseek', created_at: '2026-08-25T00:00:01Z',
+      steps: [
+        { type: 'tool_calls', tool_calls: [
+          { id: 'tool_1', name: 'exec', args: { command: 'sleep 5' }, status: 'ok',
+            output: 'exit_code: 0\nduration_ms: 5000\n---\nPING reply 1\nPING reply 2\n' },
+        ] },
+      ],
+    },
+  ]);
+  const terminal = thread.querySelector('.agent-tool-terminal');
+  assert.ok(terminal, 'exec card rendered from snapshot');
+  assert.equal(terminal.classList.contains('is-success'), true, 'card is success');
+  const out = terminal.querySelector('.agent-tool-terminal-output');
+  assert.match(out.textContent, /PING reply 1/);
+  assert.match(out.textContent, /PING reply 2/);
+  // The streaming-only Stop button must not survive the reload.
+  assert.equal(terminal.querySelector('.agent-tool-stop').hidden, true);
+});
+
+// exec tool with interrupted status keeps the persisted partial output so
+// users see the streamed lines after a reload, not just "interrupted by user".
+test('exec tool with interrupted status renders persisted partial output', () => {
+  const thread = renderTranscript([
+    { role: 'user', content: 'Cancel a long command', created_at: '2026-08-25T00:00:00Z' },
+    {
+      role: 'assistant', model: 'deepseek', created_at: '2026-08-25T00:00:01Z',
+      steps: [
+        { type: 'tool_calls', tool_calls: [
+          { id: 'tool_1', name: 'exec', args: { command: 'sleep 60' }, status: 'interrupted',
+            output: 'error: exec cancelled: context canceled\npartial output:\nfirst chunk\nsecond chunk\n' },
+        ] },
+      ],
+    },
+  ]);
+  const terminal = thread.querySelector('.agent-tool-terminal');
+  assert.equal(terminal.classList.contains('is-error'), true, 'interrupted status flagged as error styling');
+  const out = terminal.querySelector('.agent-tool-terminal-output');
+  assert.match(out.textContent, /first chunk/);
+  assert.match(out.textContent, /second chunk/);
+});
 
 test('renders one model and usage summary for all assistant rounds in a user turn', () => {
   const thread = renderTranscript([
@@ -145,6 +193,88 @@ test('generate_image renders a proof card instead of a tool terminal', () => {
     assert.match(failed.textContent, /Settings/);
     assert.equal(failed.querySelectorAll('img').length, 0);
   } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('exec tool terminal renders a stop button only while running', () => {
+  const dom = new JSDOM('<main id="thread"></main>', { url: 'http://localhost/' });
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const running = renderToolJob({ id: 't1', name: 'exec', args: { command: 'sleep 5' }, status: 'running' });
+    assert.equal(running.classList.contains('is-running'), true);
+    let stop = running.querySelector('.agent-tool-stop');
+    assert.ok(stop, 'streaming exec card has a stop button');
+    assert.equal(stop.hidden, false, 'stop button visible while running');
+
+    const done = renderToolJob({ id: 't2', name: 'exec', args: { command: 'ls' }, status: 'ok', output: 'ok\n' });
+    assert.equal(done.classList.contains('is-success'), true);
+    assert.equal(done.querySelector('.agent-tool-stop').hidden, true, 'stop hidden after done');
+
+    // Non-streaming tools never show a stop button.
+    const other = renderToolJob({ id: 't3', name: 'grep', args: {}, status: 'running' });
+    assert.equal(other.querySelector('.agent-tool-stop'), null);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('appendToolJobDelta accumulates streamed output and clears placeholder', () => {
+  const dom = new JSDOM('<main id="thread"></main>', { url: 'http://localhost/' });
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const job = renderToolJob({ id: 't1', name: 'exec', args: { command: 'ping' }, status: 'running' });
+    const output = job.querySelector('.agent-tool-terminal-output');
+    // Streaming exec starts with the "waiting" placeholder.
+    assert.match(output.textContent, /waiting/);
+    appendToolJobDelta(job, 'PING 8.8.8.8 (8.8.8.8)\n');
+    assert.equal(output.textContent, 'PING 8.8.8.8 (8.8.8.8)\n');
+    appendToolJobDelta(job, '64 bytes from 8.8.8.8\n');
+    assert.equal(output.textContent, 'PING 8.8.8.8 (8.8.8.8)\n64 bytes from 8.8.8.8\n');
+    // Placeholder must not reappear.
+    assert.doesNotMatch(output.textContent, /waiting/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('bindToolStop calls agent.turns.stop with the run id until satisfied', async () => {
+  const dom = new JSDOM('<main id="thread"></main>', { url: 'http://localhost/' });
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  let stopped = 0;
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    calls.push({ url, body: opts?.body });
+    stopped++;
+    if (stopped === 1) {
+      throw new Error('transport failed');
+    }
+    return { ok: true, json: async () => ({ result: { ok: true } }) };
+  };
+  try {
+    const job = renderToolJob({ id: 't1', name: 'exec', args: { command: 'sleep 5' }, status: 'running' });
+    bindToolStop(job, () => 'run-123');
+    const stop = job.querySelector('.agent-tool-stop');
+    assert.equal(stop.hidden, false);
+    // First click: transport fails → button re-enabled.
+    stop.click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(stop.disabled, false);
+    assert.equal(stop.textContent, '■ Stop');
+    // Second click: succeeds → button is retired.
+    stop.click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(stopped, 2);
+    assert.equal(stop.isConnected, false, 'stop button removed after successful stop');
+    assert.ok(calls.every((c) => c.url.includes('agent/turns/stop')));
+    const payload = JSON.parse(calls[1].body).payload;
+    assert.equal(payload.run_id, 'run-123');
+  } finally {
+    globalThis.fetch = originalFetch;
     globalThis.document = previousDocument;
   }
 });

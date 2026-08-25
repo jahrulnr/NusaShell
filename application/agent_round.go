@@ -548,11 +548,32 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 		toolCtx := WithConversationID(run.Ctx, run.ConversationID)
 		toolCtx = WithRunID(toolCtx, run.ID)
 		toolCtx = WithToolCallID(toolCtx, toolCall.ID)
-		output, err = a.Toolbox.Execute(toolCtx, toolCall.Name, []byte(toolCall.Args))
+		// Streaming-capable toolboxes (exec) forward live output chunks as
+		// agent.tool.delta events; everything else runs through Execute and
+		// ignores the sink entirely.
+		if s, ok := a.Toolbox.(interface {
+			ExecuteStreamed(ctx context.Context, name string, argsJSON []byte, onChunk func(string)) (string, error)
+		}); ok {
+			output, err = s.ExecuteStreamed(toolCtx, toolCall.Name, []byte(toolCall.Args), func(text string) {
+				if a.Bus != nil && text != "" {
+					a.Bus.Emit(contracts.EventToolDelta, contracts.ToolDeltaEvent{
+						RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Text: text,
+					})
+				}
+			})
+		} else {
+			output, err = a.Toolbox.Execute(toolCtx, toolCall.Name, []byte(toolCall.Args))
+		}
 	}
 	status := domain.ToolOK
 	if err != nil {
-		if run.Ctx.Err() != nil {
+		// Interrupted streaming tools keep the partial output received so
+		// far (the executor returns it with the cancellation error), so the
+		// persisted tool call still shows the streamed lines after a reload.
+		if run.Ctx.Err() != nil && strings.Contains(err.Error(), "partial output") {
+			status = domain.ToolInterrupted
+			output = err.Error()
+		} else if run.Ctx.Err() != nil {
 			status = domain.ToolInterrupted
 			output = "interrupted by user"
 		} else {

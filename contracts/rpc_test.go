@@ -85,7 +85,7 @@ func TestRosterUniqueness(t *testing.T) {
 	}
 
 	events := []string{
-		EventTurnStarted, EventMessageDelta, EventReasoningDelta, EventToolStarted, EventToolCompleted,
+		EventTurnStarted, EventMessageDelta, EventReasoningDelta, EventToolStarted, EventToolDelta, EventToolCompleted,
 		EventTurnDone, EventTurnError, EventCompacted, EventCompactionFailed, EventSteerQueued, EventSteerApplied,
 		EventSteerCancelled, EventProviderRetry, EventLogAppend, EventTodoUpdated,
 		EventCIRunCreated, EventCIRunStarted, EventCIRunCompleted, EventCIRunFailed,
@@ -240,6 +240,18 @@ func TestEventFieldNames(t *testing.T) {
 	for _, k := range []string{"tool_call_id", "attachments"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("missing field %q in ToolCompletedEvent JSON", k)
+		}
+	}
+
+	b, _ = json.Marshal(ToolDeltaEvent{
+		RunID: "r", ConversationID: "c", ToolCallID: "t", Name: "exec", Text: "line1\n",
+	})
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"run_id", "conversation_id", "tool_call_id", "name", "text"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("missing field %q in ToolDeltaEvent JSON", k)
 		}
 	}
 }

@@ -592,6 +592,18 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 	}
 }
 
+// ExecuteStreamed runs a tool while forwarding live output chunks to onChunk.
+// Only tools that produce streaming output (exec) honor the callback today;
+// every other tool executes exactly like Execute and ignores it. Returns the
+// final combined output string and error, same contract as Execute.
+func (t *Toolbox) ExecuteStreamed(ctx context.Context, name string, argsJSON []byte, onChunk func(string)) (string, error) {
+	if name == "exec" {
+		_, out, err := executeExecToolChunks(ctx, name, argsJSON, onChunk)
+		return out, err
+	}
+	return t.Execute(ctx, name, argsJSON)
+}
+
 // executePipelineOp runs one validated ci_pipeline op (list|read|validate).
 // It lives outside executeAutomation so the automation switch never answers
 // to a resolved per-op name.

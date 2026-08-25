@@ -161,7 +161,7 @@ type Settings struct {
 	CompactionModel string `json:"compaction_model,omitempty"`
 	// CompactionSummaryMaxTokens is the max_output_tokens budget for the
 	// compaction summarization call. Reasoning models count reasoning
-	// tokens against this budget, so the default (4000) leaves room for
+	// tokens against this budget, so the default (64000) leaves room for
 	// both reasoning and the summary content. 0 = use the built-in default.
 	CompactionSummaryMaxTokens int `json:"compaction_summary_max_tokens,omitempty"`
 	// CompactionSummaryMinChars is the minimum summary length (in chars)
@@ -313,7 +313,7 @@ func DefaultSettings() Settings {
 	return Settings{
 		CompactionEnabled:          true,
 		CompactionThreshold:        0, // 0 = auto (80% of model context window)
-		CompactionSummaryMaxTokens: 0, // 0 = use built-in default (4000)
+		CompactionSummaryMaxTokens: 0, // 0 = use built-in default (64000)
 		CompactionSummaryMinChars:  0, // 0 = use built-in default (200)
 		PromptCaching:              true,
 		MaxToolRounds:              8,

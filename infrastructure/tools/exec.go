@@ -35,9 +35,11 @@ func execToolInfos() []application.ToolInfo {
 	}
 }
 
-// executeExecTool handles the exec built-in. Returns handled=false for other
-// names.
-func executeExecTool(ctx context.Context, name string, argsJSON []byte) (bool, string, error) {
+// executeExecToolChunks runs the exec built-in and streams stdout/stderr
+// chunks to onChunk as they arrive. It is the streaming variant of
+// executeExecTool; when onChunk is nil the behavior is identical to the
+// plain path (bounded capture only, emitted as the final result).
+func executeExecToolChunks(ctx context.Context, name string, argsJSON []byte, onChunk func(string)) (bool, string, error) {
 	if name != "exec" {
 		return false, "", nil
 	}
@@ -77,7 +79,7 @@ func executeExecTool(ctx context.Context, name string, argsJSON []byte) (bool, s
 	var lastOutput atomic.Int64
 	lastOutput.Store(time.Now().UnixNano())
 	out := newTailBuffer(execHeadBytes, execTailBytes)
-	w := &outputWatcher{buf: out, last: &lastOutput}
+	w := &outputWatcher{buf: out, last: &lastOutput, chunk: onChunk}
 	cmd.Stdout = w
 	cmd.Stderr = w
 
@@ -104,7 +106,7 @@ func executeExecTool(ctx context.Context, name string, argsJSON []byte) (bool, s
 		case <-ctx.Done():
 			killProcessTree(cmd)
 			<-done
-			return true, "", fmt.Errorf("exec cancelled: %w", ctx.Err())
+			return true, "", fmt.Errorf("exec cancelled: %w\npartial output:\n%s", ctx.Err(), out.Snapshot())
 		case <-hardClock:
 			killProcessTree(cmd)
 			<-done
@@ -118,6 +120,12 @@ func executeExecTool(ctx context.Context, name string, argsJSON []byte) (bool, s
 			}
 		}
 	}
+}
+
+// executeExecTool runs the exec built-in. Returns handled=false for other
+// names.
+func executeExecTool(ctx context.Context, name string, argsJSON []byte) (bool, string, error) {
+	return executeExecToolChunks(ctx, name, argsJSON, nil)
 }
 
 // pickAutoWindowsShell implements the documented Windows resolution order:
@@ -152,16 +160,21 @@ func renderExecResult(started time.Time, waitErr error, output string) string {
 }
 
 // outputWriter feeds captured output into a bounded buffer while refreshing
-// the last-activity timestamp consumed by the idle watchdog.
+// the last-activity timestamp consumed by the idle watchdog, and forwards
+// each write to the streaming callback when one is attached.
 type outputWatcher struct {
-	buf  *tailBuffer
-	last *atomic.Int64
-	mu   sync.Mutex
+	buf   *tailBuffer
+	last  *atomic.Int64
+	chunk func(string)
+	mu    sync.Mutex
 }
 
 func (w *outputWatcher) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	w.last.Store(time.Now().UnixNano())
+	if w.chunk != nil {
+		w.chunk(string(p))
+	}
 	w.mu.Unlock()
 	return w.buf.Write(p)
 }

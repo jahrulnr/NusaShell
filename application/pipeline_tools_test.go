@@ -25,6 +25,21 @@ func (l *listingToolbox) Execute(_ context.Context, name string, _ []byte) (stri
 	return "ok:" + name, nil
 }
 
+// streamedListingToolbox is a listingToolbox that also supports streaming
+// execution (optional capability exercised by FilteredToolbox).
+type streamedListingToolbox struct {
+	*listingToolbox
+	streamed []string
+}
+
+func (s *streamedListingToolbox) ExecuteStreamed(_ context.Context, name string, _ []byte, onChunk func(string)) (string, error) {
+	s.listingToolbox.calls = append(s.listingToolbox.calls, "stream:"+name)
+	if onChunk != nil {
+		onChunk("chunk-" + name)
+	}
+	return "streamed:" + name, nil
+}
+
 func TestFilterACPToolsHidesSubagentSurface(t *testing.T) {
 	inner := &listingToolbox{names: []string{"ci_run", "subagent", "subagent_steer", "subagent_stop", "subagent_wait", "docs"}}
 	filtered := FilterACPTools(inner)
@@ -58,6 +73,38 @@ func TestFilterACPToolsRejectsExecute(t *testing.T) {
 	}
 	if out != "ok:ci_run" {
 		t.Fatalf("got %q", out)
+	}
+}
+
+func TestFilteredToolboxExecuteStreamedPassthrough(t *testing.T) {
+	inner := &streamedListingToolbox{listingToolbox: &listingToolbox{names: []string{"exec"}}}
+	filtered := FilterACPTools(inner)
+	var chunks []string
+	out, err := filtered.ExecuteStreamed(context.Background(), "exec", []byte(`{}`), func(text string) { chunks = append(chunks, text) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "streamed:exec" {
+		t.Fatalf("got %q", out)
+	}
+	if len(chunks) != 1 || chunks[0] != "chunk-exec" {
+		t.Fatalf("chunks = %v", chunks)
+	}
+}
+
+func TestFilteredToolboxExecuteStreamedFallback(t *testing.T) {
+	inner := &listingToolbox{names: []string{"exec"}}
+	filtered := FilterACPTools(inner)
+	var chunks []string
+	out, err := filtered.ExecuteStreamed(context.Background(), "exec", []byte(`{}`), func(text string) { chunks = append(chunks, text) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "ok:exec" {
+		t.Fatalf("got %q", out)
+	}
+	if len(chunks) != 0 {
+		t.Fatalf("inner without ExecuteStreamed must not stream, chunks = %v", chunks)
 	}
 }
 

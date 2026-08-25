@@ -54,6 +54,24 @@ func (f *FilteredToolbox) Execute(ctx context.Context, name string, argsJSON []b
 	return f.Inner.Execute(ctx, name, argsJSON)
 }
 
+// ExecuteStreamed forwards streaming tool execution to the inner toolbox
+// when it supports it (optional capability, mirroring ToolExecutor without
+// widening the interface); otherwise it falls back to the plain Execute path.
+func (f *FilteredToolbox) ExecuteStreamed(ctx context.Context, name string, argsJSON []byte, onChunk func(string)) (string, error) {
+	if f != nil && f.Hide != nil && f.Hide(name) {
+		return "", fmt.Errorf("tool %q is not available to pipeline agent steps", name)
+	}
+	if f == nil || f.Inner == nil {
+		return "", fmt.Errorf("toolbox is not configured")
+	}
+	if s, ok := f.Inner.(interface {
+		ExecuteStreamed(ctx context.Context, name string, argsJSON []byte, onChunk func(string)) (string, error)
+	}); ok {
+		return s.ExecuteStreamed(ctx, name, argsJSON, onChunk)
+	}
+	return f.Inner.Execute(ctx, name, argsJSON)
+}
+
 // PipelineAgentRunner is the AgentStepRunner for unattended workflow agent
 // steps. It never advertises ACP tools: those permission prompts are
 // fail-closed and would stall FireDue with no operator at the dock.

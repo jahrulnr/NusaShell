@@ -115,6 +115,16 @@ model's available input budget) and 80% of that budget, the provider
 summarizes the history non-streaming, the summary replaces the oldest
 messages behind a marker, and `agent.compacted` is emitted.
 
+The summarization input is text-only and bounded: media/file attachments are
+replaced with a short note (compaction models are often not vision- or
+audio-capable, and providers reject media outright — e.g. OpenRouter HTTP 404
+"No endpoints found that support image input"), and each tool call's args and
+output are truncated to a per-pass cap with an omission marker so a single
+oversized tool result (multi-megabyte grep output, 10MB `file_write` content)
+cannot exceed the compaction model's context window. After a failed turn the
+provider-measured `context_tokens` is cleared so the UI badge cannot display a
+stale undercount of the real conversation size.
+
 ### Upstream recovery
 
 Before a provider stream has emitted content or reasoning, transient upstream

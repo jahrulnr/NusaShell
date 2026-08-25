@@ -350,6 +350,25 @@
   color: var(--accent); animation: agent-tool-tick 2s ease-in-out infinite;
 }
 @keyframes agent-tool-tick { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+
+/* ---- Tool terminal stop button (exec) ---- */
+.agent-tool-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-left: 4px;
+  padding: 2px 8px;
+  border: 1px solid rgba(245, 91, 104, .45);
+  border-radius: 6px;
+  background: rgba(245, 91, 104, .08);
+  color: #ff9ca5;
+  font: 10px/1.2 var(--font-mono);
+  cursor: pointer;
+}
+.agent-tool-stop:hover { background: rgba(255, 90, 106, .18); }
+.agent-tool-stop:disabled { cursor: not-allowed; opacity: .45; }
+.agent-tool-terminal:not(.is-running) .agent-tool-stop { display: none; }
 .agent-compaction-marker {
   border-left: 2px dashed var(--border-soft);
 }

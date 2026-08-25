@@ -209,6 +209,35 @@ func TestGrepMaxResults(t *testing.T) {
 	}
 }
 
+func TestGrepOutputByteCap(t *testing.T) {
+	// max_results caps the match count, not the bytes: a few matches on huge
+	// lines (minified JS, base64 blobs) can produce multi-megabyte output
+	// that alone exceeds the model context window. The formatted result must
+	// be capped with a truncation marker.
+	dir := t.TempDir()
+	hugeLine := "match " + strings.Repeat("a", 300_000) + " match"
+	writeFile(t, filepath.Join(dir, "big.txt"), hugeLine+"\n"+hugeLine)
+
+	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+		"pattern":     "match",
+		"path":        dir,
+		"output_mode": "content",
+	}))
+	if !ok || err != nil {
+		t.Fatalf("grep failed: ok=%v err=%v", ok, err)
+	}
+	if !strings.Contains(out, "output truncated") {
+		t.Fatalf("expected truncation marker, got %d chars", len(out))
+	}
+	// Head must survive so the model still sees real matches.
+	if !strings.Contains(out, "match aaaa") {
+		t.Fatal("head of grep output missing after truncation")
+	}
+	if len(out) > grepMaxOutputChars+200 {
+		t.Fatalf("output not bounded: %d chars, cap=%d", len(out), grepMaxOutputChars)
+	}
+}
+
 func TestGrepEmptyPattern(t *testing.T) {
 	_, _, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
 		"pattern": "",

@@ -79,6 +79,8 @@ Long conversations open showing only the most recent messages, scrolled to the b
 
 Shows in-flight tool calls for the current turn, with one entry per MCP or built-in tool invocation.
 
+Streaming tools (exec) display their live output as it is produced and offer a per-call Stop button while running; the button cancels the underlying turn via agent.turns.stop (same as the composer Stop).
+
 - **Composer stack** (`#agent-composer-stack`):
   - Section: Agent
   - Type: container
