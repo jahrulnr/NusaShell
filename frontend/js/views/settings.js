@@ -18,6 +18,7 @@ let ttsSelect;
 let webAnswerProviderSelect;
 let contractModeSelect;
 let sttModelSelect;
+let sttLanguageSelect;
 
 export async function initSettings() {
   if (!bound) {
@@ -77,6 +78,15 @@ export async function initSettings() {
     sttModelSelect = createSelect(document.getElementById('settings-stt-model'), {
       placeholder: 'Auto — first installed GGML model',
       search: true,
+    });
+    sttLanguageSelect = createSelect(document.getElementById('settings-stt-language'), {
+      placeholder: 'Auto-detect',
+      search: false,
+      data: [
+        { text: 'Auto-detect', value: '' },
+        { text: 'Bahasa Indonesia', value: 'id' },
+        { text: 'English', value: 'en' },
+      ],
     });
     webAnswerProviderSelect = createSelect(document.getElementById('settings-web-answer-provider'), {
       placeholder: 'Disabled — web_answer tool is not available',
@@ -170,7 +180,7 @@ export async function refresh() {
     state.webAnswerModel = settings.web_answer_model ?? '';
     state.compactionModel = settings.compaction_model ?? '';
     state.reviewModel = settings.review_model ?? '';
-    document.getElementById('settings-stt-language').value = ['id', 'en'].includes(settings.stt_offline_language) ? settings.stt_offline_language : '';
+    sttLanguageSelect.setSelected([['id', 'en'].includes(settings.stt_offline_language) ? settings.stt_offline_language : '']);
     document.getElementById('settings-learning-threshold').value = settings.learning_review_threshold ?? 10;
     document.getElementById('settings-skill-nudge-interval').value = settings.skill_nudge_interval ?? 15;
     document.getElementById('settings-auto-continues').value = settings.max_auto_continues ?? 10;
@@ -760,7 +770,7 @@ async function save() {
       audio_provider_id: audProviderId || null,
       audio_model_id: audModelId || null,
       stt_offline_model: sttModelSelect.getSelected()?.[0] || null,
-      stt_offline_language: document.getElementById('settings-stt-language')?.value || null,
+      stt_offline_language: sttLanguageSelect.getSelected()?.[0] || null,
       video_provider_id: vidProviderId || null,
       video_model_id: vidModelId || null,
       video_gen_provider_id: vidGenProviderId || null,

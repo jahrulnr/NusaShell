@@ -22,6 +22,11 @@
   cursor: pointer;
 }
 .telemetry-range-select:hover { border-color: var(--border-strong); }
+.telemetry-header-actions .ss-main {
+  min-width: 5.5rem;
+  min-height: 32px;
+  font-size: 12px;
+}
 
 .view.active.telemetry-view .view-body { overflow-y: auto; }
 

@@ -872,9 +872,10 @@ func responsesReasoningInputItem(block core.ReasoningBlock) (responsesInputItem,
 		return item, nil
 	}
 	item := responsesInputItem{Type: "reasoning"}
-	if block.Text != "" {
-		item.Summary = []responsesSummaryItem{{Text: block.Text}}
+	if block.Text == "" {
+		return item, fmt.Errorf("OpenAI Responses reasoning block has empty text and no extra — reasoning was received from the provider but is missing on replay (input != output)")
 	}
+	item.Summary = []responsesSummaryItem{{Text: block.Text}}
 	return item, nil
 }
 
@@ -1391,8 +1392,39 @@ func (s *responsesStream) events(name string, raw json.RawMessage) ([]core.Event
 			return nil, responsesStreamParseError("openai: parse responses error", err)
 		}
 		return []core.Event{core.ErrorEvent{Err: core.NewProviderError("openai", core.ErrorTypeProvider, "openai: stream error: "+responseErr.Error.Message)}}, nil
+	case "response.output_item.done":
+		var done struct {
+			Item        responsesOutputItem `json:"item"`
+			OutputIndex *int                `json:"output_index,omitempty"`
+			Sequence    int                 `json:"sequence_number,omitempty"`
+		}
+		if err := json.Unmarshal(raw, &done); err != nil {
+			return nil, responsesStreamParseError("openai: parse responses output item done", err)
+		}
+		if !s.shouldEmit(done.Sequence) {
+			return nil, nil
+		}
+		// Reasoning items carry encrypted_content that must be echoed back
+		// on replay. The delta events (reasoning_summary_text.delta etc.)
+		// only carry the visible summary text — the encrypted_content
+		// arrives here, in output_item.done. Emit a ReasoningDelta with
+		// Extra set so the EventCollector merges it into the reasoning
+		// block. Without this, streaming loses encrypted_content and the
+		// next turn's replay is missing the reasoning state the model
+		// requires.
+		if done.Item.Type == "reasoning" {
+			extra := done.Item.Raw
+			if len(extra) == 0 {
+				extra, _ = json.Marshal(done.Item)
+			}
+			return []core.Event{core.ReasoningDelta{
+				Summary:   len(done.Item.Summary) > 0,
+				Extra:     append(json.RawMessage(nil), extra...),
+				ExtraFull: true,
+			}}, nil
+		}
+		return []core.Event{core.ProviderEvent{Name: name, Raw: raw}}, nil
 	case "response.created", "response.in_progress", "response.queued",
-		"response.output_item.done",
 		"response.content_part.added", "response.content_part.done",
 		"response.output_text.done", "response.refusal.done",
 		"response.reasoning_text.done", "response.reasoning_summary_text.done",

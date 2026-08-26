@@ -2,6 +2,7 @@
 // Mirrors the OpenRouter Activity dashboard layout.
 
 import { rpc } from '../rpc.js';
+import { createSelect } from '../ui.js';
 
 let charts = {};
 let currentRange = 180; // 3h default
@@ -25,9 +26,27 @@ export async function initTelemetry() {
   const rangeSel = document.getElementById('telemetry-range');
   const refreshBtn = document.getElementById('telemetry-refresh-btn');
   if (rangeSel) {
-    rangeSel.addEventListener('change', () => {
-      currentRange = parseInt(rangeSel.value, 10) || 0;
-      refresh();
+    createSelect(rangeSel, {
+      data: [
+        { text: '15m', value: '15' },
+        { text: '30m', value: '30' },
+        { text: '1h', value: '60' },
+        { text: '3h', value: '180' },
+        { text: '1d', value: '1440' },
+        { text: '2d', value: '2880' },
+        { text: '1w', value: '10080' },
+        { text: '1mo', value: '43200' },
+        { text: '1y', value: '525600' },
+        { text: 'All', value: '0' },
+      ],
+      value: '180',
+      search: false,
+      onChange: (value) => {
+        const next = parseInt(value, 10) || 0;
+        if (next === currentRange) return;
+        currentRange = next;
+        refresh();
+      },
     });
   }
   if (refreshBtn) refreshBtn.addEventListener('click', () => refresh());

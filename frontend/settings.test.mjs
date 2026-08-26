@@ -46,3 +46,10 @@ test('Plugin usage contracts select is slim-enhanced like the model pickers', ()
   // writes desync the rendered control and reads bypass the slim instance.
   assert.doesNotMatch(settingsView, /'settings-plugin-contract-mode'\)\.value/);
 });
+
+test('STT language select is slim-enhanced like the model pickers', () => {
+  assert.match(settingsView, /createSelect\(document\.getElementById\('settings-stt-language'\)/);
+  assert.match(settingsView, /sttLanguageSelect\.setSelected/);
+  assert.match(settingsView, /sttLanguageSelect\.getSelected/);
+  assert.doesNotMatch(settingsView, /'settings-stt-language'\)\.value/);
+});

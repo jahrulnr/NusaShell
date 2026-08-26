@@ -132,6 +132,31 @@ func chatMessageToCore(m ChatMessage, req ChatRequest) core.Message {
 		return core.Message{Role: core.RoleUser, Blocks: userBlocks(m)}
 	case "assistant":
 		blocks := []core.Block{}
+		// ReasoningBlock must come first: Anthropic requires thinking blocks
+		// to be the first block in an assistant message ("If an assistant
+		// message contains any thinking blocks, the first block must be
+		// `thinking` or `redacted_thinking`"). OpenAI Responses and compat
+		// providers don't care about block order — they route by type.
+		if m.Reasoning != "" {
+			// Always send reasoning we have from the persisted conversation.
+			// Testing against OpenRouter confirms non-reasoning models safely
+			// ignore the reasoning field, and reasoning models require it for
+			// context continuity. This uses the conversation store as the
+			// source of truth — no catalog whitelist or proactive learning
+			// needed. Models that intermittently think (task-dependent) will
+			// have reasoning stored on the turns where they did think, and
+			// those turns replay correctly; turns without reasoning simply
+			// have nothing to send.
+			blocks = append(blocks, core.ReasoningBlock{Text: m.Reasoning})
+		} else if req.ReasoningReplay {
+			// Models that require reasoning_content to be present on every
+			// assistant message (e.g. DeepSeek, GLM with interleaved_field=
+			// reasoning_content) get the placeholder sentinel when the prior
+			// reasoning text is unavailable. This is gated by ReasoningReplay
+			// because sending a placeholder to a model that doesn't require
+			// it would inject noise.
+			blocks = append(blocks, core.ReasoningBlock{Text: domain.ReasoningPlaceholder})
+		}
 		if m.Content != "" {
 			blocks = append(blocks, core.TextBlock{Text: m.Content})
 		}
@@ -141,13 +166,6 @@ func chatMessageToCore(m ChatMessage, req ChatRequest) core.Message {
 				Name:      domain.SanitizeToolName(tc.Name),
 				Arguments: jsonRaw(tc.Args),
 			})
-		}
-		if req.ReasoningReplay {
-			if m.Reasoning != "" {
-				blocks = append(blocks, core.ReasoningBlock{Text: m.Reasoning})
-			} else {
-				blocks = append(blocks, core.ReasoningBlock{Text: domain.ReasoningPlaceholder})
-			}
 		}
 		return core.Message{Role: core.RoleAssistant, Blocks: blocks}
 	case "tool":

@@ -737,7 +737,7 @@
         {
           "heading": "Header",
           "paragraphs": [
-            "Range selector (All time / 7 / 14 / 30 / 90 days) and Refresh button."
+            "Range selector (15m / 30m / 1h / 3h default / 1d / 2d / 1w / 1mo / 1y / All) and Refresh button."
           ],
           "controls": [
             "telemetry-range",
@@ -1566,6 +1566,12 @@
       "type": "number",
       "notes": "OpenAI only."
     },
+    "settings-stt-language": {
+      "label": "Audio language",
+      "section": "Settings",
+      "type": "select",
+      "notes": "Offline STT language: auto-detect, Bahasa Indonesia, or English."
+    },
     "settings-appearance-title": {
       "label": "Appearance title",
       "section": "Settings",
@@ -1862,7 +1868,7 @@
       "label": "Time range selector",
       "section": "Telemetry header",
       "type": "select",
-      "notes": "All time / 7 / 14 / 30 / 90 days lookback window."
+      "notes": "Lookback window: 15m, 30m, 1h, 3h (default), 1d, 2d, 1w, 1mo, 1y, or all time."
     },
     "telemetry-refresh-btn": {
       "label": "Refresh button",

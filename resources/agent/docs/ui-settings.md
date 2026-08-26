@@ -154,7 +154,10 @@ Lets read_media transcribe audio locally with whisper.cpp (whisper-cli) — no A
 
 - **`#settings-stt-model`** (missing map entry)
 
-- **`#settings-stt-language`** (missing map entry)
+- **Audio language** (`#settings-stt-language`):
+  - Section: Settings
+  - Type: select
+  - Notes: Offline STT language: auto-detect, Bahasa Indonesia, or English.
 
 - **`#settings-stt-install-btn`** (missing map entry)
 

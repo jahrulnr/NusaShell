@@ -1211,3 +1211,31 @@ func TestResponsesUsageClampsWhenCachedExceedsInput(t *testing.T) {
 		t.Fatalf("CacheReadTokens = %d, want 8", u.CacheReadTokens)
 	}
 }
+
+// TestResponsesInputRejectsEmptyReasoningBlock is the guard: if a
+// ReasoningBlock reaches the Responses input builder with empty text and
+// no extra, the reasoning was received from the provider (input) but is
+// missing on replay (output). Force an error instead of silently creating
+// a degenerate {type:"reasoning"} item with no content.
+func TestResponsesInputRejectsEmptyReasoningBlock(t *testing.T) {
+	_, err := responsesInputItems([]core.Message{
+		core.Assistant(core.ReasoningBlock{Text: ""}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "empty text") {
+		t.Fatalf("expected empty reasoning error, got %v", err)
+	}
+}
+
+// TestResponsesInputAcceptsPlaceholderReasoningBlock ensures the
+// placeholder sentinel is accepted and forwarded as a reasoning summary.
+func TestResponsesInputAcceptsPlaceholderReasoningBlock(t *testing.T) {
+	items, err := responsesInputItems([]core.Message{
+		core.Assistant(core.ReasoningBlock{Text: "(prior reasoning summary unavailable)"}),
+	})
+	if err != nil {
+		t.Fatalf("placeholder reasoning must pass, got error: %v", err)
+	}
+	if len(items) != 1 || items[0].Type != "reasoning" || len(items[0].Summary) != 1 || items[0].Summary[0].Text != "(prior reasoning summary unavailable)" {
+		t.Fatalf("items = %#v", items)
+	}
+}

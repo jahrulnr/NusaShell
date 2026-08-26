@@ -6,12 +6,12 @@ Aggregate token usage, spend, and caching across all conversations. Mirrors the 
 
 ## Header
 
-Range selector (All time / 7 / 14 / 30 / 90 days) and Refresh button.
+Range selector (15m / 30m / 1h / 3h default / 1d / 2d / 1w / 1mo / 1y / All) and Refresh button.
 
 - **Time range selector** (`#telemetry-range`):
   - Section: Telemetry header
   - Type: select
-  - Notes: All time / 7 / 14 / 30 / 90 days lookback window.
+  - Notes: Lookback window: 15m, 30m, 1h, 3h (default), 1d, 2d, 1w, 1mo, 1y, or all time.
 
 - **Refresh button** (`#telemetry-refresh-btn`):
   - Section: Telemetry header

@@ -235,12 +235,13 @@ func convertMessageBlocks(blocks []core.Block) (any, []toolCall, string, error) 
 			if b.Signature != "" || len(b.Redacted) > 0 || len(b.Extra) > 0 {
 				return nil, nil, "", fmt.Errorf("OpenAI Chat does not accept signed, redacted, or provider-extra reasoning blocks in message history")
 			}
-			if b.Text != "" {
-				if reasoning.Len() > 0 {
-					reasoning.WriteString("\n")
-				}
-				reasoning.WriteString(b.Text)
+			if b.Text == "" {
+				return nil, nil, "", fmt.Errorf("OpenAI Chat reasoning block has empty text — reasoning was received from the provider but is missing on replay (input != output)")
 			}
+			if reasoning.Len() > 0 {
+				reasoning.WriteString("\n")
+			}
+			reasoning.WriteString(b.Text)
 		default:
 			return nil, nil, "", fmt.Errorf("unsupported block %T", block)
 		}

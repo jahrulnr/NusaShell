@@ -1108,3 +1108,35 @@ func mustTool(t *testing.T, name, description string, schema any) core.Tool {
 	}
 	return tool
 }
+
+// TestConvertBlocksRejectsEmptyReasoningBlock is the guard: if a
+// ReasoningBlock reaches the Anthropic request builder with empty text,
+// no signature, and no redacted data, the reasoning was received from the
+// provider (input) but is missing on replay (output). Force an error
+// instead of silently creating an invalid {type:"thinking", thinking:"",
+// signature:""} block that Anthropic API would reject.
+func TestConvertBlocksRejectsEmptyReasoningBlock(t *testing.T) {
+	_, err := convertBlocks([]core.Block{
+		core.ReasoningBlock{Text: ""},
+	})
+	if err == nil || !strings.Contains(err.Error(), "empty text") {
+		t.Fatalf("expected empty reasoning error, got %v", err)
+	}
+}
+
+// TestConvertBlocksAcceptsPlaceholderReasoningBlock ensures the
+// placeholder sentinel is accepted. Anthropic thinking blocks normally
+// require a signature, but the placeholder is injected only when
+// ReasoningReplay is true (which is false for Anthropic models). This
+// test verifies the guard does not reject non-empty text.
+func TestConvertBlocksAcceptsPlaceholderReasoningBlock(t *testing.T) {
+	out, err := convertBlocks([]core.Block{
+		core.ReasoningBlock{Text: "(prior reasoning summary unavailable)"},
+	})
+	if err != nil {
+		t.Fatalf("placeholder reasoning must pass, got error: %v", err)
+	}
+	if len(out) != 1 || out[0].Type != "thinking" || out[0].Thinking != "(prior reasoning summary unavailable)" {
+		t.Fatalf("output = %#v", out)
+	}
+}

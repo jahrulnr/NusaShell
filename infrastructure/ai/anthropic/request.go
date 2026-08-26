@@ -540,6 +540,8 @@ func convertBlocks(blocks []core.Block) ([]anthropicContent, error) {
 			}
 			if len(b.Redacted) > 0 {
 				out = append(out, anthropicContent{Type: "redacted_thinking", Data: string(b.Redacted), CacheControl: cache})
+			} else if b.Text == "" && b.Signature == "" {
+				return nil, fmt.Errorf("anthropic reasoning block has empty text and no signature — reasoning was received from the provider but is missing on replay (input != output)")
 			} else {
 				out = append(out, anthropicContent{Type: "thinking", Thinking: b.Text, Signature: b.Signature, CacheControl: cache})
 			}

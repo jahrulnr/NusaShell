@@ -838,3 +838,40 @@ func TestConvertUsageClampsWhenCachedExceedsPrompt(t *testing.T) {
 		t.Fatalf("CacheReadTokens = %d, want 10", u.CacheReadTokens)
 	}
 }
+
+// TestBuildRequestRejectsEmptyReasoningBlockHistory is the guard: if a
+// ReasoningBlock reaches the Chat request builder with empty text, no
+// signature, and no extra, the reasoning was received from the provider
+// (input) but is missing on replay (output). Force an error instead of
+// silently sending an empty reasoning_content field.
+func TestBuildRequestRejectsEmptyReasoningBlockHistory(t *testing.T) {
+	provider := mustProvider(t)
+	_, err := provider.buildRequest(&core.Request{
+		Model: "gpt-4.1",
+		Messages: []core.Message{
+			core.Assistant(core.ReasoningBlock{Text: ""}),
+		},
+	}, false)
+	if err == nil || !strings.Contains(err.Error(), "empty text") {
+		t.Fatalf("expected empty reasoning error, got %v", err)
+	}
+}
+
+// TestBuildRequestAcceptsPlaceholderReasoningBlock ensures the placeholder
+// sentinel injected by the application layer is accepted and forwarded as
+// reasoning_content — the guard only rejects truly empty reasoning.
+func TestBuildRequestAcceptsPlaceholderReasoningBlock(t *testing.T) {
+	provider := mustProvider(t)
+	wire, err := provider.buildRequest(&core.Request{
+		Model: "gpt-4.1",
+		Messages: []core.Message{
+			core.Assistant(core.ReasoningBlock{Text: "(prior reasoning summary unavailable)"}),
+		},
+	}, false)
+	if err != nil {
+		t.Fatalf("placeholder reasoning must pass, got error: %v", err)
+	}
+	if wire.Messages[0].ReasoningContent != "(prior reasoning summary unavailable)" {
+		t.Fatalf("reasoning_content = %q", wire.Messages[0].ReasoningContent)
+	}
+}
