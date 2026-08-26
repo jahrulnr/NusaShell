@@ -2,7 +2,7 @@
 
 Providers are the LLM backends the agent chats through. A provider is
 defined by its **API wire format**, not by a vendor: **Messages**,
-**Responses**, **Chat**, **Ollama**, **Codex**, or **Gemini**.
+**Responses**, or **Chat**.
 
 ## Kinds
 
@@ -12,37 +12,26 @@ defined by its **API wire format**, not by a vendor: **Messages**,
   function calling and reports cached input tokens.
 - `chat` — the OpenAI Chat Completions wire format (`/chat/completions`);
   works with OpenAI, DeepSeek, LM Studio, vLLM and any compatible endpoint.
-- `ollama` — a local Ollama instance. Reuses the OpenAI-compatible
-  `/v1/chat/completions` endpoint with the `/v1` suffix appended
-  automatically; the same provider also exposes native embeddings via
-  `/api/embed` for skill and memory search. No API key needed.
-- `codex` — the ChatGPT Codex backend (`https://chatgpt.com/backend-api/codex`).
-  Uses OAuth (PKCE) login instead of a user-supplied API key; tokens are
-  stored in the SQLite credential store under the provider ID and under
-  `{providerID}:account:{accountID}` for multi-account failover.
-- `gemini` — Google's Gemini generateContent API
-  (`https://generativelanguage.googleapis.com/v1beta`). Uses a single
-  multimodal endpoint for both chat and image generation — the model returns
-  image bytes as `inlineData` parts in its response. Auth is via the
-  `x-goog-api-key` header (API key from Google AI Studio). Image models
-  (e.g. `gemini-3.1-flash-image-preview`) are available for image generation
-  via Settings → Image generation.
+  Chat-kind providers default to the **OpenRouter adapter** — aggregators
+  (TokenRouter, OmniRoute, OpenCode, OpenRouter itself, …) speak the
+  OpenRouter wire format (effort `xhigh`/`max`, `cache_retention`, block
+  cache, `/images/models`, `/videos/models`). Only a direct OpenAI host
+  (`api.openai.com`) stays on the vanilla OpenAI chat adapter, because the
+  OpenRouter provider options (`cache_retention`, `session_id`, `provider`
+  routing) would 400 there.
 
-**Base URL is required for `messages`, `responses`, `chat`, and `gemini`.**
-The UI suggests a per-kind default (`https://api.anthropic.com` for Messages,
-`https://api.openai.com/v1` for Responses and Chat,
-`https://generativelanguage.googleapis.com/v1beta` for Gemini) — replace it
-with any endpoint or AI gateway that speaks the format. The operation path is
-appended to the Base URL **verbatim**: whatever version your endpoint uses
-(v1, v4, …) must live in the Base URL and is never injected. For Messages,
-a bare compat root (e.g. `https://open.bigmodel.cn/api/anthropic`) gets the
+**Base URL is required for all three kinds.** The UI suggests a per-kind
+default (`https://api.anthropic.com` for Messages, `https://api.openai.com/v1`
+for Responses and Chat) — replace it with any endpoint or AI gateway that
+speaks the format. The operation path is appended to the Base URL
+**verbatim**: whatever version your endpoint uses (v1, v4, …) must live in
+the Base URL and is never injected. For Messages, a bare compat root
+(e.g. `https://open.bigmodel.cn/api/anthropic`) gets the
 Anthropic-compatible convention suffix `/v1/messages`, and a full endpoint
-pasted as Base URL is used as-is. `ollama` defaults to
-`http://localhost:11434` and `codex` defaults to
-`https://chatgpt.com/backend-api/codex` when the field is left blank.
+pasted as Base URL is used as-is.
 
-AI gateways (TokenRouter, LiteLLM, one-api and similar) can serve the first
-three formats on one endpoint; configure one provider per format:
+AI gateways (TokenRouter, LiteLLM, one-api and similar) can serve the three
+formats on one endpoint; configure one provider per format:
 
 ```text
 Messages  → https://gateway.example.com        (→ /v1/messages)
@@ -52,11 +41,11 @@ Chat      → https://gateway.example.com/v1     (→ /v1/chat/completions)
 
 ## API keys
 
-Only `messages`, `responses`, and `gemini` require a user-supplied API key.
-`chat` works without a key against local endpoints that need no auth.
-`ollama` never needs a key (only set one when Ollama is behind an auth proxy).
-`codex` uses OAuth tokens obtained via the Codex login flow — there is no
-manual key field. Keys are stored in the SQLite credential store
+`messages` and `responses` require a user-supplied API key. `chat` works
+without a key against local endpoints that need no auth, and the OpenRouter
+adapter (the default for chat-kind hosts) accepts keyless providers — the
+upstream decides (e.g. OpenCode/Zen free tier); when a key is present it is
+sent normally. Keys are stored in the SQLite credential store
 (`credentials.db`) inside the data directory, never in the JSON files.
 
 ### Seeding keys from the environment (explicit)
@@ -94,21 +83,16 @@ appear in the Embedding model setting for skill and memory search. Models
 tagged as image generators (`kind: image`, including `gpt-image-*` and
 `dall-e-*` even when `/models` omits a kind) appear in Settings → Image
 generation and back the `generate_image` tool. Image generation uses the
-dedicated OpenAI `/images/generations` (and `/images/edits`) endpoints,
-OpenRouter `POST /images`, or Codex OAuth
-`POST {codex base}/images/generations` and `/images/edits` (JSON body,
-including `images[].image_url` data URLs for edits — not OpenAI
-multipart). Codex `model/list` has no image catalog, so NusaShell seeds
-`gpt-image-2` and `gpt-image-1.5` on Codex providers. Anthropic Messages
-and Ollama are not image backends; they can still orchestrate
-`generate_image` when a supported image provider is configured. Codex
-image 429s with `x-codex-active-limit: image_gen` and a `resets_at`
-window use the same multi-account failover as Codex chat.
+dedicated OpenAI `/images/generations` (and `/images/edits`) endpoints or
+OpenRouter `POST /images` (JSON body, including `images[].image_url` data
+URLs for edits — not OpenAI multipart). Anthropic Messages is not an image
+backend; it can still orchestrate `generate_image` when a supported image
+provider is configured.
 
 ## Test connection
 
 **Test connection** probes connectivity only: it lists models with
-`GET /models` (responses/chat/ollama) or `GET /v1/models` (messages) and
+`GET /models` (responses/chat) or `GET /v1/models` (messages) and
 reports latency and the model count. No completion is sent, so the probe
 never costs tokens, works before importing models, and does not trip
 model-routing failures on the upstream — a broken model only surfaces when
@@ -145,8 +129,8 @@ parallel sessions). You can peek, steer, stop, change mode, and answer
 permission prompts from the Agent dock, drawer, or popup.
 
 Stdio is newline-delimited JSON-RPC (`\n` between messages, no embedded
-newlines). NusaShell does **not** send LSP `Content-Length` headers — Gemini
-CLI (`gemini --acp`) and the ACP spec parse each line with `JSON.parse`.
+newlines). NusaShell does **not** send LSP `Content-Length` headers — the
+ACP spec parses each line with `JSON.parse`.
 Logs from the agent belong on stderr.
 
 ### Common CLIs (install + auth)
@@ -154,8 +138,6 @@ Logs from the agent belong on stderr.
 | CLI | Command | Auth methods (typical) | Not logged in |
 | --- | --- | --- | --- |
 | Cursor | `curl https://cursor.com/install \| bash` then `agent acp` | `cursor_login` | `initialize` succeeds; `session/new` returns `Authentication required`. Run `agent login` locally, then **Authenticate** with `cursor_login` in Providers. |
-| Codex (adapter) | `npm i @agentclientprotocol/codex-acp` → `codex-acp` | `api-key` (and ChatGPT login when browser available) | Same: probe works, spawn/refresh catalog fail until **Authenticate** (API key env or ChatGPT login). |
-| Gemini | `npm i @google/gemini-cli` → `gemini --acp` | `oauth-personal`, `gemini-api-key`, … | Probe lists methods; session may still require **Authenticate** depending on local credentials. |
 | OpenCode | install per [opencode.ai/docs](https://opencode.ai/docs/acp/) → `opencode acp` | `opencode-login` | `initialize` works. Real login is CLI-side (`opencode auth login`) — **Authenticate** with `opencode-login` only validates the method id, it does not log in. Missing provider keys surface as JSON-RPC `-32000` on `session/new` or the first prompt. |
 
 If you register a CLI without logging in, **Probe** still works (it only runs
@@ -168,5 +150,5 @@ NusaShell surfaces a clear error naming those ids instead of a bare JSON-RPC
 does not re-call `authenticate` on subsequent probes, catalog refreshes, or
 subagent spawns. It tries `session/new` first and only calls `authenticate`
 when the agent reports an auth-required error. Agents that persist their own
-auth (e.g. Devin/Codex storing tokens in `~/.codex/auth.json`) will not
+auth (e.g. Devin storing tokens in `~/.devin/auth.json`) will not
 re-trigger the browser login flow on every new connection.

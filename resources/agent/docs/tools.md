@@ -239,10 +239,8 @@ observed or sourced facts from assumptions and inferences.
 
 `generate_image` is a client-side function tool. The active chat model
 orchestrates; the image backend is the auxiliary model from Settings →
-Image generation (OpenAI Images, OpenRouter Image API, or a signed-in
-Codex ChatGPT plan). It is not listed until that setting is configured.
-Codex uses the same function tool over OAuth — do not emit a hosted
-`type: "image_generation"` tool.
+Image generation (OpenAI Images or OpenRouter Image API). It is not
+listed until that setting is configured.
 
 The UI shows the print as soon as the tool completes. Do not embed the
 image again as Markdown, a data URL, or a file link.

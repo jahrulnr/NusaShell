@@ -5,15 +5,16 @@ Instructions for humans and coding agents working in this repository.
 ## Agent behavior
 
 - Always acting as a Senior fullstack developer.
-- Take end-to-end ownership of the work: understand the architecture, clarify boundaries, implement the smallest correct solution, test it, and verify non-functional behavior.
+- Take end-to-end ownership of the work: understand the architecture, clarify boundaries, implement the correct solution with the smallest maintainable surface (see KISS), test it, and verify non-functional behavior.
 - Make decisions grounded in repository evidence and established project constraints; do not hide uncertainty or invent completed work.
+- When backend has changed, makesure frontend is working. Refactor frontend behavior if backend have some breaking changes.
 
 ## Architecture principles
 
 - **TDD:** follow red → green → refactor. Write or extend a failing test for behavior before implementation; make the smallest change that passes; refactor only while tests are green.
 - **Clean Architecture:** keep business rules independent from delivery, persistence, frameworks, and external services. Dependencies point inward.
 - **Dependency rule:** `domain` imports no application, infrastructure, transport, HTTP, WebSocket, SSE, database, filesystem, MCP SDK, or UI code. Outer layers may depend on inner layers, never the reverse.
-- **KISS:** prefer the smallest explicit design that solves the current requirement. Avoid speculative abstractions, framework-heavy solutions, and premature optimization.
+- **KISS:** "simple" does not mean writing the thinnest or least code — it means writing the most maintainable, readable, and idiomatic code that solves the requirement without bloat. Follow best practices for the language and codebase (named abstractions at real boundaries, explicit error handling, no speculative generality), and keep the code from growing unchecked by cycling red → green → refactor (RGR): write a failing test, make it pass, then refactor while green so the code stays clean.
 - **SOLID:** keep responsibilities focused, depend on small interfaces at boundaries, preserve substitutability, and avoid forcing consumers to depend on unused APIs.
 - **Testability:** keep I/O at adapters and inject clocks, filesystem, network clients, process runners, and other effects. Code must support deterministic unit tests and isolated integration tests.
 - **Non-functional testing:** support tests for concurrency and race safety, cancellation, timeouts, ordering, backpressure, resource cleanup, startup/shutdown, compatibility, observability, and performance where the contract requires it.
@@ -48,6 +49,32 @@ Instructions for humans and coding agents working in this repository.
   library (e.g. Slim Select) or custom components that match the existing
   visual language. Native controls should only appear as a last resort.
 
+## Provider adapters (core port)
+
+The AI provider adapters under `infrastructure/ai/` are ported from the
+core provider tree and must stay structurally close to upstream:
+
+- `infrastructure/ai/core/` — core Blocks-based types (`Request`,
+  `Message`, `Block`, `Thinking`, `Tool`, `Response`, `Stream`, error
+  model). This is the shared contract between NusaShell and the providers.
+- `infrastructure/ai/anthropic/`, `infrastructure/ai/openai/`,
+  `infrastructure/ai/openrouter/`, `infrastructure/ai/compat/` — the
+  ported providers. They only import the core package, never
+  `nusashell/application` or `nusashell/domain`.
+- `infrastructure/ai/adapter.go` — the single thin adapter implementing
+  `application.AIProvider`: translates `application.ChatRequest` →
+  `core.Request` (blocks, attachments, effort, strip params, prompt
+  cache) and maps core errors → `application.UpstreamError`. It is the
+  only place allowed to import both worlds.
+- The `.experimental/litellm` clone is the sync source; new provider
+  features should be ported from there, keeping the file layout identical
+  so diffs stay reviewable.
+
+Supported provider kinds are `messages`, `responses`, and `chat`
+(OpenRouter hosts are auto-detected by Base URL). There is intentionally
+no fallback layering: stream-unsupported, empty-stream, and image-strip
+retries were removed — errors surface explicitly to the retry loop.
+
 ## Verification baseline
 
 Before considering a change complete, run the narrowest relevant tests first, then the repository gates:
@@ -65,6 +92,12 @@ Do not weaken or delete tests merely to make a suite pass. Do not commit secrets
 ## Change documentation
 
 When a behavior or public wire contract changes, update the relevant package documentation and golden fixtures. Record intentional compatibility breaks and non-functional trade-offs explicitly.
+
+## Removing old code and breaking changes
+
+- **Dead or superseded code is deleted, not kept.** If a component, adapter, fallback path, or compatibility shim is no longer reachable or no longer reflects how the system works, remove it in the same change instead of leaving it behind "just in case". Unused code is a maintenance tax: it rots, misleads readers, and inflates the surface the next change must consider.
+- **Breaking changes are confirmed with the user first.** Anything that alters persisted data, wire contracts, public RPC methods, provider semantics, or user-visible behavior must be surfaced to the user before implementation — do not silently break old behavior.
+- **Fallbacks to old code are opt-in, not automatic.** Before adding a fallback layer (old path + new path), ask the user whether they need it. Fallback is a complexity multiplier: duplicated logic that must be maintained twice, diverging behavior, and silent masking of errors. The default is one correct path, with the old code deleted — not a fallback ladder.
 
 ## Documentation sync (required)
 
@@ -134,7 +167,7 @@ side-by-side comparisons with other projects, and any proof-of-concept that
 should not touch the production tree yet.
 
 - Create a new subfolder under `.experimental/` per experiment (e.g.
-  `.experimental/sse-multiline/`, `.experimental/codex-oauth-flow/`).
+  `.experimental/sse-multiline/`, `.experimental/agent-round-spike/`).
   Create the folder if it does not exist.
 - One experiment per folder; keep experiments isolated and self-contained.
 - Experiments are not part of the build: they must not be imported by
@@ -146,8 +179,8 @@ should not touch the production tree yet.
   package and delete or archive the experiment folder.
 - Credentials policy is scoped to `.experimental/` only:
   - **Allowed:** local-only credentials that are useless if leaked — e.g.
-    personal `omniroute` / `9router` tokens, `~/.codex/auth.json` reads,
-    local OAuth fixtures tied to a single machine. These may be read from
+    personal `omniroute` / `9router` tokens, local OAuth fixtures tied
+    to a single machine. These may be read from
     the user's home directory at runtime and quoted in experiment output
     because exposure to the internet or another git checkout does not let
     anyone else use them.
@@ -157,8 +190,7 @@ should not touch the production tree yet.
     that works outside the originating machine. Never commit these to
     `.experimental/`; load them from the environment or a git-ignored file
     under the user's home directory instead.
-  - When in doubt, prefer reading from `~/.config/...`, `~/.codex/...`, or
-    an env var over writing the value into a file under
+  - When in doubt, prefer reading from `~/.config/...` or an env var over writing the value into a file under
     `.experimental/`.
   - If a credential must live in a file under `.experimental/` (e.g. a
     fixture JSON), add it to `.gitignore` so it never gets committed.

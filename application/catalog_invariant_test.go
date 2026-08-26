@@ -59,7 +59,6 @@ func TestCatalogHintForProviderKindStillWorks(t *testing.T) {
 	}{
 		{domain.ProviderResponses, "openai"},
 		{domain.ProviderMessages, "anthropic"},
-		{domain.ProviderCodex, "openai"},
 	} {
 		if got := catalogHintForProvider(&domain.Provider{Kind: tc.kind}); got != tc.want {
 			t.Fatalf("catalogHintForProvider(kind %v) = %q, want %q", tc.kind, got, tc.want)

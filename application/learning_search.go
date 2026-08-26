@@ -377,7 +377,7 @@ func ResolveEmbedder(providers ProviderStore, creds CredentialStore, factory Emb
 				break
 			}
 		}
-		if !hasEmbedding && p.Kind != domain.ProviderOllama {
+		if !hasEmbedding {
 			continue
 		}
 		key, _, _ := creds.Get(p.ID)

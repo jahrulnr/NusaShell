@@ -47,7 +47,7 @@ Default model for new conversations, the maximum tool rounds per turn (default 8
 
 ## Embeddings
 
-Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. Ollama models (e.g. nomic-embed-text) work locally without an API key. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review). The review model routes background autolearn reviews to a cheaper or faster model (default uses the conversation's active model).
+Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review). The review model routes background autolearn reviews to a cheaper or faster model (default uses the conversation's active model).
 
 - **Embeddings title** (`#settings-embedding-title`):
   - Section: Settings
@@ -86,7 +86,7 @@ When the active chat model cannot see images, NusaShell can describe attached im
 
 ## Image generation
 
-Pick the model used by the generate_image tool. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images, OpenRouter Image API, and a signed-in Codex ChatGPT plan are supported. Import models on an OpenAI or OpenRouter provider, or use a signed-in Codex provider. Leave disabled until you want the agent to be able to generate images.
+Pick the model used by the generate_image tool. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images and OpenRouter Image API are supported. Import models on an OpenAI or OpenRouter provider. Leave disabled until you want the agent to be able to generate images.
 
 - **Image generation title** (`#settings-image-title`):
   - Section: Settings

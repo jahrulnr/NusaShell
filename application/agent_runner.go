@@ -542,25 +542,6 @@ func (a *App) runTurnChain(run *TurnRun, provider *domain.Provider, apiKey, mode
 // the chain should continue.
 func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities, autoContinueIndex int) (bool, string) {
 
-	// Codex sticky account: pick the account bound to this conversation
-	// so the Codex backend can reuse the prompt cache shard. If every
-	// stored account is rate-limited or circuit-open, fail before the
-	// first request instead of silently using the active (blocked) token.
-	if provider.Kind == domain.ProviderCodex && a.CodexRouter != nil {
-		accounts := a.listCodexAccountIDs(provider.ID)
-		if len(accounts) > 0 {
-			pick := a.CodexRouter.PickAccountDetailed(run.ConversationID, provider.ID, accounts)
-			if pick.AccountID != "" {
-				if token, has, _ := a.Credentials.Get(accountKey(provider.ID, pick.AccountID)); has {
-					apiKey = token
-				}
-			} else if pick.AllRateLimited {
-				a.failTurn(run, asstMsgID, allCodexAccountsLimitedError(pick.EarliestReset))
-				return false, ""
-			}
-		}
-	}
-
 	adapter, conversation, settings, err := a.initializeTurn(run, provider, apiKey, model)
 	if err != nil {
 		a.failTurn(run, asstMsgID, err)
@@ -680,48 +661,6 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 			if run.Ctx.Err() != nil {
 				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, lastUsage.ContextTokens(), model)
 				return false, ""
-			}
-			// Codex account failover with circuit breaker:
-			// - Transient 429 (Retry-After \u2264 5min): MarkRateLimited (short cooldown)
-			// - Usage exhausted (Retry-After > 5min): MarkCircuitOpen (long block until reset)
-			// Then try a different account. If all accounts are blocked, fail with
-			// a clear error so the user knows when to retry.
-			if provider.Kind == domain.ProviderCodex && a.CodexRouter != nil && isRateLimitError(streamErr) {
-				currentAccount := a.CodexRouter.StickyAccount(run.ConversationID)
-				cooldown := rateLimitCooldown(streamErr)
-				if cooldown > retryAfterCutoff {
-					// Usage quota exhausted — open circuit until reset
-					a.CodexRouter.MarkCircuitOpen(currentAccount, time.Now().Add(cooldown))
-					a.log("warn", "ai", "codex circuit open: account %s usage exhausted for %s (conversation %s)",
-						currentAccount, cooldown.Round(time.Minute), run.ConversationID)
-					// Async fetch exact reset time from usage API.
-					// Derive from the turn context so the goroutine exits
-					// early if the turn is cancelled.
-					a.goSafe("codex", func() {
-						a.refreshCodexCircuit(context.WithoutCancel(run.Ctx), provider.ID, currentAccount)
-					})
-				} else {
-					a.CodexRouter.MarkRateLimited(currentAccount, cooldown)
-				}
-				accounts := a.listCodexAccountIDs(provider.ID)
-				pickResult := a.CodexRouter.PickAccountDetailed(run.ConversationID, provider.ID, accounts)
-				newAccount := pickResult.AccountID
-				if newAccount != "" && newAccount != currentAccount {
-					if newToken, has, _ := a.Credentials.Get(accountKey(provider.ID, newAccount)); has {
-						newAdapter, buildErr := a.Factory(run.Ctx, provider, newToken)
-						if buildErr == nil {
-							adapter = newAdapter
-							apiKey = newToken
-							a.log("info", "ai", "codex failover: account %s \u2192 %s for conversation %s",
-								currentAccount, newAccount, run.ConversationID)
-							round--
-							continue
-						}
-					}
-				}
-				if pickResult.AllRateLimited {
-					streamErr = allCodexAccountsLimitedError(pickResult.EarliestReset)
-				}
 			}
 			streamErr = a.decorateRateLimitError(provider.ID, streamErr)
 			if !continuedPartialStream && isRetryableProviderError(streamErr) && len(roundResult.Response.ToolCalls) == 0 && (roundResult.Content != "" || roundResult.Reasoning != "") {
@@ -1022,20 +961,8 @@ func effectiveContextWindow(modelWindow, maxInputTokens int) int {
 // resolveContextWindow picks the effective context window for compaction
 // decisions: min(model context, max_input_tokens) when both are known, or the
 // configured max_input_tokens fallback when the model does not advertise one.
-//
-// For Codex providers, the stored context in providers.json may be stale
-// (a catalog fallback from models.dev that overstates the real window).
-// The Codex runtime cache (~/.codex/models_cache.json) holds the actual
-// window the app-server enforces. When available and smaller, it clamps
-// the stored value so compaction triggers before the real limit is hit.
 func (a *App) resolveContextWindow(provider *domain.Provider, model string, settings domain.Settings) int {
-	ctx := domain.ResolveContextWindow(provider, model, settings)
-	if provider.Kind == domain.ProviderCodex && a.CodexContextWindowCache != nil {
-		if cached, ok := a.CodexContextWindowCache.ContextWindow(model); ok && cached > 0 && cached < ctx {
-			return cached
-		}
-	}
-	return ctx
+	return domain.ResolveContextWindow(provider, model, settings)
 }
 
 const (
@@ -1126,17 +1053,6 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 	}
 	if effectiveKeepBudget < 1000 {
 		effectiveKeepBudget = 1000
-	}
-
-	// Edge case: if the adapter supports server-side compaction, try it
-	// first. On any error, fall back to client-side compaction so the
-	// conversation still gets summarized.
-	if compactor, ok := adapter.(ServerCompactor); ok {
-		summary, err := compactor.CompactServer(ctx, c, model, contextWindow)
-		if err == nil {
-			return summary, a.persistCompactedConversation(c, summary, effectiveKeepBudget)
-		}
-		a.log("warn", "agent", "server-side compaction failed for %s, falling back to client-side: %v", c.ID, err)
 	}
 
 	// Calculate the split point: iterate backward from the most recent message,

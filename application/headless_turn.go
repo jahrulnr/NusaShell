@@ -117,9 +117,6 @@ func (a *App) resolveHeadlessModel(modelID string) (*domain.Provider, string, st
 		if !has && requiresKey(p.Kind) {
 			continue
 		}
-		if !has && p.Kind == domain.ProviderCodex {
-			continue
-		}
 		return p, p.Models[0].ID, key, nil
 	}
 	return nil, "", "", fmt.Errorf("no enabled provider with a model is available for headless agent steps")

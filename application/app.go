@@ -60,12 +60,6 @@ type App struct {
 	TTSInstaller                TTSInstaller
 	STTInstaller                STTInstaller
 	WorkspacePicker             WorkspacePicker
-	CodexRuntime                CodexRuntime
-	CodexOAuth                  CodexOAuth
-	CodexUsage                  CodexUsage
-	CodexContextWindowCache     CodexContextWindowCache
-	CodexCLIAuth                CodexCLIAuthImporter
-	CodexRouter                 *CodexAccountRouter
 	AcpAgents                   AcpAgentStore
 	Acp                         AcpRuntime
 	AcpRunStorage               domain.AcpRunStorage
@@ -944,7 +938,7 @@ func (a *App) handleAppInfo() (any, *contracts.RPCError) {
 			Compaction:    settings.CompactionEnabled,
 			PromptCaching: settings.PromptCaching,
 			Automation:    a.Automation != nil,
-			Providers:     []string{"messages", "responses", "chat", "codex"},
+			Providers:     []string{"messages", "responses", "chat"},
 		},
 	}, nil
 }
@@ -993,9 +987,6 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 		if !has && requiresKey(p.Kind) {
 			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q has no API key", p.Name)}
 		}
-		if !has && p.Kind == domain.ProviderCodex {
-			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q is not logged in — use the Codex login command to authenticate with your ChatGPT account", p.Name)}
-		}
 		return p, p.FindModel(modelID), key, nil
 	}
 	for _, p := range a.Providers.List() {
@@ -1008,9 +999,6 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 		}
 		if !has && requiresKey(p.Kind) {
 			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q has no API key", p.Name)}
-		}
-		if !has && p.Kind == domain.ProviderCodex {
-			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q is not logged in — use the Codex login command to authenticate with your ChatGPT account", p.Name)}
 		}
 		return p, p.FindModel(model), key, nil
 	}

@@ -8,49 +8,50 @@ import (
 	"nusashell/domain"
 )
 
-// fakeOllamaImportAdapter simulates Ollama's OpenAI-compatible /v1/models:
+// fakeEmbeddingImportAdapter simulates an OpenAI-compatible /v1/models:
 // every installed model (chat and embedding alike) is returned untagged.
-type fakeOllamaImportAdapter struct {
+type fakeEmbeddingImportAdapter struct {
 	fakeVisionAdapter
 }
 
-func (f *fakeOllamaImportAdapter) Kind() domain.ProviderKind { return domain.ProviderOllama }
+func (f *fakeEmbeddingImportAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
 
-func (f *fakeOllamaImportAdapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model, error) {
+func (f *fakeEmbeddingImportAdapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model, error) {
 	return []domain.Model{
 		{ID: "nomic-embed-text:latest"},
 		{ID: "gemma4:e2b"},
 	}, nil
 }
 
-// fakeEmbLister stands in for the OllamaTagLister wired in production
-// (infrastructure cannot be imported here without a dependency cycle).
+// fakeEmbLister stands in for the embedding model lister wired in
+// production (infrastructure cannot be imported here without a dependency
+// cycle).
 type fakeEmbLister struct{ ids []string }
 
 func (f fakeEmbLister) ListEmbeddingModels(ctx context.Context, apiKey string) ([]string, error) {
 	return f.ids, nil
 }
 
-func TestHandleProvidersImportTagsOllamaEmbeddings(t *testing.T) {
+func TestHandleProvidersImportTagsEmbeddingsFromLister(t *testing.T) {
 	app := &App{
 		Logs:        &fakeLogStore{},
 		Bus:         NewBus(),
 		Providers:   &fakeProviderStore{items: map[string]*domain.Provider{}},
 		Credentials: &fakeVisionCredStore{creds: map[string]string{}},
 		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error) {
-			return &fakeOllamaImportAdapter{}, nil
+			return &fakeEmbeddingImportAdapter{}, nil
 		},
-		// Native Ollama capability signal: /api/tags reports "embedding".
+		// Embedding model lister reports the embedding-capable ids.
 		EmbeddingModelListerFactory: func(p *domain.Provider) EmbeddingModelLister {
 			return fakeEmbLister{ids: []string{"nomic-embed-text:latest"}}
 		},
 	}
 	app.Providers.Save(&domain.Provider{
-		ID: "oll", Kind: domain.ProviderOllama, Name: "Local Ollama",
-		BaseURL: "http://localhost:11434", Enabled: true,
+		ID: "emb", Kind: domain.ProviderChat, Name: "Gateway",
+		BaseURL: "https://gateway.example.com/v1", Enabled: true,
 	})
 
-	res, rpcErr := app.handleProvidersImport(contracts.ProviderIDRequest{ID: "oll"})
+	res, rpcErr := app.handleProvidersImport(contracts.ProviderIDRequest{ID: "emb"})
 	if rpcErr != nil {
 		t.Fatalf("handleProvidersImport: %v", rpcErr.Message)
 	}
@@ -66,7 +67,7 @@ func TestHandleProvidersImportTagsOllamaEmbeddings(t *testing.T) {
 	}
 
 	// The provider must have persisted the tagged models too.
-	p, _ := app.Providers.Get("oll")
+	p, _ := app.Providers.Get("emb")
 	if !p.HasModel("nomic-embed-text:latest") {
 		t.Fatal("saved provider lost the embedding model")
 	}
@@ -84,7 +85,7 @@ func TestHandleModelsListSurfacesLegacyEmbeddingModel(t *testing.T) {
 		Logs: &fakeLogStore{},
 		Bus:  NewBus(),
 		Providers: &fakeProviderStore{items: map[string]*domain.Provider{
-			"oll": {ID: "oll", Kind: domain.ProviderOllama, Name: "Local Ollama", Enabled: true,
+			"emb": {ID: "emb", Kind: domain.ProviderChat, Name: "Gateway", Enabled: true,
 				Models: []domain.Model{{ID: "nomic-embed-text:latest"}, {ID: "gemma4:e2b"}}},
 		}},
 	}

@@ -14,8 +14,7 @@ func SplitQualifiedModel(s string) (providerID, modelID string, ok bool) {
 }
 
 // RequiresKey reports whether a provider kind needs a user-supplied API key.
-// Local endpoints (Ollama, LM Studio via chat kind) work without a key, and
-// Codex uses OAuth tokens stored in CredentialStore, not a user-supplied key.
+// Local endpoints (LM Studio via chat kind) work without a key.
 func RequiresKey(kind ProviderKind) bool {
-	return kind == ProviderMessages || kind == ProviderResponses || kind == ProviderGemini
+	return kind == ProviderMessages || kind == ProviderResponses
 }

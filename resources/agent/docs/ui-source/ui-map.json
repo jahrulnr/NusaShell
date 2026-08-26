@@ -182,7 +182,7 @@
         {
           "heading": "Composer",
           "paragraphs": [
-            "The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (\u2318\u21a9 on Mac) sends. While a turn is running, Send becomes Steer. The whole conversation area accepts drag & drop of files and folders \u2014 folders are attached as path-only references (desktop only)."
+            "The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (⌘↩ on Mac) sends. While a turn is running, Send becomes Steer. The whole conversation area accepts drag & drop of files and folders — folders are attached as path-only references (desktop only)."
           ],
           "controls": [
             "agent-form",
@@ -295,7 +295,7 @@
         {
           "heading": "Plugin catalog",
           "paragraphs": [
-            "Lists all plugins \u2014 manual MCP servers, MCP-only plugins, and MCP + UI plugins \u2014 with runtime state (idle/connected). Clicking a row opens the Plugins detail drawer."
+            "Lists all plugins — manual MCP servers, MCP-only plugins, and MCP + UI plugins — with runtime state (idle/connected). Clicking a row opens the Plugins detail drawer."
           ],
           "controls": [
             "plugin-table"
@@ -333,7 +333,7 @@
     },
     "providers": {
       "title": "Providers",
-      "purpose": "Configure LLM chat backends by wire format (Messages, Responses, Chat, Ollama, Codex) and spawn-only ACP subagent binaries. Chat API keys live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.",
+      "purpose": "Configure LLM chat backends by wire format (Messages, Responses, Chat) and spawn-only ACP subagent binaries. Chat API keys live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.",
       "howToOpen": "Click the Providers item in the left sidebar.",
       "sections": [
         {
@@ -410,7 +410,7 @@
         {
           "heading": "Results",
           "paragraphs": [
-            "Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately. Memory entries show a tier badge (primary or fragment) next to the kind label so the two tiers are visually distinguishable. Memory entries have a delete button (\u00d7) that opens a confirm dialog and calls memory.delete. Long content is collapsed to 3 lines; click to expand. Results refresh automatically when memory or skills change (via `memory.updated` / `skill.updated` events, debounced 300ms)."
+            "Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately. Memory entries show a tier badge (primary or fragment) next to the kind label so the two tiers are visually distinguishable. Memory entries have a delete button (×) that opens a confirm dialog and calls memory.delete. Long content is collapsed to 3 lines; click to expand. Results refresh automatically when memory or skills change (via `memory.updated` / `skill.updated` events, debounced 300ms)."
           ],
           "controls": [
             "learning-results",
@@ -553,7 +553,7 @@
         {
           "heading": "Agent runtime",
           "paragraphs": [
-            "Default model for new conversations, the maximum tool rounds per turn (default 8), the max parallel tools per round (default 6, range 1\u201364), and the plugin usage-contract enforcement mode. Existing conversations keep their selected model."
+            "Default model for new conversations, the maximum tool rounds per turn (default 8), the max parallel tools per round (default 6, range 1–64), and the plugin usage-contract enforcement mode. Existing conversations keep their selected model."
           ],
           "controls": [
             "settings-runtime-title",
@@ -566,7 +566,7 @@
         {
           "heading": "Embeddings",
           "paragraphs": [
-            "Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. Ollama models (e.g. nomic-embed-text) work locally without an API key. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review). The review model routes background autolearn reviews to a cheaper or faster model (default uses the conversation's active model)."
+            "Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review). The review model routes background autolearn reviews to a cheaper or faster model (default uses the conversation's active model)."
           ],
           "controls": [
             "settings-embedding-title",
@@ -589,7 +589,7 @@
         {
           "heading": "Image generation",
           "paragraphs": [
-            "Pick the model used by the generate_image tool. This is separate from the chat model \u2014 any chat model can orchestrate, and the image backend is resolved here. OpenAI Images, OpenRouter Image API, and a signed-in Codex ChatGPT plan are supported. Import models on an OpenAI or OpenRouter provider, or use a signed-in Codex provider. Leave disabled until you want the agent to be able to generate images."
+            "Pick the model used by the generate_image tool. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images and OpenRouter Image API are supported. Import models on an OpenAI or OpenRouter provider. Leave disabled until you want the agent to be able to generate images."
           ],
           "controls": [
             "settings-image-title",
@@ -609,7 +609,7 @@
         {
           "heading": "Speech generation",
           "paragraphs": [
-            "Pick the model used by the generate_speech tool (text-to-speech). Online models use an OpenAI-compatible /audio/speech endpoint. The offline piper engine can be installed with one click: the install button opens a dialog with a voice picker (Bahasa Indonesia news_tts medium, English US lessac high), downloads the piper binary plus the selected voice model into the data directory with live progress, and the installed voice then appears as an option in the model picker (provider \u201cpiper\u201d) so it can be selected directly \u2014 the automatic fallback works as soon as install finishes, no offline-mode checkbox needed. The old manual checkbox stays for PIPER_BIN/PATH setups."
+            "Pick the model used by the generate_speech tool (text-to-speech). Online models use an OpenAI-compatible /audio/speech endpoint. The offline piper engine can be installed with one click: the install button opens a dialog with a voice picker (Bahasa Indonesia news_tts medium, English US lessac high), downloads the piper binary plus the selected voice model into the data directory with live progress, and the installed voice then appears as an option in the model picker (provider “piper”) so it can be selected directly — the automatic fallback works as soon as install finishes, no offline-mode checkbox needed. The old manual checkbox stays for PIPER_BIN/PATH setups."
           ],
           "controls": [
             "settings-tts-title",
@@ -634,7 +634,7 @@
         {
           "heading": "Offline speech-to-text",
           "paragraphs": [
-            "Lets read_media transcribe audio locally with whisper.cpp (whisper-cli) \u2014 no API key, no network. The engine binary is downloaded once during install; models land under models/stt/ in the data directory. The install button opens a requirements dialog: a checklist (platform support, whisper.cpp engine, GGML model, free disk), a per-OS guide (Linux/Windows auto-install from official releases, macOS via brew install whisper-cpp), a model picker over the multilingual catalog (tiny/base/small-q5_1/small default/large-v3-turbo variants; Indonesian and English supported; .en variants excluded), and live download progress with speed. After install the model appears in the Offline STT model select and read_media uses it automatically."
+            "Lets read_media transcribe audio locally with whisper.cpp (whisper-cli) — no API key, no network. The engine binary is downloaded once during install; models land under models/stt/ in the data directory. The install button opens a requirements dialog: a checklist (platform support, whisper.cpp engine, GGML model, free disk), a per-OS guide (Linux/Windows auto-install from official releases, macOS via brew install whisper-cpp), a model picker over the multilingual catalog (tiny/base/small-q5_1/small default/large-v3-turbo variants; Indonesian and English supported; .en variants excluded), and live download progress with speed. After install the model appears in the Offline STT model select and read_media uses it automatically."
           ],
           "controls": [
             "settings-stt-title",
@@ -849,7 +849,7 @@
       "section": "Home",
       "type": "search",
       "action": "Filters installed apps by name, id, or description. Escape clears the query.",
-      "shortcut": "Ctrl+K / \u2318K, or / when not typing"
+      "shortcut": "Ctrl+K / ⌘K, or / when not typing"
     },
     "search-clear": {
       "label": "Clear app search",
@@ -889,14 +889,14 @@
       "section": "Agent",
       "type": "button",
       "action": "Creates a new conversation and focuses the composer.",
-      "shortcut": "Ctrl+N / \u2318N on the Agent view"
+      "shortcut": "Ctrl+N / ⌘N on the Agent view"
     },
     "conversation-search": {
       "label": "Conversation search",
       "section": "Agent",
       "type": "search",
       "notes": "Filters conversation titles in real time.",
-      "shortcut": "Ctrl+K / \u2318K, or / when not typing"
+      "shortcut": "Ctrl+K / ⌘K, or / when not typing"
     },
     "conversation-list": {
       "label": "Conversation list",
@@ -1044,7 +1044,7 @@
       "label": "Message input",
       "section": "Agent",
       "type": "textarea",
-      "shortcut": "Ctrl+Enter / \u2318\u21a9 to send; Escape closes dialogs"
+      "shortcut": "Ctrl+Enter / ⌘↩ to send; Escape closes dialogs"
     },
     "agent-attachments": {
       "label": "Attachments preview",
@@ -1107,7 +1107,7 @@
       "label": "Send",
       "section": "Agent",
       "type": "submit",
-      "shortcut": "Ctrl+Enter / \u2318\u21a9"
+      "shortcut": "Ctrl+Enter / ⌘↩"
     },
     "skills-count": {
       "label": "Skills count",
@@ -1175,7 +1175,7 @@
       "label": "State machine",
       "section": "Plugins",
       "type": "indicator",
-      "notes": "Shows idle \u2192 connecting \u2192 connected \u2192 error with the current state highlighted."
+      "notes": "Shows idle → connecting → connected → error with the current state highlighted."
     },
     "plugin-btn-open-ui": {
       "label": "Open UI",
@@ -1423,13 +1423,13 @@
       "label": "Maximum tool rounds",
       "section": "Settings",
       "type": "number",
-      "notes": "1\u201310000, default 8."
+      "notes": "1–10000, default 8."
     },
     "settings-max-parallel-tools": {
       "label": "Max parallel tools",
       "section": "Settings",
       "type": "number",
-      "notes": "1\u201364, default 6. Bounds concurrent tool calls per assistant round."
+      "notes": "1–64, default 6. Bounds concurrent tool calls per assistant round."
     },
     "settings-embedding-title": {
       "label": "Embeddings title",

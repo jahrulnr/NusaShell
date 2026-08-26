@@ -354,6 +354,19 @@ func IsOpenRouterURL(baseUrl string) bool {
 	return host == "openrouter.ai" || strings.HasSuffix(host, ".openrouter.ai")
 }
 
+// IsOpenAIDirectURL reports whether baseUrl points at a direct OpenAI API
+// host (api.openai.com). Chat-kind providers on this host stay on the
+// vanilla OpenAI chat adapter; every other chat-kind host defaults to the
+// OpenRouter adapter (aggregators speak the OpenRouter wire format).
+func IsOpenAIDirectURL(baseUrl string) bool {
+	u, err := neturl.Parse(baseUrl)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "api.openai.com" || strings.HasSuffix(host, ".api.openai.com")
+}
+
 // OpenRouterAttributionHeaders returns the OpenRouter ranking/attribution
 // headers NusaShell sends when talking to an OpenRouter endpoint.
 func OpenRouterAttributionHeaders() map[string]string {
@@ -362,167 +375,6 @@ func OpenRouterAttributionHeaders() map[string]string {
 		"x-openrouter-title":      "NusaShell",
 		"x-openrouter-categories": "personal-agent,programming-app",
 	}
-}
-
-// streamUnsupportedPhrases are body substrings (case-insensitive) that, when
-// combined with a 4xx status and the word "stream", indicate the provider
-// rejects streaming for this model/endpoint. The adapter should fall back to
-// non-streaming. Mirrors the TS isStreamUnsupported phrase list.
-var streamUnsupportedPhrases = []string{
-	"not support", "unsupported", "disabled", "not available", "not enabled", "must be false", "non-stream",
-}
-
-// IsStreamUnsupported reports whether a 4xx response body indicates the
-// provider rejects streaming. Auth errors (401/402/403) are excluded — they
-// won't work non-streaming either. 5xx errors are excluded — they're transient.
-func IsStreamUnsupported(status int, body string) bool {
-	if status == 401 || status == 402 || status == 403 {
-		return false
-	}
-	if status < 400 || status >= 500 {
-		return false
-	}
-	normalized := strings.ToLower(body)
-	if !strings.Contains(normalized, "stream") {
-		return false
-	}
-	for _, phrase := range streamUnsupportedPhrases {
-		if strings.Contains(normalized, phrase) {
-			return true
-		}
-	}
-	return false
-}
-
-// IsResponsesUnsupported reports whether an UpstreamError indicates the
-// Responses API (/responses) is not available, triggering a fallback to chat
-// completions (/chat/completions). 404/405 are always unsupported; 4xx/5xx
-// bodies with "not found"/"not supported"/"does not support"/"unavailable"
-// are also unsupported.
-func IsResponsesUnsupported(err error) bool {
-	var upstream *application.UpstreamError
-	if !errors.As(err, &upstream) {
-		return false
-	}
-	if upstream.StatusCode == 404 || upstream.StatusCode == 405 {
-		return true
-	}
-	if upstream.Err == nil {
-		return false
-	}
-	normalized := strings.ToLower(upstream.Err.Error())
-	if upstream.StatusCode < 400 || upstream.StatusCode >= 600 {
-		return false
-	}
-	for _, phrase := range []string{"not found", "not supported", "does not support", "unavailable"} {
-		if strings.Contains(normalized, phrase) {
-			return true
-		}
-	}
-	return false
-}
-
-// LooksLikeSseText reports whether a response body string begins with SSE
-// framing (data: or event:), used to detect SSE content returned with a
-// non-event-stream content-type.
-func LooksLikeSseText(value string) bool {
-	prefix := strings.TrimLeft(value, " \t\r\n")
-	if len(prefix) > 32 {
-		prefix = prefix[:32]
-	}
-	prefix = strings.ToLower(prefix)
-	return strings.HasPrefix(prefix, "data:") || strings.HasPrefix(prefix, "event:")
-}
-
-// IsStreamUnsupportedError checks whether an UpstreamError from OpenSSE
-// indicates the provider rejects streaming, triggering a fallback to
-// non-streaming Complete.
-func IsStreamUnsupportedError(err error) bool {
-	var upstream *application.UpstreamError
-	if !errors.As(err, &upstream) || upstream.Err == nil {
-		return false
-	}
-	return IsStreamUnsupported(upstream.StatusCode, upstream.Err.Error())
-}
-
-// StreamFallbackToComplete calls the adapter's Complete method and simulates
-// streaming by emitting the full content/reasoning as a single delta. Used
-// when the provider rejects streaming but non-streaming works.
-func StreamFallbackToComplete(ctx context.Context, adapter application.AIProvider, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
-	resp, err := adapter.Complete(ctx, req)
-	if err != nil {
-		return resp, err
-	}
-	if resp.Content != "" && onDelta != nil {
-		onDelta(resp.Content)
-	}
-	if resp.Reasoning != "" && onReasoning != nil {
-		onReasoning(resp.Reasoning)
-	}
-	return resp, nil
-}
-
-// ShouldRetryWithoutImages reports whether a 4xx provider error should be
-// retried with image attachments stripped. Returns true only when the error
-// is a 4xx UpstreamError, the context is not aborted, and at least one user
-// message carries an image attachment. Mirrors the TS shouldRetryWithoutImages.
-func ShouldRetryWithoutImages(err error, messages []application.ChatMessage, ctx context.Context) bool {
-	if ctx != nil && ctx.Err() != nil {
-		return false
-	}
-	var upstream *application.UpstreamError
-	if !errors.As(err, &upstream) {
-		return false
-	}
-	if upstream.StatusCode < 400 || upstream.StatusCode >= 500 {
-		return false
-	}
-	for _, msg := range messages {
-		if msg.Role != "user" {
-			continue
-		}
-		for _, att := range msg.Attachments {
-			if att.Type == "image" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// StripImages returns a copy of messages with image attachments removed.
-// Used to retry a 4xx request that may have been rejected due to image
-// content (some providers/models reject images with a 400).
-func StripImages(messages []application.ChatMessage) []application.ChatMessage {
-	out := make([]application.ChatMessage, len(messages))
-	copy(out, messages)
-	for i := range out {
-		if out[i].Role != "user" || len(out[i].Attachments) == 0 {
-			continue
-		}
-		filtered := out[i].Attachments[:0:0]
-		for _, att := range out[i].Attachments {
-			if att.Type != "image" {
-				filtered = append(filtered, att)
-			}
-		}
-		out[i].Attachments = filtered
-	}
-	return out
-}
-
-// IsIncompleteEmptyStream reports whether the error is incompleteSSEError with
-// no accumulated content, indicating an empty response body that may succeed
-// as a non-streaming request.
-func IsIncompleteEmptyStream(err error, result application.ChatResponse) bool {
-	var upstream *application.UpstreamError
-	if !errors.As(err, &upstream) || upstream.Kind != application.KindSSETransport {
-		return false
-	}
-	if !errors.Is(upstream.Err, io.ErrUnexpectedEOF) {
-		return false
-	}
-	return result.Content == "" && result.Reasoning == "" && len(result.ToolCalls) == 0
 }
 
 // stripTrailingCommas removes trailing commas before } and ] in JSON-like

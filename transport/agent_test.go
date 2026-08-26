@@ -892,8 +892,11 @@ func TestAgentTurnResponses(t *testing.T) {
 		t.Fatal("no tools in responses request")
 	}
 
-	// canonical input shape: message content is a plain string, function
-	// calls and outputs are top-level items (OpenRouter rejects block arrays)
+	// canonical input shape: message content items, function calls and
+	// outputs are top-level items. The ported litellm responses builder
+	// emits content as an array of input_text items (the Responses API
+	// accepts both shapes; OpenRouter rejects bare block arrays only for
+	// tool results, which stay top-level items).
 	input, _ := body["input"].([]any)
 	if len(input) == 0 {
 		t.Fatal("input missing")
@@ -902,8 +905,12 @@ func TestAgentTurnResponses(t *testing.T) {
 	if first["role"] != "user" {
 		t.Fatalf("first input item = %+v", first)
 	}
-	if _, isString := first["content"].(string); !isString {
-		t.Fatalf("user content must be a string, got %T: %+v", first["content"], first["content"])
+	contentItems, ok := first["content"].([]any)
+	if !ok || len(contentItems) == 0 {
+		t.Fatalf("user content must be an array of input_text items, got %T: %+v", first["content"], first["content"])
+	}
+	if item, ok := contentItems[0].(map[string]any); !ok || item["type"] != "input_text" {
+		t.Fatalf("first content item = %+v", contentItems[0])
 	}
 	hasCall, hasOutput := false, false
 	for _, raw := range input {

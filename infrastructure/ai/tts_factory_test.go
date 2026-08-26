@@ -29,8 +29,6 @@ func TestSpeechSynthesizerFactoryKinds(t *testing.T) {
 	}
 	rejected := []domain.ProviderKind{
 		domain.ProviderMessages,
-		domain.ProviderOllama,
-		domain.ProviderCodex,
 	}
 	for _, k := range rejected {
 		p := &domain.Provider{ID: "p2", Kind: k, BaseURL: "https://api.example.com/v1", Enabled: true}

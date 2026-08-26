@@ -22,7 +22,7 @@ streaming tool timeline, and expandable reasoning and tool output.
   longer than ten lines scroll inside their own panel instead of stretching the
   conversation.
 - **Providers** — Messages, Responses, and Chat API formats for Anthropic,
-  OpenAI-compatible services, DeepSeek, Ollama, LM Studio, vLLM, and similar
+  OpenAI-compatible services, DeepSeek, LM Studio, vLLM, and similar
   endpoints. API keys are kept in a local SQLite credential store.
 - **MCP, skills, memory, and docs** — stdio MCP tools are available to the
   agent as `mcp__<server>__<tool>`; reusable Markdown skills, durable memory,

@@ -301,75 +301,6 @@ func TestResolveContextWindowModelWinsOverGlobalCap(t *testing.T) {
 	}
 }
 
-// stubCodexContextCache is a test double for CodexContextWindowCache.
-type stubCodexContextCache map[string]int
-
-func (s stubCodexContextCache) ContextWindow(modelID string) (int, bool) {
-	cw, ok := s[modelID]
-	return cw, ok
-}
-
-func TestResolveContextWindowClampsCodexToRuntimeCache(t *testing.T) {
-	// providers.json stores 1.05M for Luna (stale catalog fallback), but
-	// Codex runtime cache says 272K. Compaction must use the smaller
-	// runtime value, not the stale stored value.
-	provider := &domain.Provider{
-		Kind: domain.ProviderCodex,
-		Models: []domain.Model{
-			{ID: "gpt-5.6-luna", Context: 1_050_000},
-		},
-	}
-	settings := domain.Settings{MaxInputTokens: 200_000}
-	cache := stubCodexContextCache{"gpt-5.6-luna": 272_000}
-	app := &App{CodexContextWindowCache: cache}
-	if got := app.resolveContextWindow(provider, "gpt-5.6-luna", settings); got != 272_000 {
-		t.Fatalf("codex context = %d, want 272000 (clamped to runtime cache)", got)
-	}
-}
-
-func TestResolveContextWindowNoClampForNonCodex(t *testing.T) {
-	provider := &domain.Provider{
-		Kind: domain.ProviderChat,
-		Models: []domain.Model{
-			{ID: "gpt-5.6-luna", Context: 1_050_000},
-		},
-	}
-	settings := domain.Settings{MaxInputTokens: 200_000}
-	cache := stubCodexContextCache{"gpt-5.6-luna": 272_000}
-	app := &App{CodexContextWindowCache: cache}
-	if got := app.resolveContextWindow(provider, "gpt-5.6-luna", settings); got != 1_050_000 {
-		t.Fatalf("non-codex context = %d, want 1050000 (no clamp)", got)
-	}
-}
-
-func TestResolveContextWindowNoClampWhenCacheMissing(t *testing.T) {
-	provider := &domain.Provider{
-		Kind: domain.ProviderCodex,
-		Models: []domain.Model{
-			{ID: "gpt-5.6-luna", Context: 1_050_000},
-		},
-	}
-	settings := domain.Settings{MaxInputTokens: 200_000}
-	app := &App{CodexContextWindowCache: stubCodexContextCache{}}
-	if got := app.resolveContextWindow(provider, "gpt-5.6-luna", settings); got != 1_050_000 {
-		t.Fatalf("codex context without cache hit = %d, want 1050000 (no clamp)", got)
-	}
-}
-
-func TestResolveContextWindowNoClampWhenCacheNil(t *testing.T) {
-	provider := &domain.Provider{
-		Kind: domain.ProviderCodex,
-		Models: []domain.Model{
-			{ID: "gpt-5.6-luna", Context: 1_050_000},
-		},
-	}
-	settings := domain.Settings{MaxInputTokens: 200_000}
-	app := &App{}
-	if got := app.resolveContextWindow(provider, "gpt-5.6-luna", settings); got != 1_050_000 {
-		t.Fatalf("codex context with nil cache = %d, want 1050000 (no clamp)", got)
-	}
-}
-
 func TestInterruptTurnKeepsReasoning(t *testing.T) {
 	conv := &domain.Conversation{
 		ID:       "c1",
@@ -599,50 +530,6 @@ func TestRunOneToolNoStreamFallback(t *testing.T) {
 	}
 	if deltaCount != 0 {
 		t.Fatalf("expected no deltas, got %d", deltaCount)
-	}
-}
-
-func TestRunTurnFailsWhenAllCodexAccountsBlocked(t *testing.T) {
-	conv := &domain.Conversation{
-		ID:       "c1",
-		Messages: []domain.Message{{ID: "m1", Role: domain.RoleAssistant}},
-	}
-	creds := &memCreds{m: map[string]string{
-		"prov":              `{"access_token":"active","account_id":"acc1"}`,
-		"prov:account:acc1": `{"access_token":"t1","account_id":"acc1"}`,
-		"prov:account:acc2": `{"access_token":"t2","account_id":"acc2"}`,
-	}}
-	router := NewCodexAccountRouter()
-	router.MarkCircuitOpen("acc1", time.Now().Add(time.Hour))
-	router.MarkCircuitOpen("acc2", time.Now().Add(2*time.Hour))
-
-	factoryCalled := false
-	app := &App{
-		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
-		Logs:          &fakeLogStore{},
-		Bus:           NewBus(),
-		Credentials:   creds,
-		CodexRouter:   router,
-		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error) {
-			factoryCalled = true
-			return nil, errors.New("factory should not run when all Codex accounts are blocked")
-		},
-		runs: map[string]*TurnRun{},
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	provider := &domain.Provider{ID: "prov", Kind: domain.ProviderCodex}
-
-	app.runTurn(run, provider, "active-token", "gpt-5.3-codex", "", "m1", false, ModelCapabilities{Vision: true})
-
-	if factoryCalled {
-		t.Fatal("factory must not run when every Codex account is blocked")
-	}
-	if conv.Messages[0].Status != domain.StatusError {
-		t.Fatalf("status = %q, want error", conv.Messages[0].Status)
-	}
-	if !strings.Contains(conv.Messages[0].Error, "rate-limited") {
-		t.Fatalf("error = %q, want rate-limited message", conv.Messages[0].Error)
 	}
 }
 

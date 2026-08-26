@@ -38,8 +38,7 @@ type CredentialStore interface {
 	Set(providerID, key string) error
 	Delete(providerID string) error
 	// ListByPrefix returns all provider IDs that start with the given
-	// prefix. Used by Codex multi-account support to enumerate accounts
-	// stored under "{providerID}:account:{accountID}" keys.
+	// prefix.
 	ListByPrefix(prefix string) ([]string, error)
 }
 
@@ -221,108 +220,6 @@ type WorkspacePickerFunc func(ctx context.Context) (string, error)
 
 func (f WorkspacePickerFunc) Choose(ctx context.Context) (string, error) { return f(ctx) }
 
-// CodexRuntime manages the official Codex CLI binary as a NusaShell-managed
-// sidecar. The application layer uses this port to check runtime status and
-// trigger downloads without depending on runtime package details.
-type CodexRuntime interface {
-	// Status returns the current runtime binary status: installed path +
-	// version, or download progress/error if a download is in flight.
-	Status() CodexRuntimeStatus
-	// EnsureBinary returns the path to a usable Codex binary, downloading
-	// it if necessary. If force is true, a re-download is triggered even
-	// if a binary is already installed.
-	EnsureBinary(ctx context.Context, force bool) (string, error)
-}
-
-// CodexRuntimeStatus is the runtime status snapshot returned by Status().
-type CodexRuntimeStatus struct {
-	Installed     bool
-	Version       string
-	Path          string
-	Downloading   bool
-	DownloadError string
-}
-
-// CodexOAuth performs the Codex ChatGPT OAuth PKCE login flow. The
-// implementation opens a browser and blocks until the callback completes.
-type CodexOAuth interface {
-	Login(ctx context.Context) (CodexToken, error)
-	// ExtractProfile decodes a stored token JSON and returns the email
-	// and name. Used to enrich old tokens that lack email/name fields by
-	// decoding the JWT access_token claims.
-	ExtractProfile(tokenJSON string) (email, name string)
-}
-
-// CodexCLIAuthImporter reads the Codex CLI auth.json (~/.codex/auth.json)
-// and returns the token in NusaShell's CodexToken shape. Used by the
-// "Import from Codex CLI" flow so users who already logged in to the
-// official Codex CLI don't need to re-login in NusaShell.
-type CodexCLIAuthImporter interface {
-	// ImportFromCodexCLI reads the Codex CLI auth.json and returns the
-	// parsed token. Returns an error if the file is missing or invalid.
-	ImportFromCodexCLI(ctx context.Context) (CodexToken, error)
-}
-
-// CodexUsage fetches the ChatGPT rate-limit usage for a stored OAuth token.
-// The token JSON is the same string stored in CredentialStore.
-type CodexUsage interface {
-	FetchUsage(ctx context.Context, tokenJSON string) (CodexUsageResult, error)
-}
-
-// CodexContextWindowCache reads the Codex CLI's local model cache
-// (~/.codex/models_cache.json) to get the real context window that the
-// Codex app-server enforces at runtime. This is often smaller than the
-// model's documented ceiling (e.g. Luna: 272k cache vs 1.05M models.dev)
-// and smaller than the stale value stored in providers.json from a prior
-// catalog enrichment. Compaction uses this to avoid triggering too late.
-type CodexContextWindowCache interface {
-	// ContextWindow returns the Codex runtime context window for the
-	// given model ID (slug). Returns false if the cache is unavailable
-	// or the model is not listed.
-	ContextWindow(modelID string) (int, bool)
-}
-
-// CodexUsageResult is the parsed usage snapshot returned by the Codex
-// wham/usage endpoint.
-type CodexUsageResult struct {
-	Plan          string // "go", "plus", "pro", etc.
-	LimitReached  bool
-	PrimaryWindow *CodexUsageWindow
-	// WeeklyWindow is the secondary window, if any (e.g. for review models).
-	WeeklyWindow *CodexUsageWindow
-	// ResetCreditsAvailable is the number of rate-limit reset credits
-	// the user can spend to reset their usage window.
-	ResetCreditsAvailable int
-}
-
-// CodexUsageWindow is one rate-limit window (session or weekly).
-type CodexUsageWindow struct {
-	UsedPercent       int   // 0-100
-	ResetAt           int64 // unix seconds
-	ResetAfterSeconds int64
-}
-
-// CodexToken is the result of a successful OAuth login.
-type CodexToken struct {
-	AccessToken  string
-	RefreshToken string
-	AccountID    string
-	Email        string
-	Name         string
-	ExpiresAt    int64 // unix seconds, 0 = unknown
-}
-
-// CodexTokenJSON is the on-disk format for cached OAuth tokens, stored
-// in CredentialStore as a JSON string. Matches codex.TokenJSON.
-type CodexTokenJSON struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	AccountID    string `json:"account_id,omitempty"`
-	Email        string `json:"email,omitempty"`
-	Name         string `json:"name,omitempty"`
-	ExpiresAt    int64  `json:"expires_at,omitempty"`
-}
-
 // ---- AI provider port ----
 
 type ToolDef struct {
@@ -367,9 +264,8 @@ type ChatRequest struct {
 	// wire format (prompt_cache_key for OpenAI, cache_control for Anthropic).
 	PromptCache *PromptCachePolicy
 	// ConversationID is the stable ID of the conversation this request
-	// belongs to. Used by Codex adapter to set session-id and thread-id
-	// headers, which enable server-side prompt cache hits across requests
-	// in the same conversation.
+	// belongs to. Adapters may use it for server-side prompt cache routing
+	// across requests in the same conversation.
 	ConversationID string
 	// ReasoningReplay is true when the target upstream requires
 	// reasoning_content (Chat Completions) or reasoning items (Responses
@@ -440,6 +336,10 @@ type ChatResponse struct {
 	ToolCalls  []domain.ToolCall
 	Usage      ChatUsage
 	StopReason string
+	// Warnings carries provider-level notices (dropped unsupported content
+	// blocks, malformed tool arguments, strict-tool omissions) that would
+	// otherwise be silently lost. Empty when the provider reported none.
+	Warnings []string
 }
 
 // AIProvider is the streaming/non-streaming chat port implemented by the
@@ -450,21 +350,6 @@ type AIProvider interface {
 	// Stream reports text deltas and, when the provider emits thinking
 	// content, reasoning deltas.
 	Stream(ctx context.Context, req ChatRequest, onDelta, onReasoning func(text string)) (ChatResponse, error)
-}
-
-// ServerCompactor is an optional capability implemented by adapters that
-// support server-side compaction (e.g. Codex /responses/compact). When the
-// adapter implements this interface, compactConversation delegates to
-// CompactServer instead of using the model to summarize client-side. If
-// CompactServer returns an error (e.g. 404 for free accounts, network
-// failure), the caller falls back to client-side compaction.
-//
-// The returned summary is a human-readable text summary for UI display and
-// the compaction marker. The opaque blob (if any) is stored separately on
-// the conversation via SetCompactionBlob so subsequent requests can pass it
-// back to the server.
-type ServerCompactor interface {
-	CompactServer(ctx context.Context, c *domain.Conversation, model string, contextWindow int) (summary string, err error)
 }
 
 // ModelLister is implemented by providers that can enumerate models.
@@ -492,7 +377,7 @@ type SkillSearcher interface {
 
 // Embedder is implemented by providers that can produce embedding vectors.
 // This is an optional capability — not all AIProvider implementations support
-// embeddings (e.g. Anthropic Messages, Codex OAuth). The learning layer uses
+// embeddings (e.g. Anthropic Messages). The learning layer uses
 // this to build a vector index for semantic skill/memory search. When no
 // configured provider implements Embedder, the learning layer falls back to
 // BM25-only keyword search.
@@ -513,7 +398,7 @@ type EmbedderFactory func(p *domain.Provider, apiKey string) (Embedder, error)
 
 // EmbeddingModelListerFactory builds an EmbeddingModelLister for a given
 // provider. Returns nil if the provider kind does not expose a separate
-// embedding models endpoint (e.g. Codex OAuth). The factory is provider-kind
+// embedding models endpoint. The factory is provider-kind
 // agnostic — AI gateways often support multiple chat APIs while exposing
 // embeddings on a single OpenAI-compatible endpoint, so the same lister
 // works for chat, responses, and messages kinds.
@@ -528,7 +413,7 @@ type ImageModelLister interface {
 }
 
 // ImageModelListerFactory builds an ImageModelLister for a given provider.
-// Returns nil when the provider kind has no image-model catalog (Codex
+// Returns nil when the provider kind has no image-model catalog (Anthropic
 // seeds gpt-image-2 at import/read time; Anthropic Messages has none).
 type ImageModelListerFactory func(p *domain.Provider) ImageModelLister
 
@@ -542,7 +427,7 @@ type SpeechModelLister interface {
 }
 
 // SpeechModelListerFactory builds a SpeechModelLister for a given provider.
-// Returns nil when the provider kind cannot expose a speech catalog (Codex
+// Returns nil when the provider kind cannot expose a speech catalog (Anthropic
 // OAuth; Anthropic Messages).
 type SpeechModelListerFactory func(p *domain.Provider) SpeechModelLister
 
@@ -613,8 +498,8 @@ type ImageGenRequest struct {
 	Background string // auto | transparent | opaque
 	N          int
 	References []ImageReference
-	// TurnID is sent as x-codex-image-turn-id on Codex image requests
-	// (official Codex CLI uses the tool-call turn id). Ignored by other backends.
+	// TurnID is sent as a turn correlation header by image backends that
+	// support it (currently unused; reserved for future attribution).
 	TurnID string
 }
 
@@ -633,7 +518,7 @@ type GeneratedImage struct {
 // ImageGenResult is the decoded response from an image backend.
 type ImageGenResult struct {
 	Images      []GeneratedImage
-	Provider    string // "openai" | "openrouter" | "codex"
+	Provider    string // "openai" | "openrouter"
 	Model       string
 	UsageTokens int
 	CostUSD     float64
@@ -641,7 +526,8 @@ type ImageGenResult struct {
 
 // ImageGeneratorFactory builds an ImageGenerator for a configured provider.
 // Returns an error when the provider kind has no image-generation API
-// (Anthropic Messages, Ollama). Codex uses the ChatGPT plan image endpoints.
+// (Anthropic Messages has none). OpenAI and OpenRouter hosts serve image
+// generation directly.
 type ImageGeneratorFactory func(p *domain.Provider, apiKey string) (ImageGenerator, error)
 
 // ---- speech transcription port ----

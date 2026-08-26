@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"nusashell/domain"
-	"nusashell/infrastructure/ai/codex"
 )
 
 type stubCreds struct {
@@ -25,37 +24,39 @@ func TestNewProviderHTTPClientHasNoBodyTimeout(t *testing.T) {
 	}
 }
 
-func TestNewFactoryCodexNoToken(t *testing.T) {
+func TestNewFactoryBuildsAdapterForSupportedKinds(t *testing.T) {
 	f := NewFactory(&stubCreds{})
-	_, err := f(nil, &domain.Provider{Kind: domain.ProviderCodex}, "")
-	if err != nil {
-		t.Fatalf("Codex with no token should not error at factory: %v", err)
+	for _, kind := range []domain.ProviderKind{domain.ProviderMessages, domain.ProviderResponses, domain.ProviderChat} {
+		adapter, err := f(nil, &domain.Provider{Kind: kind, BaseURL: "https://example.test/v1"}, "key")
+		if err != nil {
+			t.Fatalf("factory for %s returned error: %v", kind, err)
+		}
+		got, ok := adapter.(*Adapter)
+		if !ok {
+			t.Fatalf("adapter for %s = %T, want *Adapter", kind, adapter)
+		}
+		if got.Kind() != kind {
+			t.Fatalf("adapter kind = %s, want %s", got.Kind(), kind)
+		}
 	}
 }
 
-func TestNewFactoryCodexWithValidToken(t *testing.T) {
-	f := NewFactory(&stubCreds{ok: true, val: `{"access_token":"tok","refresh_token":"ref","account_id":"acc","expires_at":9999999999}`})
-	_, err := f(nil, &domain.Provider{Kind: domain.ProviderCodex, ID: "codex"}, "")
-	if err != nil {
-		t.Fatalf("Codex with valid token should not error: %v", err)
+func TestNewFactoryRejectsUnknownKind(t *testing.T) {
+	f := NewFactory(&stubCreds{})
+	_, err := f(nil, &domain.Provider{Kind: "unknown"}, "")
+	if err == nil {
+		t.Fatal("expected error for unknown provider kind")
 	}
 }
 
-func TestNewImageGeneratorFactoryRoutesCodex(t *testing.T) {
+func TestNewImageGeneratorFactoryRoutesOpenAIChat(t *testing.T) {
 	f := NewImageGeneratorFactory(&stubCreds{})
-	gen, err := f(&domain.Provider{Kind: domain.ProviderCodex, ID: "codex", BaseURL: "https://chatgpt.com/backend-api/codex"}, `{"access_token":"tok","account_id":"acc","expires_at":9999999999}`)
+	gen, err := f(&domain.Provider{Kind: domain.ProviderChat, BaseURL: "https://api.openai.com/v1"}, "tok")
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, ok := gen.(*codex.ImagesClient)
-	if !ok {
-		t.Fatalf("got %#v, want *codex.ImagesClient", gen)
-	}
-	if client.AccessToken != "tok" || client.AccountID != "acc" {
-		t.Fatalf("client = %+v", client)
-	}
-	if client.BaseURL != "https://chatgpt.com/backend-api/codex" {
-		t.Fatalf("base = %q", client.BaseURL)
+	if gen == nil {
+		t.Fatal("image generator must not be nil for chat kind")
 	}
 }
 

@@ -2,251 +2,62 @@ package ai
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"nusashell/application"
 	"nusashell/domain"
-	"nusashell/infrastructure/ai/chatcompletion"
-	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/embeddings"
-	"nusashell/infrastructure/ai/gemini"
 	"nusashell/infrastructure/ai/imagegen"
-	"nusashell/infrastructure/ai/messages"
-	"nusashell/infrastructure/ai/ollama"
-	"nusashell/infrastructure/ai/responses"
+	aiutil "nusashell/infrastructure/ai/internal"
 	ttsclient "nusashell/infrastructure/ai/tts"
 	"nusashell/infrastructure/ai/videogen"
-	"nusashell/infrastructure/config"
 )
 
-// codexInstallationID is a persistent UUID identifying this NusaShell
-// install for Codex backend routing. It's stored in the user config dir
-// so it survives restarts. The backend uses it together with session-id
-// and thread-id to derive a stable prompt cache key.
-var codexInstallationID = loadOrGenerateInstallationID()
-
-// NewFactory returns a ProviderFactory closure that can refresh Codex OAuth
-// tokens before building the adapter. The closure captures the CredentialStore
-// so Codex token refresh is transparent to the application layer — the app
-// never needs to know about OAuth details.
-func NewFactory(creds application.CredentialStore) application.ProviderFactory {
+// NewFactory returns a ProviderFactory closure that builds the single
+// provider Adapter for a stored provider config. For chat-kind providers,
+// the OpenRouter adapter is the default — OpenAI-compatible aggregators
+// (TokenRouter, OmniRoute, OpenCode, …) speak the OpenRouter wire format
+// (effort xhigh/max, cache retention, /images/models, /videos/models).
+// Only a direct OpenAI host (api.openai.com) stays on the vanilla OpenAI
+// chat adapter, because the OpenRouter provider options (cache_retention,
+// session_id, provider routing) would 400 there.
+func NewFactory(_ application.CredentialStore) application.ProviderFactory {
 	return func(ctx context.Context, p *domain.Provider, apiKey string) (application.AIProvider, error) {
 		client := newProviderHTTPClient()
 		switch p.Kind {
-		case domain.ProviderMessages:
-			return &messages.Adapter{BaseURL: p.BaseURL, APIKey: apiKey, Client: client}, nil
-		case domain.ProviderResponses:
-			return &responses.Adapter{BaseURL: p.BaseURL, APIKey: apiKey, Client: client}, nil
-		case domain.ProviderChat:
-			return &chatcompletion.Adapter{BaseURL: p.BaseURL, APIKey: apiKey, Client: client}, nil
-		case domain.ProviderOllama:
-			// Ollama exposes an OpenAI-compatible /v1/chat/completions endpoint.
-			// Reuse the chatcompletion adapter with the /v1 suffix appended.
-			base := strings.TrimRight(p.BaseURL, "/")
-			if !strings.HasSuffix(base, "/v1") {
-				base += "/v1"
-			}
-			return &chatcompletion.Adapter{BaseURL: base, APIKey: apiKey, Client: client}, nil
-		case domain.ProviderCodex:
-			return newCodexAdapter(ctx, p, apiKey, client, creds)
-		case domain.ProviderGemini:
-			return &gemini.Adapter{BaseURL: p.BaseURL, APIKey: apiKey, Client: client}, nil
+		case domain.ProviderMessages, domain.ProviderResponses, domain.ProviderChat:
+			return &Adapter{
+				ProviderKind: p.Kind,
+				OpenRouter:   p.Kind == domain.ProviderChat && !aiutil.IsOpenAIDirectURL(p.BaseURL),
+				BaseURL:      p.BaseURL,
+				APIKey:       apiKey,
+				Client:       client,
+			}, nil
 		default:
 			return nil, &application.ErrUnsupportedProvider{Kind: string(p.Kind)}
 		}
 	}
 }
 
-func resolveCodexToken(ctx context.Context, p *domain.Provider, storedJSON string, creds application.CredentialStore) (*codex.TokenJSON, error) {
-	if storedJSON == "" {
-		return &codex.TokenJSON{}, nil
-	}
-	tok, err := codex.UnmarshalToken(storedJSON)
-	if err != nil {
-		kind := "codex"
-		if p != nil {
-			kind = string(p.Kind)
-		}
-		return nil, &application.ErrUnsupportedProvider{Kind: kind}
-	}
-	// Auto-refresh if the access token is expired or will expire within 5 min.
-	// The 5-min margin avoids mid-stream token expiry on long generations.
-	if tok.RefreshToken != "" && tok.IsExpired(5*time.Minute) {
-		refreshed, err := codex.Refresh(ctx, tok)
-		if err != nil {
-			// If refresh fails, fall back to the stored token — the API
-			// call will fail with a clear auth error rather than a opaque
-			// refresh error. The user can re-login from the UI.
-			return tok, nil
-		}
-		// Persist the refreshed token so subsequent turns don't refresh again.
-		// Write both the active provider key and the account-scoped key used
-		// by multi-account routing; otherwise failover keeps serving the
-		// expired token.
-		if creds != nil {
-			if newJSON, err := refreshed.Marshal(); err == nil {
-				providerID := ""
-				if p != nil {
-					providerID = p.ID
-				}
-				_ = application.PersistCodexToken(creds, providerID, refreshed.AccountID, newJSON)
-			}
-		}
-		return refreshed, nil
-	}
-	return tok, nil
-}
-
-// newCodexAdapter parses the stored OAuth token, refreshes it if expired,
-// persists the refreshed token, and builds the Codex adapter. The HTTP
-// client gets a Cloudflare cookie jar so Cloudflare challenges solved by
-// the image client are reused by chat and vice versa.
-func newCodexAdapter(ctx context.Context, p *domain.Provider, storedJSON string, client *http.Client, creds application.CredentialStore) (application.AIProvider, error) {
-	tok, err := resolveCodexToken(ctx, p, storedJSON, creds)
-	if err != nil {
-		return nil, err
-	}
-	return &codex.Adapter{
-		BaseURL:        p.BaseURL,
-		AccessToken:    tok.AccessToken,
-		AccountID:      tok.AccountID,
-		InstallationID: codexInstallationID,
-		Client:         withCodexCookieJar(client),
-	}, nil
-}
-
-// NewImageGeneratorFactory routes OpenAI/OpenRouter hosts through the Images
-// API and Codex OAuth through chatgpt.com/backend-api/codex/images/*. Token
-// refresh uses the same CredentialStore path as chat Codex.
+// NewImageGeneratorFactory returns an ImageGeneratorFactory for the
+// OpenAI-compatible images API. The Codex and Gemini image backends were
+// removed with their providers; only OpenAI/OpenRouter hosts remain.
 func NewImageGeneratorFactory(creds application.CredentialStore) application.ImageGeneratorFactory {
 	openai := imagegen.NewFactory()
 	return func(p *domain.Provider, apiKey string) (application.ImageGenerator, error) {
-		if p != nil && p.Kind == domain.ProviderCodex {
-			tok, err := resolveCodexToken(context.Background(), p, apiKey, creds)
-			if err != nil {
-				return nil, err
-			}
-			return &codex.ImagesClient{
-				BaseURL:        p.BaseURL,
-				AccessToken:    tok.AccessToken,
-				AccountID:      tok.AccountID,
-				InstallationID: codexInstallationID,
-			}, nil
-		}
-		if p != nil && p.Kind == domain.ProviderGemini {
-			return &gemini.ImagesClient{BaseURL: p.BaseURL, APIKey: apiKey, HTTP: newImageHTTPClient()}, nil
-		}
 		return openai(p, apiKey)
 	}
 }
 
-// loadOrGenerateInstallationID loads a persistent installation UUID from
-// <data-dir>/config/codex-installation-id, or generates a new one and
-// persists it if none exists. This ID is sent as x-codex-installation-id
-// so the Codex backend can route requests from the same install to the
-// same cache shard. Respects NUSASHELL_DATA_DIR so the ID lives alongside
-// the rest of the user's data, not in a hardcoded default location.
-func loadOrGenerateInstallationID() string {
-	dir := os.Getenv("NUSASHELL_DATA_DIR")
-	if dir == "" {
-		dir = config.DefaultDataDir()
-	}
-	path := filepath.Join(dir, "config", "codex-installation-id")
-	if data, err := os.ReadFile(path); err == nil {
-		id := strings.TrimSpace(string(data))
-		if id != "" {
-			return id
-		}
-	}
-	id := mustGenerateUUID()
-	_ = os.MkdirAll(filepath.Dir(path), 0o700)
-	_ = os.WriteFile(path, []byte(id), 0o600)
-	return id
-}
-
-// mustGenerateUUID generates a random UUID v4 string. Panics on read failure
-// (should never happen with crypto/rand).
-func mustGenerateUUID() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		panic(fmt.Sprintf("crypto/rand failed: %v", err))
-	}
-	b[6] = (b[6] & 0x0f) | 0x40 // version 4
-	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
-	return fmt.Sprintf("%s-%s-%s-%s-%s",
-		hex.EncodeToString(b[0:4]),
-		hex.EncodeToString(b[4:6]),
-		hex.EncodeToString(b[6:8]),
-		hex.EncodeToString(b[8:10]),
-		hex.EncodeToString(b[10:16]),
-	)
-}
-
-// newProviderHTTPClient bounds dial and response headers, but not the body
-// read, so long SSE generations are not killed at 60s.
-func newProviderHTTPClient() *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout:   15 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			ForceAttemptHTTP2:     true,
-			TLSHandshakeTimeout:   15 * time.Second,
-			ResponseHeaderTimeout: 60 * time.Second,
-			IdleConnTimeout:       90 * time.Second,
-		},
-	}
-}
-
-// newImageHTTPClient bounds dial and response headers with a longer
-// ResponseHeaderTimeout (180s) for image generation, which can take longer
-// than chat completions to produce the first byte.
-func newImageHTTPClient() *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout:   15 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			ForceAttemptHTTP2:     true,
-			TLSHandshakeTimeout:   15 * time.Second,
-			ResponseHeaderTimeout: 180 * time.Second,
-			IdleConnTimeout:       90 * time.Second,
-		},
-	}
-}
-
-// withCodexCookieJar returns a shallow copy of client with the shared
-// Cloudflare cookie jar attached. The transport is reused so connection
-// pooling is preserved. If the client already has a jar (e.g. the image
-// client built its own), it is left untouched.
-func withCodexCookieJar(client *http.Client) *http.Client {
-	if client == nil || client.Jar != nil {
-		return client
-	}
-	return &http.Client{
-		Transport:     client.Transport,
-		CheckRedirect: client.CheckRedirect,
-		Jar:           codex.SharedCloudflareCookieJar(),
-		Timeout:       client.Timeout,
-	}
-}
-
 // NewEmbedderFactory returns an EmbedderFactory that builds an Embedder for
-// providers that support embeddings. Returns nil, nil for provider kinds
-// that cannot produce embeddings (Anthropic Messages, Codex OAuth) — the
-// caller falls back to BM25-only search in that case.
+// OpenAI-compatible providers (chat, responses, messages kinds all expose
+// embeddings on a single endpoint regardless of the chat wire format).
+// Returns nil, nil for provider kinds that cannot produce embeddings —
+// the caller falls back to BM25-only search in that case.
 //
 // The factory needs the provider's model list to find an embedding-capable
 // model. If the provider has no embedding model in its Models slice, the
@@ -254,24 +65,7 @@ func withCodexCookieJar(client *http.Client) *http.Client {
 func NewEmbedderFactory() application.EmbedderFactory {
 	return func(p *domain.Provider, apiKey string) (application.Embedder, error) {
 		switch p.Kind {
-		case domain.ProviderOllama:
-			// Ollama: find an embedding model in the provider's model list,
-			// fall back to nomic-embed-text if none tagged. API key is
-			// optional — only needed when Ollama is behind an auth proxy.
-			model := ""
-			for _, m := range p.Models {
-				if m.Kind == domain.ModelKindEmbedding {
-					model = m.ID
-					break
-				}
-			}
-			return ollama.New(p.BaseURL, model, apiKey), nil
 		case domain.ProviderChat, domain.ProviderResponses, domain.ProviderMessages:
-			// OpenAI-compatible: find an embedding model in the provider's
-			// model list. If none tagged, return nil — can't guess the model.
-			// Works for any gateway kind (chat, responses, messages) since
-			// AI gateways expose embeddings on a single OpenAI-compatible
-			// endpoint regardless of which chat API is configured.
 			model := ""
 			for _, m := range p.Models {
 				if m.Kind == domain.ModelKindEmbedding {
@@ -283,9 +77,8 @@ func NewEmbedderFactory() application.EmbedderFactory {
 				return nil, nil
 			}
 			base := embeddingBaseURL(p.BaseURL)
-			return chatcompletion.NewEmbedder(base, apiKey, model), nil
+			return embeddings.NewEmbedder(base, apiKey, model), nil
 		default:
-			// Codex OAuth does not support embeddings.
 			return nil, nil
 		}
 	}
@@ -293,34 +86,19 @@ func NewEmbedderFactory() application.EmbedderFactory {
 
 // NewEmbeddingModelListerFactory returns a factory that builds an
 // EmbeddingModelLister for any provider kind that exposes an OpenAI-compatible
-// /embeddings/models endpoint. Returns nil for Codex (no such endpoint).
-//
-// The lister is provider-kind agnostic — AI gateways (OpenRouter, TokenRouter,
-// OmniRoute) support multiple chat APIs (messages, responses, chat) while
+// /embeddings/models endpoint. AI gateways support multiple chat APIs while
 // exposing embeddings on a single endpoint, so the same lister works
 // regardless of which chat API the provider is configured to use.
 func NewEmbeddingModelListerFactory() application.EmbeddingModelListerFactory {
 	client := newProviderHTTPClient()
 	return func(p *domain.Provider) application.EmbeddingModelLister {
-		if p.Kind == domain.ProviderCodex {
-			return nil
-		}
-		// Ollama has no OpenAI-compatible /embeddings/models route. Its
-		// native /api/tags endpoint marks each installed model with a
-		// capabilities array ("embedding") — the authoritative embedding
-		// signal that works for any model name, no allowlist required.
-		if p.Kind == domain.ProviderOllama {
-			return embeddings.NewOllamaTagLister(p.BaseURL, client)
-		}
 		base := embeddingBaseURL(p.BaseURL)
 		return embeddings.NewModelLister(base, client)
 	}
 }
 
 // NewImageModelListerFactory returns a factory that builds an ImageModelLister
-// for OpenAI-compatible hosts. Messages (Anthropic) has no image catalog.
-// Codex has no /images/models endpoint; gpt-image-2 is seeded at import/read
-// time instead of probing a 404.
+// for OpenAI-compatible hosts. Anthropic Messages has no image catalog.
 func NewImageModelListerFactory() application.ImageModelListerFactory {
 	client := newProviderHTTPClient()
 	return func(p *domain.Provider) application.ImageModelLister {
@@ -328,7 +106,7 @@ func NewImageModelListerFactory() application.ImageModelListerFactory {
 			return nil
 		}
 		switch p.Kind {
-		case domain.ProviderChat, domain.ProviderResponses, domain.ProviderOllama:
+		case domain.ProviderChat, domain.ProviderResponses:
 			return imagegen.NewModelLister(embeddingBaseURL(p.BaseURL), client)
 		default:
 			return nil
@@ -348,7 +126,7 @@ func NewSpeechModelListerFactory() application.SpeechModelListerFactory {
 			return nil
 		}
 		switch p.Kind {
-		case domain.ProviderChat, domain.ProviderResponses, domain.ProviderOllama:
+		case domain.ProviderChat, domain.ProviderResponses:
 			return ttsclient.NewModelLister(embeddingBaseURL(p.BaseURL), client)
 		default:
 			return nil
@@ -366,7 +144,7 @@ func NewVideoGeneratorFactory() application.VideoGeneratorFactory {
 			return nil, fmt.Errorf("videogen: nil provider")
 		}
 		switch p.Kind {
-		case domain.ProviderChat, domain.ProviderResponses, domain.ProviderOllama:
+		case domain.ProviderChat, domain.ProviderResponses:
 			base := strings.TrimRight(p.BaseURL, "/")
 			if base == "" {
 				return nil, fmt.Errorf("videogen: provider %q has no base URL", p.ID)
@@ -387,11 +165,29 @@ func NewVideoModelListerFactory() application.VideoModelListerFactory {
 			return nil
 		}
 		switch p.Kind {
-		case domain.ProviderChat, domain.ProviderResponses, domain.ProviderOllama:
+		case domain.ProviderChat, domain.ProviderResponses:
 			return videogen.NewModelLister(embeddingBaseURL(p.BaseURL), client)
 		default:
 			return nil
 		}
+	}
+}
+
+// newProviderHTTPClient bounds dial and response headers, but not the body
+// read, so long SSE generations are not killed at 60s.
+func newProviderHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   15 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ForceAttemptHTTP2:     true,
+			TLSHandshakeTimeout:   15 * time.Second,
+			ResponseHeaderTimeout: 60 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+		},
 	}
 }
 

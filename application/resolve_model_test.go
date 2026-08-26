@@ -27,7 +27,7 @@ func TestSplitQualifiedModel(t *testing.T) {
 	}{
 		{"tokenrouter:deepseek-v4-flash", "tokenrouter", "deepseek-v4-flash", true},
 		{"openrouter:gpt-4o", "openrouter", "gpt-4o", true},
-		{"ollama:nomic-embed-text:latest", "ollama", "nomic-embed-text:latest", true},
+		{"gw:nomic-embed-text:latest", "gw", "nomic-embed-text:latest", true},
 		{"deepseek-v4-flash", "", "", false},
 		{"", "", "", false},
 		{":model-only", "", "", false}, // empty provider is invalid

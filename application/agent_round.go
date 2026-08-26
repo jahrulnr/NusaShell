@@ -229,6 +229,9 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID, Text: delta,
 		})
 	})
+	for _, warning := range response.Warnings {
+		a.log("warn", "ai", "provider warning: %s", warning)
+	}
 	return streamedTurnRound{Content: content.String(), Reasoning: reasoning.String(), Response: response}, err
 }
 

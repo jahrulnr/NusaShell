@@ -27,19 +27,3 @@ func DefaultDataDir() string {
 	}
 	return filepath.Join(base, DataDirName)
 }
-
-// CodexCLIDir returns the path to the Codex CLI config directory
-// (~/.codex on Linux/macOS, %USERPROFILE%\.codex on Windows). Uses
-// os.UserHomeDir() for cross-platform home resolution.
-func CodexCLIDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".", ".codex")
-	}
-	return filepath.Join(home, ".codex")
-}
-
-// CodexCLIAuthPath returns the path to the Codex CLI auth.json file.
-func CodexCLIAuthPath() string {
-	return filepath.Join(CodexCLIDir(), "auth.json")
-}

@@ -104,7 +104,7 @@ Non-document-capable models get a placeholder note with the file path.
 Note: **PDF support is separate from vision** — many vision models
 (Llama, Qwen, Grok, Mistral) cannot read PDFs. Only models with the
 `Document` capability flag (Anthropic Claude, OpenAI GPT-4o+, Google
-Gemini, xAI Grok) receive PDF attachments natively.
+xAI Grok) receive PDF attachments natively.
 
 ### Wire format for media attachments
 
@@ -130,7 +130,7 @@ content type for video input on both Chat Completions and Responses.
 images only." The only OpenAI-sanctioned video workaround is extracting
 frames and sending them as `input_image` items. `video_url` is an
 OpenRouter-specific extension that routes video to providers which do
-support it (e.g. Gemini, Stealth/ox-alpha). For direct OpenAI API calls,
+support it (e.g. Stealth/ox-alpha). For direct OpenAI API calls,
 video attachments are hidden from non-video models by capability gating
 (see below) — a model with `Video=false` never receives a `video_url`
 block.
@@ -169,7 +169,7 @@ provider errors when sent to models that lack them.
 base64 DataURL — so a 2K print does not bloat the transcript. The UI loads
 the file through `/local-file?path=`. The next provider round hydrates
 bytes from disk so a vision chat model can see the result. Backends are
-OpenAI Images, OpenRouter `POST /images`, and Codex ChatGPT plan
+OpenAI Images and OpenRouter `POST /images`
 `/images/generations` (edits are JSON `images[].image_url`, not
 multipart).
 

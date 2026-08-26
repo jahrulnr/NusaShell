@@ -109,7 +109,7 @@ Existing runs keep the workspace they bound at spawn; new spawns follow the
 current conversation workspace unless the tool overrides it.
 
 Stdio framing is newline-delimited JSON-RPC. Do not expect LSP
-`Content-Length` headers; Gemini CLI rejects them as invalid JSON.
+`Content-Length` headers; the ACP spec rejects them as invalid JSON.
 
 Pipeline `agent:` steps never advertise `subagent` / `subagent_steer` /
 `subagent_stop` / `subagent_wait`. Those tools require an interactive

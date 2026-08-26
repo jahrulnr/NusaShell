@@ -17,7 +17,6 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `config/providers.json` | provider configs (no keys) | JSON |
 | `config/acp-agents.json` | ACP subagent configs (command/args/env; env values stored locally, keys only on the wire) | JSON |
 | `config/mcp-servers.json` | manual MCP server registry | JSON |
-| `config/codex-installation-id` | persistent Codex installation UUID for cache routing | text |
 | `config/skills.json` | legacy skill metadata catalog (skillfs uses `skills/skills.json`) | JSON |
 | `conversations/*.json` | one file per agent conversation. On load, a leftover `status: running` (process crash mid-turn) is converted to idle and in-flight assistant messages are marked interrupted. A turn that exits without a terminal state (panic recovered in-process) is also healed immediately: the `runTurn` defer resets the conversation to idle and emits a turn-error event, and `agent.turns.start` heals an orphaned running conversation with no active run before starting a new turn instead of returning 409. | JSON |
 | `conversations/*.chunks/` | archived conversation chunks (compaction). Hydration checkpoints (synthetic runtime snapshots) are stripped before archive and summarization; a fresh checkpoint is injected on the next provider round after compaction, including emergency overflow retries. | JSON |

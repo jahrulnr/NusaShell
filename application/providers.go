@@ -73,26 +73,16 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 	if kind == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind is required"}
 	}
-	if kind != domain.ProviderMessages && kind != domain.ProviderResponses && kind != domain.ProviderChat && kind != domain.ProviderOllama && kind != domain.ProviderCodex && kind != domain.ProviderGemini {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses, chat, ollama, codex, or gemini"}
+	if kind != domain.ProviderMessages && kind != domain.ProviderResponses && kind != domain.ProviderChat {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses, or chat"}
 	}
 	baseURL := strings.TrimSpace(req.BaseURL)
 
-	// Resolve the existing provider first: the kind-change guard depends on
-	// it and must fire before base URL validation (switching a codex
-	// provider to "chat" would otherwise fail on "base url is required"
-	// before reaching the guard).
 	var p *domain.Provider
 	if req.ID != "" {
 		existing, err := a.Providers.Get(req.ID)
 		if err != nil {
 			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
-		}
-		// Codex is provider-specific: OAuth accounts and the fixed backend
-		// URL are tied to the kind, so switching it in place would orphan
-		// that state. Delete and recreate instead.
-		if existing.Kind == domain.ProviderCodex && kind != domain.ProviderCodex {
-			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "codex kind is provider-specific and cannot be changed; delete this provider and add a new one instead"}
 		}
 		p = existing
 	} else {
@@ -105,20 +95,9 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 		}
 	}
 
-	// Codex uses a fixed backend URL and OAuth — no user-supplied base URL.
-	// Ollama defaults to localhost:11434 — no API key needed.
-	// Other kinds require a base URL.
+	// Every supported kind requires a base URL.
 	if baseURL == "" {
-		switch kind {
-		case domain.ProviderCodex:
-			baseURL = "https://chatgpt.com/backend-api/codex"
-		case domain.ProviderOllama:
-			baseURL = "http://localhost:11434"
-		case domain.ProviderGemini:
-			baseURL = "https://generativelanguage.googleapis.com/v1beta"
-		default:
-			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "base url is required"}
-		}
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "base url is required"}
 	}
 	p.Kind = kind
 	p.Name = name
@@ -150,16 +129,6 @@ func (a *App) handleProvidersDelete(req contracts.ProviderIDRequest) (any, *cont
 	}
 	if err := a.Credentials.Delete(req.ID); err != nil {
 		a.log("warn", "ai", "failed to delete credential for %s: %v", name, err)
-	}
-	ids, err := a.Credentials.ListByPrefix(accountKeyPrefix(req.ID))
-	if err != nil {
-		a.log("warn", "ai", "failed to list account credentials for %s: %v", name, err)
-	} else {
-		for _, id := range ids {
-			if err := a.Credentials.Delete(id); err != nil {
-				a.log("warn", "ai", "failed to delete credential %s: %v", id, err)
-			}
-		}
 	}
 	a.log("info", "ai", "provider deleted: %s", name)
 	return map[string]bool{"ok": true}, nil
@@ -270,9 +239,8 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 	}
 	// Fetch embedding models from the separate /embeddings/models endpoint.
 	// This is provider-kind agnostic — works for chat, responses, and
-	// messages kinds. Skipped if no EmbeddingModelListerFactory is wired or
-	// the provider kind does not expose the endpoint (e.g. Codex OAuth).
-	if a.EmbeddingModelListerFactory != nil && p.Kind != domain.ProviderCodex {
+	// messages kinds. Skipped if no EmbeddingModelListerFactory is wired.
+	if a.EmbeddingModelListerFactory != nil {
 		embLister := a.EmbeddingModelListerFactory(p)
 		if embLister != nil {
 			embIDs, _ := embLister.ListEmbeddingModels(ctx, key)
@@ -311,7 +279,7 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 	// full chat roster, which would misclassify every chat model as TTS
 	// (e.g. OpenCode ignores output_modalities=speech). Their IDs keep
 	// Kind="" and are classified by the catalog + allowlist pass below.
-	if a.ImageModelListerFactory != nil && p.Kind != domain.ProviderCodex && p.Kind != domain.ProviderMessages {
+	if a.ImageModelListerFactory != nil && p.Kind != domain.ProviderMessages {
 		imgLister := a.ImageModelListerFactory(p)
 		if imgLister != nil {
 			imgIDs, _ := imgLister.ListImageModels(ctx, key)
@@ -331,7 +299,7 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			}
 		}
 	}
-	if a.SpeechModelListerFactory != nil && p.Kind != domain.ProviderCodex && p.Kind != domain.ProviderMessages {
+	if a.SpeechModelListerFactory != nil && p.Kind != domain.ProviderMessages {
 		spLister := a.SpeechModelListerFactory(p)
 		if spLister != nil {
 			spIDs, _ := spLister.ListSpeechModels(ctx, key)
@@ -344,7 +312,7 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			}
 		}
 	}
-	if a.VideoModelListerFactory != nil && p.Kind != domain.ProviderCodex && p.Kind != domain.ProviderMessages {
+	if a.VideoModelListerFactory != nil && p.Kind != domain.ProviderMessages {
 		vLister := a.VideoModelListerFactory(p)
 		if vLister != nil {
 			vIDs, _ := vLister.ListVideoModels(ctx, key)
@@ -450,9 +418,6 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			}
 		}
 	}
-	if p.Kind == domain.ProviderCodex {
-		models = seedCodexImageModels(models)
-	}
 	p.Models = models
 	p.UpdatedAt = time.Now().UTC()
 	if err := a.Providers.Save(p); err != nil {
@@ -476,50 +441,18 @@ func isFreeTierModel(id string) bool {
 	return false
 }
 
-// seedCodexImageModels adds the ChatGPT plan image models that Codex
-// model/list does not return. Official Codex imagegen always uses
-// gpt-image-2; gpt-image-1.5 is kept for transparent-background workflows.
-func seedCodexImageModels(models []domain.Model) []domain.Model {
-	seen := make(map[string]int, len(models))
-	for i, m := range models {
-		seen[m.ID] = i
-		if config.IsKnownImageModel(m.ID) {
-			models[i].Kind = domain.ModelKindImage
-		}
-	}
-	seeds := []domain.Model{
-		{ID: "gpt-image-2", DisplayName: "GPT Image 2", Kind: domain.ModelKindImage},
-		{ID: "gpt-image-1.5", DisplayName: "GPT Image 1.5", Kind: domain.ModelKindImage},
-	}
-	for _, seed := range seeds {
-		if i, ok := seen[seed.ID]; ok {
-			models[i].Kind = domain.ModelKindImage
-			if strings.TrimSpace(models[i].DisplayName) == "" {
-				models[i].DisplayName = seed.DisplayName
-			}
-			continue
-		}
-		models = append(models, seed)
-	}
-	return models
-}
-
 // catalogHintForProvider maps a NusaShell provider to a models.dev provider
 // ID, used to disambiguate model lookups when the same bare model ID exists
 // under multiple providers (e.g. "gpt-5.5" under "openai" and "ai-router").
 func catalogHintForProvider(p *domain.Provider) string {
 	// Kind-level hints are fixed wire formats, not vendor detection:
-	// Responses/Codex speak the OpenAI wire format, Messages speaks the
+	// Responses speaks the OpenAI wire format, Messages speaks the
 	// Anthropic one. These are not per-provider hardcodes.
 	switch p.Kind {
 	case domain.ProviderResponses:
 		return "openai"
 	case domain.ProviderMessages:
 		return "anthropic"
-	case domain.ProviderCodex:
-		return "openai"
-	case domain.ProviderGemini:
-		return "google"
 	}
 	// Chat-kind providers are fully dynamic: the hint is derived from the
 	// model ID prefix itself (e.g. "deepseek/deepseek-v4-flash" ->
@@ -684,9 +617,6 @@ func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
 
 func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
 	models := p.Models
-	if p.Kind == domain.ProviderCodex {
-		models = seedCodexImageModels(append([]domain.Model(nil), models...))
-	}
 	var out []contracts.ModelDTO
 	for _, m := range models {
 		out = append(out, contracts.ModelDTO{
@@ -715,4 +645,55 @@ func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
 		})
 	}
 	return out
+}
+
+// StartAutoModelImport launches a background goroutine that re-imports
+// models from all enabled providers every 4 hours. This keeps the model
+// list fresh without requiring the user to manually click "import" after
+// a provider adds new models. The goroutine exits when ctx is cancelled.
+// An initial import runs 30 seconds after startup to avoid blocking the
+// server boot.
+func (a *App) StartAutoModelImport(ctx context.Context) {
+	a.goSafe("ai", func() {
+		// Delay the initial import so the server is fully up and serving
+		// requests before we start hitting provider APIs.
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(30 * time.Second):
+		}
+		a.autoImportAllProviders(ctx)
+
+		ticker := time.NewTicker(4 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				a.autoImportAllProviders(ctx)
+			}
+		}
+	})
+}
+
+// autoImportAllProviders iterates all enabled providers and re-imports
+// their model lists. Failures are logged but do not stop the loop — one
+// provider being down should not prevent imports from the others.
+func (a *App) autoImportAllProviders(ctx context.Context) {
+	for _, p := range a.Providers.List() {
+		if !p.Enabled {
+			continue
+		}
+		key, has, _ := a.Credentials.Get(p.ID)
+		if !has && requiresKey(p.Kind) {
+			continue
+		}
+		importCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		_, err := a.importModelsForProvider(importCtx, p, key)
+		cancel()
+		if err != nil {
+			a.log("warn", "ai", "auto-import failed: %s: %v", p.Name, err)
+		}
+	}
 }
