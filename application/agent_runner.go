@@ -717,7 +717,11 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 			}
 			streamErr = a.decorateRateLimitError(provider.ID, streamErr)
 			if !continuedPartialStream && canContinuePartialStream(streamErr, roundResult) {
-				if err := a.persistPartialTurnRound(run.ConversationID, currentMsgID, model, roundResult); err != nil {
+				// A partial stream must never carry an unconfirmed tool call into the next
+				// continuation request. Tools run only after a fully completed round.
+				roundResult.Response.ToolCalls = nil
+				err = a.persistTurnRound(run.ConversationID, currentMsgID, model, roundResult)
+				if err != nil {
 					a.failTurn(run, currentMsgID, err)
 					return false, ""
 				}

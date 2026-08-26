@@ -31,6 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Hydration checkpoints hold a stable transcript position.** The synthetic
+  runtime-hydration exchange is now inserted immediately before the current
+  turn's assistant placeholder instead of being appended to the end of the
+  conversation, making `system prompt → user → hydration → assistant` the
+  deterministic order in every scenario: new room, existing chat, and
+  post-compaction epoch. Round-2+ requests now extend the exact round-1
+  prefix instead of shifting the checkpoint behind the model's own output,
+  restoring intra-turn prompt-cache reuse across tool rounds. The injection
+  path also persists once instead of twice.
+
 - **Built-in tools deduplicated into dispatcher families.** `skill`,
   `memory`, `docs`, and `ci_pipeline` are now one advertised tool per family
   with a required `op` field (e.g. `memory` + `op=save`), replacing 15

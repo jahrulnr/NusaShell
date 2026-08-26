@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -162,7 +163,11 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 	// store as an assistant message with hydration tool calls + matching tool
 	// results. Persisting (rather than injecting ephemerally) keeps the
 	// message-list prefix stable across tool rounds, so the provider can
-	// reuse prompt-cache hits from round 1 on round 2+.
+	// reuse prompt-cache hits from round 1 on round 2+. The checkpoint is
+	// inserted immediately BEFORE this turn's assistant placeholder, so the
+	// visible-to-provider order stays system → user → hydration → assistant
+	// in every scenario (new conversation, post-compaction turn, existing
+	// conversation) and the prefix only ever grows — it never reorders.
 	//
 	// Hydration is persisted once per history epoch. Normal user messages and
 	// steers reuse the checkpoint already present in conversation history.
@@ -176,7 +181,7 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 	// compaction can strip them before summarization.
 	if injectHydration && !HasHydration(chatMessages(conversation, messageID, caps)) {
 		hydrationMsgs := a.buildHydration(conversation)
-		conversation = a.persistHydration(conversation, hydrationMsgs)
+		conversation = a.persistHydration(conversation, hydrationMsgs, messageID)
 		// Mark the assistant message for this turn so the UI can show a
 		// "context updated" badge — the hydration checkpoint was freshly
 		// persisted, meaning runtime facts (date, memory, skills, MCP, tools)
@@ -184,6 +189,7 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 		a.updateMessage(conversation, messageID, func(message *domain.Message) {
 			message.ContextUpdated = true
 		})
+		// Single save covers both the inserted checkpoint and the badge.
 		_ = a.Conversations.Save(conversation)
 	}
 	messages := a.chatMessagesForProvider(conversation, messageID, caps)
@@ -301,43 +307,63 @@ func buildPromptCachePolicy(settings domain.Settings, providerID, model, convers
 	}
 }
 
-// persistHydration appends the synthetic hydration messages (assistant
-// toolCalls + matching tool results) to the conversation store and saves.
-// The messages are marked with the "hydrate-" tool call ID prefix so the UI
-// can filter them out and compaction can strip them before summarization.
-// Returns the updated conversation.
-func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage) *domain.Conversation {
+// persistHydration inserts the synthetic hydration messages (assistant
+// toolCalls + matching tool results) into the conversation transcript at a
+// deterministic position: immediately BEFORE the current turn's assistant
+// placeholder (beforeMsgID) — i.e. right after the triggering user message
+// or post-compaction retained history. The transcript order therefore stays
+//
+//	system prompt → user → hydration checkpoint → assistant output
+//
+// in every scenario: new conversation, existing chat, post-compaction turn.
+// Inserting before the placeholder (instead of appending at the end) also
+// means later rounds extend the exact round-1 provider prefix instead of
+// placing the newly-filled assistant message in front of the checkpoint,
+// preserving intra-turn prompt-cache hits.
+// Messages are marked with the "hydrate-" tool call ID prefix so the UI can
+// filter them out and compaction can strip them before summarization.
+// When beforeMsgID is not found (defensive fallback), messages are appended
+// at the end. Does not save — the caller persists once after related
+// mutations. Returns the updated conversation.
+func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage, beforeMsgID string) *domain.Conversation {
 	if len(msgs) == 0 {
 		return c
 	}
-	// The first message is the assistant message with hydration tool calls.
-	// Subsequent messages are the tool results.
+	// Build the durable messages first: one assistant message carrying all
+	// hydration tool calls, then each tool result attached to its matching
+	// call's Output. ToolCalls is a shared slice backing, so mutating hyd
+	// after appending to built updates the stored copy as well.
+	built := make([]domain.Message, 0, len(msgs))
+	var hyd *domain.Message
 	for _, m := range msgs {
 		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
-			hydMsg := domain.Message{
+			hyd = &domain.Message{
 				ID:        domain.NewID("msg"),
 				Role:      domain.RoleAssistant,
 				ToolCalls: m.ToolCalls,
 				Status:    domain.StatusDone,
 				CreatedAt: time.Now().UTC(),
 			}
-			c.Messages = append(c.Messages, hydMsg)
-		} else if m.Role == "tool" && m.ToolResult != nil {
-			// Attach tool results to the last assistant message's tool calls.
-			for i := len(c.Messages) - 1; i >= 0; i-- {
-				if c.Messages[i].Role == domain.RoleAssistant && len(c.Messages[i].ToolCalls) > 0 {
-					for j := range c.Messages[i].ToolCalls {
-						if c.Messages[i].ToolCalls[j].ID == m.ToolResult.ToolCallID {
-							c.Messages[i].ToolCalls[j].Output = m.ToolResult.Content
-							break
-						}
-					}
+			built = append(built, *hyd)
+			continue
+		}
+		if m.Role == "tool" && m.ToolResult != nil && hyd != nil {
+			for j := range hyd.ToolCalls {
+				if hyd.ToolCalls[j].ID == m.ToolResult.ToolCallID {
+					hyd.ToolCalls[j].Output = m.ToolResult.Content
 					break
 				}
 			}
 		}
 	}
-	_ = a.Conversations.Save(c)
+	idx := len(c.Messages)
+	for i := range c.Messages {
+		if c.Messages[i].ID == beforeMsgID {
+			idx = i
+			break
+		}
+	}
+	c.Messages = slices.Insert(c.Messages, idx, built...)
 	return c
 }
 
@@ -404,13 +430,6 @@ func (a *App) persistTurnRound(conversationID, messageID, model string, round st
 		})
 	}
 	return a.Conversations.Save(conversation)
-}
-
-func (a *App) persistPartialTurnRound(conversationID, messageID, model string, round streamedTurnRound) error {
-	// A partial stream must never carry an unconfirmed tool call into the next
-	// continuation request. Tools run only after a fully completed round.
-	round.Response.ToolCalls = nil
-	return a.persistTurnRound(conversationID, messageID, model, round)
 }
 
 func applyStreamRound(message *domain.Message, model string, round streamedTurnRound) {

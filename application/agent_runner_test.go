@@ -872,8 +872,20 @@ func TestEmergencyCompactionSkippedWhenEstimateBelowTrigger(t *testing.T) {
 	if adapter.streams != 1 {
 		t.Fatalf("streams = %d, want 1 failed attempt", adapter.streams)
 	}
-	if conv.Messages[1].Status != domain.StatusError {
-		t.Fatalf("status = %q, want error", conv.Messages[1].Status)
+	// Locate the turn's assistant message by ID: the hydration checkpoint is
+	// inserted before the placeholder, so its index depends on injection.
+	var asst *domain.Message
+	for i := range conv.Messages {
+		if conv.Messages[i].ID == "m1" {
+			asst = &conv.Messages[i]
+			break
+		}
+	}
+	if asst == nil {
+		t.Fatalf("assistant message m1 missing from transcript (%d messages)", len(conv.Messages))
+	}
+	if asst.Status != domain.StatusError {
+		t.Fatalf("status = %q, want error", asst.Status)
 	}
 }
 
