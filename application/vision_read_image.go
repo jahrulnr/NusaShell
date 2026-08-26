@@ -61,10 +61,11 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps Mode
 	if !ok {
 		return "Vision fallback provider not found or disabled.", nil, fmt.Errorf("vision provider %q not found", a.providerNameByID(settings.VisionProviderID))
 	}
-	adapter, err := a.Factory(run.Ctx, provider, apiKey)
+	rawAdapter, err := a.Factory(run.Ctx, provider, apiKey)
 	if err != nil {
 		return "Failed to initialize vision fallback adapter.", nil, err
 	}
+	adapter := NewProviderContext(provider, rawAdapter)
 
 	question := strings.TrimSpace(args.Question)
 	if question != "" {

@@ -244,9 +244,9 @@ func convertStreamUsage(u *anthropicUsage, model string) core.Usage {
 		return core.Usage{}
 	}
 	return core.Usage{
-		InputTokens:      u.InputTokens + u.CacheReadInputTokens,
+		InputTokens:      u.InputTokens,
 		OutputTokens:     u.OutputTokens,
-		TotalTokens:      u.InputTokens + u.CacheReadInputTokens + u.OutputTokens,
+		TotalTokens:      u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens + u.OutputTokens,
 		CacheReadTokens:  u.CacheReadInputTokens,
 		CacheWriteTokens: u.CacheCreationInputTokens,
 		Provider:         "anthropic",
@@ -266,7 +266,7 @@ func (s *stream) mergeUsage(u *anthropicUsage) {
 	if next.CacheWriteTokens > 0 {
 		s.usage.CacheWriteTokens = next.CacheWriteTokens
 	}
-	s.usage.TotalTokens = s.usage.InputTokens + s.usage.OutputTokens
+	s.usage.TotalTokens = s.usage.InputTokens + s.usage.CacheReadTokens + s.usage.CacheWriteTokens + s.usage.OutputTokens
 	s.usage.Provider = "anthropic"
 	s.usage.Model = s.model
 }

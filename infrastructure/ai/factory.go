@@ -10,9 +10,9 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/core"
 	"nusashell/infrastructure/ai/embeddings"
 	"nusashell/infrastructure/ai/imagegen"
-	aiutil "nusashell/infrastructure/ai/internal"
 	ttsclient "nusashell/infrastructure/ai/tts"
 	"nusashell/infrastructure/ai/videogen"
 )
@@ -26,20 +26,18 @@ import (
 // chat adapter, because the OpenRouter provider options (cache_retention,
 // session_id, provider routing) would 400 there.
 func NewFactory(_ application.CredentialStore) application.ProviderFactory {
-	return func(ctx context.Context, p *domain.Provider, apiKey string) (application.AIProvider, error) {
-		client := newProviderHTTPClient()
-		switch p.Kind {
-		case domain.ProviderMessages, domain.ProviderResponses, domain.ProviderChat:
-			return &Adapter{
-				ProviderKind: p.Kind,
-				OpenRouter:   p.Kind == domain.ProviderChat && !aiutil.IsOpenAIDirectURL(p.BaseURL),
-				BaseURL:      p.BaseURL,
-				APIKey:       apiKey,
-				Client:       client,
-			}, nil
-		default:
+	return func(ctx context.Context, p *domain.Provider, apiKey string) (core.Provider, error) {
+		if !domain.ValidKind(p.Kind) {
 			return nil, &application.ErrUnsupportedProvider{Kind: string(p.Kind)}
 		}
+		client := newProviderHTTPClient()
+		return &Adapter{
+			ProviderKind: p.Kind,
+			OpenRouter:   domain.IsOpenRouterHost(p.Kind, p.BaseURL),
+			BaseURL:      p.BaseURL,
+			APIKey:       apiKey,
+			Client:       client,
+		}, nil
 	}
 }
 
@@ -64,23 +62,21 @@ func NewImageGeneratorFactory(creds application.CredentialStore) application.Ima
 // factory returns nil, nil.
 func NewEmbedderFactory() application.EmbedderFactory {
 	return func(p *domain.Provider, apiKey string) (application.Embedder, error) {
-		switch p.Kind {
-		case domain.ProviderChat, domain.ProviderResponses, domain.ProviderMessages:
-			model := ""
-			for _, m := range p.Models {
-				if m.Kind == domain.ModelKindEmbedding {
-					model = m.ID
-					break
-				}
-			}
-			if model == "" {
-				return nil, nil
-			}
-			base := embeddingBaseURL(p.BaseURL)
-			return embeddings.NewEmbedder(base, apiKey, model), nil
-		default:
+		if !p.KindCapabilities().HasEmbeddings {
 			return nil, nil
 		}
+		model := ""
+		for _, m := range p.Models {
+			if m.Kind == domain.ModelKindEmbedding {
+				model = m.ID
+				break
+			}
+		}
+		if model == "" {
+			return nil, nil
+		}
+		base := embeddingBaseURL(p.BaseURL)
+		return embeddings.NewEmbedder(base, apiKey, model), nil
 	}
 }
 
@@ -105,12 +101,10 @@ func NewImageModelListerFactory() application.ImageModelListerFactory {
 		if p == nil {
 			return nil
 		}
-		switch p.Kind {
-		case domain.ProviderChat, domain.ProviderResponses:
-			return imagegen.NewModelLister(embeddingBaseURL(p.BaseURL), client)
-		default:
+		if !p.KindCapabilities().HasImageEndpoint {
 			return nil
 		}
+		return imagegen.NewModelLister(embeddingBaseURL(p.BaseURL), client)
 	}
 }
 
@@ -125,12 +119,10 @@ func NewSpeechModelListerFactory() application.SpeechModelListerFactory {
 		if p == nil {
 			return nil
 		}
-		switch p.Kind {
-		case domain.ProviderChat, domain.ProviderResponses:
-			return ttsclient.NewModelLister(embeddingBaseURL(p.BaseURL), client)
-		default:
+		if !p.KindCapabilities().HasSpeechEndpoint {
 			return nil
 		}
+		return ttsclient.NewModelLister(embeddingBaseURL(p.BaseURL), client)
 	}
 }
 
@@ -143,16 +135,14 @@ func NewVideoGeneratorFactory() application.VideoGeneratorFactory {
 		if p == nil {
 			return nil, fmt.Errorf("videogen: nil provider")
 		}
-		switch p.Kind {
-		case domain.ProviderChat, domain.ProviderResponses:
-			base := strings.TrimRight(p.BaseURL, "/")
-			if base == "" {
-				return nil, fmt.Errorf("videogen: provider %q has no base URL", p.ID)
-			}
-			return &videogen.Client{BaseURL: base, APIKey: apiKey, HTTP: client}, nil
-		default:
+		if !p.KindCapabilities().HasVideoEndpoint {
 			return nil, fmt.Errorf("videogen: provider kind %q has no /videos endpoint", p.Kind)
 		}
+		base := strings.TrimRight(p.BaseURL, "/")
+		if base == "" {
+			return nil, fmt.Errorf("videogen: provider %q has no base URL", p.ID)
+		}
+		return &videogen.Client{BaseURL: base, APIKey: apiKey, HTTP: client}, nil
 	}
 }
 
@@ -164,12 +154,10 @@ func NewVideoModelListerFactory() application.VideoModelListerFactory {
 		if p == nil {
 			return nil
 		}
-		switch p.Kind {
-		case domain.ProviderChat, domain.ProviderResponses:
-			return videogen.NewModelLister(embeddingBaseURL(p.BaseURL), client)
-		default:
+		if !p.KindCapabilities().HasVideoEndpoint {
 			return nil
 		}
+		return videogen.NewModelLister(embeddingBaseURL(p.BaseURL), client)
 	}
 }
 

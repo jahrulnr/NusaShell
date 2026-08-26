@@ -921,7 +921,7 @@ func compactionTriggerTokens(contextWindow, maxOutput int, settings domain.Setti
 // is built for the configured model (e.g. a cheaper/faster model). On any
 // resolution or factory error, it falls back to the default adapter+model so
 // compaction still runs instead of silently skipping.
-func (a *App) resolveCompactionAdapter(ctx context.Context, defaultAdapter AIProvider, defaultModel string, defaultWindow int, settings domain.Settings) (AIProvider, string, int) {
+func (a *App) resolveCompactionAdapter(ctx context.Context, defaultAdapter ProviderContext, defaultModel string, defaultWindow int, settings domain.Settings) (ProviderContext, string, int) {
 	compModel := strings.TrimSpace(settings.CompactionModel)
 	if compModel == "" {
 		return defaultAdapter, defaultModel, defaultWindow
@@ -936,9 +936,10 @@ func (a *App) resolveCompactionAdapter(ctx context.Context, defaultAdapter AIPro
 		a.log("warn", "agent", "compaction model %q adapter build failed, falling back to chat model: %v", compModel, err)
 		return defaultAdapter, defaultModel, defaultWindow
 	}
+	pc := NewProviderContext(provider, adapter)
 	window := a.resolveContextWindow(provider, bareModel, settings)
 	a.log("info", "agent", "compaction using override model %s (window=%d)", compModel, window)
-	return adapter, bareModel, window
+	return pc, bareModel, window
 }
 
 // resolveMaxOutput picks the per-turn completion token ceiling. The model's
@@ -1042,7 +1043,7 @@ func extractCompactionSummary(resp ChatResponse) string {
 // 404 for free accounts, network error), the function falls back to the
 // client-side multi-pass summarization below.
 
-func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *domain.Conversation, model string, contextWindow int, settings domain.Settings) (string, error) {
+func (a *App) compactConversation(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, contextWindow int, settings domain.Settings) (string, error) {
 	if len(c.Messages) <= 1 {
 		return "", nil
 	}

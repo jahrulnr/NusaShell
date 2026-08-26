@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"nusashell/application"
+	"nusashell/domain"
 )
 
 // DefaultIdleTimeout is the per-chunk stall window for SSE streams. The timer
@@ -377,96 +378,9 @@ func OpenRouterAttributionHeaders() map[string]string {
 	}
 }
 
-// stripTrailingCommas removes trailing commas before } and ] in JSON-like
-// strings, handling quoted strings correctly. Mirrors the TS stripTrailingCommas.
-func stripTrailingCommas(value string) string {
-	var out strings.Builder
-	out.Grow(len(value))
-	quoted := false
-	escaped := false
-	for i := 0; i < len(value); i++ {
-		ch := value[i]
-		if quoted {
-			out.WriteByte(ch)
-			if escaped {
-				escaped = false
-			} else if ch == '\\' {
-				escaped = true
-			} else if ch == '"' {
-				quoted = false
-			}
-			continue
-		}
-		if ch == '"' {
-			quoted = true
-			out.WriteByte(ch)
-			continue
-		}
-		if ch == ',' {
-			next := i + 1
-			for next < len(value) && (value[next] == ' ' || value[next] == '\t' || value[next] == '\n' || value[next] == '\r') {
-				next++
-			}
-			if next < len(value) && (value[next] == '}' || value[next] == ']') {
-				continue
-			}
-		}
-		out.WriteByte(ch)
-	}
-	return out.String()
-}
-
-// RepairToolCallArguments attempts to repair malformed JSON tool call
-// arguments by stripping markdown fences and trailing commas. Returns "{}"
-// for empty/whitespace input. If the result is not valid JSON, returns "{}".
-// Mirrors the TS repairableJsonCandidates + parseObject pipeline.
+// RepairToolCallArguments delegates to domain.RepairToolCallArguments.
 func RepairToolCallArguments(value string) string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return "{}"
-	}
-	// Strip markdown fences: ```json\n...\n``` or ```\n...\n```
-	if fence := extractMarkdownFence(trimmed); fence != "" {
-		trimmed = strings.TrimSpace(fence)
-	}
-	// Strip trailing commas
-	repaired := stripTrailingCommas(trimmed)
-	// Validate: if it parses as a JSON object, return it; otherwise return {}
-	var obj map[string]any
-	if err := json.Unmarshal([]byte(repaired), &obj); err == nil {
-		return repaired
-	}
-	// Try the original (maybe the commas were fine and something else is wrong)
-	if err := json.Unmarshal([]byte(trimmed), &obj); err == nil {
-		return trimmed
-	}
-	return "{}"
-}
-
-// extractMarkdownFence returns the inner content if value is wrapped in a
-// markdown code fence (```json ... ``` or ``` ... ```), empty string otherwise.
-func extractMarkdownFence(value string) string {
-	// Match ```json\n...\n``` or ```\n...\n```
-	if !strings.HasPrefix(value, "```") {
-		return ""
-	}
-	rest := value[3:]
-	// Skip optional language tag (json, etc.)
-	if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
-		lang := strings.TrimSpace(rest[:nl])
-		if lang == "" || lang == "json" {
-			rest = rest[nl+1:]
-		} else {
-			return ""
-		}
-	} else {
-		return ""
-	}
-	rest = strings.TrimRight(rest, "\n\r")
-	if strings.HasSuffix(rest, "```") {
-		return strings.TrimSuffix(rest, "```")
-	}
-	return ""
+	return domain.RepairToolCallArguments(value)
 }
 
 // IncompleteSSEError returns the error for the "clean close, no terminator"

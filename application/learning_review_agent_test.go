@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
 
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/core"
 	"nusashell/resources"
 )
 
@@ -34,9 +36,9 @@ func (s *reviewStubToolbox) Execute(_ context.Context, name string, _ []byte) (s
 	return "Saved " + name + " entry.", nil
 }
 
-// reviewStubAdapter is an AIProvider that returns tool calls for the first
-// request and a terminal response afterwards. When terminalContent is set,
-// the first call returns that content with no tool calls (simulating a
+// reviewStubAdapter is a core.Provider that returns tool calls for the
+// first request and a terminal response afterwards. When terminalContent is
+// set, the first call returns that content with no tool calls (simulating a
 // "Nothing to save." response without any tool usage).
 type reviewStubAdapter struct {
 	toolCalls       []domain.ToolCall
@@ -46,29 +48,117 @@ type reviewStubAdapter struct {
 	failErr         error
 }
 
-func (a *reviewStubAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
-func (a *reviewStubAdapter) Stream(ctx context.Context, req ChatRequest, _ func(string), _ func(string)) (ChatResponse, error) {
-	// Delegate to Complete: the review loop now calls Stream, and these stubs
-	// model a provider whose stream result carries the same ChatResponse.
-	return a.Complete(ctx, req)
-}
+func (a *reviewStubAdapter) Name() string { return "review-stub" }
 
-func (a *reviewStubAdapter) Complete(_ context.Context, req ChatRequest) (ChatResponse, error) {
+func (a *reviewStubAdapter) Chat(ctx context.Context, _ *core.Request) (*core.Response, error) {
 	a.calls++
 	if a.failOnCall > 0 && a.calls == a.failOnCall {
 		err := a.failErr
 		if err == nil {
 			err = errors.New("complete failed")
 		}
-		return ChatResponse{}, err
+		return nil, err
 	}
+	return a.coreResponse(), nil
+}
+
+func (a *reviewStubAdapter) Stream(ctx context.Context, req *core.Request) (core.Stream, error) {
+	resp, err := a.Chat(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &stubStream{events: coreResponseEvents(resp)}, nil
+}
+
+func (a *reviewStubAdapter) coreResponse() *core.Response {
+	resp := &core.Response{}
 	if a.terminalContent != "" {
-		return ChatResponse{Content: a.terminalContent}, nil
+		resp.Blocks = append(resp.Blocks, core.TextBlock{Text: a.terminalContent})
+		resp.FinishReason = core.FinishReasonStop
+		return resp
 	}
 	if a.calls == 1 {
-		return ChatResponse{ToolCalls: a.toolCalls}, nil
+		for _, tc := range a.toolCalls {
+			resp.Blocks = append(resp.Blocks, core.ToolUseBlock{
+				ID:        tc.ID,
+				Name:      tc.Name,
+				Arguments: jsonRaw(tc.Args),
+			})
+		}
+		resp.FinishReason = core.FinishReasonToolCall
+		return resp
 	}
-	return ChatResponse{Content: "Nothing to save."}, nil
+	resp.Blocks = append(resp.Blocks, core.TextBlock{Text: "Nothing to save."})
+	resp.FinishReason = core.FinishReasonStop
+	return resp
+}
+
+// stubStream is a core.Stream that yields events from a pre-built response
+// then ends with a DoneEvent.
+type stubStream struct {
+	events []core.Event
+	idx    int
+}
+
+func (s *stubStream) Next() (core.Event, error) {
+	if s.idx >= len(s.events) {
+		return nil, io.EOF
+	}
+	ev := s.events[s.idx]
+	s.idx++
+	return ev, nil
+}
+
+func (s *stubStream) Close() error { return nil }
+
+// stubProviderContext wraps a core.Provider in a ProviderContext for tests.
+func stubProviderContext(p core.Provider) ProviderContext {
+	return ProviderContext{Provider: p, Kind: domain.ProviderChat}
+}
+
+// chatResponseToCore converts a ChatResponse into a core.Response for test stubs.
+func chatResponseToCore(r ChatResponse) *core.Response {
+	resp := &core.Response{FinishReason: core.FinishReasonStop}
+	if r.Content != "" {
+		resp.Blocks = append(resp.Blocks, core.TextBlock{Text: r.Content})
+	}
+	if r.Reasoning != "" {
+		resp.Blocks = append(resp.Blocks, core.ReasoningBlock{Text: r.Reasoning})
+	}
+	for _, tc := range r.ToolCalls {
+		resp.Blocks = append(resp.Blocks, core.ToolUseBlock{
+			ID:        tc.ID,
+			Name:      tc.Name,
+			Arguments: jsonRaw(tc.Args),
+		})
+		resp.FinishReason = core.FinishReasonToolCall
+	}
+	return resp
+}
+
+// coreResponseEvents builds a slice of stream events from a core.Response
+// that the EventCollector can aggregate back into the same response.
+func coreResponseEvents(resp *core.Response) []core.Event {
+	var events []core.Event
+	for _, b := range resp.Blocks {
+		switch v := b.(type) {
+		case core.TextBlock:
+			events = append(events, core.ContentDelta{Text: v.Text})
+		case core.ReasoningBlock:
+			events = append(events, core.ReasoningDelta{Text: v.Text})
+		case core.ToolUseBlock:
+			idx := 0
+			id := v.ID
+			if id == "" {
+				id = fmt.Sprintf("tool_%d", len(events))
+			}
+			events = append(events, core.ToolUseStart{ID: id, Name: v.Name, Index: &idx})
+			events = append(events, core.ToolUseDelta{ID: id, Index: &idx, ArgumentsDelta: v.Arguments})
+			events = append(events, core.ToolUseDone{ID: id, Index: &idx})
+		}
+	}
+	events = append(events, core.DoneEvent{FinishReason: resp.FinishReason, Provider: "test-stub", Model: "test-model"})
+	return events
 }
 
 func newReviewApp(toolbox *reviewStubToolbox) *App {
@@ -98,7 +188,7 @@ func TestReviewLoopRecordsMutationOnlyOnSuccess(t *testing.T) {
 			Name: "memory",
 			Args: `{"op":"save","content":"user prefers Indonesian","tags":["preference","language"]}`,
 		}}}
-		mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+		mutations, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 		if err != nil {
 			t.Fatalf("runReviewLoop: %v", err)
 		}
@@ -119,7 +209,7 @@ func TestReviewLoopRecordsMutationOnlyOnSuccess(t *testing.T) {
 			Name: "skill",
 			Args: `{"op":"save","name":"git-rebase-cheatsheet","content":"# Rebase\nsteps…"}`,
 		}}}
-		mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+		mutations, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 		if err != nil {
 			t.Fatalf("runReviewLoop: %v", err)
 		}
@@ -137,7 +227,7 @@ func TestReviewLoopRecordsMutationOnlyOnSuccess(t *testing.T) {
 			Name: "memory",
 			Args: `{"op":"save","content":"x"}`,
 		}}}
-		mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+		mutations, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 		if err != nil {
 			t.Fatalf("runReviewLoop: %v", err)
 		}
@@ -152,7 +242,7 @@ func TestReviewLoopRecordsMutationOnlyOnSuccess(t *testing.T) {
 			Name: "memory", // the (wrong) name referenced by the old prompt
 			Args: `{"content":"x"}`,
 		}}}
-		mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+		mutations, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 		if err != nil {
 			t.Fatalf("runReviewLoop: %v", err)
 		}
@@ -187,7 +277,7 @@ func TestReviewLoopRecordsMemoryReplaceMutation(t *testing.T) {
 		Args: fmt.Sprintf("{%q:%q, %q:%q}", "op", "replace", "content", "updated durable fact"),
 	}}}
 
-	mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	mutations, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 	if err != nil {
 		t.Fatalf("runReviewLoop: %v", err)
 	}
@@ -312,7 +402,7 @@ func TestApplyReviewModelOverride(t *testing.T) {
 				}},
 			}},
 			Credentials: &fakeVisionCredStore{creds: map[string]string{"cheap-prov": "key"}},
-			Factory: func(_ context.Context, _ *domain.Provider, _ string) (AIProvider, error) {
+			Factory: func(_ context.Context, _ *domain.Provider, _ string) (core.Provider, error) {
 				return &fakeVisionAdapter{description: "review-adapter"}, nil
 			},
 			Settings: &fakeSettingsStoreWithThreshold{threshold: 10, reviewModel: reviewModel},
@@ -322,18 +412,18 @@ func TestApplyReviewModelOverride(t *testing.T) {
 
 	t.Run("no override uses the conversation adapter", func(t *testing.T) {
 		agent := NewBackgroundReviewAgent(newApp(""), DefaultReviewSettings())
-		defaultAdapter := &fakeVisionAdapter{description: "default"}
+		defaultAdapter := stubProviderContext(&fakeVisionAdapter{description: "default"})
 		gotAdapter, gotModel := agent.applyReviewModelOverride(context.Background(), defaultAdapter, "gpt-5")
-		if gotAdapter != defaultAdapter || gotModel != "gpt-5" {
+		if gotAdapter.Provider != defaultAdapter.Provider || gotModel != "gpt-5" {
 			t.Fatalf("got (%v, %q), want default adapter+model", gotAdapter, gotModel)
 		}
 	})
 
 	t.Run("configured override builds a separate adapter", func(t *testing.T) {
 		agent := NewBackgroundReviewAgent(newApp("cheap-prov:haiku"), DefaultReviewSettings())
-		defaultAdapter := &fakeVisionAdapter{description: "default"}
+		defaultAdapter := stubProviderContext(&fakeVisionAdapter{description: "default"})
 		gotAdapter, gotModel := agent.applyReviewModelOverride(context.Background(), defaultAdapter, "gpt-5")
-		if gotAdapter == defaultAdapter {
+		if gotAdapter.Provider == defaultAdapter.Provider {
 			t.Fatal("expected a separate adapter for the review model override")
 		}
 		if gotModel != "haiku" {
@@ -343,18 +433,18 @@ func TestApplyReviewModelOverride(t *testing.T) {
 
 	t.Run("unresolvable override falls back", func(t *testing.T) {
 		agent := NewBackgroundReviewAgent(newApp("nope:missing"), DefaultReviewSettings())
-		defaultAdapter := &fakeVisionAdapter{description: "default"}
+		defaultAdapter := stubProviderContext(&fakeVisionAdapter{description: "default"})
 		gotAdapter, gotModel := agent.applyReviewModelOverride(context.Background(), defaultAdapter, "gpt-5")
-		if gotAdapter != defaultAdapter || gotModel != "gpt-5" {
+		if gotAdapter.Provider != defaultAdapter.Provider || gotModel != "gpt-5" {
 			t.Fatalf("got (%v, %q), want fallback to default adapter+model", gotAdapter, gotModel)
 		}
 	})
 
 	t.Run("nil settings store falls back", func(t *testing.T) {
 		agent := NewBackgroundReviewAgent(&App{Toolbox: &reviewStubToolbox{}, Logs: &fakeLogStore{}}, DefaultReviewSettings())
-		defaultAdapter := &fakeVisionAdapter{description: "default"}
+		defaultAdapter := stubProviderContext(&fakeVisionAdapter{description: "default"})
 		gotAdapter, gotModel := agent.applyReviewModelOverride(context.Background(), defaultAdapter, "gpt-5")
-		if gotAdapter != defaultAdapter || gotModel != "gpt-5" {
+		if gotAdapter.Provider != defaultAdapter.Provider || gotModel != "gpt-5" {
 			t.Fatalf("got (%v, %q), want fallback when settings store is nil", gotAdapter, gotModel)
 		}
 	})
@@ -375,7 +465,7 @@ func TestApplyReviewModelOverrideRecordsOnlyModelChanges(t *testing.T) {
 				}},
 			}},
 			Credentials: &fakeVisionCredStore{creds: map[string]string{"cheap-prov": "key"}},
-			Factory: func(_ context.Context, _ *domain.Provider, _ string) (AIProvider, error) {
+			Factory: func(_ context.Context, _ *domain.Provider, _ string) (core.Provider, error) {
 				return &fakeVisionAdapter{description: "review-adapter"}, nil
 			},
 			Settings:             &fakeSettingsStoreWithThreshold{threshold: 10, reviewModel: reviewModel},
@@ -391,9 +481,9 @@ func TestApplyReviewModelOverrideRecordsOnlyModelChanges(t *testing.T) {
 		app := newApp("cheap-prov:haiku")
 		app.Trajectory = traj
 		agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
-		defaultAdapter := &fakeVisionAdapter{description: "default"}
+		defaultAdapter := stubProviderContext(&fakeVisionAdapter{description: "default"})
 		gotAdapter, gotModel := agent.applyReviewModelOverride(context.Background(), defaultAdapter, "haiku")
-		if gotAdapter == defaultAdapter || gotModel != "haiku" {
+		if gotAdapter.Provider == defaultAdapter.Provider || gotModel != "haiku" {
 			t.Fatalf("got (%v, %q), want override adapter keeping the same model", gotAdapter, gotModel)
 		}
 		for _, e := range ReadTrajectory(tmp, 100) {
@@ -410,9 +500,9 @@ func TestApplyReviewModelOverrideRecordsOnlyModelChanges(t *testing.T) {
 		app := newApp("cheap-prov:haiku")
 		app.Trajectory = traj
 		agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
-		defaultAdapter := &fakeVisionAdapter{description: "default"}
+		defaultAdapter := stubProviderContext(&fakeVisionAdapter{description: "default"})
 		gotAdapter, gotModel := agent.applyReviewModelOverride(context.Background(), defaultAdapter, "gpt-5")
-		if gotAdapter == defaultAdapter || gotModel != "haiku" {
+		if gotAdapter.Provider == defaultAdapter.Provider || gotModel != "haiku" {
 			t.Fatalf("got (%v, %q), want override adapter with haiku", gotAdapter, gotModel)
 		}
 		found := false
@@ -601,7 +691,7 @@ func TestReviewLoopEndsOnNothingToSave(t *testing.T) {
 	adapter := &reviewStubAdapter{
 		terminalContent: "Nothing to save.",
 	}
-	mutations, messages, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	mutations, messages, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 	if err != nil {
 		t.Fatalf("runReviewLoop: %v", err)
 	}
@@ -633,7 +723,7 @@ func TestReviewLoopEmptyResponseIsError(t *testing.T) {
 	}
 	adapter := &persistStubAdapter{responses: []ChatResponse{{}}}
 
-	_, messages, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	_, messages, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 	if err == nil || !strings.Contains(err.Error(), "empty response") {
 		t.Fatalf("err = %v, want empty response error", err)
 	}
@@ -762,7 +852,7 @@ func TestReviewLoopCompleteErrorIsReturned(t *testing.T) {
 		failOnCall: 2,
 		failErr:    errors.New("provider 500"),
 	}
-	mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	mutations, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 	if err == nil || !strings.Contains(err.Error(), "provider 500") {
 		t.Fatalf("err = %v, want provider 500", err)
 	}
@@ -924,7 +1014,7 @@ func TestReviewLoopCompactionResetsStaleMarker(t *testing.T) {
 	}
 	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
 	adapter := &reviewStubAdapter{terminalContent: "Nothing to save."}
-	_, messages, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	_, messages, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 	if err != nil {
 		t.Fatalf("runReviewLoop: %v", err)
 	}
@@ -989,13 +1079,18 @@ func TestReviewLoopCallsHydrationToolFirst(t *testing.T) {
 			Name: "review_transcript",
 			Args: `{}`,
 		}},
-		onComplete: func(req ChatRequest) {
+		onComplete: func(req *core.Request) {
 			if len(req.Messages) > 0 && capturedInitialContent == "" {
-				capturedInitialContent = req.Messages[0].Content
+				for _, b := range req.Messages[0].Blocks {
+					if tb, ok := b.(core.TextBlock); ok {
+						capturedInitialContent = tb.Text
+						break
+					}
+				}
 			}
 		},
 	}
-	_, msgs, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	_, msgs, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 	if err != nil {
 		t.Fatalf("runReviewLoop: %v", err)
 	}
@@ -1058,28 +1153,40 @@ func TestReviewTranscriptToolRespectsTokenCap(t *testing.T) {
 	}
 }
 
-// reviewCapturingAdapter is an AIProvider that returns tool calls on the
+// reviewCapturingAdapter is a core.Provider that returns tool calls on the
 // first call and a terminal response afterwards, capturing the initial
 // request for inspection.
 type reviewCapturingAdapter struct {
 	toolCalls  []domain.ToolCall
 	calls      int
-	onComplete func(req ChatRequest)
+	onComplete func(req *core.Request)
 }
 
-func (a *reviewCapturingAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
-func (a *reviewCapturingAdapter) Stream(ctx context.Context, req ChatRequest, _ func(string), _ func(string)) (ChatResponse, error) {
-	return a.Complete(ctx, req)
+func (a *reviewCapturingAdapter) Name() string { return "review-capturing" }
+func (a *reviewCapturingAdapter) Stream(ctx context.Context, req *core.Request) (core.Stream, error) {
+	resp, err := a.Chat(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &stubStream{events: coreResponseEvents(resp)}, nil
 }
-func (a *reviewCapturingAdapter) Complete(_ context.Context, req ChatRequest) (ChatResponse, error) {
+func (a *reviewCapturingAdapter) Chat(_ context.Context, req *core.Request) (*core.Response, error) {
 	a.calls++
 	if a.onComplete != nil {
 		a.onComplete(req)
 	}
 	if a.calls == 1 {
-		return ChatResponse{ToolCalls: a.toolCalls}, nil
+		resp := &core.Response{FinishReason: core.FinishReasonToolCall}
+		for _, tc := range a.toolCalls {
+			resp.Blocks = append(resp.Blocks, core.ToolUseBlock{
+				ID:        tc.ID,
+				Name:      tc.Name,
+				Arguments: jsonRaw(tc.Args),
+			})
+		}
+		return resp, nil
 	}
-	return ChatResponse{Content: "Nothing to save."}, nil
+	return &core.Response{Blocks: []core.Block{core.TextBlock{Text: "Nothing to save."}}, FinishReason: core.FinishReasonStop}, nil
 }
 
 // ---- Phase 2: Skill nudge tests ----
@@ -1278,7 +1385,7 @@ func TestReviewStartedEventRecordedInTrajectory(t *testing.T) {
 	}
 }
 
-// streamDeltaAdapter is an AIProvider whose Stream pushes text/reasoning
+// streamDeltaAdapter is a core.Provider whose Stream pushes text/reasoning
 // deltas through the callbacks and returns a ChatResponse carrying a tool
 // call on the first call and a terminal response afterwards. This models a
 // real streaming provider (e.g. OpenAI Responses) where the review loop
@@ -1293,34 +1400,35 @@ type streamDeltaAdapter struct {
 	reasonCalls       int
 }
 
-func (a *streamDeltaAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
+func (a *streamDeltaAdapter) Name() string { return "stream-delta-stub" }
 
-func (a *streamDeltaAdapter) Complete(context.Context, ChatRequest) (ChatResponse, error) {
-	return ChatResponse{}, nil // loop never calls Complete anymore
+func (a *streamDeltaAdapter) Chat(context.Context, *core.Request) (*core.Response, error) {
+	return nil, nil // loop never calls Chat directly
 }
 
-func (a *streamDeltaAdapter) Stream(_ context.Context, _ ChatRequest, onDelta, onReasoning func(string)) (ChatResponse, error) {
+func (a *streamDeltaAdapter) Stream(_ context.Context, _ *core.Request) (core.Stream, error) {
 	a.calls++
 	if a.errOnCall > 0 && a.calls == a.errOnCall {
-		return ChatResponse{}, a.err
+		return nil, a.err
 	}
+	var events []core.Event
 	if a.calls == 1 {
-		onDelta("I need to ")    // text delta 1
-		onReasoning("thinking…") // reasoning delta — must also be delivered
+		events = append(events, core.ContentDelta{Text: "I need to "})
+		events = append(events, core.ReasoningDelta{Text: "thinking…"})
 		a.deltaCalls++
 		a.reasonCalls++
-		return ChatResponse{
-			ToolCalls: []domain.ToolCall{{
-				ID:   a.initialToolCallID,
-				Name: "memory",
-				Args: `{"op":"save","content":"user prefers Indonesian"}`,
-			}},
-		}, nil
+		idx := 0
+		events = append(events, core.ToolUseStart{ID: a.initialToolCallID, Name: "memory", Index: &idx})
+		events = append(events, core.ToolUseDelta{ID: a.initialToolCallID, Index: &idx, ArgumentsDelta: jsonRaw(`{"op":"save","content":"user prefers Indonesian"}`)})
+		events = append(events, core.ToolUseDone{ID: a.initialToolCallID, Index: &idx})
+		events = append(events, core.DoneEvent{FinishReason: core.FinishReasonToolCall, Provider: "stream-delta-stub", Model: "test-model"})
+	} else {
+		events = append(events, core.ContentDelta{Text: "No more details."})
+		a.deltaCalls++
+		a.reasonCalls++
+		events = append(events, core.DoneEvent{FinishReason: core.FinishReasonStop, Provider: "stream-delta-stub", Model: "test-model"})
 	}
-	onDelta("No more details.")
-	a.deltaCalls++
-	a.reasonCalls++
-	return ChatResponse{Content: a.terminal}, nil
+	return &stubStream{events: events}, nil
 }
 
 // TestReviewLoopUsesStreamAndAccumulatesDeltas verifies the review loop now
@@ -1343,7 +1451,7 @@ func TestReviewLoopUsesStreamAndAccumulatesDeltas(t *testing.T) {
 		terminal:          "Nothing to save.",
 		initialToolCallID: "call_delta_1",
 	}
-	mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	mutations, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 	if err != nil {
 		t.Fatalf("runReviewLoop with stream adapter: %v", err)
 	}
@@ -1379,7 +1487,7 @@ func TestReviewLoopStreamErrorIsPropagated(t *testing.T) {
 		errOnCall:         1,
 		err:               errors.New("stream stalled: idle timeout"),
 	}
-	_, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	_, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 	if err == nil || !strings.Contains(err.Error(), "idle timeout") {
 		t.Fatalf("err = %v, want propagation of the stream idle timeout", err)
 	}

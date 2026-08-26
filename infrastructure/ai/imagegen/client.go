@@ -46,12 +46,10 @@ func NewFactory() application.ImageGeneratorFactory {
 		if aiutil.IsOpenRouterURL(p.BaseURL) {
 			return &Client{Backend: backendOpenRouter, BaseURL: p.BaseURL, APIKey: apiKey, HTTP: client}, nil
 		}
-		switch p.Kind {
-		case domain.ProviderChat, domain.ProviderResponses:
-			return &Client{Backend: backendOpenAI, BaseURL: p.BaseURL, APIKey: apiKey, HTTP: client}, nil
-		default:
+		if !p.KindCapabilities().HasImageEndpoint {
 			return nil, fmt.Errorf("provider kind %q has no image generation API — pick an OpenAI or OpenRouter image model in Settings → Image generation", p.Kind)
 		}
+		return &Client{Backend: backendOpenAI, BaseURL: p.BaseURL, APIKey: apiKey, HTTP: client}, nil
 	}
 }
 

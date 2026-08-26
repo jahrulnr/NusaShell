@@ -35,8 +35,8 @@ func TestNewFactoryBuildsAdapterForSupportedKinds(t *testing.T) {
 		if !ok {
 			t.Fatalf("adapter for %s = %T, want *Adapter", kind, adapter)
 		}
-		if got.Kind() != kind {
-			t.Fatalf("adapter kind = %s, want %s", got.Kind(), kind)
+		if got.ProviderKind != kind {
+			t.Fatalf("adapter kind = %s, want %s", got.ProviderKind, kind)
 		}
 	}
 }

@@ -71,6 +71,13 @@ func convertUsage(u usage, spec Spec, provider, model string) core.Usage {
 	if out.CacheReadTokens == 0 && spec.Response.HasCacheTokens {
 		out.CacheReadTokens = u.PromptCacheHitTokens
 	}
+	// Normalize: prompt_tokens includes cached tokens. Subtract cache
+	// reads so InputTokens is the UNCACHED input, matching the canonical
+	// core.Usage convention.
+	out.InputTokens -= out.CacheReadTokens
+	if out.InputTokens < 0 {
+		out.InputTokens = 0
+	}
 	return out
 }
 

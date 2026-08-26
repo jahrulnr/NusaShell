@@ -29,15 +29,16 @@ type streamedTurnRound struct {
 	Response  ChatResponse
 }
 
-func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, model string) (AIProvider, *domain.Conversation, domain.Settings, error) {
+func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, model string) (ProviderContext, *domain.Conversation, domain.Settings, error) {
 	adapter, err := a.Factory(run.Ctx, provider, apiKey)
 	if err != nil {
-		return nil, nil, domain.Settings{}, err
+		return ProviderContext{}, nil, domain.Settings{}, err
 	}
+	pc := NewProviderContext(provider, adapter)
 
 	conversation, err := a.Conversations.Get(run.ConversationID)
 	if err != nil {
-		return nil, nil, domain.Settings{}, err
+		return ProviderContext{}, nil, domain.Settings{}, err
 	}
 	settings := a.Settings.Get()
 	contextWindow := a.resolveContextWindow(provider, model, settings)
@@ -45,12 +46,12 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 	compactionTrigger := compactionTriggerTokens(contextWindow, maxOutput, settings)
 	beforeTokens := conversation.EstimateTokens()
 	if !settings.CompactionEnabled || beforeTokens <= compactionTrigger {
-		return adapter, conversation, settings, nil
+		return pc, conversation, settings, nil
 	}
 
 	a.log("info", "agent", "compaction triggered for %s: est=%d trigger=%d window=%d maxOut=%d",
 		conversation.ID, beforeTokens, compactionTrigger, contextWindow, maxOutput)
-	compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, adapter, model, contextWindow, settings)
+	compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, pc, model, contextWindow, settings)
 	summary, err := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings)
 	if err != nil {
 		a.log("warn", "agent", "compaction failed for %s: %v", conversation.ID, err)
@@ -63,10 +64,10 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 	afterTokens := conversation.EstimateTokens()
 	a.log("info", "agent", "compaction result for %s: before=%d after=%d (msgs=%d)",
 		conversation.ID, beforeTokens, afterTokens, len(conversation.Messages))
-	return adapter, conversation, settings, err
+	return pc, conversation, settings, err
 }
 
-func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
+func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
 	for retry := 1; ; retry++ {
 		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration, promptCache, caps)
 		if err == nil || retry >= maxProviderAttempts || roundResult.Content != "" || roundResult.Reasoning != "" {
@@ -133,7 +134,7 @@ func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *do
 	}
 }
 
-func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
+func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
 	var content strings.Builder
 	var reasoning strings.Builder
 	// The system prompt is deliberately cache-stable: identity, user
@@ -376,7 +377,7 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	return NewHydrationBuilder(source).Build().Messages
 }
 
-func (a *App) completeWithRetry(ctx context.Context, adapter AIProvider, request ChatRequest) (ChatResponse, error) {
+func (a *App) completeWithRetry(ctx context.Context, adapter ProviderContext, request ChatRequest) (ChatResponse, error) {
 	for retry := 1; ; retry++ {
 		response, err := adapter.Complete(ctx, request)
 		if err == nil || retry >= maxProviderAttempts {

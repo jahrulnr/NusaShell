@@ -20,15 +20,13 @@ func NewSpeechTranscriberFactory() application.SpeechTranscriberFactory {
 		if p == nil {
 			return nil, fmt.Errorf("stt: nil provider")
 		}
-		switch p.Kind {
-		case domain.ProviderChat:
-			base := strings.TrimRight(p.BaseURL, "/")
-			if base == "" {
-				return nil, fmt.Errorf("stt: provider %q has no base URL", p.ID)
-			}
-			return &stt.Client{BaseURL: base, APIKey: apiKey}, nil
-		default:
+		if !p.KindCapabilities().HasTranscriptionEndpoint {
 			return nil, fmt.Errorf("stt: provider kind %q has no transcription endpoint", p.Kind)
 		}
+		base := strings.TrimRight(p.BaseURL, "/")
+		if base == "" {
+			return nil, fmt.Errorf("stt: provider %q has no base URL", p.ID)
+		}
+		return &stt.Client{BaseURL: base, APIKey: apiKey}, nil
 	}
 }

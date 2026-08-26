@@ -773,7 +773,7 @@ func TestResponsesConvertsOutputBlocks(t *testing.T) {
 	if resp.FinishReason != core.FinishReasonToolCall {
 		t.Fatalf("finish = %q", resp.FinishReason)
 	}
-	if resp.Usage.InputTokens != 3 || resp.Usage.OutputTokens != 4 || resp.Usage.CacheReadTokens != 2 || resp.Usage.CacheWriteTokens != 5 || resp.Usage.ReasoningTokens != 1 {
+	if resp.Usage.InputTokens != 1 || resp.Usage.OutputTokens != 4 || resp.Usage.CacheReadTokens != 2 || resp.Usage.CacheWriteTokens != 5 || resp.Usage.ReasoningTokens != 1 {
 		t.Fatalf("usage = %+v", resp.Usage)
 	}
 }
@@ -1023,7 +1023,7 @@ func TestResponsesStreamCollectsTypedEvents(t *testing.T) {
 	if len(calls) != 1 || calls[0].ID != "call_1" || calls[0].Name != "lookup" || string(calls[0].Arguments) != `{"q":"x"}` {
 		t.Fatalf("tool calls = %+v", calls)
 	}
-	if resp.Usage.InputTokens != 2 || resp.Usage.OutputTokens != 3 || resp.Usage.CacheReadTokens != 1 || resp.Usage.CacheWriteTokens != 2 || resp.Usage.ReasoningTokens != 1 {
+	if resp.Usage.InputTokens != 1 || resp.Usage.OutputTokens != 3 || resp.Usage.CacheReadTokens != 1 || resp.Usage.CacheWriteTokens != 2 || resp.Usage.ReasoningTokens != 1 {
 		t.Fatalf("usage = %+v", resp.Usage)
 	}
 	if resp.FinishReason != core.FinishReasonStop {
@@ -1195,4 +1195,19 @@ func (b *contextBlockingBody) Read(p []byte) (int, error) {
 
 func (b *contextBlockingBody) Close() error {
 	return nil
+}
+
+func TestResponsesUsageClampsWhenCachedExceedsInput(t *testing.T) {
+	u := responsesUsageToUsage(responsesUsage{
+		InputTokens:        3,
+		OutputTokens:       2,
+		TotalTokens:        5,
+		InputTokensDetails: &responsesInputTokensDetails{CachedTokens: 8},
+	}, "model")
+	if u.InputTokens != 0 {
+		t.Fatalf("InputTokens = %d, want 0 (clamped)", u.InputTokens)
+	}
+	if u.CacheReadTokens != 8 {
+		t.Fatalf("CacheReadTokens = %d, want 8", u.CacheReadTokens)
+	}
 }

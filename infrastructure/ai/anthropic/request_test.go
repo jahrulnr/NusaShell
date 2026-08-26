@@ -543,7 +543,7 @@ func TestStreamConvertsSSEToTypedEvents(t *testing.T) {
 	if len(calls) != 1 || calls[0].ID != "toolu_1" || calls[0].Name != "lookup" || string(calls[0].Arguments) != `{"q":"x"}` {
 		t.Fatalf("tool calls = %+v", calls)
 	}
-	if resp.Usage.InputTokens != 7 || resp.Usage.OutputTokens != 7 || resp.Usage.CacheReadTokens != 2 {
+	if resp.Usage.InputTokens != 5 || resp.Usage.OutputTokens != 7 || resp.Usage.CacheReadTokens != 2 {
 		t.Fatalf("usage = %+v", resp.Usage)
 	}
 	if resp.FinishReason != core.FinishReasonToolCall {
@@ -623,7 +623,7 @@ func TestConvertResponseMapsUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convertResponse returned error: %v", err)
 	}
-	if resp.Usage.InputTokens != 7 || resp.Usage.OutputTokens != 9 || resp.Usage.TotalTokens != 16 || resp.Usage.CacheReadTokens != 2 {
+	if resp.Usage.InputTokens != 5 || resp.Usage.OutputTokens != 9 || resp.Usage.TotalTokens != 16 || resp.Usage.CacheReadTokens != 2 {
 		t.Fatalf("usage = %+v", resp.Usage)
 	}
 }

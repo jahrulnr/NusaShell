@@ -16,5 +16,5 @@ func SplitQualifiedModel(s string) (providerID, modelID string, ok bool) {
 // RequiresKey reports whether a provider kind needs a user-supplied API key.
 // Local endpoints (LM Studio via chat kind) work without a key.
 func RequiresKey(kind ProviderKind) bool {
-	return kind == ProviderMessages || kind == ProviderResponses
+	return KindCaps(kind).RequiresKey
 }

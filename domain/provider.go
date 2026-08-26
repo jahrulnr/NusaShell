@@ -13,6 +13,99 @@ const (
 	ProviderChat      ProviderKind = "chat"
 )
 
+// KindCapabilities describes what a provider kind can do at the protocol
+// level — independent of any specific model. This drives factory routing
+// (image generation, TTS, STT, embeddings, video) and the requiresKey check
+// without scattering switch statements across the codebase.
+type KindCapabilities struct {
+	// RequiresKey is true when the provider kind needs a user-supplied API
+	// key. Local endpoints (LM Studio via chat kind) work without one.
+	RequiresKey bool
+	// HasModelListing is true when the provider kind exposes a GET /models
+	// (or /v1/models) endpoint for chat model discovery.
+	HasModelListing bool
+	// HasEmbeddings is true when the provider kind may expose an
+	// OpenAI-compatible /embeddings endpoint.
+	HasEmbeddings bool
+	// HasImageEndpoint is true when the provider kind may serve
+	// /images/generations (OpenAI) or /images (OpenRouter).
+	HasImageEndpoint bool
+	// HasSpeechEndpoint is true when the provider kind may serve
+	// POST /audio/speech (TTS).
+	HasSpeechEndpoint bool
+	// HasTranscriptionEndpoint is true when the provider kind may serve
+	// POST /audio/transcriptions (STT).
+	HasTranscriptionEndpoint bool
+	// HasVideoEndpoint is true when the provider kind may serve
+	// the async /videos API (OpenRouter).
+	HasVideoEndpoint bool
+	// PromptCacheStyle describes how prompt caching is expressed on the
+	// wire: "anthropic" (cache_control blocks), "openai" (cached_tokens in
+	// usage details), or "" (none).
+	PromptCacheStyle string
+}
+
+var kindCaps = map[ProviderKind]KindCapabilities{
+	ProviderMessages: {
+		RequiresKey:              true,
+		HasModelListing:          true,
+		HasEmbeddings:            true,
+		HasImageEndpoint:         false,
+		HasSpeechEndpoint:        false,
+		HasTranscriptionEndpoint: false,
+		HasVideoEndpoint:         false,
+		PromptCacheStyle:         "anthropic",
+	},
+	ProviderResponses: {
+		RequiresKey:              true,
+		HasModelListing:          true,
+		HasEmbeddings:            true,
+		HasImageEndpoint:         true,
+		HasSpeechEndpoint:        true,
+		HasTranscriptionEndpoint: false,
+		HasVideoEndpoint:         true,
+		PromptCacheStyle:         "openai",
+	},
+	ProviderChat: {
+		RequiresKey:              false, // LM Studio and local endpoints work without a key
+		HasModelListing:          true,
+		HasEmbeddings:            true,
+		HasImageEndpoint:         true,
+		HasSpeechEndpoint:        true,
+		HasTranscriptionEndpoint: true,
+		HasVideoEndpoint:         true,
+		PromptCacheStyle:         "openai",
+	},
+}
+
+// KindCapabilities returns the protocol-level capabilities for this provider
+// kind. Never returns a zero-value struct — unknown kinds get the
+// ProviderChat defaults (most permissive) so local/custom hosts keep working.
+func (p *Provider) KindCapabilities() KindCapabilities {
+	if caps, ok := kindCaps[p.Kind]; ok {
+		return caps
+	}
+	return kindCaps[ProviderChat]
+}
+
+// ValidKind reports whether kind is one of the known provider kinds.
+func ValidKind(kind ProviderKind) bool {
+	switch kind {
+	case ProviderMessages, ProviderResponses, ProviderChat:
+		return true
+	}
+	return false
+}
+
+// KindCaps is a package-level helper for callers that have a
+// ProviderKind but not a *Provider (e.g. requiresKey checks).
+func KindCaps(kind ProviderKind) KindCapabilities {
+	if caps, ok := kindCaps[kind]; ok {
+		return caps
+	}
+	return kindCaps[ProviderChat]
+}
+
 // ModelKind categorizes what a model produces, used to filter the model
 // picker so users don't accidentally select an image generator or TTS
 // model for chat. Detected from the models.dev catalog (modality + name

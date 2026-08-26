@@ -279,7 +279,7 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 	// full chat roster, which would misclassify every chat model as TTS
 	// (e.g. OpenCode ignores output_modalities=speech). Their IDs keep
 	// Kind="" and are classified by the catalog + allowlist pass below.
-	if a.ImageModelListerFactory != nil && p.Kind != domain.ProviderMessages {
+	if a.ImageModelListerFactory != nil && p.KindCapabilities().HasImageEndpoint {
 		imgLister := a.ImageModelListerFactory(p)
 		if imgLister != nil {
 			imgIDs, _ := imgLister.ListImageModels(ctx, key)
@@ -299,7 +299,7 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			}
 		}
 	}
-	if a.SpeechModelListerFactory != nil && p.Kind != domain.ProviderMessages {
+	if a.SpeechModelListerFactory != nil && p.KindCapabilities().HasSpeechEndpoint {
 		spLister := a.SpeechModelListerFactory(p)
 		if spLister != nil {
 			spIDs, _ := spLister.ListSpeechModels(ctx, key)
@@ -312,7 +312,7 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			}
 		}
 	}
-	if a.VideoModelListerFactory != nil && p.Kind != domain.ProviderMessages {
+	if a.VideoModelListerFactory != nil && p.KindCapabilities().HasVideoEndpoint {
 		vLister := a.VideoModelListerFactory(p)
 		if vLister != nil {
 			vIDs, _ := vLister.ListVideoModels(ctx, key)

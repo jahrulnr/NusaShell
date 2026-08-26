@@ -6,6 +6,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/core"
 )
 
 // fakeEmbeddingImportAdapter simulates an OpenAI-compatible /v1/models:
@@ -13,8 +14,6 @@ import (
 type fakeEmbeddingImportAdapter struct {
 	fakeVisionAdapter
 }
-
-func (f *fakeEmbeddingImportAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
 
 func (f *fakeEmbeddingImportAdapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model, error) {
 	return []domain.Model{
@@ -38,7 +37,7 @@ func TestHandleProvidersImportTagsEmbeddingsFromLister(t *testing.T) {
 		Bus:         NewBus(),
 		Providers:   &fakeProviderStore{items: map[string]*domain.Provider{}},
 		Credentials: &fakeVisionCredStore{creds: map[string]string{}},
-		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error) {
+		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (core.Provider, error) {
 			return &fakeEmbeddingImportAdapter{}, nil
 		},
 		// Embedding model lister reports the embedding-capable ids.

@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/core"
 	"nusashell/infrastructure/ai/modelcatalog"
 )
 
@@ -320,10 +321,10 @@ type ChatUsage struct {
 // summing InputTokens across rounds double counts the prompt and can exceed
 // the window.
 //
-// After Option A normalization, InputTokens is the UNCACHED input for all
-// providers: OpenAI-style adapters (chat-completion, responses) subtract
-// cached_tokens from prompt_tokens at the handler boundary; Anthropic reports
-// input_tokens as uncached already. ContextTokens therefore sums
+// InputTokens is the UNCACHED input for all providers: each provider converter
+// (anthropic, openai, compat/openrouter) normalizes at the boundary —
+// OpenAI-style adapters subtract cached_tokens from prompt_tokens, Anthropic
+// reports input_tokens as uncached already. ContextTokens therefore sums
 // InputTokens + CacheRead + CacheWrite + OutputTokens uniformly — no
 // per-provider branching needed.
 func (u ChatUsage) ContextTokens() int {
@@ -342,14 +343,13 @@ type ChatResponse struct {
 	Warnings []string
 }
 
-// AIProvider is the streaming/non-streaming chat port implemented by the
-// Anthropic, Responses and OpenAI-compatible adapters.
+// AIProvider is the chat provider port. It embeds core.Provider so the
+// application can call Chat/Stream directly. Conversion between
+// application.ChatRequest/ChatResponse and core.Request/Response is handled
+// by ToCoreRequest/FromCoreResponse/CompleteViaCore/StreamViaCore in
+// ai_convert.go. Error mapping is handled by MapCoreError.
 type AIProvider interface {
-	Kind() domain.ProviderKind
-	Complete(ctx context.Context, req ChatRequest) (ChatResponse, error)
-	// Stream reports text deltas and, when the provider emits thinking
-	// content, reasoning deltas.
-	Stream(ctx context.Context, req ChatRequest, onDelta, onReasoning func(text string)) (ChatResponse, error)
+	core.Provider
 }
 
 // ModelLister is implemented by providers that can enumerate models.

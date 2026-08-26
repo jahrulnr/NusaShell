@@ -14,6 +14,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/core"
 	"nusashell/infrastructure/jsonstore"
 )
 
@@ -218,7 +219,7 @@ type DocFull struct {
 }
 
 // ProviderFactory builds a provider adapter for a stored config + key.
-type ProviderFactory func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error)
+type ProviderFactory func(ctx context.Context, p *domain.Provider, apiKey string) (core.Provider, error)
 
 // TurnRun tracks one streaming agent turn.
 type TurnRun struct {

@@ -45,11 +45,12 @@ func (a *App) describeImagesWithFallback(ctx context.Context, settings domain.Se
 		a.log("warn", "vision", "vision fallback provider %q not found or disabled; skipping image description", a.providerNameByID(settings.VisionProviderID))
 		return attachments
 	}
-	adapter, err := a.Factory(ctx, provider, apiKey)
+	rawAdapter, err := a.Factory(ctx, provider, apiKey)
 	if err != nil {
 		a.log("warn", "vision", "failed to build vision fallback adapter: %v", err)
 		return attachments
 	}
+	adapter := NewProviderContext(provider, rawAdapter)
 
 	out := make([]domain.Attachment, 0, len(attachments)+len(imageIdxs))
 	out = append(out, attachments...)
@@ -150,7 +151,7 @@ func (a *App) enrichWithVisionDescriptions(ctx context.Context, conversation *do
 // all call sites share one string.
 const defaultDescribeImagePrompt = "Describe this image concisely. Focus on visible objects, text, people, settings, and any notable details. Keep it factual and under 200 words."
 
-func (a *App) describeOneImage(ctx context.Context, adapter AIProvider, providerName, model string, image domain.Attachment, prompt string) (string, error) {
+func (a *App) describeOneImage(ctx context.Context, adapter ProviderContext, providerName, model string, image domain.Attachment, prompt string) (string, error) {
 	if strings.TrimSpace(prompt) == "" {
 		prompt = defaultDescribeImagePrompt
 	}

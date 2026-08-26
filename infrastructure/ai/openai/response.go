@@ -68,6 +68,13 @@ func convertUsage(u *usage, model string) core.Usage {
 	if u.CompletionTokensDetails != nil {
 		out.ReasoningTokens = u.CompletionTokensDetails.ReasoningTokens
 	}
+	// Normalize: prompt_tokens includes cached tokens. Subtract cache
+	// reads so InputTokens is the UNCACHED input, matching the canonical
+	// core.Usage convention.
+	out.InputTokens -= out.CacheReadTokens
+	if out.InputTokens < 0 {
+		out.InputTokens = 0
+	}
 	return out
 }
 

@@ -259,11 +259,12 @@ func (r *BackgroundReviewAgent) runReservedReview(ctx context.Context, conversat
 		r.app.log("warn", "learning", "review aborted: cannot resolve model %q: %v", model, rpcErr)
 		return fmt.Errorf("cannot resolve model %q: %v", model, rpcErr)
 	}
-	adapter, err := r.app.Factory(context.Background(), provider, apiKey)
+	rawAdapter, err := r.app.Factory(context.Background(), provider, apiKey)
 	if err != nil {
 		r.app.log("warn", "learning", "review aborted: cannot build adapter for %q: %v", model, err)
 		return fmt.Errorf("cannot build adapter for %q: %v", model, err)
 	}
+	adapter := NewProviderContext(provider, rawAdapter)
 	// Optional dedicated review model (settings.ReviewModel). Reviews re-send
 	// the transcript tail, so routing them to a cheaper/faster model cuts
 	// background cost. Falls back to the conversation model when unset or
@@ -439,7 +440,7 @@ func (r *BackgroundReviewAgent) recordReviewError(conversationID, errMsg string)
 // configured and resolvable; otherwise it returns the given adapter+model
 // unchanged so reviews still run. `model` is the bare model id used for
 // logging, not the "providerID:modelID" form.
-func (r *BackgroundReviewAgent) applyReviewModelOverride(ctx context.Context, adapter AIProvider, model string) (AIProvider, string) {
+func (r *BackgroundReviewAgent) applyReviewModelOverride(ctx context.Context, adapter ProviderContext, model string) (ProviderContext, string) {
 	if r.app == nil || r.app.Settings == nil {
 		return adapter, model
 	}
@@ -459,6 +460,7 @@ func (r *BackgroundReviewAgent) applyReviewModelOverride(ctx context.Context, ad
 		r.recordReviewModelResolution(rm, "fallback:conv_model", model)
 		return adapter, model
 	}
+	rPC := NewProviderContext(rProvider, rAdapter)
 	// Record the override only when it actually changes the model. When the
 	// override resolves to the same model the conversation already uses, the
 	// event carries no information — recording it every run turned the
@@ -468,7 +470,7 @@ func (r *BackgroundReviewAgent) applyReviewModelOverride(ctx context.Context, ad
 		r.app.log("info", "learning", "review using override model %s", rm)
 		r.recordReviewModelResolution(rm, "ok", rBare)
 	}
-	return rAdapter, rBare
+	return rPC, rBare
 }
 
 // recordReviewModelResolution writes a trajectory event recording whether
@@ -517,7 +519,7 @@ func mutationSnippet(argsJSON, field string) string {
 // calls → execute whitelisted tools → feed results back → repeat. Returns
 // the mutations and the full message history (the review agent's own
 // conversation with the LLM) so it can be persisted for the learning log.
-func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIProvider, model string, conversation *domain.Conversation) ([]ReviewMutation, []ChatMessage, error) {
+func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter ProviderContext, model string, conversation *domain.Conversation) ([]ReviewMutation, []ChatMessage, error) {
 	systemPrompt := resources.ReviewPrompt()
 	if systemPrompt == "" {
 		return nil, nil, nil

@@ -1041,6 +1041,12 @@ func convertResponsesResponse(resp *responsesResponse, fallbackModel string) (*c
 	if resp.Usage.OutputTokensDetails != nil {
 		out.Usage.ReasoningTokens = resp.Usage.OutputTokensDetails.ReasoningTokens
 	}
+	// Normalize: input_tokens includes cached tokens. Subtract cache
+	// reads so InputTokens is the UNCACHED input.
+	out.Usage.InputTokens -= out.Usage.CacheReadTokens
+	if out.Usage.InputTokens < 0 {
+		out.Usage.InputTokens = 0
+	}
 	for _, item := range resp.Output {
 		switch item.Type {
 		case "message":
@@ -1440,6 +1446,12 @@ func responsesUsageToUsage(u responsesUsage, model string) core.Usage {
 	}
 	if u.OutputTokensDetails != nil {
 		out.ReasoningTokens = u.OutputTokensDetails.ReasoningTokens
+	}
+	// Normalize: input_tokens includes cached tokens. Subtract cache
+	// reads so InputTokens is the UNCACHED input.
+	out.InputTokens -= out.CacheReadTokens
+	if out.InputTokens < 0 {
+		out.InputTokens = 0
 	}
 	return out
 }

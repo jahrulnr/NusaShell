@@ -755,3 +755,20 @@ func mustTool(t *testing.T, name, description string, schema any) core.Tool {
 	}
 	return tool
 }
+
+func TestConvertUsageClampsWhenCachedExceedsPrompt(t *testing.T) {
+	u := convertUsage(usage{
+		PromptTokens:     3,
+		CompletionTokens: 2,
+		TotalTokens:      5,
+		PromptTokensDetails: &promptTokensDetails{
+			CachedTokens: 8, // exceeds prompt
+		},
+	}, Spec{}, "test", "model")
+	if u.InputTokens != 0 {
+		t.Fatalf("InputTokens = %d, want 0 (clamped)", u.InputTokens)
+	}
+	if u.CacheReadTokens != 8 {
+		t.Fatalf("CacheReadTokens = %d, want 8", u.CacheReadTokens)
+	}
+}

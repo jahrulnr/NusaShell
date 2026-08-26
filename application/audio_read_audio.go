@@ -139,10 +139,11 @@ func (a *App) transcribeAudioOffline(audio domain.Attachment) (string, bool) {
 // transcribeAudioViaChat is the legacy multimodal chat fallback: send the
 // audio attachment as an input_audio block to an audio-capable chat model.
 func (a *App) transcribeAudioViaChat(run *TurnRun, caps ModelCapabilities, settings domain.Settings, provider *domain.Provider, apiKey string, audio domain.Attachment, question string) (string, []domain.Attachment, error) {
-	adapter, err := a.Factory(run.Ctx, provider, apiKey)
+	rawAdapter, err := a.Factory(run.Ctx, provider, apiKey)
 	if err != nil {
 		return "Failed to initialize audio fallback adapter.", nil, err
 	}
+	adapter := NewProviderContext(provider, rawAdapter)
 
 	if question == "" {
 		question = "Transcribe this audio. If there is speech, provide a full transcript. If there is music or ambient sound, describe it concisely."
@@ -169,7 +170,7 @@ func (a *App) transcribeAudioViaChat(run *TurnRun, caps ModelCapabilities, setti
 // describeOneAudio sends an audio attachment to a multimodal chat model and
 // returns the text response (transcript or description). The fallback model
 // must support audio input (e.g. Gemini, Qwen-VL).
-func (a *App) describeOneAudio(ctx context.Context, adapter AIProvider, model string, audio domain.Attachment, prompt string) (string, error) {
+func (a *App) describeOneAudio(ctx context.Context, adapter ProviderContext, model string, audio domain.Attachment, prompt string) (string, error) {
 	req := ChatRequest{
 		Model:  model,
 		System: "You are an audio transcription assistant. Transcribe speech accurately and describe non-speech audio concisely.",
@@ -228,11 +229,12 @@ func (a *App) describeAudiosWithFallback(ctx context.Context, settings domain.Se
 		a.log("warn", "audio", "audio fallback provider %q not found or disabled; skipping audio transcription", a.providerNameByID(settings.AudioProviderID))
 		return attachments
 	}
-	adapter, err := a.Factory(ctx, provider, apiKey)
+	rawAdapter, err := a.Factory(ctx, provider, apiKey)
 	if err != nil {
 		a.log("warn", "audio", "failed to build audio fallback adapter: %v", err)
 		return attachments
 	}
+	adapter := NewProviderContext(provider, rawAdapter)
 
 	out := make([]domain.Attachment, 0, len(attachments)+len(audioIdxs))
 	out = append(out, attachments...)

@@ -3,7 +3,8 @@ package aiutil
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
+
+	"nusashell/domain"
 )
 
 // MustJSON marshals v to a json.RawMessage. On error it returns an empty
@@ -43,36 +44,22 @@ func StrJSON(s string) json.RawMessage {
 	return b
 }
 
-// SanitizeToolName rewrites a tool name so it matches the OpenAI Responses
-// API pattern ^[a-zA-Z0-9_-]+$. Models occasionally hallucinate tool names
-// with characters the provider rejects (e.g. "terminal:exec", "fs.read",
-// "mcp/server"). Without auto-heal the conversation becomes unreplayable:
-// every subsequent request returns HTTP 400 "Invalid 'input[N].name': string
-// does not match pattern" because the offending name is persisted in the
-// assistant message history.
-//
-// Sanitization is safe for all three provider styles (Responses API,
-// chat-completions, Codex) because they pair function_call ↔
-// function_call_output by call_id, not by name. The rewritten name is only
-// sent on the wire; the persisted ToolCall.Name is left untouched so the
-// learning log and UI keep showing the original (hallucinated) name for
-// debugging.
+// SanitizeToolName delegates to domain.SanitizeToolName.
 func SanitizeToolName(name string) string {
-	if name == "" {
-		return ""
-	}
-	var b strings.Builder
-	b.Grow(len(name))
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z',
-			r >= 'A' && r <= 'Z',
-			r >= '0' && r <= '9',
-			r == '_', r == '-':
-			b.WriteRune(r)
-		default:
-			b.WriteByte('_')
-		}
-	}
-	return b.String()
+	return domain.SanitizeToolName(name)
+}
+
+// TextAttachmentContent delegates to domain.TextAttachmentContent.
+func TextAttachmentContent(att domain.Attachment) string {
+	return domain.TextAttachmentContent(att)
+}
+
+// DocumentAttachmentContent delegates to domain.DocumentAttachmentContent.
+func DocumentAttachmentContent(att domain.Attachment) string {
+	return domain.DocumentAttachmentContent(att)
+}
+
+// DataURLBase64 extracts the base64 payload from a data: URL.
+func DataURLBase64(dataURL string) string {
+	return domain.DataURLBase64(dataURL)
 }

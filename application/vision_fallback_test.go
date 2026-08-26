@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/core"
 )
 
-// fakeVisionAdapter is a minimal AIProvider that returns a canned description
-// for any Complete call. Used to test describeImagesWithFallback without a
-// real provider.
+// fakeVisionAdapter is a minimal core.Provider that returns a canned
+// description for any Chat call. Used to test describeImagesWithFallback
+// without a real provider.
 type fakeVisionAdapter struct {
 	description string
 	// reasoningOnly simulates reasoning models (e.g. dots-3-note) that put
@@ -18,18 +19,24 @@ type fakeVisionAdapter struct {
 	reasoningOnly bool
 }
 
-func (f *fakeVisionAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
-func (f *fakeVisionAdapter) Complete(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+func (f *fakeVisionAdapter) Name() string { return "fake-vision" }
+
+func (f *fakeVisionAdapter) Chat(_ context.Context, _ *core.Request) (*core.Response, error) {
+	resp := &core.Response{FinishReason: core.FinishReasonStop}
 	if f.reasoningOnly {
-		return ChatResponse{Reasoning: f.description}, nil
+		resp.Blocks = append(resp.Blocks, core.ReasoningBlock{Text: f.description})
+	} else {
+		resp.Blocks = append(resp.Blocks, core.TextBlock{Text: f.description})
 	}
-	return ChatResponse{Content: f.description}, nil
+	return resp, nil
 }
-func (f *fakeVisionAdapter) Stream(ctx context.Context, req ChatRequest, onDelta, onReasoning func(text string)) (ChatResponse, error) {
-	if f.reasoningOnly {
-		return ChatResponse{Reasoning: f.description}, nil
+
+func (f *fakeVisionAdapter) Stream(ctx context.Context, req *core.Request) (core.Stream, error) {
+	resp, err := f.Chat(ctx, req)
+	if err != nil {
+		return nil, err
 	}
-	return ChatResponse{Content: f.description}, nil
+	return &stubStream{events: coreResponseEvents(resp)}, nil
 }
 
 // fakeVisionCredStore is a minimal CredentialStore for vision tests.
@@ -61,7 +68,7 @@ func TestDescribeImagesWithFallbackNoImages(t *testing.T) {
 			"vision-prov": {ID: "vision-prov", Enabled: true, Kind: domain.ProviderChat},
 		}},
 		Credentials: &fakeVisionCredStore{creds: map[string]string{"vision-prov": "key"}},
-		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error) {
+		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (core.Provider, error) {
 			return &fakeVisionAdapter{description: "a cat"}, nil
 		},
 	}
@@ -95,7 +102,7 @@ func TestDescribeImagesWithFallbackAddsDescription(t *testing.T) {
 			"vision-prov": {ID: "vision-prov", Enabled: true, Kind: domain.ProviderChat},
 		}},
 		Credentials: &fakeVisionCredStore{creds: map[string]string{"vision-prov": "key"}},
-		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error) {
+		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (core.Provider, error) {
 			return &fakeVisionAdapter{description: "A orange cat sitting on a windowsill"}, nil
 		},
 	}
@@ -156,7 +163,7 @@ func TestDescribeImagesWithFallbackReasoningOnlyModel(t *testing.T) {
 			"vision-prov": {ID: "vision-prov", Enabled: true, Kind: domain.ProviderChat},
 		}},
 		Credentials: &fakeVisionCredStore{creds: map[string]string{"vision-prov": "key"}},
-		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error) {
+		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (core.Provider, error) {
 			return &fakeVisionAdapter{
 				description:   "A photo of a sunset over the ocean",
 				reasoningOnly: true,

@@ -14,10 +14,7 @@ import (
 	"nusashell/infrastructure/ai/core"
 )
 
-func temp(t *testing.T) float64 { t.Helper(); return 0.7 }
-
-func TestToLitellmRequestSystemAndMessages(t *testing.T) {
-	a := &Adapter{ProviderKind: domain.ProviderChat}
+func TestToCoreRequestSystemAndMessages(t *testing.T) {
 	req := application.ChatRequest{
 		Model: "m", MaxTokens: 64, System: "sys",
 		Messages: []application.ChatMessage{
@@ -26,7 +23,7 @@ func TestToLitellmRequestSystemAndMessages(t *testing.T) {
 			{Role: "tool", ToolResult: &application.ToolResult{ToolCallID: "c1", Content: "result"}},
 		},
 	}
-	lr := a.toLitellmRequest(req)
+	lr := application.ToCoreRequest(req, domain.ProviderChat, false)
 	if lr.Model != "m" || lr.MaxTokens == nil || *lr.MaxTokens != 64 {
 		t.Fatalf("model/max = %q/%v", lr.Model, lr.MaxTokens)
 	}
@@ -46,8 +43,7 @@ func TestToLitellmRequestSystemAndMessages(t *testing.T) {
 	}
 }
 
-func TestToLitellmRequestAttachments(t *testing.T) {
-	a := &Adapter{ProviderKind: domain.ProviderChat}
+func TestToCoreRequestAttachments(t *testing.T) {
 	req := application.ChatRequest{
 		Model: "m", MaxTokens: 8,
 		Messages: []application.ChatMessage{{
@@ -61,7 +57,7 @@ func TestToLitellmRequestAttachments(t *testing.T) {
 			},
 		}},
 	}
-	lr := a.toLitellmRequest(req)
+	lr := application.ToCoreRequest(req, domain.ProviderChat, false)
 	blocks := lr.Messages[0].Blocks
 	kinds := map[string]bool{}
 	for _, b := range blocks {
@@ -87,13 +83,12 @@ func TestToLitellmRequestAttachments(t *testing.T) {
 	}
 }
 
-func TestToLitellmRequestEffortAndStrip(t *testing.T) {
-	a := &Adapter{ProviderKind: domain.ProviderChat}
+func TestToCoreRequestEffortAndStrip(t *testing.T) {
 	effort := "high"
 	temp := 0.7
-	lr := a.toLitellmRequest(application.ChatRequest{
+	lr := application.ToCoreRequest(application.ChatRequest{
 		Model: "m", MaxTokens: 8, Effort: effort, Temperature: &temp,
-	})
+	}, domain.ProviderChat, false)
 	if lr.Thinking == nil || lr.Thinking.Mode != core.ThinkingEnabled || lr.Thinking.Effort != "high" {
 		t.Fatalf("thinking = %+v", lr.Thinking)
 	}
@@ -102,10 +97,10 @@ func TestToLitellmRequestEffortAndStrip(t *testing.T) {
 	}
 
 	// strip params null the sampling fields
-	lr = a.toLitellmRequest(application.ChatRequest{
+	lr = application.ToCoreRequest(application.ChatRequest{
 		Model: "m", MaxTokens: 8, Effort: "high", Temperature: &temp,
 		StripParams: []string{"temperature", "reasoning_effort"},
-	})
+	}, domain.ProviderChat, false)
 	if lr.Temperature != nil {
 		t.Fatalf("temperature must be stripped, got %v", lr.Temperature)
 	}
@@ -115,22 +110,30 @@ func TestToLitellmRequestEffortAndStrip(t *testing.T) {
 }
 
 func TestThinkingFromEffort(t *testing.T) {
-	if got := thinkingFromEffort(""); got != nil {
-		t.Fatalf("empty effort = %+v, want nil", got)
+	req := application.ChatRequest{Effort: ""}
+	lr := application.ToCoreRequest(req, domain.ProviderChat, false)
+	if lr.Thinking != nil {
+		t.Fatalf("empty effort = %+v, want nil", lr.Thinking)
 	}
-	if got := thinkingFromEffort("auto"); got != nil {
-		t.Fatalf("auto effort = %+v, want nil", got)
+	req.Effort = "auto"
+	lr = application.ToCoreRequest(req, domain.ProviderChat, false)
+	if lr.Thinking != nil {
+		t.Fatalf("auto effort = %+v, want nil", lr.Thinking)
 	}
-	if got := thinkingFromEffort("none"); got == nil || got.Mode != core.ThinkingDisabled {
-		t.Fatalf("none effort = %+v, want disabled", got)
+	req.Effort = "none"
+	lr = application.ToCoreRequest(req, domain.ProviderChat, false)
+	if lr.Thinking == nil || lr.Thinking.Mode != core.ThinkingDisabled {
+		t.Fatalf("none effort = %+v, want disabled", lr.Thinking)
 	}
-	if got := thinkingFromEffort("low"); got == nil || got.Mode != core.ThinkingEnabled || got.Effort != "low" {
-		t.Fatalf("low effort = %+v", got)
+	req.Effort = "low"
+	lr = application.ToCoreRequest(req, domain.ProviderChat, false)
+	if lr.Thinking == nil || lr.Thinking.Mode != core.ThinkingEnabled || lr.Thinking.Effort != "low" {
+		t.Fatalf("low effort = %+v", lr.Thinking)
 	}
 }
 
 func TestMapErrorHTTP(t *testing.T) {
-	err := mapError(core.NewHTTPError("openai", 429, `{"error":{"message":"rate limited"}}`), domain.ProviderChat)
+	err := application.MapCoreError(core.NewHTTPError("openai", 429, `{"error":{"message":"rate limited"}}`), domain.ProviderChat)
 	var up *application.UpstreamError
 	if !errors.As(err, &up) {
 		t.Fatalf("error = %T, want *UpstreamError", err)
@@ -147,7 +150,7 @@ func TestMapErrorHTTP(t *testing.T) {
 }
 
 func TestMapErrorHTTPWithRetryAfter(t *testing.T) {
-	err := mapError(&core.LiteLLMError{Type: core.ErrorTypeRateLimit, StatusCode: 429, RetryAfter: 60, Message: "slow down", Retryable: true}, domain.ProviderChat)
+	err := application.MapCoreError(&core.LiteLLMError{Type: core.ErrorTypeRateLimit, StatusCode: 429, RetryAfter: 60, Message: "slow down", Retryable: true}, domain.ProviderChat)
 	var up *application.UpstreamError
 	if !errors.As(err, &up) {
 		t.Fatalf("error = %T, want *UpstreamError", err)
@@ -161,7 +164,7 @@ func TestMapErrorHTTPWithRetryAfter(t *testing.T) {
 }
 
 func TestMapErrorNetwork(t *testing.T) {
-	err := mapError(core.NewNetworkError("openai", "boom", errors.New("dial tcp: refused")), domain.ProviderChat)
+	err := application.MapCoreError(core.NewNetworkError("openai", "boom", errors.New("dial tcp: refused")), domain.ProviderChat)
 	var up *application.UpstreamError
 	if !errors.As(err, &up) {
 		t.Fatalf("error = %T, want *UpstreamError", err)
@@ -173,7 +176,7 @@ func TestMapErrorNetwork(t *testing.T) {
 
 func TestMapErrorPassesThroughNonLiteLLM(t *testing.T) {
 	inner := errors.New("plain")
-	if got := mapError(inner, domain.ProviderChat); got != inner {
+	if got := application.MapCoreError(inner, domain.ProviderChat); got != inner {
 		t.Fatalf("plain error must pass through, got %v", got)
 	}
 }
@@ -181,8 +184,8 @@ func TestMapErrorPassesThroughNonLiteLLM(t *testing.T) {
 func TestAdapterKind(t *testing.T) {
 	for _, kind := range []domain.ProviderKind{domain.ProviderMessages, domain.ProviderResponses, domain.ProviderChat} {
 		a := &Adapter{ProviderKind: kind}
-		if a.Kind() != kind {
-			t.Fatalf("Kind() = %q, want %q", a.Kind(), kind)
+		if a.ProviderKind != kind {
+			t.Fatalf("ProviderKind = %q, want %q", a.ProviderKind, kind)
 		}
 	}
 }

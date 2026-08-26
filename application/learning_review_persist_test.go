@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/core"
 	"nusashell/resources"
 )
 
@@ -15,17 +16,23 @@ type persistStubAdapter struct {
 	calls     int
 }
 
-func (a *persistStubAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
-func (a *persistStubAdapter) Stream(ctx context.Context, req ChatRequest, _ func(string), _ func(string)) (ChatResponse, error) {
-	return a.Complete(ctx, req)
-}
-func (a *persistStubAdapter) Complete(context.Context, ChatRequest) (ChatResponse, error) {
+func (a *persistStubAdapter) Name() string { return "persist-stub" }
+
+func (a *persistStubAdapter) Chat(_ context.Context, _ *core.Request) (*core.Response, error) {
 	if a.calls >= len(a.responses) {
-		return ChatResponse{}, context.DeadlineExceeded
+		return nil, context.DeadlineExceeded
 	}
 	r := a.responses[a.calls]
 	a.calls++
-	return r, nil
+	return chatResponseToCore(r), nil
+}
+
+func (a *persistStubAdapter) Stream(ctx context.Context, req *core.Request) (core.Stream, error) {
+	resp, err := a.Chat(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &stubStream{events: coreResponseEvents(resp)}, nil
 }
 
 // TestReviewLoopPersistsReasoningAndFinalSummary pins the persistence
@@ -52,7 +59,7 @@ func TestReviewLoopPersistsReasoningAndFinalSummary(t *testing.T) {
 	}}
 
 	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
-	_, messages, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	_, messages, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 	if err != nil {
 		t.Fatalf("runReviewLoop: %v", err)
 	}
@@ -99,7 +106,7 @@ func TestReviewLoopPersistsNothingToSaveConclusion(t *testing.T) {
 	}}
 
 	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
-	_, messages, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	_, messages, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 	if err != nil {
 		t.Fatalf("runReviewLoop: %v", err)
 	}

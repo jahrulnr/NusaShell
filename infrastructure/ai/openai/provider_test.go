@@ -615,7 +615,7 @@ func TestChatConvertsResponseBlocks(t *testing.T) {
 	if resp.FinishReason != core.FinishReasonToolCall {
 		t.Fatalf("finish reason = %q", resp.FinishReason)
 	}
-	if resp.Usage.InputTokens != 10 || resp.Usage.OutputTokens != 5 || resp.Usage.CacheReadTokens != 3 || resp.Usage.CacheWriteTokens != 4 || resp.Usage.ReasoningTokens != 2 {
+	if resp.Usage.InputTokens != 7 || resp.Usage.OutputTokens != 5 || resp.Usage.CacheReadTokens != 3 || resp.Usage.CacheWriteTokens != 4 || resp.Usage.ReasoningTokens != 2 {
 		t.Fatalf("usage = %+v", resp.Usage)
 	}
 }
@@ -820,4 +820,21 @@ func mustTool(t *testing.T, name, description string, schema any) core.Tool {
 		t.Fatalf("NewTool: %v", err)
 	}
 	return tool
+}
+
+func TestConvertUsageClampsWhenCachedExceedsPrompt(t *testing.T) {
+	u := convertUsage(&usage{
+		PromptTokens:     5,
+		CompletionTokens: 3,
+		TotalTokens:      8,
+		PromptTokensDetails: &promptTokensDetails{
+			CachedTokens: 10, // exceeds prompt
+		},
+	}, "model")
+	if u.InputTokens != 0 {
+		t.Fatalf("InputTokens = %d, want 0 (clamped)", u.InputTokens)
+	}
+	if u.CacheReadTokens != 10 {
+		t.Fatalf("CacheReadTokens = %d, want 10", u.CacheReadTokens)
+	}
 }

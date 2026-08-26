@@ -30,9 +30,9 @@ func convertResponse(resp *anthropicResponse, fallbackModel string) (*core.Respo
 		Provider:     "anthropic",
 		FinishReason: core.NormalizeFinishReason(resp.StopReason),
 		Usage: core.Usage{
-			InputTokens:      resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens,
+			InputTokens:      resp.Usage.InputTokens,
 			OutputTokens:     resp.Usage.OutputTokens,
-			TotalTokens:      resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.OutputTokens,
+			TotalTokens:      resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens + resp.Usage.OutputTokens,
 			CacheReadTokens:  resp.Usage.CacheReadInputTokens,
 			CacheWriteTokens: resp.Usage.CacheCreationInputTokens,
 			Provider:         "anthropic",

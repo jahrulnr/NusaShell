@@ -68,10 +68,11 @@ func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps Mode
 	if !ok {
 		return "Video fallback provider not found or disabled.", nil, fmt.Errorf("video provider %q not found", a.providerNameByID(settings.VideoProviderID))
 	}
-	adapter, err := a.Factory(run.Ctx, provider, apiKey)
+	rawAdapter, err := a.Factory(run.Ctx, provider, apiKey)
 	if err != nil {
 		return "Failed to initialize video fallback adapter.", nil, err
 	}
+	adapter := NewProviderContext(provider, rawAdapter)
 
 	question := strings.TrimSpace(args.Question)
 	if question == "" {
@@ -99,7 +100,7 @@ func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps Mode
 // describeOneVideo sends a video attachment to a multimodal chat model and
 // returns the text description. The fallback model must support video input
 // (e.g. Gemini 2.5+, Qwen-VL).
-func (a *App) describeOneVideo(ctx context.Context, adapter AIProvider, model string, video domain.Attachment, prompt string) (string, error) {
+func (a *App) describeOneVideo(ctx context.Context, adapter ProviderContext, model string, video domain.Attachment, prompt string) (string, error) {
 	req := ChatRequest{
 		Model:  model,
 		System: "Describe videos accurately and concisely for a text-only model that cannot see them.",
@@ -158,11 +159,12 @@ func (a *App) describeVideosWithFallback(ctx context.Context, settings domain.Se
 		a.log("warn", "video", "video fallback provider %q not found or disabled; skipping video description", a.providerNameByID(settings.VideoProviderID))
 		return attachments
 	}
-	adapter, err := a.Factory(ctx, provider, apiKey)
+	rawAdapter, err := a.Factory(ctx, provider, apiKey)
 	if err != nil {
 		a.log("warn", "video", "failed to build video fallback adapter: %v", err)
 		return attachments
 	}
+	adapter := NewProviderContext(provider, rawAdapter)
 
 	out := make([]domain.Attachment, 0, len(attachments)+len(videoIdxs))
 	out = append(out, attachments...)

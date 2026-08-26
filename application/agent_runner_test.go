@@ -12,6 +12,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/core"
 )
 
 // validTestSummary is a summary string long enough to pass the compaction
@@ -64,12 +65,13 @@ func TestHydrationCheckpointPersistsOnceUntilCompaction(t *testing.T) {
 	app := &App{
 		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conversation}},
 		Toolbox:       &recordingToolbox{},
+		Bus:           NewBus(),
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background()}
 	adapter := &reviewStubAdapter{}
 	callRound := func(messageID string) {
 		t.Helper()
-		if _, err := app.streamTurnRoundOnce(run, adapter, conversation, messageID, "model", "", nil, domain.Settings{}, false, 0, true, nil, ModelCapabilities{}); err != nil {
+		if _, err := app.streamTurnRoundOnce(run, stubProviderContext(adapter), conversation, messageID, "model", "", nil, domain.Settings{}, false, 0, true, nil, ModelCapabilities{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -203,14 +205,14 @@ func TestResolveCompactionAdapter_defaultUsesCurrentModel(t *testing.T) {
 		Providers: &fakeProviderStore{items: map[string]*domain.Provider{
 			"chat-prov": {ID: "chat-prov", Enabled: true, Kind: domain.ProviderChat},
 		}},
-		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error) {
+		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (core.Provider, error) {
 			return &fakeVisionAdapter{description: "default"}, nil
 		},
 	}
-	defaultAdapter := &fakeVisionAdapter{description: "default"}
+	defaultAdapter := stubProviderContext(&fakeVisionAdapter{description: "default"})
 	settings := domain.Settings{}
 	gotAdapter, gotModel, gotWindow := app.resolveCompactionAdapter(context.Background(), defaultAdapter, "chat-prov:gpt-5", 200000, settings)
-	if gotAdapter != defaultAdapter {
+	if gotAdapter.Provider != defaultAdapter.Provider {
 		t.Fatal("expected default adapter when CompactionModel empty")
 	}
 	if gotModel != "chat-prov:gpt-5" {
@@ -231,14 +233,14 @@ func TestResolveCompactionAdapter_overrideUsesSeparateModel(t *testing.T) {
 			}},
 		}},
 		Credentials: &fakeVisionCredStore{creds: map[string]string{"cheap-prov": "key"}},
-		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error) {
+		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (core.Provider, error) {
 			return &fakeVisionAdapter{description: "compaction-adapter"}, nil
 		},
 	}
-	defaultAdapter := &fakeVisionAdapter{description: "default"}
+	defaultAdapter := stubProviderContext(&fakeVisionAdapter{description: "default"})
 	settings := domain.Settings{CompactionModel: "cheap-prov:haiku"}
 	gotAdapter, gotModel, gotWindow := app.resolveCompactionAdapter(context.Background(), defaultAdapter, "chat-prov:gpt-5", 200000, settings)
-	if gotAdapter == defaultAdapter {
+	if gotAdapter.Provider == defaultAdapter.Provider {
 		t.Fatal("expected a different adapter for compaction model override")
 	}
 	if gotModel != "haiku" {
@@ -257,14 +259,14 @@ func TestResolveCompactionAdapter_overrideFallsBackOnResolveError(t *testing.T) 
 			"chat-prov": {ID: "chat-prov", Enabled: true, Kind: domain.ProviderChat},
 		}},
 		Credentials: &fakeVisionCredStore{creds: map[string]string{"chat-prov": "key"}},
-		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error) {
+		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (core.Provider, error) {
 			return &fakeVisionAdapter{description: "default"}, nil
 		},
 	}
-	defaultAdapter := &fakeVisionAdapter{description: "default"}
+	defaultAdapter := stubProviderContext(&fakeVisionAdapter{description: "default"})
 	settings := domain.Settings{CompactionModel: "no-such-prov:no-such-model"}
 	gotAdapter, gotModel, gotWindow := app.resolveCompactionAdapter(context.Background(), defaultAdapter, "chat-prov:gpt-5", 200000, settings)
-	if gotAdapter != defaultAdapter {
+	if gotAdapter.Provider != defaultAdapter.Provider {
 		t.Fatal("expected fallback to default adapter on resolve error")
 	}
 	if gotModel != "chat-prov:gpt-5" {
@@ -643,13 +645,13 @@ type overflowThenOKAdapter struct {
 	mu        sync.Mutex
 	streams   int
 	completes int
-	secondReq ChatRequest
+	secondReq *core.Request
 	streamErr error
 	summary   string
 }
 
-func (a *overflowThenOKAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
-func (a *overflowThenOKAdapter) Stream(_ context.Context, req ChatRequest, _, _ func(string)) (ChatResponse, error) {
+func (a *overflowThenOKAdapter) Name() string { return "overflow-then-ok" }
+func (a *overflowThenOKAdapter) Stream(_ context.Context, req *core.Request) (core.Stream, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.streams++
@@ -658,12 +660,13 @@ func (a *overflowThenOKAdapter) Stream(_ context.Context, req ChatRequest, _, _ 
 		if err == nil {
 			err = &UpstreamError{StatusCode: 400, Err: errors.New("maximum context length exceeded")}
 		}
-		return ChatResponse{}, err
+		return nil, err
 	}
 	a.secondReq = req
-	return ChatResponse{Content: "ok after compact"}, nil
+	resp := &core.Response{Blocks: []core.Block{core.TextBlock{Text: "ok after compact"}}, FinishReason: core.FinishReasonStop}
+	return &stubStream{events: coreResponseEvents(resp)}, nil
 }
-func (a *overflowThenOKAdapter) Complete(context.Context, ChatRequest) (ChatResponse, error) {
+func (a *overflowThenOKAdapter) Chat(context.Context, *core.Request) (*core.Response, error) {
 	a.mu.Lock()
 	a.completes++
 	a.mu.Unlock()
@@ -671,7 +674,56 @@ func (a *overflowThenOKAdapter) Complete(context.Context, ChatRequest) (ChatResp
 	if summary == "" {
 		summary = validTestSummary
 	}
-	return ChatResponse{Content: summary}, nil
+	return &core.Response{Blocks: []core.Block{core.TextBlock{Text: summary}}, FinishReason: core.FinishReasonStop}, nil
+}
+
+// coreHasHydration checks core.Message slices for hydration tool calls,
+// mirroring HasHydration but for the core.Request message format.
+func coreHasHydration(messages []core.Message) bool {
+	for i := len(messages) - 1; i >= 0; i-- {
+		m := messages[i]
+		if m.Role != core.RoleAssistant {
+			continue
+		}
+		allHydration := true
+		expected := map[string]bool{}
+		for _, b := range m.Blocks {
+			if tc, ok := b.(core.ToolUseBlock); ok {
+				if !domain.IsHydrationCallID(tc.ID) {
+					allHydration = false
+					break
+				}
+				expected[tc.ID] = false
+			}
+		}
+		if !allHydration || len(expected) == 0 {
+			continue
+		}
+		for j := i + 1; j < len(messages); j++ {
+			t := messages[j]
+			if t.Role != core.RoleTool {
+				break
+			}
+			for _, b := range t.Blocks {
+				if tr, ok := b.(core.ToolResultBlock); ok {
+					if _, ok2 := expected[tr.ToolUseID]; ok2 {
+						expected[tr.ToolUseID] = true
+					}
+				}
+			}
+		}
+		allMatched := true
+		for _, matched := range expected {
+			if !matched {
+				allMatched = false
+				break
+			}
+		}
+		if allMatched {
+			return true
+		}
+	}
+	return false
 }
 
 func bulkyHistory(pendingID string) []domain.Message {
@@ -703,7 +755,7 @@ func TestEmergencyCompactionReinjectsHydration(t *testing.T) {
 		Bus:           NewBus(),
 		Toolbox:       &recordingToolbox{},
 		Settings:      &fakeSettingsStore{settings: settings},
-		Factory: func(context.Context, *domain.Provider, string) (AIProvider, error) {
+		Factory: func(context.Context, *domain.Provider, string) (core.Provider, error) {
 			return adapter, nil
 		},
 		runs: map[string]*TurnRun{},
@@ -721,7 +773,7 @@ func TestEmergencyCompactionReinjectsHydration(t *testing.T) {
 	if adapter.completes == 0 {
 		t.Fatal("expected compaction Complete calls")
 	}
-	if !HasHydration(adapter.secondReq.Messages) {
+	if !coreHasHydration(adapter.secondReq.Messages) {
 		t.Fatal("post-compaction retry must include a fresh hydration checkpoint")
 	}
 }
@@ -743,7 +795,7 @@ func TestEmergencyCompactionSkippedWhenEstimateBelowTrigger(t *testing.T) {
 		Bus:           NewBus(),
 		Toolbox:       &recordingToolbox{},
 		Settings:      &fakeSettingsStore{settings: settings},
-		Factory: func(context.Context, *domain.Provider, string) (AIProvider, error) {
+		Factory: func(context.Context, *domain.Provider, string) (core.Provider, error) {
 			return adapter, nil
 		},
 		runs: map[string]*TurnRun{},
@@ -787,25 +839,31 @@ type midTurnCompactionAdapter struct {
 	overflowed bool
 }
 
-func (a *midTurnCompactionAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
-func (a *midTurnCompactionAdapter) Stream(_ context.Context, _ ChatRequest, _, _ func(string)) (ChatResponse, error) {
+func (a *midTurnCompactionAdapter) Name() string { return "mid-turn-compaction" }
+func (a *midTurnCompactionAdapter) Stream(_ context.Context, _ *core.Request) (core.Stream, error) {
 	a.mu.Lock()
 	a.streams++
 	n := a.streams
 	a.mu.Unlock()
+	var resp *core.Response
 	if n == 1 {
-		return ChatResponse{
-			Content:   "let me read that file",
-			ToolCalls: []domain.ToolCall{{ID: "call_1", Name: "read_file", Args: `{"path":"/big"}`}},
-		}, nil
+		resp = &core.Response{
+			Blocks: []core.Block{
+				core.TextBlock{Text: "let me read that file"},
+				core.ToolUseBlock{ID: "call_1", Name: "read_file", Arguments: jsonRaw(`{"path":"/big"}`)},
+			},
+			FinishReason: core.FinishReasonToolCall,
+		}
+	} else {
+		resp = &core.Response{Blocks: []core.Block{core.TextBlock{Text: "done after compaction"}}, FinishReason: core.FinishReasonStop}
 	}
-	return ChatResponse{Content: "done after compaction"}, nil
+	return &stubStream{events: coreResponseEvents(resp)}, nil
 }
-func (a *midTurnCompactionAdapter) Complete(_ context.Context, _ ChatRequest) (ChatResponse, error) {
+func (a *midTurnCompactionAdapter) Chat(_ context.Context, _ *core.Request) (*core.Response, error) {
 	a.mu.Lock()
 	a.completes++
 	a.mu.Unlock()
-	return ChatResponse{Content: validTestSummary}, nil
+	return &core.Response{Blocks: []core.Block{core.TextBlock{Text: validTestSummary}}, FinishReason: core.FinishReasonStop}, nil
 }
 
 // largeOutputToolbox returns a fixed large string for any tool call,
@@ -855,7 +913,7 @@ func TestMidTurnProactiveCompaction(t *testing.T) {
 		Bus:           NewBus(),
 		Toolbox:       toolbox,
 		Settings:      &fakeSettingsStore{settings: settings},
-		Factory: func(context.Context, *domain.Provider, string) (AIProvider, error) {
+		Factory: func(context.Context, *domain.Provider, string) (core.Provider, error) {
 			return adapter, nil
 		},
 		runs: map[string]*TurnRun{},
@@ -878,16 +936,16 @@ func TestMidTurnProactiveCompaction(t *testing.T) {
 
 type recordingCompleteAdapter struct {
 	mu                sync.Mutex
-	requests          []ChatRequest
+	requests          []*core.Request
 	summaries         []string
 	toolCallSummaries []string // if set, return summary() tool call instead of Content
 }
 
-func (a *recordingCompleteAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
-func (a *recordingCompleteAdapter) Stream(context.Context, ChatRequest, func(string), func(string)) (ChatResponse, error) {
-	return ChatResponse{}, errors.New("stream not used")
+func (a *recordingCompleteAdapter) Name() string { return "recording-complete" }
+func (a *recordingCompleteAdapter) Stream(context.Context, *core.Request) (core.Stream, error) {
+	return nil, errors.New("stream not used")
 }
-func (a *recordingCompleteAdapter) Complete(_ context.Context, req ChatRequest) (ChatResponse, error) {
+func (a *recordingCompleteAdapter) Chat(_ context.Context, req *core.Request) (*core.Response, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.requests = append(a.requests, req)
@@ -898,20 +956,68 @@ func (a *recordingCompleteAdapter) Complete(_ context.Context, req ChatRequest) 
 	} else if len(a.summaries) > 0 {
 		summary = a.summaries[len(a.summaries)-1]
 	}
-	// If toolCallSummaries is configured, return a summary() tool call
-	// instead of Content (simulates a reasoning model that uses the tool).
 	if idx < len(a.toolCallSummaries) || (len(a.toolCallSummaries) > 0 && idx >= len(a.toolCallSummaries)) {
 		tcSummary := a.toolCallSummaries[min(idx, len(a.toolCallSummaries)-1)]
-		return ChatResponse{
-			Content: "",
-			ToolCalls: []domain.ToolCall{{
-				ID:   fmt.Sprintf("call_%d", idx),
-				Name: compactionSummaryToolName,
-				Args: fmt.Sprintf(`{"text":%q}`, tcSummary),
+		return &core.Response{
+			Blocks: []core.Block{core.ToolUseBlock{
+				ID:        fmt.Sprintf("call_%d", idx),
+				Name:      compactionSummaryToolName,
+				Arguments: jsonRaw(fmt.Sprintf(`{"text":%q}`, tcSummary)),
 			}},
+			FinishReason: core.FinishReasonToolCall,
 		}, nil
 	}
-	return ChatResponse{Content: summary}, nil
+	return &core.Response{Blocks: []core.Block{core.TextBlock{Text: summary}}, FinishReason: core.FinishReasonStop}, nil
+}
+
+// coreMessageText extracts text content from a core.Message's TextBlocks.
+func coreMessageText(m core.Message) string {
+	var out string
+	for _, b := range m.Blocks {
+		if tb, ok := b.(core.TextBlock); ok {
+			out += tb.Text
+		}
+	}
+	return out
+}
+
+// coreMessageHasToolResult returns true if the message has a ToolResultBlock.
+func coreMessageHasToolResult(m core.Message) bool {
+	for _, b := range m.Blocks {
+		if _, ok := b.(core.ToolResultBlock); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// coreMessageToolResultID extracts the ToolUseID from the first ToolResultBlock.
+func coreMessageToolResultID(m core.Message) string {
+	for _, b := range m.Blocks {
+		if tr, ok := b.(core.ToolResultBlock); ok {
+			return tr.ToolUseID
+		}
+	}
+	return ""
+}
+
+// coreRequestMaxTokens returns the MaxTokens value from a core.Request (0 if nil).
+func coreRequestMaxTokens(req *core.Request) int {
+	if req == nil || req.MaxTokens == nil {
+		return 0
+	}
+	return *req.MaxTokens
+}
+
+// coreBlocksText extracts all text from a slice of core.Block.
+func coreBlocksText(blocks []core.Block) string {
+	var out string
+	for _, b := range blocks {
+		if tb, ok := b.(core.TextBlock); ok {
+			out += tb.Text
+		}
+	}
+	return out
 }
 
 func TestCompactionPassBudgetShrinksWithRunningSummary(t *testing.T) {
@@ -993,7 +1099,7 @@ func TestCompactionUsesSummaryTool(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	summary, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, settings)
+	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1036,7 +1142,7 @@ func TestCompactionRetriesOnShortSummary(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	summary, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, settings)
+	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings)
 	if err != nil {
 		t.Fatalf("expected success after retry, got error: %v", err)
 	}
@@ -1067,7 +1173,7 @@ func TestCompactionFailsAfterMaxRetries(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	_, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, settings)
+	_, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings)
 	if err == nil {
 		t.Fatal("expected error when all retries produce short summaries, got nil")
 	}
@@ -1101,13 +1207,13 @@ func TestCompactionBudgetDoublesOnRetry(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	_, _ = app.compactConversation(context.Background(), adapter, conv, "model", 200000, settings)
+	_, _ = app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 200000, settings)
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
 	expectedBudget := 800
 	for i, req := range adapter.requests {
-		if req.MaxTokens != expectedBudget {
-			t.Fatalf("attempt %d: MaxTokens=%d, want %d", i, req.MaxTokens, expectedBudget)
+		if coreRequestMaxTokens(req) != expectedBudget {
+			t.Fatalf("attempt %d: MaxTokens=%d, want %d", i, coreRequestMaxTokens(req), expectedBudget)
 		}
 		expectedBudget *= 2
 	}
@@ -1133,13 +1239,13 @@ func TestCompactionBudgetClampedToContextWindow(t *testing.T) {
 	settings.CompactionSummaryMaxTokens = 800
 	// Small context window (2000) so the doubled budget hits the clamp.
 	// maxBudget = 2000 - 300 (systemReserve) = 1700
-	_, _ = app.compactConversation(context.Background(), adapter, conv, "model", 2000, settings)
+	_, _ = app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 2000, settings)
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
 	maxBudget := 2000 - compactionSystemReserve
 	for i, req := range adapter.requests {
-		if req.MaxTokens > maxBudget {
-			t.Fatalf("attempt %d: MaxTokens=%d exceeds maxBudget=%d", i, req.MaxTokens, maxBudget)
+		if coreRequestMaxTokens(req) > maxBudget {
+			t.Fatalf("attempt %d: MaxTokens=%d exceeds maxBudget=%d", i, coreRequestMaxTokens(req), maxBudget)
 		}
 	}
 }
@@ -1172,7 +1278,7 @@ func TestCompactionStripsMediaAttachments(t *testing.T) {
 	}
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
-	summary, err := app.compactConversation(context.Background(), adapter, conv, "model", 20000, settings)
+	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 20000, settings)
 	if err != nil {
 		t.Fatalf("compaction failed: %v", err)
 	}
@@ -1186,15 +1292,18 @@ func TestCompactionStripsMediaAttachments(t *testing.T) {
 	}
 	for i, req := range adapter.requests {
 		for _, m := range req.Messages {
-			if len(m.Attachments) > 0 {
-				t.Fatalf("request %d: message carries %d attachments, want stripped", i, len(m.Attachments))
+			for _, b := range m.Blocks {
+				switch b.(type) {
+				case core.ImageBlock, core.AudioBlock, core.VideoBlock:
+					t.Fatalf("request %d: message carries media block, want stripped", i)
+				}
 			}
 		}
 	}
 	noteSeen := false
 	for _, req := range adapter.requests {
 		for _, m := range req.Messages {
-			if strings.Contains(m.Content, "shot.png") {
+			if strings.Contains(coreMessageText(m), "shot.png") {
 				noteSeen = true
 			}
 		}
@@ -1231,7 +1340,7 @@ func TestCompactionCapsOversizedToolOutput(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	// Small window keeps the per-call cap small so truncation is observable.
-	_, err := app.compactConversation(context.Background(), adapter, conv, "model", 2000, settings)
+	_, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 2000, settings)
 	if err != nil {
 		t.Fatalf("compaction failed: %v", err)
 	}
@@ -1240,14 +1349,18 @@ func TestCompactionCapsOversizedToolOutput(t *testing.T) {
 	truncated := false
 	for _, req := range adapter.requests {
 		for _, m := range req.Messages {
-			if m.ToolResult == nil {
-				continue
-			}
-			if len(m.ToolResult.Content) > 2200 {
-				t.Fatalf("tool result not capped: %d chars", len(m.ToolResult.Content))
-			}
-			if strings.Contains(m.ToolResult.Content, "[truncated:") {
-				truncated = true
+			for _, b := range m.Blocks {
+				tr, ok := b.(core.ToolResultBlock)
+				if !ok {
+					continue
+				}
+				content := coreBlocksText(tr.Content)
+				if len(content) > 2200 {
+					t.Fatalf("tool result not capped: %d chars", len(content))
+				}
+				if strings.Contains(content, "[truncated:") {
+					truncated = true
+				}
 			}
 		}
 	}
@@ -1276,7 +1389,7 @@ func TestCompactionSummaryMinCharsFromSettings(t *testing.T) {
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
 	settings.CompactionSummaryMinChars = 500
-	_, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, settings)
+	_, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings)
 	if err == nil {
 		t.Fatal("expected error when summary < settings min chars, got nil")
 	}
@@ -1304,7 +1417,7 @@ func TestMultiPassCompactionShrinksLaterChunks(t *testing.T) {
 	// summary reserve.
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	if _, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, settings); err != nil {
+	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()
@@ -1314,24 +1427,26 @@ func TestMultiPassCompactionShrinksLaterChunks(t *testing.T) {
 	}
 	firstContent := 0
 	for _, m := range adapter.requests[0].Messages {
-		firstContent += domain.EstimateTokens(m.Content)
+		firstContent += domain.EstimateTokens(coreMessageText(m))
 	}
 	secondContent := 0
 	for _, m := range adapter.requests[1].Messages {
-		secondContent += domain.EstimateTokens(m.Content)
+		secondContent += domain.EstimateTokens(coreMessageText(m))
 	}
 	// Second pass carries the huge running summary, so remaining message
 	// content must be smaller than the first pass's message payload.
 	firstMsgs := 0
 	for _, m := range adapter.requests[0].Messages {
-		if !strings.HasPrefix(m.Content, compactionSummaryPrefix) {
-			firstMsgs += domain.EstimateTokens(m.Content)
+		text := coreMessageText(m)
+		if !strings.HasPrefix(text, compactionSummaryPrefix) {
+			firstMsgs += domain.EstimateTokens(text)
 		}
 	}
 	secondMsgs := 0
 	for _, m := range adapter.requests[1].Messages {
-		if !strings.HasPrefix(m.Content, compactionSummaryPrefix) {
-			secondMsgs += domain.EstimateTokens(m.Content)
+		text := coreMessageText(m)
+		if !strings.HasPrefix(text, compactionSummaryPrefix) {
+			secondMsgs += domain.EstimateTokens(text)
 		}
 	}
 	if secondMsgs >= firstMsgs {
@@ -1366,7 +1481,7 @@ func TestCompactionArchiveStripsHydration(t *testing.T) {
 		Bus:           NewBus(),
 	}
 	adapter := &recordingCompleteAdapter{summaries: []string{validTestSummary}}
-	if _, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, domain.DefaultSettings()); err != nil {
+	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, domain.DefaultSettings()); err != nil {
 		t.Fatal(err)
 	}
 	for _, m := range store.archived {
@@ -1406,7 +1521,7 @@ func TestCompactionStripsToolOutputImageAttachments(t *testing.T) {
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	adapter := &recordingCompleteAdapter{summaries: []string{validTestSummary}}
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
-	if _, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, domain.DefaultSettings()); err != nil {
+	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, domain.DefaultSettings()); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()
@@ -1416,14 +1531,20 @@ func TestCompactionStripsToolOutputImageAttachments(t *testing.T) {
 	}
 	for _, req := range adapter.requests {
 		for _, msg := range req.Messages {
-			if msg.ToolResult == nil {
-				continue
-			}
-			if len(msg.ToolResult.Attachments) > 0 {
-				t.Fatalf("compaction must not replay image attachments: %+v", msg.ToolResult.Attachments)
-			}
-			if strings.Contains(msg.ToolResult.Content, huge) {
-				t.Fatal("compaction payload still contains image data URL")
+			for _, b := range msg.Blocks {
+				tr, ok := b.(core.ToolResultBlock)
+				if !ok {
+					continue
+				}
+				for _, rb := range tr.Content {
+					switch rb.(type) {
+					case core.ImageBlock, core.AudioBlock, core.VideoBlock:
+						t.Fatalf("compaction must not replay media attachments in tool results: %T", rb)
+					}
+				}
+				if strings.Contains(coreBlocksText(tr.Content), huge) {
+					t.Fatal("compaction payload still contains image data URL")
+				}
 			}
 		}
 	}
