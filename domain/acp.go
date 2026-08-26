@@ -420,14 +420,6 @@ func hostRootedPath(p string) bool {
 	return false
 }
 
-func relEscapesWorkspace(rel string) bool {
-	if rel == ".." {
-		return true
-	}
-	sep := string(filepath.Separator)
-	return strings.HasPrefix(rel, ".."+sep) || strings.HasPrefix(rel, "../")
-}
-
 // ResolveWithinWorkspace joins relative paths onto workspace and reports
 // whether the result stays inside workspace. Rooted paths are compared as-is.
 func ResolveWithinWorkspace(workspace, path string) (string, bool) {
@@ -440,7 +432,7 @@ func ResolveWithinWorkspace(workspace, path string) (string, bool) {
 		clean = filepath.Clean(filepath.Join(root, clean))
 	}
 	rel, err := filepath.Rel(root, clean)
-	if err != nil || relEscapesWorkspace(rel) {
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || strings.HasPrefix(rel, "../") {
 		return "", false
 	}
 	return clean, true
@@ -491,7 +483,7 @@ func WrapSessionAuthError(agent *AcpAgent, err error) error {
 	if len(agent.CachedAuthMethods) == 0 {
 		return err
 	}
-	if !isSessionAuthRequired(err) {
+	if !IsSessionAuthRequired(err) {
 		return err
 	}
 	methods := make([]string, 0, len(agent.CachedAuthMethods))
@@ -509,10 +501,6 @@ func WrapSessionAuthError(agent *AcpAgent, err error) error {
 		strings.Join(methods, ", "),
 		err,
 	)
-}
-
-func isSessionAuthRequired(err error) bool {
-	return IsSessionAuthRequired(err)
 }
 
 // IsSessionAuthRequired reports whether err indicates the ACP agent needs

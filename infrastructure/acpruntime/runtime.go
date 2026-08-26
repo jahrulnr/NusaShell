@@ -90,18 +90,6 @@ func (rt *Runtime) Close() {
 	rt.runs = map[string]*liveRun{}
 }
 
-func poolKey(agentID, workspace string) string {
-	return agentID + "\x00" + workspace
-}
-
-func launchEnv(agent *domain.AcpAgent) []string {
-	env := append([]string{}, os.Environ()...)
-	for k, v := range agent.Env {
-		env = append(env, k+"="+v)
-	}
-	return env
-}
-
 func (rt *Runtime) Probe(ctx context.Context, agent *domain.AcpAgent) (domain.AcpAgent, error) {
 	return rt.withThrowaway(ctx, agent, func(conn *acpclient.Conn) (domain.AcpAgent, error) {
 		init, err := conn.Initialize(ctx)
@@ -191,7 +179,11 @@ func (rt *Runtime) dialAgent(ctx context.Context, agent *domain.AcpAgent, cwd st
 		}
 		return acpclient.DialWire(ctx, w, handler)
 	}
-	return acpclient.Dial(ctx, agent.Command, agent.Args, launchEnv(agent), cwd, handler)
+	env := append([]string{}, os.Environ()...)
+	for k, v := range agent.Env {
+		env = append(env, k+"="+v)
+	}
+	return acpclient.Dial(ctx, agent.Command, agent.Args, env, cwd, handler)
 }
 
 func applyInitialize(agent *domain.AcpAgent, init acpclient.InitializeResult) {
@@ -425,7 +417,7 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 }
 
 func (rt *Runtime) ensureConn(agent *domain.AcpAgent, workspace string) (*pooledConn, error) {
-	key := poolKey(agent.ID, workspace)
+	key := agent.ID + "\x00" + workspace
 	rt.mu.Lock()
 	rt.initLocked()
 	if existing, ok := rt.conns[key]; ok {
@@ -481,7 +473,36 @@ func (pc *pooledConn) SessionUpdate(params acpclient.SessionUpdateParams) {
 		return
 	}
 	lr.mu.Lock()
-	chunk := chunkFromUpdate(params.Update)
+	u := params.Update
+	now := time.Now().UTC()
+	var chunk domain.AcpTranscriptChunk
+	switch u.SessionUpdate {
+	case "agent_message_chunk", "agent_thought_chunk", "user_message_chunk":
+		kind := "text"
+		if u.SessionUpdate == "agent_thought_chunk" {
+			kind = "thought"
+		}
+		text := ""
+		if u.Content != nil {
+			text = u.Content.Text
+		}
+		chunk = domain.AcpTranscriptChunk{Kind: kind, Text: text, At: now}
+	case "tool_call", "tool_call_update":
+		chunk = domain.AcpTranscriptChunk{
+			Kind: "tool", ToolID: u.ToolCallID, ToolTitle: u.Title, ToolKind: u.Kind, ToolStatus: u.Status, At: now,
+		}
+	case "plan":
+		var b strings.Builder
+		for _, e := range u.Entries {
+			b.WriteString(e.Status)
+			b.WriteString(" ")
+			b.WriteString(e.Content)
+			b.WriteString("\n")
+		}
+		chunk = domain.AcpTranscriptChunk{Kind: "plan", Text: strings.TrimSpace(b.String()), At: now}
+	case "usage_update":
+		chunk = domain.AcpTranscriptChunk{Kind: "usage", Text: fmt.Sprintf("%d/%d", u.Used, u.Size), At: now}
+	}
 	if chunk.Kind != "" {
 		lr.run.AppendTranscript(chunk)
 	}
@@ -615,38 +636,6 @@ func containedPath(workspace, p string) (string, error) {
 		return "", fmt.Errorf("path %q is outside the bound workspace", p)
 	}
 	return clean, nil
-}
-
-func chunkFromUpdate(u acpclient.SessionUpdate) domain.AcpTranscriptChunk {
-	now := time.Now().UTC()
-	switch u.SessionUpdate {
-	case "agent_message_chunk", "agent_thought_chunk", "user_message_chunk":
-		kind := "text"
-		if u.SessionUpdate == "agent_thought_chunk" {
-			kind = "thought"
-		}
-		text := ""
-		if u.Content != nil {
-			text = u.Content.Text
-		}
-		return domain.AcpTranscriptChunk{Kind: kind, Text: text, At: now}
-	case "tool_call", "tool_call_update":
-		return domain.AcpTranscriptChunk{
-			Kind: "tool", ToolID: u.ToolCallID, ToolTitle: u.Title, ToolKind: u.Kind, ToolStatus: u.Status, At: now,
-		}
-	case "plan":
-		var b strings.Builder
-		for _, e := range u.Entries {
-			b.WriteString(e.Status)
-			b.WriteString(" ")
-			b.WriteString(e.Content)
-			b.WriteString("\n")
-		}
-		return domain.AcpTranscriptChunk{Kind: "plan", Text: strings.TrimSpace(b.String()), At: now}
-	case "usage_update":
-		return domain.AcpTranscriptChunk{Kind: "usage", Text: fmt.Sprintf("%d/%d", u.Used, u.Size), At: now}
-	}
-	return domain.AcpTranscriptChunk{}
 }
 
 func (lr *liveRun) drivePrompt(text string) {

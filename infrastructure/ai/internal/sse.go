@@ -280,18 +280,14 @@ func OpenSSE(ctx context.Context, client *http.Client, url string, headers map[s
 		return resp, nil
 	}
 	defer resp.Body.Close()
-	message, _ := readAllLimit(resp.Body, 4096)
+	rawBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	message := string(rawBody)
 	return nil, &application.UpstreamError{
 		Kind:       application.KindHTTPStatus,
 		StatusCode: resp.StatusCode,
 		RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
 		Err:        fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(message)),
 	}
-}
-
-func readAllLimit(r io.Reader, n int64) (string, error) {
-	b, err := io.ReadAll(io.LimitReader(r, n))
-	return string(b), err
 }
 
 // DoJSON performs a request and decodes the JSON response into out.

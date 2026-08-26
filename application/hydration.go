@@ -80,7 +80,21 @@ type HydrationResult struct {
 // the other results still contribute.
 func (b *HydrationBuilder) Build() HydrationResult {
 	nonce := randomNonce()
-	slots := b.collectSlots()
+	var slots []hydrationSlot
+	for _, slot := range []hydrationSlot{
+		b.readRuntimeContext(),
+		b.readMemory(),
+		b.readSkills(),
+		b.readMcpList(),
+	} {
+		if slot.content != "" {
+			slots = append(slots, slot)
+		}
+	}
+	slots = append(slots, b.readToolList()...)
+	if slot := b.readTodoList(); slot.content != "" {
+		slots = append(slots, slot)
+	}
 	calls := make([]domain.ToolCall, 0, len(slots))
 	for i, slot := range slots {
 		args := slot.args
@@ -115,25 +129,6 @@ type hydrationSlot struct {
 	name    string
 	args    string // tool-call arguments rendered in the synthetic transcript ("{}" when empty)
 	content string
-}
-
-func (b *HydrationBuilder) collectSlots() []hydrationSlot {
-	var slots []hydrationSlot
-	for _, slot := range []hydrationSlot{
-		b.readRuntimeContext(),
-		b.readMemory(),
-		b.readSkills(),
-		b.readMcpList(),
-	} {
-		if slot.content != "" {
-			slots = append(slots, slot)
-		}
-	}
-	slots = append(slots, b.readToolList()...)
-	if slot := b.readTodoList(); slot.content != "" {
-		slots = append(slots, slot)
-	}
-	return slots
 }
 
 func (b *HydrationBuilder) readRuntimeContext() hydrationSlot {

@@ -246,7 +246,37 @@ func handlePrompt(req request) {
 				"locations":     []any{map[string]any{"path": "/tmp/workspace/README.md"}},
 			},
 		})
-		askPermission(p.SessionID)
+		{
+			mu.Lock()
+			permSeq++
+			permID := fmt.Sprintf("perm-%d", permSeq)
+			permCh := make(chan request, 1)
+			rpcWait[permID] = permCh
+			mu.Unlock()
+			permBody, _ := json.Marshal(response{
+				JSONRPC: "2.0",
+				ID:      permID,
+				Method:  "session/request_permission",
+				Params: map[string]any{
+					"sessionId": p.SessionID,
+					"toolCall": map[string]any{
+						"toolCallId": "call_edit",
+						"title":      "Edit README.md",
+						"kind":       "edit",
+						"locations":  []any{map[string]any{"path": "/tmp/workspace/README.md"}},
+					},
+					"options": []any{
+						map[string]any{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
+						map[string]any{"optionId": "reject-once", "name": "Reject", "kind": "reject_once"},
+					},
+				},
+			})
+			writeFrame(permBody)
+			select {
+			case <-permCh:
+			case <-time.After(30 * time.Second):
+			}
+		}
 	}
 	mu.Lock()
 	cancelCh := cancels[p.SessionID]
@@ -264,38 +294,6 @@ func handlePrompt(req request) {
 		reply(req.ID, map[string]any{"stopReason": "cancelled"})
 	default:
 		reply(req.ID, map[string]any{"stopReason": "end_turn"})
-	}
-}
-
-func askPermission(sessionID string) {
-	mu.Lock()
-	permSeq++
-	id := fmt.Sprintf("perm-%d", permSeq)
-	ch := make(chan request, 1)
-	rpcWait[id] = ch
-	mu.Unlock()
-	body, _ := json.Marshal(response{
-		JSONRPC: "2.0",
-		ID:      id,
-		Method:  "session/request_permission",
-		Params: map[string]any{
-			"sessionId": sessionID,
-			"toolCall": map[string]any{
-				"toolCallId": "call_edit",
-				"title":      "Edit README.md",
-				"kind":       "edit",
-				"locations":  []any{map[string]any{"path": "/tmp/workspace/README.md"}},
-			},
-			"options": []any{
-				map[string]any{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
-				map[string]any{"optionId": "reject-once", "name": "Reject", "kind": "reject_once"},
-			},
-		},
-	})
-	writeFrame(body)
-	select {
-	case <-ch:
-	case <-time.After(30 * time.Second):
 	}
 }
 

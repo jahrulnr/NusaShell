@@ -39,7 +39,11 @@ func (s *Store) Save(conversationID string, att domain.Attachment) (string, erro
 	if att.DataURL == "" {
 		return "", nil
 	}
-	data, err := decodeDataURL(att.DataURL)
+	_, dataURLData, ok := strings.Cut(att.DataURL, ",")
+	if !ok {
+		return "", fmt.Errorf("attachmentfs: decode %s: invalid data URL", att.Name)
+	}
+	data, err := base64.StdEncoding.DecodeString(dataURLData)
 	if err != nil {
 		return "", fmt.Errorf("attachmentfs: decode %s: %w", att.Name, err)
 	}
@@ -109,12 +113,4 @@ func (s *Store) ReadFile(absPath string) ([]byte, error) {
 		return nil, fmt.Errorf("attachmentfs: read: %w", err)
 	}
 	return data, nil
-}
-
-func decodeDataURL(dataURL string) ([]byte, error) {
-	_, data, ok := strings.Cut(dataURL, ",")
-	if !ok {
-		return nil, fmt.Errorf("invalid data URL")
-	}
-	return base64.StdEncoding.DecodeString(data)
 }

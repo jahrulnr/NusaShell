@@ -52,7 +52,9 @@ func attachmentFromDTO(item contracts.AttachmentDTO) (domain.Attachment, error) 
 			return domain.Attachment{}, errAttachment(attachment.Name + " is larger than 4 MiB")
 		}
 	case "image":
-		if !allowedImageMediaType(attachment.MediaType) {
+		switch attachment.MediaType {
+		case "image/png", "image/jpeg", "image/gif", "image/webp":
+		default:
 			return domain.Attachment{}, errAttachment("unsupported image attachment type")
 		}
 		if err := validateDataURL(attachment.DataURL, attachment.MediaType, attachment.Name); err != nil {
@@ -85,15 +87,6 @@ func attachmentFromDTO(item contracts.AttachmentDTO) (domain.Attachment, error) 
 type errAttachment string
 
 func (e errAttachment) Error() string { return string(e) }
-
-func allowedImageMediaType(mediaType string) bool {
-	switch mediaType {
-	case "image/png", "image/jpeg", "image/gif", "image/webp":
-		return true
-	default:
-		return false
-	}
-}
 
 func validateDataURL(dataURL, mediaType, name string) error {
 	prefix := "data:" + mediaType + ";base64,"

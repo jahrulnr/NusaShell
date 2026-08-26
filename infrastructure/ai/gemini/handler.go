@@ -220,7 +220,15 @@ func buildRequest(req application.ChatRequest, stream bool) *generateContentRequ
 		}
 	}
 	if len(req.Tools) > 0 {
-		out.Tools = buildTools(req.Tools)
+		decls := make([]FunctionDeclaration, 0, len(req.Tools))
+		for _, t := range req.Tools {
+			decls = append(decls, FunctionDeclaration{
+				Name:        aiutil.SanitizeToolName(t.Name),
+				Description: t.Description,
+				Parameters:  schemaFromMap(t.InputSchema),
+			})
+		}
+		out.Tools = []Tool{{FunctionDeclarations: decls}}
 	}
 	gc := &GenerationConfig{}
 	if req.MaxTokens > 0 {
@@ -246,9 +254,25 @@ func buildContents(msgs []application.ChatMessage) []Content {
 		case "user", "system":
 			c := Content{Role: "user", Parts: []Part{{Text: m.Content}}}
 			for _, att := range m.Attachments {
-				if blob := attachmentToBlob(att); blob != nil {
-					c.Parts = append(c.Parts, Part{InlineData: blob})
+				if att.DataURL == "" {
+					continue
 				}
+				// data:image/png;base64,iVBOR...
+				idx := strings.Index(att.DataURL, ",")
+				if idx < 0 {
+					continue
+				}
+				header := att.DataURL[:idx]
+				data := att.DataURL[idx+1:]
+				mime := ""
+				if strings.HasPrefix(header, "data:") {
+					mime = strings.TrimPrefix(header, "data:")
+					mime = strings.Split(mime, ";")[0]
+				}
+				if mime == "" || data == "" {
+					continue
+				}
+				c.Parts = append(c.Parts, Part{InlineData: &Blob{MimeType: mime, Data: data}})
 			}
 			out = append(out, c)
 		case "assistant":
@@ -287,18 +311,6 @@ func buildContents(msgs []application.ChatMessage) []Content {
 		}
 	}
 	return out
-}
-
-func buildTools(tools []application.ToolDef) []Tool {
-	decls := make([]FunctionDeclaration, 0, len(tools))
-	for _, t := range tools {
-		decls = append(decls, FunctionDeclaration{
-			Name:        aiutil.SanitizeToolName(t.Name),
-			Description: t.Description,
-			Parameters:  schemaFromMap(t.InputSchema),
-		})
-	}
-	return []Tool{{FunctionDeclarations: decls}}
 }
 
 func schemaFromMap(m map[string]any) *Schema {
@@ -340,26 +352,4 @@ func schemaFromMap(m map[string]any) *Schema {
 		}
 	}
 	return s
-}
-
-func attachmentToBlob(att domain.Attachment) *Blob {
-	if att.DataURL == "" {
-		return nil
-	}
-	// data:image/png;base64,iVBOR...
-	idx := strings.Index(att.DataURL, ",")
-	if idx < 0 {
-		return nil
-	}
-	header := att.DataURL[:idx]
-	data := att.DataURL[idx+1:]
-	mime := ""
-	if strings.HasPrefix(header, "data:") {
-		mime = strings.TrimPrefix(header, "data:")
-		mime = strings.Split(mime, ";")[0]
-	}
-	if mime == "" || data == "" {
-		return nil
-	}
-	return &Blob{MimeType: mime, Data: data}
 }

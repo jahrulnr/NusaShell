@@ -24,7 +24,9 @@ func encodeWav16(samples []int16) []byte {
 	buf.WriteString("data")
 	putU32(buf, uint32(dataSize))
 	for _, s := range samples {
-		putI16(buf, s)
+		b := make([]byte, 2)
+		binary.LittleEndian.PutUint16(b, uint16(s))
+		buf.Write(b)
 	}
 	return buf.Bytes()
 }
@@ -38,11 +40,5 @@ func putU32(buf *bytes.Buffer, v uint32) {
 func putU16(buf *bytes.Buffer, v uint16) {
 	b := make([]byte, 2)
 	binary.LittleEndian.PutUint16(b, v)
-	buf.Write(b)
-}
-
-func putI16(buf *bytes.Buffer, v int16) {
-	b := make([]byte, 2)
-	binary.LittleEndian.PutUint16(b, uint16(v))
 	buf.Write(b)
 }

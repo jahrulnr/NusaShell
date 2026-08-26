@@ -151,7 +151,11 @@ func (r *CapabilityRegistry) Resolve(ctx context.Context, name string, policy do
 	var match *domain.Plugin
 	var toolName string
 	for _, p := range plugins {
-		tools, ok := r.toolsOf(p)
+		var tools []contracts.MCPToolDTO
+		ok := r.MCP != nil
+		if ok {
+			tools, ok = r.MCP.ToolsFor(p.Manifest.MCPServerID())
+		}
 		for _, t := range tools {
 			if logicalCapability(p.Manifest.Name, t.Name) == name || t.Name == name {
 				match = p
@@ -302,13 +306,6 @@ func (r *CapabilityRegistry) disabled(ctx context.Context, providerID string) bo
 	}
 	d, ok, err := r.State.Get(ctx, providerID)
 	return err == nil && ok && d
-}
-
-func (r *CapabilityRegistry) toolsOf(p *domain.Plugin) ([]contracts.MCPToolDTO, bool) {
-	if r.MCP == nil {
-		return nil, false
-	}
-	return r.MCP.ToolsFor(p.Manifest.MCPServerID())
 }
 
 func logicalCapability(server, tool string) string {

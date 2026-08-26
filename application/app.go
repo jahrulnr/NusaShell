@@ -445,7 +445,44 @@ func NewApp(deps Deps) *App {
 			app.Bus.Emit(contracts.EventAskPending, askPendingEvent(conversationID, runID, callID, req))
 		})
 	}
-	app.wireAcpCallbacks()
+	// Wire the ACP runtime callbacks so run updates, completion,
+	// permission requests, and session mode changes reach the bus and the
+	// async completion path.
+	if sink, ok := app.Acp.(interface {
+		SetCallbacks(
+			onUpdate, onDone func(*domain.AcpRun),
+			onPerm func(*domain.AcpRun, domain.AcpPermissionRequest),
+			onMode func(*domain.AcpRun, string),
+		)
+	}); ok {
+		sink.SetCallbacks(
+			func(run *domain.AcpRun) { app.emitAcpRun(contracts.EventAcpRunUpdated, run) },
+			func(run *domain.AcpRun) {
+				app.emitAcpRun(contracts.EventAcpRunDone, run)
+				app.onAcpRunDone(run)
+			},
+			func(run *domain.AcpRun, req domain.AcpPermissionRequest) {
+				app.emitAcpRun(contracts.EventAcpRunUpdated, run)
+				perm := contracts.AcpPermissionDTO{
+					ID: req.ID, SessionID: req.SessionID, ToolTitle: req.ToolTitle, ToolKind: req.ToolKind,
+					Paths: req.Paths, PathCount: len(req.Paths),
+				}
+				if !req.RequestedAt.IsZero() {
+					perm.RequestedAt = req.RequestedAt.Format(timeRFC3339)
+				}
+				for _, o := range req.Options {
+					perm.Options = append(perm.Options, contracts.AcpPermissionOptionDTO{ID: o.ID, Name: o.Name, Kind: o.Kind})
+				}
+				app.Bus.Emit(contracts.EventAcpPermissionRequested, contracts.AcpPermissionEvent{RunID: run.ID, Permission: perm})
+			},
+			func(run *domain.AcpRun, source string) {
+				app.Bus.Emit(contracts.EventAcpSessionModeChanged, contracts.AcpModeChangedEvent{
+					RunID: run.ID, ModeID: run.CurrentModeID, Source: source,
+				})
+				app.emitAcpRun(contracts.EventAcpRunUpdated, run)
+			},
+		)
+	}
 	// Wire the lifecycle manager (decay + prune). Started by StartLifecycle,
 	// stopped by CloseLifecycle.
 	if deps.Memory != nil {

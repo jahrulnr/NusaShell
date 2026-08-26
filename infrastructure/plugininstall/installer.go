@@ -101,8 +101,19 @@ func (i *Installer) Catalog(ctx context.Context) ([]domain.PluginCatalogEntry, e
 		go func(key string, info catalogVersion) {
 			defer wg.Done()
 			manifestURL := i.rawBaseURL + "/" + key + "/manifest.json"
-			manifest, err := i.fetchManifest(ctx, manifestURL)
+			body, err := i.fetch(ctx, manifestURL)
 			if err != nil {
+				i.logger.Warn("plugin catalog: skipping entry", "id", key, "error", err)
+				return
+			}
+			var manifest domain.PluginManifest
+			if err := json.NewDecoder(body).Decode(&manifest); err != nil {
+				body.Close()
+				i.logger.Warn("plugin catalog: skipping entry", "id", key, "error", err)
+				return
+			}
+			body.Close()
+			if err := manifest.Validate(); err != nil {
 				i.logger.Warn("plugin catalog: skipping entry", "id", key, "error", err)
 				return
 			}
@@ -231,8 +242,8 @@ func (i *Installer) Install(ctx context.Context, req domain.PluginInstallRequest
 		return nil, err
 	}
 
-	if err := i.assertManifest(sourceDir); err != nil {
-		return nil, err
+	if _, err := os.Stat(filepath.Join(sourceDir, "manifest.json")); err != nil {
+		return nil, fmt.Errorf("plugin install: no manifest.json in %s", sourceDir)
 	}
 
 	return i.store.Install(sourceDir)
@@ -297,9 +308,21 @@ func (i *Installer) installFromGitHub(ctx context.Context, rawURL, subdir, ref, 
 		return "", fmt.Errorf("plugin install: extract repo: %w", err)
 	}
 
-	topDir, err := findSingleTopDir(stage)
+	entries, err := os.ReadDir(stage)
 	if err != nil {
 		return "", err
+	}
+	var topDir string
+	for _, e := range entries {
+		if e.IsDir() {
+			if topDir != "" {
+				return "", fmt.Errorf("archive has multiple top-level directories")
+			}
+			topDir = filepath.Join(stage, e.Name())
+		}
+	}
+	if topDir == "" {
+		return "", fmt.Errorf("archive has no top-level directory")
 	}
 
 	if subdir != "" {
@@ -403,30 +426,6 @@ func (i *Installer) resolveCatalogIcon(ctx context.Context, key, icon string) st
 		return pluginicon.FallbackIcon
 	}
 	return pluginicon.DataURL(data)
-}
-
-func (i *Installer) fetchManifest(ctx context.Context, url string) (*domain.PluginManifest, error) {
-	body, err := i.fetch(ctx, url)
-	if err != nil {
-		return nil, err
-	}
-	defer body.Close()
-
-	var m domain.PluginManifest
-	if err := json.NewDecoder(body).Decode(&m); err != nil {
-		return nil, fmt.Errorf("parse manifest: %w", err)
-	}
-	if err := m.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid manifest: %w", err)
-	}
-	return &m, nil
-}
-
-func (i *Installer) assertManifest(dir string) error {
-	if _, err := os.Stat(filepath.Join(dir, "manifest.json")); err != nil {
-		return fmt.Errorf("plugin install: no manifest.json in %s", dir)
-	}
-	return nil
 }
 
 func extractTarGz(rc io.ReadCloser, dest string) error {
@@ -553,26 +552,6 @@ func secureJoin(root, name string) (string, error) {
 		return "", fmt.Errorf("archive path escapes root: %s", name)
 	}
 	return absJoined, nil
-}
-
-func findSingleTopDir(root string) (string, error) {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return "", err
-	}
-	var top string
-	for _, e := range entries {
-		if e.IsDir() {
-			if top != "" {
-				return "", fmt.Errorf("archive has multiple top-level directories")
-			}
-			top = filepath.Join(root, e.Name())
-		}
-	}
-	if top == "" {
-		return "", fmt.Errorf("archive has no top-level directory")
-	}
-	return top, nil
 }
 
 func findUniqueManifestDir(root string) (string, error) {

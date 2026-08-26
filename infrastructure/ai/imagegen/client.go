@@ -246,7 +246,15 @@ func (c *Client) openaiEdits(ctx context.Context, req application.ImageGenReques
 		_ = writer.WriteField("background", background)
 	}
 	for i, ref := range req.References {
-		ext := extForMedia(ref.MediaType)
+		var ext string
+		switch strings.ToLower(strings.TrimSpace(ref.MediaType)) {
+		case "image/jpeg":
+			ext = ".jpg"
+		case "image/webp":
+			ext = ".webp"
+		default:
+			ext = ".png"
+		}
 		part, err := writer.CreateFormFile("image", fmt.Sprintf("ref-%d%s", i, ext))
 		if err != nil {
 			return nil, err
@@ -330,15 +338,4 @@ func (c *Client) generateOpenRouter(ctx context.Context, req application.ImageGe
 		return nil, err
 	}
 	return decodeImages(decoded, backendOpenRouter, req.Model)
-}
-
-func extForMedia(mediaType string) string {
-	switch strings.ToLower(strings.TrimSpace(mediaType)) {
-	case "image/jpeg":
-		return ".jpg"
-	case "image/webp":
-		return ".webp"
-	default:
-		return ".png"
-	}
 }

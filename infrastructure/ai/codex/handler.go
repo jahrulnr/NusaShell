@@ -210,7 +210,23 @@ func toCodexInput(msgs []application.ChatMessage, reasoningReplay bool) []codexI
 		case "user":
 			content := aiutil.StrJSON(m.Content)
 			if len(m.Attachments) > 0 {
-				content = aiutil.MustJSON(codexUserContent(m))
+				blocks := make([]map[string]any, 0, 1+len(m.Attachments))
+				if m.Content != "" {
+					blocks = append(blocks, map[string]any{"type": "input_text", "text": m.Content})
+				}
+				for _, attachment := range m.Attachments {
+					switch attachment.Type {
+					case "text":
+						blocks = append(blocks, map[string]any{"type": "input_text", "text": aiutil.TextAttachmentContent(attachment)})
+					case "image":
+						blocks = append(blocks, map[string]any{"type": "input_image", "image_url": attachment.DataURL})
+					case "file":
+						blocks = append(blocks, map[string]any{
+							"type": "input_file", "file_data": attachment.DataURL, "filename": attachment.Name,
+						})
+					}
+				}
+				content = aiutil.MustJSON(blocks)
 			}
 			out = append(out, codexInputItem{Role: "user", Content: content})
 		case "system":
@@ -260,26 +276,6 @@ func toCodexInput(msgs []application.ChatMessage, reasoningReplay bool) []codexI
 	// 9router stripStoredItemReferences.
 	out = stripStoredItemReferences(out)
 	return out
-}
-
-func codexUserContent(message application.ChatMessage) []map[string]any {
-	blocks := make([]map[string]any, 0, 1+len(message.Attachments))
-	if message.Content != "" {
-		blocks = append(blocks, map[string]any{"type": "input_text", "text": message.Content})
-	}
-	for _, attachment := range message.Attachments {
-		switch attachment.Type {
-		case "text":
-			blocks = append(blocks, map[string]any{"type": "input_text", "text": aiutil.TextAttachmentContent(attachment)})
-		case "image":
-			blocks = append(blocks, map[string]any{"type": "input_image", "image_url": attachment.DataURL})
-		case "file":
-			blocks = append(blocks, map[string]any{
-				"type": "input_file", "file_data": attachment.DataURL, "filename": attachment.Name,
-			})
-		}
-	}
-	return blocks
 }
 
 // stripStoredItemReferences removes server-generated item IDs from the

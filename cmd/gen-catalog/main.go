@@ -383,7 +383,15 @@ func fetchOpenRouter(ctx context.Context) (map[string]catalogEntry, error) {
 		case containsStr(outMods, "audio") && !containsStr(outMods, "text"):
 			e.Kind = "tts"
 		default:
-			if isEmbeddingByName(m.ID) {
+			lower := strings.ToLower(m.ID)
+			embedding := false
+			for _, p := range []string{"embed", "bge-", "e5-", "gte-", "voyage-", "text-embedding"} {
+				if strings.Contains(lower, p) {
+					embedding = true
+					break
+				}
+			}
+			if embedding {
 				e.Kind = "embedding"
 			} else {
 				e.Kind = "chat"
@@ -392,16 +400,6 @@ func fetchOpenRouter(ctx context.Context) (map[string]catalogEntry, error) {
 		out[m.ID] = e
 	}
 	return out, nil
-}
-
-func isEmbeddingByName(id string) bool {
-	lower := strings.ToLower(id)
-	for _, p := range []string{"embed", "bge-", "e5-", "gte-", "voyage-", "text-embedding"} {
-		if strings.Contains(lower, p) {
-			return true
-		}
-	}
-	return false
 }
 
 // ---- helpers ----

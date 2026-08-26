@@ -19,7 +19,13 @@ type Zenity struct {
 func (z Zenity) Choose(ctx context.Context) (string, error) {
 	selectDirectory := z.selectDirectory
 	if selectDirectory == nil {
-		selectDirectory = openDirectory
+		selectDirectory = func(ctx context.Context) (string, error) {
+			return zenity.SelectFile(
+				zenity.Context(ctx),
+				zenity.Directory(),
+				zenity.Title("Choose NusaShell workspace folder"),
+			)
+		}
 	}
 
 	directory, err := selectDirectory(ctx)
@@ -27,12 +33,4 @@ func (z Zenity) Choose(ctx context.Context) (string, error) {
 		return "", context.Canceled
 	}
 	return directory, err
-}
-
-func openDirectory(ctx context.Context) (string, error) {
-	return zenity.SelectFile(
-		zenity.Context(ctx),
-		zenity.Directory(),
-		zenity.Title("Choose NusaShell workspace folder"),
-	)
 }

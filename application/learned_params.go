@@ -2,7 +2,6 @@ package application
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 
@@ -164,15 +163,6 @@ func isLearnable400(err error) bool {
 		return false
 	}
 	return upstream.StatusCode == 400
-}
-
-// formatLearnedActionLog renders a short log line for a learned action.
-func formatLearnedActionLog(action domain.LearnedParamAction, provider, model, param string) string {
-	verb := "strip"
-	if action == domain.LearnedActionInject {
-		verb = "inject"
-	}
-	return fmt.Sprintf("learned %s: %s for %s/%s", verb, param, provider, model)
 }
 
 // stripReasoningContentParam is the param name we inject/strip for

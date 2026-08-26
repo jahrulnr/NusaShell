@@ -89,10 +89,19 @@ func validateImageEnum(field, value string, allowed ...string) error {
 
 func (a *App) executeGenerateImage(run *TurnRun, toolCall domain.ToolCall, settings domain.Settings) (string, []domain.Attachment, error) {
 	started := time.Now()
-	if err := a.acquireImageGen(run.Ctx); err != nil {
-		return "error: " + err.Error(), nil, err
+	if a.imageGenSem != nil {
+		select {
+		case a.imageGenSem <- struct{}{}:
+		case <-run.Ctx.Done():
+			err := run.Ctx.Err()
+			return "error: " + err.Error(), nil, err
+		}
 	}
-	defer a.releaseImageGen()
+	defer func() {
+		if a.imageGenSem != nil {
+			<-a.imageGenSem
+		}
+	}()
 
 	args, err := parseGenerateImageArgs(toolCall.Args)
 	if err != nil {
@@ -200,7 +209,9 @@ func (a *App) loadImageReferences(paths []string) ([]ImageReference, error) {
 		if media == "" {
 			media = sniffMediaType(data)
 		}
-		if !allowedGeneratedMediaType(media) {
+		switch strings.ToLower(strings.TrimSpace(media)) {
+		case "image/png", "image/jpeg", "image/webp":
+		default:
 			return nil, fmt.Errorf("referenced image %q has unsupported type %q", path, media)
 		}
 		out = append(out, ImageReference{MediaType: media, Data: data})
@@ -256,15 +267,6 @@ func generatedImageBaseName(toolCallID string, index, total int) string {
 	return "gen-" + id
 }
 
-func allowedGeneratedMediaType(mediaType string) bool {
-	switch strings.ToLower(strings.TrimSpace(mediaType)) {
-	case "image/png", "image/jpeg", "image/webp":
-		return true
-	default:
-		return false
-	}
-}
-
 func sanitizeFilePart(value string) string {
 	var b strings.Builder
 	for _, r := range value {
@@ -302,7 +304,27 @@ func (a *App) generateImageWithCodexFailover(run *TurnRun, provider *domain.Prov
 		if err != nil {
 			return nil, err
 		}
-		result, err := a.generateImageWithRetry(run.Ctx, generator, req)
+		var result *ImageGenResult
+		for retry := 1; ; retry++ {
+			result, err = generator.Generate(run.Ctx, req)
+			if err == nil || retry >= maxProviderAttempts {
+				break
+			}
+			delay, retryable := providerRetryDelay(err, retry)
+			if !retryable {
+				break
+			}
+			a.log("warn", "image", "retrying image generation (%d/%d) after %s: %v", retry, maxProviderAttempts, delay.Round(time.Millisecond), err)
+			sleeper := a.retrySleeper
+			if sleeper == nil {
+				sleeper = sleepForRetry
+			}
+			if serr := sleeper(run.Ctx, delay); serr != nil {
+				err = serr
+				result = nil
+				break
+			}
+		}
 		if err == nil {
 			return result, nil
 		}
@@ -341,27 +363,6 @@ func (a *App) generateImageWithCodexFailover(run *TurnRun, provider *domain.Prov
 	}
 }
 
-func (a *App) generateImageWithRetry(ctx context.Context, generator ImageGenerator, req ImageGenRequest) (*ImageGenResult, error) {
-	for retry := 1; ; retry++ {
-		result, err := generator.Generate(ctx, req)
-		if err == nil || retry >= maxProviderAttempts {
-			return result, err
-		}
-		delay, retryable := providerRetryDelay(err, retry)
-		if !retryable {
-			return result, err
-		}
-		a.log("warn", "image", "retrying image generation (%d/%d) after %s: %v", retry, maxProviderAttempts, delay.Round(time.Millisecond), err)
-		sleeper := a.retrySleeper
-		if sleeper == nil {
-			sleeper = sleepForRetry
-		}
-		if err := sleeper(ctx, delay); err != nil {
-			return nil, err
-		}
-	}
-}
-
 func formatImageGenFailure(err error) string {
 	if err == nil {
 		return "error: image generation failed"
@@ -392,25 +393,6 @@ func failGenerateImage(msg string) (string, []domain.Attachment, error) {
 		msg = "image generation failed"
 	}
 	return "error: " + msg, nil, fmt.Errorf("%s", msg)
-}
-
-func (a *App) acquireImageGen(ctx context.Context) error {
-	if a == nil || a.imageGenSem == nil {
-		return nil
-	}
-	select {
-	case a.imageGenSem <- struct{}{}:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (a *App) releaseImageGen() {
-	if a == nil || a.imageGenSem == nil {
-		return
-	}
-	<-a.imageGenSem
 }
 
 func (a *App) hydrateAttachmentDataURLs(atts []domain.Attachment) []domain.Attachment {

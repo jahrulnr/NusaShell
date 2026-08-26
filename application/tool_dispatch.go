@@ -54,7 +54,7 @@ var dispatchFamilies = []dispatchFamily{
 				pEnum("category", "Memory category (save/search/list)", "project", "user", "task", "general"),
 				pStr("project", "Optional project/workspace label"),
 				pStr("task", "Optional task label (save/search)"),
-				pArr("tags", "Optional tags; search requires ALL to match"),
+				schemaProp{"tags", map[string]any{"type": "array", "description": "Optional tags; search requires ALL to match", "items": map[string]any{"type": "string"}}},
 				pEnum("target", "replace: primary|fragment · list: primary|fragments (default fragments)", "primary", "fragment", "fragments"),
 				pStr("old_text", "Primary substring to replace; omit to rewrite the entire body (op=replace target=primary)"),
 				pStr("id", "Fragment id (op=replace target=fragment / op=delete)"),
@@ -108,10 +108,6 @@ func pEnum(name, desc string, vals ...string) schemaProp {
 		anyVals[i] = v
 	}
 	return schemaProp{name, map[string]any{"type": "string", "description": desc, "enum": anyVals}}
-}
-
-func pArr(name, desc string) schemaProp {
-	return schemaProp{name, map[string]any{"type": "array", "description": desc, "items": map[string]any{"type": "string"}}}
 }
 
 // objSchema builds a dispatcher input schema. The first property is the

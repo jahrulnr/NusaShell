@@ -130,7 +130,8 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 		}
 		raw := make([]json.RawMessage, 0, len(chunks))
 		for _, c := range chunks {
-			raw = append(raw, mustJSON(c))
+			b, _ := json.Marshal(c)
+			raw = append(raw, b)
 		}
 		return contracts.CILogsResult{Chunks: raw}, nil
 	case contracts.MethodCIJobsGet:

@@ -46,7 +46,19 @@ func ParseYAML(raw []byte) (*domain.WorkflowDefinition, error) {
 		}
 		w.Defaults.Timeout = d
 	}
-	for i, t := range flattenTriggers(doc.Triggers) {
+	var triggers []yamlTrigger
+	switch doc.Triggers.Kind {
+	case yaml.SequenceNode:
+		_ = doc.Triggers.Decode(&triggers)
+	case yaml.MappingNode:
+		var m yamlTriggerMap
+		_ = doc.Triggers.Decode(&m)
+		if m.Manual {
+			v := true
+			triggers = []yamlTrigger{{Manual: &v}}
+		}
+	}
+	for i, t := range triggers {
 		tr, err := parseTrigger(t, i)
 		if err != nil {
 			return nil, err
@@ -61,7 +73,26 @@ func ParseYAML(raw []byte) (*domain.WorkflowDefinition, error) {
 		w.Jobs = append(w.Jobs, job)
 	}
 	// YAML maps iterate randomly; keep definition order from the node if possible.
-	if ordered := jobOrder(raw); len(ordered) == len(w.Jobs) {
+	var ordered []string
+	var root yaml.Node
+	if err := yaml.Unmarshal(raw, &root); err == nil && len(root.Content) > 0 {
+		doc := root.Content[0]
+		if doc.Kind == yaml.MappingNode {
+			for i := 0; i+1 < len(doc.Content); i += 2 {
+				if doc.Content[i].Value != "jobs" {
+					continue
+				}
+				jobs := doc.Content[i+1]
+				if jobs.Kind == yaml.MappingNode {
+					for j := 0; j+1 < len(jobs.Content); j += 2 {
+						ordered = append(ordered, jobs.Content[j].Value)
+					}
+				}
+				break
+			}
+		}
+	}
+	if len(ordered) == len(w.Jobs) {
 		index := map[string]domain.Job{}
 		for _, j := range w.Jobs {
 			index[j.ID] = j
@@ -95,26 +126,6 @@ type yamlDoc struct {
 
 type yamlTriggerMap struct {
 	Manual bool `yaml:"manual"`
-}
-
-func flattenTriggers(n yaml.Node) []yamlTrigger {
-	if n.Kind == 0 {
-		return nil
-	}
-	if n.Kind == yaml.SequenceNode {
-		var list []yamlTrigger
-		_ = n.Decode(&list)
-		return list
-	}
-	if n.Kind == yaml.MappingNode {
-		var m yamlTriggerMap
-		_ = n.Decode(&m)
-		if m.Manual {
-			v := true
-			return []yamlTrigger{{Manual: &v}}
-		}
-	}
-	return nil
 }
 
 type yamlConcurrency struct {
@@ -401,30 +412,4 @@ func (n *yamlNeeds) UnmarshalYAML(value *yaml.Node) error {
 
 func (n yamlNeeds) parse() ([]domain.JobNeed, error) {
 	return n.ids, nil
-}
-
-func jobOrder(raw []byte) []string {
-	var root yaml.Node
-	if err := yaml.Unmarshal(raw, &root); err != nil || len(root.Content) == 0 {
-		return nil
-	}
-	doc := root.Content[0]
-	if doc.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(doc.Content); i += 2 {
-		if doc.Content[i].Value != "jobs" {
-			continue
-		}
-		jobs := doc.Content[i+1]
-		if jobs.Kind != yaml.MappingNode {
-			return nil
-		}
-		var ids []string
-		for j := 0; j+1 < len(jobs.Content); j += 2 {
-			ids = append(ids, jobs.Content[j].Value)
-		}
-		return ids
-	}
-	return nil
 }

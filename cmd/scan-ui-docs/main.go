@@ -87,18 +87,32 @@ func main() {
 		dest = filepath.Join(root, "resources", "agent", "docs")
 	}
 
-	m, err := loadMap(uiMapPath)
+	b, err := os.ReadFile(uiMapPath)
 	if err != nil {
 		fail("load ui-map: %v", err)
+	}
+	var m uiMap
+	if err := json.Unmarshal(b, &m); err != nil {
+		fail("parse ui-map: %v", err)
 	}
 	html, err := os.ReadFile(htmlPath)
 	if err != nil {
 		fail("read html: %v", err)
 	}
-	jsFiles, err := walkJS(jsDir)
+	var jsFiles []string
+	err = filepath.WalkDir(jsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".js") {
+			jsFiles = append(jsFiles, path)
+		}
+		return nil
+	})
 	if err != nil {
 		fail("walk js: %v", err)
 	}
+	sort.Strings(jsFiles)
 	jsSources := make([]string, 0, len(jsFiles))
 	for _, f := range jsFiles {
 		b, err := os.ReadFile(f)
@@ -108,10 +122,35 @@ func main() {
 		jsSources = append(jsSources, string(b))
 	}
 
-	htmlViews := collectViews(string(html))
-	htmlIDs := collectHTMLIDs(string(html))
-	jsIDs := collectJSIDs(jsSources)
-	sourceIDs := union(htmlIDs, jsIDs)
+	htmlViews := map[string]bool{}
+	for _, vm := range viewRegex.FindAllStringSubmatch(string(html), -1) {
+		if len(vm) > 1 {
+			htmlViews[vm[1]] = true
+		}
+	}
+	htmlIDs := map[string]bool{}
+	for _, im := range htmlIDRegex.FindAllStringSubmatch(string(html), -1) {
+		if len(im) > 1 {
+			htmlIDs[im[1]] = true
+		}
+	}
+	jsIDs := map[string]bool{}
+	for _, src := range jsSources {
+		for _, jm := range jsIDRegex.FindAllStringSubmatch(src, -1) {
+			for _, g := range jm[1:] {
+				if g != "" {
+					jsIDs[g] = true
+				}
+			}
+		}
+	}
+	sourceIDs := make(map[string]bool, len(htmlIDs)+len(jsIDs))
+	for k := range htmlIDs {
+		sourceIDs[k] = true
+	}
+	for k := range jsIDs {
+		sourceIDs[k] = true
+	}
 
 	var errors []string
 
@@ -188,81 +227,6 @@ func main() {
 	fmt.Printf("UI docs %s: %d views (scanned %d JS files in %s)\n", mode, generated, len(jsFiles), filepath.Join("frontend", "js"))
 }
 
-func loadMap(path string) (*uiMap, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var m uiMap
-	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	return &m, nil
-}
-
-func walkJS(dir string) ([]string, error) {
-	var files []string
-	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if strings.HasSuffix(d.Name(), ".js") {
-			files = append(files, path)
-		}
-		return nil
-	})
-	sort.Strings(files)
-	return files, err
-}
-
-func collectViews(html string) map[string]bool {
-	views := map[string]bool{}
-	for _, m := range viewRegex.FindAllStringSubmatch(html, -1) {
-		if len(m) > 1 {
-			views[m[1]] = true
-		}
-	}
-	return views
-}
-
-func collectHTMLIDs(html string) map[string]bool {
-	ids := map[string]bool{}
-	for _, m := range htmlIDRegex.FindAllStringSubmatch(html, -1) {
-		if len(m) > 1 {
-			ids[m[1]] = true
-		}
-	}
-	return ids
-}
-
-func collectJSIDs(sources []string) map[string]bool {
-	ids := map[string]bool{}
-	for _, src := range sources {
-		for _, m := range jsIDRegex.FindAllStringSubmatch(src, -1) {
-			for _, g := range m[1:] {
-				if g != "" {
-					ids[g] = true
-				}
-			}
-		}
-	}
-	return ids
-}
-
-func union(a, b map[string]bool) map[string]bool {
-	out := make(map[string]bool, len(a)+len(b))
-	for k := range a {
-		out[k] = true
-	}
-	for k := range b {
-		out[k] = true
-	}
-	return out
-}
-
 // containsSelector reports whether any JS source mentions the CSS selector
 // string (e.g. ".agent-tool-stop"), used for controls without a static id.
 func containsSelector(sources []string, selector string) bool {
@@ -293,43 +257,6 @@ func controlRef(id string, c uiControl) string {
 	return "`#" + id + "`"
 }
 
-func renderControl(id string, c uiControl, all map[string]uiControl) string {
-	label := c.Label
-	if label == "" {
-		label = id
-	}
-	var lines []string
-	lines = append(lines, fmt.Sprintf("- **%s** (%s):", label, controlRef(id, c)))
-	if c.Section != "" {
-		lines = append(lines, "  - Section: "+c.Section)
-	}
-	if c.Type != "" {
-		lines = append(lines, "  - Type: "+c.Type)
-	}
-	if c.Action != "" {
-		lines = append(lines, "  - Action: "+c.Action)
-	}
-	if c.Shortcut != "" {
-		lines = append(lines, "  - Shortcut: "+c.Shortcut)
-	}
-	if len(c.Related) > 0 {
-		var parts []string
-		for _, rid := range c.Related {
-			r, ok := all[rid]
-			rl := rid
-			if ok && r.Label != "" {
-				rl = r.Label
-			}
-			parts = append(parts, fmt.Sprintf("%s (%s)", rl, controlRef(rid, r)))
-		}
-		lines = append(lines, "  - Related: "+strings.Join(parts, ", "))
-	}
-	if c.Notes != "" {
-		lines = append(lines, "  - Notes: "+c.Notes)
-	}
-	return strings.Join(lines, "\n")
-}
-
 func renderView(id string, v uiView, controls map[string]uiControl) string {
 	title := v.Title
 	if title == "" {
@@ -357,7 +284,40 @@ func renderView(id string, v uiView, controls map[string]uiControl) string {
 				lines = append(lines, fmt.Sprintf("- **`#%s`** (missing map entry)", cid), "")
 				continue
 			}
-			lines = append(lines, renderControl(cid, c, controls), "")
+			label := c.Label
+			if label == "" {
+				label = cid
+			}
+			var cl []string
+			cl = append(cl, fmt.Sprintf("- **%s** (%s):", label, controlRef(cid, c)))
+			if c.Section != "" {
+				cl = append(cl, "  - Section: "+c.Section)
+			}
+			if c.Type != "" {
+				cl = append(cl, "  - Type: "+c.Type)
+			}
+			if c.Action != "" {
+				cl = append(cl, "  - Action: "+c.Action)
+			}
+			if c.Shortcut != "" {
+				cl = append(cl, "  - Shortcut: "+c.Shortcut)
+			}
+			if len(c.Related) > 0 {
+				var parts []string
+				for _, rid := range c.Related {
+					r, ok := controls[rid]
+					rl := rid
+					if ok && r.Label != "" {
+						rl = r.Label
+					}
+					parts = append(parts, fmt.Sprintf("%s (%s)", rl, controlRef(rid, r)))
+				}
+				cl = append(cl, "  - Related: "+strings.Join(parts, ", "))
+			}
+			if c.Notes != "" {
+				cl = append(cl, "  - Notes: "+c.Notes)
+			}
+			lines = append(lines, strings.Join(cl, "\n"), "")
 		}
 	}
 	return strings.TrimRight(strings.Join(lines, "\n"), "\n") + "\n"

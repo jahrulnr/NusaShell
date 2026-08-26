@@ -148,25 +148,21 @@ func (a *App) handleProvidersDelete(req contracts.ProviderIDRequest) (any, *cont
 	if err := a.Providers.Delete(req.ID); err != nil {
 		return nil, rpcInternal(err)
 	}
-	a.deleteProviderCredentials(req.ID, name)
-	a.log("info", "ai", "provider deleted: %s", name)
-	return map[string]bool{"ok": true}, nil
-}
-
-func (a *App) deleteProviderCredentials(providerID, providerName string) {
-	if err := a.Credentials.Delete(providerID); err != nil {
-		a.log("warn", "ai", "failed to delete credential for %s: %v", providerName, err)
+	if err := a.Credentials.Delete(req.ID); err != nil {
+		a.log("warn", "ai", "failed to delete credential for %s: %v", name, err)
 	}
-	ids, err := a.Credentials.ListByPrefix(accountKeyPrefix(providerID))
+	ids, err := a.Credentials.ListByPrefix(accountKeyPrefix(req.ID))
 	if err != nil {
-		a.log("warn", "ai", "failed to list account credentials for %s: %v", providerName, err)
-		return
-	}
-	for _, id := range ids {
-		if err := a.Credentials.Delete(id); err != nil {
-			a.log("warn", "ai", "failed to delete credential %s: %v", id, err)
+		a.log("warn", "ai", "failed to list account credentials for %s: %v", name, err)
+	} else {
+		for _, id := range ids {
+			if err := a.Credentials.Delete(id); err != nil {
+				a.log("warn", "ai", "failed to delete credential %s: %v", id, err)
+			}
 		}
 	}
+	a.log("info", "ai", "provider deleted: %s", name)
+	return map[string]bool{"ok": true}, nil
 }
 
 func (a *App) providerWithKey(id string) (*domain.Provider, string, *contracts.RPCError) {

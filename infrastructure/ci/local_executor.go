@@ -45,10 +45,45 @@ func (e *LocalExecutor) RunStep(ctx context.Context, req application.RunStepRequ
 	if req.Step.Run == "" {
 		return application.StepResult{Error: "local executor only runs shell steps"}, fmt.Errorf("no run command")
 	}
-	shell, args := selectShell(req.Step.Shell, req.Step.Run)
+	shell := req.Step.Shell
+	if shell == "" || shell == "auto" {
+		if runtime.GOOS == "windows" {
+			shell = "powershell"
+		} else {
+			shell = "sh"
+		}
+	}
+	var args []string
+	switch shell {
+	case "bash":
+		args = []string{"-c", req.Step.Run}
+	case "pwsh":
+		args = []string{"-NoProfile", "-NonInteractive", "-Command", req.Step.Run}
+	case "powershell":
+		args = []string{"-NoProfile", "-NonInteractive", "-Command", req.Step.Run}
+	default:
+		args = []string{"-c", req.Step.Run}
+	}
 	cmd := exec.Command(shell, args...)
 	cmd.Dir = req.Workspace.Dir
-	cmd.Env = flattenEnv(req.Env)
+	env := os.Environ()
+	if len(req.Env) > 0 {
+		seen := map[string]int{}
+		for i, kv := range env {
+			if j := strings.IndexByte(kv, '='); j > 0 {
+				seen[kv[:j]] = i
+			}
+		}
+		for k, v := range req.Env {
+			entry := k + "=" + v
+			if i, ok := seen[k]; ok {
+				env[i] = entry
+			} else {
+				env = append(env, entry)
+			}
+		}
+	}
+	cmd.Env = env
 	setProcGroup(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &chunkWriter{req: req, stream: "stdout", buf: &stdout}
@@ -100,49 +135,6 @@ func (w *chunkWriter) Write(p []byte) (int, error) {
 		})
 	}
 	return len(p), nil
-}
-
-func selectShell(explicit, command string) (string, []string) {
-	shell := explicit
-	if shell == "" || shell == "auto" {
-		if runtime.GOOS == "windows" {
-			shell = "powershell"
-		} else {
-			shell = "sh"
-		}
-	}
-	switch shell {
-	case "bash":
-		return "bash", []string{"-c", command}
-	case "pwsh":
-		return "pwsh", []string{"-NoProfile", "-NonInteractive", "-Command", command}
-	case "powershell":
-		return "powershell", []string{"-NoProfile", "-NonInteractive", "-Command", command}
-	default:
-		return "sh", []string{"-c", command}
-	}
-}
-
-func flattenEnv(env map[string]string) []string {
-	base := os.Environ()
-	if len(env) == 0 {
-		return base
-	}
-	seen := map[string]int{}
-	for i, kv := range base {
-		if j := strings.IndexByte(kv, '='); j > 0 {
-			seen[kv[:j]] = i
-		}
-	}
-	for k, v := range env {
-		entry := k + "=" + v
-		if i, ok := seen[k]; ok {
-			base[i] = entry
-		} else {
-			base = append(base, entry)
-		}
-	}
-	return base
 }
 
 func CIEnv(run *domain.WorkflowRun, job domain.JobRun, step domain.StepRun, workspace string) map[string]string {

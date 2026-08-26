@@ -41,13 +41,23 @@ func (a *App) handleTTSSettingsInstallStart(req contracts.TTSInstallStartRequest
 	if !knownTTSVoice(req.VoiceID) {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: fmt.Sprintf("unknown voice %q", req.VoiceID)}
 	}
-	if !a.ttsInstallBegin() {
+	a.ttsInstallMu.Lock()
+	begin := !a.ttsInstallActive
+	if begin {
+		a.ttsInstallActive = true
+	}
+	a.ttsInstallMu.Unlock()
+	if !begin {
 		return contracts.TTSInstallStartResult{Started: false, Running: true, Message: "an offline TTS install is already running"}, nil
 	}
 
 	ctx := context.Background()
 	go func() {
-		defer a.ttsInstallEnd()
+		defer func() {
+			a.ttsInstallMu.Lock()
+			a.ttsInstallActive = false
+			a.ttsInstallMu.Unlock()
+		}()
 		err := a.TTSInstaller.Install(ctx, req.VoiceID, func(p contracts.TTSInstallProgressDTO) {
 			p.VoiceID = req.VoiceID // stamp once here; adapters fill phase/bytes only
 			a.Bus.Emit(contracts.EventTTSInstallProgress, p)
@@ -72,22 +82,6 @@ func (a *App) ttsInstallRunning() bool {
 	a.ttsInstallMu.Lock()
 	defer a.ttsInstallMu.Unlock()
 	return a.ttsInstallActive
-}
-
-func (a *App) ttsInstallBegin() bool {
-	a.ttsInstallMu.Lock()
-	defer a.ttsInstallMu.Unlock()
-	if a.ttsInstallActive {
-		return false
-	}
-	a.ttsInstallActive = true
-	return true
-}
-
-func (a *App) ttsInstallEnd() {
-	a.ttsInstallMu.Lock()
-	defer a.ttsInstallMu.Unlock()
-	a.ttsInstallActive = false
 }
 
 // knownTTSVoice validates against the wire-visible catalog without

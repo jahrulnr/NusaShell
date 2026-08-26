@@ -201,7 +201,19 @@ func (c *Conversation) recoverRunningTurn(reason string) bool {
 		if m.Role != RoleAssistant {
 			continue
 		}
-		interruptedTools := interruptAbandonedTools(m)
+		interruptedTools := false
+		for i := range m.ToolCalls {
+			if abandonTool(&m.ToolCalls[i]) {
+				interruptedTools = true
+			}
+		}
+		for i := range m.Steps {
+			for j := range m.Steps[i].ToolCalls {
+				if abandonTool(&m.Steps[i].ToolCalls[j]) {
+					interruptedTools = true
+				}
+			}
+		}
 		if m.Status == "" || interruptedTools {
 			m.Status = StatusInterrupted
 			if m.Error == "" {
@@ -211,23 +223,6 @@ func (c *Conversation) recoverRunningTurn(reason string) bool {
 	}
 	c.Touch()
 	return true
-}
-
-func interruptAbandonedTools(m *Message) bool {
-	changed := false
-	for i := range m.ToolCalls {
-		if abandonTool(&m.ToolCalls[i]) {
-			changed = true
-		}
-	}
-	for i := range m.Steps {
-		for j := range m.Steps[i].ToolCalls {
-			if abandonTool(&m.Steps[i].ToolCalls[j]) {
-				changed = true
-			}
-		}
-	}
-	return changed
 }
 
 func abandonTool(tc *ToolCall) bool {
@@ -245,7 +240,10 @@ func abandonTool(tc *ToolCall) bool {
 func (c *Conversation) DefaultTitle() string {
 	for _, m := range c.Messages {
 		if m.Role == RoleUser {
-			return truncateRunes(m.Content, 48)
+			if utf8.RuneCountInString(m.Content) <= 48 {
+				return m.Content
+			}
+			return string([]rune(m.Content)[:48]) + "…"
 		}
 	}
 	return "Untitled"
@@ -347,17 +345,6 @@ func estimateImageTokens(dataURL string) int {
 
 func estimateToolCallTokens(tc ToolCall) int {
 	return EstimateTokens(tc.Name) + EstimateTokens(tc.Args) + EstimateTokens(tc.Output)
-}
-
-func truncateRunes(s string, n int) string {
-	if n <= 0 || s == "" {
-		return s
-	}
-	if utf8.RuneCountInString(s) <= n {
-		return s
-	}
-	runes := []rune(s)
-	return string(runes[:n]) + "…"
 }
 
 // CompactionSummaryPrefix is the prefix that identifies a compaction summary
@@ -541,20 +528,10 @@ func truncateMessageContent(m Message, tokens int) Message {
 	}
 	maxBytes := tokens * 4
 	if len(m.Content) > maxBytes {
-		m.Content = truncateToBytes(m.Content, maxBytes)
+		for maxBytes > 0 && !utf8.RuneStart(m.Content[maxBytes]) {
+			maxBytes--
+		}
+		m.Content = m.Content[:maxBytes]
 	}
 	return m
-}
-
-func truncateToBytes(s string, maxBytes int) string {
-	if maxBytes <= 0 {
-		return ""
-	}
-	if len(s) <= maxBytes {
-		return s
-	}
-	for maxBytes > 0 && !utf8.RuneStart(s[maxBytes]) {
-		maxBytes--
-	}
-	return s[:maxBytes]
 }

@@ -66,22 +66,6 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 	return adapter, conversation, settings, err
 }
 
-func (a *App) toolDefinitions() []ToolDef {
-	// Roster for providers: non-family built-ins plus the dispatcher family
-	// definitions. Root+op is the single naming layer (see
-	// docs/design/tool-dispatchers.md).
-	tools := append(a.Toolbox.ListTools(), DispatcherToolInfos()...)
-	definitions := make([]ToolDef, 0, len(tools))
-	for _, tool := range tools {
-		definitions = append(definitions, ToolDef{
-			Name:        tool.Name,
-			Description: tool.Description,
-			InputSchema: tool.InputSchema,
-		})
-	}
-	return definitions
-}
-
 func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
 	for retry := 1; ; retry++ {
 		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration, promptCache, caps)
@@ -419,10 +403,28 @@ func (a *App) persistTurnRound(conversationID, messageID, model string, round st
 
 	newToolCalls := make([]domain.ToolCall, 0, len(round.Response.ToolCalls))
 	for _, toolCall := range round.Response.ToolCalls {
-		if !a.hasToolCall(conversation, messageID, toolCall.ID) {
-			conversation = a.appendToolCall(conversation, messageID, toolCall)
-			newToolCalls = append(newToolCalls, toolCall)
+		found := false
+		for i := range conversation.Messages {
+			if conversation.Messages[i].ID != messageID {
+				continue
+			}
+			for _, tc := range conversation.Messages[i].ToolCalls {
+				if tc.ID == toolCall.ID {
+					found = true
+					break
+				}
+			}
 		}
+		if found {
+			continue
+		}
+		for i := range conversation.Messages {
+			if conversation.Messages[i].ID == messageID {
+				conversation.Messages[i].ToolCalls = append(conversation.Messages[i].ToolCalls, toolCall)
+				break
+			}
+		}
+		newToolCalls = append(newToolCalls, toolCall)
 	}
 	if len(newToolCalls) > 0 {
 		a.updateMessage(conversation, messageID, func(message *domain.Message) {
@@ -455,7 +457,19 @@ type toolExecResult struct {
 
 func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall, caps ModelCapabilities, settings domain.Settings) error {
 	if err := run.Ctx.Err(); err != nil {
-		a.interruptRemainingTools(run, messageID, toolCalls)
+		if len(toolCalls) > 0 {
+			conversation, gerr := a.Conversations.Get(run.ConversationID)
+			if gerr == nil {
+				for _, toolCall := range toolCalls {
+					a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
+						RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
+						Name: toolCall.Name, Status: string(domain.ToolInterrupted), Output: "interrupted by user",
+					})
+					conversation = a.updateToolResult(conversation, messageID, toolCall.ID, domain.ToolInterrupted, "interrupted by user", nil)
+				}
+				_ = a.Conversations.Save(conversation)
+			}
+		}
 		return err
 	}
 
@@ -654,24 +668,6 @@ func (a *App) emitLearningMutationEvents(toolName string, status domain.ToolCall
 			"tool":   toolName,
 		})
 	}
-}
-
-func (a *App) interruptRemainingTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall) {
-	if len(toolCalls) == 0 {
-		return
-	}
-	conversation, err := a.Conversations.Get(run.ConversationID)
-	if err != nil {
-		return
-	}
-	for _, toolCall := range toolCalls {
-		a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
-			RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
-			Name: toolCall.Name, Status: string(domain.ToolInterrupted), Output: "interrupted by user",
-		})
-		conversation = a.updateToolResult(conversation, messageID, toolCall.ID, domain.ToolInterrupted, "interrupted by user", nil)
-	}
-	_ = a.Conversations.Save(conversation)
 }
 
 func (a *App) appendTurnAssistant(conversationID string) (*domain.Conversation, string, error) {

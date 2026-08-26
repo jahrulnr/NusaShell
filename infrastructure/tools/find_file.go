@@ -12,25 +12,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"nusashell/application"
 )
 
 const findFileMaxResults = 500
-
-func findFileToolInfo() application.ToolInfo {
-	return application.ToolInfo{
-		Name: "find_file",
-		Description: "Find files by glob pattern. Supports ** for recursive directory matching " +
-			"(e.g. \"**/*.go\" matches any .go file at any depth) and brace expansion " +
-			"(e.g. \"*.{go,ts,py}\"). Skips .git, node_modules, and vendor directories. " +
-			"Returns matching file paths sorted alphabetically.",
-		InputSchema: obj("object", props(
-			"pattern", str("Glob pattern (e.g. \"**/*.tsx\", \"*.go\", \"*.{go,ts}\")"),
-			"path", str("Directory to search in (default current directory)"),
-		), "pattern"),
-	}
-}
 
 type findFileArgs struct {
 	Pattern string `json:"pattern"`

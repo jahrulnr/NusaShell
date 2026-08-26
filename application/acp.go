@@ -490,7 +490,7 @@ func (a *App) handleAcpPermissionDecide(req contracts.AcpPermissionDecideRequest
 	if outcome == "" {
 		outcome = domain.PermissionAllowOnce
 	}
-	a.log("info", "acp", "permission decided before apply: run=%s tool=%s outcome=%s", req.RunID, permissionTitle(run), outcome)
+	a.log("info", "acp", "permission decided before apply: run=%s tool=%s outcome=%s", req.RunID, domain.PermissionTitle(run), outcome)
 	if err := rt.DecidePermission(req.RunID, req.ID, req.OptionID, outcome); err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
@@ -499,10 +499,6 @@ func (a *App) handleAcpPermissionDecide(req contracts.AcpPermissionDecideRequest
 	})
 	updated, _ := rt.Get(req.RunID)
 	return acpRunDTO(updated), nil
-}
-
-func permissionTitle(run *domain.AcpRun) string {
-	return domain.PermissionTitle(run)
 }
 
 func (a *App) acpReady(id string) (*domain.AcpAgent, AcpRuntime, *contracts.RPCError) {
@@ -540,15 +536,13 @@ func (a *App) enabledAcpAgents() []*domain.AcpAgent {
 	return out
 }
 
-func (a *App) defaultAcpAgent() *domain.AcpAgent {
-	list := a.enabledAcpAgents()
-	if len(list) == 0 {
-		return nil
-	}
-	return list[0]
-}
-
-func (a *App) spawnAcpSubagents(ctx context.Context, argsJSON []byte) (string, error) {
+// SpawnSubagents is the `subagent` tool implementation. It spawns one or
+// more ACP subagents and always returns "starting" immediately: the parent
+// agent is free to continue other work, and when a subagent finishes the
+// OnDone callback updates the original tool call with the summary and
+// triggers a new turn (tool injection) so the parent processes the result
+// without blocking.
+func (a *App) SpawnSubagents(ctx context.Context, argsJSON []byte) (string, error) {
 	if a.Acp == nil || a.AcpAgents == nil {
 		return "", fmt.Errorf("ACP subagents are not configured")
 	}
@@ -582,10 +576,11 @@ func (a *App) spawnAcpSubagents(ctx context.Context, argsJSON []byte) (string, e
 			return "", fmt.Errorf("unknown ACP agent %q", args.AgentID)
 		}
 	} else {
-		agent = a.defaultAcpAgent()
-		if agent == nil {
+		list := a.enabledAcpAgents()
+		if len(list) == 0 {
 			return "", fmt.Errorf("no enabled ACP agents; add one in Providers")
 		}
+		agent = list[0]
 	}
 	if !agent.Enabled {
 		return "", fmt.Errorf("ACP agent %q is disabled", agent.Name)
@@ -628,12 +623,6 @@ func (a *App) spawnAcpSubagents(ctx context.Context, argsJSON []byte) (string, e
 	// triggers a new turn (tool injection) so the parent agent processes
 	// the result without blocking.
 	return domain.FormatSpawnResult(results), nil
-}
-
-// subagentCompletionResult builds the tool result: YAML frontmatter
-// (status, workspace, output_path) + markdown body (the summary).
-func (a *App) SpawnSubagents(ctx context.Context, argsJSON []byte) (string, error) {
-	return a.spawnAcpSubagents(ctx, argsJSON)
 }
 
 func (a *App) SteerAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
@@ -692,46 +681,6 @@ func (a *App) emitAcpRun(event string, run *domain.AcpRun) {
 		return
 	}
 	a.Bus.Emit(event, contracts.AcpRunEvent{Run: acpRunDTO(run)})
-}
-
-func (a *App) wireAcpCallbacks() {
-	sink, ok := a.Acp.(interface {
-		SetCallbacks(
-			onUpdate, onDone func(*domain.AcpRun),
-			onPerm func(*domain.AcpRun, domain.AcpPermissionRequest),
-			onMode func(*domain.AcpRun, string),
-		)
-	})
-	if !ok {
-		return
-	}
-	sink.SetCallbacks(
-		func(run *domain.AcpRun) { a.emitAcpRun(contracts.EventAcpRunUpdated, run) },
-		func(run *domain.AcpRun) {
-			a.emitAcpRun(contracts.EventAcpRunDone, run)
-			a.onAcpRunDone(run)
-		},
-		func(run *domain.AcpRun, req domain.AcpPermissionRequest) {
-			a.emitAcpRun(contracts.EventAcpRunUpdated, run)
-			perm := contracts.AcpPermissionDTO{
-				ID: req.ID, SessionID: req.SessionID, ToolTitle: req.ToolTitle, ToolKind: req.ToolKind,
-				Paths: req.Paths, PathCount: len(req.Paths),
-			}
-			if !req.RequestedAt.IsZero() {
-				perm.RequestedAt = req.RequestedAt.Format(timeRFC3339)
-			}
-			for _, o := range req.Options {
-				perm.Options = append(perm.Options, contracts.AcpPermissionOptionDTO{ID: o.ID, Name: o.Name, Kind: o.Kind})
-			}
-			a.Bus.Emit(contracts.EventAcpPermissionRequested, contracts.AcpPermissionEvent{RunID: run.ID, Permission: perm})
-		},
-		func(run *domain.AcpRun, source string) {
-			a.Bus.Emit(contracts.EventAcpSessionModeChanged, contracts.AcpModeChangedEvent{
-				RunID: run.ID, ModeID: run.CurrentModeID, Source: source,
-			})
-			a.emitAcpRun(contracts.EventAcpRunUpdated, run)
-		},
-	)
 }
 
 // onAcpRunDone handles subagent completion: persists the transcript to
@@ -958,8 +907,4 @@ func (a *App) resolveConversationProvider(conv *domain.Conversation) (*domain.Pr
 		return p, models[0].ID, key, conv.Effort, nil
 	}
 	return nil, "", "", "", fmt.Errorf("no enabled provider with a model")
-}
-
-func availableAcpSummary(agents []*domain.AcpAgent) (list, def string) {
-	return domain.AvailableAcpSummary(agents)
 }

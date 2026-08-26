@@ -141,7 +141,41 @@ func (c *ImagesClient) Generate(ctx context.Context, req application.ImageGenReq
 	if err := c.postJSON(ctx, url, c.headers(req.TurnID), body, &decoded); err != nil {
 		return nil, err
 	}
-	return decodeCodexImages(decoded, model)
+	if decoded.Error != nil && strings.TrimSpace(decoded.Error.Message) != "" {
+		return nil, fmt.Errorf("%s", strings.TrimSpace(decoded.Error.Message))
+	}
+	if len(decoded.Data) == 0 {
+		return nil, fmt.Errorf("image provider returned no images")
+	}
+	var media string
+	switch strings.ToLower(strings.TrimSpace(decoded.OutputFormat)) {
+	case "jpeg", "jpg":
+		media = "image/jpeg"
+	case "webp":
+		media = "image/webp"
+	case "png", "":
+		media = "image/png"
+	}
+	out := &application.ImageGenResult{
+		Provider:    "codex",
+		Model:       model,
+		UsageTokens: decoded.Usage.TotalTokens,
+	}
+	if out.UsageTokens == 0 {
+		out.UsageTokens = decoded.Usage.InputTokens + decoded.Usage.OutputTokens
+	}
+	for i, item := range decoded.Data {
+		raw := strings.TrimSpace(item.B64JSON)
+		if raw == "" {
+			return nil, fmt.Errorf("image provider returned empty b64_json (item %d)", i)
+		}
+		data, err := base64.StdEncoding.DecodeString(raw)
+		if err != nil {
+			return nil, fmt.Errorf("decode b64_json (item %d): %w", i, err)
+		}
+		out.Images = append(out.Images, application.GeneratedImage{Bytes: data, MediaType: media})
+	}
+	return out, nil
 }
 
 func codexImageParam(value string) string {
@@ -168,49 +202,6 @@ type codexImagesResponse struct {
 
 type codexImageData struct {
 	B64JSON string `json:"b64_json"`
-}
-
-func decodeCodexImages(resp codexImagesResponse, model string) (*application.ImageGenResult, error) {
-	if resp.Error != nil && strings.TrimSpace(resp.Error.Message) != "" {
-		return nil, fmt.Errorf("%s", strings.TrimSpace(resp.Error.Message))
-	}
-	if len(resp.Data) == 0 {
-		return nil, fmt.Errorf("image provider returned no images")
-	}
-	media := mediaTypeForCodexFormat(resp.OutputFormat)
-	out := &application.ImageGenResult{
-		Provider:    "codex",
-		Model:       model,
-		UsageTokens: resp.Usage.TotalTokens,
-	}
-	if out.UsageTokens == 0 {
-		out.UsageTokens = resp.Usage.InputTokens + resp.Usage.OutputTokens
-	}
-	for i, item := range resp.Data {
-		raw := strings.TrimSpace(item.B64JSON)
-		if raw == "" {
-			return nil, fmt.Errorf("image provider returned empty b64_json (item %d)", i)
-		}
-		data, err := base64.StdEncoding.DecodeString(raw)
-		if err != nil {
-			return nil, fmt.Errorf("decode b64_json (item %d): %w", i, err)
-		}
-		out.Images = append(out.Images, application.GeneratedImage{Bytes: data, MediaType: media})
-	}
-	return out, nil
-}
-
-func mediaTypeForCodexFormat(format string) string {
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "jpeg", "jpg":
-		return "image/jpeg"
-	case "webp":
-		return "image/webp"
-	case "png", "":
-		return "image/png"
-	default:
-		return ""
-	}
 }
 
 func (c *ImagesClient) postJSON(ctx context.Context, url string, headers map[string]string, body any, out *codexImagesResponse) error {
@@ -275,7 +266,13 @@ type usageLimitBody struct {
 }
 
 func parseCodexImageRetryAfter(headers http.Header, body []byte, now time.Time) time.Duration {
-	retryAfter := parseHTTPRetryAfter(headers.Get("Retry-After"), now)
+	retryAfter := time.Duration(0)
+	value := strings.TrimSpace(headers.Get("Retry-After"))
+	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
+		retryAfter = time.Duration(seconds) * time.Second
+	} else if when, err := http.ParseTime(value); err == nil && when.After(now) {
+		retryAfter = when.Sub(now)
+	}
 	var parsed usageLimitBody
 	if json.Unmarshal(body, &parsed) == nil && parsed.Error.ResetsAt != nil && *parsed.Error.ResetsAt > 0 {
 		if until := time.Unix(*parsed.Error.ResetsAt, 0); until.After(now) {
@@ -301,15 +298,4 @@ func parseCodexImageRetryAfter(headers http.Header, body []byte, now time.Time) 
 		}
 	}
 	return retryAfter
-}
-
-func parseHTTPRetryAfter(value string, now time.Time) time.Duration {
-	value = strings.TrimSpace(value)
-	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
-		return time.Duration(seconds) * time.Second
-	}
-	if when, err := http.ParseTime(value); err == nil && when.After(now) {
-		return when.Sub(now)
-	}
-	return 0
 }

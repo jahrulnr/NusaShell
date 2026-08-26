@@ -99,13 +99,3 @@ func engineAsset(goos, goarch string) (EngineAsset, bool) {
 	a, ok := engineAssets[goos+"/"+goarch]
 	return a, ok
 }
-
-// byID finds a model by picker id.
-func modelByID(id string) (Model, bool) {
-	for _, m := range Models {
-		if m.ID == id {
-			return m, true
-		}
-	}
-	return Model{}, false
-}

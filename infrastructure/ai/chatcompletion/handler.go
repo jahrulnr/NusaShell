@@ -130,7 +130,30 @@ func toOpenAIMessages(req application.ChatRequest) []openAIMessage {
 		case "user", "system":
 			content := any(m.Content)
 			if m.Role == "user" && len(m.Attachments) > 0 {
-				content = openAIUserContent(m)
+				blocks := make([]map[string]any, 0, 1+len(m.Attachments))
+				if m.Content != "" {
+					blocks = append(blocks, map[string]any{"type": "text", "text": m.Content})
+				}
+				for _, attachment := range m.Attachments {
+					switch attachment.Type {
+					case "text":
+						blocks = append(blocks, map[string]any{"type": "text", "text": aiutil.TextAttachmentContent(attachment)})
+					case "audio":
+						blocks = append(blocks, inputAudioBlock(attachment))
+					case "video":
+						blocks = append(blocks, aiutil.VideoURLBlock(attachment))
+					case "image":
+						blocks = append(blocks, map[string]any{
+							"type":      "image_url",
+							"image_url": map[string]any{"url": attachment.DataURL, "detail": "auto"},
+						})
+					case "file":
+						// Chat Completions has no portable file-input part. Electron keeps
+						// the document visible to the model as a descriptive text block.
+						blocks = append(blocks, map[string]any{"type": "text", "text": aiutil.DocumentAttachmentContent(attachment)})
+					}
+				}
+				content = blocks
 			}
 			out = append(out, openAIMessage{Role: m.Role, Content: content})
 		case "assistant":
@@ -206,33 +229,6 @@ func openAIToolContent(result *application.ToolResult) []map[string]any {
 	return blocks
 }
 
-func openAIUserContent(message application.ChatMessage) []map[string]any {
-	blocks := make([]map[string]any, 0, 1+len(message.Attachments))
-	if message.Content != "" {
-		blocks = append(blocks, map[string]any{"type": "text", "text": message.Content})
-	}
-	for _, attachment := range message.Attachments {
-		switch attachment.Type {
-		case "text":
-			blocks = append(blocks, map[string]any{"type": "text", "text": aiutil.TextAttachmentContent(attachment)})
-		case "audio":
-			blocks = append(blocks, inputAudioBlock(attachment))
-		case "video":
-			blocks = append(blocks, aiutil.VideoURLBlock(attachment))
-		case "image":
-			blocks = append(blocks, map[string]any{
-				"type":      "image_url",
-				"image_url": map[string]any{"url": attachment.DataURL, "detail": "auto"},
-			})
-		case "file":
-			// Chat Completions has no portable file-input part. Electron keeps
-			// the document visible to the model as a descriptive text block.
-			blocks = append(blocks, map[string]any{"type": "text", "text": aiutil.DocumentAttachmentContent(attachment)})
-		}
-	}
-	return blocks
-}
-
 // inputAudioBlock encodes an audio attachment as the Chat Completions
 // input_audio part. Delegates to aiutil.InputAudioBlock which is shared
 // with the Responses API handler.
@@ -240,10 +236,10 @@ func inputAudioBlock(att domain.Attachment) map[string]any {
 	return aiutil.InputAudioBlock(att)
 }
 
-func openAITools(tools []application.ToolDef) []openAITool {
-	var out []openAITool
-	for _, t := range tools {
-		out = append(out, openAITool{
+func buildRequest(req application.ChatRequest, stream bool) openAIRequest {
+	tools := make([]openAITool, 0, len(req.Tools))
+	for _, t := range req.Tools {
+		tools = append(tools, openAITool{
 			Type: "function",
 			Function: map[string]any{
 				"name":        t.Name,
@@ -252,14 +248,10 @@ func openAITools(tools []application.ToolDef) []openAITool {
 			},
 		})
 	}
-	return out
-}
-
-func buildRequest(req application.ChatRequest, stream bool) openAIRequest {
 	r := openAIRequest{
 		Model:            req.Model,
 		Messages:         toOpenAIMessages(req),
-		Tools:            openAITools(req.Tools),
+		Tools:            tools,
 		Stream:           stream,
 		MaxTokens:        req.MaxTokens,
 		Temperature:      req.Temperature,

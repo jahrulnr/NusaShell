@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"nusashell/application"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,26 +25,6 @@ const (
 	// that alone exceeds the model's context window and defeats compaction.
 	grepMaxOutputChars = 200_000
 )
-
-func grepToolInfo() application.ToolInfo {
-	return application.ToolInfo{
-		Name: "grep",
-		Description: "Search file contents with regex. Built on Go regexp (RE2 syntax — no backreferences). " +
-			"Filters files by glob_pattern, returns matching lines with optional context_lines. " +
-			"output_mode: content (matching lines + context), files_with_matches (just filenames), count (match count per file). " +
-			"Results are capped at ~200k chars with a truncation marker — for huge result sets narrow the pattern, reduce context_lines, or use output_mode files_with_matches/count. " +
-			"Prefer this over exec+shell grep — structured output, no process spawn, works without rg installed.",
-		InputSchema: obj("object", props(
-			"pattern", str("Regular expression to search for (RE2 syntax)"),
-			"path", str("Directory or file to search in"),
-			"glob_pattern", str("Glob filter for file paths (e.g. \"*.go\", \"**/*.tsx\"). Empty = all files"),
-			"output_mode", strEnum("Result format: content (default), files_with_matches, count", "content", "files_with_matches", "count"),
-			"context_lines", intSchema("Lines of context before and after each match (default 0, max 10)"),
-			"case_insensitive", obj("boolean", nil),
-			"max_results", intSchema("Max number of matches to return (default 100)"),
-		), "pattern", "path"),
-	}
-}
 
 type grepArgs struct {
 	Pattern         string `json:"pattern"`
@@ -161,7 +140,7 @@ func grepDir(root, glob string, re *regexp.Regexp, contextLines, maxResults int)
 			}
 			return nil
 		}
-		if glob != "" && !matchGlob(path, glob) {
+		if glob != "" && !globMatch(glob, path) {
 			return nil
 		}
 		fileMatches, err := grepFile(path, re, contextLines)
@@ -275,13 +254,6 @@ func truncateGrepOutput(s string, n int) string {
 		return s
 	}
 	return string(runes[:n])
-}
-
-// matchGlob checks if path matches a glob pattern. Supports ** for
-// recursive directory matching (e.g. "**/*.go" matches any .go file
-// at any depth).
-func matchGlob(path, pattern string) bool {
-	return globMatch(pattern, path)
 }
 
 // globMatch implements glob matching with ** support.

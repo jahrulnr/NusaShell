@@ -31,13 +31,6 @@ var (
 	runtimeManagerErr  error
 )
 
-func getRuntimeManager() (*runtime.Manager, error) {
-	runtimeManagerOnce.Do(func() {
-		runtimeManager, runtimeManagerErr = runtime.NewManager()
-	})
-	return runtimeManager, runtimeManagerErr
-}
-
 // resolveCodexBinary returns the path to a usable Codex binary.
 // It first checks for a NusaShell-managed runtime (auto-downloaded),
 // then falls back to "codex" in PATH.
@@ -48,7 +41,10 @@ var skipRuntimeManager bool
 
 func resolveCodexBinary(ctx context.Context) (string, error) {
 	if !skipRuntimeManager {
-		mgr, err := getRuntimeManager()
+		runtimeManagerOnce.Do(func() {
+			runtimeManager, runtimeManagerErr = runtime.NewManager()
+		})
+		mgr, err := runtimeManager, runtimeManagerErr
 		if err == nil {
 			binPath, err := mgr.EnsureBinary(ctx)
 			if err == nil {

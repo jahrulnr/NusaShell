@@ -73,7 +73,13 @@ func (s *BM25) Search(query string, topK int) []BM25Result {
 		idf /= df + 0.5
 		idf = math.Log(1 + idf) // BM25+ variant
 		for _, docIdx := range docIDs {
-			tf := float64(bm25TermFrequency(s.docs[docIdx].Text, term))
+			tfCount := 0
+			for _, t := range bm25Tokenize(s.docs[docIdx].Text) {
+				if t == term {
+					tfCount++
+				}
+			}
+			tf := float64(tfCount)
 			dl := float64(len(bm25Tokenize(s.docs[docIdx].Text)))
 			score := idf * (tf * (s.k1 + 1)) / (tf + s.k1*(1-s.b+s.b*dl/s.avgDL))
 			scores[docIdx] += score
@@ -98,14 +104,4 @@ func bm25Tokenize(s string) []string {
 	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
 	})
-}
-
-func bm25TermFrequency(text, term string) int {
-	count := 0
-	for _, t := range bm25Tokenize(text) {
-		if t == term {
-			count++
-		}
-	}
-	return count
 }

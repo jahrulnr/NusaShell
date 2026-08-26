@@ -118,9 +118,31 @@ func toAnthropicMessages(msgs []application.ChatMessage) []anthropicMessage {
 	for _, m := range msgs {
 		switch m.Role {
 		case "user":
+			blocks := make([]anthropicContentBlock, 0, 1+len(m.Attachments))
+			if m.Content != "" {
+				blocks = append(blocks, anthropicContentBlock{Type: "text", Text: m.Content})
+			}
+			for _, attachment := range m.Attachments {
+				switch attachment.Type {
+				case "text":
+					blocks = append(blocks, anthropicContentBlock{Type: "text", Text: aiutil.TextAttachmentContent(attachment)})
+				case "image", "audio", "video":
+					blocks = append(blocks, anthropicContentBlock{
+						Type: "image", Source: &anthropicSource{
+							Type: "base64", MediaType: attachment.MediaType, Data: aiutil.DataURLBase64(attachment.DataURL),
+						},
+					})
+				case "file":
+					blocks = append(blocks, anthropicContentBlock{
+						Type: "document", Title: attachment.Name, Source: &anthropicSource{
+							Type: "base64", MediaType: attachment.MediaType, Data: aiutil.DataURLBase64(attachment.DataURL),
+						},
+					})
+				}
+			}
 			out = append(out, anthropicMessage{
 				Role:    "user",
-				Content: aiutil.MustJSON(anthropicUserContent(m)),
+				Content: aiutil.MustJSON(blocks),
 			})
 		case "assistant":
 			var blocks []anthropicContentBlock
@@ -180,32 +202,6 @@ func anthropicToolResultContent(result *application.ToolResult) json.RawMessage 
 		}
 	}
 	return aiutil.MustJSON(blocks)
-}
-
-func anthropicUserContent(message application.ChatMessage) []anthropicContentBlock {
-	blocks := make([]anthropicContentBlock, 0, 1+len(message.Attachments))
-	if message.Content != "" {
-		blocks = append(blocks, anthropicContentBlock{Type: "text", Text: message.Content})
-	}
-	for _, attachment := range message.Attachments {
-		switch attachment.Type {
-		case "text":
-			blocks = append(blocks, anthropicContentBlock{Type: "text", Text: aiutil.TextAttachmentContent(attachment)})
-		case "image", "audio", "video":
-			blocks = append(blocks, anthropicContentBlock{
-				Type: "image", Source: &anthropicSource{
-					Type: "base64", MediaType: attachment.MediaType, Data: aiutil.DataURLBase64(attachment.DataURL),
-				},
-			})
-		case "file":
-			blocks = append(blocks, anthropicContentBlock{
-				Type: "document", Title: attachment.Name, Source: &anthropicSource{
-					Type: "base64", MediaType: attachment.MediaType, Data: aiutil.DataURLBase64(attachment.DataURL),
-				},
-			})
-		}
-	}
-	return blocks
 }
 
 func buildAnthropicRequest(req application.ChatRequest, stream bool) anthropicRequest {

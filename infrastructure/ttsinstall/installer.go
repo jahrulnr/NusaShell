@@ -120,10 +120,8 @@ func New(dataDir, baseURL string) *Installer {
 	}
 }
 
-func (in *Installer) binRoot() string { return filepath.Join(in.dataDir, "piper") }
-
 func (in *Installer) platformDir() string {
-	return filepath.Join(in.binRoot(), runtime.GOOS+"-"+runtime.GOARCH)
+	return filepath.Join(in.dataDir, "piper", runtime.GOOS+"-"+runtime.GOARCH)
 }
 
 // binaryPath returns where the piper executable lands after extraction.
@@ -142,27 +140,6 @@ func (in *Installer) voicesDirectory() string {
 		return dir
 	}
 	return filepath.Join(in.dataDir, "models", "tts")
-}
-
-// voiceAssetURL returns the release asset name for the running platform,
-// or "" when this platform has no official piper build.
-func piperAssetName() string {
-	switch {
-	case runtime.GOOS == "linux" && runtime.GOARCH == "amd64":
-		return "piper_linux_x86_64.tar.gz"
-	case runtime.GOOS == "linux" && runtime.GOARCH == "arm64":
-		return "piper_linux_aarch64.tar.gz"
-	case runtime.GOOS == "linux" && runtime.GOARCH == "arm":
-		return "piper_linux_armv7l.tar.gz"
-	case runtime.GOOS == "darwin" && runtime.GOARCH == "amd64":
-		return "piper_macos_x64.tar.gz"
-	case runtime.GOOS == "darwin" && runtime.GOARCH == "arm64":
-		return "piper_macos_aarch64.tar.gz"
-	case runtime.GOOS == "windows" && runtime.GOARCH == "amd64":
-		return "piper_windows_amd64.zip"
-	default:
-		return ""
-	}
 }
 
 // status snapshots what is installed on disk right now.
@@ -217,10 +194,22 @@ func (in *Installer) engineUsable() bool {
 // plus the requested voice, reporting progress per phase. Safe to call
 // again: already-satisfied parts are skipped.
 func (in *Installer) install(ctx context.Context, voiceID string, report func(Progress)) error {
-	report = orNoop(report)
-	voice, err := lookupVoice(voiceID)
-	if err != nil {
-		return err
+	if report == nil {
+		report = func(Progress) {}
+	}
+	var voice *Voice
+	for i := range Voices {
+		if Voices[i].ID == voiceID {
+			voice = &Voices[i]
+			break
+		}
+	}
+	if voice == nil {
+		ids := make([]string, 0, len(Voices))
+		for _, v := range Voices {
+			ids = append(ids, v.ID)
+		}
+		return fmt.Errorf("ttsinstall: unknown voice %q (catalog: %s)", voiceID, strings.Join(ids, ", "))
 	}
 	if err := os.MkdirAll(in.dataDir, 0o700); err != nil {
 		return fmt.Errorf("ttsinstall: data dir: %w", err)
@@ -231,7 +220,21 @@ func (in *Installer) install(ctx context.Context, voiceID string, report func(Pr
 	}
 
 	if !in.managedBinaryReady() {
-		asset := piperAssetName()
+		var asset string
+		switch {
+		case runtime.GOOS == "linux" && runtime.GOARCH == "amd64":
+			asset = "piper_linux_x86_64.tar.gz"
+		case runtime.GOOS == "linux" && runtime.GOARCH == "arm64":
+			asset = "piper_linux_aarch64.tar.gz"
+		case runtime.GOOS == "linux" && runtime.GOARCH == "arm":
+			asset = "piper_linux_armv7l.tar.gz"
+		case runtime.GOOS == "darwin" && runtime.GOARCH == "amd64":
+			asset = "piper_macos_x64.tar.gz"
+		case runtime.GOOS == "darwin" && runtime.GOARCH == "arm64":
+			asset = "piper_macos_aarch64.tar.gz"
+		case runtime.GOOS == "windows" && runtime.GOARCH == "amd64":
+			asset = "piper_windows_amd64.zip"
+		}
 		if asset == "" {
 			return fmt.Errorf("ttsinstall: no official piper build for %s/%s; set PIPER_BIN to an existing binary", runtime.GOOS, runtime.GOARCH)
 		}
@@ -256,7 +259,14 @@ func (in *Installer) install(ctx context.Context, voiceID string, report func(Pr
 	report(Progress{Phase: PhaseVoice, BytesTotal: voice.Size, Message: "Downloading " + voice.Label})
 	onnxPath := filepath.Join(in.voicesDir, voice.ID+".onnx")
 	jsonPath := filepath.Join(in.voicesDir, voice.ID+".onnx.json")
-	if !voiceFilesPresent(in.voicesDir, voice.ID) {
+	needVoice := false
+	for _, suffix := range []string{".onnx", ".onnx.json"} {
+		if _, err := os.Stat(filepath.Join(in.voicesDir, voice.ID+suffix)); err != nil {
+			needVoice = true
+			break
+		}
+	}
+	if needVoice {
 		if err := in.fetchToFile(ctx, fmt.Sprintf("%s/%s", in.voicesBase(), voice.HFPath), onnxPath, report); err != nil {
 			_ = os.Remove(onnxPath) // never keep partial models
 			return fmt.Errorf("ttsinstall: %w", err)
@@ -539,37 +549,4 @@ func safeArchiveTarget(dest, name, prefix string) (string, bool) {
 		return "", false // zip-slip guard
 	}
 	return target, true
-}
-
-func lookupVoice(id string) (*Voice, error) {
-	for i := range Voices {
-		if Voices[i].ID == id {
-			return &Voices[i], nil
-		}
-	}
-	return nil, fmt.Errorf("ttsinstall: unknown voice %q (catalog: %s)", id, voiceIDs())
-}
-
-func voiceIDs() string {
-	ids := make([]string, 0, len(Voices))
-	for _, v := range Voices {
-		ids = append(ids, v.ID)
-	}
-	return strings.Join(ids, ", ")
-}
-
-func voiceFilesPresent(dir, id string) bool {
-	for _, suffix := range []string{".onnx", ".onnx.json"} {
-		if _, err := os.Stat(filepath.Join(dir, id+suffix)); err != nil {
-			return false
-		}
-	}
-	return true
-}
-
-func orNoop(report func(Progress)) func(Progress) {
-	if report == nil {
-		return func(Progress) {}
-	}
-	return report
 }

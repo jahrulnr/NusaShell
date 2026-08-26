@@ -222,7 +222,17 @@ func (c *Conn) readLoop() {
 			c.handleIncoming(msg)
 			continue
 		}
-		id, ok := asInt(msg.ID)
+		var id int
+		var ok bool
+		switch v := msg.ID.(type) {
+		case float64:
+			id, ok = int(v), true
+		case int:
+			id, ok = v, true
+		case json.Number:
+			n, err := v.Int64()
+			id, ok = int(n), err == nil
+		}
 		if !ok {
 			continue
 		}
@@ -305,20 +315,6 @@ func (c *Conn) handleIncoming(msg jsonRPCResponse) {
 		if msg.ID != nil {
 			c.reply(msg.ID, nil, &rpcError{Code: -32601, Message: "method not found: " + msg.Method})
 		}
-	}
-}
-
-func asInt(id any) (int, bool) {
-	switch v := id.(type) {
-	case float64:
-		return int(v), true
-	case int:
-		return v, true
-	case json.Number:
-		n, err := v.Int64()
-		return int(n), err == nil
-	default:
-		return 0, false
 	}
 }
 

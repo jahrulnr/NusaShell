@@ -128,7 +128,7 @@ func (p *ifParser) parsePrimary() (ifNode, error) {
 		return n, nil
 	}
 	if p.s[p.pos] == '"' {
-		s, err := p.parseString()
+		s, err := p.parseQuote('"')
 		if err != nil {
 			return nil, err
 		}
@@ -149,9 +149,9 @@ func (p *ifParser) parsePrimary() (ifNode, error) {
 		}
 		return ifLit{p.s[start:p.pos]}, nil
 	}
-	if isIdentStart(rune(p.s[p.pos])) {
+	if unicode.IsLetter(rune(p.s[p.pos])) || p.s[p.pos] == '_' {
 		p.pos++
-		for p.pos < len(p.s) && isIdentPart(rune(p.s[p.pos])) {
+		for p.pos < len(p.s) && (unicode.IsLetter(rune(p.s[p.pos])) || unicode.IsDigit(rune(p.s[p.pos])) || p.s[p.pos] == '_' || p.s[p.pos] == '.') {
 			p.pos++
 		}
 		name := p.s[start:p.pos]
@@ -174,10 +174,6 @@ func (p *ifParser) parsePrimary() (ifNode, error) {
 	return nil, fmt.Errorf("unexpected %q", p.s[p.pos:])
 }
 
-func (p *ifParser) parseString() (string, error) {
-	return p.parseQuote('"')
-}
-
 func (p *ifParser) parseQuote(q byte) (string, error) {
 	if p.pos >= len(p.s) || p.s[p.pos] != q {
 		return "", fmt.Errorf("expected quote")
@@ -198,14 +194,6 @@ func (p *ifParser) parseQuote(q byte) (string, error) {
 		b.WriteByte(c)
 	}
 	return "", fmt.Errorf("unterminated string")
-}
-
-func isIdentStart(r rune) bool {
-	return unicode.IsLetter(r) || r == '_'
-}
-
-func isIdentPart(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '.'
 }
 
 type ifNode interface{ ifNode() }

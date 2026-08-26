@@ -130,7 +130,13 @@ func (s *ExecutionScheduler) Tick(ctx context.Context, runID string) error {
 		}
 		dag, issues := domain.BuildDAG(run.Definition.Jobs)
 		if len(issues) > 0 {
-			return s.failRun(ctx, run, issues[0].Message)
+			run.Status = domain.StatusFailed
+			t := s.now().UTC()
+			run.FinishedAt = &t
+			_ = s.persist(ctx, run)
+			s.emit(contracts.EventCIRunFailed, map[string]any{"run_id": run.ID, "error": issues[0].Message})
+			s.notifyWebhook(ctx, run)
+			return fmt.Errorf("%s", issues[0].Message)
 		}
 		status := map[string]domain.RunStatus{}
 		continueOn := map[string]bool{}
@@ -144,7 +150,7 @@ func (s *ExecutionScheduler) Tick(ctx context.Context, runID string) error {
 		if len(ready) == 0 {
 			return s.maybeFinalize(ctx, run)
 		}
-		claimed := s.claimJobs(run, ready)
+		claimed := domain.ClaimJobs(run, ready)
 		if err := s.persist(ctx, run); err != nil {
 			return err
 		}
@@ -184,8 +190,7 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 	if jr.Status != domain.StatusQueued && jr.Status != domain.StatusPending && jr.Status != domain.StatusRunning {
 		return nil
 	}
-	env := conditionEnv(run)
-	ok, err := domain.EvalIf(job.If, env)
+	ok, err := domain.EvalIf(job.If, domain.BuildConditionEnv(run))
 	if err != nil {
 		return s.failJob(ctx, run, jr, err.Error())
 	}
@@ -261,12 +266,28 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 		case step.Uses != "":
 			result, err = s.runUses(jobCtx, run, step)
 		case step.Agent != nil:
-			result, err = s.runAgent(jobCtx, run, step, sr)
-		default:
-			envMap := mergeEnv(run.Definition.Env, job.Env, step.Env)
-			for k, v := range ciEnv(run, *jr, *sr, ws.Dir) {
-				envMap[k] = v
+			if s.Agent == nil {
+				result, err = StepResult{Error: "agent steps are not configured"}, fmt.Errorf("agent steps are not configured")
+				break
 			}
+			out, convID, agentErr := s.Agent.RunAgentStep(jobCtx, step.Agent.Prompt, step.Agent.Model, run.Definition.Trust, step.Agent.OutputSchema)
+			if agentErr != nil {
+				result, err = StepResult{Error: agentErr.Error()}, agentErr
+				break
+			}
+			if sr != nil {
+				sr.ConversationID = convID
+			}
+			result, err = StepResult{ExitCode: 0, Outputs: out}, nil
+		default:
+			envMap := domain.MergeEnv(run.Definition.Env, job.Env, step.Env)
+			envMap["NUSASHELL"] = "true"
+			envMap["NUSASHELL_CI"] = "true"
+			envMap["NUSASHELL_PIPELINE_ID"] = run.WorkflowID
+			envMap["NUSASHELL_RUN_ID"] = run.ID
+			envMap["NUSASHELL_JOB_ID"] = jr.JobID
+			envMap["NUSASHELL_STEP_ID"] = sr.StepID
+			envMap["NUSASHELL_WORKSPACE"] = ws.Dir
 			result, err = s.Exec.RunStep(jobCtx, RunStepRequest{
 				Run: run, Job: *job, JobRun: jr, Step: step, StepRun: sr, Workspace: ws, Env: envMap,
 				OnOutput: func(chunk domain.LogChunk) {
@@ -370,20 +391,6 @@ func (s *ExecutionScheduler) runUses(ctx context.Context, run *domain.WorkflowRu
 	return StepResult{ExitCode: 0, Outputs: outputs}, nil
 }
 
-func (s *ExecutionScheduler) runAgent(ctx context.Context, run *domain.WorkflowRun, step domain.Step, sr *domain.StepRun) (StepResult, error) {
-	if s.Agent == nil {
-		return StepResult{Error: "agent steps are not configured"}, fmt.Errorf("agent steps are not configured")
-	}
-	out, convID, err := s.Agent.RunAgentStep(ctx, step.Agent.Prompt, step.Agent.Model, run.Definition.Trust, step.Agent.OutputSchema)
-	if err != nil {
-		return StepResult{Error: err.Error()}, err
-	}
-	if sr != nil {
-		sr.ConversationID = convID
-	}
-	return StepResult{ExitCode: 0, Outputs: out}, nil
-}
-
 func (s *ExecutionScheduler) failJob(ctx context.Context, run *domain.WorkflowRun, jr *domain.JobRun, reason string) error {
 	jr.Status = domain.StatusFailed
 	jr.FailureReason = reason
@@ -409,16 +416,6 @@ func (s *ExecutionScheduler) failJob(ctx context.Context, run *domain.WorkflowRu
 	}
 	s.emit(contracts.EventCIJobFailed, map[string]any{"run_id": run.ID, "job_id": jr.JobID, "error": reason})
 	return nil
-}
-
-func (s *ExecutionScheduler) failRun(ctx context.Context, run *domain.WorkflowRun, reason string) error {
-	run.Status = domain.StatusFailed
-	t := s.now().UTC()
-	run.FinishedAt = &t
-	_ = s.persist(ctx, run)
-	s.emit(contracts.EventCIRunFailed, map[string]any{"run_id": run.ID, "error": reason})
-	s.notifyWebhook(ctx, run)
-	return fmt.Errorf("%s", reason)
 }
 
 func (s *ExecutionScheduler) maybeFinalize(ctx context.Context, run *domain.WorkflowRun) error {
@@ -517,23 +514,15 @@ func (s *ExecutionScheduler) RecoverStale(ctx context.Context) error {
 	return nil
 }
 
-func (s *ExecutionScheduler) claimJobs(run *domain.WorkflowRun, ready []string) []string {
-	return domain.ClaimJobs(run, ready)
-}
-
 func (s *ExecutionScheduler) persist(ctx context.Context, run *domain.WorkflowRun) error {
 	s.lockRun(run.ID).Lock()
 	defer s.lockRun(run.ID).Unlock()
 	cur, err := s.Runs.Get(ctx, run.ID)
 	if err == nil {
-		mergeRun(cur, run)
+		domain.MergeRun(cur, run)
 		run = cur
 	}
 	return s.Runs.Update(ctx, run)
-}
-
-func mergeRun(dst, src *domain.WorkflowRun) {
-	domain.MergeRun(dst, src)
 }
 
 func (s *ExecutionScheduler) emit(typ string, v any) {
@@ -564,24 +553,4 @@ func NewWorkflowRun(def domain.WorkflowDefinition, requestedBy string) *domain.W
 		run.Jobs = append(run.Jobs, jr)
 	}
 	return run
-}
-
-func conditionEnv(run *domain.WorkflowRun) domain.ConditionEnv {
-	return domain.BuildConditionEnv(run)
-}
-
-func mergeEnv(layers ...map[string]string) map[string]string {
-	return domain.MergeEnv(layers...)
-}
-
-func ciEnv(run *domain.WorkflowRun, job domain.JobRun, step domain.StepRun, workspace string) map[string]string {
-	return map[string]string{
-		"NUSASHELL":             "true",
-		"NUSASHELL_CI":          "true",
-		"NUSASHELL_PIPELINE_ID": run.WorkflowID,
-		"NUSASHELL_RUN_ID":      run.ID,
-		"NUSASHELL_JOB_ID":      job.JobID,
-		"NUSASHELL_STEP_ID":     step.StepID,
-		"NUSASHELL_WORKSPACE":   workspace,
-	}
 }

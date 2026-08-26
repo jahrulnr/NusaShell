@@ -60,11 +60,14 @@ func New(root string) (*Store, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, fmt.Errorf("skillfs: mkdir %s: %w", root, err)
 	}
-	j, err := loadMetaStore(root)
-	if err != nil {
-		return nil, err
+	meta := &jsonMetaStore{
+		path:  filepath.Join(root, "skills.json"),
+		items: make(map[string]*skillMeta),
 	}
-	return &Store{root: root, json: j, pluginMounts: make(map[string]string)}, nil
+	if data, err := os.ReadFile(meta.path); err == nil {
+		_ = json.Unmarshal(data, &meta.items)
+	}
+	return &Store{root: root, json: meta, pluginMounts: make(map[string]string)}, nil
 }
 
 // SeedBuiltinSkills copies builtin skill packages from the embedded
@@ -113,7 +116,25 @@ func SeedBuiltinSkills(root string) error {
 		}
 
 		// Copy the entire skill directory from the embed.
-		if err := copyEmbedDir(filepath.Join("agent/skills", skillID), destDir); err != nil {
+		srcDir := filepath.Join("agent/skills", skillID)
+		if err := fs.WalkDir(resources.BuiltinSkillsFS, srcDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(srcDir, path)
+			if err != nil {
+				return err
+			}
+			destPath := filepath.Join(destDir, rel)
+			if d.IsDir() {
+				return os.MkdirAll(destPath, 0o755)
+			}
+			data, err := resources.BuiltinSkillsFS.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(destPath, data, 0o644)
+		}); err != nil {
 			continue // skip broken skill, don't abort whole seed
 		}
 
@@ -125,7 +146,22 @@ func SeedBuiltinSkills(root string) error {
 	}
 
 	// Cleanup orphan builtin skills (exist in dest but not in source).
-	cleanupOrphanBuiltin(root, sourceIDs, provenance, deleted)
+	entries, err = os.ReadDir(root)
+	if err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() || !skillIDRe.MatchString(entry.Name()) {
+				continue
+			}
+			orphanID := entry.Name()
+			if sourceIDs[orphanID] {
+				continue
+			}
+			if prov, ok := provenance[orphanID]; ok && prov.CreatedBy == "builtin" {
+				_ = os.RemoveAll(filepath.Join(root, orphanID))
+				delete(provenance, orphanID)
+			}
+		}
+	}
 
 	// Persist provenance.
 	if err := saveProvenance(root, provenance); err != nil {
@@ -499,18 +535,6 @@ type jsonMetaStore struct {
 	items map[string]*skillMeta
 }
 
-func loadMetaStore(root string) (*jsonMetaStore, error) {
-	store := &jsonMetaStore{
-		path:  filepath.Join(root, "skills.json"),
-		items: make(map[string]*skillMeta),
-	}
-	data, err := os.ReadFile(store.path)
-	if err == nil {
-		_ = json.Unmarshal(data, &store.items)
-	}
-	return store, nil
-}
-
 func (j *jsonMetaStore) get(id string) (*skillMeta, bool) {
 	m, ok := j.items[id]
 	return m, ok
@@ -612,49 +636,6 @@ func saveDeletedBuiltin(root string, deleted map[string]deletedEntry) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
-}
-
-// --- Embed copy helpers ---
-
-func copyEmbedDir(src, dest string) error {
-	return fs.WalkDir(resources.BuiltinSkillsFS, src, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		destPath := filepath.Join(dest, rel)
-		if d.IsDir() {
-			return os.MkdirAll(destPath, 0o755)
-		}
-		data, err := resources.BuiltinSkillsFS.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(destPath, data, 0o644)
-	})
-}
-
-func cleanupOrphanBuiltin(root string, sourceIDs map[string]bool, provenance map[string]provenanceEntry, deleted map[string]deletedEntry) {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() || !skillIDRe.MatchString(entry.Name()) {
-			continue
-		}
-		skillID := entry.Name()
-		if sourceIDs[skillID] {
-			continue
-		}
-		if prov, ok := provenance[skillID]; ok && prov.CreatedBy == "builtin" {
-			_ = os.RemoveAll(filepath.Join(root, skillID))
-			delete(provenance, skillID)
-		}
-	}
 }
 
 // Compile-time interface check.

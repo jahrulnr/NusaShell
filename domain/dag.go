@@ -112,7 +112,18 @@ func findCycle(needs map[string][]string) string {
 		for _, dep := range needs[n] {
 			switch color[dep] {
 			case grey:
-				cycle = stringsJoinCycle(path, dep)
+				start := 0
+				for i, p := range path {
+					if p == dep {
+						start = i
+						break
+					}
+				}
+				parts := append(append([]string{}, path[start:]...), dep)
+				cycle = parts[0]
+				for i := 1; i < len(parts); i++ {
+					cycle += " -> " + parts[i]
+				}
 				return true
 			case white:
 				if visit(dep) {
@@ -132,22 +143,6 @@ func findCycle(needs map[string][]string) string {
 		}
 	}
 	return ""
-}
-
-func stringsJoinCycle(path []string, dep string) string {
-	start := 0
-	for i, p := range path {
-		if p == dep {
-			start = i
-			break
-		}
-	}
-	parts := append(append([]string{}, path[start:]...), dep)
-	out := parts[0]
-	for i := 1; i < len(parts); i++ {
-		out += " -> " + parts[i]
-	}
-	return out
 }
 
 func topological(needs map[string][]string) []string {

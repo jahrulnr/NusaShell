@@ -102,7 +102,22 @@ func executeExecToolChunks(ctx context.Context, name string, argsJSON []byte, on
 	for {
 		select {
 		case waitErr := <-done:
-			return true, renderExecResult(started, waitErr, out.Snapshot()), nil
+			meta := map[string]any{
+				"duration_ms": time.Since(started).Milliseconds(),
+			}
+			body := strings.TrimRight(out.Snapshot(), "\n")
+			if waitErr == nil {
+				meta["exit_code"] = 0
+			} else {
+				var ee *exec.ExitError
+				switch {
+				case errors.As(waitErr, &ee):
+					meta["exit_code"] = ee.ExitCode()
+				default:
+					meta["error"] = waitErr.Error()
+				}
+			}
+			return true, yamlMD(meta, body), nil
 		case <-ctx.Done():
 			killProcessTree(cmd)
 			<-done
@@ -138,25 +153,6 @@ func pickAutoWindowsShell(bashAvailable bool) string {
 		return "bash"
 	}
 	return "powershell"
-}
-
-func renderExecResult(started time.Time, waitErr error, output string) string {
-	meta := map[string]any{
-		"duration_ms": time.Since(started).Milliseconds(),
-	}
-	body := strings.TrimRight(output, "\n")
-	if waitErr == nil {
-		meta["exit_code"] = 0
-	} else {
-		var ee *exec.ExitError
-		switch {
-		case errors.As(waitErr, &ee):
-			meta["exit_code"] = ee.ExitCode()
-		default:
-			meta["error"] = waitErr.Error()
-		}
-	}
-	return yamlMD(meta, body)
 }
 
 // outputWriter feeds captured output into a bounded buffer while refreshing

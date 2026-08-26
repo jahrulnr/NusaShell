@@ -201,24 +201,17 @@ var (
 	atomicWriters   = make(map[string]*atomicWriter)
 )
 
-func getAtomicWriter(path string) *atomicWriter {
-	atomicWritersMu.Lock()
-	defer atomicWritersMu.Unlock()
-
-	if w, ok := atomicWriters[path]; ok {
-		return w
-	}
-
-	w := &atomicWriter{}
-	atomicWriters[path] = w
-	return w
-}
-
 // atomicWrite writes via a unique temp file + rename so readers never see torn
 // files and concurrent writers of the same path cannot collide on a shared
 // temp name (which would race the rename and fail with "no such file").
 func atomicWrite(path string, b []byte) error {
-	w := getAtomicWriter(path)
+	atomicWritersMu.Lock()
+	w, ok := atomicWriters[path]
+	if !ok {
+		w = &atomicWriter{}
+		atomicWriters[path] = w
+	}
+	atomicWritersMu.Unlock()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -679,22 +672,18 @@ func (s *Store) AppendLog(e *domain.LogEntry) {
 	// keep the file bounded: when it exceeds maxLogEntries * 2 lines, rewrite
 	// with only the tail. Cheap enough for a personal shell.
 	if fi, err := f.Stat(); err == nil && fi.Size() > maxLogEntries*300 {
-		s.rewriteLogTailLocked()
+		entries := s.readLogsLocked()
+		if len(entries) > maxLogEntries {
+			entries = entries[len(entries)-maxLogEntries:]
+		}
+		var sb strings.Builder
+		for _, e := range entries {
+			b, _ := json.Marshal(e)
+			sb.Write(b)
+			sb.WriteByte('\n')
+		}
+		_ = atomicWrite(filepath.Join(s.dir, "logs.jsonl"), []byte(sb.String()))
 	}
-}
-
-func (s *Store) rewriteLogTailLocked() {
-	entries := s.readLogsLocked()
-	if len(entries) > maxLogEntries {
-		entries = entries[len(entries)-maxLogEntries:]
-	}
-	var sb strings.Builder
-	for _, e := range entries {
-		b, _ := json.Marshal(e)
-		sb.Write(b)
-		sb.WriteByte('\n')
-	}
-	_ = atomicWrite(filepath.Join(s.dir, "logs.jsonl"), []byte(sb.String()))
 }
 
 func (s *Store) readLogsLocked() []*domain.LogEntry {

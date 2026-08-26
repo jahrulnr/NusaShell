@@ -33,25 +33,23 @@ func MatchWhere(e Event, where map[string]any) bool {
 		return true
 	}
 	for key, want := range where {
-		if !matchWhereKey(e, key, want) {
+		var match bool
+		switch {
+		case key == "subject_contains":
+			match = strings.Contains(strings.ToLower(e.Subject), strings.ToLower(fmt.Sprint(want)))
+		case strings.HasSuffix(key, "_contains"):
+			field := strings.TrimSuffix(key, "_contains")
+			got := lookupAttr(e, field)
+			match = strings.Contains(strings.ToLower(fmt.Sprint(got)), strings.ToLower(fmt.Sprint(want)))
+		default:
+			got := lookupAttr(e, key)
+			match = stringify(got) == stringify(want)
+		}
+		if !match {
 			return false
 		}
 	}
 	return true
-}
-
-func matchWhereKey(e Event, key string, want any) bool {
-	switch {
-	case key == "subject_contains":
-		return strings.Contains(strings.ToLower(e.Subject), strings.ToLower(fmt.Sprint(want)))
-	case strings.HasSuffix(key, "_contains"):
-		field := strings.TrimSuffix(key, "_contains")
-		got := lookupAttr(e, field)
-		return strings.Contains(strings.ToLower(fmt.Sprint(got)), strings.ToLower(fmt.Sprint(want)))
-	default:
-		got := lookupAttr(e, key)
-		return stringify(got) == stringify(want)
-	}
 }
 
 func lookupAttr(e Event, key string) any {

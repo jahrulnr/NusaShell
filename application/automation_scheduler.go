@@ -236,8 +236,27 @@ func (s *AutomationScheduler) IngestEvent(ctx context.Context, ev domain.Event) 
 }
 
 func (s *AutomationScheduler) startFromTrigger(ctx context.Context, w *domain.WorkflowDefinition, triggerID, eventID string, ev *domain.Event) error {
-	if err := s.checkCapabilities(ctx, w); err != nil {
-		return nil
+	if s.Caps != nil {
+		for _, j := range w.Jobs {
+			for _, step := range j.Steps {
+				name := strings.TrimSpace(step.Uses)
+				if name == "" {
+					continue
+				}
+				b, err := s.Caps.Resolve(ctx, name, domain.DefaultAutoStart)
+				if err != nil && b.Status == domain.CapMissing {
+					return nil
+				}
+				if b.Kind == domain.CapabilityMCP {
+					b, _ = s.Caps.EnsureAvailable(ctx, b, domain.DefaultAutoStart)
+				}
+				avail := domain.MapAvailability(b.Status, domain.AllowsAutoStart(b.Status, domain.DefaultAutoStart, true))
+				if avail == domain.AvailBlocked {
+					_ = s.blockWorkflow(ctx, w, b)
+					return nil
+				}
+			}
+		}
 	}
 	key := w.Concurrency.Normalized().Key
 	if key == "" {
@@ -278,33 +297,6 @@ func (s *AutomationScheduler) startFromTrigger(ctx context.Context, w *domain.Wo
 		_ = s.Locks.Release(ctx, key, run.ID)
 	}
 	return err
-}
-
-func (s *AutomationScheduler) checkCapabilities(ctx context.Context, w *domain.WorkflowDefinition) error {
-	if s.Caps == nil {
-		return nil
-	}
-	for _, j := range w.Jobs {
-		for _, step := range j.Steps {
-			name := strings.TrimSpace(step.Uses)
-			if name == "" {
-				continue
-			}
-			b, err := s.Caps.Resolve(ctx, name, domain.DefaultAutoStart)
-			if err != nil && b.Status == domain.CapMissing {
-				return err
-			}
-			if b.Kind == domain.CapabilityMCP {
-				b, _ = s.Caps.EnsureAvailable(ctx, b, domain.DefaultAutoStart)
-			}
-			avail := domain.MapAvailability(b.Status, domain.AllowsAutoStart(b.Status, domain.DefaultAutoStart, true))
-			if avail == domain.AvailBlocked {
-				_ = s.blockWorkflow(ctx, w, b)
-				return fmt.Errorf("blocked")
-			}
-		}
-	}
-	return nil
 }
 
 func (s *AutomationScheduler) Validate(ctx context.Context, w *domain.WorkflowDefinition) domain.ValidationResult {

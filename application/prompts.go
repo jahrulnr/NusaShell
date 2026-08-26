@@ -64,7 +64,7 @@ func AcpDelegationDescription(agents []*domain.AcpAgent) string {
 	if len(agents) == 0 || strings.TrimSpace(subagentDelegationPrompt) == "" {
 		return ""
 	}
-	list, def := availableAcpSummary(agents)
+	list, def := domain.AvailableAcpSummary(agents)
 	p := strings.ReplaceAll(subagentDelegationPrompt, "{{available_subagents}}", list)
 	return strings.ReplaceAll(p, "{{default_subagent}}", def)
 }

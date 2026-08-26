@@ -59,59 +59,47 @@ func (a *App) SeedProvidersFromEnv(getenv func(string) string) []string {
 		}
 		existing, err := a.Providers.Get(spec.ID)
 		if err != nil {
-			if msg := a.seedNewProvider(spec, key); msg != "" {
-				actions = append(actions, msg)
+			if err := a.Credentials.Set(spec.ID, key); err != nil {
+				a.log("warn", "ai", "env seed: failed to store %s credential: %v", spec.Name, err)
+				continue
 			}
+			p := &domain.Provider{
+				ID:        spec.ID,
+				Kind:      spec.Kind,
+				Name:      spec.Name,
+				BaseURL:   spec.BaseURL,
+				Enabled:   true,
+				HasAPIKey: true,
+				UpdatedAt: time.Now().UTC(),
+			}
+			if err := a.Providers.Save(p); err != nil {
+				a.log("warn", "ai", "env seed: failed to save provider %s: %v", spec.Name, err)
+				continue
+			}
+			a.log("info", "ai", "seeded provider %s from %s", spec.Name, spec.EnvVar)
+			actions = append(actions, fmt.Sprintf("%s created from %s", spec.Name, spec.EnvVar))
 			continue
 		}
-		if msg := a.refreshProviderKey(existing, spec, key); msg != "" {
-			actions = append(actions, msg)
+		cur, has, err := a.Credentials.Get(spec.ID)
+		if err != nil {
+			a.log("warn", "ai", "env seed: failed to read %s credential: %v", spec.Name, err)
+			continue
 		}
+		if has && cur == key {
+			continue
+		}
+		if err := a.Credentials.Set(spec.ID, key); err != nil {
+			a.log("warn", "ai", "env seed: failed to update %s credential: %v", spec.Name, err)
+			continue
+		}
+		existing.HasAPIKey = true
+		existing.UpdatedAt = time.Now().UTC()
+		if err := a.Providers.Save(existing); err != nil {
+			a.log("warn", "ai", "env seed: failed to persist %s: %v", spec.Name, err)
+			continue
+		}
+		a.log("info", "ai", "refreshed %s API key from %s", spec.Name, spec.EnvVar)
+		actions = append(actions, fmt.Sprintf("%s API key refreshed from %s", spec.Name, spec.EnvVar))
 	}
 	return actions
-}
-
-func (a *App) seedNewProvider(spec envProviderSpec, key string) string {
-	if err := a.Credentials.Set(spec.ID, key); err != nil {
-		a.log("warn", "ai", "env seed: failed to store %s credential: %v", spec.Name, err)
-		return ""
-	}
-	p := &domain.Provider{
-		ID:        spec.ID,
-		Kind:      spec.Kind,
-		Name:      spec.Name,
-		BaseURL:   spec.BaseURL,
-		Enabled:   true,
-		HasAPIKey: true,
-		UpdatedAt: time.Now().UTC(),
-	}
-	if err := a.Providers.Save(p); err != nil {
-		a.log("warn", "ai", "env seed: failed to save provider %s: %v", spec.Name, err)
-		return ""
-	}
-	a.log("info", "ai", "seeded provider %s from %s", spec.Name, spec.EnvVar)
-	return fmt.Sprintf("%s created from %s", spec.Name, spec.EnvVar)
-}
-
-func (a *App) refreshProviderKey(existing *domain.Provider, spec envProviderSpec, key string) string {
-	cur, has, err := a.Credentials.Get(spec.ID)
-	if err != nil {
-		a.log("warn", "ai", "env seed: failed to read %s credential: %v", spec.Name, err)
-		return ""
-	}
-	if has && cur == key {
-		return ""
-	}
-	if err := a.Credentials.Set(spec.ID, key); err != nil {
-		a.log("warn", "ai", "env seed: failed to update %s credential: %v", spec.Name, err)
-		return ""
-	}
-	existing.HasAPIKey = true
-	existing.UpdatedAt = time.Now().UTC()
-	if err := a.Providers.Save(existing); err != nil {
-		a.log("warn", "ai", "env seed: failed to persist %s: %v", spec.Name, err)
-		return ""
-	}
-	a.log("info", "ai", "refreshed %s API key from %s", spec.Name, spec.EnvVar)
-	return fmt.Sprintf("%s API key refreshed from %s", spec.Name, spec.EnvVar)
 }

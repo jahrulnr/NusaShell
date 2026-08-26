@@ -120,7 +120,7 @@ func (a *App) enrichWithVisionDescriptions(ctx context.Context, conversation *do
 	}
 
 	a.log("info", "vision", "describing %d image(s) via fallback model %s/%s for non-vision chat model",
-		countImages(userMsg.Attachments), a.providerNameByID(settings.VisionProviderID), settings.VisionModelID)
+		countAttachmentsByType(userMsg.Attachments, "image"), a.providerNameByID(settings.VisionProviderID), settings.VisionModelID)
 
 	described := a.describeImagesWithFallback(ctx, settings, userMsg.Attachments)
 	if len(described) <= len(userMsg.Attachments) {
@@ -143,10 +143,6 @@ func (a *App) enrichWithVisionDescriptions(ctx context.Context, conversation *do
 		return conversation
 	}
 	return reloaded
-}
-
-func countImages(atts []domain.Attachment) int {
-	return countAttachmentsByType(atts, "image")
 }
 
 // defaultDescribeImagePrompt is the description request used when the image

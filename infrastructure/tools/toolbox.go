@@ -217,21 +217,18 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 // mode has a configured backend (the unified tool is advertised once for all
 // modes; unconfigured modes are rejected at execution time with guidance).
 func (t *Toolbox) mediaGenerationAnyConfigured() bool {
-	return t.imageGenerationConfigured() || t.speechGenerationConfigured() || t.videoGenerationConfigured()
+	imageConfigured := false
+	if t.Settings != nil {
+		s := t.Settings.Get()
+		imageConfigured = mediaGenerationConfigured(s.ImageProviderID, s.ImageModelID)
+	}
+	return imageConfigured || t.speechGenerationConfigured() || t.videoGenerationConfigured()
 }
 
 // mediaGenerationConfigured is the shared gate for all generate_* tools:
 // both provider and model must be set (non-empty).
 func mediaGenerationConfigured(providerID, modelID string) bool {
 	return strings.TrimSpace(providerID) != "" && strings.TrimSpace(modelID) != ""
-}
-
-func (t *Toolbox) imageGenerationConfigured() bool {
-	if t.Settings == nil {
-		return false
-	}
-	s := t.Settings.Get()
-	return mediaGenerationConfigured(s.ImageProviderID, s.ImageModelID)
 }
 
 // speechGenerationConfigured reports whether generate_speech can serve:

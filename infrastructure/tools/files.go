@@ -40,9 +40,41 @@ func fileToolInfos() []application.ToolInfo {
 		{Name: "file_copy", Description: "Copy a file or directory recursively.", InputSchema: obj("object", props("source", str("Absolute source path"), "destination", str("Absolute destination path")), "source", "destination")},
 		{Name: "file_exists", Description: "Check whether a path exists. Does NOT error on missing paths — returns exists=false.", InputSchema: obj("object", props("path", str("Absolute file or directory path")), "path")},
 		{Name: "file_info", Description: "Get metadata for a path (size, permissions, type, modification time).", InputSchema: obj("object", props("path", str("Absolute path")), "path")},
-		grepToolInfo(),
-		findFileToolInfo(),
-		showToolInfo(),
+		{Name: "grep", Description: "Search file contents with regex. Built on Go regexp (RE2 syntax — no backreferences). " +
+			"Filters files by glob_pattern, returns matching lines with optional context_lines. " +
+			"output_mode: content (matching lines + context), files_with_matches (just filenames), count (match count per file). " +
+			"Results are capped at ~200k chars with a truncation marker — for huge result sets narrow the pattern, reduce context_lines, or use output_mode files_with_matches/count. " +
+			"Prefer this over exec+shell grep — structured output, no process spawn, works without rg installed.",
+			InputSchema: obj("object", props(
+				"pattern", str("Regular expression to search for (RE2 syntax)"),
+				"path", str("Directory or file to search in"),
+				"glob_pattern", str("Glob filter for file paths (e.g. \"*.go\", \"**/*.tsx\"). Empty = all files"),
+				"output_mode", strEnum("Result format: content (default), files_with_matches, count", "content", "files_with_matches", "count"),
+				"context_lines", intSchema("Lines of context before and after each match (default 0, max 10)"),
+				"case_insensitive", obj("boolean", nil),
+				"max_results", intSchema("Max number of matches to return (default 100)"),
+			), "pattern", "path")},
+		{Name: "find_file", Description: "Find files by glob pattern. Supports ** for recursive directory matching " +
+			"(e.g. \"**/*.go\" matches any .go file at any depth) and brace expansion " +
+			"(e.g. \"*.{go,ts,py}\"). Skips .git, node_modules, and vendor directories. " +
+			"Returns matching file paths sorted alphabetically.",
+			InputSchema: obj("object", props(
+				"pattern", str("Glob pattern (e.g. \"**/*.tsx\", \"*.go\", \"*.{go,ts}\")"),
+				"path", str("Directory to search in (default current directory)"),
+			), "pattern")},
+		{Name: "show", Description: "Render a file from disk in the UI. op=html reads an HTML file and " +
+			"displays it in a sandboxed iframe (for prototypes, dashboards, visualizations, " +
+			"minigames — write the file first with file_write, then show it). op=image reads " +
+			"an image file and displays it inline. op=audio reads an audio file (mp3, wav, ogg, " +
+			"m4a) and displays an inline player. op=video reads a video file (mp4, webm, " +
+			"mov, avi) and displays an inline player. Use file_write to create the file, " +
+			"file_patch to update it, file_read to inspect it — show only handles display.",
+			InputSchema: obj("object", props(
+				"op", strEnum("Display type: html (iframe), image (inline), audio (inline player), or video (inline player)", "html", "image", "audio", "video"),
+				"path", str("Absolute path to the file to display"),
+				"width", intSchema("Iframe width in pixels (html only, default 720)"),
+				"height", intSchema("Iframe height in pixels (html only, default 400)"),
+			), "op", "path")},
 	}
 }
 
@@ -85,7 +117,11 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			data = data[:maxBytes]
 			truncated = true
 		}
-		if fileLooksBinary(data) {
+		head := data
+		if len(head) > 1024 {
+			head = head[:1024]
+		}
+		if bytes.IndexByte(head, 0) >= 0 {
 			meta := map[string]any{"binary": true, "size": len(data)}
 			return true, yamlMD(meta, "[binary file — not rendered]"), nil
 		}
@@ -154,7 +190,14 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			if occ < 1 || occ > count {
 				return true, "", fmt.Errorf("old_string matches %d times in %s; pass occurrence (1-%d) to disambiguate", count, path, count)
 			}
-			idx := fileNthIndex(s, oldStr, occ)
+			idx := -1
+			for n := occ; n > 0; n-- {
+				j := strings.Index(s[idx+1:], oldStr)
+				if j < 0 {
+					return true, "", fmt.Errorf("old_string not found in %s", path)
+				}
+				idx += j + 1
+			}
 			out = s[:idx] + newStr + s[idx+len(oldStr):]
 		}
 		meta := map[string]any{"replaced": 1}
@@ -306,26 +349,6 @@ func fileArgInt(args map[string]any, key string, def int) int {
 func fileArgBool(args map[string]any, key string) bool {
 	v, _ := args[key].(bool)
 	return v
-}
-
-func fileNthIndex(s, sub string, n int) int {
-	i := -1
-	for ; n > 0; n-- {
-		j := strings.Index(s[i+1:], sub)
-		if j < 0 {
-			return -1
-		}
-		i += j + 1
-	}
-	return i
-}
-
-func fileLooksBinary(data []byte) bool {
-	head := data
-	if len(head) > 1024 {
-		head = head[:1024]
-	}
-	return bytes.IndexByte(head, 0) >= 0
 }
 
 // Injected effects so rename-retry behavior stays deterministically testable.

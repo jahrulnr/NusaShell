@@ -111,7 +111,8 @@ func (in *Installer) Status() contracts.STTInstallStatusResult {
 	models := make([]contracts.STTModelDTO, 0, len(Models))
 	anyModel := false
 	for _, m := range Models {
-		installed := fileOk(in.modelPath(m.ID))
+		_, statErr := os.Stat(in.modelPath(m.ID))
+		installed := statErr == nil
 		if installed {
 			anyModel = true
 		}
@@ -156,18 +157,21 @@ func diskFree(dir string) int64 {
 	return int64(st.Bavail) * st.Bsize
 }
 
-func fileOk(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
 // Install downloads the engine (only when the platform auto-installs it
 // AND none is found) then the chosen model, verifying sha256 along the way.
 // The App validates the model id, guards the in-flight single-flight, and
 // routes Progress to the Bus.
 func (in *Installer) Install(ctx context.Context, modelID string, report func(Progress)) error {
-	model, ok := modelByID(modelID)
-	if !ok {
+	var model Model
+	found := false
+	for _, m := range Models {
+		if m.ID == modelID {
+			model = m
+			found = true
+			break
+		}
+	}
+	if !found {
 		return fmt.Errorf("stt: unknown model %q", modelID)
 	}
 	if _, ok := engineAsset(runtime.GOOS, runtime.GOARCH); !ok && in.engineBinary() == "" {
@@ -208,7 +212,9 @@ func (in *Installer) installEngine(ctx context.Context, report func(Progress)) e
 	archive := filepath.Join(os.TempDir(), fmt.Sprintf("nusashell-stt-engine-%d.%s", os.Getpid(), asset.Kind))
 	if err := downloadToFile(ctx, in.client, fmt.Sprintf("%s/%s", in.releaseBase, asset.Name), archive, func(p Progress) {
 		p.Phase = PhaseBinary
-		p.BytesTotal = maxOf(p.BytesTotal, 0)
+		if p.BytesTotal < 0 {
+			p.BytesTotal = 0
+		}
 		if p.Message == "" {
 			p.Message = "Downloading whisper.cpp engine"
 		}
@@ -407,11 +413,4 @@ func downloadToFile(ctx context.Context, client *http.Client, url, dst string, r
 		}
 	}
 	return nil
-}
-
-func maxOf(a, b int64) int64 {
-	if a < b {
-		return b
-	}
-	return a
 }

@@ -47,7 +47,11 @@ func New(app *application.App, logger *slog.Logger, static http.Handler, dev boo
 func (s *Server) RoutesMux() *http.ServeMux { return s.mux }
 
 func (s *Server) Routes() http.Handler {
-	return logRequests(s.Logger, s.mux)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		s.mux.ServeHTTP(w, r)
+		s.Logger.Debug("http", "method", r.Method, "path", r.URL.Path, "elapsed_ms", time.Since(start).Milliseconds())
+	})
 }
 
 // maxRPCBodyBytes fits the documented attachment contract (four 4 MiB files
@@ -87,11 +91,3 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // ---- request logging middleware ----
-
-func logRequests(logger *slog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		next.ServeHTTP(w, r)
-		logger.Debug("http", "method", r.Method, "path", r.URL.Path, "elapsed_ms", time.Since(start).Milliseconds())
-	})
-}

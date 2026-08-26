@@ -66,7 +66,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 		var req contracts.WSRequest
 		if err := json.Unmarshal(data, &req); err != nil {
-			s.writeWSError(conn, ctx, req.ID, contracts.CodeValidation, "malformed frame")
+			errBody, _ := json.Marshal(contracts.WSResponse{
+				ID:    req.ID,
+				Error: &contracts.RPCError{Code: contracts.CodeValidation, Message: "malformed frame"},
+			})
+			_ = conn.Write(ctx, websocket.MessageText, errBody)
 			continue
 		}
 		result, rpcErr := s.App.Dispatch(ctx, req.Method, req.Payload)
@@ -91,14 +95,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-}
-
-func (s *Server) writeWSError(conn *websocket.Conn, ctx context.Context, id int, code contracts.ErrorCode, msg string) {
-	b, _ := json.Marshal(contracts.WSResponse{
-		ID:    id,
-		Error: &contracts.RPCError{Code: code, Message: msg},
-	})
-	_ = conn.Write(ctx, websocket.MessageText, b)
 }
 
 // loopbackOriginPatterns returns the origin patterns allowed for WS

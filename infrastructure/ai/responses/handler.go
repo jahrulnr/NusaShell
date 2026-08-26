@@ -143,7 +143,27 @@ func toResponsesInput(msgs []application.ChatMessage, reasoningReplay bool) []re
 		case "user":
 			content := aiutil.StrJSON(m.Content)
 			if len(m.Attachments) > 0 {
-				content = aiutil.MustJSON(responsesUserContent(m))
+				blocks := make([]map[string]any, 0, 1+len(m.Attachments))
+				if m.Content != "" {
+					blocks = append(blocks, map[string]any{"type": "input_text", "text": m.Content})
+				}
+				for _, attachment := range m.Attachments {
+					switch attachment.Type {
+					case "text":
+						blocks = append(blocks, map[string]any{"type": "input_text", "text": aiutil.TextAttachmentContent(attachment)})
+					case "audio":
+						blocks = append(blocks, aiutil.InputAudioBlock(attachment))
+					case "video":
+						blocks = append(blocks, aiutil.VideoURLBlock(attachment))
+					case "image":
+						blocks = append(blocks, aiutil.InputImageBlock(attachment))
+					case "file":
+						blocks = append(blocks, map[string]any{
+							"type": "input_file", "file_data": attachment.DataURL, "filename": attachment.Name,
+						})
+					}
+				}
+				content = aiutil.MustJSON(blocks)
 			}
 			out = append(out, responsesInputItem{Type: "message", Role: "user", Content: content})
 		case "assistant":
@@ -177,28 +197,26 @@ func toResponsesInput(msgs []application.ChatMessage, reasoningReplay bool) []re
 				})
 			}
 		case "tool":
+			var output json.RawMessage
+			if m.ToolResult == nil {
+				output = json.RawMessage(`""`)
+			} else if len(m.ToolResult.Attachments) == 0 {
+				if b, err := json.Marshal(m.ToolResult.Content); err == nil {
+					output = b
+				} else {
+					output = json.RawMessage(`""`)
+				}
+			} else {
+				output = aiutil.MustJSON(responsesToolOutputContent(m.ToolResult))
+			}
 			out = append(out, responsesInputItem{
 				Type:   "function_call_output",
 				CallID: m.ToolResult.ToolCallID,
-				Output: responsesToolOutput(m.ToolResult),
+				Output: output,
 			})
 		}
 	}
 	return out
-}
-
-func responsesToolOutput(result *application.ToolResult) json.RawMessage {
-	if result == nil {
-		return json.RawMessage(`""`)
-	}
-	if len(result.Attachments) == 0 {
-		b, err := json.Marshal(result.Content)
-		if err != nil {
-			return json.RawMessage(`""`)
-		}
-		return b
-	}
-	return aiutil.MustJSON(responsesToolOutputContent(result))
 }
 
 // responsesToolOutputContent builds a multimodal content array for tool
@@ -222,30 +240,6 @@ func responsesToolOutputContent(result *application.ToolResult) []map[string]any
 			blocks = append(blocks, aiutil.VideoURLBlock(att))
 		case "image":
 			blocks = append(blocks, aiutil.InputImageBlock(att))
-		}
-	}
-	return blocks
-}
-
-func responsesUserContent(message application.ChatMessage) []map[string]any {
-	blocks := make([]map[string]any, 0, 1+len(message.Attachments))
-	if message.Content != "" {
-		blocks = append(blocks, map[string]any{"type": "input_text", "text": message.Content})
-	}
-	for _, attachment := range message.Attachments {
-		switch attachment.Type {
-		case "text":
-			blocks = append(blocks, map[string]any{"type": "input_text", "text": aiutil.TextAttachmentContent(attachment)})
-		case "audio":
-			blocks = append(blocks, aiutil.InputAudioBlock(attachment))
-		case "video":
-			blocks = append(blocks, aiutil.VideoURLBlock(attachment))
-		case "image":
-			blocks = append(blocks, aiutil.InputImageBlock(attachment))
-		case "file":
-			blocks = append(blocks, map[string]any{
-				"type": "input_file", "file_data": attachment.DataURL, "filename": attachment.Name,
-			})
 		}
 	}
 	return blocks

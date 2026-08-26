@@ -56,10 +56,13 @@ type LoginOptions struct {
 // Login runs the full PKCE Authorization Code flow and returns the
 // obtained tokens. Ported from genai example doBrowserLogin.
 func Login(ctx context.Context, opts LoginOptions) (*TokenJSON, error) {
-	verifier, challenge, err := generatePKCE()
-	if err != nil {
+	pkceBytes := make([]byte, 64)
+	if _, err := rand.Read(pkceBytes); err != nil {
 		return nil, fmt.Errorf("generating PKCE: %w", err)
 	}
+	verifier := base64.RawURLEncoding.EncodeToString(pkceBytes)
+	sum := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 	originator := opts.Originator
 	if originator == "" {
 		originator = DefaultOriginator
@@ -77,9 +80,34 @@ func Login(ctx context.Context, opts LoginOptions) (*TokenJSON, error) {
 	if err != nil {
 		return nil, err
 	}
-	tokens, err := exchangeCode(ctx, redirectURI, verifier, code)
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"client_id":     {oauthClientID},
+		"code":          {code},
+		"redirect_uri":  {redirectURI},
+		"code_verifier": {verifier},
+	}
+	tokensReq, err := http.NewRequestWithContext(ctx, "POST", oauthIssuer+"/oauth/token", strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating token exchange request: %w", err)
+	}
+	tokensReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokensResp, err := http.DefaultClient.Do(tokensReq)
+	if err != nil {
+		return nil, fmt.Errorf("exchanging code for tokens: %w", err)
+	}
+	defer tokensResp.Body.Close()
+	if tokensResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(tokensResp.Body)
+		return nil, fmt.Errorf("token exchange returned %s: %s", tokensResp.Status, b)
+	}
+	var tokens struct {
+		IDToken      string `json:"id_token"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(tokensResp.Body).Decode(&tokens); err != nil {
+		return nil, fmt.Errorf("decoding token response: %w", err)
 	}
 	claims := extractJWTClaims(tokens.IDToken)
 	return &TokenJSON{
@@ -230,51 +258,17 @@ func ReadCodexCLIAuth(path string) (*TokenJSON, error) {
 
 // ---- internal OAuth helpers (ported from genai example) ----
 
-type codeExchangeResponse struct {
-	IDToken      string `json:"id_token"`
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-}
-
-func exchangeCode(ctx context.Context, redirectURI, verifier, code string) (*codeExchangeResponse, error) {
-	form := url.Values{
-		"grant_type":    {"authorization_code"},
-		"client_id":     {oauthClientID},
-		"code":          {code},
-		"redirect_uri":  {redirectURI},
-		"code_verifier": {verifier},
-	}
-	req, err := http.NewRequestWithContext(ctx, "POST", oauthIssuer+"/oauth/token", strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, fmt.Errorf("creating token exchange request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("exchanging code for tokens: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("token exchange returned %s: %s", resp.Status, b)
-	}
-	var tok codeExchangeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil {
-		return nil, fmt.Errorf("decoding token response: %w", err)
-	}
-	return &tok, nil
-}
-
 type callbackResult struct {
 	code string
 	err  error
 }
 
 func waitForCallback(ctx context.Context, authEndpoint string, params url.Values, openBrowser bool) (redirectURI, code string, err error) {
-	state, err := randomString(32)
-	if err != nil {
+	stateBytes := make([]byte, 32)
+	if _, err := rand.Read(stateBytes); err != nil {
 		return "", "", fmt.Errorf("generating state: %w", err)
 	}
+	state := base64.RawURLEncoding.EncodeToString(stateBytes)
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", callbackPort))
 	if err != nil {
@@ -317,8 +311,19 @@ func waitForCallback(ctx context.Context, authEndpoint string, params url.Values
 	fmt.Fprintf(os.Stderr, "Opening browser for OpenAI login...\n")
 	fmt.Fprintf(os.Stderr, "If the browser does not open, visit:\n%s\n", authURL)
 	if openBrowser {
-		if err := openBrowserURL(authURL); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not open browser: %v\n", err)
+		var browseErr error
+		switch runtime.GOOS {
+		case "linux":
+			browseErr = exec.Command("xdg-open", authURL).Start()
+		case "darwin":
+			browseErr = exec.Command("open", authURL).Start()
+		case "windows":
+			browseErr = exec.Command("cmd", "/c", "start", strings.ReplaceAll(authURL, "&", "^&")).Start()
+		default:
+			browseErr = fmt.Errorf("unsupported platform %s", runtime.GOOS)
+		}
+		if browseErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not open browser: %v\n", browseErr)
 		}
 	}
 
@@ -332,38 +337,6 @@ func waitForCallback(ctx context.Context, authEndpoint string, params url.Values
 		return "", "", res.err
 	}
 	return redirectURI, res.code, nil
-}
-
-func generatePKCE() (verifier, challenge string, err error) {
-	b := make([]byte, 64)
-	if _, err := rand.Read(b); err != nil {
-		return "", "", err
-	}
-	verifier = base64.RawURLEncoding.EncodeToString(b)
-	h := sha256.Sum256([]byte(verifier))
-	challenge = base64.RawURLEncoding.EncodeToString(h[:])
-	return verifier, challenge, nil
-}
-
-func randomString(n int) (string, error) {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-func openBrowserURL(u string) error {
-	switch runtime.GOOS {
-	case "linux":
-		return exec.Command("xdg-open", u).Start()
-	case "darwin":
-		return exec.Command("open", u).Start()
-	case "windows":
-		return exec.Command("cmd", "/c", "start", strings.ReplaceAll(u, "&", "^&")).Start()
-	default:
-		return fmt.Errorf("unsupported platform %s", runtime.GOOS)
-	}
 }
 
 // jwtClaims holds the fields NusaShell extracts from a ChatGPT id_token.

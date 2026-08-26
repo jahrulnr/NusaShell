@@ -582,7 +582,15 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	if !caps.Video && settings.VideoProviderID != "" && settings.VideoModelID != "" {
 		conversation = a.enrichWithVideoDescriptions(run.Ctx, conversation, asstMsgID, settings)
 	}
-	toolDefs := a.toolDefinitions()
+	tools := append(a.Toolbox.ListTools(), DispatcherToolInfos()...)
+	toolDefs := make([]ToolDef, 0, len(tools))
+	for _, tool := range tools {
+		toolDefs = append(toolDefs, ToolDef{
+			Name:        tool.Name,
+			Description: tool.Description,
+			InputSchema: tool.InputSchema,
+		})
+	}
 	if run.Headless {
 		toolDefs = filterACPToolDefs(toolDefs)
 	}
@@ -716,7 +724,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				}
 			}
 			streamErr = a.decorateRateLimitError(provider.ID, streamErr)
-			if !continuedPartialStream && canContinuePartialStream(streamErr, roundResult) {
+			if !continuedPartialStream && isRetryableProviderError(streamErr) && len(roundResult.Response.ToolCalls) == 0 && (roundResult.Content != "" || roundResult.Reasoning != "") {
 				// A partial stream must never carry an unconfirmed tool call into the next
 				// continuation request. Tools run only after a fully completed round.
 				roundResult.Response.ToolCalls = nil
@@ -949,10 +957,6 @@ func (a *App) applyQueuedSteer(run *TurnRun, _ string) (bool, *domain.Conversati
 	return true, c, nil
 }
 
-func canContinuePartialStream(err error, round streamedTurnRound) bool {
-	return isRetryableProviderError(err) && len(round.Response.ToolCalls) == 0 && (round.Content != "" || round.Reasoning != "")
-}
-
 // shouldContinueFailedTurn reports whether a retry should freeze partial
 // output and ask the new model to continue. Tool-bearing failures are always
 // restarted from scratch so a leftover continuation flag cannot skip tool
@@ -1116,7 +1120,13 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 		return "", nil
 	}
 
-	effectiveKeepBudget := effectiveCompactionKeepBudget(contextWindow)
+	effectiveKeepBudget := compactionKeepTokenBudget
+	if cap := contextWindow * 3 / 10; cap < effectiveKeepBudget {
+		effectiveKeepBudget = cap
+	}
+	if effectiveKeepBudget < 1000 {
+		effectiveKeepBudget = 1000
+	}
 
 	// Edge case: if the adapter supports server-side compaction, try it
 	// first. On any error, fall back to client-side compaction so the
@@ -1344,17 +1354,6 @@ func truncateCompactionText(s string, n int) string {
 	return string(head) + fmt.Sprintf("\n\n[truncated: %d chars omitted]", omitted)
 }
 
-func effectiveCompactionKeepBudget(contextWindow int) int {
-	keep := compactionKeepTokenBudget
-	if cap := contextWindow * 3 / 10; cap < keep {
-		keep = cap
-	}
-	if keep < 1000 {
-		keep = 1000
-	}
-	return keep
-}
-
 const compactionSummaryPrefix = "Previous summary of earlier conversation:\n"
 
 // compactionPassAvailable is the per-pass token budget for message content.
@@ -1450,30 +1449,6 @@ func (a *App) updateMessage(c *domain.Conversation, msgID string, fn func(*domai
 			return
 		}
 	}
-}
-
-func (a *App) hasToolCall(c *domain.Conversation, msgID, callID string) bool {
-	for i := range c.Messages {
-		if c.Messages[i].ID != msgID {
-			continue
-		}
-		for _, tc := range c.Messages[i].ToolCalls {
-			if tc.ID == callID {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (a *App) appendToolCall(c *domain.Conversation, msgID string, tc domain.ToolCall) *domain.Conversation {
-	for i := range c.Messages {
-		if c.Messages[i].ID == msgID {
-			c.Messages[i].ToolCalls = append(c.Messages[i].ToolCalls, tc)
-			return c
-		}
-	}
-	return c
 }
 
 func (a *App) updateToolResult(c *domain.Conversation, msgID, callID string, status domain.ToolCallStatus, output string, outputAttachments []domain.Attachment) *domain.Conversation {

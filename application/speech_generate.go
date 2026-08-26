@@ -44,9 +44,16 @@ func (a *App) executeGenerateSpeech(run *TurnRun, toolCall domain.ToolCall, sett
 	if len(text) > 20000 {
 		return "error: text too long", nil, fmt.Errorf("text exceeds 20000 characters")
 	}
-	format, err := normalizeTTSFormat(args.Format)
-	if err != nil {
-		return "error: " + err.Error(), nil, err
+	var format string
+	switch strings.ToLower(strings.TrimSpace(args.Format)) {
+	case "", "mp3":
+		format = "mp3"
+	case "wav":
+		format = "wav"
+	case "opus":
+		format = "opus"
+	default:
+		return "error: format must be one of: mp3, wav, opus", nil, errTTS("format must be one of: mp3, wav, opus")
 	}
 
 	req := TTSRequest{Text: text, Voice: strings.TrimSpace(args.Voice), Format: format, Speed: args.Speed}

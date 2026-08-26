@@ -41,32 +41,28 @@ func IsKnownImageModel(modelID string) bool {
 	if _, ok := knownImageModelSet[base]; ok {
 		return true
 	}
-	return looksLikeImageGenName(modelID, base)
-}
-
-func looksLikeImageGenName(fullID, base string) bool {
 	switch {
-	case strings.Contains(fullID, "gpt-image"), strings.Contains(base, "gpt-image"):
+	case strings.Contains(modelID, "gpt-image"), strings.Contains(base, "gpt-image"):
 		return true
-	case strings.Contains(fullID, "dall-e"), strings.Contains(base, "dall-e"):
+	case strings.Contains(modelID, "dall-e"), strings.Contains(base, "dall-e"):
 		return true
-	case strings.Contains(fullID, "stable-diffusion"), strings.Contains(base, "stable-diffusion"):
+	case strings.Contains(modelID, "stable-diffusion"), strings.Contains(base, "stable-diffusion"):
 		return true
-	case strings.Contains(fullID, "seedream"), strings.Contains(base, "seedream"):
+	case strings.Contains(modelID, "seedream"), strings.Contains(base, "seedream"):
 		return true
-	case strings.Contains(fullID, "ideogram"), strings.Contains(base, "ideogram"):
+	case strings.Contains(modelID, "ideogram"), strings.Contains(base, "ideogram"):
 		return true
-	case strings.Contains(fullID, "recraft"), strings.Contains(base, "recraft"):
+	case strings.Contains(modelID, "recraft"), strings.Contains(base, "recraft"):
 		return true
-	case strings.Contains(fullID, "riverflow"), strings.Contains(base, "riverflow"):
+	case strings.Contains(modelID, "riverflow"), strings.Contains(base, "riverflow"):
 		return true
-	case strings.Contains(fullID, "flash-image"), strings.Contains(base, "flash-image"):
+	case strings.Contains(modelID, "flash-image"), strings.Contains(base, "flash-image"):
 		return true
-	case strings.Contains(fullID, "krea"), strings.HasPrefix(base, "krea"):
+	case strings.Contains(modelID, "krea"), strings.HasPrefix(base, "krea"):
 		return true
-	case strings.Contains(fullID, "imagen-"), strings.HasPrefix(base, "imagen-"):
+	case strings.Contains(modelID, "imagen-"), strings.HasPrefix(base, "imagen-"):
 		return true
-	case strings.Contains(fullID, "flux.1"), strings.Contains(fullID, "flux-1"), strings.HasPrefix(base, "flux"):
+	case strings.Contains(modelID, "flux.1"), strings.Contains(modelID, "flux-1"), strings.HasPrefix(base, "flux"):
 		return true
 	default:
 		return false

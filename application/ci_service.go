@@ -209,11 +209,6 @@ func validationDTO(r domain.ValidationResult) contracts.ValidationDTO {
 	}
 }
 
-func mustJSON(v any) json.RawMessage {
-	b, _ := json.Marshal(v)
-	return b
-}
-
 func (a *Automation) AvailabilityOf(ctx context.Context, w *domain.WorkflowDefinition) (string, string) {
 	if a.Auto == nil {
 		return "runnable", ""

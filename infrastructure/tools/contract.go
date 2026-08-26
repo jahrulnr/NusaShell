@@ -94,10 +94,6 @@ type contractGate struct {
 	read map[string]map[string]bool // conversationID -> pluginID -> read
 }
 
-func newContractGate() *contractGate {
-	return &contractGate{read: map[string]map[string]bool{}}
-}
-
 func (g *contractGate) mark(ctx context.Context, pluginIDs ...string) {
 	cid := application.ConversationIDFromContext(ctx)
 	g.mu.Lock()
@@ -125,7 +121,7 @@ func (g *contractGate) hasRead(ctx context.Context, pluginID string) bool {
 // gate lazily initializes the per-Toolbox gate (zero value usable because
 // of sync.Once).
 func (t *Toolbox) gate() *contractGate {
-	t.contractsGateOnce.Do(func() { t.contractsGate = newContractGate() })
+	t.contractsGateOnce.Do(func() { t.contractsGate = &contractGate{read: map[string]map[string]bool{}} })
 	return t.contractsGate
 }
 
