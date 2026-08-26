@@ -320,6 +320,7 @@ func (i *responsesOutputItem) UnmarshalJSON(data []byte) error {
 }
 
 type responsesSummaryItem struct {
+	Type string `json:"type"`
 	Text string `json:"text"`
 }
 
@@ -875,7 +876,7 @@ func responsesReasoningInputItem(block core.ReasoningBlock) (responsesInputItem,
 	if block.Text == "" {
 		return item, fmt.Errorf("OpenAI Responses reasoning block has empty text and no extra — reasoning was received from the provider but is missing on replay (input != output)")
 	}
-	item.Summary = []responsesSummaryItem{{Text: block.Text}}
+	item.Summary = []responsesSummaryItem{{Type: "summary_text", Text: block.Text}}
 	return item, nil
 }
 
