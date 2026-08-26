@@ -1524,6 +1524,11 @@ type ModelCapabilities struct {
 	Audio    bool // audio input
 	Video    bool // video input
 	Document bool // PDF/document input
+	// Reasoning reports whether the model supports reasoning/thinking mode.
+	// When false, effort levels other than "auto"/"none" are stripped
+	// before the request is sent so non-reasoning models do not receive a
+	// thinking field they would reject or ignore.
+	Reasoning bool
 	// ReasoningReplay is true when the upstream requires reasoning_content
 	// (Chat Completions) or reasoning items (Responses API) to be echoed
 	// back on every assistant message in subsequent turns. Resolved from
@@ -1555,6 +1560,7 @@ func modelCapabilitiesWithLearned(provider *domain.Provider, model string, cache
 	caps := ModelCapabilities{Vision: dc.Vision, Audio: dc.Audio, Video: dc.Video, Document: dc.Document}
 	if provider != nil {
 		if m := provider.FindModel(model); m != nil {
+			caps.Reasoning = m.Reasoning
 			caps.ReasoningReplay = domain.RequiresReasoningReplay(provider.ID, model, m.InterleavedField)
 		} else {
 			caps.ReasoningReplay = domain.RequiresReasoningReplay(provider.ID, model, "")

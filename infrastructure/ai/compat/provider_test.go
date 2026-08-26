@@ -739,6 +739,79 @@ func TestConvertToolsAlwaysStrict(t *testing.T) {
 	}
 }
 
+// TestReasoningBlockEmptyTextErrorsWhenReasoningConfigured is the guard:
+// if a ReasoningBlock reaches the provider builder with empty text AND no
+// Extra AND no Signature, the reasoning was received from the provider
+// (input) but is now empty on replay (output). This is a consistency
+// violation — force an error instead of silently sending an empty
+// reasoning field that models requiring reasoning_content would reject.
+func TestReasoningBlockEmptyTextErrorsWhenReasoningConfigured(t *testing.T) {
+	provider, err := New(Config{
+		BaseURL: "https://compat.example",
+		HTTPClient: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			t.Fatal("request must not be sent when reasoning block is empty")
+			return nil, nil
+		}),
+	}, Spec{
+		Name: "deepseek",
+		Response: ResponseSpec{
+			ReasoningFields: []string{"reasoning_content"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	_, err = provider.Chat(context.Background(), &core.Request{
+		Model: "m",
+		Messages: []core.Message{
+			core.UserText("hi"),
+			core.Assistant(core.ReasoningBlock{Text: ""}),
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "empty reasoning") {
+		t.Fatalf("expected empty reasoning error, got %v", err)
+	}
+}
+
+// TestReasoningBlockPlaceholderTextPasses ensures the placeholder injected
+// by the application layer (domain.ReasoningPlaceholder) is accepted and
+// forwarded — the guard only rejects truly empty reasoning, not the
+// placeholder sentinel.
+func TestReasoningBlockPlaceholderTextPasses(t *testing.T) {
+	var capturedBody map[string]any
+	provider, err := New(Config{
+		BaseURL: "https://compat.example",
+		HTTPClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if err := json.NewDecoder(req.Body).Decode(&capturedBody); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			return jsonResponse(http.StatusOK, `{"choices":[{"message":{"content":"ok"}}]}`), nil
+		}),
+	}, Spec{
+		Name: "deepseek",
+		Response: ResponseSpec{
+			ReasoningFields: []string{"reasoning_content"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	_, err = provider.Chat(context.Background(), &core.Request{
+		Model: "m",
+		Messages: []core.Message{
+			core.UserText("hi"),
+			core.Assistant(core.ReasoningBlock{Text: "(prior reasoning summary unavailable)"}),
+		},
+	})
+	if err != nil {
+		t.Fatalf("placeholder reasoning must pass, got error: %v", err)
+	}
+	messages := capturedBody["messages"].([]any)
+	if messages[1].(map[string]any)["reasoning_content"] != "(prior reasoning summary unavailable)" {
+		t.Fatalf("reasoning_content = %#v", messages[1])
+	}
+}
+
 func jsonResponse(status int, body string) *http.Response {
 	return &http.Response{
 		StatusCode: status,

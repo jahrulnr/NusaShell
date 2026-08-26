@@ -137,6 +137,14 @@ func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversatio
 func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
 	var content strings.Builder
 	var reasoning strings.Builder
+	// Guard: strip effort for models that do not support reasoning. Sending
+	// "low"/"medium"/"high" to a non-reasoning model pushes a thinking field
+	// the upstream rejects or silently ignores. "auto" (omit) and "none"
+	// (explicit disable) are safe to keep — they do not request thinking.
+	if !caps.Reasoning && effort != "" && effort != "auto" && effort != "none" {
+		a.log("warn", "ai", "stripping effort %q for non-reasoning model %s", effort, model)
+		effort = "auto"
+	}
 	// The system prompt is deliberately cache-stable: identity, user
 	// instructions, system-level skill messages, and workspace only. No
 	// runtime state (delegation config, continuation instructions, async

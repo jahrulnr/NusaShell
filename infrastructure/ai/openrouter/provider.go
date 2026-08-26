@@ -412,8 +412,11 @@ func putReasoning(out map[string]any, block core.ReasoningBlock) error {
 		delete(out, "reasoning")
 		return nil
 	}
-	if block.Text == "" || out["reasoning_details"] != nil {
-		return nil
+	if block.Text == "" {
+		if out["reasoning_details"] != nil {
+			return nil
+		}
+		return fmt.Errorf("OpenRouter reasoning block has empty text with no details — reasoning was received from the provider but is missing on replay (input != output)")
 	}
 	if current, _ := out["reasoning"].(string); current != "" {
 		out["reasoning"] = current + "\n\n" + block.Text

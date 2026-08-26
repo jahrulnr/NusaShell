@@ -142,8 +142,12 @@ func chatMessageToCore(m ChatMessage, req ChatRequest) core.Message {
 				Arguments: jsonRaw(tc.Args),
 			})
 		}
-		if req.ReasoningReplay && m.Reasoning != "" {
-			blocks = append(blocks, core.ReasoningBlock{Text: m.Reasoning})
+		if req.ReasoningReplay {
+			if m.Reasoning != "" {
+				blocks = append(blocks, core.ReasoningBlock{Text: m.Reasoning})
+			} else {
+				blocks = append(blocks, core.ReasoningBlock{Text: domain.ReasoningPlaceholder})
+			}
 		}
 		return core.Message{Role: core.RoleAssistant, Blocks: blocks}
 	case "tool":

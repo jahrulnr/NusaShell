@@ -264,6 +264,15 @@ func TestRejectsSignedOrRedactedReasoningBlockHistory(t *testing.T) {
 	}
 }
 
+func TestRejectsEmptyReasoningBlockOnReplay(t *testing.T) {
+	_, _, _, err := mapBlocks([]core.Block{
+		core.ReasoningBlock{Text: ""},
+	})
+	if err == nil || !strings.Contains(err.Error(), "empty text") {
+		t.Fatalf("expected empty reasoning error, got %v", err)
+	}
+}
+
 func TestUsageIncludesCacheWriteTokens(t *testing.T) {
 	p, err := New(compat.Config{
 		APIKey:  "key",

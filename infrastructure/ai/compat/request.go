@@ -333,7 +333,7 @@ func putReasoningBlock(out map[string]any, block core.ReasoningBlock, spec Spec)
 	if block.Signature != "" || len(block.Redacted) > 0 {
 		return fmt.Errorf("ReasoningBlock has provider state that this compat provider cannot encode")
 	}
-	return nil
+	return fmt.Errorf("ReasoningBlock has empty reasoning text with no extra or signature — reasoning was received from the provider but is missing on replay (input != output)")
 }
 
 func textOnly(blocks []core.Block) (string, error) {

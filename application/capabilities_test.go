@@ -289,6 +289,29 @@ func TestModelCapabilitiesReasoningReplayPatternFallback(t *testing.T) {
 	}
 }
 
+// TestModelCapabilitiesReasoningFlagFromCatalog proves the Reasoning
+// capability is resolved from the model's catalog metadata. A model with
+// Reasoning=true gets caps.Reasoning=true; a model without it gets false.
+// This flag guards the effort strip in streamTurnRoundOnce so non-reasoning
+// models do not receive a thinking field.
+func TestModelCapabilitiesReasoningFlagFromCatalog(t *testing.T) {
+	provider := &domain.Provider{
+		ID: "openrouter",
+		Models: []domain.Model{
+			{ID: "deepseek/deepseek-r1", Reasoning: true},
+			{ID: "openai/gpt-4.1", Reasoning: false},
+		},
+	}
+	caps := modelCapabilities(provider, "deepseek/deepseek-r1")
+	if !caps.Reasoning {
+		t.Errorf("deepseek-r1 with Reasoning=true: caps.Reasoning = false, want true")
+	}
+	caps = modelCapabilities(provider, "openai/gpt-4.1")
+	if caps.Reasoning {
+		t.Errorf("gpt-4.1 with Reasoning=false: caps.Reasoning = true, want false")
+	}
+}
+
 func TestChatMessagesDocumentPlaceholderForNonDocumentModel(t *testing.T) {
 	dir := t.TempDir()
 	pdfPath := testAbsPath(dir, "report.pdf")
