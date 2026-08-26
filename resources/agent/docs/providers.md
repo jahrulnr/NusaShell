@@ -4,6 +4,26 @@ Providers are the LLM backends the agent chats through. A provider is
 defined by its **API wire format**, not by a vendor: **Messages**,
 **Responses**, or **Chat**.
 
+## Drivers
+
+The provider driver selects the implementation package while the provider kind
+selects the wire format:
+
+- The persistent **Anthropic** card uses
+  `infrastructure/ai/anthropic` with `messages`.
+- The persistent **OpenAI** card uses `infrastructure/ai/openai` with
+  `responses`.
+- The persistent **OpenRouter** card uses
+  `infrastructure/ai/openrouter`; its editor supports `responses`, `chat`, and
+  `messages`.
+- Every custom provider uses `infrastructure/ai/openrouter`; its editor
+  supports `responses`, `chat`, and `messages`. There is no custom-provider
+  count limit.
+
+The three built-in cards remain visible before they are configured. Configure a
+card with its base URL and key, then import models. OpenRouter and custom
+providers can each use a different API kind and base URL.
+
 ## Kinds
 
 - `messages` — the Anthropic Messages wire format (`/v1/messages`); supports
@@ -12,13 +32,9 @@ defined by its **API wire format**, not by a vendor: **Messages**,
   function calling and reports cached input tokens.
 - `chat` — the OpenAI Chat Completions wire format (`/chat/completions`);
   works with OpenAI, DeepSeek, LM Studio, vLLM and any compatible endpoint.
-  Chat-kind providers default to the **OpenRouter adapter** — aggregators
-  (TokenRouter, OmniRoute, OpenCode, OpenRouter itself, …) speak the
-  OpenRouter wire format (effort `xhigh`/`max`, `cache_retention`, block
-  cache, `/images/models`, `/videos/models`). Only a direct OpenAI host
-  (`api.openai.com`) stays on the vanilla OpenAI chat adapter, because the
-  OpenRouter provider options (`cache_retention`, `session_id`, `provider`
-  routing) would 400 there.
+  OpenRouter and custom providers use the OpenRouter implementation for this
+  kind, including its provider options and attribution headers. Providers
+  without an explicit driver retain host-detected routing.
 
 **Base URL is required for all three kinds.** The UI suggests a per-kind
 default (`https://api.anthropic.com` for Messages, `https://api.openai.com/v1`

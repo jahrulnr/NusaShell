@@ -30,6 +30,7 @@ func (a *App) providerNameByID(providerID string) string {
 func (a *App) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 	dto := contracts.ProviderDTO{
 		ID:      p.ID,
+		Driver:  string(p.EffectiveDriver()),
 		Kind:    string(p.Kind),
 		Name:    p.Name,
 		BaseURL: p.BaseURL,
@@ -55,6 +56,57 @@ func (a *App) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 	return dto
 }
 
+func builtInProvider(id string) (*domain.Provider, bool) {
+	switch id {
+	case "anthropic":
+		return &domain.Provider{
+			ID:      id,
+			Driver:  domain.ProviderDriverAnthropic,
+			Kind:    domain.ProviderMessages,
+			Name:    "Anthropic",
+			BaseURL: "https://api.anthropic.com",
+			Enabled: true,
+		}, true
+	case "openai":
+		return &domain.Provider{
+			ID:      id,
+			Driver:  domain.ProviderDriverOpenAI,
+			Kind:    domain.ProviderResponses,
+			Name:    "OpenAI",
+			BaseURL: "https://api.openai.com/v1",
+			Enabled: true,
+		}, true
+	case "openrouter":
+		return &domain.Provider{
+			ID:      id,
+			Driver:  domain.ProviderDriverOpenRouter,
+			Kind:    domain.ProviderChat,
+			Name:    "OpenRouter",
+			BaseURL: "https://openrouter.ai/api/v1",
+			Enabled: true,
+		}, true
+	default:
+		return nil, false
+	}
+}
+
+func validateProviderDriver(driver domain.ProviderDriver, kind domain.ProviderKind) error {
+	if !domain.ValidDriver(driver) {
+		return fmt.Errorf("unsupported provider driver %q", driver)
+	}
+	switch driver {
+	case domain.ProviderDriverAnthropic:
+		if kind != domain.ProviderMessages {
+			return fmt.Errorf("anthropic driver only supports messages kind")
+		}
+	case domain.ProviderDriverOpenAI:
+		if kind != domain.ProviderResponses {
+			return fmt.Errorf("openai driver only supports responses kind")
+		}
+	}
+	return nil
+}
+
 func (a *App) handleProvidersList() (any, *contracts.RPCError) {
 	list := a.Providers.List()
 	out := make([]contracts.ProviderDTO, 0, len(list))
@@ -77,14 +129,20 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses, or chat"}
 	}
 	baseURL := strings.TrimSpace(req.BaseURL)
+	driver := domain.ProviderDriver(strings.ToLower(strings.TrimSpace(req.Driver)))
 
 	var p *domain.Provider
 	if req.ID != "" {
 		existing, err := a.Providers.Get(req.ID)
 		if err != nil {
-			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+			if defaults, ok := builtInProvider(req.ID); ok {
+				p = defaults
+			} else {
+				return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+			}
+		} else {
+			p = existing
 		}
-		p = existing
 	} else {
 		p = &domain.Provider{
 			ID:      domain.NewID("prov"),
@@ -95,10 +153,18 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 		}
 	}
 
+	if driver == domain.ProviderDriverAuto {
+		driver = p.EffectiveDriver()
+	}
+	if err := validateProviderDriver(driver, kind); err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
+	}
+
 	// Every supported kind requires a base URL.
 	if baseURL == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "base url is required"}
 	}
+	p.Driver = driver
 	p.Kind = kind
 	p.Name = name
 	p.BaseURL = baseURL

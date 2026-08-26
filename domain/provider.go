@@ -13,6 +13,28 @@ const (
 	ProviderChat      ProviderKind = "chat"
 )
 
+// ProviderDriver selects the implementation package behind a provider.
+// ProviderKind remains the wire API shape so a driver can expose more than
+// one API kind.
+type ProviderDriver string
+
+const (
+	ProviderDriverAuto       ProviderDriver = ""
+	ProviderDriverAnthropic  ProviderDriver = "anthropic"
+	ProviderDriverOpenAI     ProviderDriver = "openai"
+	ProviderDriverOpenRouter ProviderDriver = "openrouter"
+)
+
+// ValidDriver reports whether driver is supported. The empty driver keeps the
+// legacy host-detected routing for providers created before explicit drivers.
+func ValidDriver(driver ProviderDriver) bool {
+	switch driver {
+	case ProviderDriverAuto, ProviderDriverAnthropic, ProviderDriverOpenAI, ProviderDriverOpenRouter:
+		return true
+	}
+	return false
+}
+
 // KindCapabilities describes what a provider kind can do at the protocol
 // level — independent of any specific model. This drives factory routing
 // (image generation, TTS, STT, embeddings, video) and the requiresKey check
@@ -154,6 +176,7 @@ type Model struct {
 
 type Provider struct {
 	ID        string
+	Driver    ProviderDriver
 	Kind      ProviderKind
 	Name      string
 	BaseURL   string
@@ -161,6 +184,28 @@ type Provider struct {
 	HasAPIKey bool
 	Models    []Model
 	UpdatedAt time.Time
+}
+
+// EffectiveDriver returns the explicit driver when present. The stable
+// built-in IDs also identify their driver for records created by older
+// versions that predate the Driver field.
+func (p *Provider) EffectiveDriver() ProviderDriver {
+	if p == nil {
+		return ProviderDriverAuto
+	}
+	if p.Driver != ProviderDriverAuto {
+		return p.Driver
+	}
+	switch p.ID {
+	case "anthropic":
+		return ProviderDriverAnthropic
+	case "openai":
+		return ProviderDriverOpenAI
+	case "openrouter":
+		return ProviderDriverOpenRouter
+	default:
+		return ProviderDriverAuto
+	}
 }
 
 func (p *Provider) HasModel(id string) bool {

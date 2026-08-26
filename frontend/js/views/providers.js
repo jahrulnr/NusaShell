@@ -11,9 +11,97 @@ const KIND_META = {
   responses: { label: 'Responses', mark: 'RS', cls: 'accent-openai', desc: 'Responses API format' },
   chat: { label: 'Chat', mark: 'CH', cls: 'accent-compatible', desc: 'Chat Completions API format (incl. OpenRouter hosts)' },
 };
-// Fallback for unknown/stale kinds (e.g. a codex/ollama entry left over
-// from a prior install) so the view doesn't crash on render.
 const KIND_META_FALLBACK = { label: 'Unknown', mark: '?', cls: 'accent-compatible', desc: 'Unsupported provider kind — delete and re-add as messages, responses, or chat.' };
+
+const DRIVER_META = {
+  anthropic: { label: 'Anthropic', mark: 'AN', cls: 'accent-anthropic', desc: 'Anthropic Messages API' },
+  openai: { label: 'OpenAI', mark: 'OA', cls: 'accent-openai', desc: 'OpenAI Responses API' },
+  openrouter: { label: 'OpenRouter', mark: 'OR', cls: 'accent-compatible', desc: 'OpenRouter-compatible API' },
+};
+
+const API_KIND_OPTIONS = [
+  { value: 'responses', label: 'Responses' },
+  { value: 'chat', label: 'Chat' },
+  { value: 'messages', label: 'Messages' },
+];
+
+export const BUILTIN_PROVIDERS = [
+  {
+    id: 'anthropic',
+    driver: 'anthropic',
+    kind: 'messages',
+    name: 'Anthropic',
+    base_url: 'https://api.anthropic.com',
+    enabled: true,
+    configured: false,
+    has_api_key: false,
+    models: [],
+    builtin: true,
+  },
+  {
+    id: 'openai',
+    driver: 'openai',
+    kind: 'responses',
+    name: 'OpenAI',
+    base_url: 'https://api.openai.com/v1',
+    enabled: true,
+    configured: false,
+    has_api_key: false,
+    models: [],
+    builtin: true,
+  },
+  {
+    id: 'openrouter',
+    driver: 'openrouter',
+    kind: 'chat',
+    name: 'OpenRouter',
+    base_url: 'https://openrouter.ai/api/v1',
+    enabled: true,
+    configured: false,
+    has_api_key: false,
+    models: [],
+    builtin: true,
+  },
+];
+
+export function mergeProviderRegistry(configured = []) {
+  const records = Array.isArray(configured) ? configured : [];
+  const saved = new Map(records.filter((provider) => provider?.id).map((provider) => [provider.id, provider]));
+  const fixed = BUILTIN_PROVIDERS.map((definition) => {
+    const provider = saved.get(definition.id);
+    if (!provider) return { ...definition, models: [] };
+    const kind = definition.id === 'openrouter' && ['messages', 'responses', 'chat'].includes(provider.kind)
+      ? provider.kind
+      : definition.kind;
+    return {
+      ...definition,
+      ...provider,
+      id: definition.id,
+      driver: definition.driver,
+      kind,
+      name: provider.name?.trim() || definition.name,
+      base_url: provider.base_url || definition.base_url,
+      enabled: provider.enabled !== undefined ? provider.enabled : definition.enabled,
+      models: [...(provider.models ?? [])],
+      builtin: true,
+    };
+  });
+  const custom = records
+    .filter((provider) => !BUILTIN_PROVIDERS.some((definition) => definition.id === provider.id))
+    .map((provider) => ({ ...provider, builtin: false }));
+  return [...fixed, ...custom];
+}
+
+function providerMeta(provider) {
+  const kindMeta = KIND_META[provider.kind] || KIND_META_FALLBACK;
+  if (!provider.builtin || !DRIVER_META[provider.driver]) return kindMeta;
+  const driverMeta = DRIVER_META[provider.driver];
+  if (provider.driver !== 'openrouter') return driverMeta;
+  return {
+    ...driverMeta,
+    desc: `${kindMeta.label} API via OpenRouter`,
+  };
+}
 
 export async function initProviders() {
   document.getElementById('add-provider-btn').addEventListener('click', () => addProvider());
@@ -22,8 +110,8 @@ export async function initProviders() {
 
 export async function refresh() {
   const res = await rpc('ai.providers.list');
-  providers = res.providers ?? [];
-  if (detailId && !providers.find((p) => p.id === detailId)) detailId = null;
+  providers = mergeProviderRegistry(res.providers ?? []);
+  if (detailId && !providers.some((p) => p.id === detailId)) detailId = null;
   renderRegistry();
 }
 
@@ -42,69 +130,86 @@ function renderRegistry() {
     registry.append(el('div', { class: 'empty-state', style: 'grid-column:1/-1' },
       el('div', { class: 'empty-mark', text: '▣' }),
       el('strong', { text: 'No providers configured' }),
-      el('span', { text: 'Add a provider in the Messages, Responses or Chat API format, then import its models to chat with the agent.' }),
+      el('span', { text: 'Configure one of the built-in providers or add a custom provider, then import its models to chat with the agent.' }),
     ));
     return;
   }
-  for (const p of providers) {
-    const meta = KIND_META[p.kind] || KIND_META_FALLBACK;
-    const card = el('div', {
-      class: `provider-registry-card ${meta.cls}${p.id === detailId ? ' is-active' : ''}`,
-    },
-      el('div', { class: 'provider-card-head' },
-        el('div', { class: 'provider-mark', text: meta.mark }),
-        el('div', { style: 'min-width:0' },
-          el('h2', { text: p.name }),
-          el('p', { text: p.base_url || meta.label }),
-        ),
-        el('label', { class: 'toggle provider-enabled', title: p.enabled === false ? 'Enable provider' : 'Disable provider' },
-          el('input', { type: 'checkbox', checked: p.enabled !== false }),
-          el('span', { class: 'toggle-slider' }),
-        ),
-      ),
-      el('p', { text: meta.desc }),
-      el('div', { class: 'provider-card-footer' },
-        el('span', { class: `provider-status${p.configured ? ' configured' : ''}`, text: p.configured ? `${p.models?.length ?? 0} models` : 'not configured' }),
-        el('div', { class: 'provider-card-actions' },
-          el('button', { class: 'mini-btn ghost', type: 'button', text: 'Configure' }),
-          el('button', { class: 'mini-btn danger', type: 'button', text: 'Delete' }),
-        ),
-      ),
-    );
-    card.querySelectorAll('button')[0].addEventListener('click', () => showDetail(p.id));
-    card.querySelectorAll('button')[1].addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const ok = await confirmDialog('Delete provider', `"${p.name}" and its stored API key will be removed.`, 'Delete');
-      if (!ok) return;
-      try {
-        await rpc('ai.providers.delete', { id: p.id });
-        toast('Provider deleted', 'success');
-        await refresh();
-      } catch (err) { toast(err.message, 'error'); }
-    });
-    card.querySelector('.provider-enabled input').addEventListener('change', async (event) => {
-      const toggle = event.currentTarget;
-      toggle.disabled = true;
-      try {
-        await rpc('ai.providers.save', {
-          id: p.id,
-          kind: p.kind,
-          name: p.name,
-          base_url: p.base_url,
-          enabled: toggle.checked,
-        });
-        toast(toggle.checked ? 'Provider enabled' : 'Provider disabled', 'success');
-        await refresh();
-      } catch (err) {
-        toggle.checked = !toggle.checked;
-        toast(err.message, 'error');
-      } finally {
-        toggle.disabled = false;
-      }
-    });
-    registry.append(card);
-  }
+  for (const p of providers) registry.append(renderProviderCard(p));
   if (detailId) renderDetail(providers.find((p) => p.id === detailId));
+}
+
+function renderProviderCard(p) {
+  const meta = providerMeta(p);
+  let modelStatus = 'not configured';
+  if (p.configured) modelStatus = `${p.models?.length ?? 0} models`;
+  else if (p.builtin) modelStatus = 'built-in · not configured';
+  const enabledToggle = p.builtin && !p.configured
+    ? null
+    : el('label', { class: 'toggle provider-enabled', title: p.enabled === false ? 'Enable provider' : 'Disable provider' },
+      el('input', { type: 'checkbox', checked: p.enabled !== false }),
+      el('span', { class: 'toggle-slider' }),
+    );
+  const configureButton = el('button', { class: 'mini-btn ghost provider-configure', type: 'button', text: 'Configure' });
+  const deleteButton = p.builtin
+    ? null
+    : el('button', { class: 'mini-btn danger provider-delete', type: 'button', text: 'Delete' });
+  const card = el('article', {
+    class: `provider-registry-card ${meta.cls}${p.id === detailId ? ' is-active' : ''}`,
+  },
+    el('div', { class: 'provider-card-head' },
+      el('div', { class: 'provider-mark', text: meta.mark }),
+      el('div', { style: 'min-width:0' },
+        el('h2', { text: p.name }),
+        el('p', { text: p.base_url || meta.label }),
+      ),
+      enabledToggle,
+    ),
+    el('p', { text: meta.desc }),
+    el('div', { class: 'provider-card-footer' },
+      el('span', { class: `provider-status${p.configured ? ' configured' : ''}`, text: modelStatus }),
+      el('div', { class: 'provider-card-actions' }, configureButton, deleteButton),
+    ),
+  );
+  configureButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    showDetail(p.id);
+  });
+  deleteButton?.addEventListener('click', (event) => deleteProvider(p, event));
+  enabledToggle?.querySelector('input')?.addEventListener('change', (event) => toggleProvider(p, event));
+  return card;
+}
+
+async function deleteProvider(provider, event) {
+  event.stopPropagation();
+  const ok = await confirmDialog('Delete provider', `"${provider.name}" and its stored API key will be removed.`, 'Delete');
+  if (!ok) return;
+  try {
+    await rpc('ai.providers.delete', { id: provider.id });
+    toast('Provider deleted', 'success');
+    await refresh();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function toggleProvider(provider, event) {
+  const toggle = event.currentTarget;
+  toggle.disabled = true;
+  try {
+    await rpc('ai.providers.save', {
+      id: provider.id,
+      driver: provider.driver || undefined,
+      kind: provider.kind,
+      name: provider.name,
+      base_url: provider.base_url,
+      enabled: toggle.checked,
+    });
+    toast(toggle.checked ? 'Provider enabled' : 'Provider disabled', 'success');
+    await refresh();
+  } catch (err) {
+    toggle.checked = !toggle.checked;
+    toast(err.message, 'error');
+  } finally {
+    toggle.disabled = false;
+  }
 }
 
 function showDetail(id) {
@@ -118,7 +223,7 @@ function backToRegistry() {
 }
 
 function renderDetail(p) {
-  const meta = KIND_META[p.kind] || KIND_META.chat;
+  const meta = providerMeta(p);
   const detail = document.getElementById('provider-detail');
   detail.innerHTML = '';
   detail.append(el('div', { class: 'provider-detail-head' },
@@ -130,20 +235,21 @@ function renderDetail(p) {
       el('div', { class: `provider-mark ${meta.cls}`, text: meta.mark }),
       el('div', { style: 'min-width:0' },
         el('h2', { text: p.name }),
-        el('p', { text: meta.label }),
+        el('p', { text: p.builtin ? meta.desc : meta.label }),
       ),
     ),
     el('dl', { class: 'provider-detail-grid' },
-      el('div', {}, el('dt', { text: 'Kind' }), el('dd', { text: (KIND_META[p.kind] || KIND_META.chat).label })),
+      el('div', {}, el('dt', { text: 'Provider' }), el('dd', { text: DRIVER_META[p.driver]?.label || 'Automatic' })),
+      el('div', {}, el('dt', { text: 'API kind' }), el('dd', { text: (KIND_META[p.kind] || KIND_META.chat).label })),
       el('div', {}, el('dt', { text: 'Base URL' }), el('dd', { text: p.base_url || '—' })),
       el('div', {}, el('dt', { text: 'API key' }), el('dd', { text: p.has_api_key ? '••••••••' : '—' })),
       el('div', {}, el('dt', { text: 'Status' }), el('dd', { text: p.enabled === false ? 'disabled' : 'enabled' })),
     ),
     el('div', { class: 'provider-detail-actions' },
-      el('button', { class: 'mini-btn', type: 'button', text: 'Edit' }),
-      el('button', { class: 'mini-btn ghost', type: 'button', text: 'Test connection' }),
-      el('button', { class: 'mini-btn ghost', type: 'button', text: 'Import models' }),
-      el('button', { class: 'mini-btn danger', type: 'button', text: 'Delete' }),
+      el('button', { class: 'mini-btn provider-edit', type: 'button', text: 'Edit' }),
+      el('button', { class: 'mini-btn ghost provider-test', type: 'button', text: 'Test connection', disabled: !p.configured }),
+      el('button', { class: 'mini-btn ghost provider-import', type: 'button', text: 'Import models', disabled: !p.configured }),
+      p.builtin ? null : el('button', { class: 'mini-btn danger provider-delete', type: 'button', text: 'Delete' }),
     ),
   ));
 
@@ -157,7 +263,10 @@ function renderDetail(p) {
     el('div', { class: 'provider-model-list' }, renderModels(p)),
   ));
 
-  const [editBtn, testBtn, importBtn, delBtn] = detail.querySelectorAll('.provider-detail-actions button');
+  const editBtn = detail.querySelector('.provider-edit');
+  const testBtn = detail.querySelector('.provider-test');
+  const importBtn = detail.querySelector('.provider-import');
+  const delBtn = detail.querySelector('.provider-delete');
   detail.querySelector('.provider-back')?.addEventListener('click', backToRegistry);
   editBtn.addEventListener('click', () => addProvider(p));
   testBtn.addEventListener('click', async () => {
@@ -187,7 +296,7 @@ function renderDetail(p) {
       importBtn.textContent = 'Import models';
     }
   });
-  delBtn.addEventListener('click', async () => {
+  delBtn?.addEventListener('click', async () => {
     const ok = await confirmDialog('Delete provider', `"${p.name}" and its stored credentials will be removed.`, 'Delete');
     if (!ok) return;
     try {
@@ -226,24 +335,31 @@ const KIND_DEFAULTS = {
 };
 
 async function addProvider(provider = null) {
-  const initialKind = provider?.kind ?? 'chat';
+  const driver = provider?.driver || 'openrouter';
+  const selectableKind = !provider?.builtin || driver === 'openrouter';
+  const defaultKinds = { anthropic: 'messages', openai: 'responses', openrouter: 'chat' };
+  const initialKind = provider?.kind ?? defaultKinds[driver] ?? 'chat';
+  let initialBaseURL = provider?.base_url;
+  if (initialBaseURL === undefined && provider?.builtin) initialBaseURL = KIND_DEFAULTS[initialKind] ?? '';
+  if (initialBaseURL === undefined) initialBaseURL = '';
+  let message;
+  if (!provider) {
+    message = 'Custom providers use the OpenRouter-compatible provider driver. API keys are stored in the local SQLite credential store.';
+  } else if (provider.builtin) {
+    message = 'Update this built-in provider. OpenRouter-compatible cards can use any supported API kind.';
+  } else {
+    message = 'Update the custom provider. It uses the OpenRouter-compatible provider driver.';
+  }
   const res = await dialog({
-    title: provider ? 'Edit provider' : 'Add provider',
-    message: provider
-      ? 'Update provider settings. The kind (wire format) can be changed.'
-      : 'API keys are stored in the local SQLite credential store.',
+    title: provider ? 'Edit provider' : 'Add custom provider',
+    message,
     fields: [
-      {
-        name: 'kind', label: 'Kind', tag: 'select',
-        options: [
-          { value: 'messages', label: 'Messages' },
-          { value: 'responses', label: 'Responses' },
-          { value: 'chat', label: 'Chat' },
-        ],
+      ...(selectableKind ? [{
+        name: 'kind', label: 'API kind', tag: 'select',
+        options: API_KIND_OPTIONS,
         value: initialKind,
         onChange: (kindInput, all) => {
           const urlInput = all.base_url;
-          const apiKeyInput = all.api_key;
           if (!urlInput) return;
           const current = urlInput.value.trim();
           const known = Object.values(KIND_DEFAULTS);
@@ -251,14 +367,11 @@ async function addProvider(provider = null) {
             urlInput.value = KIND_DEFAULTS[kindInput.value] ?? '';
           }
           urlInput.placeholder = `API base URL — vendor endpoint or AI gateway (e.g. ${KIND_DEFAULTS[kindInput.value] ?? ''})`;
-          if (apiKeyInput) {
-            apiKeyInput.placeholder = provider?.has_api_key ? 'leave blank to keep current key' : 'sk-…';
-          }
         },
-      },
+      }] : []),
       { name: 'name', label: 'Name', value: provider?.name ?? '', placeholder: 'e.g. my provider' },
-      { name: 'base_url', label: 'Base URL', value: provider?.base_url ?? KIND_DEFAULTS[initialKind] ?? '', placeholder: `API base URL — vendor endpoint or AI gateway (e.g. ${KIND_DEFAULTS[initialKind]})` },
-      { name: 'api_key', label: 'API key', value: '', placeholder: provider?.has_api_key ? 'leave blank to keep current key' : 'sk-…' },
+      { name: 'base_url', label: 'Base URL', value: initialBaseURL, placeholder: `API base URL — vendor endpoint or AI gateway (e.g. ${KIND_DEFAULTS[initialKind] ?? 'https://gateway.example/v1'})` },
+      { name: 'api_key', label: 'API key', type: 'password', value: '', placeholder: provider?.has_api_key ? 'leave blank to keep current key' : 'sk-…' },
     ],
     actions: [
       { label: 'Cancel', value: null },
@@ -266,12 +379,14 @@ async function addProvider(provider = null) {
     ],
   });
   if (res.value !== 'save') return;
-  const { kind, name, base_url, api_key } = res.fields;
+  const kind = selectableKind ? res.fields.kind : initialKind;
+  const { name, base_url, api_key } = res.fields;
   if (!name.trim()) { toast('Provider name is required', 'error'); return; }
   if (!base_url.trim()) { toast('Base URL is required', 'error'); return; }
   try {
     await rpc('ai.providers.save', {
       id: provider?.id || undefined,
+      driver,
       kind,
       name: name.trim(),
       base_url: base_url.trim(),

@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -235,6 +236,57 @@ func TestAdapterOpenRouterDefault(t *testing.T) {
 	}
 	if p.Name() != "openai" {
 		t.Fatalf("openai direct adapter name = %q, want openai", p.Name())
+	}
+}
+
+func TestExplicitOpenRouterDriverHonorsAPIKind(t *testing.T) {
+	var lastPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastPath = r.URL.Path
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	tests := []struct {
+		kind domain.ProviderKind
+		path string
+	}{
+		{kind: domain.ProviderChat, path: "/v1/chat/completions"},
+		{kind: domain.ProviderResponses, path: "/v1/responses"},
+		{kind: domain.ProviderMessages, path: "/v1/messages"},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			maxTokens := 32
+			adapter := &Adapter{
+				Driver:       domain.ProviderDriverOpenRouter,
+				ProviderKind: tc.kind,
+				BaseURL:      srv.URL + "/v1",
+				APIKey:       "key",
+				Client:       srv.Client(),
+			}
+			provider, err := adapter.providerFor()
+			if err != nil {
+				t.Fatalf("providerFor: %v", err)
+			}
+			stream, err := provider.Stream(context.Background(), &core.Request{
+				Model: "model", MaxTokens: &maxTokens,
+				Messages: []core.Message{{
+					Role:   core.RoleUser,
+					Blocks: []core.Block{core.TextBlock{Text: "hello"}},
+				}},
+			})
+			if err != nil {
+				t.Fatalf("stream: %v", err)
+			}
+			if err := stream.Close(); err != nil {
+				t.Fatalf("close stream: %v", err)
+			}
+			if lastPath != tc.path {
+				t.Fatalf("request path = %q, want %q", lastPath, tc.path)
+			}
+		})
 	}
 }
 

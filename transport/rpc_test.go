@@ -479,6 +479,66 @@ func TestProviderValidationAndErrors(t *testing.T) {
 	}
 }
 
+func TestProviderDriversPersistForBuiltInsAndCustomProviders(t *testing.T) {
+	h := newHarness(t, nil)
+
+	for _, tc := range []struct {
+		id     string
+		driver string
+		kind   string
+		name   string
+	}{
+		{id: "anthropic", driver: "anthropic", kind: "messages", name: "Anthropic"},
+		{id: "openai", driver: "openai", kind: "responses", name: "OpenAI"},
+		{id: "openrouter", driver: "openrouter", kind: "responses", name: "OpenRouter"},
+	} {
+		res := h.rpcOK(t, "ai.providers.save", map[string]any{
+			"id": tc.id, "driver": tc.driver, "kind": tc.kind, "name": tc.name,
+			"base_url": h.llm.URL + "/v1", "api_key": "key-" + tc.id, "enabled": true,
+		})
+		var saved struct {
+			Providers []struct {
+				ID     string `json:"id"`
+				Driver string `json:"driver"`
+				Kind   string `json:"kind"`
+			} `json:"providers"`
+		}
+		if err := json.Unmarshal(res.Result, &saved); err != nil || len(saved.Providers) != 1 {
+			t.Fatalf("save %s result malformed: %s (%v)", tc.id, res.Result, err)
+		}
+		got := saved.Providers[0]
+		if got.ID != tc.id || got.Driver != tc.driver || got.Kind != tc.kind {
+			t.Fatalf("saved %s provider = %+v", tc.id, got)
+		}
+	}
+
+	res := h.rpcOK(t, "ai.providers.save", map[string]any{
+		"driver": "openrouter", "kind": "messages", "name": "Custom messages",
+		"base_url": h.llm.URL + "/v1", "api_key": "custom-key", "enabled": true,
+	})
+	var custom struct {
+		Providers []struct {
+			ID     string `json:"id"`
+			Driver string `json:"driver"`
+			Kind   string `json:"kind"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(res.Result, &custom); err != nil || len(custom.Providers) != 1 {
+		t.Fatalf("custom provider result malformed: %s (%v)", res.Result, err)
+	}
+	if custom.Providers[0].Driver != "openrouter" || custom.Providers[0].Kind != "messages" {
+		t.Fatalf("custom provider = %+v", custom.Providers[0])
+	}
+
+	res = h.rpc(t, "ai.providers.save", map[string]any{
+		"driver": "openai", "kind": "chat", "name": "Invalid OpenAI",
+		"base_url": h.llm.URL + "/v1", "enabled": true,
+	})
+	if res.OK || res.Error == nil || res.Error.Code != "VALIDATION_ERROR" {
+		t.Fatalf("openai chat driver must fail validation, got %+v", res)
+	}
+}
+
 func TestProviderTestProbesModelsEndpoint(t *testing.T) {
 	h := newHarness(t, nil)
 	h.llm.models = []string{"m1", "m2"}

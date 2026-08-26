@@ -333,13 +333,13 @@
     },
     "providers": {
       "title": "Providers",
-      "purpose": "Configure LLM chat backends by wire format (Messages, Responses, Chat) and spawn-only ACP subagent binaries. Chat API keys live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.",
+      "purpose": "Configure persistent Anthropic, OpenAI, and OpenRouter cards, add unlimited custom OpenRouter-compatible providers by wire format (Messages, Responses, Chat), and manage spawn-only ACP subagent binaries. Chat API keys live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.",
       "howToOpen": "Click the Providers item in the left sidebar.",
       "sections": [
         {
           "heading": "Header",
           "paragraphs": [
-            "View title plus Add provider (chat backends) and Add ACP agent (spawn-only subprocesses)."
+            "View title plus Add custom provider (unlimited OpenRouter-compatible gateways) and Add ACP agent (spawn-only subprocesses)."
           ],
           "controls": [
             "providers-header-actions",
@@ -350,7 +350,7 @@
         {
           "heading": "Chat providers",
           "paragraphs": [
-            "The registry lists LLM providers as cards. Selecting one opens the detail pane for editing the base URL, API key, enabled state, importing models, and testing connectivity. These models appear in the Agent composer."
+            "The registry always shows persistent Anthropic, OpenAI, and OpenRouter cards, even before configuration. Anthropic uses the Anthropic Messages driver; OpenAI uses the OpenAI Responses driver; OpenRouter and custom providers use the OpenRouter driver. OpenRouter and custom forms expose Messages, Responses, and Chat API kinds. Selecting a card opens the detail pane for editing its base URL, API key, enabled state, importing models, and testing connectivity. These models appear in the Agent composer."
           ],
           "controls": [
             "provider-llm-section",
@@ -1268,16 +1268,16 @@
       "notes": "Key/value summary of the selected MCP server or plugin, including version, category, and install path when available."
     },
     "add-provider-btn": {
-      "label": "Add provider",
+      "label": "Add custom provider",
       "section": "Providers",
       "type": "button",
-      "action": "Opens the provider editor."
+      "action": "Opens the custom OpenRouter-compatible provider editor; users can save any number of custom providers."
     },
     "provider-registry": {
       "label": "Provider registry",
       "section": "Providers",
       "type": "list",
-      "notes": "Provider cards grouped by kind."
+      "notes": "Always contains Anthropic, OpenAI, and OpenRouter cards, followed by any number of custom provider cards. OpenRouter and custom cards show their selected API kind."
     },
     "provider-detail": {
       "label": "Provider detail",

@@ -386,6 +386,35 @@ func (s *Store) migrateProviderKinds() {
 			p.Kind = domain.ProviderChat
 			changed = true
 		}
+		switch p.ID {
+		case "anthropic":
+			if p.Driver != domain.ProviderDriverAnthropic {
+				p.Driver = domain.ProviderDriverAnthropic
+				changed = true
+			}
+			if p.Kind != domain.ProviderMessages {
+				p.Kind = domain.ProviderMessages
+				changed = true
+			}
+		case "openai":
+			if p.Driver != domain.ProviderDriverOpenAI {
+				p.Driver = domain.ProviderDriverOpenAI
+				changed = true
+			}
+			if p.Kind != domain.ProviderResponses {
+				p.Kind = domain.ProviderResponses
+				changed = true
+			}
+		case "openrouter":
+			if p.Driver != domain.ProviderDriverOpenRouter {
+				p.Driver = domain.ProviderDriverOpenRouter
+				changed = true
+			}
+			if !domain.ValidKind(p.Kind) {
+				p.Kind = domain.ProviderChat
+				changed = true
+			}
+		}
 	}
 	if changed {
 		_ = s.writeJSON("config/providers.json", s.providers)

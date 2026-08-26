@@ -22,16 +22,15 @@ import (
 )
 
 // Adapter implements core.Provider for every supported provider kind. The
-// provider-specific litellm adapter is selected per call by Kind.
-// OpenRouter is not a separate stored kind — a chat-kind provider whose
-// BaseURL is an OpenRouter host gets the OpenRouter adapter (extra headers,
-// reasoning_details, cache_retention) automatically.
+// provider-specific adapter is selected per call by Driver and Kind.
+// Providers without an explicit Driver retain host-detected routing.
 //
 // Conversion between application.ChatRequest/ChatResponse and
 // core.Request/Response is handled in application/ai_convert.go.
 // Error mapping is handled by application.MapCoreError.
 type Adapter struct {
 	ProviderKind domain.ProviderKind
+	Driver       domain.ProviderDriver
 	OpenRouter   bool
 	BaseURL      string
 	APIKey       string
@@ -43,6 +42,25 @@ func (a *Adapter) Name() string { return string(a.ProviderKind) }
 
 // providerFor builds the litellm provider for this adapter's kind.
 func (a *Adapter) providerFor() (core.Provider, error) {
+	switch a.Driver {
+	case domain.ProviderDriverAnthropic:
+		if a.ProviderKind != domain.ProviderMessages {
+			return nil, &application.ErrUnsupportedProvider{Kind: string(a.ProviderKind)}
+		}
+		return anthropic.New(anthropic.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client})
+	case domain.ProviderDriverOpenAI:
+		if a.ProviderKind != domain.ProviderResponses {
+			return nil, &application.ErrUnsupportedProvider{Kind: string(a.ProviderKind)}
+		}
+		return openai.New(openai.Config{API: openai.APIResponses, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client})
+	case domain.ProviderDriverOpenRouter:
+		return openrouter.NewForAPI(openrouter.Config{
+			APIKey:         a.APIKey,
+			BaseURL:        a.BaseURL,
+			HTTPClient:     a.Client,
+			APIKeyOptional: a.ProviderKind == domain.ProviderChat && a.APIKey == "",
+		}, string(a.ProviderKind))
+	}
 	switch {
 	case a.ProviderKind == domain.ProviderMessages:
 		return anthropic.New(anthropic.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client})
@@ -77,15 +95,15 @@ func (a *Adapter) Stream(ctx context.Context, req *core.Request) (core.Stream, e
 
 // ListModels implements application.ModelLister.
 func (a *Adapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model, error) {
-	switch a.ProviderKind {
-	case domain.ProviderMessages:
+	switch {
+	case a.ProviderKind == domain.ProviderMessages && a.Driver != domain.ProviderDriverOpenRouter:
 		return listAnthropicModels(ctx, a.BaseURL, a.APIKey, a.Client)
 	default:
 		headers := map[string]string{}
 		if apiKey != "" {
 			headers["Authorization"] = "Bearer " + apiKey
 		}
-		if a.OpenRouter {
+		if a.OpenRouter || a.Driver == domain.ProviderDriverOpenRouter {
 			for k, v := range aiutil.OpenRouterAttributionHeaders() {
 				headers[k] = v
 			}

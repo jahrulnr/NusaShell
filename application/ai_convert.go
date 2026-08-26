@@ -265,7 +265,7 @@ func NewProviderContext(p *domain.Provider, provider core.Provider) ProviderCont
 	return ProviderContext{
 		Provider:   provider,
 		Kind:       p.Kind,
-		OpenRouter: domain.IsOpenRouterHost(p.Kind, p.BaseURL),
+		OpenRouter: p.EffectiveDriver() == domain.ProviderDriverOpenRouter || domain.IsOpenRouterHost(p.Kind, p.BaseURL),
 	}
 }
 

@@ -6,15 +6,25 @@ import (
 	"net/http"
 	"strings"
 
+	"nusashell/infrastructure/ai/anthropic"
 	"nusashell/infrastructure/ai/compat"
 	"nusashell/infrastructure/ai/core"
+	"nusashell/infrastructure/ai/openai"
 )
 
-const defaultBaseURL = "https://openrouter.ai/api/v1"
+const (
+	defaultBaseURL          = "https://openrouter.ai/api/v1"
+	openRouterRefererHeader = "HTTP-Referer"
+	openRouterTitleHeader   = "X-Title"
+)
 
 type Config = compat.Config
 
 const (
+	APIChat      = "chat"
+	APIMessages  = "messages"
+	APIResponses = "responses"
+
 	ProviderOptionCacheRetention = "cache_retention"
 	ProviderOptionSessionID      = "session_id"
 	ProviderOptionRouting        = "provider"
@@ -30,8 +40,8 @@ func New(cfg Config) (*compat.Provider, error) {
 		Auth: compat.AuthSpec{APIKeyRequired: true},
 		Headers: compat.HeaderSpec{
 			Extra: map[string]string{
-				"HTTP-Referer": "https://github.com/jahrulnr/NusaShell",
-				"X-Title":      "NusaShell",
+				openRouterRefererHeader: "https://github.com/jahrulnr/NusaShell",
+				openRouterTitleHeader:   "NusaShell",
 			},
 			Request: mapHeaders,
 		},
@@ -72,6 +82,81 @@ func New(cfg Config) (*compat.Provider, error) {
 			return caps
 		},
 	})
+}
+
+// NewForAPI builds the OpenRouter driver for the selected wire API. Chat uses
+// OpenRouter's native compatibility provider; messages and responses delegate
+// to the corresponding wire-format implementations while retaining the
+// OpenRouter attribution headers.
+func NewForAPI(cfg Config, api string) (core.Provider, error) {
+	switch strings.ToLower(strings.TrimSpace(api)) {
+	case "", APIChat:
+		return New(cfg)
+	case APIResponses:
+		cfgBaseURL := cfg.BaseURL
+		if cfgBaseURL == "" {
+			cfgBaseURL = defaultBaseURL
+		}
+		provider, err := openai.New(openai.Config{
+			API:        openai.APIResponses,
+			APIKey:     cfg.APIKey,
+			APIKeyFunc: cfg.APIKeyFunc,
+			BaseURL:    cfgBaseURL,
+			HTTPClient: cfg.HTTPClient,
+			Transport:  cfg.Transport,
+			Retry:      cfg.Retry,
+			UserAgent:  cfg.UserAgent,
+			Headers:    openRouterHeaders(cfg.Headers),
+		})
+		if err != nil {
+			return nil, err
+		}
+		return namedProvider{Provider: provider, name: "openrouter"}, nil
+	case APIMessages:
+		cfgBaseURL := cfg.BaseURL
+		if cfgBaseURL == "" {
+			cfgBaseURL = defaultBaseURL
+		}
+		provider, err := anthropic.New(anthropic.Config{
+			APIKey:     cfg.APIKey,
+			APIKeyFunc: cfg.APIKeyFunc,
+			BaseURL:    cfgBaseURL,
+			HTTPClient: cfg.HTTPClient,
+			Transport:  cfg.Transport,
+			Retry:      cfg.Retry,
+			UserAgent:  cfg.UserAgent,
+			Headers:    openRouterHeaders(cfg.Headers),
+		})
+		if err != nil {
+			return nil, err
+		}
+		return namedProvider{Provider: provider, name: "openrouter"}, nil
+	default:
+		return nil, fmt.Errorf("openrouter: api must be messages, responses, or chat, got %q", api)
+	}
+}
+
+type namedProvider struct {
+	core.Provider
+	name string
+}
+
+func (p namedProvider) Name() string {
+	return p.name
+}
+
+func openRouterHeaders(headers map[string]string) map[string]string {
+	out := make(map[string]string, len(headers)+2)
+	for name, value := range headers {
+		out[name] = value
+	}
+	if strings.TrimSpace(out[openRouterRefererHeader]) == "" {
+		out[openRouterRefererHeader] = "https://github.com/jahrulnr/NusaShell"
+	}
+	if strings.TrimSpace(out[openRouterTitleHeader]) == "" {
+		out[openRouterTitleHeader] = "NusaShell"
+	}
+	return out
 }
 
 func mapHeaders(headers http.Header, req *core.Request) {

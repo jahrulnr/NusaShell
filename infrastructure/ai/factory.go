@@ -31,9 +31,11 @@ func NewFactory(_ application.CredentialStore) application.ProviderFactory {
 			return nil, &application.ErrUnsupportedProvider{Kind: string(p.Kind)}
 		}
 		client := newProviderHTTPClient()
+		driver := p.EffectiveDriver()
 		return &Adapter{
 			ProviderKind: p.Kind,
-			OpenRouter:   domain.IsOpenRouterHost(p.Kind, p.BaseURL),
+			Driver:       driver,
+			OpenRouter:   driver == domain.ProviderDriverOpenRouter || domain.IsOpenRouterHost(p.Kind, p.BaseURL),
 			BaseURL:      p.BaseURL,
 			APIKey:       apiKey,
 			Client:       client,

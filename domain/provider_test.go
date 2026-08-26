@@ -4,15 +4,15 @@ import "testing"
 
 func TestKindCapabilities(t *testing.T) {
 	tests := []struct {
-		kind         ProviderKind
-		wantKey      bool
-		wantModels   bool
-		wantEmbed    bool
-		wantImage    bool
-		wantSpeech   bool
-		wantSTT      bool
-		wantVideo    bool
-		wantCache    string
+		kind       ProviderKind
+		wantKey    bool
+		wantModels bool
+		wantEmbed  bool
+		wantImage  bool
+		wantSpeech bool
+		wantSTT    bool
+		wantVideo  bool
+		wantCache  string
 	}{
 		{ProviderMessages, true, true, true, false, false, false, false, "anthropic"},
 		{ProviderResponses, true, true, true, true, true, false, true, "openai"},
@@ -90,5 +90,37 @@ func TestRequiresKey(t *testing.T) {
 	}
 	if RequiresKey(ProviderChat) {
 		t.Error("chat should not require key")
+	}
+}
+
+func TestProviderDrivers(t *testing.T) {
+	for _, driver := range []ProviderDriver{
+		ProviderDriverAuto,
+		ProviderDriverAnthropic,
+		ProviderDriverOpenAI,
+		ProviderDriverOpenRouter,
+	} {
+		if !ValidDriver(driver) {
+			t.Errorf("ValidDriver(%q) = false", driver)
+		}
+	}
+	if ValidDriver("unsupported") {
+		t.Fatal(`ValidDriver("unsupported") = true`)
+	}
+
+	tests := []struct {
+		id   string
+		want ProviderDriver
+	}{
+		{id: "anthropic", want: ProviderDriverAnthropic},
+		{id: "openai", want: ProviderDriverOpenAI},
+		{id: "openrouter", want: ProviderDriverOpenRouter},
+		{id: "custom", want: ProviderDriverAuto},
+	}
+	for _, tc := range tests {
+		p := &Provider{ID: tc.id}
+		if got := p.EffectiveDriver(); got != tc.want {
+			t.Errorf("EffectiveDriver(%q) = %q, want %q", tc.id, got, tc.want)
+		}
 	}
 }

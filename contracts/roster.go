@@ -595,7 +595,8 @@ type ModelDTO struct {
 
 type ProviderDTO struct {
 	ID         string     `json:"id"`
-	Kind       string     `json:"kind"` // anthropic | openai | compatible
+	Driver     string     `json:"driver,omitempty"` // auto | anthropic | openai | openrouter
+	Kind       string     `json:"kind"`             // messages | responses | chat
 	Name       string     `json:"name"`
 	BaseURL    string     `json:"base_url,omitempty"`
 	Enabled    bool       `json:"enabled"`
@@ -611,6 +612,7 @@ type ProvidersListResult struct {
 
 type ProviderSaveRequest struct {
 	ID      string `json:"id,omitempty"`
+	Driver  string `json:"driver,omitempty"` // auto | anthropic | openai | openrouter
 	Kind    string `json:"kind"`
 	Name    string `json:"name"`
 	BaseURL string `json:"base_url,omitempty"`
