@@ -27,7 +27,6 @@ import (
 // from the deltas and shows an indeterminate bar when BytesTotal == 0.
 type Progress = contracts.STTInstallProgressDTO
 
-
 const (
 	whisperReleasesBase = "https://github.com/ggml-org/whisper.cpp/releases/download"
 	modelsBaseDefault   = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"

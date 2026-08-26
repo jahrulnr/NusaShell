@@ -14,13 +14,13 @@ func encodeWav16(samples []int16) []byte {
 	putU32(buf, uint32(36+dataSize))
 	buf.WriteString("WAVE")
 	buf.WriteString("fmt ")
-	putU32(buf, 16)          // fmt chunk size
-	putU16(buf, 1)           // PCM
-	putU16(buf, 1)           // mono
-	putU32(buf, sampleRate)  // 16000 Hz
+	putU32(buf, 16)           // fmt chunk size
+	putU16(buf, 1)            // PCM
+	putU16(buf, 1)            // mono
+	putU32(buf, sampleRate)   // 16000 Hz
 	putU32(buf, sampleRate*2) // byte rate
-	putU16(buf, 2)           // block align (bytes per sample)
-	putU16(buf, 16)          // bits per sample
+	putU16(buf, 2)            // block align (bytes per sample)
+	putU16(buf, 16)           // bits per sample
 	buf.WriteString("data")
 	putU32(buf, uint32(dataSize))
 	for _, s := range samples {

@@ -33,8 +33,8 @@ func NewTranscriber(dataDir string, modelFile, language func() string) *Transcri
 	return &Transcriber{modelFile: modelFile, language: language, dataDir: dataDir}
 }
 
-func (t *Transcriber) modelsDir() string  { return modelsDir(t.dataDir) }
-func (t *Transcriber) engine() *Engine    { return New("", t.modelsDir()) }
+func (t *Transcriber) modelsDir() string { return modelsDir(t.dataDir) }
+func (t *Transcriber) engine() *Engine   { return New("", t.modelsDir()) }
 func (t *Transcriber) request(req *application.OfflineSTTRequest) application.OfflineSTTRequest {
 	if req.Model == "" {
 		req.Model = t.modelFile()

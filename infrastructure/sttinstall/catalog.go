@@ -21,12 +21,12 @@ const (
 
 // Model is one installable whisper GGML model on Hugging Face.
 type Model struct {
-	ID       string // stable id, equals the picker value and the on-disk .bin base name
-	Label    string // human-readable picker label
-	Size     int64  // exact LFS byte count (verified 2026-08-23)
-	SHA256   string // LFS oid = sha256 of the file
-	HFPath   string // path inside ggerganov/whisper.cpp on Hugging Face
-	Default  bool   // recommended default install (Settings: Install)
+	ID      string // stable id, equals the picker value and the on-disk .bin base name
+	Label   string // human-readable picker label
+	Size    int64  // exact LFS byte count (verified 2026-08-23)
+	SHA256  string // LFS oid = sha256 of the file
+	HFPath  string // path inside ggerganov/whisper.cpp on Hugging Face
+	Default bool   // recommended default install (Settings: Install)
 }
 
 // Models is the curated, language-gated catalog: every entry must serve
@@ -80,18 +80,18 @@ var Models = []Model{
 
 // EngineAsset describes one official whisper.cpp CLI release for a platform.
 type EngineAsset struct {
-	Name     string // asset file name inside the release
-	Kind     string // "tar.gz" | "zip"
-	DiskMB   int64  // rough extracted size hint for the UI bar
+	Name   string // asset file name inside the release
+	Kind   string // "tar.gz" | "zip"
+	DiskMB int64  // rough extracted size hint for the UI bar
 }
 
 // engineAssets mirrors the official release manifest (ggml macOS ships no CLI,
 // surface via SupportedErrors + guide modal).
 var engineAssets = map[string]EngineAsset{
-	"linux/amd64":  {Name: "whisper-bin-ubuntu-x64.tar.gz", Kind: "tar.gz", DiskMB: 10},
-	"linux/arm64":  {Name: "whisper-bin-ubuntu-arm64.tar.gz", Kind: "tar.gz", DiskMB: 5},
+	"linux/amd64":   {Name: "whisper-bin-ubuntu-x64.tar.gz", Kind: "tar.gz", DiskMB: 10},
+	"linux/arm64":   {Name: "whisper-bin-ubuntu-arm64.tar.gz", Kind: "tar.gz", DiskMB: 5},
 	"windows/amd64": {Name: "whisper-bin-x64.zip", Kind: "zip", DiskMB: 9},
-	"windows/386":  {Name: "whisper-bin-Win32.zip", Kind: "zip", DiskMB: 6},
+	"windows/386":   {Name: "whisper-bin-Win32.zip", Kind: "zip", DiskMB: 6},
 }
 
 // engineAsset resolves the release archive for the running platform.
