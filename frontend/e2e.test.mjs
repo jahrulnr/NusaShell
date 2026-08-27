@@ -158,6 +158,11 @@ function fakeLLM(port) {
   // used to pop from `scripts`, racing the main chat for the next stub.
   let reviewScripts = [];
   let sendDone = true;
+  // sendFinish controls the trailing finish_reason chunk. Compat streams
+  // treat finish_reason without [DONE] as a normal termination (many
+  // OpenAI-compatible gateways omit the sentinel), so simulating a true
+  // mid-stream cut requires disabling both sendFinish and sendDone.
+  let sendFinish = true;
   // requests captures every parsed chat/completions request body alongside
   // whether it was a streaming request. Used by hydration E2E tests to
   // verify the synthetic runtime-hydration transcript is present in the
@@ -209,7 +214,9 @@ function fakeLLM(port) {
           }
           res.write(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`);
         }
-        res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } })}\n\n`);
+        if (sendFinish) {
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } })}\n\n`);
+        }
         if (sendDone) {
           res.write('data: [DONE]\n\n');
         }
@@ -226,6 +233,7 @@ function fakeLLM(port) {
     setScripts: (s) => { scripts = s; },
     setReviewScripts: (s) => { reviewScripts = s; },
     setSendDone: (v) => { sendDone = v; },
+    setSendFinish: (v) => { sendFinish = v; },
     requests: () => requests,
     url: `http://127.0.0.1:${port}`,
   };
@@ -438,17 +446,17 @@ test('compaction triggers and renders a marker when conversation exceeds thresho
   }
 });
 
-// BH-AI-01: When a provider SSE stream accumulates tool-call deltas but
-// closes without the terminator ([DONE] / message_stop / response.completed),
-// isIncompleteEmptyStream checks result.ToolCalls — which is still empty
-// because tool calls are in the local accumulator map (toolAcc/toolByIndex)
-// and only moved to result.ToolCalls AFTER the completed check. The check
-// misclassifies the stream as "empty" and falls back to non-streaming,
-// silently discarding the accumulated tool calls.
+// BH-AI-01: A stream cut mid-stream (no finish_reason, no [DONE]) that had
+// accumulated tool-call deltas must surface as an error after the retry
+// loop exhausts — never silently fall back to non-streaming, and never
+// silently discard the accumulated tool calls.
 //
-// This test demonstrates the bug: a stream with a tool-call delta and no
-// [DONE] silently produces the non-streaming fallback text instead of
-// either preserving the tool call or surfacing the error.
+// Architecture note: the old TS fallback layering (isIncompleteEmptyStream
+// -> non-streaming retry) was removed; errors surface explicitly to the
+// retry loop (see AGENTS.md). Compat streams intentionally treat
+// finish_reason without [DONE] as a normal termination (many OpenAI-
+// compatible gateways omit the sentinel), so this test simulates a TRUE
+// mid-stream cut by omitting both the finish_reason chunk and [DONE].
 test('BH-AI-01: incomplete stream with tool-call deltas must not silently fall back to non-streaming', async (t) => {
   assert.ok(NativeWebSocket, 'Node WebSocket support is required for the E2E event stream');
   const llmPort = await freePort();
@@ -505,13 +513,17 @@ test('BH-AI-01: incomplete stream with tool-call deltas must not silently fall b
     const convID = conversations.conversations[0].id;
 
     // Script: stream a tool-call delta for the built-in "skill" family tool,
-    // then close the connection WITHOUT sending [DONE].
+    // then cut the connection mid-stream: no finish_reason chunk and no
+    // [DONE]. (finish_reason alone would be a normal termination for
+    // compat streams — see the test header.)
     llm.setSendDone(false);
+    llm.setSendFinish(false);
     llm.setScripts([[
       { toolCall: { id: 'call_bh01', name: 'skill', arguments: '{"op":"list"}' } },
     ]]);
-    // Non-streaming fallback returns this text — if the bug is present,
-    // the turn will silently produce this instead of the tool call.
+    // Non-streaming fallback returns this text — if a fallback layer were
+    // (re)introduced, the turn would silently produce this instead of
+    // surfacing the error.
     llm.setComplete('FALLBACK_TEXT_FROM_NON_STREAMING');
 
     await startTurn(rpcModule.rpc, {
@@ -528,17 +540,24 @@ test('BH-AI-01: incomplete stream with tool-call deltas must not silently fall b
     const assistantMsgs = gotten.messages?.filter((m) => m.role === 'assistant') || [];
     const lastAssistant = assistantMsgs[assistantMsgs.length - 1];
 
-    // After the fix: the tool calls are finalized into result.ToolCalls
-    // BEFORE the incomplete-stream check, so isIncompleteEmptyStream sees
-    // them and does NOT trigger the non-streaming fallback. The adapter
-    // returns incompleteSSEError, the retry loop exhausts (fake LLM always
-    // closes without [DONE]), and the turn fails with status=error.
-    // The fallback text must NOT appear — the tool calls must not be
+    // Every streaming attempt is cut mid-stream (no finish_reason, no
+    // [DONE]), so the compat stream surfaces a provider error on each
+    // attempt. The retry loop exhausts (the fake LLM always cuts), the
+    // partial-stream continuation fires once and fails too, and the turn
+    // ends with status=error. The fallback text must NOT appear — there is
+    // no non-streaming fallback layer, and the tool calls must not be
     // silently discarded.
     assert.ok(lastAssistant, 'an assistant message must exist');
     assert.notEqual(
       lastAssistant.content, 'FALLBACK_TEXT_FROM_NON_STREAMING',
       'BH-AI-01: must not silently fall back to non-streaming when tool calls were accumulated',
+    );
+    // The main chat must never receive a non-streaming request: the only
+    // non-streaming consumer is compaction, and this test has none.
+    const nonStreamReqs = llm.requests().filter((r) => !r.stream);
+    assert.equal(
+      nonStreamReqs.length, 0,
+      'BH-AI-01: no non-streaming fallback request may be made for the main chat',
     );
     assert.equal(
       lastAssistant.status, 'error',
@@ -894,16 +913,18 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     //
     // Filter out autolearn background-review requests: compaction triggers
     // a fire-and-forget learning review (subscribeCompactionReview) that
-    // streams to the same fake LLM with a single "Call review_transcript"
-    // user message. Without filtering, that review request can land last
-    // and mask the real post-compaction turn request we need to inspect.
+    // streams to the same fake LLM. The review agent sends its own system
+    // prompt plus a synthetic transcript (tool call ids prefixed
+    // "synthetic_"), and its request can land after the main turn's —
+    // masking the post-compaction request we need to inspect.
     const allReqs = llm.requests();
     const nonStreamReqs = allReqs.filter((r) => !r.stream);
-    const isAutolearnReview = (r) =>
-      r.body.messages?.length === 1
-      && r.body.messages[0].role === 'user'
-      && typeof r.body.messages[0].content === 'string'
-      && r.body.messages[0].content.startsWith('Call review_transcript');
+    const isAutolearnReview = (r) => {
+      const sys = r.body.messages?.find((m) => m.role === 'system');
+      if (typeof sys?.content === 'string' && sys.content.includes('background review agent')) return true;
+      return (r.body.messages || []).some((m) =>
+        Array.isArray(m.tool_calls) && m.tool_calls.some((c) => c.id?.startsWith('synthetic_')));
+    };
     const streamReqs = allReqs.filter((r) => r.stream && !isAutolearnReview(r));
 
     // Non-streaming compaction request must not carry hydration.

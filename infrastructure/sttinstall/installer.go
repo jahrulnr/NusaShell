@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"nusashell/contracts"
@@ -146,15 +145,6 @@ func (in *Installer) nextAction(enginePath string) string {
 		return "model"
 	}
 	return ""
-}
-
-// diskFree reports free bytes on the volume backing dir (0 = unknown).
-func diskFree(dir string) int64 {
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(dir, &st); err != nil {
-		return 0
-	}
-	return int64(st.Bavail) * st.Bsize
 }
 
 // Install downloads the engine (only when the platform auto-installs it

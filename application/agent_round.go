@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"nusashell/contracts"
 	"nusashell/domain"
@@ -525,7 +526,7 @@ func applyStreamRound(message *domain.Message, model string, round streamedTurnR
 		message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepReasoning, Content: round.Reasoning})
 		message.Reasoning = round.Reasoning
 	}
-	if content := visibleText(round.Content); content != "" {
+	if content := persistableText(round.Content); content != "" {
 		message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepText, Content: content})
 		message.Content = content
 	}
@@ -538,6 +539,20 @@ func applyStreamRound(message *domain.Message, model string, round streamedTurnR
 // after thinking; storing that makes empty rounds look like real turns.
 func visibleText(s string) string {
 	return strings.TrimSpace(s)
+}
+
+// persistableText is the content stored for a streamed round. Whitespace-only
+// rounds are dropped entirely (visibleText's job), but real content keeps its
+// trailing space: a stream cut mid-sentence ends on a word boundary that the
+// continuation round needs so the two halves do not run together
+// ("here.And"). Leading whitespace (including blank paragraphs) carries no
+// meaning and is trimmed; on the trailing side only newlines are stripped.
+func persistableText(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return ""
+	}
+	left := strings.TrimLeftFunc(s, unicode.IsSpace)
+	return strings.TrimRight(left, "\r\n")
 }
 
 // toolExecResult is one tool's outcome from the concurrent execution phase,

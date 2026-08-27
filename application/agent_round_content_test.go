@@ -26,3 +26,18 @@ func TestApplyStreamRoundTrimsLeadingTrailingNewlines(t *testing.T) {
 		t.Fatalf("Content = %q, want trimmed text", msg.Content)
 	}
 }
+
+// TestApplyStreamRoundKeepsTrailingSpace pins partial-stream fidelity: a
+// stream cut mid-sentence persists its trailing space. The continuation
+// round starts a new message, and the space is the word boundary between
+// the two — stripping it runs words together ("here.And").
+func TestApplyStreamRoundKeepsTrailingSpace(t *testing.T) {
+	msg := &domain.Message{ID: "a1", Role: domain.RoleAssistant}
+	applyStreamRound(msg, "model", streamedTurnRound{Content: "The answer starts here. "})
+	if msg.Content != "The answer starts here. " {
+		t.Fatalf("Content = %q, want trailing space preserved", msg.Content)
+	}
+	if len(msg.Steps) != 1 || msg.Steps[0].Content != "The answer starts here. " {
+		t.Fatalf("Steps = %+v, want the same trailing-space text", msg.Steps)
+	}
+}
