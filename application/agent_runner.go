@@ -632,6 +632,9 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				}
 			}
 		}
+		if injectHydration {
+			conversation = a.ensureHydration(conversation, currentMsgID, caps)
+		}
 		a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Round: round,
 		})

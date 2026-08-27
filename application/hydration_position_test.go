@@ -1,10 +1,12 @@
 package application
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/core"
 )
 
 // hydrationPositionFixture returns a conversation shaped like the moment a
@@ -159,4 +161,86 @@ func rolesOf(msgs []ChatMessage) []string {
 		out[i] = m.Role
 	}
 	return out
+}
+
+type freshTurnStreamAdapter struct {
+	first *core.Request
+}
+
+func (a *freshTurnStreamAdapter) Name() string { return "fresh-turn" }
+func (a *freshTurnStreamAdapter) Chat(context.Context, *core.Request) (*core.Response, error) {
+	return &core.Response{Blocks: []core.Block{core.TextBlock{Text: "hello"}}, FinishReason: core.FinishReasonStop}, nil
+}
+func (a *freshTurnStreamAdapter) Stream(ctx context.Context, req *core.Request) (core.Stream, error) {
+	if a.first == nil {
+		a.first = req
+	}
+	return &stubStream{events: coreResponseEvents(&core.Response{
+		Blocks:       []core.Block{core.TextBlock{Text: "hello"}},
+		FinishReason: core.FinishReasonStop,
+	})}, nil
+}
+
+// TestFreshTurnHydrationSitsBetweenUserAndAssistant pins the never-compacted
+// room: user → hydration checkpoint → first working assistant. conv_f16
+// already had this shape; the post-compaction insert-after-last-user change
+// must not move the checkpoint past the placeholder on a fresh turn.
+func TestFreshTurnHydrationSitsBetweenUserAndAssistant(t *testing.T) {
+	conv := &domain.Conversation{
+		ID: "c_fresh",
+		Messages: []domain.Message{
+			{ID: "u1", Role: domain.RoleUser, Content: "halo", Status: domain.StatusDone},
+			{ID: "a1", Role: domain.RoleAssistant},
+		},
+	}
+	adapter := &freshTurnStreamAdapter{}
+	settings := domain.DefaultSettings()
+	settings.CompactionEnabled = false
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c_fresh": conv}},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		Toolbox:       &recordingToolbox{},
+		Settings:      &fakeSettingsStore{settings: settings},
+		Factory: func(context.Context, *domain.Provider, string) (core.Provider, error) {
+			return adapter, nil
+		},
+		runs: map[string]*TurnRun{},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &TurnRun{ID: "r1", ConversationID: "c_fresh", Ctx: ctx, Cancel: cancel}
+	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "a1", false, ModelCapabilities{})
+
+	if len(conv.Messages) < 3 {
+		t.Fatalf("len(Messages) = %d, want user + hydration + assistant", len(conv.Messages))
+	}
+	if conv.Messages[0].ID != "u1" || !isHydrationMessage(conv.Messages[1]) || conv.Messages[2].ID != "a1" {
+		t.Fatalf("fresh transcript order = %s %v %s, want user, hydration, a1",
+			conv.Messages[0].ID, isHydrationMessage(conv.Messages[1]), conv.Messages[2].ID)
+	}
+	if conv.Messages[2].Content != "hello" {
+		t.Fatalf("assistant content = %q", conv.Messages[2].Content)
+	}
+	if adapter.first == nil || !coreHasHydration(adapter.first.Messages) {
+		t.Fatal("first stream must include the hydration checkpoint")
+	}
+	msgs := adapter.first.Messages
+	start := 0
+	if len(msgs) > 0 && msgs[0].Role == core.RoleSystem {
+		start = 1
+	}
+	if len(msgs) < start+2 || msgs[start].Role != core.RoleUser || msgs[start+1].Role != core.RoleAssistant {
+		t.Fatalf("first stream prefix after system = %+v, want user then hydration assistant", msgs[start:])
+	}
+	hyd := false
+	for _, b := range msgs[start+1].Blocks {
+		if tc, ok := b.(core.ToolUseBlock); ok && domain.IsHydrationCallID(tc.ID) {
+			hyd = true
+			break
+		}
+	}
+	if !hyd {
+		t.Fatal("message after the user must be the hydration assistant")
+	}
 }

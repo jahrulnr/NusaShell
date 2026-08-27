@@ -194,18 +194,8 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 	// The hydration messages are marked with the "hydrate-" tool call ID
 	// prefix so the UI can filter them out of the visible conversation and
 	// compaction can strip them before summarization.
-	if injectHydration && !HasHydration(chatMessages(conversation, messageID, caps)) {
-		hydrationMsgs := a.buildHydration(conversation)
-		conversation = a.persistHydration(conversation, hydrationMsgs, messageID)
-		// Mark the assistant message for this turn so the UI can show a
-		// "context updated" badge — the hydration checkpoint was freshly
-		// persisted, meaning runtime facts (date, memory, skills, MCP, tools)
-		// were refreshed for this turn.
-		a.updateMessage(conversation, messageID, func(message *domain.Message) {
-			message.ContextUpdated = true
-		})
-		// Single save covers both the inserted checkpoint and the badge.
-		_ = a.Conversations.Save(conversation)
+	if injectHydration {
+		conversation = a.ensureHydration(conversation, messageID, caps)
 	}
 	messages := a.chatMessagesForProvider(conversation, messageID, caps)
 	// Continuation rounds (partial-stream recovery, failed-message retry)
@@ -416,6 +406,30 @@ func hydrationInsertIndex(msgs []domain.Message, beforeMsgID string) int {
 		return lastUser + 1
 	}
 	return pendingIdx
+}
+
+// ensureHydration persists a checkpoint after the last user when the current
+// history epoch has none. Call it before EventTurnStarted so a fresh room
+// does not show the assistant working with no hydration in the transcript.
+func (a *App) ensureHydration(conversation *domain.Conversation, messageID string, caps ModelCapabilities) *domain.Conversation {
+	if conversation == nil {
+		return conversation
+	}
+	if HasHydration(chatMessages(conversation, messageID, caps)) {
+		return conversation
+	}
+	hydrationMsgs := a.buildHydration(conversation)
+	if len(hydrationMsgs) == 0 {
+		return conversation
+	}
+	conversation = a.persistHydration(conversation, hydrationMsgs, messageID)
+	a.updateMessage(conversation, messageID, func(message *domain.Message) {
+		message.ContextUpdated = true
+	})
+	if a.Conversations != nil {
+		_ = a.Conversations.Save(conversation)
+	}
+	return conversation
 }
 
 // buildHydration assembles a synthetic runtime-hydration checkpoint from the

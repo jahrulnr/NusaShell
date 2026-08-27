@@ -7,13 +7,15 @@ import (
 )
 
 func TestApplyStreamRoundDropsWhitespaceOnlyContent(t *testing.T) {
-	msg := &domain.Message{ID: "a1", Role: domain.RoleAssistant}
-	applyStreamRound(msg, "qwen", streamedTurnRound{Content: "\n\n"})
-	if msg.Content != "" {
-		t.Fatalf("Content = %q, want empty", msg.Content)
-	}
-	if len(msg.Steps) != 0 {
-		t.Fatalf("Steps = %+v, want none for whitespace-only content", msg.Steps)
+	for _, raw := range []string{"\n\n", "\n\n\n\n", "  \n"} {
+		msg := &domain.Message{ID: "a1", Role: domain.RoleAssistant}
+		applyStreamRound(msg, "qwen", streamedTurnRound{Content: raw})
+		if msg.Content != "" {
+			t.Fatalf("Content = %q from %q, want empty", msg.Content, raw)
+		}
+		if len(msg.Steps) != 0 {
+			t.Fatalf("Steps = %+v, want none for whitespace-only content", msg.Steps)
+		}
 	}
 }
 
