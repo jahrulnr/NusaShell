@@ -115,6 +115,9 @@ func (p *Primary) Load() *domain.PrimaryMemory {
 	}
 }
 
+// Path returns the absolute filesystem path of the primary.md file.
+func (p *Primary) Path() string { return p.path }
+
 // Update replaces the entire primary document body and rewrites the file.
 // Used by memory op=replace target=primary when the agent rewrites the whole
 // document. Returns an error if the new content would exceed PrimaryCharCap.

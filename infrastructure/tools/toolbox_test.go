@@ -73,7 +73,6 @@ func (s *stubPluginStore) Delete(id string) error      { return nil }
 // stubMCP is a minimal MCP manager stub for testing.
 type stubMCP struct {
 	tools        map[string][]contracts.MCPToolDTO // serverID -> tools
-	running      map[string]bool                   // serverID -> running
 	lastServerID string
 	lastTool     string
 	lastArgs     map[string]any
@@ -239,36 +238,6 @@ func TestSkillSearchNoMatch(t *testing.T) {
 		t.Errorf("expected count: 0 in YAML output, got: %s", out)
 	}
 }
-
-type stubSkillStoreNoFiles struct{ skills []*domain.Skill }
-
-func (s *stubSkillStoreNoFiles) List() []*domain.Skill { return s.skills }
-func (s *stubSkillStoreNoFiles) Get(id, ownedBy string) (*domain.Skill, error) {
-	for _, sk := range s.skills {
-		if sk.ID == id {
-			return sk, nil
-		}
-	}
-	return nil, fmt.Errorf("not found")
-}
-func (s *stubSkillStoreNoFiles) Save(sk *domain.Skill) error     { return nil }
-func (s *stubSkillStoreNoFiles) Delete(id, ownedBy string) error { return nil }
-func (s *stubSkillStoreNoFiles) ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error) {
-	return nil, errReadFileUnsupported
-}
-func (s *stubSkillStoreNoFiles) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
-	return nil, errReadFileUnsupported
-}
-func (s *stubSkillStoreNoFiles) WriteFile(id, ownedBy, path, content string) error {
-	return errReadFileUnsupported
-}
-func (s *stubSkillStoreNoFiles) Install(zipData []byte) (string, error) {
-	return "", fmt.Errorf("not supported")
-}
-func (s *stubSkillStoreNoFiles) MountPluginSkills(pluginID, dir string) error { return nil }
-func (s *stubSkillStoreNoFiles) UnmountPluginSkills(pluginID string) error    { return nil }
-
-var errReadFileUnsupported = fmt.Errorf("file reads unsupported by this store")
 
 func TestSkillListLimit(t *testing.T) {
 	skills := []*domain.Skill{}

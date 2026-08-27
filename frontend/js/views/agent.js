@@ -1288,9 +1288,10 @@ function replaceGenerateImageJob(job, payload, assign) {
   assign(card);
 }
 
-function endTurn(runId) {
+function endTurn(runId, keepRun = false) {
   const run = state.runs.get(runId);
   if (!run) {
+    if (keepRun) return;
     // Run entry already gone (refresh raced the turn, or a terminal event
     // arrived for an unknown run). Seal any matching room buffer anyway so
     // it cannot stay "live" forever and overlay stale deltas over future
@@ -1318,20 +1319,22 @@ function endTurn(runId) {
   run.bubble?.querySelectorAll('.agent-reasoning.is-streaming').forEach((n) => n.classList.remove('is-streaming'));
   run.bubble?.querySelector('.agent-retry-banner')?.remove();
   clearToolTimers(run);
-  state.runs.delete(runId);
-  // Finalize the room buffer: the turn is terminal now, the persisted
-  // snapshot is authoritative on the next switch-back. Keep the buffer
-  // around briefly so the sidebar dot can still signal "finished", then
-  // let reattach render from the server snapshot.
-  const buffer = state.roomBuffers.get(convId);
-  if (buffer) {
-    buffer.done = true;
-    touchRoomBuffer(buffer);
+  if (!keepRun) {
+    state.runs.delete(runId);
+    // Finalize the room buffer: the turn is terminal now, the persisted
+    // snapshot is authoritative on the next switch-back. Keep the buffer
+    // around briefly so the sidebar dot can still signal "finished", then
+    // let reattach render from the server snapshot.
+    const buffer = state.roomBuffers.get(convId);
+    if (buffer) {
+      buffer.done = true;
+      touchRoomBuffer(buffer);
+    }
   }
   // Clear steer for this conversation (turn ended, unapplied steer is cancelled).
   if (convId === state.activeId) {
     clearSteerQueue();
-    if (!runForConversation(state.activeId)) {
+    if (!keepRun && !runForConversation(state.activeId)) {
       const stop = stopButton();
       if (stop) stop.hidden = true;
     }
@@ -1586,9 +1589,45 @@ async function loadOlderChunk() {
 function bindEvents() {
   on('agent.turn.started', (payload) => {
     const { run_id, message_id, round, conversation_id } = payload;
-    const run = getRunOrQueue('agent.turn.started', payload);
-    if (!run) return;
+    let run = state.runs.get(run_id);
+    if (!run) {
+      // Safety net: the run entry was deleted (endTurn on a turn.done
+      // whose auto_continue DTO was missing or false) but the backend
+      // reused the run_id for the next turn in the chain. Re-create the
+      // entry so streaming events render instead of being silently queued
+      // and dropped — which made the agent's response look like it was
+      // replaced by the continue.md prompt (empty A2 bubble, no stream).
+      if (conversation_id !== state.activeId) {
+        getRunOrQueue('agent.turn.started', payload);
+        return;
+      }
+      run = {
+        msgNode: null, bubble: null, strip: null, textBox: null, reasoningEl: null,
+        toolJobs: new Map(), raw: '', rawReasoning: '',
+        round: 1, conversationId: conversation_id, runId: run_id,
+        messageId: message_id,
+      };
+      state.runs.set(run_id, run);
+      stopButton().hidden = false;
+      updateSendAvailability(state);
+    }
+    // Auto-continue: the run entry was kept across turns (endTurn with
+    // keepRun=true), but the new turn has a different assistant message
+    // ID. Set up a fresh streaming slot for the new message instead of
+    // reusing the previous turn's textBox — clearing the old textBox
+    // would wipe the prior turn's visible content (the "rollback" bug).
+    const prevMessageId = run.messageId;
     run.messageId = message_id;
+    if (prevMessageId !== message_id) {
+      const slot = ensureRunSlot(run);
+      if (slot) {
+        run.msgNode = slot.msgNode;
+        run.bubble = slot.bubble;
+        run.reasoningEl = slot.reasoningEl;
+        run.textBox = slot.textBox;
+        run.strip = slot.strip;
+      }
+    }
     // round 1: clear the placeholder; round 2+: append new step elements
     // after the previous round's tool strip, preserving temporal order
     if (!round || round <= 1) {
@@ -2027,14 +2066,21 @@ function bindEvents() {
       // Render any Mermaid diagrams in the just-finished message (settle point).
       void renderMermaidDiagrams(run.msgNode); void highlightCode(run.msgNode); attachZoomButtons(run.msgNode);
     }
-    endTurn(run_id);
+    // Auto-continue: the backend will reuse the same run_id for the next
+    // turn in the chain. Keep the run entry so turn.started for the next
+    // turn finds it and streaming continues. Skip refreshActiveConversation
+    // mid-chain — it would re-render the thread and stale the DOM refs
+    // that the next turn's streaming handlers need. The thread is refreshed
+    // when the chain ends (turn.done without should_continue).
+    const willAutoContinue = Boolean(payload.auto_continue?.should_continue);
+    endTurn(run_id, willAutoContinue);
     if (error) {
       toast(error, 'error');
       playError(state.settings?.sound_notifications !== false);
     } else {
       playComplete(state.settings?.sound_notifications !== false);
     }
-    if (conversation_id === state.activeId) refreshActiveConversation();
+    if (conversation_id === state.activeId && !willAutoContinue) refreshActiveConversation();
     void maybeAutoTitleConversation(conversation_id);
     refreshConversations();
   });

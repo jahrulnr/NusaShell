@@ -98,7 +98,7 @@ func (e *LocalExecutor) RunStep(ctx context.Context, req application.RunStepRequ
 	case err = <-done:
 	case <-ctx.Done():
 		killProcGroup(cmd)
-		err = <-done
+		<-done // wait for the process to exit before returning
 		res := application.StepResult{Error: ctx.Err().Error()}
 		if cmd.ProcessState != nil {
 			res.ExitCode = cmd.ProcessState.ExitCode()

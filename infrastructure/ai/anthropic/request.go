@@ -487,16 +487,6 @@ func audioVideoPayload(block core.Block) (mime string, data []byte, cache *core.
 	return "", nil, nil
 }
 
-func blockCache(block core.Block) *core.CacheControl {
-	switch b := block.(type) {
-	case core.AudioBlock:
-		return b.Cache
-	case core.VideoBlock:
-		return b.Cache
-	}
-	return nil
-}
-
 func convertBlocks(blocks []core.Block) ([]anthropicContent, error) {
 	out := make([]anthropicContent, 0, len(blocks))
 	for _, block := range blocks {

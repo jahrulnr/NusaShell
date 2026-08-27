@@ -187,10 +187,6 @@ func (p *Provider) splitProviderOptions(options core.ProviderOptions) (core.Prov
 	return mapped, passthrough
 }
 
-func convertMessages(messages []core.Message) ([]map[string]any, error) {
-	return convertMessagesWithSpec(messages, Spec{})
-}
-
 func convertMessagesWithSpec(messages []core.Message, spec Spec) ([]map[string]any, error) {
 	out := make([]map[string]any, 0, len(messages))
 	for i, msg := range messages {

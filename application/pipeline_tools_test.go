@@ -29,7 +29,6 @@ func (l *listingToolbox) Execute(_ context.Context, name string, _ []byte) (stri
 // execution (optional capability exercised by FilteredToolbox).
 type streamedListingToolbox struct {
 	*listingToolbox
-	streamed []string
 }
 
 func (s *streamedListingToolbox) ExecuteStreamed(_ context.Context, name string, _ []byte, onChunk func(string)) (string, error) {

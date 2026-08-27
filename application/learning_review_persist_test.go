@@ -64,28 +64,28 @@ func TestReviewLoopPersistsReasoningAndFinalSummary(t *testing.T) {
 		t.Fatalf("runReviewLoop: %v", err)
 	}
 
-	// Expected shape after the synthetic-tool refactor:
+	// Expected shape (newReviewApp sets no PrimaryStore, so only
+	// review_transcript is pre-injected — no file_read call):
 	//   0: user (prompt from prompts/user/review.md)
-	//   1: assistant (synthetic tool calls: review_transcript + memory_primary)
+	//   1: assistant (synthetic tool call: review_transcript)
 	//   2: tool (review_transcript result)
-	//   3: tool (memory_primary result)
-	//   4: assistant (first LLM response: reasoning + memory save tool call)
-	//   5: tool (memory save result)
-	//   6: assistant (final summary: reasoning + content)
-	if len(messages) != 7 {
-		t.Fatalf("messages = %d, want 7; got %+v", len(messages), messages)
+	//   3: assistant (first LLM response: reasoning + memory save tool call)
+	//   4: tool (memory save result)
+	//   5: assistant (final summary: reasoning + content)
+	if len(messages) != 6 {
+		t.Fatalf("messages = %d, want 6; got %+v", len(messages), messages)
 	}
-	if messages[4].Reasoning != "The user stated a durable preference." {
-		t.Errorf("round reasoning not persisted: %q", messages[4].Reasoning)
+	if messages[3].Reasoning != "The user stated a durable preference." {
+		t.Errorf("round reasoning not persisted: %q", messages[3].Reasoning)
 	}
-	if messages[5].ToolResult == nil || messages[5].ToolResult.ToolCallID != "tc_1" {
-		t.Fatalf("tool result missing: %+v", messages[5])
+	if messages[4].ToolResult == nil || messages[4].ToolResult.ToolCallID != "tc_1" {
+		t.Fatalf("tool result missing: %+v", messages[4])
 	}
-	if messages[6].Role != "assistant" || messages[6].Content != "Saved one memory fragment." {
-		t.Errorf("final summary not persisted as assistant message: %+v", messages[6])
+	if messages[5].Role != "assistant" || messages[5].Content != "Saved one memory fragment." {
+		t.Errorf("final summary not persisted as assistant message: %+v", messages[5])
 	}
-	if messages[6].Reasoning != "Save succeeded, done." {
-		t.Errorf("final reasoning not persisted: %q", messages[6].Reasoning)
+	if messages[5].Reasoning != "Save succeeded, done." {
+		t.Errorf("final reasoning not persisted: %q", messages[5].Reasoning)
 	}
 }
 
@@ -110,16 +110,16 @@ func TestReviewLoopPersistsNothingToSaveConclusion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runReviewLoop: %v", err)
 	}
-	// Expected shape after the synthetic-tool refactor:
+	// Expected shape (newReviewApp sets no PrimaryStore, so only
+	// review_transcript is pre-injected — no file_read call):
 	//   0: user (prompt)
-	//   1: assistant (synthetic tool calls)
+	//   1: assistant (synthetic tool call: review_transcript)
 	//   2: tool (review_transcript result)
-	//   3: tool (memory_primary result)
-	//   4: assistant ("Nothing to save." conclusion)
-	if len(messages) != 5 {
-		t.Fatalf("messages = %d, want 5 (prompt + synthetic + 2 tools + conclusion); got %+v", len(messages), messages)
+	//   3: assistant ("Nothing to save." conclusion)
+	if len(messages) != 4 {
+		t.Fatalf("messages = %d, want 4 (prompt + synthetic + 1 tool + conclusion); got %+v", len(messages), messages)
 	}
-	if messages[4].Content != "Nothing to save." {
-		t.Errorf("conclusion = %q, want %q", messages[4].Content, "Nothing to save.")
+	if messages[3].Content != "Nothing to save." {
+		t.Errorf("conclusion = %q, want %q", messages[3].Content, "Nothing to save.")
 	}
 }

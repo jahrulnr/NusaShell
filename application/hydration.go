@@ -30,12 +30,16 @@ type RuntimeContextSnapshot struct {
 type HydrationSource struct {
 	RuntimeContext RuntimeContextSnapshot
 	// Executor runs the REAL meta-tools — mcp_list, tool_list (per running
-	// server), skill op=list, memory op=list target=primary — so the checkpoint
+	// server), skill op=list, file_read (primary.md) — so the checkpoint
 	// contains genuine tool output, the same tools the agent itself calls.
 	// The builder never mutates, clones, or mirrors a tool: it calls the
 	// real tool, processes the result, and attaches it to the conversation.
 	// When nil, the tool-backed slots fail soft (hidden).
 	Executor ToolExecutor
+	// PrimaryPath is the absolute filesystem path of memory/primary.md.
+	// When set, the memory slot reads the file via file_read. When empty,
+	// the memory slot is hidden.
+	PrimaryPath string
 	// Todos is the per-conversation todo checklist. When nil, no todo_list
 	// slot is injected.
 	Todos  ConversationTodoPort
@@ -146,55 +150,55 @@ func (b *HydrationBuilder) readRuntimeContext() hydrationSlot {
 	return hydrationSlot{name: "runtime_context", content: string(content)}
 }
 
-// readMemory runs the real `memory` tool (op=list) with target=primary and
-// attaches its entries, enriched with usage stats computed from the output
-// (the checkpoint's value-add; the tool itself returns bare entries). An
-// empty primary document hides the slot.
+// readMemory reads the primary.md file via file_read and attaches its body
+// as a single entry, enriched with usage stats. An empty or missing primary
+// document hides the slot.
 func (b *HydrationBuilder) readMemory() hydrationSlot {
-	if b.source.Executor == nil {
+	if b.source.Executor == nil || b.source.PrimaryPath == "" {
 		return hydrationSlot{name: "memory", content: ""}
 	}
-	out, err := b.source.Executor.Execute(context.Background(), "memory", []byte(`{"op":"list","target":"primary"}`))
+	args := fmt.Sprintf(`{"path":%q}`, b.source.PrimaryPath)
+	out, err := b.source.Executor.Execute(context.Background(), "file_read", []byte(args))
 	if err != nil {
 		return hydrationSlot{name: "memory", content: ""}
 	}
-	type primaryEntry struct {
-		ID      string `json:"id"`
-		Content string `json:"content"`
-	}
-	type usage struct {
-		Chars int `json:"chars"`
-		Limit int `json:"limit"`
-		Pct   int `json:"pct"`
-	}
-	var entries []primaryEntry
-	chars := 0
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "{") {
-			continue
-		}
-		var e primaryEntry
-		if json.Unmarshal([]byte(line), &e) != nil || e.Content == "" {
-			continue
-		}
-		entries = append(entries, e)
-		chars += len(e.Content)
-	}
-	if len(entries) == 0 {
+	// file_read returns yamlMD: a YAML frontmatter block (bytes meta)
+	// followed by the file body. The primary.md file itself also starts with
+	// a YAML frontmatter block (last_updated/version). Strip both so the
+	// hydration slot carries only the prose body, matching the previous
+	// memory-list output.
+	body := stripYAMLFrontmatter(stripYAMLFrontmatter(out))
+	body = strings.TrimSpace(body)
+	if body == "" {
 		return hydrationSlot{name: "memory", content: ""}
 	}
+	chars := len(body)
 	limit := domain.PrimaryCharCap
 	pct := 0
 	if limit > 0 {
 		pct = chars * 100 / limit
 	}
 	content, _ := json.Marshal(map[string]any{
-		"entries": entries,
-		"count":   len(entries),
-		"usage":   usage{Chars: chars, Limit: limit, Pct: pct},
+		"entries": []map[string]any{{"content": body}},
+		"count":   1,
+		"usage":   map[string]any{"chars": chars, "limit": limit, "pct": pct},
 	})
-	return hydrationSlot{name: "memory", args: `{"target":"primary"}`, content: string(content)}
+	return hydrationSlot{name: "memory", args: args, content: string(content)}
+}
+
+// stripYAMLFrontmatter removes a leading "---\n...\n---" block from text.
+func stripYAMLFrontmatter(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "---") {
+		return s
+	}
+	rest := strings.TrimPrefix(s, "---")
+	// Find the closing ---
+	idx := strings.Index(rest, "\n---")
+	if idx < 0 {
+		return s
+	}
+	return strings.TrimSpace(rest[idx+4:])
 }
 
 // readSkills runs the real `skill` tool (op=list) and attaches its output

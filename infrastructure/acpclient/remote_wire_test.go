@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // TestRemoteWireRoundTrip verifies that remoteWire can write a JSON-RPC

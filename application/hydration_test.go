@@ -139,30 +139,32 @@ func TestHydrationRuntimeContext(t *testing.T) {
 }
 
 func TestHydrationMemory(t *testing.T) {
-	// The memory slot runs the real memory tool (op=list, target=primary) and
-	// enriches its entries with usage stats computed from the output.
+	// The memory slot reads primary.md via file_read and enriches the body
+	// with usage stats. The file body carries its own YAML frontmatter
+	// (last_updated/version) which must be stripped from the slot content.
+	primaryPath := "/data/memory/primary.md"
 	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
 		switch name {
-		case "memory":
-			return "---\ncount: 2\n---\n" +
-				`{"id":"frag_1","content":"User prefers Indonesian"}` + "\n" +
-				`{"id":"frag_2","content":"Repo uses Go + Clean Architecture"}`, nil
+		case "file_read":
+			// file_read yamlMD output: meta block + raw file body.
+			return "---\nbytes: 60\n---\n\n" +
+				"---\nlast_updated: \"2026-01-01T00:00:00Z\"\nversion: 2\n---\n\n" +
+				"User prefers Indonesian. Repo uses Go + Clean Architecture.", nil
 		case "skill", "mcp_list", "tool_list":
 			return emptyToolOutput, nil
 		}
 		return "", fmt.Errorf("unexpected tool %q", name)
 	}}
-	b := NewHydrationBuilder(HydrationSource{Executor: exec})
+	b := NewHydrationBuilder(HydrationSource{Executor: exec, PrimaryPath: primaryPath})
 	result := b.Build()
-	if got := result.Messages[0].ToolCalls[1].Args; got != `{"target":"primary"}` {
-		t.Errorf("memory call args = %s, want target=primary", got)
+	if got := result.Messages[0].ToolCalls[1].Args; got != `{"path":"/data/memory/primary.md"}` {
+		t.Errorf("memory call args = %s, want file_read path", got)
 	}
 	// memory is the second slot (after runtime_context)
 	memContent := hydrationResultByName(t, result, "memory")
 	var mem struct {
 		Count   int `json:"count"`
 		Entries []struct {
-			ID      string `json:"id"`
 			Content string `json:"content"`
 		} `json:"entries"`
 		Usage struct {
@@ -174,22 +176,22 @@ func TestHydrationMemory(t *testing.T) {
 	if err := json.Unmarshal([]byte(memContent), &mem); err != nil {
 		t.Fatalf("invalid memory JSON: %v", err)
 	}
-	if mem.Count != 2 {
-		t.Errorf("expected 2 primary entries, got %d", mem.Count)
+	if mem.Count != 1 {
+		t.Errorf("expected 1 primary entry, got %d", mem.Count)
 	}
-	if len(mem.Entries) != 2 {
+	if len(mem.Entries) != 1 {
 		t.Fatalf("unexpected entries: %+v", mem.Entries)
 	}
-	if mem.Entries[0].ID != "frag_1" || mem.Entries[0].Content != "User prefers Indonesian" {
-		t.Errorf("entry 0 = %+v", mem.Entries[0])
+	wantBody := "User prefers Indonesian. Repo uses Go + Clean Architecture."
+	if mem.Entries[0].Content != wantBody {
+		t.Errorf("entry content = %q, want %q", mem.Entries[0].Content, wantBody)
 	}
 	// Usage should report the primary char budget.
 	if mem.Usage.Limit != domain.PrimaryCharCap {
 		t.Errorf("limit = %d, want %d", mem.Usage.Limit, domain.PrimaryCharCap)
 	}
-	expectedChars := len("User prefers Indonesian") + len("Repo uses Go + Clean Architecture")
-	if mem.Usage.Chars != expectedChars {
-		t.Errorf("chars = %d, want %d", mem.Usage.Chars, expectedChars)
+	if mem.Usage.Chars != len(wantBody) {
+		t.Errorf("chars = %d, want %d", mem.Usage.Chars, len(wantBody))
 	}
 }
 
@@ -202,15 +204,19 @@ func TestHydrationMemoryHiddenWhenEmpty(t *testing.T) {
 			t.Fatal("memory slot must be hidden when the real tool is unavailable")
 		}
 	}
-	// Executor present but primary memory empty: also hidden.
+	// Executor + PrimaryPath present but the primary.md body is empty:
+	// also hidden.
 	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
 		switch name {
-		case "memory", "skill", "mcp_list", "tool_list":
+		case "file_read":
+			// file_read of an empty primary.md: meta block + frontmatter only.
+			return "---\nbytes: 0\n---\n\n---\nversion: 2\n---\n", nil
+		case "skill", "mcp_list", "tool_list":
 			return emptyToolOutput, nil
 		}
 		return "", fmt.Errorf("unexpected tool %q", name)
 	}}
-	result = NewHydrationBuilder(HydrationSource{Executor: exec}).Build()
+	result = NewHydrationBuilder(HydrationSource{Executor: exec, PrimaryPath: "/data/memory/primary.md"}).Build()
 	for _, c := range result.Messages[0].ToolCalls {
 		if c.Name == "memory" {
 			t.Fatal("memory slot must be hidden when primary memory is empty")

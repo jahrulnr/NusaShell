@@ -8,7 +8,7 @@ archive.
 
 | Tier | Storage | Cap | Injected | Tools |
 |---|---|---|---|---|
-| **Primary** | `memory/primary.md` (single markdown document) | ~1k tokens | Every turn (via hydration) | `memory(op="list",target="primary")`, `memory(op="replace",target="primary")` |
+| **Primary** | `memory/primary.md` (single markdown document) | ~1k tokens | Every turn (via hydration) | `file_read(path="memory/primary.md")`, `memory(op="replace",target="primary")` |
 | **Fragments** | `memory/fragments/*.md` (one file per entry) | Unlimited | On-demand (search) | `memory(op="save")`, `memory(op="search")`, `memory(op="list",target="fragments")`, `memory(op="replace",target="fragment")`, `memory(op="delete")` |
 
 Primary memory is a single markdown document — like a README the agent
@@ -72,9 +72,9 @@ All memory operations go through the `memory` dispatcher tool; `op` selects:
 - `search` — search fragments by content (BM25) with optional
   metadata filters (`query`, `category`, `project`, `task`, `tags`,
   `limit`). Returns ranked results with scores.
-- `list` — list entries. `target="primary"` returns the primary
-  document; `target="fragments"` (default) lists the archive with
-  optional metadata filters.
+- `list` — list the fragment archive (`target="fragments"`, the default)
+  with optional metadata filters. Primary is a single document, not a
+  list — read it with `file_read(path="memory/primary.md")` instead.
 - `replace` — update memory. For primary: `target="primary"` +
   `old_text` (substring match) + `content` to edit part of the document,
   or omit `old_text` to rewrite the entire body. For fragments:
@@ -112,9 +112,9 @@ tokens, so the agent rewrites or trims stale text before adding new
 content.
 
 The review agent sees the current primary document as a pre-injected
-`memory_primary` synthetic tool result at the start of each review run,
-so it can avoid duplicates and spot stale text without needing to call
-`memory(op="list", target="primary")` first. Reviews are bounded to a small number of
+`file_read` tool result (reading `memory/primary.md` directly, frontmatter
+included) at the start of each review run, so it can avoid duplicates and
+spot stale text without needing to read the file itself first. Reviews are bounded to a small number of
 tool rounds and coalesce concurrent threshold/skill/compaction triggers, so a burst cannot launch duplicate reviews or replay the same transcript repeatedly. Activity that arrives while a review is running is retained for one follow-up review. Both successful and failed reviews enter the cooldown period to prevent redundant re-review of the same window. Exact duplicate fragment writes are idempotent.
 
 ## How the review agent gets the transcript
@@ -131,13 +131,15 @@ any other tool.
 The transcript is **incrementally bounded**: each review only processes
 messages since the last review (tracked via `last_reviewed_msg_count` on
 the conversation). This prevents re-reading and re-reasoning over
-already reviewed content. The `review_transcript` and `memory_primary`
-tools are pre-injected before the first LLM call — the agent does not
-need to call them to get the initial data.
+already reviewed content. The `review_transcript` tool and the primary
+`file_read` result are pre-injected before the first LLM call — the agent
+does not need to call them to get the initial data.
 
-The hydration tools are review-only: they are not registered in the
-global Toolbox and are not available to the main agent. They are executed
-locally by the review loop, not via `Toolbox.Execute`.
+`review_transcript` is review-only: it is not registered in the global
+Toolbox and is executed locally by the review loop. The primary memory
+injection uses the real `file_read` tool (which IS in the global Toolbox
+and whitelisted for the review agent), so the agent can re-read the file
+itself if needed.
 
 ## Review triggers
 

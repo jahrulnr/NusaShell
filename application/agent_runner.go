@@ -13,8 +13,9 @@ import (
 )
 
 func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartRequest) (any, *contracts.RPCError) {
-	c, rpcErr := a.getConversation(req.ConversationID)
-	if rpcErr != nil {
+	// Existence check before any side effects (attachment writes, model
+	// resolution); the conversation is re-fetched under startMu below.
+	if _, rpcErr := a.getConversation(req.ConversationID); rpcErr != nil {
 		return nil, rpcErr
 	}
 	text := strings.TrimSpace(req.Text)
@@ -44,7 +45,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
-	c, rpcErr = a.getConversation(req.ConversationID)
+	c, rpcErr := a.getConversation(req.ConversationID)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
@@ -102,8 +103,9 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 // is asked to continue from where it stopped; otherwise the failed message is
 // cleared and re-run from scratch.
 func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryRequest) (any, *contracts.RPCError) {
-	c, rpcErr := a.getConversation(req.ConversationID)
-	if rpcErr != nil {
+	// Existence check before validation; the conversation is re-fetched
+	// under startMu below.
+	if _, rpcErr := a.getConversation(req.ConversationID); rpcErr != nil {
 		return nil, rpcErr
 	}
 	model := strings.TrimSpace(req.Model)
@@ -113,7 +115,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
-	c, rpcErr = a.getConversation(req.ConversationID)
+	c, rpcErr := a.getConversation(req.ConversationID)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
@@ -566,11 +568,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	tools := append(a.Toolbox.ListTools(), DispatcherToolInfos()...)
 	toolDefs := make([]ToolDef, 0, len(tools))
 	for _, tool := range tools {
-		toolDefs = append(toolDefs, ToolDef{
-			Name:        tool.Name,
-			Description: tool.Description,
-			InputSchema: tool.InputSchema,
-		})
+		toolDefs = append(toolDefs, ToolDef(tool))
 	}
 	if run.Headless {
 		toolDefs = filterACPToolDefs(toolDefs)
@@ -734,13 +732,12 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 			// turn, drain any queued steer — if one is pending, inject it and
 			// continue the loop so the model gets a new round to respond to it
 			// instead of silently dropping the steer.
-			applied, steerConv, steerErr := a.applyQueuedSteer(run, currentMsgID)
+			applied, steerErr := a.applyQueuedSteer(run)
 			if steerErr != nil {
 				a.failTurn(run, currentMsgID, steerErr)
 				return false, ""
 			}
 			if applied {
-				conversation = steerConv
 				conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)
 				if err != nil {
 					a.failTurn(run, currentMsgID, err)
@@ -777,13 +774,12 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		// Drain any queued steer message at this safe boundary (between tool
 		// completion and the next provider round). The steer is appended as a
 		// real user message so the provider sees it in the next round's context.
-		applied, steerConv, steerErr := a.applyQueuedSteer(run, currentMsgID)
+		applied, steerErr := a.applyQueuedSteer(run)
 		if steerErr != nil {
 			a.failTurn(run, currentMsgID, steerErr)
 			return false, ""
 		}
 		if applied {
-			conversation = steerConv
 			injectHydration = true // allow a missing post-compaction checkpoint
 		}
 
@@ -874,26 +870,25 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 }
 
 // applyQueuedSteer drains a queued steer and appends it as a real user message
-// at the current safe boundary. Returns (true, updatedConversation, nil) when a
-// steer was applied, (false, nil, nil) when no steer was queued.
-func (a *App) applyQueuedSteer(run *TurnRun, _ string) (bool, *domain.Conversation, error) {
+// at the current safe boundary. Returns true when a steer was applied.
+func (a *App) applyQueuedSteer(run *TurnRun) (bool, error) {
 	entry := run.drainSteer()
 	if entry == nil {
-		return false, nil, nil
+		return false, nil
 	}
 	c, err := a.Conversations.Get(run.ConversationID)
 	if err != nil {
-		return false, nil, err
+		return false, err
 	}
 	c.AddMessage(entry.Message)
 	if err := a.Conversations.Save(c); err != nil {
-		return false, nil, err
+		return false, err
 	}
 	a.Bus.Emit(contracts.EventSteerApplied, contracts.SteerEvent{
 		ConversationID: run.ConversationID, SteerID: entry.ID, Text: entry.Text, Status: "applied",
 	})
 	a.log("info", "agent", "steer applied for %s: %s", run.ConversationID, entry.ID)
-	return true, c, nil
+	return true, nil
 }
 
 // shouldContinueFailedTurn reports whether a retry should freeze partial
@@ -1406,13 +1401,6 @@ func (a *App) updateToolResult(c *domain.Conversation, msgID, callID string, sta
 		}
 	}
 	return c
-}
-
-func allCodexAccountsLimitedError(reset time.Time) error {
-	if reset.IsZero() {
-		return fmt.Errorf("all Codex accounts are rate-limited")
-	}
-	return fmt.Errorf("all Codex accounts are rate-limited. Earliest reset at %s", reset.Format(time.RFC3339))
 }
 
 func (a *App) failTurn(run *TurnRun, msgID string, err error) {

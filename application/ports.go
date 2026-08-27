@@ -122,6 +122,9 @@ type PrimaryStore interface {
 	Load() *domain.PrimaryMemory
 	Update(entries []domain.PrimaryEntry) error
 	Replace(oldText, content string) error // substring match update
+	// Path returns the absolute filesystem path of the primary.md file.
+	// Used by the review agent to pre-inject the file via file_read.
+	Path() string
 }
 
 // FragmentStore is the unlimited, searchable memory archive backed by

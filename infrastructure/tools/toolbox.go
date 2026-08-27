@@ -509,18 +509,12 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			limit = 50
 		}
 		if args.Target == "primary" {
+			// Primary is a single document, not a list. Reading it via
+			// list was a design wart; file_read is the honest path.
 			if t.Primary == nil {
-				return yamlBlock(map[string]any{"target": "primary", "count": 0, "error": "primary store not configured"}), nil
+				return "", fmt.Errorf("primary memory is a single document, not a list — and no primary store is configured")
 			}
-			mem := t.Primary.Load()
-			items := make([]any, 0, len(mem.Entries))
-			for _, e := range mem.Entries {
-				if e.Content == "" {
-					continue
-				}
-				items = append(items, map[string]any{"id": e.ID, "content": e.Content})
-			}
-			return yamlJSONL(map[string]any{"target": "primary", "count": len(mem.Entries)}, items), nil
+			return "", fmt.Errorf("primary memory is a single document, not a list — read it with file_read(path=%q)", t.Primary.Path())
 		}
 		// Default: list fragments
 		if t.Fragments == nil {

@@ -29,7 +29,7 @@ import (
 	"nusashell/infrastructure/sqlitestore"
 	"nusashell/infrastructure/tools"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // ---- fake LLM server ----

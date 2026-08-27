@@ -83,9 +83,22 @@ func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversatio
 		// on OpenRouter that 400s with "reasoning_content must be passed
 		// back", or Qwen3.8 that 400s with "text-only; must be a text
 		// part").
+		//
+		// adapted is set when learning produced a recoverable action
+		// (strip / inject / disable-modality). 400s are not normally
+		// retryable, but an adapted 400 means the next request will be
+		// rebuilt with the fix applied (stripped param, injected
+		// reasoning_content, or image/audio/video stripped via caps), so
+		// we force a retry instead of failing the turn on the first 400.
+		// The retry >= maxProviderAttempts guard above still bounds the
+		// total attempts.
+		adapted := false
 		if isLearnable400(err) {
 			body := extractErrBody(err)
 			action, param := a.learnedParams.LearnFrom400(run.ProviderID, model, body)
+			if action != "" && param != "" {
+				adapted = true
+			}
 			providerName := a.providerNameByID(run.ProviderID)
 			if action == domain.LearnedActionInject && strings.EqualFold(param, stripReasoningContentParam) {
 				if !caps.ReasoningReplay {
@@ -109,8 +122,14 @@ func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversatio
 			}
 		}
 		delay, retryable := providerRetryDelay(err, retry)
-		if !retryable {
+		if !retryable && !adapted {
 			return roundResult, err
+		}
+		if !retryable {
+			// Learnable 400 was adapted but is not normally retryable.
+			// Use a short fixed delay; the adaptation makes the next
+			// request valid.
+			delay = retryBaseDelay
 		}
 		a.log("warn", "ai", "retrying provider stream for turn %s (%d/%d) after %s: %s", run.ID, retry, maxProviderAttempts, delay.Round(time.Millisecond), describeProviderError(err))
 		retryEvt := contracts.ProviderRetryEvent{
@@ -374,9 +393,12 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	}
 	if a.Toolbox != nil {
 		// The real toolbox executes the meta-tools (mcp_list, tool_list per
-		// server, skill, memory op=list) so the checkpoint contains genuine
+		// server, skill, file_read) so the checkpoint contains genuine
 		// tool output — the same tools the agent calls.
 		source.Executor = a.Toolbox
+	}
+	if a.Primary != nil {
+		source.PrimaryPath = a.Primary.Path()
 	}
 	if a.Todos != nil {
 		source.Todos = a.Todos

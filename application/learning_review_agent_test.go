@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -29,9 +31,24 @@ func (s *reviewStubToolbox) ListTools() []ToolInfo {
 	}
 }
 
-func (s *reviewStubToolbox) Execute(_ context.Context, name string, _ []byte) (string, error) {
+func (s *reviewStubToolbox) Execute(_ context.Context, name string, argsJSON []byte) (string, error) {
 	if s.fail[name] {
 		return "", errors.New("boom: tool unavailable")
+	}
+	// file_read is used by the review loop to pre-inject primary.md; read
+	// the real file so tests can assert on its content.
+	if name == "file_read" {
+		var args struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", err
+		}
+		data, err := os.ReadFile(args.Path)
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
 	}
 	return "Saved " + name + " entry.", nil
 }
@@ -253,13 +270,17 @@ func TestReviewLoopRecordsMutationOnlyOnSuccess(t *testing.T) {
 }
 
 // stubPrimaryStoreReview is a minimal PrimaryStore for review-agent tests.
-type stubPrimaryStoreReview struct{ mem *domain.PrimaryMemory }
+type stubPrimaryStoreReview struct {
+	mem  *domain.PrimaryMemory
+	path string
+}
 
 func (s *stubPrimaryStoreReview) Load() *domain.PrimaryMemory { return s.mem }
 func (s *stubPrimaryStoreReview) Update(entries []domain.PrimaryEntry) error {
 	return nil
 }
 func (s *stubPrimaryStoreReview) Replace(oldText, content string) error { return nil }
+func (s *stubPrimaryStoreReview) Path() string                          { return s.path }
 
 func TestReviewLoopRecordsMemoryReplaceMutation(t *testing.T) {
 	if resources.ReviewPrompt() == "" {
@@ -292,50 +313,93 @@ func TestReviewLoopRecordsMemoryReplaceMutation(t *testing.T) {
 	}
 }
 
-func TestExecuteMemoryPrimaryInjectsContent(t *testing.T) {
+// TestReviewLoopInjectsPrimaryViaFileRead pins the new injection contract:
+// when a PrimaryStore with a real file path is configured, the review loop
+// pre-injects a file_read tool call + result carrying the primary.md content
+// (frontmatter included), so the agent sees the actual file as ground truth.
+func TestReviewLoopInjectsPrimaryViaFileRead(t *testing.T) {
+	if resources.ReviewPrompt() == "" {
+		t.Fatal("review prompt must be non-empty for the loop to run")
+	}
+	dir := t.TempDir()
+	primaryPath := filepath.Join(dir, "primary.md")
+	body := "---\nversion: 2\n---\n\nUser prefers Indonesian.\n"
+	if err := os.WriteFile(primaryPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	conv := &domain.Conversation{
+		ID:       "conv_1",
+		Messages: []domain.Message{{Role: domain.RoleUser, Content: "hello"}},
+	}
+	adapter := &persistStubAdapter{responses: []ChatResponse{{Content: "Nothing to save."}}}
 	app := &App{
 		Toolbox: &reviewStubToolbox{},
 		Logs:    &fakeLogStore{},
-		Primary: &stubPrimaryStoreReview{mem: &domain.PrimaryMemory{
-			Entries: []domain.PrimaryEntry{
-				{ID: "prim_1", Content: "User prefers Indonesian"},
-				{ID: "prim_2", Content: "Repo uses Go + Clean Architecture"},
-			},
-		}},
+		Primary: &stubPrimaryStoreReview{
+			mem:  &domain.PrimaryMemory{Entries: []domain.PrimaryEntry{{Content: "User prefers Indonesian."}}},
+			path: primaryPath,
+		},
 	}
 	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
-	output := agent.executeMemoryPrimary()
-	if !strings.Contains(output, "User prefers Indonesian") {
-		t.Error("executeMemoryPrimary should contain primary memory entry 'User prefers Indonesian'")
+	_, messages, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
+	if err != nil {
+		t.Fatalf("runReviewLoop: %v", err)
 	}
-	if !strings.Contains(output, "Repo uses Go + Clean Architecture") {
-		t.Error("executeMemoryPrimary should contain primary memory entry 'Repo uses Go + Clean Architecture'")
+
+	// messages[1] is the synthetic assistant turn carrying the tool calls.
+	if len(messages) < 2 || messages[1].Role != "assistant" {
+		t.Fatalf("expected synthetic assistant turn at messages[1], got %+v", messages)
+	}
+	var sawFileRead bool
+	for _, tc := range messages[1].ToolCalls {
+		if tc.Name == "file_read" && strings.Contains(tc.Args, primaryPath) {
+			sawFileRead = true
+		}
+	}
+	if !sawFileRead {
+		t.Errorf("expected a file_read tool call for %q in %+v", primaryPath, messages[1].ToolCalls)
+	}
+	// The file_read result must carry the real file content.
+	var fileReadContent string
+	for _, m := range messages {
+		if m.ToolResult != nil && m.ToolResult.Name == "file_read" {
+			fileReadContent = m.ToolResult.Content
+		}
+	}
+	if !strings.Contains(fileReadContent, "User prefers Indonesian.") {
+		t.Errorf("file_read result should contain primary body, got %q", fileReadContent)
 	}
 }
 
-func TestExecuteMemoryPrimaryEmpty(t *testing.T) {
-	app := &App{
-		Toolbox: &reviewStubToolbox{},
-		Logs:    &fakeLogStore{},
-		Primary: &stubPrimaryStoreReview{mem: &domain.PrimaryMemory{Entries: nil}},
+// TestReviewLoopSkipsPrimaryInjectionWithoutStore covers the no-Primary path:
+// only review_transcript is injected, no file_read call appears.
+func TestReviewLoopSkipsPrimaryInjectionWithoutStore(t *testing.T) {
+	if resources.ReviewPrompt() == "" {
+		t.Fatal("review prompt must be non-empty for the loop to run")
 	}
-	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
-	output := agent.executeMemoryPrimary()
-	if output != "(empty)" {
-		t.Errorf("empty primary should show '(empty)', got %q", output)
+	conv := &domain.Conversation{
+		ID:       "conv_1",
+		Messages: []domain.Message{{Role: domain.RoleUser, Content: "hello"}},
 	}
-}
-
-func TestExecuteMemoryPrimaryNoStore(t *testing.T) {
+	adapter := &persistStubAdapter{responses: []ChatResponse{{Content: "Nothing to save."}}}
 	app := &App{
 		Toolbox: &reviewStubToolbox{},
 		Logs:    &fakeLogStore{},
 		// Primary not set
 	}
 	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
-	output := agent.executeMemoryPrimary()
-	if output != "(unavailable)" {
-		t.Errorf("missing PrimaryStore should show '(unavailable)', got %q", output)
+	_, messages, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
+	if err != nil {
+		t.Fatalf("runReviewLoop: %v", err)
+	}
+	if len(messages) < 2 {
+		t.Fatalf("expected at least prompt + synthetic turn, got %d messages", len(messages))
+	}
+	for _, tc := range messages[1].ToolCalls {
+		if tc.Name == "file_read" {
+			t.Errorf("no file_read call expected without a PrimaryStore, got %+v", tc)
+		}
 	}
 }
 
@@ -703,8 +767,8 @@ func TestReviewLoopEndsOnNothingToSave(t *testing.T) {
 	// decided even when it stored nothing. With the synthetic-tool refactor,
 	// the message sequence is: user prompt, synthetic assistant tool calls,
 	// 2 tool results, and the final assistant conclusion = 5 messages.
-	if len(messages) != 5 {
-		t.Errorf("expected 5 messages (prompt + synthetic + 2 tools + conclusion), got %d", len(messages))
+	if len(messages) != 4 {
+		t.Errorf("expected 4 messages (prompt + synthetic + 1 tool + conclusion), got %d", len(messages))
 	}
 	// Verify the adapter was called exactly once (no tool rounds).
 	if adapter.calls != 1 {
@@ -727,10 +791,11 @@ func TestReviewLoopEmptyResponseIsError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "empty response") {
 		t.Fatalf("err = %v, want empty response error", err)
 	}
-	// Pre-injected synthetic tools produce 4 messages before the first LLM
-	// call: user prompt, synthetic assistant tool calls, and 2 tool results.
-	if len(messages) != 4 {
-		t.Fatalf("messages = %d, want 4 (user + synthetic assistant + 2 tool results)", len(messages))
+	// Pre-injected synthetic tool produces 3 messages before the first LLM
+	// call: user prompt, synthetic assistant tool call, and 1 tool result
+	// (newReviewApp sets no PrimaryStore, so no file_read injection).
+	if len(messages) != 3 {
+		t.Fatalf("messages = %d, want 3 (user + synthetic assistant + 1 tool result)", len(messages))
 	}
 }
 
@@ -1023,9 +1088,10 @@ func TestReviewLoopCompactionResetsStaleMarker(t *testing.T) {
 	if messages == nil {
 		t.Fatal("expected review to run after marker reset, got nil messages (stale marker not reset)")
 	}
-	// 5 messages: user prompt + synthetic assistant + 2 tool results + conclusion
-	if len(messages) != 5 {
-		t.Errorf("messages = %d, want 5; got %+v", len(messages), messages)
+	// 4 messages: user prompt + synthetic assistant + 1 tool result + conclusion
+	// (no PrimaryStore set, so no file_read injection).
+	if len(messages) != 4 {
+		t.Errorf("messages = %d, want 4; got %+v", len(messages), messages)
 	}
 }
 

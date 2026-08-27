@@ -47,7 +47,7 @@ var dispatchFamilies = []dispatchFamily{
 		members: []string{"save", "replace", "search", "list", "delete"},
 		def: ToolInfo{
 			Name:        "memory",
-			Description: "Long-term memory; \"op\" selects: save {content,category?,project?,task?,tags?} idempotent fragment dedup — durable knowledge only; replace {target:primary|fragment,content,old_text?,id?} edit primary document substring/whole body or one fragment; search {query,category?,project?,task?,tags?,limit?} BM25-ranked fragments; list {target?:primary|fragments,category?,project?,limit?}; delete {id}",
+			Description: "Long-term memory; \"op\" selects: save {content,category?,project?,task?,tags?} idempotent fragment dedup — durable knowledge only; replace {target:primary|fragment,content,old_text?,id?} edit primary document substring/whole body or one fragment; search {query,category?,project?,task?,tags?,limit?} BM25-ranked fragments; list {target?:fragments,category?,project?,limit?} list the fragment archive (primary is a single document — read it with file_read, not list); delete {id}",
 			InputSchema: objSchema(
 				pEnum("op", "Operation", "save", "replace", "search", "list", "delete"),
 				pStr("content", "Fact/observation to save, replacement body, or new fragment content"),
@@ -55,7 +55,7 @@ var dispatchFamilies = []dispatchFamily{
 				pStr("project", "Optional project/workspace label"),
 				pStr("task", "Optional task label (save/search)"),
 				schemaProp{"tags", map[string]any{"type": "array", "description": "Optional tags; search requires ALL to match", "items": map[string]any{"type": "string"}}},
-				pEnum("target", "replace: primary|fragment · list: primary|fragments (default fragments)", "primary", "fragment", "fragments"),
+				pEnum("target", "replace: primary|fragment · list: fragments (default)", "primary", "fragment", "fragments"),
 				pStr("old_text", "Primary substring to replace; omit to rewrite the entire body (op=replace target=primary)"),
 				pStr("id", "Fragment id (op=replace target=fragment / op=delete)"),
 				pStr("query", "Search query (op=search)"),

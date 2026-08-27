@@ -18,12 +18,13 @@ Two tool results are pre-injected before your first response:
    to the full conversation JSON file. Use `file_read` on that path only if
    the bounded segment lacks context you need.
 
-2. **`memory_primary`** — the current content of primary memory. Read it
-   before editing to avoid duplicates and to identify stale,
-   overly-specific, or work-oriented text that should be trimmed.
+2. **`file_read`** — the current content of `memory/primary.md` (the primary
+   memory file, including its YAML frontmatter). Read it before editing to
+   avoid duplicates and to identify stale, overly-specific, or work-oriented
+   text that should be trimmed.
 
-Do not call `review_transcript` or `memory_primary` — their results are
-already in the message stream. Proceed directly to analysis.
+Do not call `review_transcript` or re-read `memory/primary.md` — their
+results are already in the message stream. Proceed directly to analysis.
 
 ## Decide if there is anything to save
 

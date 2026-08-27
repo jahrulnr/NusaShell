@@ -120,7 +120,7 @@ func (s *LearningSearcher) searchSkillsWithOpts(ctx context.Context, query strin
 
 	out := make([]SearchResult, len(fused))
 	for i, f := range fused {
-		out[i] = SearchResult{ID: f.ID, Score: f.Score}
+		out[i] = SearchResult(f)
 	}
 	return out, nil
 }
@@ -189,7 +189,7 @@ func (s *LearningSearcher) searchMemoryWithOpts(ctx context.Context, query strin
 
 	out := make([]SearchResult, len(fused))
 	for i, f := range fused {
-		out[i] = SearchResult{ID: f.ID, Score: f.Score}
+		out[i] = SearchResult(f)
 	}
 	return out, nil
 }

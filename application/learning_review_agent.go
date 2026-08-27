@@ -11,7 +11,7 @@
 // Design follows the learning-sources-audit Phase 2:
 //   - Background review after N turns (fork agent, replay snapshot)
 //   - LLM-based extraction (no regex)
-//   - Restricted tool whitelist (memory + skill meta-tools only)
+//   - Restricted tool whitelist (memory + skill meta-tools + file_read)
 //   - Bounded tool rounds (maxToolRounds, default 6)
 //   - No streaming; parent conversation is not modified
 //   - Review transcript and mutation events are persisted for observability
@@ -113,7 +113,7 @@ func NewBackgroundReviewAgent(app *App, settings ReviewSettings) *BackgroundRevi
 // the memory and skill dispatcher roots. Destructive ops (delete/files) are
 // rejected per-call by reviewAllowedOp.
 func reviewToolWhitelist() map[string]bool {
-	return map[string]bool{"memory": true, "skill": true}
+	return map[string]bool{"memory": true, "skill": true, "file_read": true}
 }
 
 // reviewAllowedOp reports whether a review-agent call to a whitelisted root
@@ -134,13 +134,6 @@ func reviewAllowedOp(name string, argsJSON []byte) bool {
 // reviewTranscriptToolName is the hydration tool the review agent calls to
 // get the conversation transcript as structured JSON. It is NOT in Toolbox.
 const reviewTranscriptToolName = "review_transcript"
-
-// memoryPrimaryToolName is the synthetic tool that injects the current
-// primary memory content as a tool result. It is NOT in Toolbox and NOT
-// callable by the agent — the review loop pre-injects its result before
-// the first LLM call so the agent sees primary memory as factual ground
-// truth (tool output authority > system prompt authority).
-const memoryPrimaryToolName = "memory_primary"
 
 // reviewTranscriptToolDef is the tool definition sent to the LLM so it
 // knows review_transcript exists and how to call it. The path, start, and
@@ -167,19 +160,6 @@ var reviewTranscriptToolDef = ToolDef{
 				"description": "End message index (exclusive) of the segment to review. Omit to use the pre-injected segment.",
 			},
 		},
-	},
-}
-
-// memoryPrimaryToolDef is the synthetic tool definition for memory_primary.
-// The review loop pre-injects the current primary memory content as a tool
-// result for this tool, so the agent sees it as factual ground truth
-// before deciding what to save. The agent does not need to call it.
-var memoryPrimaryToolDef = ToolDef{
-	Name:        memoryPrimaryToolName,
-	Description: "Current content of primary memory (memory/primary.md). This is pre-injected as a tool result so you can see what is already saved before editing. Do not call this tool — its result is already provided.",
-	InputSchema: map[string]any{
-		"type":       "object",
-		"properties": map[string]any{},
 	},
 }
 
@@ -287,7 +267,7 @@ func (r *BackgroundReviewAgent) runReservedReview(ctx context.Context, conversat
 	// but steadily streaming one. MaxToolRounds and ReviewCooldown bound the
 	// total work independently of wall-clock time.
 	mutations, messages, loopErr := r.runReviewLoop(ctx, adapter, bareModel, conversation)
-	reviewID := saveReviewTranscript(r.app.DataDir, conversationID, model, messages)
+	reviewID := saveReviewTranscript(r.app.DataDir, conversationID, bareModel, messages)
 	// Update the incremental review marker regardless of success or
 	// failure. On success this prevents the next review from re-reading
 	// the same segment. On failure this prevents a retry loop from
@@ -564,37 +544,27 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 
 	// Build the opening message sequence:
 	//   user:    user/review.md (imperative instruction)
-	//   assistant: synthetic tool_call(review_transcript) + tool_call(memory_primary)
+	//   assistant: synthetic tool_call(review_transcript) [+ tool_call(file_read)]
 	//   tool:    review_transcript result (bounded segment)
-	//   tool:    memory_primary result (current primary memory)
+	//   tool:    file_read result (primary.md content, when available)
 	//
-	// Pre-injecting the synthetic tool results means the agent starts with
-	// both the transcript segment and the current primary memory as factual
-	// ground truth (tool output authority > system prompt authority). The
-	// agent does not need to call these tools — their results are already
-	// in the message stream.
+	// Pre-injecting the tool results means the agent starts with both the
+	// transcript segment and the current primary memory as factual ground
+	// truth (tool output authority > system prompt authority). The agent
+	// does not need to call these tools — their results are already in the
+	// message stream.
 	userPrompt := resources.ReviewUserPrompt()
 	if userPrompt == "" {
 		userPrompt = "Review this conversation and manage your memories."
 	}
 
 	transcriptOutput := r.executeReviewTranscript(conversation, start, end, convPath)
-	memoryOutput := r.executeMemoryPrimary()
 
-	// Generate stable synthetic tool-call IDs so the tool results can
-	// reference them.
 	reviewTCID := "synthetic_review_transcript"
-	memoryTCID := "synthetic_memory_primary"
-
-	messages := []ChatMessage{
-		{Role: "user", Content: userPrompt},
-		{
-			Role: "assistant",
-			ToolCalls: []domain.ToolCall{
-				{ID: reviewTCID, Name: reviewTranscriptToolName, Args: fmt.Sprintf(`{"path":%q,"messages_start":%d,"messages_end":%d}`, convPath, start, end)},
-				{ID: memoryTCID, Name: memoryPrimaryToolName, Args: "{}"},
-			},
-		},
+	toolCalls := []domain.ToolCall{
+		{ID: reviewTCID, Name: reviewTranscriptToolName, Args: fmt.Sprintf(`{"path":%q,"messages_start":%d,"messages_end":%d}`, convPath, start, end)},
+	}
+	toolResults := []ChatMessage{
 		{
 			Role: "tool",
 			ToolResult: &ToolResult{
@@ -603,15 +573,36 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 				Content:    transcriptOutput,
 			},
 		},
-		{
+	}
+
+	// Primary memory: pre-inject as a real file_read call so the agent
+	// sees the actual primary.md file (including frontmatter) as ground
+	// truth. Uses the real Toolbox.Execute so the output format is
+	// identical to what the agent would get calling file_read itself.
+	if r.app.Primary != nil && r.app.Primary.Path() != "" {
+		primaryPath := r.app.Primary.Path()
+		fileReadArgs := fmt.Sprintf(`{"path":%q}`, primaryPath)
+		fileReadTCID := "synthetic_file_read_primary"
+		output, err := r.app.Toolbox.Execute(ctx, "file_read", []byte(fileReadArgs))
+		if err != nil {
+			output = "(primary memory file unavailable: " + err.Error() + ")"
+		}
+		toolCalls = append(toolCalls, domain.ToolCall{ID: fileReadTCID, Name: "file_read", Args: fileReadArgs})
+		toolResults = append(toolResults, ChatMessage{
 			Role: "tool",
 			ToolResult: &ToolResult{
-				ToolCallID: memoryTCID,
-				Name:       memoryPrimaryToolName,
-				Content:    memoryOutput,
+				ToolCallID: fileReadTCID,
+				Name:       "file_read",
+				Content:    output,
 			},
-		},
+		})
 	}
+
+	messages := []ChatMessage{
+		{Role: "user", Content: userPrompt},
+		{Role: "assistant", ToolCalls: toolCalls},
+	}
+	messages = append(messages, toolResults...)
 
 	var mutations []ReviewMutation
 	for round := 0; round < r.settings.MaxToolRounds; round++ {
@@ -719,18 +710,6 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 				})
 				continue
 			}
-			if tc.Name == memoryPrimaryToolName {
-				output := r.executeMemoryPrimary()
-				messages = append(messages, ChatMessage{
-					Role: "tool",
-					ToolResult: &ToolResult{
-						ToolCallID: tc.ID,
-						Name:       tc.Name,
-						Content:    output,
-					},
-				})
-				continue
-			}
 			if !reviewAllowedOp(tc.Name, []byte(tc.Args)) {
 				messages = append(messages, ChatMessage{
 					Role: "tool",
@@ -803,44 +782,17 @@ func isNothingToSave(content string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(content)), "nothing to save")
 }
 
-// executeMemoryPrimary returns the current primary memory content as a
-// plain-text tool result for the synthetic memory_primary tool. This is
-// pre-injected by runReviewLoop before the first LLM call so the agent
-// sees primary memory as factual ground truth (tool output authority >
-// system prompt authority). Returns "(empty)" when no PrimaryStore is
-// configured or the document has no entries.
-func (r *BackgroundReviewAgent) executeMemoryPrimary() string {
-	if r.app == nil || r.app.Primary == nil {
-		return "(unavailable)"
-	}
-	mem := r.app.Primary.Load()
-	if mem == nil || len(mem.Entries) == 0 {
-		return "(empty)"
-	}
-	var b strings.Builder
-	for _, e := range mem.Entries {
-		b.WriteString("- ")
-		b.WriteString(e.Content)
-		b.WriteString("\n")
-	}
-	return strings.TrimSpace(b.String())
-}
-
 // reviewTools returns the restricted tool definitions for the review agent.
-// The two synthetic tools (review_transcript, memory_primary) are listed
-// first so the LLM knows their schemas, but their results are pre-injected
-// by runReviewLoop before the first LLM call — the agent does not need to
-// call them to get the initial data.
+// The synthetic review_transcript tool is listed first so the LLM knows its
+// schema, but its result is pre-injected by runReviewLoop before the first
+// LLM call — the agent does not need to call it to get the initial data.
+// Whitelisted tools (memory, skill, file_read) come from the Toolbox.
 func (r *BackgroundReviewAgent) reviewTools() []ToolDef {
-	out := []ToolDef{reviewTranscriptToolDef, memoryPrimaryToolDef}
+	out := []ToolDef{reviewTranscriptToolDef}
 	all := append(r.app.Toolbox.ListTools(), DispatcherToolInfos()...)
 	for _, t := range all {
 		if reviewToolWhitelist()[t.Name] && t.Name != reviewTranscriptToolName {
-			out = append(out, ToolDef{
-				Name:        t.Name,
-				Description: t.Description,
-				InputSchema: t.InputSchema,
-			})
+			out = append(out, ToolDef(t))
 		}
 	}
 	return out

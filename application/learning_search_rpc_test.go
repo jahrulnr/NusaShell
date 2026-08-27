@@ -272,6 +272,7 @@ func (f *fakePrimaryStore) Update(entries []domain.PrimaryEntry) error {
 	return nil
 }
 func (f *fakePrimaryStore) Replace(oldText, content string) error { return nil }
+func (f *fakePrimaryStore) Path() string                          { return "" }
 
 func TestHandleLearningGraphPrimaryNodeTierAndLabel(t *testing.T) {
 	primary := &fakePrimaryStore{entries: []domain.PrimaryEntry{

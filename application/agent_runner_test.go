@@ -419,7 +419,6 @@ func (r *recordingToolbox) Execute(ctx context.Context, name string, argsJSON []
 // them onto *streamedRecordingToolbox (the type App.Toolbox holds).
 type streamedRecordingToolbox struct {
 	*recordingToolbox
-	chunks []string
 }
 
 func (s *streamedRecordingToolbox) ExecuteStreamed(ctx context.Context, name string, argsJSON []byte, onChunk func(string)) (string, error) {
@@ -979,26 +978,6 @@ func coreMessageText(m core.Message) string {
 		}
 	}
 	return out
-}
-
-// coreMessageHasToolResult returns true if the message has a ToolResultBlock.
-func coreMessageHasToolResult(m core.Message) bool {
-	for _, b := range m.Blocks {
-		if _, ok := b.(core.ToolResultBlock); ok {
-			return true
-		}
-	}
-	return false
-}
-
-// coreMessageToolResultID extracts the ToolUseID from the first ToolResultBlock.
-func coreMessageToolResultID(m core.Message) string {
-	for _, b := range m.Blocks {
-		if tr, ok := b.(core.ToolResultBlock); ok {
-			return tr.ToolUseID
-		}
-	}
-	return ""
 }
 
 // coreRequestMaxTokens returns the MaxTokens value from a core.Request (0 if nil).
