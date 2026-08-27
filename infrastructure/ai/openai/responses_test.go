@@ -812,6 +812,60 @@ func TestResponsesIncompleteMaxOutputTokensMapsToLength(t *testing.T) {
 	}
 }
 
+// TestResponsesReasoningItemFromContentReasoningText proves that when a
+// provider (OpenRouter Responses API) emits reasoning text in
+// content[].reasoning_text instead of summary[], NusaShell still extracts
+// the reasoning text. OpenRouter puts DeepSeek/GLM chain-of-thought in
+// content[].reasoning_text and leaves summary[] empty; without this path
+// the reasoning text is silently dropped on non-streaming responses.
+func TestResponsesReasoningItemFromContentReasoningText(t *testing.T) {
+	resp, err := convertResponsesResponse(&responsesResponse{
+		Model:  "deepseek/deepseek-v4-flash-0731",
+		Status: "completed",
+		Output: []responsesOutputItem{
+			{
+				ID:      "rs_1",
+				Type:    "reasoning",
+				Status:  "completed",
+				Summary: []responsesSummaryItem{}, // empty — OpenRouter style
+				Content: []responsesContentItem{
+					{Type: "reasoning_text", Text: "1. Analyze the user input.\n2. Formulate response."},
+				},
+				Raw: json.RawMessage(`{"id":"rs_1","type":"reasoning","status":"completed","summary":[],"content":[{"type":"reasoning_text","text":"1. Analyze the user input.\n2. Formulate response."}]}`),
+			},
+			{
+				ID:     "msg_1",
+				Type:   "message",
+				Role:   "assistant",
+				Status: "completed",
+				Content: []responsesContentItem{
+					{Type: "output_text", Text: "Hello!"},
+				},
+			},
+		},
+	}, "")
+	if err != nil {
+		t.Fatalf("convertResponsesResponse: %v", err)
+	}
+	if len(resp.Blocks) < 2 {
+		t.Fatalf("expected at least 2 blocks, got %d: %#v", len(resp.Blocks), resp.Blocks)
+	}
+	reasoning, ok := resp.Blocks[0].(core.ReasoningBlock)
+	if !ok {
+		t.Fatalf("first block must be ReasoningBlock, got %T: %#v", resp.Blocks[0], resp.Blocks[0])
+	}
+	want := "1. Analyze the user input.\n2. Formulate response."
+	if reasoning.Text != want {
+		t.Fatalf("reasoning text = %q, want %q", reasoning.Text, want)
+	}
+	if !reasoning.Summary {
+		t.Fatalf("reasoning.Summary = false, want true (Responses reasoning is summary-style)")
+	}
+	if _, ok := resp.Blocks[1].(core.TextBlock); !ok {
+		t.Fatalf("second block must be TextBlock, got %T: %#v", resp.Blocks[1], resp.Blocks[1])
+	}
+}
+
 func TestResponsesReasoningItemRoundTripsWithEncryptedContent(t *testing.T) {
 	resp, err := convertResponsesResponse(&responsesResponse{
 		Model:  "gpt-5.1",

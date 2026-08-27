@@ -204,3 +204,70 @@ func TestResponsesStreamCapturesEncryptedContentFromOutputItemDone(t *testing.T)
 		t.Fatalf("streaming response lost encrypted_content — ReasoningBlock Extra must carry it for replay; blocks: %#v", resp.Blocks)
 	}
 }
+
+// TestResponsesStreamOpenRouterReasoningTextDelta proves that OpenRouter's
+// streaming format (reasoning text in response.reasoning_text.delta with
+// empty summary[]) produces a ReasoningBlock with the full text and Extra
+// for replay. OpenRouter puts DeepSeek/GLM chain-of-thought in
+// content[].reasoning_text, not summary[].
+func TestResponsesStreamOpenRouterReasoningTextDelta(t *testing.T) {
+	sse := strings.Join([]string{
+		`event: response.created`,
+		`data: {"type":"response.created","sequence_number":1,"response":{"id":"resp_1"}}`,
+		``,
+		`event: response.reasoning_text.delta`,
+		`data: {"type":"response.reasoning_text.delta","delta":"Step 1: analyze. ","sequence_number":2}`,
+		``,
+		`event: response.reasoning_text.delta`,
+		`data: {"type":"response.reasoning_text.delta","delta":"Step 2: respond.","sequence_number":3}`,
+		``,
+		`event: response.output_item.done`,
+		`data: {"type":"response.output_item.done","sequence_number":4,"output_index":0,"item":{"id":"rs_001","type":"reasoning","status":"completed","content":[{"type":"reasoning_text","text":"Step 1: analyze. Step 2: respond."}],"summary":[]}}`,
+		``,
+		`event: response.output_text.delta`,
+		`data: {"type":"response.output_text.delta","delta":"Hello!","sequence_number":5,"output_index":1}`,
+		``,
+		`event: response.completed`,
+		`data: {"type":"response.completed","sequence_number":6,"response":{"model":"deepseek/deepseek-v4-flash-0731","status":"completed","usage":{"input_tokens":10,"output_tokens":20,"total_tokens":30}}}`,
+		``,
+	}, "\n")
+
+	provider, err := New(Config{
+		APIKey:  "test-key",
+		BaseURL: "https://example.test",
+		HTTPClient: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return streamResponseForTest(sse), nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	stream, err := provider.ResponsesStream(context.Background(), &ResponsesRequest{
+		Model:    "deepseek/deepseek-v4-flash-0731",
+		Messages: []core.Message{core.UserText("hello")},
+	})
+	if err != nil {
+		t.Fatalf("ResponsesStream: %v", err)
+	}
+	resp, err := core.Collect(stream)
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if len(resp.Blocks) < 2 {
+		t.Fatalf("expected at least 2 blocks, got %d: %#v", len(resp.Blocks), resp.Blocks)
+	}
+	reasoning, ok := resp.Blocks[0].(core.ReasoningBlock)
+	if !ok {
+		t.Fatalf("first block must be ReasoningBlock, got %T: %#v", resp.Blocks[0], resp.Blocks[0])
+	}
+	want := "Step 1: analyze. Step 2: respond."
+	if reasoning.Text != want {
+		t.Fatalf("reasoning text = %q, want %q", reasoning.Text, want)
+	}
+	if len(reasoning.Extra) == 0 {
+		t.Fatalf("reasoning Extra must be set for replay (output_item.done raw JSON)")
+	}
+	if _, ok := resp.Blocks[1].(core.TextBlock); !ok {
+		t.Fatalf("second block must be TextBlock, got %T: %#v", resp.Blocks[1], resp.Blocks[1])
+	}
+}

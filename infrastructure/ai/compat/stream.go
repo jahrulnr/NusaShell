@@ -149,21 +149,12 @@ func (s *stream) events(chunk streamChunk) ([]core.Event, error) {
 			if err := json.Unmarshal(choice.Delta, &delta); err != nil {
 				return nil, core.NewProviderErrorWithCause(s.spec.providerName(), core.ErrorTypeProvider, fmt.Sprintf("%s: parse delta", s.spec.providerName()), err)
 			}
-			if text := s.findContent(delta); text != "" {
-				if s.contentCumulativeAllowed() {
-					next, err := s.contentDelta(text)
-					if err != nil {
-						return nil, err
-					}
-					text = next
-				}
-				if text != "" {
-					events = append(events, core.ContentDelta{Text: text, OutputIndex: core.IntPtr(choice.Index)})
-				}
-			}
-			if refusal, _ := delta["refusal"].(string); refusal != "" {
-				events = append(events, core.RefusalDelta{Text: refusal, OutputIndex: core.IntPtr(choice.Index)})
-			}
+			// Reasoning must be emitted before text: a combined delta can
+			// carry both at the reasoning→answer transition (seen with GLM
+			// via NVIDIA NIM, DeepSeek via OpenRouter). Reasoning always
+			// precedes the answer, so emitting text first would fragment
+			// the EventCollector's blocks (Reasoning, Text, Reasoning,
+			// Text instead of Reasoning, Text). Mirrors zendev-sh/goai #119.
 			if s.reasoningAllowed() {
 				reasoning := findReasoning(delta, s.reasoningFields())
 				extra, err := reasoningExtra(delta)
@@ -183,6 +174,21 @@ func (s *stream) events(chunk streamChunk) ([]core.Event, error) {
 						events = append(events, core.ReasoningDelta{Text: reasoning, Extra: extra, ExtraFull: extraFull, Index: core.IntPtr(choice.Index)})
 					}
 				}
+			}
+			if text := s.findContent(delta); text != "" {
+				if s.contentCumulativeAllowed() {
+					next, err := s.contentDelta(text)
+					if err != nil {
+						return nil, err
+					}
+					text = next
+				}
+				if text != "" {
+					events = append(events, core.ContentDelta{Text: text, OutputIndex: core.IntPtr(choice.Index)})
+				}
+			}
+			if refusal, _ := delta["refusal"].(string); refusal != "" {
+				events = append(events, core.RefusalDelta{Text: refusal, OutputIndex: core.IntPtr(choice.Index)})
 			}
 			if rawCalls, ok := delta["tool_calls"].([]any); ok {
 				for _, raw := range rawCalls {

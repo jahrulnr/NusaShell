@@ -399,6 +399,51 @@ func TestStreamCleanEOFWithoutFinishReasonErrors(t *testing.T) {
 	}
 }
 
+// TestStreamEmitsReasoningBeforeTextInCombinedDelta proves that a single
+// SSE delta carrying both reasoning and content (seen at the
+// reasoning→answer transition with GLM via NVIDIA NIM, DeepSeek via
+// OpenRouter, etc.) must emit the reasoning chunk before the text chunk.
+// Reasoning always precedes the answer, so the EventCollector must merge
+// all reasoning into one block and all text into one block — not
+// interleave them. Emitting text before reasoning in a combined delta
+// fragments the blocks: ReasoningBlock, TextBlock, ReasoningBlock,
+// TextBlock instead of ReasoningBlock, TextBlock.
+//
+// Mirrors zendev-sh/goai PR #119.
+func TestStreamEmitsReasoningBeforeTextInCombinedDelta(t *testing.T) {
+	stream := streamFromSSE(t, strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"existing aesthetic"}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":".","content":"V"}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"oy a explorar"}}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+	}, "\n"), Spec{
+		Name: "compat",
+		Stream: StreamSpec{
+			ReasoningFields: []string{"reasoning_content"},
+		},
+	}, nil)
+	resp, err := core.Collect(stream)
+	if err != nil {
+		t.Fatalf("Collect returned error: %v", err)
+	}
+	if len(resp.Blocks) != 2 {
+		t.Fatalf("expected exactly 2 blocks (ReasoningBlock + TextBlock), got %d: %#v", len(resp.Blocks), resp.Blocks)
+	}
+	if _, ok := resp.Blocks[0].(core.ReasoningBlock); !ok {
+		t.Fatalf("first block must be ReasoningBlock, got %T: %#v", resp.Blocks[0], resp.Blocks[0])
+	}
+	if _, ok := resp.Blocks[1].(core.TextBlock); !ok {
+		t.Fatalf("second block must be TextBlock, got %T: %#v", resp.Blocks[1], resp.Blocks[1])
+	}
+	if resp.Reasoning() != "existing aesthetic." {
+		t.Fatalf("reasoning = %q, want %q", resp.Reasoning(), "existing aesthetic.")
+	}
+	if resp.Text() != "Voy a explorar" {
+		t.Fatalf("text = %q, want %q", resp.Text(), "Voy a explorar")
+	}
+}
+
 func streamFromSSE(t *testing.T, body string, spec Spec, req *core.Request) core.Stream {
 	t.Helper()
 	provider, err := New(Config{

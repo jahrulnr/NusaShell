@@ -93,6 +93,19 @@ func (s *stream) events(chunk streamChunk) []core.Event {
 		events = append(events, core.UsageEvent{Usage: convertUsage(chunk.Usage, s.model)})
 	}
 	for _, choice := range chunk.Choices {
+		// Reasoning must be emitted before text: a combined delta can
+		// carry both at the reasoning→answer transition. Reasoning always
+		// precedes the answer, so emitting text first would fragment the
+		// EventCollector's blocks. Mirrors zendev-sh/goai #119.
+		if s.includeReasoning {
+			if text, summary := extractDeltaReasoning(choice.Delta); text != "" {
+				events = append(events, core.ReasoningDelta{
+					Text:    text,
+					Summary: summary,
+					Index:   core.IntPtr(choice.Index),
+				})
+			}
+		}
 		if choice.Delta.Content != "" {
 			events = append(events, core.ContentDelta{
 				Text:        choice.Delta.Content,
@@ -104,15 +117,6 @@ func (s *stream) events(chunk streamChunk) []core.Event {
 				Text:        choice.Delta.Refusal,
 				OutputIndex: core.IntPtr(choice.Index),
 			})
-		}
-		if s.includeReasoning {
-			if text, summary := extractDeltaReasoning(choice.Delta); text != "" {
-				events = append(events, core.ReasoningDelta{
-					Text:    text,
-					Summary: summary,
-					Index:   core.IntPtr(choice.Index),
-				})
-			}
 		}
 		for _, call := range choice.Delta.ToolCalls {
 			index := call.Index

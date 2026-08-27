@@ -1085,7 +1085,11 @@ func convertResponsesResponse(resp *responsesResponse, fallbackModel string) (*c
 			})
 			out.FinishReason = core.FinishReasonToolCall
 		case "reasoning":
-			if text := reasoningSummaryText(item.Summary); text != "" {
+			text := reasoningSummaryText(item.Summary)
+			if text == "" {
+				text = reasoningContentText(item.Content)
+			}
+			if text != "" {
 				out.Blocks = append(out.Blocks, core.ReasoningBlock{
 					Text:    text,
 					Summary: true,
@@ -1548,6 +1552,23 @@ func responseAnnotations(item responsesContentItem) ([]core.Annotation, error) {
 		out = append(out, ann)
 	}
 	return out, nil
+}
+
+// reasoningContentText extracts reasoning text from content[].reasoning_text
+// items. OpenRouter Responses API puts chain-of-thought here (with summary[]
+// empty) for DeepSeek, GLM, and other reasoning models it routes.
+func reasoningContentText(items []responsesContentItem) string {
+	var out strings.Builder
+	for _, item := range items {
+		if item.Type != "reasoning_text" || item.Text == "" {
+			continue
+		}
+		if out.Len() > 0 {
+			out.WriteString("\n")
+		}
+		out.WriteString(item.Text)
+	}
+	return out.String()
 }
 
 func reasoningSummaryText(items []responsesSummaryItem) string {
