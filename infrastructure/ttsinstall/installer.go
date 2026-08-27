@@ -537,13 +537,17 @@ func linkArchiveEntry(dest, name, linkname string, hard bool, prefix string) err
 // for entries outside the expected root.
 func safeArchiveTarget(dest, name, prefix string) (string, bool) {
 	clean := filepath.Clean(filepath.FromSlash(name))
+	// The prefix is slash-form ("piper/"); compare it in native form so
+	// Windows paths (piper\piper.exe) match — otherwise every entry is
+	// silently skipped and extraction produces nothing.
+	nativePrefix := filepath.FromSlash(prefix)
 	if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
 		return "", false // zip-slip guard
 	}
-	if !strings.HasPrefix(clean, prefix) || clean == "." {
+	if !strings.HasPrefix(clean, nativePrefix) || clean == "." {
 		return "", false
 	}
-	rel := strings.TrimPrefix(clean, prefix)
+	rel := strings.TrimPrefix(clean, nativePrefix)
 	target := filepath.Join(dest, rel)
 	if !strings.HasPrefix(target, filepath.Clean(dest)+string(os.PathSeparator)) {
 		return "", false // zip-slip guard

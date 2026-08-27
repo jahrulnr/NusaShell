@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -200,10 +201,17 @@ func TestHydrationMemory(t *testing.T) {
 // positioned right after runtime_context so project instructions lead.
 func TestHydrationAgentsMD(t *testing.T) {
 	agentsOut := "---\nbytes: 42\n---\n\n# Project rules\nUse Go, keep it simple."
+	wantPath := filepath.Join("/ws/proj", "AGENTS.md")
 	exec := &stubHydrationExecutor{fn: func(name string, args []byte) (string, error) {
 		switch name {
 		case "file_read":
-			if string(args) == `{"path":"/ws/proj/AGENTS.md"}` {
+			// Decode the JSON args and compare the path field so the check
+			// is platform-neutral (Windows backslashes are escaped in the
+			// raw JSON string).
+			var fa struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(args, &fa); err == nil && fa.Path == wantPath {
 				return agentsOut, nil
 			}
 			return "", fmt.Errorf("unexpected file_read args: %s", args)

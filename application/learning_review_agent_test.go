@@ -354,7 +354,16 @@ func TestReviewLoopInjectsPrimaryViaFileRead(t *testing.T) {
 	}
 	var sawFileRead bool
 	for _, tc := range messages[1].ToolCalls {
-		if tc.Name == "file_read" && strings.Contains(tc.Args, primaryPath) {
+		if tc.Name != "file_read" {
+			continue
+		}
+		// Compare the decoded path field, not the raw JSON: on Windows the
+		// backslashes in tc.Args are escaped (C:\\Users\\...) and would not
+		// match the native primaryPath.
+		var args struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(tc.Args), &args); err == nil && args.Path == primaryPath {
 			sawFileRead = true
 		}
 	}
