@@ -45,6 +45,7 @@ type App struct {
 	Docs                        DocsSource
 	Bus                         *Bus
 	Toolbox                     ToolExecutor
+	Journal                     ChangeJournal
 	MCPToolbox                  MCPToolbox
 	Factory                     ProviderFactory
 	ImageGeneratorFactory       ImageGeneratorFactory
@@ -117,6 +118,11 @@ type App struct {
 	// re-embedding the same content on every search. Content-addressed
 	// by (model_id, sha256(normalized_text)).
 	EmbeddingCache *jsonstore.EmbeddingCache
+	// journalRootsMu guards lazy creation of per-workspace-root mutexes used
+	// to serialize mutating tool calls against the same root.
+	journalRootsMu sync.Mutex
+	journalRoots   map[string]*sync.Mutex
+
 	// edgeBuilder pre-computes learning edges (similarity + token overlap)
 	// as a background job. Nil if not configured.
 	edgeBuilder *EdgeBuilder
@@ -195,6 +201,62 @@ func (a *App) hasPendingSubagents(conversationID string) bool {
 	return len(a.pendingSubagents[conversationID]) > 0
 }
 
+// rootMutationLock returns a mutex serializing mutating tool calls against
+// the same workspace root. Roots are keyed by absolute path; the registry
+// is lazy and lives for the process lifetime.
+func (a *App) rootMutationLock(root string) *sync.Mutex {
+	a.journalRootsMu.Lock()
+	defer a.journalRootsMu.Unlock()
+	if a.journalRoots == nil {
+		a.journalRoots = map[string]*sync.Mutex{}
+	}
+	mu, ok := a.journalRoots[root]
+	if !ok {
+		mu = &sync.Mutex{}
+		a.journalRoots[root] = mu
+	}
+	return mu
+}
+
+// journalArchiver is the optional lifecycle extension a ChangeJournal may
+// implement: compress the live journal at turn end so the JSONL stays
+// bounded. Kept as a narrow type assertion (same pattern as the streaming
+// toolbox) so the ChangeJournal port stays minimal.
+type journalArchiver interface {
+	Archive(conversationID string) error
+}
+
+// journalRemover is the optional lifecycle extension for deleting a
+// conversation's journal sidecar when the conversation is deleted.
+type journalRemover interface {
+	Remove(conversationID string) error
+}
+
+// archiveJournal compresses the conversation's live journal after a turn
+// ends. Failures are logged, never surfaced: journaling must not break the
+// agent loop.
+func (a *App) archiveJournal(conversationID string) {
+	archiver, ok := a.Journal.(journalArchiver)
+	if !ok {
+		return
+	}
+	if err := archiver.Archive(conversationID); err != nil {
+		a.log("warn", "journal", "archive failed for %s: %v", conversationID, err)
+	}
+}
+
+// removeJournal deletes the conversation's journal sidecar. Called from the
+// conversation delete handler after the conversation record is gone.
+func (a *App) removeJournal(conversationID string) {
+	remover, ok := a.Journal.(journalRemover)
+	if !ok {
+		return
+	}
+	if err := remover.Remove(conversationID); err != nil {
+		a.log("warn", "journal", "remove failed for %s: %v", conversationID, err)
+	}
+}
+
 // MCPToolbox gives use cases access to connected MCP servers and their tools.
 type MCPToolbox interface {
 	ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
@@ -245,6 +307,10 @@ type TurnRun struct {
 	// during a headless turn. Derived from the workflow TrustLevel via
 	// domain.TrustLevelToRiskTierCap. Empty means no cap (interactive turns).
 	RiskTierCap domain.RiskTier
+	// Workspace is the absolute workspace root of the conversation, captured
+	// at turn start so tool execution can attribute mutations without
+	// re-reading the conversation.
+	Workspace string
 
 	steerMu     sync.Mutex
 	steerQueued *SteerEntry
@@ -368,6 +434,7 @@ type Deps struct {
 	Docs                        DocsSource
 	Bus                         *Bus
 	Toolbox                     ToolExecutor
+	Journal                     ChangeJournal
 	MCPToolbox                  MCPToolbox
 	Factory                     ProviderFactory
 	ImageGeneratorFactory       ImageGeneratorFactory       // optional; nil = generate_image unavailable
@@ -426,7 +493,9 @@ func NewApp(deps Deps) *App {
 		Docs:                        deps.Docs,
 		Bus:                         deps.Bus,
 		Toolbox:                     deps.Toolbox,
+		Journal:                     deps.Journal,
 		MCPToolbox:                  deps.MCPToolbox,
+		journalRoots:                map[string]*sync.Mutex{},
 		Factory:                     deps.Factory,
 		ImageGeneratorFactory:       deps.ImageGeneratorFactory,
 		SpeechTranscriberFactory:    deps.SpeechTranscriberFactory,

@@ -85,7 +85,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	// is not killed when the HTTP response is sent. The turn is cancelled
 	// explicitly via handleTurnsStop or server shutdown.
 	turnCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	run := &TurnRun{ID: domain.NewID("run"), ConversationID: c.ID, MessageID: asstMsg.ID, Ctx: turnCtx, Cancel: cancel, ProviderID: provider.ID}
+	run := &TurnRun{ID: domain.NewID("run"), ConversationID: c.ID, MessageID: asstMsg.ID, Ctx: turnCtx, Cancel: cancel, ProviderID: provider.ID, Workspace: c.Workspace}
 	a.runsMu.Lock()
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
@@ -170,7 +170,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	}
 
 	turnCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	run := &TurnRun{ID: domain.NewID("run"), ConversationID: c.ID, MessageID: targetMsgID, Ctx: turnCtx, Cancel: cancel, ProviderID: provider.ID}
+	run := &TurnRun{ID: domain.NewID("run"), ConversationID: c.ID, MessageID: targetMsgID, Ctx: turnCtx, Cancel: cancel, ProviderID: provider.ID, Workspace: c.Workspace}
 	a.runsMu.Lock()
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
@@ -486,6 +486,9 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		// Without this the conversation is permanently stuck and the user
 		// gets a 409 "conversation is busy" on every new message.
 		a.recoverOrphanedTurn(run)
+		// Compress the conversation's live journal now that the turn is
+		// done, keeping journal.jsonl bounded across long sessions.
+		a.archiveJournal(run.ConversationID)
 	}()
 	a.runTurnChain(run, provider, apiKey, model, effort, asstMsgID, initialContinuation, caps, 0)
 }

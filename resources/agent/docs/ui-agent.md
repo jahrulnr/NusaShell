@@ -50,7 +50,7 @@ Lists conversations with a search filter and a New conversation button. The coun
 
 Renders the active conversation. An empty thread offers starter prompt chips that fill the composer.
 
-Long conversations open showing only the most recent messages, scrolled to the bottom; a 'Load older messages' button at the top of the thread reveals earlier messages in batches (keeping the scroll position anchored). Live streaming auto-follows only while the view is pinned to the bottom.
+Long conversations open showing only the most recent messages, scrolled to the bottom. A 'Load older messages' button at the top reveals earlier in-memory messages, then archived pre-compaction chunks, one batch at a time. Chunks are never auto-loaded after a turn finishes or mid-turn compaction. Long assistant turns keep only the last few rounds mounted; earlier rounds collapse until expanded. Thinking is parsed when the disclosure is opened. Live streaming auto-follows only while the view is pinned to the bottom.
 
 - **Agent shell** (`#agent-shell`):
   - Section: Agent
@@ -63,7 +63,7 @@ Long conversations open showing only the most recent messages, scrolled to the b
 - **Thread log** (`#agent-thread`):
   - Section: Agent
   - Type: log
-  - Notes: Renders the active conversation messages. Long conversations are windowed: only the most recent messages render on open (scrolled to bottom), older ones load on demand. An empty thread shows starter prompt chips.
+  - Notes: Renders the active conversation messages. Long conversations are windowed: only the most recent messages render on open (scrolled to bottom); archived chunks and older active messages load on demand via Load older or scroll-to-top. Thinking markdown is parsed when expanded. An empty thread shows starter prompt chips.
 
 - **Starter prompts** (`#agent-starter-prompts`):
   - Section: Agent
@@ -73,7 +73,7 @@ Long conversations open showing only the most recent messages, scrolled to the b
 - **Load older messages** (`#agent-load-older`):
   - Section: Agent
   - Type: button
-  - Action: Reveals the previous batch of older messages at the top of the thread, keeping the scroll position anchored. Shown only while older messages remain windowed out; hidden once the oldest message is reached.
+  - Action: Reveals the previous batch of older in-memory messages, then archived pre-compaction chunks, keeping the scroll position anchored. Shown while older messages or unloaded chunks remain; hidden once the oldest history is reached.
 
 ## Tool call strip
 

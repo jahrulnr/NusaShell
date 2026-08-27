@@ -560,6 +560,30 @@ summary { outline: none; }
 .agent-reasoning-content pre { box-sizing: border-box; max-width: 100%; overflow-x: auto; white-space: pre; }
 .agent-reasoning-content a { color: #c9a66b; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; word-break: break-word; }
 .agent-reasoning-content a:hover { color: #ddc08a; }
+.agent-round-stub { width: min(100%, 790px); margin: 2px 0 8px; }
+.agent-round-stub summary { margin-left: -12px; }
+
+.agent-round { min-width: 0; }
+.agent-round-stub {
+  width: min(100%, 790px);
+  margin: 2px 0 8px;
+  color: #8796aa;
+  border-left: 1px solid #2a3748;
+  font-size: 12px;
+}
+.agent-round-stub summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 8px 0 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.agent-round-stub summary::-webkit-details-marker { display: none; }
+.agent-round-stub-title { color: #9badd0; }
+.agent-round-stub-hint { margin-left: auto; color: #66768a; }
+.agent-round-stub-body { padding: 4px 0 2px 12px; }
 .agent-send-btn,
 .agent-new-conversation:hover,
 .agent-new-conversation:focus-visible { color: var(--accent-ink); }

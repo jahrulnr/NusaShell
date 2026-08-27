@@ -4,8 +4,15 @@ import { rpc } from '../../rpc.js';
 import { createAskCard } from '../ask-card.js';
 import { openDrawer, agentNameForId, firstVisibleRunId } from './subagents.js';
 import { renderArtifactCard, parseArtifactOutput } from '../../artifact-render.js';
-import { openAudioLightbox, openVideoLightbox, openTextPreviewPopup } from '../../media-zoom.js';
+import { openAudioLightbox, openVideoLightbox, openTextPreviewPopup, attachZoomButtons } from '../../media-zoom.js';
+import { renderMermaidDiagrams } from '../../mermaid-render.js';
+import { highlightCode } from '../../highlight-render.js';
 import { agentThread, composerInput, toolJobStrip } from './domrefs.js';
+
+// KEEP_VISIBLE_ROUNDS caps how many assistant tool-rounds stay fully mounted
+// in one turn bubble. Older rounds collapse into a stub so a 20+ round live
+// turn cannot grow an unbounded DOM (markdown, highlight, tool terminals).
+export const KEEP_VISIBLE_ROUNDS = 3;
 
 export const STARTER_PROMPTS = [
   {
@@ -100,20 +107,57 @@ export function renderTodoItem(item, onDelete) {
   );
 }
 
+// reasoningHasVisibleSource reports whether raw reasoning has anything to show
+// without parsing markdown — used to decide if the collapsed Thinking row
+// should appear at all.
+export function reasoningHasVisibleSource(raw) {
+  if (typeof raw !== 'string' || !raw) return false;
+  return raw.replace(/[\u200B-\u200D\uFEFF\u2060\u2063]/g, '').trim().length > 0;
+}
+
 // reasoningHasVisibleContent returns true when a rendered reasoning block
 // actually contains something the user can see. It strips zero-width and
 // whitespace-only text, and counts visual elements (images, diagrams, tables,
-// horizontal rules, etc.) as visible content.
+// horizontal rules, etc.) as visible content. A collapsed disclosure with
+// stored raw source also counts as visible so the Thinking row can appear
+// before markdown is parsed.
 export function reasoningHasVisibleContent(content) {
   if (!content) return false;
-  const text = content.textContent.replace(/[\u200B-\u200D\uFEFF\u2060\u2063]/g, '').trim();
+  const details = content.classList?.contains('agent-reasoning')
+    ? content
+    : content.closest?.('.agent-reasoning');
+  if (details && reasoningHasVisibleSource(details._reasoningRaw)) return true;
+  const text = (content.textContent || '').replace(/[\u200B-\u200D\uFEFF\u2060\u2063]/g, '').trim();
   if (text.length > 0) return true;
-  return content.querySelector('img, svg, video, canvas, table, hr, .mermaid') !== null;
+  return content.querySelector?.('img, svg, video, canvas, table, hr, .mermaid') !== null;
+}
+
+function materializeReasoning(details) {
+  if (!details?.open) return;
+  const raw = details._reasoningRaw || '';
+  const content = details.querySelector('.agent-reasoning-content');
+  if (!content) return;
+  const marker = `${raw.length}:${raw.slice(0, 48)}`;
+  if (content.dataset.rendered === marker) return;
+  content.innerHTML = raw ? renderMarkdown(raw) : '';
+  content.dataset.rendered = marker;
+  void renderMermaidDiagrams(content);
+  void highlightCode(content);
+  attachZoomButtons(content);
+}
+
+// setReasoningSource updates the stored raw reasoning on a disclosure without
+// parsing markdown. If the user already opened it, the body is refreshed.
+export function setReasoningSource(details, raw) {
+  if (!details) return;
+  details._reasoningRaw = typeof raw === 'string' ? raw : '';
+  details.hidden = !reasoningHasVisibleSource(details._reasoningRaw);
+  if (details.open) materializeReasoning(details);
 }
 
 export function reasoningDisclosure(reasoning) {
+  const raw = typeof reasoning === 'string' ? reasoning : '';
   const content = el('div', { class: 'agent-reasoning-content' });
-  content.innerHTML = renderMarkdown(reasoning);
   const details = el('details', { class: 'agent-reasoning' },
     el('summary', {},
       el('span', { class: 'agent-reasoning-mark', text: '⌁' }),
@@ -123,10 +167,70 @@ export function reasoningDisclosure(reasoning) {
     ),
     content,
   );
-  details.hidden = !reasoningHasVisibleContent(content);
+  details._reasoningRaw = raw;
+  details.hidden = !reasoningHasVisibleSource(raw);
   details.addEventListener('toggle', () => {
     const hint = details.querySelector('.agent-reasoning-hint');
     if (hint) hint.textContent = details.open ? 'Hide reasoning' : 'Show reasoning';
+    if (details.open) materializeReasoning(details);
+  });
+  return details;
+}
+
+function pruneOverflowLiveRounds(bubble) {
+  const rounds = [...bubble.querySelectorAll(':scope > .agent-round')];
+  const overflow = rounds.length - KEEP_VISIBLE_ROUNDS;
+  if (overflow <= 0) return;
+  let stub = bubble.querySelector(':scope > .agent-round-stub');
+  if (!stub) {
+    stub = el('div', { class: 'agent-round-stub' });
+    bubble.prepend(stub);
+  }
+  const dropped = Number(stub.dataset.dropped || '0') + overflow;
+  stub.dataset.dropped = String(dropped);
+  stub.textContent = dropped === 1
+    ? '1 earlier round hidden until the turn finishes'
+    : `${dropped} earlier rounds hidden until the turn finishes`;
+  for (let i = 0; i < overflow; i++) rounds[i].remove();
+}
+
+// mountLiveRound appends one streaming round (reasoning + text + tool strip)
+// to a live assistant bubble and drops rounds past KEEP_VISIBLE_ROUNDS.
+export function mountLiveRound(bubble, source = {}) {
+  const reasoningEl = reasoningDisclosure(source.rawReasoning || '');
+  const textBox = el('div', { class: 'agent-bubble-text' });
+  const strip = el('div', { class: 'agent-tool-stack' });
+  strip.hidden = true;
+  const round = el('div', { class: 'agent-round' });
+  round.append(reasoningEl, textBox, strip);
+  bubble.append(round);
+  pruneOverflowLiveRounds(bubble);
+  return { reasoningEl, textBox, strip };
+}
+
+function earlierRoundsDisclosure(messages) {
+  const n = messages.length;
+  const details = el('details', { class: 'agent-round-stub' });
+  details.append(
+    el('summary', {},
+      el('span', { class: 'agent-round-stub-title', text: `${n} earlier round${n === 1 ? '' : 's'}` }),
+      el('span', { class: 'agent-round-stub-hint', text: 'Show' }),
+    ),
+  );
+  const body = el('div', { class: 'agent-round-stub-body' });
+  details.append(body);
+  details.addEventListener('toggle', () => {
+    const hint = details.querySelector('.agent-round-stub-hint');
+    if (hint) hint.textContent = details.open ? 'Hide' : 'Show';
+    if (!details.open || body.dataset.filled) return;
+    body.dataset.filled = '1';
+    const prevDoc = globalThis.document;
+    if (details.ownerDocument) globalThis.document = details.ownerDocument;
+    try {
+      for (const message of messages) appendAssistantSteps(body, message);
+    } finally {
+      globalThis.document = prevDoc;
+    }
   });
   return details;
 }
@@ -220,7 +324,12 @@ function renderAssistantTurn(messages, onRetry) {
   if (messageIds.length) node.dataset.messageIds = messageIds.join(' ');
 
   const bubble = el('div', { class: 'agent-bubble' });
-  for (const message of messages) appendAssistantSteps(bubble, message);
+  if (messages.length > KEEP_VISIBLE_ROUNDS) {
+    bubble.append(earlierRoundsDisclosure(messages.slice(0, -KEEP_VISIBLE_ROUNDS)));
+    for (const message of messages.slice(-KEEP_VISIBLE_ROUNDS)) appendAssistantSteps(bubble, message);
+  } else {
+    for (const message of messages) appendAssistantSteps(bubble, message);
+  }
   if (bubble.children.length) node.append(bubble);
 
   const meta = el('div', { class: 'agent-turn-meta' });
@@ -249,25 +358,27 @@ function renderAssistantTurn(messages, onRetry) {
 }
 
 function appendAssistantSteps(bubble, message) {
+  const round = el('div', { class: 'agent-round' });
   if (message.steps?.length) {
     for (const step of message.steps) {
       if (step.type === 'reasoning' && step.content?.trim()) {
-        bubble.append(reasoningDisclosure(step.content));
+        round.append(reasoningDisclosure(step.content));
       } else if (step.type === 'text' && step.content) {
         const textBox = el('div', { class: 'agent-bubble-text' });
         textBox.innerHTML = renderMarkdown(step.content);
-        bubble.append(textBox);
+        round.append(textBox);
       } else if (step.type === 'tool_calls' && step.tool_calls?.length) {
-        appendToolCards(bubble, step.tool_calls.map(renderToolCallCard));
+        appendToolCards(round, step.tool_calls.map(renderToolCallCard));
       }
     }
   } else {
-    if (message.reasoning?.trim()) bubble.append(reasoningDisclosure(message.reasoning));
+    if (message.reasoning?.trim()) round.append(reasoningDisclosure(message.reasoning));
     const textBox = el('div', { class: 'agent-bubble-text' });
     if (message.content) textBox.innerHTML = renderMarkdown(message.content);
-    if (textBox.innerHTML) bubble.append(textBox);
-    if (message.tool_calls?.length) appendToolCards(bubble, message.tool_calls.map(renderToolCallCard));
+    if (textBox.innerHTML) round.append(textBox);
+    if (message.tool_calls?.length) appendToolCards(round, message.tool_calls.map(renderToolCallCard));
   }
+  if (round.children.length) bubble.append(round);
 }
 
 // appendToolCards splits rendered tool cards into standalone cards (ask,

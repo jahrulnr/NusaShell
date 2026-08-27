@@ -24,6 +24,7 @@ import (
 	"nusashell/infrastructure/ci"
 	"nusashell/infrastructure/config"
 	"nusashell/infrastructure/docs"
+	"nusashell/infrastructure/journal"
 	"nusashell/infrastructure/jsonstore"
 	"nusashell/infrastructure/mcpclient"
 	"nusashell/infrastructure/memorystore"
@@ -256,6 +257,7 @@ func run() error {
 		Bus:                         bus,
 		AskQuestions:                askService,
 		Toolbox:                     tb,
+		Journal:                     journal.New(dataDir),
 		MCPToolbox:                  mcpManager,
 		Factory:                     ai.NewFactory(credentials),
 		ImageGeneratorFactory:       ai.NewImageGeneratorFactory(credentials),

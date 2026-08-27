@@ -45,6 +45,9 @@ type HydrationSource struct {
 	// slot is injected.
 	Todos  ConversationTodoPort
 	ConvID string
+	// Journal supplies workspace change state for the workspace_state slot.
+	// When nil, that slot is hidden.
+	Journal ChangeJournal
 }
 
 // HydrationBuilder produces an ephemeral synthetic tool transcript
@@ -99,6 +102,9 @@ func (b *HydrationBuilder) Build() HydrationResult {
 	}
 	slots = append(slots, b.readToolList()...)
 	if slot := b.readTodoList(); slot.content != "" {
+		slots = append(slots, slot)
+	}
+	if slot := b.readWorkspaceState(); slot.content != "" {
 		slots = append(slots, slot)
 	}
 	calls := make([]domain.ToolCall, 0, len(slots))
@@ -360,6 +366,34 @@ func (b *HydrationBuilder) readTodoList() hydrationSlot {
 		return hydrationSlot{name: "todo_list", content: ""}
 	}
 	return hydrationSlot{name: "todo_list", content: strings.Join(sections, "\n\n")}
+}
+
+// readWorkspaceState injects accumulated workspace file changes for the
+// conversation so post-compaction context retains what the agent modified.
+func (b *HydrationBuilder) readWorkspaceState() hydrationSlot {
+	if b.source.Journal == nil {
+		return hydrationSlot{name: "workspace_state", content: ""}
+	}
+	workspace := strings.TrimSpace(b.source.RuntimeContext.Workspace)
+	if workspace == "" || b.source.ConvID == "" {
+		return hydrationSlot{name: "workspace_state", content: ""}
+	}
+	state, err := b.source.Journal.SessionState(context.Background(), b.source.ConvID, workspace)
+	if err != nil || state == nil || len(state.Changes) == 0 {
+		return hydrationSlot{name: "workspace_state", content: ""}
+	}
+	content, err := json.Marshal(state)
+	if err != nil {
+		return hydrationSlot{name: "workspace_state", content: ""}
+	}
+	args, err := json.Marshal(map[string]string{
+		"conversation_id": b.source.ConvID,
+		"workspace":       workspace,
+	})
+	if err != nil {
+		return hydrationSlot{name: "workspace_state", content: ""}
+	}
+	return hydrationSlot{name: "workspace_state", args: string(args), content: string(content)}
 }
 
 // FilterHydration drops the synthetic runtime-hydration exchange (assistant

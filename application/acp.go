@@ -903,6 +903,7 @@ func (a *App) triggerSubagentCompletionTurn(conversationID string) {
 		MessageID:      asstMsg.ID,
 		Ctx:            turnCtx,
 		Cancel:         cancel,
+		Workspace:      conv.Workspace,
 	}
 	a.runsMu.Lock()
 	a.runs[run.ID] = run

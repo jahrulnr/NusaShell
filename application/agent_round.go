@@ -440,6 +440,8 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	ctx.DataDir = a.DataDir
 	source := HydrationSource{
 		RuntimeContext: ctx,
+		ConvID:         c.ID,
+		Journal:        a.Journal,
 	}
 	if a.Toolbox != nil {
 		// The real toolbox executes the meta-tools (mcp_list, tool_list per
@@ -692,21 +694,43 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 		toolCtx := WithConversationID(run.Ctx, run.ConversationID)
 		toolCtx = WithRunID(toolCtx, run.ID)
 		toolCtx = WithToolCallID(toolCtx, toolCall.ID)
-		// Streaming-capable toolboxes (exec) forward live output chunks as
-		// agent.tool.delta events; everything else runs through Execute and
-		// ignores the sink entirely.
-		if s, ok := a.Toolbox.(interface {
-			ExecuteStreamed(ctx context.Context, name string, argsJSON []byte, onChunk func(string)) (string, error)
-		}); ok {
-			output, err = s.ExecuteStreamed(toolCtx, toolCall.Name, []byte(toolCall.Args), func(text string) {
-				if a.Bus != nil && text != "" {
-					a.Bus.Emit(contracts.EventToolDelta, contracts.ToolDeltaEvent{
-						RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Text: text,
-					})
-				}
-			})
+		executeTool := func() error {
+			if s, ok := a.Toolbox.(interface {
+				ExecuteStreamed(ctx context.Context, name string, argsJSON []byte, onChunk func(string)) (string, error)
+			}); ok {
+				var e error
+				output, e = s.ExecuteStreamed(toolCtx, toolCall.Name, []byte(toolCall.Args), func(text string) {
+					if a.Bus != nil && text != "" {
+						a.Bus.Emit(contracts.EventToolDelta, contracts.ToolDeltaEvent{
+							RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Text: text,
+						})
+					}
+				})
+				return e
+			}
+			var e error
+			output, e = a.Toolbox.Execute(toolCtx, toolCall.Name, []byte(toolCall.Args))
+			return e
+		}
+		req := ClassifyMutation(toolCall.Name, []byte(toolCall.Args))
+		if a.Journal != nil && req.Class != domain.MutationNone {
+			req.ConversationID = run.ConversationID
+			req.RunID = run.ID
+			req.ToolCallID = toolCall.ID
+			req.WorkspaceRoot = run.Workspace
+			root := req.Cwd
+			if root == "" {
+				root = req.WorkspaceRoot
+			}
+			if root == "" {
+				root = "\x00journal"
+			}
+			mu := a.rootMutationLock(root)
+			mu.Lock()
+			err = a.Journal.WrapMutation(toolCtx, req, executeTool)
+			mu.Unlock()
 		} else {
-			output, err = a.Toolbox.Execute(toolCtx, toolCall.Name, []byte(toolCall.Args))
+			err = executeTool()
 		}
 	}
 	status := domain.ToolOK

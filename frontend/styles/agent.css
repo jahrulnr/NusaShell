@@ -488,6 +488,29 @@
   white-space: pre-wrap;
 }
 
+.agent-round { min-width: 0; }
+.agent-round-stub {
+  width: min(100%, 790px);
+  margin: 2px 0 8px;
+  color: #8796aa;
+  border-left: 1px solid #2a3748;
+  font: 12px/1.4 "IBM Plex Sans", system-ui, sans-serif;
+}
+.agent-round-stub summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 8px 0 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.agent-round-stub summary::-webkit-details-marker { display: none; }
+.agent-round-stub summary:hover { background: rgba(18, 28, 40, .72); }
+.agent-round-stub-title { color: #9badd0; }
+.agent-round-stub-hint { margin-left: auto; color: #66768a; }
+.agent-round-stub-body { padding: 4px 0 2px 0; }
+
 /* Tool job cards */
 .agent-tool-job-strip { flex: none; border: 0; border-bottom: 1px solid #243246; background: #0b131c; padding: 0; }
 .agent-tool-job-strip[hidden] { display: none; }

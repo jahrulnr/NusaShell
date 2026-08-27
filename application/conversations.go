@@ -233,6 +233,7 @@ func (a *App) handleConversationsDelete(req contracts.ConversationIDRequest) (an
 	if err := a.Conversations.Delete(req.ID); err != nil {
 		return nil, rpcInternal(err)
 	}
+	a.removeJournal(req.ID)
 	if a.Todos != nil {
 		a.Todos.Clear(req.ID)
 	}

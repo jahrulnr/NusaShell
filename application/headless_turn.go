@@ -51,6 +51,7 @@ func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust d
 		Cancel:         cancel,
 		Headless:       true,
 		RiskTierCap:    domain.TrustLevelToRiskTierCap(trust),
+		Workspace:      conv.Workspace,
 	}
 	a.runsMu.Lock()
 	a.runs[run.ID] = run

@@ -93,11 +93,16 @@ const transcript = {
 
 test('details show thinking, tool cards, and the final note - but never the replayed transcript', () => {
   const view = withDocument(() => renderTranscript(transcript));
-  const text = view.textContent;
 
   // Agent flow is visible: reasoning disclosures + terminal-style tool cards.
   const disclosures = view.querySelectorAll('details.agent-reasoning');
   assert.equal(disclosures.length, 2, 'each reasoning-bearing round keeps a thinking disclosure');
+  for (const details of disclosures) {
+    const EventCtor = details.ownerDocument?.defaultView?.Event || Event;
+    details.open = true;
+    details.dispatchEvent(new EventCtor('toggle'));
+  }
+  const text = view.textContent;
   assert.ok(text.includes('The user stated a durable preference'));
   assert.ok(text.includes('Not stored yet. Saving now.'));
 

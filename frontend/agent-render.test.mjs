@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS } from './js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, mountLiveRound, KEEP_VISIBLE_ROUNDS } from './js/views/agent/render.js';
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
   const previousDocument = globalThis.document;
@@ -554,6 +554,101 @@ test('renderToolCallCard renders a video card for generate_video', () => {
     assert.match(done.textContent, /veo3|veo-3/);
     assert.ok(done.querySelector('a[download]'), 'video card has a Download link');
     assert.equal(done.querySelectorAll('.agent-tool-terminal').length, 0);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+function openDetails(details) {
+  const EventCtor = details.ownerDocument?.defaultView?.Event || Event;
+  details.open = true;
+  details.dispatchEvent(new EventCtor('toggle'));
+}
+
+test('reasoning markdown stays out of the DOM until the disclosure is opened', () => {
+  const dom = new JSDOM('<body></body>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const details = reasoningDisclosure('I will inspect **the workspace**.');
+    document.body.append(details);
+    const content = details.querySelector('.agent-reasoning-content');
+    assert.equal(details.hidden, false, 'non-empty reasoning is visible as a collapsed row');
+    assert.equal(content.innerHTML, '', 'collapsed reasoning is not markdown-parsed');
+    assert.doesNotMatch(details.textContent, /the workspace/, 'raw reasoning is not in the collapsed DOM');
+    openDetails(details);
+    assert.match(content.innerHTML, /<strong>the workspace<\/strong>/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('whitespace-only reasoning stays hidden and unparsed', () => {
+  const dom = new JSDOM('<body></body>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const details = reasoningDisclosure('  \n\t');
+    document.body.append(details);
+    assert.equal(details.hidden, true);
+    assert.equal(details.querySelector('.agent-reasoning-content').innerHTML, '');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('a long assistant turn keeps only the last KEEP_VISIBLE_ROUNDS in the DOM', () => {
+  const messages = [{ role: 'user', content: 'go', created_at: '2026-08-28T00:00:00Z' }];
+  for (let i = 0; i < 6; i++) {
+    messages.push({
+      role: 'assistant',
+      id: `msg_round_${i}`,
+      model: 'luna',
+      created_at: `2026-08-28T00:00:0${i + 1}Z`,
+      steps: [
+        { type: 'reasoning', content: `thinking UNIQUE_ROUND_${i}` },
+        { type: 'text', content: `visible round ${i}` },
+        { type: 'tool_calls', tool_calls: [{ id: `t${i}`, name: 'file_read', args: {}, status: 'ok', output: `out ${i}` }] },
+      ],
+    });
+  }
+  const dom = new JSDOM('<main id="thread"></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const thread = document.getElementById('thread');
+    thread.append(renderConversation(messages));
+    const turn = thread.querySelector('.agent-message.assistant');
+    const stub = turn.querySelector('.agent-round-stub');
+    assert.ok(stub, 'earlier rounds collapse into a stub');
+    assert.match(stub.textContent, /3 earlier round/);
+    assert.equal(turn.querySelectorAll(':scope > .agent-bubble > .agent-round').length, KEEP_VISIBLE_ROUNDS);
+    assert.match(turn.textContent, /visible round 3/);
+    assert.match(turn.textContent, /visible round 5/);
+    assert.doesNotMatch(turn.textContent, /visible round 0/);
+    assert.doesNotMatch(turn.textContent, /UNIQUE_ROUND_5/, 'kept-round reasoning is still lazy');
+    openDetails(stub);
+    assert.match(turn.textContent, /visible round 0/);
+    assert.match(turn.textContent, /visible round 2/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('mountLiveRound prunes overflow rounds and leaves a non-expandable stub', () => {
+  const dom = new JSDOM('<main id="thread"><div class="agent-bubble"></div></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const bubble = document.querySelector('.agent-bubble');
+    for (let i = 0; i < 5; i++) {
+      mountLiveRound(bubble, { rawReasoning: `think ${i}` });
+    }
+    assert.equal(bubble.querySelectorAll(':scope > .agent-round').length, KEEP_VISIBLE_ROUNDS);
+    const stub = bubble.querySelector(':scope > .agent-round-stub');
+    assert.ok(stub);
+    assert.equal(stub.tagName, 'DIV', 'live stub is not expandable mid-turn');
+    assert.match(stub.textContent, /2 earlier rounds hidden/);
   } finally {
     globalThis.document = previousDocument;
   }

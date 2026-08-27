@@ -36,12 +36,27 @@ test('Agent uses the Electron workspace shell without unsupported Todo UI', () =
   assert.match(tabletRules, /\.agent-conversations \{ display: none; \}/);
 });
 
-test('Agent tool transcripts start collapsed, cap output at ten lines, and render reasoning as Markdown', () => {
+test('Agent tool transcripts start collapsed, cap output at ten lines, and lazy-render reasoning', () => {
   assert.match(agentRender, /class: 'agent-tool-terminal'/);
   assert.match(agentRender, /el\('details', \{ class: 'agent-tool-terminal'/);
-  assert.match(agentRender, /content\.innerHTML = renderMarkdown\(reasoning\)/);
-  assert.match(agentView, /content\.innerHTML = renderMarkdown\(run\.rawReasoning\)/);
+  assert.match(agentRender, /function materializeReasoning/);
+  assert.doesNotMatch(agentRender, /content\.innerHTML = renderMarkdown\(reasoning\)/);
+  assert.doesNotMatch(agentView, /content\.innerHTML = renderMarkdown\(run\.rawReasoning\)/);
   assert.match(parityCSS, /\.agent-tool-terminal-output \{[^}]*max-height: calc\(10 \* 1\.55em\);[^}]*overflow-y: auto;/s);
+});
+
+test('Archived chunks load only on explicit Load older or scroll-to-top, never after turn.done or live compaction', () => {
+  // Proactive maybeLoadOlderChunk after refresh/compaction re-inflated the
+  // just-archived long turn into the DOM and froze the thread.
+  assert.doesNotMatch(agentView, /maybeLoadOlderChunk/);
+  assert.match(agentView, /function revealOlderHistory/);
+  assert.match(agentView, /hasOlderActiveMessages\(\) \|\| state\.nextChunkIndex >= 0/);
+});
+
+test('Live and snapshot turns keep only KEEP_VISIBLE_ROUNDS fully mounted', () => {
+  assert.match(agentRender, /KEEP_VISIBLE_ROUNDS = 3/);
+  assert.match(agentRender, /export function mountLiveRound/);
+  assert.match(agentView, /mountLiveRound\(/);
 });
 
 test('Agent delegates presentation, composer, and model picker responsibilities to focused modules', () => {

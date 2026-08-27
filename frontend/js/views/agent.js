@@ -11,7 +11,9 @@ import { bindRoomInfo, updateRoomInfo } from './agent/room-info.js';
 import {
   attachmentChip,
   formatTokens,
-  reasoningDisclosure,
+  mountLiveRound,
+  setReasoningSource,
+  reasoningHasVisibleSource,
   renderEmptyThread,
   bindStarterPrompts,
   renderConversation,
@@ -30,7 +32,6 @@ import {
   parseShowImageOutput,
   parseShowAudioOutput,
   parseShowVideoOutput,
-  reasoningHasVisibleContent,
 } from './agent/render.js';
 import { bindSubagents, setSubagentConversation } from './agent/subagents.js';
 import { agentThread, composerInput, stopButton, attachmentsContainer, workspaceButton, workspaceLabel, providerStatus } from './agent/domrefs.js';
@@ -48,7 +49,7 @@ import { playComplete, playError } from '../sounds.js';
 // the strip so the border-left visual cue groups them.
 function placeToolCard(bubble, strip, card) {
   if (card.dataset.standalone === 'true') {
-    bubble.append(card);
+    (strip?.parentElement || bubble).append(card);
   } else {
     strip.append(card);
     strip.hidden = false;
@@ -482,11 +483,9 @@ async function openConversation(id) {
   }
   renderConversationList();
   renderThread(windowedActiveMessages(), true);
-  // If the active conversation has very few bubbles (e.g. after compaction
-  // the active slice is just a marker + a handful of retained messages),
-  // proactively load the newest archived chunk so the user sees history
-  // immediately without having to scroll up.
-  maybeLoadOlderChunk();
+  // Archived chunks stay on disk until the user asks for them (Load older
+  // or scroll-to-top). Auto-loading after open/compaction re-inflated the
+  // just-archived long turn into the DOM and froze the thread.
   // If there's an active run for this conversation (e.g. user switched away
   // and came back, or page was refreshed while a turn was running), re-attach
   // the streaming UI to the rendered thread so live deltas continue updating
@@ -676,12 +675,7 @@ function appendRoundSection(node, source) {
     bubble = el('div', { class: 'agent-bubble' });
     node.prepend(bubble);
   }
-  const reasoningEl = reasoningDisclosure(source.rawReasoning);
-  const textBox = el('div', { class: 'agent-bubble-text' });
-  const strip = el('div', { class: 'agent-tool-stack' });
-  strip.hidden = true;
-  bubble.append(reasoningEl, textBox, strip);
-  return { bubble, reasoningEl, textBox, strip };
+  return { bubble, ...mountLiveRound(bubble, source) };
 }
 
 // buildStreamNode creates a brand-new streaming node for a message the
@@ -690,13 +684,9 @@ function buildStreamNode(thread, messageId, source) {
   const bubble = el('div', { class: 'agent-bubble' });
   const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
   if (messageId) msgNode.dataset.messageIds = messageId;
-  const reasoningEl = reasoningDisclosure(source.rawReasoning);
-  const textBox = el('div', { class: 'agent-bubble-text' });
-  const strip = el('div', { class: 'agent-tool-stack' });
-  strip.hidden = true;
-  bubble.append(reasoningEl, textBox, strip);
+  const refs = mountLiveRound(bubble, source);
   thread.append(msgNode);
-  return { msgNode, bubble, reasoningEl, textBox, strip };
+  return { msgNode, bubble, ...refs };
 }
 
 // sealStaleRoomBuffer marks a room buffer terminal when the backend says the
@@ -757,14 +747,11 @@ function reattachActiveRun() {
     return;
   }
   // Re-render accumulated content for the current (unpersisted) round.
-  if (run.rawReasoning) {
-    const content = reasoningEl.querySelector('.agent-reasoning-content');
-    if (content) { content.innerHTML = renderMarkdown(run.rawReasoning); void renderMermaidDiagrams(content); void highlightCode(content); attachZoomButtons(content); }
-    reasoningEl.hidden = !reasoningHasVisibleContent(content);
-    // If reasoning has content but no text yet, the agent is still thinking —
-    // resume the streaming pulse so the user doesn't think it's stuck.
-    if (!reasoningEl.hidden && !run.raw?.trim()) reasoningEl.classList.add('is-streaming');
-  }
+  setReasoningSource(reasoningEl, run.rawReasoning);
+  reasoningEl.hidden = !reasoningHasVisibleSource(run.rawReasoning);
+  // If reasoning has content but no text yet, the agent is still thinking —
+  // resume the streaming pulse so the user doesn't think it's stuck.
+  if (!reasoningEl.hidden && !run.raw?.trim()) reasoningEl.classList.add('is-streaming');
   if (run.raw?.trim()) { textBox.innerHTML = renderMarkdown(run.raw); void renderMermaidDiagrams(textBox); void highlightCode(textBox); attachZoomButtons(textBox); }
   else {
     textBox.append(el('span', { class: 'agent-thinking-dots' },
@@ -907,9 +894,8 @@ function applyBufferedRunToDOM(convId) {
     return;
   }
   if (source.rawReasoning) {
-    const content = reasoningEl.querySelector('.agent-reasoning-content');
-    if (content) { content.innerHTML = renderMarkdown(source.rawReasoning); void renderMermaidDiagrams(content); void highlightCode(content); attachZoomButtons(content); }
-    reasoningEl.hidden = !reasoningHasVisibleContent(content);
+    setReasoningSource(reasoningEl, source.rawReasoning);
+    reasoningEl.hidden = !reasoningHasVisibleSource(source.rawReasoning);
     if (!reasoningEl.hidden && !source.raw?.trim()) reasoningEl.classList.add('is-streaming');
   }
   if (source.raw?.trim()) textBox.innerHTML = renderMarkdown(source.raw);
@@ -1084,15 +1070,10 @@ function beginTurn(runId, userText, attachments = []) {
   const bubble = el('div', { class: 'agent-bubble' });
   const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
   thread.append(msgNode);
-  // first round elements
-  const reasoningEl = reasoningDisclosure('');
+  const { reasoningEl, textBox, strip } = mountLiveRound(bubble, {});
   reasoningEl.hidden = true;
-  const textBox = el('div', { class: 'agent-bubble-text' });
   textBox.append(el('span', { class: 'agent-thinking-dots' },
     el('span'), el('span'), el('span')));
-  const strip = el('div', { class: 'agent-tool-stack' });
-  strip.hidden = true;
-  bubble.append(reasoningEl, textBox, strip);
   state.runs.set(runId, {
     msgNode, bubble, strip, textBox, reasoningEl,
     toolJobs: new Map(), raw: '', rawReasoning: '',
@@ -1145,12 +1126,9 @@ async function retryTurn(failedNode, failedMessageId) {
   const bubble = el('div', { class: 'agent-bubble' });
   const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
   thread.append(msgNode);
-  const reasoningEl = reasoningDisclosure('');
+  const { reasoningEl, textBox, strip } = mountLiveRound(bubble, {});
   reasoningEl.hidden = true;
-  const textBox = el('div', { class: 'agent-bubble-text', text: '…' });
-  const strip = el('div', { class: 'agent-tool-stack' });
-  strip.hidden = true;
-  bubble.append(reasoningEl, textBox, strip);
+  textBox.textContent = '…';
   state.runs.set(runId, {
     msgNode, bubble, strip, textBox, reasoningEl,
     toolJobs: new Map(), raw: '', rawReasoning: '',
@@ -1372,10 +1350,10 @@ function bindScrollPin() {
     // Older *active* messages are revealed via the explicit "Load older"
     // button (a deliberate click keeps the scroll anchored — auto-loading
     // during a fast wheel scroll fights the browser's momentum and jumps the
-    // view). Archived pre-compaction chunks keep their proactive scroll-top
-    // load, but only once the in-memory window is fully revealed.
+    // view). Archived chunks load one at a time on scroll-to-top once the
+    // in-memory window is fully revealed.
     if (!state.suppressTopLoad && thread.scrollTop <= 4 && state.activeWindowStart === 0) {
-      maybeLoadOlderChunk();
+      loadOlderChunk();
     }
   }, { passive: true });
 }
@@ -1386,14 +1364,19 @@ function hasOlderActiveMessages() {
   return state.activeWindowStart > 0;
 }
 
+function hasOlderHistory() {
+  return hasOlderActiveMessages() || state.nextChunkIndex >= 0;
+}
+
 // updateOlderSentinel keeps a "Load older messages" button pinned at the top of
-// the thread while older active messages remain windowed out. Clicking it
-// reveals one batch with a stable (anchored) scroll position.
+// the thread while older active messages remain windowed out or archived
+// chunks remain unloaded. Clicking it reveals one batch with a stable
+// (anchored) scroll position.
 function updateOlderSentinel() {
   const thread = agentThread();
   if (!thread) return;
   let btn = document.getElementById('agent-load-older');
-  if (!hasOlderActiveMessages()) {
+  if (!hasOlderHistory()) {
     btn?.remove();
     return;
   }
@@ -1403,10 +1386,15 @@ function updateOlderSentinel() {
       id: 'agent-load-older',
       type: 'button',
     });
-    btn.addEventListener('click', () => prependActiveBatch());
+    btn.addEventListener('click', () => revealOlderHistory());
   }
   btn.textContent = '↑ Load older messages';
   if (thread.firstChild !== btn) thread.insertBefore(btn, thread.firstChild);
+}
+
+function revealOlderHistory() {
+  if (hasOlderActiveMessages()) prependActiveBatch();
+  else loadOlderChunk();
 }
 
 // prependActiveBatch renders the previous WINDOW_BATCH of already-loaded active
@@ -1483,30 +1471,9 @@ function scrollToBottom(force = false) {
 
 // ---- chunk-based lazy load ----
 
-// Count visible "bubbles" in the thread: user messages, assistant messages,
-// tool jobs, and reasoning blocks. Used to decide whether the active slice
-// is too sparse and an older chunk should be proactively loaded.
-function countThreadBubbles() {
-  const thread = agentThread();
-  if (!thread) return 0;
-  return thread.querySelectorAll(
-    '.agent-message.user, .agent-message.assistant, .agent-tool-terminal, .agent-reasoning',
-  ).length;
-}
-
-// maybeLoadOlderChunk triggers a chunk load when:
-// 1. There are chunks available (nextChunkIndex >= 0)
-// 2. No chunk is currently loading
-// 3. The thread has fewer than MIN_BUBBLES_FOR_PROACTIVE_LOAD bubbles OR the
-//    user has scrolled to the top (handled by the scroll listener)
-const MIN_BUBBLES_FOR_PROACTIVE_LOAD = 20;
-
-function maybeLoadOlderChunk() {
-  if (state.loadingChunk || state.nextChunkIndex < 0) return;
-  if (countThreadBubbles() >= MIN_BUBBLES_FOR_PROACTIVE_LOAD) return;
-  loadOlderChunk();
-}
-
+// loadOlderChunk fetches one archived pre-compaction chunk and prepends it.
+// It does not chain: each Load-older click or scroll-to-top loads one chunk
+// so a 1MB archived turn cannot auto-inflate the thread.
 async function loadOlderChunk() {
   if (state.loadingChunk || state.nextChunkIndex < 0 || !state.activeId) return;
   state.loadingChunk = true;
@@ -1537,6 +1504,7 @@ async function loadOlderChunk() {
     // Insert a "Load older" sentinel above the chunk so the user can manually
     // trigger the next load if the proactive threshold is not met.
     thread?.insertBefore(fragment, thread.firstChild);
+    updateOlderSentinel();
     if (thread) void renderMermaidDiagrams(thread); void highlightCode(thread); attachZoomButtons(thread);
     // Restore the scroll position so the user doesn't jump.
     if (thread) {
@@ -1555,6 +1523,7 @@ async function loadOlderChunk() {
       if (slot) {
         Object.assign(prevRun, slot);
         if (roundAlreadyPersisted(prevRun.messageId)) {
+          slot.reasoningEl.closest('.agent-round')?.remove();
           slot.reasoningEl.remove();
           slot.textBox.remove();
           slot.strip.remove();
@@ -1566,9 +1535,8 @@ async function loadOlderChunk() {
           prevRun.strip = null;
         } else {
           if (prevRun.rawReasoning) {
-            const content = slot.reasoningEl.querySelector('.agent-reasoning-content');
-            if (content) { content.innerHTML = renderMarkdown(prevRun.rawReasoning); void renderMermaidDiagrams(content); void highlightCode(content); attachZoomButtons(content); }
-            slot.reasoningEl.hidden = !reasoningHasVisibleContent(content);
+            setReasoningSource(slot.reasoningEl, prevRun.rawReasoning);
+            slot.reasoningEl.hidden = !reasoningHasVisibleSource(prevRun.rawReasoning);
           }
           if (prevRun.raw?.trim()) { slot.textBox.innerHTML = renderMarkdown(prevRun.raw); void renderMermaidDiagrams(slot.textBox); void highlightCode(slot.textBox); attachZoomButtons(slot.textBox); }
           else {
@@ -1591,11 +1559,7 @@ async function loadOlderChunk() {
       return;
     }
     state.loadingChunk = false;
-    // If the thread is still sparse after loading, keep going until we hit
-    // the threshold or run out of chunks.
-    if (state.nextChunkIndex >= 0 && countThreadBubbles() < MIN_BUBBLES_FOR_PROACTIVE_LOAD) {
-      loadOlderChunk();
-    }
+    updateOlderSentinel();
   }
 }
 
@@ -1778,15 +1742,15 @@ function bindEvents() {
     }
     if (conversation_id !== state.activeId) return;
     if (run.reasoningEl) {
-      const content = run.reasoningEl.querySelector('.agent-reasoning-content');
-      if (content) {
-        incrementalRender(content, run.rawReasoning);
-        void renderMermaidDiagrams(content); void highlightCode(content); attachZoomButtons(content);
+      setReasoningSource(run.reasoningEl, run.rawReasoning);
+      if (run.reasoningEl.open) {
+        const content = run.reasoningEl.querySelector('.agent-reasoning-content');
+        if (content) {
+          incrementalRender(content, run.rawReasoning);
+          void renderMermaidDiagrams(content); void highlightCode(content); attachZoomButtons(content);
+        }
       }
-      // Only show the thinking block once it actually renders something
-      // visible. Providers can emit leading whitespace or other invisible
-      // content that would otherwise leave an empty "Thinking" block.
-      run.reasoningEl.hidden = !reasoningHasVisibleContent(content);
+      run.reasoningEl.hidden = !reasoningHasVisibleSource(run.rawReasoning);
       if (run.reasoningEl.hidden) return;
       run.reasoningEl.classList.add('is-streaming');
       // Remove thinking dots when reasoning starts arriving.
@@ -1808,8 +1772,7 @@ function bindEvents() {
     }
     if (run.rawReasoning) {
       run.rawReasoning = '';
-      const rc = run.reasoningEl?.querySelector('.agent-reasoning-content');
-      if (rc) rc.innerHTML = '';
+      setReasoningSource(run.reasoningEl, '');
     }
     if (run.reasoningEl) {
       run.reasoningEl.hidden = true;
@@ -2378,7 +2341,7 @@ async function applyLiveCompaction(conversationId, run) {
       renderThread(windowedActiveMessages(), state.pinned);
       reattachActiveRun();
     }
-    maybeLoadOlderChunk();
+    updateOlderSentinel();
     updateComposerStatus();
     scrollToBottom();
   } catch (err) {
@@ -2414,7 +2377,7 @@ async function refreshActiveConversation() {
     const hasLiveBuffer = buffer && !buffer.done && !buffer.capped && buffer.lastEventAt > 0;
     renderThread(windowedActiveMessages(), state.pinned);
     if (hasLiveBuffer) applyBufferedRunToDOM(conversationId);
-    maybeLoadOlderChunk();
+    updateOlderSentinel();
     updateComposerStatus();
   } catch (err) {
     // The list refresh will surface a deleted conversation if it raced a turn.
