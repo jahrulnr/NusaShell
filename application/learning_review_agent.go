@@ -277,9 +277,19 @@ func (r *BackgroundReviewAgent) runReservedReview(ctx context.Context, conversat
 	if messages != nil && r.app.Conversations != nil {
 		newMarker := len(r.transcriptMessages(conversation))
 		if newMarker > conversation.LastReviewedMsgCount {
-			conversation.LastReviewedMsgCount = newMarker
-			if err := r.app.Conversations.Save(conversation); err != nil {
-				r.app.log("warn", "learning", "failed to persist review marker: conv=%s err=%v", conversationID, err)
+			// Re-fetch the latest conversation state before saving the
+			// marker. The review loop may have taken minutes, during which
+			// the turn goroutine added messages and tool results. Saving
+			// the stale snapshot fetched at the start of the review would
+			// overwrite that progress — the "disappearing turn" race.
+			latest, err := r.app.Conversations.Get(conversationID)
+			if err != nil {
+				r.app.log("warn", "learning", "failed to re-fetch conversation for review marker: conv=%s err=%v", conversationID, err)
+			} else if newMarker > latest.LastReviewedMsgCount {
+				latest.LastReviewedMsgCount = newMarker
+				if err := r.app.Conversations.Save(latest); err != nil {
+					r.app.log("warn", "learning", "failed to persist review marker: conv=%s err=%v", conversationID, err)
+				}
 			}
 		}
 	}

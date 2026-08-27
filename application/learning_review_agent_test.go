@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1556,5 +1557,119 @@ func TestReviewLoopStreamErrorIsPropagated(t *testing.T) {
 	_, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 	if err == nil || !strings.Contains(err.Error(), "idle timeout") {
 		t.Fatalf("err = %v, want propagation of the stream idle timeout", err)
+	}
+}
+
+// cloningConvStore is a ConversationStore that clones on Get and Save,
+// matching the real jsonstore behavior. After the first Get it injects a
+// message into the stored conversation to simulate a concurrent turn
+// goroutine adding messages while the review runs.
+type cloningConvStore struct {
+	mu              sync.Mutex
+	conv            *domain.Conversation
+	getCount        int
+	injectAfterGet  bool
+	injectedMessage *domain.Message
+}
+
+func (s *cloningConvStore) List() []*domain.Conversation {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return []*domain.Conversation{s.conv}
+}
+func (s *cloningConvStore) Get(id string) (*domain.Conversation, error) {
+	s.mu.Lock()
+	s.getCount++
+	// Deep-copy Messages so the returned clone is independent of the
+	// stored conversation — matches the real jsonstore clone-on-read.
+	c := *s.conv
+	c.Messages = append([]domain.Message(nil), s.conv.Messages...)
+	// Simulate concurrent turn activity: after the review agent's first
+	// Get, append a message to the STORED conversation (not the returned
+	// clone) so a subsequent Save with the stale snapshot would overwrite
+	// it. The clone was fetched BEFORE the "turn" added the message.
+	if s.injectAfterGet && s.getCount == 1 && s.injectedMessage != nil {
+		s.conv.Messages = append(s.conv.Messages, *s.injectedMessage)
+	}
+	s.mu.Unlock()
+	return &c, nil
+}
+func (s *cloningConvStore) Save(c *domain.Conversation) error {
+	s.mu.Lock()
+	saved := *c
+	saved.Messages = append([]domain.Message(nil), c.Messages...)
+	s.conv = &saved
+	s.mu.Unlock()
+	return nil
+}
+func (s *cloningConvStore) Delete(id string) error { return nil }
+func (s *cloningConvStore) ArchiveChunk(id string, messages []domain.Message) (int, error) {
+	return 0, nil
+}
+func (s *cloningConvStore) GetChunk(id string, index int) ([]domain.Message, error) {
+	return nil, errNotFound
+}
+
+// TestReviewMarkerSaveDoesNotOverwriteConcurrentTurnProgress reproduces the
+// race condition where the review agent fetches a stale conversation snapshot
+// at the start of the review, then saves it back after the review loop —
+// overwriting messages and tool results that the turn goroutine added in
+// between. The fix re-fetches the conversation before saving the marker.
+func TestReviewMarkerSaveDoesNotOverwriteConcurrentTurnProgress(t *testing.T) {
+	if resources.ReviewPrompt() == "" {
+		t.Fatal("review prompt must be non-empty for the loop to run")
+	}
+	conv := &domain.Conversation{
+		ID:    "conv_race",
+		Model: "prov_test:test-model",
+		Messages: []domain.Message{
+			{ID: "m1", Role: domain.RoleUser, Content: "hello"},
+			{ID: "m2", Role: domain.RoleAssistant, Content: "hi there"},
+		},
+	}
+	store := &cloningConvStore{
+		conv:           conv,
+		injectAfterGet: true,
+		injectedMessage: &domain.Message{
+			ID: "m_concurrent", Role: domain.RoleAssistant, Content: "concurrent turn progress",
+			Status: domain.StatusDone,
+		},
+	}
+	providers := &fakeProviderStore{items: map[string]*domain.Provider{
+		"prov_test": {ID: "prov_test", Enabled: true, Kind: domain.ProviderChat, Models: []domain.Model{
+			{ID: "test-model", Context: 128000},
+		}},
+	}}
+	app := &App{
+		Conversations: store,
+		Providers:     providers,
+		Credentials:   &fakeVisionCredStore{creds: map[string]string{"prov_test": "key"}},
+		Toolbox:       &reviewStubToolbox{},
+		Logs:          &fakeLogStore{},
+		Factory: func(_ context.Context, _ *domain.Provider, _ string) (core.Provider, error) {
+			return &persistStubAdapter{responses: []ChatResponse{{Content: "Nothing to save."}}}, nil
+		},
+	}
+	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
+
+	if err := agent.RunReview(context.Background(), "conv_race"); err != nil {
+		t.Fatalf("RunReview: %v", err)
+	}
+
+	// After the review, the store must still have the injected message.
+	// Without the fix, the review agent saves its stale 2-message snapshot,
+	// overwriting the 3-message state the turn goroutine wrote.
+	got, err := store.Get("conv_race")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, m := range got.Messages {
+		if m.ID == "m_concurrent" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("concurrent message was overwritten by stale review save; messages: %+v", got.Messages)
 	}
 }

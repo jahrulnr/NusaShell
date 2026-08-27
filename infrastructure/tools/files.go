@@ -38,8 +38,7 @@ func fileToolInfos() []application.ToolInfo {
 		{Name: "file_delete", Description: "Delete a file or directory. Directories require recursive=true when not empty. Irreversible.", InputSchema: obj("object", props("path", str("Absolute path to delete"), "recursive", obj("boolean", nil)), "path")},
 		{Name: "file_move", Description: "Move or rename a file/directory; overwrites an existing destination. Falls back to copy+delete across filesystems.", InputSchema: obj("object", props("source", str("Absolute source path"), "destination", str("Absolute destination path")), "source", "destination")},
 		{Name: "file_copy", Description: "Copy a file or directory recursively.", InputSchema: obj("object", props("source", str("Absolute source path"), "destination", str("Absolute destination path")), "source", "destination")},
-		{Name: "file_exists", Description: "Check whether a path exists. Does NOT error on missing paths — returns exists=false.", InputSchema: obj("object", props("path", str("Absolute file or directory path")), "path")},
-		{Name: "file_info", Description: "Get metadata for a path (size, permissions, type, modification time).", InputSchema: obj("object", props("path", str("Absolute path")), "path")},
+		{Name: "file_info", Description: "Get metadata for a path (exists, size, permissions, type, modification time). Does NOT error on missing paths — returns exists=false.", InputSchema: obj("object", props("path", str("Absolute file or directory path")), "path")},
 		{Name: "grep", Description: "Search file contents with regex. Built on Go regexp (RE2 syntax — no backreferences). " +
 			"Filters files by glob_pattern, returns matching lines with optional context_lines. " +
 			"output_mode: content (matching lines + context), files_with_matches (just filenames), count (match count per file). " +
@@ -298,21 +297,6 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 		}
 		return true, yamlBlock(map[string]any{"copied": true}), nil
 
-	case "file_exists":
-		path := fileArgStr(args, "path")
-		if strings.TrimSpace(path) == "" {
-			return true, "", fmt.Errorf("path is required")
-		}
-		_, serr := os.Stat(path)
-		exists := serr == nil || !os.IsNotExist(serr)
-		isDir := false
-		if serr == nil {
-			if info, ierr := os.Stat(path); ierr == nil {
-				isDir = info.IsDir()
-			}
-		}
-		return true, yamlBlock(map[string]any{"exists": exists, "is_dir": isDir}), nil
-
 	case "file_info":
 		path := fileArgStr(args, "path")
 		if strings.TrimSpace(path) == "" {
@@ -320,9 +304,16 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 		}
 		info, err := os.Stat(path)
 		if err != nil {
+			// Missing paths are not an error: report exists=false so the
+			// caller can branch without parsing error strings (this absorbs
+			// the old file_exists contract).
+			if os.IsNotExist(err) {
+				return true, yamlBlock(map[string]any{"exists": false}), nil
+			}
 			return true, "", err
 		}
 		meta := map[string]any{
+			"exists":   true,
 			"name":     info.Name(),
 			"size":     info.Size(),
 			"dir":      info.IsDir(),

@@ -95,9 +95,9 @@ func TestFileListMkdirExistsDelete(t *testing.T) {
 	if _, err := testTB.Execute(context.Background(), "file_mkdir", []byte(`{"path":"`+jp+`"}`)); err != nil {
 		t.Fatalf("file_mkdir: %v", err)
 	}
-	out, err := testTB.Execute(context.Background(), "file_exists", []byte(`{"path":"`+jp+`"}`))
+	out, err := testTB.Execute(context.Background(), "file_info", []byte(`{"path":"`+jp+`"}`))
 	if err != nil || !strings.Contains(out, "exists: true") {
-		t.Fatalf("file_exists: %v %q", err, out)
+		t.Fatalf("file_info: %v %q", err, out)
 	}
 
 	if _, err := testTB.Execute(context.Background(), "file_write", []byte(`{"path":"`+jp+`/f.txt","content":"x"}`)); err != nil {
@@ -110,14 +110,14 @@ func TestFileListMkdirExistsDelete(t *testing.T) {
 	if _, err := testTB.Execute(context.Background(), "file_delete", []byte(`{"path":"`+jp+`","recursive":true}`)); err != nil {
 		t.Fatalf("file_delete recursive: %v", err)
 	}
-	out, _ = testTB.Execute(context.Background(), "file_exists", []byte(`{"path":"`+jp+`"}`))
+	out, _ = testTB.Execute(context.Background(), "file_info", []byte(`{"path":"`+jp+`"}`))
 	if !strings.Contains(out, "exists: false") {
 		t.Fatalf("dir still exists: %q", out)
 	}
 
 	// Missing path must not error.
-	if _, err := testTB.Execute(context.Background(), "file_exists", []byte(`{"path":"`+jsonPath(filepath.Join(dir, "nope"))+`"}`)); err != nil {
-		t.Fatalf("file_exists on missing path errored: %v", err)
+	if _, err := testTB.Execute(context.Background(), "file_info", []byte(`{"path":"`+jsonPath(filepath.Join(dir, "nope"))+`"}`)); err != nil {
+		t.Fatalf("file_info on missing path errored: %v", err)
 	}
 }
 
@@ -173,7 +173,7 @@ func TestFileToolInfosRegistered(t *testing.T) {
 	for _, ti := range tb.ListTools() {
 		names[ti.Name] = true
 	}
-	for _, want := range []string{"file_read", "file_write", "file_patch", "file_list", "file_mkdir", "file_delete", "file_move", "file_copy", "file_exists", "file_info", "grep", "find_file", "show", "exec"} {
+	for _, want := range []string{"file_read", "file_write", "file_patch", "file_list", "file_mkdir", "file_delete", "file_move", "file_copy", "file_info", "grep", "find_file", "show", "exec"} {
 		if !names[want] {
 			t.Errorf("ListTools missing %q", want)
 		}

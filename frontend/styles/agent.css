@@ -287,8 +287,6 @@
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
-  overflow-y: auto;
-  max-height: 6rem;
 }
 .agent-message.assistant .agent-bubble pre code { padding: 0; background: none; }
 .agent-message.assistant .agent-bubble a { color: var(--accent); }
