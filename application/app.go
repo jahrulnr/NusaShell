@@ -988,7 +988,9 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 		if !has && requiresKey(p.Kind) {
 			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q has no API key", p.Name)}
 		}
-		return p, p.FindModel(modelID), key, nil
+		m := p.FindModel(modelID)
+		a.applyLearnedModelOverrides(p, m)
+		return p, m, key, nil
 	}
 	for _, p := range a.Providers.List() {
 		if !p.Enabled || !p.HasModel(model) {
@@ -1001,11 +1003,27 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 		if !has && requiresKey(p.Kind) {
 			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q has no API key", p.Name)}
 		}
-		return p, p.FindModel(model), key, nil
+		m := p.FindModel(model)
+		a.applyLearnedModelOverrides(p, m)
+		return p, m, key, nil
 	}
 	return nil, nil, "", &contracts.RPCError{
 		Code:    contracts.CodeValidation,
 		Message: fmt.Sprintf("model %q is not available on any enabled provider", model),
+	}
+}
+
+// applyLearnedModelOverrides applies learned 400-adaptations (context cap,
+// disabled modalities) to a freshly resolved model's metadata in place.
+// Providers come from the store as deep clones, so the mutation only affects
+// this resolution's copy and never leaks back into the persisted catalog.
+// This is the canonical application point for models present in the catalog;
+// modelCapabilitiesWithLearned and resolveContextWindow additionally cover
+// models with no catalog metadata (FindModel == nil), and both are
+// idempotent with this override.
+func (a *App) applyLearnedModelOverrides(p *domain.Provider, m *domain.Model) {
+	if a.learnedParams != nil && m != nil && a.learnedParams.OverrideModel(m, p.ID, m.ID) {
+		a.log("info", "learning", "applied learned overrides to %s/%s (context=%d vision=%v)", p.ID, m.ID, m.Context, m.Vision)
 	}
 }
 

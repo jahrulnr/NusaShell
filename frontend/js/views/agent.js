@@ -30,6 +30,7 @@ import {
   parseShowImageOutput,
   parseShowAudioOutput,
   parseShowVideoOutput,
+  reasoningHasVisibleContent,
 } from './agent/render.js';
 import { bindSubagents, setSubagentConversation } from './agent/subagents.js';
 import { agentThread, composerInput, stopButton, attachmentsContainer, workspaceButton, workspaceLabel, providerStatus } from './agent/domrefs.js';
@@ -638,6 +639,13 @@ function findMessageNode(thread, messageId) {
   return thread.querySelector(`.agent-message.assistant[data-message-ids~="${messageId}"]`);
 }
 
+function stampRunMessageId(node, messageId) {
+  if (!node || !messageId) return;
+  const ids = new Set((node.dataset.messageIds || '').split(/\s+/).filter(Boolean));
+  ids.add(messageId);
+  node.dataset.messageIds = [...ids].join(' ');
+}
+
 // roundAlreadyPersisted reports whether the snapshot already contains content
 // for messageId (its round finished and was saved server-side). Stream mirrors
 // covering a persisted round must NOT be overlaid — renderThread already drew
@@ -664,8 +672,7 @@ function appendRoundSection(node, source) {
     bubble = el('div', { class: 'agent-bubble' });
     node.prepend(bubble);
   }
-  const reasoningEl = reasoningDisclosure('');
-  reasoningEl.hidden = !source.rawReasoning;
+  const reasoningEl = reasoningDisclosure(source.rawReasoning);
   const textBox = el('div', { class: 'agent-bubble-text' });
   const strip = el('div', { class: 'agent-tool-stack' });
   strip.hidden = true;
@@ -679,8 +686,7 @@ function buildStreamNode(thread, messageId, source) {
   const bubble = el('div', { class: 'agent-bubble' });
   const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
   if (messageId) msgNode.dataset.messageIds = messageId;
-  const reasoningEl = reasoningDisclosure('');
-  reasoningEl.hidden = !source.rawReasoning;
+  const reasoningEl = reasoningDisclosure(source.rawReasoning);
   const textBox = el('div', { class: 'agent-bubble-text' });
   const strip = el('div', { class: 'agent-tool-stack' });
   strip.hidden = true;
@@ -750,11 +756,12 @@ function reattachActiveRun() {
   if (run.rawReasoning) {
     const content = reasoningEl.querySelector('.agent-reasoning-content');
     if (content) { content.innerHTML = renderMarkdown(run.rawReasoning); void renderMermaidDiagrams(content); void highlightCode(content); attachZoomButtons(content); }
+    reasoningEl.hidden = !reasoningHasVisibleContent(content);
     // If reasoning has content but no text yet, the agent is still thinking —
     // resume the streaming pulse so the user doesn't think it's stuck.
-    if (!run.raw) reasoningEl.classList.add('is-streaming');
+    if (!reasoningEl.hidden && !run.raw?.trim()) reasoningEl.classList.add('is-streaming');
   }
-  if (run.raw) { textBox.innerHTML = renderMarkdown(run.raw); void renderMermaidDiagrams(textBox); void highlightCode(textBox); attachZoomButtons(textBox); }
+  if (run.raw?.trim()) { textBox.innerHTML = renderMarkdown(run.raw); void renderMermaidDiagrams(textBox); void highlightCode(textBox); attachZoomButtons(textBox); }
   else {
     textBox.append(el('span', { class: 'agent-thinking-dots' },
       el('span'), el('span'), el('span')));
@@ -898,9 +905,10 @@ function applyBufferedRunToDOM(convId) {
   if (source.rawReasoning) {
     const content = reasoningEl.querySelector('.agent-reasoning-content');
     if (content) { content.innerHTML = renderMarkdown(source.rawReasoning); void renderMermaidDiagrams(content); void highlightCode(content); attachZoomButtons(content); }
-    if (!source.raw) reasoningEl.classList.add('is-streaming');
+    reasoningEl.hidden = !reasoningHasVisibleContent(content);
+    if (!reasoningEl.hidden && !source.raw?.trim()) reasoningEl.classList.add('is-streaming');
   }
-  if (source.raw) textBox.innerHTML = renderMarkdown(source.raw);
+  if (source.raw?.trim()) textBox.innerHTML = renderMarkdown(source.raw);
   else textBox.append(el('span', { class: 'agent-thinking-dots' }, el('span'), el('span'), el('span')));
   void renderMermaidDiagrams(textBox); void highlightCode(textBox); attachZoomButtons(textBox);
   for (const job of source.toolJobs.values()) placeToolCard(bubble, strip, job);
@@ -1556,8 +1564,9 @@ async function loadOlderChunk() {
           if (prevRun.rawReasoning) {
             const content = slot.reasoningEl.querySelector('.agent-reasoning-content');
             if (content) { content.innerHTML = renderMarkdown(prevRun.rawReasoning); void renderMermaidDiagrams(content); void highlightCode(content); attachZoomButtons(content); }
+            slot.reasoningEl.hidden = !reasoningHasVisibleContent(content);
           }
-          if (prevRun.raw) { slot.textBox.innerHTML = renderMarkdown(prevRun.raw); void renderMermaidDiagrams(slot.textBox); void highlightCode(slot.textBox); attachZoomButtons(slot.textBox); }
+          if (prevRun.raw?.trim()) { slot.textBox.innerHTML = renderMarkdown(prevRun.raw); void renderMermaidDiagrams(slot.textBox); void highlightCode(slot.textBox); attachZoomButtons(slot.textBox); }
           else {
             slot.textBox.append(el('span', { class: 'agent-thinking-dots' },
               el('span'), el('span'), el('span')));
@@ -1618,27 +1627,44 @@ function bindEvents() {
     // would wipe the prior turn's visible content (the "rollback" bug).
     const prevMessageId = run.messageId;
     run.messageId = message_id;
-    if (prevMessageId !== message_id) {
-      const slot = ensureRunSlot(run);
-      if (slot) {
-        run.msgNode = slot.msgNode;
-        run.bubble = slot.bubble;
-        run.reasoningEl = slot.reasoningEl;
-        run.textBox = slot.textBox;
-        run.strip = slot.strip;
-      }
-    }
-    // round 1: clear the placeholder; round 2+: append new step elements
-    // after the previous round's tool strip, preserving temporal order
+    // round 1: bind the placeholder that beginTurn already created. Do not
+    // ensureRunSlot here — that used to append a second Thinking block
+    // (and a second assistant node) because the placeholder has no
+    // data-message-ids yet. Auto-continue reuses the run with a new
+    // message id and must open a fresh node instead of writing over the
+    // previous turn.
     if (!round || round <= 1) {
       run.raw = '';
       run.rawReasoning = '';
       run.round = 1;
       resetRoomBufferMirror(conversation_id, run, 1);
-      if (conversation_id === state.activeId && run.textBox) {
-        run.textBox.textContent = '';
-        run.textBox.append(el('span', { class: 'agent-thinking-dots' },
-          el('span'), el('span'), el('span')));
+      const reusePlaceholder = conversation_id === state.activeId
+        && run.msgNode?.isConnected
+        && (!prevMessageId || prevMessageId === message_id);
+      if (reusePlaceholder) {
+        stampRunMessageId(run.msgNode, message_id);
+        if (run.textBox) {
+          run.textBox.textContent = '';
+          run.textBox.append(el('span', { class: 'agent-thinking-dots' },
+            el('span'), el('span'), el('span')));
+        }
+        return;
+      }
+      if (conversation_id === state.activeId) {
+        const slot = ensureRunSlot(run);
+        if (slot) {
+          run.msgNode = slot.msgNode;
+          run.bubble = slot.bubble;
+          run.reasoningEl = slot.reasoningEl;
+          run.textBox = slot.textBox;
+          run.strip = slot.strip;
+          stampRunMessageId(run.msgNode, message_id);
+          if (run.textBox && !run.raw) {
+            run.textBox.textContent = '';
+            run.textBox.append(el('span', { class: 'agent-thinking-dots' },
+              el('span'), el('span'), el('span')));
+          }
+        }
       }
       return;
     }
@@ -1650,9 +1676,16 @@ function bindEvents() {
     if (conversation_id !== state.activeId) return;
     // seal previous round: hide its tool strip if empty
     if (run.strip && run.strip.hidden) run.strip.remove();
-    if (!run.msgNode || !run.msgNode.isConnected) {
-      // Node lost (e.g. rebuilt while detached during a race) — recreate the
-      // streaming slot instead of appending into a detached subtree.
+    if (run.msgNode?.isConnected) {
+      // Same bubble, new round — one section only. Do not also call
+      // ensureRunSlot when message_id changes; that appended a second
+      // Thinking disclosure on every tool round.
+      stampRunMessageId(run.msgNode, message_id);
+      const refs = appendRoundSection(run.msgNode, run);
+      run.reasoningEl = refs.reasoningEl;
+      run.textBox = refs.textBox;
+      run.strip = refs.strip;
+    } else {
       const slot = ensureRunSlot(run);
       if (!slot) return;
       run.msgNode = slot.msgNode;
@@ -1660,11 +1693,7 @@ function bindEvents() {
       run.reasoningEl = slot.reasoningEl;
       run.textBox = slot.textBox;
       run.strip = slot.strip;
-    } else {
-      const refs = appendRoundSection(run.msgNode, run);
-      run.reasoningEl = refs.reasoningEl;
-      run.textBox = refs.textBox;
-      run.strip = refs.strip;
+      stampRunMessageId(run.msgNode, message_id);
     }
     clearToolTimers(run);
     run.toolJobs = new Map();
@@ -1745,15 +1774,19 @@ function bindEvents() {
     }
     if (conversation_id !== state.activeId) return;
     if (run.reasoningEl) {
-      run.reasoningEl.hidden = false;
-      run.reasoningEl.classList.add('is-streaming');
-      // Remove thinking dots when reasoning starts arriving.
-      run.textBox?.querySelector('.agent-thinking-dots')?.remove();
       const content = run.reasoningEl.querySelector('.agent-reasoning-content');
       if (content) {
         incrementalRender(content, run.rawReasoning);
         void renderMermaidDiagrams(content); void highlightCode(content); attachZoomButtons(content);
       }
+      // Only show the thinking block once it actually renders something
+      // visible. Providers can emit leading whitespace or other invisible
+      // content that would otherwise leave an empty "Thinking" block.
+      run.reasoningEl.hidden = !reasoningHasVisibleContent(content);
+      if (run.reasoningEl.hidden) return;
+      run.reasoningEl.classList.add('is-streaming');
+      // Remove thinking dots when reasoning starts arriving.
+      run.textBox?.querySelector('.agent-thinking-dots')?.remove();
       scrollToBottom();
     }
   });
@@ -2179,16 +2212,17 @@ function bindEvents() {
     cancelAskCard(card, reason);
   });
   on('agent.compacted', ({ conversation_id }) => {
-    // Compaction rebuilds the durable history; drop any live buffer for this
-    // room so a switch-back doesn't merge deltas that predate the summary.
-    state.roomBuffers.delete(conversation_id);
     if (conversation_id !== state.activeId) {
+      state.roomBuffers.delete(conversation_id);
       refreshLiveDots();
       return;
     }
-    const thread = agentThread();
-    thread.append(el('div', { class: 'agent-compaction-marker', text: 'Compacted · context summarized' }));
-    scrollToBottom();
+    const run = runForConversation(conversation_id);
+    if (run) {
+      void applyLiveCompaction(conversation_id, run);
+      return;
+    }
+    state.roomBuffers.delete(conversation_id);
     refreshActiveConversation();
   });
   on('agent.compaction.failed', ({ conversation_id, error }) => {
@@ -2304,6 +2338,47 @@ function promoteSteerToTranscript(text) {
     thread.append(steerNode);
   }
   scrollToBottom(true);
+}
+
+async function applyLiveCompaction(conversationId, run) {
+  const token = state.conversationLoadToken;
+  try {
+    const { conversation, messages } = await rpc('agent.conversations.get', { id: conversationId });
+    if (token !== state.conversationLoadToken || state.activeId !== conversationId) return;
+    state.conversation = conversation;
+    state.messages = messages ?? [];
+    state.contextEstimate = Number(conversation?.context_tokens) || Number(conversation?.estimated_tokens) || 0;
+    state.activeWindowStart = initialWindowStart(state.messages.length, INITIAL_WINDOW);
+    state.chunkCount = conversation?.chunk_count ?? 0;
+    state.nextChunkIndex = state.chunkCount - 1;
+    state.loadedChunks = new Set();
+    state.loadingChunk = false;
+
+    const thread = agentThread();
+    const liveNode = run.msgNode?.isConnected ? run.msgNode : null;
+    const snapshot = windowedActiveMessages().filter((m) => m.id !== run.messageId);
+    if (liveNode && thread) {
+      const frag = renderConversation(snapshot, retryTurn);
+      while (liveNode.previousSibling) liveNode.previousSibling.remove();
+      let after = liveNode.nextSibling;
+      while (after) {
+        const next = after.nextSibling;
+        if (after.classList?.contains('agent-compaction-marker')) after.remove();
+        after = next;
+      }
+      thread.insertBefore(frag, liveNode);
+      void renderMermaidDiagrams(thread); void highlightCode(thread); attachZoomButtons(thread);
+    } else {
+      renderThread(windowedActiveMessages(), state.pinned);
+      reattachActiveRun();
+    }
+    maybeLoadOlderChunk();
+    updateComposerStatus();
+    scrollToBottom();
+  } catch (err) {
+    console.warn('applyLiveCompaction failed:', err?.message || err);
+    refreshActiveConversation();
+  }
 }
 
 async function refreshActiveConversation() {

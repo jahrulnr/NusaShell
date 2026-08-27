@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -350,8 +351,8 @@ func estimateToolCallTokens(tc ToolCall) int {
 // CompactionSummaryPrefix is the prefix that identifies a compaction summary
 // message. It lets chatMessages, buildSystemPrompt, and the UI distinguish a
 // compaction handover from a real user message even though both carry
-// role=user — matching the codex-rs design where the summary is the last
-// user-visible item in the compacted history.
+// role=user. The summary is the first live message after compaction so the
+// transcript stays chronological and the provider still sees a user message.
 const CompactionSummaryPrefix = "Compacted context handover:"
 
 // IsCompactionSummary reports whether a message content is a compaction
@@ -371,24 +372,24 @@ const compactedUserMessageBudget = 20000
 
 // compactionRetention computes which message indices Compact would retain
 // for the given keepTokenBudget and returns the stripped+truncated retained
-// messages split by kind (user vs recent). Used by both Compact (to build
+// messages in original chronological order. Used by both Compact (to build
 // the new message slice) and ArchiveMessages (to compute what gets dropped)
 // so the two stay consistent — if they drift, archived chunks will either
 // duplicate retained messages or drop messages that should be archived.
 //
-// Retention policy (matches codex-rs build_compacted_history):
+// Retention policy:
 //  1. Real user messages (excluding prior compaction summaries) within a
 //     dedicated 20k-token budget, scanned backward from the most recent.
 //  2. Recent non-user messages (assistant, tool calls) within keepTokenBudget,
 //     scanned backward from the most recent.
 //
-// The compaction summary itself is not part of retention — Compact appends it
+// The compaction summary itself is not part of retention — Compact prepends it
 // after retention, and ArchiveMessages is called before Compact so the
 // summary does not exist yet.
-func (c *Conversation) compactionRetention(keepTokenBudget int) (retainedUserMsgs, retainedRecent []Message, retainedIndices map[int]bool) {
+func (c *Conversation) compactionRetention(keepTokenBudget int) (retained []Message, retainedIndices map[int]bool) {
 	retainedIndices = make(map[int]bool)
+	byIndex := make(map[int]Message)
 
-	// 1. User messages within dedicated budget (backward scan).
 	remainingUser := compactedUserMessageBudget
 	for i := len(c.Messages) - 1; i >= 0; i-- {
 		if remainingUser <= 0 {
@@ -401,20 +402,19 @@ func (c *Conversation) compactionRetention(keepTokenBudget int) (retainedUserMsg
 		stripped := StripForRetention(m)
 		tokens := m.EstimateTokens()
 		if tokens <= remainingUser {
-			retainedUserMsgs = append([]Message{stripped}, retainedUserMsgs...)
+			byIndex[i] = stripped
 			retainedIndices[i] = true
 			remainingUser -= tokens
 		} else {
 			stripped = truncateMessageContent(stripped, remainingUser)
 			if stripped.Content != "" || len(stripped.Attachments) > 0 {
-				retainedUserMsgs = append([]Message{stripped}, retainedUserMsgs...)
+				byIndex[i] = stripped
 				retainedIndices[i] = true
 			}
 			remainingUser = 0
 		}
 	}
 
-	// 2. Non-user messages within keepTokenBudget (backward scan).
 	remaining := keepTokenBudget
 	for i := len(c.Messages) - 1; i >= 0; i-- {
 		if remaining <= 0 {
@@ -427,19 +427,29 @@ func (c *Conversation) compactionRetention(keepTokenBudget int) (retainedUserMsg
 		stripped := StripForRetention(m)
 		tokens := m.EstimateTokens()
 		if tokens <= remaining {
-			retainedRecent = append([]Message{stripped}, retainedRecent...)
+			byIndex[i] = stripped
 			retainedIndices[i] = true
 			remaining -= tokens
 		} else {
 			stripped = truncateMessageContent(stripped, remaining)
 			if stripped.Content != "" || len(stripped.Attachments) > 0 {
-				retainedRecent = append([]Message{stripped}, retainedRecent...)
+				byIndex[i] = stripped
 				retainedIndices[i] = true
 			}
 			remaining = 0
 		}
 	}
-	return retainedUserMsgs, retainedRecent, retainedIndices
+
+	keys := make([]int, 0, len(byIndex))
+	for i := range byIndex {
+		keys = append(keys, i)
+	}
+	sort.Ints(keys)
+	retained = make([]Message, 0, len(keys))
+	for _, i := range keys {
+		retained = append(retained, byIndex[i])
+	}
+	return retained, retainedIndices
 }
 
 // Compact replaces the oldest messages with a compaction summary and keeps:
@@ -447,15 +457,14 @@ func (c *Conversation) compactionRetention(keepTokenBudget int) (retainedUserMsg
 //     dedicated 20k-token budget, scanned backward from the most recent.
 //  2. Recent non-user messages (assistant, tool calls) within keepTokenBudget,
 //     scanned backward from the most recent.
-//  3. The compaction summary as the final user message.
+//  3. Those retained messages in original chronological order.
+//  4. The compaction summary as the first live user message.
 //
-// The summary carries role=user so it appears in the provider request's
-// messages array — providers require at least one user message and return
-// HTTP 400 "No user query found in messages" without one. The
-// CompactionSummaryPrefix lets the UI and buildSystemPrompt distinguish it
-// from a real user message. This follows the codex-rs compaction design
-// (build_compacted_history in core/src/compact.rs) where the summary is the
-// last user-visible item in the compacted history.
+// The summary carries role=user so the provider request always starts with a
+// user message (HTTP 400 "No user query found in messages" otherwise). The
+// CompactionSummaryPrefix lets the UI distinguish it from a real user
+// message. Putting it first (not last) keeps the live turn at the tail so
+// mid-turn compaction cannot park the handover under streaming deltas.
 func (c *Conversation) Compact(summary string, keepTokenBudget int) {
 	if c.Summary != "" {
 		c.Summary += "\n\n" + summary
@@ -463,9 +472,8 @@ func (c *Conversation) Compact(summary string, keepTokenBudget int) {
 		c.Summary = summary
 	}
 
-	retainedUserMsgs, retainedRecent, _ := c.compactionRetention(keepTokenBudget)
+	retained, _ := c.compactionRetention(keepTokenBudget)
 
-	// Build the compaction summary as the final user message.
 	summaryMsg := Message{
 		ID:        NewID("msg"),
 		Role:      RoleUser,
@@ -474,7 +482,7 @@ func (c *Conversation) Compact(summary string, keepTokenBudget int) {
 		Status:    StatusDone,
 	}
 
-	c.Messages = append(append(retainedUserMsgs, retainedRecent...), summaryMsg)
+	c.Messages = append([]Message{summaryMsg}, retained...)
 	c.Touch()
 }
 
@@ -490,7 +498,7 @@ func (c *Conversation) Compact(summary string, keepTokenBudget int) {
 // that should be archived (losing scroll-back history). Both use
 // compactionRetention to stay in sync.
 func (c *Conversation) ArchiveMessages(keepTokenBudget int) []Message {
-	_, _, retainedIndices := c.compactionRetention(keepTokenBudget)
+	_, retainedIndices := c.compactionRetention(keepTokenBudget)
 	if len(retainedIndices) >= len(c.Messages) {
 		return nil
 	}

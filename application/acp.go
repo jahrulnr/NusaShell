@@ -861,7 +861,7 @@ func (a *App) triggerSubagentCompletionTurn(conversationID string) {
 	a.runsMu.Unlock()
 
 	bareModel := strings.TrimSpace(strings.TrimPrefix(model, provider.ID+"/"))
-	caps := modelCapabilities(provider, bareModel)
+	caps := modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams)
 
 	a.goSafe("agent", func() {
 		a.runTurn(run, provider, apiKey, bareModel, effort, asstMsg.ID, false, caps)

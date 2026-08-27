@@ -1140,6 +1140,49 @@ func TestCompactionUsesSummaryTool(t *testing.T) {
 	if !found {
 		t.Fatalf("compaction request did not advertise %s tool", compactionSummaryToolName)
 	}
+	if req.ToolChoice == nil {
+		t.Fatal("compaction request did not force tool_choice onto summary()")
+	}
+}
+
+func TestCompactionToolChoiceForChatKind(t *testing.T) {
+	got := compactionToolChoice(domain.ProviderChat)
+	m, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("chat tool_choice = %#v", got)
+	}
+	fn, _ := m["function"].(map[string]any)
+	if m["type"] != "function" || fn["name"] != compactionSummaryToolName {
+		t.Fatalf("chat tool_choice = %#v", got)
+	}
+	got = compactionToolChoice(domain.ProviderMessages)
+	m, ok = got.(map[string]any)
+	if !ok || m["type"] != "tool" || m["name"] != compactionSummaryToolName {
+		t.Fatalf("messages tool_choice = %#v", got)
+	}
+}
+
+func TestCompactionSummaryEchoesAssistant(t *testing.T) {
+	asst := strings.Repeat("Build hijau. Sekarang aku verifikasi dua konsumen kunci. ", 3)
+	msgs := []ChatMessage{{Role: "user", Content: "go"}, {Role: "assistant", Content: asst}}
+	if !compactionSummaryEchoesAssistant(asst+" extra", msgs) {
+		t.Fatal("expected echo of latest assistant content")
+	}
+	if compactionSummaryEchoesAssistant("## Goal\nfix ordering\n## Done\nfound the Compact regroup bug", msgs) {
+		t.Fatal("structured handoff must not be treated as an echo")
+	}
+}
+
+func TestReasoningDeltaVisibleSkipsLeadingWhitespace(t *testing.T) {
+	if reasoningDeltaVisible(" \n\t") {
+		t.Fatal("leading whitespace-only reasoning must not be emitted")
+	}
+	if !reasoningDeltaVisible("ok") {
+		t.Fatal("visible reasoning must be emitted")
+	}
+	if !reasoningDeltaVisible("ok\n") {
+		t.Fatal("whitespace after visible text must still emit")
+	}
 }
 
 func TestCompactionRetriesOnShortSummary(t *testing.T) {

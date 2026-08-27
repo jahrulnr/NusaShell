@@ -61,6 +61,16 @@ test('Agent surfaces an unavailable backend promptly instead of waiting for a no
   assert.match(appShell, /rpc\('app\.info', \{\}, \{ timeoutMs: 4000 \}\)/);
 });
 
+test('Live compaction does not append a marker at the thread tail, and a new round does not open two thinking slots', () => {
+  // Mid-turn compaction used to thread.append a marker while deltas still
+  // targeted the live bubble above it. The live path must splice history
+  // in front of the active node instead.
+  assert.doesNotMatch(agentView, /thread\.append\(el\('div', \{ class: 'agent-compaction-marker'/);
+  assert.match(agentView, /applyLiveCompaction/);
+  assert.match(agentView, /stampRunMessageId/);
+  assert.match(agentView, /reusePlaceholder/);
+});
+
 test('Agent todo strip has race protection via render token and event filtering', () => {
   // Render token guards against stale async fetches (room switch during fetch)
   assert.match(agentView, /todoRenderToken/);

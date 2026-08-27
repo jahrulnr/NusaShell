@@ -63,6 +63,17 @@ func (c *learnedParamsCache) DisabledModalities(provider, model string) []string
 	return c.registry.DisabledModalities(provider, model)
 }
 
+// OverrideModel applies learned 400-adaptations to a model's metadata in
+// place. Safe to call on a nil cache; returns true when a field changed.
+func (c *learnedParamsCache) OverrideModel(m *domain.Model, provider, model string) bool {
+	if c == nil || m == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.registry.OverrideModel(m, provider, model)
+}
+
 // ContextCap returns the smallest learned context-window cap for the
 // provider+model, or 0 if none has been learned.
 func (c *learnedParamsCache) ContextCap(provider, model string) int {

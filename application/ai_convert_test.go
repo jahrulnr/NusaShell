@@ -334,3 +334,11 @@ func blockTypeName(b core.Block) string {
 		return fmt.Sprintf("%T", b)
 	}
 }
+
+func TestToCoreRequestCopiesToolChoice(t *testing.T) {
+	choice := map[string]any{"type": "function", "function": map[string]any{"name": "summary"}}
+	cr := ToCoreRequest(ChatRequest{Model: "m", ToolChoice: choice}, domain.ProviderChat, false)
+	if cr.ToolChoice == nil {
+		t.Fatal("ToolChoice dropped during conversion")
+	}
+}

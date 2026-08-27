@@ -576,10 +576,6 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	maxTokens := resolveMaxOutput(provider, model, settings)
 	promptCache := buildPromptCachePolicy(settings, provider.ID, model, run.ConversationID)
 
-	a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
-		RunID: run.ID, ConversationID: run.ConversationID, MessageID: asstMsgID, Round: 0,
-	})
-
 	var totalUsage ChatUsage
 	// lastUsage holds the most recent round's provider usage. Its
 	// ContextTokens() is the authoritative context fill for the whole turn
@@ -1014,6 +1010,19 @@ var compactionSummaryToolDef = ToolDef{
 	},
 }
 
+// compactionToolChoice forces the compaction model to call summary() instead
+// of continuing the agent turn as free-text (the failure mode that produced
+// one-sentence "handovers" from reasoning models).
+func compactionToolChoice(kind domain.ProviderKind) any {
+	if kind == domain.ProviderMessages {
+		return map[string]any{"type": "tool", "name": compactionSummaryToolName}
+	}
+	return map[string]any{
+		"type":     "function",
+		"function": map[string]any{"name": compactionSummaryToolName},
+	}
+}
+
 // extractCompactionSummary extracts the summary from the model response. It
 // prefers the summary() tool call (which carries the text in args, separate
 // from reasoning tokens) and falls back to resp.Content for non-tool-calling
@@ -1031,6 +1040,31 @@ func extractCompactionSummary(resp ChatResponse) string {
 		}
 	}
 	return resp.Content
+}
+
+// compactionSummaryEchoesAssistant reports whether the candidate summary is
+// just a copy of the latest assistant turn (the compaction model continuing
+// the live agent instead of writing a handoff).
+func compactionSummaryEchoesAssistant(summary string, msgs []ChatMessage) bool {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return false
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != "assistant" {
+			continue
+		}
+		ast := strings.TrimSpace(msgs[i].Content)
+		if len(ast) < 80 {
+			return false
+		}
+		prefix := ast
+		if len(prefix) > 120 {
+			prefix = prefix[:120]
+		}
+		return strings.Contains(summary, prefix)
+	}
+	return false
 }
 
 // compactConversation summarizes the conversation history via multi-pass
@@ -1182,11 +1216,12 @@ func (a *App) compactConversation(ctx context.Context, adapter ProviderContext, 
 		var lastErr error
 		for attempt := 0; attempt <= compactionSummaryMaxRetries; attempt++ {
 			resp, err := a.completeWithRetry(ctx, adapter, ChatRequest{
-				Model:     model,
-				System:    systemPrompt,
-				Messages:  msgs,
-				Tools:     []ToolDef{compactionSummaryToolDef},
-				MaxTokens: passBudget,
+				Model:      model,
+				System:     systemPrompt,
+				Messages:   msgs,
+				Tools:      []ToolDef{compactionSummaryToolDef},
+				ToolChoice: compactionToolChoice(adapter.Kind),
+				MaxTokens:  passBudget,
 			})
 			if err != nil {
 				lastErr = err
@@ -1194,6 +1229,9 @@ func (a *App) compactConversation(ctx context.Context, adapter ProviderContext, 
 				continue
 			}
 			summary = extractCompactionSummary(resp)
+			if compactionSummaryEchoesAssistant(summary, msgs) {
+				summary = ""
+			}
 			if len(strings.TrimSpace(summary)) >= summaryMinChars {
 				runningSummary = summary
 				break

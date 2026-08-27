@@ -141,12 +141,49 @@ func TestCompactSummaryIsUserRole(t *testing.T) {
 	}
 	c.Compact("summary of work", 1000)
 
-	last := c.Messages[len(c.Messages)-1]
-	if last.Role != RoleUser {
-		t.Fatalf("compaction summary role = %s, want user", last.Role)
+	first := c.Messages[0]
+	if first.Role != RoleUser {
+		t.Fatalf("compaction summary role = %s, want user", first.Role)
 	}
-	if !IsCompactionSummary(last.Content) {
-		t.Fatalf("compaction summary content = %q, want prefix %q", last.Content, CompactionSummaryPrefix)
+	if !IsCompactionSummary(first.Content) {
+		t.Fatalf("compaction summary content = %q, want prefix %q", first.Content, CompactionSummaryPrefix)
+	}
+}
+
+// TestCompactPreservesChronologicalOrderAndPutsSummaryFirst: Compact must
+// not regroup users then assistants (that scrambled the live transcript and
+// parked the handover after the in-flight turn). Retained messages stay in
+// original order; the summary is the first live message so the UI and the
+// next provider request both see a user handoff followed by the recent turn.
+func TestCompactPreservesChronologicalOrderAndPutsSummaryFirst(t *testing.T) {
+	c := &Conversation{
+		Messages: []Message{
+			{ID: "u1", Role: RoleUser, Content: "first question"},
+			{ID: "a1", Role: RoleAssistant, Content: "first answer"},
+			{ID: "u2", Role: RoleUser, Content: "follow up"},
+			{ID: "a2", Role: RoleAssistant, Content: "still working"},
+		},
+	}
+	c.Compact("handoff of the work so far", 10000)
+
+	if len(c.Messages) < 5 {
+		t.Fatalf("messages = %d, want summary + 4 retained", len(c.Messages))
+	}
+	if !IsCompactionSummary(c.Messages[0].Content) {
+		t.Fatalf("first message is not the compaction summary: %q", c.Messages[0].Content)
+	}
+	got := make([]string, 0, 4)
+	for _, m := range c.Messages[1:] {
+		got = append(got, m.ID)
+	}
+	want := []string{"u1", "a1", "u2", "a2"}
+	if len(got) != len(want) {
+		t.Fatalf("retained ids = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("retained ids = %v, want chronological %v", got, want)
+		}
 	}
 }
 
@@ -181,7 +218,7 @@ func TestCompactAlwaysRetainsUserMessage(t *testing.T) {
 	c := &Conversation{Messages: msgs}
 	c.Compact("summary of work done", 1000)
 
-	// After compaction: [user_messages..., recent_messages..., summary].
+	// After compaction: [summary, chronological retained...].
 	// At least one retained message must be RoleUser (the real user
 	// message, not just the compaction summary).
 	realUserCount := 0

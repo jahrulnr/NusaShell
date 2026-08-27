@@ -353,3 +353,44 @@ func TestTruncateReason(t *testing.T) {
 		t.Errorf("truncateReason long must end with ellipsis, got %q", got)
 	}
 }
+
+func TestLearnedParamRegistryOverrideModel(t *testing.T) {
+	r := NewLearnedParamRegistry()
+	r.RecordCapContext("tokenrouter", "qwen/qwen3.8-max-free", "262144", "exceeded context")
+	r.RecordDisableModality("tokenrouter", "qwen/qwen3.8-max-free", "vision", "text-only")
+
+	m := &Model{
+		ID:      "qwen/qwen3.8-max-free",
+		Context: 1_000_000,
+		Vision:  true,
+		Audio:   true,
+	}
+	if !r.OverrideModel(m, "tokenrouter", "qwen/qwen3.8-max-free") {
+		t.Fatal("OverrideModel should have changed the model")
+	}
+	if m.Context != 262144 {
+		t.Errorf("Context = %d, want 262144", m.Context)
+	}
+	if m.Vision {
+		t.Error("Vision should be disabled by learned modality")
+	}
+	if !m.Audio {
+		t.Error("Audio should not be touched")
+	}
+
+	// A larger learned cap should not re-expand a model that was already
+	// capped to a smaller value.
+	r.RecordCapContext("tokenrouter", "qwen/qwen3.8-max-free", "500000", "larger cap")
+	if r.OverrideModel(m, "tokenrouter", "qwen/qwen3.8-max-free") {
+		t.Error("OverrideModel should not change the model when learned cap is larger")
+	}
+	if m.Context != 262144 {
+		t.Errorf("Context should stay at 262144, got %d", m.Context)
+	}
+
+	// Learned overrides must not leak to a different provider+model.
+	other := &Model{ID: "other-model", Context: 1_000_000, Vision: true}
+	if r.OverrideModel(other, "openrouter", "other-model") {
+		t.Error("OverrideModel should not change an unrelated model")
+	}
+}

@@ -53,8 +53,10 @@ type LearnedParam struct {
 }
 
 // LearnedParamRegistry is the persisted set of learned parameter rules,
-// keyed by "<provider>:<model>:<param>". The registry is safe for
-// concurrent use.
+// keyed by "<provider>:<model>:<param>". The registry itself is not
+// internally synchronized; concurrent access is guarded by
+// learnedParamsCache in the application layer, which holds the only
+// registry instance at runtime.
 type LearnedParamRegistry struct {
 	Entries map[string]*LearnedParam `json:"entries"`
 }
@@ -200,6 +202,56 @@ func (r *LearnedParamRegistry) DisabledModalities(provider, model string) []stri
 		}
 	}
 	return out
+}
+
+// OverrideModel applies learned 400-adaptations to a model's metadata in
+// place. It sets Context to the learned cap (when smaller) and disables
+// modalities learned to be unsupported. This makes the model's catalog
+// metadata reflect what the provider actually accepts, so future turns do
+// not have to hit the 400 first. Returns true when at least one field was
+// changed.
+//
+// This only works for models that have catalog metadata (m != nil). Models
+// unknown to the catalog are covered separately by
+// modelCapabilitiesWithLearned (modalities) and resolveContextWindow
+// (context cap) in the application layer; all three are idempotent with
+// each other.
+func (r *LearnedParamRegistry) OverrideModel(m *Model, provider, model string) bool {
+	if m == nil || r == nil {
+		return false
+	}
+	changed := false
+	if learnedCap := r.ContextCap(provider, model); learnedCap > 0 {
+		if m.Context == 0 || learnedCap < m.Context {
+			m.Context = learnedCap
+			changed = true
+		}
+	}
+	for _, mod := range r.DisabledModalities(provider, model) {
+		switch strings.ToLower(mod) {
+		case "vision":
+			if m.Vision {
+				m.Vision = false
+				changed = true
+			}
+		case "audio":
+			if m.Audio {
+				m.Audio = false
+				changed = true
+			}
+		case "video":
+			if m.Video {
+				m.Video = false
+				changed = true
+			}
+		case "document":
+			if m.Document {
+				m.Document = false
+				changed = true
+			}
+		}
+	}
+	return changed
 }
 
 // Lookup returns the learned entry for a specific provider+model+param, or

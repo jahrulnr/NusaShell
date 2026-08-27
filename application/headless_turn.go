@@ -56,7 +56,7 @@ func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust d
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
 
-	a.runTurn(run, provider, apiKey, bareModel, "", asstMsgID, false, modelCapabilities(provider, bareModel))
+	a.runTurn(run, provider, apiKey, bareModel, "", asstMsgID, false, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams))
 
 	saved, err := a.Conversations.Get(convID)
 	if err != nil || saved == nil {
@@ -117,7 +117,9 @@ func (a *App) resolveHeadlessModel(modelID string) (*domain.Provider, string, st
 		if !has && requiresKey(p.Kind) {
 			continue
 		}
-		return p, p.Models[0].ID, key, nil
+		m := &p.Models[0]
+		a.applyLearnedModelOverrides(p, m)
+		return p, m.ID, key, nil
 	}
 	return nil, "", "", fmt.Errorf("no enabled provider with a model is available for headless agent steps")
 }

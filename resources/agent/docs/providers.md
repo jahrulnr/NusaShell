@@ -96,9 +96,14 @@ are merged and tagged `kind: image`. The agent only offers imported models.
 Messages providers bundle Claude model metadata (context window, pricing);
 imported models keep the provider's own ids. If a chat request is rejected
 with an explicit "maximum context length" or "context window" limit, NusaShell
-learns that limit for the provider+model and uses it to cap compaction and
-future turns, so the model catalog does not overstate the actual window
-available on that gateway. Models tagged as embedding-capable appear in the
+learns that limit for the provider+model and updates the model's effective
+context window, so the catalog does not overstate the actual window available
+on that gateway. Likewise, if a model 400s because it is text-only or does
+not support a modality (vision, audio, video, document), NusaShell learns
+that and disables the modality for the provider+model. Future turns apply
+these learned overrides at model resolution time, so requests are built with
+the real capabilities instead of waiting for another 400. Models tagged as
+embedding-capable appear in the
 Embedding model setting for skill and memory search. Models tagged as image
 generators (`kind: image`, including `gpt-image-*` and `dall-e-*` even when
 `/models` omits a kind) appear in Settings → Image generation and back the

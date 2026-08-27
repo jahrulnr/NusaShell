@@ -389,6 +389,9 @@
 .agent-compaction-marker {
   border-left: 2px dashed var(--border-soft);
 }
+.agent-message.assistant.agent-compaction-marker .agent-turn-meta {
+  margin-left: 14px;
+}
 .agent-compaction-label {
   font: 10px var(--font-mono);
   font-weight: 600;
@@ -398,9 +401,6 @@
   margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 1px dashed var(--border-soft);
-}
-.agent-message.assistant.agent-compaction-marker .agent-turn-meta {
-  margin-left: 14px;
 }
 .agent-retry-btn {
   align-self: flex-start;
@@ -1926,3 +1926,71 @@
 }
 .artifact-zoom-btn:hover { border-color: var(--accent); color: var(--accent); }
 .artifact-zoom-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ── Local file text / markdown preview popup ── */
+.agent-text-preview-overlay { padding: 4vh 6vw; }
+.agent-text-preview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(880px, 100%);
+  gap: 12px;
+}
+.agent-text-preview-overlay a.media-zoom-download {
+  color: var(--accent);
+  text-decoration: none;
+}
+.agent-text-preview-frame {
+  flex: 1;
+  width: min(880px, 100%);
+  margin: 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+}
+.agent-text-preview-content {
+  flex: 1;
+  overflow: auto;
+  padding: 18px 22px;
+}
+.agent-text-preview-content pre {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+.agent-text-preview-content pre code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.agent-text-preview-loading {
+  color: var(--text-faint);
+  font: 12px var(--font-mono);
+  text-align: center;
+  padding: 40px;
+}
+.agent-text-preview-error {
+  color: var(--red);
+  font: 12px var(--font-mono);
+  padding: 20px;
+}
+.agent-text-preview-md {
+  font-size: 13px;
+  line-height: 1.6;
+}
+a.agent-local-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+a.agent-local-link:hover {
+  text-decoration-style: solid;
+}
+

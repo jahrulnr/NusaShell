@@ -106,3 +106,35 @@ func TestResolveModelQualifiedNotFound(t *testing.T) {
 		t.Error("expected error for nonexistent provider")
 	}
 }
+
+func TestResolveModelWithMetaAppliesLearnedOverrides(t *testing.T) {
+	providers := &fakeProviderStore{items: map[string]*domain.Provider{
+		"tokenrouter": {ID: "tokenrouter", Enabled: true, Kind: domain.ProviderChat, Models: []domain.Model{{
+			ID:      "qwen/qwen3.8-max-free",
+			Context: 1_000_000,
+			Vision:  true,
+		}}},
+	}}
+	creds := &fakeCreds{keys: map[string]string{"tokenrouter": "tr-key"}}
+	store := &fakeLearnedParamStore{}
+	cache := newLearnedParamsCache(store)
+	cache.LearnFrom400("tokenrouter", "qwen/qwen3.8-max-free",
+		`Requested token count exceeds the model's maximum context length of 262144 tokens.`)
+	cache.LearnFrom400("tokenrouter", "qwen/qwen3.8-max-free",
+		`Qwen3.8 open checkpoint is text-only; messages[131].content[1] must be a text part`)
+
+	app := &App{Providers: providers, Credentials: creds, learnedParams: cache}
+	_, m, _, err := app.resolveModelWithMeta("tokenrouter:qwen/qwen3.8-max-free")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m == nil {
+		t.Fatal("expected model metadata")
+	}
+	if m.Context != 262144 {
+		t.Errorf("learned cap should set Context to 262144, got %d", m.Context)
+	}
+	if m.Vision {
+		t.Error("learned text-only should set Vision=false")
+	}
+}

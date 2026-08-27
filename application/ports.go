@@ -286,6 +286,9 @@ type ChatRequest struct {
 	// "top_p", "top_k", "frequency_penalty", "presence_penalty"). The
 	// adapter omits the field from the wire request when listed here.
 	StripParams []string
+	// ToolChoice forces a specific tool when set (provider-native object).
+	// Compaction uses this to require summary() instead of a free-text reply.
+	ToolChoice any
 }
 
 // PromptCachePolicy is the provider-neutral cache intent. Adapters translate

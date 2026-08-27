@@ -35,7 +35,8 @@ var compactionPrompt = resources.Prompt("compaction")
 // workspace switch for no benefit.
 //
 // Compaction summaries carry role=user (not system) so they appear in the
-// provider request's messages array — see domain.CompactionSummaryPrefix.
+// provider request's messages array as the first live message after
+// compaction — see domain.CompactionSummaryPrefix.
 func buildSystemPrompt(c *domain.Conversation, userPrompt string) string {
 	var sb strings.Builder
 	sb.WriteString(systemPrompt)

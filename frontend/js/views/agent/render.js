@@ -100,6 +100,17 @@ export function renderTodoItem(item, onDelete) {
   );
 }
 
+// reasoningHasVisibleContent returns true when a rendered reasoning block
+// actually contains something the user can see. It strips zero-width and
+// whitespace-only text, and counts visual elements (images, diagrams, tables,
+// horizontal rules, etc.) as visible content.
+export function reasoningHasVisibleContent(content) {
+  if (!content) return false;
+  const text = content.textContent.replace(/[\u200B-\u200D\uFEFF\u2060\u2063]/g, '').trim();
+  if (text.length > 0) return true;
+  return content.querySelector('img, svg, video, canvas, table, hr, .mermaid') !== null;
+}
+
 export function reasoningDisclosure(reasoning) {
   const content = el('div', { class: 'agent-reasoning-content' });
   content.innerHTML = renderMarkdown(reasoning);
@@ -112,6 +123,7 @@ export function reasoningDisclosure(reasoning) {
     ),
     content,
   );
+  details.hidden = !reasoningHasVisibleContent(content);
   details.addEventListener('toggle', () => {
     const hint = details.querySelector('.agent-reasoning-hint');
     if (hint) hint.textContent = details.open ? 'Hide reasoning' : 'Show reasoning';

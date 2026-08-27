@@ -71,6 +71,7 @@ func ToCoreRequest(req ChatRequest, kind domain.ProviderKind, openRouter bool) *
 		}
 		out.Tools = append(out.Tools, tool)
 	}
+	out.ToolChoice = req.ToolChoice
 	if req.PromptCache != nil && req.PromptCache.Mode != "off" {
 		switch kind {
 		case domain.ProviderResponses:

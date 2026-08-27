@@ -256,6 +256,9 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 		})
 	}, func(delta string) {
 		reasoning.WriteString(delta)
+		if !reasoningDeltaVisible(reasoning.String()) {
+			return
+		}
 		a.Bus.Emit(contracts.EventReasoningDelta, contracts.ReasoningDeltaEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID, Text: delta,
 		})
@@ -264,6 +267,13 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 		a.log("warn", "ai", "provider warning: %s", warning)
 	}
 	return streamedTurnRound{Content: content.String(), Reasoning: reasoning.String(), Response: response}, err
+}
+
+// reasoningDeltaVisible is true once accumulated reasoning has something the
+// UI can show. Leading whitespace-only deltas must not open an empty
+// Thinking disclosure.
+func reasoningDeltaVisible(accumulated string) bool {
+	return strings.TrimSpace(accumulated) != ""
 }
 
 // appendContinuationTool appends the synthetic continue_stream tool call

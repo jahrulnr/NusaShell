@@ -64,6 +64,21 @@ test('exec tool with interrupted status renders persisted partial output', () =>
   assert.match(out.textContent, /second chunk/);
 });
 
+test('compaction summary renders above retained chronological turns, not after them', () => {
+  const thread = renderTranscript([
+    { role: 'user', content: 'Compacted context handover:\nGoal: fix ordering. Done: found Compact regrouped users then assistants.', created_at: '2026-08-27T15:50:00Z' },
+    { role: 'user', content: 'keep going', created_at: '2026-08-27T15:51:00Z' },
+    { role: 'assistant', content: 'live delta continues here', created_at: '2026-08-27T15:52:00Z' },
+  ]);
+  const nodes = [...thread.children];
+  assert.equal(nodes[0].classList.contains('agent-compaction-marker'), true, 'handover is the first live bubble');
+  assert.match(nodes[0].textContent, /Compacted context/);
+  assert.equal(nodes[1].classList.contains('user'), true);
+  assert.match(nodes[1].textContent, /keep going/);
+  assert.equal(nodes[2].classList.contains('assistant'), true);
+  assert.match(nodes[2].textContent, /live delta continues here/);
+});
+
 test('renders one model and usage summary for all assistant rounds in a user turn', () => {
   const thread = renderTranscript([
     { role: 'user', content: 'Run the checks', created_at: '2026-08-13T18:00:00Z' },
