@@ -29,7 +29,7 @@ func TestShowHTMLReturnsMetadata(t *testing.T) {
 	if !contains(out, `"height":480`) {
 		t.Errorf("output should contain height, got: %s", out)
 	}
-	if !contains(out, `"path":"`+htmlPath+`"`) {
+	if !contains(out, `"path":"`+jsonPath(htmlPath)+`"`) {
 		t.Errorf("output should include original path, got: %s", out)
 	}
 	// The HTML body must NOT be in the output — it bloats the conversation
@@ -101,7 +101,7 @@ func TestShowImageReturnsMetadata(t *testing.T) {
 	if !contains(out, `"type":"image"`) {
 		t.Errorf("output should contain type:image, got: %s", out)
 	}
-	if !contains(out, `"path":"`+pngPath+`"`) {
+	if !contains(out, `"path":"`+jsonPath(pngPath)+`"`) {
 		t.Errorf("output should include original path, got: %s", out)
 	}
 	if !contains(out, `"media_type":"image/png"`) {
@@ -157,7 +157,7 @@ func TestShowImageSVG(t *testing.T) {
 	if !contains(out, `"media_type":"image/svg+xml"`) {
 		t.Errorf("output should include media_type image/svg+xml, got: %s", out)
 	}
-	if !contains(out, `"path":"`+svgPath+`"`) {
+	if !contains(out, `"path":"`+jsonPath(svgPath)+`"`) {
 		t.Errorf("output should include original path, got: %s", out)
 	}
 }
@@ -240,7 +240,7 @@ func TestShowAudioReturnsMetadata(t *testing.T) {
 	if !contains(out, `"type":"audio"`) {
 		t.Errorf("output should set type=audio, got: %s", out)
 	}
-	if !contains(out, `"path":"`+wavPath+`"`) {
+	if !contains(out, `"path":"`+jsonPath(wavPath)+`"`) {
 		t.Errorf("output should include original path, got: %s", out)
 	}
 	if !contains(out, `"media_type":"audio/wav"`) {
@@ -334,7 +334,7 @@ func TestShowVideoReturnsMetadata(t *testing.T) {
 	if !contains(out, `"type":"video"`) {
 		t.Errorf("output should set type=video, got: %s", out)
 	}
-	if !contains(out, `"path":"`+mp4Path+`"`) {
+	if !contains(out, `"path":"`+jsonPath(mp4Path)+`"`) {
 		t.Errorf("output should include original path, got: %s", out)
 	}
 	if !contains(out, `"media_type":"video/mp4"`) {

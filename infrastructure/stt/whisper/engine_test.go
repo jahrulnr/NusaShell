@@ -53,6 +53,9 @@ func quietEnv(t *testing.T) {
 }
 
 func TestLookupBinaryOverrideManagedAndFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake whisper-cli is a POSIX shell script; managed lookup also expects .exe on Windows")
+	}
 	quietEnv(t)
 	dir := t.TempDir()
 
@@ -102,6 +105,9 @@ func TestResolveModelFallbackAndByName(t *testing.T) {
 }
 
 func TestTranscribeEndToEndEmitsExpectedFlags(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake whisper-cli is a POSIX shell script")
+	}
 	quietEnv(t)
 	dir := t.TempDir()
 	t.Setenv("WFAKE_ARGS", filepath.Join(dir, "args.log"))
@@ -146,6 +152,9 @@ func TestTranscribeEndToEndEmitsExpectedFlags(t *testing.T) {
 }
 
 func TestTranscribeHonorsTranslateAndMissingModel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake whisper-cli is a POSIX shell script")
+	}
 	quietEnv(t)
 	dir := t.TempDir()
 	t.Setenv("WFAKE_ARGS", filepath.Join(dir, "args.log"))

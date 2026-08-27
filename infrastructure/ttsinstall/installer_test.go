@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -36,16 +37,22 @@ func zipBytes(t *testing.T, files map[string]string) []byte {
 }
 
 // fakeBinaryServer serves a deterministic binary archive per platform plus
-// voice model files, so Install can be exercised without network.
+// voice model files, so Install can be exercised without network. The binary
+// entry honors the platform executable name (piper.exe on Windows) so the
+// managed-binary verify gate passes there too.
 func fakeBinaryServer(t *testing.T, dataDir string) *httptest.Server {
 	t.Helper()
+	binName := "piper/piper"
+	if runtime.GOOS == "windows" {
+		binName = "piper/piper.exe"
+	}
 	mux := http.NewServeMux()
 	zipBin := zipBytes(t, map[string]string{
-		"piper/piper":            "#!/bin/sh\necho piper-fake",
+		binName:                  "#!/bin/sh\necho piper-fake",
 		"piper/espeak-ng-data/x": "x",
 	})
 	tarBin := tarGzBytes(t, map[string]string{
-		"piper/piper":            "#!/bin/sh\necho piper-fake",
+		binName:                  "#!/bin/sh\necho piper-fake",
 		"piper/espeak-ng-data/x": "x",
 	})
 	onnx := bytes.Repeat([]byte("ONNX"), 1000) // 4000 bytes
@@ -210,6 +217,9 @@ func TestInstallDownloadsBinaryAndVoice(t *testing.T) {
 // symlinks; the extractor must recreate them or the dynamic linker fails
 // with "file too short" (regression guard).
 func TestInstallRecreatesSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinked .so files are a Linux/macOS tarball concern; the Windows piper build ships a zip without symlinks")
+	}
 	dataDir := t.TempDir()
 	withFakeBin(t, dataDir)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

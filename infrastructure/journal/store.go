@@ -284,17 +284,20 @@ func (s *store) archive(conversationID string) error {
 	if err != nil {
 		return err
 	}
-	defer src.Close()
-
 	dst, err := os.OpenFile(gzPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
+		src.Close()
 		return err
 	}
 	gw := gzip.NewWriter(dst)
-	if _, err := io.Copy(gw, src); err != nil {
+	_, copyErr := io.Copy(gw, src)
+	// Close the source before removing it: the copy is complete here, and
+	// Windows refuses to delete a file that is still open.
+	src.Close()
+	if copyErr != nil {
 		gw.Close()
 		dst.Close()
-		return err
+		return copyErr
 	}
 	if err := gw.Close(); err != nil {
 		dst.Close()

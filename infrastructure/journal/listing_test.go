@@ -50,7 +50,9 @@ func TestListing_snapshotRealDir(t *testing.T) {
 	if _, ok := snap["a.txt"]; !ok {
 		t.Fatal("missing a.txt")
 	}
-	if _, ok := snap[filepath.Join("sub", "b.txt")]; !ok {
+	// Snapshot keys are slash-normalized (filepath.ToSlash) so they are
+	// stable across platforms — look them up with slashes, not filepath.Join.
+	if _, ok := snap["sub/b.txt"]; !ok {
 		t.Fatal("missing sub/b.txt")
 	}
 }
