@@ -261,7 +261,7 @@
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
-.agent-message.user .agent-bubble { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 3px; font-weight: 500; }
+.agent-message.user .agent-bubble { background: var(--accent-glow); border-color: var(--accent-glow); color: var(--text); border-bottom-right-radius: 3px; font-weight: 500; }
 .agent-message.assistant .agent-bubble { white-space: normal; }
 .agent-message.assistant .agent-bubble > :first-child { margin-top: 0; }
 .agent-message.assistant .agent-bubble > :last-child { margin-bottom: 0; }
@@ -282,13 +282,21 @@
   overflow-x: auto;
   padding: 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 0 7px 7px 7px;
-  background: var(--input-bg);
+  border-radius: 1rem;
+  background: var(--bg);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
 }
-.agent-message.assistant .agent-bubble pre code { padding: 0; background: none; }
+.agent-message.assistant .agent-bubble pre::before {
+  display: block;
+  content: "Code";
+  background: var(--accent-wash);
+  padding: 4px 0px 4px 10px;
+  margin: -10px -10px 5px -10px;
+  border-radius: 0px;
+}
+.agent-message.assistant .agent-bubble pre code { padding: 0; background: var(--bg); }
 .agent-message.assistant .agent-bubble a { color: var(--accent); }
 .agent-message.assistant .agent-bubble blockquote { margin: .75em 0; padding: 2px 12px; border-left: 2px solid var(--accent-border); color: var(--text-dim); }
 .agent-message.assistant .agent-bubble table { 
