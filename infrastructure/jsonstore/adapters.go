@@ -64,6 +64,15 @@ func (l *LearnedParams) Save(r *domain.LearnedParamRegistry) error {
 	return l.S.SaveLearnedParams(r)
 }
 
+type ModelOverrides struct{ S *Store }
+
+func (m *ModelOverrides) Load() *domain.ModelOverrideRegistry {
+	return m.S.LoadModelOverrides()
+}
+func (m *ModelOverrides) Save(r *domain.ModelOverrideRegistry) error {
+	return m.S.SaveModelOverrides(r)
+}
+
 type Logs struct{ S *Store }
 
 func (l *Logs) Append(e *domain.LogEntry) { l.S.AppendLog(e) }

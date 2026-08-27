@@ -219,23 +219,26 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			return true, "", err
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-		items := make([]any, 0, len(entries))
+		now := time.Now()
+		lines := make([]string, 0, len(entries))
+		var totalSize int64
 		for _, e := range entries {
-			if len(items) >= fileListEntryLimit {
+			if len(lines) >= fileListEntryLimit {
 				break
 			}
-			kind := "file"
-			if e.IsDir() {
-				kind = "dir"
+			info, ierr := e.Info()
+			if ierr != nil {
+				continue
 			}
-			item := map[string]any{"name": e.Name(), "type": kind}
-			if info, ierr := e.Info(); ierr == nil {
-				item["size"] = info.Size()
-				item["modified"] = info.ModTime().UTC().Format(time.RFC3339)
-			}
-			items = append(items, item)
+			totalSize += info.Size()
+			lines = append(lines, lsLine(info, now))
 		}
-		return true, yamlJSONL(map[string]any{"count": len(entries)}, items), nil
+		meta := map[string]any{"count": len(entries), "total": humanSize(totalSize)}
+		if len(entries) > fileListEntryLimit {
+			meta["truncated"] = true
+			meta["shown"] = len(lines)
+		}
+		return true, yamlMD(meta, strings.Join(lines, "\n")), nil
 
 	case "file_mkdir":
 		path := fileArgStr(args, "path")

@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -362,103 +361,55 @@ func IsCompactionSummary(content string) bool {
 	return strings.HasPrefix(content, CompactionSummaryPrefix)
 }
 
-// compactedUserMessageBudget is the token budget for retaining real user
-// messages across compaction. User messages are the most important context
-// (they carry the user's goal and constraints) and providers require at
-// least one user message in the request, so they get a dedicated budget
-// separate from the recent-message keep budget. Matches codex-rs
-// COMPACT_USER_MESSAGE_MAX_TOKENS.
-const compactedUserMessageBudget = 20000
+// CompactionSplitIndex is the start of the contiguous keep suffix: walk
+// backward from the most recent message until keepTokenBudget is exhausted.
+// Everything before the index is summarized/archived; everything from the
+// index onward is cloned in place. A single oversized latest message is
+// still kept so compaction cannot drop the in-flight turn.
+func (c *Conversation) CompactionSplitIndex(keepTokenBudget int) int {
+	if len(c.Messages) == 0 {
+		return 0
+	}
+	remaining := keepTokenBudget
+	splitIdx := 0
+	for i := len(c.Messages) - 1; i >= 0; i-- {
+		tokens := c.Messages[i].EstimateTokens()
+		if tokens > remaining {
+			if remaining == keepTokenBudget {
+				return i
+			}
+			return i + 1
+		}
+		remaining -= tokens
+		splitIdx = i
+	}
+	return splitIdx
+}
 
-// compactionRetention computes which message indices Compact would retain
-// for the given keepTokenBudget and returns the stripped+truncated retained
-// messages in original chronological order. Used by both Compact (to build
-// the new message slice) and ArchiveMessages (to compute what gets dropped)
-// so the two stay consistent — if they drift, archived chunks will either
-// duplicate retained messages or drop messages that should be archived.
-//
-// Retention policy:
-//  1. Real user messages (excluding prior compaction summaries) within a
-//     dedicated 20k-token budget, scanned backward from the most recent.
-//  2. Recent non-user messages (assistant, tool calls) within keepTokenBudget,
-//     scanned backward from the most recent.
-//
-// The compaction summary itself is not part of retention — Compact prepends it
-// after retention, and ArchiveMessages is called before Compact so the
-// summary does not exist yet.
+// compactionRetention clones the contiguous keep suffix (and drops a prior
+// compaction summary if it sits inside that suffix). Used by Compact and
+// ArchiveMessages so the two stay consistent.
 func (c *Conversation) compactionRetention(keepTokenBudget int) (retained []Message, retainedIndices map[int]bool) {
 	retainedIndices = make(map[int]bool)
-	byIndex := make(map[int]Message)
-
-	remainingUser := compactedUserMessageBudget
-	for i := len(c.Messages) - 1; i >= 0; i-- {
-		if remainingUser <= 0 {
-			break
-		}
+	split := c.CompactionSplitIndex(keepTokenBudget)
+	if split < 0 {
+		split = 0
+	}
+	for i := split; i < len(c.Messages); i++ {
 		m := c.Messages[i]
-		if m.Role != RoleUser || IsCompactionSummary(m.Content) {
+		if IsCompactionSummary(m.Content) {
 			continue
 		}
-		stripped := StripForRetention(m)
-		tokens := m.EstimateTokens()
-		if tokens <= remainingUser {
-			byIndex[i] = stripped
-			retainedIndices[i] = true
-			remainingUser -= tokens
-		} else {
-			stripped = truncateMessageContent(stripped, remainingUser)
-			if stripped.Content != "" || len(stripped.Attachments) > 0 {
-				byIndex[i] = stripped
-				retainedIndices[i] = true
-			}
-			remainingUser = 0
-		}
-	}
-
-	remaining := keepTokenBudget
-	for i := len(c.Messages) - 1; i >= 0; i-- {
-		if remaining <= 0 {
-			break
-		}
-		m := c.Messages[i]
-		if m.Role == RoleUser {
-			continue
-		}
-		stripped := StripForRetention(m)
-		tokens := m.EstimateTokens()
-		if tokens <= remaining {
-			byIndex[i] = stripped
-			retainedIndices[i] = true
-			remaining -= tokens
-		} else {
-			stripped = truncateMessageContent(stripped, remaining)
-			if stripped.Content != "" || len(stripped.Attachments) > 0 {
-				byIndex[i] = stripped
-				retainedIndices[i] = true
-			}
-			remaining = 0
-		}
-	}
-
-	keys := make([]int, 0, len(byIndex))
-	for i := range byIndex {
-		keys = append(keys, i)
-	}
-	sort.Ints(keys)
-	retained = make([]Message, 0, len(keys))
-	for _, i := range keys {
-		retained = append(retained, byIndex[i])
+		retainedIndices[i] = true
+		retained = append(retained, StripForRetention(m))
 	}
 	return retained, retainedIndices
 }
 
-// Compact replaces the oldest messages with a compaction summary and keeps:
-//  1. Real user messages (excluding prior compaction summaries) within a
-//     dedicated 20k-token budget, scanned backward from the most recent.
-//  2. Recent non-user messages (assistant, tool calls) within keepTokenBudget,
-//     scanned backward from the most recent.
-//  3. Those retained messages in original chronological order.
-//  4. The compaction summary as the first live user message.
+// Compact replaces the oldest messages with a compaction summary and keeps
+// a clone of the recent contiguous suffix. The summarizer request is the
+// dropped prefix cloned in order plus a final user handoff command — no
+// role regrouping and no timestamp sort.
 //
 // The summary carries role=user so the provider request always starts with a
 // user message (HTTP 400 "No user query found in messages" otherwise). The
@@ -524,22 +475,4 @@ func StripForRetention(m Message) Message {
 		Status:      m.Status,
 		Model:       m.Model,
 	}
-}
-
-// truncateMessageContent truncates the message content string to fit within
-// the given token budget. Since EstimateTokens is len/4, we keep approximately
-// tokens*4 characters. Attachments are preserved as-is.
-func truncateMessageContent(m Message, tokens int) Message {
-	if tokens <= 0 {
-		m.Content = ""
-		return m
-	}
-	maxBytes := tokens * 4
-	if len(m.Content) > maxBytes {
-		for maxBytes > 0 && !utf8.RuneStart(m.Content[maxBytes]) {
-			maxBytes--
-		}
-		m.Content = m.Content[:maxBytes]
-	}
-	return m
 }

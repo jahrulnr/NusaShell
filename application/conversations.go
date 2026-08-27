@@ -264,6 +264,12 @@ func (a *App) handleConversationsPickWorkspace(req contracts.ConversationIDReque
 	}
 	c.Workspace = workspace
 	c.Touch()
+	// A workspace switch invalidates the persisted hydration checkpoint: its
+	// runtime_context (workspace path) and AGENTS.md slot describe the OLD
+	// workspace. Strip it so the next turn rebuilds a fresh checkpoint for
+	// the new workspace (HasHydration then returns false and the round
+	// re-injects). Same epoch-reset semantics as compaction.
+	c.Messages = domain.FilterHydrationDomainMessages(c.Messages)
 	if err := a.Conversations.Save(c); err != nil {
 		return nil, rpcInternal(err)
 	}

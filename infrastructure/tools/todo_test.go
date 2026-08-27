@@ -41,6 +41,16 @@ func (s *stubTodoPort) Clear(convID string) {
 	delete(s.items, convID)
 	delete(s.briefs, convID)
 }
+func (s *stubTodoPort) ClearBrief(convID string) error {
+	delete(s.briefs, convID)
+	return nil
+}
+func (s *stubTodoPort) PlanPath(convID string) string {
+	if s.briefs[convID] == "" {
+		return ""
+	}
+	return "/tmp/plans/" + convID + ".plan.md"
+}
 func (s *stubTodoPort) Patch(convID string, patches []domain.TodoItem) {
 	if s.items == nil {
 		s.items = map[string][]domain.TodoItem{}
@@ -413,5 +423,100 @@ func TestExecTodoReplaceModeRejectsEmptyContent(t *testing.T) {
 	_, err := toolbox.execTodo(ctx, args)
 	if err == nil {
 		t.Fatal("replace mode should reject empty content")
+	}
+}
+
+// clear_brief removes the brief and returns no plan_path; items survive.
+func TestExecTodoClearBrief(t *testing.T) {
+	todoPort := &stubTodoPort{}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	// Seed a brief + items.
+	seed, _ := json.Marshal(map[string]any{
+		"items": []map[string]any{{"id": "1", "content": "Task", "status": "pending"}},
+		"brief": "## Objective\nX\n\n## Done when\nY",
+	})
+	if _, err := toolbox.execTodo(ctx, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Clear the brief (no items in this call — they must survive).
+	clearArgs, _ := json.Marshal(map[string]any{"clear_brief": true})
+	result, err := toolbox.execTodo(ctx, clearArgs)
+	if err != nil {
+		t.Fatalf("clear_brief: %v", err)
+	}
+	if todoPort.GetBrief("conv_1") != "" {
+		t.Errorf("brief should be cleared, got %q", todoPort.GetBrief("conv_1"))
+	}
+	if len(todoPort.Get("conv_1")) != 1 {
+		t.Errorf("items must survive clear_brief, got %d", len(todoPort.Get("conv_1")))
+	}
+	// No plan_path once the brief is gone.
+	if strings.Contains(result, "plan_path") {
+		t.Errorf("result must not carry plan_path after clear, got:\n%s", result)
+	}
+}
+
+// clear_brief and brief together are rejected (mutually exclusive).
+func TestExecTodoClearBriefAndBriefMutuallyExclusive(t *testing.T) {
+	todoPort := &stubTodoPort{}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	args, _ := json.Marshal(map[string]any{
+		"clear_brief": true,
+		"brief":       "## Objective\nX\n\n## Done when\nY",
+	})
+	if _, err := toolbox.execTodo(ctx, args); err == nil {
+		t.Fatal("clear_brief + brief should be rejected")
+	}
+}
+
+// An empty brief string alone never clears — it means "don't change brief".
+func TestExecTodoEmptyBriefDoesNotClear(t *testing.T) {
+	todoPort := &stubTodoPort{}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	seed, _ := json.Marshal(map[string]any{
+		"items": []map[string]any{{"id": "1", "content": "Task", "status": "pending"}},
+		"brief": "## Objective\nX\n\n## Done when\nY",
+	})
+	if _, err := toolbox.execTodo(ctx, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Patch with an empty brief — must NOT clear.
+	patch, _ := json.Marshal(map[string]any{
+		"mode":  "patch",
+		"items": []map[string]any{{"id": "1", "status": "completed"}},
+		"brief": "",
+	})
+	if _, err := toolbox.execTodo(ctx, patch); err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	if todoPort.GetBrief("conv_1") != "## Objective\nX\n\n## Done when\nY" {
+		t.Errorf("empty brief must not clear, got %q", todoPort.GetBrief("conv_1"))
+	}
+}
+
+// Setting a brief returns plan_path in the result.
+func TestExecTodoReturnsPlanPath(t *testing.T) {
+	todoPort := &stubTodoPort{}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	args, _ := json.Marshal(map[string]any{
+		"items": []map[string]any{{"id": "1", "content": "Task", "status": "pending"}},
+		"brief": "## Objective\nX\n\n## Done when\nY",
+	})
+	result, err := toolbox.execTodo(ctx, args)
+	if err != nil {
+		t.Fatalf("execTodo: %v", err)
+	}
+	if !strings.Contains(result, "plan_path") {
+		t.Errorf("result should carry plan_path when a brief is set, got:\n%s", result)
 	}
 }

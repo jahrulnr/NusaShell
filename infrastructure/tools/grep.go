@@ -1,18 +1,28 @@
 package tools
 
-// Native grep tool: regex search across files with glob filtering,
-// context lines, and structured output modes. Pure Go — no external
-// ripgrep dependency required.
+// Native grep tool: regex search across files, rendered ripgrep-style
+// (file:line:content). Hybrid backend: when the `rg` binary is on PATH we
+// shell out to it (gitignore-aware, parallel, battle-tested regex) and parse
+// its --json stream; otherwise we fall back to a pure-Go walker so the tool
+// stays portable. Both backends feed one shared rg-style formatter, so output
+// is identical regardless of which ran. No ripgrep engine is reimplemented
+// here — rg does the searching, we only shape the output.
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 )
 
 const (
@@ -71,38 +81,50 @@ func executeGrep(argsJSON []byte) (bool, string, error) {
 		maxResults = grepDefaultMaxResults
 	}
 
-	pat := args.Pattern
-	if args.CaseInsensitive {
-		pat = "(?i)" + pat
-	}
-	re, err := regexp.Compile(pat)
-	if err != nil {
-		return true, "", fmt.Errorf("invalid regex: %w", err)
-	}
-
-	info, err := os.Stat(args.Path)
-	if err != nil {
+	if _, err := os.Stat(args.Path); err != nil {
 		return true, "", fmt.Errorf("path not found: %w", err)
 	}
 
-	var matches []grepMatch
-	if !info.IsDir() {
-		matches, err = grepFile(args.Path, re, contextLines)
+	var (
+		matches []grepMatch
+		via     string
+		capped  bool
+	)
+	if rgAvailable() {
+		ms, cp, err := rgSearch(args, mode, contextLines, maxResults)
 		if err != nil {
 			return true, "", err
 		}
+		matches, via, capped = ms, "rg", cp
 	} else {
-		matches, err = grepDir(args.Path, args.GlobPattern, re, contextLines, maxResults)
+		pat := args.Pattern
+		if args.CaseInsensitive {
+			pat = "(?i)" + pat
+		}
+		re, err := regexp.Compile(pat)
+		if err != nil {
+			return true, "", fmt.Errorf("invalid regex: %w", err)
+		}
+		info, err := os.Stat(args.Path)
+		if err != nil {
+			return true, "", fmt.Errorf("path not found: %w", err)
+		}
+		if !info.IsDir() {
+			matches, err = grepFile(args.Path, re, contextLines)
+		} else {
+			matches, err = grepDir(args.Path, args.GlobPattern, re, contextLines, maxResults)
+		}
 		if err != nil {
 			return true, "", err
 		}
+		capped = len(matches) >= maxResults
+		if len(matches) > maxResults {
+			matches = matches[:maxResults]
+		}
+		via = "go"
 	}
 
-	if len(matches) > maxResults {
-		matches = matches[:maxResults]
-	}
-
-	out := formatGrepResults(matches, mode)
+	out := formatRgResults(matches, mode, via, capped)
 	if len(out) > grepMaxOutputChars {
 		omitted := len(out) - grepMaxOutputChars
 		out = truncateGrepOutput(out, grepMaxOutputChars)
@@ -123,6 +145,220 @@ type grepContextLine struct {
 	Content string
 	Before  bool
 }
+
+// --- ripgrep backend (shell-out) -------------------------------------------
+
+var (
+	rgOnce sync.Once
+	rgPath string
+)
+
+// rgAvailable reports whether the ripgrep binary is on PATH (checked once).
+func rgAvailable() bool {
+	rgOnce.Do(func() {
+		if p, err := exec.LookPath("rg"); err == nil {
+			rgPath = p
+		}
+	})
+	return rgPath != ""
+}
+
+// rgJSONLine is the subset of ripgrep's --json records we consume.
+type rgJSONLine struct {
+	Type string `json:"type"`
+	Data struct {
+		Path  struct{ Text string } `json:"path"`
+		Lines struct{ Text string } `json:"lines"`
+		Line  int                   `json:"line_number"`
+	} `json:"data"`
+}
+
+// rgSearch runs ripgrep and parses its --json stream into grepMatch records.
+// The second return reports whether the stream hit maxResults (more matches
+// exist than were kept).
+func rgSearch(args grepArgs, mode string, contextLines, maxResults int) ([]grepMatch, bool, error) {
+	rgArgs := []string{"--json", "--color", "never"}
+	if args.CaseInsensitive {
+		rgArgs = append(rgArgs, "-i")
+	}
+	if args.GlobPattern != "" {
+		rgArgs = append(rgArgs, "-g", args.GlobPattern)
+	}
+	if mode == "content" && contextLines > 0 {
+		rgArgs = append(rgArgs, "-C", strconv.Itoa(contextLines))
+	}
+	rgArgs = append(rgArgs, "-e", args.Pattern, "--", args.Path)
+
+	cmd := exec.Command(rgPath, rgArgs...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, false, err
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, false, err
+	}
+	matches, capped := parseRgJSON(stdout, contextLines, maxResults)
+	waitErr := cmd.Wait()
+	if waitErr != nil && len(matches) == 0 {
+		if ee, ok := waitErr.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			return matches, capped, nil // exit 1 == no matches
+		}
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = waitErr.Error()
+		}
+		return nil, false, fmt.Errorf("rg: %s", msg)
+	}
+	return matches, capped, nil
+}
+
+// parseRgJSON consumes ripgrep --json records, grouping context lines with
+// their match. It drains the stream fully (so cmd.Wait never deadlocks) but
+// stops collecting once maxResults matches are kept; the second return is
+// true when that cap was hit.
+func parseRgJSON(r io.Reader, contextLines, maxResults int) ([]grepMatch, bool) {
+	var matches []grepMatch
+	prevIdx := -1
+	var ctxBuf []grepContextLine
+	capped := false
+
+	// Attach any trailing context as after-context of the last match.
+	flush := func() {
+		if prevIdx >= 0 {
+			for _, c := range ctxBuf {
+				if c.Line > matches[prevIdx].Line {
+					matches[prevIdx].Context = append(matches[prevIdx].Context,
+						grepContextLine{Line: c.Line, Content: c.Content})
+				}
+			}
+		}
+		prevIdx = -1
+		ctxBuf = nil
+	}
+
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), 16*1024*1024) // tolerate very long lines
+	for sc.Scan() {
+		if capped {
+			continue // drain only
+		}
+		var rec rgJSONLine
+		if json.Unmarshal(sc.Bytes(), &rec) != nil {
+			continue
+		}
+		switch rec.Type {
+		case "begin", "end":
+			flush()
+		case "context":
+			ctxBuf = append(ctxBuf, grepContextLine{
+				Line: rec.Data.Line, Content: strings.TrimRight(rec.Data.Lines.Text, "\n"),
+			})
+		case "match":
+			L := rec.Data.Line
+			m := grepMatch{
+				File: rec.Data.Path.Text, Line: L,
+				Content: strings.TrimRight(rec.Data.Lines.Text, "\n"),
+			}
+			for _, c := range ctxBuf {
+				switch {
+				case prevIdx >= 0 && c.Line > matches[prevIdx].Line && c.Line <= matches[prevIdx].Line+contextLines:
+					matches[prevIdx].Context = append(matches[prevIdx].Context,
+						grepContextLine{Line: c.Line, Content: c.Content})
+				case c.Line >= L-contextLines && c.Line < L:
+					m.Context = append(m.Context,
+						grepContextLine{Line: c.Line, Content: c.Content, Before: true})
+				}
+			}
+			ctxBuf = nil
+			matches = append(matches, m)
+			prevIdx = len(matches) - 1
+			if len(matches) >= maxResults {
+				capped = true
+			}
+		}
+	}
+	flush()
+	return matches, capped
+}
+
+// --- shared rg-style formatter ---------------------------------------------
+
+// formatRgResults renders matches ripgrep-style. content: file:line:text with
+// context lines using "-" separators; files_with_matches: one path per line;
+// count: file:N per line. The YAML header carries the tallies, which backend
+// ran (via: rg|go), and capped: true when max_results cut the result short.
+func formatRgResults(matches []grepMatch, mode, via string, capped bool) string {
+	meta := map[string]any{"via": via}
+	if capped {
+		meta["capped"] = true
+	}
+	if len(matches) == 0 {
+		meta["matches"] = 0
+		return yamlBlock(meta)
+	}
+	var b strings.Builder
+	switch mode {
+	case "files_with_matches":
+		seen := make(map[string]bool)
+		var files []string
+		for _, m := range matches {
+			if !seen[m.File] {
+				seen[m.File] = true
+				files = append(files, m.File)
+			}
+		}
+		for _, f := range files {
+			b.WriteString(f)
+			b.WriteByte('\n')
+		}
+		meta["files"] = len(files)
+		return yamlMD(meta, strings.TrimRight(b.String(), "\n"))
+	case "count":
+		counts := make(map[string]int)
+		for _, m := range matches {
+			counts[m.File]++
+		}
+		files := make([]string, 0, len(counts))
+		for f := range counts {
+			files = append(files, f)
+		}
+		sort.Strings(files)
+		total := 0
+		for _, f := range files {
+			fmt.Fprintf(&b, "%s:%d\n", f, counts[f])
+			total += counts[f]
+		}
+		meta["files"] = len(files)
+		meta["total_matches"] = total
+		return yamlMD(meta, strings.TrimRight(b.String(), "\n"))
+	default: // content
+		for _, m := range matches {
+			var before, after []grepContextLine
+			for _, c := range m.Context {
+				if c.Before {
+					before = append(before, c)
+				} else {
+					after = append(after, c)
+				}
+			}
+			sort.Slice(before, func(i, j int) bool { return before[i].Line < before[j].Line })
+			sort.Slice(after, func(i, j int) bool { return after[i].Line < after[j].Line })
+			for _, c := range before {
+				fmt.Fprintf(&b, "%s-%d-%s\n", m.File, c.Line, c.Content)
+			}
+			fmt.Fprintf(&b, "%s:%d:%s\n", m.File, m.Line, m.Content)
+			for _, c := range after {
+				fmt.Fprintf(&b, "%s-%d-%s\n", m.File, c.Line, c.Content)
+			}
+		}
+		meta["matches"] = len(matches)
+		return yamlMD(meta, strings.TrimRight(b.String(), "\n"))
+	}
+}
+
+// --- pure-Go fallback backend ----------------------------------------------
 
 func grepDir(root, glob string, re *regexp.Regexp, contextLines, maxResults int) ([]grepMatch, error) {
 	var matches []grepMatch
@@ -193,57 +429,6 @@ func grepFile(path string, re *regexp.Regexp, contextLines int) ([]grepMatch, er
 		}
 	}
 	return matches, nil
-}
-
-func formatGrepResults(matches []grepMatch, mode string) string {
-	if len(matches) == 0 {
-		return yamlBlock(map[string]any{"matches": 0})
-	}
-	switch mode {
-	case "files_with_matches":
-		seen := make(map[string]bool)
-		var files []string
-		for _, m := range matches {
-			if !seen[m.File] {
-				seen[m.File] = true
-				files = append(files, m.File)
-			}
-		}
-		return yamlBlock(map[string]any{"files": files, "count": len(files)})
-	case "count":
-		counts := make(map[string]int)
-		for _, m := range matches {
-			counts[m.File]++
-		}
-		var files []string
-		for f := range counts {
-			files = append(files, f)
-		}
-		sort.Strings(files)
-		items := make([]any, 0, len(files))
-		for _, f := range files {
-			items = append(items, map[string]any{"file": f, "matches": counts[f]})
-		}
-		return yamlJSONL(map[string]any{"total_matches": len(matches)}, items)
-	default: // content
-		items := make([]any, 0, len(matches))
-		for _, m := range matches {
-			item := map[string]any{"file": m.File, "line": m.Line, "content": m.Content}
-			if len(m.Context) > 0 {
-				var ctx []map[string]any
-				for _, c := range m.Context {
-					entry := map[string]any{"line": c.Line, "content": c.Content}
-					if c.Before {
-						entry["before"] = true
-					}
-					ctx = append(ctx, entry)
-				}
-				item["context"] = ctx
-			}
-			items = append(items, item)
-		}
-		return yamlJSONL(map[string]any{"matches": len(matches)}, items)
-	}
 }
 
 // truncateGrepOutput keeps the first n runes of s without splitting a

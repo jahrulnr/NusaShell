@@ -21,6 +21,12 @@ var continuePrompt = resources.Prompt("continue")
 // to call the summary() tool with the handoff checkpoint text.
 var compactionPrompt = resources.Prompt("compaction")
 
+// compactionHandoffUserPrompt is the last user message on a compaction
+// Complete request. System-prompt instructions are not enough: if the
+// transcript ends on assistant/tool, reasoning models continue the agent
+// turn. This closer makes the current instruction a user turn.
+var compactionHandoffUserPrompt = resources.UserPrompt("compaction")
+
 // buildSystemPrompt composes the agent identity + tool protocol (single
 // system.md) with any system-level skill messages stored in the conversation.
 // The system.md prefix is cache-stable across turns; the user prompt (if set)
@@ -30,7 +36,8 @@ var compactionPrompt = resources.Prompt("compaction")
 //
 // The active workspace is NOT appended here — it travels in the
 // runtime_context hydration slot (see HydrationBuilder.readRuntimeContext),
-// which is re-injected whenever the workspace changes or after compaction.
+// which is re-injected whenever the workspace changes (the pick-workspace
+// handler strips the stale checkpoint) or after compaction.
 // Duplicating it in the system prompt would break cache stability on
 // workspace switch for no benefit.
 //

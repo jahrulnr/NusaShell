@@ -373,14 +373,23 @@ func (r *BackgroundReviewAgent) tryAcquireReview(conversationID string) bool {
 // prevents re-reading, but the cooldown prevents wasted reservation attempts
 // during the burst of turns that cross the threshold). It returns whether
 // new activity was coalesced while the review was active.
+//
+// When activity was coalesced (pending) AND the review succeeded, the
+// cooldown is skipped so the coalesced follow-up review in
+// runReservedReview's defer can reserve immediately. Setting cooldown here
+// would block that follow-up at the very gate this release just opened,
+// leaving the coalesced activity unreviewed. Failed reviews always enter the
+// cooldown regardless of pending, so a failed review is not retried
+// immediately. The follow-up's own release reapplies the cooldown.
 func (r *BackgroundReviewAgent) releaseReview(conversationID string, failed ...bool) bool {
 	r.reviewMu.Lock()
 	defer r.reviewMu.Unlock()
 	pending := r.pending[conversationID]
 	delete(r.inFlight, conversationID)
-	if r.settings.ReviewCooldown > 0 {
+	isFailed := len(failed) > 0 && failed[0]
+	if r.settings.ReviewCooldown > 0 && !(pending && !isFailed) {
 		r.lastReview[conversationID] = r.reviewNow()
-	} else {
+	} else if r.settings.ReviewCooldown <= 0 {
 		delete(r.lastReview, conversationID)
 	}
 	return pending
@@ -720,6 +729,36 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 				})
 				continue
 			}
+			// model_override is a local tool (like review_transcript): it
+			// touches the modelOverridesCache directly and is NOT subject to
+			// reviewAllowedOp. Execute it before the gate. Mutations are
+			// tracked and emitted here because the local path `continue`s
+			// before the dispatcher mutation-tracking block below.
+			if tc.Name == modelOverrideToolName {
+				output, snippet, _ := r.executeModelOverride([]byte(tc.Args))
+				if snippet != "" {
+					mutations = append(mutations, ReviewMutation{
+						Kind:    "model_override",
+						Tool:    tc.Name,
+						Snippet: snippet,
+					})
+					if r.app.Bus != nil {
+						r.app.Bus.Emit(contracts.EventModelOverrideUpdated, map[string]any{
+							"source": "review",
+							"tool":   tc.Name,
+						})
+					}
+				}
+				messages = append(messages, ChatMessage{
+					Role: "tool",
+					ToolResult: &ToolResult{
+						ToolCallID: tc.ID,
+						Name:       tc.Name,
+						Content:    output,
+					},
+				})
+				continue
+			}
 			if !reviewAllowedOp(tc.Name, []byte(tc.Args)) {
 				messages = append(messages, ChatMessage{
 					Role: "tool",
@@ -798,7 +837,7 @@ func isNothingToSave(content string) bool {
 // LLM call — the agent does not need to call it to get the initial data.
 // Whitelisted tools (memory, skill, file_read) come from the Toolbox.
 func (r *BackgroundReviewAgent) reviewTools() []ToolDef {
-	out := []ToolDef{reviewTranscriptToolDef}
+	out := []ToolDef{reviewTranscriptToolDef, modelOverrideToolDef}
 	all := append(r.app.Toolbox.ListTools(), DispatcherToolInfos()...)
 	for _, t := range all {
 		if reviewToolWhitelist()[t.Name] && t.Name != reviewTranscriptToolName {

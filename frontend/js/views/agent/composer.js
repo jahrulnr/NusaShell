@@ -107,12 +107,12 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
     // map (state.running) and the persisted conversation status — after a page
     // refresh, state.runs may still be empty even though a turn is active
     // server-side, and openConversation may not have finished re-attaching.
-    if (state.running || state.conversation?.status === 'running') {
-      await sendSteer(text);
-      return;
-    }
     sending = true;
     try {
+      if (state.running || state.conversation?.status === 'running') {
+        await sendSteer(text);
+        return;
+      }
       if (!state.activeId) await createConversation(text.slice(0, 48));
       const attachments = [...state.attachments];
       const { run_id: runID } = await rpc('agent.turns.start', {
@@ -144,7 +144,6 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
   async function sendSteer(text) {
     if (!state.activeId) return;
     try {
-      state.steerDraft = text;
       const attachments = [...state.attachments];
       await rpc('agent.turns.steer', {
         conversation_id: state.activeId,

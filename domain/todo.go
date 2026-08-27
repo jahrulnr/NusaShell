@@ -100,6 +100,40 @@ func errBriefMissingSection(section string) error {
 	return &briefValidationError{Missing: section}
 }
 
+// BriefSummarySections lists the sections included in a compact brief
+// summary (used when the full brief is too large to inline, e.g. ACP
+// subagent spawn prompts where the plan file may be unreadable).
+var briefSummarySections = []string{"## Objective", "## Done when"}
+
+// SummarizeBrief extracts the Objective and Done when sections of a brief
+// as a compact summary. Sections are returned verbatim (heading included),
+// in order, separated by blank lines. Sections missing from the brief are
+// skipped; a brief without any summary section returns "".
+func SummarizeBrief(brief string) string {
+	lines := strings.Split(brief, "\n")
+	var out []string
+	for _, section := range briefSummarySections {
+		var body []string
+		collecting := false
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if collecting && strings.HasPrefix(trimmed, "## ") {
+				break
+			}
+			if !collecting && trimmed == section {
+				collecting = true
+			}
+			if collecting {
+				body = append(body, line)
+			}
+		}
+		if len(body) > 0 {
+			out = append(out, strings.TrimSpace(strings.Join(body, "\n")))
+		}
+	}
+	return strings.Join(out, "\n\n")
+}
+
 type briefValidationError struct{ Missing string }
 
 func (e *briefValidationError) Error() string {

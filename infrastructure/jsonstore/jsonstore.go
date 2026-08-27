@@ -36,15 +36,16 @@ func clone[T any](v *T) *T {
 type Store struct {
 	dir string
 
-	mu            sync.RWMutex
-	conversations map[string]*domain.Conversation
-	providers     []*domain.Provider
-	acpAgents     []*domain.AcpAgent
-	skills        []*domain.Skill
-	memories      []*domain.MemoryEntry
-	learningEdges []*domain.LearningEdge
-	learnedParams *domain.LearnedParamRegistry
-	settings      domain.Settings
+	mu             sync.RWMutex
+	conversations  map[string]*domain.Conversation
+	providers      []*domain.Provider
+	acpAgents      []*domain.AcpAgent
+	skills         []*domain.Skill
+	memories       []*domain.MemoryEntry
+	learningEdges  []*domain.LearningEdge
+	learnedParams  *domain.LearnedParamRegistry
+	modelOverrides *domain.ModelOverrideRegistry
+	settings       domain.Settings
 
 	logMu sync.Mutex
 }
@@ -168,6 +169,11 @@ func (s *Store) load() error {
 	// learned_params: single JSON registry (dynamic 400-learning)
 	s.learnedParams = domain.NewLearnedParamRegistry()
 	if err := s.loadJSON("learning/provider_params.json", s.learnedParams); err != nil {
+		return err
+	}
+	// model_overrides: single JSON registry (manual catalog corrections)
+	s.modelOverrides = domain.NewModelOverrideRegistry()
+	if err := s.loadJSON("learning/model_overrides.json", s.modelOverrides); err != nil {
 		return err
 	}
 	return nil
@@ -843,4 +849,30 @@ func (s *Store) SaveLearnedParams(r *domain.LearnedParamRegistry) error {
 	stored := clone(r)
 	s.learnedParams = stored
 	return s.writeJSON("learning/provider_params.json", stored)
+}
+
+// ---- model overrides (manual catalog corrections) ----
+
+// LoadModelOverrides returns the current model-override registry. The
+// registry is loaded once at startup and kept in memory; callers mutate
+// the returned pointer and call SaveModelOverrides to persist. Returns an
+// empty (non-nil) registry when no override file exists yet.
+func (s *Store) LoadModelOverrides() *domain.ModelOverrideRegistry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.modelOverrides == nil {
+		return domain.NewModelOverrideRegistry()
+	}
+	// Return a deep copy so callers can mutate without holding the lock.
+	return clone(s.modelOverrides)
+}
+
+// SaveModelOverrides persists the registry atomically to
+// learning/model_overrides.json.
+func (s *Store) SaveModelOverrides(r *domain.ModelOverrideRegistry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored := clone(r)
+	s.modelOverrides = stored
+	return s.writeJSON("learning/model_overrides.json", stored)
 }

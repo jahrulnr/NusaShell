@@ -20,7 +20,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `config/skills.json` | legacy skill metadata catalog (skillfs uses `skills/skills.json`) | JSON |
 | `conversations/*.json` | one file per agent conversation. On load, a leftover `status: running` (process crash mid-turn) is converted to idle and in-flight assistant messages are marked interrupted. A turn that exits without a terminal state (panic recovered in-process) is also healed immediately: the `runTurn` defer resets the conversation to idle and emits a turn-error event, and `agent.turns.start` heals an orphaned running conversation with no active run before starting a new turn instead of returning 409. | JSON |
 | `conversations/*.chunks/` | archived conversation chunks (compaction). Hydration checkpoints (synthetic runtime snapshots) are stripped before archive and summarization; a fresh checkpoint is injected on the next provider round after compaction, including emergency overflow retries. | JSON |
-| `conversations/todos.json` | per-conversation TODO checklists + planning briefs | JSON |
+| `conversations/todos.json` | per-conversation TODO checklists + planning briefs. Each non-empty brief is also mirrored to a markdown plan file so the agent and ACP subagents can `file_read` it: `<workspace>/.nusashell/plans/<conv_id>.plan.md` when the conversation has a workspace, otherwise `conversations/<conv_id>/plan.md` (below). The mirror is a generated runtime artifact — safe to gitignore in user projects (`.nusashell/plans/`); deleting it does not lose data (the JSON store is the source of truth and the next brief update rewrites it). | JSON |
 | `conversations/artifacts.json` | per-conversation interactive artifacts (HTML/CSS/JS) | JSON |
 | `skills/<id>/` | one directory per user/builtin skill: `SKILL.md` + optional support files | markdown + files |
 | `skills/skills.json` | skill metadata (category, state, origin, owned_by, pinned, usage) | JSON |
@@ -34,6 +34,8 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `learning/embeddings.jsonl` | embedding cache for memory/skill entries | JSONL |
 | `learning/trajectory.jsonl` | learning trajectory log (one event per line) | JSONL |
 | `learning/turns.json` | turn counters for review agent scheduling | JSON |
+| `learning/provider_params.json` | auto-learned provider/model params (context caps, disabled modalities from 400 errors) | JSON |
+| `learning/model_overrides.json` | manual model-metadata overrides (review agent corrections; win over catalog + learned) | JSON |
 | `learning/reviews/` | background review agent transcripts (one JSON file per review run; viewable from the Learning log) | JSON |
 | `attachments/<conv_id>/` | user image/file attachments and generated images (`gen-<toolCallID>.<ext>`) | files |
 | `models/tts/<voice>.onnx(.json)` | offline TTS voice models (piper). Installed by the one-click Settings installer or placed manually; `PIPER_VOICES_DIR` overrides this location | binary + JSON |

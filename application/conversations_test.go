@@ -27,6 +27,7 @@ func (f *fakeLogStore) Clear() {}
 type fakeConvStore struct {
 	convs    map[string]*domain.Conversation
 	archived []domain.Message
+	saveErr  error
 }
 
 func (f *fakeConvStore) List() []*domain.Conversation {
@@ -46,6 +47,9 @@ func (f *fakeConvStore) Get(id string) (*domain.Conversation, error) {
 }
 
 func (f *fakeConvStore) Save(c *domain.Conversation) error {
+	if f.saveErr != nil {
+		return f.saveErr
+	}
 	if f.convs == nil {
 		f.convs = map[string]*domain.Conversation{}
 	}
@@ -250,6 +254,58 @@ func TestHandleConversationsPickWorkspaceAcceptsAbsolutePath(t *testing.T) {
 	got, ok := resp.(contracts.ConversationGetResult)
 	if !ok || got.Conversation.Workspace != workspace {
 		t.Fatalf("workspace = %+v, want %q", resp, workspace)
+	}
+}
+
+// TestHandleConversationsPickWorkspaceInvalidatesHydration pins the
+// workspace-switch epoch reset: a persisted hydration checkpoint (stale
+// runtime_context + AGENTS.md for the OLD workspace) is stripped when the
+// workspace changes, so the next turn rebuilds a fresh checkpoint.
+func TestHandleConversationsPickWorkspaceInvalidatesHydration(t *testing.T) {
+	hydID := domain.HydrateToolCallPrefix + "abc123_0"
+	conv := &domain.Conversation{
+		ID:    "conv_1",
+		Title: "Test",
+		Messages: []domain.Message{
+			{ID: "m1", Role: domain.RoleUser, Content: "hello"},
+			{ID: "m2", Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{
+				{ID: hydID, Name: "runtime_context", Args: "{}", Output: `{"workspace":"/old/ws"}`},
+				{ID: domain.HydrateToolCallPrefix + "abc123_1", Name: "file_read",
+					Args: `{"path":"/old/ws/AGENTS.md"}`, Output: "old rules"},
+			}, Status: domain.StatusDone},
+			{ID: "m3", Role: domain.RoleAssistant, Content: "hi there"},
+		},
+	}
+	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{"conv_1": conv}}
+	newWS := t.TempDir()
+	app := &App{
+		Conversations: convStore,
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
+			return newWS, nil
+		}),
+	}
+	if _, rpcErr := app.handleConversationsPickWorkspace(contracts.ConversationIDRequest{ID: "conv_1"}); rpcErr != nil {
+		t.Fatalf("pick workspace: %v", rpcErr)
+	}
+	saved := convStore.convs["conv_1"]
+	if saved.Workspace != newWS {
+		t.Fatalf("workspace = %q, want %q", saved.Workspace, newWS)
+	}
+	// The pure-hydration assistant message is gone; real messages survive.
+	if len(saved.Messages) != 2 {
+		t.Fatalf("expected 2 messages after stripping hydration, got %d", len(saved.Messages))
+	}
+	for _, m := range saved.Messages {
+		for _, tc := range m.ToolCalls {
+			if domain.IsHydrationCallID(tc.ID) {
+				t.Fatalf("hydration call %s survived workspace switch", tc.ID)
+			}
+		}
+	}
+	if saved.Messages[0].Content != "hello" || saved.Messages[1].Content != "hi there" {
+		t.Errorf("real messages lost or reordered: %+v", saved.Messages)
 	}
 }
 

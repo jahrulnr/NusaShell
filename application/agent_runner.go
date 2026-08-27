@@ -91,7 +91,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	a.runsMu.Unlock()
 
 	a.goSafe("agent", func() {
-		a.runTurn(run, provider, apiKey, bareModel, req.Effort, asstMsg.ID, false, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams))
+		a.runTurn(run, provider, apiKey, bareModel, req.Effort, asstMsg.ID, false, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides))
 	})
 	a.log("info", "agent", "turn started: %s (model %s)", run.ID, bareModel)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
@@ -176,7 +176,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	a.runsMu.Unlock()
 
 	a.goSafe("agent", func() {
-		a.runTurn(run, provider, apiKey, bareModel, req.Effort, targetMsgID, continuation, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams))
+		a.runTurn(run, provider, apiKey, bareModel, req.Effort, targetMsgID, continuation, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides))
 	})
 	a.log("info", "agent", "turn retried: %s (model %s)", run.ID, bareModel)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
@@ -313,12 +313,17 @@ func (a *App) handleTurnsActive(req contracts.ConversationIDRequest) (any, *cont
 	if run == nil {
 		return contracts.TurnActiveResult{Active: false}, nil
 	}
-	return contracts.TurnActiveResult{
+	out := contracts.TurnActiveResult{
 		RunID:          run.ID,
 		ConversationID: run.ConversationID,
 		MessageID:      run.MessageID,
 		Active:         true,
-	}, nil
+	}
+	if s := run.queuedSteer(); s != nil {
+		out.QueuedSteer = s.Text
+		out.QueuedSteerID = s.ID
+	}
+	return out, nil
 }
 
 // askPendingEvent maps a domain ask request to the wire event shape shared by
@@ -425,9 +430,6 @@ func (a *App) runConversationID(runID string) string {
 
 func (a *App) handleTurnsSteer(_ context.Context, req contracts.TurnSteerRequest) (any, *contracts.RPCError) {
 	text := strings.TrimSpace(req.Text)
-	if text == "" {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "steer text is required"}
-	}
 	run := a.activeRunForConversation(req.ConversationID)
 	if run == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "no active turn for this conversation"}
@@ -436,23 +438,11 @@ func (a *App) handleTurnsSteer(_ context.Context, req contracts.TurnSteerRequest
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
+	if text == "" && len(attachments) == 0 {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "steer text is required"}
+	}
 	a.saveAttachmentsToDisk(req.ConversationID, attachments)
-	now := time.Now().UTC()
-	steerMsg := domain.Message{
-		ID:          domain.NewID("msg"),
-		Role:        domain.RoleUser,
-		Content:     text,
-		Attachments: attachments,
-		CreatedAt:   now,
-		Status:      domain.StatusDone,
-		Steer:       true,
-	}
-	entry := &SteerEntry{
-		ID:      domain.NewID("steer"),
-		Text:    text,
-		Status:  "queued",
-		Message: steerMsg,
-	}
+	entry := newSteerEntry(text, attachments)
 	if !run.queueSteer(entry) {
 		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "a steer is already queued for this turn"}
 	}
@@ -468,11 +458,12 @@ func (a *App) handleTurnsCancelSteer(req contracts.TurnCancelSteerRequest) (any,
 	if run == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "no active turn for this conversation"}
 	}
-	if !run.cancelSteer() {
+	entry := run.cancelSteerEntry()
+	if entry == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "no queued steer to cancel"}
 	}
 	a.Bus.Emit(contracts.EventSteerCancelled, contracts.SteerEvent{
-		ConversationID: req.ConversationID, Status: "cancelled",
+		ConversationID: req.ConversationID, SteerID: entry.ID, Text: entry.Text, Status: "cancelled", Reason: contracts.SteerCancelReasonUser,
 	})
 	a.log("info", "agent", "steer cancelled for %s", req.ConversationID)
 	return map[string]any{"ok": true, "accepted": true}, nil
@@ -745,13 +736,19 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 			break
 		}
 
-		if err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls, caps, settings); err != nil {
+		hydrationRefreshed, err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls, caps, settings)
+		if err != nil {
 			if run.Ctx.Err() != nil {
 				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, lastUsage.ContextTokens(), model)
 				return false, ""
 			}
 			a.failTurn(run, currentMsgID, err)
 			return false, ""
+		}
+		if hydrationRefreshed {
+			// The todo brief changed (set or cleared) and the stale
+			// checkpoint was stripped — rebuild a fresh one next round.
+			injectHydration = true
 		}
 		toolRounds++
 
@@ -874,10 +871,12 @@ func (a *App) applyQueuedSteer(run *TurnRun) (bool, error) {
 	}
 	c, err := a.Conversations.Get(run.ConversationID)
 	if err != nil {
+		run.requeueSteer(entry)
 		return false, err
 	}
 	c.AddMessage(entry.Message)
 	if err := a.Conversations.Save(c); err != nil {
+		run.requeueSteer(entry)
 		return false, err
 	}
 	a.Bus.Emit(contracts.EventSteerApplied, contracts.SteerEvent{
@@ -955,12 +954,24 @@ func effectiveContextWindow(modelWindow, maxInputTokens int) int {
 // configured max_input_tokens fallback when the model does not advertise one.
 // A learned cap from a provider 400 overflow error overrides the catalog value
 // for the provider+model so future turns do not overestimate the window.
+// A manual context override (set via the review agent) wins over the learned
+// cap — the provider clone already carries it, so we skip the learned cap
+// when one is present to avoid clobbering the operator's correction.
 func (a *App) resolveContextWindow(provider *domain.Provider, model string, settings domain.Settings) int {
 	cw := domain.ResolveContextWindow(provider, model, settings)
 	if a.learnedParams != nil {
 		if cap := a.learnedParams.ContextCap(provider.ID, model); cap > 0 && cap < cw {
 			a.log("info", "learning", "capping context window for %s/%s to %d from learned 400", provider.ID, model, cap)
-			return cap
+			cw = cap
+		}
+	}
+	// Manual override is applied last and wins over both the catalog value
+	// and the learned cap. Applied directly (not just via the mutated clone)
+	// so it also covers models absent from the catalog and any resolve path
+	// that did not pre-mutate the provider.
+	if a.modelOverrides != nil {
+		if o := a.modelOverrides.Get(provider.ID, model); o != nil && o.Context != nil {
+			cw = *o.Context
 		}
 	}
 	return cw
@@ -1094,34 +1105,23 @@ func (a *App) compactConversation(ctx context.Context, adapter ProviderContext, 
 		effectiveKeepBudget = 1000
 	}
 
-	// Calculate the split point: iterate backward from the most recent message,
-	// counting tokens until the keep budget is exhausted. Everything before the
-	// split point gets summarized; everything after is retained by Compact.
-	// Token cost is computed from the original message (including tool calls)
-	// so tool-heavy messages are not undercounted — matching Compact/ArchiveMessages.
-	remaining := effectiveKeepBudget
-	splitIdx := 0
-	for i := len(c.Messages) - 1; i >= 0; i-- {
-		tokens := c.Messages[i].EstimateTokens()
-		if tokens > remaining {
-			splitIdx = i + 1
-			break
-		}
-		remaining -= tokens
-		splitIdx = i
-	}
-	if splitIdx < 0 {
-		splitIdx = 0
-	}
+	// Clone a contiguous prefix to summarize. Compact/ArchiveMessages use
+	// the same split so keep is a suffix clone — not "all users + recent
+	// assistants", which piled users on top of the handoff request.
+	splitIdx := c.CompactionSplitIndex(effectiveKeepBudget)
 
 	toCompact := filterHydrationDomainMessages(c.Messages[:splitIdx])
 	runningSummary := c.Summary
 
 	remainingMsgs := make([]domain.Message, 0, len(toCompact))
 	for _, m := range toCompact {
-		if m.Role != domain.RoleSystem {
-			remainingMsgs = append(remainingMsgs, m)
+		if m.Role == domain.RoleSystem {
+			continue
 		}
+		if domain.IsCompactionSummary(m.Content) {
+			continue
+		}
+		remainingMsgs = append(remainingMsgs, m)
 	}
 	if len(remainingMsgs) == 0 {
 		return "", nil
@@ -1201,6 +1201,7 @@ func (a *App) compactConversation(ctx context.Context, adapter ProviderContext, 
 				}
 			}
 		}
+		msgs = appendCompactionHandoffUser(msgs)
 		// Quality guard: retry up to compactionSummaryMaxRetries times when
 		// the summary is too short. Each retry doubles the max_output_tokens
 		// budget so a reasoning model has more room for content after
@@ -1323,7 +1324,8 @@ func compactionPassAvailable(contextWindow int, runningSummary string, summaryMa
 	if runningSummary != "" {
 		summaryTokens += domain.EstimateTokens(compactionSummaryPrefix)
 	}
-	available := contextWindow - compactionSystemReserve - summaryTokens - summaryMaxOut
+	handoffTokens := domain.EstimateTokens(strings.TrimSpace(compactionHandoffUserPrompt))
+	available := contextWindow - compactionSystemReserve - summaryTokens - summaryMaxOut - handoffTokens
 	if available < 1000 {
 		return 1000
 	}
@@ -1345,6 +1347,16 @@ func takeCompactionChunk(msgs []domain.Message, available int) (chunk, rest []do
 		currentTokens += mt
 	}
 	return current, nil
+}
+
+// appendCompactionHandoffUser appends the handoff command as the last user
+// message so the compaction model is not left on an assistant/tool turn.
+func appendCompactionHandoffUser(msgs []ChatMessage) []ChatMessage {
+	closer := strings.TrimSpace(compactionHandoffUserPrompt)
+	if closer == "" {
+		return msgs
+	}
+	return append(msgs, ChatMessage{Role: "user", Content: closer})
 }
 
 // persistCompactedConversation archives dropped messages (without hydration
@@ -1524,7 +1536,7 @@ func (a *App) discardQueuedSteer(run *TurnRun) {
 		return
 	}
 	a.Bus.Emit(contracts.EventSteerCancelled, contracts.SteerEvent{
-		ConversationID: run.ConversationID, Status: "cancelled", Text: entry.Text,
+		ConversationID: run.ConversationID, SteerID: entry.ID, Text: entry.Text, Status: "cancelled", Reason: contracts.SteerCancelReasonDiscarded,
 	})
 }
 
@@ -1584,13 +1596,16 @@ type ModelCapabilities struct {
 // to false so the first request strips those attachments instead of
 // waiting for a 400 and retrying.
 func modelCapabilities(provider *domain.Provider, model string) ModelCapabilities {
-	return modelCapabilitiesWithLearned(provider, model, nil)
+	return modelCapabilitiesWithLearned(provider, model, nil, nil)
 }
 
 // modelCapabilitiesWithLearned is the testable form of modelCapabilities
 // that accepts a learnedParamsCache for applying learned disabled
-// modalities. When cache is nil, no learned overrides are applied.
-func modelCapabilitiesWithLearned(provider *domain.Provider, model string, cache *learnedParamsCache) ModelCapabilities {
+// modalities and a modelOverridesCache for applying manual overrides. When
+// cache is nil, no learned overrides are applied; when manual is nil, no
+// manual overrides are applied. Precedence: catalog → learned → manual
+// (manual is applied last so it always wins).
+func modelCapabilitiesWithLearned(provider *domain.Provider, model string, cache *learnedParamsCache, manual *modelOverridesCache) ModelCapabilities {
 	dc := domain.ModelCapabilitiesOf(provider, model)
 	caps := ModelCapabilities{Vision: dc.Vision, Audio: dc.Audio, Video: dc.Video, Document: dc.Document}
 	if provider != nil {
@@ -1619,6 +1634,28 @@ func modelCapabilitiesWithLearned(provider *domain.Provider, model string, cache
 			caps.Video = false
 		case "document":
 			caps.Document = false
+		}
+	}
+	// Manual overrides win over both the catalog and learned adaptations.
+	// Applied last so an operator/review-agent correction is never clobbered
+	// by a learned rule re-derived from the (already mutated) provider.
+	if manual != nil && provider != nil {
+		if o := manual.Get(provider.ID, model); o != nil {
+			if o.Vision != nil {
+				caps.Vision = *o.Vision
+			}
+			if o.Audio != nil {
+				caps.Audio = *o.Audio
+			}
+			if o.Video != nil {
+				caps.Video = *o.Video
+			}
+			if o.Document != nil {
+				caps.Document = *o.Document
+			}
+			if o.Reasoning != nil {
+				caps.Reasoning = *o.Reasoning
+			}
 		}
 	}
 	return caps

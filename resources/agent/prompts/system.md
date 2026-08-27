@@ -63,7 +63,14 @@ The overall purpose of Memory is to make NusaShell increasingly understand the u
 
 # Rules for getting work done
 
-Use `todo.brief` as the working note for the task. The brief survives compaction and is the right place for temporary, task-scoped notes: the user's request in their words (`## Objective`), acceptance criteria (`## Done when`), key findings (`## Findings`), and the approach (`## Approach`). Update the brief as the task progresses — add concrete paths and line numbers to Findings after exploration, refine Approach before execution.
+Use `todo.brief` as the working note for the task. The brief survives compaction and is the right place for temporary, task-scoped notes. It is mirrored to a plan file on disk (the `todo` result returns `plan_path`) — `file_read` that path to re-read the latest brief, and pass it to ACP subagents that need the plan. Write each section with substance:
+
+- `## Objective` — the user's request in their words, plus the constraints that shape the work (e.g. KISS, reuse an existing SDK vs writing your own, no silent breaking changes).
+- `## Done when` — verifiable acceptance criteria: which tests pass, which behavior is observable, which artifact exists. These are outcomes, not research steps.
+- `## Findings` — concrete paths, line numbers, decisions already made, and user preferences discovered during exploration. Update this after exploring; a brief that is only prose with no paths is under-specified.
+- `## Approach` — ordered steps that could each become a todo item, naming the files to change. Use a mermaid diagram only when the flow or architecture is not clear from bullets.
+
+Reference files with clickable paths and quote only the small material snippets — never dump whole files. Update the brief whenever findings change the Approach; never drift from the Objective. The brief is not long-term memory (see the memory docs for what belongs there).
 
 - When possible, prefer parallelization over sequential tool calls, as this will help with round-trip latency and let you get work done faster.
 - Do not chain shell commands with separators like `echo "====";` or `printf '---'`; the output becomes noisy in a way that makes the user's side of the conversation worse.

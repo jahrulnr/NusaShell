@@ -19,5 +19,9 @@
 .env
 .env.local
 
+# NusaShell runtime artifacts (todo brief plan mirrors, generated per
+# conversation — never commit)
+.nusashell/
+
 # Frontend E2E dependencies
 node_modules/

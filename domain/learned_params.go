@@ -287,6 +287,25 @@ func (r *LearnedParamRegistry) Remove(provider, model, param string) bool {
 	return true
 }
 
+// Sanitize drops entries whose param is a prose stopword — garbage learned
+// by older classifier versions (e.g. param="this" from Gemini's "This is
+// required" phrasing). Such entries can never apply to a real request and
+// only pollute the registry. Returns the number of entries removed.
+// Idempotent: a second pass removes nothing.
+func (r *LearnedParamRegistry) Sanitize() int {
+	if r == nil || r.Entries == nil {
+		return 0
+	}
+	removed := 0
+	for k, e := range r.Entries {
+		if isParamStopword(e.Param) {
+			delete(r.Entries, k)
+			removed++
+		}
+	}
+	return removed
+}
+
 // Len returns the number of learned entries.
 func (r *LearnedParamRegistry) Len() int {
 	if r == nil || r.Entries == nil {
@@ -317,7 +336,48 @@ var unsupportedParamRe = regexp.MustCompile(`(?i)unsupported\s+parameter\w*(?:\s
 
 // requiredFieldRe matches "reasoning_content must be passed back",
 // "reasoning_content is required", "field 'reasoning_content' is required".
+//
+// LIMITATION: it captures the single identifier immediately before the
+// "is required" phrase. When the upstream error separates the field name
+// from that phrase with prose — e.g. Gemini's "...missing a thought_signature
+// in functionCall parts. This is required for tools..." — the captured word
+// is the pronoun "This", not the field. missingFieldRe (checked first) and
+// the isParamStopword guard (below) cover that case.
 var requiredFieldRe = regexp.MustCompile(`(?i)(?:field\s+['"]?)?([A-Za-z_][A-Za-z0-9_]*)(?:['"]?)?\s+(?:must be passed back|is required|is a required field|must be provided)`)
+
+// missingFieldRe matches the "missing <field>" family of errors where the
+// required field directly follows the word "missing" (Gemini-style). This is
+// a stronger signal than requiredFieldRe for those bodies because it names
+// the field itself rather than the word before "is required". Examples:
+//   - "Function call is missing a thought_signature in functionCall parts"
+//   - "missing required field 'reasoning_content'"
+//   - "missing parameter api_key"
+//   - "The request is missing an auth_token"
+var missingFieldRe = regexp.MustCompile(`(?i)missing\s+(?:(?:a|an|the)\s+)?(?:required\s+)?(?:field\s+|param(?:eter)?\s+)?['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+
+// paramStopwords are words that can occupy the capture slot of the
+// required-field / missing-field regexes but are never a real parameter
+// name — pronouns, determiners, and other function words that appear in
+// prose around the actual field ("This is required...", "It must be
+// provided"). Capturing one of these is a false positive; the classifier
+// rejects it instead of recording garbage like param="this".
+var paramStopwords = map[string]bool{
+	"this": true, "that": true, "it": true, "its": true,
+	"these": true, "those": true, "there": true, "here": true,
+	"a": true, "an": true, "the": true,
+	"and": true, "or": true, "but": true, "not": true,
+	"is": true, "are": true, "was": true, "were": true, "be": true,
+	"he": true, "she": true, "they": true, "we": true, "you": true,
+	"his": true, "her": true, "their": true, "our": true, "your": true,
+	"which": true, "who": true, "what": true, "when": true,
+	"where": true, "why": true, "how": true,
+}
+
+// isParamStopword reports whether a captured identifier is a prose
+// function-word rather than a plausible parameter name.
+func isParamStopword(param string) bool {
+	return paramStopwords[strings.ToLower(strings.TrimSpace(param))]
+}
 
 // textOnlyModelRe matches "text-only" in error messages from text-only
 // models that reject non-text content (images, audio, video). Examples:
@@ -361,18 +421,26 @@ func ExtractContextLimit(body string) (int, string, bool) {
 // a known pattern.
 //
 // Order matters:
-//  1. "required field" pattern — strongest signal (a model explicitly
-//     requiring a field like reasoning_content).
-//  2. "text-only" pattern — the model rejects all non-text content; we
+//  1. "missing <field>" pattern — names the required field directly
+//     (Gemini-style "missing a thought_signature"). Checked before the
+//     required-field pattern because it captures the field itself, not the
+//     word that happens to sit before "is required".
+//  2. "required field" pattern — a model explicitly requiring a field like
+//     reasoning_content. Captured identifiers that are prose stopwords
+//     ("this", "it", ...) are rejected as false positives.
+//  3. "text-only" pattern — the model rejects all non-text content; we
 //     disable the vision modality (most common trigger) and retry.
-//  3. "unsupported parameter" pattern — the model rejects a specific
+//  4. "unsupported parameter" pattern — the model rejects a specific
 //     parameter; we strip it and retry.
 func Classify400Error(body string) (LearnedParamAction, string) {
 	b := strings.TrimSpace(body)
 	if b == "" {
 		return "", ""
 	}
-	if m := requiredFieldRe.FindStringSubmatch(b); len(m) > 1 {
+	if m := missingFieldRe.FindStringSubmatch(b); len(m) > 1 && !isParamStopword(m[1]) {
+		return LearnedActionInject, strings.ToLower(m[1])
+	}
+	if m := requiredFieldRe.FindStringSubmatch(b); len(m) > 1 && !isParamStopword(m[1]) {
 		return LearnedActionInject, strings.ToLower(m[1])
 	}
 	if textOnlyModelRe.MatchString(b) {

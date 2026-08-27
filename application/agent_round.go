@@ -502,7 +502,7 @@ type toolExecResult struct {
 	atts   []domain.Attachment
 }
 
-func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall, caps ModelCapabilities, settings domain.Settings) error {
+func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall, caps ModelCapabilities, settings domain.Settings) (hydrationRefreshed bool, err error) {
 	if err := run.Ctx.Err(); err != nil {
 		if len(toolCalls) > 0 {
 			conversation, gerr := a.Conversations.Get(run.ConversationID)
@@ -517,7 +517,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 				_ = a.Conversations.Save(conversation)
 			}
 		}
-		return err
+		return false, err
 	}
 
 	// Phase 1: execute all tool calls concurrently (bounded). Only tool
@@ -525,6 +525,14 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 	// so each backing store's own lock is sufficient and there are no
 	// read-modify-write races on the conversation snapshot. Results are kept in
 	// tool-call order for deterministic persistence in phase 2.
+	//
+	// Capture the brief BEFORE phase 1 runs the tools: a todo tool call in
+	// this round may set or clear the brief, and phase 2 compares against
+	// this pre-execution snapshot to detect the change.
+	briefBefore := ""
+	if a.Todos != nil {
+		briefBefore = a.Todos.GetBrief(run.ConversationID)
+	}
 	results := make([]toolExecResult, len(toolCalls))
 	var wg sync.WaitGroup
 	limit := settings.MaxParallelTools
@@ -548,8 +556,9 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 	// race with each other.
 	conversation, err := a.Conversations.Get(run.ConversationID)
 	if err != nil {
-		return err
+		return false, err
 	}
+	todoTouched := false
 	for i := range toolCalls {
 		toolCall := toolCalls[i]
 		r := results[i]
@@ -557,6 +566,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 		// When the model updates the todo checklist, emit a dedicated event so
 		// the UI can re-render the strip without polling agent.todos.get.
 		if toolCall.Name == "todo" && r.status == domain.ToolOK && a.Todos != nil {
+			todoTouched = true
 			items := a.Todos.Get(run.ConversationID)
 			dtos := make([]contracts.TodoItemDTO, 0, len(items))
 			for _, item := range items {
@@ -571,13 +581,23 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 			})
 		}
 	}
+	// A brief change (set or cleared) invalidates the persisted hydration
+	// checkpoint's todo_list slot, which still carries the OLD brief. Strip
+	// the checkpoint so the next round rebuilds a fresh one with the current
+	// brief — same epoch-reset semantics as a workspace switch. Pure item
+	// patches that leave the brief untouched do NOT strip (the checkpoint's
+	// todo_list brief is still accurate), avoiding needless rebuilds.
+	if todoTouched && a.Todos != nil && a.Todos.GetBrief(run.ConversationID) != briefBefore {
+		conversation.Messages = domain.FilterHydrationDomainMessages(conversation.Messages)
+		hydrationRefreshed = true
+	}
 	if saveErr := a.Conversations.Save(conversation); saveErr != nil {
-		return saveErr
+		return false, saveErr
 	}
 	if err := run.Ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
-	return nil
+	return hydrationRefreshed, nil
 }
 
 // runOneTool executes a single tool call and returns its result. It emits the
@@ -858,22 +878,30 @@ func (a *App) incrementToolCallCounter(conversationID string) {
 // prompt. It is fire-and-forget — it never blocks or fails the parent
 // turn.
 func (a *App) flushLearningReview(conversationID string, reason string) {
-	a.log("info", "learning", "review triggered: conv=%s reason=%s", conversationID, reason)
 	if a.ReviewAgent == nil {
 		return
 	}
-	// Reserve synchronously before launching the worker. This makes the
-	// counter transition deterministic: rejected/coalesced triggers retain
-	// their evidence, while a trigger that wins the slot resets counters
-	// immediately. The LLM work remains fire-and-forget below.
-	if !a.ReviewAgent.reserveReview(conversationID) {
-		return
-	}
+	// Reset the counters on every trigger attempt, including deferred ones.
+	// The counters measure "activity since the last trigger attempt"; once an
+	// attempt is made (even if rejected by cooldown/in-flight), the activity
+	// is acknowledged. Without this reset the counters stay at/above the
+	// threshold so every subsequent tool call/turn re-enters this function,
+	// flooding the learning log with "review triggered" events for the whole
+	// cooldown window. A deferred trigger still leaves the pending flag set
+	// inside acquireReview, so activity that arrived while a review was
+	// running is picked up by the coalesced follow-up after release.
 	a.learningMu.Lock()
 	a.turnsSinceReview[conversationID] = 0
 	a.toolCallsSinceReview[conversationID] = 0
 	a.learningMu.Unlock()
 	a.saveTurnCounters()
+	// Reserve synchronously before launching the worker. Rejected triggers
+	// log "review deferred" (coalesced) inside reserveReviewWithReason; only a
+	// trigger that wins the slot logs "review triggered" and launches work.
+	if !a.ReviewAgent.reserveReview(conversationID) {
+		return
+	}
+	a.log("info", "learning", "review triggered: conv=%s reason=%s", conversationID, reason)
 	a.goSafe("learning", func() {
 		if a.Bus != nil {
 			a.Bus.Emit(contracts.EventLearningReviewStarted, contracts.LearningReviewEvent{

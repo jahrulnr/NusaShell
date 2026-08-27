@@ -1617,7 +1617,8 @@ func TestTodoToolDescriptionMatchesSingleHydrationCheckpoint(t *testing.T) {
 // already knows what it set, and the UI gets the full list via the
 // agent.todo.updated event.
 func TestTodoToolResultDoesNotEchoItemsOrBrief(t *testing.T) {
-	store := jsonstore.NewTodoStore(filepath.Join(t.TempDir(), "todos.json"))
+	dir := t.TempDir()
+	store := jsonstore.NewTodoStore(filepath.Join(dir, "todos.json"), dir, nil)
 	tb := &Toolbox{Todos: store}
 	ctx := application.WithConversationID(context.Background(), "conv_echo")
 	args := `{"items":[{"id":"a","content":"do thing one","status":"pending"},{"id":"b","content":"do thing two with a long description that should not be echoed back","status":"in_progress"}],"brief":"## Objective\nBuild the feature\n## Done when\nTests pass"}`

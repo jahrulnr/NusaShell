@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestIsValidTodoStatus(t *testing.T) {
 	cases := []struct {
@@ -68,5 +71,34 @@ func TestCountOpenTodosAllCompleted(t *testing.T) {
 	}
 	if got := CountOpenTodos(items); got != 0 {
 		t.Errorf("CountOpenTodos = %d, want 0", got)
+	}
+}
+
+func TestSummarizeBrief(t *testing.T) {
+	brief := "## Objective\nBuild the API\n\n## Done when\nTests pass\n\n## Findings\npath/to/file.go:42\n\n## Approach\n1. step one"
+	got := SummarizeBrief(brief)
+	if !strings.Contains(got, "## Objective\nBuild the API") {
+		t.Errorf("summary missing Objective section:\n%s", got)
+	}
+	if !strings.Contains(got, "## Done when\nTests pass") {
+		t.Errorf("summary missing Done when section:\n%s", got)
+	}
+	// Findings/Approach must NOT leak into the compact summary.
+	if strings.Contains(got, "Findings") || strings.Contains(got, "Approach") {
+		t.Errorf("summary must only carry Objective + Done when:\n%s", got)
+	}
+}
+
+func TestSummarizeBriefMissingSections(t *testing.T) {
+	if got := SummarizeBrief("just prose, no sections"); got != "" {
+		t.Errorf("summary of section-less brief = %q, want empty", got)
+	}
+	if got := SummarizeBrief(""); got != "" {
+		t.Errorf("summary of empty brief = %q, want empty", got)
+	}
+	// Only Objective present: summary carries just that section.
+	got := SummarizeBrief("## Objective\nOnly this")
+	if got != "## Objective\nOnly this" {
+		t.Errorf("summary = %q, want only the Objective section", got)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -600,13 +601,29 @@ func (a *App) SpawnSubagents(ctx context.Context, argsJSON []byte) (string, erro
 		return "", fmt.Errorf("workspace must be an absolute path")
 	}
 
+	// Parent plan handoff: ACP subagents do not receive the parent
+	// conversation, so a running task's plan must travel explicitly. When
+	// the parent conversation has a todo brief, point the subagent at the
+	// mirrored plan file (read-first); when the file is missing or the
+	// subagent runs in a different workspace (sandbox may refuse paths
+	// outside it), inline a compact Objective + Done when summary instead
+	// of relying on the subagent's memory of a plan it never saw.
+	prompt := args.Prompt
+	if a.Todos != nil {
+		if cid := ConversationIDFromContext(ctx); cid != "" {
+			if brief := a.Todos.GetBrief(cid); strings.TrimSpace(brief) != "" {
+				prompt = withParentPlan(prompt, a.Todos.PlanPath(cid), brief, workspace)
+			}
+		}
+	}
+
 	results := make([]domain.AcpSpawned, count)
 	for i := 0; i < count; i++ {
 		run, err := a.Acp.Spawn(ctx, AcpSpawnRequest{
 			Agent:            agent,
 			ConversationID:   ConversationIDFromContext(ctx),
 			ParentToolCallID: ToolCallIDFromContext(ctx),
-			Prompt:           args.Prompt,
+			Prompt:           prompt,
 			Workspace:        workspace,
 			ModeID:           args.ModeID,
 			ModelID:          args.ModelID,
@@ -623,6 +640,37 @@ func (a *App) SpawnSubagents(ctx context.Context, argsJSON []byte) (string, erro
 	// triggers a new turn (tool injection) so the parent agent processes
 	// the result without blocking.
 	return domain.FormatSpawnResult(results), nil
+}
+
+// withParentPlan appends the parent conversation's plan context to a
+// subagent prompt. planPath is the mirrored plan file ("" when unresolvable);
+// brief is the full brief body. When the plan file exists on disk, the
+// subagent is told to read it first. When the file is missing or the
+// subagent workspace differs from the plan file's location (a sandboxed
+// agent may refuse paths outside its workspace), a compact Objective +
+// Done when summary is inlined instead so the plan intent always travels.
+func withParentPlan(prompt, planPath, brief, workspace string) string {
+	var sb strings.Builder
+	sb.WriteString(prompt)
+	sb.WriteString("\n\n")
+	if planPath != "" {
+		if _, err := os.Stat(planPath); err == nil {
+			sb.WriteString("Parent plan file (read this first): " + planPath + "\n")
+			if workspace != "" && !strings.HasPrefix(planPath, workspace+string(os.PathSeparator)) {
+				// The plan file lives outside the subagent workspace;
+				// include a summary as a fallback in case the sandbox
+				// refuses to read it.
+				if summary := domain.SummarizeBrief(brief); summary != "" {
+					sb.WriteString("\nParent plan summary (in case the file is unreadable):\n" + summary + "\n")
+				}
+			}
+			return sb.String()
+		}
+	}
+	if summary := domain.SummarizeBrief(brief); summary != "" {
+		sb.WriteString("Parent plan summary:\n" + summary + "\n")
+	}
+	return sb.String()
 }
 
 func (a *App) SteerAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
@@ -861,7 +909,7 @@ func (a *App) triggerSubagentCompletionTurn(conversationID string) {
 	a.runsMu.Unlock()
 
 	bareModel := strings.TrimSpace(strings.TrimPrefix(model, provider.ID+"/"))
-	caps := modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams)
+	caps := modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides)
 
 	a.goSafe("agent", func() {
 		a.runTurn(run, provider, apiKey, bareModel, effort, asstMsg.ID, false, caps)

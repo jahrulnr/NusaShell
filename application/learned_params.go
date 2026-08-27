@@ -23,8 +23,16 @@ func newLearnedParamsCache(store LearnedParamStore) *learnedParamsCache {
 	if store == nil {
 		return &learnedParamsCache{registry: domain.NewLearnedParamRegistry()}
 	}
+	registry := store.Load()
+	// Self-heal garbage entries learned by older classifier versions
+	// (e.g. param="this" from Gemini's "This is required" phrasing). The
+	// sanitized registry is persisted back so the cleanup survives the
+	// next restart and does not repeat.
+	if removed := registry.Sanitize(); removed > 0 && store != nil {
+		_ = store.Save(registry)
+	}
 	return &learnedParamsCache{
-		registry: store.Load(),
+		registry: registry,
 		store:    store,
 	}
 }

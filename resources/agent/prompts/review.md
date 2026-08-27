@@ -179,6 +179,34 @@ If `skill-creator` is not installed, save the procedure as a fragment with
 `category="task"` and tags `["skill-candidate"]` so a future review can
 promote it to a skill.
 
+## Model metadata correction
+
+Sometimes the transcript shows a model capability error that is really a
+metadata problem: the catalog says a model has no vision, a wrong context
+window, or a wrong max output, and the provider rejects or truncates the
+request because of it. Auto-learn already captures these from error logs,
+but it can learn the wrong value (a false positive) or miss the correction
+entirely.
+
+When the transcript contains clear evidence that a model's metadata is
+wrong — e.g. an upstream error saying the model does not support images
+while the user successfully used images with it, or a context-length error
+at a size the model actually supports — use `model_override` to record the
+corrected value.
+
+`model_override` writes a durable, per-model correction that survives
+catalog re-imports and wins over both the catalog and auto-learned values.
+
+Rules:
+
+- Only override with evidence from the transcript. Do not guess from the
+  model name or from general knowledge about a model family.
+- Override only the fields the evidence contradicts. Do not touch unrelated
+  fields.
+- Use `op="remove"` to clear an override that turned out to be wrong.
+- A model override is not user memory. Do not also save it as a memory
+  fragment.
+
 ## Memory rules
 
 Use `memory` with `op=save` to save new durable facts as fragments.

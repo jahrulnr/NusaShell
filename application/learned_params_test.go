@@ -164,6 +164,43 @@ func TestLearnedParamsCachePersistAcrossInstances(t *testing.T) {
 	}
 }
 
+// TestLearnedParamsCacheSanitizeOnLoad proves that garbage entries persisted
+// by older classifier versions (param="this") are dropped when the cache is
+// built, and the cleaned registry is saved back so the cleanup persists.
+func TestLearnedParamsCacheSanitizeOnLoad(t *testing.T) {
+	store := &fakeLearnedParamStore{}
+	// Seed the store the way an old binary would have left it: one garbage
+	// inject entry plus one valid strip entry.
+	seed := domain.NewLearnedParamRegistry()
+	seed.RecordInject("prov", "gemini-3.7-flash", "this", "This is required")
+	seed.RecordStrip("openrouter", "glm-5.2", "logprobs", "Unsupported parameter: logprobs")
+	store.registry = seed
+
+	cache := newLearnedParamsCache(store)
+
+	// Garbage is gone from the in-memory registry.
+	if got := cache.InjectParams("prov", "gemini-3.7-flash"); len(got) != 0 {
+		t.Errorf("garbage inject entry survived: %v", got)
+	}
+	// Valid entry survives.
+	if got := cache.StripParams("openrouter", "glm-5.2"); len(got) != 1 || got[0] != "logprobs" {
+		t.Errorf("valid strip entry lost: %v", got)
+	}
+	// The cleaned registry was persisted back.
+	if store.saves != 1 {
+		t.Errorf("expected 1 save after sanitize, got %d", store.saves)
+	}
+	if store.registry.Lookup("prov", "gemini-3.7-flash", "this") != nil {
+		t.Error("garbage entry still present in persisted store")
+	}
+
+	// A second construction finds nothing to sanitize and does not save.
+	_ = newLearnedParamsCache(store)
+	if store.saves != 1 {
+		t.Errorf("second construction should not re-save, saves = %d", store.saves)
+	}
+}
+
 func TestIsLearnable400(t *testing.T) {
 	if !isLearnable400(&UpstreamError{StatusCode: 400, Err: errors.New("bad request")}) {
 		t.Error("400 should be learnable")

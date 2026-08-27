@@ -195,6 +195,112 @@ func TestHydrationMemory(t *testing.T) {
 	}
 }
 
+// TestHydrationAgentsMD pins the forced AGENTS.md injection: the slot is a
+// REAL file_read call against <workspace>/AGENTS.md, attached verbatim, and
+// positioned right after runtime_context so project instructions lead.
+func TestHydrationAgentsMD(t *testing.T) {
+	agentsOut := "---\nbytes: 42\n---\n\n# Project rules\nUse Go, keep it simple."
+	exec := &stubHydrationExecutor{fn: func(name string, args []byte) (string, error) {
+		switch name {
+		case "file_read":
+			if string(args) == `{"path":"/ws/proj/AGENTS.md"}` {
+				return agentsOut, nil
+			}
+			return "", fmt.Errorf("unexpected file_read args: %s", args)
+		case "skill", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	b := NewHydrationBuilder(HydrationSource{
+		Executor:       exec,
+		RuntimeContext: RuntimeContextSnapshot{Workspace: "/ws/proj"},
+	})
+	result := b.Build()
+
+	// The slot is a genuine file_read call with the workspace AGENTS.md path.
+	var idx = -1
+	for i, c := range result.Messages[0].ToolCalls {
+		if c.Name == "file_read" {
+			idx = i
+			if c.Args != `{"path":"/ws/proj/AGENTS.md"}` {
+				t.Errorf("file_read args = %s, want AGENTS.md path", c.Args)
+			}
+		}
+	}
+	if idx < 0 {
+		t.Fatal("file_read (AGENTS.md) slot missing from hydration transcript")
+	}
+	// Positioned right after runtime_context.
+	if idx != 1 || result.Messages[0].ToolCalls[0].Name != "runtime_context" {
+		t.Errorf("AGENTS.md slot must follow runtime_context, got index %d (first=%s)",
+			idx, result.Messages[0].ToolCalls[0].Name)
+	}
+	// Verbatim real tool output.
+	if got := result.Messages[idx+1].ToolResult.Content; got != agentsOut {
+		t.Errorf("AGENTS.md slot must carry the real file_read output verbatim:\n got %q\nwant %q", got, agentsOut)
+	}
+}
+
+// TestHydrationAgentsMDHidden covers the fail-soft rules: no workspace, a
+// missing file (file_read error), or an empty body all hide the slot.
+func TestHydrationAgentsMDHidden(t *testing.T) {
+	// No workspace → hidden even with an executor.
+	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
+		switch name {
+		case "skill", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	result := NewHydrationBuilder(HydrationSource{Executor: exec}).Build()
+	for _, c := range result.Messages[0].ToolCalls {
+		if c.Name == "file_read" {
+			t.Fatal("AGENTS.md slot must be hidden without a workspace")
+		}
+	}
+
+	// file_read error (missing file) → hidden.
+	exec = &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
+		switch name {
+		case "file_read":
+			return "", fmt.Errorf("open /ws/proj/AGENTS.md: no such file or directory")
+		case "skill", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	result = NewHydrationBuilder(HydrationSource{
+		Executor:       exec,
+		RuntimeContext: RuntimeContextSnapshot{Workspace: "/ws/proj"},
+	}).Build()
+	for _, c := range result.Messages[0].ToolCalls {
+		if c.Name == "file_read" {
+			t.Fatal("AGENTS.md slot must be hidden when the file is missing")
+		}
+	}
+
+	// Empty body → hidden.
+	exec = &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
+		switch name {
+		case "file_read":
+			return "---\nbytes: 0\n---\n", nil
+		case "skill", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	result = NewHydrationBuilder(HydrationSource{
+		Executor:       exec,
+		RuntimeContext: RuntimeContextSnapshot{Workspace: "/ws/proj"},
+	}).Build()
+	for _, c := range result.Messages[0].ToolCalls {
+		if c.Name == "file_read" {
+			t.Fatal("AGENTS.md slot must be hidden when the file body is empty")
+		}
+	}
+}
+
 func TestHydrationMemoryHiddenWhenEmpty(t *testing.T) {
 	// No executor: the memory slot is hidden, not emitted as an empty stub.
 	b := NewHydrationBuilder(HydrationSource{})
@@ -487,6 +593,18 @@ func (f *fakeTodoPort) SetBrief(convID string, goal string) {
 func (f *fakeTodoPort) Clear(convID string) {
 	delete(f.items, convID)
 	delete(f.briefs, convID)
+}
+
+func (f *fakeTodoPort) ClearBrief(convID string) error {
+	delete(f.briefs, convID)
+	return nil
+}
+
+func (f *fakeTodoPort) PlanPath(convID string) string {
+	if f.briefs[convID] == "" {
+		return ""
+	}
+	return "/tmp/plans/" + convID + ".plan.md"
 }
 
 func (f *fakeTodoPort) Patch(convID string, patches []domain.TodoItem) {

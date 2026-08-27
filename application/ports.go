@@ -165,6 +165,20 @@ type LearnedParamStore interface {
 	Save(r *domain.LearnedParamRegistry) error
 }
 
+// ModelOverrideStore persists the manual model-override registry
+// (field-level corrections of catalog metadata, per provider+model). The
+// store backs learning/model_overrides.json so corrections survive process
+// restarts and catalog re-imports. Implementations must be safe for
+// concurrent use.
+type ModelOverrideStore interface {
+	// Load returns the current registry, or an empty registry when no
+	// override file exists yet. Never returns nil.
+	Load() *domain.ModelOverrideRegistry
+	// Save persists the registry atomically. Callers may pass the same
+	// pointer they got from Load after mutating it.
+	Save(r *domain.ModelOverrideRegistry) error
+}
+
 // ConversationTodoPort is the per-conversation todo checklist store. The
 // model owns the list (full-replace via the `todo` tool, or patch by ID
 // via mode:"patch"); the user can delete items from the UI. The brief (a
@@ -176,6 +190,14 @@ type ConversationTodoPort interface {
 	Set(conversationID string, items []domain.TodoItem)
 	SetBrief(conversationID string, brief string)
 	Clear(conversationID string)
+	// ClearBrief removes the brief for the given conversation and deletes
+	// the mirror plan file, leaving items intact. Persists to disk.
+	ClearBrief(conversationID string) error
+	// PlanPath returns the absolute path to the conversation's plan file
+	// mirror (.nusashell/plans/<id>.plan.md in workspace, or
+	// <datadir>/conversations/<id>/plan.md when no workspace). Returns
+	// empty string when the brief is empty or the path cannot be resolved.
+	PlanPath(conversationID string) string
 	// Patch merges items by ID into the existing list. Items with an
 	// existing ID update their status (always) and content (only when
 	// non-empty). Items with a new ID are appended. Items not in the

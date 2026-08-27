@@ -56,7 +56,7 @@ func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust d
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
 
-	a.runTurn(run, provider, apiKey, bareModel, "", asstMsgID, false, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams))
+	a.runTurn(run, provider, apiKey, bareModel, "", asstMsgID, false, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides))
 
 	saved, err := a.Conversations.Get(convID)
 	if err != nil || saved == nil {
@@ -84,11 +84,15 @@ func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust d
 // identified by its conversation ID. Returns an error if no active turn
 // exists for the conversation.
 func (a *App) SteerHeadlessTurn(conversationID, text string) error {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return fmt.Errorf("steer text is required")
+	}
 	run := a.activeRunForConversation(conversationID)
 	if run == nil {
 		return fmt.Errorf("no active headless turn for conversation %s", conversationID)
 	}
-	entry := &SteerEntry{ID: domain.NewID("steer"), Text: text, Status: "queued"}
+	entry := newSteerEntry(text, nil)
 	if !run.queueSteer(entry) {
 		return fmt.Errorf("a steer is already queued for conversation %s", conversationID)
 	}
@@ -118,7 +122,7 @@ func (a *App) resolveHeadlessModel(modelID string) (*domain.Provider, string, st
 			continue
 		}
 		m := &p.Models[0]
-		a.applyLearnedModelOverrides(p, m)
+		a.applyModelOverrides(p, m)
 		return p, m.ID, key, nil
 	}
 	return nil, "", "", fmt.Errorf("no enabled provider with a model is available for headless agent steps")

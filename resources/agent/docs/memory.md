@@ -141,6 +141,14 @@ injection uses the real `file_read` tool (which IS in the global Toolbox
 and whitelisted for the review agent), so the agent can re-read the file
 itself if needed.
 
+`model_override` is also review-only and executed locally. It lets the
+review agent correct a model's catalog metadata (vision, context window,
+max output, etc.) for a specific provider+model pair when the transcript
+shows the catalog is wrong. Corrections are stored in
+`learning/model_overrides.json`, survive catalog re-imports, and win over
+both catalog and auto-learned values at model resolution time. See
+`providers.md` for the precedence rules.
+
 ## Review triggers
 
 Two independent triggers fire the background review:
@@ -152,7 +160,14 @@ Two independent triggers fire the background review:
    that don't reach the turn threshold. Set 0 to disable.
 
 Both triggers share the same reservation gate, so a threshold and a skill nudge
-firing at the same time produce only one review. Concurrent triggers are coalesced and retain their new activity for a follow-up review. Compaction-triggered review uses the same gate. Retry cooldown applies only after a failed review.
+firing at the same time produce only one review. A trigger that is deferred
+(cooldown active or a review already running) still resets its counter, so it
+does not re-fire on every subsequent turn/tool call during the cooldown
+window. When new activity arrives while a review is running, it is coalesced
+and a single follow-up review runs immediately after the in-flight review
+finishes (the cooldown is skipped for that one follow-up). Compaction-triggered
+review uses the same gate. Retry cooldown applies after a failed review, and
+after a successful review that had no coalesced activity.
 
 Good examples:
 

@@ -394,3 +394,106 @@ func TestLearnedParamRegistryOverrideModel(t *testing.T) {
 		t.Error("OverrideModel should not change an unrelated model")
 	}
 }
+
+// TestClassify400ErrorGeminiThoughtSignature reproduces the real Gemini 400
+// body that previously produced the garbage param "this". The required field
+// (thought_signature) is mentioned earlier in the sentence; the word right
+// before "is required" is the pronoun "This". The classifier must capture
+// thought_signature, not the pronoun.
+func TestClassify400ErrorGeminiThoughtSignature(t *testing.T) {
+	body := "provider returned HTTP 400: {\n  \"error\": {\n    \"code\": 400,\n    " +
+		"\"message\": \"Function call is missing a thought_signature in functionCall parts. " +
+		"This is required for tools to work correctly, and missing thought_signatures may " +
+		"lead to degraded performance or errors.\",\n    \"status\": \"INVALID_ARGUMENT\"\n  }\n}"
+	action, param := Classify400Error(body)
+	if action != LearnedActionInject {
+		t.Errorf("action = %q, want %q", action, LearnedActionInject)
+	}
+	if param != "thought_signature" {
+		t.Errorf("param = %q, want %q (must not capture the pronoun \"this\")", param, "thought_signature")
+	}
+}
+
+// A body whose only "is required" subject is a pronoun must not be learned
+// as a param. Without a real field name the classifier returns empty rather
+// than recording garbage like "this".
+func TestClassify400ErrorPronounNotCaptured(t *testing.T) {
+	cases := []string{
+		`This is required for the request to succeed`,
+		`That must be provided before continuing`,
+		`It is required`,
+	}
+	for _, body := range cases {
+		action, param := Classify400Error(body)
+		if isParamStopword(param) {
+			t.Errorf("Classify400Error(%q) captured stopword param %q", body, param)
+		}
+		if param == "this" || param == "that" || param == "it" {
+			t.Errorf("Classify400Error(%q) = (%q, %q), must not capture a pronoun", body, action, param)
+		}
+	}
+}
+
+// TestClassify400ErrorMissingField covers the "missing <field>" family of
+// errors (Gemini-style) where the required field follows the word "missing".
+func TestClassify400ErrorMissingField(t *testing.T) {
+	cases := []struct {
+		body  string
+		param string
+	}{
+		{`Function call is missing a thought_signature in functionCall parts`, "thought_signature"},
+		{`missing required field 'reasoning_content'`, "reasoning_content"},
+		{`missing parameter api_key`, "api_key"},
+		{`The request is missing an auth_token`, "auth_token"},
+	}
+	for _, c := range cases {
+		action, param := Classify400Error(c.body)
+		if action != LearnedActionInject {
+			t.Errorf("Classify400Error(%q) action = %q, want %q", c.body, action, LearnedActionInject)
+		}
+		if param != c.param {
+			t.Errorf("Classify400Error(%q) param = %q, want %q", c.body, param, c.param)
+		}
+	}
+}
+
+// TestLearnedParamRegistrySanitize proves that Sanitize drops entries whose
+// param is a stopword (legacy garbage like "this") while keeping valid
+// entries, and reports how many were removed.
+func TestLearnedParamRegistrySanitize(t *testing.T) {
+	r := NewLearnedParamRegistry()
+	// Force legacy garbage entries the way an older classifier would have.
+	r.RecordInject("prov", "gemini-3.7-flash", "this", "This is required")
+	r.RecordInject("prov", "other", "that", "That is required")
+	// Valid entries that must survive.
+	r.RecordStrip("openrouter", "glm-5.2", "logprobs", "Unsupported parameter: logprobs")
+	r.RecordCapContext("tokenrouter", "qwen/qwen3.8-max-free", "262144", "exceeded")
+
+	removed := r.Sanitize()
+	if removed != 2 {
+		t.Fatalf("Sanitize removed = %d, want 2", removed)
+	}
+	if r.Lookup("prov", "gemini-3.7-flash", "this") != nil {
+		t.Error("garbage 'this' entry survived Sanitize")
+	}
+	if r.Lookup("prov", "other", "that") != nil {
+		t.Error("garbage 'that' entry survived Sanitize")
+	}
+	if r.Lookup("openrouter", "glm-5.2", "logprobs") == nil {
+		t.Error("valid strip entry was removed by Sanitize")
+	}
+	if r.Lookup("tokenrouter", "qwen/qwen3.8-max-free", "262144") == nil {
+		t.Error("valid cap_context entry was removed by Sanitize")
+	}
+	// Idempotent: a second pass removes nothing.
+	if removed := r.Sanitize(); removed != 0 {
+		t.Errorf("second Sanitize removed = %d, want 0", removed)
+	}
+}
+
+func TestLearnedParamRegistrySanitizeNilSafe(t *testing.T) {
+	var r *LearnedParamRegistry
+	if got := r.Sanitize(); got != 0 {
+		t.Errorf("nil registry Sanitize = %d, want 0", got)
+	}
+}

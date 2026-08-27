@@ -15,6 +15,15 @@ necessary constraints, and the expected artifact. Do quick lookups and
 shell-owned work yourself — delegate only what genuinely benefits from an
 independent agent.
 
+When the delegation touches a running task, reference the parent plan
+file instead of re-summarizing the plan from memory: the `todo` tool
+result returns `plan_path` (the brief mirrored to disk, always current).
+NusaShell automatically appends a `Parent plan file (read this first):
+<abs path>` block to the spawn prompt when the parent conversation has a
+brief — plus a compact Objective + Done when summary when the file lives
+outside the subagent workspace or is unreadable. Keep your own prompt
+focused on the delegated slice; the plan file carries the shared context.
+
 Good example:
 
     subagent(prompt="Refactor /home/user/proj/src/api/client.go: extract the

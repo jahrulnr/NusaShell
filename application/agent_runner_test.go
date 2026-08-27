@@ -387,7 +387,7 @@ func TestExecuteTurnToolsStopsOnCancel(t *testing.T) {
 		Toolbox:       box,
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	if err := app.executeTurnTools(run, "m1", conv.Messages[0].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}); err == nil {
+	if _, err := app.executeTurnTools(run, "m1", conv.Messages[0].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}); err == nil {
 		t.Fatal("want context error")
 	}
 	if len(box.names) != 0 {
@@ -396,6 +396,142 @@ func TestExecuteTurnToolsStopsOnCancel(t *testing.T) {
 	if conv.Messages[0].ToolCalls[0].Status != domain.ToolInterrupted || conv.Messages[0].ToolCalls[1].Status != domain.ToolInterrupted {
 		t.Fatalf("tool statuses = %+v", conv.Messages[0].ToolCalls)
 	}
+}
+
+// briefMutatingToolbox executes the todo tool by writing a new brief to the
+// injected todo port, simulating the real toolbox's SetBrief side effect.
+type briefMutatingToolbox struct {
+	todos    *fakeTodoPort
+	newBrief string
+	clearIt  bool
+}
+
+func (b *briefMutatingToolbox) ListTools() []ToolInfo { return nil }
+func (b *briefMutatingToolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {
+	if name == "todo" {
+		if b.clearIt {
+			_ = b.todos.ClearBrief(ConversationIDFromContext(ctx))
+		} else {
+			b.todos.SetBrief(ConversationIDFromContext(ctx), b.newBrief)
+		}
+	}
+	return "ok", nil
+}
+
+// hydrationCheckpointMessage builds a synthetic hydration checkpoint message:
+// an assistant message carrying only hydration tool calls (IDs prefixed
+// "hydrate-") and no content/reasoning — the exact shape
+// FilterHydrationDomainMessages strips.
+func hydrationCheckpointMessage() domain.Message {
+	return domain.Message{
+		ID:   "hydration-msg",
+		Role: domain.RoleAssistant,
+		ToolCalls: []domain.ToolCall{
+			{ID: "hydrate-runtime_context", Name: "runtime_context", Status: domain.ToolOK, Output: "{}"},
+			{ID: "hydrate-todo_list", Name: "todo_list", Status: domain.ToolOK, Output: "brief"},
+		},
+	}
+}
+
+// TestExecuteTurnToolsStripsHydrationOnBriefChange verifies that when a todo
+// tool call changes the brief (set or clear), the persisted hydration
+// checkpoint is stripped and hydrationRefreshed is true so the runner
+// rebuilds a fresh checkpoint next round.
+func TestExecuteTurnToolsStripsHydrationOnBriefChange(t *testing.T) {
+	todos := &fakeTodoPort{briefs: map[string]string{"c1": "old brief"}}
+	box := &briefMutatingToolbox{todos: todos, newBrief: "## Objective\nnew\n## Done when\nnew"}
+	conv := &domain.Conversation{
+		ID: "c1",
+		Messages: []domain.Message{
+			hydrationCheckpointMessage(),
+			{ID: "m1", Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "t1", Name: "todo", Args: `{}`}}},
+		},
+	}
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		Toolbox:       box,
+		Todos:         todos,
+	}
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: WithConversationID(context.Background(), "c1"), Cancel: func() {}}
+
+	refreshed, err := app.executeTurnTools(run, "m1", conv.Messages[1].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{})
+	if err != nil {
+		t.Fatalf("executeTurnTools: %v", err)
+	}
+	if !refreshed {
+		t.Fatal("hydrationRefreshed = false, want true after brief change")
+	}
+	// The hydration checkpoint message must be gone from the saved conversation.
+	for _, m := range conv.Messages {
+		for _, tc := range m.ToolCalls {
+			if domain.IsHydrationCallID(tc.ID) {
+				t.Fatalf("hydration checkpoint survived brief change: message %s", m.ID)
+			}
+		}
+	}
+}
+
+// TestExecuteTurnToolsKeepsHydrationOnItemOnlyPatch verifies that a todo call
+// that only patches items (brief unchanged) does NOT strip the hydration
+// checkpoint — the checkpoint's todo_list brief is still accurate.
+func TestExecuteTurnToolsKeepsHydrationOnItemOnlyPatch(t *testing.T) {
+	todos := &fakeTodoPort{
+		briefs: map[string]string{"c1": "stable brief"},
+		items:  map[string][]domain.TodoItem{"c1": {{ID: "a", Content: "task", Status: domain.TodoPending}}},
+	}
+	// A toolbox that patches an item status but never touches the brief.
+	box := &itemPatchToolbox{todos: todos}
+	conv := &domain.Conversation{
+		ID: "c1",
+		Messages: []domain.Message{
+			hydrationCheckpointMessage(),
+			{ID: "m1", Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "t1", Name: "todo", Args: `{}`}}},
+		},
+	}
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		Toolbox:       box,
+		Todos:         todos,
+	}
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: WithConversationID(context.Background(), "c1"), Cancel: func() {}}
+
+	refreshed, err := app.executeTurnTools(run, "m1", conv.Messages[1].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{})
+	if err != nil {
+		t.Fatalf("executeTurnTools: %v", err)
+	}
+	if refreshed {
+		t.Fatal("hydrationRefreshed = true, want false when brief is unchanged")
+	}
+	// The hydration checkpoint must still be present.
+	found := false
+	for _, m := range conv.Messages {
+		for _, tc := range m.ToolCalls {
+			if domain.IsHydrationCallID(tc.ID) {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("hydration checkpoint was stripped even though the brief did not change")
+	}
+}
+
+// itemPatchToolbox executes the todo tool by patching an item status only,
+// leaving the brief untouched.
+type itemPatchToolbox struct {
+	todos *fakeTodoPort
+}
+
+func (b *itemPatchToolbox) ListTools() []ToolInfo { return nil }
+func (b *itemPatchToolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {
+	if name == "todo" {
+		b.todos.Patch(ConversationIDFromContext(ctx), []domain.TodoItem{{ID: "a", Status: domain.TodoCompleted}})
+	}
+	return "ok", nil
 }
 
 // TestRunOneToolKeepsPartialOutputInError verifies that when a streaming
@@ -600,6 +736,16 @@ func TestDiscardQueuedSteerOnFail(t *testing.T) {
 		case ev := <-events:
 			if ev.Type == contracts.EventSteerCancelled {
 				gotCancel = true
+				var payload contracts.SteerEvent
+				if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+					t.Fatal(err)
+				}
+				if payload.Text != "wait" {
+					t.Fatalf("cancelled text = %q, want wait", payload.Text)
+				}
+				if payload.Reason != contracts.SteerCancelReasonDiscarded {
+					t.Fatalf("cancelled reason = %q, want discarded", payload.Reason)
+				}
 			}
 		default:
 			i = 8
@@ -607,6 +753,142 @@ func TestDiscardQueuedSteerOnFail(t *testing.T) {
 	}
 	if !gotCancel {
 		t.Fatal("expected steer cancelled event")
+	}
+}
+
+func TestSteerHeadlessTurnAppliesUserMessage(t *testing.T) {
+	conv := &domain.Conversation{ID: "c1"}
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
+		Bus:           NewBus(),
+		runs:          map[string]*TurnRun{},
+	}
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background(), Cancel: func() {}, Headless: true}
+	app.runs[run.ID] = run
+
+	if err := app.SteerHeadlessTurn("c1", "  focus on tests  "); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := app.applyQueuedSteer(run)
+	if err != nil || !applied {
+		t.Fatalf("apply: applied=%v err=%v", applied, err)
+	}
+	saved, err := app.Conversations.Get("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Messages) != 1 {
+		t.Fatalf("messages=%d, want 1", len(saved.Messages))
+	}
+	m := saved.Messages[0]
+	if m.Role != domain.RoleUser || !m.Steer || m.Content != "focus on tests" {
+		t.Fatalf("persisted message = %+v", m)
+	}
+	msgs := chatMessages(saved, "", ModelCapabilities{})
+	if len(msgs) != 1 || msgs[0].Role != "user" || msgs[0].Content != "focus on tests" {
+		t.Fatalf("provider messages = %+v", msgs)
+	}
+}
+
+func TestApplyQueuedSteerRequeuesOnSaveFailure(t *testing.T) {
+	conv := &domain.Conversation{ID: "c1"}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}, saveErr: errors.New("disk full")}
+	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
+	run := &TurnRun{ID: "r1", ConversationID: "c1"}
+	msg := domain.Message{ID: "m-steer", Role: domain.RoleUser, Content: "wait", Status: domain.StatusDone, Steer: true}
+	if !run.queueSteer(&SteerEntry{ID: "s1", Text: "wait", Status: "queued", Message: msg}) {
+		t.Fatal("queue steer")
+	}
+	applied, err := app.applyQueuedSteer(run)
+	if err == nil || applied {
+		t.Fatalf("apply: applied=%v err=%v, want persist error", applied, err)
+	}
+	queued := run.queuedSteer()
+	if queued == nil || queued.Text != "wait" || queued.Message.Content != "wait" {
+		t.Fatalf("steer should be requeued after save failure, got %+v", queued)
+	}
+}
+
+func TestCancelSteerEmitsTextAndUserReason(t *testing.T) {
+	app := &App{Bus: NewBus(), runs: map[string]*TurnRun{}}
+	run := &TurnRun{ID: "r1", ConversationID: "c1"}
+	app.runs[run.ID] = run
+	if !run.queueSteer(&SteerEntry{ID: "s1", Text: "hold on", Status: "queued"}) {
+		t.Fatal("queue steer")
+	}
+	_, events, unsub := app.Bus.Subscribe()
+	defer unsub()
+
+	got, rpcErr := app.handleTurnsCancelSteer(contracts.TurnCancelSteerRequest{ConversationID: "c1"})
+	if rpcErr != nil {
+		t.Fatalf("cancel: %v", rpcErr)
+	}
+	if got == nil {
+		t.Fatal("expected cancel result")
+	}
+
+	select {
+	case ev := <-events:
+		if ev.Type != contracts.EventSteerCancelled {
+			t.Fatalf("event type = %s", ev.Type)
+		}
+		var payload contracts.SteerEvent
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Text != "hold on" {
+			t.Fatalf("text = %q", payload.Text)
+		}
+		if payload.Reason != contracts.SteerCancelReasonUser {
+			t.Fatalf("reason = %q, want user", payload.Reason)
+		}
+	default:
+		t.Fatal("expected steer cancelled event")
+	}
+}
+
+func TestSteerAllowsAttachmentsWithoutText(t *testing.T) {
+	app := &App{Bus: NewBus(), runs: map[string]*TurnRun{}}
+	run := &TurnRun{ID: "r1", ConversationID: "c1"}
+	app.runs[run.ID] = run
+
+	_, rpcErr := app.handleTurnsSteer(context.Background(), contracts.TurnSteerRequest{
+		ConversationID: "c1",
+		Text:           "   ",
+		Attachments:    []contracts.AttachmentDTO{{Type: "text", Name: "note.txt", MediaType: "text/plain", Content: "see this"}},
+	})
+	if rpcErr != nil {
+		t.Fatalf("steer: %v", rpcErr)
+	}
+	queued := run.queuedSteer()
+	if queued == nil {
+		t.Fatal("expected queued steer")
+	}
+	if queued.Message.Role != domain.RoleUser || !queued.Message.Steer {
+		t.Fatalf("message = %+v", queued.Message)
+	}
+	if len(queued.Message.Attachments) != 1 || queued.Message.Attachments[0].Name != "note.txt" {
+		t.Fatalf("attachments = %+v", queued.Message.Attachments)
+	}
+}
+
+func TestTurnsActiveIncludesQueuedSteer(t *testing.T) {
+	app := &App{runs: map[string]*TurnRun{}}
+	run := &TurnRun{ID: "r1", ConversationID: "c1", MessageID: "m1"}
+	app.runs[run.ID] = run
+	if !run.queueSteer(&SteerEntry{ID: "s1", Text: "nudge", Status: "queued"}) {
+		t.Fatal("queue steer")
+	}
+	got, rpcErr := app.handleTurnsActive(contracts.ConversationIDRequest{ID: "c1"})
+	if rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	res, ok := got.(contracts.TurnActiveResult)
+	if !ok {
+		t.Fatalf("result type %T", got)
+	}
+	if !res.Active || res.QueuedSteer != "nudge" || res.QueuedSteerID != "s1" {
+		t.Fatalf("active result = %+v", res)
 	}
 }
 
@@ -1142,6 +1424,143 @@ func TestCompactionUsesSummaryTool(t *testing.T) {
 	}
 	if req.ToolChoice == nil {
 		t.Fatal("compaction request did not force tool_choice onto summary()")
+	}
+	assertCompactionRequestEndsWithUserHandoff(t, req)
+}
+
+// TestCompactionRequestEndsWithUserHandoffAfterToolRound: a compaction
+// chunk that ends on an open agent tool round (assistant + tool result)
+// must still close the provider request with a user-role handoff command.
+// Leaving tool as the last role makes reasoning models continue the task
+// instead of calling summary() — the Nemotron 3 Ultra failure on
+// conv_e27858651cd4e5ee.
+func TestCompactionRequestEndsWithUserHandoffAfterToolRound(t *testing.T) {
+	toolOut := strings.Repeat("tool-output-line\n", 80)
+	keepFiller := strings.Repeat("keep-me-recent-user-message-", 40)
+	msgs := []domain.Message{
+		{ID: "u0", Role: domain.RoleUser, Content: "start the work", Status: domain.StatusDone},
+		{ID: "a0", Role: domain.RoleAssistant, Content: "reading the review agent", Status: domain.StatusDone, ToolCalls: []domain.ToolCall{
+			{ID: "call_read", Name: "file_read", Args: `{"path":"application/learning_review_agent.go"}`, Output: toolOut},
+		}},
+	}
+	for i := 0; i < 12; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("keep%d", i), Role: domain.RoleUser, Content: keepFiller, Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c-tool", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c-tool": conv}}
+	adapter := &recordingCompleteAdapter{toolCallSummaries: []string{validTestSummary}}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	settings := domain.DefaultSettings()
+	settings.CompactionSummaryMaxTokens = 800
+	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings); err != nil {
+		t.Fatal(err)
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.requests) == 0 {
+		t.Fatal("no Complete calls")
+	}
+	req := adapter.requests[0]
+	assertCompactionRequestEndsWithUserHandoff(t, req)
+	foundTool := false
+	for _, m := range req.Messages {
+		if m.Role == core.RoleTool {
+			foundTool = true
+			break
+		}
+	}
+	if !foundTool {
+		t.Fatal("expected the file_read tool result in the compaction transcript")
+	}
+}
+
+func TestCompactionRequestClonesPrefixThenAppendsHandoff(t *testing.T) {
+	// Clone the prefix in array order, then append the user closer.
+	// Do not regroup users then assistants and do not sort by CreatedAt.
+	keepFiller := strings.Repeat("keep-me-recent-user-message-", 40)
+	msgs := []domain.Message{
+		{ID: "u1", Role: domain.RoleUser, Content: "question-one-unique", Status: domain.StatusDone},
+		{ID: "a1", Role: domain.RoleAssistant, Content: "answer-one-unique", Status: domain.StatusDone, ToolCalls: []domain.ToolCall{
+			{ID: "call_one", Name: "file_read", Args: `{"path":"a.go"}`, Output: strings.Repeat("tool-one-output\n", 40)},
+		}},
+		{ID: "u2", Role: domain.RoleUser, Content: "question-two-unique", Status: domain.StatusDone},
+		{ID: "a2", Role: domain.RoleAssistant, Content: "answer-two-unique", Status: domain.StatusDone},
+	}
+	for i := 0; i < 12; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("keep%d", i), Role: domain.RoleUser, Content: keepFiller, Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c-order", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c-order": conv}}
+	adapter := &recordingCompleteAdapter{toolCallSummaries: []string{validTestSummary}}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	settings := domain.DefaultSettings()
+	settings.CompactionSummaryMaxTokens = 800
+	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings); err != nil {
+		t.Fatal(err)
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.requests) == 0 {
+		t.Fatal("no Complete calls")
+	}
+	req := adapter.requests[0]
+	assertCompactionRequestEndsWithUserHandoff(t, req)
+	var seen []string
+	for _, m := range req.Messages {
+		text := coreMessageText(m)
+		switch {
+		case strings.Contains(text, "question-one-unique"):
+			seen = append(seen, "q1")
+		case strings.Contains(text, "answer-one-unique"):
+			seen = append(seen, "a1")
+		case strings.Contains(text, "question-two-unique"):
+			seen = append(seen, "q2")
+		case strings.Contains(text, "answer-two-unique"):
+			seen = append(seen, "a2")
+		}
+	}
+	want := []string{"q1", "a1", "q2", "a2"}
+	if strings.Join(seen, ",") != strings.Join(want, ",") {
+		t.Fatalf("handoff transcript order = %v, want cloned turn order %v", seen, want)
+	}
+}
+
+func TestAppendCompactionHandoffUserClosesToolRound(t *testing.T) {
+	msgs := []ChatMessage{
+		{Role: "assistant", Content: "reading", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "file_read", Args: `{}`}}},
+		{Role: "tool", ToolResult: &ToolResult{ToolCallID: "c1", Name: "file_read", Content: "package application"}},
+	}
+	got := appendCompactionHandoffUser(msgs)
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3 (transcript + closer)", len(got))
+	}
+	if got[1].Role != "tool" {
+		t.Fatalf("transcript tool result dropped, last-but-one role = %s", got[1].Role)
+	}
+	if got[2].Role != "user" {
+		t.Fatalf("last role = %s, want user", got[2].Role)
+	}
+	if !strings.Contains(got[2].Content, "Call the summary tool exactly once") {
+		t.Fatalf("closer missing handoff command: %q", got[2].Content)
+	}
+}
+
+func assertCompactionRequestEndsWithUserHandoff(t *testing.T, req *core.Request) {
+	t.Helper()
+	if req == nil || len(req.Messages) == 0 {
+		t.Fatal("empty compaction request")
+	}
+	last := req.Messages[len(req.Messages)-1]
+	if last.Role != core.RoleUser {
+		t.Fatalf("compaction request last role = %s, want user (handoff command must be last)", last.Role)
+	}
+	text := coreMessageText(last)
+	if !strings.Contains(text, "Call the summary tool exactly once") {
+		t.Fatalf("last user message is not the handoff command: %q", text)
 	}
 }
 

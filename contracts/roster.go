@@ -113,20 +113,24 @@ const (
 	EventSteerQueued      = "agent.steer.queued"
 	EventSteerApplied     = "agent.steer.applied"
 	EventSteerCancelled   = "agent.steer.cancelled"
-	EventProviderRetry    = "agent.provider.retry"
-	EventLogAppend        = "logs.append"
-	EventTodoUpdated      = "agent.todo.updated"
-	EventAutoContinue     = "agent.auto_continue"
-	EventAskPending       = "agent.ask.pending"
-	EventAskAnswered      = "agent.ask.answered"
-	EventAskCancelled     = "agent.ask.cancelled"
+
+	SteerCancelReasonUser      = "user"
+	SteerCancelReasonDiscarded = "discarded"
+	EventProviderRetry         = "agent.provider.retry"
+	EventLogAppend             = "logs.append"
+	EventTodoUpdated           = "agent.todo.updated"
+	EventAutoContinue          = "agent.auto_continue"
+	EventAskPending            = "agent.ask.pending"
+	EventAskAnswered           = "agent.ask.answered"
+	EventAskCancelled          = "agent.ask.cancelled"
 
 	EventLearningReviewStarted = "learning.review.started"
 	EventLearningReviewDone    = "learning.review.done"
 	EventLearningReviewError   = "learning.review.error"
 
-	EventMemoryUpdated = "memory.updated"
-	EventSkillUpdated  = "skill.updated"
+	EventMemoryUpdated        = "memory.updated"
+	EventSkillUpdated         = "skill.updated"
+	EventModelOverrideUpdated = "model_override.updated"
 
 	// Offline TTS install progress (settings.tts_install_start runs in the
 	// background; these events drive the install dialog).
@@ -316,6 +320,8 @@ type TurnActiveResult struct {
 	ConversationID string `json:"conversation_id"`
 	MessageID      string `json:"message_id"`
 	Active         bool   `json:"active"`
+	QueuedSteer    string `json:"queued_steer,omitempty"`
+	QueuedSteerID  string `json:"queued_steer_id,omitempty"`
 }
 
 type TurnStartedEvent struct {
@@ -463,6 +469,7 @@ type SteerEvent struct {
 	SteerID        string `json:"steer_id,omitempty"`
 	Text           string `json:"text,omitempty"`
 	Status         string `json:"status"`
+	Reason         string `json:"reason,omitempty"` // "user" | "discarded"
 }
 
 // ---- ask_question ----

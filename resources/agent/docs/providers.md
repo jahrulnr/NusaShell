@@ -102,7 +102,18 @@ on that gateway. Likewise, if a model 400s because it is text-only or does
 not support a modality (vision, audio, video, document), NusaShell learns
 that and disables the modality for the provider+model. Future turns apply
 these learned overrides at model resolution time, so requests are built with
-the real capabilities instead of waiting for another 400. Models tagged as
+the real capabilities instead of waiting for another 400.
+
+Learned overrides are inferred from errors and can be wrong (a false
+positive). A second, **manual override** layer exists for corrections with
+direct evidence. The background review agent can record one via its local
+`model_override` tool when a transcript shows the catalog metadata is wrong
+for a specific provider+model (e.g. a model marked text-only that actually
+served images). Manual overrides are stored per provider+model in
+`learning/model_overrides.json`, survive catalog re-imports and process
+restarts, and are applied at model resolution time **after** learned
+overrides — so a manual correction always wins over both the catalog and an
+auto-learned value. Precedence: catalog → learned → manual. Models tagged as
 embedding-capable appear in the
 Embedding model setting for skill and memory search. Models tagged as image
 generators (`kind: image`, including `gpt-image-*` and `dall-e-*` even when

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -87,6 +88,7 @@ func (b *HydrationBuilder) Build() HydrationResult {
 	var slots []hydrationSlot
 	for _, slot := range []hydrationSlot{
 		b.readRuntimeContext(),
+		b.readAgentsMD(),
 		b.readMemory(),
 		b.readSkills(),
 		b.readMcpList(),
@@ -148,6 +150,35 @@ func (b *HydrationBuilder) readRuntimeContext() hydrationSlot {
 	}
 	content, _ := json.Marshal(ctx)
 	return hydrationSlot{name: "runtime_context", content: string(content)}
+}
+
+// readAgentsMD loads the active workspace's AGENTS.md through the REAL
+// file_read tool and attaches the genuine output verbatim, so the agent
+// receives the project's agent instructions without having to read the file
+// itself (agents frequently skip AGENTS.md when left to their own devices —
+// this forces it via hydration). The slot is a real file_read call: same
+// tool, same args, same output the agent would get from a direct call.
+// Fail-soft: no workspace, a missing file, or an empty body hides the slot.
+func (b *HydrationBuilder) readAgentsMD() hydrationSlot {
+	if b.source.Executor == nil {
+		return hydrationSlot{name: "file_read", content: ""}
+	}
+	ws := strings.TrimSpace(b.source.RuntimeContext.Workspace)
+	if ws == "" {
+		return hydrationSlot{name: "file_read", content: ""}
+	}
+	path := filepath.Join(ws, "AGENTS.md")
+	args := fmt.Sprintf(`{"path":%q}`, path)
+	out, err := b.source.Executor.Execute(context.Background(), "file_read", []byte(args))
+	if err != nil {
+		return hydrationSlot{name: "file_read", content: ""}
+	}
+	// file_read returns yamlMD (bytes meta + body). Hide the slot when the
+	// file body is empty so we don't inject a bare meta block.
+	if strings.TrimSpace(stripYAMLFrontmatter(out)) == "" {
+		return hydrationSlot{name: "file_read", content: ""}
+	}
+	return hydrationSlot{name: "file_read", args: args, content: out}
 }
 
 // readMemory reads the primary.md file via file_read and attaches its body

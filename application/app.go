@@ -33,6 +33,7 @@ type App struct {
 	Fragments       FragmentStore
 	LearningEdges   LearningEdgeStore
 	LearnedParams   LearnedParamStore
+	ModelOverrides  ModelOverrideStore
 	Todos           ConversationTodoPort
 	AskQuestions    *AskQuestionService
 	Plugins         PluginStore
@@ -93,7 +94,12 @@ type App struct {
 	// learnedParamsCache mirrors the persisted dynamic 400-learning
 	// registry in memory so the hot path (request building) doesn't hit
 	// disk. Initialized once at App construction from LearnedParams store.
-	learnedParams   *learnedParamsCache
+	learnedParams *learnedParamsCache
+	// modelOverrides mirrors the persisted manual model-override registry
+	// in memory. Applied at resolve time AFTER learned 400-adaptations so
+	// manual corrections always win. Initialized once at App construction
+	// from the ModelOverrides store.
+	modelOverrides  *modelOverridesCache
 	ReviewAgent     *BackgroundReviewAgent
 	lifecycle       *LifecycleManager
 	lifecycleCancel context.CancelFunc
@@ -265,19 +271,6 @@ func (r *TurnRun) queueSteer(entry *SteerEntry) bool {
 	return true
 }
 
-// cancelSteer removes a queued steer. Returns false if no queued steer exists
-// or it has already been applied.
-func (r *TurnRun) cancelSteer() bool {
-	r.steerMu.Lock()
-	defer r.steerMu.Unlock()
-	if r.steerQueued == nil || r.steerQueued.Status != "queued" {
-		return false
-	}
-	r.steerQueued.Status = "cancelled"
-	r.steerQueued = nil
-	return true
-}
-
 // cancelSteerEntry removes a queued steer and returns it (with its text) so the
 // caller can emit a cancel event that lets the frontend restore the draft to
 // the composer. Returns nil if no queued steer exists.
@@ -317,6 +310,40 @@ func (r *TurnRun) queuedSteer() *SteerEntry {
 	return r.steerQueued
 }
 
+// requeueSteer puts a previously drained entry back when persist failed.
+// Returns false if another steer occupied the slot.
+func (r *TurnRun) requeueSteer(entry *SteerEntry) bool {
+	if entry == nil {
+		return false
+	}
+	r.steerMu.Lock()
+	defer r.steerMu.Unlock()
+	if r.steerQueued != nil {
+		return false
+	}
+	entry.Status = "queued"
+	r.steerQueued = entry
+	return true
+}
+
+// newSteerEntry builds a queued steer with a persistable user message.
+func newSteerEntry(text string, attachments []domain.Attachment) *SteerEntry {
+	return &SteerEntry{
+		ID:     domain.NewID("steer"),
+		Text:   text,
+		Status: "queued",
+		Message: domain.Message{
+			ID:          domain.NewID("msg"),
+			Role:        domain.RoleUser,
+			Content:     text,
+			Attachments: attachments,
+			CreatedAt:   time.Now().UTC(),
+			Status:      domain.StatusDone,
+			Steer:       true,
+		},
+	}
+}
+
 // Deps is the wiring for NewApp.
 type Deps struct {
 	Version                     string
@@ -330,6 +357,7 @@ type Deps struct {
 	Fragments                   FragmentStore
 	LearningEdges               LearningEdgeStore
 	LearnedParams               LearnedParamStore
+	ModelOverrides              ModelOverrideStore
 	Todos                       ConversationTodoPort
 	AskQuestions                *AskQuestionService
 	Plugins                     PluginStore
@@ -427,6 +455,7 @@ func NewApp(deps Deps) *App {
 		toolCallsSinceReview:        map[string]int{},
 		pendingSubagents:            map[string]map[string]bool{},
 		learnedParams:               newLearnedParamsCache(deps.LearnedParams),
+		modelOverrides:              newModelOverridesCache(deps.ModelOverrides),
 	}
 	// Wire the background LLM review agent. Uses the conversation's
 	// configured model ("global LLM") with a restricted toolset and the
@@ -989,7 +1018,7 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q has no API key", p.Name)}
 		}
 		m := p.FindModel(modelID)
-		a.applyLearnedModelOverrides(p, m)
+		a.applyModelOverrides(p, m)
 		return p, m, key, nil
 	}
 	for _, p := range a.Providers.List() {
@@ -1004,7 +1033,7 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q has no API key", p.Name)}
 		}
 		m := p.FindModel(model)
-		a.applyLearnedModelOverrides(p, m)
+		a.applyModelOverrides(p, m)
 		return p, m, key, nil
 	}
 	return nil, nil, "", &contracts.RPCError{
@@ -1013,17 +1042,29 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 	}
 }
 
-// applyLearnedModelOverrides applies learned 400-adaptations (context cap,
-// disabled modalities) to a freshly resolved model's metadata in place.
+// applyModelOverrides applies model-metadata corrections to a freshly
+// resolved model in place, in precedence order:
+//
+//  1. Learned 400-adaptations (context cap, disabled modalities) — reactive,
+//     restrict-only, derived from upstream errors.
+//  2. Manual overrides — assertive, bidirectional, set by the review agent
+//     or a user. Applied last so they always win over learned adaptations.
+//
 // Providers come from the store as deep clones, so the mutation only affects
 // this resolution's copy and never leaks back into the persisted catalog.
 // This is the canonical application point for models present in the catalog;
 // modelCapabilitiesWithLearned and resolveContextWindow additionally cover
 // models with no catalog metadata (FindModel == nil), and both are
 // idempotent with this override.
-func (a *App) applyLearnedModelOverrides(p *domain.Provider, m *domain.Model) {
-	if a.learnedParams != nil && m != nil && a.learnedParams.OverrideModel(m, p.ID, m.ID) {
+func (a *App) applyModelOverrides(p *domain.Provider, m *domain.Model) {
+	if m == nil {
+		return
+	}
+	if a.learnedParams != nil && a.learnedParams.OverrideModel(m, p.ID, m.ID) {
 		a.log("info", "learning", "applied learned overrides to %s/%s (context=%d vision=%v)", p.ID, m.ID, m.Context, m.Vision)
+	}
+	if a.modelOverrides != nil && a.modelOverrides.Apply(m, p.ID, m.ID) {
+		a.log("info", "learning", "applied manual overrides to %s/%s (context=%d vision=%v)", p.ID, m.ID, m.Context, m.Vision)
 	}
 }
 

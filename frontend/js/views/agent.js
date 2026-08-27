@@ -627,6 +627,10 @@ async function reattachActiveRunFromBackend() {
     messageId: hasLive ? (liveBuffer.messageId || active.message_id) : active.message_id,
   });
   flushPendingEvents(active.run_id);
+  if (active.queued_steer) {
+    state.steerDraft = active.queued_steer;
+    state.steerId = active.queued_steer_id ?? null;
+  }
   stopButton().hidden = false;
   updateSendAvailability(state);
 }
@@ -1234,12 +1238,12 @@ function wireSteerCancelStrip() {
   cancelBtn.addEventListener('click', async () => {
     if (!state.activeId) return;
     try {
+      const draft = state.steerDraft ?? '';
       await rpc('agent.turns.cancel-steer', { conversation_id: state.activeId });
       clearSteerQueue();
       const input = composerInput();
-      if (input && !input.value.trim()) {
-        input.value = state.steerDraft ?? '';
-        state.steerDraft = '';
+      if (input && !input.value.trim() && draft) {
+        input.value = draft;
         input.dispatchEvent(new Event('input'));
       }
       updateSendAvailability(state);
@@ -2241,9 +2245,11 @@ function bindEvents() {
     if (conversation_id !== state.activeId) return;
     promoteSteerToTranscript(text);
   });
-  on('agent.steer.cancelled', ({ conversation_id, text }) => {
+  on('agent.steer.cancelled', ({ conversation_id, text, reason }) => {
     if (conversation_id !== state.activeId) return;
     clearSteerQueue();
+    // User cancel already restored the draft in the cancel-button handler.
+    if (reason === 'user') return;
     // Restore the steer text to the composer so the user can re-send it as a
     // new message. The steer was never applied — it was cancelled because the
     // turn ended without reaching a safe boundary to inject it.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -193,19 +194,21 @@ func TestGrepMaxResults(t *testing.T) {
 	if !ok || err != nil {
 		t.Fatalf("grep failed: ok=%v err=%v", ok, err)
 	}
-	// Count JSON content lines (each match is one JSON object with "content")
 	if !contains(out, "matches: 2") {
 		t.Errorf("max_results=2 should report 2 matches, got: %s", out)
 	}
-	lines := strings.Split(out, "\n")
+	if !contains(out, "capped: true") {
+		t.Errorf("max_results=2 of 5 should flag capped, got: %s", out)
+	}
+	// rg-style content lines are file:line:text — exactly 2 of them.
 	contentLines := 0
-	for _, l := range lines {
-		if contains(l, `"content"`) {
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, ":") && strings.HasPrefix(l, filepath.Join(dir, "a.go")) {
 			contentLines++
 		}
 	}
-	if contentLines > 2 {
-		t.Errorf("max_results=2 should cap at 2 content lines, got %d: %s", contentLines, out)
+	if contentLines != 2 {
+		t.Errorf("max_results=2 should emit exactly 2 match lines, got %d: %s", contentLines, out)
 	}
 }
 
@@ -255,6 +258,139 @@ func TestGrepNonexistentPath(t *testing.T) {
 	}))
 	if err == nil {
 		t.Error("nonexistent path should error")
+	}
+}
+
+// --- backend unit tests (rg JSON parser, Go fallback, shared formatter) ----
+
+func TestParseRgJSONContextGrouping(t *testing.T) {
+	// Two matches in one file with -C 1: context lines must attach to the
+	// right match (before-context to the next match, after-context to the
+	// previous one), and the cap must be reported.
+	stream := `{"type":"begin","data":{"path":{"text":"a.go"}}}
+{"type":"context","data":{"path":{"text":"a.go"},"lines":{"text":"ctx1\n"},"line_number":1}}
+{"type":"match","data":{"path":{"text":"a.go"},"lines":{"text":"hit one\n"},"line_number":2}}
+{"type":"context","data":{"path":{"text":"a.go"},"lines":{"text":"mid\n"},"line_number":3}}
+{"type":"match","data":{"path":{"text":"a.go"},"lines":{"text":"hit two\n"},"line_number":4}}
+{"type":"context","data":{"path":{"text":"a.go"},"lines":{"text":"ctx5\n"},"line_number":5}}
+{"type":"end","data":{"path":{"text":"a.go"}}}`
+	matches, capped := parseRgJSON(strings.NewReader(stream), 1, 10)
+	if capped {
+		t.Error("should not be capped with maxResults=10")
+	}
+	if len(matches) != 2 {
+		t.Fatalf("want 2 matches, got %d", len(matches))
+	}
+	m1, m2 := matches[0], matches[1]
+	// "mid" (line 3) sits between the two matches; it must render exactly
+	// once, attached as after-context of match1 (not duplicated as
+	// before-context of match2).
+	if len(m1.Context) != 2 || !m1.Context[0].Before || m1.Context[0].Content != "ctx1" || m1.Context[1].Before || m1.Context[1].Content != "mid" {
+		t.Errorf("match1 context wrong: %+v", m1.Context)
+	}
+	if len(m2.Context) != 1 || m2.Context[0].Before || m2.Context[0].Content != "ctx5" {
+		t.Errorf("match2 context wrong (mid must not duplicate): %+v", m2.Context)
+	}
+}
+
+func TestParseRgJSONCap(t *testing.T) {
+	stream := `{"type":"match","data":{"path":{"text":"a.go"},"lines":{"text":"hit\n"},"line_number":1}}
+{"type":"match","data":{"path":{"text":"a.go"},"lines":{"text":"hit\n"},"line_number":2}}
+{"type":"match","data":{"path":{"text":"a.go"},"lines":{"text":"hit\n"},"line_number":3}}`
+	matches, capped := parseRgJSON(strings.NewReader(stream), 0, 2)
+	if !capped {
+		t.Error("3 matches with maxResults=2 must report capped")
+	}
+	if len(matches) != 2 {
+		t.Errorf("want 2 kept matches, got %d", len(matches))
+	}
+}
+
+func TestGrepGoFallbackWalker(t *testing.T) {
+	// Exercise the pure-Go backend directly (rg may or may not be present
+	// on the test host; this covers the portable path either way).
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "sub", "a.go"), "alpha\nbeta\nalpha\n")
+	writeFile(t, filepath.Join(dir, "b.txt"), "alpha\n")
+	writeFile(t, filepath.Join(dir, "node_modules", "skip.js"), "alpha\n")
+
+	re := regexp.MustCompile("alpha")
+	matches, err := grepDir(dir, "*.go", re, 0, 100)
+	if err != nil {
+		t.Fatalf("grepDir: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("want 2 matches (glob *.go, node_modules skipped), got %d: %+v", len(matches), matches)
+	}
+	for _, m := range matches {
+		if !strings.HasSuffix(m.File, "a.go") {
+			t.Errorf("unexpected file %s", m.File)
+		}
+	}
+	if matches[0].Line != 1 || matches[1].Line != 3 {
+		t.Errorf("want lines 1 and 3, got %d and %d", matches[0].Line, matches[1].Line)
+	}
+}
+
+func TestGrepGoFallbackContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.go")
+	writeFile(t, path, "l1\nl2\nHIT\nl4\nl5\n")
+	re := regexp.MustCompile("HIT")
+	matches, err := grepFile(path, re, 1)
+	if err != nil {
+		t.Fatalf("grepFile: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("want 1 match, got %d", len(matches))
+	}
+	m := matches[0]
+	var before, after []grepContextLine
+	for _, c := range m.Context {
+		if c.Before {
+			before = append(before, c)
+		} else {
+			after = append(after, c)
+		}
+	}
+	if len(before) != 1 || before[0].Content != "l2" || before[0].Line != 2 {
+		t.Errorf("before-context wrong: %+v", before)
+	}
+	if len(after) != 1 || after[0].Content != "l4" || after[0].Line != 4 {
+		t.Errorf("after-context wrong: %+v", after)
+	}
+}
+
+func TestFormatRgResultsShapes(t *testing.T) {
+	matches := []grepMatch{
+		{File: "a.go", Line: 2, Content: "hit one",
+			Context: []grepContextLine{{Line: 1, Content: "ctx", Before: true}}},
+		{File: "a.go", Line: 9, Content: "hit two"},
+		{File: "b.go", Line: 1, Content: "hit three"},
+	}
+
+	out := formatRgResults(matches, "content", "go", false)
+	for _, want := range []string{"a.go-1-ctx", "a.go:2:hit one", "a.go:9:hit two", "b.go:1:hit three", "matches: 3", "via: go"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("content mode missing %q:\n%s", want, out)
+		}
+	}
+
+	out = formatRgResults(matches, "files_with_matches", "rg", false)
+	if !strings.Contains(out, "files: 2") || strings.Contains(out, "hit one") {
+		t.Errorf("files_with_matches shape wrong:\n%s", out)
+	}
+
+	out = formatRgResults(matches, "count", "rg", true)
+	for _, want := range []string{"a.go:2", "b.go:1", "total_matches: 3", "capped: true"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("count mode missing %q:\n%s", want, out)
+		}
+	}
+
+	out = formatRgResults(nil, "content", "go", false)
+	if !strings.Contains(out, "matches: 0") || !strings.Contains(out, "via: go") {
+		t.Errorf("empty result shape wrong:\n%s", out)
 	}
 }
 

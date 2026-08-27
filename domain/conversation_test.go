@@ -187,18 +187,59 @@ func TestCompactPreservesChronologicalOrderAndPutsSummaryFirst(t *testing.T) {
 	}
 }
 
-// TestCompactAlwaysRetainsUserMessage: after compaction, at least one real
-// user message must remain in the retained set. In a long tool-heavy turn
-// the user message can be far outside the recent-message keep budget; the
-// dedicated user-message budget (20k tokens) must retain it.
-func TestCompactAlwaysRetainsUserMessage(t *testing.T) {
-	// One user message at the start, then 100 assistant+tool messages.
-	// With a small keep budget, the backward scan only retains the last
-	// few assistant messages — the user message at index 0 is far
-	// outside the budget but must be retained by the dedicated budget.
+func TestCompactDropsPrefixInsteadOfPullingAllUsers(t *testing.T) {
+	// Old users must be summarized, not pulled forward in front of recent
+	// assistant turns.
+	msgs := []Message{
+		{ID: "u-old", Role: RoleUser, Content: strings.Repeat("old-user-", 80)},
+		{ID: "a-old", Role: RoleAssistant, Content: strings.Repeat("old-asst-", 80)},
+		{ID: "u-new", Role: RoleUser, Content: "latest question"},
+		{ID: "a-new", Role: RoleAssistant, Content: "latest answer"},
+	}
+	c := &Conversation{Messages: msgs}
+	c.Compact("summary", 50) // tiny keep: only the latest turn fits
+
+	ids := make([]string, 0, len(c.Messages))
+	for _, m := range c.Messages {
+		if IsCompactionSummary(m.Content) {
+			continue
+		}
+		ids = append(ids, m.ID)
+	}
+	for i := 1; i < len(ids); i++ {
+		// suffix clone: original relative order, no u-old sitting above a-new
+		// without a-old.
+		if ids[i] == "a-new" && containsID(ids[:i], "u-old") && !containsID(ids[:i], "a-old") {
+			t.Fatalf("users piled above recent assistant: %v", ids)
+		}
+	}
+	if containsID(ids, "u-new") && containsID(ids, "a-new") {
+		ui, ai := indexOfID(ids, "u-new"), indexOfID(ids, "a-new")
+		if ui > ai {
+			t.Fatalf("latest turn reversed: %v", ids)
+		}
+	}
+}
+
+func containsID(ids []string, id string) bool {
+	return indexOfID(ids, id) >= 0
+}
+
+func indexOfID(ids []string, id string) int {
+	for i, v := range ids {
+		if v == id {
+			return i
+		}
+	}
+	return -1
+}
+func TestCompactSummaryIsTheUserWhenSuffixHasNoUser(t *testing.T) {
+	// Keep is a suffix clone. A long tool-only tail may drop the original
+	// user message into the summary; the prepended handover still gives
+	// the provider a user turn (no 400 "No user query found").
 	msgs := make([]Message, 0, 102)
 	msgs = append(msgs, Message{
-		ID:      NewID("msg"),
+		ID:      "u0",
 		Role:    RoleUser,
 		Content: "Please fix the bug in auth.go",
 	})
@@ -218,25 +259,20 @@ func TestCompactAlwaysRetainsUserMessage(t *testing.T) {
 	c := &Conversation{Messages: msgs}
 	c.Compact("summary of work done", 1000)
 
-	// After compaction: [summary, chronological retained...].
-	// At least one retained message must be RoleUser (the real user
-	// message, not just the compaction summary).
-	realUserCount := 0
-	for _, m := range c.Messages {
-		if m.Role == RoleUser && !IsCompactionSummary(m.Content) {
-			realUserCount++
-		}
+	if !IsCompactionSummary(c.Messages[0].Content) || c.Messages[0].Role != RoleUser {
+		t.Fatal("Compact must prepend a user-role handover so the provider sees a user turn")
 	}
-	if realUserCount == 0 {
-		t.Fatal("Compact dropped all real user messages — provider will return 400 'No user query found in messages'")
+	for _, m := range c.Messages[1:] {
+		if m.ID == "u0" {
+			t.Fatal("prefix user must not be pulled forward in front of the keep suffix")
+		}
 	}
 }
 
-// TestCompactExcludesPriorSummaryFromUserBudget: when compacting a
+// TestCompactExcludesPriorSummaryFromKeepSuffix: when compacting a
 // conversation that already has a compaction summary, the prior summary
-// must not be counted against the user-message budget — only real user
-// messages are retained.
-func TestCompactExcludesPriorSummaryFromUserBudget(t *testing.T) {
+// is replaced — it must not leak into the cloned keep suffix.
+func TestCompactExcludesPriorSummaryFromKeepSuffix(t *testing.T) {
 	c := &Conversation{
 		Messages: []Message{
 			{ID: "s1", Role: RoleUser, Content: CompactionSummaryPrefix + "\nprior summary"},
@@ -263,8 +299,8 @@ func TestCompactExcludesPriorSummaryFromUserBudget(t *testing.T) {
 // partition the original set with no overlap and no loss.
 func TestArchiveMessagesAndCompactAreConsistent(t *testing.T) {
 	// 1 user message at the start, then 50 assistant+tool messages.
-	// keepBudget is small so most assistant messages are dropped, but the
-	// user message is retained by the dedicated 20k budget.
+	// keepBudget is small so the prefix (including the original user) is
+	// archived and the live suffix is a contiguous clone.
 	msgs := make([]Message, 0, 51)
 	msgs = append(msgs, Message{ID: "u0", Role: RoleUser, Content: "fix the bug"})
 	for i := 0; i < 50; i++ {
@@ -310,11 +346,6 @@ func TestArchiveMessagesAndCompactAreConsistent(t *testing.T) {
 		if !archivedIDs[orig.ID] && !liveIDs[orig.ID] {
 			t.Fatalf("message %s lost — neither archived nor live", orig.ID)
 		}
-	}
-
-	// The user message must be live (retained by dedicated budget), not archived.
-	if !liveIDs["u0"] {
-		t.Fatal("user message u0 should be retained live by the dedicated budget, not archived")
 	}
 }
 
