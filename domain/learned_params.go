@@ -2,6 +2,7 @@ package domain
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,6 +24,11 @@ const (
 	// loop sets the corresponding caps field to false and re-builds
 	// messages, which strips the modality's attachments via chatMessages.
 	LearnedActionDisableModality LearnedParamAction = "disable_modality"
+	// LearnedActionCapContext: the upstream 400 rejected the request because
+	// the prompt + max_output combination exceeded the model's actual context
+	// window. The param is the context limit in tokens (e.g. "262144").
+	// Future turns cap the context window to this value for the provider+model.
+	LearnedActionCapContext LearnedParamAction = "cap_context"
 )
 
 // LearnedParam is a single learned parameter entry for a provider+model
@@ -111,6 +117,37 @@ func (r *LearnedParamRegistry) RecordInject(provider, model, param, reason strin
 // of that type.
 func (r *LearnedParamRegistry) RecordDisableModality(provider, model, param, reason string) *LearnedParam {
 	return r.record(provider, model, param, LearnedActionDisableModality, reason)
+}
+
+// RecordCapContext learns that `param` (a token count) is the actual context
+// window for provider+model and should cap future context-window decisions.
+func (r *LearnedParamRegistry) RecordCapContext(provider, model, param, reason string) *LearnedParam {
+	return r.record(provider, model, param, LearnedActionCapContext, reason)
+}
+
+// ContextCap returns the smallest learned context-window cap for the
+// provider+model, or 0 if no cap has been learned. The cap is stored as a
+// parameter string and parsed as an integer.
+func (r *LearnedParamRegistry) ContextCap(provider, model string) int {
+	if r == nil || r.Entries == nil {
+		return 0
+	}
+	p := strings.ToLower(strings.TrimSpace(provider))
+	m := strings.ToLower(strings.TrimSpace(model))
+	cap := 0
+	for _, e := range r.Entries {
+		if e.Action != LearnedActionCapContext || e.Provider != p || e.Model != m {
+			continue
+		}
+		n, err := strconv.Atoi(strings.ReplaceAll(strings.ReplaceAll(e.Param, ",", ""), "_", ""))
+		if err != nil || n <= 0 {
+			continue
+		}
+		if cap == 0 || n < cap {
+			cap = n
+		}
+	}
+	return cap
 }
 
 // StripParams returns the list of params that should be stripped for the
@@ -241,6 +278,32 @@ var requiredFieldRe = regexp.MustCompile(`(?i)(?:field\s+['"]?)?([A-Za-z_][A-Za-
 // will be learned separately on subsequent retries.
 var textOnlyModelRe = regexp.MustCompile(`(?i)text-only`)
 
+// contextLimitRe matches error bodies that state an explicit context-window
+// limit, e.g.:
+//
+//	"Requested token count exceeds the model's maximum context length of 262144 tokens."
+//	"This model's maximum context length is 8192 tokens."
+var contextLimitRe = regexp.MustCompile(`(?i)(?:maximum\s+)?context\s+(?:length|window)(?:\s+(?:is|of))?\s*[:=]?\s*(\d[\d_,]*)\b`)
+
+// ExtractContextLimit parses an explicit context-window limit from an
+// upstream error body. Returns the limit, the normalized numeric string, and
+// ok=true when a number was found.
+func ExtractContextLimit(body string) (int, string, bool) {
+	if body == "" {
+		return 0, "", false
+	}
+	m := contextLimitRe.FindStringSubmatch(strings.TrimSpace(body))
+	if len(m) < 2 {
+		return 0, "", false
+	}
+	num := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(m[1], ",", ""), "_", ""))
+	n, err := strconv.Atoi(num)
+	if err != nil || n <= 0 {
+		return 0, "", false
+	}
+	return n, num, true
+}
+
 // Classify400Error inspects an upstream 400 error body and returns the
 // learned action + parameter name, or (0, "") when the body does not match
 // a known pattern.
@@ -262,6 +325,9 @@ func Classify400Error(body string) (LearnedParamAction, string) {
 	}
 	if textOnlyModelRe.MatchString(b) {
 		return LearnedActionDisableModality, "vision"
+	}
+	if _, num, ok := ExtractContextLimit(b); ok {
+		return LearnedActionCapContext, num
 	}
 	if m := unsupportedParamRe.FindStringSubmatch(b); len(m) > 1 {
 		return LearnedActionStrip, strings.ToLower(m[1])

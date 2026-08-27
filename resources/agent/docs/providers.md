@@ -94,11 +94,15 @@ After saving a provider, use **Import models** to fetch its model list
 (`GET /models`). OpenRouter also exposes `GET /images/models`; those ids
 are merged and tagged `kind: image`. The agent only offers imported models.
 Messages providers bundle Claude model metadata (context window, pricing);
-imported models keep the provider's own ids. Models tagged as embedding-capable
-appear in the Embedding model setting for skill and memory search. Models
-tagged as image generators (`kind: image`, including `gpt-image-*` and
-`dall-e-*` even when `/models` omits a kind) appear in Settings → Image
-generation and back the `generate_image` tool. Image generation uses the
+imported models keep the provider's own ids. If a chat request is rejected
+with an explicit "maximum context length" or "context window" limit, NusaShell
+learns that limit for the provider+model and uses it to cap compaction and
+future turns, so the model catalog does not overstate the actual window
+available on that gateway. Models tagged as embedding-capable appear in the
+Embedding model setting for skill and memory search. Models tagged as image
+generators (`kind: image`, including `gpt-image-*` and `dall-e-*` even when
+`/models` omits a kind) appear in Settings → Image generation and back the
+`generate_image` tool. Image generation uses the
 dedicated OpenAI `/images/generations` (and `/images/edits`) endpoints or
 OpenRouter `POST /images` (JSON body, including `images[].image_url` data
 URLs for edits — not OpenAI multipart). Anthropic Messages is not an image

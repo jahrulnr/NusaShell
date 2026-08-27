@@ -235,6 +235,110 @@ func TestLearnedParamRegistryDisableModalityCaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestClassify400ErrorCapContext(t *testing.T) {
+	cases := []struct {
+		body   string
+		action LearnedParamAction
+		param  string
+	}{
+		{
+			`Requested token count exceeds the model's maximum context length of 262144 tokens. You requested a total of 267042 tokens: 201506 tokens from the input messages and 65536 tokens for the completion.`,
+			LearnedActionCapContext,
+			"262144",
+		},
+		{
+			`This model's maximum context length is 8192 tokens, however you requested 9000 tokens.`,
+			LearnedActionCapContext,
+			"8192",
+		},
+		{
+			`{"error":{"message":"context length of 128,000 exceeded"}}`,
+			LearnedActionCapContext,
+			"128000",
+		},
+		{
+			`context_length_exceeded`,
+			"",
+			"",
+		},
+		{
+			`You requested 267042 tokens`,
+			"",
+			"",
+		},
+	}
+	for _, c := range cases {
+		action, param := Classify400Error(c.body)
+		if action != c.action || param != c.param {
+			t.Errorf("Classify400Error(%q) = (%q, %q), want (%q, %q)", c.body, action, param, c.action, c.param)
+		}
+	}
+}
+
+func TestExtractContextLimit(t *testing.T) {
+	tests := []struct {
+		body  string
+		limit int
+		num   string
+		ok    bool
+	}{
+		{
+			`Requested token count exceeds the model's maximum context length of 262144 tokens.`,
+			262144,
+			"262144",
+			true,
+		},
+		{
+			`maximum context window is 1_000_000`,
+			1000000,
+			"1000000",
+			true,
+		},
+		{"no numbers here", 0, "", false},
+	}
+	for _, tt := range tests {
+		limit, num, ok := ExtractContextLimit(tt.body)
+		if ok != tt.ok {
+			t.Errorf("ExtractContextLimit(%q) ok = %t, want %t", tt.body, ok, tt.ok)
+		}
+		if ok && (limit != tt.limit || num != tt.num) {
+			t.Errorf("ExtractContextLimit(%q) = (%d, %q), want (%d, %q)", tt.body, limit, num, tt.limit, tt.num)
+		}
+	}
+}
+
+func TestLearnedParamRegistryContextCap(t *testing.T) {
+	r := NewLearnedParamRegistry()
+	r.RecordCapContext("tokenrouter", "qwen/qwen3.8-max-free", "262144", "exceeded context")
+
+	if got := r.ContextCap("tokenrouter", "qwen/qwen3.8-max-free"); got != 262144 {
+		t.Fatalf("ContextCap = %d, want 262144", got)
+	}
+	// Different provider/model should not see this cap.
+	if got := r.ContextCap("openrouter", "qwen/qwen3.8-max-free"); got != 0 {
+		t.Fatalf("ContextCap leaked across providers: %d", got)
+	}
+
+	// Multiple caps for the same pair: smallest wins.
+	r.RecordCapContext("tokenrouter", "qwen/qwen3.8-max-free", "500000", "later error")
+	if got := r.ContextCap("tokenrouter", "qwen/qwen3.8-max-free"); got != 262144 {
+		t.Fatalf("ContextCap should be smallest, got %d", got)
+	}
+
+	// Invalid param is ignored.
+	r.RecordCapContext("tokenrouter", "qwen/qwen3.8-max-free", "not-a-number", "bad")
+	if got := r.ContextCap("tokenrouter", "qwen/qwen3.8-max-free"); got != 262144 {
+		t.Fatalf("ContextCap should ignore invalid param, got %d", got)
+	}
+}
+
+func TestLearnedParamRegistryContextCapNilSafe(t *testing.T) {
+	var r *LearnedParamRegistry
+	if got := r.ContextCap("p", "m"); got != 0 {
+		t.Errorf("nil registry ContextCap must return 0, got %d", got)
+	}
+}
+
 func TestTruncateReason(t *testing.T) {
 	short := "error message"
 	if got := truncateReason(short); got != short {

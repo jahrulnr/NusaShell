@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom';
 import {
   openZoomableMedia,
   openArtifactPopup,
+  openTextPreviewPopup,
   attachZoomButtons,
   attachMermaidZoomButton,
 } from './js/media-zoom.js';
@@ -298,4 +299,71 @@ test('clicking the image zoom trigger opens the zoomable overlay', () => {
     assert.ok(overlay.querySelector('img[src="https://example.com/pic.png"]'), 'image in overlay');
     overlay.remove();
   } finally { cleanup(); }
+});
+
+// ---------- openTextPreviewPopup ----------
+
+test('openTextPreviewPopup creates an overlay and loads file content', async () => {
+  makeDom();
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    assert.match(url, /\/local-file\?path=%2Fpath%2Fto%2Ffile\.txt/);
+    return {
+      ok: true,
+      status: 200,
+      text: async () => 'hello world from file',
+    };
+  };
+  try {
+    await openTextPreviewPopup('/path/to/file.txt:12');
+    const overlay = document.querySelector('.agent-text-preview-overlay');
+    assert.ok(overlay, 'text preview overlay created');
+    assert.equal(overlay.getAttribute('aria-label'), 'file.txt');
+    assert.match(overlay.textContent, /hello world from file/);
+    overlay.remove();
+  } finally {
+    globalThis.fetch = origFetch;
+    cleanup();
+  }
+});
+
+test('openTextPreviewPopup renders markdown for .md files', async () => {
+  makeDom();
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => '# Heading\n\n- item 1',
+  });
+  try {
+    await openTextPreviewPopup('/path/to/tools.md');
+    const overlay = document.querySelector('.agent-text-preview-overlay');
+    assert.ok(overlay);
+    assert.ok(overlay.querySelector('h1'), 'renders h1');
+    assert.ok(overlay.querySelector('ul'), 'renders ul');
+    overlay.remove();
+  } finally {
+    globalThis.fetch = origFetch;
+    cleanup();
+  }
+});
+
+test('openTextPreviewPopup handles fetch errors gracefully', async () => {
+  makeDom();
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 404,
+    statusText: 'Not Found',
+  });
+  try {
+    await openTextPreviewPopup('/missing/file.go');
+    const overlay = document.querySelector('.agent-text-preview-overlay');
+    assert.ok(overlay);
+    assert.match(overlay.textContent, /Failed to load/);
+    overlay.remove();
+  } finally {
+    globalThis.fetch = origFetch;
+    cleanup();
+  }
 });

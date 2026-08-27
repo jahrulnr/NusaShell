@@ -17,6 +17,8 @@
 // them on view change (same pattern as dialog()/openImageLightbox).
 
 import { el, registerOverlayDismiss } from './ui.js';
+import { renderMarkdown } from './markdown.js';
+import { highlightCode } from './highlight-render.js';
 
 // ─── Zoomable media popup (SVG + images) ─────────────────────────────
 
@@ -480,4 +482,80 @@ export function openVideoLightbox({ src, name, caption } = {}) {
   // are right there.
   video.play().catch(() => { /* blocked — controls remain usable */ });
   closeBtn.focus();
+}
+
+// ─── Local file text / markdown preview popup ──────────────────────
+
+// openTextPreviewPopup loads a file via /local-file?path= and opens an overlay.
+// If the path ends in .md, it renders via renderMarkdown; otherwise as <pre><code>.
+export async function openTextPreviewPopup(filePath) {
+  if (!filePath) return;
+  // Strip trailing line numbers if any (e.g., /path/to/file.go:12)
+  const cleanPath = filePath.replace(/:\d+(?::\d+)?$/, '');
+  const fileName = cleanPath.split(/[\\/]/).pop() || cleanPath;
+
+  const overlay = el('div', {
+    class: 'media-zoom-overlay agent-text-preview-overlay',
+    role: 'dialog',
+    'aria-modal': 'true',
+    'aria-label': fileName,
+  });
+
+  const closeBtn = el('button', {
+    class: 'media-zoom-close',
+    type: 'button',
+    text: 'Close',
+    'aria-label': 'Close',
+  });
+
+  const bar = el('div', { class: 'media-zoom-bar agent-text-preview-bar' },
+    el('span', { class: 'media-zoom-caption', text: filePath }),
+    el('a', { class: 'media-zoom-download', href: '/local-file?path=' + encodeURIComponent(cleanPath), download: fileName, text: 'Download' }),
+  );
+
+  const frame = el('div', { class: 'agent-text-preview-frame' });
+  const contentBox = el('div', { class: 'agent-text-preview-content' });
+  contentBox.append(el('div', { class: 'agent-text-preview-loading', text: 'Loading…' }));
+  frame.append(contentBox);
+  overlay.append(closeBtn, bar, frame);
+  document.body.append(overlay);
+
+  const onKey = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    }
+  };
+  const unregister = registerOverlayDismiss(close);
+  function close() {
+    unregister();
+    document.removeEventListener('keydown', onKey, true);
+    overlay.remove();
+  }
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  closeBtn.addEventListener('click', close);
+  document.addEventListener('keydown', onKey, true);
+  closeBtn.focus();
+
+  try {
+    const res = await fetch('/local-file?path=' + encodeURIComponent(cleanPath));
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    const text = await res.text();
+    contentBox.replaceChildren();
+
+    const isMd = /\.md$/i.test(cleanPath);
+    if (isMd) {
+      const mdWrapper = el('div', { class: 'agent-bubble-text agent-text-preview-md' });
+      mdWrapper.innerHTML = renderMarkdown(text);
+      contentBox.append(mdWrapper);
+      void highlightCode(contentBox);
+    } else {
+      const pre = el('pre', {}, el('code', { text }));
+      contentBox.append(pre);
+      void highlightCode(contentBox);
+    }
+  } catch (err) {
+    contentBox.replaceChildren(el('div', { class: 'agent-text-preview-error', text: `Failed to load ${cleanPath}: ${err.message}` }));
+  }
 }

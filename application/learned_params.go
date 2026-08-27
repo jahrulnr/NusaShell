@@ -63,6 +63,17 @@ func (c *learnedParamsCache) DisabledModalities(provider, model string) []string
 	return c.registry.DisabledModalities(provider, model)
 }
 
+// ContextCap returns the smallest learned context-window cap for the
+// provider+model, or 0 if none has been learned.
+func (c *learnedParamsCache) ContextCap(provider, model string) int {
+	if c == nil {
+		return 0
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.registry.ContextCap(provider, model)
+}
+
 // HasInjectFor reports whether the provider+model has any learned inject
 // rule (e.g. reasoning_content). Used to upgrade ReasoningReplay from
 // "catalog-suspected" to "learned-required" for models not in the catalog.
@@ -99,6 +110,8 @@ func (c *learnedParamsCache) LearnFrom400(provider, model, errBody string) (doma
 		c.registry.RecordInject(provider, model, param, errBody)
 	case domain.LearnedActionDisableModality:
 		c.registry.RecordDisableModality(provider, model, param, errBody)
+	case domain.LearnedActionCapContext:
+		c.registry.RecordCapContext(provider, model, param, errBody)
 	}
 	if c.store != nil {
 		_ = c.store.Save(c.registry)

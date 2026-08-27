@@ -142,8 +142,14 @@ function postProcessBlockHtml(block, html) {
     return `<img src="${proxiedSrc}" alt="${escapeHtml(alt)}" loading="lazy" onerror="this.classList.add('img-load-error');this.nextElementSibling?.classList.remove('hidden')">`;
   });
 
-  // 5. External links: add target="_blank" rel="noopener" to http(s) links.
+  // 5. Links handling:
+  //    - External links: add target="_blank" rel="noopener" to http(s) links.
+  //    - Local file links (/path or file://): annotate with data-local-path and class for in-app preview.
   html = html.replace(/<a\s+href="(https?:\/\/[^"]+)"/g, '<a href="$1" target="_blank" rel="noopener"');
+  html = html.replace(/<a\s+href="((?:\/|file:\/\/)[^"]+)"/g, (match, href) => {
+    const rawPath = href.startsWith('file://') ? decodeURIComponent(href.slice('file://'.length).replace(/^\/+/, '/')) : href;
+    return `<a href="${href}" class="agent-local-link" data-local-path="${escapeHtml(rawPath)}"`;
+  });
 
   // 6. Task list checkboxes: replace native <input type="checkbox"> with
   //    styled span (AGENTS.md: do not render visible native browser controls).

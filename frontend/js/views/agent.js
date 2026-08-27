@@ -1774,6 +1774,9 @@ function bindEvents() {
       const rc = run.reasoningEl?.querySelector('.agent-reasoning-content');
       if (rc) rc.innerHTML = '';
     }
+    if (run.reasoningEl) {
+      run.reasoningEl.hidden = true;
+    }
     // Remove any previous retry banner, then show a new one at the top of the
     // bubble so the user sees the agent is retrying, not stuck.
     run.bubble.querySelector('.agent-retry-banner')?.remove();

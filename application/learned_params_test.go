@@ -61,6 +61,37 @@ func TestLearnedParamsCacheLearnFrom400Inject(t *testing.T) {
 	}
 }
 
+func TestLearnedParamsCacheLearnFrom400CapContext(t *testing.T) {
+	store := &fakeLearnedParamStore{}
+	cache := newLearnedParamsCache(store)
+
+	body := `Requested token count exceeds the model's maximum context length of 262144 tokens. You requested a total of 267042 tokens.`
+	action, param := cache.LearnFrom400("tokenrouter", "qwen/qwen3.8-max-free", body)
+	if action != domain.LearnedActionCapContext || param != "262144" {
+		t.Fatalf("LearnFrom400 = (%q, %q), want (cap_context, 262144)", action, param)
+	}
+	if got := cache.ContextCap("tokenrouter", "qwen/qwen3.8-max-free"); got != 262144 {
+		t.Fatalf("ContextCap = %d, want 262144", got)
+	}
+	if store.saves != 1 {
+		t.Errorf("expected 1 save, got %d", store.saves)
+	}
+
+	// Smallest cap wins on a second, larger observation.
+	cache.LearnFrom400("tokenrouter", "qwen/qwen3.8-max-free",
+		`This model's maximum context length is 500000 tokens.`)
+	if got := cache.ContextCap("tokenrouter", "qwen/qwen3.8-max-free"); got != 262144 {
+		t.Fatalf("ContextCap should keep smallest, got %d", got)
+	}
+}
+
+func TestLearnedParamsCacheContextCapNilSafe(t *testing.T) {
+	var cache *learnedParamsCache
+	if got := cache.ContextCap("p", "m"); got != 0 {
+		t.Errorf("nil cache ContextCap must return 0, got %d", got)
+	}
+}
+
 func TestLearnedParamsCacheLearnFrom400DisableModality(t *testing.T) {
 	store := &fakeLearnedParamStore{}
 	cache := newLearnedParamsCache(store)

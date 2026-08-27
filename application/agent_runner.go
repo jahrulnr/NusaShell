@@ -957,8 +957,17 @@ func effectiveContextWindow(modelWindow, maxInputTokens int) int {
 // resolveContextWindow picks the effective context window for compaction
 // decisions: min(model context, max_input_tokens) when both are known, or the
 // configured max_input_tokens fallback when the model does not advertise one.
+// A learned cap from a provider 400 overflow error overrides the catalog value
+// for the provider+model so future turns do not overestimate the window.
 func (a *App) resolveContextWindow(provider *domain.Provider, model string, settings domain.Settings) int {
-	return domain.ResolveContextWindow(provider, model, settings)
+	cw := domain.ResolveContextWindow(provider, model, settings)
+	if a.learnedParams != nil {
+		if cap := a.learnedParams.ContextCap(provider.ID, model); cap > 0 && cap < cw {
+			a.log("info", "learning", "capping context window for %s/%s to %d from learned 400", provider.ID, model, cap)
+			return cap
+		}
+	}
+	return cw
 }
 
 const (

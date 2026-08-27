@@ -209,6 +209,44 @@ func TestIsPermanentProviderFailure(t *testing.T) {
 // a billing body is NOT retryable, even though 503 is in the transient status
 // set. This is the integration point between isPermanentProviderFailure and
 // isRetryableUpstream.
+func TestShouldEmergencyCompact(t *testing.T) {
+	overflow := &UpstreamError{
+		Kind:       KindHTTPStatus,
+		StatusCode: 400,
+		Err:        errors.New(`provider returned HTTP 400: Requested token count exceeds the model's maximum context length of 262144 tokens. You requested a total of 267042 tokens.`),
+	}
+	notOverflow := &UpstreamError{
+		Kind:       KindHTTPStatus,
+		StatusCode: 400,
+		Err:        errors.New("provider returned HTTP 400: unsupported parameter"),
+	}
+
+	if !shouldEmergencyCompact(overflow, 200_000, 150_000) {
+		t.Error("expected emergency compact when estimate exceeds trigger")
+	}
+	// Even with a low heuristic estimate, an explicit context limit forces compaction.
+	if !shouldEmergencyCompact(overflow, 100_000, 150_000) {
+		t.Error("expected emergency compact with explicit context limit despite low estimate")
+	}
+	if shouldEmergencyCompact(notOverflow, 200_000, 150_000) {
+		t.Error("unexpected emergency compact for non-overflow 400")
+	}
+}
+
+func TestContextLimitFromError(t *testing.T) {
+	overflow := &UpstreamError{
+		Kind:       KindHTTPStatus,
+		StatusCode: 400,
+		Err:        errors.New(`provider returned HTTP 400: Requested token count exceeds the model's maximum context length of 262144 tokens.`),
+	}
+	if got, ok := contextLimitFromError(overflow); !ok || got != 262144 {
+		t.Fatalf("contextLimitFromError = (%d, %t), want (262144, true)", got, ok)
+	}
+	if _, ok := contextLimitFromError(errors.New("plain error")); ok {
+		t.Fatal("contextLimitFromError should not match non-UpstreamError")
+	}
+}
+
 func TestIsRetryableProviderErrorRejectsPermanentFailure(t *testing.T) {
 	err := &UpstreamError{
 		Kind:       KindHTTPStatus,

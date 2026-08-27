@@ -303,6 +303,45 @@ func TestResolveContextWindowModelWinsOverGlobalCap(t *testing.T) {
 	}
 }
 
+// TestResolveContextWindowLearnedCap verifies that a cap_context learned
+// from a provider 400 overflow error overrides the catalog value.
+func TestResolveContextWindowLearnedCap(t *testing.T) {
+	store := &fakeLearnedParamStore{}
+	cache := newLearnedParamsCache(store)
+	cache.LearnFrom400("tokenrouter", "qwen/qwen3.8-max-free",
+		`Requested token count exceeds the model's maximum context length of 262144 tokens.`)
+
+	provider := &domain.Provider{ID: "tokenrouter", Models: []domain.Model{
+		{ID: "qwen/qwen3.8-max-free", Context: 1_000_000},
+	}}
+	settings := domain.Settings{MaxInputTokens: 200_000}
+	app := &App{learnedParams: cache}
+
+	if got := app.resolveContextWindow(provider, "qwen/qwen3.8-max-free", settings); got != 262144 {
+		t.Fatalf("learned cap should override catalog: got %d, want 262144", got)
+	}
+	// A larger cap observed later does not erase the smaller cap. The
+	// registry keeps the smallest cap, so the 262144 limit stays in effect.
+	cache.LearnFrom400("tokenrouter", "qwen/qwen3.8-max-free",
+		`This model's maximum context length is 2_000_000 tokens.`)
+	if got := app.resolveContextWindow(provider, "qwen/qwen3.8-max-free", settings); got != 262144 {
+		t.Fatalf("larger cap must not erase smaller cap: got %d, want 262144", got)
+	}
+
+	// A cap larger than the catalog value is ignored entirely.
+	bigCache := newLearnedParamsCache(&fakeLearnedParamStore{})
+	bigCache.LearnFrom400("tokenrouter", "qwen/qwen3.8-max-free",
+		`This model's maximum context length is 2_000_000 tokens.`)
+	bigApp := &App{learnedParams: bigCache}
+	if got := bigApp.resolveContextWindow(provider, "qwen/qwen3.8-max-free", settings); got != 1_000_000 {
+		t.Fatalf("larger learned cap must not override catalog: got %d, want 1000000", got)
+	}
+	// Unknown model still falls back to settings, ignoring unrelated learned cap.
+	if got := app.resolveContextWindow(provider, "unknown", settings); got != 200_000 {
+		t.Fatalf("unknown model context = %d, want fallback 200000", got)
+	}
+}
+
 func TestInterruptTurnKeepsReasoning(t *testing.T) {
 	conv := &domain.Conversation{
 		ID:       "c1",

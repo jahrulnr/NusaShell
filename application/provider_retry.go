@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"nusashell/domain"
 	"strings"
 	"time"
 )
@@ -253,14 +254,33 @@ var contextOverflowPhrases = []string{
 	"prompt is too long",
 }
 
+// contextLimitFromError extracts the explicit context-window limit from a
+// provider 400 overflow error, if one is present. Used to force emergency
+// compaction when our local estimate is below the trigger but the provider
+// already told us the actual limit.
+func contextLimitFromError(err error) (int, bool) {
+	var upstream *UpstreamError
+	if !errors.As(err, &upstream) || upstream.Err == nil {
+		return 0, false
+	}
+	n, _, ok := domain.ExtractContextLimit(upstream.Err.Error())
+	return n, ok
+}
+
 // shouldEmergencyCompact reports whether a provider error should trigger
 // destructive emergency compaction. The body must match an explicit overflow
-// phrase (not a generic field name like "input_tokens"), and the local
-// token estimate must already exceed the compaction trigger so a 400 about
-// schema/validation cannot archive the transcript.
+// phrase (not a generic field name like "input_tokens"). Normally the local
+// token estimate must already exceed the compaction trigger, but if the
+// provider states a concrete context limit we trust the error even when the
+// heuristic estimate is low — different tokenizers can count more tokens than
+// our chars/4 estimate.
 func shouldEmergencyCompact(err error, estimatedTokens, compactionTrigger int) bool {
 	if !isContextOverflowError(err) {
 		return false
 	}
-	return estimatedTokens > compactionTrigger
+	if estimatedTokens > compactionTrigger {
+		return true
+	}
+	_, ok := contextLimitFromError(err)
+	return ok
 }

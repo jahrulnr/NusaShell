@@ -4,7 +4,7 @@ import { rpc } from '../../rpc.js';
 import { createAskCard } from '../ask-card.js';
 import { openDrawer, agentNameForId, firstVisibleRunId } from './subagents.js';
 import { renderArtifactCard, parseArtifactOutput } from '../../artifact-render.js';
-import { openAudioLightbox, openVideoLightbox } from '../../media-zoom.js';
+import { openAudioLightbox, openVideoLightbox, openTextPreviewPopup } from '../../media-zoom.js';
 import { agentThread, composerInput, toolJobStrip } from './domrefs.js';
 
 export const STARTER_PROMPTS = [
@@ -47,6 +47,13 @@ function starterChip(item) {
 
 export function bindStarterPrompts() {
   agentThread()?.addEventListener('click', (event) => {
+    const localLink = event.target.closest?.('a[data-local-path]');
+    if (localLink) {
+      event.preventDefault();
+      const path = localLink.getAttribute('data-local-path');
+      if (path) void openTextPreviewPopup(path);
+      return;
+    }
     const chip = event.target.closest?.('[data-starter-prompt]');
     if (!chip) return;
     applyStarterPrompt(chip.getAttribute('data-starter-prompt'));

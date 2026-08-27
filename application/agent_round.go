@@ -96,10 +96,13 @@ func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversatio
 		if isLearnable400(err) {
 			body := extractErrBody(err)
 			action, param := a.learnedParams.LearnFrom400(run.ProviderID, model, body)
-			if action != "" && param != "" {
+			if action != "" && param != "" && action != domain.LearnedActionCapContext {
 				adapted = true
 			}
 			providerName := a.providerNameByID(run.ProviderID)
+			if action == domain.LearnedActionCapContext {
+				a.log("info", "learning", "capped context window for %s/%s to %s tokens from 400", providerName, model, param)
+			}
 			if action == domain.LearnedActionInject && strings.EqualFold(param, stripReasoningContentParam) {
 				if !caps.ReasoningReplay {
 					caps.ReasoningReplay = true
