@@ -282,13 +282,16 @@
   overflow-x: auto;
   padding: 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 1rem;
+  border-radius: 0 1rem 1rem;;
   background: var(--bg);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
 }
-.agent-message.assistant .agent-bubble pre::before {
+.agent-message.assistant .agent-bubble pre[data-complete="true"] {
+  border-radius: 1rem;
+}
+.agent-message.assistant .agent-bubble pre[data-complete="true"]::before {
   display: block;
   content: "Code";
   background: var(--accent-wash);
