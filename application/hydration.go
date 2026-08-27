@@ -385,7 +385,7 @@ func FilterHydration(messages []ChatMessage) []ChatMessage {
 				continue
 			}
 			// All calls were hydration and no content/reasoning — drop entirely.
-			if len(realCalls) == 0 && m.Content == "" && m.Reasoning == "" {
+			if len(realCalls) == 0 && visibleText(m.Content) == "" && visibleText(m.Reasoning) == "" {
 				continue
 			}
 			m.ToolCalls = realCalls

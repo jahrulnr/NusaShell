@@ -109,6 +109,32 @@ func TestHydrationCheckpointPersistsOnceUntilCompaction(t *testing.T) {
 	}
 }
 
+func TestChatMessagesSkipsWhitespaceOnlyAssistantTurns(t *testing.T) {
+	c := &domain.Conversation{Messages: []domain.Message{
+		{ID: "u1", Role: domain.RoleUser, Content: "hi"},
+		{ID: "a1", Role: domain.RoleAssistant, Content: "\n\n", Status: domain.StatusDone},
+		{ID: "a2", Role: domain.RoleAssistant, Content: "  \n", Status: domain.StatusDone},
+		{ID: "a3", Role: domain.RoleAssistant, Content: "\n\nNow update main.go:\n\n", Status: domain.StatusDone},
+		{ID: "a4", Role: domain.RoleAssistant, Content: "\n\n", ToolCalls: []domain.ToolCall{
+			{ID: "call_1", Name: "file_read", Args: `{"path":"main.go"}`},
+		}, Status: domain.StatusDone},
+		{ID: "pending", Role: domain.RoleAssistant},
+	}}
+	got := chatMessages(c, "pending", ModelCapabilities{})
+	if len(got) != 4 {
+		t.Fatalf("got %d messages, want user + trimmed text + assistant + tool", len(got))
+	}
+	if got[0].Role != "user" || got[1].Role != "assistant" || got[1].Content != "Now update main.go:" {
+		t.Fatalf("trimmed assistant = %+v", got[1])
+	}
+	if got[2].Role != "assistant" || got[2].Content != "" || len(got[2].ToolCalls) != 1 {
+		t.Fatalf("tool round = %+v", got[2])
+	}
+	if got[3].Role != "tool" {
+		t.Fatalf("tool result role = %s", got[3].Role)
+	}
+}
+
 func TestChatMessagesKeepsReasoningOnlyAssistantTurns(t *testing.T) {
 	c := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "hi"},

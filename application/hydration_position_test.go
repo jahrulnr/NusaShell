@@ -64,9 +64,9 @@ func TestPersistHydrationInsertsBeforePendingAssistant(t *testing.T) {
 	}
 }
 
-// TestPersistHydrationFallsBackToAppendWhenAnchorMissing keeps the old
-// append-at-end behavior as a defensive fallback when the placeholder ID is
-// not present in the conversation.
+// TestPersistHydrationFallsBackToAppendWhenAnchorMissing inserts after the
+// last user when the placeholder ID is not present. With only a user
+// message that is equivalent to append-at-end.
 func TestPersistHydrationFallsBackToAppendWhenAnchorMissing(t *testing.T) {
 	app := &App{}
 	c := domain.NewConversation("conv_pos2", "position")
@@ -112,4 +112,51 @@ func TestPersistHydrationKeepsRoundTwoPrefixStable(t *testing.T) {
 			t.Fatalf("prefix diverges at %d: %+v vs round1 %+v", i, got, want)
 		}
 	}
+}
+
+// TestPersistHydrationInsertsAfterLastUserWhenKeepHasPriorRounds is the
+// post-compaction shape: handover user, then retained assistant rounds,
+// then the in-flight placeholder. Inserting before the placeholder parks
+// the checkpoint in the middle of agent work. It must land immediately
+// after the last user so the provider sees user → hydration → assistants.
+func TestPersistHydrationInsertsAfterLastUserWhenKeepHasPriorRounds(t *testing.T) {
+	app := &App{}
+	c := domain.NewConversation("conv_mid", "mid")
+	c.Messages = append(c.Messages,
+		domain.Message{ID: "handover", Role: domain.RoleUser, Content: "Compacted context handover:\n## Goal"},
+		domain.Message{ID: "old1", Role: domain.RoleAssistant, Content: "Now update main.go:"},
+		domain.Message{ID: "old2", Role: domain.RoleAssistant, Content: "\n\n"},
+		domain.Message{ID: "m_asst", Role: domain.RoleAssistant},
+	)
+
+	c = app.persistHydration(c, hydrationPositionMsgs(), "m_asst")
+
+	if len(c.Messages) != 5 {
+		t.Fatalf("len(Messages) = %d, want 5", len(c.Messages))
+	}
+	if c.Messages[0].ID != "handover" {
+		t.Fatalf("Messages[0] = %s, want handover", c.Messages[0].ID)
+	}
+	hyd := c.Messages[1]
+	if hyd.Role != domain.RoleAssistant || len(hyd.ToolCalls) != 1 ||
+		!strings.HasPrefix(hyd.ToolCalls[0].ID, domain.HydrateToolCallPrefix) {
+		t.Fatalf("Messages[1] is not the hydration checkpoint: %+v", hyd)
+	}
+	if c.Messages[2].ID != "old1" || c.Messages[3].ID != "old2" || c.Messages[4].ID != "m_asst" {
+		t.Fatalf("kept assistants shifted wrongly: %+v %+v %+v", c.Messages[2].ID, c.Messages[3].ID, c.Messages[4].ID)
+	}
+
+	msgs := chatMessages(c, "m_asst", ModelCapabilities{})
+	if len(msgs) < 3 || msgs[0].Role != "user" || msgs[1].Role != "assistant" ||
+		len(msgs[1].ToolCalls) == 0 || !domain.IsHydrationCallID(msgs[1].ToolCalls[0].ID) {
+		t.Fatalf("provider order must start user → hydration, got %+v", rolesOf(msgs))
+	}
+}
+
+func rolesOf(msgs []ChatMessage) []string {
+	out := make([]string, len(msgs))
+	for i, m := range msgs {
+		out[i] = m.Role
+	}
+	return out
 }

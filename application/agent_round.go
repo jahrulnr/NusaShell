@@ -70,7 +70,7 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
 	for retry := 1; ; retry++ {
 		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration, promptCache, caps)
-		if err == nil || retry >= maxProviderAttempts || roundResult.Content != "" || roundResult.Reasoning != "" {
+		if err == nil || retry >= maxProviderAttempts || visibleText(roundResult.Content) != "" || visibleText(roundResult.Reasoning) != "" {
 			return roundResult, err
 		}
 		// Dynamic 400-learning: classify the error body and, when it
@@ -179,10 +179,10 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 	// results. Persisting (rather than injecting ephemerally) keeps the
 	// message-list prefix stable across tool rounds, so the provider can
 	// reuse prompt-cache hits from round 1 on round 2+. The checkpoint is
-	// inserted immediately BEFORE this turn's assistant placeholder, so the
-	// visible-to-provider order stays system → user → hydration → assistant
-	// in every scenario (new conversation, post-compaction turn, existing
-	// conversation) and the prefix only ever grows — it never reorders.
+	// inserted immediately after the last user before this turn's assistant
+	// placeholder, so the visible-to-provider order stays
+	// system → user → hydration → assistant — including after mid-turn
+	// compaction, when the keep suffix still holds prior assistant rounds.
 	//
 	// Hydration is persisted once per history epoch. Normal user messages and
 	// steers reuse the checkpoint already present in conversation history.
@@ -336,23 +336,20 @@ func buildPromptCachePolicy(settings domain.Settings, providerID, model, convers
 }
 
 // persistHydration inserts the synthetic hydration messages (assistant
-// toolCalls + matching tool results) into the conversation transcript at a
-// deterministic position: immediately BEFORE the current turn's assistant
-// placeholder (beforeMsgID) — i.e. right after the triggering user message
-// or post-compaction retained history. The transcript order therefore stays
+// toolCalls + matching tool results) immediately after the last user
+// message that precedes the in-flight assistant (beforeMsgID).
 //
-//	system prompt → user → hydration checkpoint → assistant output
+// On a fresh turn that is [user, placeholder], that is the same as
+// inserting before the placeholder: system → user → hydration → assistant.
+// After mid-turn compaction the keep suffix can contain many prior
+// assistant rounds before the placeholder; inserting before the
+// placeholder would park the checkpoint in the middle of agent work.
+// Anchoring after the last user keeps user → hydration → assistants
+// even when the keep suffix is long.
 //
-// in every scenario: new conversation, existing chat, post-compaction turn.
-// Inserting before the placeholder (instead of appending at the end) also
-// means later rounds extend the exact round-1 provider prefix instead of
-// placing the newly-filled assistant message in front of the checkpoint,
-// preserving intra-turn prompt-cache hits.
-// Messages are marked with the "hydrate-" tool call ID prefix so the UI can
-// filter them out and compaction can strip them before summarization.
-// When beforeMsgID is not found (defensive fallback), messages are appended
-// at the end. Does not save — the caller persists once after related
-// mutations. Returns the updated conversation.
+// When beforeMsgID is not found, the insert is still after the last user
+// (or appended if the transcript has no user). Does not save — the caller
+// persists once after related mutations. Returns the updated conversation.
 func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage, beforeMsgID string) *domain.Conversation {
 	if len(msgs) == 0 {
 		return c
@@ -384,15 +381,41 @@ func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage, befor
 			}
 		}
 	}
-	idx := len(c.Messages)
-	for i := range c.Messages {
-		if c.Messages[i].ID == beforeMsgID {
-			idx = i
+	c.Messages = slices.Insert(c.Messages, hydrationInsertIndex(c.Messages, beforeMsgID), built...)
+	return c
+}
+
+// hydrationInsertIndex is the slot immediately after the last user that
+// precedes beforeMsgID. Falls back to after the last user in the whole
+// transcript, then to append, when the placeholder is missing.
+func hydrationInsertIndex(msgs []domain.Message, beforeMsgID string) int {
+	pendingIdx := -1
+	lastUser := -1
+	for i := range msgs {
+		if beforeMsgID != "" && msgs[i].ID == beforeMsgID {
+			pendingIdx = i
 			break
 		}
+		if msgs[i].Role == domain.RoleUser {
+			lastUser = i
+		}
 	}
-	c.Messages = slices.Insert(c.Messages, idx, built...)
-	return c
+	if pendingIdx < 0 {
+		lastUser = -1
+		for i := range msgs {
+			if msgs[i].Role == domain.RoleUser {
+				lastUser = i
+			}
+		}
+		if lastUser >= 0 {
+			return lastUser + 1
+		}
+		return len(msgs)
+	}
+	if lastUser >= 0 {
+		return lastUser + 1
+	}
+	return pendingIdx
 }
 
 // buildHydration assembles a synthetic runtime-hydration checkpoint from the
@@ -486,12 +509,19 @@ func applyStreamRound(message *domain.Message, model string, round streamedTurnR
 		message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepReasoning, Content: round.Reasoning})
 		message.Reasoning = round.Reasoning
 	}
-	if round.Content != "" {
-		message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepText, Content: round.Content})
-		message.Content = round.Content
+	if content := visibleText(round.Content); content != "" {
+		message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepText, Content: content})
+		message.Content = content
 	}
 	message.Model = model
 	message.Usage = toDomainUsage(round.Response.Usage)
+}
+
+// visibleText is the assistant text worth persisting or sending. Models such
+// as Qwen3.8 emit a blank paragraph ("\n\n") as the first/last content tokens
+// after thinking; storing that makes empty rounds look like real turns.
+func visibleText(s string) string {
+	return strings.TrimSpace(s)
 }
 
 // toolExecResult is one tool's outcome from the concurrent execution phase,

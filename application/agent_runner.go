@@ -648,7 +648,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				return false, ""
 			}
 			streamErr = a.decorateRateLimitError(provider.ID, streamErr)
-			if !continuedPartialStream && isRetryableProviderError(streamErr) && len(roundResult.Response.ToolCalls) == 0 && (roundResult.Content != "" || roundResult.Reasoning != "") {
+			if !continuedPartialStream && isRetryableProviderError(streamErr) && len(roundResult.Response.ToolCalls) == 0 && (visibleText(roundResult.Content) != "" || visibleText(roundResult.Reasoning) != "") {
 				// A partial stream must never carry an unconfirmed tool call into the next
 				// continuation request. Tools run only after a fully completed round.
 				roundResult.Response.ToolCalls = nil
@@ -1506,7 +1506,7 @@ func (a *App) interruptTurn(run *TurnRun, msgID string, round streamedTurnRound,
 	a.log("warn", "agent", "turn interrupted: %s", run.ID)
 	if c, e := a.Conversations.Get(run.ConversationID); e == nil {
 		a.updateMessage(c, msgID, func(m *domain.Message) {
-			if m.Content == "" && m.Reasoning == "" && len(m.Steps) == 0 {
+			if visibleText(m.Content) == "" && visibleText(m.Reasoning) == "" && len(m.Steps) == 0 {
 				applyStreamRound(m, model, round)
 			} else if model != "" {
 				m.Model = model
@@ -1755,13 +1755,14 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 			}
 			out = append(out, ChatMessage{Role: "user", Content: content, Attachments: attachments})
 		case domain.RoleAssistant:
-			if m.ID == pendingMsgID && m.Content == "" && m.Reasoning == "" && len(m.ToolCalls) == 0 {
+			content := visibleText(m.Content)
+			if m.ID == pendingMsgID && content == "" && m.Reasoning == "" && len(m.ToolCalls) == 0 {
 				continue
 			}
-			if m.Content == "" && m.Reasoning == "" && len(m.ToolCalls) == 0 {
+			if content == "" && m.Reasoning == "" && len(m.ToolCalls) == 0 {
 				continue
 			}
-			cm := ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: m.ToolCalls}
+			cm := ChatMessage{Role: "assistant", Content: content, Reasoning: m.Reasoning, ToolCalls: m.ToolCalls}
 			out = append(out, cm)
 			for _, tc := range m.ToolCalls {
 				// Summarize first (show/subagent get short summaries),

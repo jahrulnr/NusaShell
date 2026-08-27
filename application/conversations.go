@@ -14,7 +14,7 @@ import (
 // checkpoint — all tool calls have the "hydrate-" prefix and there is no
 // visible content or reasoning. These messages are hidden from the UI.
 func isHydrationMessage(m domain.Message) bool {
-	if len(m.ToolCalls) == 0 || (m.Content != "" || m.Reasoning != "") {
+	if len(m.ToolCalls) == 0 || visibleText(m.Content) != "" || visibleText(m.Reasoning) != "" {
 		return false
 	}
 	for _, tc := range m.ToolCalls {
