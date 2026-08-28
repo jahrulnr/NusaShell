@@ -236,38 +236,48 @@ token estimate, which is why the provider's own `Limit`/`Requested` numbers
 are trusted as proof of overflow even when the local estimate is far below
 the compaction trigger.
 
-## Native server-side compaction (OpenAI Responses)
+## Server-side compaction (OpenAI Responses)
 
-For OpenAI Responses models with major version 5 or higher (e.g. `gpt-5`,
-`gpt-5.1`, `gpt-5.2`), NusaShell delegates compaction to the server-side
-`POST /v1/responses/compact` endpoint instead of client-side summarization.
-The endpoint returns an opaque encrypted compaction blob (the canonical next
-context window) that is replayed verbatim as a prefix of the next
-`/responses` request's `input` array — no parsing, pruning, or re-encoding.
+For eligible OpenAI Responses models, NusaShell uses server-side compaction
+via the `context_management` parameter in `POST /responses`. When the
+rendered token count crosses the configured `compact_threshold`, the server
+triggers a compaction pass in-stream, emits an encrypted compaction item in
+the response output, and prunes context before continuing inference. No
+separate `/responses/compact` call is required.
+
+Eligible models (context window >= 200k):
+
+- `gpt-5.x` family (gpt-5, 5.1, 5.2, 5.3-codex, 5.4, 5.5, 5.6-sol/terra/luna,
+  mini, nano, pro, codex) — 400k–1M context
+- `gpt-4.1` family (gpt-4.1, 4.1-mini, 4.1-nano) — 1M context
+- `o-series` (o1, o3, o3-mini, o4-mini, o1-pro, o3-pro, codex-mini-latest) —
+  200k context
+
+Models below the 200k floor (gpt-4o at 128k, gpt-*-chat-latest at 128k) and
+non-OpenAI models (Anthropic, OpenRouter) use the client-side multi-pass
+summarization path.
 
 Key behaviors:
 
-- **Model gating:** only `gpt-(\d+)` models with major version >= 5 are
-  eligible. All other models (including `gpt-4o`, Anthropic, OpenRouter)
-  use the client-side multi-pass summarization path.
-- **Blob replay:** the blob is stored on the conversation as
-  `CompactionBlob` and injected into every subsequent agent round via the
-  `compaction_blob` provider option. The OpenAI Responses adapter decodes
-  it and prepends the blob items before the live message items.
-- **Suffix integrity:** the live suffix (recent messages after the
-  compaction split point) is kept intact — tool calls, reasoning, and tool
-  results are not stripped. The blob covers only the archived prefix.
-- **Fallback:** if the compact endpoint rejects the call (404/400 for
-  accounts without access, network error), NusaShell falls back once to
-  the client-side multi-pass summarization path. This is capability
-  detection, not a permanent fallback ladder — the native path is retried
-  on the next compaction.
-- **Compaction model override:** when the chat model is native-eligible
-  and the adapter supports `ServerCompactor`, the
-  `settings.compaction_model` override is skipped. The opaque blob is
-  encrypted for the chat model and only that model's compact endpoint can
+- **Threshold:** `max(context_window * 0.9, 120_000)` — the server compacts
+  when the rendered token count crosses this threshold. The floor ensures
+  the server does not wait longer than the client-side path would have.
+- **Compaction item capture:** when the server emits a compaction item in
+  the response stream, NusaShell captures it and stores it on the
+  conversation as `CompactionBlob`. The next turn replays it as a prefix
+  of the request's `input` array via the `compaction_items` provider
+  option. The server then truncates context before the last compaction
+  item automatically.
+- **No fallback:** server-side compaction runs in-stream; there is no
+  separate endpoint call that can fail. If the server does not trigger
+  compaction (context stays under threshold), the conversation continues
+  normally. The client-side summarization path is only used for models
+  that are not server-side eligible.
+- **Compaction model override:** when the chat model is server-side
+  eligible, the `settings.compaction_model` override is skipped. The
+  compaction item is encrypted for the chat model and only that model can
   read it, so switching to a different model for compaction would
-  invalidate the blob.
+  invalidate it.
 - **Token estimation:** `EstimateTokens` includes the `CompactionBlob`
   length so the context badge reflects the real request size after a
-  native compaction.
+  server-side compaction.

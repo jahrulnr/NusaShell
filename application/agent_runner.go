@@ -929,15 +929,12 @@ func (a *App) resolveCompactionAdapter(ctx context.Context, defaultAdapter Provi
 	if compModel == "" {
 		return defaultAdapter, defaultModel, defaultWindow
 	}
-	// Native server-side compaction is tied to the chat model: the opaque blob
-	// is encrypted for the model that produced it and only that model's
-	// /responses/compact endpoint can read it. Skip the compaction-model
-	// override when the chat model is native-eligible and the adapter supports
-	// it, so the blob stays valid across compactions.
-	if domain.OpenAISupportsNativeCompaction(defaultModel) {
-		if _, ok := defaultAdapter.Provider.(ServerCompactor); ok {
-			return defaultAdapter, defaultModel, defaultWindow
-		}
+	// Server-side compaction (context_management) is handled by the server
+	// during the normal stream call, not by a separate compaction model.
+	// Skip the compaction-model override when the chat model is server-side
+	// eligible so the compaction item stays valid for the same model.
+	if domain.OpenAISupportsServerCompaction(defaultModel) {
+		return defaultAdapter, defaultModel, defaultWindow
 	}
 	provider, bareModel, apiKey, rpcErr := a.resolveModel(compModel)
 	if rpcErr != nil || provider == nil {
@@ -1142,19 +1139,13 @@ func (a *App) compactConversation(ctx context.Context, adapter ProviderContext, 
 		effectiveKeepBudget = 1000
 	}
 
-	// Native server-side compaction (OpenAI Responses /responses/compact).
-	// The blob covers only the archived prefix; the live suffix stays intact
-	// (no StripForRetention). On any error, fall back once to the client-side
-	// multi-pass summarization below — capability detection, not a permanent
-	// fallback ladder.
-	if domain.OpenAISupportsNativeCompaction(model) {
-		if sc, ok := adapter.Provider.(ServerCompactor); ok {
-			if summary, err := a.compactNative(ctx, sc, c, model, effectiveKeepBudget); err == nil {
-				return summary, nil
-			} else {
-				a.log("warn", "agent", "native compaction failed for %s, falling back to client-side summarization: %v", c.ID, err)
-			}
-		}
+	// Server-side compaction (context_management) is handled by the server
+	// during the normal stream call. When the model is eligible, skip the
+	// client-side summarization entirely — the server compacts automatically
+	// when the threshold is crossed and returns a compaction item in the
+	// response stream. The application layer captures and stores it.
+	if domain.OpenAISupportsServerCompaction(model) {
+		return "", nil
 	}
 
 	// Clone a contiguous prefix to summarize. Compact/ArchiveMessages use
@@ -1427,116 +1418,6 @@ func (a *App) persistCompactedConversation(c *domain.Conversation, summary strin
 	c.Summary = ""
 	c.Compact(summary, keepBudget)
 	return a.Conversations.Save(c)
-}
-
-// compactNative runs the OpenAI-native server-side compaction
-// (/responses/compact). It sends the archived prefix (plus any existing blob)
-// to the compact endpoint and persists the returned opaque blob as the new
-// canonical context. The live suffix is kept intact — the blob does not cover
-// it, so tool calls and reasoning are preserved (no StripForRetention). The
-// returned string is a marker for the EventCompacted payload; the real
-// compaction state is the blob on the conversation.
-func (a *App) compactNative(ctx context.Context, sc ServerCompactor, c *domain.Conversation, model string, keepBudget int) (string, error) {
-	splitIdx := c.CompactionSplitIndex(keepBudget)
-	prefix := filterHydrationDomainMessages(c.Messages[:splitIdx])
-	msgs := compactionPrefixChatMessages(prefix)
-	if len(msgs) == 0 {
-		return "", nil
-	}
-	systemPrompt := compactionPrompt
-	if todoCtx := a.compactionTodoContext(c.ID); todoCtx != "" {
-		systemPrompt += "\n\nCurrent state to preserve in the summary:\n" + todoCtx
-	}
-	result, err := sc.CompactServer(ctx, ChatRequest{
-		Model:          model,
-		System:         systemPrompt,
-		Messages:       msgs,
-		CompactionBlob: c.CompactionBlob,
-	})
-	if err != nil {
-		return "", err
-	}
-	if err := a.persistNativeCompactedConversation(c, result.Blob, keepBudget); err != nil {
-		return "", err
-	}
-	return "server-side compaction", nil
-}
-
-// persistNativeCompactedConversation archives the dropped prefix (full
-// content), keeps the live suffix intact (no StripForRetention — the blob does
-// not cover it), and stores the opaque compaction blob as the canonical
-// context. The client-side Summary is cleared so EstimateTokens does not
-// double-count both the blob and a stale summary.
-func (a *App) persistNativeCompactedConversation(c *domain.Conversation, blob string, keepBudget int) error {
-	c.Messages = filterHydrationDomainMessages(c.Messages)
-	splitIdx := c.CompactionSplitIndex(keepBudget)
-	if splitIdx < 0 {
-		splitIdx = 0
-	}
-	var toArchive []domain.Message
-	for i := 0; i < splitIdx && i < len(c.Messages); i++ {
-		m := c.Messages[i]
-		if domain.IsCompactionSummary(m.Content) {
-			continue
-		}
-		toArchive = append(toArchive, m)
-	}
-	if len(toArchive) > 0 {
-		idx, err := a.Conversations.ArchiveChunk(c.ID, toArchive)
-		if err != nil {
-			a.log("warn", "agent", "failed to archive chunk for %s: %v", c.ID, err)
-		} else {
-			c.ChunkCount = idx + 1
-		}
-	}
-	var suffix []domain.Message
-	for i := splitIdx; i < len(c.Messages); i++ {
-		m := c.Messages[i]
-		if domain.IsCompactionSummary(m.Content) {
-			continue
-		}
-		suffix = append(suffix, m)
-	}
-	c.Messages = suffix
-	c.Summary = ""
-	c.CompactionBlob = blob
-	c.Touch()
-	return a.Conversations.Save(c)
-}
-
-// compactionPrefixChatMessages converts the archived-prefix domain messages
-// into ChatMessages for the native compact call. Tool calls, reasoning, and
-// tool results are preserved so the compact endpoint sees the full prefix;
-// media attachments are replaced with text notes (the opaque blob cannot be
-// assumed to carry image bytes). System and compaction-summary markers are
-// skipped by the caller.
-func compactionPrefixChatMessages(msgs []domain.Message) []ChatMessage {
-	var out []ChatMessage
-	for _, m := range msgs {
-		switch m.Role {
-		case domain.RoleUser:
-			content := m.Content
-			if note := compactionAttachmentNote(m); note != "" {
-				if content == "" {
-					content = note
-				} else {
-					content = content + "\n\n" + note
-				}
-			}
-			out = append(out, ChatMessage{Role: "user", Content: content})
-		case domain.RoleAssistant:
-			if m.Content == "" && m.Reasoning == "" && len(m.ToolCalls) == 0 {
-				continue
-			}
-			out = append(out, ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: m.ToolCalls})
-			for _, tc := range m.ToolCalls {
-				out = append(out, ChatMessage{Role: "tool", ToolResult: &ToolResult{
-					ToolCallID: tc.ID, Name: tc.Name, Content: providerToolContent(tc.Name, tc.Output),
-				}})
-			}
-		}
-	}
-	return out
 }
 
 // compactionTodoContext renders the live user goal and open TODOs for the

@@ -481,6 +481,12 @@ func cloneResponse(resp *Response) *Response {
 	out.Blocks = cloneBlocks(resp.Blocks)
 	out.Warnings = append([]Warning(nil), resp.Warnings...)
 	out.Raw = cloneBytes(resp.Raw)
+	if resp.CompactionItems != nil {
+		out.CompactionItems = make([]json.RawMessage, len(resp.CompactionItems))
+		for i, item := range resp.CompactionItems {
+			out.CompactionItems[i] = cloneBytes(item)
+		}
+	}
 	return &out
 }
 

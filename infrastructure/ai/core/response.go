@@ -16,6 +16,13 @@ type Response struct {
 	FinishReasonRaw string
 	Warnings        []Warning
 	Raw             json.RawMessage
+
+	// CompactionItems carries opaque server-side compaction items (OpenAI
+	// Responses API context_management). When non-empty, the application
+	// layer stores them and truncates the conversation context before the
+	// last compaction item on the next turn. Each entry is the raw JSON of
+	// a compaction output item (type "compaction" with encrypted_content).
+	CompactionItems []json.RawMessage
 }
 
 func CaptureRawResponse(req *Request, resp *Response, raw []byte) {

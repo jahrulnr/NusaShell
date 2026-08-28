@@ -343,16 +343,16 @@ func TestToCoreRequestCopiesToolChoice(t *testing.T) {
 	}
 }
 
-func TestToCoreRequestSetsCompactionBlobForResponses(t *testing.T) {
+func TestToCoreRequestSetsCompactionItemsForResponses(t *testing.T) {
 	cr := ToCoreRequest(ChatRequest{Model: "gpt-5.2", CompactionBlob: `[{"type":"compaction"}]`}, domain.ProviderResponses, false)
-	if got := cr.ProviderOptions["compaction_blob"]; got != `[{"type":"compaction"}]` {
-		t.Fatalf("compaction_blob = %#v, want the blob", got)
+	if got := cr.ProviderOptions["compaction_items"]; got != `[{"type":"compaction"}]` {
+		t.Fatalf("compaction_items = %#v, want the blob", got)
 	}
 }
 
-func TestToCoreRequestOmitsCompactionBlobForChatKind(t *testing.T) {
+func TestToCoreRequestOmitsCompactionItemsForChatKind(t *testing.T) {
 	cr := ToCoreRequest(ChatRequest{Model: "gpt-4o", CompactionBlob: `[{"type":"compaction"}]`}, domain.ProviderChat, false)
-	if _, ok := cr.ProviderOptions["compaction_blob"]; ok {
-		t.Fatal("compaction_blob must not be set for chat kind")
+	if _, ok := cr.ProviderOptions["compaction_items"]; ok {
+		t.Fatal("compaction_items must not be set for chat kind")
 	}
 }

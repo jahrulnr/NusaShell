@@ -28,7 +28,8 @@ const (
 	ProviderOptionWebSearchOptions     = "web_search_options"
 	ProviderOptionParallelToolCalls    = "parallel_tool_calls"
 	ProviderOptionSeed                 = "seed"
-	ProviderOptionCompactionBlob       = "compaction_blob"
+	ProviderOptionCompactionItems      = "compaction_items"
+	ProviderOptionContextManagement    = "context_management"
 )
 
 var providerOptionKeys = map[string]struct{}{
@@ -55,7 +56,8 @@ var providerOptionKeys = map[string]struct{}{
 	ProviderOptionWebSearchOptions:     {},
 	ProviderOptionParallelToolCalls:    {},
 	ProviderOptionSeed:                 {},
-	ProviderOptionCompactionBlob:       {},
+	ProviderOptionCompactionItems:      {},
+	ProviderOptionContextManagement:    {},
 }
 
 func applyProviderOptions(req *chatRequest, options map[string]any) error {
@@ -434,6 +436,35 @@ func optionResponsesStreamOptions(key string, value any) (*ResponsesStreamOption
 		default:
 			return nil, fmt.Errorf("openai: unsupported responses stream_options field %q", optionKey)
 		}
+	}
+	return out, nil
+}
+
+// optionContextManagement parses the context_management provider option for
+// the Responses API. The value is a list of context management entries; the
+// only supported type is "compaction" with a compact_threshold (token count
+// at which the server triggers compaction). Example:
+//
+//	[]map[string]any{{"type": "compaction", "compact_threshold": 360000}}
+//
+// The parsed value is forwarded verbatim to the wire request's
+// context_management field.
+func optionContextManagement(key string, value any) ([]map[string]any, error) {
+	entries, ok := value.([]map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("openai: provider option %q must be []map[string]any", key)
+	}
+	out := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		entryType, _ := entry["type"].(string)
+		if entryType == "" {
+			return nil, fmt.Errorf("openai: provider option %q entry missing \"type\"", key)
+		}
+		if entryType != "compaction" {
+			return nil, fmt.Errorf("openai: provider option %q entry type %q not supported (only \"compaction\")", key, entryType)
+		}
+		cloned := cloneMapAny(entry)
+		out = append(out, cloned)
 	}
 	return out, nil
 }

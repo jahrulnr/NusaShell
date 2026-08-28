@@ -290,6 +290,11 @@ type EventCollector struct {
 	model       string
 	warnings    []Warning
 	tools       *ToolUseAccumulator
+	// compactionItems captures opaque server-side compaction items forwarded
+	// by providers (OpenAI Responses context_management). They are emitted as
+	// ProviderEvent{Name: "compaction"} and collected here so the final
+	// Response carries them to the application layer.
+	compactionItems []json.RawMessage
 }
 
 // NewEventCollector returns an initialized stream event collector.
@@ -345,8 +350,15 @@ func (c *EventCollector) Apply(event Event) (bool, error) {
 		}
 		return false, e.Err
 	case ProviderEvent:
-		// Provider-native events are observable by stream consumers. The core
-		// collector ignores them unless they are promoted to typed events.
+		// Compaction items from server-side context_management are forwarded
+		// as ProviderEvent{Name: "compaction"}. Capture the raw item so the
+		// final Response carries it to the application layer for storage and
+		// context truncation.
+		if e.Name == "compaction" && len(e.Raw) > 0 {
+			c.compactionItems = append(c.compactionItems, cloneBytes(e.Raw))
+		}
+		// Other provider-native events are observable by stream consumers.
+		// The core collector ignores them unless they are promoted to typed events.
 	case DoneEvent:
 		c.finish = e.FinishReason
 		c.finishRaw = e.FinishReasonRaw
@@ -413,6 +425,12 @@ func (c *EventCollector) Response() *Response {
 		FinishReasonRaw: c.finishRaw,
 		Refusal:         c.refusal.String(),
 		Warnings:        append([]Warning(nil), c.warnings...),
+	}
+	if len(c.compactionItems) > 0 {
+		resp.CompactionItems = make([]json.RawMessage, len(c.compactionItems))
+		for i, item := range c.compactionItems {
+			resp.CompactionItems[i] = cloneBytes(item)
+		}
 	}
 	resp.Usage.StampModel(resp.Provider, resp.Model)
 	return resp

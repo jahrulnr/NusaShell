@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -84,7 +85,13 @@ func ToCoreRequest(req ChatRequest, kind domain.ProviderKind, openRouter bool) *
 		if out.ProviderOptions == nil {
 			out.ProviderOptions = core.ProviderOptions{}
 		}
-		out.ProviderOptions["compaction_blob"] = req.CompactionBlob
+		out.ProviderOptions["compaction_items"] = req.CompactionBlob
+	}
+	if req.ContextManagement != nil && kind == domain.ProviderResponses {
+		if out.ProviderOptions == nil {
+			out.ProviderOptions = core.ProviderOptions{}
+		}
+		out.ProviderOptions["context_management"] = req.ContextManagement
 	}
 	return out
 }
@@ -111,6 +118,12 @@ func FromCoreResponse(resp *core.Response) ChatResponse {
 	}
 	for _, w := range resp.Warnings {
 		out.Warnings = append(out.Warnings, fmt.Sprintf("%s: %s", w.Code, w.Message))
+	}
+	if len(resp.CompactionItems) > 0 {
+		out.CompactionItems = make([]json.RawMessage, len(resp.CompactionItems))
+		for i, item := range resp.CompactionItems {
+			out.CompactionItems[i] = append(json.RawMessage(nil), item...)
+		}
 	}
 	return out
 }

@@ -224,23 +224,24 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 		}
 	}
 	response, err := adapter.Stream(run.Ctx, ChatRequest{
-		Model:            model,
-		System:           system,
-		Messages:         messages,
-		Tools:            tools,
-		PromptCaching:    settings.PromptCaching,
-		PromptCache:      promptCache,
-		MaxTokens:        maxTokens,
-		Effort:           effort,
-		Temperature:      settings.Temperature,
-		TopP:             settings.TopP,
-		TopK:             settings.TopK,
-		FrequencyPenalty: settings.FrequencyPenalty,
-		PresencePenalty:  settings.PresencePenalty,
-		ConversationID:   run.ConversationID,
-		ReasoningReplay:  caps.ReasoningReplay,
-		StripParams:      a.learnedParams.StripParams(run.ProviderID, model),
-		CompactionBlob:   conversation.CompactionBlob,
+		Model:             model,
+		System:            system,
+		Messages:          messages,
+		Tools:             tools,
+		PromptCaching:     settings.PromptCaching,
+		PromptCache:       promptCache,
+		MaxTokens:         maxTokens,
+		Effort:            effort,
+		Temperature:       settings.Temperature,
+		TopP:              settings.TopP,
+		TopK:              settings.TopK,
+		FrequencyPenalty:  settings.FrequencyPenalty,
+		PresencePenalty:   settings.PresencePenalty,
+		ConversationID:    run.ConversationID,
+		ReasoningReplay:   caps.ReasoningReplay,
+		StripParams:       a.learnedParams.StripParams(run.ProviderID, model),
+		CompactionBlob:    conversation.CompactionBlob,
+		ContextManagement: serverCompactionContextManagement(model),
 	}, func(delta string) {
 		content.WriteString(delta)
 		a.Bus.Emit(contracts.EventMessageDelta, contracts.MessageDeltaEvent{
@@ -258,6 +259,22 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 	for _, warning := range response.Warnings {
 		a.log("warn", "ai", "provider warning: %s", warning)
 	}
+	// Capture server-side compaction items from the response. When the
+	// server triggers compaction (context_management), it emits opaque
+	// compaction items in the output. Store them on the conversation so the
+	// next turn replays them as a prefix; the server then truncates context
+	// before the last compaction item automatically.
+	if len(response.CompactionItems) > 0 {
+		blob, marshalErr := json.Marshal(response.CompactionItems)
+		if marshalErr != nil {
+			a.log("warn", "agent", "failed to marshal compaction items for %s: %v", run.ConversationID, marshalErr)
+		} else {
+			conversation.CompactionBlob = string(blob)
+			conversation.Summary = ""
+			_ = a.Conversations.Save(conversation)
+			a.log("info", "agent", "server-side compaction captured for %s (%d items)", run.ConversationID, len(response.CompactionItems))
+		}
+	}
 	return streamedTurnRound{Content: content.String(), Reasoning: reasoning.String(), Response: response}, err
 }
 
@@ -266,6 +283,32 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 // Thinking disclosure.
 func reasoningDeltaVisible(accumulated string) bool {
 	return strings.TrimSpace(accumulated) != ""
+}
+
+// serverCompactionThresholdFloor is the minimum compact_threshold we ever
+// send. It matches the client-side compaction trigger so the server does not
+// wait longer than the client would have. Models with larger context windows
+// get a higher threshold (90% of window), but never below this floor.
+var serverCompactionThresholdFloor = 120_000
+
+// serverCompactionContextManagement returns the context_management directive
+// for server-side compaction when the model is eligible. Returns nil for
+// ineligible models (the client-side summarization path handles them).
+// The threshold is max(context_window*0.9, floor) so small-window eligible
+// models (200k) trigger at a reasonable point while large-window models
+// (400k–1M) use most of their window before compacting.
+func serverCompactionContextManagement(model string) []map[string]any {
+	if !domain.OpenAISupportsServerCompaction(model) {
+		return nil
+	}
+	window := domain.OpenAIServerCompactionContextWindow(model)
+	threshold := int(float64(window) * 0.9)
+	if threshold < serverCompactionThresholdFloor {
+		threshold = serverCompactionThresholdFloor
+	}
+	return []map[string]any{
+		{"type": "compaction", "compact_threshold": threshold},
+	}
 }
 
 // appendContinuationTool appends the synthetic continue_stream tool call

@@ -10,8 +10,6 @@ package ai
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"nusashell/application"
@@ -112,46 +110,4 @@ func (a *Adapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model
 		}
 		return listOpenAIModels(ctx, a.BaseURL, headers, a.Client)
 	}
-}
-
-// CompactServer implements application.ServerCompactor for the OpenAI Responses
-// driver. It is only available when Driver==openai and Kind==responses: the
-// opaque compaction blob is tied to the chat model and only the OpenAI
-// /responses/compact endpoint can read it. The live messages from the request
-// are converted to responses input items and prepended with any existing
-// compaction blob; the returned Blob is the marshalled compact output array
-// (encrypted compaction item + retained items) to be replayed verbatim on the
-// next /responses call. Non-OpenAI/non-responses adapters do not implement
-// this capability and the caller falls back to client-side summarization.
-func (a *Adapter) CompactServer(ctx context.Context, req application.ChatRequest) (application.CompactionResult, error) {
-	if a.Driver != domain.ProviderDriverOpenAI || a.ProviderKind != domain.ProviderResponses {
-		return application.CompactionResult{}, fmt.Errorf("ai: server-side compaction requires openai responses driver, got driver=%q kind=%q", a.Driver, a.ProviderKind)
-	}
-	provider, err := openai.New(openai.Config{API: openai.APIResponses, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client})
-	if err != nil {
-		return application.CompactionResult{}, err
-	}
-	coreReq := application.ToCoreRequest(req, a.ProviderKind, a.OpenRouter)
-	input, instructions, err := openai.BuildCompactInput(coreReq.Messages, req.CompactionBlob)
-	if err != nil {
-		return application.CompactionResult{}, err
-	}
-	resp, err := provider.Compact(ctx, openai.ResponsesCompactRequest{
-		Model:        req.Model,
-		Input:        input,
-		Instructions: instructions,
-	})
-	if err != nil {
-		return application.CompactionResult{}, err
-	}
-	blobBytes, err := json.Marshal(resp.Output)
-	if err != nil {
-		return application.CompactionResult{}, fmt.Errorf("ai: marshal compact output: %w", err)
-	}
-	return application.CompactionResult{
-		Blob:         string(blobBytes),
-		InputTokens:  resp.Usage.InputTokens,
-		OutputTokens: resp.Usage.OutputTokens,
-		TotalTokens:  resp.Usage.TotalTokens,
-	}, nil
 }

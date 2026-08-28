@@ -85,15 +85,52 @@ test('conversationTail prefix window leaves older complete turns behind Load old
   assert.ok(tail.assistKeepStart > tail.runStart);
 });
 
-test('conversationTail honors a lowered assistKeepStart when Load older reveals more of the run', () => {
-  const messages = [msg('user', 'u0'), ...Array.from({ length: 6 }, (_, i) => msg('assistant', `a${i}`))];
-  const first = conversationTail(messages, { keepRounds: 3 });
-  const expanded = conversationTail(messages, {
-    prefixStart: first.prefixStart,
-    assistKeepStart: first.assistKeepStart - 3,
-  });
-  assert.deepEqual(expanded.visible.map((m) => m.id), ['u0', 'a0', 'a1', 'a2', 'a3', 'a4', 'a5']);
-  assert.equal(expanded.assistKeepStart, first.runStart);
+test('conversationTail keeps the immediate user bubble when the prefix budget is exhausted', () => {
+  const messages = [];
+  for (let i = 0; i < 40; i++) {
+    messages.push(msg('user', `old-u${i}`), msg('assistant', `old-a${i}`));
+  }
+  messages.push(msg('user', 'current-user'));
+  for (let i = 0; i < 6; i++) messages.push(msg('assistant', `current-a${i}`));
+
+  const tail = conversationTail(messages, { prefixWindow: 3, keepRounds: 3 });
+
+  assert.deepEqual(tail.visible.map((m) => m.id), ['current-user', 'current-a3', 'current-a4', 'current-a5']);
+  assert.equal(tail.prefixStart, tail.runStart - 1);
+});
+
+test('conversationTail keeps a compaction marker immediately before the live assistant run', () => {
+  const messages = [];
+  for (let i = 0; i < 40; i++) {
+    messages.push(msg('user', `old-u${i}`), msg('assistant', `old-a${i}`));
+  }
+  messages.push(msg('user', 'Compacted context handover: preserve this marker'));
+  for (let i = 0; i < 4; i++) messages.push(msg('assistant', `post-compact-a${i}`));
+
+  const tail = conversationTail(messages, { prefixWindow: 2, keepRounds: 3 });
+
+  assert.deepEqual(tail.visible.map((m) => m.id), [
+    'Compacted context handover: preserve this marker',
+    'post-compact-a1',
+    'post-compact-a2',
+    'post-compact-a3',
+  ]);
+});
+
+test('conversationTail keeps the synthetic auto-continue user message before its assistant tail', () => {
+  const messages = [
+    msg('user', 'original-user'),
+    msg('assistant', 'first-assistant'),
+    { role: 'user', id: 'auto-continue', auto_continue: true },
+    msg('assistant', 'continued-a0'),
+    msg('assistant', 'continued-a1'),
+    msg('assistant', 'continued-a2'),
+    msg('assistant', 'continued-a3'),
+  ];
+
+  const tail = conversationTail(messages, { prefixWindow: 2, keepRounds: 3 });
+
+  assert.deepEqual(tail.visible.map((m) => m.id), ['auto-continue', 'continued-a1', 'continued-a2', 'continued-a3']);
 });
 
 test('attachments are detected by bytes rather than their filename or MIME type', () => {

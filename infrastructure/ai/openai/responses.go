@@ -65,11 +65,11 @@ type ResponsesRequest struct {
 
 	CaptureRawResponse bool
 
-	// CompactionBlob is a JSON-encoded []json.RawMessage carrying the opaque
-	// server-side compaction output (encrypted_content + retained items).
-	// When non-empty, buildResponsesRequest decodes it and prepends the items
-	// to the request input so the compacted context is replayed verbatim.
-	CompactionBlob string
+	// CompactionItems is a JSON-encoded []json.RawMessage carrying opaque
+	// server-side compaction items (from context_management response). When
+	// non-empty, buildResponsesRequest decodes and prepends them to the
+	// request input so the compacted context is replayed verbatim.
+	CompactionItems string
 
 	providerOptions   map[string]any
 	unsupportedFields []string
@@ -507,8 +507,8 @@ func (p *Provider) buildResponsesRequest(req *ResponsesRequest, stream bool) (*r
 	} else {
 		out.Instructions = effective.Instructions
 	}
-	if effective.CompactionBlob != "" {
-		if err := prependCompactionBlob(out, effective.CompactionBlob); err != nil {
+	if effective.CompactionItems != "" {
+		if err := prependCompactionItems(out, effective.CompactionItems); err != nil {
 			return nil, err
 		}
 	}
@@ -530,18 +530,18 @@ func (p *Provider) buildResponsesRequest(req *ResponsesRequest, stream bool) (*r
 	return out, nil
 }
 
-// prependCompactionBlob decodes the opaque compaction blob (a JSON array of
-// raw input items produced by /responses/compact) and prepends those items to
-// the request input. The blob covers only already-archived messages, so it
-// must come before the live message items and must never overlap them. A
-// plain-string Input is converted to a single user message item first; a nil
-// Input lets the blob items become the entire input. The blob items are
-// forwarded verbatim via responsesInputItem.Raw so encrypted_content and
+// prependCompactionItems decodes the opaque compaction items (a JSON array of
+// raw input items produced by server-side context_management compaction) and
+// prepends them to the request input. The items cover only already-archived
+// context, so they must come before the live message items and must never
+// overlap them. A plain-string Input is converted to a single user message
+// item first; a nil Input lets the items become the entire input. The items
+// are forwarded verbatim via responsesInputItem.Raw so encrypted_content and
 // retained items are replayed without parsing.
-func prependCompactionBlob(out *responsesRequest, blob string) error {
+func prependCompactionItems(out *responsesRequest, items string) error {
 	var blobItems []json.RawMessage
-	if err := json.Unmarshal([]byte(blob), &blobItems); err != nil {
-		return fmt.Errorf("openai: compaction_blob must be a JSON array of input items: %w", err)
+	if err := json.Unmarshal([]byte(items), &blobItems); err != nil {
+		return fmt.Errorf("openai: compaction items must be a JSON array of input items: %w", err)
 	}
 	if len(blobItems) == 0 {
 		return nil
@@ -566,7 +566,7 @@ func prependCompactionBlob(out *responsesRequest, blob string) error {
 	case []responsesInputItem:
 		out.Input = append(prefix, current...)
 	default:
-		return fmt.Errorf("openai: compaction_blob cannot prepend to input type %T", out.Input)
+		return fmt.Errorf("openai: compaction items cannot prepend to input type %T", out.Input)
 	}
 	return nil
 }
@@ -703,12 +703,18 @@ func applyResponsesProviderOptions(req *ResponsesRequest, stream bool) error {
 				return err
 			}
 			req.TopLogprobs = &v
-		case ProviderOptionCompactionBlob:
+		case ProviderOptionCompactionItems:
 			v, err := optionString(key, value)
 			if err != nil {
 				return err
 			}
-			req.CompactionBlob = v
+			req.CompactionItems = v
+		case ProviderOptionContextManagement:
+			v, err := optionContextManagement(key, value)
+			if err != nil {
+				return err
+			}
+			req.ContextManagement = v
 		default:
 			return fmt.Errorf("openai: provider option %q is only supported with chat completions API", key)
 		}
@@ -1155,6 +1161,10 @@ func convertResponsesResponse(resp *responsesResponse, fallbackModel string) (*c
 					Extra:   responsesReasoningExtra(item),
 				})
 			}
+		case "compaction":
+			if len(item.Raw) > 0 {
+				out.CompactionItems = append(out.CompactionItems, append(json.RawMessage(nil), item.Raw...))
+			}
 		default:
 			return nil, fmt.Errorf("openai: unsupported responses output item type %q", item.Type)
 		}
@@ -1504,6 +1514,17 @@ func (s *responsesStream) events(name string, raw json.RawMessage) ([]core.Event
 				Extra:     append(json.RawMessage(nil), extra...),
 				ExtraFull: true,
 			}}, nil
+		}
+		// Compaction items from server-side context_management arrive as
+		// output_item.done with type "compaction". Forward the raw item so the
+		// EventCollector / application layer can store it and truncate context
+		// before the last compaction item on the next turn.
+		if done.Item.Type == "compaction" {
+			raw := done.Item.Raw
+			if len(raw) == 0 {
+				raw, _ = json.Marshal(done.Item)
+			}
+			return []core.Event{core.ProviderEvent{Name: "compaction", Raw: append(json.RawMessage(nil), raw...)}}, nil
 		}
 		return []core.Event{core.ProviderEvent{Name: name, Raw: raw}}, nil
 	case "response.created", "response.in_progress", "response.queued",

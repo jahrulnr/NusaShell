@@ -4,6 +4,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/core"
@@ -311,12 +312,18 @@ type ChatRequest struct {
 	// ToolChoice forces a specific tool when set (provider-native object).
 	// Compaction uses this to require summary() instead of a free-text reply.
 	ToolChoice any
-	// CompactionBlob carries an opaque server-side compaction payload
-	// (OpenAI /responses/compact encrypted_content) that must be replayed as
-	// a prefix of the next request's input. Set by the native compaction
-	// path; the OpenAI Responses adapter forwards it via the
-	// "compaction_blob" provider option. Empty for the client-side path.
+	// CompactionBlob carries opaque server-side compaction items
+	// (OpenAI Responses context_management encrypted_content) that must be
+	// replayed as a prefix of the next request's input. Set by the
+	// server-side compaction path; the OpenAI Responses adapter forwards it
+	// via the "compaction_items" provider option. Empty for the client-side
+	// path.
 	CompactionBlob string
+	// ContextManagement carries server-side context management directives
+	// (OpenAI Responses context_management). When non-empty, the adapter
+	// forwards it to the wire request so the server can compact context
+	// automatically when the threshold is crossed.
+	ContextManagement []map[string]any
 }
 
 // PromptCachePolicy is the provider-neutral cache intent. Adapters translate
@@ -375,6 +382,11 @@ type ChatResponse struct {
 	// blocks, malformed tool arguments, strict-tool omissions) that would
 	// otherwise be silently lost. Empty when the provider reported none.
 	Warnings []string
+	// CompactionItems carries opaque server-side compaction items (OpenAI
+	// Responses context_management). When non-empty, the application layer
+	// stores them on the conversation and replays them as a prefix on the
+	// next turn. Each entry is the raw JSON of a compaction output item.
+	CompactionItems []json.RawMessage
 }
 
 // AIProvider is the chat provider port. It embeds core.Provider so the
@@ -384,27 +396,6 @@ type ChatResponse struct {
 // ai_convert.go. Error mapping is handled by MapCoreError.
 type AIProvider interface {
 	core.Provider
-}
-
-// CompactionResult is the outcome of a server-side compaction call. Blob is a
-// JSON-encoded array of opaque input items (the canonical next context
-// window) that must be replayed verbatim to the next provider request.
-type CompactionResult struct {
-	Blob         string
-	InputTokens  int
-	OutputTokens int
-	TotalTokens  int
-}
-
-// ServerCompactor is implemented by adapters that can delegate compaction to
-// a provider-native server-side endpoint (OpenAI POST /responses/compact).
-// The request carries the live messages to compact plus any existing
-// CompactionBlob; the returned Blob replaces the archived prefix in the next
-// request's input. Adapters that do not support native compaction do not
-// implement this interface, and the caller falls back to client-side
-// summarization.
-type ServerCompactor interface {
-	CompactServer(ctx context.Context, req ChatRequest) (CompactionResult, error)
 }
 
 // ModelLister is implemented by providers that can enumerate models.
