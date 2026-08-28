@@ -287,15 +287,18 @@ func parseRgJSON(r io.Reader, contextLines, maxResults int) ([]grepMatch, bool) 
 
 // formatRgResults renders matches ripgrep-style. content: file:line:text with
 // context lines using "-" separators; files_with_matches: one path per line;
-// count: file:N per line. The YAML header carries the tallies, which backend
-// ran (via: rg|go), and capped: true when max_results cut the result short.
+// count: file:N per line (N = match count in that file). The YAML header
+// carries the tallies with unit-labeled keys — line_matches counts matched
+// lines (the :N in content rows is a 1-based line number, not a byte
+// offset), which backend ran (via: rg|go), and capped: true when
+// max_results cut the result short.
 func formatRgResults(matches []grepMatch, mode, via string, capped bool) string {
 	meta := map[string]any{"via": via}
 	if capped {
 		meta["capped"] = true
 	}
 	if len(matches) == 0 {
-		meta["matches"] = 0
+		meta["line_matches"] = 0
 		return yamlBlock(meta)
 	}
 	var b strings.Builder
@@ -331,7 +334,7 @@ func formatRgResults(matches []grepMatch, mode, via string, capped bool) string 
 			total += counts[f]
 		}
 		meta["files"] = len(files)
-		meta["total_matches"] = total
+		meta["total_line_matches"] = total
 		return yamlMD(meta, strings.TrimRight(b.String(), "\n"))
 	default: // content
 		for _, m := range matches {
@@ -353,7 +356,7 @@ func formatRgResults(matches []grepMatch, mode, via string, capped bool) string 
 				fmt.Fprintf(&b, "%s-%d-%s\n", m.File, c.Line, c.Content)
 			}
 		}
-		meta["matches"] = len(matches)
+		meta["line_matches"] = len(matches)
 		return yamlMD(meta, strings.TrimRight(b.String(), "\n"))
 	}
 }

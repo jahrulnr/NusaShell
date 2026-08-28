@@ -194,7 +194,7 @@ func TestGrepMaxResults(t *testing.T) {
 	if !ok || err != nil {
 		t.Fatalf("grep failed: ok=%v err=%v", ok, err)
 	}
-	if !contains(out, "matches: 2") {
+	if !contains(out, "line_matches: 2") {
 		t.Errorf("max_results=2 should report 2 matches, got: %s", out)
 	}
 	if !contains(out, "capped: true") {
@@ -370,7 +370,7 @@ func TestFormatRgResultsShapes(t *testing.T) {
 	}
 
 	out := formatRgResults(matches, "content", "go", false)
-	for _, want := range []string{"a.go-1-ctx", "a.go:2:hit one", "a.go:9:hit two", "b.go:1:hit three", "matches: 3", "via: go"} {
+	for _, want := range []string{"a.go-1-ctx", "a.go:2:hit one", "a.go:9:hit two", "b.go:1:hit three", "line_matches: 3", "via: go"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("content mode missing %q:\n%s", want, out)
 		}
@@ -382,14 +382,14 @@ func TestFormatRgResultsShapes(t *testing.T) {
 	}
 
 	out = formatRgResults(matches, "count", "rg", true)
-	for _, want := range []string{"a.go:2", "b.go:1", "total_matches: 3", "capped: true"} {
+	for _, want := range []string{"a.go:2", "b.go:1", "total_line_matches: 3", "capped: true"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("count mode missing %q:\n%s", want, out)
 		}
 	}
 
 	out = formatRgResults(nil, "content", "go", false)
-	if !strings.Contains(out, "matches: 0") || !strings.Contains(out, "via: go") {
+	if !strings.Contains(out, "line_matches: 0") || !strings.Contains(out, "via: go") {
 		t.Errorf("empty result shape wrong:\n%s", out)
 	}
 }

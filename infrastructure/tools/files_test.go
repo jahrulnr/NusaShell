@@ -162,8 +162,38 @@ func TestFileReadBinaryAndTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read big: %v", err)
 	}
-	if !strings.Contains(out, "truncated: true") || !strings.Contains(out, "next_offset: 10") {
+	if !strings.Contains(out, "truncated: true") || !strings.Contains(out, "next_offset_bytes: 10") {
 		t.Fatalf("truncation metadata missing: %q", out)
+	}
+}
+
+// Self-describing I/O: every numeric coordinate file_read reports carries
+// its unit in the field name, so an agent never has to remember whether a
+// bare integer is a byte offset or a line number (audit conv_c21e02199596a3cc:
+// offset/line confusion lands reads hundreds of lines off).
+func TestFileReadSelfDescribingOffsets(t *testing.T) {
+	dir := t.TempDir()
+	big := filepath.Join(dir, "big.txt")
+	content := strings.Repeat("a", 100)
+	if _, err := testTB.Execute(context.Background(), "file_write", []byte(`{"path":"`+jsonPath(big)+`","content":"`+content+`"}`)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	out, err := testTB.Execute(context.Background(), "file_read", []byte(`{"path":"`+jsonPath(big)+`","offset_bytes":10,"max_bytes":10}`))
+	if err != nil {
+		t.Fatalf("read with offset_bytes: %v", err)
+	}
+	if !strings.Contains(out, "offset_bytes: 10") {
+		t.Errorf("result must echo the unit-labeled offset: %q", out)
+	}
+	if !strings.Contains(out, "next_offset_bytes: 20") {
+		t.Errorf("truncated result must carry next_offset_bytes: %q", out)
+	}
+	// No unit-less coordinate may leak into the output.
+	for _, bare := range []string{"\noffset:", "\nnext_offset:"} {
+		if strings.Contains(out, bare) {
+			t.Errorf("unit-less field %q leaked into output: %q", bare, out)
+		}
 	}
 }
 

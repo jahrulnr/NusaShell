@@ -30,7 +30,7 @@ const (
 
 func fileToolInfos() []application.ToolInfo {
 	return []application.ToolInfo{
-		{Name: "file_read", Description: "Read a text file from disk. Returns up to max_bytes (default 32768); continue with offset when truncated. Binary files are reported, not dumped.", InputSchema: obj("object", props("path", str("Absolute file path"), "offset", intSchema("Byte offset to start reading from (default 0)"), "max_bytes", intSchema("Maximum bytes returned (default 32768)")), "path")},
+		{Name: "file_read", Description: "Read a text file from disk. Returns up to max_bytes (default 32768); continue with offset_bytes when truncated. Binary files are reported, not dumped.", InputSchema: obj("object", props("path", str("Absolute file path"), "offset_bytes", intSchema("Byte offset to start reading from (default 0)"), "max_bytes", intSchema("Maximum bytes returned (default 32768)")), "path")},
 		{Name: "file_write", Description: "Create or overwrite a text file atomically (temp file in the same directory, then rename). Parent directories are created automatically.", InputSchema: obj("object", props("path", str("Absolute file path"), "content", str("File content (UTF-8, max 10 MB)"), "encoding", strEnum("Content encoding: utf8 (default) or base64", "utf8", "base64")), "path", "content")},
 		{Name: "file_patch", Description: "Replace an exact substring in a file. Fails unless old_string matches exactly once; disambiguate multiple matches with occurrence (1-based). Use preview=true to see the result without writing.", InputSchema: obj("object", props("path", str("Absolute file path"), "old_string", str("Exact text to replace"), "new_string", str("Replacement text (may be empty to delete)"), "occurrence", intSchema("1-based occurrence to replace when old_string appears multiple times"), "preview", obj("boolean", nil)), "path", "old_string", "new_string")},
 		{Name: "file_list", Description: "List a directory's entries with type, size, and modified time.", InputSchema: obj("object", props("path", str("Absolute directory path")))},
@@ -99,7 +99,7 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 		if err != nil {
 			return true, "", err
 		}
-		offset := fileArgInt(args, "offset", 0)
+		offset := fileArgInt(args, "offset_bytes", 0)
 		if offset < 0 {
 			offset = 0
 		}
@@ -126,11 +126,11 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 		}
 		meta := map[string]any{"bytes": len(data)}
 		if offset > 0 {
-			meta["offset"] = offset
+			meta["offset_bytes"] = offset
 		}
 		if truncated {
 			meta["truncated"] = true
-			meta["next_offset"] = offset + len(data)
+			meta["next_offset_bytes"] = offset + len(data)
 		}
 		return true, yamlMD(meta, string(data)), nil
 

@@ -7,7 +7,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | Tool | Purpose |
 | --- | --- |
 | `exec` | run a shell command as a child process; combined stdout/stderr streamed live to the tool terminal as it is produced (head/tail elision for huge output) plus an optional per-call Stop button while running; default shell is POSIX `sh` on Unix/macOS, on Windows `auto` resolves Git Bash first (POSIX syntax works best) then PowerShell — `cmd` only via explicit `shell="cmd"`, plus optional kinds `bash`/`powershell`/`pwsh`/`wsl` (wsl maps cwd under /mnt); no absolute wall-clock limit — running commands keep producing, but silence longer than `idle_timeout_ms` (default 180000) fails the run; optional explicit `timeout_ms`; optional absolute `cwd`; the whole child tree dies on cancel/timeout (Stop button or composer Stop); on Windows select shells via `shell=` instead of invoking cmd.exe/powershell.exe inside a bash command line (MSYS path conversion mangles drive-letter paths like `Z:/x`) |
-| `file_read` | read a text file by absolute path (up to `max_bytes`, default 32768; continue with `offset` when truncated; binary files are reported, not dumped) |
+| `file_read` | read a text file by absolute path (up to `max_bytes`, default 32768; continue with `offset_bytes` when truncated — the result echoes `offset_bytes`/`next_offset_bytes`, always byte counts, never line numbers; binary files are reported, not dumped) |
 | `file_write` | create or overwrite a text file atomically (temp file + rename); parent directories created automatically; `encoding` utf8 or base64; transient Windows file-lock errors during the rename are retried briefly |
 | `file_patch` | exact substring replace; errors unless `old_string` matches exactly once — disambiguate repeated matches with 1-based `occurrence`; `preview=true` returns the result without writing |
 | `file_list` | list directory entries with name, type, size, modified time |
@@ -16,7 +16,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `file_move` | move/rename a path; overwrites an existing destination; falls back to copy+delete across filesystems (transient Windows rename locks are retried briefly first) |
 | `file_copy` | copy a file or directory recursively |
 | `file_info` | metadata for a path: `exists`, size, mode, type, modified time. Does NOT error on missing paths — returns `exists: false` (use it for existence checks too) |
-| `grep` | search file contents with regex (RE2 syntax); filters by `glob_pattern`, returns matching lines with optional `context_lines`; `output_mode`: content (default), files_with_matches, count; case-insensitive via `case_insensitive=true`; results are capped at ~200k chars with a truncation marker — for huge result sets narrow the pattern, reduce `context_lines`, or use `output_mode` files_with_matches/count; prefer this over exec+shell grep — structured output, no process spawn, works without rg installed |
+| `grep` | search file contents with regex (RE2 syntax); filters by `glob_pattern`, returns matching lines with optional `context_lines`; `output_mode`: content (default), files_with_matches, count; case-insensitive via `case_insensitive=true`; content rows are `path:LINE:text` where LINE is a 1-based line number (context rows use `path-LINE-text`), and the header tallies them as `line_matches` (count mode: `file:N` = match count, `total_line_matches`); results are capped at ~200k chars with a truncation marker — for huge result sets narrow the pattern, reduce `context_lines`, or use `output_mode` files_with_matches/count; prefer this over exec+shell grep — structured output, no process spawn, works without rg installed |
 | `find_file` | find files by glob pattern with `**` recursive matching (e.g. `**/*.go`) and brace expansion (e.g. `*.{go,ts}`); skips .git/node_modules/vendor; returns matching paths sorted alphabetically |
 | `show` | render a file from disk in the UI. `op=html` reads an HTML file and displays it in a sandboxed iframe (write the file first with `file_write`, then `show` it — use `file_patch` for edits, `file_read` to inspect). `op=image` reads an image file and displays it inline. `op=audio` reads an audio file (mp3, wav, ogg, m4a) and displays an inline player. `op=video` reads a video file (mp4, webm, mov, avi) and displays an inline player. `width`/`height` control the iframe viewport (html only, default 720x400). The tool result to the model is metadata only (path, name, media_type, size_bytes for media; path, width, height, title for html) — no file content or base64 payload is ever embedded in the tool output, so it does not bloat the conversation JSON or enter the provider request. The frontend loads the file via `/local-file?path=` on demand. Use `read_media` instead when the model needs to see the image/audio/video content. Replaces the former `artifact_*` tools — file_* handles CRUD, `show` only handles display |
 | `skill` | skill library dispatcher; `op` selects: `list`, `search`, `save`. Skill files live on disk — read `SKILL.md` and support files with `file_read`, list a skill folder with `file_list` (see `docs(op="read", id="skills")` for the path layout) |
@@ -61,6 +61,38 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `subagent_steer` | queue an extra instruction on a live ACP run |
 | `subagent_stop` | cancel a live ACP run (pending permissions fail closed) |
 | `subagent_wait` | wait for an async ACP run to finish |
+
+## Coordinate discipline (grep ↔ file_read ↔ file_patch)
+
+`grep` and `file_read` speak different coordinate systems, and both are
+correct: grep reports **1-based line numbers** (`path:LINE:text`, tallied as
+`line_matches`), file_read reports **byte offsets** (`offset_bytes`,
+`next_offset_bytes`). Never convert between them with arithmetic — line
+lengths vary and CRLF files count one line but two bytes per newline, so
+mental math lands hundreds of lines off. Anchor on **content** instead:
+numbers are for orientation, content is the only anchor all three tools
+share.
+
+```text
+# GOOD — grep locates, content anchors the edit
+grep(pattern="version=1\\.2\\.3", path="deploy.yaml")
+  → deploy.yaml:2:deploy: version=1.2.3 env=prod
+file_patch(path="deploy.yaml",
+  old_string="deploy: version=1.2.3 env=prod",   # verbatim from the grep row
+  new_string="deploy: version=2.0.0 env=prod")
+
+# GOOD — truncated read continues with its own byte coordinate
+file_read(path="big.log")            → next_offset_bytes: 32768
+file_read(path="big.log", offset_bytes=32768)
+
+# BAD — treating a line number as a byte offset
+grep(...) → line 900
+file_read(path="big.log", offset_bytes=900)   # lands mid-line ~14, not line 900
+
+# BAD — arithmetic between coordinate systems
+file_read(...) → next_offset_bytes: 32768
+grep(..., "line 32768")                        # bytes ≠ lines
+```
 
 The provider receives the current `Toolbox.ListTools` roster. `web_answer` is
 listed only when configured, `generate_image` is listed only when an image
