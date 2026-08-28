@@ -1047,13 +1047,24 @@ var compactionSummaryToolDef = ToolDef{
 // compactionToolChoice forces the compaction model to call summary() instead
 // of continuing the agent turn as free-text (the failure mode that produced
 // one-sentence "handovers" from reasoning models).
+//
+// The wire shape differs by provider kind:
+//   - Anthropic Messages: {"type":"tool","name":"summary"}
+//   - OpenAI Responses:   {"type":"function","name":"summary"} (flat — the
+//     Responses API rejects the nested Chat shape with
+//     "missing_required_parameter: 'tool_choice.name'")
+//   - OpenAI Chat / OpenRouter chat: {"type":"function","function":{"name":"summary"}}
 func compactionToolChoice(kind domain.ProviderKind) any {
-	if kind == domain.ProviderMessages {
+	switch kind {
+	case domain.ProviderMessages:
 		return map[string]any{"type": "tool", "name": compactionSummaryToolName}
-	}
-	return map[string]any{
-		"type":     "function",
-		"function": map[string]any{"name": compactionSummaryToolName},
+	case domain.ProviderResponses:
+		return map[string]any{"type": "function", "name": compactionSummaryToolName}
+	default:
+		return map[string]any{
+			"type":     "function",
+			"function": map[string]any{"name": compactionSummaryToolName},
+		}
 	}
 }
 

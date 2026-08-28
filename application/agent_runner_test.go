@@ -1607,6 +1607,28 @@ func TestCompactionToolChoiceForChatKind(t *testing.T) {
 	}
 }
 
+// TestCompactionToolChoiceForResponsesKind: the OpenAI Responses API uses the
+// flat tool_choice shape {"type":"function","name":"summary"} (no nested
+// "function" object). The nested Chat shape triggers
+// "missing_required_parameter: 'tool_choice.name'" on gpt-5 responses models,
+// which silently kills every client-side compaction pass.
+func TestCompactionToolChoiceForResponsesKind(t *testing.T) {
+	got := compactionToolChoice(domain.ProviderResponses)
+	m, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("responses tool_choice = %#v", got)
+	}
+	if m["type"] != "function" {
+		t.Fatalf("responses tool_choice type = %#v, want \"function\"", m["type"])
+	}
+	if name, _ := m["name"].(string); name != compactionSummaryToolName {
+		t.Fatalf("responses tool_choice name = %#v, want %q", m["name"], compactionSummaryToolName)
+	}
+	if _, hasNested := m["function"]; hasNested {
+		t.Fatalf("responses tool_choice must not nest \"function\" (Chat shape); got %#v", got)
+	}
+}
+
 func TestCompactionSummaryEchoesAssistant(t *testing.T) {
 	asst := strings.Repeat("Build hijau. Sekarang aku verifikasi dua konsumen kunci. ", 3)
 	msgs := []ChatMessage{{Role: "user", Content: "go"}, {Role: "assistant", Content: asst}}
