@@ -2568,7 +2568,14 @@ function promoteSteerToTranscript(text) {
   } else {
     thread.append(steerNode);
   }
-  scrollToBottom(true);
+  // Bring the steer into view. It is inserted after the running assistant
+  // node, which on a long multi-round turn sits thousands of pixels above
+  // the live tail — without this the user never sees their steer land
+  // (it looked like "submit does nothing: no bubble, no new round").
+  // scrollIntoView releases the bottom pin via the scroll listener, so the
+  // growing tail below does not immediately yank the view back down; the
+  // newly started round streams right under the steer bubble, in view.
+  steerNode.scrollIntoView({ block: 'start' });
 }
 
 async function applyLiveCompaction(conversationId, run, expectedRunId = '') {

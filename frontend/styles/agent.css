@@ -221,7 +221,12 @@
   outline: none;
 }
 .agent-rooms-backdrop { display: none; }
-.agent-message { display: flex; flex-direction: column; gap: 10px; min-width: 0; width: min(100%, 920px); max-width: none; content-visibility: auto; }
+/* No content-visibility on .agent-message: a freshly inserted bubble that is
+   still off-screen gets size-contained to 0px — invisible AND unreachable by
+   scroll (scrollHeight never grows to include it). That is exactly the
+   "submit/steer looks like it did nothing" bug. Same reason it was reverted
+   on .agent-round. */
+.agent-message { display: flex; flex-direction: column; gap: 10px; min-width: 0; width: min(100%, 920px); max-width: none; }
 .agent-message.user { align-self: flex-end; align-items: flex-end; }
 .agent-message.assistant { align-self: flex-start; }
 .agent-message-meta { margin: auto 0; color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
