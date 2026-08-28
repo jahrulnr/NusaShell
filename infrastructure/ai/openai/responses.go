@@ -65,6 +65,12 @@ type ResponsesRequest struct {
 
 	CaptureRawResponse bool
 
+	// CompactionBlob is a JSON-encoded []json.RawMessage carrying the opaque
+	// server-side compaction output (encrypted_content + retained items).
+	// When non-empty, buildResponsesRequest decodes it and prepends the items
+	// to the request input so the compacted context is replayed verbatim.
+	CompactionBlob string
+
 	providerOptions   map[string]any
 	unsupportedFields []string
 }
@@ -501,6 +507,11 @@ func (p *Provider) buildResponsesRequest(req *ResponsesRequest, stream bool) (*r
 	} else {
 		out.Instructions = effective.Instructions
 	}
+	if effective.CompactionBlob != "" {
+		if err := prependCompactionBlob(out, effective.CompactionBlob); err != nil {
+			return nil, err
+		}
+	}
 	text, err := p.responsesText(&effective)
 	if err != nil {
 		return nil, err
@@ -517,6 +528,47 @@ func (p *Provider) buildResponsesRequest(req *ResponsesRequest, stream bool) (*r
 	}
 	out.Tools = tools
 	return out, nil
+}
+
+// prependCompactionBlob decodes the opaque compaction blob (a JSON array of
+// raw input items produced by /responses/compact) and prepends those items to
+// the request input. The blob covers only already-archived messages, so it
+// must come before the live message items and must never overlap them. A
+// plain-string Input is converted to a single user message item first; a nil
+// Input lets the blob items become the entire input. The blob items are
+// forwarded verbatim via responsesInputItem.Raw so encrypted_content and
+// retained items are replayed without parsing.
+func prependCompactionBlob(out *responsesRequest, blob string) error {
+	var blobItems []json.RawMessage
+	if err := json.Unmarshal([]byte(blob), &blobItems); err != nil {
+		return fmt.Errorf("openai: compaction_blob must be a JSON array of input items: %w", err)
+	}
+	if len(blobItems) == 0 {
+		return nil
+	}
+	prefix := make([]responsesInputItem, 0, len(blobItems))
+	for _, raw := range blobItems {
+		prefix = append(prefix, responsesInputItem{Raw: append(json.RawMessage(nil), raw...)})
+	}
+	switch current := out.Input.(type) {
+	case nil:
+		out.Input = prefix
+	case string:
+		if current == "" {
+			out.Input = prefix
+			break
+		}
+		out.Input = append(prefix, responsesInputItem{
+			Type:    "message",
+			Role:    "user",
+			Content: []responsesContentItem{{Type: "input_text", Text: current}},
+		})
+	case []responsesInputItem:
+		out.Input = append(prefix, current...)
+	default:
+		return fmt.Errorf("openai: compaction_blob cannot prepend to input type %T", out.Input)
+	}
+	return nil
 }
 
 func validateResponsesRequest(req *ResponsesRequest, stream bool) error {
@@ -651,6 +703,12 @@ func applyResponsesProviderOptions(req *ResponsesRequest, stream bool) error {
 				return err
 			}
 			req.TopLogprobs = &v
+		case ProviderOptionCompactionBlob:
+			v, err := optionString(key, value)
+			if err != nil {
+				return err
+			}
+			req.CompactionBlob = v
 		default:
 			return fmt.Errorf("openai: provider option %q is only supported with chat completions API", key)
 		}

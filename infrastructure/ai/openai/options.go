@@ -28,6 +28,7 @@ const (
 	ProviderOptionWebSearchOptions     = "web_search_options"
 	ProviderOptionParallelToolCalls    = "parallel_tool_calls"
 	ProviderOptionSeed                 = "seed"
+	ProviderOptionCompactionBlob       = "compaction_blob"
 )
 
 var providerOptionKeys = map[string]struct{}{
@@ -54,6 +55,7 @@ var providerOptionKeys = map[string]struct{}{
 	ProviderOptionWebSearchOptions:     {},
 	ProviderOptionParallelToolCalls:    {},
 	ProviderOptionSeed:                 {},
+	ProviderOptionCompactionBlob:       {},
 }
 
 func applyProviderOptions(req *chatRequest, options map[string]any) error {
