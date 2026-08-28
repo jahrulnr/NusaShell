@@ -107,3 +107,45 @@ func (p *Provider) Compact(ctx context.Context, req ResponsesCompactRequest) (*R
 		},
 	}, nil
 }
+
+// BuildCompactInput builds the input and instructions for /responses/compact
+// from a core request's messages plus an optional compaction blob. System
+// messages are folded into instructions; the remaining messages become input
+// items. The blob (a JSON array of raw input items from a prior compact call)
+// is prepended verbatim so the archived context is replayed before the live
+// messages. Returns the input value for ResponsesCompactRequest.Input and the
+// instructions string.
+func BuildCompactInput(messages []core.Message, blob string) (input any, instructions string, err error) {
+	instructions, live, err := responsesInstructions(messages)
+	if err != nil {
+		return nil, "", err
+	}
+	var items []responsesInputItem
+	if text, ok := responsesInputString(live); ok {
+		items = []responsesInputItem{{
+			Type:    "message",
+			Role:    "user",
+			Content: []responsesContentItem{{Type: "input_text", Text: text}},
+		}}
+	} else {
+		items, err = responsesInputItems(live)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+	if blob != "" {
+		var blobItems []json.RawMessage
+		if err := json.Unmarshal([]byte(blob), &blobItems); err != nil {
+			return nil, "", fmt.Errorf("openai: compaction_blob must be a JSON array of input items: %w", err)
+		}
+		prefix := make([]responsesInputItem, 0, len(blobItems))
+		for _, raw := range blobItems {
+			prefix = append(prefix, responsesInputItem{Raw: append(json.RawMessage(nil), raw...)})
+		}
+		items = append(prefix, items...)
+	}
+	if len(items) == 0 {
+		return nil, instructions, nil
+	}
+	return items, instructions, nil
+}
