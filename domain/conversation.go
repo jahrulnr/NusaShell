@@ -123,11 +123,13 @@ type Conversation struct {
 	Workspace  string // optional absolute working directory selected for this conversation
 	Messages   []Message
 	ChunkCount int // number of archived pre-compaction chunks available for scroll-back
-	// CompactionBlob holds an opaque server-side compaction payload (e.g.
-	// Codex encrypted_content) that only the originating provider can read.
-	// When non-empty, the Codex adapter passes it back as a Compaction item
-	// in subsequent request input. Empty for providers that don't support
-	// server-side compaction.
+	// CompactionBlob holds an opaque server-side compaction payload
+	// (OpenAI /responses/compact encrypted_content) that only the
+	// originating provider can read. When non-empty, the OpenAI Responses
+	// adapter passes it back as a prefix of the next request's input so the
+	// compacted context is replayed verbatim. Empty for providers that don't
+	// support server-side compaction (then Summary carries the client-side
+	// handover instead).
 	CompactionBlob string
 	// EstimatedTokens is the last server-side *heuristic* context estimate for
 	// this conversation (system + messages + tool definitions, ~chars/4). It
@@ -255,7 +257,10 @@ func (c *Conversation) AddMessage(m Message) {
 	c.Touch()
 }
 
-// EstimateTokens sums the message content, tool args and outputs.
+// EstimateTokens sums the message content, tool args and outputs. The
+// compaction blob (opaque server-side compaction payload) is included so the
+// 80% trigger stays correct after a native compaction: the blob replaces the
+// archived messages in the next request's context window.
 func (c *Conversation) EstimateTokens() int {
 	total := 0
 	for _, m := range c.Messages {
@@ -263,6 +268,9 @@ func (c *Conversation) EstimateTokens() int {
 	}
 	if c.Summary != "" {
 		total += EstimateTokens(c.Summary)
+	}
+	if c.CompactionBlob != "" {
+		total += len(c.CompactionBlob) / 3
 	}
 	return total
 }
