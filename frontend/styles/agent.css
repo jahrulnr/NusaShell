@@ -221,7 +221,7 @@
   outline: none;
 }
 .agent-rooms-backdrop { display: none; }
-.agent-message { display: flex; flex-direction: column; gap: 10px; min-width: 0; width: min(100%, 920px); max-width: none; }
+.agent-message { display: flex; flex-direction: column; gap: 10px; min-width: 0; width: min(100%, 920px); max-width: none; content-visibility: auto; }
 .agent-message.user { align-self: flex-end; align-items: flex-end; }
 .agent-message.assistant { align-self: flex-start; }
 .agent-message-meta { margin: auto 0; color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
@@ -488,7 +488,10 @@
   white-space: pre-wrap;
 }
 
-.agent-round { min-width: 0; }
+.agent-round {
+  min-width: 0;
+  contain-intrinsic-size: auto 120px;
+}
 .agent-live-trimmed {
   width: min(100%, 790px);
   margin: 0 0 7px;
@@ -496,38 +499,6 @@
   border-left: 1px solid #2a3748;
   color: #8796aa;
   font: 11px/1.4 "IBM Plex Sans", system-ui, sans-serif;
-}
-.agent-round-stub {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  box-sizing: border-box;
-  width: min(100%, 790px);
-  margin: 2px 0 8px;
-  padding: 5px 10px 5px 12px;
-  border-radius: 0 6px 6px 0;
-  background: rgba(18, 28, 40, .48);
-  color: #8796aa;
-  border-left: 1px solid #2a3748;
-  font: 12px/1.4 "IBM Plex Sans", system-ui, sans-serif;
-}
-.agent-round-stub-label { min-width: 0; }
-.agent-round-stub-action {
-  flex: none;
-  margin-left: auto;
-  border: 1px solid #2a3748;
-  border-radius: 5px;
-  padding: 3px 7px;
-  background: transparent;
-  color: #9badd0;
-  cursor: pointer;
-  font: inherit;
-}
-.agent-round-stub-action:hover,
-.agent-round-stub-action:focus-visible {
-  border-color: #496078;
-  background: rgba(18, 28, 40, .72);
-  outline: none;
 }
 
 /* Tool job cards */

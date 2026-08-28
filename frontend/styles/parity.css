@@ -560,7 +560,10 @@ summary { outline: none; }
 .agent-reasoning-content pre { box-sizing: border-box; max-width: 100%; overflow-x: auto; white-space: pre; }
 .agent-reasoning-content a { color: #c9a66b; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; word-break: break-word; }
 .agent-reasoning-content a:hover { color: #ddc08a; }
-.agent-round { min-width: 0; }
+.agent-round {
+  min-width: 0;
+  contain-intrinsic-size: auto 120px;
+}
 .agent-live-trimmed {
   width: min(100%, 790px);
   margin: 0 0 7px;
@@ -569,38 +572,6 @@ summary { outline: none; }
   color: #8796aa;
   font-size: 11px;
   line-height: 1.4;
-}
-.agent-round-stub {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  box-sizing: border-box;
-  width: min(100%, 790px);
-  margin: 2px 0 8px;
-  padding: 5px 10px 5px 12px;
-  border-radius: 0 6px 6px 0;
-  background: rgba(18, 28, 40, .48);
-  color: #8796aa;
-  border-left: 1px solid #2a3748;
-  font-size: 12px;
-}
-.agent-round-stub-label { min-width: 0; }
-.agent-round-stub-action {
-  flex: none;
-  margin-left: auto;
-  border: 1px solid #2a3748;
-  border-radius: 5px;
-  padding: 3px 7px;
-  background: transparent;
-  color: #9badd0;
-  cursor: pointer;
-  font: inherit;
-}
-.agent-round-stub-action:hover,
-.agent-round-stub-action:focus-visible {
-  border-color: #496078;
-  background: rgba(18, 28, 40, .72);
-  outline: none;
 }
 .agent-send-btn,
 .agent-new-conversation:hover,

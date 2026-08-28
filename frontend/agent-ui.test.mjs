@@ -104,13 +104,13 @@ test('conversationTail keeps a compaction marker immediately before the live ass
   for (let i = 0; i < 40; i++) {
     messages.push(msg('user', `old-u${i}`), msg('assistant', `old-a${i}`));
   }
-  messages.push(msg('user', 'Compacted context handover: preserve this marker'));
+  messages.push(msg('user', '[COMPACTION CHECKPOINT] preserve this marker'));
   for (let i = 0; i < 4; i++) messages.push(msg('assistant', `post-compact-a${i}`));
 
   const tail = conversationTail(messages, { prefixWindow: 2, keepRounds: 3 });
 
   assert.deepEqual(tail.visible.map((m) => m.id), [
-    'Compacted context handover: preserve this marker',
+    '[COMPACTION CHECKPOINT] preserve this marker',
     'post-compact-a1',
     'post-compact-a2',
     'post-compact-a3',

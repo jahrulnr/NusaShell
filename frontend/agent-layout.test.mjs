@@ -54,11 +54,21 @@ test('Archived chunks load only on explicit Load older or scroll-to-top, never a
   assert.match(agentView, /hasOlderActiveMessages\(\) \|\| state\.nextChunkIndex >= 0/);
 });
 
-test('Live turns prune overflow rounds; snapshot history uses a conversation tail instead of an earlier-rounds stub', () => {
-  assert.match(agentRender, /KEEP_VISIBLE_ROUNDS = 3/);
+test('Live turns keep every round mounted; perf comes from content-visibility + targeted enhancement, not DOM removal', () => {
+  // The hide-bubble workaround (park rounds, "N earlier rounds trimmed"
+  // stub) is removed — it traded UX away for performance.
+  assert.doesNotMatch(agentRender, /KEEP_VISIBLE_ROUNDS|MAX_PARKED_LIVE_ROUNDS|parkLiveRound|restoreParkedLiveRounds|pruneOverflowLiveRounds|agent-round-stub/);
   assert.match(agentRender, /export function mountLiveRound/);
-  assert.match(agentRender, /MAX_PARKED_LIVE_ROUNDS = 12/);
-  assert.match(agentRender, /restoreParkedLiveRounds/);
+  // Snapshot history windowing keeps its own constant (agent.js), still
+  // backed by the conversation tail + explicit Load older.
+  assert.match(agentView, /SNAPSHOT_KEEP_ROUNDS = 12/);
+  assert.doesNotMatch(agentView, /KEEP_VISIBLE_ROUNDS/);
+  // The browser-level guard rails that replace the trimming:
+  // off-screen rounds skip layout/paint; live-delta enhancement only
+  // touches newly rendered blocks.
+  assert.match(agentCSS, /\.agent-round \{[^}]*content-visibility: auto;[^}]*contain-intrinsic-size/s);
+  assert.match(agentView, /incrementalRender\(/);
+  assert.match(agentView, /scheduleLiveEnhancement\(/);
   assert.match(agentView, /mountLiveRound\(/);
   assert.match(agentView, /scheduleLiveRender/);
   assert.match(agentView, /run\.toolJobs = toolJobs/);
@@ -67,6 +77,8 @@ test('Live turns prune overflow rounds; snapshot history uses a conversation tai
   assert.match(agentView, /MAX_LIVE_TOOL_JOBS = 128/);
   assert.match(agentView, /setLiveToolJob/);
   assert.match(agentCSS, /\.agent-live-trimmed/);
+  assert.doesNotMatch(agentCSS, /agent-round-stub/);
+  assert.doesNotMatch(parityCSS, /agent-round-stub/);
   assert.match(html, /id="agent-provider-status" aria-live="polite" aria-atomic="true"/);
   assert.match(agentView, /conversationTail\(/);
   assert.doesNotMatch(agentRender, /function earlierRoundsDisclosure/);

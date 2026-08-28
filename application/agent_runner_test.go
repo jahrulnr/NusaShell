@@ -54,6 +54,12 @@ func TestShouldContinueFailedTurn(t *testing.T) {
 	}
 }
 
+// TestHydrationCheckpointPersistsOnceUntilCompaction verifies the epoch-based
+// hydration lifecycle: a fresh room gets one checkpoint via
+// ensureFreshRoomHydration, follow-up user messages do NOT add another, and
+// persistCompactedConversation rebuilds exactly one fresh checkpoint after
+// compaction. The turn loop no longer touches hydration, so the checkpoint
+// stays at its epoch anchor (after the first user / handover) across rounds.
 func TestHydrationCheckpointPersistsOnceUntilCompaction(t *testing.T) {
 	conversation := &domain.Conversation{
 		ID: "c1",
@@ -68,13 +74,6 @@ func TestHydrationCheckpointPersistsOnceUntilCompaction(t *testing.T) {
 		Bus:           NewBus(),
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background()}
-	adapter := &reviewStubAdapter{}
-	callRound := func(messageID string) {
-		t.Helper()
-		if _, err := app.streamTurnRoundOnce(run, stubProviderContext(adapter), conversation, messageID, "model", "", nil, domain.Settings{}, false, 0, true, nil, ModelCapabilities{}); err != nil {
-			t.Fatal(err)
-		}
-	}
 	countCheckpoints := func() int {
 		count := 0
 		for _, message := range conversation.Messages {
@@ -85,25 +84,28 @@ func TestHydrationCheckpointPersistsOnceUntilCompaction(t *testing.T) {
 		return count
 	}
 
-	callRound("a1")
+	// Fresh room: one user, no checkpoint → ensureFreshRoomHydration builds one.
+	app.ensureFreshRoomHydration(run, "a1", ModelCapabilities{})
 	if got := countCheckpoints(); got != 1 {
 		t.Fatalf("initial checkpoints = %d, want 1", got)
 	}
+
+	// Follow-up user message: two users now, checkpoint already present.
+	// ensureFreshRoomHydration must skip (not fresh, and HasHydration is true).
 	conversation.Messages = append(conversation.Messages,
 		domain.Message{ID: "u2", Role: domain.RoleUser, Content: "follow up"},
 		domain.Message{ID: "a2", Role: domain.RoleAssistant},
 	)
-	callRound("a2")
+	app.ensureFreshRoomHydration(run, "a2", ModelCapabilities{})
 	if got := countCheckpoints(); got != 1 {
 		t.Fatalf("checkpoints after later user message = %d, want 1", got)
 	}
 
-	conversation.Messages = filterHydrationDomainMessages(conversation.Messages)
-	conversation.Messages = append(conversation.Messages,
-		domain.Message{ID: "u3", Role: domain.RoleUser, Content: "after compaction"},
-		domain.Message{ID: "a3", Role: domain.RoleAssistant},
-	)
-	callRound("a3")
+	// Compaction epoch: persistCompactedConversation strips the old checkpoint
+	// and rebuilds a fresh one in the same Save.
+	if err := app.persistCompactedConversation(conversation, "summary", 1_000_000); err != nil {
+		t.Fatalf("persistCompactedConversation: %v", err)
+	}
 	if got := countCheckpoints(); got != 1 {
 		t.Fatalf("post-compaction checkpoints = %d, want 1 fresh checkpoint", got)
 	}
@@ -378,7 +380,7 @@ func TestExecuteTurnToolsStopsOnCancel(t *testing.T) {
 		Toolbox:       box,
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	if _, err := app.executeTurnTools(run, "m1", conv.Messages[0].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}); err == nil {
+	if err := app.executeTurnTools(run, "m1", conv.Messages[0].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}); err == nil {
 		t.Fatal("want context error")
 	}
 	if len(box.names) != 0 {
@@ -424,49 +426,12 @@ func hydrationCheckpointMessage() domain.Message {
 	}
 }
 
-// TestExecuteTurnToolsStripsHydrationOnBriefChange verifies that when a todo
-// tool call changes the brief (set or clear), the persisted hydration
-// checkpoint is stripped and hydrationRefreshed is true so the runner
-// rebuilds a fresh checkpoint next round.
-func TestExecuteTurnToolsStripsHydrationOnBriefChange(t *testing.T) {
-	todos := &fakeTodoPort{briefs: map[string]string{"c1": "old brief"}}
-	box := &briefMutatingToolbox{todos: todos, newBrief: "## Objective\nnew\n## Done when\nnew"}
-	conv := &domain.Conversation{
-		ID: "c1",
-		Messages: []domain.Message{
-			hydrationCheckpointMessage(),
-			{ID: "m1", Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "t1", Name: "todo", Args: `{}`}}},
-		},
-	}
-	app := &App{
-		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
-		Logs:          &fakeLogStore{},
-		Bus:           NewBus(),
-		Toolbox:       box,
-		Todos:         todos,
-	}
-	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: WithConversationID(context.Background(), "c1"), Cancel: func() {}}
-
-	refreshed, err := app.executeTurnTools(run, "m1", conv.Messages[1].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{})
-	if err != nil {
-		t.Fatalf("executeTurnTools: %v", err)
-	}
-	if !refreshed {
-		t.Fatal("hydrationRefreshed = false, want true after brief change")
-	}
-	// The hydration checkpoint message must be gone from the saved conversation.
-	for _, m := range conv.Messages {
-		for _, tc := range m.ToolCalls {
-			if domain.IsHydrationCallID(tc.ID) {
-				t.Fatalf("hydration checkpoint survived brief change: message %s", m.ID)
-			}
-		}
-	}
-}
-
 // TestExecuteTurnToolsKeepsHydrationOnItemOnlyPatch verifies that a todo call
 // that only patches items (brief unchanged) does NOT strip the hydration
-// checkpoint — the checkpoint's todo_list brief is still accurate.
+// checkpoint — the checkpoint's todo_list brief is still accurate. With the
+// cache-poison fix, the checkpoint is never stripped on a brief change either
+// (see TestExecuteTurnToolsKeepsHydrationOnBriefChange in
+// hydration_position_test.go), so the item-only case is the same invariant.
 func TestExecuteTurnToolsKeepsHydrationOnItemOnlyPatch(t *testing.T) {
 	todos := &fakeTodoPort{
 		briefs: map[string]string{"c1": "stable brief"},
@@ -490,12 +455,8 @@ func TestExecuteTurnToolsKeepsHydrationOnItemOnlyPatch(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: WithConversationID(context.Background(), "c1"), Cancel: func() {}}
 
-	refreshed, err := app.executeTurnTools(run, "m1", conv.Messages[1].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{})
-	if err != nil {
+	if err := app.executeTurnTools(run, "m1", conv.Messages[1].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}); err != nil {
 		t.Fatalf("executeTurnTools: %v", err)
-	}
-	if refreshed {
-		t.Fatal("hydrationRefreshed = true, want false when brief is unchanged")
 	}
 	// The hydration checkpoint must still be present.
 	found := false
@@ -2006,10 +1967,18 @@ func TestCompactionArchiveStripsHydration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// After compaction, the live transcript must have exactly ONE fresh
+	// hydration checkpoint — persistCompactedConversation rebuilds it in the
+	// same Save as Compact (the old one was stripped + archived). The
+	// archived chunks above must not carry any (checked before this).
+	checkpoints := 0
 	for _, m := range got.Messages {
 		if isHydrationMessage(m) {
-			t.Fatal("live transcript must not keep hydration after compaction")
+			checkpoints++
 		}
+	}
+	if checkpoints != 1 {
+		t.Fatalf("live transcript after compaction has %d hydration checkpoints, want 1 fresh rebuild", checkpoints)
 	}
 }
 

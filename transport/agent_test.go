@@ -377,7 +377,7 @@ func TestAgentTurnCompaction(t *testing.T) {
 	}
 	markers := 0
 	for _, m := range conv.Messages {
-		if m.Role == "user" && strings.HasPrefix(m.Content, "Compacted context handover:") {
+		if m.Role == "user" && strings.HasPrefix(m.Content, "[COMPACTION CHECKPOINT]") {
 			markers++
 		}
 	}
@@ -450,7 +450,7 @@ func TestAgentTurnMultiPassCompaction(t *testing.T) {
 	}
 	hasMarker := false
 	for _, m := range conv.Messages {
-		if m.Role == "user" && strings.HasPrefix(m.Content, "Compacted context handover:") {
+		if m.Role == "user" && strings.HasPrefix(m.Content, "[COMPACTION CHECKPOINT]") {
 			hasMarker = true
 			if !strings.Contains(m.Content, "SUMMARY") {
 				t.Fatalf("compaction marker missing summary: %q", m.Content)

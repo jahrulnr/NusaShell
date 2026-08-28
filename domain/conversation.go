@@ -360,7 +360,7 @@ func estimateToolCallTokens(tc ToolCall) int {
 // compaction handover from a real user message even though both carry
 // role=user. The summary is the first live message after compaction so the
 // transcript stays chronological and the provider still sees a user message.
-const CompactionSummaryPrefix = "Compacted context handover:"
+const CompactionSummaryPrefix = "[COMPACTION CHECKPOINT]"
 
 // IsCompactionSummary reports whether a message content is a compaction
 // summary marker. Used to skip compaction summaries when collecting real
@@ -421,10 +421,12 @@ func (c *Conversation) compactionRetention(keepTokenBudget int) (retained []Mess
 //
 // The summary carries role=user so the provider request always starts with a
 // user message (HTTP 400 "No user query found in messages" otherwise). The
-// CompactionSummaryPrefix lets the UI distinguish it from a real user
-// message. Putting it first (not last) keeps the live turn at the tail so
-// mid-turn compaction cannot park the handover under streaming deltas.
-func (c *Conversation) Compact(summary string, keepTokenBudget int) {
+// handoverContent is the full rendered template (from the application layer)
+// — domain does not own prompt text. CompactionSummaryPrefix lets the UI
+// distinguish it from a real user message. Putting it first (not last) keeps
+// the live turn at the tail so mid-turn compaction cannot park the handover
+// under streaming deltas.
+func (c *Conversation) Compact(summary, handoverContent string, keepTokenBudget int) {
 	if c.Summary != "" {
 		c.Summary += "\n\n" + summary
 	} else {
@@ -436,7 +438,7 @@ func (c *Conversation) Compact(summary string, keepTokenBudget int) {
 	summaryMsg := Message{
 		ID:        NewID("msg"),
 		Role:      RoleUser,
-		Content:   CompactionSummaryPrefix + "\n" + c.Summary,
+		Content:   handoverContent,
 		CreatedAt: time.Now().UTC(),
 		Status:    StatusDone,
 	}

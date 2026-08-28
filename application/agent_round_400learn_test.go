@@ -71,7 +71,7 @@ func TestStreamTurnRoundRetriesAfterLearnable400(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", ProviderID: "9router", Ctx: context.Background()}
 	caps := ModelCapabilities{Vision: true}
 
-	res, err := app.streamTurnRound(run, stubProviderContext(provider), conv, "a1", "qwen/qwen3.8-max-free", "", nil, domain.Settings{}, false, 100, true, nil, caps)
+	res, err := app.streamTurnRound(run, stubProviderContext(provider), conv, "a1", "qwen/qwen3.8-max-free", "", nil, domain.Settings{}, false, 100, nil, caps)
 	if err != nil {
 		t.Fatalf("streamTurnRound returned error after learnable 400: %v (expected retry to succeed)", err)
 	}

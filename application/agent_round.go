@@ -72,9 +72,9 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 	return pc, conversation, settings, err
 }
 
-func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
+func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
 	for retry := 1; ; retry++ {
-		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration, promptCache, caps)
+		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, promptCache, caps)
 		if err == nil || retry >= maxProviderAttempts || visibleText(roundResult.Content) != "" || visibleText(roundResult.Reasoning) != "" {
 			return roundResult, err
 		}
@@ -164,7 +164,7 @@ func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversatio
 	}
 }
 
-func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
+func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
 	var content strings.Builder
 	var reasoning strings.Builder
 	// Guard: strip effort for models that do not support reasoning. Sending
@@ -181,30 +181,16 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 	// results) is appended here — those travel as tool hydration or tool
 	// descriptions so the system prefix keeps its prompt-cache hits.
 	system := buildSystemPrompt(conversation, settings.UserPrompt)
-	// Persist the synthetic runtime-hydration transcript (runtime_context,
-	// memory, skill, mcp_list, tool_list, todo_list) to the conversation
-	// store as an assistant message with hydration tool calls + matching tool
-	// results. Persisting (rather than injecting ephemerally) keeps the
-	// message-list prefix stable across tool rounds, so the provider can
-	// reuse prompt-cache hits from round 1 on round 2+. The checkpoint is
-	// inserted immediately after the last user before this turn's assistant
-	// placeholder, so the visible-to-provider order stays
-	// system → user → hydration → assistant — including after mid-turn
-	// compaction, when the keep suffix still holds prior assistant rounds.
-	//
-	// Hydration is persisted once per history epoch. Normal user messages and
-	// steers reuse the checkpoint already present in conversation history.
-	// Compaction strips that checkpoint, so the first post-compaction round
-	// creates a fresh one. Re-injecting it while history is intact causes smaller
-	// models to misinterpret the synthetic tool calls as a pattern to repeat
-	// ("call all tools in parallel every round") and wastes context.
-	//
-	// The hydration messages are marked with the "hydrate-" tool call ID
-	// prefix so the UI can filter them out of the visible conversation and
-	// compaction can strip them before summarization.
-	if injectHydration {
-		conversation = a.ensureHydration(conversation, messageID, caps)
-	}
+	// The hydration checkpoint is persisted once per history epoch (fresh
+	// room at turn start, and inside persistCompactedConversation after
+	// compaction) — never inside the turn loop. The first Stream reads the
+	// already-persisted transcript, so the provider prefix up to and
+	// including the checkpoint is frozen across rounds and follow-up user
+	// messages. Re-injecting mid-loop relocated the checkpoint after
+	// whatever user was last (the cache-poison dump) and invalidated the
+	// prompt-cache prefix from the hydration byte onward. The checkpoint
+	// messages carry the "hydrate-" tool call ID prefix so the UI can hide
+	// them and compaction can strip them before summarization.
 	messages := a.chatMessagesForProvider(conversation, messageID, caps)
 	// Continuation rounds (partial-stream recovery, failed-message retry)
 	// inject the "continue from where you stopped" instruction as an
@@ -405,21 +391,21 @@ func buildPromptCachePolicy(settings domain.Settings, providerID, model, convers
 }
 
 // persistHydration inserts the synthetic hydration messages (assistant
-// toolCalls + matching tool results) immediately after the last user
-// message that precedes the in-flight assistant (beforeMsgID).
+// toolCalls + matching tool results) immediately after the FIRST user
+// message in the transcript.
 //
-// On a fresh turn that is [user, placeholder], that is the same as
-// inserting before the placeholder: system → user → hydration → assistant.
-// After mid-turn compaction the keep suffix can contain many prior
-// assistant rounds before the placeholder; inserting before the
-// placeholder would park the checkpoint in the middle of agent work.
-// Anchoring after the last user keeps user → hydration → assistants
-// even when the keep suffix is long.
+// Hydration is an epoch marker anchored to the first user of the epoch: the
+// opening user of a fresh room, or the compaction handover user (which
+// Compact places at messages[0]). Anchoring after the first user — not after
+// the last user before the in-flight placeholder — keeps the checkpoint
+// stable across follow-up user messages and steers. The poison dump showed
+// the old last-user-before-placeholder index relocating the checkpoint after
+// a "." follow-up once a brief-change strip removed the original, breaking
+// the prompt-cache prefix from the hydration byte onward.
 //
-// When beforeMsgID is not found, the insert is still after the last user
-// (or appended if the transcript has no user). Does not save — the caller
-// persists once after related mutations. Returns the updated conversation.
-func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage, beforeMsgID string) *domain.Conversation {
+// Does not save — the caller persists once after related mutations. Returns
+// the updated conversation.
+func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage) *domain.Conversation {
 	if len(msgs) == 0 {
 		return c
 	}
@@ -450,65 +436,21 @@ func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage, befor
 			}
 		}
 	}
-	c.Messages = slices.Insert(c.Messages, hydrationInsertIndex(c.Messages, beforeMsgID), built...)
+	c.Messages = slices.Insert(c.Messages, hydrationInsertIndex(c.Messages), built...)
 	return c
 }
 
-// hydrationInsertIndex is the slot immediately after the last user that
-// precedes beforeMsgID. Falls back to after the last user in the whole
-// transcript, then to append, when the placeholder is missing.
-func hydrationInsertIndex(msgs []domain.Message, beforeMsgID string) int {
-	pendingIdx := -1
-	lastUser := -1
+// hydrationInsertIndex is the slot immediately after the first user message
+// in the transcript, or append when there is no user. The first user is the
+// epoch anchor (fresh-room opening user or compaction handover), so the
+// checkpoint stays put across later follow-up users and steers.
+func hydrationInsertIndex(msgs []domain.Message) int {
 	for i := range msgs {
-		if beforeMsgID != "" && msgs[i].ID == beforeMsgID {
-			pendingIdx = i
-			break
-		}
 		if msgs[i].Role == domain.RoleUser {
-			lastUser = i
+			return i + 1
 		}
 	}
-	if pendingIdx < 0 {
-		lastUser = -1
-		for i := range msgs {
-			if msgs[i].Role == domain.RoleUser {
-				lastUser = i
-			}
-		}
-		if lastUser >= 0 {
-			return lastUser + 1
-		}
-		return len(msgs)
-	}
-	if lastUser >= 0 {
-		return lastUser + 1
-	}
-	return pendingIdx
-}
-
-// ensureHydration persists a checkpoint after the last user when the current
-// history epoch has none. Call it before EventTurnStarted so a fresh room
-// does not show the assistant working with no hydration in the transcript.
-func (a *App) ensureHydration(conversation *domain.Conversation, messageID string, caps ModelCapabilities) *domain.Conversation {
-	if conversation == nil {
-		return conversation
-	}
-	if HasHydration(chatMessages(conversation, messageID, caps)) {
-		return conversation
-	}
-	hydrationMsgs := a.buildHydration(conversation)
-	if len(hydrationMsgs) == 0 {
-		return conversation
-	}
-	conversation = a.persistHydration(conversation, hydrationMsgs, messageID)
-	a.updateMessage(conversation, messageID, func(message *domain.Message) {
-		message.ContextUpdated = true
-	})
-	if a.Conversations != nil {
-		_ = a.Conversations.Save(conversation)
-	}
-	return conversation
+	return len(msgs)
 }
 
 // buildHydration assembles a synthetic runtime-hydration checkpoint from the
@@ -536,6 +478,56 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 		source.ConvID = c.ID
 	}
 	return NewHydrationBuilder(source).Build().Messages
+}
+
+// ensureFreshRoomHydration persists the hydration checkpoint at the start of a
+// turn when the conversation is on its first user message and has no
+// checkpoint yet. This is the only turn-loop entry point that builds
+// hydration; post-compaction checkpoints are built inside
+// persistCompactedConversation. Follow-up turns, steers, and retries all
+// return early (checkpoint present, or not a fresh room) so the cached prefix
+// is never relocated.
+func (a *App) ensureFreshRoomHydration(run *TurnRun, messageID string, caps ModelCapabilities) {
+	if a.Conversations == nil {
+		return
+	}
+	conversation, err := a.Conversations.Get(run.ConversationID)
+	if err != nil || conversation == nil {
+		return
+	}
+	if HasHydration(chatMessages(conversation, messageID, caps)) {
+		return
+	}
+	if !isFreshRoom(conversation) {
+		return
+	}
+	hydrationMsgs := a.buildHydration(conversation)
+	if len(hydrationMsgs) == 0 {
+		return
+	}
+	conversation = a.persistHydration(conversation, hydrationMsgs)
+	a.updateMessage(conversation, messageID, func(message *domain.Message) {
+		message.ContextUpdated = true
+	})
+	_ = a.Conversations.Save(conversation)
+}
+
+// isFreshRoom reports whether the conversation is on its first user turn: at
+// most one user message and no hydration checkpoint. A fresh room has exactly
+// the opening user; follow-up turns and post-steer turns have two or more
+// users. Post-compaction turns are excluded by the HasHydration guard in the
+// caller (the checkpoint is rebuilt by persistCompactedConversation), so a
+// handover-only transcript with no checkpoint still counts as fresh only when
+// it has no prior user — which compaction never produces (the handover is a
+// user, and the checkpoint is built in the same Save).
+func isFreshRoom(c *domain.Conversation) bool {
+	userCount := 0
+	for _, m := range c.Messages {
+		if m.Role == domain.RoleUser {
+			userCount++
+		}
+	}
+	return userCount <= 1
 }
 
 func (a *App) completeWithRetry(ctx context.Context, adapter ProviderContext, request ChatRequest) (ChatResponse, error) {
@@ -641,7 +633,7 @@ type toolExecResult struct {
 	atts   []domain.Attachment
 }
 
-func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall, caps ModelCapabilities, settings domain.Settings) (hydrationRefreshed bool, err error) {
+func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall, caps ModelCapabilities, settings domain.Settings) error {
 	if err := run.Ctx.Err(); err != nil {
 		if len(toolCalls) > 0 {
 			conversation, gerr := a.Conversations.Get(run.ConversationID)
@@ -656,7 +648,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 				_ = a.Conversations.Save(conversation)
 			}
 		}
-		return false, err
+		return err
 	}
 
 	// Phase 1: execute all tool calls concurrently (bounded). Only tool
@@ -664,14 +656,6 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 	// so each backing store's own lock is sufficient and there are no
 	// read-modify-write races on the conversation snapshot. Results are kept in
 	// tool-call order for deterministic persistence in phase 2.
-	//
-	// Capture the brief BEFORE phase 1 runs the tools: a todo tool call in
-	// this round may set or clear the brief, and phase 2 compares against
-	// this pre-execution snapshot to detect the change.
-	briefBefore := ""
-	if a.Todos != nil {
-		briefBefore = a.Todos.GetBrief(run.ConversationID)
-	}
 	results := make([]toolExecResult, len(toolCalls))
 	var wg sync.WaitGroup
 	limit := settings.MaxParallelTools
@@ -695,9 +679,8 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 	// race with each other.
 	conversation, err := a.Conversations.Get(run.ConversationID)
 	if err != nil {
-		return false, err
+		return err
 	}
-	todoTouched := false
 	for i := range toolCalls {
 		toolCall := toolCalls[i]
 		r := results[i]
@@ -705,7 +688,6 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 		// When the model updates the todo checklist, emit a dedicated event so
 		// the UI can re-render the strip without polling agent.todos.get.
 		if toolCall.Name == "todo" && r.status == domain.ToolOK && a.Todos != nil {
-			todoTouched = true
 			items := a.Todos.Get(run.ConversationID)
 			dtos := make([]contracts.TodoItemDTO, 0, len(items))
 			for _, item := range items {
@@ -720,23 +702,18 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 			})
 		}
 	}
-	// A brief change (set or cleared) invalidates the persisted hydration
-	// checkpoint's todo_list slot, which still carries the OLD brief. Strip
-	// the checkpoint so the next round rebuilds a fresh one with the current
-	// brief — same epoch-reset semantics as a workspace switch. Pure item
-	// patches that leave the brief untouched do NOT strip (the checkpoint's
-	// todo_list brief is still accurate), avoiding needless rebuilds.
-	if todoTouched && a.Todos != nil && a.Todos.GetBrief(run.ConversationID) != briefBefore {
-		conversation.Messages = domain.FilterHydrationDomainMessages(conversation.Messages)
-		hydrationRefreshed = true
-	}
+	// A brief change no longer strips the hydration checkpoint. The
+	// checkpoint's todo_list brief is frozen until the next compaction epoch;
+	// the agent can call todo/todo_list live. Stripping + rebuilding relocated
+	// the checkpoint after whatever user was last (the cache-poison dump),
+	// invalidating the prompt-cache prefix from the hydration byte onward.
 	if saveErr := a.Conversations.Save(conversation); saveErr != nil {
-		return false, saveErr
+		return saveErr
 	}
 	if err := run.Ctx.Err(); err != nil {
-		return false, err
+		return err
 	}
-	return hydrationRefreshed, nil
+	return nil
 }
 
 // runOneTool executes a single tool call and returns its result. It emits the

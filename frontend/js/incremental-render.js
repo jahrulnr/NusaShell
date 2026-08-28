@@ -29,8 +29,13 @@ function htmlToElement(html) {
 // and updates only the blocks that changed. Non-block children (those
 // without data-start) are left untouched — the caller is responsible for
 // removing thinking dots, retry banners, etc. before calling this.
+//
+// Returns the array of elements that were created or replaced (new/changed
+// blocks only). Callers use it to run post-render enhancement (mermaid,
+// syntax highlighting, zoom buttons) on just those nodes instead of
+// re-scanning the whole message during live deltas.
 export function incrementalRender(container, raw) {
-  if (!container) return;
+  if (!container) return [];
   const newBlocks = parseBlocks(raw);
 
   // Snapshot of existing block children (those with data-start).
@@ -44,6 +49,7 @@ export function incrementalRender(container, raw) {
 
   // Track which old elements are still in use (either preserved or replaced).
   const used = new Set();
+  const changed = [];
   let prevEl = null;
 
   for (const block of newBlocks) {
@@ -76,6 +82,7 @@ export function incrementalRender(container, raw) {
       container.prepend(newEl);
       used.add(newEl);
     }
+    changed.push(newEl);
     prevEl = newEl;
   }
 
@@ -85,4 +92,5 @@ export function incrementalRender(container, raw) {
   for (const el of oldBlockChildren) {
     if (!used.has(el)) el.remove();
   }
+  return changed;
 }

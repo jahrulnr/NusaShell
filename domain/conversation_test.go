@@ -6,6 +6,13 @@ import (
 	"unicode/utf8"
 )
 
+// testHandover builds a minimal handover content for domain tests. Domain
+// cannot import resources, so tests use the prefix directly. The application
+// layer builds the real handover from compacted-continue.md.
+func testHandover(summary string) string {
+	return CompactionSummaryPrefix + "\n" + summary
+}
+
 func TestMessageEstimateTokensIgnoresUsageAndDoesNotDoubleCountSteps(t *testing.T) {
 	content := strings.Repeat("a", 40) // 10 tokens
 	msg := Message{
@@ -121,7 +128,7 @@ func TestCompactCountsToolCallsInTokenBudget(t *testing.T) {
 	if len(archived) < 80 {
 		t.Fatalf("ArchiveMessages archived only %d messages, expected most to be archived (tool tokens undercounted)", len(archived))
 	}
-	c.Compact("summary", keepBudget)
+	c.Compact("summary", testHandover("summary"), keepBudget)
 	if len(c.Messages) > 15 {
 		t.Fatalf("after Compact, %d messages retained — tool call tokens not counted in budget", len(c.Messages))
 	}
@@ -139,7 +146,7 @@ func TestCompactSummaryIsUserRole(t *testing.T) {
 			{ID: "a1", Role: RoleAssistant, Content: "working on it"},
 		},
 	}
-	c.Compact("summary of work", 1000)
+	c.Compact("summary of work", testHandover("summary of work"), 1000)
 
 	first := c.Messages[0]
 	if first.Role != RoleUser {
@@ -164,7 +171,7 @@ func TestCompactPreservesChronologicalOrderAndPutsSummaryFirst(t *testing.T) {
 			{ID: "a2", Role: RoleAssistant, Content: "still working"},
 		},
 	}
-	c.Compact("handoff of the work so far", 10000)
+	c.Compact("handoff of the work so far", testHandover("handoff of the work so far"), 10000)
 
 	if len(c.Messages) < 5 {
 		t.Fatalf("messages = %d, want summary + 4 retained", len(c.Messages))
@@ -197,7 +204,7 @@ func TestCompactDropsPrefixInsteadOfPullingAllUsers(t *testing.T) {
 		{ID: "a-new", Role: RoleAssistant, Content: "latest answer"},
 	}
 	c := &Conversation{Messages: msgs}
-	c.Compact("summary", 50) // tiny keep: only the latest turn fits
+	c.Compact("summary", testHandover("summary"), 50) // tiny keep: only the latest turn fits
 
 	ids := make([]string, 0, len(c.Messages))
 	for _, m := range c.Messages {
@@ -257,7 +264,7 @@ func TestCompactSummaryIsTheUserWhenSuffixHasNoUser(t *testing.T) {
 		})
 	}
 	c := &Conversation{Messages: msgs}
-	c.Compact("summary of work done", 1000)
+	c.Compact("summary of work done", testHandover("summary of work done"), 1000)
 
 	if !IsCompactionSummary(c.Messages[0].Content) || c.Messages[0].Role != RoleUser {
 		t.Fatal("Compact must prepend a user-role handover so the provider sees a user turn")
@@ -280,7 +287,7 @@ func TestCompactExcludesPriorSummaryFromKeepSuffix(t *testing.T) {
 			{ID: "a1", Role: RoleAssistant, Content: "response"},
 		},
 	}
-	c.Compact("new summary", 1000)
+	c.Compact("new summary", testHandover("new summary"), 1000)
 
 	// The prior summary must not appear in the retained user messages.
 	for _, m := range c.Messages {
@@ -319,7 +326,7 @@ func TestArchiveMessagesAndCompactAreConsistent(t *testing.T) {
 	c := &Conversation{Messages: msgs}
 
 	archived := c.ArchiveMessages(1000)
-	c.Compact("summary", 1000)
+	c.Compact("summary", testHandover("summary"), 1000)
 
 	// Build a set of live message IDs (excluding the new summary).
 	liveIDs := make(map[string]bool)

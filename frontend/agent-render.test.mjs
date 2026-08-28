@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, mountLiveRound, KEEP_VISIBLE_ROUNDS } from './js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, mountLiveRound } from './js/views/agent/render.js';
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
   const previousDocument = globalThis.document;
@@ -66,7 +66,7 @@ test('exec tool with interrupted status renders persisted partial output', () =>
 
 test('compaction summary renders above retained chronological turns, not after them', () => {
   const thread = renderTranscript([
-    { role: 'user', content: 'Compacted context handover:\nGoal: fix ordering. Done: found Compact regrouped users then assistants.', created_at: '2026-08-27T15:50:00Z' },
+    { role: 'user', content: '[COMPACTION CHECKPOINT]\nGoal: fix ordering. Done: found Compact regrouped users then assistants.', created_at: '2026-08-27T15:50:00Z' },
     { role: 'user', content: 'keep going', created_at: '2026-08-27T15:51:00Z' },
     { role: 'assistant', content: 'live delta continues here', created_at: '2026-08-27T15:52:00Z' },
   ]);
@@ -630,26 +630,24 @@ test('snapshot renderConversation keeps the user bubble and every round it is gi
   }
 });
 
-test('mountLiveRound trims older rounds without hiding the current live round', () => {
+test('mountLiveRound keeps every live round mounted (no trim, no stub)', () => {
   const dom = new JSDOM('<main id="thread"><div class="agent-bubble"></div></main>');
   const previousDocument = globalThis.document;
   globalThis.document = dom.window.document;
   try {
     const bubble = document.querySelector('.agent-bubble');
     let current;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       current = mountLiveRound(bubble, { rawReasoning: `think ${i}` });
     }
-    assert.equal(bubble.querySelectorAll(':scope > .agent-round').length, KEEP_VISIBLE_ROUNDS);
-    const stub = bubble.querySelector(':scope > .agent-round-stub');
-    assert.ok(stub);
-    assert.equal(stub.tagName, 'DIV', 'live history marker stays lightweight');
-    assert.match(stub.textContent, /2 earlier rounds trimmed for performance/);
-    assert.doesNotMatch(stub.textContent, /until the turn finishes/);
-    assert.ok(stub.querySelector('button'));
-    stub.querySelector('button').click();
-    assert.equal(bubble.querySelectorAll(':scope > .agent-round').length, 5);
-    assert.equal(bubble.querySelectorAll(':scope > .agent-round')[0].querySelector('.agent-reasoning')._reasoningRaw, 'think 0');
+    // The hide-bubble workaround is gone: live deltas must never remove
+    // earlier rounds from the DOM nor replace them with a stub.
+    assert.equal(bubble.querySelector(':scope > .agent-round-stub'), null);
+    const rounds = bubble.querySelectorAll(':scope > .agent-round');
+    assert.equal(rounds.length, 6);
+    for (const round of rounds) assert.ok(round.isConnected, 'round stays mounted');
+    assert.equal(rounds[0].querySelector('.agent-reasoning')._reasoningRaw, 'think 0');
+    assert.equal(bubble._liveRoundArchive, undefined, 'no parking archive');
     assert.ok(current.textBox.closest('.agent-round')?.isConnected, 'newest live round remains mounted');
   } finally {
     globalThis.document = previousDocument;
@@ -673,7 +671,7 @@ test('appendLiveError preserves streamed assistant content', () => {
   }
 });
 
-test('live round parking stays bounded while keeping the newest round mounted', () => {
+test('live rounds stay mounted no matter how many arrive (performance is CSS + targeted enhancement, not DOM removal)', () => {
   const dom = new JSDOM('<main id="thread"><div class="agent-bubble"></div></main>');
   const previousDocument = globalThis.document;
   globalThis.document = dom.window.document;
@@ -683,11 +681,12 @@ test('live round parking stays bounded while keeping the newest round mounted', 
     for (let i = 0; i < 40; i++) {
       current = mountLiveRound(bubble, { raw: `output ${i}` });
     }
-    assert.equal(bubble.querySelectorAll(':scope > .agent-round').length, KEEP_VISIBLE_ROUNDS);
-    assert.ok(bubble._liveRoundArchive.rounds.length <= 12);
-    assert.ok(current.textBox.closest('.agent-round')?.isConnected);
-    bubble.querySelector('.agent-round-stub-action').click();
-    assert.equal(bubble.querySelectorAll(':scope > .agent-round').length, KEEP_VISIBLE_ROUNDS + 3);
+    assert.equal(bubble.querySelectorAll(':scope > .agent-round').length, 40);
+    assert.equal(bubble.querySelector(':scope > .agent-round-stub'), null);
+    assert.equal(bubble._liveRoundArchive, undefined);
+    for (const round of bubble.querySelectorAll(':scope > .agent-round')) {
+      assert.ok(round.isConnected, 'every round stays in the live DOM');
+    }
     assert.ok(current.textBox.closest('.agent-round')?.isConnected);
   } finally {
     globalThis.document = previousDocument;

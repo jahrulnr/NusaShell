@@ -185,7 +185,7 @@
   gap: 10px;
   min-width: 0;
 }
-.acp-transcript-line { color: var(--text); font: 13px/1.55 "IBM Plex Sans", system-ui, sans-serif; overflow-wrap: anywhere; min-width: 0; }
+.acp-transcript-line { color: var(--text); font: 13px/1.55 "IBM Plex Sans", system-ui, sans-serif; overflow-wrap: anywhere; min-width: 0; /* long subagent transcripts stay cheap: off-screen lines skip layout/paint but remain mounted */ content-visibility: auto; contain-intrinsic-size: auto 40px; }
 .acp-transcript-line.is-thought { color: var(--text-faint); font-style: italic; }
 .acp-transcript-line.is-plan { color: var(--text-dim); }
 .acp-transcript-line.is-status { color: var(--text-dim); font-size: 11.5px; }

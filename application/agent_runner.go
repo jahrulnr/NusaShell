@@ -472,6 +472,17 @@ func (a *App) handleTurnsCancelSteer(req contracts.TurnCancelSteerRequest) (any,
 }
 
 func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities) {
+	// Build the hydration checkpoint once per epoch, before the first Stream.
+	// A fresh room (the first user message of a conversation, no checkpoint
+	// yet) gets its checkpoint persisted here so the first provider request
+	// already carries runtime_context / AGENTS.md / tool_list / todo_list.
+	// Post-compaction epochs are handled inside persistCompactedConversation
+	// (same Save as Compact), so by the time the loop re-fetches the
+	// conversation after compaction the checkpoint is already present and
+	// this guard skips. Follow-up user messages, steers, and retries all
+	// reuse the existing checkpoint — the turn loop never touches hydration,
+	// which keeps the prompt-cache prefix frozen across rounds.
+	a.ensureFreshRoomHydration(run, asstMsgID, caps)
 	defer func() {
 		run.Cancel()
 		// Reject any pending ask_question calls for this run so the
@@ -590,11 +601,6 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	// per turn (this function is the per-turn entry).
 	compactionAttempts := 0
 	repeatedGuard := &repeatedToolGuard{limit: settings.RepeatedToolLimit}
-	// injectHydration lets the first round create a checkpoint when the current
-	// history epoch has none, normally initially or after compaction. Existing
-	// checkpoints are reused across normal user messages and steers. The flag is
-	// reset after one round so later tool rounds do not repeat the check.
-	injectHydration := true
 	for {
 		round++
 		toolsForRound := toolDefs
@@ -633,7 +639,10 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 					postEst := conversation.EstimateTokens()
 					a.log("info", "agent", "mid-turn compaction done for %s round %d: before=%d after=%d (msgs=%d)",
 						run.ID, round, est, postEst, len(conversation.Messages))
-					injectHydration = true
+					// persistCompactedConversation already rebuilt the hydration
+					// checkpoint in the same Save as Compact, so the re-fetched
+					// conversation carries it. No re-arm flag; the next round
+					// reads the frozen transcript.
 				} else {
 					a.log("warn", "agent", "mid-turn compaction failed for %s round %d: %v", run.ID, round, compErr)
 					a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: run.ID, ConversationID: conversation.ID, Error: compErr.Error()})
@@ -642,14 +651,10 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				}
 			}
 		}
-		if injectHydration {
-			conversation = a.ensureHydration(conversation, currentMsgID, caps)
-		}
 		a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Round: round,
 		})
-		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, injectHydration, promptCache, caps)
-		injectHydration = false // only the first round may create a missing checkpoint
+		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, promptCache, caps)
 		continuation = false
 		totalUsage = mergeUsage(totalUsage, roundResult.Response.Usage)
 		if roundResult.Response.Usage.ContextTokens() > 0 {
@@ -718,7 +723,9 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 					postEmg := conversation.EstimateTokens()
 					a.log("info", "agent", "emergency compaction done for %s: before=%d after=%d (msgs=%d)",
 						conversation.ID, preEmg, postEmg, len(conversation.Messages))
-					injectHydration = true // compaction strips the checkpoint; recreate it
+					// persistCompactedConversation rebuilt the hydration checkpoint
+					// in the same Save as Compact; the re-fetched conversation
+					// already carries it, so no re-arm flag is needed.
 					round--
 					continue
 				}
@@ -757,25 +764,18 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 					return false, ""
 				}
 				run.setMessageID(currentMsgID)
-				injectHydration = true // allow a missing post-compaction checkpoint
 				continue
 			}
 			break
 		}
 
-		hydrationRefreshed, err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls, caps, settings)
-		if err != nil {
+		if err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls, caps, settings); err != nil {
 			if run.Ctx.Err() != nil {
 				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, lastUsage.ContextTokens(), model)
 				return false, ""
 			}
 			a.failTurn(run, currentMsgID, err)
 			return false, ""
-		}
-		if hydrationRefreshed {
-			// The todo brief changed (set or cleared) and the stale
-			// checkpoint was stripped — rebuild a fresh one next round.
-			injectHydration = true
 		}
 		toolRounds++
 
@@ -794,15 +794,14 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		// Drain any queued steer message at this safe boundary (between tool
 		// completion and the next provider round). The steer is appended as a
 		// real user message so the provider sees it in the next round's context.
-		applied, steerErr := a.applyQueuedSteer(run)
-		if steerErr != nil {
+		// Steer is not a hydration epoch: it must not relocate the checkpoint.
+		// The existing checkpoint (after the first user / handover) stays put;
+		// the steer user lands later in the transcript and the cache prefix up
+		// to the checkpoint is preserved.
+		if _, steerErr := a.applyQueuedSteer(run); steerErr != nil {
 			a.failTurn(run, currentMsgID, steerErr)
 			return false, ""
 		}
-		if applied {
-			injectHydration = true // allow a missing post-compaction checkpoint
-		}
-
 		conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)
 		if err != nil {
 			a.failTurn(run, currentMsgID, err)
@@ -1413,7 +1412,19 @@ func appendCompactionHandoffUser(msgs []ChatMessage) []ChatMessage {
 }
 
 // persistCompactedConversation archives dropped messages (without hydration
-// checkpoints), strips hydration from the live transcript, then applies Compact.
+// checkpoints), strips hydration from the live transcript, applies Compact, and
+// rebuilds the hydration checkpoint for the new epoch — all in the same Save.
+//
+// Compact places the handover user at messages[0]; persistHydration inserts the
+// checkpoint immediately after it (the first user is the epoch anchor), so the
+// provider sees handover → hydration → retained suffix. Anchoring after the
+// handover — not after a later steer user that may live in the retained suffix
+// — keeps the checkpoint at a stable prefix position so the prompt cache
+// survives the compaction boundary.
+//
+// The handover message content is built from the compacted-continue.md template
+// (single source of truth for the handover prompt text) — domain layer stores
+// it as-is without owning any prompt text.
 func (a *App) persistCompactedConversation(c *domain.Conversation, summary string, keepBudget int) error {
 	c.Messages = filterHydrationDomainMessages(c.Messages)
 	toArchive := c.ArchiveMessages(keepBudget)
@@ -1426,7 +1437,15 @@ func (a *App) persistCompactedConversation(c *domain.Conversation, summary strin
 		}
 	}
 	c.Summary = ""
-	c.Compact(summary, keepBudget)
+	handoverContent := resources.CompactedUserPrompt(summary)
+	c.Compact(summary, handoverContent, keepBudget)
+	// Rebuild the hydration checkpoint for the new epoch in the same Save.
+	// Compact already stripped the old one (filterHydrationDomainMessages +
+	// retention), so this is the only place a post-compaction checkpoint is
+	// created — the turn loop no longer re-arms hydration.
+	if hydrationMsgs := a.buildHydration(c); len(hydrationMsgs) > 0 {
+		c = a.persistHydration(c, hydrationMsgs)
+	}
 	return a.Conversations.Save(c)
 }
 

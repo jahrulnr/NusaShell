@@ -186,7 +186,7 @@ func TestExecuteTurnToolsSerializesMutationsPerRoot(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Workspace: "/tmp/ws", Ctx: context.Background(), Cancel: func() {}}
 
-	if _, err := app.executeTurnTools(run, "m1", conv.Messages[0].ToolCalls, ModelCapabilities{}, domain.Settings{}); err != nil {
+	if err := app.executeTurnTools(run, "m1", conv.Messages[0].ToolCalls, ModelCapabilities{}, domain.Settings{}); err != nil {
 		t.Fatalf("executeTurnTools: %v", err)
 	}
 	if box.mutatingMaxConcurrent > 1 {

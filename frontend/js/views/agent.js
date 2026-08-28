@@ -11,7 +11,6 @@ import { bindRoomInfo, updateRoomInfo } from './agent/room-info.js';
 import {
   attachmentChip,
   formatTokens,
-  KEEP_VISIBLE_ROUNDS,
   mountLiveRound,
   setReasoningSource,
   reasoningHasVisibleSource,
@@ -123,6 +122,14 @@ const state = {
   roomBuffers: new Map(), // conversationId -> RoomStreamBuffer
 };
 
+// Snapshot-history windowing: how many trailing assistant rounds a full
+// thread re-render keeps visible before the explicit "Load older" affordance
+// (agent-layout.test.mjs pins this). Kept generous — 12 covers a whole long
+// turn at first paint — because the anti-overload job now belongs to CSS
+// content-visibility (layout/paint skip) rather than content removal; this
+// window only bounds the one-time markdown parse + DOM insert on open.
+// (Live turns never trim — see render.js's strategy comment.)
+const SNAPSHOT_KEEP_ROUNDS = 12;
 const MAX_ROOM_BUFFER_CHARS = 512 * 1024; // per room (raw + rawReasoning)
 const MAX_LIVE_ROUND_CHARS = 512 * 1024;
 const MAX_LIVE_TOOL_JOBS = 128;
@@ -214,14 +221,14 @@ function windowedActiveMessages() {
   return conversationTail(state.messages, {
     prefixStart: state.activeWindowStart,
     assistKeepStart: state.assistKeepStart,
-    keepRounds: KEEP_VISIBLE_ROUNDS,
+    keepRounds: SNAPSHOT_KEEP_ROUNDS,
   }).visible;
 }
 
 function applyConversationTail() {
   const tail = conversationTail(state.messages, {
     prefixWindow: INITIAL_WINDOW,
-    keepRounds: KEEP_VISIBLE_ROUNDS,
+    keepRounds: SNAPSHOT_KEEP_ROUNDS,
   });
   state.activeWindowStart = tail.prefixStart;
   state.assistKeepStart = tail.assistKeepStart;
@@ -231,7 +238,7 @@ function trailingRunStart() {
   return conversationTail(state.messages, {
     prefixStart: state.activeWindowStart,
     assistKeepStart: state.assistKeepStart,
-    keepRounds: KEEP_VISIBLE_ROUNDS,
+    keepRounds: SNAPSHOT_KEEP_ROUNDS,
   }).runStart;
 }
 
@@ -1449,6 +1456,7 @@ function renderLiveRun(run) {
   const reasoningEl = run.reasoningEl;
   if (!textBox?.isConnected && !reasoningEl?.isConnected && !run.bubble?.isConnected) return;
 
+  const enhanced = [];
   updateLiveTrimNotice(run);
   const flushedToolDelta = flushPendingToolDeltas(run);
   if (flushedToolDelta) updateRoomInfo(state.conversation, state.messages);
@@ -1464,7 +1472,9 @@ function renderLiveRun(run) {
     }
     if (reasoningEl.open) {
       const content = reasoningEl.querySelector('.agent-reasoning-content');
-      if (content && run.rawReasoning) incrementalRender(content, run.rawReasoning);
+      if (content && run.rawReasoning) {
+        enhanced.push(...incrementalRender(content, run.rawReasoning));
+      }
     }
   }
 
@@ -1473,22 +1483,30 @@ function renderLiveRun(run) {
     textBox.querySelector('.agent-thinking-dots')?.remove();
     const banner = run.bubble?.querySelector('.agent-retry-banner');
     if (banner) banner.remove();
-    incrementalRender(textBox, run.raw);
+    enhanced.push(...incrementalRender(textBox, run.raw));
   }
-  scheduleLiveEnhancement(run);
+  scheduleLiveEnhancement(run, enhanced);
   scrollToBottom();
 }
 
-function scheduleLiveEnhancement(run) {
+// scheduleLiveEnhancement runs mermaid/highlight/zoom enhancement ONLY on the
+// blocks this delta just created or changed (from incrementalRender) — never
+// over the whole bubble. This is what keeps long live turns cheap without
+// trimming rounds: enhancement cost stays proportional to the delta, and
+// settled blocks (hash-locked highlight/mermaid) are never re-scanned.
+function scheduleLiveEnhancement(run, changedNodes = []) {
   if (!run) return;
+  const targets = changedNodes.filter((node) => node?.isConnected);
+  if (!targets.length) return;
   if (run.enhanceTimer) clearTimeout(run.enhanceTimer);
   run.enhanceTimer = setTimeout(() => {
     run.enhanceTimer = null;
-    const target = run.bubble?.isConnected ? run.bubble : run.textBox;
-    if (!target) return;
-    void renderMermaidDiagrams(target);
-    void highlightCode(target);
-    attachZoomButtons(target);
+    for (const node of targets) {
+      if (!node.isConnected) continue;
+      void renderMermaidDiagrams(node);
+      void highlightCode(node);
+      attachZoomButtons(node);
+    }
   }, 120);
 }
 
@@ -1655,7 +1673,7 @@ function revealOlderTurnRounds() {
   try {
     const userNode = [...thread.querySelectorAll('.agent-message.user, .agent-compaction-marker')].at(-1);
     const userTop = userNode ? userNode.getBoundingClientRect().top : 0;
-    state.assistKeepStart = Math.max(runStart, state.assistKeepStart - KEEP_VISIBLE_ROUNDS);
+    state.assistKeepStart = Math.max(runStart, state.assistKeepStart - SNAPSHOT_KEEP_ROUNDS);
     renderThread(windowedActiveMessages(), false);
     if (userNode) {
       const nextUser = [...thread.querySelectorAll('.agent-message.user, .agent-compaction-marker')].at(-1);

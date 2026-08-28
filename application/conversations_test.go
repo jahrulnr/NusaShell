@@ -260,7 +260,9 @@ func TestHandleConversationsPickWorkspaceAcceptsAbsolutePath(t *testing.T) {
 // TestHandleConversationsPickWorkspaceInvalidatesHydration pins the
 // workspace-switch epoch reset: a persisted hydration checkpoint (stale
 // runtime_context + AGENTS.md for the OLD workspace) is stripped when the
-// workspace changes, so the next turn rebuilds a fresh checkpoint.
+// workspace changes, and a fresh checkpoint for the NEW workspace is rebuilt
+// in the same Save — same epoch semantics as compaction. The turn loop no
+// longer re-injects hydration, so the rebuild must happen here.
 func TestHandleConversationsPickWorkspaceInvalidatesHydration(t *testing.T) {
 	hydID := domain.HydrateToolCallPrefix + "abc123_0"
 	conv := &domain.Conversation{
@@ -293,19 +295,30 @@ func TestHandleConversationsPickWorkspaceInvalidatesHydration(t *testing.T) {
 	if saved.Workspace != newWS {
 		t.Fatalf("workspace = %q, want %q", saved.Workspace, newWS)
 	}
-	// The pure-hydration assistant message is gone; real messages survive.
-	if len(saved.Messages) != 2 {
-		t.Fatalf("expected 2 messages after stripping hydration, got %d", len(saved.Messages))
-	}
+	// The OLD hydration checkpoint is gone; a fresh one is rebuilt in its
+	// place (after the first user, same epoch anchor). Real messages survive.
+	oldHydGone := true
+	freshHydCount := 0
 	for _, m := range saved.Messages {
 		for _, tc := range m.ToolCalls {
 			if domain.IsHydrationCallID(tc.ID) {
-				t.Fatalf("hydration call %s survived workspace switch", tc.ID)
+				freshHydCount++
+				// The old checkpoint's runtime_context output referenced /old/ws.
+				if tc.Name == "runtime_context" && strings.Contains(tc.Output, "/old/ws") {
+					oldHydGone = false
+				}
 			}
 		}
 	}
-	if saved.Messages[0].Content != "hello" || saved.Messages[1].Content != "hi there" {
-		t.Errorf("real messages lost or reordered: %+v", saved.Messages)
+	if !oldHydGone {
+		t.Fatal("stale hydration checkpoint referencing /old/ws survived workspace switch")
+	}
+	if freshHydCount == 0 {
+		t.Fatal("no fresh hydration checkpoint rebuilt after workspace switch; the turn loop no longer re-injects")
+	}
+	// Real messages survive and keep their order: user first, assistant last.
+	if saved.Messages[0].Content != "hello" {
+		t.Errorf("first real message lost or reordered: %+v", saved.Messages[0])
 	}
 }
 

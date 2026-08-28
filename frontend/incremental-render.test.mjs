@@ -82,6 +82,39 @@ test('renderMarkdown is backward compatible (produces same blocks joined)', () =
 
 // ---------- incrementalRender: diff-based DOM update ----------
 
+test('incrementalRender returns only new or changed block elements', () => {
+  const dom = makeDom();
+  try {
+    const container = document.createElement('div');
+
+    // First render: the paragraph is new.
+    const first = incrementalRender(container, 'hello');
+    assert.equal(first.length, 1, 'first render yields the one created block');
+    assert.equal(container.children.length, 1);
+
+    // Delta grows the same paragraph: the block is re-created (changed).
+    const second = incrementalRender(container, 'hello world');
+    assert.equal(second.length, 1, 'grown block is reported as changed');
+    assert.notEqual(second[0], first[0], 'changed block is a fresh element');
+    assert.equal(container.children.length, 1, 'still one block in the DOM');
+
+    // Unchanged delta: nothing new to enhance.
+    const third = incrementalRender(container, 'hello world');
+    assert.equal(third.length, 0, 'unchanged blocks produce no enhancement targets');
+
+    // A new block appends; only the new block is reported.
+    const fourth = incrementalRender(container, 'hello world\n\n```js\nconst a = 1;\n```');
+    assert.equal(fourth.length, 1, 'only the new code block is reported');
+    assert.match(fourth[0].tagName, /^PRE$/i);
+
+    // A settled block stays untouched: the reported set excludes it.
+    const fifth = incrementalRender(container, 'hello world\n\n```js\nconst a = 1;\n```\n\nbye');
+    assert.equal(fifth.length, 1, 'only the trailing paragraph is reported');
+    assert.equal(container.children.length, 3);
+  } finally { cleanup(); }
+});
+
+
 test('incrementalRender first paint inserts all blocks', () => {
   const dom = makeDom();
   try {

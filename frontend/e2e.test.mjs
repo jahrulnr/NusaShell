@@ -430,11 +430,11 @@ test('compaction triggers and renders a marker when conversation exceeds thresho
     }, 'post-compaction turn done', 15000);
 
     // Verify the conversation has the compaction marker in persisted state.
-    // Compaction summaries carry role=user with a "Compacted context handover:"
+    // Compaction summaries carry role=user with a "[COMPACTION CHECKPOINT]"
     // prefix so they appear in the provider request's messages array.
     const gotten = await rpcModule.rpc('agent.conversations.get', { id: convID });
     const compactionMsgs = gotten.messages?.filter(
-      (m) => m.role === 'user' && m.content?.startsWith('Compacted context handover:'),
+      (m) => m.role === 'user' && m.content?.startsWith('[COMPACTION CHECKPOINT]'),
     ) || [];
     assert.ok(compactionMsgs.length > 0, 'at least one compaction summary (user) message exists');
     assert.ok(

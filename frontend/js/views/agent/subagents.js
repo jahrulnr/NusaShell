@@ -119,7 +119,29 @@ async function hydrate() {
 function upsertRun(run, { silent } = {}) {
   if (!run?.id) return;
   state.runs.set(run.id, run);
+  pruneRuns();
   if (!silent) renderAll();
+}
+
+// pruneRuns drops terminal runs that fell out of the recent window and are
+// not part of the active conversation (plus their rendered-chunk counters).
+// Without this the maps grow for the lifetime of the session even though
+// nothing can ever render those runs again.
+function pruneRuns() {
+  const now = Date.now();
+  const active = activeConversationId();
+  for (const [id, run] of state.runs) {
+    if (LIVE.has(run.status)) continue;
+    if (active && run.conversation_id === active) continue;
+    const ended = Date.parse(run.ended_at || run.updated_at || '') || 0;
+    if (!ended || now - ended > RECENT_MS) {
+      state.runs.delete(id);
+      state.renderedChunks.delete(id);
+    }
+  }
+  for (const id of [...state.renderedChunks.keys()]) {
+    if (!state.runs.has(id)) state.renderedChunks.delete(id);
+  }
 }
 
 function activeConversationId() {
