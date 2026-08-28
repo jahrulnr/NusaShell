@@ -14,7 +14,7 @@ var systemPrompt = resources.Prompt("system")
 
 // continuePrompt is the steering prompt injected at the start of each
 // auto-continue turn. Loaded from resources/agent/prompts/continue.md.
-var continuePrompt = resources.Prompt("continue")
+var continuePrompt = resources.UserPrompt("continue")
 
 // compactionPrompt is the system prompt for the compaction summarization
 // call. Loaded from resources/agent/prompts/compaction.md. Tells the model

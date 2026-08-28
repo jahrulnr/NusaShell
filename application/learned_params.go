@@ -71,6 +71,17 @@ func (c *learnedParamsCache) DisabledModalities(provider, model string) []string
 	return c.registry.DisabledModalities(provider, model)
 }
 
+// NeedsUserNudge reports whether provider+model has learned that requests
+// must contain at least one user message. Safe to call on a nil cache.
+func (c *learnedParamsCache) NeedsUserNudge(provider, model string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.registry.NeedsUserNudge(provider, model)
+}
+
 // OverrideModel applies learned 400-adaptations to a model's metadata in
 // place. Safe to call on a nil cache; returns true when a field changed.
 func (c *learnedParamsCache) OverrideModel(m *domain.Model, provider, model string) bool {
@@ -131,6 +142,8 @@ func (c *learnedParamsCache) LearnFrom400(provider, model, errBody string) (doma
 		c.registry.RecordDisableModality(provider, model, param, errBody)
 	case domain.LearnedActionCapContext:
 		c.registry.RecordCapContext(provider, model, param, errBody)
+	case domain.LearnedActionNudgeUser:
+		c.registry.RecordNudgeUser(provider, model, param, errBody)
 	}
 	if c.store != nil {
 		_ = c.store.Save(c.registry)

@@ -10,6 +10,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/resources"
 )
 
 func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartRequest) (any, *contracts.RPCError) {
@@ -298,6 +299,7 @@ func (a *App) recoverOrphanedTurn(run *TurnRun) {
 	a.Bus.Emit(contracts.EventTurnError, contracts.TurnErrorEvent{
 		RunID:          run.ID,
 		ConversationID: run.ConversationID,
+		MessageID:      run.currentMessageID(),
 		Message:        domain.OrphanedTurnError,
 	})
 }
@@ -316,7 +318,7 @@ func (a *App) handleTurnsActive(req contracts.ConversationIDRequest) (any, *cont
 	out := contracts.TurnActiveResult{
 		RunID:          run.ID,
 		ConversationID: run.ConversationID,
-		MessageID:      run.MessageID,
+		MessageID:      run.currentMessageID(),
 		Active:         true,
 	}
 	if s := run.queuedSteer(); s != nil {
@@ -621,15 +623,20 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, adapter, model, cw, settings)
 				summary, compErr := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings)
 				if compErr == nil {
-					a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{ConversationID: conversation.ID, Summary: summary})
-					conversation, _ = a.Conversations.Get(run.ConversationID)
+					a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{RunID: run.ID, ConversationID: conversation.ID, Summary: summary})
+					refreshed, getErr := a.Conversations.Get(run.ConversationID)
+					if getErr != nil {
+						a.failTurn(run, currentMsgID, getErr)
+						return false, ""
+					}
+					conversation = refreshed
 					postEst := conversation.EstimateTokens()
 					a.log("info", "agent", "mid-turn compaction done for %s round %d: before=%d after=%d (msgs=%d)",
 						run.ID, round, est, postEst, len(conversation.Messages))
 					injectHydration = true
 				} else {
 					a.log("warn", "agent", "mid-turn compaction failed for %s round %d: %v", run.ID, round, compErr)
-					a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{ConversationID: conversation.ID, Error: compErr.Error()})
+					a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: run.ID, ConversationID: conversation.ID, Error: compErr.Error()})
 					// Don't fail the turn — let the stream attempt proceed.
 					// If it overflows, emergency compaction is the fallback.
 				}
@@ -673,6 +680,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 					a.failTurn(run, currentMsgID, err)
 					return false, ""
 				}
+				run.setMessageID(currentMsgID)
 				continuation = true
 				continuedPartialStream = true
 				// This replaces the interrupted provider attempt; it is not an
@@ -700,8 +708,13 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, adapter, model, cw, settings)
 				summary, compErr := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings)
 				if compErr == nil {
-					a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{ConversationID: conversation.ID, Summary: summary})
-					conversation, _ = a.Conversations.Get(run.ConversationID)
+					a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{RunID: run.ID, ConversationID: conversation.ID, Summary: summary})
+					refreshed, getErr := a.Conversations.Get(run.ConversationID)
+					if getErr != nil {
+						a.failStreamTurn(run, currentMsgID, model, roundResult, getErr)
+						return false, ""
+					}
+					conversation = refreshed
 					postEmg := conversation.EstimateTokens()
 					a.log("info", "agent", "emergency compaction done for %s: before=%d after=%d (msgs=%d)",
 						conversation.ID, preEmg, postEmg, len(conversation.Messages))
@@ -710,7 +723,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 					continue
 				}
 				a.log("warn", "agent", "emergency compaction failed for %s: %v", conversation.ID, compErr)
-				a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{ConversationID: conversation.ID, Error: compErr.Error()})
+				a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: run.ID, ConversationID: conversation.ID, Error: compErr.Error()})
 				a.failStreamTurn(run, currentMsgID, model, roundResult, streamErr)
 			} else {
 				a.failStreamTurn(run, currentMsgID, model, roundResult, streamErr)
@@ -743,6 +756,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 					a.failTurn(run, currentMsgID, err)
 					return false, ""
 				}
+				run.setMessageID(currentMsgID)
 				injectHydration = true // allow a missing post-compaction checkpoint
 				continue
 			}
@@ -794,10 +808,11 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 			a.failTurn(run, currentMsgID, err)
 			return false, ""
 		}
+		run.setMessageID(currentMsgID)
 	}
 
-	if err := a.finishTurn(run, asstMsgID, model, totalUsage, lastUsage.ContextTokens(), autoContinueIndex); err != nil {
-		a.failTurn(run, asstMsgID, err)
+	if err := a.finishTurn(run, currentMsgID, model, totalUsage, lastUsage.ContextTokens(), autoContinueIndex); err != nil {
+		a.failTurn(run, currentMsgID, err)
 		return false, ""
 	}
 	a.discardQueuedSteer(run)
@@ -813,7 +828,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	if err != nil {
 		return false, ""
 	}
-	lastText := lastAssistantText(conv, asstMsgID)
+	lastText := lastAssistantText(conv, currentMsgID)
 	decision := domain.DecideAutoContinue(domain.AutoContinueInput{
 		Items:             items,
 		AutoContinueIndex: autoContinueIndex,
@@ -872,6 +887,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		return false, ""
 	}
 	_ = nextConv
+	run.setMessageID(nextMsgID)
 	return true, nextMsgID
 }
 
@@ -1171,10 +1187,6 @@ func (a *App) compactConversation(ctx context.Context, adapter ProviderContext, 
 	}
 
 	systemPrompt := compactionPrompt
-	if todoCtx := a.compactionTodoContext(c.ID); todoCtx != "" {
-		systemPrompt += "\n\nCurrent state to preserve in the summary:\n" + todoCtx
-	}
-
 	summaryMaxOut := compactionSummaryMaxOut
 	if settings.CompactionSummaryMaxTokens > 0 {
 		summaryMaxOut = settings.CompactionSummaryMaxTokens
@@ -1209,7 +1221,7 @@ func (a *App) compactConversation(ctx context.Context, adapter ProviderContext, 
 		if runningSummary != "" {
 			msgs = append(msgs, ChatMessage{
 				Role:    "user",
-				Content: compactionSummaryPrefix + runningSummary,
+				Content: resources.CompactedUserPrompt(runningSummary),
 			})
 		}
 		for _, m := range chunk {
@@ -1357,15 +1369,13 @@ func truncateCompactionText(s string, n int) string {
 	return string(head) + fmt.Sprintf("\n\n[truncated: %d chars omitted]", omitted)
 }
 
-const compactionSummaryPrefix = "Previous summary of earlier conversation:\n"
-
 // compactionPassAvailable is the per-pass token budget for message content.
 // The running summary grows across passes, so later chunks shrink to leave
 // room for it instead of using a one-shot 2000-token reserve.
 func compactionPassAvailable(contextWindow int, runningSummary string, summaryMaxOut int) int {
 	summaryTokens := domain.EstimateTokens(runningSummary)
 	if runningSummary != "" {
-		summaryTokens += domain.EstimateTokens(compactionSummaryPrefix)
+		summaryTokens += domain.EstimateTokens(resources.CompactedUserPrompt(""))
 	}
 	handoffTokens := domain.EstimateTokens(strings.TrimSpace(compactionHandoffUserPrompt))
 	available := contextWindow - compactionSystemReserve - summaryTokens - summaryMaxOut - handoffTokens
@@ -1420,42 +1430,6 @@ func (a *App) persistCompactedConversation(c *domain.Conversation, summary strin
 	return a.Conversations.Save(c)
 }
 
-// compactionTodoContext renders the live user goal and open TODOs for the
-// conversation into a compact block appended to the compaction prompt. The
-// hydration checkpoint (which carries this state) is stripped before
-// summarization, so without this the summary's "remaining steps and TODO
-// status" would rely on the model's memory of what it wrote. Goal and item
-// content are truncated so a large goal cannot blow the compaction budget.
-// Returns "" when no todo store is configured or there is nothing to report.
-func (a *App) compactionTodoContext(conversationID string) string {
-	if a.Todos == nil {
-		return ""
-	}
-	var sb strings.Builder
-	if brief := strings.TrimSpace(a.Todos.GetBrief(conversationID)); brief != "" {
-		sb.WriteString("User goal: ")
-		sb.WriteString(truncate(brief, 2000))
-		sb.WriteString("\n")
-	}
-	var open []domain.TodoItem
-	for _, it := range a.Todos.Get(conversationID) {
-		if it.Status != domain.TodoCompleted {
-			open = append(open, it)
-		}
-	}
-	if len(open) > 0 {
-		sb.WriteString("Open TODOs:\n")
-		for _, it := range open {
-			sb.WriteString("- [")
-			sb.WriteString(string(it.Status))
-			sb.WriteString("] ")
-			sb.WriteString(truncate(it.Content, 300))
-			sb.WriteString("\n")
-		}
-	}
-	return strings.TrimSpace(sb.String())
-}
-
 func (a *App) updateMessage(c *domain.Conversation, msgID string, fn func(*domain.Message)) {
 	for i := range c.Messages {
 		if c.Messages[i].ID == msgID {
@@ -1506,6 +1480,9 @@ func (a *App) updateToolResult(c *domain.Conversation, msgID, callID string, sta
 }
 
 func (a *App) failTurn(run *TurnRun, msgID string, err error) {
+	if msgID == "" {
+		msgID = run.currentMessageID()
+	}
 	a.log("error", "agent", "turn failed: %s: %v", run.ID, err)
 	if c, e := a.Conversations.Get(run.ConversationID); e == nil {
 		a.updateMessage(c, msgID, func(m *domain.Message) {
@@ -1517,11 +1494,14 @@ func (a *App) failTurn(run *TurnRun, msgID string, err error) {
 	}
 	a.discardQueuedSteer(run)
 	a.Bus.Emit(contracts.EventTurnError, contracts.TurnErrorEvent{
-		RunID: run.ID, ConversationID: run.ConversationID, Message: err.Error(),
+		RunID: run.ID, ConversationID: run.ConversationID, MessageID: msgID, Message: err.Error(),
 	})
 }
 
 func (a *App) failStreamTurn(run *TurnRun, msgID, model string, round streamedTurnRound, err error) {
+	if msgID == "" {
+		msgID = run.currentMessageID()
+	}
 	a.log("error", "agent", "turn failed: %s: %v", run.ID, err)
 	if c, getErr := a.Conversations.Get(run.ConversationID); getErr == nil {
 		a.updateMessage(c, msgID, func(message *domain.Message) {
@@ -1541,7 +1521,7 @@ func (a *App) failStreamTurn(run *TurnRun, msgID, model string, round streamedTu
 	}
 	a.discardQueuedSteer(run)
 	a.Bus.Emit(contracts.EventTurnError, contracts.TurnErrorEvent{
-		RunID: run.ID, ConversationID: run.ConversationID, Message: err.Error(),
+		RunID: run.ID, ConversationID: run.ConversationID, MessageID: msgID, Message: err.Error(),
 	})
 }
 

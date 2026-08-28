@@ -28,6 +28,7 @@ import {
   toolTerminalMeta,
   toolTerminalOutput,
   appendToolJobDelta,
+  appendLiveError,
   bindToolStop,
   isStreamingTool,
   parseShowImageOutput,
@@ -117,14 +118,88 @@ const state = {
   // Per-room live run buffers. While the user is looking at another room, the
   // deltas for this room keep arriving over the same WebSocket; they are
   // mirrored here (raw text, reasoning, tool jobs) so switching back renders
-  // a stable, complete stream instead of a blank turn. `raw`/`rawReasoning`
-  // are capped to keep memory bounded — when a cap is hit the room falls
-  // back to the persisted snapshot on switch-back. `lastEventAt` powers the
-  // sidebar live-activity indicator.
+  // a stable live stream instead of a blank turn. Text and tool state are
+  // capped to keep memory bounded. `lastEventAt` powers the sidebar indicator.
   roomBuffers: new Map(), // conversationId -> RoomStreamBuffer
 };
 
 const MAX_ROOM_BUFFER_CHARS = 512 * 1024; // per room (raw + rawReasoning)
+const MAX_LIVE_ROUND_CHARS = 512 * 1024;
+const MAX_LIVE_TOOL_JOBS = 128;
+
+function appendBoundedLiveText(target, field, text) {
+  if (!target || !text) return;
+  const value = String(text);
+  const current = String(target[field] || '');
+  if (value.length >= MAX_LIVE_ROUND_CHARS) {
+    target[field] = value.slice(-MAX_LIVE_ROUND_CHARS);
+    target[`${field}Capped`] = true;
+    return;
+  }
+  const next = current + value;
+  if (next.length <= MAX_LIVE_ROUND_CHARS) {
+    target[field] = next;
+    return;
+  }
+  target[field] = next.slice(-MAX_LIVE_ROUND_CHARS);
+  target[`${field}Capped`] = true;
+}
+
+function trimRoomBuffer(buffer) {
+  if (!buffer) return;
+  let excess = buffer.raw.length + buffer.rawReasoning.length - MAX_ROOM_BUFFER_CHARS;
+  if (excess <= 0) return;
+  buffer.capped = true;
+  if (buffer.raw.length >= excess) {
+    buffer.raw = buffer.raw.slice(excess);
+    return;
+  }
+  excess -= buffer.raw.length;
+  buffer.raw = '';
+  buffer.rawReasoning = buffer.rawReasoning.slice(excess);
+}
+
+function setLiveToolJob(toolJobs, toolCallID, job) {
+  if (!toolJobs || !job) return;
+  const previous = toolJobs.get(toolCallID);
+  if (previous && previous !== job) {
+    if (previous._elapsedTimer) clearInterval(previous._elapsedTimer);
+    previous.remove?.();
+  }
+  toolJobs.set(toolCallID, job);
+  while (toolJobs.size > MAX_LIVE_TOOL_JOBS) {
+    const oldestID = toolJobs.keys().next().value;
+    const oldest = toolJobs.get(oldestID);
+    if (oldest?._elapsedTimer) clearInterval(oldest._elapsedTimer);
+    oldest?.remove?.();
+    toolJobs.delete(oldestID);
+  }
+}
+
+function updateLiveTrimNotice(run) {
+  const bubble = run?.bubble;
+  if (!bubble) return;
+  const capped = run.rawCapped || run.rawReasoningCapped;
+  const existing = bubble.querySelector(':scope > .agent-live-trimmed');
+  if (!capped) {
+    existing?.remove();
+    return;
+  }
+  if (existing) return;
+  bubble.prepend(el('div', {
+    class: 'agent-live-trimmed',
+    text: 'Earlier live output trimmed for performance; the full transcript appears when the turn finishes.',
+  }));
+}
+
+function resetLiveRoundText(run) {
+  if (!run) return;
+  run.raw = '';
+  run.rawReasoning = '';
+  run.rawCapped = false;
+  run.rawReasoningCapped = false;
+  run.bubble?.querySelector(':scope > .agent-live-trimmed')?.remove();
+}
 
 // Active-message windowing sizes (messages, not turns). INITIAL_WINDOW keeps
 // the first paint of a long conversation cheap; WINDOW_BATCH is revealed per
@@ -417,7 +492,7 @@ function updateConversationItem(item, c) {
   // Only rooms that are not the active one and not terminal get the live
   // dot. The dot signals "this room is still streaming in the background".
   const isLive = Boolean(
-    buffer && !buffer.done && !buffer.capped && c.id !== state.activeId && buffer.lastEventAt > 0,
+    buffer && !buffer.done && c.id !== state.activeId && buffer.lastEventAt > 0,
   );
   item.classList.toggle('is-running', isLive);
   const dot = item.querySelector('.agent-conversation-dot');
@@ -542,12 +617,16 @@ async function openConversation(id) {
       toolJobs: buffer.toolJobs,
       raw: buffer.raw,
       rawReasoning: buffer.rawReasoning,
+      rawCapped: buffer.capped,
+      rawReasoningCapped: false,
       round: buffer.round,
       conversationId: state.activeId,
       runId: buffer.runId,
       messageId: buffer.messageId,
     });
   }
+  const attachedRun = runForConversation(state.activeId);
+  if (attachedRun) flushPendingEvents(attachedRun.runId);
   expireCompletedBuffers();
   renderConversationList();
   // Restore the steer queue strip if a steer is still pending for this room.
@@ -607,7 +686,7 @@ async function restorePendingAsks(conversationId, token) {
     else if (run.strip) {
       placeToolCard(run.bubble, run.strip, card);
     }
-    run.toolJobs.set(a.tool_call_id, card);
+    setLiveToolJob(run.toolJobs, a.tool_call_id, card);
   }
   scrollToBottom();
 }
@@ -633,7 +712,7 @@ async function reattachActiveRunFromBackend() {
   // Register a run entry. reattachActiveRun will populate the DOM
   // references by replacing the last assistant message node. When a live
   // room buffer already holds the streamed deltas for this run, seed the
-  // entry from it so the re-attached DOM shows the full accumulated text,
+  // entry from it so the re-attached DOM shows the accumulated live tail,
   // not just the deltas that arrive after the switch.
   const liveBuffer = state.roomBuffers.get(conversationId);
   // A capped buffer is still usable: it retains the newest MAX_ROOM_BUFFER_CHARS
@@ -645,11 +724,12 @@ async function reattachActiveRunFromBackend() {
     toolJobs: hasLive ? liveBuffer.toolJobs : new Map(),
     raw: hasLive ? liveBuffer.raw : '',
     rawReasoning: hasLive ? liveBuffer.rawReasoning : '',
+    rawCapped: Boolean(hasLive && liveBuffer.capped),
+    rawReasoningCapped: false,
     round: hasLive ? (liveBuffer.round || 1) : 1,
     conversationId: conversationId, runId: active.run_id,
     messageId: hasLive ? (liveBuffer.messageId || active.message_id) : active.message_id,
   });
-  flushPendingEvents(active.run_id);
   if (active.queued_steer) {
     state.steerDraft = active.queued_steer;
     state.steerId = active.queued_steer_id ?? null;
@@ -760,8 +840,7 @@ function reattachActiveRun() {
     // Keep the (empty) section attached: every run ref stays valid for the
     // next round or in-flight tool updates. agent.turn.started appends a
     // fresh section cleanly, and turn-end refresh repaints from snapshot.
-    run.raw = '';
-    run.rawReasoning = '';
+    resetLiveRoundText(run);
     run.toolJobs = new Map();
     run.msgNode = msgNode;
     run.bubble = bubble;
@@ -784,7 +863,11 @@ function reattachActiveRun() {
   // Render buffered tool jobs so a switch-back shows the tool cards that
   // ran while this room was hidden. Standalone cards go to the bubble;
   // terminals go to the strip.
-  for (const job of run.toolJobs.values()) placeToolCard(bubble, strip, job);
+  const buffer = state.roomBuffers.get(run.conversationId);
+  const toolJobs = buffer?.runId === run.runId && buffer.toolJobs
+    ? buffer.toolJobs
+    : (run.toolJobs || new Map());
+  for (const job of toolJobs.values()) placeToolCard(bubble, strip, job);
   // Update the run entry with fresh DOM references.
   run.msgNode = msgNode;
   run.bubble = bubble;
@@ -792,7 +875,8 @@ function reattachActiveRun() {
   run.textBox = textBox;
   run.strip = strip;
   clearToolTimers(run);
-  run.toolJobs = new Map();
+  run.toolJobs = toolJobs;
+  if (buffer?.runId === run.runId) buffer.toolJobs = toolJobs;
   scrollToBottom(true);
 }
 
@@ -901,20 +985,32 @@ function applyBufferedRunToDOM(convId) {
   // snapshot cannot render the in-flight round, so showing the newest tail
   // beats a blank bubble.
   const run = state.runs.get(buffer.runId);
+  const sourceMessageID = buffer.messageId || run?.messageId || '';
+  buffer.messageId = sourceMessageID || buffer.messageId;
   const source = {
     raw: buffer.raw,
     rawReasoning: buffer.rawReasoning,
     toolJobs: buffer.toolJobs,
-    messageId: buffer.messageId,
+    messageId: sourceMessageID,
   };
   const slot = ensureRunSlot(source);
   if (!slot) return;
-  const { reasoningEl, textBox, strip } = slot;
+  const { bubble, reasoningEl, textBox, strip } = slot;
   slot.msgNode.classList.add('agent-pending');
+  if (run && buffer.capped) run.rawCapped = true;
+  if (buffer.capped) updateLiveTrimNotice({ bubble, rawCapped: true });
   if (roundAlreadyPersisted(source.messageId)) {
     // The turn finished server-side while the user was away; the snapshot
     // already renders this round. Leave the empty section attached (harmless
     // and transient) rather than risking detached refs in live handlers.
+    if (run) {
+      run.msgNode = slot.msgNode;
+      run.bubble = slot.bubble;
+      run.reasoningEl = reasoningEl;
+      run.textBox = textBox;
+      run.strip = strip;
+      run.toolJobs = source.toolJobs;
+    }
     return;
   }
   if (source.rawReasoning) {
@@ -940,6 +1036,9 @@ function applyBufferedRunToDOM(convId) {
   run.reasoningEl = reasoningEl;
   run.textBox = textBox;
   run.strip = strip;
+  run.messageId = sourceMessageID || run.messageId;
+  run.toolJobs = source.toolJobs;
+  if (buffer.runId === run.runId) buffer.toolJobs = source.toolJobs;
   scrollToBottom(true);
 }
 
@@ -1098,6 +1197,8 @@ function beginTurn(runId, userText, attachments = []) {
   reasoningEl.hidden = true;
   textBox.append(el('span', { class: 'agent-thinking-dots' },
     el('span'), el('span'), el('span')));
+  const previousBuffer = state.roomBuffers.get(state.activeId);
+  if (previousBuffer?.done) state.roomBuffers.delete(state.activeId);
   state.runs.set(runId, {
     msgNode, bubble, strip, textBox, reasoningEl,
     toolJobs: new Map(), raw: '', rawReasoning: '',
@@ -1153,6 +1254,8 @@ async function retryTurn(failedNode, failedMessageId) {
   const { reasoningEl, textBox, strip } = mountLiveRound(bubble, {});
   reasoningEl.hidden = true;
   textBox.textContent = '…';
+  const previousBuffer = state.roomBuffers.get(state.activeId);
+  if (previousBuffer?.done) state.roomBuffers.delete(state.activeId);
   state.runs.set(runId, {
     msgNode, bubble, strip, textBox, reasoningEl,
     toolJobs: new Map(), raw: '', rawReasoning: '',
@@ -1273,12 +1376,120 @@ function flushPendingEvents(runId) {
 
 function clearToolTimers(run) {
   if (!run?.toolJobs) return;
+  flushPendingToolDeltas(run);
   for (const job of run.toolJobs.values()) {
     if (job._elapsedTimer) {
       clearInterval(job._elapsedTimer);
       job._elapsedTimer = null;
     }
   }
+}
+
+function queueToolDelta(run, toolCallId, text) {
+  if (!run || !text) return;
+  if (!run.pendingToolDeltas) run.pendingToolDeltas = new Map();
+  if (!run.pendingToolDeltas.has(toolCallId) && run.pendingToolDeltas.size >= MAX_LIVE_TOOL_JOBS) {
+    run.pendingToolDeltas.delete(run.pendingToolDeltas.keys().next().value);
+  }
+  run.pendingToolDeltas.set(
+    toolCallId,
+    ((run.pendingToolDeltas.get(toolCallId) || '') + text).slice(-12000),
+  );
+  scheduleLiveRender(run);
+}
+
+function flushPendingToolDeltas(run) {
+  if (!run?.pendingToolDeltas?.size) return false;
+  let flushed = false;
+  for (const [toolCallId, text] of run.pendingToolDeltas) {
+    const job = run.toolJobs?.get(toolCallId);
+    if (!job) continue;
+    appendToolJobDelta(job, text);
+    flushed = true;
+  }
+  run.pendingToolDeltas.clear();
+  return flushed;
+}
+
+function scheduleLiveRender(run) {
+  if (!run || run.renderScheduled) return;
+  run.renderScheduled = true;
+  const flush = () => {
+    run.renderScheduled = false;
+    run.renderFrame = 0;
+    renderLiveRun(run);
+  };
+  if (typeof requestAnimationFrame === 'function') {
+    run.renderFrame = requestAnimationFrame(flush);
+  } else {
+    run.renderFrame = setTimeout(flush, 0);
+  }
+}
+
+function cancelLiveRender(run) {
+  if (!run?.renderScheduled) return;
+  if (typeof cancelAnimationFrame === 'function' && typeof run.renderFrame === 'number') {
+    cancelAnimationFrame(run.renderFrame);
+  } else {
+    clearTimeout(run.renderFrame);
+  }
+  run.renderScheduled = false;
+  run.renderFrame = 0;
+}
+
+function flushLiveRender(run) {
+  if (!run?.renderScheduled) return;
+  cancelLiveRender(run);
+  renderLiveRun(run);
+}
+
+function renderLiveRun(run) {
+  if (run.conversationId !== state.activeId) return;
+  const textBox = run.textBox;
+  const reasoningEl = run.reasoningEl;
+  if (!textBox?.isConnected && !reasoningEl?.isConnected && !run.bubble?.isConnected) return;
+
+  updateLiveTrimNotice(run);
+  const flushedToolDelta = flushPendingToolDeltas(run);
+  if (flushedToolDelta) updateRoomInfo(state.conversation, state.messages);
+
+  if (reasoningEl) {
+    setReasoningSource(reasoningEl, run.rawReasoning, { render: false });
+    reasoningEl.hidden = !reasoningHasVisibleSource(run.rawReasoning);
+    if (reasoningEl.hidden || run.raw?.trim()) {
+      reasoningEl.classList.remove('is-streaming');
+    } else if (run.rawReasoning) {
+      reasoningEl.classList.add('is-streaming');
+      textBox?.querySelector('.agent-thinking-dots')?.remove();
+    }
+    if (reasoningEl.open) {
+      const content = reasoningEl.querySelector('.agent-reasoning-content');
+      if (content && run.rawReasoning) incrementalRender(content, run.rawReasoning);
+    }
+  }
+
+  if (textBox && run.raw?.trim()) {
+    run.reasoningEl?.classList.remove('is-streaming');
+    textBox.querySelector('.agent-thinking-dots')?.remove();
+    const banner = run.bubble?.querySelector('.agent-retry-banner');
+    if (banner) banner.remove();
+    incrementalRender(textBox, run.raw);
+  }
+  scheduleLiveEnhancement(run);
+  scrollToBottom();
+}
+
+function scheduleLiveEnhancement(run) {
+  if (!run) return;
+  if (run.enhanceTimer) clearTimeout(run.enhanceTimer);
+  run.enhanceTimer = setTimeout(() => {
+    run.enhanceTimer = null;
+    const target = run.bubble?.isConnected ? run.bubble : run.textBox;
+    if (!target) return;
+    void renderMermaidDiagrams(target);
+    void highlightCode(target);
+    attachZoomButtons(target);
+  }, 120);
 }
 
 function replaceGenerateImageJob(job, payload, assign) {
@@ -1320,6 +1531,11 @@ function endTurn(runId, keepRun = false) {
     return;
   }
   const convId = run.conversationId;
+  flushLiveRender(run);
+  if (run.enhanceTimer) {
+    clearTimeout(run.enhanceTimer);
+    run.enhanceTimer = null;
+  }
   // Detach the DOM for a run that ended while this room was NOT visible.
   // The room's live buffer is kept so switching back renders the final
   // state; the run entry is removed from the shared map (the DOM refs for
@@ -1648,6 +1864,10 @@ function bindEvents() {
     // would wipe the prior turn's visible content (the "rollback" bug).
     const prevMessageId = run.messageId;
     run.messageId = message_id;
+    if (run.msgNode?.isConnected && run.textBox && prevMessageId === message_id) {
+      run.round = round || run.round;
+      return;
+    }
     // round 1: bind the placeholder that beginTurn already created. Do not
     // ensureRunSlot here — that used to append a second Thinking block
     // (and a second assistant node) because the placeholder has no
@@ -1655,12 +1875,12 @@ function bindEvents() {
     // message id and must open a fresh node instead of writing over the
     // previous turn.
     if (!round || round <= 1) {
-      run.raw = '';
-      run.rawReasoning = '';
+      resetLiveRoundText(run);
       run.round = 1;
       resetRoomBufferMirror(conversation_id, run, 1);
       const reusePlaceholder = conversation_id === state.activeId
         && run.msgNode?.isConnected
+        && run.textBox
         && (!prevMessageId || prevMessageId === message_id);
       if (reusePlaceholder) {
         stampRunMessageId(run.msgNode, message_id);
@@ -1691,8 +1911,7 @@ function bindEvents() {
     }
     // Track round even when not active so re-attach knows the current round.
     run.round = round;
-    run.raw = '';
-    run.rawReasoning = '';
+    resetLiveRoundText(run);
     resetRoomBufferMirror(conversation_id, run, round);
     if (conversation_id !== state.activeId) return;
     // seal previous round: hide its tool strip if empty
@@ -1724,38 +1943,22 @@ function bindEvents() {
     const run = getRunOrQueue('agent.message.delta', payload);
     if (!run) return;
     // Always accumulate raw text so we can re-render on room switch.
-    run.raw += text;
+    appendBoundedLiveText(run, 'raw', text);
     // Mirror into the room buffer so a switch-back that happens at any point
     // (including after this run entry was cleaned up) still renders the full
-    // stream. The buffer is capped; when the cap is hit the room falls back
-    // to the persisted snapshot on switch-back.
+    // stream. The buffer keeps only a bounded tail if the room is very large.
     if (conversation_id !== state.activeId) {
       const buffer = getOrCreateRoomBuffer(conversation_id);
       buffer.runId = run.runId;
       buffer.messageId = run.messageId;
       buffer.raw += text;
-      if (buffer.raw.length > MAX_ROOM_BUFFER_CHARS) {
-        buffer.capped = true;
-        buffer.raw = buffer.raw.slice(-MAX_ROOM_BUFFER_CHARS);
-      }
+      trimRoomBuffer(buffer);
       touchRoomBuffer(buffer);
       refreshLiveDots();
     }
     // Only update DOM if this conversation is the active one.
     if (conversation_id !== state.activeId || !run.textBox) return;
-    // Text deltas mean reasoning finished — stop the streaming pulse.
-    run.reasoningEl?.classList.remove('is-streaming');
-    // Remove thinking dots / retry banner on first delta.
-    run.textBox.querySelector('.agent-thinking-dots')?.remove();
-    const banner = run.bubble.querySelector('.agent-retry-banner');
-    if (banner && run.raw) banner.remove();
-    // Incremental render: only blocks whose byte range changed are
-    // re-rendered. Unchanged blocks — including rendered Mermaid SVGs —
-    // are preserved. This is the ChatGPT pattern: mermaid renders at
-    // fence-close and stays locked across subsequent text deltas.
-    incrementalRender(run.textBox, run.raw);
-    void renderMermaidDiagrams(run.textBox); void highlightCode(run.textBox); attachZoomButtons(run.textBox);
-    scrollToBottom();
+    scheduleLiveRender(run);
   });
   on('agent.context.estimate', (payload) => {
     // Use the server-side estimate of what is really sent (system + messages
@@ -1775,7 +1978,7 @@ function bindEvents() {
     const { text, conversation_id } = payload;
     const run = getRunOrQueue('agent.reasoning.delta', payload);
     if (!run) return;
-    run.rawReasoning += text;
+    appendBoundedLiveText(run, 'rawReasoning', text);
     // Mirror into the room buffer for a non-active room so a switch-back
     // restores the full reasoning stream.
     if (conversation_id !== state.activeId) {
@@ -1783,48 +1986,39 @@ function bindEvents() {
       buffer.runId = run.runId;
       buffer.messageId = run.messageId;
       buffer.rawReasoning += text;
-      if (buffer.raw.length + buffer.rawReasoning.length > MAX_ROOM_BUFFER_CHARS) {
-        buffer.capped = true;
-        // Trim BOTH mirrors so the cap actually bounds memory; keeping an
-        // uncapped reasoning mirror defeated the limit entirely.
-        buffer.rawReasoning = buffer.rawReasoning.slice(-MAX_ROOM_BUFFER_CHARS);
-        buffer.raw = buffer.raw.slice(-MAX_ROOM_BUFFER_CHARS);
-      }
+      trimRoomBuffer(buffer);
       touchRoomBuffer(buffer);
       refreshLiveDots();
     }
     if (conversation_id !== state.activeId) return;
-    if (run.reasoningEl) {
-      setReasoningSource(run.reasoningEl, run.rawReasoning);
-      if (run.reasoningEl.open) {
-        const content = run.reasoningEl.querySelector('.agent-reasoning-content');
-        if (content) {
-          incrementalRender(content, run.rawReasoning);
-          void renderMermaidDiagrams(content); void highlightCode(content); attachZoomButtons(content);
-        }
-      }
-      run.reasoningEl.hidden = !reasoningHasVisibleSource(run.rawReasoning);
-      if (run.reasoningEl.hidden) return;
-      run.reasoningEl.classList.add('is-streaming');
-      // Remove thinking dots when reasoning starts arriving.
-      run.textBox?.querySelector('.agent-thinking-dots')?.remove();
-      scrollToBottom();
-    }
+    scheduleLiveRender(run);
   });
   on('agent.provider.retry', (payload) => {
     const { attempt, max_attempts, delay_ms, error, conversation_id } = payload;
     const run = getRunOrQueue('agent.provider.retry', payload);
     if (!run) return;
-    if (conversation_id !== state.activeId) return;
     // Clear partial content from the interrupted stream so the retry
     // starts fresh. Without this, new deltas from the retry append to
     // the cut-off text and produce garbled output.
-    if (run.raw) {
-      run.raw = '';
+    if (conversation_id !== state.activeId) {
+      const buffer = getOrCreateRoomBuffer(conversation_id);
+      buffer.runId = run.runId;
+      buffer.messageId = run.messageId;
+      buffer.raw = '';
+      buffer.rawReasoning = '';
+      buffer.toolJobs = new Map();
+      buffer.capped = false;
+      touchRoomBuffer(buffer);
+      refreshLiveDots();
+      return;
+    }
+    const hadRaw = Boolean(run.raw);
+    const hadReasoning = Boolean(run.rawReasoning);
+    resetLiveRoundText(run);
+    if (hadRaw) {
       if (run.textBox) run.textBox.textContent = '';
     }
-    if (run.rawReasoning) {
-      run.rawReasoning = '';
+    if (hadReasoning) {
       setReasoningSource(run.reasoningEl, '');
     }
     if (run.reasoningEl) {
@@ -1860,7 +2054,7 @@ function bindEvents() {
         ? renderGenerateImageCard({ name, args: args ?? {}, status: 'running' })
         : renderToolJob({ name, args: args ?? {}, status: 'running' });
       if (isStreamingTool(name)) bindToolStop(job, () => run.runId);
-      buffer.toolJobs.set(tool_call_id, job);
+      setLiveToolJob(buffer.toolJobs, tool_call_id, job);
       touchRoomBuffer(buffer);
       refreshLiveDots();
       return;
@@ -1888,7 +2082,7 @@ function bindEvents() {
       ? renderGenerateImageCard({ name, args: args ?? {}, status: 'running' })
       : renderToolJob({ name, args: args ?? {}, status: 'running' });
     if (isStreamingTool(name)) bindToolStop(job, () => run.runId);
-    run.toolJobs.set(tool_call_id, job);
+    setLiveToolJob(run.toolJobs, tool_call_id, job);
     placeToolCard(run.bubble, run.strip, job);
     // Appending a tool card grows the thread; follow it if the user is pinned.
     // Without this, a burst of parallel tool.started events would leave the
@@ -1924,20 +2118,29 @@ function bindEvents() {
       touchRoomBuffer(buffer);
       return;
     }
-    const job = run.toolJobs.get(tool_call_id);
-    if (job) appendToolJobDelta(job, text);
-    updateRoomInfo(state.conversation, state.messages);
-    scrollToBottom();
+    queueToolDelta(run, tool_call_id, text);
   });
   on('agent.tool.completed', (payload) => {
     const { tool_call_id, name, status, output, conversation_id } = payload;
     const run = getRunOrQueue('agent.tool.completed', payload);
-    if (!run) return;
+    if (!run) {
+      if (conversation_id === state.activeId) void refreshActiveConversation();
+      else refreshConversations();
+      return;
+    }
     // Mirror the completed tool output into the non-active room buffer so a
     // switch-back renders the finished tool card.
     if (conversation_id !== state.activeId) {
       const buffer = getOrCreateRoomBuffer(conversation_id);
-      const job = buffer.toolJobs.get(tool_call_id);
+      buffer.runId = run.runId;
+      buffer.messageId = run.messageId;
+      let job = buffer.toolJobs.get(tool_call_id);
+      if (!job) {
+        job = name === 'generate_image'
+          ? renderGenerateImageCard({ name, args: {}, status: 'running' })
+          : renderToolJob({ name, args: {}, status: 'running' });
+        setLiveToolJob(buffer.toolJobs, tool_call_id, job);
+      }
       if (job) {
         // show (op=html): swap terminal for artifact card in the buffer
         // too, so a room switch-back shows the card directly.
@@ -1950,7 +2153,7 @@ function bindEvents() {
             card._toolArgs = toolCall.args;
             card.dataset.standalone = 'true';
             swapToolCard(job, card, buffer.bubble, buffer.strip);
-            buffer.toolJobs.set(tool_call_id, card);
+            setLiveToolJob(buffer.toolJobs, tool_call_id, card);
           } else {
             // show(op=image|audio|video): swap terminal for inline media
             // card in the buffer too.
@@ -1961,7 +2164,7 @@ function bindEvents() {
               const card = renderToolCallCard(toolCall);
               card._toolArgs = toolCall.args;
               swapToolCard(job, card, buffer.bubble, buffer.strip);
-              buffer.toolJobs.set(tool_call_id, card);
+              setLiveToolJob(buffer.toolJobs, tool_call_id, card);
             }
           }
         } else if (name === 'subagent') {
@@ -1972,9 +2175,9 @@ function bindEvents() {
           const card = renderSubagentCard(toolCall);
           card._toolArgs = toolCall.args;
           job.replaceWith(card);
-          buffer.toolJobs.set(tool_call_id, card);
+          setLiveToolJob(buffer.toolJobs, tool_call_id, card);
         } else if (name === 'generate_image') {
-          replaceGenerateImageJob(job, payload, (card) => buffer.toolJobs.set(tool_call_id, card));
+          replaceGenerateImageJob(job, payload, (card) => setLiveToolJob(buffer.toolJobs, tool_call_id, card));
         } else {
           const next = { name, args: job._toolArgs, status: status || 'ok', output };
           setToolTerminalStatus(job, next.status);
@@ -1992,6 +2195,8 @@ function bindEvents() {
       refreshLiveDots();
       return;
     }
+    const flushedToolDelta = flushPendingToolDeltas(run);
+    if (flushedToolDelta) updateRoomInfo(state.conversation, state.messages);
     // ask_question: the ask card is already sealed by agent.ask.answered
     // (or agent.ask.cancelled). Skip the tool terminal update — the ask
     // card IS the tool card, there's no terminal to update.
@@ -2014,7 +2219,7 @@ function bindEvents() {
         card._toolArgs = toolCall.args;
         card.dataset.standalone = 'true';
         swapToolCard(job, card, run.bubble, run.strip);
-        run.toolJobs.set(tool_call_id, card);
+        setLiveToolJob(run.toolJobs, tool_call_id, card);
       } else if (job) {
         // show(op=image|audio|video): swap terminal for inline media card.
         // renderToolCallCard dispatches to the correct card via the show
@@ -2028,7 +2233,7 @@ function bindEvents() {
           const card = renderToolCallCard(toolCall);
           card._toolArgs = toolCall.args;
           swapToolCard(job, card, run.bubble, run.strip);
-          run.toolJobs.set(tool_call_id, card);
+          setLiveToolJob(run.toolJobs, tool_call_id, card);
         }
       }
       return;
@@ -2045,18 +2250,18 @@ function bindEvents() {
       card.dataset.standalone = 'true';
       if (job) {
         swapToolCard(job, card, run.bubble, run.strip);
-        run.toolJobs.set(tool_call_id, card);
+        setLiveToolJob(run.toolJobs, tool_call_id, card);
         card._toolArgs = toolCall.args;
       } else if (run.strip) {
         placeToolCard(run.bubble, run.strip, card);
-        run.toolJobs.set(tool_call_id, card);
+        setLiveToolJob(run.toolJobs, tool_call_id, card);
       }
       return;
     }
     if (name === 'generate_image') {
       const job = run.toolJobs.get(tool_call_id);
       replaceGenerateImageJob(job, payload, (card) => {
-        run.toolJobs.set(tool_call_id, card);
+        setLiveToolJob(run.toolJobs, tool_call_id, card);
         if (!job) placeToolCard(run.bubble, run.strip, card);
       });
       return;
@@ -2071,7 +2276,7 @@ function bindEvents() {
       const toolCall = { name, args: run.toolArgs?.get?.(tool_call_id) ?? {}, output: output ?? '', status: status || 'ok' };
       const card = name === 'generate_image' ? renderGenerateImageCard(toolCall) : renderToolJob(toolCall);
       if (isStreamingTool(name)) bindToolStop(card, () => run.runId);
-      run.toolJobs.set(tool_call_id, card);
+      setLiveToolJob(run.toolJobs, tool_call_id, card);
       if (run.strip) {
         placeToolCard(run.bubble, run.strip, card);
       }
@@ -2141,34 +2346,40 @@ function bindEvents() {
     refreshConversations();
   });
   on('agent.turn.error', (payload) => {
-    const { run_id, message, conversation_id } = payload;
+    const { run_id, message, message_id, conversation_id } = payload;
     playError(state.settings?.sound_notifications !== false);
     const run = getRunOrQueue('agent.turn.error', payload);
-    if (run) {
+    const fallbackNode = !run && conversation_id === state.activeId && message_id
+      ? findMessageNode(agentThread(), message_id)
+      : null;
+    if (run || fallbackNode) {
       // Mirror the terminal error state into the room buffer so a
       // non-active room still shows the failure when switched back.
       if (conversation_id !== state.activeId) {
         const buffer = getOrCreateRoomBuffer(conversation_id);
         buffer.raw += (buffer.raw ? '\n\n' : '') + (message || 'Turn failed');
+        trimRoomBuffer(buffer);
         buffer.done = true;
         touchRoomBuffer(buffer);
         refreshLiveDots();
       }
-      const bubble = run.msgNode.querySelector('.agent-bubble');
-      if (bubble) bubble.textContent = message || 'Turn failed';
-      run.msgNode.classList.add('agent-message-error');
+      const node = run?.msgNode || fallbackNode;
+      const bubble = node?.querySelector('.agent-bubble');
+      appendLiveError(bubble, message);
+      node?.classList.add('agent-message-error');
       // Add retry button directly to the error node so the user can retry
       // without waiting for refreshActiveConversation to re-render.
-      const existingRetry = run.msgNode.querySelector('.agent-retry-btn');
-      if (!existingRetry) {
+      const existingRetry = node?.querySelector('.agent-retry-btn');
+      if (node && !existingRetry) {
         const retryBtn = el('button', { class: 'agent-retry-btn', type: 'button', text: '↻ Retry with model' });
-        retryBtn.addEventListener('click', () => retryTurn(run.msgNode));
-        run.msgNode.append(retryBtn);
+        retryBtn.addEventListener('click', () => retryTurn(node, message_id));
+        node.append(retryBtn);
       }
     }
     endTurn(run_id);
     toast(message || 'Turn failed', 'error');
     if (conversation_id === state.activeId) refreshActiveConversation();
+    else refreshConversations();
   });
   on('agent.auto_continue', (payload) => {
     const { conversation_id, decision, continue_text } = payload;
@@ -2209,7 +2420,7 @@ function bindEvents() {
       onStop: () => rpc('agent.turns.stop', { run_id }).catch(() => {}),
     });
     card.dataset.standalone = 'true';
-    run.toolJobs.set(tool_call_id, card);
+    setLiveToolJob(run.toolJobs, tool_call_id, card);
     placeToolCard(run.bubble, run.strip, card);
     card.focus();
     scrollToBottom();
@@ -2231,7 +2442,7 @@ function bindEvents() {
     if (!card || !card.classList?.contains('agent-ask-card')) return;
     cancelAskCard(card, reason);
   });
-  on('agent.compacted', ({ conversation_id }) => {
+  on('agent.compacted', ({ conversation_id, run_id }) => {
     if (conversation_id !== state.activeId) {
       state.roomBuffers.delete(conversation_id);
       refreshLiveDots();
@@ -2239,19 +2450,20 @@ function bindEvents() {
     }
     const run = runForConversation(conversation_id);
     if (run) {
-      void applyLiveCompaction(conversation_id, run);
+      if (!run_id || run.runId === run_id) void applyLiveCompaction(conversation_id, run, run_id);
       return;
     }
     state.roomBuffers.delete(conversation_id);
     refreshActiveConversation();
   });
-  on('agent.compaction.failed', ({ conversation_id, error }) => {
+  on('agent.compaction.failed', ({ conversation_id, run_id, error }) => {
     // Compaction failed but the turn continues with the un-compacted
     // conversation. Warn the user so they know context may fill up soon;
     // this is not turn-fatal (emergency compaction will catch overflow).
     const msg = error || 'Context compaction failed';
     toast(`Compaction failed: ${msg}`, 'error');
-    if (conversation_id === state.activeId) refreshActiveConversation();
+    const run = runForConversation(conversation_id);
+    if (conversation_id === state.activeId && (!run_id || run?.runId === run_id)) refreshActiveConversation();
   });
   on('agent.steer.queued', ({ conversation_id, steer_id, text }) => {
     if (conversation_id !== state.activeId) return;
@@ -2362,11 +2574,12 @@ function promoteSteerToTranscript(text) {
   scrollToBottom(true);
 }
 
-async function applyLiveCompaction(conversationId, run) {
+async function applyLiveCompaction(conversationId, run, expectedRunId = '') {
   const token = state.conversationLoadToken;
   try {
     const { conversation, messages } = await rpc('agent.conversations.get', { id: conversationId });
     if (token !== state.conversationLoadToken || state.activeId !== conversationId) return;
+    if (runForConversation(conversationId) !== run || (expectedRunId && run.runId !== expectedRunId)) return;
     state.conversation = conversation;
     state.messages = messages ?? [];
     state.contextEstimate = Number(conversation?.context_tokens) || Number(conversation?.estimated_tokens) || 0;
@@ -2378,7 +2591,8 @@ async function applyLiveCompaction(conversationId, run) {
 
     const thread = agentThread();
     const liveNode = run.msgNode?.isConnected ? run.msgNode : null;
-    const snapshot = windowedActiveMessages().filter((m) => m.id !== run.messageId);
+    const renderedMessageIDs = new Set((liveNode?.dataset.messageIds || '').split(/\s+/).filter(Boolean));
+    const snapshot = windowedActiveMessages().filter((message) => !renderedMessageIDs.has(message.id));
     if (liveNode && thread) {
       const frag = renderConversation(snapshot, retryTurn);
       while (liveNode.previousSibling) liveNode.previousSibling.remove();
@@ -2388,7 +2602,7 @@ async function applyLiveCompaction(conversationId, run) {
         if (after.classList?.contains('agent-compaction-marker')) after.remove();
         after = next;
       }
-      thread.insertBefore(frag, liveNode);
+      liveNode.before(frag);
       void renderMermaidDiagrams(thread); void highlightCode(thread); attachZoomButtons(thread);
     } else {
       renderThread(windowedActiveMessages(), state.pinned);
@@ -2399,7 +2613,9 @@ async function applyLiveCompaction(conversationId, run) {
     scrollToBottom();
   } catch (err) {
     console.warn('applyLiveCompaction failed:', err?.message || err);
-    refreshActiveConversation();
+    if (state.activeId === conversationId && runForConversation(conversationId) === run) {
+      void refreshActiveConversation();
+    }
   }
 }
 
@@ -2410,6 +2626,7 @@ async function refreshActiveConversation() {
   try {
     const { conversation, messages } = await rpc('agent.conversations.get', { id: conversationId });
     if (token !== state.conversationLoadToken || state.activeId !== conversationId) return;
+    const liveRun = runForConversation(conversationId);
     state.conversation = conversation;
     state.messages = messages ?? [];
     // Re-sync the context badge with the backend source of truth (the turn
@@ -2427,9 +2644,27 @@ async function refreshActiveConversation() {
     // the refresh race), re-merge it so the visible stream stays stable while
     // the server snapshot catches up.
     const buffer = state.roomBuffers.get(conversationId);
-    const hasLiveBuffer = buffer && !buffer.done && !buffer.capped && buffer.lastEventAt > 0;
-    renderThread(windowedActiveMessages(), state.pinned);
-    if (hasLiveBuffer) applyBufferedRunToDOM(conversationId);
+  const hasLiveBuffer = buffer && !buffer.done && buffer.lastEventAt > 0;
+    const thread = agentThread();
+    const liveNode = liveRun?.msgNode?.isConnected ? liveRun.msgNode : null;
+    if (liveRun && liveNode && thread && runForConversation(conversationId) === liveRun) {
+      const renderedMessageIDs = new Set((liveNode.dataset.messageIds || '').split(/\s+/).filter(Boolean));
+      const snapshot = windowedActiveMessages().filter((message) => !renderedMessageIDs.has(message.id));
+      const fragment = renderConversation(snapshot, retryTurn);
+      while (liveNode.previousSibling) liveNode.previousSibling.remove();
+      let after = liveNode.nextSibling;
+      while (after) {
+        const next = after.nextSibling;
+        after.remove();
+        after = next;
+      }
+      liveNode.before(fragment);
+      void renderMermaidDiagrams(thread); void highlightCode(thread); attachZoomButtons(thread);
+    } else {
+      renderThread(windowedActiveMessages(), state.pinned);
+      if (liveRun && runForConversation(conversationId) === liveRun) reattachActiveRun();
+      else if (hasLiveBuffer) applyBufferedRunToDOM(conversationId);
+    }
     updateOlderSentinel();
     updateComposerStatus();
   } catch (err) {
@@ -2534,7 +2769,7 @@ function updateComposerStatus() {
   const activeRun = runForConversation(state.activeId);
   const activeBuffered = state.roomBuffers.get(state.activeId);
   const activeRoomLive = Boolean(
-    activeRun || (activeBuffered && !activeBuffered.done && !activeBuffered.capped && activeBuffered.lastEventAt > 0),
+    activeRun || (activeBuffered && !activeBuffered.done && activeBuffered.lastEventAt > 0),
   );
   if (activeRoomLive) {
     // Live turn: keep the useful context-usage badge visible (running is

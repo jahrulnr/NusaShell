@@ -312,6 +312,7 @@ type TurnRun struct {
 	// re-reading the conversation.
 	Workspace string
 
+	messageMu   sync.RWMutex
 	steerMu     sync.Mutex
 	steerQueued *SteerEntry
 }
@@ -323,6 +324,21 @@ type SteerEntry struct {
 	Text    string
 	Status  string // "queued" | "applied" | "cancelled"
 	Message domain.Message
+}
+
+func (r *TurnRun) currentMessageID() string {
+	r.messageMu.RLock()
+	defer r.messageMu.RUnlock()
+	return r.MessageID
+}
+
+func (r *TurnRun) setMessageID(id string) {
+	if id == "" {
+		return
+	}
+	r.messageMu.Lock()
+	r.MessageID = id
+	r.messageMu.Unlock()
 }
 
 // queueSteer stores a steer entry for this run. Returns false if a steer is

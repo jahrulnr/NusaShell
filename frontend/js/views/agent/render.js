@@ -9,10 +9,14 @@ import { renderMermaidDiagrams } from '../../mermaid-render.js';
 import { highlightCode } from '../../highlight-render.js';
 import { agentThread, composerInput, toolJobStrip } from './domrefs.js';
 
-// KEEP_VISIBLE_ROUNDS caps how many assistant tool-rounds stay fully mounted
-// in a *live* turn bubble. Snapshot history uses conversationTail instead of
-// collapsing earlier rounds into a stub, so refresh still looks like a chat.
+// KEEP_VISIBLE_ROUNDS is the default number of assistant tool-rounds kept
+// mounted in a *live* turn bubble. Snapshot history uses conversationTail
+// instead of collapsing earlier rounds into a stub, so refresh still looks
+// like a chat.
 export const KEEP_VISIBLE_ROUNDS = 3;
+const MAX_PARKED_LIVE_ROUNDS = 12;
+const MAX_PARKED_LIVE_CHARS = 128000;
+const LIVE_RESTORE_BATCH = 3;
 
 export const STARTER_PROMPTS = [
   {
@@ -148,11 +152,11 @@ function materializeReasoning(details) {
 
 // setReasoningSource updates the stored raw reasoning on a disclosure without
 // parsing markdown. If the user already opened it, the body is refreshed.
-export function setReasoningSource(details, raw) {
+export function setReasoningSource(details, raw, options = {}) {
   if (!details) return;
   details._reasoningRaw = typeof raw === 'string' ? raw : '';
   details.hidden = !reasoningHasVisibleSource(details._reasoningRaw);
-  if (details.open) materializeReasoning(details);
+  if (details.open && options.render !== false) materializeReasoning(details);
 }
 
 export function reasoningDisclosure(reasoning) {
@@ -177,31 +181,113 @@ export function reasoningDisclosure(reasoning) {
   return details;
 }
 
+export function appendLiveError(bubble, message = 'Turn failed') {
+  if (!bubble) return null;
+  let errorEl = bubble.querySelector(':scope > .agent-live-error');
+  if (!errorEl) {
+    errorEl = el('div', { class: 'agent-message-meta agent-error-text agent-live-error' });
+    bubble.append(errorEl);
+  }
+  errorEl.textContent = message || 'Turn failed';
+  return errorEl;
+}
+
+function liveRoundWeight(round) {
+  let weight = round.textContent.length;
+  for (const reasoning of round.querySelectorAll('.agent-reasoning')) {
+    weight += reasoning._reasoningRaw?.length || 0;
+  }
+  return weight;
+}
+
+function liveRoundArchive(bubble) {
+  if (!bubble._liveRoundArchive) {
+    bubble._liveRoundArchive = { rounds: [], chars: 0, discarded: 0 };
+  }
+  return bubble._liveRoundArchive;
+}
+
+function ensureLiveRoundStub(bubble) {
+  let stub = bubble.querySelector(':scope > .agent-round-stub');
+  if (stub) return stub;
+  const label = el('span', { class: 'agent-round-stub-label', 'aria-live': 'polite' });
+  const action = el('button', {
+    class: 'agent-round-stub-action',
+    type: 'button',
+    text: 'Review earlier rounds',
+  });
+  stub = el('div', { class: 'agent-round-stub' }, label, action);
+  action.addEventListener('click', () => restoreParkedLiveRounds(bubble));
+  stub._liveRoundLabel = label;
+  stub._liveRoundAction = action;
+  bubble.prepend(stub);
+  return stub;
+}
+
+function updateLiveRoundStub(bubble) {
+  const archive = liveRoundArchive(bubble);
+  const count = archive.rounds.length + archive.discarded;
+  const stub = bubble.querySelector(':scope > .agent-round-stub');
+  if (!stub) return;
+  stub.dataset.dropped = String(count);
+  stub._liveRoundLabel.textContent = count === 1
+    ? '1 earlier round trimmed for performance; the current round stays live'
+    : `${count} earlier rounds trimmed for performance; the current round stays live`;
+  const available = archive.rounds.length;
+  stub._liveRoundAction.hidden = available === 0;
+  if (available > 0) {
+    const batch = Math.min(available, LIVE_RESTORE_BATCH);
+    stub._liveRoundAction.textContent = `Review ${batch} earlier round${batch === 1 ? '' : 's'}`;
+  }
+}
+
+function parkLiveRound(bubble, round) {
+  const archive = liveRoundArchive(bubble);
+  const weight = liveRoundWeight(round);
+  round.remove();
+  archive.rounds.push({ node: round, weight });
+  archive.chars += weight;
+  while (archive.rounds.length > MAX_PARKED_LIVE_ROUNDS || archive.chars > MAX_PARKED_LIVE_CHARS) {
+    const oldest = archive.rounds.shift();
+    if (!oldest) break;
+    archive.chars -= oldest.weight;
+    archive.discarded++;
+  }
+}
+
+function restoreParkedLiveRounds(bubble) {
+  const archive = liveRoundArchive(bubble);
+  if (!archive.rounds.length) return;
+  const stub = bubble.querySelector(':scope > .agent-round-stub');
+  const firstVisibleRound = bubble.querySelector(':scope > .agent-round');
+  const start = Math.max(0, archive.rounds.length - LIVE_RESTORE_BATCH);
+  const restored = archive.rounds.splice(start);
+  archive.chars -= restored.reduce((total, entry) => total + entry.weight, 0);
+  const fragment = document.createDocumentFragment();
+  for (const entry of restored) fragment.append(entry.node);
+  if (firstVisibleRound) firstVisibleRound.before(fragment);
+  else if (stub) stub.after(fragment);
+  updateLiveRoundStub(bubble);
+}
+
 function pruneOverflowLiveRounds(bubble) {
   const rounds = [...bubble.querySelectorAll(':scope > .agent-round')];
   const overflow = rounds.length - KEEP_VISIBLE_ROUNDS;
   if (overflow <= 0) return;
-  let stub = bubble.querySelector(':scope > .agent-round-stub');
-  if (!stub) {
-    stub = el('div', { class: 'agent-round-stub' });
-    bubble.prepend(stub);
-  }
-  const dropped = Number(stub.dataset.dropped || '0') + overflow;
-  stub.dataset.dropped = String(dropped);
-  stub.textContent = dropped === 1
-    ? '1 earlier round hidden until the turn finishes'
-    : `${dropped} earlier rounds hidden until the turn finishes`;
-  for (let i = 0; i < overflow; i++) rounds[i].remove();
+  ensureLiveRoundStub(bubble);
+  for (let i = 0; i < overflow; i++) parkLiveRound(bubble, rounds[i]);
+  updateLiveRoundStub(bubble);
 }
 
 // mountLiveRound appends one streaming round (reasoning + text + tool strip)
-// to a live assistant bubble and drops rounds past KEEP_VISIBLE_ROUNDS.
+// to a live assistant bubble and parks rounds past KEEP_VISIBLE_ROUNDS.
 export function mountLiveRound(bubble, source = {}) {
   const reasoningEl = reasoningDisclosure(source.rawReasoning || '');
   const textBox = el('div', { class: 'agent-bubble-text' });
   const strip = el('div', { class: 'agent-tool-stack' });
   strip.hidden = true;
   const round = el('div', { class: 'agent-round' });
+  if (source.messageId) round.dataset.messageId = source.messageId;
   round.append(reasoningEl, textBox, strip);
   bubble.append(round);
   pruneOverflowLiveRounds(bubble);
@@ -327,6 +413,7 @@ function renderAssistantTurn(messages, onRetry) {
 
 function appendAssistantSteps(bubble, message) {
   const round = el('div', { class: 'agent-round' });
+  if (message.id) round.dataset.messageId = message.id;
   if (message.steps?.length) {
     for (const step of message.steps) {
       if (step.type === 'reasoning' && step.content?.trim()) {
@@ -1191,7 +1278,9 @@ export function bindToolStop(card, getRunId) {
   const btn = card?.querySelector('.agent-tool-stop');
   if (!btn) return;
   btn.hidden = false;
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     if (btn.disabled) return;
     btn.disabled = true;
     btn.textContent = 'Stopping…';

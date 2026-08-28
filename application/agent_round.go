@@ -56,12 +56,16 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 	summary, err := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings)
 	if err != nil {
 		a.log("warn", "agent", "compaction failed for %s: %v", conversation.ID, err)
-		a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{ConversationID: conversation.ID, Error: err.Error()})
+		a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: run.ID, ConversationID: conversation.ID, Error: err.Error()})
 	} else {
-		a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{ConversationID: conversation.ID, Summary: summary})
+		a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{RunID: run.ID, ConversationID: conversation.ID, Summary: summary})
 		a.log("info", "agent", "compacted conversation %s", conversation.ID)
 	}
-	conversation, err = a.Conversations.Get(run.ConversationID)
+	refreshed, getErr := a.Conversations.Get(run.ConversationID)
+	if getErr != nil {
+		return pc, nil, settings, getErr
+	}
+	conversation = refreshed
 	afterTokens := conversation.EstimateTokens()
 	a.log("info", "agent", "compaction result for %s: before=%d after=%d (msgs=%d)",
 		conversation.ID, beforeTokens, afterTokens, len(conversation.Messages))
@@ -123,6 +127,9 @@ func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversatio
 					caps.Video = false
 					a.log("info", "learning", "disabled Video for %s/%s from 400 learning", providerName, model)
 				}
+			}
+			if action == domain.LearnedActionNudgeUser {
+				a.log("info", "learning", "learned nudge_user for %s/%s from 400 learning (provider requires user message)", providerName, model)
 			}
 		}
 		delay, retryable := providerRetryDelay(err, retry)
@@ -208,6 +215,15 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 	if continuation {
 		messages = appendContinuationTool(messages)
 	}
+	// Some providers/models reject requests that contain no user message
+	// ("No user query found in messages"). When 400-learning has recorded
+	// this for the current provider+model and the messages don't already
+	// contain a user role, inject a minimal user message ("."). This is
+	// ephemeral — not persisted to the conversation store — so later turns
+	// keep the real transcript intact.
+	if a.learnedParams != nil && a.learnedParams.NeedsUserNudge(run.ProviderID, model) && !hasUserMessage(messages) {
+		messages = append(messages, ChatMessage{Role: "user", Content: userNudgeText})
+	}
 	// Publish a lightweight server-side context estimate (system + messages +
 	// tool definitions as actually sent) so the UI badge is not just a guess
 	// from the transcript alone — and remember it on the conversation so the
@@ -290,6 +306,24 @@ func reasoningDeltaVisible(accumulated string) bool {
 // wait longer than the client would have. Models with larger context windows
 // get a higher threshold (90% of window), but never below this floor.
 var serverCompactionThresholdFloor = 120_000
+
+// userNudgeText is the minimal content injected as a synthetic user message
+// when the provider requires a user message but none is present. A single
+// "." is the smallest valid user turn that satisfies the constraint without
+// adding semantic content the model would act on.
+const userNudgeText = "."
+
+// hasUserMessage reports whether the messages slice contains at least one
+// message with Role "user". Used to decide whether to inject a nudge user
+// message for providers that require one.
+func hasUserMessage(messages []ChatMessage) bool {
+	for _, m := range messages {
+		if m.Role == "user" {
+			return true
+		}
+	}
+	return false
+}
 
 // serverCompactionContextManagement returns the context_management directive
 // for server-side compaction when the model is eligible. Returns nil for

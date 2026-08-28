@@ -56,6 +56,7 @@ func TestAgentTurnStreamsOverSSE(t *testing.T) {
 		t.Fatalf("turns.start = %s", started.Result)
 	}
 
+	var doneMessageID string
 	select {
 	case frames := <-done:
 		if frames == nil {
@@ -74,6 +75,9 @@ func TestAgentTurnStreamsOverSSE(t *testing.T) {
 			if f["type"] == contracts.EventMessageDelta {
 				text += f["payload"].(map[string]any)["text"].(string)
 			}
+			if f["type"] == contracts.EventTurnDone {
+				doneMessageID = f["payload"].(map[string]any)["message_id"].(string)
+			}
 		}
 		if !strings.Contains(text, "docs explain MCP") {
 			t.Fatalf("streamed text = %q", text)
@@ -90,6 +94,7 @@ func TestAgentTurnStreamsOverSSE(t *testing.T) {
 			Model  string `json:"model"`
 		} `json:"conversation"`
 		Messages []struct {
+			ID      string `json:"id"`
 			Role    string `json:"role"`
 			Content string `json:"content"`
 			Status  string `json:"status"`
@@ -117,6 +122,9 @@ func TestAgentTurnStreamsOverSSE(t *testing.T) {
 	assistant := conv.Messages[1]
 	if assistant.Role != "assistant" || assistant.Status != "done" {
 		t.Fatalf("assistant message = %+v", assistant)
+	}
+	if doneMessageID == "" || doneMessageID != conv.Messages[2].ID {
+		t.Fatalf("turn.done message_id = %q, final message id = %q", doneMessageID, conv.Messages[2].ID)
 	}
 	if len(assistant.ToolCalls) != 1 {
 		t.Fatalf("tool calls = %+v", assistant.ToolCalls)
@@ -339,7 +347,11 @@ func TestAgentTurnCompaction(t *testing.T) {
 		}
 		for _, f := range frames {
 			if f["type"] == contracts.EventCompacted {
-				summary := f["payload"].(map[string]any)["summary"].(string)
+				payload := f["payload"].(map[string]any)
+				if payload["run_id"] == "" {
+					t.Fatal("compaction event missing run_id")
+				}
+				summary := payload["summary"].(string)
 				if !strings.Contains(summary, "SUMMARY") {
 					t.Fatalf("summary = %q", summary)
 				}

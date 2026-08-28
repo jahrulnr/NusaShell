@@ -182,41 +182,6 @@ func TestCompactionTriggerAutoUsesWindowPercentage(t *testing.T) {
 	}
 }
 
-func TestCompactionTodoContext(t *testing.T) {
-	port := &fakeTodoPort{
-		items: map[string][]domain.TodoItem{
-			"conv_1": {
-				{ID: "1", Content: "Finish auth", Status: domain.TodoInProgress},
-				{ID: "2", Content: "Write tests", Status: domain.TodoPending},
-				{ID: "3", Content: "Done item", Status: domain.TodoCompleted},
-			},
-		},
-		briefs: map[string]string{"conv_1": "Build a CLI tool that converts Markdown"},
-	}
-	ctx := (&App{Todos: port}).compactionTodoContext("conv_1")
-	for _, want := range []string{"Build a CLI tool that converts Markdown", "[in_progress] Finish auth", "[pending] Write tests"} {
-		if !strings.Contains(ctx, want) {
-			t.Errorf("compaction todo context missing %q: %s", want, ctx)
-		}
-	}
-	if strings.Contains(ctx, "Done item") {
-		t.Error("completed todos must not appear in the compaction context")
-	}
-
-	// No todo store configured.
-	if got := (&App{}).compactionTodoContext("x"); got != "" {
-		t.Errorf("no todo store: got %q, want empty", got)
-	}
-	// Goal present but no open items.
-	doneOnly := &fakeTodoPort{
-		items:  map[string][]domain.TodoItem{"c": {{ID: "1", Content: "done", Status: domain.TodoCompleted}}},
-		briefs: map[string]string{"c": "goal text"},
-	}
-	if got := (&App{Todos: doneOnly}).compactionTodoContext("c"); got != "User goal: goal text" {
-		t.Errorf("goal-only context: got %q, want %q", got, "User goal: goal text")
-	}
-}
-
 func TestCompactionTriggerSubtractsMaxOutput(t *testing.T) {
 	// 256k window, 64k output → available = 196608 → trigger = 80% × 196608 = 157286
 	settings := domain.Settings{CompactionThreshold: 0}
@@ -757,6 +722,7 @@ func TestDiscardQueuedSteerOnFail(t *testing.T) {
 		t.Fatal("queued steer should be discarded on fail")
 	}
 	gotCancel := false
+	gotError := false
 	for i := 0; i < 8; i++ {
 		select {
 		case ev := <-events:
@@ -773,12 +739,25 @@ func TestDiscardQueuedSteerOnFail(t *testing.T) {
 					t.Fatalf("cancelled reason = %q, want discarded", payload.Reason)
 				}
 			}
+			if ev.Type == contracts.EventTurnError {
+				gotError = true
+				var payload contracts.TurnErrorEvent
+				if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+					t.Fatal(err)
+				}
+				if payload.MessageID != "m1" {
+					t.Fatalf("error message id = %q, want m1", payload.MessageID)
+				}
+			}
 		default:
 			i = 8
 		}
 	}
 	if !gotCancel {
 		t.Fatal("expected steer cancelled event")
+	}
+	if !gotError {
+		t.Fatal("expected turn error event")
 	}
 }
 
@@ -905,6 +884,7 @@ func TestTurnsActiveIncludesQueuedSteer(t *testing.T) {
 	if !run.queueSteer(&SteerEntry{ID: "s1", Text: "nudge", Status: "queued"}) {
 		t.Fatal("queue steer")
 	}
+	run.setMessageID("m2")
 	got, rpcErr := app.handleTurnsActive(contracts.ConversationIDRequest{ID: "c1"})
 	if rpcErr != nil {
 		t.Fatal(rpcErr)
@@ -913,7 +893,7 @@ func TestTurnsActiveIncludesQueuedSteer(t *testing.T) {
 	if !ok {
 		t.Fatalf("result type %T", got)
 	}
-	if !res.Active || res.QueuedSteer != "nudge" || res.QueuedSteerID != "s1" {
+	if !res.Active || res.MessageID != "m2" || res.QueuedSteer != "nudge" || res.QueuedSteerID != "s1" {
 		t.Fatalf("active result = %+v", res)
 	}
 }
@@ -1963,17 +1943,22 @@ func TestMultiPassCompactionShrinksLaterChunks(t *testing.T) {
 	}
 	// Second pass carries the huge running summary, so remaining message
 	// content must be smaller than the first pass's message payload.
+	// The running-summary wrapper is detected by its stable header
+	// ([COMPACTION CHECKPOINT]); the full template is not a prefix of the
+	// filled version because the {{compacted_summaries}} placeholder sits
+	// mid-template, so HasPrefix against the empty-filled template fails.
+	const compactionWrapperHeader = "[COMPACTION CHECKPOINT]"
 	firstMsgs := 0
 	for _, m := range adapter.requests[0].Messages {
 		text := coreMessageText(m)
-		if !strings.HasPrefix(text, compactionSummaryPrefix) {
+		if !strings.HasPrefix(text, compactionWrapperHeader) {
 			firstMsgs += domain.EstimateTokens(text)
 		}
 	}
 	secondMsgs := 0
 	for _, m := range adapter.requests[1].Messages {
 		text := coreMessageText(m)
-		if !strings.HasPrefix(text, compactionSummaryPrefix) {
+		if !strings.HasPrefix(text, compactionWrapperHeader) {
 			secondMsgs += domain.EstimateTokens(text)
 		}
 	}

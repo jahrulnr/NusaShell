@@ -95,7 +95,7 @@
           "heading": "Thread",
           "paragraphs": [
             "Renders the active conversation. An empty thread offers starter prompt chips that fill the composer.",
-            "Long conversations open showing only the most recent messages, scrolled to the bottom. A 'Load older messages' button at the top reveals earlier in-memory messages (including older rounds of the current assistant turn), then archived pre-compaction chunks, one batch at a time. Chunks are never auto-loaded after a turn finishes or mid-turn compaction. Snapshot render keeps the last user bubble and a short tail of the current turn; live streaming still prunes overflow rounds inside the active bubble. Thinking is parsed when the disclosure is opened. Live streaming auto-follows only while the view is pinned to the bottom."
+            "Long conversations open showing only the most recent messages, scrolled to the bottom. A 'Load older messages' button at the top reveals earlier in-memory messages (including older rounds of the current assistant turn), then archived pre-compaction chunks, one batch at a time. Chunks are never auto-loaded after a turn finishes or mid-turn compaction. Snapshot render keeps the immediate user or compaction bubble and a short tail of the current turn; live streaming keeps the newest assistant round mounted, parks a bounded set of older live rounds behind a lightweight performance marker with a review action, caps unusually large live text and tool-card state with an in-context notice, and coalesces delta rendering per animation frame. Thinking is parsed when the disclosure is opened. Live streaming auto-follows only while the view is pinned to the bottom."
           ],
           "controls": [
             "agent-shell",

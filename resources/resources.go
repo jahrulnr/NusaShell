@@ -75,6 +75,7 @@ func UserPrompt(name string) string {
 const (
 	skillReviewRulesPlaceholder = "{{skill_review_rules}}"
 	primaryMemoryPlaceholder    = "{{primary_memory}}"
+	compactedSummaries          = "{{compacted_summaries}}"
 )
 
 // ReviewPrompt loads the combined background review prompt
@@ -124,4 +125,9 @@ func SubstitutePrimaryMemory(prompt string, entries []string) string {
 	}
 	body := strings.Join(entries, "\n")
 	return strings.Replace(prompt, primaryMemoryPlaceholder, body, 1)
+}
+
+// Brief new agent after compaction to continue conversation
+func CompactedUserPrompt(summaries string) string {
+	return strings.Replace(UserPrompt("compacted-continue"), compactedSummaries, summaries, 1)
 }

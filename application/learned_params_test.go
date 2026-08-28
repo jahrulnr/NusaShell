@@ -117,6 +117,32 @@ func TestLearnedParamsCacheDisabledModalitiesNilSafe(t *testing.T) {
 	}
 }
 
+func TestLearnedParamsCacheNeedsUserNudge(t *testing.T) {
+	store := &fakeLearnedParamStore{}
+	cache := newLearnedParamsCache(store)
+	if cache.NeedsUserNudge("openrouter", "glm-5.2") {
+		t.Fatal("expected false before learning")
+	}
+	action, param := cache.LearnFrom400("openrouter", "glm-5.2",
+		`bad_response_status_code: No user query found in messages.`)
+	if action != domain.LearnedActionNudgeUser || param != "user_message" {
+		t.Fatalf("LearnFrom400 = (%q, %q), want (nudge_user, user_message)", action, param)
+	}
+	if !cache.NeedsUserNudge("openrouter", "glm-5.2") {
+		t.Fatal("expected true after learning")
+	}
+	if cache.NeedsUserNudge("openrouter", "gpt-5") {
+		t.Fatal("expected false for different model")
+	}
+}
+
+func TestLearnedParamsCacheNeedsUserNudgeNilSafe(t *testing.T) {
+	var cache *learnedParamsCache
+	if cache.NeedsUserNudge("p", "m") {
+		t.Error("nil cache NeedsUserNudge must return false")
+	}
+}
+
 func TestLearnedParamsCacheNoMatch(t *testing.T) {
 	store := &fakeLearnedParamStore{}
 	cache := newLearnedParamsCache(store)

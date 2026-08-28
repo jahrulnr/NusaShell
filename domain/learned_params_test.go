@@ -60,6 +60,27 @@ func TestClassify400ErrorEmptyOrUnknown(t *testing.T) {
 	}
 }
 
+func TestClassify400ErrorNoUserQuery(t *testing.T) {
+	cases := []struct {
+		body   string
+		action LearnedParamAction
+		param  string
+	}{
+		{`bad_response_status_code: No user query found in messages.`, LearnedActionNudgeUser, "user_message"},
+		{`No user query found in messages.`, LearnedActionNudgeUser, "user_message"},
+		{`{"error":{"message":"No user query found in messages."}}`, LearnedActionNudgeUser, "user_message"},
+		{`no user query found in messages`, LearnedActionNudgeUser, "user_message"},
+		{`No user message found in the conversation`, LearnedActionNudgeUser, "user_message"},
+		{`Messages must contain at least one user message`, LearnedActionNudgeUser, "user_message"},
+	}
+	for _, c := range cases {
+		action, param := Classify400Error(c.body)
+		if action != c.action || param != c.param {
+			t.Errorf("Classify400Error(%q) = (%q, %q), want (%q, %q)", c.body, action, param, c.action, c.param)
+		}
+	}
+}
+
 // TestClassify400ErrorTextOnly proves that "text-only" / "must be a text
 // part" errors from text-only models (e.g. Qwen3.8) are classified as
 // LearnedActionDisableModality with param "vision" — the most common
@@ -118,6 +139,23 @@ func TestLearnedParamRegistryRecordAndLookup(t *testing.T) {
 	}
 	if e := r.Lookup("openrouter", "stealth/ox-alpha", "reasoning_content"); e == nil || e.Action != LearnedActionInject {
 		t.Fatalf("inject entry missing or wrong action: %+v", e)
+	}
+}
+
+func TestLearnedParamRegistryNeedsUserNudge(t *testing.T) {
+	r := NewLearnedParamRegistry()
+	if r.NeedsUserNudge("openrouter", "glm-5.2") {
+		t.Fatal("expected false before learning")
+	}
+	r.RecordNudgeUser("openrouter", "glm-5.2", "user_message", "No user query found in messages.")
+	if !r.NeedsUserNudge("openrouter", "glm-5.2") {
+		t.Fatal("expected true after learning")
+	}
+	if r.NeedsUserNudge("openrouter", "gpt-5") {
+		t.Fatal("expected false for different model")
+	}
+	if r.NeedsUserNudge("anthropic", "glm-5.2") {
+		t.Fatal("expected false for different provider")
 	}
 }
 

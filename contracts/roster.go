@@ -434,10 +434,12 @@ type AutoContinueEvent struct {
 type TurnErrorEvent struct {
 	RunID          string `json:"run_id"`
 	ConversationID string `json:"conversation_id"`
+	MessageID      string `json:"message_id,omitempty"`
 	Message        string `json:"message"`
 }
 
 type CompactedEvent struct {
+	RunID          string `json:"run_id,omitempty"`
 	ConversationID string `json:"conversation_id"`
 	Summary        string `json:"summary"`
 }
@@ -447,6 +449,7 @@ type CompactedEvent struct {
 // this is a warning, not a turn-fatal error. Emergency compaction failures
 // (context overflow) still go through EventTurnError since they fail the turn.
 type CompactionFailedEvent struct {
+	RunID          string `json:"run_id,omitempty"`
 	ConversationID string `json:"conversation_id"`
 	Error          string `json:"error"`
 }

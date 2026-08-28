@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, mountLiveRound, KEEP_VISIBLE_ROUNDS } from './js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, mountLiveRound, KEEP_VISIBLE_ROUNDS } from './js/views/agent/render.js';
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
   const previousDocument = globalThis.document;
@@ -630,20 +630,65 @@ test('snapshot renderConversation keeps the user bubble and every round it is gi
   }
 });
 
-test('mountLiveRound prunes overflow rounds and leaves a non-expandable stub', () => {
+test('mountLiveRound trims older rounds without hiding the current live round', () => {
   const dom = new JSDOM('<main id="thread"><div class="agent-bubble"></div></main>');
   const previousDocument = globalThis.document;
   globalThis.document = dom.window.document;
   try {
     const bubble = document.querySelector('.agent-bubble');
+    let current;
     for (let i = 0; i < 5; i++) {
-      mountLiveRound(bubble, { rawReasoning: `think ${i}` });
+      current = mountLiveRound(bubble, { rawReasoning: `think ${i}` });
     }
     assert.equal(bubble.querySelectorAll(':scope > .agent-round').length, KEEP_VISIBLE_ROUNDS);
     const stub = bubble.querySelector(':scope > .agent-round-stub');
     assert.ok(stub);
-    assert.equal(stub.tagName, 'DIV', 'live stub is not expandable mid-turn');
-    assert.match(stub.textContent, /2 earlier rounds hidden/);
+    assert.equal(stub.tagName, 'DIV', 'live history marker stays lightweight');
+    assert.match(stub.textContent, /2 earlier rounds trimmed for performance/);
+    assert.doesNotMatch(stub.textContent, /until the turn finishes/);
+    assert.ok(stub.querySelector('button'));
+    stub.querySelector('button').click();
+    assert.equal(bubble.querySelectorAll(':scope > .agent-round').length, 5);
+    assert.equal(bubble.querySelectorAll(':scope > .agent-round')[0].querySelector('.agent-reasoning')._reasoningRaw, 'think 0');
+    assert.ok(current.textBox.closest('.agent-round')?.isConnected, 'newest live round remains mounted');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('appendLiveError preserves streamed assistant content', () => {
+  const dom = new JSDOM('<main id="thread"><div class="agent-bubble"></div></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const bubble = document.querySelector('.agent-bubble');
+    const { textBox } = mountLiveRound(bubble, {});
+    textBox.textContent = 'The streamed answer remains visible';
+    appendLiveError(bubble, 'provider failed');
+    assert.match(bubble.textContent, /The streamed answer remains visible/);
+    assert.match(bubble.textContent, /provider failed/);
+    assert.equal(bubble.querySelectorAll('.agent-live-error').length, 1);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('live round parking stays bounded while keeping the newest round mounted', () => {
+  const dom = new JSDOM('<main id="thread"><div class="agent-bubble"></div></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const bubble = document.querySelector('.agent-bubble');
+    let current;
+    for (let i = 0; i < 40; i++) {
+      current = mountLiveRound(bubble, { raw: `output ${i}` });
+    }
+    assert.equal(bubble.querySelectorAll(':scope > .agent-round').length, KEEP_VISIBLE_ROUNDS);
+    assert.ok(bubble._liveRoundArchive.rounds.length <= 12);
+    assert.ok(current.textBox.closest('.agent-round')?.isConnected);
+    bubble.querySelector('.agent-round-stub-action').click();
+    assert.equal(bubble.querySelectorAll(':scope > .agent-round').length, KEEP_VISIBLE_ROUNDS + 3);
+    assert.ok(current.textBox.closest('.agent-round')?.isConnected);
   } finally {
     globalThis.document = previousDocument;
   }

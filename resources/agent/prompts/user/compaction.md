@@ -1,9 +1,15 @@
-CONTEXT THRESHOLD REACHED.
+[CONTEXT THRESHOLD REACHED]
 
-STOP IMMEDIATELY. Do not continue, resume, or perform any further part of the current conversation or task. Do not provide a user-facing answer.
+This is automation message from NusaShell System. So, STOP IMMEDIATELY. Do not continue, resume, or perform any further part of the current conversation or task. Do not provide a user-facing answer.
 
-Your only remaining action is to create a detailed handover for the next LLM and submit it to the summary tool. The handover MUST preserve all relevant context, discussions, instructions, requirements, constraints, decisions, completed work, unfinished work, assumptions, errors, and next steps necessary for seamless continuation.
+You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
+
+Include:
+- Current progress and key decisions made
+- Important context, constraints, or user preferences
+- What remains to be done (clear next steps)
+- Any critical data, examples, or references needed to continue
+
+Be concise, structured, and focused on helping the next LLM seamlessly continue the work.
 
 Call the summary tool exactly once with the complete handover checkpoint.
-
-Do not write the checkpoint as plain text. Do not continue the task after the summary call. Do not respond as the assistant from the previous context.

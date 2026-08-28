@@ -82,6 +82,7 @@ export function conversationTail(messages = [], options = {}) {
     const prefixBudget = Math.max(0, prefixWindow - keptAssistants);
     prefixStart = Math.max(0, runStart - prefixBudget);
   }
+  if (runStart > 0) prefixStart = Math.min(prefixStart, runStart - 1);
   const visible = messages.slice(prefixStart, runStart).concat(messages.slice(assistKeepStart));
   return { visible, prefixStart, runStart, assistKeepStart };
 }

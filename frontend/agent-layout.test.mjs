@@ -4,6 +4,7 @@ import { test } from 'node:test';
 
 const html = await readFile(new URL('./index.html', import.meta.url), 'utf8');
 const parityCSS = await readFile(new URL('./styles/parity.css', import.meta.url), 'utf8');
+const agentCSS = await readFile(new URL('./styles/agent.css', import.meta.url), 'utf8');
 const agentView = await readFile(new URL('./js/views/agent.js', import.meta.url), 'utf8');
 const appShell = await readFile(new URL('./js/app.js', import.meta.url), 'utf8');
 const agentRender = await readFile(new URL('./js/views/agent/render.js', import.meta.url), 'utf8');
@@ -56,7 +57,17 @@ test('Archived chunks load only on explicit Load older or scroll-to-top, never a
 test('Live turns prune overflow rounds; snapshot history uses a conversation tail instead of an earlier-rounds stub', () => {
   assert.match(agentRender, /KEEP_VISIBLE_ROUNDS = 3/);
   assert.match(agentRender, /export function mountLiveRound/);
+  assert.match(agentRender, /MAX_PARKED_LIVE_ROUNDS = 12/);
+  assert.match(agentRender, /restoreParkedLiveRounds/);
   assert.match(agentView, /mountLiveRound\(/);
+  assert.match(agentView, /scheduleLiveRender/);
+  assert.match(agentView, /run\.toolJobs = toolJobs/);
+  assert.match(agentView, /retryTurn\(node, message_id\)/);
+  assert.match(agentView, /MAX_LIVE_ROUND_CHARS = 512 \* 1024/);
+  assert.match(agentView, /MAX_LIVE_TOOL_JOBS = 128/);
+  assert.match(agentView, /setLiveToolJob/);
+  assert.match(agentCSS, /\.agent-live-trimmed/);
+  assert.match(html, /id="agent-provider-status" aria-live="polite" aria-atomic="true"/);
   assert.match(agentView, /conversationTail\(/);
   assert.doesNotMatch(agentRender, /function earlierRoundsDisclosure/);
 });
@@ -72,6 +83,11 @@ test('Agent delegates presentation, composer, and model picker responsibilities 
 test('Thinking and tool markers share the same conversation rail', () => {
   assert.match(parityCSS, /\.agent-reasoning summary \{[^}]*margin-left: -12px;/s);
   assert.match(parityCSS, /\.agent-tool-terminal summary \{[^}]*margin-left: -12px;/s);
+});
+
+test('Agent live motion respects reduced-motion preferences', () => {
+  assert.match(agentCSS, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(parityCSS, /animation-duration: \.001ms !important/);
 });
 
 test('Agent surfaces an unavailable backend promptly instead of waiting for a normal RPC timeout', () => {

@@ -39,11 +39,15 @@ embedded ES module with no build step.
 | `GET /` + assets | embedded frontend (disk in `NUSASHELL_DEV=1` mode) |
 
 Events are published to an in-memory `application.Bus`; each WS
-connection subscribes. Subscribers that fall behind drop events rather than
-stall the agent loop. The frontend receives event triggers over WebSocket
-only and talks to the backend over HTTP
-`/rpc/{method...}`; the SSE endpoint stays available for non-browser clients. The
-transports speak the same event vocabulary (`contracts`).
+connection subscribes. High-volume stream events may be dropped for a slow
+subscriber, while turn boundaries, compaction, and auto-continue lifecycle
+events stay queued so a state transition cannot be lost behind deltas. Delivery
+is ordered per subscriber but has no replay cursor; the frontend reconciles
+room state through the conversation and active-turn RPCs after a race or
+reload. The frontend receives event triggers over WebSocket only and talks to
+the backend over HTTP `/rpc/{method...}`; the SSE endpoint stays available for
+non-browser clients. The transports speak the same event vocabulary
+(`contracts`).
 
 ### RPC dispatch
 
@@ -79,7 +83,10 @@ the matching domain dispatcher, and add a handler-level test in
    any requested tool calls, capped by `settings.max_tool_rounds` (default 8).
 3. Deltas and tool lifecycles are pushed as `agent.message.delta`,
    `agent.tool.started`, `agent.tool.completed`, then `agent.turn.done` (or
-   `agent.turn.error` / interrupted state).
+   `agent.turn.error` / interrupted state). Turn terminal and compaction
+   events carry the active run and assistant message identity where applicable,
+   so a refreshed client can reattach to the current round instead of an
+   earlier assistant message.
 4. `agent.turns.stop` cancels the run context; partial output is kept and
    marked `interrupted`.
 

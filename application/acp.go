@@ -817,7 +817,12 @@ func (a *App) completeSubagentRun(conversationID, toolCallID string, status doma
 		a.log("error", "acp", "completeSubagentRun: save failed: %v", err)
 		return
 	}
+	parentRunID := ""
+	if parentRun := a.activeRunForConversation(conversationID); parentRun != nil {
+		parentRunID = parentRun.ID
+	}
 	a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
+		RunID:          parentRunID,
 		ConversationID: conversationID,
 		ToolCallID:     toolCallID,
 		Name:           "subagent",

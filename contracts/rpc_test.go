@@ -133,6 +133,22 @@ func TestGoldenEnvelopes(t *testing.T) {
 	})
 }
 
+func TestTurnErrorEventCarriesMessageID(t *testing.T) {
+	payload, err := json.Marshal(TurnErrorEvent{
+		RunID: "run_1", ConversationID: "conv_1", MessageID: "msg_1", Message: "provider failed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["message_id"] != "msg_1" {
+		t.Fatalf("message_id = %q, want msg_1", got["message_id"])
+	}
+}
+
 func TestGoldenDTOs(t *testing.T) {
 	assertGolden(t, "conversation.json", ConversationDTO{
 		ID: "conv_1", Title: "Hello", CreatedAt: "2026-08-12T00:00:00Z",

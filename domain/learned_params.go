@@ -29,6 +29,12 @@ const (
 	// window. The param is the context limit in tokens (e.g. "262144").
 	// Future turns cap the context window to this value for the provider+model.
 	LearnedActionCapContext LearnedParamAction = "cap_context"
+	// LearnedActionNudgeUser: the upstream 400 rejected the request because
+	// the messages array contained no user message. Some providers/models
+	// require at least one user-role message. The retry loop injects a
+	// minimal user message (".") into the request when this is learned and
+	// the messages don't already contain a user role.
+	LearnedActionNudgeUser LearnedParamAction = "nudge_user"
 )
 
 // LearnedParam is a single learned parameter entry for a provider+model
@@ -127,6 +133,14 @@ func (r *LearnedParamRegistry) RecordCapContext(provider, model, param, reason s
 	return r.record(provider, model, param, LearnedActionCapContext, reason)
 }
 
+// RecordNudgeUser learns that provider+model requires at least one user
+// message in the request. The retry loop injects a minimal user message
+// (".") when this is learned and the messages don't already contain a
+// user role.
+func (r *LearnedParamRegistry) RecordNudgeUser(provider, model, param, reason string) *LearnedParam {
+	return r.record(provider, model, param, LearnedActionNudgeUser, reason)
+}
+
 // ContextCap returns the smallest learned context-window cap for the
 // provider+model, or 0 if no cap has been learned. The cap is stored as a
 // parameter string and parsed as an integer.
@@ -202,6 +216,24 @@ func (r *LearnedParamRegistry) DisabledModalities(provider, model string) []stri
 		}
 	}
 	return out
+}
+
+// NeedsUserNudge reports whether provider+model has learned that requests
+// must contain at least one user message. When true, the application layer
+// injects a minimal user message (".") into the request when the messages
+// don't already contain a user role.
+func (r *LearnedParamRegistry) NeedsUserNudge(provider, model string) bool {
+	if r == nil || r.Entries == nil {
+		return false
+	}
+	p := strings.ToLower(strings.TrimSpace(provider))
+	m := strings.ToLower(strings.TrimSpace(model))
+	for _, e := range r.Entries {
+		if e.Action == LearnedActionNudgeUser && e.Provider == p && e.Model == m {
+			return true
+		}
+	}
+	return false
 }
 
 // OverrideModel applies learned 400-adaptations to a model's metadata in
@@ -382,6 +414,14 @@ func isParamStopword(param string) bool {
 	return paramStopwords[strings.ToLower(strings.TrimSpace(param))]
 }
 
+// noUserQueryRe matches error bodies where the provider requires at least
+// one user message but none was found in the request. Examples:
+//   - "No user query found in messages."
+//   - "No user message found in the conversation"
+//   - "Messages must contain at least one user message"
+//   - "bad_response_status_code: No user query found in messages."
+var noUserQueryRe = regexp.MustCompile(`(?i)no\s+user\s+(?:query|message)\s+found|messages?\s+must\s+contain\s+at\s+least\s+one\s+user\s+message`)
+
 // textOnlyModelRe matches "text-only" in error messages from text-only
 // models that reject non-text content (images, audio, video). Examples:
 //   - "Qwen3.8 open checkpoint is text-only; messages[131].content[1] must be a text part"
@@ -435,6 +475,9 @@ func ExtractContextLimit(body string) (int, string, bool) {
 //     disable the vision modality (most common trigger) and retry.
 //  4. "unsupported parameter" pattern — the model rejects a specific
 //     parameter; we strip it and retry.
+//  5. "no user query" pattern — the provider requires at least one user
+//     message but none was found; we inject a minimal user message on
+//     retry.
 func Classify400Error(body string) (LearnedParamAction, string) {
 	b := strings.TrimSpace(body)
 	if b == "" {
@@ -454,6 +497,9 @@ func Classify400Error(body string) (LearnedParamAction, string) {
 	}
 	if m := unsupportedParamRe.FindStringSubmatch(b); len(m) > 1 {
 		return LearnedActionStrip, strings.ToLower(m[1])
+	}
+	if noUserQueryRe.MatchString(b) {
+		return LearnedActionNudgeUser, "user_message"
 	}
 	return "", ""
 }
