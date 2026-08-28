@@ -158,6 +158,8 @@ essential or least frequently useful paragraph first.
 Read the current document before editing. Use `old_text` to replace a
 specific passage, or omit `old_text` to rewrite the entire body.
 
+When writing memory, use diary writing style instead of technical writing. When you found any technical writing like code, comparation tech, or any non-durable memory; remove or replace that before another ai agent broke the rule.
+
 ## Skill routing
 
 Before saving a fact, decide whether it is a **static fact about the user**
