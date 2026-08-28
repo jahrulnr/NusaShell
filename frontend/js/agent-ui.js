@@ -51,6 +51,41 @@ export function previousWindowStart(currentStart, batch) {
   return Math.max(0, s - b);
 }
 
+// conversationTail is the snapshot window for a long thread: keep the last
+// user (or compaction) bubble, cap the trailing assistant run at keepRounds,
+// and leave older complete turns to Load older. Live streaming still prunes
+// rounds inside the current bubble; this function must not flatten history
+// into an "N earlier rounds" stub.
+export function conversationTail(messages = [], options = {}) {
+  const prefixWindow = Math.max(1, Math.floor(Number(options.prefixWindow) || 60));
+  const keepRounds = Math.max(1, Math.floor(Number(options.keepRounds) || 3));
+  const n = Array.isArray(messages) ? messages.length : 0;
+  if (n === 0) {
+    return { visible: [], prefixStart: 0, runStart: 0, assistKeepStart: 0 };
+  }
+  let lastNonAssistant = n - 1;
+  while (lastNonAssistant >= 0 && messages[lastNonAssistant]?.role === 'assistant') {
+    lastNonAssistant--;
+  }
+  const runStart = lastNonAssistant + 1;
+  let assistKeepStart;
+  if (options.assistKeepStart != null && Number.isFinite(Number(options.assistKeepStart))) {
+    assistKeepStart = Math.min(n, Math.max(runStart, Math.floor(Number(options.assistKeepStart))));
+  } else {
+    assistKeepStart = Math.max(runStart, n - keepRounds);
+  }
+  let prefixStart;
+  if (options.prefixStart != null && Number.isFinite(Number(options.prefixStart))) {
+    prefixStart = Math.min(runStart, Math.max(0, Math.floor(Number(options.prefixStart))));
+  } else {
+    const keptAssistants = n - assistKeepStart;
+    const prefixBudget = Math.max(0, prefixWindow - keptAssistants);
+    prefixStart = Math.max(0, runStart - prefixBudget);
+  }
+  const visible = messages.slice(prefixStart, runStart).concat(messages.slice(assistKeepStart));
+  return { visible, prefixStart, runStart, assistKeepStart };
+}
+
 export function inspectAttachmentContent(bytes) {
   const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   if (startsWith(data, PNG_SIGNATURE)) return { type: 'image', mediaType: 'image/png' };

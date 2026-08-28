@@ -53,10 +53,12 @@ test('Archived chunks load only on explicit Load older or scroll-to-top, never a
   assert.match(agentView, /hasOlderActiveMessages\(\) \|\| state\.nextChunkIndex >= 0/);
 });
 
-test('Live and snapshot turns keep only KEEP_VISIBLE_ROUNDS fully mounted', () => {
+test('Live turns prune overflow rounds; snapshot history uses a conversation tail instead of an earlier-rounds stub', () => {
   assert.match(agentRender, /KEEP_VISIBLE_ROUNDS = 3/);
   assert.match(agentRender, /export function mountLiveRound/);
   assert.match(agentView, /mountLiveRound\(/);
+  assert.match(agentView, /conversationTail\(/);
+  assert.doesNotMatch(agentRender, /function earlierRoundsDisclosure/);
 });
 
 test('Agent delegates presentation, composer, and model picker responsibilities to focused modules', () => {

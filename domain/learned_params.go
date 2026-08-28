@@ -331,8 +331,11 @@ func truncateReason(s string) string {
 // pattern.
 
 // unsupportedParamRe matches "Unsupported parameter: X",
-// "Unsupported parameter(s): 'X'", "Unsupported parameter 'X'".
-var unsupportedParamRe = regexp.MustCompile(`(?i)unsupported\s+parameter\w*(?:\s*\(s\))?\s*[:'"]+\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+// "Unsupported parameter(s): 'X'", "Unsupported parameter 'X'", and the
+// "Unknown parameter: 'X'" phrasing used by OpenAI-compatible aggregators
+// (TokenRouter rejects the OpenRouter reasoning object with
+// "Unknown parameter: 'reasoning'").
+var unsupportedParamRe = regexp.MustCompile(`(?i)(?:unsupported|unknown)\s+parameter\w*(?:\s*\(s\))?\s*[:'"]+\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
 
 // requiredFieldRe matches "reasoning_content must be passed back",
 // "reasoning_content is required", "field 'reasoning_content' is required".

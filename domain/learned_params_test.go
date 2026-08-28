@@ -15,6 +15,13 @@ func TestClassify400ErrorUnsupportedParam(t *testing.T) {
 		{`Unsupported parameter(s): 'reasoning_budget'`, LearnedActionStrip, "reasoning_budget"},
 		{`Unsupported parameter 'top_logprobs'`, LearnedActionStrip, "top_logprobs"},
 		{`unsupported parameter: verbosity`, LearnedActionStrip, "verbosity"},
+		// "Unknown parameter" is the phrasing OpenAI-compatible aggregators
+		// use — TokenRouter rejects the OpenRouter reasoning object with
+		// "Unknown parameter: 'reasoning'". It must be learned exactly like
+		// "Unsupported parameter" so the strip-and-retry loop can recover.
+		{`{"error":{"message":"Unknown parameter: 'reasoning'"}}`, LearnedActionStrip, "reasoning"},
+		{`unknown_parameter: Unknown parameter: 'reasoning'.`, LearnedActionStrip, "reasoning"},
+		{`Unknown parameter: reasoning`, LearnedActionStrip, "reasoning"},
 	}
 	for _, c := range cases {
 		action, param := Classify400Error(c.body)

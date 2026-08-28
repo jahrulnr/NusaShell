@@ -18,13 +18,17 @@ import (
 )
 
 // NewFactory returns a ProviderFactory closure that builds the single
-// provider Adapter for a stored provider config. For chat-kind providers,
-// the OpenRouter adapter is the default — OpenAI-compatible aggregators
-// (TokenRouter, OmniRoute, OpenCode, …) speak the OpenRouter wire format
-// (effort xhigh/max, cache retention, /images/models, /videos/models).
-// Only a direct OpenAI host (api.openai.com) stays on the vanilla OpenAI
-// chat adapter, because the OpenRouter provider options (cache_retention,
-// session_id, provider routing) would 400 there.
+// provider Adapter for a stored provider config. For chat-kind providers:
+//   - Genuine OpenRouter hosts (openrouter.ai) or an explicit
+//     ProviderDriverOpenRouter use the OpenRouter adapter (OpenRouter wire
+//     format: reasoning object, reasoning_details, cache_retention,
+//     provider routing, attribution headers).
+//   - Every other chat-kind host (direct OpenAI, OpenAI-compatible
+//     aggregators like TokenRouter/9Router/OpenCode, local endpoints) uses
+//     the vanilla OpenAI Chat adapter. Aggregators implement the OpenAI
+//     wire and reject OpenRouter-specific params — e.g. TokenRouter returns
+//     HTTP 400 "Unknown parameter: 'reasoning'" for the OpenRouter
+//     reasoning object — so they must NOT receive the OpenRouter format.
 func NewFactory(_ application.CredentialStore) application.ProviderFactory {
 	return func(ctx context.Context, p *domain.Provider, apiKey string) (core.Provider, error) {
 		if !domain.ValidKind(p.Kind) {

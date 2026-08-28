@@ -11,8 +11,8 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
-	"nusashell/infrastructure/ai/compat"
 	"nusashell/infrastructure/ai/core"
+	"nusashell/infrastructure/ai/openai"
 )
 
 func TestToCoreRequestSystemAndMessages(t *testing.T) {
@@ -191,41 +191,52 @@ func TestAdapterKind(t *testing.T) {
 	}
 }
 
-func TestAdapterOpenRouterNoKeyOptional(t *testing.T) {
-	// A chat-kind OpenRouter adapter with no API key must construct fine
-	// (free-tier hosts like OpenCode/Zen accept keyless requests); the
-	// upstream decides. With a key, construction still succeeds.
-	a := &Adapter{ProviderKind: domain.ProviderChat, OpenRouter: true, BaseURL: "https://opencode.ai/zen/v1"}
+func TestAdapterChatNoKeyOptional(t *testing.T) {
+	// A chat-kind adapter with no API key must construct fine on
+	// OpenAI-compatible hosts that need no auth (LM Studio, Ollama, vLLM,
+	// OpenCode/Zen free tier); the vanilla OpenAI Chat adapter is used and
+	// skips the Authorization header when no key is present.
+	a := &Adapter{ProviderKind: domain.ProviderChat, OpenRouter: false, BaseURL: "https://opencode.ai/zen/v1"}
 	p, err := a.providerFor()
 	if err != nil {
 		t.Fatalf("providerFor without key: %v", err)
 	}
-	if p.Name() != "openrouter" {
-		t.Fatalf("adapter name = %q, want openrouter", p.Name())
+	if p.Name() != "openai" {
+		t.Fatalf("adapter name = %q, want openai", p.Name())
 	}
 
-	// The compat provider must not reject keyless construction when
+	// The openai provider must not reject keyless construction when
 	// APIKeyOptional is set.
-	if _, err := compat.New(compat.Config{BaseURL: "https://opencode.ai/zen/v1", APIKeyOptional: true}, compat.Spec{Name: "openrouter", Auth: compat.AuthSpec{APIKeyRequired: true}}); err != nil {
-		t.Fatalf("compat.New with APIKeyOptional: %v", err)
+	if _, err := openai.New(openai.Config{BaseURL: "https://opencode.ai/zen/v1", APIKeyOptional: true}); err != nil {
+		t.Fatalf("openai.New with APIKeyOptional: %v", err)
 	}
-	if _, err := compat.New(compat.Config{BaseURL: "https://opencode.ai/zen/v1"}, compat.Spec{Name: "openrouter", Auth: compat.AuthSpec{APIKeyRequired: true}}); err == nil {
-		t.Fatal("compat.New without APIKeyOptional must still require a key")
+	if _, err := openai.New(openai.Config{BaseURL: "https://opencode.ai/zen/v1"}); err == nil {
+		t.Fatal("openai.New without APIKeyOptional must still require a key")
 	}
 }
 
-func TestAdapterOpenRouterDefault(t *testing.T) {
-	// Chat-kind with a non-OpenAI host defaults to the OpenRouter adapter
-	// (aggregators like TokenRouter, OmniRoute, OpenCode speak the
-	// OpenRouter wire format). The factory sets OpenRouter=true for
-	// chat-kind non-OpenAI hosts.
-	a := &Adapter{ProviderKind: domain.ProviderChat, OpenRouter: true, BaseURL: "https://api.tokenrouter.com/v1", APIKey: "k"}
+func TestAdapterRouting(t *testing.T) {
+	// Genuine OpenRouter host → OpenRouter adapter (wire: reasoning object).
+	a := &Adapter{ProviderKind: domain.ProviderChat, OpenRouter: true, BaseURL: "https://openrouter.ai/api/v1", APIKey: "k"}
 	p, err := a.providerFor()
 	if err != nil {
 		t.Fatalf("providerFor: %v", err)
 	}
 	if p.Name() != "openrouter" {
 		t.Fatalf("adapter name = %q, want openrouter", p.Name())
+	}
+
+	// OpenAI-compatible aggregator (TokenRouter) → vanilla OpenAI Chat
+	// adapter (wire: reasoning_effort). The OpenRouter flag is only set by
+	// the factory for genuine OpenRouter hosts; even if it were set for an
+	// aggregator, the provider stays on the vanilla wire.
+	a = &Adapter{ProviderKind: domain.ProviderChat, OpenRouter: false, BaseURL: "https://api.tokenrouter.com/v1", APIKey: "k"}
+	p, err = a.providerFor()
+	if err != nil {
+		t.Fatalf("providerFor: %v", err)
+	}
+	if p.Name() != "openai" {
+		t.Fatalf("tokenrouter adapter name = %q, want openai", p.Name())
 	}
 
 	// Chat-kind with api.openai.com stays on the vanilla OpenAI chat adapter.

@@ -16,13 +16,28 @@ selects the wire format:
 - The persistent **OpenRouter** card uses
   `infrastructure/ai/openrouter`; its editor supports `responses`, `chat`, and
   `messages`.
-- Every custom provider uses `infrastructure/ai/openrouter`; its editor
-  supports `responses`, `chat`, and `messages`. There is no custom-provider
-  count limit.
+- Every custom provider defaults to `infrastructure/ai/openrouter`; its
+  editor supports `responses`, `chat`, and `messages`. There is no
+  custom-provider count limit. For `chat` kind, host detection (below)
+  routes genuine OpenRouter hosts to the OpenRouter implementation and all
+  other hosts to the vanilla OpenAI Chat implementation.
 
 The three built-in cards remain visible before they are configured. Configure a
 card with its base URL and key, then import models. OpenRouter and custom
 providers can each use a different API kind and base URL.
+
+**Host detection for `chat`:** only a genuine OpenRouter host
+(`*.openrouter.ai`) uses the OpenRouter chat implementation (OpenRouter wire
+format — `reasoning` object, `reasoning_details`, cache retention, provider
+options, attribution headers). Every other `chat` host — direct OpenAI,
+OpenAI-compatible aggregators (TokenRouter, 9Router, OpenCode, one-api,
+LiteLLM, local endpoints like LM Studio/vLLM) — uses the vanilla OpenAI Chat
+Completions wire (`reasoning_effort`, `reasoning_content`, `max_tokens`).
+Aggregators implement the OpenAI wire and reject OpenRouter-specific params:
+for example TokenRouter returns HTTP 400 `Unknown parameter: 'reasoning'`
+for the OpenRouter `reasoning` object, so they must not receive the OpenRouter
+format. A provider with an explicit `openrouter` driver is always treated as
+OpenRouter regardless of host.
 
 ## Kinds
 
@@ -32,9 +47,10 @@ providers can each use a different API kind and base URL.
   function calling and reports cached input tokens.
 - `chat` — the OpenAI Chat Completions wire format (`/chat/completions`);
   works with OpenAI, DeepSeek, LM Studio, vLLM and any compatible endpoint.
-  OpenRouter and custom providers use the OpenRouter implementation for this
-  kind, including its provider options and attribution headers. Providers
-  without an explicit driver retain host-detected routing.
+  Genuine OpenRouter hosts use the OpenRouter chat implementation for this
+  kind, including its provider options and attribution headers; all other
+  `chat` hosts use the vanilla OpenAI Chat wire (see host detection above).
+  Providers without an explicit driver retain host-detected routing.
 
 **Base URL is required for all three kinds.** The UI suggests a per-kind
 default (`https://api.anthropic.com` for Messages, `https://api.openai.com/v1`
@@ -58,10 +74,12 @@ Chat      → https://gateway.example.com/v1     (→ /v1/chat/completions)
 ## API keys
 
 `messages` and `responses` require a user-supplied API key. `chat` works
-without a key against local endpoints that need no auth, and the OpenRouter
-adapter (the default for chat-kind hosts) accepts keyless providers — the
-upstream decides (e.g. OpenCode/Zen free tier); when a key is present it is
-sent normally. Keys are stored in the SQLite credential store
+without a key against local endpoints that need no auth, and both chat wire
+implementations accept keyless providers — the vanilla OpenAI Chat adapter
+skips the `Authorization` header when no key is present, and the OpenRouter
+adapter (used for genuine OpenRouter hosts) does the same; the upstream
+decides (e.g. OpenCode/Zen free tier). When a key is present it is sent
+normally. Keys are stored in the SQLite credential store
 (`credentials.db`) inside the data directory, never in the JSON files.
 
 ### Seeding keys from the environment (explicit)

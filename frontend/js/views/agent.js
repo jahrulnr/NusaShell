@@ -4,13 +4,14 @@ import { rpc, on, emit } from '../rpc.js';
 import { el, fmtTime, toast, confirmDialog, debounce } from '../ui.js';
 import { renderMarkdown } from '../markdown.js';
 import { incrementalRender } from '../incremental-render.js';
-import { estimateContextTokens, formatContextUsage, effectiveContextWindow, initialWindowStart, previousWindowStart } from '../agent-ui.js';
+import { estimateContextTokens, formatContextUsage, effectiveContextWindow, previousWindowStart, conversationTail } from '../agent-ui.js';
 import { bindComposer, updateSendAvailability } from './agent/composer.js';
 import { bindModelPicker } from './agent/model-picker.js';
 import { bindRoomInfo, updateRoomInfo } from './agent/room-info.js';
 import {
   attachmentChip,
   formatTokens,
+  KEEP_VISIBLE_ROUNDS,
   mountLiveRound,
   setReasoningSource,
   reasoningHasVisibleSource,
@@ -100,6 +101,7 @@ const state = {
   // active message. Older active messages are prepended in WINDOW_BATCH-sized
   // batches on scroll-up (before falling back to archived chunks).
   activeWindowStart: 0,
+  assistKeepStart: 0,
   // While a room is opening we scroll to the bottom; suppress the
   // scroll-to-top "load older" trigger until that settles so the initial
   // scrollTop≈0 is not mistaken for the user scrolling up (which would strand
@@ -130,10 +132,32 @@ const MAX_ROOM_BUFFER_CHARS = 512 * 1024; // per room (raw + rawReasoning)
 const INITIAL_WINDOW = 60;
 const WINDOW_BATCH = 30;
 
-// windowedActiveMessages returns the currently-rendered slice of active
-// messages (the tail from activeWindowStart onward).
+// windowedActiveMessages returns the currently-rendered slice: older complete
+// turns from activeWindowStart, plus the trailing assistant-run tail from
+// assistKeepStart, so a 50-round turn cannot hide the last user bubble.
 function windowedActiveMessages() {
-  return state.messages.slice(state.activeWindowStart);
+  return conversationTail(state.messages, {
+    prefixStart: state.activeWindowStart,
+    assistKeepStart: state.assistKeepStart,
+    keepRounds: KEEP_VISIBLE_ROUNDS,
+  }).visible;
+}
+
+function applyConversationTail() {
+  const tail = conversationTail(state.messages, {
+    prefixWindow: INITIAL_WINDOW,
+    keepRounds: KEEP_VISIBLE_ROUNDS,
+  });
+  state.activeWindowStart = tail.prefixStart;
+  state.assistKeepStart = tail.assistKeepStart;
+}
+
+function trailingRunStart() {
+  return conversationTail(state.messages, {
+    prefixStart: state.activeWindowStart,
+    assistKeepStart: state.assistKeepStart,
+    keepRounds: KEEP_VISIBLE_ROUNDS,
+  }).runStart;
 }
 
 // Per-room state that survives conversation switches. When the user switches
@@ -467,7 +491,7 @@ async function openConversation(id) {
   state.contextEstimate = Number(conversation?.context_tokens) || Number(conversation?.estimated_tokens) || 0;
   // Only render the most recent INITIAL_WINDOW messages on open; older active
   // messages are revealed on scroll-up. Keeps opening a long conversation fast.
-  state.activeWindowStart = initialWindowStart(state.messages.length, INITIAL_WINDOW);
+  applyConversationTail();
   // Reset chunk lazy-load state for the new conversation.
   state.chunkCount = conversation?.chunk_count ?? 0;
   state.nextChunkIndex = state.chunkCount - 1;
@@ -1352,7 +1376,7 @@ function bindScrollPin() {
     // during a fast wheel scroll fights the browser's momentum and jumps the
     // view). Archived chunks load one at a time on scroll-to-top once the
     // in-memory window is fully revealed.
-    if (!state.suppressTopLoad && thread.scrollTop <= 4 && state.activeWindowStart === 0) {
+    if (!state.suppressTopLoad && thread.scrollTop <= 4 && !hasOlderActiveMessages()) {
       loadOlderChunk();
     }
   }, { passive: true });
@@ -1360,8 +1384,13 @@ function bindScrollPin() {
 
 // hasOlderActiveMessages reports whether older active messages are held back by
 // the window and can be revealed with the "Load older" button.
+function hasOlderTurnRounds() {
+  return state.assistKeepStart > trailingRunStart();
+}
+
 function hasOlderActiveMessages() {
-  return state.activeWindowStart > 0;
+  if (state.activeWindowStart > 0) return true;
+  return hasOlderTurnRounds() && !runForConversation(state.activeId);
 }
 
 function hasOlderHistory() {
@@ -1393,8 +1422,32 @@ function updateOlderSentinel() {
 }
 
 function revealOlderHistory() {
-  if (hasOlderActiveMessages()) prependActiveBatch();
+  if (hasOlderTurnRounds() && !runForConversation(state.activeId)) {
+    revealOlderTurnRounds();
+    return;
+  }
+  if (state.activeWindowStart > 0) prependActiveBatch();
   else loadOlderChunk();
+}
+
+function revealOlderTurnRounds() {
+  const thread = agentThread();
+  if (!thread || state.loadingActiveBatch) return;
+  const runStart = trailingRunStart();
+  if (state.assistKeepStart <= runStart) return;
+  state.loadingActiveBatch = true;
+  try {
+    const userNode = [...thread.querySelectorAll('.agent-message.user, .agent-compaction-marker')].at(-1);
+    const userTop = userNode ? userNode.getBoundingClientRect().top : 0;
+    state.assistKeepStart = Math.max(runStart, state.assistKeepStart - KEEP_VISIBLE_ROUNDS);
+    renderThread(windowedActiveMessages(), false);
+    if (userNode) {
+      const nextUser = [...thread.querySelectorAll('.agent-message.user, .agent-compaction-marker')].at(-1);
+      if (nextUser) thread.scrollTop += nextUser.getBoundingClientRect().top - userTop;
+    }
+  } finally {
+    state.loadingActiveBatch = false;
+  }
 }
 
 // prependActiveBatch renders the previous WINDOW_BATCH of already-loaded active
@@ -2317,7 +2370,7 @@ async function applyLiveCompaction(conversationId, run) {
     state.conversation = conversation;
     state.messages = messages ?? [];
     state.contextEstimate = Number(conversation?.context_tokens) || Number(conversation?.estimated_tokens) || 0;
-    state.activeWindowStart = initialWindowStart(state.messages.length, INITIAL_WINDOW);
+    applyConversationTail();
     state.chunkCount = conversation?.chunk_count ?? 0;
     state.nextChunkIndex = state.chunkCount - 1;
     state.loadedChunks = new Set();
@@ -2364,7 +2417,7 @@ async function refreshActiveConversation() {
     state.contextEstimate = Number(conversation?.context_tokens) || Number(conversation?.estimated_tokens) || 0;
     // Re-window to the tail on refresh (a turn finished / compaction changed
     // the set). Render respects the pin so a user who scrolled up is not yanked.
-    state.activeWindowStart = initialWindowStart(state.messages.length, INITIAL_WINDOW);
+    applyConversationTail();
     // Reset chunk state — compaction may have created new chunks.
     state.chunkCount = conversation?.chunk_count ?? 0;
     state.nextChunkIndex = state.chunkCount - 1;

@@ -69,7 +69,7 @@ func (a *Adapter) providerFor() (core.Provider, error) {
 	case a.ProviderKind == domain.ProviderChat && a.OpenRouter:
 		return openrouter.New(openrouter.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: a.APIKey == ""})
 	case a.ProviderKind == domain.ProviderChat:
-		return openai.New(openai.Config{API: openai.APIChat, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client})
+		return openai.New(openai.Config{API: openai.APIChat, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: a.APIKey == ""})
 	default:
 		return nil, &application.ErrUnsupportedProvider{Kind: string(a.ProviderKind)}
 	}

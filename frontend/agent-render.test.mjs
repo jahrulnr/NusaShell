@@ -597,7 +597,7 @@ test('whitespace-only reasoning stays hidden and unparsed', () => {
   }
 });
 
-test('a long assistant turn keeps only the last KEEP_VISIBLE_ROUNDS in the DOM', () => {
+test('snapshot renderConversation keeps the user bubble and every round it is given (no earlier-rounds stub)', () => {
   const messages = [{ role: 'user', content: 'go', created_at: '2026-08-28T00:00:00Z' }];
   for (let i = 0; i < 6; i++) {
     messages.push({
@@ -618,18 +618,13 @@ test('a long assistant turn keeps only the last KEEP_VISIBLE_ROUNDS in the DOM',
   try {
     const thread = document.getElementById('thread');
     thread.append(renderConversation(messages));
+    assert.ok(thread.querySelector('.agent-message.user'));
     const turn = thread.querySelector('.agent-message.assistant');
-    const stub = turn.querySelector('.agent-round-stub');
-    assert.ok(stub, 'earlier rounds collapse into a stub');
-    assert.match(stub.textContent, /3 earlier round/);
-    assert.equal(turn.querySelectorAll(':scope > .agent-bubble > .agent-round').length, KEEP_VISIBLE_ROUNDS);
-    assert.match(turn.textContent, /visible round 3/);
-    assert.match(turn.textContent, /visible round 5/);
-    assert.doesNotMatch(turn.textContent, /visible round 0/);
-    assert.doesNotMatch(turn.textContent, /UNIQUE_ROUND_5/, 'kept-round reasoning is still lazy');
-    openDetails(stub);
+    assert.equal(turn.querySelector('.agent-round-stub'), null);
+    assert.equal(turn.querySelectorAll(':scope > .agent-bubble > .agent-round').length, 6);
     assert.match(turn.textContent, /visible round 0/);
-    assert.match(turn.textContent, /visible round 2/);
+    assert.match(turn.textContent, /visible round 5/);
+    assert.doesNotMatch(turn.textContent, /UNIQUE_ROUND_5/, 'kept-round reasoning is still lazy');
   } finally {
     globalThis.document = previousDocument;
   }

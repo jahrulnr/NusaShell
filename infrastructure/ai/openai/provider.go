@@ -35,6 +35,13 @@ type Config struct {
 	UserAgent         string
 	Headers           map[string]string
 
+	// APIKeyOptional allows construction and request sending without an API
+	// key. Used by chat-kind providers on local/OpenAI-compatible endpoints
+	// that need no auth (LM Studio, Ollama, vLLM, OpenCode/Zen free tier).
+	// When false (default) an empty key is rejected, preserving the strict
+	// behavior required by the official OpenAI endpoints.
+	APIKeyOptional bool
+
 	// PromptCacheParams declares that a compatible endpoint accepts OpenAI's
 	// prompt cache params and content breakpoints. The official endpoint is
 	// enabled automatically; custom endpoints require this opt-in.
@@ -50,7 +57,7 @@ type Provider struct {
 }
 
 func New(cfg Config) (*Provider, error) {
-	if cfg.APIKey == "" && cfg.APIKeyFunc == nil {
+	if cfg.APIKey == "" && cfg.APIKeyFunc == nil && !cfg.APIKeyOptional {
 		return nil, fmt.Errorf("openai: api key is required")
 	}
 	if cfg.HTTPClient != nil && cfg.Transport != nil {
@@ -217,12 +224,14 @@ func (p *Provider) setHeaders(ctx context.Context, req *http.Request) error {
 		}
 		key = resolved
 	}
-	if key == "" {
+	if key == "" && !p.cfg.APIKeyOptional {
 		return fmt.Errorf("openai: api key is required")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+key)
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
 	req.Header.Set("User-Agent", p.cfg.UserAgent)
 	for name, value := range p.cfg.Headers {
 		name = strings.TrimSpace(name)

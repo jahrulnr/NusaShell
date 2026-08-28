@@ -429,6 +429,61 @@ func TestResponsesInputRejectsNonTextToolResultOutput(t *testing.T) {
 	}
 }
 
+// TestResponsesInputImageWireIsFlatURL pins the OpenAI Responses wire shape
+// for image inputs. Unlike Chat Completions (which nests
+// image_url:{url,detail}), the Responses API's ResponseInputImage takes
+// image_url as a bare URL string and detail as a SIBLING field:
+// {"type":"input_image","image_url":"https://...","detail":"high"}.
+// Sending the nested object makes OpenAI reject the request with
+// "Invalid type for 'input[N].content[M].image_url': expected an image URL,
+// but got an object instead".
+func TestResponsesInputImageWireIsFlatURL(t *testing.T) {
+	items, err := responsesContent([]core.Block{
+		core.ImageBlock{URL: "https://example.test/a.png", Detail: "high"},
+	}, "input_text")
+	if err != nil {
+		t.Fatalf("responsesContent: %v", err)
+	}
+	data, err := json.Marshal(items)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `"image_url":"https://example.test/a.png"`) {
+		t.Errorf("image_url must be a flat URL string, got: %s", s)
+	}
+	if !strings.Contains(s, `"detail":"high"`) {
+		t.Errorf("detail must be a sibling field, got: %s", s)
+	}
+	if strings.Contains(s, `"image_url":{`) {
+		t.Errorf("image_url must not be a nested object, got: %s", s)
+	}
+}
+
+// TestResponsesOutputImageParsesFlatURL proves the response side accepts the
+// flat image_url string the Responses API returns for output/screenshot
+// images and maps it back to an ImageBlock.
+func TestResponsesOutputImageParsesFlatURL(t *testing.T) {
+	var item responsesContentItem
+	if err := json.Unmarshal([]byte(`{"type":"output_image","image_url":"https://example.test/out.png"}`), &item); err != nil {
+		t.Fatalf("unmarshal flat image_url: %v", err)
+	}
+	blocks, err := responsesOutputBlocks([]responsesContentItem{item})
+	if err != nil {
+		t.Fatalf("responsesOutputBlocks: %v", err)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("blocks len = %d, want 1: %#v", len(blocks), blocks)
+	}
+	img, ok := blocks[0].(core.ImageBlock)
+	if !ok {
+		t.Fatalf("block type = %T, want ImageBlock", blocks[0])
+	}
+	if img.URL != "https://example.test/out.png" {
+		t.Fatalf("URL = %q", img.URL)
+	}
+}
+
 func TestResponsesToolsDefaultLeavesSchemaUnchanged(t *testing.T) {
 	tool, err := core.NewTool("lookup", "Lookup.", map[string]any{
 		"type": "object",

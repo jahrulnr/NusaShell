@@ -235,17 +235,13 @@ type responsesContentItem struct {
 	Type                  string                 `json:"type"`
 	Text                  string                 `json:"text,omitempty"`
 	Refusal               string                 `json:"refusal,omitempty"`
-	ImageURL              *responsesImageURL     `json:"image_url,omitempty"`
+	ImageURL              string                 `json:"image_url,omitempty"`
+	Detail                string                 `json:"detail,omitempty"`
 	InputAudio            *responsesInputAudio   `json:"input_audio,omitempty"`
 	VideoURL              *responsesVideoURL     `json:"video_url,omitempty"`
 	PromptCacheBreakpoint *promptCacheBreakpoint `json:"prompt_cache_breakpoint,omitempty"`
 	Annotations           []map[string]any       `json:"annotations,omitempty"`
 	Logprobs              []map[string]any       `json:"logprobs,omitempty"`
-}
-
-type responsesImageURL struct {
-	URL    string `json:"url"`
-	Detail string `json:"detail,omitempty"`
 }
 
 type responsesInputAudio struct {
@@ -838,7 +834,7 @@ func responsesContent(blocks []core.Block, textType string) ([]responsesContentI
 			if err != nil {
 				return nil, err
 			}
-			items = append(items, responsesContentItem{Type: "input_image", ImageURL: &responsesImageURL{URL: url, Detail: b.Detail}, PromptCacheBreakpoint: breakpoint})
+			items = append(items, responsesContentItem{Type: "input_image", ImageURL: url, Detail: b.Detail, PromptCacheBreakpoint: breakpoint})
 		case core.AudioBlock:
 			items = append(items, responsesContentItem{Type: "input_audio", InputAudio: &responsesInputAudio{Data: base64.StdEncoding.EncodeToString(b.Data), Format: audioFormat(b)}})
 		case core.VideoBlock:
@@ -1517,8 +1513,8 @@ func responsesOutputBlocks(items []responsesContentItem) ([]core.Block, error) {
 				blocks = append(blocks, core.TextBlock{Text: item.Text, Annotations: annotations, Logprobs: logprobs})
 			}
 		case "image", "image_url", "output_image":
-			if item.ImageURL != nil && item.ImageURL.URL != "" {
-				blocks = append(blocks, core.ImageBlock{URL: item.ImageURL.URL, Detail: item.ImageURL.Detail})
+			if item.ImageURL != "" {
+				blocks = append(blocks, core.ImageBlock{URL: item.ImageURL, Detail: item.Detail})
 			}
 		case "refusal":
 			refusal := item.Refusal

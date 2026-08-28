@@ -10,8 +10,8 @@ import { highlightCode } from '../../highlight-render.js';
 import { agentThread, composerInput, toolJobStrip } from './domrefs.js';
 
 // KEEP_VISIBLE_ROUNDS caps how many assistant tool-rounds stay fully mounted
-// in one turn bubble. Older rounds collapse into a stub so a 20+ round live
-// turn cannot grow an unbounded DOM (markdown, highlight, tool terminals).
+// in a *live* turn bubble. Snapshot history uses conversationTail instead of
+// collapsing earlier rounds into a stub, so refresh still looks like a chat.
 export const KEEP_VISIBLE_ROUNDS = 3;
 
 export const STARTER_PROMPTS = [
@@ -208,33 +208,6 @@ export function mountLiveRound(bubble, source = {}) {
   return { reasoningEl, textBox, strip };
 }
 
-function earlierRoundsDisclosure(messages) {
-  const n = messages.length;
-  const details = el('details', { class: 'agent-round-stub' });
-  details.append(
-    el('summary', {},
-      el('span', { class: 'agent-round-stub-title', text: `${n} earlier round${n === 1 ? '' : 's'}` }),
-      el('span', { class: 'agent-round-stub-hint', text: 'Show' }),
-    ),
-  );
-  const body = el('div', { class: 'agent-round-stub-body' });
-  details.append(body);
-  details.addEventListener('toggle', () => {
-    const hint = details.querySelector('.agent-round-stub-hint');
-    if (hint) hint.textContent = details.open ? 'Hide' : 'Show';
-    if (!details.open || body.dataset.filled) return;
-    body.dataset.filled = '1';
-    const prevDoc = globalThis.document;
-    if (details.ownerDocument) globalThis.document = details.ownerDocument;
-    try {
-      for (const message of messages) appendAssistantSteps(body, message);
-    } finally {
-      globalThis.document = prevDoc;
-    }
-  });
-  return details;
-}
-
 export function renderMessage(message) {
   if (message.role === 'system' || isCompactionSummary(message)) {
     return renderCompactionMessage(message);
@@ -324,12 +297,7 @@ function renderAssistantTurn(messages, onRetry) {
   if (messageIds.length) node.dataset.messageIds = messageIds.join(' ');
 
   const bubble = el('div', { class: 'agent-bubble' });
-  if (messages.length > KEEP_VISIBLE_ROUNDS) {
-    bubble.append(earlierRoundsDisclosure(messages.slice(0, -KEEP_VISIBLE_ROUNDS)));
-    for (const message of messages.slice(-KEEP_VISIBLE_ROUNDS)) appendAssistantSteps(bubble, message);
-  } else {
-    for (const message of messages) appendAssistantSteps(bubble, message);
-  }
+  for (const message of messages) appendAssistantSteps(bubble, message);
   if (bubble.children.length) node.append(bubble);
 
   const meta = el('div', { class: 'agent-turn-meta' });

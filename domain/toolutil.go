@@ -153,9 +153,26 @@ func IsOpenAIDirectURL(baseURL string) bool {
 	return host == "api.openai.com" || strings.HasSuffix(host, ".api.openai.com")
 }
 
+// isOpenRouterBaseURL reports whether baseURL points at a genuine OpenRouter
+// host (openrouter.ai). Only its own hosts speak the OpenRouter wire format
+// (reasoning object, reasoning_details, cache_retention, provider routing).
+// OpenAI-compatible aggregators (TokenRouter, 9Router, OpenCode, one-api,
+// LiteLLM, local endpoints) implement the vanilla OpenAI Chat wire and
+// reject OpenRouter-specific params — e.g. TokenRouter returns HTTP 400
+// "Unknown parameter: 'reasoning'" for the OpenRouter reasoning object.
+func isOpenRouterBaseURL(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "openrouter.ai" || strings.HasSuffix(host, ".openrouter.ai")
+}
+
 // IsOpenRouterHost reports whether a chat-kind provider with the given base
-// URL should use the OpenRouter wire format (extra headers, reasoning_details,
-// cache_retention). Returns true for all chat-kind hosts except direct OpenAI.
+// URL should use the OpenRouter wire format (extra headers, reasoning object,
+// reasoning_details, cache_retention). Only genuine OpenRouter hosts qualify;
+// every other chat-kind host gets the vanilla OpenAI Chat wire format.
 func IsOpenRouterHost(kind ProviderKind, baseURL string) bool {
-	return kind == ProviderChat && !IsOpenAIDirectURL(baseURL)
+	return kind == ProviderChat && isOpenRouterBaseURL(baseURL)
 }
