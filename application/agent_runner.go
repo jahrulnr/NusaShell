@@ -653,6 +653,10 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, lastUsage.ContextTokens(), model)
 				return false, ""
 			}
+			// Capture the raw error before decoration: decorateRateLimitError
+			// replaces an HTTP 429 with a friendly message that drops the
+			// UpstreamError type, which the overflow/TPM classifiers below need.
+			rawStreamErr := streamErr
 			streamErr = a.decorateRateLimitError(provider.ID, streamErr)
 			if !continuedPartialStream && isRetryableProviderError(streamErr) && len(roundResult.Response.ToolCalls) == 0 && (visibleText(roundResult.Content) != "" || visibleText(roundResult.Reasoning) != "") {
 				// A partial stream must never carry an unconfirmed tool call into the next
@@ -675,21 +679,24 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				// additional tool round and must not reduce the user's tool budget.
 				round--
 				continue
-			} else if compactionAttempts < 3 && isContextOverflowError(streamErr) {
-				// Emergency compaction safety net: the conversation exceeded the
-				// model's context window (input + max_output > window). This can
-				// happen when the estimate is inaccurate or compaction was
-				// disabled. Force compaction once, then retry the round.
+			} else if compactionAttempts < 3 && (isContextOverflowError(rawStreamErr) || isTPMOverflowError(rawStreamErr)) {
+				// Emergency compaction safety net: the request is too large for
+				// the provider — either it overflowed the model's context window
+				// (input + max_output > window) or it structurally exceeds the
+				// tokens-per-minute budget (one request needs more tokens than the
+				// whole per-minute limit). Both can happen when the local estimate
+				// is inaccurate or compaction was disabled. Force compaction once,
+				// then retry the round.
 				cw := a.resolveContextWindow(provider, model, settings)
 				trigger := compactionTriggerTokens(cw, resolveMaxOutput(provider, model, settings), settings)
 				preEmg := conversation.EstimateTokens()
-				if !shouldEmergencyCompact(streamErr, preEmg, trigger) {
+				if !shouldEmergencyCompact(rawStreamErr, preEmg, trigger) {
 					a.log("warn", "agent", "overflow-like 400 for turn %s but est=%d <= trigger=%d; skipping emergency compaction", run.ID, preEmg, trigger)
 					a.failStreamTurn(run, currentMsgID, model, roundResult, streamErr)
 					return false, ""
 				}
 				compactionAttempts++
-				a.log("warn", "agent", "context overflow for turn %s (est=%d trigger=%d), forcing emergency compaction", run.ID, preEmg, trigger)
+				a.log("warn", "agent", "request too large for turn %s (est=%d trigger=%d), forcing emergency compaction", run.ID, preEmg, trigger)
 				compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, adapter, model, cw, settings)
 				summary, compErr := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings)
 				if compErr == nil {

@@ -1206,6 +1206,21 @@ func responsesStreamParseError(message string, cause error) error {
 	return core.NewProviderErrorWithCause("openai", core.ErrorTypeProvider, message, cause)
 }
 
+// isRateLimitStreamError reports whether an in-stream error event is a
+// rate-limit rejection. OpenAI signals rate limits with the "tokens" and
+// "requests" error types (and "rate_limit_error" on some gateways); the
+// message pattern covers providers that reuse a generic error type for the
+// same rejection ("Request too large ... on tokens per min (TPM): Limit X,
+// Requested Y").
+func isRateLimitStreamError(errType, message string) bool {
+	switch strings.ToLower(strings.TrimSpace(errType)) {
+	case "tokens", "requests", "rate_limit_error", "rate_limit":
+		return true
+	}
+	lower := strings.ToLower(message)
+	return strings.Contains(lower, "tokens per min") || strings.Contains(lower, "tokens per minute") || strings.Contains(lower, "requests per min") || strings.Contains(lower, "requests per minute")
+}
+
 func (s *responsesStream) events(name string, raw json.RawMessage) ([]core.Event, error) {
 	switch name {
 	case "response.output_text.delta":
@@ -1391,6 +1406,14 @@ func (s *responsesStream) events(name string, raw json.RawMessage) ([]core.Event
 		var responseErr responsesErrorEvent
 		if err := json.Unmarshal(raw, &responseErr); err != nil {
 			return nil, responsesStreamParseError("openai: parse responses error", err)
+		}
+		if isRateLimitStreamError(responseErr.Error.Type, responseErr.Error.Message) {
+			// Rate-limit rejections arrive as in-stream error events (the
+			// Responses API accepts the request with HTTP 200 first), so no
+			// Retry-After header is available. Assume the standard 1-minute
+			// window; the application layer decides whether waiting can help
+			// (transient) or the request itself must shrink (structural TPM).
+			return []core.Event{core.ErrorEvent{Err: core.NewRateLimitError("openai", "openai: stream error: "+responseErr.Error.Message, 60)}}, nil
 		}
 		return []core.Event{core.ErrorEvent{Err: core.NewProviderError("openai", core.ErrorTypeProvider, "openai: stream error: "+responseErr.Error.Message)}}, nil
 	case "response.output_item.done":

@@ -1197,6 +1197,42 @@ func TestResponsesStreamErrorEventSurfaces(t *testing.T) {
 	}
 }
 
+// TestResponsesStreamRateLimitErrorEventClassified pins that rate-limit
+// rejections delivered as in-stream SSE error events (the Responses API
+// accepts the request with HTTP 200, then rejects it mid-stream) are
+// classified as rate-limit errors, not generic provider errors. The
+// application layer needs the distinction to choose between waiting out a
+// transient window and forcing emergency compaction for a structural
+// tokens-per-minute overflow. Since SSE events carry no Retry-After header,
+// the provider assumes the standard 1-minute window.
+func TestResponsesStreamRateLimitErrorEventClassified(t *testing.T) {
+	const tpmMsg = "Request too large for gpt-5.6-luna in organization org-test on tokens per min (TPM): Limit 200000, Requested 333331. The input or output tokens must be reduced in order to run successfully. Visit https://platform.openai.com/account/rate-limits to learn more."
+	cases := []struct {
+		name string
+		data string
+	}{
+		{"rate limit error type", `{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`},
+		{"tokens error type", `{"type":"error","error":{"type":"tokens","message":"` + tpmMsg + `"}}`},
+		{"message pattern only", `{"type":"error","error":{"type":"invalid_request_error","message":"` + tpmMsg + `"}}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			stream := newResponsesStream(streamResponse(strings.Join([]string{
+				`event: error`,
+				`data: ` + c.data,
+				``,
+			}, "\n")), "gpt-5.6-luna")
+			_, err := core.Collect(stream)
+			if err == nil || !core.IsRateLimitError(err) {
+				t.Fatalf("expected rate-limit error, got %v", err)
+			}
+			if got := core.GetRetryAfter(err); got != 60 {
+				t.Fatalf("RetryAfter = %d, want 60 (assumed 1-minute window)", got)
+			}
+		})
+	}
+}
+
 func TestResponsesStreamFailedEventSurfacesStructuredError(t *testing.T) {
 	stream := newResponsesStream(streamResponse(strings.Join([]string{
 		`event: response.failed`,

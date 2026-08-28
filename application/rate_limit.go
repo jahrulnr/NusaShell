@@ -71,6 +71,18 @@ func (a *App) ProviderRateLimitWait(providerID string) time.Duration {
 // tells the user how long to wait, instead of a raw provider JSON blob.
 func (a *App) friendlyRateLimitError(providerID string, upstream *UpstreamError, wait time.Duration) error {
 	providerLabel := a.providerNameByID(providerID)
+	// A structural tokens-per-minute rejection (one request needs more tokens
+	// than the entire per-minute budget) is not a "wait and retry" situation —
+	// the request itself must shrink. Surface the provider's own numbers and
+	// point at compaction instead of the requests-per-minute message, which
+	// only applies to request-count (RPM) limits.
+	body := ""
+	if upstream != nil && upstream.Err != nil {
+		body = upstream.Err.Error()
+	}
+	if limit, requested, ok := parseTPMLimitRequested(body); ok && requested > limit {
+		return fmt.Errorf("%s rejected this request: it needs %d tokens but the tokens-per-minute limit is %d. The conversation will be compacted to fit, or reduce the input/output tokens.", providerLabel, requested, limit)
+	}
 	if wait <= 0 {
 		wait = DefaultRateLimitWindow
 	}

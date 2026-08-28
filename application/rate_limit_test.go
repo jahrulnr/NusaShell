@@ -60,3 +60,26 @@ func TestDecorateRateLimitErrorNon429Untouched(t *testing.T) {
 		t.Fatalf("non-429 must not record window, wait=%v", w)
 	}
 }
+
+// TestDecorateRateLimitErrorTPMMessage verifies that a tokens-per-minute 429
+// gets a token-accurate friendly message instead of the requests-per-minute
+// one. Telling the user "max ~5 requests/min, wait and retry" is wrong for
+// TPM: the request itself is too large and waiting changes nothing.
+func TestDecorateRateLimitErrorTPMMessage(t *testing.T) {
+	a := &App{}
+	up := &UpstreamError{Kind: KindHTTPStatus, StatusCode: 429, Err: errors.New(tpmOverflowBody)}
+	err := a.decorateRateLimitError("tok", up)
+	if err == nil {
+		t.Fatal("nil error")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "requests/min") {
+		t.Fatalf("TPM 429 must not render the RPM message: %q", msg)
+	}
+	if !strings.Contains(msg, "tokens") || !strings.Contains(msg, "200000") || !strings.Contains(msg, "333331") {
+		t.Fatalf("TPM message must name the token numbers: %q", msg)
+	}
+	if w := a.ProviderRateLimitWait("tok"); w <= 0 {
+		t.Fatalf("TPM 429 must still record the window, wait=%v", w)
+	}
+}

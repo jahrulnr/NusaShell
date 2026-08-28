@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -255,5 +256,88 @@ func TestIsRetryableProviderErrorRejectsPermanentFailure(t *testing.T) {
 	}
 	if isRetryableProviderError(err) {
 		t.Fatal("503 with billing body must NOT be retryable")
+	}
+}
+
+// The observed OpenAI TPM rejection body (delivered either as an in-stream
+// SSE error event on the Responses API or as an HTTP 429 on Chat
+// Completions). Sanitized org id.
+const tpmOverflowBody = "openai: stream error: Request too large for gpt-5.6-luna in organization org-test on tokens per min (TPM): Limit 200000, Requested 333331. The input or output tokens must be reduced in order to run successfully. Visit https://platform.openai.com/account/rate-limits to learn more."
+
+func TestParseTPMLimitRequested(t *testing.T) {
+	limit, requested, ok := parseTPMLimitRequested(tpmOverflowBody)
+	if !ok || limit != 200000 || requested != 333331 {
+		t.Fatalf("parseTPMLimitRequested = (%d, %d, %t), want (200000, 333331, true)", limit, requested, ok)
+	}
+	// Minute spelling variant.
+	if _, _, ok := parseTPMLimitRequested("on tokens per minute: Limit 30000, Requested 40000"); !ok {
+		t.Fatal("tokens per minute spelling must parse")
+	}
+	// Non-TPM bodies never match.
+	for _, body := range []string{"", "rate limit exceeded", "maximum context length of 262144 tokens"} {
+		if _, _, ok := parseTPMLimitRequested(body); ok {
+			t.Fatalf("parseTPMLimitRequested(%q) must not match", body)
+		}
+	}
+}
+
+// TestIsTPMOverflowError distinguishes a structural TPM rejection (one
+// request needs more tokens than the entire per-minute budget — waiting can
+// never help) from a transient one (the request fits the budget but other
+// traffic consumed it — waiting for the next window helps).
+func TestIsTPMOverflowError(t *testing.T) {
+	structural := &UpstreamError{Kind: KindSSETransport, Temporary: true, Err: errors.New(tpmOverflowBody)}
+	if !isTPMOverflowError(structural) {
+		t.Fatal("requested > limit must be structural TPM overflow")
+	}
+	// Wrapping layers must not hide the signal.
+	if !isTPMOverflowError(fmt.Errorf("stream round failed: %w", structural)) {
+		t.Fatal("wrapped structural TPM must still be detected")
+	}
+	transient := &UpstreamError{Kind: KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
+		Err: errors.New("Request too large for gpt-5.6-luna on tokens per min (TPM): Limit 200000, Requested 150000. The input or output tokens must be reduced in order to run successfully.")}
+	if isTPMOverflowError(transient) {
+		t.Fatal("requested <= limit is transient, not structural")
+	}
+	if isTPMOverflowError(errors.New("boom")) {
+		t.Fatal("unrelated error must not match")
+	}
+	if isTPMOverflowError(nil) {
+		t.Fatal("nil error must not match")
+	}
+}
+
+// TestProviderRetryDelayRejectsStructuralTPM verifies that a structural TPM
+// rejection is never retried, even when it arrives as an HTTP 429 with a
+// Retry-After that would normally qualify. Retrying resends the same
+// oversized request, which fails again in every window.
+func TestProviderRetryDelayRejectsStructuralTPM(t *testing.T) {
+	err := &UpstreamError{Kind: KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second, Err: errors.New(tpmOverflowBody)}
+	delay, retryable := providerRetryDelay(err, 1)
+	if retryable {
+		t.Fatalf("structural TPM must not be retryable, got delay=%s", delay)
+	}
+	// The transient variant with the same status stays retryable.
+	transient := &UpstreamError{Kind: KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
+		Err: errors.New("Request too large on tokens per min (TPM): Limit 200000, Requested 150000.")}
+	if _, retryable := providerRetryDelay(transient, 1); !retryable {
+		t.Fatal("transient TPM with Retry-After must stay retryable")
+	}
+}
+
+// TestShouldEmergencyCompactTPM verifies that a structural TPM rejection
+// triggers emergency compaction even when the local token estimate is far
+// below the compaction trigger — the provider's own numbers are the proof
+// (image-heavy transcripts are routinely undercounted by the chars/4
+// estimate).
+func TestShouldEmergencyCompactTPM(t *testing.T) {
+	err := &UpstreamError{Kind: KindSSETransport, Temporary: true, Err: errors.New(tpmOverflowBody)}
+	if !shouldEmergencyCompact(err, 50_000, 150_000) {
+		t.Fatal("structural TPM must force emergency compaction despite low estimate")
+	}
+	transient := &UpstreamError{Kind: KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
+		Err: errors.New("Request too large on tokens per min (TPM): Limit 200000, Requested 150000.")}
+	if shouldEmergencyCompact(transient, 50_000, 150_000) {
+		t.Fatal("transient TPM must not force compaction")
 	}
 }

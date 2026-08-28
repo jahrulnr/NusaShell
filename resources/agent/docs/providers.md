@@ -206,3 +206,32 @@ subagent spawns. It tries `session/new` first and only calls `authenticate`
 when the agent reports an auth-required error. Agents that persist their own
 auth (e.g. Devin storing tokens in `~/.devin/auth.json`) will not
 re-trigger the browser login flow on every new connection.
+
+## Rate limits and emergency compaction
+
+Providers enforce per-minute budgets: **RPM** (requests per minute) and
+**TPM** (tokens per minute). NusaShell treats the two failure shapes
+differently:
+
+- **Transient rate limit** — the request fits the budget but other traffic
+  consumed the window (`Requested <= Limit`, or a plain RPM 429). The agent
+  waits out the window (honoring `Retry-After` when present) and retries.
+- **Structural TPM overflow** — one request needs more tokens than the
+  entire per-minute budget (`on tokens per min (TPM): Limit 200000,
+  Requested 333331`). Waiting can never help: the same request fails in
+  every window. The agent does **not** retry it; it forces an **emergency
+  compaction** (the transcript is summarized down to the compaction budget)
+  and retries the round with the smaller context. This is the same safety
+  net that fires on a context-window overflow 400.
+
+On the Responses API, TPM rejections arrive mid-stream as an SSE
+`event: error` (the request is accepted with HTTP 200 first), so the
+provider classifies them as rate-limit errors with an assumed 1-minute
+window instead of generic provider errors. On Chat Completions they arrive
+as HTTP 429. Both paths surface a message naming the token numbers instead
+of the requests-per-minute one.
+
+Image-heavy transcripts are routinely undercounted by the local chars/4
+token estimate, which is why the provider's own `Limit`/`Requested` numbers
+are trusted as proof of overflow even when the local estimate is far below
+the compaction trigger.

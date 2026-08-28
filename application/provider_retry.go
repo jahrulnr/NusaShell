@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math/rand"
 	"nusashell/domain"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -124,6 +126,13 @@ func isRetryableProviderError(err error) bool {
 
 func isRetryableUpstream(err *UpstreamError) bool {
 	if err == nil {
+		return false
+	}
+	// A structural TPM rejection (one request needs more tokens than the
+	// entire per-minute budget) never resolves by waiting — the same request
+	// fails in every window. Do not retry it; the runner forces emergency
+	// compaction instead.
+	if isTPMOverflowError(err) {
 		return false
 	}
 	body := ""
@@ -267,6 +276,47 @@ func contextLimitFromError(err error) (int, bool) {
 	return n, ok
 }
 
+// tpmLimitRe matches OpenAI's tokens-per-minute rejection body, delivered as
+// an HTTP 429 (Chat Completions) or as an in-stream SSE error event
+// (Responses API): "... on tokens per min (TPM): Limit 200000, Requested
+// 333331. ...".
+var tpmLimitRe = regexp.MustCompile(`(?i)tokens per min(?:ute)?[^:]*:\s*Limit\s+(\d+),\s*Requested\s+(\d+)`)
+
+// parseTPMLimitRequested extracts the per-minute token budget and the token
+// count the rejected request asked for from a TPM error body.
+func parseTPMLimitRequested(body string) (limit, requested int, ok bool) {
+	m := tpmLimitRe.FindStringSubmatch(body)
+	if len(m) < 3 {
+		return 0, 0, false
+	}
+	limit, err1 := strconv.Atoi(m[1])
+	requested, err2 := strconv.Atoi(m[2])
+	if err1 != nil || err2 != nil || limit <= 0 {
+		return 0, 0, false
+	}
+	return limit, requested, true
+}
+
+// isTPMOverflowError reports whether the provider rejected the request
+// because a single request needs more tokens than the entire
+// tokens-per-minute budget ("Limit 200000, Requested 333331"). This is
+// structural: the same request fails in every window, so waiting or backing
+// off can never help — the only recovery is shrinking the request via
+// emergency compaction. A TPM rejection where the request fits the budget is
+// transient (other traffic consumed the window) and stays retryable.
+func isTPMOverflowError(err error) bool {
+	var upstream *UpstreamError
+	if !errors.As(err, &upstream) {
+		return false
+	}
+	body := ""
+	if upstream.Err != nil {
+		body = upstream.Err.Error()
+	}
+	limit, requested, ok := parseTPMLimitRequested(body)
+	return ok && requested > limit
+}
+
 // shouldEmergencyCompact reports whether a provider error should trigger
 // destructive emergency compaction. The body must match an explicit overflow
 // phrase (not a generic field name like "input_tokens"). Normally the local
@@ -275,6 +325,12 @@ func contextLimitFromError(err error) (int, bool) {
 // heuristic estimate is low — different tokenizers can count more tokens than
 // our chars/4 estimate.
 func shouldEmergencyCompact(err error, estimatedTokens, compactionTrigger int) bool {
+	// A structural TPM rejection proves the request is too large for the
+	// provider's per-minute budget regardless of the local estimate —
+	// image-heavy transcripts are routinely undercounted by chars/4.
+	if isTPMOverflowError(err) {
+		return true
+	}
 	if !isContextOverflowError(err) {
 		return false
 	}
