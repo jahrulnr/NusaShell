@@ -488,17 +488,15 @@
   white-space: pre-wrap;
 }
 
-.agent-round {
-  min-width: 0;
-  /* Live-turn overload guard (replaces the removed round-trimming):
-     off-screen rounds skip style recalc/layout/paint while staying fully
-     mounted, so long streaming turns never disappear from the DOM.
-     `auto` sizes from the last real render, keeping scroll anchoring stable.
-     The round being streamed is on-screen (user is pinned to the bottom),
-     so it always renders at full fidelity. */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 120px;
-}
+.agent-round { min-width: 0; }
+/* Live-turn overload is handled without CSS containment on rounds:
+   enhancement is targeted (only newly rendered blocks get
+   mermaid/highlight/zoom, see render.js) and markdown is diffed per block
+   (incremental-render.js), so per-delta cost stays proportional to the
+   delta. `content-visibility: auto` was tried here and reverted — its
+   paint containment clipped the reasoning mark / tool-terminal chrome that
+   draws at the round edges, and its size placeholder made long threads
+   jump while scrolling. */
 
 /* Tool job cards */
 .agent-tool-job-strip { flex: none; border: 0; border-bottom: 1px solid #243246; background: #0b131c; padding: 0; }

@@ -63,10 +63,12 @@ test('Live turns keep every round mounted; perf comes from content-visibility + 
   // backed by the conversation tail + explicit Load older.
   assert.match(agentView, /SNAPSHOT_KEEP_ROUNDS = 12/);
   assert.doesNotMatch(agentView, /KEEP_VISIBLE_ROUNDS/);
-  // The browser-level guard rails that replace the trimming:
-  // off-screen rounds skip layout/paint; live-delta enhancement only
-  // touches newly rendered blocks.
-  assert.match(agentCSS, /\.agent-round \{[^}]*content-visibility: auto;[^}]*contain-intrinsic-size/s);
+  // The browser-level guard rails that replace the trimming: per-delta
+  // enhancement only touches newly rendered blocks (incrementalRender).
+  // No CSS containment on .agent-round — content-visibility there clipped
+  // the reasoning mark / tool-terminal chrome drawn at the round edges.
+  assert.doesNotMatch(agentCSS, /\.agent-round \{[^}]*content-visibility/s);
+  assert.doesNotMatch(parityCSS, /\.agent-round \{[^}]*content-visibility/s);
   assert.match(agentView, /incrementalRender\(/);
   assert.match(agentView, /scheduleLiveEnhancement\(/);
   assert.match(agentView, /mountLiveRound\(/);

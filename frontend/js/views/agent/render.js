@@ -12,12 +12,12 @@ import { agentThread, composerInput, toolJobStrip } from './domrefs.js';
 // Live-turn performance strategy: every streaming round stays mounted in the
 // DOM (nothing is parked, trimmed, or hidden behind a stub — the old
 // "N earlier rounds trimmed for performance" workaround traded UX away).
-// Overload protection instead comes from two browser-level mechanisms:
-//   1. CSS `content-visibility: auto` on .agent-round — off-screen rounds
-//      skip style recalc/layout/paint (see styles/agent.css).
-//   2. Targeted enhancement in agent.js — mermaid/highlight/zoom run only
-//      on the blocks incrementalRender reports as new or changed, never
-//      over the whole bubble.
+// Overload protection instead comes from targeted enhancement in agent.js —
+// mermaid/highlight/zoom run only on the blocks incrementalRender reports
+// as new or changed, so per-delta cost is proportional to the delta, never
+// to the whole bubble. (CSS content-visibility on .agent-round was tried as
+// an extra guard and reverted: its paint containment clipped the reasoning
+// mark / tool-terminal chrome drawn at the round edges.)
 
 export const STARTER_PROMPTS = [
   {

@@ -560,11 +560,7 @@ summary { outline: none; }
 .agent-reasoning-content pre { box-sizing: border-box; max-width: 100%; overflow-x: auto; white-space: pre; }
 .agent-reasoning-content a { color: #c9a66b; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; word-break: break-word; }
 .agent-reasoning-content a:hover { color: #ddc08a; }
-.agent-round {
-  min-width: 0;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 120px;
-}
+.agent-round { min-width: 0; }
 .agent-send-btn,
 .agent-new-conversation:hover,
 .agent-new-conversation:focus-visible { color: var(--accent-ink); }

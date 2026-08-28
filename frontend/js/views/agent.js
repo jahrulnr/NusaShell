@@ -125,10 +125,10 @@ const state = {
 // Snapshot-history windowing: how many trailing assistant rounds a full
 // thread re-render keeps visible before the explicit "Load older" affordance
 // (agent-layout.test.mjs pins this). Kept generous — 12 covers a whole long
-// turn at first paint — because the anti-overload job now belongs to CSS
-// content-visibility (layout/paint skip) rather than content removal; this
-// window only bounds the one-time markdown parse + DOM insert on open.
-// (Live turns never trim — see render.js's strategy comment.)
+// turn at first paint — because per-delta cost is already bounded by
+// targeted enhancement + block-diffed markdown (see render.js's strategy
+// comment); this window only bounds the one-time markdown parse + DOM
+// insert on open. (Live turns never trim.)
 const SNAPSHOT_KEEP_ROUNDS = 12;
 const MAX_ROOM_BUFFER_CHARS = 512 * 1024; // per room (raw + rawReasoning)
 const MAX_LIVE_ROUND_CHARS = 512 * 1024;
