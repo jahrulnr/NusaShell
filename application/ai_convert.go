@@ -80,6 +80,12 @@ func ToCoreRequest(req ChatRequest, kind domain.ProviderKind, openRouter bool) *
 			}
 		}
 	}
+	if req.CompactionBlob != "" && kind == domain.ProviderResponses {
+		if out.ProviderOptions == nil {
+			out.ProviderOptions = core.ProviderOptions{}
+		}
+		out.ProviderOptions["compaction_blob"] = req.CompactionBlob
+	}
 	return out
 }
 
