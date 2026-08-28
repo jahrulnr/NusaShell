@@ -150,7 +150,7 @@ const LONG_COMPACTION_SUMMARY = 'SUMMARY: user explored compaction e2e test. '
 // Script step shape: { text, reasoning, toolCall: { id, name, arguments } }
 // When sendDone is false, the stream closes without `data: [DONE]` to
 // simulate an incomplete SSE stream (BH-AI-01).
-function fakeLLM(port) {
+function fakeLLM(port, { contextLength = 1000 } = {}) {
   let completeText = 'compaction summary: user likes Go.';
   let scripts = [];
   // Autolearn review-agent scripts live in their own queue: the review
@@ -174,7 +174,7 @@ function fakeLLM(port) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         data: [
-          { id: 'tiny-model', context_length: 1000, description: 'Tiny test model' },
+          { id: 'tiny-model', context_length: contextLength, description: 'Tiny test model' },
         ],
       }));
       return;
@@ -438,7 +438,7 @@ test('compaction triggers and renders a marker when conversation exceeds thresho
     ) || [];
     assert.ok(compactionMsgs.length > 0, 'at least one compaction summary (user) message exists');
     assert.ok(
-      compactionMsgs.some((m) => m.content.includes('compacted') || m.content.includes('Compacted')),
+      compactionMsgs.some((m) => m.content.includes('SUMMARY: user explored compaction e2e test')),
       `compaction marker not found: ${JSON.stringify(compactionMsgs.map((m) => m.content.slice(0, 80)))}`,
     );
   } catch (error) {
@@ -460,7 +460,10 @@ test('compaction triggers and renders a marker when conversation exceeds thresho
 test('BH-AI-01: incomplete stream with tool-call deltas must not silently fall back to non-streaming', async (t) => {
   assert.ok(NativeWebSocket, 'Node WebSocket support is required for the E2E event stream');
   const llmPort = await freePort();
-  const llm = fakeLLM(llmPort);
+  // Large context: this test asserts streaming behavior, so the fresh-room
+  // hydration checkpoint must NOT trip pre-turn compaction (a 1k window
+  // would compact before the first stream and mask what is being tested).
+  const llm = fakeLLM(llmPort, { contextLength: 200000 });
   await new Promise((resolveListen) => llm.server.listen(llmPort, '127.0.0.1', resolveListen));
   t.after(() => new Promise((r) => llm.server.close(r)));
 
@@ -673,7 +676,9 @@ function hydrationSlotNames(hydration) {
 test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration transcript', async (t) => {
   assert.ok(NativeWebSocket, 'Node WebSocket support is required for the E2E event stream');
   const llmPort = await freePort();
-  const llm = fakeLLM(llmPort);
+  // Large context: the hydration checkpoint itself is what this test
+  // inspects, so it must not trip pre-turn compaction on a 1k window.
+  const llm = fakeLLM(llmPort, { contextLength: 200000 });
   await new Promise((resolveListen) => llm.server.listen(llmPort, '127.0.0.1', resolveListen));
   t.after(() => new Promise((r) => llm.server.close(r)));
 
