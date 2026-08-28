@@ -45,11 +45,22 @@ export function startLiveDeltaServer({
   rounds = 10,
   speedMs = 15,
   chunkSize = 24,
+  // Inter-round pause in ms: a number, or a "min-max" range that is rolled
+  // randomly per round (e.g. "1000-5000" reads like a ~10 tok/s agent).
+  roundDelay = 120,
   frontendDir = REPO_FRONTEND,
   log = () => {},
 } = {}) {
+  const parseDelay = (spec) => {
+    if (typeof spec === 'number') return () => spec;
+    const [min, max] = String(spec).split('-').map(Number);
+    if (!max || max < min) return () => min || 120;
+    return () => min + Math.floor(Math.random() * (max - min + 1));
+  };
+  const nextRoundDelay = parseDelay(roundDelay);
   const clients = new Set();
   let activeStream = null; // { cancelled: boolean }
+  let pendingSteer = null; // { id, conversationId, text }
   // Synthetic persisted transcript (mirrors what the real backend saves at
   // turn end) so refreshActiveConversation after turn.done renders the
   // finished turn instead of an empty thread.
@@ -153,14 +164,22 @@ export function startLiveDeltaServer({
     const stream = { cancelled: false };
     activeStream = stream;
     const steps = [];
+    let currentRound = 1;
+    try {
     broadcast('agent.turn.started', { run_id: runId, conversation_id: conversationId, round: 1, message_id: 'msg_r1' });
 
     for (let round = 1; round <= rounds; round++) {
       if (stream.cancelled) return runId;
+      currentRound = round;
       const messageId = `msg_r${round}`;
       if (round > 1) {
+        const pause = nextRoundDelay();
         broadcast('agent.turn.started', { run_id: runId, conversation_id: conversationId, round, message_id: messageId });
-        await sleep(120);
+        await sleep(pause);
+      }
+      if (pendingSteer && pendingSteer.conversationId === conversationId) {
+        broadcast('agent.steer.applied', { conversation_id: conversationId, steer_id: pendingSteer.id, text: pendingSteer.text });
+        pendingSteer = null;
       }
 
       // Reasoning stream
@@ -207,7 +226,14 @@ export function startLiveDeltaServer({
       model: MODEL_ID,
       usage: { input_tokens: 1024, output_tokens: 4096 },
     });
-    activeStream = null;
+    } finally {
+      if (activeStream === stream) activeStream = null;
+      if (stream.cancelled) {
+        // Terminal event on cancel — without it the frontend keeps the room
+        // "running" and routes every later submit into steer forever.
+        broadcast('agent.turn.done', { run_id: runId, conversation_id: conversationId, message_id: `msg_r${currentRound}`, model: MODEL_ID, usage: { input_tokens: 0, output_tokens: 0 } });
+      }
+    }
     return runId;
   }
 
@@ -229,8 +255,15 @@ export function startLiveDeltaServer({
     'agent.todos.get': () => ({ items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, brief: '' }),
     'agent.turns.active': () => ({}),
     'agent.turns.stop': () => { if (activeStream) activeStream.cancelled = true; return {}; },
+    'agent.turns.steer': async (payload) => {
+      if (!activeStream) throw new Error('no running turn to steer');
+      const steerId = `steer_${randomUUID().slice(0, 8)}`;
+      pendingSteer = { id: steerId, conversationId: payload?.conversation_id || CONV_ID, text: String(payload?.text || '') };
+      broadcast('agent.steer.queued', { conversation_id: pendingSteer.conversationId, steer_id: steerId, text: pendingSteer.text });
+      return { steer_id: steerId };
+    },
     'agent.turns.start': async (payload) => {
-      if (activeStream) { await sleep(50); }
+      if (activeStream) throw new Error('conversation is busy');
       const conversationId = payload?.conversation_id || CONV_ID;
       transcript.push({ role: 'user', content: String(payload?.text || payload?.message || '(fake turn)'), created_at: new Date().toISOString() });
       // Fire-and-forget: the HTTP response returns immediately; events flow
@@ -357,7 +390,8 @@ if (isMain) {
   const port = Number(flag('port', 8787));
   const rounds = Number(flag('rounds', 10));
   const speedMs = Number(flag('speed', 15));
-  const { port: actualPort } = await startLiveDeltaServer({ port, rounds, speedMs, log: (line) => console.log(line) });
-  console.log(`live-delta-server ready → http://127.0.0.1:${actualPort}  (rounds=${rounds}, speed=${speedMs}ms/chunk)`);
+  const roundDelay = flag('round-delay', '120');
+  const { port: actualPort } = await startLiveDeltaServer({ port, rounds, speedMs, roundDelay, log: (line) => console.log(line) });
+  console.log(`live-delta-server ready → http://127.0.0.1:${actualPort}  (rounds=${rounds}, speed=${speedMs}ms/chunk, roundDelay=${roundDelay}ms)`);
   console.log('send a message in the UI to start the fake multi-round turn; Ctrl+C to stop');
 }

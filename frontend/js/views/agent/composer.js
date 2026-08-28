@@ -110,23 +110,20 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
     sending = true;
     try {
       if (state.running || state.conversation?.status === 'running') {
-        await sendSteer(text);
-        return;
+        try {
+          await sendSteer(text);
+          return;
+        } catch (error) {
+          // Stale running status — the turn died without the frontend seeing
+          // a terminal event (missed turn.done/error over a WS reconnect, a
+          // stop that raced the stream). The steer was rejected because there
+          // is no active turn, so the message must NOT vanish: fall through
+          // and start a new turn with it.
+          if (!/no active turn/i.test(error?.message || '')) throw error;
+          toast('Agent already stopped — sending as a new message.', 'info');
+        }
       }
-      if (!state.activeId) await createConversation(text.slice(0, 48));
-      const attachments = [...state.attachments];
-      const { run_id: runID } = await rpc('agent.turns.start', {
-        conversation_id: state.activeId,
-        text,
-        model: state.model,
-        effort: state.effort && state.effort !== 'auto' ? state.effort : undefined,
-        attachments,
-      });
-      input.value = '';
-      autosize();
-      state.attachments = [];
-      renderAttachments();
-      beginTurn(runID, text, attachments);
+      await startNewTurn(text);
     } catch (error) {
       // If the conversation is busy (a turn is already running server-side but
       // the frontend hasn't re-attached yet), fall back to steering instead of
@@ -141,26 +138,39 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
     }
   }
 
+  async function startNewTurn(text) {
+    if (!state.activeId) await createConversation(text.slice(0, 48));
+    const attachments = [...state.attachments];
+    const { run_id: runID } = await rpc('agent.turns.start', {
+      conversation_id: state.activeId,
+      text,
+      model: state.model,
+      effort: state.effort && state.effort !== 'auto' ? state.effort : undefined,
+      attachments,
+    });
+    input.value = '';
+    autosize();
+    state.attachments = [];
+    renderAttachments();
+    beginTurn(runID, text, attachments);
+  }
+
   async function sendSteer(text) {
     if (!state.activeId) return;
-    try {
-      const attachments = [...state.attachments];
-      await rpc('agent.turns.steer', {
-        conversation_id: state.activeId,
-        text,
-        attachments,
-      });
-      input.value = '';
-      autosize();
-      state.attachments = [];
-      renderAttachments();
-      // showSteerQueued is handled by the agent.steer.queued event handler,
-      // not here — calling it explicitly would double-render the steer bubble
-      // (once from the RPC response, once from the event).
-      updateSendAvailability(state);
-    } catch (error) {
-      toast(error.message, 'error');
-    }
+    const attachments = [...state.attachments];
+    await rpc('agent.turns.steer', {
+      conversation_id: state.activeId,
+      text,
+      attachments,
+    });
+    input.value = '';
+    autosize();
+    state.attachments = [];
+    renderAttachments();
+    // showSteerQueued is handled by the agent.steer.queued event handler,
+    // not here — calling it explicitly would double-render the steer bubble
+    // (once from the RPC response, once from the event).
+    updateSendAvailability(state);
   }
 
   async function handlePaste(event, inputEl, autosize) {
