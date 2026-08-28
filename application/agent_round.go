@@ -240,6 +240,7 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 		ConversationID:   run.ConversationID,
 		ReasoningReplay:  caps.ReasoningReplay,
 		StripParams:      a.learnedParams.StripParams(run.ProviderID, model),
+		CompactionBlob:   conversation.CompactionBlob,
 	}, func(delta string) {
 		content.WriteString(delta)
 		a.Bus.Emit(contracts.EventMessageDelta, contracts.MessageDeltaEvent{
