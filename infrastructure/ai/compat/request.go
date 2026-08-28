@@ -215,11 +215,18 @@ func convertMessagesWithSpec(messages []core.Message, spec Spec) ([]map[string]a
 				if !ok {
 					return nil, fmt.Errorf("messages[%d]: tool role only supports ToolResultBlock, got %T", i, block)
 				}
-				text, err := textOnly(result.Content)
+				text, media, err := textAndMedia(result.Content)
 				if err != nil {
 					return nil, err
 				}
 				out = append(out, map[string]any{"role": "tool", "tool_call_id": result.ToolUseID, "content": text})
+				// Chat-compat tool results only carry text. Non-text blocks
+				// (image/audio/video from read_media) are reinjected as a
+				// follow-up user message so the vision-capable model still
+				// sees the media in the next round.
+				if len(media) > 0 {
+					out = append(out, map[string]any{"role": "user", "content": media})
+				}
 			}
 		default:
 			return nil, fmt.Errorf("messages[%d]: unsupported role %q", i, msg.Role)
@@ -332,19 +339,47 @@ func putReasoningBlock(out map[string]any, block core.ReasoningBlock, spec Spec)
 	return fmt.Errorf("ReasoningBlock has empty reasoning text with no extra or signature — reasoning was received from the provider but is missing on replay (input != output)")
 }
 
-func textOnly(blocks []core.Block) (string, error) {
-	var out strings.Builder
+// textAndMedia splits a tool result's content blocks into the text portion
+// (which chat-compat tool results can carry) and the non-text media blocks
+// (image/audio/video), serialized as user-message content parts for the
+// caller to reinject as a follow-up user message.
+func textAndMedia(blocks []core.Block) (string, []map[string]any, error) {
+	var text strings.Builder
+	var media []map[string]any
 	for _, block := range blocks {
-		text, ok := block.(core.TextBlock)
-		if !ok {
-			return "", fmt.Errorf("compat tool result only supports text blocks, got %T", block)
+		switch b := block.(type) {
+		case core.TextBlock:
+			if text.Len() > 0 {
+				text.WriteString("\n")
+			}
+			text.WriteString(b.Text)
+		case core.ImageBlock:
+			if b.URL == "" {
+				return "", nil, fmt.Errorf("compat tool result image blocks require URL")
+			}
+			image := map[string]any{"url": b.URL}
+			if b.Detail != "" {
+				image["detail"] = b.Detail
+			}
+			media = append(media, map[string]any{"type": "image_url", "image_url": image})
+		case core.AudioBlock:
+			media = append(media, map[string]any{
+				"type": "input_audio",
+				"input_audio": map[string]any{
+					"data":   base64.StdEncoding.EncodeToString(b.Data),
+					"format": compatAudioFormat(b),
+				},
+			})
+		case core.VideoBlock:
+			if b.URL == "" {
+				return "", nil, fmt.Errorf("compat tool result video blocks require URL")
+			}
+			media = append(media, map[string]any{"type": "video_url", "video_url": map[string]any{"url": b.URL}})
+		default:
+			return "", nil, fmt.Errorf("compat tool result only supports text, image, audio, or video blocks, got %T", block)
 		}
-		if out.Len() > 0 {
-			out.WriteString("\n")
-		}
-		out.WriteString(text.Text)
 	}
-	return out.String(), nil
+	return text.String(), media, nil
 }
 
 func convertTools(tools []core.Tool, mode StrictToolMode) ([]map[string]any, []core.Warning, error) {

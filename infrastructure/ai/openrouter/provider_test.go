@@ -413,3 +413,53 @@ func captureBody(t *testing.T, referer, title *string, req *core.Request) map[st
 	}
 	return body
 }
+
+func TestToolResultImageReinjectsAsUserMessage(t *testing.T) {
+	body := captureBody(t, nil, nil, &core.Request{
+		Model: "openai/gpt-4o",
+		Messages: []core.Message{
+			core.UserText("read this image"),
+			core.Assistant(core.ToolUseBlock{ID: "call_1", Name: "read_media", Arguments: core.MustJSONRaw(map[string]any{"file_path": "/tmp/x.png"})}),
+			core.ToolResult("call_1", core.Text("/tmp/x.png"), core.ImageURL("https://example.test/x.png")),
+		},
+	})
+	msgs := body["messages"].([]any)
+	// Expect: user, assistant(tool_call), tool(text-only), user(image)
+	if len(msgs) != 4 {
+		t.Fatalf("got %d messages, want 4 (tool + reinjected user): %+v", len(msgs), msgs)
+	}
+	toolMsg, _ := msgs[2].(map[string]any)
+	if toolMsg["role"] != "tool" {
+		t.Fatalf("msgs[2] role = %v, want tool", toolMsg["role"])
+	}
+	if toolMsg["content"] != "/tmp/x.png" {
+		t.Fatalf("tool content = %v, want path-only text", toolMsg["content"])
+	}
+	reinject, _ := msgs[3].(map[string]any)
+	if reinject["role"] != "user" {
+		t.Fatalf("msgs[3] role = %v, want user (reinject)", reinject["role"])
+	}
+	parts := reinject["content"].([]any)
+	if len(parts) != 1 {
+		t.Fatalf("reinject parts = %d, want 1", len(parts))
+	}
+	imgPart, _ := parts[0].(map[string]any)
+	if imgPart["type"] != "image_url" {
+		t.Fatalf("reinject part type = %v, want image_url", imgPart["type"])
+	}
+}
+
+func TestToolResultTextOnlyNoReinject(t *testing.T) {
+	body := captureBody(t, nil, nil, &core.Request{
+		Model: "openai/gpt-4o",
+		Messages: []core.Message{
+			core.UserText("hi"),
+			core.Assistant(core.ToolUseBlock{ID: "call_1", Name: "lookup", Arguments: core.MustJSONRaw(map[string]any{"q": "x"})}),
+			core.ToolResultText("call_1", "ok"),
+		},
+	})
+	msgs := body["messages"].([]any)
+	if len(msgs) != 3 {
+		t.Fatalf("got %d messages, want 3 (no reinject for text-only result): %+v", len(msgs), msgs)
+	}
+}

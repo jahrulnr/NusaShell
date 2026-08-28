@@ -10,10 +10,15 @@ import (
 )
 
 // executeReadImage handles the read_media tool call when the sniffed kind
-// is "image". It loads the image
-// directly from disk by absolute path, then either:
-//   - Native fast path (vision model): returns the image directly as a tool
-//     result attachment so the model can see it in the next round.
+// is "image". It loads the image directly from disk by absolute path, then
+// either:
+//   - Native fast path (vision model): returns the file path as the tool
+//     output text and the image as an attachment. Chat-compat providers
+//     (OpenRouter, OpenAI-compat) cannot carry image blocks inside tool
+//     results, so the provider serialization layer strips the image from
+//     the tool message and reinjects it as a follow-up user message with
+//     an image_url block. Native providers (Anthropic) carry the image
+//     block inside the tool result directly.
 //   - Fallback path (non-vision model + fallback configured): describes the
 //     image via the vision fallback model and returns the text description.
 //   - No fallback (non-vision model, no fallback): returns an error message
@@ -39,11 +44,14 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps Mode
 		return "error: " + err.Error(), nil, err
 	}
 
-	// Native fast path: vision model gets the image directly.
+	// Native fast path: vision model gets the image. The tool output is the
+	// file path only; the image is delivered as an attachment. Provider
+	// serialization reinjects the image as a user message for chat-compat
+	// providers, or carries it inside the tool result for native providers.
 	if caps.Vision {
-		summary := "Image loaded into your context."
+		summary := "Image loaded."
 		if image.FilePath != "" {
-			summary += " File path: " + image.FilePath
+			summary = image.FilePath
 		}
 		return summary, []domain.Attachment{image}, nil
 	}

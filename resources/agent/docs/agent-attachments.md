@@ -77,11 +77,14 @@ Bad examples:
 
     read_media(file_path="/home/user/Pictures/guess.png")  # not the attached file
 
-- **Vision-capable model (native fast path):** the image is returned
-  directly as a tool result attachment. The provider adapter serializes it
-  as an `image_url` content block (Chat Completions) or `image` content
-  block (Messages) in the tool result, so the model sees the pixels in the
-  next round.
+- **Vision-capable model (native fast path):** the tool output is the
+  absolute file path only (text), and the image is carried as a tool result
+  attachment. Native providers (Anthropic Messages) serialize the image
+  block inside the tool result directly. Chat-compat providers
+  (OpenRouter, OpenAI-compat) cannot carry image blocks inside tool
+  results, so the provider serialization strips the image from the tool
+  message and reinjects it as a follow-up user message with an `image_url`
+  block, so the model still sees the pixels in the next round.
 - **Non-vision model + fallback configured:** the image is described using
   the vision fallback model and the text description is returned as the
   tool result.

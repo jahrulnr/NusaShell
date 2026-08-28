@@ -99,8 +99,11 @@ func TestExecuteReadImageVisionModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(output, "Image loaded") {
-		t.Errorf("output should mention image loaded, got: %q", output)
+	// Vision-model tool output is the file path only; the image is delivered
+	// as an attachment and reinjected as a user message by chat-compat
+	// providers (or carried inside the tool result by native providers).
+	if !strings.Contains(output, catPath) {
+		t.Errorf("output should be the file path, got: %q", output)
 	}
 	// Question echo was removed from vision-model output (the model already
 	// knows its own question — echoing it wastes tokens).
@@ -143,8 +146,8 @@ func TestExecuteReadImageOutsideWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error for path outside attachment roots: %v", err)
 	}
-	if !strings.Contains(output, "Image loaded") {
-		t.Errorf("output should mention image loaded, got: %q", output)
+	if !strings.Contains(output, path) {
+		t.Errorf("output should be the file path, got: %q", output)
 	}
 	if len(atts) != 1 || atts[0].MediaType != "image/jpeg" {
 		t.Fatalf("expected jpeg attachment from arbitrary path, got %+v", atts)

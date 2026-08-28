@@ -317,11 +317,18 @@ func mapMessages(messages []core.Message) (any, error) {
 				if !ok {
 					return nil, fmt.Errorf("messages[%d]: tool role only supports ToolResultBlock, got %T", i, block)
 				}
-				text, err := textOnly(result.Content)
+				text, media, err := textAndMedia(result.Content)
 				if err != nil {
 					return nil, err
 				}
 				out = append(out, map[string]any{"role": "tool", "tool_call_id": result.ToolUseID, "content": text})
+				// Chat-compat tool results only carry text. Non-text blocks
+				// (image/audio/video from read_media) are reinjected as a
+				// follow-up user message so the vision-capable model still
+				// sees the media in the next round.
+				if len(media) > 0 {
+					out = append(out, map[string]any{"role": "user", "content": media})
+				}
 			}
 		default:
 			return nil, fmt.Errorf("messages[%d]: unsupported role %q", i, msg.Role)
@@ -448,8 +455,14 @@ func mapCache(cache *core.CacheControl) (map[string]any, error) {
 	return out, nil
 }
 
-func textOnly(blocks []core.Block) (string, error) {
+// textAndMedia splits a tool result's content blocks into the text portion
+// (which chat-compat tool results can carry) and the image blocks, which the
+// caller reinjects as a follow-up user message so a vision-capable model
+// still sees the image in the next round. Audio and video blocks are not
+// supported in OpenRouter user messages and surface an error.
+func textAndMedia(blocks []core.Block) (string, []map[string]any, error) {
 	var text strings.Builder
+	var media []map[string]any
 	for _, block := range blocks {
 		switch b := block.(type) {
 		case core.TextBlock:
@@ -457,11 +470,20 @@ func textOnly(blocks []core.Block) (string, error) {
 				text.WriteString("\n")
 			}
 			text.WriteString(b.Text)
+		case core.ImageBlock:
+			if b.URL == "" {
+				return "", nil, fmt.Errorf("openrouter tool result image blocks require URL")
+			}
+			image := map[string]any{"url": b.URL}
+			if b.Detail != "" {
+				image["detail"] = b.Detail
+			}
+			media = append(media, map[string]any{"type": "image_url", "image_url": image})
 		default:
-			return "", fmt.Errorf("OpenRouter tool results only support text content, got %T", block)
+			return "", nil, fmt.Errorf("OpenRouter tool results only support text or image content, got %T", block)
 		}
 	}
-	return text.String(), nil
+	return text.String(), media, nil
 }
 
 func cleanStrictSchema(schema core.Schema, strict core.StrictMode) (any, error) {

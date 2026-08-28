@@ -845,3 +845,96 @@ func TestConvertUsageClampsWhenCachedExceedsPrompt(t *testing.T) {
 		t.Fatalf("CacheReadTokens = %d, want 8", u.CacheReadTokens)
 	}
 }
+
+func TestToolResultImageReinjectsAsUserMessage(t *testing.T) {
+	var capturedBody map[string]any
+	provider, err := New(Config{
+		APIKey:  "test-key",
+		BaseURL: "https://compat.example/v1",
+		HTTPClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if err := json.NewDecoder(req.Body).Decode(&capturedBody); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			return jsonResponse(http.StatusOK, `{"choices":[{"message":{"content":"ok"}}]}`), nil
+		}),
+	}, Spec{
+		Name: "testcompat",
+		Auth: AuthSpec{APIKeyRequired: true},
+		Request: RequestSpec{
+			SupportsJSONSchema: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := provider.Chat(context.Background(), &core.Request{
+		Model: "m",
+		Messages: []core.Message{
+			core.UserText("read this image"),
+			core.Assistant(core.ToolUseBlock{ID: "call_1", Name: "read_media", Arguments: core.MustJSONRaw(map[string]any{"file_path": "/tmp/x.png"})}),
+			core.ToolResult("call_1", core.Text("/tmp/x.png"), core.ImageURL("https://example.test/x.png")),
+		},
+	}); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	msgs := capturedBody["messages"].([]any)
+	if len(msgs) != 4 {
+		t.Fatalf("got %d messages, want 4 (tool + reinjected user): %+v", len(msgs), msgs)
+	}
+	toolMsg, _ := msgs[2].(map[string]any)
+	if toolMsg["role"] != "tool" {
+		t.Fatalf("msgs[2] role = %v, want tool", toolMsg["role"])
+	}
+	if toolMsg["content"] != "/tmp/x.png" {
+		t.Fatalf("tool content = %v, want path-only text", toolMsg["content"])
+	}
+	reinject, _ := msgs[3].(map[string]any)
+	if reinject["role"] != "user" {
+		t.Fatalf("msgs[3] role = %v, want user (reinject)", reinject["role"])
+	}
+	parts := reinject["content"].([]any)
+	if len(parts) != 1 {
+		t.Fatalf("reinject parts = %d, want 1", len(parts))
+	}
+	imgPart, _ := parts[0].(map[string]any)
+	if imgPart["type"] != "image_url" {
+		t.Fatalf("reinject part type = %v, want image_url", imgPart["type"])
+	}
+}
+
+func TestToolResultTextOnlyNoReinject(t *testing.T) {
+	var capturedBody map[string]any
+	provider, err := New(Config{
+		APIKey:  "test-key",
+		BaseURL: "https://compat.example/v1",
+		HTTPClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if err := json.NewDecoder(req.Body).Decode(&capturedBody); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			return jsonResponse(http.StatusOK, `{"choices":[{"message":{"content":"ok"}}]}`), nil
+		}),
+	}, Spec{
+		Name: "testcompat",
+		Auth: AuthSpec{APIKeyRequired: true},
+		Request: RequestSpec{
+			SupportsJSONSchema: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := provider.Chat(context.Background(), &core.Request{
+		Model: "m",
+		Messages: []core.Message{
+			core.UserText("hi"),
+			core.Assistant(core.ToolUseBlock{ID: "call_1", Name: "lookup", Arguments: core.MustJSONRaw(map[string]any{"q": "x"})}),
+			core.ToolResultText("call_1", "ok"),
+		},
+	}); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	msgs := capturedBody["messages"].([]any)
+	if len(msgs) != 3 {
+		t.Fatalf("got %d messages, want 3 (no reinject for text-only result): %+v", len(msgs), msgs)
+	}
+}
