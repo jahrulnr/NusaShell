@@ -1156,6 +1156,11 @@ async function handleTodoDelete(itemId, btn) {
 
 function beginTurn(runId, userText, attachments = []) {
   stopButton().hidden = false;
+  // Reflect the running status immediately: composer steering routes on
+  // state.conversation.status (state.running is never set), and without
+  // this the next submit races a turns.start into a busy backend instead
+  // of entering steer mode directly.
+  if (state.conversation) state.conversation.status = 'running';
   updateSendAvailability(state);
 
   const thread = agentThread();
@@ -1519,6 +1524,11 @@ function endTurn(runId, keepRun = false) {
     return;
   }
   const convId = run.conversationId;
+  // Turn is terminal on the wire — mirror it so composer routing stops
+  // treating the room as running (see beginTurn).
+  const conv = state.conversations.find((c) => c.id === convId);
+  if (conv) conv.status = 'idle';
+  if (state.activeId === convId && state.conversation) state.conversation.status = 'idle';
   flushLiveRender(run);
   if (run.enhanceTimer) {
     clearTimeout(run.enhanceTimer);
