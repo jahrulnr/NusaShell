@@ -140,7 +140,6 @@ function appendBoundedLiveText(target, field, text) {
   const current = String(target[field] || '');
   if (value.length >= MAX_LIVE_ROUND_CHARS) {
     target[field] = value.slice(-MAX_LIVE_ROUND_CHARS);
-    target[`${field}Capped`] = true;
     return;
   }
   const next = current + value;
@@ -149,14 +148,12 @@ function appendBoundedLiveText(target, field, text) {
     return;
   }
   target[field] = next.slice(-MAX_LIVE_ROUND_CHARS);
-  target[`${field}Capped`] = true;
 }
 
 function trimRoomBuffer(buffer) {
   if (!buffer) return;
   let excess = buffer.raw.length + buffer.rawReasoning.length - MAX_ROOM_BUFFER_CHARS;
   if (excess <= 0) return;
-  buffer.capped = true;
   if (buffer.raw.length >= excess) {
     buffer.raw = buffer.raw.slice(excess);
     return;
@@ -183,29 +180,10 @@ function setLiveToolJob(toolJobs, toolCallID, job) {
   }
 }
 
-function updateLiveTrimNotice(run) {
-  const bubble = run?.bubble;
-  if (!bubble) return;
-  const capped = run.rawCapped || run.rawReasoningCapped;
-  const existing = bubble.querySelector(':scope > .agent-live-trimmed');
-  if (!capped) {
-    existing?.remove();
-    return;
-  }
-  if (existing) return;
-  bubble.prepend(el('div', {
-    class: 'agent-live-trimmed',
-    text: 'Earlier live output trimmed for performance; the full transcript appears when the turn finishes.',
-  }));
-}
-
 function resetLiveRoundText(run) {
   if (!run) return;
   run.raw = '';
   run.rawReasoning = '';
-  run.rawCapped = false;
-  run.rawReasoningCapped = false;
-  run.bubble?.querySelector(':scope > .agent-live-trimmed')?.remove();
 }
 
 // Active-message windowing sizes (messages, not turns). INITIAL_WINDOW keeps
@@ -624,8 +602,6 @@ async function openConversation(id) {
       toolJobs: buffer.toolJobs,
       raw: buffer.raw,
       rawReasoning: buffer.rawReasoning,
-      rawCapped: buffer.capped,
-      rawReasoningCapped: false,
       round: buffer.round,
       conversationId: state.activeId,
       runId: buffer.runId,
@@ -731,8 +707,6 @@ async function reattachActiveRunFromBackend() {
     toolJobs: hasLive ? liveBuffer.toolJobs : new Map(),
     raw: hasLive ? liveBuffer.raw : '',
     rawReasoning: hasLive ? liveBuffer.rawReasoning : '',
-    rawCapped: Boolean(hasLive && liveBuffer.capped),
-    rawReasoningCapped: false,
     round: hasLive ? (liveBuffer.round || 1) : 1,
     conversationId: conversationId, runId: active.run_id,
     messageId: hasLive ? (liveBuffer.messageId || active.message_id) : active.message_id,
@@ -957,7 +931,6 @@ function resetRoomBufferMirror(conversationId, run, round) {
   buffer.raw = '';
   buffer.rawReasoning = '';
   buffer.toolJobs = new Map();
-  buffer.capped = false;
   buffer.round = round || 1;
   buffer.messageId = run?.messageId ?? null;
 }
@@ -1004,8 +977,6 @@ function applyBufferedRunToDOM(convId) {
   if (!slot) return;
   const { bubble, reasoningEl, textBox, strip } = slot;
   slot.msgNode.classList.add('agent-pending');
-  if (run && buffer.capped) run.rawCapped = true;
-  if (buffer.capped) updateLiveTrimNotice({ bubble, rawCapped: true });
   if (roundAlreadyPersisted(source.messageId)) {
     // The turn finished server-side while the user was away; the snapshot
     // already renders this round. Leave the empty section attached (harmless
@@ -1457,7 +1428,6 @@ function renderLiveRun(run) {
   if (!textBox?.isConnected && !reasoningEl?.isConnected && !run.bubble?.isConnected) return;
 
   const enhanced = [];
-  updateLiveTrimNotice(run);
   const flushedToolDelta = flushPendingToolDeltas(run);
   if (flushedToolDelta) updateRoomInfo(state.conversation, state.messages);
 
@@ -2025,7 +1995,6 @@ function bindEvents() {
       buffer.raw = '';
       buffer.rawReasoning = '';
       buffer.toolJobs = new Map();
-      buffer.capped = false;
       touchRoomBuffer(buffer);
       refreshLiveDots();
       return;

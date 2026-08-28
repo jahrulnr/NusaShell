@@ -562,16 +562,8 @@ summary { outline: none; }
 .agent-reasoning-content a:hover { color: #ddc08a; }
 .agent-round {
   min-width: 0;
+  content-visibility: auto;
   contain-intrinsic-size: auto 120px;
-}
-.agent-live-trimmed {
-  width: min(100%, 790px);
-  margin: 0 0 7px;
-  padding: 4px 10px;
-  border-left: 1px solid #2a3748;
-  color: #8796aa;
-  font-size: 11px;
-  line-height: 1.4;
 }
 .agent-send-btn,
 .agent-new-conversation:hover,

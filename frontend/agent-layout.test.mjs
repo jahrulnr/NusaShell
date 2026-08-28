@@ -76,7 +76,10 @@ test('Live turns keep every round mounted; perf comes from content-visibility + 
   assert.match(agentView, /MAX_LIVE_ROUND_CHARS = 512 \* 1024/);
   assert.match(agentView, /MAX_LIVE_TOOL_JOBS = 128/);
   assert.match(agentView, /setLiveToolJob/);
-  assert.match(agentCSS, /\.agent-live-trimmed/);
+  // The raw-cap banner was taken out too: nothing in the live thread may be
+  // hidden or replaced by a notice — the 512KB memory caps stay, silently.
+  assert.doesNotMatch(agentCSS, /agent-live-trimmed/);
+  assert.doesNotMatch(agentView, /updateLiveTrimNotice|rawCapped|rawReasoningCapped/);
   assert.doesNotMatch(agentCSS, /agent-round-stub/);
   assert.doesNotMatch(parityCSS, /agent-round-stub/);
   assert.match(html, /id="agent-provider-status" aria-live="polite" aria-atomic="true"/);

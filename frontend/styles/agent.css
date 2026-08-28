@@ -490,15 +490,14 @@
 
 .agent-round {
   min-width: 0;
+  /* Live-turn overload guard (replaces the removed round-trimming):
+     off-screen rounds skip style recalc/layout/paint while staying fully
+     mounted, so long streaming turns never disappear from the DOM.
+     `auto` sizes from the last real render, keeping scroll anchoring stable.
+     The round being streamed is on-screen (user is pinned to the bottom),
+     so it always renders at full fidelity. */
+  content-visibility: auto;
   contain-intrinsic-size: auto 120px;
-}
-.agent-live-trimmed {
-  width: min(100%, 790px);
-  margin: 0 0 7px;
-  padding: 4px 10px;
-  border-left: 1px solid #2a3748;
-  color: #8796aa;
-  font: 11px/1.4 "IBM Plex Sans", system-ui, sans-serif;
 }
 
 /* Tool job cards */
