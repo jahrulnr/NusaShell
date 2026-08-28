@@ -231,7 +231,13 @@ func TestHydrationAgentsMD(t *testing.T) {
 	for i, c := range result.Messages[0].ToolCalls {
 		if c.Name == "file_read" {
 			idx = i
-			if c.Args != `{"path":"/ws/proj/AGENTS.md"}` {
+			// Decode the args and compare the path field so the check is
+			// platform-neutral (Windows backslashes are escaped in the raw
+			// JSON string).
+			var fa struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal([]byte(c.Args), &fa); err != nil || fa.Path != wantPath {
 				t.Errorf("file_read args = %s, want AGENTS.md path", c.Args)
 			}
 		}
