@@ -1,4 +1,4 @@
-package application
+package mediaread
 
 import (
 	"encoding/json"
@@ -51,7 +51,7 @@ func TestSniffMediaKindFromArgs(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			args, _ := json.Marshal(map[string]string{"file_path": tc.path})
-			got, err := sniffMediaKind(args)
+			got, err := SniffMediaKind(args)
 			if tc.want == "" {
 				if err == nil {
 					t.Fatalf("expected error for non-media file, got kind %q", got)
@@ -70,7 +70,7 @@ func TestSniffMediaKindFromArgs(t *testing.T) {
 
 func TestSniffMediaKindMissingPath(t *testing.T) {
 	args, _ := json.Marshal(map[string]string{})
-	_, err := sniffMediaKind(args)
+	_, err := SniffMediaKind(args)
 	if err == nil {
 		t.Fatal("expected error for missing file_path")
 	}
@@ -78,7 +78,7 @@ func TestSniffMediaKindMissingPath(t *testing.T) {
 
 func TestSniffMediaKindFileNotFound(t *testing.T) {
 	args, _ := json.Marshal(map[string]string{"file_path": "/nonexistent/path/file.png"})
-	_, err := sniffMediaKind(args)
+	_, err := SniffMediaKind(args)
 	if err == nil {
 		t.Fatal("expected error for non-existent file")
 	}

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"nusashell/application/internal/service/generatedmedia"
 	"nusashell/domain"
 )
 
@@ -416,7 +417,7 @@ func TestPersistGeneratedImagesNamesIndexedWhenNGreaterThanOne(t *testing.T) {
 
 func TestPersistGeneratedImagesRejectsOversize(t *testing.T) {
 	app := &App{Attachments: &memAttachmentStore{root: t.TempDir()}}
-	huge := make([]byte, maxGeneratedImageBytes+1)
+	huge := make([]byte, generatedmedia.MaxGeneratedImageBytes+1)
 	copy(huge, png1x1(t))
 	_, _, err := app.persistGeneratedImages("c1", "tc", &ImageGenResult{
 		Images: []GeneratedImage{{Bytes: huge, MediaType: "image/png"}},

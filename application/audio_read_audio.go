@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"nusashell/application/internal/service/mediaread"
+	"nusashell/application/internal/service/yamlmd"
 	"nusashell/domain"
 	"nusashell/resources"
 )
@@ -36,7 +38,7 @@ func (a *App) executeReadAudio(run *TurnRun, toolCall domain.ToolCall, caps Mode
 		return "error: file_path must be an absolute path", nil, fmt.Errorf("file_path must be absolute, got %q", path)
 	}
 
-	audio, err := loadMediaAttachment("audio", path)
+	audio, err := mediaread.LoadMediaAttachment("audio", path)
 	if err != nil {
 		return "error: " + err.Error(), nil, err
 	}
@@ -134,7 +136,7 @@ func (a *App) transcribeAudioOffline(audio domain.Attachment) (string, bool) {
 	if audio.FilePath != "" {
 		meta["file_path"] = audio.FilePath
 	}
-	return yamlMDApp(meta, result), true
+	return yamlmd.YAMLMD(meta, result), true
 }
 
 // transcribeAudioViaChat is the legacy multimodal chat fallback: send the
@@ -165,7 +167,7 @@ func (a *App) transcribeAudioViaChat(run *TurnRun, caps ModelCapabilities, setti
 	if audio.FilePath != "" {
 		meta["file_path"] = audio.FilePath
 	}
-	return yamlMDApp(meta, result), nil, nil
+	return yamlmd.YAMLMD(meta, result), nil, nil
 }
 
 // describeOneAudio sends an audio attachment to a multimodal chat model and

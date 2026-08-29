@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"nusashell/application/internal/service/tooloutput"
 	"nusashell/contracts"
 	"nusashell/domain"
 )
@@ -96,7 +97,7 @@ func TestWaitAcpRunReturnsPersistedPathAndLastTurnOnly(t *testing.T) {
 		t.Fatalf("full run was not persisted: %+v", storage.record)
 	}
 
-	providerOutput := providerToolContent("subagent_wait", output)
+	providerOutput := tooloutput.ProviderToolContent("subagent_wait", output)
 	if !strings.Contains(providerOutput, "Finished the fix.") ||
 		!strings.Contains(providerOutput, storage.path) {
 		t.Fatalf("provider summary lost compact result:\n%s", providerOutput)

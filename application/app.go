@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"nusashell/application/internal/service/learnedparams"
+	"nusashell/application/internal/service/modeloverrides"
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/core"
@@ -97,12 +99,12 @@ type App struct {
 	// learnedParamsCache mirrors the persisted dynamic 400-learning
 	// registry in memory so the hot path (request building) doesn't hit
 	// disk. Initialized once at App construction from LearnedParams store.
-	learnedParams *learnedParamsCache
+	learnedParams *learnedparams.Cache
 	// modelOverrides mirrors the persisted manual model-override registry
 	// in memory. Applied at resolve time AFTER learned 400-adaptations so
 	// manual corrections always win. Initialized once at App construction
 	// from the ModelOverrides store.
-	modelOverrides  *modelOverridesCache
+	modelOverrides  *modeloverrides.Cache
 	ReviewAgent     *BackgroundReviewAgent
 	lifecycle       *LifecycleManager
 	lifecycleCancel context.CancelFunc
@@ -560,8 +562,8 @@ func NewApp(deps Deps) *App {
 		turnsSinceReview:            map[string]int{},
 		toolCallsSinceReview:        map[string]int{},
 		pendingSubagents:            map[string]map[string]bool{},
-		learnedParams:               newLearnedParamsCache(deps.LearnedParams),
-		modelOverrides:              newModelOverridesCache(deps.ModelOverrides),
+		learnedParams:               learnedparams.New(deps.LearnedParams),
+		modelOverrides:              modeloverrides.New(deps.ModelOverrides),
 	}
 	// Wire the background LLM review agent. Uses the conversation's
 	// configured model ("global LLM") with a restricted toolset and the

@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode"
 
+	"nusashell/application/internal/service/attachments"
+	"nusashell/application/internal/service/generatedmedia"
+	"nusashell/application/internal/service/yamlmd"
 	"nusashell/domain"
 )
 
@@ -189,7 +191,7 @@ func (a *App) executeGenerateImage(run *TurnRun, toolCall domain.ToolCall, setti
 	if len(paths) > 1 {
 		body = fmt.Sprintf("%d images saved (%s). They are already displayed to the user in the UI — do not re-render them as Markdown images or file links. To edit one, pass its file_path in referenced_image_paths.", len(paths), strings.Join(paths, ", "))
 	}
-	return yamlMDApp(meta, body), atts, nil
+	return yamlmd.YAMLMD(meta, body), atts, nil
 }
 
 // loadImageReferences reads referenced images directly from disk by
@@ -205,9 +207,9 @@ func (a *App) loadImageReferences(paths []string) ([]ImageReference, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read referenced image %q: %w", path, err)
 		}
-		media := sniffMediaType(data)
+		media := attachments.SniffMediaType(data)
 		if media == "" {
-			media = sniffMediaType(data)
+			media = attachments.SniffMediaType(data)
 		}
 		switch strings.ToLower(strings.TrimSpace(media)) {
 		case "image/png", "image/jpeg", "image/webp":
@@ -257,7 +259,7 @@ func (a *App) persistGeneratedImages(conversationID, toolCallID string, result *
 // of total generated images ("gen-<id>" or "gen-<id>-<n>"); the extension
 // comes from the sniffed media type in saveGeneratedMedia.
 func generatedImageBaseName(toolCallID string, index, total int) string {
-	id := sanitizeFilePart(toolCallID)
+	id := generatedmedia.SanitizeFilePart(toolCallID)
 	if id == "" {
 		id = "image"
 	}
@@ -265,18 +267,6 @@ func generatedImageBaseName(toolCallID string, index, total int) string {
 		return fmt.Sprintf("gen-%s-%d", id, index+1)
 	}
 	return "gen-" + id
-}
-
-func sanitizeFilePart(value string) string {
-	var b strings.Builder
-	for _, r := range value {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' || r == '.' {
-			b.WriteRune(r)
-		} else {
-			b.WriteByte('_')
-		}
-	}
-	return b.String()
 }
 
 // generateImage runs the configured image generator with the app-level
@@ -357,7 +347,7 @@ func (a *App) hydrateAttachmentDataURLs(atts []domain.Attachment) []domain.Attac
 		}
 		media := out[i].MediaType
 		if media == "" {
-			media = sniffMediaType(data)
+			media = attachments.SniffMediaType(data)
 		}
 		if media == "" {
 			continue

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"nusashell/application/internal/service/learnedparams"
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/core"
 )
@@ -65,7 +66,7 @@ func TestStreamTurnRoundRetriesAfterLearnable400(t *testing.T) {
 		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
 		Toolbox:       &recordingToolbox{},
 		Bus:           NewBus(),
-		learnedParams: newLearnedParamsCache(&fakeLearnedParamStore{}),
+		learnedParams: learnedparams.New(&fakeLearnedParamStore{}),
 		retrySleeper:  func(context.Context, time.Duration) error { return nil },
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", ProviderID: "9router", Ctx: context.Background()}

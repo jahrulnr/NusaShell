@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"nusashell/application/internal/service/mediaread"
+	"nusashell/application/internal/service/yamlmd"
 	"nusashell/domain"
 	"nusashell/resources"
 )
@@ -42,7 +44,7 @@ func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps Mode
 		return "error: file_path must be an absolute path", nil, fmt.Errorf("file_path must be absolute, got %q", path)
 	}
 
-	video, err := loadMediaAttachment("video", path)
+	video, err := mediaread.LoadMediaAttachment("video", path)
 	if err != nil {
 		return "error: " + err.Error(), nil, err
 	}
@@ -95,7 +97,7 @@ func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps Mode
 	if video.FilePath != "" {
 		meta["file_path"] = video.FilePath
 	}
-	return yamlMDApp(meta, result), nil, nil
+	return yamlmd.YAMLMD(meta, result), nil, nil
 }
 
 // describeOneVideo sends a video attachment to a multimodal chat model and

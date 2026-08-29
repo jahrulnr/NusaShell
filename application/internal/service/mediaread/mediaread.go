@@ -1,4 +1,8 @@
-package application
+// Package mediaread loads media files from disk by absolute path and sniffs
+// their binary kind for the read_media tool. Extracted from the application
+// root so media tool handlers depend on a small leaf package instead of the
+// whole application package.
+package mediaread
 
 import (
 	"encoding/base64"
@@ -12,16 +16,16 @@ import (
 	"nusashell/domain"
 )
 
-// maxReadMediaBytes caps the size of a media file loaded by the read_media
+// MaxReadMediaBytes caps the size of a media file loaded by the read_media
 // tool into an inline data URL attachment. A var so tests can narrow it.
-var maxReadMediaBytes int64 = 100 << 20 // 100 MB
+var MaxReadMediaBytes int64 = 100 << 20 // 100 MB
 
-// sniffMediaKind reads the file_path from args (JSON), opens the file,
-// reads the first 32 bytes, and returns the media kind detected by
+// SniffMediaKind reads the file_path from args (JSON), opens the file,
+// reads the first 512 bytes, and returns the media kind detected by
 // domain.SniffMagic ("image", "audio", or "video"). Returns an error
 // when file_path is missing, the file cannot be read, or the magic
 // bytes do not match any known media format.
-func sniffMediaKind(argsJSON []byte) (string, error) {
+func SniffMediaKind(argsJSON []byte) (string, error) {
 	var args struct {
 		FilePath string `json:"file_path"`
 	}
@@ -50,7 +54,7 @@ func sniffMediaKind(argsJSON []byte) (string, error) {
 	return kind, nil
 }
 
-// loadMediaAttachment loads any media file directly from disk by absolute
+// LoadMediaAttachment loads any media file directly from disk by absolute
 // path and wraps it as an inline data-URL attachment. The filesystem is the
 // single source of truth: no conversation-history lookup happens here, so
 // paths outside the workspace and attachment store work identically to
@@ -61,7 +65,7 @@ func sniffMediaKind(argsJSON []byte) (string, error) {
 // renamed to .png); magic bytes cannot. When the sniffed kind does not
 // match the expected kind, or the bytes do not match any known media
 // signature, the file is rejected.
-func loadMediaAttachment(kind, path string) (domain.Attachment, error) {
+func LoadMediaAttachment(kind, path string) (domain.Attachment, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -72,10 +76,10 @@ func loadMediaAttachment(kind, path string) (domain.Attachment, error) {
 	if info.IsDir() {
 		return domain.Attachment{}, fmt.Errorf("path is a directory, not a %s file: %s", kind, path)
 	}
-	if info.Size() > maxReadMediaBytes {
+	if info.Size() > MaxReadMediaBytes {
 		return domain.Attachment{}, fmt.Errorf(
 			"%s file is %d bytes, exceeding the %d byte limit for inline loading",
-			kind, info.Size(), maxReadMediaBytes)
+			kind, info.Size(), MaxReadMediaBytes)
 	}
 
 	data, err := os.ReadFile(path)

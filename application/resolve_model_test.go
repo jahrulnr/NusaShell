@@ -3,6 +3,7 @@ package application
 import (
 	"testing"
 
+	"nusashell/application/internal/service/learnedparams"
 	"nusashell/domain"
 )
 
@@ -117,7 +118,7 @@ func TestResolveModelWithMetaAppliesLearnedOverrides(t *testing.T) {
 	}}
 	creds := &fakeCreds{keys: map[string]string{"tokenrouter": "tr-key"}}
 	store := &fakeLearnedParamStore{}
-	cache := newLearnedParamsCache(store)
+	cache := learnedparams.New(store)
 	cache.LearnFrom400("tokenrouter", "qwen/qwen3.8-max-free",
 		`Requested token count exceeds the model's maximum context length of 262144 tokens.`)
 	cache.LearnFrom400("tokenrouter", "qwen/qwen3.8-max-free",

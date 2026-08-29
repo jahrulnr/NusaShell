@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"nusashell/application/internal/service/generatedmedia"
+	"nusashell/application/internal/service/yamlmd"
 	"nusashell/domain"
 )
 
@@ -102,7 +104,7 @@ func (a *App) executeGenerateVideo(run *TurnRun, toolCall domain.ToolCall, setti
 	if result == nil || len(result.Video) == 0 {
 		return failGenerateVideo("video provider returned no video")
 	}
-	att, path, err := a.saveGeneratedMedia(run.ConversationID, "gen-"+sanitizeFilePart(toolCall.ID), "video", result.Video, true)
+	att, path, err := a.saveGeneratedMedia(run.ConversationID, "gen-"+generatedmedia.SanitizeFilePart(toolCall.ID), "video", result.Video, true)
 	if err != nil {
 		return failGenerateVideo(err.Error())
 	}
@@ -129,7 +131,7 @@ func (a *App) executeGenerateVideo(run *TurnRun, toolCall domain.ToolCall, setti
 	if len(refs) > 0 {
 		body = fmt.Sprintf("Video saved to %s (generated from %d reference image(s)).", path, len(refs))
 	}
-	return yamlMDApp(meta, body), []domain.Attachment{att}, nil
+	return yamlmd.YAMLMD(meta, body), []domain.Attachment{att}, nil
 }
 
 func failGenerateVideo(msg string) (string, []domain.Attachment, error) {

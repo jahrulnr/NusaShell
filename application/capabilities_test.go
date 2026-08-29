@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"nusashell/application/internal/service/learnedparams"
 	"nusashell/domain"
 )
 
@@ -77,7 +78,7 @@ func TestModelCapabilitiesFromMetadata(t *testing.T) {
 // loop in streamTurnRound handles the reactive path.
 func TestModelCapabilitiesLearnedDisablesVision(t *testing.T) {
 	store := &fakeLearnedParamStore{}
-	cache := newLearnedParamsCache(store)
+	cache := learnedparams.New(store)
 	cache.LearnFrom400("openrouter", "qwen3.8-max-free",
 		`Qwen3.8 open checkpoint is text-only; messages[131].content[1] must be a text part`)
 
@@ -93,7 +94,7 @@ func TestModelCapabilitiesLearnedDisablesVision(t *testing.T) {
 // learned disabled modality for one model does not leak to another.
 func TestModelCapabilitiesLearnedDoesNotAffectOtherModel(t *testing.T) {
 	store := &fakeLearnedParamStore{}
-	cache := newLearnedParamsCache(store)
+	cache := learnedparams.New(store)
 	cache.LearnFrom400("openrouter", "qwen3.8-max-free", `text-only`)
 
 	provider := &domain.Provider{ID: "openrouter", Models: nil}

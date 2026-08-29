@@ -1,4 +1,4 @@
-package application
+package mediaread
 
 import (
 	"encoding/json"
@@ -30,7 +30,7 @@ func TestLoadMediaAttachment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	att, err := loadMediaAttachment("audio", path)
+	att, err := LoadMediaAttachment("audio", path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestLoadMediaAttachment(t *testing.T) {
 
 func TestLoadMediaAttachmentNotFound(t *testing.T) {
 	dir := t.TempDir()
-	_, err := loadMediaAttachment("audio", filepath.Join(dir, "missing.mp3"))
+	_, err := LoadMediaAttachment("audio", filepath.Join(dir, "missing.mp3"))
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected not-found error, got: %v", err)
 	}
@@ -61,22 +61,22 @@ func TestLoadMediaAttachmentNotFound(t *testing.T) {
 
 func TestLoadMediaAttachmentDirectoryRejected(t *testing.T) {
 	dir := t.TempDir()
-	_, err := loadMediaAttachment("video", dir)
+	_, err := LoadMediaAttachment("video", dir)
 	if err == nil || !strings.Contains(err.Error(), "directory") {
 		t.Fatalf("expected directory error, got: %v", err)
 	}
 }
 
 func TestLoadMediaAttachmentRejectsOversizedFile(t *testing.T) {
-	orig := maxReadMediaBytes
-	maxReadMediaBytes = 16
-	defer func() { maxReadMediaBytes = orig }()
+	orig := MaxReadMediaBytes
+	MaxReadMediaBytes = 16
+	defer func() { MaxReadMediaBytes = orig }()
 
 	path := filepath.Join(t.TempDir(), "big.mp4")
 	if err := os.WriteFile(path, realMP4Header, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := loadMediaAttachment("video", path)
+	_, err := LoadMediaAttachment("video", path)
 	if err == nil || !strings.Contains(err.Error(), "exceeding") {
 		t.Fatalf("expected oversize error, got: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestLoadMediaAttachmentRejectsNonMedia(t *testing.T) {
 	if err := os.WriteFile(path, js, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := loadMediaAttachment("image", path)
+	_, err := LoadMediaAttachment("image", path)
 	if err == nil {
 		t.Fatal("expected error for non-media file with image extension, got nil")
 	}
@@ -115,7 +115,7 @@ func TestLoadMediaAttachmentRejectsKindMismatch(t *testing.T) {
 	if err := os.WriteFile(path, realMP3Header, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := loadMediaAttachment("image", path)
+	_, err := LoadMediaAttachment("image", path)
 	if err == nil {
 		t.Fatal("expected error for audio file loaded as image, got nil")
 	}
@@ -124,7 +124,7 @@ func TestLoadMediaAttachmentRejectsKindMismatch(t *testing.T) {
 	}
 }
 
-// TestSniffMediaKindDetectsSVGWithXMLProlog verifies that sniffMediaKind
+// TestSniffMediaKindDetectsSVGWithXMLProlog verifies that SniffMediaKind
 // reads enough bytes to find "<svg" past an XML prolog. The old 32-byte
 // read window missed SVGs with <?xml version="1.0" encoding="UTF-8"?>
 // because "<svg" appears at byte 38+.
@@ -138,9 +138,9 @@ func TestSniffMediaKindDetectsSVGWithXMLProlog(t *testing.T) {
 	if err := os.WriteFile(path, []byte(svg), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	kind, err := sniffMediaKind(mustMarshal(t, map[string]any{"file_path": path}))
+	kind, err := SniffMediaKind(mustMarshal(t, map[string]any{"file_path": path}))
 	if err != nil {
-		t.Fatalf("sniffMediaKind failed for SVG with XML prolog: %v", err)
+		t.Fatalf("SniffMediaKind failed for SVG with XML prolog: %v", err)
 	}
 	if kind != "image" {
 		t.Errorf("kind = %q, want image", kind)
@@ -158,7 +158,7 @@ func TestLoadMediaAttachmentRejectsSVGAsImageInput(t *testing.T) {
 	if err := os.WriteFile(path, svg, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := loadMediaAttachment("image", path)
+	_, err := LoadMediaAttachment("image", path)
 	if err == nil {
 		t.Fatal("expected error for SVG via read_media, got nil")
 	}
@@ -181,7 +181,7 @@ func TestLoadMediaAttachmentAcceptsRealPNG(t *testing.T) {
 	if err := os.WriteFile(path, realPNGHeader, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	att, err := loadMediaAttachment("image", path)
+	att, err := LoadMediaAttachment("image", path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestLoadMediaAttachmentAcceptsRealMP4(t *testing.T) {
 	if err := os.WriteFile(path, realMP4Header, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	att, err := loadMediaAttachment("video", path)
+	att, err := LoadMediaAttachment("video", path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestLoadMediaAttachmentRejectsEmptyFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := loadMediaAttachment("image", path)
+	_, err := LoadMediaAttachment("image", path)
 	if err == nil {
 		t.Fatal("expected error for empty file, got nil")
 	}

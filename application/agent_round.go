@@ -14,6 +14,8 @@ import (
 	"time"
 	"unicode"
 
+	"nusashell/application/internal/service/learnedparams"
+	"nusashell/application/internal/service/mediaread"
 	"nusashell/contracts"
 	"nusashell/domain"
 )
@@ -108,7 +110,7 @@ func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversatio
 			if action == domain.LearnedActionCapContext {
 				a.log("info", "learning", "capped context window for %s/%s to %s tokens from 400", providerName, model, param)
 			}
-			if action == domain.LearnedActionInject && strings.EqualFold(param, stripReasoningContentParam) {
+			if action == domain.LearnedActionInject && strings.EqualFold(param, learnedparams.StripReasoningContentParam) {
 				if !caps.ReasoningReplay {
 					caps.ReasoningReplay = true
 					a.log("info", "learning", "upgraded ReasoningReplay for %s/%s from 400 learning", providerName, model)
@@ -821,7 +823,7 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 	var err error
 	switch toolCall.Name {
 	case "read_media":
-		kind, sniffErr := sniffMediaKind([]byte(toolCall.Args))
+		kind, sniffErr := mediaread.SniffMediaKind([]byte(toolCall.Args))
 		if sniffErr != nil {
 			output = "error: " + sniffErr.Error()
 			err = sniffErr

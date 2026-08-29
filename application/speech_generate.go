@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"nusashell/application/internal/service/ttserr"
+	"nusashell/application/internal/service/yamlmd"
 	"nusashell/domain"
 )
 
@@ -53,7 +55,7 @@ func (a *App) executeGenerateSpeech(run *TurnRun, toolCall domain.ToolCall, sett
 	case "opus":
 		format = "opus"
 	default:
-		return "error: format must be one of: mp3, wav, opus", nil, errTTS("format must be one of: mp3, wav, opus")
+		return "error: format must be one of: mp3, wav, opus", nil, ttserr.ErrTTS("format must be one of: mp3, wav, opus")
 	}
 
 	req := TTSRequest{Text: text, Voice: strings.TrimSpace(args.Voice), Format: format, Speed: args.Speed}
@@ -114,7 +116,7 @@ func (a *App) persistTTSText(run *TurnRun, toolCallID string, result *TTSResult)
 		"voice": result.Voice, "media_type": result.MediaType, "file_path": path,
 	}
 	body := fmt.Sprintf("Speech generated and saved to %s.", path)
-	return yamlMDApp(meta, body), []domain.Attachment{att}, nil
+	return yamlmd.YAMLMD(meta, body), []domain.Attachment{att}, nil
 }
 
 // synthesizeOfflineTTS runs the local piper engine when wired and available.

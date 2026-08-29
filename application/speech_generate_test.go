@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"nusashell/application/internal/service/ttserr"
 	"nusashell/domain"
 )
 
@@ -109,7 +110,7 @@ func TestGenerateSpeechOnlineWins(t *testing.T) {
 }
 
 func TestGenerateSpeechFallsBackToOfflineWhenCloudFails(t *testing.T) {
-	online := &fakeOnlineTTS{err: errTTS("HTTP 503 down")}
+	online := &fakeOnlineTTS{err: ttserr.ErrTTS("HTTP 503 down")}
 	offline := &fakeOfflineTTS{available: true, result: &TTSResult{Audio: wavMagic(), MediaType: "audio/wav", Ext: "wav", Provider: "piper"}}
 	app := ttsApp(t, online, offline)
 	app.Settings = &fakeSettingsTTS{settings: domain.Settings{TTSProviderID: "ttsprov", TTSModelID: "tts-1"}}

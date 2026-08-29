@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"nusashell/application/internal/service/yamlmd"
 	"nusashell/domain"
 )
 
@@ -70,5 +71,5 @@ func (a *App) transcribeAudioViaSTT(ctx context.Context, provider *domain.Provid
 	if att.FilePath != "" {
 		meta["file_path"] = att.FilePath
 	}
-	return yamlMDApp(meta, result), nil, nil
+	return yamlmd.YAMLMD(meta, result), nil, nil
 }

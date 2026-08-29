@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"nusashell/application/internal/service/modeloverrides"
 	"nusashell/domain"
 )
 
@@ -146,7 +147,7 @@ func (r *BackgroundReviewAgent) executeModelOverride(argsJSON []byte) (output, s
 
 // formatOverrideList renders all current overrides as a compact, readable
 // table for the review agent's context.
-func (r *BackgroundReviewAgent) formatOverrideList(cache *modelOverridesCache) string {
+func (r *BackgroundReviewAgent) formatOverrideList(cache *modeloverrides.Cache) string {
 	list := cache.List()
 	if len(list) == 0 {
 		return "no model overrides currently set"

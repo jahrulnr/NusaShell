@@ -4,12 +4,13 @@ import (
 	"strings"
 	"testing"
 
+	"nusashell/application/internal/service/modeloverrides"
 	"nusashell/domain"
 )
 
 func newReviewAgentForOverrideTest(t *testing.T) *BackgroundReviewAgent {
 	t.Helper()
-	app := &App{modelOverrides: newModelOverridesCache(&fakeModelOverrideStore{})}
+	app := &App{modelOverrides: modeloverrides.New(&fakeModelOverrideStore{})}
 	return NewBackgroundReviewAgent(app, DefaultReviewSettings())
 }
 

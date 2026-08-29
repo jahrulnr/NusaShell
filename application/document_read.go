@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"nusashell/application/internal/service/mediaread"
 	"nusashell/domain"
 )
 
@@ -32,7 +33,7 @@ func (a *App) executeReadDocument(run *TurnRun, toolCall domain.ToolCall, caps M
 		return "error: file_path must be an absolute path", nil, fmt.Errorf("file_path must be absolute, got %q", path)
 	}
 
-	doc, err := loadMediaAttachment("document", path)
+	doc, err := mediaread.LoadMediaAttachment("document", path)
 	if err != nil {
 		return "error: " + err.Error(), nil, err
 	}

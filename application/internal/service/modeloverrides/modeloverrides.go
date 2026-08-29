@@ -1,4 +1,10 @@
-package application
+// Package modeloverrides maintains a process-local mirror of the persisted
+// manual model-override registry. It is loaded once at startup and mutated
+// in-memory as overrides are set or removed; the persisted copy is refreshed
+// on each mutation. Extracted from the application root so the model
+// resolution hot path depends on a small leaf package instead of the whole
+// application package.
+package modeloverrides
 
 import (
 	"sync"
@@ -6,23 +12,27 @@ import (
 	"nusashell/domain"
 )
 
-// modelOverridesCache is a process-local mirror of the persisted
-// ModelOverrideRegistry. It is loaded once at startup and mutated in-memory
-// as overrides are set or removed; the persisted copy is refreshed on each
-// mutation. This avoids a file read on every request (the registry is
-// consulted on the model-resolution hot path) while keeping persistence for
-// restart-safety. Mirrors learnedParamsCache.
-type modelOverridesCache struct {
-	mu       sync.RWMutex
-	registry *domain.ModelOverrideRegistry
-	store    ModelOverrideStore
+// Store is the persistence port for the override registry. The application
+// root's ModelOverrideStore satisfies this implicitly.
+type Store interface {
+	Load() *domain.ModelOverrideRegistry
+	Save(r *domain.ModelOverrideRegistry) error
 }
 
-func newModelOverridesCache(store ModelOverrideStore) *modelOverridesCache {
+// Cache is a process-local mirror of the persisted ModelOverrideRegistry.
+type Cache struct {
+	mu       sync.RWMutex
+	registry *domain.ModelOverrideRegistry
+	store    Store
+}
+
+// New creates a cache from the given store. When store is nil an empty
+// registry is used and mutations are not persisted.
+func New(store Store) *Cache {
 	if store == nil {
-		return &modelOverridesCache{registry: domain.NewModelOverrideRegistry()}
+		return &Cache{registry: domain.NewModelOverrideRegistry()}
 	}
-	return &modelOverridesCache{
+	return &Cache{
 		registry: store.Load(),
 		store:    store,
 	}
@@ -31,7 +41,7 @@ func newModelOverridesCache(store ModelOverrideStore) *modelOverridesCache {
 // Apply applies the manual override for provider+model to a model's
 // metadata in place. Safe to call on a nil cache; returns true when a field
 // changed.
-func (c *modelOverridesCache) Apply(m *domain.Model, provider, model string) bool {
+func (c *Cache) Apply(m *domain.Model, provider, model string) bool {
 	if c == nil || m == nil {
 		return false
 	}
@@ -42,7 +52,7 @@ func (c *modelOverridesCache) Apply(m *domain.Model, provider, model string) boo
 
 // Get returns the stored override for provider+model, or nil. Safe on nil
 // cache. The returned pointer is the live entry; callers must not mutate it.
-func (c *modelOverridesCache) Get(provider, model string) *domain.ModelOverride {
+func (c *Cache) Get(provider, model string) *domain.ModelOverride {
 	if c == nil {
 		return nil
 	}
@@ -53,7 +63,7 @@ func (c *modelOverridesCache) Get(provider, model string) *domain.ModelOverride 
 
 // List returns a snapshot of all stored overrides (for reporting/audit).
 // Safe on nil cache.
-func (c *modelOverridesCache) List() []*domain.ModelOverride {
+func (c *Cache) List() []*domain.ModelOverride {
 	if c == nil {
 		return nil
 	}
@@ -70,7 +80,7 @@ func (c *modelOverridesCache) List() []*domain.ModelOverride {
 // Set validates and stores (or merges) an override, then persists the
 // registry. Returns the validation error when rejected. Safe on nil cache
 // (no-op, returns nil) so callers without a configured store do not fail.
-func (c *modelOverridesCache) Set(o *domain.ModelOverride) error {
+func (c *Cache) Set(o *domain.ModelOverride) error {
 	if c == nil {
 		return nil
 	}
@@ -90,7 +100,7 @@ func (c *modelOverridesCache) Set(o *domain.ModelOverride) error {
 
 // Remove deletes the override for provider+model and persists the registry.
 // Returns true when an entry was removed. Safe on nil cache.
-func (c *modelOverridesCache) Remove(provider, model string) bool {
+func (c *Cache) Remove(provider, model string) bool {
 	if c == nil {
 		return false
 	}

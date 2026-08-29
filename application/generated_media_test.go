@@ -29,61 +29,6 @@ func newMediaApp() *App {
 	return &App{Attachments: &stubAttach{}}
 }
 
-func TestSaveGeneratedMediaAcceptsValidPNG(t *testing.T) {
-	app := newMediaApp()
-	att, path, err := app.saveGeneratedMedia("c1", "gen-tc1", "image", pngMagic, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if att.MediaType != "image/png" || att.Type != "image" || path == "" {
-		t.Fatalf("unexpected attachment %+v path %q", att, path)
-	}
-	if len(att.DataURL) == 0 {
-		t.Error("expected data URL")
-	}
-}
-
-func TestSaveGeneratedMediaRejectsMislabeledBytes(t *testing.T) {
-	app := newMediaApp()
-	if _, _, err := app.saveGeneratedMedia("c1", "gen-x", "image", []byte("this is definitely not an image"), true); err == nil {
-		t.Fatal("non-media bytes must be rejected")
-	}
-	if _, _, err := app.saveGeneratedMedia("c1", "gen-x", "image", mp4Magic(), true); err == nil {
-		t.Fatal("mp4 bytes must be rejected for kind=image")
-	}
-}
-
-func TestSaveGeneratedMediaAcceptsMP4AsVideo(t *testing.T) {
-	app := newMediaApp()
-	att, _, err := app.saveGeneratedMedia("c1", "gen-vid", "video", mp4Magic(), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if att.MediaType != "video/mp4" || att.Name[len(att.Name)-4:] != ".mp4" {
-		t.Fatalf("unexpected attachment %+v", att)
-	}
-}
-
-func TestSaveGeneratedMediaRejectsEmptyAndUnknownKind(t *testing.T) {
-	app := newMediaApp()
-	if _, _, err := app.saveGeneratedMedia("c1", "gen-x", "video", nil, true); err == nil {
-		t.Fatal("empty data must be rejected")
-	}
-	if _, _, err := app.saveGeneratedMedia("c1", "gen-x", "hologram", pngMagic, true); err == nil {
-		t.Fatal("unknown kind must be rejected")
-	}
-}
-
-func TestSaveGeneratedMediaCapEnforced(t *testing.T) {
-	app := newMediaApp()
-	old := generatedMediaCaps["image"]
-	generatedMediaCaps["image"] = 8
-	defer func() { generatedMediaCaps["image"] = old }()
-	if _, _, err := app.saveGeneratedMedia("c1", "gen-x", "image", pngMagic, true); err == nil {
-		t.Fatal("over-cap data must be rejected")
-	}
-}
-
 // TestExecuteGenerateMediaRoutesByType pins the unified generate_media
 // dispatch: media_type picks the executor, and legacy names from older
 // conversations fall back by tool name when media_type is absent.

@@ -1,4 +1,8 @@
-package application
+// Package attachments validates and converts wire-level attachment DTOs into
+// domain Attachment values. Extracted from the application root so the agent
+// runner and media generators depend on a small leaf package instead of the
+// whole application package.
+package attachments
 
 import (
 	"bytes"
@@ -12,17 +16,20 @@ import (
 )
 
 const (
-	maxAttachmentsPerTurn = 4
-	maxAttachmentBytes    = 4 * 1024 * 1024
+	MaxAttachmentsPerTurn = 4
+	MaxAttachmentBytes    = 4 * 1024 * 1024
 )
 
-func attachmentsFromDTO(input []contracts.AttachmentDTO) ([]domain.Attachment, *contracts.RPCError) {
-	if len(input) > maxAttachmentsPerTurn {
+// AttachmentsFromDTO converts a slice of wire attachment DTOs into domain
+// Attachments, enforcing the per-turn count limit. Returns a contracts-level
+// validation error when the input is rejected.
+func AttachmentsFromDTO(input []contracts.AttachmentDTO) ([]domain.Attachment, *contracts.RPCError) {
+	if len(input) > MaxAttachmentsPerTurn {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "a turn can include up to 4 attachments"}
 	}
 	attachments := make([]domain.Attachment, 0, len(input))
 	for _, item := range input {
-		attachment, err := attachmentFromDTO(item)
+		attachment, err := AttachmentFromDTO(item)
 		if err != nil {
 			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
 		}
@@ -31,7 +38,7 @@ func attachmentsFromDTO(input []contracts.AttachmentDTO) ([]domain.Attachment, *
 	return attachments, nil
 }
 
-func attachmentFromDTO(item contracts.AttachmentDTO) (domain.Attachment, error) {
+func AttachmentFromDTO(item contracts.AttachmentDTO) (domain.Attachment, error) {
 	attachment := domain.Attachment{
 		Type: strings.TrimSpace(item.Type), Name: strings.TrimSpace(item.Name),
 		MediaType: strings.TrimSpace(item.MediaType), Content: item.Content, DataURL: item.DataURL,
@@ -48,7 +55,7 @@ func attachmentFromDTO(item contracts.AttachmentDTO) (domain.Attachment, error) 
 		if !utf8.ValidString(attachment.Content) {
 			return domain.Attachment{}, errAttachment("text attachment must contain UTF-8 text")
 		}
-		if len([]byte(attachment.Content)) > maxAttachmentBytes {
+		if len([]byte(attachment.Content)) > MaxAttachmentBytes {
 			return domain.Attachment{}, errAttachment(attachment.Name + " is larger than 4 MiB")
 		}
 	case "image":
@@ -97,16 +104,18 @@ func validateDataURL(dataURL, mediaType, name string) error {
 	if err != nil || len(data) == 0 {
 		return errAttachment("invalid data for " + name)
 	}
-	if len(data) > maxAttachmentBytes {
+	if len(data) > MaxAttachmentBytes {
 		return errAttachment(name + " is larger than 4 MiB")
 	}
-	if sniffed := sniffMediaType(data); sniffed != mediaType {
+	if sniffed := SniffMediaType(data); sniffed != mediaType {
 		return errAttachment("invalid data for " + name)
 	}
 	return nil
 }
 
-func sniffMediaType(data []byte) string {
+// SniffMediaType identifies common image/document formats by their binary
+// magic numbers. Returns the media type or "" when unknown.
+func SniffMediaType(data []byte) string {
 	switch {
 	case bytes.HasPrefix(data, []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}):
 		return "image/png"

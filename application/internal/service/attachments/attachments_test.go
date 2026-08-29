@@ -1,4 +1,4 @@
-package application
+package attachments
 
 import (
 	"encoding/base64"
@@ -10,7 +10,7 @@ import (
 )
 
 func TestTextAttachmentRejectsInvalidUTF8(t *testing.T) {
-	_, err := attachmentFromDTO(contracts.AttachmentDTO{
+	_, err := AttachmentFromDTO(contracts.AttachmentDTO{
 		Type: "text", Name: "note.txt", MediaType: "text/plain",
 		Content: string([]byte{0xff, 0xfe}),
 	})
@@ -21,7 +21,7 @@ func TestTextAttachmentRejectsInvalidUTF8(t *testing.T) {
 
 func TestImageAttachmentRejectsMismatchedMagicBytes(t *testing.T) {
 	payload := base64.StdEncoding.EncodeToString([]byte("not a png"))
-	_, err := attachmentFromDTO(contracts.AttachmentDTO{
+	_, err := AttachmentFromDTO(contracts.AttachmentDTO{
 		Type: "image", Name: "diagram.png", MediaType: "image/png",
 		DataURL: "data:image/png;base64," + payload,
 	})
@@ -33,7 +33,7 @@ func TestImageAttachmentRejectsMismatchedMagicBytes(t *testing.T) {
 func TestPNGAttachmentAcceptsSignature(t *testing.T) {
 	png := []byte{137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3}
 	payload := base64.StdEncoding.EncodeToString(png)
-	got, err := attachmentFromDTO(contracts.AttachmentDTO{
+	got, err := AttachmentFromDTO(contracts.AttachmentDTO{
 		Type: "image", Name: "diagram.png", MediaType: "image/png",
 		DataURL: "data:image/png;base64," + payload,
 	})
@@ -50,7 +50,7 @@ func TestAttachmentCountLimit(t *testing.T) {
 	for i := range items {
 		items[i] = contracts.AttachmentDTO{Type: "text", Name: "n.txt", MediaType: "text/plain", Content: "x"}
 	}
-	_, rpcErr := attachmentsFromDTO(items)
+	_, rpcErr := AttachmentsFromDTO(items)
 	if rpcErr == nil {
 		t.Fatal("want validation error for more than 4 attachments")
 	}
@@ -60,7 +60,7 @@ func TestAttachmentCountLimit(t *testing.T) {
 }
 
 func TestFolderAttachmentRequiresAbsolutePath(t *testing.T) {
-	_, err := attachmentFromDTO(contracts.AttachmentDTO{
+	_, err := AttachmentFromDTO(contracts.AttachmentDTO{
 		Type: "folder", Name: "my-project", FilePath: "relative/path",
 	})
 	if err == nil {
@@ -69,7 +69,7 @@ func TestFolderAttachmentRequiresAbsolutePath(t *testing.T) {
 }
 
 func TestFolderAttachmentRequiresFilePath(t *testing.T) {
-	_, err := attachmentFromDTO(contracts.AttachmentDTO{
+	_, err := AttachmentFromDTO(contracts.AttachmentDTO{
 		Type: "folder", Name: "my-project",
 	})
 	if err == nil {
@@ -81,7 +81,7 @@ func TestFolderAttachmentAcceptsAbsolutePath(t *testing.T) {
 	// Build a path that is absolute on the current OS: "C:\home\user\project"
 	// on Windows, "/home/user/project" on Unix.
 	absPath := filepath.Join(filepath.VolumeName("C:"), string(filepath.Separator), "home", "user", "project")
-	got, err := attachmentFromDTO(contracts.AttachmentDTO{
+	got, err := AttachmentFromDTO(contracts.AttachmentDTO{
 		Type: "folder", Name: "my-project", FilePath: absPath,
 	})
 	if err != nil {

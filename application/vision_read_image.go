@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"nusashell/application/internal/service/mediaread"
+	"nusashell/application/internal/service/yamlmd"
 	"nusashell/domain"
 )
 
@@ -39,7 +41,7 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps Mode
 		return "error: file_path must be an absolute path", nil, fmt.Errorf("file_path must be absolute, got %q", path)
 	}
 
-	image, err := loadMediaAttachment("image", path)
+	image, err := mediaread.LoadMediaAttachment("image", path)
 	if err != nil {
 		return "error: " + err.Error(), nil, err
 	}
@@ -93,5 +95,5 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps Mode
 	if image.FilePath != "" {
 		meta["file_path"] = image.FilePath
 	}
-	return yamlMDApp(meta, result), nil, nil
+	return yamlmd.YAMLMD(meta, result), nil, nil
 }

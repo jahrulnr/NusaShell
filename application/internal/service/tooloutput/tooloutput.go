@@ -1,4 +1,7 @@
-package application
+// Package tooloutput wraps and summarizes tool results before they are sent
+// to the model. Extracted from the application root so the agent runner
+// depends on a small leaf package instead of the whole application package.
+package tooloutput
 
 import (
 	"encoding/json"
@@ -14,13 +17,13 @@ import (
 // forge an open/close tag to escape the envelope.
 var delimiterVariantRe = regexp.MustCompile(`untrusted[-_]tool[-_]result`)
 
-// wrapToolOutput wraps every tool payload in an <untrusted_tool_result>
+// WrapToolOutput wraps every tool payload in an <untrusted_tool_result>
 // envelope before sending it to the model. It does not matter whether the
 // source is a local built-in (file_read, exec, grep) or an external MCP
 // server — all tool output is treated as untrusted data. The wrapper is
 // ephemeral: it is applied only when building provider messages, never
 // persisted to the conversation store.
-func wrapToolOutput(toolName, rawOutput string) string {
+func WrapToolOutput(toolName, rawOutput string) string {
 	safe := delimiterVariantRe.ReplaceAllString(rawOutput, "untrusted tool result")
 	var sb strings.Builder
 	sb.WriteString("<untrusted_tool_result source=\"")
@@ -31,13 +34,13 @@ func wrapToolOutput(toolName, rawOutput string) string {
 	return sb.String()
 }
 
-// summarizeToolContent returns the tool result content with summarization
+// SummarizeToolContent returns the tool result content with summarization
 // applied (show/subagent tools get short summaries) but WITHOUT the untrusted
 // envelope. The caller is responsible for wrapping the result via
-// wrapToolOutput after any additional content manipulation (e.g. capability
+// WrapToolOutput after any additional content manipulation (e.g. capability
 // filtering notes). This ensures all tool-derived content — including
 // appended notes — lands inside the untrusted envelope.
-func summarizeToolContent(toolName, rawOutput string) string {
+func SummarizeToolContent(toolName, rawOutput string) string {
 	if toolName == "show" {
 		if summary, ok := summarizeShowOutput(rawOutput); ok {
 			return summary
@@ -52,15 +55,15 @@ func summarizeToolContent(toolName, rawOutput string) string {
 	return rawOutput
 }
 
-// providerToolContent returns the tool result content that is sent to the
+// ProviderToolContent returns the tool result content that is sent to the
 // provider. For most tools this is the full output wrapped in the untrusted
 // envelope. For the show tool the output is replaced with a short summary —
 // the show tool is UI-only, the model does not need the payload. (The
 // backend no longer embeds base64 data URLs in the output at all; the
 // summarizer produces a text description from the metadata fields.) The
 // full output is still persisted in tc.Output for the frontend.
-func providerToolContent(toolName, rawOutput string) string {
-	return wrapToolOutput(toolName, summarizeToolContent(toolName, rawOutput))
+func ProviderToolContent(toolName, rawOutput string) string {
+	return WrapToolOutput(toolName, SummarizeToolContent(toolName, rawOutput))
 }
 
 // summarizeShowOutput parses a show tool result and returns a short text

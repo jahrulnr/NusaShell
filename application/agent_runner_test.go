@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"nusashell/application/internal/service/learnedparams"
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/core"
@@ -300,7 +301,7 @@ func TestResolveContextWindowModelWinsOverGlobalCap(t *testing.T) {
 // from a provider 400 overflow error overrides the catalog value.
 func TestResolveContextWindowLearnedCap(t *testing.T) {
 	store := &fakeLearnedParamStore{}
-	cache := newLearnedParamsCache(store)
+	cache := learnedparams.New(store)
 	cache.LearnFrom400("tokenrouter", "qwen/qwen3.8-max-free",
 		`Requested token count exceeds the model's maximum context length of 262144 tokens.`)
 
@@ -322,7 +323,7 @@ func TestResolveContextWindowLearnedCap(t *testing.T) {
 	}
 
 	// A cap larger than the catalog value is ignored entirely.
-	bigCache := newLearnedParamsCache(&fakeLearnedParamStore{})
+	bigCache := learnedparams.New(&fakeLearnedParamStore{})
 	bigCache.LearnFrom400("tokenrouter", "qwen/qwen3.8-max-free",
 		`This model's maximum context length is 2_000_000 tokens.`)
 	bigApp := &App{learnedParams: bigCache}

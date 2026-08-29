@@ -8,6 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"nusashell/application/internal/service/attachments"
+	"nusashell/application/internal/service/learnedparams"
+	"nusashell/application/internal/service/modeloverrides"
+	"nusashell/application/internal/service/tooloutput"
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/resources"
@@ -20,7 +24,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 		return nil, rpcErr
 	}
 	text := strings.TrimSpace(req.Text)
-	attachments, rpcErr := attachmentsFromDTO(req.Attachments)
+	attachments, rpcErr := attachments.AttachmentsFromDTO(req.Attachments)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
@@ -484,7 +488,7 @@ func (a *App) handleTurnsSteer(_ context.Context, req contracts.TurnSteerRequest
 	if run == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "no active turn for this conversation"}
 	}
-	attachments, rpcErr := attachmentsFromDTO(req.Attachments)
+	attachments, rpcErr := attachments.AttachmentsFromDTO(req.Attachments)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
@@ -1329,7 +1333,7 @@ func (a *App) compactConversation(ctx context.Context, adapter ProviderContext, 
 				msgs = append(msgs, ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: calls})
 				for _, tc := range calls {
 					msgs = append(msgs, ChatMessage{Role: "tool", ToolResult: &ToolResult{
-						ToolCallID: tc.ID, Name: tc.Name, Content: providerToolContent(tc.Name, tc.Output),
+						ToolCallID: tc.ID, Name: tc.Name, Content: tooloutput.ProviderToolContent(tc.Name, tc.Output),
 					}})
 				}
 			}
@@ -1729,7 +1733,7 @@ func modelCapabilities(provider *domain.Provider, model string) ModelCapabilitie
 // cache is nil, no learned overrides are applied; when manual is nil, no
 // manual overrides are applied. Precedence: catalog → learned → manual
 // (manual is applied last so it always wins).
-func modelCapabilitiesWithLearned(provider *domain.Provider, model string, cache *learnedParamsCache, manual *modelOverridesCache) ModelCapabilities {
+func modelCapabilitiesWithLearned(provider *domain.Provider, model string, cache *learnedparams.Cache, manual *modeloverrides.Cache) ModelCapabilities {
 	dc := domain.ModelCapabilitiesOf(provider, model)
 	caps := ModelCapabilities{Vision: dc.Vision, Audio: dc.Audio, Video: dc.Video, Document: dc.Document}
 	if provider != nil {
@@ -1901,12 +1905,12 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 				// appending notes after wrapping would let a malicious
 				// tool craft a file path containing injection
 				// instructions that the model treats as trusted content.
-				toolContent := summarizeToolContent(tc.Name, tc.Output)
+				toolContent := tooloutput.SummarizeToolContent(tc.Name, tc.Output)
 				toolAtts := tc.OutputAttachments
 				if len(toolAtts) > 0 {
 					toolAtts, toolContent = filterToolAttachmentsByCaps(toolAtts, toolContent, caps)
 				}
-				toolContent = wrapToolOutput(tc.Name, toolContent)
+				toolContent = tooloutput.WrapToolOutput(tc.Name, toolContent)
 				out = append(out, ChatMessage{Role: "tool", ToolResult: &ToolResult{
 					ToolCallID: tc.ID, Name: tc.Name, Content: toolContent,
 					Attachments: toolAtts,
