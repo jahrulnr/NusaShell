@@ -128,3 +128,21 @@ func TestExecuteReadVideoRejectsRelativePath(t *testing.T) {
 		t.Errorf("output should mention absolute path required, got: %q", output)
 	}
 }
+
+func TestDescribeVideosWithFallbackSkipsExistingDescription(t *testing.T) {
+	adapter := &fakeVisionAdapter{description: "should not run"}
+	var factoryCalls int
+	app := visionFallbackTestApp(adapter, &factoryCalls)
+	settings := domain.Settings{VideoProviderID: "vision-prov", VideoModelID: "gpt-4o"}
+	atts := []domain.Attachment{
+		{Type: "video", Name: "clip.mp4", MediaType: "video/mp4", DataURL: "data:video/mp4;base64,AAA="},
+		{Type: "text", Name: "video:clip.mp4", MediaType: "text/plain", Content: "[Video description for clip.mp4]\nexisting"},
+	}
+	out := app.describeVideosWithFallback(context.Background(), settings, atts)
+	if len(out) != 2 {
+		t.Fatalf("expected unchanged attachments, got %d", len(out))
+	}
+	if factoryCalls != 0 || adapter.calls != 0 {
+		t.Fatalf("video fallback called factory=%d chat=%d, want 0/0", factoryCalls, adapter.calls)
+	}
+}

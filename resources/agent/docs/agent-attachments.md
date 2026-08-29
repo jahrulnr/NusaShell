@@ -29,8 +29,12 @@ When the active chat model does not support vision but the user has
 configured a **Vision fallback model** in settings (VisionProviderID +
 VisionModelID), the agent describes each attached image using the fallback
 vision model before the first turn round. The description is injected as a
-text attachment on the user message. The original image is preserved so a
-later switch to a vision-capable model can still see it.
+text attachment named `vision:<filename>` on the user message. The original
+image is preserved so a later switch to a vision-capable model can still
+see it. Retries and later turns skip any image that already has that text
+attachment — the fallback model is not called again and descriptions are
+not duplicated. Audio (`audio:<filename>`) and video (`video:<filename>`)
+follow the same skip.
 
 If no fallback is configured, non-vision models receive the text placeholder
 described above.
@@ -157,6 +161,8 @@ This is the same handling for image, audio, video, and document (PDF):
    `enrichWithVideoDescriptions`): when a fallback model is configured,
    the media is described via the fallback before the turn starts, so
    the text-only model receives the content as a text attachment.
+   Images, audio, and video that already have a matching
+   `vision:` / `audio:` / `video:` text attachment are skipped on retry.
 
 A model's capabilities are resolved from the provider catalog
 (`domain.ModelCapabilitiesOf`). Unknown models default to

@@ -17,11 +17,13 @@ type fakeVisionAdapter struct {
 	// reasoningOnly simulates reasoning models (e.g. dots-3-note) that put
 	// their output in Reasoning instead of Content.
 	reasoningOnly bool
+	calls         int
 }
 
 func (f *fakeVisionAdapter) Name() string { return "fake-vision" }
 
 func (f *fakeVisionAdapter) Chat(_ context.Context, _ *core.Request) (*core.Response, error) {
+	f.calls++
 	resp := &core.Response{FinishReason: core.FinishReasonStop}
 	if f.reasoningOnly {
 		resp.Blocks = append(resp.Blocks, core.ReasoningBlock{Text: f.description})
@@ -184,5 +186,121 @@ func TestDescribeImagesWithFallbackReasoningOnlyModel(t *testing.T) {
 	}
 	if !strings.Contains(desc.Content, "sunset") {
 		t.Errorf("description should contain reasoning output, got: %q", desc.Content)
+	}
+}
+
+func visionFallbackTestApp(adapter *fakeVisionAdapter, factoryCalls *int) *App {
+	return &App{
+		Logs: &fakeLogStore{},
+		Bus:  NewBus(),
+		Providers: &fakeProviderStore{items: map[string]*domain.Provider{
+			"vision-prov": {ID: "vision-prov", Enabled: true, Kind: domain.ProviderChat},
+		}},
+		Credentials: &fakeVisionCredStore{creds: map[string]string{"vision-prov": "key"}},
+		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (core.Provider, error) {
+			if factoryCalls != nil {
+				*factoryCalls++
+			}
+			return adapter, nil
+		},
+	}
+}
+
+// TestDescribeImagesWithFallbackSkipsExistingDescription is the retry bug:
+// a preserved image plus an existing vision:<name> text must not call the
+// fallback model again or append a duplicate description.
+func TestDescribeImagesWithFallbackSkipsExistingDescription(t *testing.T) {
+	adapter := &fakeVisionAdapter{description: "should not run"}
+	var factoryCalls int
+	app := visionFallbackTestApp(adapter, &factoryCalls)
+	settings := domain.Settings{VisionProviderID: "vision-prov", VisionModelID: "gpt-4o"}
+	atts := []domain.Attachment{
+		{Type: "image", Name: "image.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
+		{Type: "text", Name: "vision:image.png", MediaType: "text/plain", Content: "[Image description for image.png]\nexisting"},
+	}
+	out := app.describeImagesWithFallback(context.Background(), settings, atts)
+	if len(out) != 2 {
+		t.Fatalf("expected unchanged attachments, got %d", len(out))
+	}
+	if factoryCalls != 0 {
+		t.Fatalf("fallback factory called %d times, want 0", factoryCalls)
+	}
+	if adapter.calls != 0 {
+		t.Fatalf("vision Chat called %d times, want 0", adapter.calls)
+	}
+	nDesc := 0
+	for _, a := range out {
+		if a.Name == "vision:image.png" {
+			nDesc++
+		}
+	}
+	if nDesc != 1 {
+		t.Fatalf("description attachments = %d, want 1", nDesc)
+	}
+}
+
+func TestDescribeImagesWithFallbackDescribesOnlyNewImages(t *testing.T) {
+	adapter := &fakeVisionAdapter{description: "a dog on a sofa"}
+	var factoryCalls int
+	app := visionFallbackTestApp(adapter, &factoryCalls)
+	settings := domain.Settings{VisionProviderID: "vision-prov", VisionModelID: "gpt-4o"}
+	atts := []domain.Attachment{
+		{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
+		{Type: "text", Name: "vision:cat.png", MediaType: "text/plain", Content: "[Image description for cat.png]\nalready described"},
+		{Type: "image", Name: "dog.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
+	}
+	out := app.describeImagesWithFallback(context.Background(), settings, atts)
+	if adapter.calls != 1 {
+		t.Fatalf("vision Chat called %d times, want 1 (only the undescribed image)", adapter.calls)
+	}
+	nCat, nDog := 0, 0
+	for _, a := range out {
+		switch a.Name {
+		case "vision:cat.png":
+			nCat++
+		case "vision:dog.png":
+			nDog++
+			if !strings.Contains(a.Content, "dog on a sofa") {
+				t.Errorf("new description should contain fallback output, got: %q", a.Content)
+			}
+		}
+	}
+	if nCat != 1 || nDog != 1 {
+		t.Fatalf("vision:cat.png=%d vision:dog.png=%d, want 1 and 1 (got %d attachments)", nCat, nDog, len(out))
+	}
+}
+
+func TestEnrichWithVisionDescriptionsSkipsWhenAlreadyDescribed(t *testing.T) {
+	adapter := &fakeVisionAdapter{description: "should not run"}
+	var factoryCalls int
+	app := visionFallbackTestApp(adapter, &factoryCalls)
+	conv := &domain.Conversation{
+		ID: "c1",
+		Messages: []domain.Message{
+			{
+				ID:   "u1",
+				Role: domain.RoleUser,
+				Attachments: []domain.Attachment{
+					{Type: "image", Name: "image.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
+					{Type: "text", Name: "vision:image.png", MediaType: "text/plain", Content: "[Image description for image.png]\nexisting"},
+				},
+			},
+			{ID: "a1", Role: domain.RoleAssistant, Status: domain.StatusDone},
+		},
+	}
+	app.Conversations = &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	settings := domain.Settings{VisionProviderID: "vision-prov", VisionModelID: "gpt-4o"}
+	out := app.enrichWithVisionDescriptions(context.Background(), conv, "a1", settings)
+	if factoryCalls != 0 || adapter.calls != 0 {
+		t.Fatalf("retry enrich called factory=%d chat=%d, want 0/0", factoryCalls, adapter.calls)
+	}
+	nDesc := 0
+	for _, a := range out.Messages[0].Attachments {
+		if a.Name == "vision:image.png" {
+			nDesc++
+		}
+	}
+	if nDesc != 1 {
+		t.Fatalf("description attachments = %d, want 1", nDesc)
 	}
 }

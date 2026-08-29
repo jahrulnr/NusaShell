@@ -145,12 +145,7 @@ func (a *App) describeVideosWithFallback(ctx context.Context, settings domain.Se
 	if settings.VideoProviderID == "" || settings.VideoModelID == "" {
 		return attachments
 	}
-	var videoIdxs []int
-	for i, att := range attachments {
-		if att.Type == "video" {
-			videoIdxs = append(videoIdxs, i)
-		}
-	}
+	videoIdxs := undescribedMediaIndexes(attachments, "video", mediaDescPrefixVideo)
 	if len(videoIdxs) == 0 {
 		return attachments
 	}
@@ -179,7 +174,7 @@ func (a *App) describeVideosWithFallback(ctx context.Context, settings domain.Se
 		}
 		out = append(out, domain.Attachment{
 			Type:      "text",
-			Name:      "video:" + vid.Name,
+			Name:      mediaDescPrefixVideo + vid.Name,
 			MediaType: "text/plain",
 			Content:   fmt.Sprintf("[Video description for %s]\n%s", vid.Name, description),
 		})
@@ -205,19 +200,13 @@ func (a *App) enrichWithVideoDescriptions(ctx context.Context, conversation *dom
 		return conversation
 	}
 	userMsg := &conversation.Messages[userMsgIdx]
-	hasVideo := false
-	for _, att := range userMsg.Attachments {
-		if att.Type == "video" {
-			hasVideo = true
-			break
-		}
-	}
-	if !hasVideo {
+	pending := undescribedMediaIndexes(userMsg.Attachments, "video", mediaDescPrefixVideo)
+	if len(pending) == 0 {
 		return conversation
 	}
 
 	a.log("info", "video", "describing %d video file(s) via fallback model %s/%s for non-video chat model",
-		countAttachmentsByType(userMsg.Attachments, "video"), a.providerNameByID(settings.VideoProviderID), settings.VideoModelID)
+		len(pending), a.providerNameByID(settings.VideoProviderID), settings.VideoModelID)
 
 	described := a.describeVideosWithFallback(ctx, settings, userMsg.Attachments)
 	if len(described) <= len(userMsg.Attachments) {

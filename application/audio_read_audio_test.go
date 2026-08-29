@@ -128,3 +128,40 @@ func TestExecuteReadAudioRejectsRelativePath(t *testing.T) {
 		t.Errorf("output should mention absolute path required, got: %q", output)
 	}
 }
+
+func TestDescribeAudiosWithFallbackSkipsExistingTranscript(t *testing.T) {
+	adapter := &fakeVisionAdapter{description: "should not run"}
+	var factoryCalls int
+	app := visionFallbackTestApp(adapter, &factoryCalls)
+	settings := domain.Settings{AudioProviderID: "vision-prov", AudioModelID: "gpt-4o"}
+	atts := []domain.Attachment{
+		{Type: "audio", Name: "clip.mp3", MediaType: "audio/mpeg", DataURL: "data:audio/mpeg;base64,AAA="},
+		{Type: "text", Name: "audio:clip.mp3", MediaType: "text/plain", Content: "[Audio transcript for clip.mp3]\nexisting"},
+	}
+	out := app.describeAudiosWithFallback(context.Background(), settings, atts)
+	if len(out) != 2 {
+		t.Fatalf("expected unchanged attachments, got %d", len(out))
+	}
+	if factoryCalls != 0 || adapter.calls != 0 {
+		t.Fatalf("audio fallback called factory=%d chat=%d, want 0/0", factoryCalls, adapter.calls)
+	}
+}
+
+func TestUndescribedMediaIndexes(t *testing.T) {
+	atts := []domain.Attachment{
+		{Type: "image", Name: "a.png"},
+		{Type: "text", Name: "vision:a.png"},
+		{Type: "image", Name: "b.png"},
+		{Type: "audio", Name: "c.mp3"},
+	}
+	got := undescribedMediaIndexes(atts, "image", mediaDescPrefixVision)
+	if len(got) != 1 || got[0] != 2 {
+		t.Fatalf("undescribed images = %v, want [2]", got)
+	}
+	if n := undescribedMediaIndexes(atts, "audio", mediaDescPrefixAudio); len(n) != 1 || n[0] != 3 {
+		t.Fatalf("undescribed audio = %v, want [3]", n)
+	}
+	if n := undescribedMediaIndexes(nil, "image", mediaDescPrefixVision); len(n) != 0 {
+		t.Fatalf("empty attachments = %v, want []", n)
+	}
+}

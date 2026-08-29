@@ -22,7 +22,8 @@ import (
 //
 // If the fallback is not configured or fails, the original attachments are
 // returned unchanged and the caller falls back to the placeholder behavior
-// in chatMessages.
+// in chatMessages. Images that already have a matching vision:<name> text
+// attachment are skipped so retries do not re-call the fallback model.
 func (a *App) describeImagesWithFallback(ctx context.Context, settings domain.Settings, attachments []domain.Attachment) []domain.Attachment {
 	if len(attachments) == 0 {
 		return attachments
@@ -30,13 +31,7 @@ func (a *App) describeImagesWithFallback(ctx context.Context, settings domain.Se
 	if settings.VisionProviderID == "" || settings.VisionModelID == "" {
 		return attachments
 	}
-	// Collect image attachments; if none, nothing to do.
-	var imageIdxs []int
-	for i, att := range attachments {
-		if att.Type == "image" {
-			imageIdxs = append(imageIdxs, i)
-		}
-	}
+	imageIdxs := undescribedMediaIndexes(attachments, "image", mediaDescPrefixVision)
 	if len(imageIdxs) == 0 {
 		return attachments
 	}
@@ -64,7 +59,7 @@ func (a *App) describeImagesWithFallback(ctx context.Context, settings domain.Se
 		}
 		out = append(out, domain.Attachment{
 			Type:      "text",
-			Name:      "vision:" + img.Name,
+			Name:      mediaDescPrefixVision + img.Name,
 			MediaType: "text/plain",
 			Content:   fmt.Sprintf("[Image description for %s]\n%s", img.Name, description),
 		})
@@ -110,19 +105,13 @@ func (a *App) enrichWithVisionDescriptions(ctx context.Context, conversation *do
 		return conversation
 	}
 	userMsg := &conversation.Messages[userMsgIdx]
-	hasImage := false
-	for _, att := range userMsg.Attachments {
-		if att.Type == "image" {
-			hasImage = true
-			break
-		}
-	}
-	if !hasImage {
+	pending := undescribedMediaIndexes(userMsg.Attachments, "image", mediaDescPrefixVision)
+	if len(pending) == 0 {
 		return conversation
 	}
 
 	a.log("info", "vision", "describing %d image(s) via fallback model %s/%s for non-vision chat model",
-		countAttachmentsByType(userMsg.Attachments, "image"), a.providerNameByID(settings.VisionProviderID), settings.VisionModelID)
+		len(pending), a.providerNameByID(settings.VisionProviderID), settings.VisionModelID)
 
 	described := a.describeImagesWithFallback(ctx, settings, userMsg.Attachments)
 	if len(described) <= len(userMsg.Attachments) {

@@ -215,12 +215,7 @@ func (a *App) describeAudiosWithFallback(ctx context.Context, settings domain.Se
 	if settings.AudioProviderID == "" || settings.AudioModelID == "" {
 		return attachments
 	}
-	var audioIdxs []int
-	for i, att := range attachments {
-		if att.Type == "audio" {
-			audioIdxs = append(audioIdxs, i)
-		}
-	}
+	audioIdxs := undescribedMediaIndexes(attachments, "audio", mediaDescPrefixAudio)
 	if len(audioIdxs) == 0 {
 		return attachments
 	}
@@ -249,7 +244,7 @@ func (a *App) describeAudiosWithFallback(ctx context.Context, settings domain.Se
 		}
 		out = append(out, domain.Attachment{
 			Type:      "text",
-			Name:      "audio:" + aud.Name,
+			Name:      mediaDescPrefixAudio + aud.Name,
 			MediaType: "text/plain",
 			Content:   fmt.Sprintf("[Audio transcript for %s]\n%s", aud.Name, description),
 		})
@@ -275,19 +270,13 @@ func (a *App) enrichWithAudioDescriptions(ctx context.Context, conversation *dom
 		return conversation
 	}
 	userMsg := &conversation.Messages[userMsgIdx]
-	hasAudio := false
-	for _, att := range userMsg.Attachments {
-		if att.Type == "audio" {
-			hasAudio = true
-			break
-		}
-	}
-	if !hasAudio {
+	pending := undescribedMediaIndexes(userMsg.Attachments, "audio", mediaDescPrefixAudio)
+	if len(pending) == 0 {
 		return conversation
 	}
 
 	a.log("info", "audio", "transcribing %d audio file(s) via fallback model %s/%s for non-audio chat model",
-		countAttachmentsByType(userMsg.Attachments, "audio"), a.providerNameByID(settings.AudioProviderID), settings.AudioModelID)
+		len(pending), a.providerNameByID(settings.AudioProviderID), settings.AudioModelID)
 
 	described := a.describeAudiosWithFallback(ctx, settings, userMsg.Attachments)
 	if len(described) <= len(userMsg.Attachments) {
@@ -309,12 +298,30 @@ func (a *App) enrichWithAudioDescriptions(ctx context.Context, conversation *dom
 	return reloaded
 }
 
-func countAttachmentsByType(atts []domain.Attachment, typ string) int {
-	n := 0
-	for _, a := range atts {
-		if a.Type == typ {
-			n++
+const (
+	mediaDescPrefixVision = "vision:"
+	mediaDescPrefixAudio  = "audio:"
+	mediaDescPrefixVideo  = "video:"
+)
+
+func hasMediaDescription(atts []domain.Attachment, prefix, name string) bool {
+	want := prefix + name
+	for _, att := range atts {
+		if att.Type == "text" && att.Name == want {
+			return true
 		}
 	}
-	return n
+	return false
+}
+
+// undescribedMediaIndexes returns attachments of mediaType that do not yet
+// have a matching prefix+name text description (e.g. vision:cat.png).
+func undescribedMediaIndexes(atts []domain.Attachment, mediaType, prefix string) []int {
+	var idxs []int
+	for i, att := range atts {
+		if att.Type == mediaType && !hasMediaDescription(atts, prefix, att.Name) {
+			idxs = append(idxs, i)
+		}
+	}
+	return idxs
 }
