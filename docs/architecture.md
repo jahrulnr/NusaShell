@@ -36,17 +36,33 @@ embedded ES module with no build step.
 | --- | --- |
 | `POST /rpc/{method...}` | request/response commands and queries — the method is encoded in the URL path (dots → slashes, e.g. `/rpc/agent/conversations/list`), body is `{method, payload}` → `{ok, result|error}` |
 | `GET /ws` | bidirectional: `{id, method, payload}` requests with `{id, ok, ...}` replies plus the event stream as `{type, payload}` |
+| `GET /stream?run_id=&message_id=&after=` | per-round SSE stream of live agent deltas (see below) |
 | `GET /` + assets | embedded frontend (disk in `NUSASHELL_DEV=1` mode) |
 
 Events are published to an in-memory `application.Bus`; each WS
-connection subscribes. High-volume stream events may be dropped for a slow
-subscriber, while turn boundaries, compaction, and auto-continue lifecycle
-events stay queued so a state transition cannot be lost behind deltas. Delivery
-is ordered per subscriber but has no replay cursor; the frontend reconciles
-room state through the conversation and active-turn RPCs after a race or
-reload. The frontend receives event triggers over WebSocket only and talks to
-the backend over HTTP `/rpc/{method...}`; the SSE endpoint stays available for
-non-browser clients. The transports speak the same event vocabulary
+connection subscribes. High-volume events may be dropped for a slow
+subscriber, while turn boundaries, compaction, steer, and auto-continue
+lifecycle events stay queued so a state transition cannot be lost behind
+deltas. Delivery is ordered per subscriber but has no replay cursor; the
+frontend reconciles room state through the conversation and active-turn RPCs
+after a race or reload.
+
+Since the round-stream refactor, **live agent deltas do not travel the
+WebSocket at all**. Each round (one assistant message, `(run_id,
+message_id)`) is staged in an in-memory `application.RoundStreamRegistry`
+with a per-stream monotonic `seq`. The frontend opens `GET
+/stream?run_id=&message_id=` when `agent.turn.started` fires (or when
+re-attaching to a running turn after reload/room switch), receives
+`round.delta` frames (`seq`, `kind` = `text` | `reasoning` | `tool`, text),
+and closes on `round.done` (`state`, `usage`, `next`). Re-opening with
+`after=<lastSeq>` replays exactly the missed frames (idempotent resume), so
+a dropped connection self-heals; `next` chaining carries tool-loop and
+auto-continue rounds forward without WebSocket round bookkeeping. The round
+is committed to the conversation store atomically when it seals, so a
+snapshot read mid-round can never see torn content. The WS keeps signaling:
+`agent.turn.started`, `agent.tool.started`, `agent.tool.completed`,
+`agent.turn.done`, `agent.turn.error`, steer, ask, compaction, and
+non-agent domains. The transports speak the same event vocabulary
 (`contracts`).
 
 ### RPC dispatch
@@ -81,12 +97,16 @@ the matching domain dispatcher, and add a handler-level test in
 2. A goroutine runs the turn: compaction check → tool list refresh → stream
    rounds. Each round streams into its own assistant message and executes
    any requested tool calls, capped by `settings.max_tool_rounds` (default 8).
-3. Deltas and tool lifecycles are pushed as `agent.message.delta`,
-   `agent.tool.started`, `agent.tool.completed`, then `agent.turn.done` (or
-   `agent.turn.error` / interrupted state). Turn terminal and compaction
-   events carry the active run and assistant message identity where applicable,
-   so a refreshed client can reattach to the current round instead of an
-   earlier assistant message.
+3. Deltas are staged per round in the in-memory round-stream registry and
+   streamed over `GET /stream` as `round.delta` frames; the WebSocket carries
+   the lifecycle signals (`agent.turn.started`, `agent.tool.started`,
+   `agent.tool.completed`, then `agent.turn.done` or `agent.turn.error` /
+   interrupted). The final `round.done` frame carries `next` (the following
+   round's `message_id`) for tool loops and auto-continue chains, so the
+   frontend chains streams without depending on additional WS delivery.
+   Turn terminal and compaction events carry the active run and assistant
+   message identity where applicable, so a refreshed client can reattach to
+   the current round instead of an earlier assistant message.
 4. `agent.turns.stop` cancels the run context; partial output is kept and
    marked `interrupted`.
 

@@ -1,9 +1,9 @@
 {
-  "type": "agent.message.delta",
+  "type": "agent.turn.started",
   "payload": {
     "run_id": "run_1",
     "conversation_id": "conv_1",
     "message_id": "msg_1",
-    "text": "hi"
+    "round": 1
   }
 }

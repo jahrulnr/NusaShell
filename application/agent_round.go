@@ -72,9 +72,9 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 	return pc, conversation, settings, err
 }
 
-func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
+func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, promptCache *PromptCachePolicy, caps ModelCapabilities, round int) (streamedTurnRound, error) {
 	for retry := 1; ; retry++ {
-		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, promptCache, caps)
+		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, promptCache, caps, round)
 		if err == nil || retry >= maxProviderAttempts || visibleText(roundResult.Content) != "" || visibleText(roundResult.Reasoning) != "" {
 			return roundResult, err
 		}
@@ -158,13 +158,19 @@ func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversatio
 			retryEvt.Status = upstream.StatusCode
 		}
 		a.Bus.Emit(contracts.EventProviderRetry, retryEvt)
+		// A retry restarts the round stream from a clean slate: the failed
+		// attempt's buffered deltas must not replay into the retry's stream
+		// (mixed output). Consumers re-subscribe with after=0 after the event.
+		if a.RoundStreams != nil {
+			a.RoundStreams.Reset(run.ID, messageID)
+		}
 		if err := a.retrySleeper(run.Ctx, delay); err != nil {
 			return roundResult, err
 		}
 	}
 }
 
-func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, promptCache *PromptCachePolicy, caps ModelCapabilities) (streamedTurnRound, error) {
+func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, promptCache *PromptCachePolicy, caps ModelCapabilities, round int) (streamedTurnRound, error) {
 	var content strings.Builder
 	var reasoning strings.Builder
 	// Guard: strip effort for models that do not support reasoning. Sending
@@ -246,17 +252,13 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 		ContextManagement: serverCompactionContextManagement(model),
 	}, func(delta string) {
 		content.WriteString(delta)
-		a.Bus.Emit(contracts.EventMessageDelta, contracts.MessageDeltaEvent{
-			RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID, Text: delta,
-		})
+		a.publishRoundDelta(run.ID, messageID, round, contracts.RoundDeltaText, "", "", delta)
 	}, func(delta string) {
 		reasoning.WriteString(delta)
 		if !reasoningDeltaVisible(reasoning.String()) {
 			return
 		}
-		a.Bus.Emit(contracts.EventReasoningDelta, contracts.ReasoningDeltaEvent{
-			RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID, Text: delta,
-		})
+		a.publishRoundDelta(run.ID, messageID, round, contracts.RoundDeltaReasoning, "", "", delta)
 	})
 	for _, warning := range response.Warnings {
 		a.log("warn", "ai", "provider warning: %s", warning)
@@ -675,6 +677,15 @@ func applyStreamRound(message *domain.Message, model string, round streamedTurnR
 	message.Usage = toDomainUsage(round.Response.Usage)
 }
 
+// publishRoundDelta stages a live round delta into the in-memory round
+// stream registry (SSE /stream). The registry is process-local and
+// drop-tolerant: consumers re-open with after=<seq> to replay missed frames.
+func (a *App) publishRoundDelta(runID, messageID string, round int, kind, toolCallID, name, text string) {
+	if a.RoundStreams != nil {
+		a.RoundStreams.Publish(runID, messageID, round, kind, toolCallID, name, text)
+	}
+}
+
 // visibleText is the assistant text worth persisting or sending. Models such
 // as Qwen3.8 emit a blank paragraph ("\n\n") as the first/last content tokens
 // after thinking; storing that makes empty rounds look like real turns.
@@ -704,7 +715,7 @@ type toolExecResult struct {
 	atts   []domain.Attachment
 }
 
-func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall, caps ModelCapabilities, settings domain.Settings) error {
+func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall, caps ModelCapabilities, settings domain.Settings, round int) error {
 	if err := run.Ctx.Err(); err != nil {
 		if len(toolCalls) > 0 {
 			conversation, gerr := a.Conversations.Get(run.ConversationID)
@@ -740,7 +751,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results[i] = a.runOneTool(run, toolCalls[i], caps, settings)
+			results[i] = a.runOneTool(run, messageID, toolCalls[i], caps, settings, round)
 		}(i)
 	}
 	wg.Wait()
@@ -790,7 +801,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 // runOneTool executes a single tool call and returns its result. It emits the
 // tool-started and tool-completed events and never writes to the conversation
 // store, so it is safe to run concurrently for the tool calls of one round.
-func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapabilities, settings domain.Settings) toolExecResult {
+func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCall, caps ModelCapabilities, settings domain.Settings, round int) toolExecResult {
 	a.Bus.Emit(contracts.EventToolStarted, contracts.ToolStartedEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: []byte(toolCall.Args),
 	})
@@ -842,10 +853,8 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 			}); ok {
 				var e error
 				output, e = s.ExecuteStreamed(toolCtx, toolCall.Name, []byte(toolCall.Args), func(text string) {
-					if a.Bus != nil && text != "" {
-						a.Bus.Emit(contracts.EventToolDelta, contracts.ToolDeltaEvent{
-							RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Text: text,
-						})
+					if text != "" {
+						a.publishRoundDelta(run.ID, messageID, round, contracts.RoundDeltaTool, toolCall.ID, toolCall.Name, text)
 					}
 				})
 				return e

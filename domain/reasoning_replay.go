@@ -82,7 +82,7 @@ func RequiresReasoningReplay(provider, model, interleavedField string) bool {
 // unavailable (empty or stripped by the client). Models may echo it; the
 // response decoder strips it from user-visible output. Mirrors OmniRoute's
 // NON_ANTHROPIC_THINKING_PLACEHOLDER.
-const ReasoningPlaceholder = "(prior reasoning summary unavailable)"
+const ReasoningPlaceholder = "(Continue from the current context.)"
 
 // IsReasoningPlaceholder reports whether value is the internal replay
 // sentinel. Use to avoid caching or re-replaying the placeholder (which

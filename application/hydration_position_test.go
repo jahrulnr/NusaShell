@@ -348,7 +348,7 @@ func TestExecuteTurnToolsKeepsHydrationOnBriefChange(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: WithConversationID(context.Background(), "c1"), Cancel: func() {}}
 
-	if err := app.executeTurnTools(run, "m1", conv.Messages[1].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}); err != nil {
+	if err := app.executeTurnTools(run, "m1", conv.Messages[1].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err != nil {
 		t.Fatalf("executeTurnTools: %v", err)
 	}
 	// The hydration checkpoint must still be present.

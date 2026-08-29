@@ -1375,12 +1375,12 @@ func TestResponsesInputRejectsEmptyReasoningBlock(t *testing.T) {
 // placeholder sentinel is accepted and forwarded as a reasoning summary.
 func TestResponsesInputAcceptsPlaceholderReasoningBlock(t *testing.T) {
 	items, err := responsesInputItems([]core.Message{
-		core.Assistant(core.ReasoningBlock{Text: "(prior reasoning summary unavailable)"}),
+		core.Assistant(core.ReasoningBlock{Text: "(Continue from the current context.)"}),
 	})
 	if err != nil {
 		t.Fatalf("placeholder reasoning must pass, got error: %v", err)
 	}
-	if len(items) != 1 || items[0].Type != "reasoning" || len(items[0].Summary) != 1 || items[0].Summary[0].Text != "(prior reasoning summary unavailable)" {
+	if len(items) != 1 || items[0].Type != "reasoning" || len(items[0].Summary) != 1 || items[0].Summary[0].Text != "(Continue from the current context.)" {
 		t.Fatalf("items = %#v", items)
 	}
 }

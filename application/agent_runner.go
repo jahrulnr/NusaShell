@@ -649,6 +649,11 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	toolRounds := 0
 	continuation := initialContinuation
 	continuedPartialStream := initialContinuation
+	// Round-stream bookkeeping: the previous round's stream is sealed when
+	// the next round starts, carrying the next-round reference so SSE
+	// consumers can chain to the following stream.
+	var prevMsgID, prevState string
+	prevRound := 0
 	// Safety net for context overflow. Unlike a bool, a counter lets the
 	// loop retry emergency compaction a bounded number of times in one
 	// turn, so a compaction that fails to shrink the transcript below the
@@ -706,10 +711,19 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				}
 			}
 		}
+		// Seal the previous round's stream now that the next round starts.
+		// Consumers get the terminal round.done frame with the next-round
+		// reference, so they can chain to the following stream. Partial
+		// continuation rounds (provider error mid-stream) seal as "partial";
+		// the persisted first half continues in the new message.
+		if prevMsgID != "" && prevMsgID != currentMsgID {
+			a.sealRound(run, prevMsgID, prevRound, prevState, &contracts.RoundRef{RunID: run.ID, MessageID: currentMsgID, Round: round}, nil, "")
+		}
+		prevMsgID, prevRound, prevState = currentMsgID, round, "done"
 		a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Round: round,
 		})
-		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, promptCache, caps)
+		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, promptCache, caps, round)
 		continuation = false
 		totalUsage = mergeUsage(totalUsage, roundResult.Response.Usage)
 		if roundResult.Response.Usage.ContextTokens() > 0 {
@@ -745,6 +759,10 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				continuedPartialStream = true
 				// This replaces the interrupted provider attempt; it is not an
 				// additional tool round and must not reduce the user's tool budget.
+				// The interrupted round's stream is sealed as "partial" when the
+				// next round starts, so SSE consumers know the text continues
+				// in the next round instead of ending mid-word.
+				prevState = "partial"
 				round--
 				continue
 			} else if compactionAttempts < 3 && (isContextOverflowError(rawStreamErr) || isTPMOverflowError(rawStreamErr)) {
@@ -824,7 +842,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 			break
 		}
 
-		if err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls, caps, settings); err != nil {
+		if err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls, caps, settings, round); err != nil {
 			if run.Ctx.Err() != nil {
 				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, lastUsage.ContextTokens(), model)
 				return false, ""
@@ -875,6 +893,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	// TurnDone with the decision attached, but we need the raw decision
 	// here to decide whether to start the next turn.
 	if a.Todos == nil {
+		a.sealRound(run, currentMsgID, round, "done", nil, usageDTO(totalUsage), "")
 		return false, ""
 	}
 	items := a.Todos.Get(run.ConversationID)
@@ -894,6 +913,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	})
 	if !decision.ShouldContinue {
 		a.log("info", "agent", "auto-continue chain stopped: %s (open todos: %d)", decision.Reason, decision.OpenTodoCount)
+		a.sealRound(run, currentMsgID, round, "done", nil, usageDTO(totalUsage), "")
 		return false, ""
 	}
 	// Emit an event so the UI can show "Continuing tasks… (N/M)" and insert
@@ -936,7 +956,19 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	}
 	_ = nextConv
 	run.setMessageID(nextMsgID)
+	// Seal the final round of this turn, chaining to the first round of the
+	// auto-continue turn so SSE consumers keep streaming without waiting for
+	// the next agent.turn.started only.
+	a.sealRound(run, currentMsgID, round, "done", &contracts.RoundRef{RunID: run.ID, MessageID: nextMsgID, Round: 1}, usageDTO(totalUsage), "")
 	return true, nextMsgID
+}
+
+// usageDTO renders turn usage for the round.done frame.
+func usageDTO(u ChatUsage) *contracts.UsageDTO {
+	return &contracts.UsageDTO{
+		InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
+		CacheRead: u.CacheRead, CacheWrite: u.CacheWrite,
+	}
 }
 
 // applyQueuedSteer drains a queued steer and appends it as a real user message
@@ -1561,6 +1593,7 @@ func (a *App) failTurn(run *TurnRun, msgID string, err error) {
 		_ = a.Conversations.Save(c)
 	}
 	a.discardQueuedSteer(run)
+	a.sealRound(run, msgID, 0, contracts.RoundStateError, nil, nil, err.Error())
 	a.Bus.Emit(contracts.EventTurnError, contracts.TurnErrorEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, MessageID: msgID, Message: err.Error(),
 	})
@@ -1588,6 +1621,7 @@ func (a *App) failStreamTurn(run *TurnRun, msgID, model string, round streamedTu
 		_ = a.Conversations.Save(c)
 	}
 	a.discardQueuedSteer(run)
+	a.sealRound(run, msgID, 0, contracts.RoundStateError, nil, nil, err.Error())
 	a.Bus.Emit(contracts.EventTurnError, contracts.TurnErrorEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, MessageID: msgID, Message: err.Error(),
 	})
@@ -1613,6 +1647,7 @@ func (a *App) interruptTurn(run *TurnRun, msgID string, round streamedTurnRound,
 		}
 		_ = a.Conversations.Save(c)
 	}
+	a.sealRound(run, msgID, 0, contracts.RoundStateInterrupted, nil, usageDTO(usage), "")
 	a.discardQueuedSteer(run)
 	a.Bus.Emit(contracts.EventTurnDone, contracts.TurnDoneEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, MessageID: msgID, Model: model,

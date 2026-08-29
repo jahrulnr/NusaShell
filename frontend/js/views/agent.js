@@ -122,12 +122,11 @@ const state = {
   // painted "..." above the user, then beginTurn painted a second "..." below.
   localTurnPending: false,
   conversationLoadToken: 0,
-  // Per-room live run buffers. While the user is looking at another room, the
-  // deltas for this room keep arriving over the same WebSocket; they are
-  // mirrored here (raw text, reasoning, tool jobs) so switching back renders
-  // a stable live stream instead of a blank turn. Text and tool state are
-  // capped to keep memory bounded. `lastEventAt` powers the sidebar indicator.
-  roomBuffers: new Map(), // conversationId -> RoomStreamBuffer
+  // Live runs are tracked in state.runs. Deltas for the ACTIVE room travel a
+  // per-round SSE stream (see openRoundStream); rooms the user is not looking
+  // at need no mirror — switching back opens a fresh stream with after=<seq>
+  // and the server replays the round from its buffer. The per-room buffer
+  // mirrors were removed with the round-stream refactor.
 };
 
 // Snapshot-history windowing: how many trailing assistant rounds a full
@@ -141,7 +140,6 @@ const state = {
 // cards or announcements behind a Load older path that used to no-op while
 // a run was attached.
 const SNAPSHOT_KEEP_ROUNDS = 12;
-const MAX_ROOM_BUFFER_CHARS = 512 * 1024; // per room (raw + rawReasoning)
 const MAX_LIVE_ROUND_CHARS = 512 * 1024;
 const MAX_LIVE_TOOL_JOBS = 128;
 
@@ -161,17 +159,163 @@ function appendBoundedLiveText(target, field, text) {
   target[field] = next.slice(-MAX_LIVE_ROUND_CHARS);
 }
 
-function trimRoomBuffer(buffer) {
-  if (!buffer) return;
-  let excess = buffer.raw.length + buffer.rawReasoning.length - MAX_ROOM_BUFFER_CHARS;
-  if (excess <= 0) return;
-  if (buffer.raw.length >= excess) {
-    buffer.raw = buffer.raw.slice(excess);
-    return;
+// ---- per-round SSE stream ----
+//
+// Live deltas travel a per-round SSE stream (GET /stream?run_id&message_id),
+// not the WebSocket. One stream is open per LIVE round attached to the
+// visible room; the frontend opens it when agent.turn.started fires (or when
+// re-attaching to a running turn after a reload/switch), and closes it when
+// the round seals (round.done frame) or the user switches rooms. Re-opening
+// with after=<lastSeq> replays exactly the frames missed since the cursor,
+// so a dropped HTTP connection self-heals without any room buffer mirror.
+
+const STREAM_RETRY_DELAYS = [300, 1200, 4000];
+
+// closeRoundStream aborts a live round stream, if any.
+function closeRoundStream(run) {
+  if (!run) return;
+  if (run.streamReader) {
+    try { run.streamReader.cancel(); } catch { /* already closed */ }
+    run.streamReader = null;
   }
-  excess -= buffer.raw.length;
-  buffer.raw = '';
-  buffer.rawReasoning = buffer.rawReasoning.slice(excess);
+  if (run.streamAbort) {
+    run.streamAbort.abort();
+    run.streamAbort = null;
+  }
+  run.streamRetries = 0;
+}
+
+// openRoundStream attaches the SSE stream for the run's current round
+// (run.runId + run.messageId). Idempotent per round: re-attaching with the
+// same message id after a disconnect resumes from run.lastSeq.
+async function openRoundStream(run) {
+  if (!run || !run.runId || !run.messageId) return;
+  const attachedMessage = run.streamMessageId;
+  if (attachedMessage === run.messageId && run.streamReader) return; // already live
+  closeRoundStream(run);
+  run.streamMessageId = run.messageId;
+  const params = new URLSearchParams({ run_id: run.runId, message_id: run.messageId });
+  if (run.lastSeq > 0) params.set('after', String(run.lastSeq));
+  run.streamAbort = new AbortController();
+  try {
+    const resp = await fetch(`/stream?${params}`, {
+      headers: { Accept: 'text/event-stream' },
+      signal: run.streamAbort.signal,
+    });
+    if (!resp.ok) {
+      handleStreamMiss(run);
+      return;
+    }
+    if (!resp.body) {
+      handleStreamMiss(run);
+      return;
+    }
+    run.streamReader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let event = '';
+    let data = '';
+    const flushBlock = () => {
+      if (event === 'round.delta' && data) {
+        try {
+          const frame = JSON.parse(data);
+          applyRoundDeltaFrame(run, frame);
+        } catch { /* malformed frame; skip */ }
+      } else if (event === 'round.done' && data) {
+        try {
+          const done = JSON.parse(data);
+          applyRoundDoneFrame(run, done);
+        } catch { /* malformed terminal frame; fall back to WS turn.done */ }
+      }
+      event = '';
+      data = '';
+    };
+    for (;;) {
+      const { done, value } = await run.streamReader.read();
+      if (done) break; // server closed the stream; terminal frame already handled
+      buffer += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) >= 0) {
+        const block = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event: ')) event = line.slice(7);
+          else if (line.startsWith('data: ')) data = line.slice(6);
+        }
+        flushBlock();
+      }
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError' || run.streamAbort?.signal?.aborted) return;
+    // Network drop mid-round: retry with backoff, resuming from lastSeq.
+    const attempts = run.streamRetries || 0;
+    if (attempts < STREAM_RETRY_DELAYS.length && runForConversation(run.conversationId) === run) {
+      run.streamRetries = attempts + 1;
+      const delay = STREAM_RETRY_DELAYS[attempts];
+      setTimeout(() => { void openRoundStream(run); }, delay);
+      return;
+    }
+    handleStreamMiss(run);
+  } finally {
+    run.streamReader = null;
+  }
+}
+
+// handleStreamMiss is the fallback when a round stream cannot be attached:
+// the backend restarted, the round was GC'd, or the run ended. Re-sync from
+// the authoritative snapshot.
+function handleStreamMiss(run) {
+  if (!run) return;
+  if (run.streamAbort) { run.streamAbort.abort(); run.streamAbort = null; }
+  if (run.conversationId === state.activeId && runForConversation(run.conversationId) === run) {
+    void refreshActiveConversation();
+  }
+}
+
+// applyRoundDeltaFrame routes one round.delta frame into the live run state.
+function applyRoundDeltaFrame(run, frame) {
+  if (!run) return;
+  run.lastSeq = frame.seq;
+  switch (frame.kind) {
+    case 'text':
+      appendBoundedLiveText(run, 'raw', frame.text);
+      if (run.conversationId === state.activeId) scheduleLiveRender(run);
+      break;
+    case 'reasoning':
+      appendBoundedLiveText(run, 'rawReasoning', frame.text);
+      if (run.conversationId === state.activeId) scheduleLiveRender(run);
+      break;
+    case 'tool':
+      if (!frame.text) break;
+      if (run.conversationId === state.activeId) queueToolDelta(run, frame.tool_call_id, frame.text);
+      break;
+  }
+}
+
+// applyRoundDoneFrame seals the round from the stream side: the terminal
+// frame carries usage (attached to the message node) and the next-round
+// reference, so auto-continue chains keep streaming without any WebSocket
+// round bookkeeping.
+function applyRoundDoneFrame(run, done) {
+  if (!run) return;
+  run.lastSeq = 0;
+  run.streamMessageId = null;
+  if (run.msgNode && done.usage) {
+    run.msgNode.querySelectorAll('.agent-turn-meta, .agent-message-meta').forEach((n) => n.remove());
+    const meta = el('div', { class: 'agent-turn-meta' });
+    const usage = done.usage || {};
+    if (usage.input_tokens || usage.output_tokens) {
+      meta.append(el('span', { class: 'agent-turn-tag', text: `↑${formatTokens(usage.input_tokens ?? 0)} ↓${formatTokens(usage.output_tokens ?? 0)}` }));
+      if (usage.cache_read) meta.append(el('span', { class: 'agent-turn-tag', text: `cache ${formatTokens(usage.cache_read)}` }));
+    }
+    run.msgNode.append(meta);
+  }
+  // The backend reuses run_id across auto-continue turns; keep the run entry
+  // so the next agent.turn.started (same run) finds it and opens the next
+  // round stream. The WebSocket agent.turn.done still drives the final
+  // refresh + sounds when the chain ends (next == null).
+  endTurn(run.runId, Boolean(done.next));
+  void renderMermaidDiagrams(run.msgNode); void highlightCode(run.msgNode); attachZoomButtons(run.msgNode);
 }
 
 function setLiveToolJob(toolJobs, toolCallID, job) {
@@ -491,15 +635,13 @@ function updateConversationItem(item, c) {
   const timeText = String(c.message_count ?? 0) + ' msgs · ' + fmtTime(c.updated_at);
   if (time && time.textContent !== timeText) time.textContent = timeText;
   item.classList.toggle('is-active', c.id === state.activeId);
-  const buffer = state.roomBuffers.get(c.id);
-  // Only rooms that are not the active one and not terminal get the live
-  // dot. The dot signals "this room is still streaming in the background".
-  const isLive = Boolean(
-    buffer && !buffer.done && c.id !== state.activeId && buffer.lastEventAt > 0,
-  );
-  item.classList.toggle('is-running', isLive);
+  // Remove the room-buffer mirror: a room with a turn running anywhere is
+  // covered by the conversations list refresh (status=running); the active
+  // tab tracks its own live runs in state.runs.
+  const isRunning = c.status === 'running';
+  item.classList.toggle('is-running', isRunning);
   const dot = item.querySelector('.agent-conversation-dot');
-  const wantDot = Boolean(isLive);
+  const wantDot = isRunning && c.id !== state.activeId;
   if (dot && !wantDot) dot.remove();
   if (!dot && wantDot) {
     const textSpan = item.querySelector('.agent-conversation-time');
@@ -519,7 +661,6 @@ async function deleteConversation(id) {
   try {
     await rpc('agent.conversations.delete', { id });
     savedRooms.delete(id);
-    state.roomBuffers.delete(id);
     if (state.activeId === id) {
       state.activeId = null;
       state.conversation = null;
@@ -560,9 +701,6 @@ async function openConversation(id) {
   if (token !== state.conversationLoadToken) return;
   state.conversation = conversation;
   state.messages = messages ?? [];
-  // Seal a room buffer the backend says is finished (its terminal event was
-  // missed or raced). Must happen before any buffer-driven rendering below.
-  sealStaleRoomBuffer(id, conversation?.status);
   // Seed the context badge from the backend for this room (provider-measured
   // fill preferred, else server heuristic). Resetting here prevents another
   // room's number from leaking across a switch.
@@ -603,39 +741,8 @@ async function openConversation(id) {
     renderThread(windowedActiveMessages(), true);
   }
   reattachActiveRun();
-  // Merge buffered deltas only when no run was re-attached from the backend:
-  // reattachActiveRun already rendered the live buffer (seeded from
-  // reattachActiveRunFromBackend), so a second apply here would detach the
-  // very nodes the streaming handlers keep updating.
-  if (!runForConversation(state.activeId)) {
-    applyBufferedRunToDOM(state.activeId);
-  }
-  // The buffered run (if any) is still a live stream; treat it as the active
-  // run again so subsequent deltas keep the DOM in sync. Only re-attach for
-  // a LIVE buffer (not the terminal done buffer); a done buffer is already
-  // fully rendered and re-registering it would leave a phantom run in
-  // state.runs with no future turn.done to clean it up (composer stuck in
-  // steer mode).
-  const buffer = state.roomBuffers.get(state.activeId);
-  if (buffer && !buffer.done && !runForConversation(state.activeId)) {
-    state.runs.set(buffer.runId, {
-      msgNode: buffer.msgNode,
-      bubble: buffer.bubble,
-      strip: buffer.strip,
-      textBox: buffer.textBox,
-      reasoningEl: buffer.reasoningEl,
-      toolJobs: buffer.toolJobs,
-      raw: buffer.raw,
-      rawReasoning: buffer.rawReasoning,
-      round: buffer.round,
-      conversationId: state.activeId,
-      runId: buffer.runId,
-      messageId: buffer.messageId,
-    });
-  }
   const attachedRun = runForConversation(state.activeId);
   if (attachedRun) flushPendingEvents(attachedRun.runId);
-  expireCompletedBuffers();
   renderConversationList();
   // Restore the steer queue strip if a steer is still pending for this room.
   // The strip is composer chrome, not part of the thread — it is re-shown
@@ -718,23 +825,17 @@ async function reattachActiveRunFromBackend() {
   if (state.activeId !== conversationId) return;
   if (!active?.active || !active.run_id) return;
   // Register a run entry. reattachActiveRun will populate the DOM
-  // references by replacing the last assistant message node. When a live
-  // room buffer already holds the streamed deltas for this run, seed the
-  // entry from it so the re-attached DOM shows the accumulated live tail,
-  // not just the deltas that arrive after the switch.
-  const liveBuffer = state.roomBuffers.get(conversationId);
-  // A capped buffer is still usable: it retains the newest MAX_ROOM_BUFFER_CHARS
-  // of the stream, which beats seeding an empty entry (the old behavior made
-  // the UI look like it "pulled only the latest delta" after switch-back).
-  const hasLive = liveBuffer && !liveBuffer.done && liveBuffer.lastEventAt > 0;
+  // references by converting the message node; openRoundStream then pulls
+  // the accumulated deltas from the server-side round buffer (replay from
+  // seq 0), so a reload/switch-back never shows a blank tail.
   state.runs.set(active.run_id, {
     msgNode: null, bubble: null, strip: null, textBox: null, reasoningEl: null,
-    toolJobs: hasLive ? liveBuffer.toolJobs : new Map(),
-    raw: hasLive ? liveBuffer.raw : '',
-    rawReasoning: hasLive ? liveBuffer.rawReasoning : '',
-    round: hasLive ? (liveBuffer.round || 1) : 1,
+    toolJobs: new Map(),
+    raw: '',
+    rawReasoning: '',
+    round: 1,
     conversationId: conversationId, runId: active.run_id,
-    messageId: hasLive ? (liveBuffer.messageId || active.message_id) : active.message_id,
+    messageId: active.message_id,
     awaitingSteerRound: hasSteerAfterMessage(active.message_id),
   });
   if (active.queued_steer) {
@@ -806,20 +907,6 @@ function buildStreamNode(thread, messageId, source, anchor = null) {
   return { msgNode, bubble, ...refs };
 }
 
-// sealStaleRoomBuffer marks a room buffer terminal when the backend says the
-// conversation is not running but its buffer was never sealed (missed or
-// raced agent.turn.done/error). Without this the buffer stays live forever:
-// every switch-back overlays stale stream content over the authoritative
-// snapshot and expireCompletedBuffers never prunes it.
-function sealStaleRoomBuffer(convId, runningStatus) {
-  if (runningStatus === 'running') return;
-  const buffer = state.roomBuffers.get(convId);
-  if (!buffer || buffer.done || !buffer.runId) return;
-  if (state.runs.has(buffer.runId)) return; // genuinely live
-  buffer.done = true;
-  touchRoomBuffer(buffer);
-}
-
 // ensureRunSlot converts the snapshot node that owns run.messageId into a
 // live streaming slot, or appends a fresh node when the snapshot does not
 // contain that message yet. Existing nodes are ADDED TO, never replaced.
@@ -880,13 +967,9 @@ function reattachActiveRun() {
   else {
     textBox.append(thinkingDots());
   }
-  // Render buffered tool jobs so a switch-back shows the tool cards that
-  // ran while this room was hidden. Standalone cards go to the bubble;
-  // terminals go to the strip.
-  const buffer = state.roomBuffers.get(run.conversationId);
-  const toolJobs = buffer?.runId === run.runId && buffer.toolJobs
-    ? buffer.toolJobs
-    : (run.toolJobs || new Map());
+  // Render the tool jobs accumulated so far (in-flight while this room was
+  // away). Standalone cards go to the bubble; terminals go to the strip.
+  const toolJobs = run.toolJobs || new Map();
   for (const job of toolJobs.values()) placeToolCard(bubble, strip, job);
   // Update the run entry with fresh DOM references.
   run.msgNode = msgNode;
@@ -896,8 +979,12 @@ function reattachActiveRun() {
   run.strip = strip;
   clearToolTimers(run);
   run.toolJobs = toolJobs;
-  if (buffer?.runId === run.runId) buffer.toolJobs = toolJobs;
   scrollToBottom(true);
+  // Attach the per-round SSE stream for the current round: switch-back and
+  // reload both replay the accumulated deltas from the server-side round
+  // buffer, so the re-attached DOM shows the full live tail, not a blank
+  // bubble until the next delta.
+  void openRoundStream(run);
 }
 
 // renderThread paints the given (already windowed) messages. force controls the
@@ -927,136 +1014,6 @@ function renderThread(messages, force = true) {
     // Background refresh: respect the pin so a user reading history is not yanked.
     requestAnimationFrame(() => scrollToBottom(false));
   }
-}
-
-// ---- per-room live run buffers ----
-
-// getOrCreateRoomBuffer returns the live-run buffer for a conversation,
-// creating it on first activity. The buffer mirrors the deltas that keep
-// arriving on the shared WebSocket while the user is looking at another room.
-function getOrCreateRoomBuffer(convId) {
-  if (!convId) return null;
-  let buffer = state.roomBuffers.get(convId);
-  if (!buffer) {
-    buffer = {
-      runId: null,
-      messageId: null,
-      round: 1,
-      raw: '',
-      rawReasoning: '',
-      toolJobs: new Map(),
-      lastEventAt: 0,
-      done: false,
-      // DOM refs are filled only when this room becomes active again.
-      msgNode: null, bubble: null, strip: null, textBox: null, reasoningEl: null,
-    };
-    state.roomBuffers.set(convId, buffer);
-  }
-  return buffer;
-}
-
-function touchRoomBuffer(buffer) {
-  if (!buffer) return;
-  buffer.lastEventAt = Date.now();
-}
-
-// resetRoomBufferMirror resets a room's stream mirror at each agent.turn.started
-// boundary: the mirror only ever covers the CURRENT round. Persisted earlier
-// rounds belong to the snapshot; accumulating them in the mirror duplicated
-// text across rounds and hit the size cap prematurely.
-function resetRoomBufferMirror(conversationId, run, round) {
-  const buffer = state.roomBuffers.get(conversationId);
-  if (!buffer || buffer.done) return;
-  buffer.raw = '';
-  buffer.rawReasoning = '';
-  buffer.toolJobs = new Map();
-  buffer.round = round || 1;
-  buffer.messageId = run?.messageId ?? null;
-}
-
-// expireCompletedBuffers prunes room buffers whose runs have finished and are
-// longer needed: the persisted snapshot is authoritative after the turn is
-// terminal, and a stale buffer would only re-merge old deltas on switch-back.
-function expireCompletedBuffers() {
-  for (const [convId, buffer] of state.roomBuffers) {
-    if (buffer.done && buffer.lastEventAt < Date.now() - 30_000) {
-      state.roomBuffers.delete(convId);
-    }
-  }
-}
-
-// applyBufferedRunToDOM merges the buffered LIVE run for the now-active
-// conversation into the rendered thread. It replaces the last assistant node
-// with a streaming placeholder populated from the accumulated raw text +
-// reasoning + tool jobs, so switching back never shows a blank turn.
-//
-// Terminal (done) buffers are intentionally NOT rendered here: once a turn
-// finishes, the persisted snapshot is authoritative and already contains the
-// final message, so re-merging a stale done buffer would misrender when a
-// newer turn has progressed past it.
-function applyBufferedRunToDOM(convId) {
-  const buffer = state.roomBuffers.get(convId);
-  if (!buffer || buffer.done || buffer.lastEventAt === 0 || !buffer.runId) return;
-  const thread = agentThread();
-  if (!thread) return;
-  // Convert the snapshot node that owns this message into a streaming slot
-  // (append-based). A capped buffer still overlays its retained tail — the
-  // snapshot cannot render the in-flight round, so showing the newest tail
-  // beats a blank bubble.
-  const run = state.runs.get(buffer.runId);
-  const sourceMessageID = buffer.messageId || run?.messageId || '';
-  buffer.messageId = sourceMessageID || buffer.messageId;
-  const source = {
-    raw: buffer.raw,
-    rawReasoning: buffer.rawReasoning,
-    toolJobs: buffer.toolJobs,
-    messageId: sourceMessageID,
-  };
-  const slot = ensureRunSlot(source);
-  if (!slot) return;
-  const { bubble, reasoningEl, textBox, strip } = slot;
-  slot.msgNode.classList.add('agent-pending');
-  if (roundAlreadyPersisted(source.messageId)) {
-    // The turn finished server-side while the user was away; the snapshot
-    // already renders this round. Leave the empty section attached (harmless
-    // and transient) rather than risking detached refs in live handlers.
-    if (run) {
-      run.msgNode = slot.msgNode;
-      run.bubble = slot.bubble;
-      run.reasoningEl = reasoningEl;
-      run.textBox = textBox;
-      run.strip = strip;
-      run.toolJobs = source.toolJobs;
-    }
-    return;
-  }
-  if (source.rawReasoning) {
-    setReasoningSource(reasoningEl, source.rawReasoning);
-    reasoningEl.hidden = !reasoningHasVisibleSource(source.rawReasoning);
-    if (!reasoningEl.hidden && !source.raw?.trim()) reasoningEl.classList.add('is-streaming');
-  }
-  if (source.raw?.trim()) textBox.innerHTML = renderMarkdown(source.raw);
-  else textBox.append(thinkingDots());
-  void renderMermaidDiagrams(textBox); void highlightCode(textBox); attachZoomButtons(textBox);
-  for (const job of source.toolJobs.values()) placeToolCard(bubble, strip, job);
-  // Write the slot refs back to the buffer: openConversation may re-register
-  // a live run FROM this buffer right after, copying these DOM references.
-  buffer.msgNode = slot.msgNode;
-  buffer.bubble = slot.bubble;
-  buffer.reasoningEl = reasoningEl;
-  buffer.textBox = textBox;
-  buffer.strip = strip;
-  if (!run) return; // buffered-only view; live handlers will attach later
-  // Refresh the run's DOM refs so the active-run handlers keep updating.
-  run.msgNode = slot.msgNode;
-  run.bubble = slot.bubble;
-  run.reasoningEl = reasoningEl;
-  run.textBox = textBox;
-  run.strip = strip;
-  run.messageId = sourceMessageID || run.messageId;
-  run.toolJobs = source.toolJobs;
-  if (buffer.runId === run.runId) buffer.toolJobs = source.toolJobs;
-  scrollToBottom(true);
 }
 
 function renderAttachments() {
@@ -1212,8 +1169,6 @@ function beginTurn(runId, userText, attachments = []) {
   state.messages.push(userMessage);
   const existing = state.runs.get(runId);
   const slot = bindOptimisticTurn(thread, userMessage, existing?.msgNode?.isConnected ? existing : null);
-  const previousBuffer = state.roomBuffers.get(state.activeId);
-  if (previousBuffer?.done) state.roomBuffers.delete(state.activeId);
   state.runs.set(runId, {
     msgNode: slot.msgNode, bubble: slot.bubble, strip: slot.strip,
     textBox: slot.textBox, reasoningEl: slot.reasoningEl,
@@ -1271,8 +1226,6 @@ async function retryTurn(failedNode, failedMessageId) {
       failedNode.remove();
     }
     const existing = state.runs.get(runId);
-    const previousBuffer = state.roomBuffers.get(state.activeId);
-    if (previousBuffer?.done) state.roomBuffers.delete(state.activeId);
     if (existing?.msgNode?.isConnected) {
       existing.msgNode.classList.add('agent-pending');
       if (existing.textBox && !existing.raw) {
@@ -1576,16 +1529,8 @@ function endTurn(runId, keepRun = false) {
   if (!run) {
     if (keepRun) return;
     // Run entry already gone (refresh raced the turn, or a terminal event
-    // arrived for an unknown run). Seal any matching room buffer anyway so
-    // it cannot stay "live" forever and overlay stale deltas over future
-    // snapshots (the disappearing-turn bug).
-    for (const [, buffer] of state.roomBuffers) {
-      if (buffer.runId === runId && !buffer.done) {
-        buffer.done = true;
-        touchRoomBuffer(buffer);
-      }
-    }
-    refreshLiveDots();
+    // arrived for an unknown run). Nothing to clean up: live round state is
+    // server-side and self-expires (sealed TTL); the snapshot is authoritative.
     return;
   }
   const convId = run.conversationId;
@@ -1614,15 +1559,6 @@ function endTurn(runId, keepRun = false) {
   clearToolTimers(run);
   if (!keepRun) {
     state.runs.delete(runId);
-    // Finalize the room buffer: the turn is terminal now, the persisted
-    // snapshot is authoritative on the next switch-back. Keep the buffer
-    // around briefly so the sidebar dot can still signal "finished", then
-    // let reattach render from the server snapshot.
-    const buffer = state.roomBuffers.get(convId);
-    if (buffer) {
-      buffer.done = true;
-      touchRoomBuffer(buffer);
-    }
   }
   // Clear steer for this conversation (turn ended, unapplied steer is cancelled).
   if (convId === state.activeId) {
@@ -1636,7 +1572,6 @@ function endTurn(runId, keepRun = false) {
   } else {
     clearSavedSteerQueue(convId);
   }
-  refreshLiveDots();
 }
 
 // ---------- scroll pinning ----------
@@ -1951,7 +1886,6 @@ function bindEvents() {
     if (!round || round <= 1) {
       resetLiveRoundText(run);
       run.round = 1;
-      resetRoomBufferMirror(conversation_id, run, 1);
       const reusePlaceholder = conversation_id === state.activeId
         && run.msgNode?.isConnected
         && run.textBox
@@ -1962,6 +1896,8 @@ function bindEvents() {
           run.textBox.textContent = '';
           run.textBox.append(thinkingDots());
         }
+        // Open the per-round SSE stream for this round (live deltas).
+        void openRoundStream(run);
         return;
       }
       if (conversation_id === state.activeId) {
@@ -1977,6 +1913,8 @@ function bindEvents() {
             run.textBox.textContent = '';
             run.textBox.append(thinkingDots());
           }
+          // Open the per-round SSE stream for this round (live deltas).
+          void openRoundStream(run);
         }
       }
       return;
@@ -1984,7 +1922,6 @@ function bindEvents() {
     // Track round even when not active so re-attach knows the current round.
     run.round = round;
     resetLiveRoundText(run);
-    resetRoomBufferMirror(conversation_id, run, round);
     if (conversation_id !== state.activeId) {
       run.nextRoundAnchor = null;
       run.awaitingSteerRound = false;
@@ -2017,28 +1954,10 @@ function bindEvents() {
       run.textBox.append(thinkingDots());
     }
     flushPendingEvents(run_id);
-  });
-  on('agent.message.delta', (payload) => {
-    const { text, conversation_id } = payload;
-    const run = getRunOrQueue('agent.message.delta', payload);
-    if (!run) return;
-    // Always accumulate raw text so we can re-render on room switch.
-    appendBoundedLiveText(run, 'raw', text);
-    // Mirror into the room buffer so a switch-back that happens at any point
-    // (including after this run entry was cleaned up) still renders the full
-    // stream. The buffer keeps only a bounded tail if the room is very large.
-    if (conversation_id !== state.activeId) {
-      const buffer = getOrCreateRoomBuffer(conversation_id);
-      buffer.runId = run.runId;
-      buffer.messageId = run.messageId;
-      buffer.raw += text;
-      trimRoomBuffer(buffer);
-      touchRoomBuffer(buffer);
-      refreshLiveDots();
-    }
-    // Only update DOM if this conversation is the active one.
-    if (conversation_id !== state.activeId || !run.textBox) return;
-    scheduleLiveRender(run);
+    // Open the per-round SSE stream for this round (live deltas). The final
+    // round.done frame chains to the next round via next, so auto-continue
+    // keeps streaming across turns.
+    void openRoundStream(run);
   });
   on('agent.context.estimate', (payload) => {
     // Use the server-side estimate of what is really sent (system + messages
@@ -2054,46 +1973,24 @@ function bindEvents() {
     const windowSize = effectiveContextWindow(Number(chosen.context) || 0, Number(state.settings.max_input_tokens) || 0);
     status.textContent = formatContextUsage(Number(estimated_tokens), windowSize);
   });
-  on('agent.reasoning.delta', (payload) => {
-    const { text, conversation_id } = payload;
-    const run = getRunOrQueue('agent.reasoning.delta', payload);
-    if (!run) return;
-    appendBoundedLiveText(run, 'rawReasoning', text);
-    // Mirror into the room buffer for a non-active room so a switch-back
-    // restores the full reasoning stream.
-    if (conversation_id !== state.activeId) {
-      const buffer = getOrCreateRoomBuffer(conversation_id);
-      buffer.runId = run.runId;
-      buffer.messageId = run.messageId;
-      buffer.rawReasoning += text;
-      trimRoomBuffer(buffer);
-      touchRoomBuffer(buffer);
-      refreshLiveDots();
-    }
-    if (conversation_id !== state.activeId) return;
-    scheduleLiveRender(run);
-  });
   on('agent.provider.retry', (payload) => {
     const { attempt, max_attempts, delay_ms, error, conversation_id } = payload;
     const run = getRunOrQueue('agent.provider.retry', payload);
     if (!run) return;
-    // Clear partial content from the interrupted stream so the retry
-    // starts fresh. Without this, new deltas from the retry append to
-    // the cut-off text and produce garbled output.
-    if (conversation_id !== state.activeId) {
-      const buffer = getOrCreateRoomBuffer(conversation_id);
-      buffer.runId = run.runId;
-      buffer.messageId = run.messageId;
-      buffer.raw = '';
-      buffer.rawReasoning = '';
-      buffer.toolJobs = new Map();
-      touchRoomBuffer(buffer);
-      refreshLiveDots();
-      return;
-    }
+    // A provider retry restarts the SAME round stream (same run_id +
+    // message_id); the registry keeps the old buffered frames, so the
+    // frontend drops its accumulated raw text and resumes the stream with
+    // after=<lastSeq> — the server replays only the retry's fresh frames.
+    if (conversation_id !== state.activeId) return;
+    // The round stream was reset server-side for the retry; drop the
+    // accumulated text and re-open the stream fresh (after=0), so the retry
+    // frames are not mixed with the failed attempt's.
+    closeRoundStream(run);
     const hadRaw = Boolean(run.raw);
     const hadReasoning = Boolean(run.rawReasoning);
     resetLiveRoundText(run);
+    run.lastSeq = 0;
+    run.streamMessageId = null;
     if (hadRaw) {
       if (run.textBox) run.textBox.textContent = '';
     }
@@ -2118,26 +2015,16 @@ function bindEvents() {
     // Also clear thinking dots since we're now in retry state, not initial wait.
     run.textBox?.querySelector('.agent-thinking-dots')?.remove();
     scrollToBottom();
+    // Re-open the (server-reset) round stream so the retry's deltas render.
+    void openRoundStream(run);
   });
   on('agent.tool.started', (payload) => {
     const { tool_call_id, name, args, conversation_id } = payload;
     const run = getRunOrQueue('agent.tool.started', payload);
     if (!run) return;
-    // Mirror tool activity into the non-active room buffer so a switch-back
-    // restores the tool cards that ran while this room was hidden.
-    if (conversation_id !== state.activeId) {
-      const buffer = getOrCreateRoomBuffer(conversation_id);
-      buffer.runId = run.runId;
-      buffer.messageId = run.messageId;
-      const job = name === 'generate_image'
-        ? renderGenerateImageCard({ name, args: args ?? {}, status: 'running' })
-        : renderToolJob({ name, args: args ?? {}, status: 'running' });
-      if (isStreamingTool(name)) bindToolStop(job, () => run.runId);
-      setLiveToolJob(buffer.toolJobs, tool_call_id, job);
-      touchRoomBuffer(buffer);
-      refreshLiveDots();
-      return;
-    }
+    // Non-active rooms get their tool cards via the round stream replay on
+    // switch-back; only the active room renders live tool cards here.
+    if (conversation_id !== state.activeId) return;
     // ask_question renders as an ask card (not a tool terminal). The card
     // is created when agent.ask.pending fires with the validated args.
     // Skip the tool terminal here to avoid a double card.
@@ -2183,95 +2070,12 @@ function bindEvents() {
       elapsedEl.textContent = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
     }, 1000);
   });
-  on('agent.tool.delta', (payload) => {
-    const { tool_call_id, text, conversation_id } = payload;
-    const run = getRunOrQueue('agent.tool.delta', payload);
-    if (!run || !text) return;
-    // Mirror streamed output into the non-active room buffer so a
-    // switch-back shows the accumulated tool output, not just the final
-    // snapshot.
-    if (conversation_id !== state.activeId) {
-      const buffer = getOrCreateRoomBuffer(conversation_id);
-      const job = buffer.toolJobs.get(tool_call_id);
-      if (job) appendToolJobDelta(job, text);
-      touchRoomBuffer(buffer);
-      return;
-    }
-    queueToolDelta(run, tool_call_id, text);
-  });
   on('agent.tool.completed', (payload) => {
     const { tool_call_id, name, status, output, conversation_id } = payload;
     const run = getRunOrQueue('agent.tool.completed', payload);
     if (!run) {
       if (conversation_id === state.activeId) void refreshActiveConversation();
       else refreshConversations();
-      return;
-    }
-    // Mirror the completed tool output into the non-active room buffer so a
-    // switch-back renders the finished tool card.
-    if (conversation_id !== state.activeId) {
-      const buffer = getOrCreateRoomBuffer(conversation_id);
-      buffer.runId = run.runId;
-      buffer.messageId = run.messageId;
-      let job = buffer.toolJobs.get(tool_call_id);
-      if (!job) {
-        job = name === 'generate_image'
-          ? renderGenerateImageCard({ name, args: {}, status: 'running' })
-          : renderToolJob({ name, args: {}, status: 'running' });
-        setLiveToolJob(buffer.toolJobs, tool_call_id, job);
-      }
-      if (job) {
-        // show (op=html): swap terminal for artifact card in the buffer
-        // too, so a room switch-back shows the card directly.
-        if (name === 'show') {
-          if (job._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
-          const toolCall = { name, args: job._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
-          const artifact = parseArtifactOutput(toolCall);
-          if (artifact) {
-            const card = renderArtifactCard(toolCall, artifact);
-            card._toolArgs = toolCall.args;
-            card.dataset.standalone = 'true';
-            swapToolCard(job, card, buffer.bubble, buffer.strip);
-            setLiveToolJob(buffer.toolJobs, tool_call_id, card);
-          } else {
-            // show(op=image|audio|video): swap terminal for inline media
-            // card in the buffer too.
-            const showImage = parseShowImageOutput(toolCall);
-            const showAudio = parseShowAudioOutput(toolCall);
-            const showVideo = parseShowVideoOutput(toolCall);
-            if (showImage || showAudio || showVideo) {
-              const card = renderToolCallCard(toolCall);
-              card._toolArgs = toolCall.args;
-              swapToolCard(job, card, buffer.bubble, buffer.strip);
-              setLiveToolJob(buffer.toolJobs, tool_call_id, card);
-            }
-          }
-        } else if (name === 'subagent') {
-          // Re-render the delegation card with the completion output so a
-          // room switch-back shows the settled card, not a stuck "running".
-          if (job._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
-          const toolCall = { name, args: job._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
-          const card = renderSubagentCard(toolCall);
-          card._toolArgs = toolCall.args;
-          job.replaceWith(card);
-          setLiveToolJob(buffer.toolJobs, tool_call_id, card);
-        } else if (name === 'generate_image') {
-          replaceGenerateImageJob(job, payload, (card) => setLiveToolJob(buffer.toolJobs, tool_call_id, card));
-        } else {
-          const next = { name, args: job._toolArgs, status: status || 'ok', output };
-          setToolTerminalStatus(job, next.status);
-          job.open = false;
-          const meta = job.querySelector('.agent-tool-terminal-meta');
-          if (meta) meta.textContent = toolTerminalMeta(next);
-          const outputEl = job.querySelector('.agent-tool-terminal-output');
-          if (outputEl) {
-            outputEl.classList.toggle('is-error', next.status === 'fail');
-            outputEl.textContent = toolTerminalOutput(next);
-          }
-        }
-      }
-      touchRoomBuffer(buffer);
-      refreshLiveDots();
       return;
     }
     const flushedToolDelta = flushPendingToolDeltas(run);
@@ -2432,16 +2236,6 @@ function bindEvents() {
       ? findMessageNode(agentThread(), message_id)
       : null;
     if (run || fallbackNode) {
-      // Mirror the terminal error state into the room buffer so a
-      // non-active room still shows the failure when switched back.
-      if (conversation_id !== state.activeId) {
-        const buffer = getOrCreateRoomBuffer(conversation_id);
-        buffer.raw += (buffer.raw ? '\n\n' : '') + (message || 'Turn failed');
-        trimRoomBuffer(buffer);
-        buffer.done = true;
-        touchRoomBuffer(buffer);
-        refreshLiveDots();
-      }
       const node = run?.msgNode || fallbackNode;
       const bubble = node?.querySelector('.agent-bubble');
       appendLiveError(bubble, message);
@@ -2536,17 +2330,11 @@ function bindEvents() {
     cancelAskCard(card, reason);
   });
   on('agent.compacted', ({ conversation_id, run_id }) => {
-    if (conversation_id !== state.activeId) {
-      state.roomBuffers.delete(conversation_id);
-      refreshLiveDots();
-      return;
-    }
     const run = runForConversation(conversation_id);
     if (run) {
       if (!run_id || run.runId === run_id) void applyLiveCompaction(conversation_id, run, run_id);
       return;
     }
-    state.roomBuffers.delete(conversation_id);
     refreshActiveConversation();
   });
   on('agent.compaction.failed', ({ conversation_id, run_id, error }) => {
@@ -2596,12 +2384,7 @@ function bindEvents() {
     const { conversation_id, items, summary, brief } = payload;
     // Keep the per-room status fresh (used by the sidebar live dot) even for
     // non-active rooms; only the DOM strip touches the active room.
-    if (conversation_id !== state.activeId) {
-      const buffer = getOrCreateRoomBuffer(conversation_id);
-      touchRoomBuffer(buffer);
-      refreshLiveDots();
-      return;
-    }
+    if (conversation_id !== state.activeId) return;
     state.todos = { items: items ?? [], summary: summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 }, brief: brief ?? state.todos.brief ?? '' };
     renderTodoStrip();
   });
@@ -2746,11 +2529,6 @@ async function refreshActiveConversation() {
     state.nextChunkIndex = state.chunkCount - 1;
     state.loadedChunks = new Set();
     state.loadingChunk = false;
-    // If a live buffer exists for this room (a turn is still streaming across
-    // the refresh race), re-merge it so the visible stream stays stable while
-    // the server snapshot catches up.
-    const buffer = state.roomBuffers.get(conversationId);
-  const hasLiveBuffer = buffer && !buffer.done && buffer.lastEventAt > 0;
     const thread = agentThread();
     const liveNode = liveRun?.msgNode?.isConnected ? liveRun.msgNode : null;
     if (liveRun && liveNode && thread && runForConversation(conversationId) === liveRun) {
@@ -2769,7 +2547,6 @@ async function refreshActiveConversation() {
     } else {
       renderThread(windowedActiveMessages(), state.pinned);
       if (liveRun && runForConversation(conversationId) === liveRun) reattachActiveRun();
-      else if (hasLiveBuffer) applyBufferedRunToDOM(conversationId);
     }
     updateOlderSentinel();
     updateComposerStatus();
@@ -2842,7 +2619,6 @@ export async function openConversationExternal(id) {
 export async function refresh() {
   if (backendIsOffline()) return;
   await refreshConversations();
-  expireCompletedBuffers();
 }
 
 // ---------- status ----------
@@ -2873,10 +2649,7 @@ function updateComposerStatus() {
   // refresh the run map is empty until reattachActiveRunFromBackend
   // resolves, so fall back to the persisted status for the active room.
   const activeRun = runForConversation(state.activeId);
-  const activeBuffered = state.roomBuffers.get(state.activeId);
-  const activeRoomLive = Boolean(
-    activeRun || (activeBuffered && !activeBuffered.done && activeBuffered.lastEventAt > 0),
-  );
+  const activeRoomLive = Boolean(activeRun);
   if (activeRoomLive) {
     // Live turn: keep the useful context-usage badge visible (running is
     // already conveyed by the prompt pulse + activity); just pulse it.
@@ -2938,20 +2711,6 @@ function maybeRenderConversationList() {
   if (!view || view.classList.contains('active')) renderConversationList();
 }
 
-// refreshLiveDots re-renders just the sidebar indicators (no thread touch).
-// Called when any non-active room buffer changes so the user can see at a
-// glance which rooms are still streaming. Renders are coalesced to one per
-// animation frame: while several rooms stream deltas simultaneously this
-// keeps the list from being rebuilt dozens of times per second (which both
-// wastes layout work and could race a click on a row).
-let liveDotsRaf = 0;
-function refreshLiveDots() {
-  if (liveDotsRaf) return;
-  liveDotsRaf = requestAnimationFrame(() => {
-    liveDotsRaf = 0;
-    maybeRenderConversationList();
-  });
-}
 
 
 

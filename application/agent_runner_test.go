@@ -380,7 +380,7 @@ func TestExecuteTurnToolsStopsOnCancel(t *testing.T) {
 		Toolbox:       box,
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	if err := app.executeTurnTools(run, "m1", conv.Messages[0].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}); err == nil {
+	if err := app.executeTurnTools(run, "m1", conv.Messages[0].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err == nil {
 		t.Fatal("want context error")
 	}
 	if len(box.names) != 0 {
@@ -455,7 +455,7 @@ func TestExecuteTurnToolsKeepsHydrationOnItemOnlyPatch(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: WithConversationID(context.Background(), "c1"), Cancel: func() {}}
 
-	if err := app.executeTurnTools(run, "m1", conv.Messages[1].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}); err != nil {
+	if err := app.executeTurnTools(run, "m1", conv.Messages[1].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err != nil {
 		t.Fatalf("executeTurnTools: %v", err)
 	}
 	// The hydration checkpoint must still be present.
@@ -500,7 +500,7 @@ func TestRunOneToolKeepsPartialOutputInError(t *testing.T) {
 	toolbox := &partialOutputToolbox{err: partialErr}
 	app := &App{Bus: NewBus(), Toolbox: toolbox}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background(), Cancel: func() {}}
-	res := app.runOneTool(run, domain.ToolCall{ID: "t1", Name: "exec", Args: `{}`}, ModelCapabilities{}, domain.Settings{})
+	res := app.runOneTool(run, "m1", domain.ToolCall{ID: "t1", Name: "exec", Args: `{}`}, ModelCapabilities{}, domain.Settings{}, 1)
 	if res.status != domain.ToolFailed {
 		t.Fatalf("status = %s, want failed", res.status)
 	}
@@ -572,92 +572,66 @@ func (s *streamedRecordingToolbox) Execute(ctx context.Context, name string, arg
 }
 
 // TestRunOneToolStreamsDeltas verifies that a streaming-capable toolbox
-// emits one agent.tool.delta event per output chunk during tool execution,
+// stages one round-delta frame per output chunk into the round stream
+// registry (SSE /stream) during tool execution, with ordered seq numbers,
 // and that the final result is preserved.
 func TestRunOneToolStreamsDeltas(t *testing.T) {
-	var mu sync.Mutex
-	var deltas []contracts.ToolDeltaEvent
-	bus := NewBus()
-	subscribeEvents := func(ch <-chan contracts.Event, done func(), onDelta func(contracts.ToolDeltaEvent)) {
-		go func() {
-			defer done()
-			for ev := range ch {
-				if ev.Type == contracts.EventToolDelta {
-					var d contracts.ToolDeltaEvent
-					b, _ := json.Marshal(ev.Payload)
-					_ = json.Unmarshal(b, &d)
-					onDelta(d)
-				}
-			}
-		}()
-	}
-	_, ch, unsubscribe := bus.Subscribe()
-	done := make(chan struct{})
-	subscribeEvents(ch, func() { close(done) }, func(d contracts.ToolDeltaEvent) {
-		mu.Lock()
-		deltas = append(deltas, d)
-		mu.Unlock()
-	})
-	defer unsubscribe()
-
-	app := &App{Bus: bus, Toolbox: &streamedRecordingToolbox{recordingToolbox: &recordingToolbox{}}}
+	reg := NewRoundStreamRegistry()
+	app := &App{RoundStreams: reg, Bus: NewBus(), Toolbox: &streamedRecordingToolbox{recordingToolbox: &recordingToolbox{}}}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background()}
-	res := app.runOneTool(run, domain.ToolCall{ID: "t1", Name: "exec", Args: `{"command":"echo hi"}`}, ModelCapabilities{}, domain.Settings{})
+	res := app.runOneTool(run, "m1", domain.ToolCall{ID: "t1", Name: "exec", Args: `{"command":"echo hi"}`}, ModelCapabilities{}, domain.Settings{}, 1)
 	if res.output != "streamed-ok" {
 		t.Fatalf("output = %q", res.output)
 	}
-	unsubscribe()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("delta stream never closed")
+
+	sub, err := reg.Subscribe(context.Background(), "r1", "m1", 0)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(deltas) != 2 {
-		t.Fatalf("expected 2 deltas, got %d", len(deltas))
-	}
-	for _, d := range deltas {
-		if d.RunID != "r1" || d.ConversationID != "c1" || d.ToolCallID != "t1" || d.Name != "exec" {
-			t.Fatalf("bad delta metadata: %+v", d)
+	defer sub.Close()
+	var frames []contracts.RoundDeltaFrame
+	for {
+		select {
+		case f := <-sub.Frames():
+			frames = append(frames, f)
+			if len(frames) == 2 {
+				goto collected
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("delta stream never delivered both frames")
 		}
 	}
-	if deltas[0].Text != "line-1\n" || deltas[1].Text != "line-2\n" {
-		t.Fatalf("delta text order wrong: %+v", deltas)
+collected:
+	if len(frames) != 2 {
+		t.Fatalf("expected 2 frames, got %d", len(frames))
+	}
+	for _, f := range frames {
+		if f.Kind != contracts.RoundDeltaTool || f.ToolCallID != "t1" || f.Name != "exec" {
+			t.Fatalf("bad frame metadata: %+v", f)
+		}
+	}
+	if frames[0].Text != "line-1\n" || frames[1].Text != "line-2\n" {
+		t.Fatalf("frame text order wrong: %+v", frames)
+	}
+	if frames[0].Seq != 1 || frames[1].Seq != 2 {
+		t.Fatalf("frame seq order wrong: %+v", frames)
 	}
 }
 
 // TestRunOneToolNoStreamFallback verifies toolboxes without the streaming
-// capability still execute normally and emit no deltas.
+// capability still execute normally and stage no tool deltas.
 func TestRunOneToolNoStreamFallback(t *testing.T) {
-	bus := NewBus()
-	var deltaCount int
-	_, ch, unsubscribe := bus.Subscribe()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for ev := range ch {
-			if ev.Type == contracts.EventToolDelta {
-				deltaCount++
-			}
-		}
-	}()
-	defer unsubscribe()
-
-	app := &App{Bus: bus, Toolbox: &recordingToolbox{}}
+	reg := NewRoundStreamRegistry()
+	app := &App{RoundStreams: reg, Bus: NewBus(), Toolbox: &recordingToolbox{}}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background()}
-	res := app.runOneTool(run, domain.ToolCall{ID: "t1", Name: "exec", Args: `{"command":"echo hi"}`}, ModelCapabilities{}, domain.Settings{})
+	res := app.runOneTool(run, "m1", domain.ToolCall{ID: "t1", Name: "exec", Args: `{"command":"echo hi"}`}, ModelCapabilities{}, domain.Settings{}, 1)
 	if res.output != "ok" {
 		t.Fatalf("output = %q", res.output)
 	}
-	unsubscribe()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("event stream never closed")
-	}
-	if deltaCount != 0 {
-		t.Fatalf("expected no deltas, got %d", deltaCount)
+	// Streams are created lazily on publish; a non-streaming toolbox must
+	// not have produced one.
+	if reg.Exists("r1", "m1") {
+		t.Fatal("expected no round stream for a non-streaming tool")
 	}
 }
 

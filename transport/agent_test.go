@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,8 +15,50 @@ import (
 	"nusashell/contracts"
 )
 
+// readSSEUntilClosed consumes a /stream response until the server closes it
+// (the round is sealed) or ctx expires. Returns the parsed frames in order.
+func readSSEUntilClosed(ctx context.Context, url string) ([]map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET %s status %d", url, resp.StatusCode)
+	}
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	var frames []map[string]any
+	var event, data string
+	appendFrame := func() {
+		if event == "" && data == "" {
+			return
+		}
+		var payload map[string]any
+		_ = json.Unmarshal([]byte(data), &payload)
+		frames = append(frames, map[string]any{"type": event, "payload": payload})
+		event, data = "", ""
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case line == "":
+			appendFrame()
+		case strings.HasPrefix(line, "event: "):
+			event = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			data = strings.TrimPrefix(line, "data: ")
+		}
+	}
+	return frames, scanner.Err()
+}
+
 // TestAgentTurnStreamsOverSSE drives the full turn through the HTTP handler
-// and asserts the SSE event sequence and persisted conversation.
+// and asserts the SSE round-stream sequence and persisted conversation.
 func TestAgentTurnStreamsOverSSE(t *testing.T) {
 	h := newHarness(t, nil)
 	pid := h.addOpenAIProvider(t, "Fake")
@@ -64,23 +107,75 @@ func TestAgentTurnStreamsOverSSE(t *testing.T) {
 		}
 		assertFrameTypes(t, frames, []string{
 			contracts.EventTurnStarted,
-			contracts.EventMessageDelta,
 			contracts.EventToolStarted,
 			contracts.EventToolCompleted,
-			contracts.EventMessageDelta,
+			contracts.EventTurnStarted,
 			contracts.EventTurnDone,
 		})
-		var text string
+		// Text deltas travel the per-round SSE streams, not the WebSocket.
+		var runID string
+		var msgIDs []string
 		for _, f := range frames {
-			if f["type"] == contracts.EventMessageDelta {
-				text += f["payload"].(map[string]any)["text"].(string)
-			}
-			if f["type"] == contracts.EventTurnDone {
-				doneMessageID = f["payload"].(map[string]any)["message_id"].(string)
+			p := f["payload"].(map[string]any)
+			switch f["type"] {
+			case contracts.EventTurnStarted:
+				if runID == "" {
+					runID = p["run_id"].(string)
+				}
+				msgIDs = append(msgIDs, p["message_id"].(string))
+			case contracts.EventTurnDone:
+				doneMessageID = p["message_id"].(string)
 			}
 		}
-		if !strings.Contains(text, "docs explain MCP") {
-			t.Fatalf("streamed text = %q", text)
+		if runID == "" || len(msgIDs) != 2 {
+			t.Fatalf("expected run_id and 2 turn.started message ids, got run=%q msgs=%v", runID, msgIDs)
+		}
+		// Round 1 only made a tool call: no deltas, seals with next chaining
+		// to round 2's message.
+		r1, err := readSSEUntilClosed(ctx, fmt.Sprintf("%s/stream?run_id=%s&message_id=%s", h.server.URL, runID, msgIDs[0]))
+		if err != nil {
+			t.Fatalf("round 1 stream: %v", err)
+		}
+		var nextMsg string
+		for _, f := range r1 {
+			if f["type"] == "round.done" {
+				if state := f["payload"].(map[string]any)["state"]; state != "done" {
+					t.Fatalf("round 1 state = %v", state)
+				}
+				if n, ok := f["payload"].(map[string]any)["next"].(map[string]any); ok {
+					nextMsg = n["message_id"].(string)
+				}
+			}
+		}
+		if nextMsg != msgIDs[1] {
+			t.Fatalf("round 1 next = %q, want %q", nextMsg, msgIDs[1])
+		}
+		// Round 2 streams the final text via round.delta frames.
+		r2, err := readSSEUntilClosed(ctx, fmt.Sprintf("%s/stream?run_id=%s&message_id=%s", h.server.URL, runID, msgIDs[1]))
+		if err != nil {
+			t.Fatalf("round 2 stream: %v", err)
+		}
+		var streamed strings.Builder
+		var doneCount int
+		for _, f := range r2 {
+			if f["type"] == "round.delta" {
+				p := f["payload"].(map[string]any)
+				if p["kind"] == "text" {
+					streamed.WriteString(p["text"].(string))
+				}
+			}
+			if f["type"] == "round.done" {
+				doneCount++
+				if n, ok := f["payload"].(map[string]any)["next"]; ok && n != nil {
+					t.Fatalf("round 2 next should be nil, got %v", n)
+				}
+			}
+		}
+		if doneCount != 1 {
+			t.Fatalf("round 2 done frames = %d", doneCount)
+		}
+		if !strings.Contains(streamed.String(), "docs explain MCP") {
+			t.Fatalf("streamed text = %q", streamed.String())
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for turn.done")
@@ -207,7 +302,7 @@ func TestAgentTurnOverWebSocket(t *testing.T) {
 
 	var gotRunID string
 	var events []string
-	var streamed strings.Builder
+	var msgID string
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		_, data, err := conn.Read(ctx)
@@ -226,8 +321,8 @@ func TestAgentTurnOverWebSocket(t *testing.T) {
 		}
 		events = append(events, msg["type"].(string))
 		if p, ok := msg["payload"].(map[string]any); ok {
-			if text, ok := p["text"].(string); ok {
-				streamed.WriteString(text)
+			if mid, ok := p["message_id"].(string); ok && msg["type"] == contracts.EventTurnStarted {
+				msgID = mid
 			}
 		}
 		if msg["type"] == contracts.EventTurnDone {
@@ -238,7 +333,7 @@ func TestAgentTurnOverWebSocket(t *testing.T) {
 		t.Fatal("no run_id reply over ws")
 	}
 	assertFrameTypes(t, nil, nil) // no-op keeps helper referenced
-	for _, want := range []string{contracts.EventTurnStarted, contracts.EventMessageDelta, contracts.EventTurnDone} {
+	for _, want := range []string{contracts.EventTurnStarted, contracts.EventTurnDone} {
 		found := false
 		for _, e := range events {
 			if e == want {
@@ -249,8 +344,26 @@ func TestAgentTurnOverWebSocket(t *testing.T) {
 			t.Fatalf("missing ws event %s in %v", want, events)
 		}
 	}
-	if streamed.String() != "ws streaming works" {
-		t.Fatalf("ws streamed = %q", streamed.String())
+	// Text deltas travel the per-round SSE stream. Attach with the message id
+	// from turn.started and verify the final text.
+	if msgID == "" {
+		t.Fatal("no turn.started message_id captured over ws")
+	}
+	frames, err := readSSEUntilClosed(ctx, fmt.Sprintf("%s/stream?run_id=%s&message_id=%s", h.server.URL, gotRunID, msgID))
+	if err != nil {
+		t.Fatalf("round stream: %v", err)
+	}
+	var sseText strings.Builder
+	for _, f := range frames {
+		if f["type"] == "round.delta" {
+			p := f["payload"].(map[string]any)
+			if p["kind"] == "text" {
+				sseText.WriteString(p["text"].(string))
+			}
+		}
+	}
+	if sseText.String() != "ws streaming works" {
+		t.Fatalf("round stream text = %q", sseText.String())
 	}
 }
 
@@ -1381,15 +1494,45 @@ func TestAgentTurnReasoningInterleaved(t *testing.T) {
 		t.Fatal("no frames received")
 	}
 
-	// 1) at least two reasoning delta events arrived
-	reasoningDeltas := 0
+	// 1) reasoning deltas arrive via the per-round SSE streams: attach to
+	// each round's message (ids from turn.started) and collect the
+	// kind=reasoning frames across all rounds.
+	var runID string
+	var msgIDs []string
 	for _, f := range frames {
-		if f["type"] == contracts.EventReasoningDelta {
-			reasoningDeltas++
+		p := f["payload"].(map[string]any)
+		if f["type"] == contracts.EventTurnStarted {
+			if runID == "" {
+				runID = p["run_id"].(string)
+			}
+			msgIDs = append(msgIDs, p["message_id"].(string))
+		}
+	}
+	if runID == "" || len(msgIDs) != 3 {
+		t.Fatalf("expected run_id and 3 turn.started message ids, got run=%q msgs=%v", runID, msgIDs)
+	}
+	reasoningDeltas := 0
+	var reasoningText strings.Builder
+	for _, msgID := range msgIDs {
+		sseFrames, err := readSSEUntilClosed(ctx, fmt.Sprintf("%s/stream?run_id=%s&message_id=%s", h.server.URL, runID, msgID))
+		if err != nil {
+			t.Fatalf("round stream %s: %v", msgID, err)
+		}
+		for _, f := range sseFrames {
+			if f["type"] == "round.delta" {
+				p := f["payload"].(map[string]any)
+				if p["kind"] == "reasoning" {
+					reasoningDeltas++
+					reasoningText.WriteString(p["text"].(string))
+				}
+			}
 		}
 	}
 	if reasoningDeltas == 0 {
-		t.Fatalf("expected reasoning delta events, got 0 (frames: %d)", len(frames))
+		t.Fatalf("expected reasoning delta frames, got 0")
+	}
+	if !strings.Contains(reasoningText.String(), "Now I need to list skills") {
+		t.Fatalf("reasoning delta text = %q", reasoningText.String())
 	}
 
 	// 2) two tool-started events (call_r1, call_r2)

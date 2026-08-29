@@ -13,7 +13,7 @@ func TestBusPreservesTurnTerminalEventsBehindDeltaBurst(t *testing.T) {
 	defer unsubscribe()
 
 	for i := 0; i < busNormalQueueLimit*2; i++ {
-		bus.Emit(contracts.EventMessageDelta, map[string]any{"text": "delta"})
+		bus.Emit(contracts.EventContextEstimate, map[string]any{"estimated_tokens": 1})
 	}
 	bus.Emit(contracts.EventTurnDone, contracts.TurnDoneEvent{RunID: "run_1", ConversationID: "conv_1"})
 	bus.Emit(contracts.EventTurnError, contracts.TurnErrorEvent{RunID: "run_2", ConversationID: "conv_2", Message: "failed"})
@@ -39,7 +39,7 @@ func TestBusPreservesSteerAppliedBeforeNextRoundBehindDeltaBurst(t *testing.T) {
 	defer unsubscribe()
 
 	for i := 0; i < busNormalQueueLimit*2; i++ {
-		bus.Emit(contracts.EventMessageDelta, map[string]any{"text": "delta"})
+		bus.Emit(contracts.EventContextEstimate, map[string]any{"estimated_tokens": 1})
 	}
 	bus.Emit(contracts.EventSteerApplied, contracts.SteerEvent{
 		ConversationID: "conv_1", SteerID: "steer_1", Text: "fix it", Status: "applied",
@@ -87,7 +87,7 @@ func TestBusPreservesBlockingLifecycleEventsBehindDeltaBurst(t *testing.T) {
 			defer unsubscribe()
 
 			for i := 0; i < busNormalQueueLimit*2; i++ {
-				bus.Emit(contracts.EventMessageDelta, map[string]any{"text": "delta"})
+				bus.Emit(contracts.EventContextEstimate, map[string]any{"estimated_tokens": 1})
 			}
 			bus.Emit(eventType, map[string]any{"id": "lifecycle"})
 

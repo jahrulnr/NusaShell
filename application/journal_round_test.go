@@ -68,7 +68,7 @@ func TestRunOneToolWrapsDeclaredMutation(t *testing.T) {
 		Args: `{"path":"/tmp/ws/foo.txt","content":"hi"}`,
 	}
 
-	res := app.runOneTool(run, toolCall, ModelCapabilities{}, domain.Settings{})
+	res := app.runOneTool(run, "m1", toolCall, ModelCapabilities{}, domain.Settings{}, 1)
 	if res.status != domain.ToolOK {
 		t.Fatalf("status = %v, want ok", res.status)
 	}
@@ -100,7 +100,7 @@ func TestRunOneToolSkipsJournalForNonMutating(t *testing.T) {
 	run := &TurnRun{ID: "run1", ConversationID: "conv1", Workspace: "/tmp/ws", Ctx: context.Background()}
 	toolCall := domain.ToolCall{ID: "tc1", Name: "file_read", Args: `{"path":"/tmp/ws/foo.txt"}`}
 
-	app.runOneTool(run, toolCall, ModelCapabilities{}, domain.Settings{})
+	app.runOneTool(run, "m1", toolCall, ModelCapabilities{}, domain.Settings{}, 1)
 	if _, ok := journal.lastWrap(); ok {
 		t.Fatal("WrapMutation should not be called for file_read")
 	}
@@ -111,7 +111,7 @@ func TestRunOneToolSkipsJournalWhenNil(t *testing.T) {
 	run := &TurnRun{ID: "run1", ConversationID: "conv1", Workspace: "/tmp/ws", Ctx: context.Background()}
 	toolCall := domain.ToolCall{ID: "tc1", Name: "file_write", Args: `{"path":"/tmp/ws/foo.txt"}`}
 
-	app.runOneTool(run, toolCall, ModelCapabilities{}, domain.Settings{})
+	app.runOneTool(run, "m1", toolCall, ModelCapabilities{}, domain.Settings{}, 1)
 }
 
 type serializeProbeToolbox struct {
@@ -186,7 +186,7 @@ func TestExecuteTurnToolsSerializesMutationsPerRoot(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Workspace: "/tmp/ws", Ctx: context.Background(), Cancel: func() {}}
 
-	if err := app.executeTurnTools(run, "m1", conv.Messages[0].ToolCalls, ModelCapabilities{}, domain.Settings{}); err != nil {
+	if err := app.executeTurnTools(run, "m1", conv.Messages[0].ToolCalls, ModelCapabilities{}, domain.Settings{}, 1); err != nil {
 		t.Fatalf("executeTurnTools: %v", err)
 	}
 	if box.mutatingMaxConcurrent > 1 {

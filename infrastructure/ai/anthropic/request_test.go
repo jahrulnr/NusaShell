@@ -1131,12 +1131,12 @@ func TestConvertBlocksRejectsEmptyReasoningBlock(t *testing.T) {
 // test verifies the guard does not reject non-empty text.
 func TestConvertBlocksAcceptsPlaceholderReasoningBlock(t *testing.T) {
 	out, err := convertBlocks([]core.Block{
-		core.ReasoningBlock{Text: "(prior reasoning summary unavailable)"},
+		core.ReasoningBlock{Text: "(Continue from the current context.)"},
 	})
 	if err != nil {
 		t.Fatalf("placeholder reasoning must pass, got error: %v", err)
 	}
-	if len(out) != 1 || out[0].Type != "thinking" || out[0].Thinking != "(prior reasoning summary unavailable)" {
+	if len(out) != 1 || out[0].Type != "thinking" || out[0].Thinking != "(Continue from the current context.)" {
 		t.Fatalf("output = %#v", out)
 	}
 }

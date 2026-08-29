@@ -29,6 +29,7 @@ func New(app *application.App, logger *slog.Logger, static http.Handler, dev boo
 	s := &Server{App: app, Logger: logger, Static: static, Dev: dev, mux: mux}
 	mux.HandleFunc("POST /rpc/{method...}", s.handleRPC)
 	mux.HandleFunc("GET /ws", s.handleWS)
+	mux.HandleFunc("GET /stream", s.handleStream)
 	mux.HandleFunc("GET /local-file", s.handleLocalFile)
 	// Sound assets: serve embedded notification sounds (turn-complete,
 	// turn-error) from resources/sounds/. Registered before the catch-all

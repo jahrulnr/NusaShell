@@ -45,6 +45,7 @@ type App struct {
 
 	Docs                        DocsSource
 	Bus                         *Bus
+	RoundStreams                *RoundStreamRegistry
 	Toolbox                     ToolExecutor
 	Journal                     ChangeJournal
 	MCPToolbox                  MCPToolbox
@@ -527,6 +528,7 @@ func NewApp(deps Deps) *App {
 		Attachments:                 deps.Attachments,
 		Docs:                        deps.Docs,
 		Bus:                         deps.Bus,
+		RoundStreams:                NewRoundStreamRegistry(),
 		Toolbox:                     deps.Toolbox,
 		Journal:                     deps.Journal,
 		MCPToolbox:                  deps.MCPToolbox,

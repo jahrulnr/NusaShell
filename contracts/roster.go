@@ -100,11 +100,8 @@ const (
 // Event types pushed over WebSocket (/ws).
 const (
 	EventTurnStarted      = "agent.turn.started"
-	EventMessageDelta     = "agent.message.delta"
 	EventContextEstimate  = "agent.context.estimate"
-	EventReasoningDelta   = "agent.reasoning.delta"
 	EventToolStarted      = "agent.tool.started"
-	EventToolDelta        = "agent.tool.delta"
 	EventToolCompleted    = "agent.tool.completed"
 	EventTurnDone         = "agent.turn.done"
 	EventTurnError        = "agent.turn.error"
@@ -330,18 +327,62 @@ type TurnStartedEvent struct {
 	Round          int    `json:"round"`
 }
 
-type MessageDeltaEvent struct {
-	RunID          string `json:"run_id"`
-	ConversationID string `json:"conversation_id"`
-	MessageID      string `json:"message_id"`
-	Text           string `json:"text"`
+// ---- round stream (SSE /stream) ----
+//
+// Round-stream frames replace the old per-delta WebSocket events
+// (agent.message.delta / agent.reasoning.delta / agent.tool.delta). The
+// frontend opens one GET /stream per round after the agent.turn.started
+// signal, and the server streams frames until the round is sealed. Every
+// frame carries a per-stream monotonic Seq so a reconnect can resume with
+// GET /stream?after=<seq> (idempotent replay); the final round.done frame
+// carries the next round reference so the frontend can open the next stream
+// without depending on additional WebSocket delivery.
+
+// RoundRef identifies one streaming round: the run and the assistant
+// message the round produces (message_id is unique per round, including
+// across auto-continue turns that reuse the run id).
+type RoundRef struct {
+	RunID     string `json:"run_id"`
+	MessageID string `json:"message_id"`
+	Round     int    `json:"round"`
 }
 
-type ReasoningDeltaEvent struct {
-	RunID          string `json:"run_id"`
-	ConversationID string `json:"conversation_id"`
-	MessageID      string `json:"message_id"`
-	Text           string `json:"text"`
+// RoundDeltaKind discriminates round.delta frames.
+const (
+	RoundDeltaText      = "text"
+	RoundDeltaReasoning = "reasoning"
+	RoundDeltaTool      = "tool"
+)
+
+// RoundDeltaFrame is one incremental chunk of a live round.
+type RoundDeltaFrame struct {
+	Seq        int64  `json:"seq"`
+	Kind       string `json:"kind"` // "text" | "reasoning" | "tool"
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Name       string `json:"name,omitempty"` // tool name for kind="tool"
+	Text       string `json:"text,omitempty"`
+}
+
+// RoundDoneState discriminates round.done frames.
+const (
+	RoundStateDone        = "done"
+	RoundStatePartial     = "partial" // provider error mid-stream; persisted text continues in next round
+	RoundStateError       = "error"
+	RoundStateInterrupted = "interrupted"
+)
+
+// RoundDoneFrame seals a round stream. Next is non-nil when the agent
+// continues with another round (tool loop or auto-continue chain); the
+// frontend then opens the next stream for Next.MessageID when it receives
+// the following agent.turn.started.
+type RoundDoneFrame struct {
+	State     string    `json:"state"`
+	RunID     string    `json:"run_id"`
+	MessageID string    `json:"message_id"`
+	Round     int       `json:"round"`
+	Usage     *UsageDTO `json:"usage,omitempty"`
+	Next      *RoundRef `json:"next,omitempty"`
+	Error     string    `json:"error,omitempty"`
 }
 
 // ContextEstimateEvent carries a lightweight server-side estimate of the
@@ -363,18 +404,6 @@ type ToolStartedEvent struct {
 	ToolCallID     string          `json:"tool_call_id"`
 	Name           string          `json:"name"`
 	Args           json.RawMessage `json:"args,omitempty"`
-}
-
-// ToolDeltaEvent carries a live output chunk for a running tool call,
-// mirrored from the tool's stdout/stderr as it is produced (only emitted
-// for tools that stream, e.g. exec). The frontend appends `text` to the
-// tool terminal's output panel while the call is still running.
-type ToolDeltaEvent struct {
-	RunID          string `json:"run_id"`
-	ConversationID string `json:"conversation_id"`
-	ToolCallID     string `json:"tool_call_id"`
-	Name           string `json:"name"`
-	Text           string `json:"text"`
 }
 
 type ToolCompletedEvent struct {

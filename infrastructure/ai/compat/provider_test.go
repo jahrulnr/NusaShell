@@ -800,14 +800,14 @@ func TestReasoningBlockPlaceholderTextPasses(t *testing.T) {
 		Model: "m",
 		Messages: []core.Message{
 			core.UserText("hi"),
-			core.Assistant(core.ReasoningBlock{Text: "(prior reasoning summary unavailable)"}),
+			core.Assistant(core.ReasoningBlock{Text: "(Continue from the current context.)"}),
 		},
 	})
 	if err != nil {
 		t.Fatalf("placeholder reasoning must pass, got error: %v", err)
 	}
 	messages := capturedBody["messages"].([]any)
-	if messages[1].(map[string]any)["reasoning_content"] != "(prior reasoning summary unavailable)" {
+	if messages[1].(map[string]any)["reasoning_content"] != "(Continue from the current context.)" {
 		t.Fatalf("reasoning_content = %#v", messages[1])
 	}
 }

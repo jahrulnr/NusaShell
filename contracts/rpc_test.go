@@ -85,7 +85,7 @@ func TestRosterUniqueness(t *testing.T) {
 	}
 
 	events := []string{
-		EventTurnStarted, EventMessageDelta, EventReasoningDelta, EventToolStarted, EventToolDelta, EventToolCompleted,
+		EventTurnStarted, EventToolStarted, EventToolCompleted,
 		EventTurnDone, EventTurnError, EventCompacted, EventCompactionFailed, EventSteerQueued, EventSteerApplied,
 		EventSteerCancelled, EventProviderRetry, EventLogAppend, EventTodoUpdated,
 		EventCIRunCreated, EventCIRunStarted, EventCIRunCompleted, EventCIRunFailed,
@@ -128,8 +128,8 @@ func TestGoldenEnvelopes(t *testing.T) {
 		},
 	})
 	assertGolden(t, "event.json", Event{
-		Type:    EventMessageDelta,
-		Payload: json.RawMessage(`{"run_id":"run_1","conversation_id":"conv_1","message_id":"msg_1","text":"hi"}`),
+		Type:    EventTurnStarted,
+		Payload: json.RawMessage(`{"run_id":"run_1","conversation_id":"conv_1","message_id":"msg_1","round":1}`),
 	})
 }
 
@@ -259,15 +259,15 @@ func TestEventFieldNames(t *testing.T) {
 		}
 	}
 
-	b, _ = json.Marshal(ToolDeltaEvent{
-		RunID: "r", ConversationID: "c", ToolCallID: "t", Name: "exec", Text: "line1\n",
+	b, _ = json.Marshal(RoundDeltaFrame{
+		Seq: 1, Kind: RoundDeltaTool, ToolCallID: "t", Name: "exec", Text: "line1\n",
 	})
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"run_id", "conversation_id", "tool_call_id", "name", "text"} {
+	for _, k := range []string{"seq", "kind", "tool_call_id", "name", "text"} {
 		if _, ok := m[k]; !ok {
-			t.Errorf("missing field %q in ToolDeltaEvent JSON", k)
+			t.Errorf("missing field %q in RoundDeltaFrame JSON", k)
 		}
 	}
 }

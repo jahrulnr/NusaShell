@@ -73,7 +73,7 @@ func TestStreamTurnRoundStripsEffortForNonReasoningModel(t *testing.T) {
 			{ID: "u1", Role: domain.RoleUser, Content: "hi"},
 			{ID: "a1", Role: domain.RoleAssistant},
 		},
-	}, "a1", "openai/gpt-4.1", "high", nil, domain.Settings{}, false, 100, nil, caps)
+	}, "a1", "openai/gpt-4.1", "high", nil, domain.Settings{}, false, 100, nil, caps, 1)
 	if err != nil {
 		t.Fatalf("streamTurnRoundOnce: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestStreamTurnRoundKeepsEffortForReasoningModel(t *testing.T) {
 			{ID: "u1", Role: domain.RoleUser, Content: "hi"},
 			{ID: "a1", Role: domain.RoleAssistant},
 		},
-	}, "a1", "deepseek/deepseek-r1", "high", nil, domain.Settings{}, false, 100, nil, caps)
+	}, "a1", "deepseek/deepseek-r1", "high", nil, domain.Settings{}, false, 100, nil, caps, 1)
 	if err != nil {
 		t.Fatalf("streamTurnRoundOnce: %v", err)
 	}

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Live agent deltas moved from WebSocket to per-round SSE streams (`GET /stream`).** This is a **breaking wire change**: `agent.message.delta`, `agent.reasoning.delta`, and `agent.tool.delta` WS events are removed. The frontend now opens one SSE stream per round (`?run_id=&message_id=&after=<seq>`) on `agent.turn.started`, receives `round.delta` frames (`seq`, `kind` = text | reasoning | tool) and a terminal `round.done` frame (`state`, `usage`, `next`). `after=` replay makes reconnects, room switches, and page reloads self-healing: the server stages live round content in an in-memory registry (bounded, sealed TTL) and the round is committed to the conversation store atomically at seal, so snapshots never see torn mid-round state. `next` chaining carries tool-loop and auto-continue rounds forward, removing the previous room-buffer/pending-event workarounds. The WebSocket keeps signaling and lifecycle events (`agent.turn.started`, `agent.tool.started/completed`, `agent.turn.done/error`, steer, ask, compaction).
+
 ### Added
 
 - **PWA-grade shell: installable, offline-capable, mini window.** The web
