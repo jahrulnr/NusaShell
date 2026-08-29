@@ -582,10 +582,6 @@
 /* Steer message flag in transcript (after apply) */
 .agent-message-steer-flag { color: var(--accent); font: 9px var(--font-mono); letter-spacing: .04em; text-transform: uppercase; }
 
-/* Auto-continue message flag in transcript (synthetic user message from continue.md) */
-.agent-message-auto-continue-flag { color: var(--text-faint); font: 9px var(--font-mono); letter-spacing: .04em; text-transform: uppercase; }
-.agent-message.agent-auto-continue .agent-bubble { opacity: .7; font-size: 12px; }
-
 /* Composer stack: task strip + jobs + form as one floating card (Cursor-like). */
 .agent-composer-stack {
   position: relative;

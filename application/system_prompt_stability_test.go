@@ -7,9 +7,9 @@ import (
 	"nusashell/domain"
 )
 
-// TestAppendContinuationTool verifies the continuation instruction is
-// delivered as an ephemeral synthetic tool call + result (announcement
-// style), never as a system prompt mutation.
+// TestAppendContinuationTool verifies the interrupted-response notice is
+// delivered on the shared announcement channel as an ephemeral synthetic
+// tool call + result, never as a system prompt mutation.
 func TestAppendContinuationTool(t *testing.T) {
 	base := []ChatMessage{{Role: "user", Content: "hi"}}
 	msgs := appendContinuationTool(base)
@@ -22,20 +22,20 @@ func TestAppendContinuationTool(t *testing.T) {
 		t.Fatalf("synthetic assistant message wrong: %+v", asst)
 	}
 	call := asst.ToolCalls[0]
-	if call.Name != domain.ContinueStreamToolName {
-		t.Fatalf("tool name = %q, want %q", call.Name, domain.ContinueStreamToolName)
+	if call.Name != domain.AnnouncementToolName {
+		t.Fatalf("tool name = %q, want %q", call.Name, domain.AnnouncementToolName)
 	}
-	if !domain.IsContinueStreamCallID(call.ID) {
-		t.Fatalf("call id %q must use the cont- prefix", call.ID)
+	if !domain.IsAnnouncementCallID(call.ID) {
+		t.Fatalf("call id %q must use the announce- prefix", call.ID)
 	}
-	if call.Status != domain.ToolOK || call.Output != domain.ContinueStreamMessage {
+	if call.Status != domain.ToolOK || call.Output != domain.AnnouncementInterruptedMessage {
 		t.Fatalf("tool call must be pre-completed: %+v", call)
 	}
 	res := msgs[len(msgs)-1]
 	if res.Role != "tool" || res.ToolResult == nil {
 		t.Fatalf("last message must be the tool result: %+v", res)
 	}
-	if res.ToolResult.ToolCallID != call.ID || res.ToolResult.Content != domain.ContinueStreamMessage {
+	if res.ToolResult.ToolCallID != call.ID || res.ToolResult.Content != domain.AnnouncementInterruptedMessage {
 		t.Fatalf("tool result must reference the same call with the same content: %+v", res.ToolResult)
 	}
 }

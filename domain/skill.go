@@ -275,7 +275,7 @@ type Settings struct {
 	// After a successful sealed turn, if the conversation todo list
 	// still has open items (pending or in_progress), the agent runner
 	// starts the next turn without a user message, injecting the
-	// continue.md steering prompt. The chain stops when:
+	// `announcement` tool result with the continuation guidance. The chain stops when:
 	//   - no open todos remain
 	//   - the chain budget is exhausted
 	//   - the last assistant turn ended with a question

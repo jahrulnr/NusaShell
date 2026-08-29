@@ -117,11 +117,15 @@ test('conversationTail keeps a compaction marker immediately before the live ass
   ]);
 });
 
-test('conversationTail keeps the synthetic auto-continue user message before its assistant tail', () => {
+test('conversationTail treats the auto-continue announcement like any assistant round and keeps the last user bubble', () => {
   const messages = [
     msg('user', 'original-user'),
     msg('assistant', 'first-assistant'),
-    { role: 'user', id: 'auto-continue', auto_continue: true },
+    {
+      role: 'assistant',
+      id: 'auto-continue-announcement',
+      tool_calls: [{ id: 'announce-x', name: 'announcement', args: { type: 'auto_continue' }, status: 'ok', output: 'notice' }],
+    },
     msg('assistant', 'continued-a0'),
     msg('assistant', 'continued-a1'),
     msg('assistant', 'continued-a2'),
@@ -130,7 +134,7 @@ test('conversationTail keeps the synthetic auto-continue user message before its
 
   const tail = conversationTail(messages, { prefixWindow: 2, keepRounds: 3 });
 
-  assert.deepEqual(tail.visible.map((m) => m.id), ['auto-continue', 'continued-a1', 'continued-a2', 'continued-a3']);
+  assert.deepEqual(tail.visible.map((m) => m.id), ['original-user', 'continued-a1', 'continued-a2', 'continued-a3']);
 });
 
 test('attachments are detected by bytes rather than their filename or MIME type', () => {

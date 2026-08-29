@@ -2390,13 +2390,27 @@ function bindEvents() {
       status.textContent = label;
       status.classList.add('is-running');
     }
-    // Insert the synthetic continue user message into the transcript so the
-    // user sees what triggered the next turn. Marked auto_continue so the UI
-    // can style it differently from real user messages.
+    // Insert the synthetic announcement tool card into the transcript so
+    // the user sees what triggered the next turn. Mirrors the persisted
+    // assistant message the backend stores for the auto-continue notice.
     if (continue_text) {
-      const continueMessage = { role: 'user', content: continue_text, auto_continue: true, created_at: new Date().toISOString() };
-      state.messages.push(continueMessage);
-      const node = renderMessage(continueMessage);
+      const notice = {
+        role: 'assistant',
+        tool_calls: [{
+          id: `announce-${Math.random().toString(36).slice(2, 12)}`,
+          name: 'announcement',
+          args: {
+            type: 'auto_continue',
+            continues_used: decision?.continues_used ?? 0,
+            open_todos: decision?.open_todo_count ?? 0,
+          },
+          status: 'ok',
+          output: continue_text,
+        }],
+        created_at: new Date().toISOString(),
+      };
+      state.messages.push(notice);
+      const node = renderMessage(notice);
       const thread = agentThread();
       if (thread && node) thread.append(node);
       thread?.scrollTo?.({ top: thread.scrollHeight, behavior: 'smooth' });

@@ -214,7 +214,7 @@ export function renderMessage(message) {
     return renderCompactionMessage(message);
   }
   if (message.role === 'user') {
-    const node = el('div', { class: `agent-message user${message.steer ? ' agent-steer' : ''}${message.auto_continue ? ' agent-auto-continue' : ''}` });
+    const node = el('div', { class: `agent-message user${message.steer ? ' agent-steer' : ''}` });
     const bubble = el('div', { class: 'agent-bubble' });
     bubble.append(el('div', { text: message.content || (message.attachments?.length ? 'Attached files' : '') }));
     if (message.attachments?.length) bubble.append(renderMessageAttachments(message.attachments));
@@ -222,9 +222,6 @@ export function renderMessage(message) {
     const meta = el('div', { class: 'agent-message-meta' });
     if (message.steer) {
       meta.append(el('span', { class: 'agent-message-steer-flag', text: 'Steer message' }));
-    }
-    if (message.auto_continue) {
-      meta.append(el('span', { class: 'agent-message-auto-continue-flag', text: 'Auto-continue' }));
     }
     meta.append(el('span', { text: fmtTime(message.created_at) }));
     node.append(meta);

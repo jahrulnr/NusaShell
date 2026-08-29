@@ -226,6 +226,26 @@ func (a *App) restartAnnouncement() domain.Message {
 	}
 }
 
+// autoContinueAnnouncement builds the synthetic assistant message carrying
+// the `announcement` tool call that continues the todo-driven chain into the
+// next turn. Mirrors restartAnnouncement: persisted, result pre-filled, args
+// self-describing the chain state (rounds used, open todos).
+func (a *App) autoContinueAnnouncement(decision domain.AutoContinueDecision) domain.Message {
+	return domain.Message{
+		ID:        domain.NewID("msg"),
+		Role:      domain.RoleAssistant,
+		CreatedAt: time.Now().UTC(),
+		Status:    domain.StatusDone,
+		ToolCalls: []domain.ToolCall{{
+			ID:     domain.AnnouncementToolCallPrefix + randomNonce(),
+			Name:   domain.AnnouncementToolName,
+			Args:   domain.AutoContinueAnnouncementArgs(decision.ContinuesUsed, decision.OpenTodoCount),
+			Status: domain.ToolOK,
+			Output: continuePrompt,
+		}},
+	}
+}
+
 func (a *App) handleTurnsStop(req contracts.TurnStopRequest) (any, *contracts.RPCError) {
 	a.runsMu.Lock()
 	run, ok := a.runs[req.RunID]
@@ -842,7 +862,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		return false, ""
 	}
 	// Emit an event so the UI can show "Continuing tasks… (N/M)" and insert
-	// the synthetic continue user message into the transcript.
+	// the auto-continue announcement tool card into the transcript.
 	a.Bus.Emit(contracts.EventAutoContinue, contracts.AutoContinueEvent{
 		ConversationID: run.ConversationID,
 		RunID:          run.ID,
@@ -855,28 +875,22 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		},
 		ContinueText: continuePrompt,
 	})
-	// Append the auto-continue prompt as a synthetic user message so the
-	// model sees a user turn (not just a system prompt suffix). Without this,
-	// after compaction the conversation history ends with an assistant message
-	// and the model interprets the missing user message as an empty message
-	// from the user. The message is marked AutoContinue so the UI can style
-	// it differently from real user messages.
-	continueMsg := domain.Message{
-		ID:           domain.NewID("msg"),
-		Role:         domain.RoleUser,
-		Content:      continuePrompt,
-		CreatedAt:    time.Now().UTC(),
-		Status:       domain.StatusDone,
-		AutoContinue: true,
-	}
+	// Append the auto-continue notice on the shared `announcement` tool
+	// channel (same mechanism as restart announcements) so the model
+	// receives it as harness runtime state, never as user speech — models
+	// attribute synthetic user messages to the human regardless of prompt
+	// wording. The call is persisted with its result pre-filled, so the
+	// model sees it in this turn and in later turns, and the UI renders it
+	// as a normal tool card.
+	notice := a.autoContinueAnnouncement(decision)
 	conv, convErr := a.Conversations.Get(run.ConversationID)
 	if convErr != nil {
 		a.log("error", "agent", "auto-continue: failed to get conversation: %v", convErr)
 		return false, ""
 	}
-	conv.AddMessage(continueMsg)
+	conv.AddMessage(notice)
 	if saveErr := a.Conversations.Save(conv); saveErr != nil {
-		a.log("error", "agent", "auto-continue: failed to save user message: %v", saveErr)
+		a.log("error", "agent", "auto-continue: failed to save announcement: %v", saveErr)
 		return false, ""
 	}
 	// Append a fresh assistant message for the next turn.

@@ -12,9 +12,10 @@ import (
 // and intent/evidence routing as one merged document.
 var systemPrompt = resources.Prompt("system")
 
-// continuePrompt is the steering prompt injected at the start of each
+// continuePrompt is the auto-continue guidance delivered as the output of
+// the synthetic `announcement` tool call injected at the start of each
 // auto-continue turn. Loaded from resources/agent/prompts/continue.md.
-var continuePrompt = resources.UserPrompt("continue")
+var continuePrompt = resources.Prompt("continue")
 
 // compactionPrompt is the system prompt for the compaction summarization
 // call. Loaded from resources/agent/prompts/compaction.md. Tells the model

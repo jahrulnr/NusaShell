@@ -1,6 +1,7 @@
 package application
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -64,6 +65,36 @@ func TestRestartAnnouncementShape(t *testing.T) {
 	}
 	if tc.Status != domain.ToolOK || tc.Output != domain.AnnouncementMessage {
 		t.Fatalf("tool call must be pre-completed: %+v", tc)
+	}
+}
+
+// TestAutoContinueAnnouncementShape verifies the auto-continue notice rides
+// the same announcement channel as restarts: persisted assistant message,
+// pre-completed tool call, self-describing args, continuation guidance as
+// the pre-filled output — never a synthetic user message.
+func TestAutoContinueAnnouncementShape(t *testing.T) {
+	app := &App{Bus: NewBus()}
+	msg := app.autoContinueAnnouncement(domain.AutoContinueDecision{ShouldContinue: true, ContinuesUsed: 2, OpenTodoCount: 3})
+	if msg.Role != domain.RoleAssistant || msg.Status != domain.StatusDone {
+		t.Fatalf("unexpected message: %+v", msg)
+	}
+	if len(msg.ToolCalls) != 1 {
+		t.Fatalf("want 1 tool call, got %d", len(msg.ToolCalls))
+	}
+	tc := msg.ToolCalls[0]
+	if tc.Name != domain.AnnouncementToolName || !domain.IsAnnouncementCallID(tc.ID) {
+		t.Fatalf("call must use the announcement channel: %+v", tc)
+	}
+	if tc.Status != domain.ToolOK {
+		t.Fatalf("tool call must be pre-completed: %+v", tc)
+	}
+	if strings.TrimSpace(tc.Output) == "" {
+		t.Fatalf("output must carry the continuation guidance: %+v", tc)
+	}
+	for _, want := range []string{`"type":"auto_continue"`, `"continues_used":2`, `"open_todos":3`} {
+		if !strings.Contains(tc.Args, want) {
+			t.Fatalf("args must contain %s, got %s", want, tc.Args)
+		}
 	}
 }
 

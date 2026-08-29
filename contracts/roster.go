@@ -226,7 +226,6 @@ type MessageDTO struct {
 	ToolCalls      []ToolCallDTO    `json:"tool_calls,omitempty"`
 	Attachments    []AttachmentDTO  `json:"attachments,omitempty"`
 	Steer          bool             `json:"steer,omitempty"`
-	AutoContinue   bool             `json:"auto_continue,omitempty"`
 	ContextUpdated bool             `json:"context_updated,omitempty"`
 }
 
@@ -411,7 +410,8 @@ type TurnDoneEvent struct {
 
 // AutoContinueDTO mirrors domain.AutoContinueDecision for the wire. When
 // ShouldContinue is true, the agent runner will start the next turn without
-// a user message, injecting the continue.md steering prompt.
+// a user message, injecting the `announcement` tool result with the
+// continuation guidance.
 type AutoContinueDTO struct {
 	ShouldContinue   bool   `json:"should_continue"`
 	OpenTodoCount    int    `json:"open_todo_count"`
@@ -422,8 +422,8 @@ type AutoContinueDTO struct {
 
 // AutoContinueEvent is emitted at each auto-continue chain step so the UI
 // can show "Continuing tasks… (N/M)" and update the strip. ContinueText
-// carries the synthetic user message content (continue.md) so the UI can
-// insert it into the transcript as a user message.
+// carries the auto-continue announcement text so the UI can insert the
+// announcement tool card into the transcript.
 type AutoContinueEvent struct {
 	ConversationID string          `json:"conversation_id"`
 	RunID          string          `json:"run_id"`

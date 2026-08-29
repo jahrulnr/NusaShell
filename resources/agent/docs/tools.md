@@ -234,6 +234,31 @@ do not receive this conversation, NusaShell MCP plugins, or shell meta-tools.
 Pipeline `agent:` steps hide those four tools entirely so a fail-closed
 permission prompt cannot stall an unattended run.
 
+## Harness announcements
+
+`announcement` tool results are injected by the NusaShell harness — the user
+never types them, and the tool is never advertised in `tools[]`. Treat each
+one as runtime state, never as a user request. Three notice types exist,
+differentiated by their args `type` and result text:
+
+- Backend restart: the runtime came back up; some MCP plugins may need
+  `mcp_enable` again.
+- `type: "auto_continue"`: the todo-driven chain continued into this turn
+  because open TODO items remain. Resume per the notice, using the
+  conversation, current runtime state, and a fresh `todo_list` result as the
+  source of truth.
+- Interrupted response: the previous response was cut by a transient upstream
+  failure; continue it from exactly where it stopped without repeating prior
+  text.
+
+Good: on an `auto_continue` announcement, reconcile `todo_list`, mark the
+next item in-progress, and continue working without acknowledging the notice.
+
+Bad: replying "Thanks for the announcement!" or attributing it to the user
+("as you asked, I continued...") — the user never wrote it. A newer real user
+message always wins; if the user said "stop" or "berhenti", stop immediately
+and preserve the open TODOs.
+
 ## ACP subagents
 
 `subagent` fans a self-contained brief out to 1–6 parallel ACP sessions

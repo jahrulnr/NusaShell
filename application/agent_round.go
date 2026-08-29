@@ -331,16 +331,16 @@ func serverCompactionContextManagement(model string) []map[string]any {
 	}
 }
 
-// appendContinuationTool appends the synthetic continue_stream tool call
-// (with its result pre-filled, announcement-style) to the provider message
-// list for a continuation round. Ephemeral: it exists only in this
+// appendContinuationTool appends the synthetic announcement tool call (with
+// its result pre-filled) to the provider message list for a continuation
+// round after an interrupted response. Ephemeral: it exists only in this
 // request, never persisted to the conversation store.
 func appendContinuationTool(messages []ChatMessage) []ChatMessage {
-	id := domain.ContinueStreamToolCallPrefix + randomNonce()
-	call := domain.ToolCall{ID: id, Name: domain.ContinueStreamToolName, Args: "{}", Status: domain.ToolOK, Output: domain.ContinueStreamMessage}
+	id := domain.AnnouncementToolCallPrefix + randomNonce()
+	call := domain.ToolCall{ID: id, Name: domain.AnnouncementToolName, Args: "{}", Status: domain.ToolOK, Output: domain.AnnouncementInterruptedMessage}
 	return append(messages,
 		ChatMessage{Role: "assistant", ToolCalls: []domain.ToolCall{call}},
-		ChatMessage{Role: "tool", ToolResult: &ToolResult{ToolCallID: id, Name: domain.ContinueStreamToolName, Content: domain.ContinueStreamMessage}},
+		ChatMessage{Role: "tool", ToolResult: &ToolResult{ToolCallID: id, Name: domain.AnnouncementToolName, Content: domain.AnnouncementInterruptedMessage}},
 	)
 }
 

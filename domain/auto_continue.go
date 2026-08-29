@@ -20,7 +20,8 @@ const (
 
 // AutoContinueDecision is the outcome of the outer multi-turn auto-continue
 // policy. When ShouldContinue is true, the agent runner starts the next turn
-// without a user message, injecting the continue.md steering prompt.
+// without a user message, injecting the `announcement` tool result with the
+// continuation guidance.
 type AutoContinueDecision struct {
 	ShouldContinue   bool               `json:"should_continue"`
 	OpenTodoCount    int                `json:"open_todo_count"`
