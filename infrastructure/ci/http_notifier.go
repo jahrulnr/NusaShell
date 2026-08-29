@@ -18,7 +18,7 @@ type HTTPNotifier struct {
 }
 
 func NewHTTPNotifier() *HTTPNotifier {
-	return &HTTPNotifier{Client: &http.Client{Timeout: 10 * time.Second}}
+	return &HTTPNotifier{Client: &http.Client{Timeout: 300 * time.Second}}
 }
 
 type webhookPayload struct {

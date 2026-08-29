@@ -58,13 +58,13 @@ func newImageHTTPClient() *http.Client {
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
-				Timeout:   15 * time.Second,
-				KeepAlive: 30 * time.Second,
+				Timeout:   300 * time.Second,
+				KeepAlive: 300 * time.Second,
 			}).DialContext,
 			ForceAttemptHTTP2:     true,
-			TLSHandshakeTimeout:   15 * time.Second,
-			ResponseHeaderTimeout: 180 * time.Second,
-			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   300 * time.Second,
+			ResponseHeaderTimeout: 300 * time.Second,
+			IdleConnTimeout:       300 * time.Second,
 		},
 	}
 }

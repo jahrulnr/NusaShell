@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"strings"
 
-	"nusashell/infrastructure/ai/internal"
+	aiutil "nusashell/infrastructure/ai/internal"
 )
 
 // ModelLister fetches the list of embedding model IDs from a provider's

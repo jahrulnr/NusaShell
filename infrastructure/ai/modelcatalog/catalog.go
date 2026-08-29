@@ -113,11 +113,11 @@ type Catalog struct {
 	loaded   bool
 }
 
-// New creates a catalog fetcher. The HTTP client defaults to a 30s timeout
+// New creates a catalog fetcher. The HTTP client defaults to a 300s timeout
 // if nil.
 func New(client *http.Client) *Catalog {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = &http.Client{Timeout: 300 * time.Second}
 	}
 	return &Catalog{
 		client:   client,

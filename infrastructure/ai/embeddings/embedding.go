@@ -31,7 +31,7 @@ func NewEmbedder(baseURL, apiKey, model string) *Embedder {
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		APIKey:  apiKey,
 		Model:   model,
-		Client:  &http.Client{Timeout: 30 * time.Second},
+		Client:  &http.Client{Timeout: 300 * time.Second},
 	}
 }
 
