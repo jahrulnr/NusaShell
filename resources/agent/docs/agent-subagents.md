@@ -71,13 +71,14 @@ When a subagent finishes (completed, failed, or cancelled):
    plus the subagent's last-turn text summary) is injected into the
    conversation, announcement-style. It is persisted as a normal
    assistant tool call so the model sees it in fresh context and in
-   later turns (auto-continue) too. If the parent is still mutating the
-   conversation, completion waits for that turn boundary and remains
-   pending so auto-continue cannot run ahead of the injected result.
-4. A new parent-agent turn is triggered (tool injection) so the parent
-   processes the result without a user message. The parent agent sees
-   the `subagent_result` tool call in its message history and acts on
-   the summary as if it had just called the tool.
+   later turns (auto-continue) too. If the parent is still in a turn,
+   completion is queued and injected at the next tool-round boundary —
+   the same boundary as steer — then the parent continues. Auto-continue
+   stays paused (`awaiting-background-jobs`) until that injection lands.
+4. If the parent is idle, a new parent-agent turn is triggered so the
+   parent processes the `subagent_result` without a user message. The
+   parent sees that tool call in history and acts on the summary as if
+   it had just completed the tool.
 
 Runtime state (delegation config, continuation instructions, subagent
 results) is never appended to the system prompt — it travels as tool
@@ -90,8 +91,9 @@ turn. When all subagents complete, the chain resumes.
 
 ## Waiting for results
 
-`subagent` is always async. When you need the result before continuing,
-call `subagent_wait` with the run id; to adjust a live run use
+`subagent` is always async. The harness injects `subagent_result` when
+the run finishes. Call `subagent_wait` only when the next action in
+this round cannot proceed without the result; to adjust a live run use
 `subagent_steer`, and to cancel it use `subagent_stop`.
 
 When `subagent_wait` reaches a terminal result, it persists the full run

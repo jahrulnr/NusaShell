@@ -146,8 +146,9 @@ type App struct {
 	// IDs per conversation. Used to implement HasBackgroundJobs: while any
 	// subagent is running, the parent agent's auto-continue chain pauses
 	// with reason "awaiting-background-jobs" instead of ending the turn.
-	// When a subagent completes, the OnDone callback removes it from this
-	// map and triggers a new turn so the parent agent processes the result.
+	// When a subagent completes, the result is injected at the next
+	// steer-style turn boundary (or a new turn if the parent is idle)
+	// and then removed from this map.
 	pendingSubagentsMu sync.Mutex
 	pendingSubagents   map[string]map[string]bool // conversationID → set of runIDs
 
@@ -335,6 +336,17 @@ type TurnRun struct {
 	messageMu   sync.RWMutex
 	steerMu     sync.Mutex
 	steerQueued *SteerEntry
+
+	subagentDoneMu sync.Mutex
+	subagentDone   []pendingSubagentDone
+}
+
+// pendingSubagentDone is a finished ACP run waiting to be injected into the
+// parent turn at the next steer-style tool-round boundary.
+type pendingSubagentDone struct {
+	Run        *domain.AcpRun
+	OutputPath string
+	Status     domain.ToolCallStatus
 }
 
 // SteerEntry is a user message queued for injection at the next tool round
@@ -426,6 +438,35 @@ func (r *TurnRun) requeueSteer(entry *SteerEntry) bool {
 	entry.Status = "queued"
 	r.steerQueued = entry
 	return true
+}
+
+func (r *TurnRun) queueSubagentDone(entry pendingSubagentDone) {
+	if r == nil || entry.Run == nil {
+		return
+	}
+	r.subagentDoneMu.Lock()
+	defer r.subagentDoneMu.Unlock()
+	r.subagentDone = append(r.subagentDone, entry)
+}
+
+func (r *TurnRun) drainSubagentDone() []pendingSubagentDone {
+	if r == nil {
+		return nil
+	}
+	r.subagentDoneMu.Lock()
+	defer r.subagentDoneMu.Unlock()
+	out := r.subagentDone
+	r.subagentDone = nil
+	return out
+}
+
+func (r *TurnRun) requeueSubagentDone(entries []pendingSubagentDone) {
+	if r == nil || len(entries) == 0 {
+		return
+	}
+	r.subagentDoneMu.Lock()
+	defer r.subagentDoneMu.Unlock()
+	r.subagentDone = append(entries, r.subagentDone...)
 }
 
 // newSteerEntry builds a queued steer with a persistable user message.

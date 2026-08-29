@@ -291,9 +291,9 @@ the directory it started with. The tool is always async: it returns run ids
 with `status: "starting"` immediately and the parent agent is free to
 continue other work. When a subagent finishes, the original tool call
 transitions to `ok`/`fail` with a brief terminal status and a synthetic
-`subagent_result` tool call carrying the full result is injected; a new
-parent-agent turn is triggered (tool injection) so the parent processes
-the result without a user message. While any subagent is running, the
+`subagent_result` tool call carrying the full result is injected at the
+next steer-style tool-round boundary (or a new parent turn if idle)
+so the parent processes the result without a user message. While any subagent is running, the
 parent's auto-continue chain pauses with reason
 `awaiting-background-jobs`. Completed run transcripts are persisted per
 conversation under `conversations/<conversation_id>.acp/`. Permissions are auto-allowed

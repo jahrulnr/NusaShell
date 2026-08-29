@@ -750,16 +750,10 @@ func (a *App) emitAcpRun(event string, run *domain.AcpRun) {
 	a.Bus.Emit(event, contracts.AcpRunEvent{Run: acpRunDTO(run)})
 }
 
-// onAcpRunDone handles subagent completion: persists the transcript to
-// JSONL storage, updates the original `subagent` tool call from running
-// to ok/fail with a brief terminal status, injects a synthetic
-// `subagent_result` tool call carrying the full result, and triggers a
-// new parent-agent turn (tool injection) so the parent processes the
-// result without blocking.
-//
-// This is the async completion path. The spawn path returns immediately
-// with status "starting"; this callback fires when the subagent finishes
-// (completed, failed, or cancelled) and closes the loop.
+// onAcpRunDone handles subagent completion: persists the transcript,
+// then either queues the result onto a live parent turn (injected at
+// the next steer-style tool-round boundary) or, if the parent is idle,
+// writes `subagent_result` immediately and starts a new turn.
 func (a *App) onAcpRunDone(run *domain.AcpRun) {
 	if run == nil || run.ConversationID == "" {
 		return
@@ -767,30 +761,29 @@ func (a *App) onAcpRunDone(run *domain.AcpRun) {
 
 	// 1. Persist the full transcript.
 	outputPath := a.persistAcpRun(run)
-
-	// 2. Update the original `subagent` tool call to a brief terminal
-	// status (the full result travels in the synthetic subagent_result
-	// tool call below, so old history is not silently rewritten) and
-	// inject the synthetic subagent_result message carrying the full
-	// result. The tool call was marked "running" when spawned; now it
-	// transitions to ok/fail.
-	if run.ParentToolCallID != "" {
-		status := domain.ToolOK
-		if run.Status == domain.AcpRunFailed || run.Status == domain.AcpRunCancelled {
-			status = domain.ToolFailed
-		}
-		a.completeSubagentRun(run.ConversationID, run.ParentToolCallID, status, run, outputPath)
+	status := domain.ToolOK
+	if run.Status == domain.AcpRunFailed || run.Status == domain.AcpRunCancelled {
+		status = domain.ToolFailed
 	}
+	pending := pendingSubagentDone{Run: run, OutputPath: outputPath, Status: status}
 
-	// 3. Untrack only after the result is persisted. While completion waits
-	// for an active parent turn to release the conversation, the pending flag
-	// prevents that turn from auto-continuing without the subagent result.
+	// If the parent turn is live, queue like steer: do not block on the
+	// conversation lock (held for the whole turn) and inject at the next
+	// tool-round boundary so the model sees the result in the following
+	// provider round.
+	a.runsMu.Lock()
+	if parent := a.activeRunForConversationLocked(run.ConversationID); parent != nil {
+		parent.queueSubagentDone(pending)
+		a.runsMu.Unlock()
+		return
+	}
+	a.runsMu.Unlock()
+
+	if err := a.completeSubagentRun(run.ConversationID, run.ParentToolCallID, status, run, outputPath); err != nil {
+		a.log("error", "acp", "completeSubagentRun: %v", err)
+		return
+	}
 	wasPending := a.untrackPendingSubagent(run.ConversationID, run.ID)
-
-	// 4. Trigger a new parent-agent turn (tool injection). Only trigger
-	// if this run was pending (not already completed) and no turn is
-	// currently active for the conversation — the agent loop will pick
-	// up the synthetic subagent_result tool call and process the result.
 	if wasPending {
 		a.triggerSubagentCompletionTurn(run.ConversationID)
 	}
@@ -830,34 +823,42 @@ func (a *App) persistAcpRun(run *domain.AcpRun) string {
 // (announcement-style). Persisted so the model sees it in this turn and
 // in later turns (auto-continue), and the UI renders it as a normal tool
 // card. Keeps the cache-stable system prompt untouched.
-func (a *App) completeSubagentRun(conversationID, toolCallID string, status domain.ToolCallStatus, run *domain.AcpRun, outputPath string) {
+func (a *App) completeSubagentRun(conversationID, toolCallID string, status domain.ToolCallStatus, run *domain.AcpRun, outputPath string) error {
 	turnLock := a.conversationTurnLock(conversationID)
 	turnLock.Lock()
 	defer turnLock.Unlock()
+	return a.completeSubagentRunLocked(conversationID, toolCallID, status, run, outputPath)
+}
 
+func (a *App) completeSubagentRunLocked(conversationID, toolCallID string, status domain.ToolCallStatus, run *domain.AcpRun, outputPath string) error {
 	conv, err := a.Conversations.Get(conversationID)
 	if err != nil {
 		a.log("error", "acp", "completeSubagentRun: conversation %s not found: %v", conversationID, err)
-		return
+		return err
 	}
-	conv = a.updateToolResult(conv, "", toolCallID, status, domain.SubagentBriefResult(run), nil)
+	if toolCallID != "" {
+		conv = a.updateToolResult(conv, "", toolCallID, status, domain.SubagentBriefResult(run), nil)
+	}
 	conv.AddMessage(a.subagentResultMessage(run, outputPath, status))
 	if err := a.Conversations.Save(conv); err != nil {
 		a.log("error", "acp", "completeSubagentRun: save failed: %v", err)
-		return
+		return err
 	}
 	parentRunID := ""
 	if parentRun := a.activeRunForConversation(conversationID); parentRun != nil {
 		parentRunID = parentRun.ID
 	}
-	a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
-		RunID:          parentRunID,
-		ConversationID: conversationID,
-		ToolCallID:     toolCallID,
-		Name:           "subagent",
-		Status:         string(status),
-		Output:         domain.SubagentBriefResult(run),
-	})
+	if toolCallID != "" {
+		a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
+			RunID:          parentRunID,
+			ConversationID: conversationID,
+			ToolCallID:     toolCallID,
+			Name:           "subagent",
+			Status:         string(status),
+			Output:         domain.SubagentBriefResult(run),
+		})
+	}
+	return nil
 }
 
 // subagentResultMessage builds the synthetic assistant message carrying
@@ -887,8 +888,8 @@ func (a *App) subagentResultMessage(run *domain.AcpRun, outputPath string, statu
 // result as if it had just completed the tool call itself.
 //
 // The turn is only started if the conversation is idle (no active turn).
-// If a turn is already running, the synthetic subagent_result message is
-// already persisted, so the next round's context picks it up naturally.
+// Live parent turns drain queued completions at the next tool-round
+// boundary (same as steer) instead of starting a second turn.
 func (a *App) triggerSubagentCompletionTurn(conversationID string) {
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
@@ -976,6 +977,9 @@ func (a *App) resolveConversationProvider(conv *domain.Conversation) (*domain.Pr
 		if rpcErr == nil && p != nil && p.Enabled {
 			return p, bare, key, conv.Effort, nil
 		}
+	}
+	if a.Providers == nil {
+		return nil, "", "", "", fmt.Errorf("no enabled provider with a model")
 	}
 	// Fallback: first enabled provider with at least one model.
 	for _, p := range a.Providers.List() {

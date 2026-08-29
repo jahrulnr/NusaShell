@@ -301,6 +301,10 @@ func (a *App) handleTurnsStop(req contracts.TurnStopRequest) (any, *contracts.RP
 func (a *App) activeRunForConversation(convID string) *TurnRun {
 	a.runsMu.Lock()
 	defer a.runsMu.Unlock()
+	return a.activeRunForConversationLocked(convID)
+}
+
+func (a *App) activeRunForConversationLocked(convID string) *TurnRun {
 	for _, run := range a.runs {
 		if run.ConversationID == convID {
 			return run
@@ -527,7 +531,6 @@ func (a *App) handleTurnsCancelSteer(req contracts.TurnCancelSteerRequest) (any,
 func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities) {
 	turnLock := a.conversationTurnLock(run.ConversationID)
 	turnLock.Lock()
-	defer turnLock.Unlock()
 
 	// Build the hydration checkpoint once per epoch, before the first Stream.
 	// A fresh room (the first user message of a conversation, no checkpoint
@@ -543,7 +546,15 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 	// workspace pick) so OpenAI/Claude see user → hydration, not the reverse.
 	a.repairHydrationPlacement(run)
 	a.ensureFreshRoomHydration(run, asstMsgID, caps)
+	convID := run.ConversationID
+	flushed := false
 	defer func() {
+		defer func() {
+			turnLock.Unlock()
+			if flushed {
+				a.triggerSubagentCompletionTurn(convID)
+			}
+		}()
 		run.Cancel()
 		// Reject any pending ask_question calls for this run so the
 		// tool handler unblocks instead of hanging forever.
@@ -551,8 +562,16 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 			a.AskQuestions.RejectRun(run.ID, "Agent turn ended")
 		}
 		a.runsMu.Lock()
+		leftovers := run.drainSubagentDone()
 		delete(a.runs, run.ID)
 		a.runsMu.Unlock()
+		if len(leftovers) > 0 {
+			if _, err := a.applySubagentDoneList(convID, leftovers); err != nil {
+				a.log("error", "acp", "flush queued subagent results for %s: %v", convID, err)
+			} else {
+				flushed = true
+			}
+		}
 		// Finalize any conversation still marked "running" after the turn
 		// exited without an explicit terminal state (panic recovered by
 		// goSafe, or an early return that skipped failTurn/interruptTurn).
@@ -831,15 +850,20 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 
 		if len(roundResult.Response.ToolCalls) == 0 {
 			// The model finished without requesting tools. Before exiting the
-			// turn, drain any queued steer — if one is pending, inject it and
-			// continue the loop so the model gets a new round to respond to it
-			// instead of silently dropping the steer.
-			applied, steerErr := a.applyQueuedSteer(run)
+			// turn, drain queued steer and completed subagent results — if
+			// either is pending, inject and continue so the model sees them
+			// at this round boundary instead of waiting for subagent_wait.
+			appliedSteer, steerErr := a.applyQueuedSteer(run)
 			if steerErr != nil {
 				a.failTurn(run, currentMsgID, steerErr)
 				return false, ""
 			}
-			if applied {
+			appliedSub, subErr := a.applyQueuedSubagentResults(run)
+			if subErr != nil {
+				a.failTurn(run, currentMsgID, subErr)
+				return false, ""
+			}
+			if appliedSteer || appliedSub {
 				conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)
 				if err != nil {
 					a.failTurn(run, currentMsgID, err)
@@ -882,6 +906,10 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		// to the checkpoint is preserved.
 		if _, steerErr := a.applyQueuedSteer(run); steerErr != nil {
 			a.failTurn(run, currentMsgID, steerErr)
+			return false, ""
+		}
+		if _, subErr := a.applyQueuedSubagentResults(run); subErr != nil {
+			a.failTurn(run, currentMsgID, subErr)
 			return false, ""
 		}
 		conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)
@@ -996,6 +1024,38 @@ func (a *App) applyQueuedSteer(run *TurnRun) (bool, error) {
 	})
 	a.log("info", "agent", "steer applied for %s: %s", run.ConversationID, entry.ID)
 	return true, nil
+}
+
+// applyQueuedSubagentResults drains finished ACP runs queued on this turn
+// and injects them as synthetic subagent_result messages, same boundary as
+// steer. Returns true when at least one result was injected.
+func (a *App) applyQueuedSubagentResults(run *TurnRun) (bool, error) {
+	pending := run.drainSubagentDone()
+	if len(pending) == 0 {
+		return false, nil
+	}
+	applied, err := a.applySubagentDoneList(run.ConversationID, pending)
+	if err != nil {
+		run.requeueSubagentDone(pending[applied:])
+		return applied > 0, err
+	}
+	return applied > 0, nil
+}
+
+func (a *App) applySubagentDoneList(conversationID string, pending []pendingSubagentDone) (int, error) {
+	applied := 0
+	for _, p := range pending {
+		if p.Run == nil {
+			applied++
+			continue
+		}
+		if err := a.completeSubagentRunLocked(conversationID, p.Run.ParentToolCallID, p.Status, p.Run, p.OutputPath); err != nil {
+			return applied, err
+		}
+		a.untrackPendingSubagent(conversationID, p.Run.ID)
+		applied++
+	}
+	return applied, nil
 }
 
 // shouldContinueFailedTurn reports whether a retry should freeze partial
