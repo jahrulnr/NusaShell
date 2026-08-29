@@ -616,8 +616,8 @@ type ProviderDTO struct {
 	Error      string     `json:"error,omitempty"`
 	// CacheTTLs is the prompt-cache TTL enum from this provider's OpenAPI
 	// spec (or SDK fallback). Empty when the provider kind has no caching.
-	CacheTTLs []string `json:"cache_ttls,omitempty"`
-	CacheStyle string  `json:"cache_style,omitempty"` // "anthropic" | "openai" | ""
+	CacheTTLs  []string `json:"cache_ttls,omitempty"`
+	CacheStyle string   `json:"cache_style,omitempty"` // "anthropic" | "openai" | ""
 }
 
 type ProvidersListResult struct {
