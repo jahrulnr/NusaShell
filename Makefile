@@ -46,6 +46,7 @@ vet:
 ## fmt: format all Go source files in place.
 fmt:
 	gofmt -w .
+	gofmt -l .
 	@echo "gofmt: done"
 
 ## check: full verification baseline.
