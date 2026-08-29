@@ -50,7 +50,7 @@ Lists conversations with a search filter and a New conversation button. The coun
 
 Renders the active conversation. An empty thread offers starter prompt chips that fill the composer.
 
-Long conversations open showing only the most recent messages, scrolled to the bottom. A 'Load older messages' button at the top reveals earlier in-memory messages (including older rounds of the current assistant turn), then archived pre-compaction chunks, one batch at a time. Chunks are never auto-loaded after a turn finishes or mid-turn compaction. Snapshot render keeps the immediate user or compaction bubble and a short tail of the current turn; live streaming keeps the newest assistant round mounted, parks a bounded set of older live rounds behind a lightweight performance marker with a review action, caps unusually large live text and tool-card state with an in-context notice, and coalesces delta rendering per animation frame. Thinking is parsed when the disclosure is opened. Live streaming auto-follows only while the view is pinned to the bottom.
+Long conversations open showing only the most recent messages, scrolled to the bottom. A 'Load older messages' button at the top reveals earlier in-memory messages (including older rounds of a finished assistant turn), then archived pre-compaction chunks, one batch at a time. Chunks are never auto-loaded after a turn finishes or mid-turn compaction. Snapshot render keeps the immediate user or compaction bubble and a short tail of a finished turn. A running turn keeps every persisted round of that turn mounted on open and reload — Load older still reveals earlier complete turns and archived chunks. Live streaming coalesces delta rendering per animation frame. Thinking is parsed when the disclosure is opened. Live streaming auto-follows only while the view is pinned to the bottom.
 
 - **Agent shell** (`#agent-shell`):
   - Section: Agent
@@ -63,7 +63,7 @@ Long conversations open showing only the most recent messages, scrolled to the b
 - **Thread log** (`#agent-thread`):
   - Section: Agent
   - Type: log
-  - Notes: Renders the active conversation messages. Long conversations are windowed: the last user bubble plus a short tail of the current turn render on open (scrolled to bottom); older rounds of that turn, earlier turns, and archived chunks load on demand via Load older or scroll-to-top. Thinking markdown is parsed when expanded. An empty thread shows starter prompt chips.
+  - Notes: Renders the active conversation messages. Long conversations are windowed: the last user bubble plus a short tail of a finished turn render on open (scrolled to bottom). A running turn keeps every persisted round of that turn mounted on reload. Older finished-turn rounds, earlier turns, and archived chunks load on demand via Load older or scroll-to-top. Thinking markdown is parsed when expanded. An empty thread shows starter prompt chips.
 
 - **Starter prompts** (`#agent-starter-prompts`):
   - Section: Agent
@@ -73,7 +73,7 @@ Long conversations open showing only the most recent messages, scrolled to the b
 - **Load older messages** (`#agent-load-older`):
   - Section: Agent
   - Type: button
-  - Action: Reveals the previous batch of older in-memory messages (first older rounds of the current turn, then earlier turns), then archived pre-compaction chunks, keeping the scroll position anchored. Shown while older messages or unloaded chunks remain; hidden once the oldest history is reached.
+  - Action: Reveals the previous batch of older in-memory messages (first older rounds of a finished turn, then earlier turns), then archived pre-compaction chunks, keeping the scroll position anchored. Shown while older messages or unloaded chunks remain; hidden once the oldest history is reached. A running turn already mounts its full persisted round list, so this button is for earlier complete turns and archives.
 
 ## Tool call strip
 

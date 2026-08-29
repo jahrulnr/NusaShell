@@ -128,7 +128,10 @@ const state = {
 // turn at first paint — because per-delta cost is already bounded by
 // targeted enhancement + block-diffed markdown (see render.js's strategy
 // comment); this window only bounds the one-time markdown parse + DOM
-// insert on open. (Live turns never trim.)
+// insert on open. Live / running turns never trim: keepAllTrailing mounts
+// every persisted round of the current turn so a reload cannot hide tool
+// cards or announcements behind a Load older path that used to no-op while
+// a run was attached.
 const SNAPSHOT_KEEP_ROUNDS = 12;
 const MAX_ROOM_BUFFER_CHARS = 512 * 1024; // per room (raw + rawReasoning)
 const MAX_LIVE_ROUND_CHARS = 512 * 1024;
@@ -195,11 +198,17 @@ const WINDOW_BATCH = 30;
 // windowedActiveMessages returns the currently-rendered slice: older complete
 // turns from activeWindowStart, plus the trailing assistant-run tail from
 // assistKeepStart, so a 50-round turn cannot hide the last user bubble.
+function keepLiveTurnMounted() {
+  return state.conversation?.status === 'running' || Boolean(runForConversation(state.activeId));
+}
+
 function windowedActiveMessages() {
+  const live = keepLiveTurnMounted();
   return conversationTail(state.messages, {
     prefixStart: state.activeWindowStart,
-    assistKeepStart: state.assistKeepStart,
+    assistKeepStart: live ? undefined : state.assistKeepStart,
     keepRounds: SNAPSHOT_KEEP_ROUNDS,
+    keepAllTrailing: live,
   }).visible;
 }
 
@@ -207,6 +216,7 @@ function applyConversationTail() {
   const tail = conversationTail(state.messages, {
     prefixWindow: INITIAL_WINDOW,
     keepRounds: SNAPSHOT_KEEP_ROUNDS,
+    keepAllTrailing: keepLiveTurnMounted(),
   });
   state.activeWindowStart = tail.prefixStart;
   state.assistKeepStart = tail.assistKeepStart;
@@ -577,6 +587,13 @@ async function openConversation(id) {
   // backend for the active run first.
   await reattachActiveRunFromBackend();
   if (token !== state.conversationLoadToken) return;
+  // Status can lag the in-memory run (turns.active found a live turn while
+  // conversations.get still said idle). Expand the trailing-run window before
+  // wiring the stream so reload does not paint a 12-round stub.
+  if (keepLiveTurnMounted() && hasOlderTurnRounds()) {
+    applyConversationTail();
+    renderThread(windowedActiveMessages(), true);
+  }
   reattachActiveRun();
   // Merge buffered deltas only when no run was re-attached from the backend:
   // reattachActiveRun already rendered the live buffer (seeded from
@@ -1604,7 +1621,7 @@ function hasOlderTurnRounds() {
 
 function hasOlderActiveMessages() {
   if (state.activeWindowStart > 0) return true;
-  return hasOlderTurnRounds() && !runForConversation(state.activeId);
+  return hasOlderTurnRounds();
 }
 
 function hasOlderHistory() {
@@ -1636,7 +1653,7 @@ function updateOlderSentinel() {
 }
 
 function revealOlderHistory() {
-  if (hasOlderTurnRounds() && !runForConversation(state.activeId)) {
+  if (hasOlderTurnRounds()) {
     revealOlderTurnRounds();
     return;
   }
@@ -1655,6 +1672,7 @@ function revealOlderTurnRounds() {
     const userTop = userNode ? userNode.getBoundingClientRect().top : 0;
     state.assistKeepStart = Math.max(runStart, state.assistKeepStart - SNAPSHOT_KEEP_ROUNDS);
     renderThread(windowedActiveMessages(), false);
+    if (runForConversation(state.activeId)) reattachActiveRun();
     if (userNode) {
       const nextUser = [...thread.querySelectorAll('.agent-message.user, .agent-compaction-marker')].at(-1);
       if (nextUser) thread.scrollTop += nextUser.getBoundingClientRect().top - userTop;

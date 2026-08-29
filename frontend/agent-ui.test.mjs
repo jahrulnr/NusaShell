@@ -137,6 +137,35 @@ test('conversationTail treats the auto-continue announcement like any assistant 
   assert.deepEqual(tail.visible.map((m) => m.id), ['original-user', 'continued-a1', 'continued-a2', 'continued-a3']);
 });
 
+test('conversationTail keepAllTrailing keeps the full live run including announcements', () => {
+  const messages = [
+    msg('user', 'original-user'),
+    msg('assistant', 'first-assistant'),
+    {
+      role: 'assistant',
+      id: 'auto-continue-announcement',
+      tool_calls: [{ id: 'announce-x', name: 'announcement', args: { type: 'auto_continue' }, status: 'ok', output: 'notice' }],
+    },
+    msg('assistant', 'continued-a0'),
+    msg('assistant', 'continued-a1'),
+    msg('assistant', 'continued-a2'),
+    msg('assistant', 'continued-a3'),
+  ];
+
+  const tail = conversationTail(messages, { prefixWindow: 2, keepRounds: 3, keepAllTrailing: true });
+
+  assert.equal(tail.assistKeepStart, tail.runStart);
+  assert.deepEqual(tail.visible.map((m) => m.id), [
+    'original-user',
+    'first-assistant',
+    'auto-continue-announcement',
+    'continued-a0',
+    'continued-a1',
+    'continued-a2',
+    'continued-a3',
+  ]);
+});
+
 test('attachments are detected by bytes rather than their filename or MIME type', () => {
   const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
   assert.deepEqual(inspectAttachmentContent(png), { type: 'image', mediaType: 'image/png' });

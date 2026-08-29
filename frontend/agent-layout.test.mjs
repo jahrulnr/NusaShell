@@ -87,6 +87,13 @@ test('Live turns keep every round mounted; perf comes from content-visibility + 
   assert.match(html, /id="agent-provider-status" aria-live="polite" aria-atomic="true"/);
   assert.match(agentView, /conversationTail\(/);
   assert.doesNotMatch(agentRender, /function earlierRoundsDisclosure/);
+  // Reloading a running turn must keep every persisted round of that turn.
+  // Snapshot keepRounds would otherwise hide older tool rounds / announcements
+  // and Load older used to refuse to reveal them while a run was attached.
+  assert.match(agentView, /keepAllTrailing: keepLiveTurnMounted\(\)/);
+  assert.match(agentView, /function keepLiveTurnMounted/);
+  assert.match(agentView, /hasOlderTurnRounds\(\)/);
+  assert.doesNotMatch(agentView, /hasOlderTurnRounds\(\) && !runForConversation/);
 });
 
 test('Agent delegates presentation, composer, and model picker responsibilities to focused modules', () => {

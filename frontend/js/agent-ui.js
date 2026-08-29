@@ -53,9 +53,11 @@ export function previousWindowStart(currentStart, batch) {
 
 // conversationTail is the snapshot window for a long thread: keep the last
 // user (or compaction) bubble, cap the trailing assistant run at keepRounds,
-// and leave older complete turns to Load older. Live streaming still prunes
-// rounds inside the current bubble; this function must not flatten history
-// into an "N earlier rounds" stub.
+// and leave older complete turns to Load older. A live (running) turn must
+// pass keepAllTrailing so a reload does not hide earlier tool rounds or
+// announcements behind a Load older path that cannot run while the stream
+// is attached. This function must not flatten history into an "N earlier
+// rounds" stub.
 export function conversationTail(messages = [], options = {}) {
   const prefixWindow = Math.max(1, Math.floor(Number(options.prefixWindow) || 60));
   const keepRounds = Math.max(1, Math.floor(Number(options.keepRounds) || 3));
@@ -71,6 +73,8 @@ export function conversationTail(messages = [], options = {}) {
   let assistKeepStart;
   if (options.assistKeepStart != null && Number.isFinite(Number(options.assistKeepStart))) {
     assistKeepStart = Math.min(n, Math.max(runStart, Math.floor(Number(options.assistKeepStart))));
+  } else if (options.keepAllTrailing) {
+    assistKeepStart = runStart;
   } else {
     assistKeepStart = Math.max(runStart, n - keepRounds);
   }
