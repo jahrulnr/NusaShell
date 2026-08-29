@@ -1,5 +1,10 @@
 # NusaShell
 
+[![CI](https://github.com/jahrulnr/NusaShell/actions/workflows/ci.yml/badge.svg)](https://github.com/jahrulnr/NusaShell/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Go 1.26+](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](go.mod)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](.github/pull_request_template.md)
+
 NusaShell is a local, personal AI shell written in Go. It delivers the
 NusaShell conversation experience in a single binary: an embedded native
 JavaScript frontend, multi-conversation agent chat, provider adapters, MCP,
@@ -41,7 +46,10 @@ Requirements:
   provider is already available). Windows and macOS use their system dialogs.
 
 ```bash
+# SSH (recommended for contributors with commit access)
 git clone git@github.com:jahrulnr/NusaShell.git
+# or HTTPS
+git clone https://github.com/jahrulnr/NusaShell.git
 cd NusaShell
 
 # Keep the local UI private to this machine.
@@ -122,6 +130,13 @@ Please keep changes focused, preserve the dependency direction described in
 [`AGENTS.md`](AGENTS.md), add or update tests for changed behavior, and run the
 verification commands relevant to the change. Pull requests can use the
 repository template at [`.github/pull_request_template.md`](.github/pull_request_template.md).
+
+## Recent changes
+
+Notable additions, removals, and breaking changes live in
+[`CHANGELOG.md`](CHANGELOG.md). The current `[Unreleased]` section covers the
+PWA-grade shell, deterministic hydration placement, the dispatcher-family
+tool refactor, and the review-agent hydration tool.
 
 ## License
 

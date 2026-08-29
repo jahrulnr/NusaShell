@@ -1,0 +1,62 @@
+# NusaShell code owners. The owner below is requested as a reviewer on every
+# pull request that touches the matching paths. When the project grows more
+# contributors, add them under the area they own.
+#
+# Reference: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything not matched below.
+/  @jahrulnr
+
+# Core architecture — domain rules, application use cases, transport, contracts.
+/domain/          @jahrulnr
+/application/     @jahrulnr
+/transport/       @jahrulnr
+/contracts/       @jahrulnr
+/cmd/             @jahrulnr
+
+# Provider adapters and infrastructure adapters. Each line narrows the
+# surface so future owners can be assigned per family.
+/infrastructure/ai/      @jahrulnr
+/infrastructure/mcpclient/  @jahrulnr
+/infrastructure/sqlitestore/ @jahrulnr
+/infrastructure/jsonstore/  @jahrulnr
+/infrastructure/ci/          @jahrulnr
+/infrastructure/tools/       @jahrulnr
+/infrastructure/docs/        @jahrulnr
+/infrastructure/memorystore/ @jahrulnr
+/infrastructure/skillfs/     @jahrulnr
+/infrastructure/stt/         @jahrulnr
+/infrastructure/tts/         @jahrulnr
+/infrastructure/workspacepicker/ @jahrulnr
+/infrastructure/attachmentfs/    @jahrulnr
+/infrastructure/pluginfs/        @jahrulnr
+/infrastructure/pluginicon/      @jahrulnr
+/infrastructure/plugininstall/   @jahrulnr
+/infrastructure/pluginruntime/   @jahrulnr
+/infrastructure/sttinstall/      @jahrulnr
+/infrastructure/ttsinstall/      @jahrulnr
+/infrastructure/config/          @jahrulnr
+/infrastructure/journal/         @jahrulnr
+/infrastructure/testdata/        @jahrulnr
+
+# Frontend native JS/HTML/CSS — embedded by Go, no build step.
+/frontend/         @jahrulnr
+
+# Agent docs, skills, and system prompt shipped to the embedded agent.
+# Touching these is a user-facing change; follow the documentation sync
+# rules in AGENTS.md.
+/resources/agent/  @jahrulnr
+/.agents/          @jahrulnr
+
+# Repository metadata, CI, agent guidance, and templates.
+/.github/          @jahrulnr
+/AGENTS.md         @jahrulnr
+/CHANGELOG.md      @jahrulnr
+/README.md         @jahrulnr
+/Makefile          @jahrulnr
+/go.mod            @jahrulnr
+/go.sum            @jahrulnr
+/package.json      @jahrulnr
+/package-lock.json @jahrulnr
+/docs/             @jahrulnr
+/tasks/            @jahrulnr

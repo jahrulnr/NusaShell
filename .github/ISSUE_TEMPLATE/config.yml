@@ -1,0 +1,16 @@
+# Disable the blank-issue flow so every new issue picks a template.
+blank_issues_enabled: false
+
+# When a contributor opens an issue that is not a clear bug/feature/docs/question,
+# GitHub's chooser shows this heading above the template list.
+# Keep it short — one line.
+contact_links:
+  - name: NusaShell architecture
+    url: https://github.com/jahrulnr/NusaShell/blob/master/docs/architecture.md
+    about: Read the high-level design before opening an issue about the layers or wire contract.
+  - name: NusaShell agent docs
+    url: https://github.com/jahrulnr/NusaShell/tree/master/resources/agent/docs
+    about: Provider, MCP, memory, skills, automation, and tool references for the embedded agent.
+  - name: CHANGELOG
+    url: https://github.com/jahrulnr/NusaShell/blob/master/CHANGELOG.md
+    about: Check whether the behavior you are reporting was already changed in `[Unreleased]`.
