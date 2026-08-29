@@ -1000,6 +1000,13 @@ func (a *App) goSafe(source string, fn func()) {
 	}()
 }
 
+// GoSafe starts a recovered background goroutine. The composition root
+// (cmd/nusashell) uses this for fire-and-forget work that must not crash
+// the process (same recover as the unexported goSafe helper).
+func (a *App) GoSafe(source string, fn func()) {
+	a.goSafe(source, fn)
+}
+
 // Dispatch routes an RPC method to its use case. Transport handlers are the
 // only other caller of this method, which keeps handler-level tests honest.
 // Domain prefixes (agent.*, ai.*, acp.*, etc.) are delegated to per-domain

@@ -318,6 +318,7 @@ func run() error {
 	app.StartAutoModelImport(ctx)
 	app.StartAutoUpdateLoop(ctx, 0)
 	app.StartLifecycle()
+	app.GoSafe("tools", func() { tools.RunOverflowCleanup(ctx) })
 	app.StartMCPAutostart(ctx)
 	app.StartSettingsWatcher(ctx)
 	defer app.CloseLifecycle()

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"nusashell/application"
@@ -150,4 +151,68 @@ func TestCapJSONLSpills(t *testing.T) {
 	}
 	path := overflowPathFrom(t, out)
 	t.Cleanup(func() { _ = os.Remove(path) })
+}
+
+func TestSweepOverflowRemovesOnlyAgedFiles(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	oldPath := filepath.Join(dir, "grep-old.txt")
+	freshPath := filepath.Join(dir, "grep-fresh.txt")
+	keepDir := filepath.Join(dir, "subdir")
+	if err := os.WriteFile(oldPath, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(freshPath, []byte("fresh"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(keepDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := now.Add(-ToolOverflowMaxAge - time.Second)
+	freshTime := now.Add(-23 * time.Hour)
+	if err := os.Chtimes(oldPath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(freshPath, freshTime, freshTime); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := sweepToolOverflowDir(dir, now, ToolOverflowMaxAge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("removed %d, want 1", n)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatal("aged file should be removed")
+	}
+	if _, err := os.Stat(freshPath); err != nil {
+		t.Fatalf("fresh file should remain: %v", err)
+	}
+	if _, err := os.Stat(keepDir); err != nil {
+		t.Fatalf("subdir should remain: %v", err)
+	}
+}
+
+func TestSweepOverflowMissingDir(t *testing.T) {
+	n, err := sweepToolOverflowDir(filepath.Join(t.TempDir(), "nope"), time.Now(), ToolOverflowMaxAge)
+	if err != nil || n != 0 {
+		t.Fatalf("missing dir: n=%d err=%v", n, err)
+	}
+}
+
+func TestRunOverflowCleanupStopsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		runOverflowCleanup(ctx, ToolOverflowMaxAge, 20*time.Millisecond, time.Now)
+		close(done)
+	}()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cleanup loop did not exit after cancel")
+	}
 }

@@ -89,6 +89,9 @@ file_read(path="big.log", offset_bytes=32768)
 grep(...) → overflow_path: /tmp/nusashell/grep-ab12.txt  next_offset_bytes: 32768
 file_read(path="/tmp/nusashell/grep-ab12.txt", offset_bytes=32768)
 
+Spill files live under the platform temp dir (`nusashell/`) and are swept
+after 24 hours while the server is running.
+
 # BAD — treating a line number as a byte offset
 grep(...) → line 900
 file_read(path="big.log", offset_bytes=900)   # lands mid-line ~14, not line 900
