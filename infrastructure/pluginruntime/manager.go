@@ -9,6 +9,7 @@ package pluginruntime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"nusashell/contracts"
@@ -62,6 +63,38 @@ func (m *Manager) CallToolRaw(ctx context.Context, pluginID, toolName string, ar
 		return nil, fmt.Errorf("plugin %s: %w", pluginID, err)
 	}
 	return m.mcp.CallToolRaw(ctx, plugin.Manifest.MCPServerID(), toolName, args)
+}
+
+// CallTool is the application.PluginRuntimePort adapter: it calls
+// CallToolRaw and converts the mcp-go result to contracts.PluginToolResult
+// so transport does not need to import the MCP SDK. Text content parts are
+// normalized to { type: "text", text: string }; non-text parts fall back
+// to the SDK's JSON marshalling so no part is dropped.
+func (m *Manager) CallTool(ctx context.Context, pluginID, toolName string, args map[string]any) (*contracts.PluginToolResult, error) {
+	result, err := m.CallToolRaw(ctx, pluginID, toolName, args)
+	if result == nil {
+		return nil, err
+	}
+	out := &contracts.PluginToolResult{
+		Content: make([]any, 0, len(result.Content)),
+		IsError: result.IsError,
+	}
+	for _, c := range result.Content {
+		if t, ok := c.(mcp.TextContent); ok {
+			out.Content = append(out.Content, map[string]any{"type": "text", "text": t.Text})
+			continue
+		}
+		if raw, jerr := json.Marshal(c); jerr == nil {
+			var decoded any
+			if json.Unmarshal(raw, &decoded) == nil {
+				out.Content = append(out.Content, decoded)
+			}
+		}
+	}
+	if result.StructuredContent != nil {
+		out.StructuredContent = result.StructuredContent
+	}
+	return out, err
 }
 
 // ListTools returns the tools advertised by a running plugin. Returns

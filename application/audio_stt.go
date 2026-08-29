@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"nusashell/application/internal/service/yamlmd"
 	"nusashell/domain"
+	"nusashell/internal/yamlmd"
 )
 
 // Audio fallback API routes. Probe-verified 2026-08-23
@@ -71,5 +71,5 @@ func (a *App) transcribeAudioViaSTT(ctx context.Context, provider *domain.Provid
 	if att.FilePath != "" {
 		meta["file_path"] = att.FilePath
 	}
-	return yamlmd.YAMLMD(meta, result), nil, nil
+	return yamlmd.MD(meta, result), nil, nil
 }

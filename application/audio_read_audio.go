@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"nusashell/application/internal/service/mediaread"
-	"nusashell/application/internal/service/yamlmd"
 	"nusashell/domain"
+	"nusashell/internal/yamlmd"
 	"nusashell/resources"
 )
 
@@ -136,7 +136,7 @@ func (a *App) transcribeAudioOffline(audio domain.Attachment) (string, bool) {
 	if audio.FilePath != "" {
 		meta["file_path"] = audio.FilePath
 	}
-	return yamlmd.YAMLMD(meta, result), true
+	return yamlmd.MD(meta, result), true
 }
 
 // transcribeAudioViaChat is the legacy multimodal chat fallback: send the
@@ -167,7 +167,7 @@ func (a *App) transcribeAudioViaChat(run *TurnRun, caps ModelCapabilities, setti
 	if audio.FilePath != "" {
 		meta["file_path"] = audio.FilePath
 	}
-	return yamlmd.YAMLMD(meta, result), nil, nil
+	return yamlmd.MD(meta, result), nil, nil
 }
 
 // describeOneAudio sends an audio attachment to a multimodal chat model and

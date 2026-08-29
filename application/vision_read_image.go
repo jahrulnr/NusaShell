@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"nusashell/application/internal/service/mediaread"
-	"nusashell/application/internal/service/yamlmd"
 	"nusashell/domain"
+	"nusashell/internal/yamlmd"
 )
 
 // executeReadImage handles the read_media tool call when the sniffed kind
@@ -95,5 +95,5 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps Mode
 	if image.FilePath != "" {
 		meta["file_path"] = image.FilePath
 	}
-	return yamlmd.YAMLMD(meta, result), nil, nil
+	return yamlmd.MD(meta, result), nil, nil
 }

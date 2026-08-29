@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"nusashell/application/internal/service/mediaread"
-	"nusashell/application/internal/service/yamlmd"
 	"nusashell/domain"
+	"nusashell/internal/yamlmd"
 	"nusashell/resources"
 )
 
@@ -97,7 +97,7 @@ func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps Mode
 	if video.FilePath != "" {
 		meta["file_path"] = video.FilePath
 	}
-	return yamlmd.YAMLMD(meta, result), nil, nil
+	return yamlmd.MD(meta, result), nil, nil
 }
 
 // describeOneVideo sends a video attachment to a multimodal chat model and

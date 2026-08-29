@@ -5,24 +5,27 @@ import (
 	"fmt"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"nusashell/internal/yamlmd"
 )
 
 // yamlBlock marshals v as YAML and wraps it in YAML front matter delimited
 // by --- lines (Jekyll/Hugo style). Used by all built-in tool handlers for
 // consistent, readable output.
+//
+// Thin wrapper around the shared yamlmd.Block so the implementation lives
+// in one place (nusashell/internal/yamlmd) and both application/ and
+// infrastructure/tools/ share the same code.
 func yamlBlock(v any) string {
-	b, err := yaml.Marshal(v)
-	if err != nil {
-		return fmt.Sprintf("---\n# marshal error: %v\n---", err)
-	}
-	s := strings.TrimRight(string(b), "\n")
-	return "---\n" + s + "\n---"
+	return yamlmd.Block(v)
 }
 
 // yamlMD produces a YAML front matter block followed by an optional body.
 // When body is empty, only the front matter is returned. This is the
 // standard output format for all built-in tools.
+//
+// Thin wrapper around the shared yamlmd.MD so the implementation lives
+// in one place (nusashell/internal/yamlmd) and both application/ and
+// infrastructure/tools/ share the same code.
 //
 // Example:
 //
@@ -33,12 +36,7 @@ func yamlBlock(v any) string {
 //	## Items
 //	- **id**: abc
 func yamlMD(meta any, body string) string {
-	block := yamlBlock(meta)
-	body = strings.TrimSpace(body)
-	if body == "" {
-		return block
-	}
-	return block + "\n\n" + body
+	return yamlmd.MD(meta, body)
 }
 
 // yamlJSONL produces a YAML front matter block followed by a JSONL body:

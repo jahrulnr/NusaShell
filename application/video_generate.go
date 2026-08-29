@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"nusashell/application/internal/service/generatedmedia"
-	"nusashell/application/internal/service/yamlmd"
 	"nusashell/domain"
+	"nusashell/internal/yamlmd"
 )
 
 const (
@@ -131,7 +131,7 @@ func (a *App) executeGenerateVideo(run *TurnRun, toolCall domain.ToolCall, setti
 	if len(refs) > 0 {
 		body = fmt.Sprintf("Video saved to %s (generated from %d reference image(s)).", path, len(refs))
 	}
-	return yamlmd.YAMLMD(meta, body), []domain.Attachment{att}, nil
+	return yamlmd.MD(meta, body), []domain.Attachment{att}, nil
 }
 
 func failGenerateVideo(msg string) (string, []domain.Attachment, error) {

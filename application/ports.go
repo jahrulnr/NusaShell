@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/core"
 	"nusashell/infrastructure/ai/modelcatalog"
@@ -678,4 +679,23 @@ type ModelCataloger interface {
 	EnsureLoaded(ctx context.Context) error
 	Loaded() bool
 	Lookup(providerHint, modelID string) *modelcatalog.ModelMetadata
+}
+
+// PluginUIPort is the read-only plugin store surface needed by the plugin
+// UI HTTP handler. It decouples transport from infrastructure/pluginfs so
+// transport only depends on application + contracts. Implemented by
+// *pluginfs.Store.
+type PluginUIPort interface {
+	List() ([]*domain.Plugin, error)
+	Get(id string) (*domain.Plugin, error)
+	UIDir(p *domain.Plugin) string
+}
+
+// PluginRuntimePort is the plugin runtime surface needed by the plugin UI
+// HTTP handler. It decouples transport from infrastructure/pluginruntime.
+// Implemented by *pluginruntime.Manager.
+type PluginRuntimePort interface {
+	EnsureStarted(ctx context.Context, pluginID string) ([]contracts.MCPToolDTO, error)
+	ListTools(pluginID string) []contracts.MCPToolDTO
+	CallTool(ctx context.Context, pluginID, toolName string, args map[string]any) (*contracts.PluginToolResult, error)
 }

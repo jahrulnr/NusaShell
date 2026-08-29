@@ -13,11 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"nusashell/application"
 	"nusashell/contracts"
-	"nusashell/infrastructure/pluginfs"
-	"nusashell/infrastructure/pluginruntime"
-
-	"github.com/mark3labs/mcp-go/mcp"
+	"nusashell/domain"
 )
 
 // PluginHandler serves plugin UI static files and routes tool calls
@@ -33,13 +31,13 @@ import (
 //	GET  /plugins/{id}/tools            → list tools (JSON)
 //	POST /plugins/{id}/tools/{tool}     → call a tool (JSON body = args)
 type PluginHandler struct {
-	Store   *pluginfs.Store
-	Runtime *pluginruntime.Manager
+	Store   application.PluginUIPort
+	Runtime application.PluginRuntimePort
 }
 
 // NewPluginHandler creates a plugin handler backed by the given store
-// and runtime manager.
-func NewPluginHandler(store *pluginfs.Store, runtime *pluginruntime.Manager) *PluginHandler {
+// and runtime manager ports.
+func NewPluginHandler(store application.PluginUIPort, runtime application.PluginRuntimePort) *PluginHandler {
 	return &PluginHandler{Store: store, Runtime: runtime}
 }
 
@@ -57,9 +55,9 @@ func (h *PluginHandler) handleList(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	out := make([]pluginfs.PluginDTO, 0, len(plugins))
+	out := make([]contracts.PluginUIEntryDTO, 0, len(plugins))
 	for _, p := range plugins {
-		out = append(out, pluginfs.ToDTO(p))
+		out = append(out, pluginToDTO(p))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"plugins": out})
 }
@@ -106,7 +104,7 @@ func (h *PluginHandler) handlePlugin(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCallTool routes a tool call to the plugin's MCP server.
-// Body is JSON args. Response is the full MCP tool result
+// Body is JSON args. Response is the full plugin tool result
 // (content + structuredContent + isError) so plugin UIs that expect
 // structured JSON do not have to parse human-readable text.
 func (h *PluginHandler) handleCallTool(w http.ResponseWriter, r *http.Request, pluginID, toolName string) {
@@ -127,7 +125,7 @@ func (h *PluginHandler) handleCallTool(w http.ResponseWriter, r *http.Request, p
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	result, err := h.Runtime.CallToolRaw(ctx, pluginID, toolName, args)
+	result, err := h.Runtime.CallTool(ctx, pluginID, toolName, args)
 	if err != nil {
 		// Surface MCP-level errors (e.g. server not connected) as 502.
 		// Tool-level errors (IsError=true) are forwarded in the result
@@ -137,40 +135,7 @@ func (h *PluginHandler) handleCallTool(w http.ResponseWriter, r *http.Request, p
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"result": pluginToolResultDTO(result)})
-}
-
-// pluginToolResultDTO maps an mcp.CallToolResult to the JSON shape the
-// plugin UI bridge expects: { content, structuredContent, isError }.
-// Text content parts are normalized to { type: "text", text: string } so
-// the UI does not need to import the mcp-go type registry.
-func pluginToolResultDTO(result *mcp.CallToolResult) map[string]any {
-	if result == nil {
-		return map[string]any{"content": []any{}, "isError": false}
-	}
-	content := make([]any, 0, len(result.Content))
-	for _, c := range result.Content {
-		if t, ok := c.(mcp.TextContent); ok {
-			content = append(content, map[string]any{"type": "text", "text": t.Text})
-			continue
-		}
-		// Non-text content (image/audio/embedded) is rare for plugin UIs;
-		// fall back to the SDK's JSON marshalling so we never drop a part.
-		if raw, err := json.Marshal(c); err == nil {
-			var decoded any
-			if json.Unmarshal(raw, &decoded) == nil {
-				content = append(content, decoded)
-			}
-		}
-	}
-	out := map[string]any{
-		"content": content,
-		"isError": result.IsError,
-	}
-	if result.StructuredContent != nil {
-		out["structuredContent"] = result.StructuredContent
-	}
-	return out
+	writeJSON(w, http.StatusOK, map[string]any{"result": result})
 }
 
 // handleListTools returns the tools advertised by a running plugin.
@@ -243,6 +208,25 @@ func (h *PluginHandler) handleStatic(w http.ResponseWriter, r *http.Request, plu
 
 	// Non-HTML files: serve directly from the filesystem.
 	http.ServeFile(w, r, fullPath)
+}
+
+// pluginToDTO converts a domain.Plugin to a contracts.PluginUIEntryDTO. The
+// icon is left empty here; icon resolution to a PNG data URL is an
+// infrastructure concern (pluginicon) and is applied by the
+// pluginfs.ToDTO helper used by the application resources handler. The
+// plugin UI handler serves icons as static files from the UI directory,
+// so it does not need the data URL.
+func pluginToDTO(p *domain.Plugin) contracts.PluginUIEntryDTO {
+	return contracts.PluginUIEntryDTO{
+		ID:          p.Manifest.ID,
+		Name:        p.Manifest.Name,
+		Version:     p.Manifest.Version,
+		Category:    p.Manifest.Category,
+		HasUI:       p.HasUI,
+		InstallPath: p.InstallPath,
+		InstalledAt: p.InstalledAt,
+		Manifest:    &p.Manifest,
+	}
 }
 
 // readFile is a helper that reads a file and returns its contents.

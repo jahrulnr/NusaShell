@@ -13,8 +13,8 @@ import (
 
 	"nusashell/application/internal/service/attachments"
 	"nusashell/application/internal/service/generatedmedia"
-	"nusashell/application/internal/service/yamlmd"
 	"nusashell/domain"
+	"nusashell/internal/yamlmd"
 )
 
 const (
@@ -191,7 +191,7 @@ func (a *App) executeGenerateImage(run *TurnRun, toolCall domain.ToolCall, setti
 	if len(paths) > 1 {
 		body = fmt.Sprintf("%d images saved (%s). They are already displayed to the user in the UI — do not re-render them as Markdown images or file links. To edit one, pass its file_path in referenced_image_paths.", len(paths), strings.Join(paths, ", "))
 	}
-	return yamlmd.YAMLMD(meta, body), atts, nil
+	return yamlmd.MD(meta, body), atts, nil
 }
 
 // loadImageReferences reads referenced images directly from disk by

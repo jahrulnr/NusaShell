@@ -10,8 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
+	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/pluginicon"
 )
@@ -250,23 +250,16 @@ func (s *Store) IsInstalled(id string) bool {
 }
 
 // PluginDTO converts a domain.Plugin to a lightweight DTO for transport.
-type PluginDTO struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Version     string                 `json:"version"`
-	Icon        string                 `json:"icon"`
-	Category    string                 `json:"category,omitempty"`
-	HasUI       bool                   `json:"hasUI"`
-	InstallPath string                 `json:"installPath"`
-	InstalledAt time.Time              `json:"installedAt"`
-	Manifest    *domain.PluginManifest `json:"manifest,omitempty"`
-}
+// PluginDTO is kept as an alias for contracts.PluginUIEntryDTO so
+// existing callers (resources.go) compile without churn. New code should
+// use contracts.PluginUIEntryDTO directly.
+type PluginDTO = contracts.PluginUIEntryDTO
 
-// ToDTO converts a domain.Plugin to a PluginDTO. Local file icons are
-// resolved to PNG data URLs so browsers (http://localhost) can render them
-// (file:// is blocked by the browser from an http origin).
-func ToDTO(p *domain.Plugin) PluginDTO {
-	return PluginDTO{
+// ToDTO converts a domain.Plugin to a contracts.PluginUIEntryDTO. Local
+// file icons are resolved to PNG data URLs so browsers (http://localhost)
+// can render them (file:// is blocked by the browser from an http origin).
+func ToDTO(p *domain.Plugin) contracts.PluginUIEntryDTO {
+	return contracts.PluginUIEntryDTO{
 		ID:          p.Manifest.ID,
 		Name:        p.Manifest.Name,
 		Version:     p.Manifest.Version,

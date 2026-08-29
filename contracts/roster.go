@@ -1,6 +1,10 @@
 package contracts
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"nusashell/domain"
+	"time"
+)
 
 // Method roster. The frontend only speaks these methods; adding one here
 // without a handler keeps the contract explicit for handler-level tests.
@@ -766,6 +770,31 @@ type MCPToolDTO struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	InputSchema json.RawMessage `json:"input_schema,omitempty"`
+}
+
+// PluginUIEntryDTO is the wire shape for a plugin list entry served by
+// the plugin UI handler (/plugins). Kept in contracts so transport does
+// not need to import infrastructure/pluginfs. Distinct from PluginDTO
+// (which is the MCP drawer entry shape).
+type PluginUIEntryDTO struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Version     string                 `json:"version"`
+	Icon        string                 `json:"icon"`
+	Category    string                 `json:"category,omitempty"`
+	HasUI       bool                   `json:"hasUI"`
+	InstallPath string                 `json:"installPath"`
+	InstalledAt time.Time              `json:"installedAt"`
+	Manifest    *domain.PluginManifest `json:"manifest,omitempty"`
+}
+
+// PluginToolResult is the wire shape for a plugin tool call result served
+// by the plugin UI handler. Kept in contracts so transport does not need
+// to import the mcp-go SDK.
+type PluginToolResult struct {
+	Content           []any `json:"content"`
+	IsError           bool  `json:"isError"`
+	StructuredContent any   `json:"structuredContent,omitempty"`
 }
 
 type MCPServerDTO struct {

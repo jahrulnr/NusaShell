@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"nusashell/application/internal/service/ttserr"
-	"nusashell/application/internal/service/yamlmd"
 	"nusashell/domain"
+	"nusashell/internal/yamlmd"
 )
 
 const (
@@ -116,7 +116,7 @@ func (a *App) persistTTSText(run *TurnRun, toolCallID string, result *TTSResult)
 		"voice": result.Voice, "media_type": result.MediaType, "file_path": path,
 	}
 	body := fmt.Sprintf("Speech generated and saved to %s.", path)
-	return yamlmd.YAMLMD(meta, body), []domain.Attachment{att}, nil
+	return yamlmd.MD(meta, body), []domain.Attachment{att}, nil
 }
 
 // synthesizeOfflineTTS runs the local piper engine when wired and available.
