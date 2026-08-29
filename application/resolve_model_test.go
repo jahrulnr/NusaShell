@@ -3,7 +3,7 @@ package application
 import (
 	"testing"
 
-	"nusashell/application/internal/service/learnedparams"
+	"nusashell/application/service/learnedparams"
 	"nusashell/domain"
 )
 

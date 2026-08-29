@@ -3,7 +3,7 @@ package application
 import (
 	"context"
 	"math"
-	"nusashell/application/internal/service/textsim"
+	"nusashell/application/service/textsim"
 	"nusashell/domain"
 	"testing"
 )

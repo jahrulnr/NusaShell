@@ -1,7 +1,7 @@
 package application
 
 import (
-	"nusashell/application/internal/service/todosconv"
+	"nusashell/application/service/todosconv"
 	"nusashell/contracts"
 	"nusashell/domain"
 )

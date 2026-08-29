@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"nusashell/application/internal/service/attachments"
-	"nusashell/application/internal/service/learnedparams"
-	"nusashell/application/internal/service/modeloverrides"
-	"nusashell/application/internal/service/tooloutput"
+	"nusashell/application/service/attachments"
+	"nusashell/application/service/learnedparams"
+	"nusashell/application/service/modeloverrides"
+	"nusashell/application/service/tooloutput"
 	"nusashell/contracts"
 	"nusashell/domain"
-	"nusashell/internal/nonce"
+	"nusashell/pkg/nonce"
 	"nusashell/resources"
 )
 

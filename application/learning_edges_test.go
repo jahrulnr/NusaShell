@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"nusashell/application/internal/service/textsim"
+	"nusashell/application/service/textsim"
 	"nusashell/domain"
 )
 

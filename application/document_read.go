@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"nusashell/application/internal/service/mediaread"
+	"nusashell/application/service/mediaread"
 	"nusashell/domain"
 )
 

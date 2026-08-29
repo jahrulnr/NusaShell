@@ -25,7 +25,7 @@ import (
 	"context"
 	"sync"
 
-	"nusashell/application/internal/service/textsim"
+	"nusashell/application/service/textsim"
 	"nusashell/domain"
 	"nusashell/infrastructure/jsonstore"
 )

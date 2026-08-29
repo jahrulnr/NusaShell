@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"nusashell/application/internal/service/generatedmedia"
+	"nusashell/application/service/generatedmedia"
 	"nusashell/domain"
 )
 

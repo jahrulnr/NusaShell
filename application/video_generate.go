@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"nusashell/application/internal/service/generatedmedia"
+	"nusashell/application/service/generatedmedia"
 	"nusashell/domain"
-	"nusashell/internal/yamlmd"
+	"nusashell/pkg/yamlmd"
 )
 
 const (

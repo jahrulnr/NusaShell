@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"nusashell/application/internal/service/generatedmedia"
+	"nusashell/application/service/generatedmedia"
 	"nusashell/domain"
 )
 

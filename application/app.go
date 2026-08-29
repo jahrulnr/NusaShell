@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"nusashell/application/internal/service/learnedparams"
-	"nusashell/application/internal/service/modeloverrides"
+	"nusashell/application/service/learnedparams"
+	"nusashell/application/service/modeloverrides"
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/core"

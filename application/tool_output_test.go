@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"nusashell/application/internal/service/tooloutput"
+	"nusashell/application/service/tooloutput"
 	"nusashell/domain"
 )
 

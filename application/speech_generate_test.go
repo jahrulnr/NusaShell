@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"nusashell/application/internal/service/ttserr"
+	"nusashell/application/service/ttserr"
 	"nusashell/domain"
 )
 

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"nusashell/internal/yamlmd"
+	"nusashell/pkg/yamlmd"
 )
 
 // yamlBlock marshals v as YAML and wraps it in YAML front matter delimited
@@ -13,7 +13,7 @@ import (
 // consistent, readable output.
 //
 // Thin wrapper around the shared yamlmd.Block so the implementation lives
-// in one place (nusashell/internal/yamlmd) and both application/ and
+// in one place (nusashell/pkg/yamlmd) and both application/ and
 // infrastructure/tools/ share the same code.
 func yamlBlock(v any) string {
 	return yamlmd.Block(v)
@@ -24,7 +24,7 @@ func yamlBlock(v any) string {
 // standard output format for all built-in tools.
 //
 // Thin wrapper around the shared yamlmd.MD so the implementation lives
-// in one place (nusashell/internal/yamlmd) and both application/ and
+// in one place (nusashell/pkg/yamlmd) and both application/ and
 // infrastructure/tools/ share the same code.
 //
 // Example:

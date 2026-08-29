@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"nusashell/domain"
-	"nusashell/internal/yamlmd"
+	"nusashell/pkg/yamlmd"
 )
 
 // Audio fallback API routes. Probe-verified 2026-08-23

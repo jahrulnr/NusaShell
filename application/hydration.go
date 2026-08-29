@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"nusashell/domain"
-	"nusashell/internal/nonce"
+	"nusashell/pkg/nonce"
 )
 
 // RuntimeContextSnapshot is the read-only runtime context payload for the

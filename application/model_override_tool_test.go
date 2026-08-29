@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"nusashell/application/internal/service/modeloverrides"
+	"nusashell/application/service/modeloverrides"
 	"nusashell/domain"
 )
 

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"nusashell/application/internal/service/learnedparams"
+	"nusashell/application/service/learnedparams"
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/core"

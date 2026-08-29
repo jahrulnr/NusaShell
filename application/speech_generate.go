@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"nusashell/application/internal/service/ttserr"
+	"nusashell/application/service/ttserr"
 	"nusashell/domain"
-	"nusashell/internal/yamlmd"
+	"nusashell/pkg/yamlmd"
 )
 
 const (

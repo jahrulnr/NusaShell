@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"nusashell/application/internal/service/textsim"
+	"nusashell/application/service/textsim"
 	"nusashell/domain"
 	"nusashell/infrastructure/jsonstore"
 )

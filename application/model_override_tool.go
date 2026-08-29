@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"nusashell/application/internal/service/modeloverrides"
+	"nusashell/application/service/modeloverrides"
 	"nusashell/domain"
 )
 

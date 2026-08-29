@@ -14,11 +14,11 @@ import (
 	"time"
 	"unicode"
 
-	"nusashell/application/internal/service/learnedparams"
-	"nusashell/application/internal/service/mediaread"
+	"nusashell/application/service/learnedparams"
+	"nusashell/application/service/mediaread"
 	"nusashell/contracts"
 	"nusashell/domain"
-	"nusashell/internal/nonce"
+	"nusashell/pkg/nonce"
 )
 
 // defaultMaxParallelTools is the fallback concurrency bound for tool calls
