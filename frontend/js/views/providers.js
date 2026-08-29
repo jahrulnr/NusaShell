@@ -138,11 +138,26 @@ function renderRegistry() {
   if (detailId) renderDetail(providers.find((p) => p.id === detailId));
 }
 
+function renderCacheTTLBadge(p) {
+  const ttls = Array.isArray(p.cache_ttls) ? p.cache_ttls : [];
+  if (!ttls.length) return null;
+  // OpenRouter (chat via OpenRouter): show "5m · 1h · 30m · via upstream"
+  const label = p.id === 'openrouter' ? `${ttls.join(' · ')} · via upstream` : ttls.join(' · ');
+  const style = p.cache_style || (p.kind === 'messages' ? 'anthropic' : 'openai');
+  const title = style === 'anthropic'
+    ? `cache_control TTL: ${ttls.join(', ')} (from OpenAPI spec)`
+    : style === 'openai' && ttls.length === 1 && ttls[0] === '30m'
+      ? 'prompt_cache_options.ttl: 30m (from OpenAPI spec)'
+      : `cache TTLs: ${ttls.join(', ')} (from OpenAPI spec)`;
+  return el('span', { class: 'provider-cache-ttl', title, text: `cache ${label}` });
+}
+
 function renderProviderCard(p) {
   const meta = providerMeta(p);
   let modelStatus = 'not configured';
   if (p.configured) modelStatus = `${p.models?.length ?? 0} models`;
   else if (p.builtin) modelStatus = 'built-in · not configured';
+  const cacheBadge = renderCacheTTLBadge(p);
   const enabledToggle = p.builtin && !p.configured
     ? null
     : el('label', { class: 'toggle provider-enabled', title: p.enabled === false ? 'Enable provider' : 'Disable provider' },
@@ -165,6 +180,7 @@ function renderProviderCard(p) {
       enabledToggle,
     ),
     el('p', { text: meta.desc }),
+    cacheBadge ? el('div', { class: 'provider-card-meta' }, cacheBadge) : null,
     el('div', { class: 'provider-card-footer' },
       el('span', { class: `provider-status${p.configured ? ' configured' : ''}`, text: modelStatus }),
       el('div', { class: 'provider-card-actions' }, configureButton, deleteButton),
@@ -244,6 +260,15 @@ function renderDetail(p) {
       el('div', {}, el('dt', { text: 'Base URL' }), el('dd', { text: p.base_url || '—' })),
       el('div', {}, el('dt', { text: 'API key' }), el('dd', { text: p.has_api_key ? '••••••••' : '—' })),
       el('div', {}, el('dt', { text: 'Status' }), el('dd', { text: p.enabled === false ? 'disabled' : 'enabled' })),
+      ...(Array.isArray(p.cache_ttls) && p.cache_ttls.length
+        ? [el('div', {},
+          el('dt', { text: 'Cache TTL' }),
+          el('dd', {},
+            ...p.cache_ttls.map((ttl) => el('span', { class: 'provider-cache-ttl-badge', text: ttl })),
+            p.id === 'openrouter' ? el('span', { class: 'provider-cache-ttl-note', text: ' via upstream' }) : null,
+          ),
+        )]
+        : []),
     ),
     el('div', { class: 'provider-detail-actions' },
       el('button', { class: 'mini-btn provider-edit', type: 'button', text: 'Edit' }),

@@ -13,10 +13,11 @@ func TestKindCapabilities(t *testing.T) {
 		wantSTT    bool
 		wantVideo  bool
 		wantCache  string
+		wantTTLs   []string
 	}{
-		{ProviderMessages, true, true, true, false, false, false, false, "anthropic"},
-		{ProviderResponses, true, true, true, true, true, false, true, "openai"},
-		{ProviderChat, false, true, true, true, true, true, true, "openai"},
+		{ProviderMessages, true, true, true, false, false, false, false, "anthropic", []string{"5m", "1h"}},
+		{ProviderResponses, true, true, true, true, true, false, true, "openai", []string{"30m"}},
+		{ProviderChat, false, true, true, true, true, true, true, "openai", []string{"5m", "1h", "30m"}},
 	}
 	for _, tc := range tests {
 		t.Run(string(tc.kind), func(t *testing.T) {
@@ -44,6 +45,15 @@ func TestKindCapabilities(t *testing.T) {
 			}
 			if caps.PromptCacheStyle != tc.wantCache {
 				t.Errorf("PromptCacheStyle = %q, want %q", caps.PromptCacheStyle, tc.wantCache)
+			}
+			if len(caps.CacheTTLs) != len(tc.wantTTLs) {
+				t.Errorf("CacheTTLs = %v, want %v", caps.CacheTTLs, tc.wantTTLs)
+			} else {
+				for i, ttl := range tc.wantTTLs {
+					if caps.CacheTTLs[i] != ttl {
+						t.Errorf("CacheTTLs[%d] = %q, want %q", i, caps.CacheTTLs[i], ttl)
+					}
+				}
 			}
 		})
 	}

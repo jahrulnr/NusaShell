@@ -28,13 +28,16 @@ func (a *App) providerNameByID(providerID string) string {
 }
 
 func (a *App) providerDTO(p *domain.Provider) contracts.ProviderDTO {
+	caps := domain.KindCaps(p.Kind)
 	dto := contracts.ProviderDTO{
-		ID:      p.ID,
-		Driver:  string(p.EffectiveDriver()),
-		Kind:    string(p.Kind),
-		Name:    p.Name,
-		BaseURL: p.BaseURL,
-		Enabled: p.Enabled,
+		ID:         p.ID,
+		Driver:     string(p.EffectiveDriver()),
+		Kind:       string(p.Kind),
+		Name:       p.Name,
+		BaseURL:    p.BaseURL,
+		Enabled:    p.Enabled,
+		CacheTTLs:  append([]string(nil), caps.CacheTTLs...),
+		CacheStyle: caps.PromptCacheStyle,
 	}
 	_, hasKey, _ := a.Credentials.Get(p.ID)
 	dto.HasAPIKey = hasKey

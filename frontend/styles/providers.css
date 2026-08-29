@@ -54,6 +54,10 @@
 .provider-detail-grid dt { margin-bottom: 5px; color: var(--text-faint); font: 9px var(--font-mono); text-transform: uppercase; }
 .provider-detail-grid dd { margin: 0; overflow: hidden; color: var(--text-dim); font: 11px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .provider-detail-actions { display: flex; gap: 8px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-soft); }
+.provider-card-meta { margin: 8px 0 0; }
+.provider-cache-ttl { display: inline-block; border: 1px solid #2a3d52; border-radius: 6px; padding: 3px 7px; background: #13202e; color: #7eb8ff; font: 9px var(--font-mono); }
+.provider-cache-ttl-badge { display: inline-block; border: 1px solid #2a3d52; border-radius: 4px; padding: 2px 6px; margin-right: 4px; background: #13202e; color: #7eb8ff; font: 9px var(--font-mono); }
+.provider-cache-ttl-note { color: var(--text-faint); font: 9px var(--font-mono); }
 .provider-detail-error { margin: 12px 0 0; border-left: 2px solid var(--red); padding: 8px 10px; background: rgba(245,91,104,.08); color: #ff9ca5; font-size: 11px; }
 .provider-models-card { margin-top: 14px; }
 .provider-models-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }

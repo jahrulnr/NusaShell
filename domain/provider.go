@@ -65,6 +65,11 @@ type KindCapabilities struct {
 	// wire: "anthropic" (cache_control blocks), "openai" (cached_tokens in
 	// usage details), or "" (none).
 	PromptCacheStyle string
+	// CacheTTLs is the prompt-cache TTL enum captured from the provider's
+	// OpenAPI spec (or hardcoded SDK fallback). Empty when the provider does
+	// not support prompt caching. Examples: ["5m","1h"] (Anthropic) or
+	// ["30m"] (OpenAI GPT-5.6+).
+	CacheTTLs []string
 }
 
 var kindCaps = map[ProviderKind]KindCapabilities{
@@ -77,6 +82,7 @@ var kindCaps = map[ProviderKind]KindCapabilities{
 		HasTranscriptionEndpoint: false,
 		HasVideoEndpoint:         false,
 		PromptCacheStyle:         "anthropic",
+		CacheTTLs:                []string{"5m", "1h"},
 	},
 	ProviderResponses: {
 		RequiresKey:              true,
@@ -87,6 +93,7 @@ var kindCaps = map[ProviderKind]KindCapabilities{
 		HasTranscriptionEndpoint: false,
 		HasVideoEndpoint:         true,
 		PromptCacheStyle:         "openai",
+		CacheTTLs:                []string{"30m"},
 	},
 	ProviderChat: {
 		RequiresKey:              false, // LM Studio and local endpoints work without a key
@@ -97,6 +104,7 @@ var kindCaps = map[ProviderKind]KindCapabilities{
 		HasTranscriptionEndpoint: true,
 		HasVideoEndpoint:         true,
 		PromptCacheStyle:         "openai",
+		CacheTTLs:                []string{"5m", "1h", "30m"},
 	},
 }
 
