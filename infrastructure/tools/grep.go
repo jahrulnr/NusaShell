@@ -29,11 +29,11 @@ const (
 	grepDefaultMaxResults = 100
 	grepMaxFileBytes      = 10 << 20 // skip files larger than 10 MB
 	grepMaxContextLines   = 10
-	// grepMaxOutputChars caps the formatted result size. max_results caps the
-	// match count but not the bytes: a few matches on huge lines (minified
-	// JS, base64 blobs, giant JSON lines) can produce multi-megabyte output
-	// that alone exceeds the model's context window and defeats compaction.
-	grepMaxOutputChars = 200_000
+	// grepMaxLineBytes clips a single match/context line (minified JS,
+	// one-line vendor bundles). rg --json does not honor --max-columns, so
+	// the formatter applies the cap. The formatted body then goes through
+	// capToolOutput (32KiB inline + spill to tmp).
+	grepMaxLineBytes = 200
 )
 
 type grepArgs struct {
@@ -124,13 +124,7 @@ func executeGrep(argsJSON []byte) (bool, string, error) {
 		via = "go"
 	}
 
-	out := formatRgResults(matches, mode, via, capped)
-	if len(out) > grepMaxOutputChars {
-		omitted := len(out) - grepMaxOutputChars
-		out = truncateGrepOutput(out, grepMaxOutputChars)
-		out += fmt.Sprintf("\n... [output truncated: %d chars omitted — narrow the pattern, reduce context_lines, or use output_mode files_with_matches/count]", omitted)
-	}
-	return true, out, nil
+	return true, formatRgResults(matches, mode, via, capped), nil
 }
 
 type grepMatch struct {
@@ -184,6 +178,9 @@ func rgSearch(args grepArgs, mode string, contextLines, maxResults int) ([]grepM
 	if args.GlobPattern != "" {
 		rgArgs = append(rgArgs, "-g", args.GlobPattern)
 	}
+	// Negative globs last so they win over a positive **/*.js (rg: later
+	// glob takes precedence). Mirrors find_file skip of .git/node_modules/vendor.
+	rgArgs = append(rgArgs, rgDefaultExcludeGlobs()...)
 	if mode == "content" && contextLines > 0 {
 		rgArgs = append(rgArgs, "-C", strconv.Itoa(contextLines))
 	}
@@ -317,7 +314,7 @@ func formatRgResults(matches []grepMatch, mode, via string, capped bool) string 
 			b.WriteByte('\n')
 		}
 		meta["files"] = len(files)
-		return yamlMD(meta, strings.TrimRight(b.String(), "\n"))
+		return capToolOutput("grep", meta, strings.TrimRight(b.String(), "\n"))
 	case "count":
 		counts := make(map[string]int)
 		for _, m := range matches {
@@ -335,7 +332,7 @@ func formatRgResults(matches []grepMatch, mode, via string, capped bool) string 
 		}
 		meta["files"] = len(files)
 		meta["total_line_matches"] = total
-		return yamlMD(meta, strings.TrimRight(b.String(), "\n"))
+		return capToolOutput("grep", meta, strings.TrimRight(b.String(), "\n"))
 	default: // content
 		for _, m := range matches {
 			var before, after []grepContextLine
@@ -349,15 +346,15 @@ func formatRgResults(matches []grepMatch, mode, via string, capped bool) string 
 			sort.Slice(before, func(i, j int) bool { return before[i].Line < before[j].Line })
 			sort.Slice(after, func(i, j int) bool { return after[i].Line < after[j].Line })
 			for _, c := range before {
-				fmt.Fprintf(&b, "%s-%d-%s\n", m.File, c.Line, c.Content)
+				fmt.Fprintf(&b, "%s-%d-%s\n", m.File, c.Line, clipGrepLine(c.Content))
 			}
-			fmt.Fprintf(&b, "%s:%d:%s\n", m.File, m.Line, m.Content)
+			fmt.Fprintf(&b, "%s:%d:%s\n", m.File, m.Line, clipGrepLine(m.Content))
 			for _, c := range after {
-				fmt.Fprintf(&b, "%s-%d-%s\n", m.File, c.Line, c.Content)
+				fmt.Fprintf(&b, "%s-%d-%s\n", m.File, c.Line, clipGrepLine(c.Content))
 			}
 		}
 		meta["line_matches"] = len(matches)
-		return yamlMD(meta, strings.TrimRight(b.String(), "\n"))
+		return capToolOutput("grep", meta, strings.TrimRight(b.String(), "\n"))
 	}
 }
 
@@ -377,6 +374,9 @@ func grepDir(root, glob string, re *regexp.Regexp, contextLines, maxResults int)
 			if base == ".git" || base == "node_modules" || base == "vendor" {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		if grepSkipNoiseFile(d.Name()) {
 			return nil
 		}
 		if glob != "" && !globMatch(glob, path) {
@@ -434,14 +434,28 @@ func grepFile(path string, re *regexp.Regexp, contextLines int) ([]grepMatch, er
 	return matches, nil
 }
 
-// truncateGrepOutput keeps the first n runes of s without splitting a
-// multi-byte character (grep output is UTF-8 text).
-func truncateGrepOutput(s string, n int) string {
-	runes := []rune(s)
-	if len(runes) <= n {
+func rgDefaultExcludeGlobs() []string {
+	return []string{
+		"-g", "!**/.git/**",
+		"-g", "!**/node_modules/**",
+		"-g", "!**/vendor/**",
+		"-g", "!*.min.js",
+		"-g", "!*.min.css",
+		"-g", "!*.map",
+	}
+}
+
+func grepSkipNoiseFile(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".min.js") || strings.HasSuffix(lower, ".min.css") || strings.HasSuffix(lower, ".map")
+}
+
+func clipGrepLine(s string) string {
+	if len(s) <= grepMaxLineBytes {
 		return s
 	}
-	return string(runes[:n])
+	head := clipUTF8Prefix(s, grepMaxLineBytes)
+	return head + fmt.Sprintf(" [line omitted, %d chars]", len(s)-len(head))
 }
 
 // globMatch implements glob matching with ** support.

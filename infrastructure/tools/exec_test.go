@@ -153,3 +153,44 @@ func TestToolboxExecuteStreamedNonExec(t *testing.T) {
 		t.Fatalf("expected empty output, got %q", out)
 	}
 }
+
+func TestExecOverflowSpillsFullLog(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix shell syntax")
+	}
+	tb := &Toolbox{}
+	out, err := tb.Execute(context.Background(), "exec",
+		[]byte(`{"command":"python3 -c 'print(\"x\"*50000)'"}`))
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if !strings.Contains(out, "overflow_path:") {
+		t.Fatalf("expected spill for 50k stdout, got: %s", out[:min(len(out), 500)])
+	}
+	path := overflowPathFrom(t, out)
+	t.Cleanup(func() { _ = os.Remove(path) })
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(saved), "x") < 50000 {
+		t.Fatalf("spill incomplete: %d bytes", len(saved))
+	}
+	if !strings.Contains(out, "next_offset_bytes: 0") {
+		t.Fatalf("exec overflow must be complete-file (next_offset_bytes 0): %s", out[:400])
+	}
+}
+
+func TestExecSmallOutputDoesNotSpill(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix shell syntax")
+	}
+	tb := &Toolbox{}
+	out, err := tb.Execute(context.Background(), "exec", []byte(`{"command":"echo tiny"}`))
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if strings.Contains(out, "overflow_path:") {
+		t.Fatalf("small exec must not spill: %s", out)
+	}
+}

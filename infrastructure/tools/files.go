@@ -42,7 +42,8 @@ func fileToolInfos() []application.ToolInfo {
 		{Name: "grep", Description: "Search file contents with regex. Built on Go regexp (RE2 syntax — no backreferences). " +
 			"Filters files by glob_pattern, returns matching lines with optional context_lines. " +
 			"output_mode: content (matching lines + context), files_with_matches (just filenames), count (match count per file). " +
-			"Results are capped at ~200k chars with a truncation marker — for huge result sets narrow the pattern, reduce context_lines, or use output_mode files_with_matches/count. " +
+			"Skips .git, node_modules, vendor, and *.min.js/*.min.css/*.map. Content lines are clipped at 200 bytes. " +
+			"In-band results cap at ~32KiB; overflow_path is the full body in the platform temp dir — continue with file_read (next_offset_bytes). " +
 			"Prefer this over exec+shell grep — structured output, no process spawn, works without rg installed.",
 			InputSchema: obj("object", props(
 				"pattern", str("Regular expression to search for (RE2 syntax)"),

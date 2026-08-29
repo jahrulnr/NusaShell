@@ -150,8 +150,8 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "mcp_install", Description: "Install an MCP plugin from the curated catalog or a GitHub repository (owner/repo or URL). After install, call mcp_enable with the resulting plugin id to connect and load its tools.", InputSchema: obj("object", props("source", strEnum("Install source", "catalog", "github"), "id", str("Catalog plugin id (required when source=catalog)"), "url", str("GitHub repo URL or owner/repo shorthand (required when source=github)"), "subdir", str("Optional subdirectory inside a monorepo (github)"), "ref", str("Optional branch or tag to pin (github)")), "source")},
 		{Name: "mcp_server_add", Description: "Register a manual MCP server (no manifest needed). Transports: stdio (command/args/env, e.g. npx servers), sse, or http (Streamable HTTP) with url and optional headers for remote servers. Use for generic MCP servers; use mcp_register for NusaShell plugin folders. After adding, call mcp_enable with the server id to connect and load its tools.", InputSchema: obj("object", props("name", str("Human-readable server name"), "transport", strEnum("Transport kind", "stdio", "sse", "http"), "command", str("Command to launch the server (stdio transport, e.g. npx, node, python)"), "url", str("Server URL (required for sse/http transports, e.g. https://host/mcp)"), "args", arr("Arguments for the stdio command (e.g. -y @modelcontextprotocol/server-github)"), "env", obj("object", props("additional", str("KEY=VALUE entries for the stdio process")), "additional"), "headers", obj("object", props("additional", str("HTTP headers for sse/http transports, e.g. Authorization: Bearer <token>")), "additional"), "id", str("Optional stable id (default auto-generated)")), "name")},
 		{Name: "read_media", Description: "Load a media file (image, audio, video, or PDF document) from disk into your context. The media type is auto-detected from the file's binary magic bytes — no need to specify whether it's an image, audio, video, or PDF. When your active model supports the detected media kind natively, the file is attached to your context directly. For non-capable models, a fallback model transcribes/describes the content and returns the text, or a placeholder note with the file path is returned for documents.", InputSchema: obj("object", props("file_path", str("Absolute path of the media file on disk"), "question", str("Optional question about the media content")), "file_path")},
-		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
-		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
+		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content. Oversized result lists are truncated in-band (~32KiB) with overflow_path pointing at the full JSONL in the platform temp dir; continue with file_read.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
+		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only. Extraction may read up to max_bytes (default 2MB); the in-band tool result is capped at ~32KiB. When truncated, overflow_path is an absolute temp file — page with file_read using next_offset_bytes.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
 	}
 	if t.Acp != nil && len(t.Acp.EnabledAcpAgents()) > 0 {
 		subagentDesc := "Delegate a self-contained task to a configured ACP coding agent (Cursor, Claude Code, Codex CLI, etc). The ACP agent does not receive this conversation, MCP plugins, or NusaShell tools. Pass a compact brief with absolute paths. Always async: returns immediately with run ids (status \"starting\"); the tool call stays \"running\" until the subagent finishes, then a synthetic `subagent_result` tool call delivers the full result and a new turn is triggered so you process it. count (1-6) fans the same brief out to parallel sessions."
@@ -563,7 +563,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		for _, h := range hits {
 			items = append(items, map[string]any{"id": h.ID, "title": h.Title, "path": h.Path})
 		}
-		return yamlJSONL(map[string]any{"count": len(hits)}, items), nil
+		return capJSONL("docs", map[string]any{"count": len(hits)}, items), nil
 
 	case name == "docs_read":
 		var args struct {
@@ -576,7 +576,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		if err != nil {
 			return "", fmt.Errorf("document %q not found; use docs with op=search first", args.ID)
 		}
-		return yamlMD(map[string]any{"title": doc.Title, "path": doc.Path}, doc.Content), nil
+		return capToolOutput("docs", map[string]any{"title": doc.Title, "path": doc.Path}, doc.Content), nil
 
 	default:
 		return "", fmt.Errorf("unknown %s op %q", name, op)
@@ -1105,7 +1105,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			}
 			meta["errors"] = errs
 		}
-		return yamlJSONL(meta, items), nil
+		return capJSONL("web_search", meta, items), nil
 	case name == "web_fetch":
 		if t.Searcher == nil {
 			return "", fmt.Errorf("search is not available")
@@ -1168,7 +1168,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			}
 			body = body + "\n\n" + strings.Join(linkLines, "\n")
 		}
-		return yamlMD(meta, body), nil
+		return capToolOutput("web_fetch", meta, body), nil
 	case name == "web_answer":
 		sw := t.webAnswerSearcher()
 		if sw == nil || !sw.CanAnswer() {

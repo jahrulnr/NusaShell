@@ -68,7 +68,7 @@ var dispatchFamilies = []dispatchFamily{
 		members: []string{"search", "read"},
 		def: ToolInfo{
 			Name:        "docs",
-			Description: "NusaShell documentation corpus; \"op\" selects: search {query,limit?} ranked page ids; read {id} full page by id from search results",
+			Description: "NusaShell documentation corpus; \"op\" selects: search {query,limit?} ranked page ids; read {id} full page by id from search results. Long pages are truncated in-band (~32KiB) with overflow_path in the platform temp dir — continue with file_read using next_offset_bytes.",
 			InputSchema: objSchema(
 				pEnum("op", "Operation", "search", "read"),
 				pStr("query", "Search query (op=search)"),

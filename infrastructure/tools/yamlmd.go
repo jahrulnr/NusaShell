@@ -71,3 +71,19 @@ func yamlJSONL(meta any, items []any) string {
 	}
 	return yamlMD(meta, strings.Join(lines, "\n"))
 }
+
+func capJSONL(tool string, meta map[string]any, items []any) string {
+	if len(items) == 0 {
+		return yamlBlock(meta)
+	}
+	var lines []string
+	for _, item := range items {
+		b, err := json.Marshal(item)
+		if err != nil {
+			lines = append(lines, fmt.Sprintf(`{"error":"marshal: %s"}`, err.Error()))
+			continue
+		}
+		lines = append(lines, string(b))
+	}
+	return capToolOutput(tool, meta, strings.Join(lines, "\n"))
+}

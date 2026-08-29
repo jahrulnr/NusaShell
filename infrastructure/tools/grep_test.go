@@ -2,6 +2,7 @@ package tools
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -212,14 +213,10 @@ func TestGrepMaxResults(t *testing.T) {
 	}
 }
 
-func TestGrepOutputByteCap(t *testing.T) {
-	// max_results caps the match count, not the bytes: a few matches on huge
-	// lines (minified JS, base64 blobs) can produce multi-megabyte output
-	// that alone exceeds the model context window. The formatted result must
-	// be capped with a truncation marker.
+func TestGrepClipsHugeLines(t *testing.T) {
 	dir := t.TempDir()
 	hugeLine := "match " + strings.Repeat("a", 300_000) + " match"
-	writeFile(t, filepath.Join(dir, "big.txt"), hugeLine+"\n"+hugeLine)
+	writeFile(t, filepath.Join(dir, "big.txt"), hugeLine+"\n")
 
 	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
 		"pattern":     "match",
@@ -229,15 +226,71 @@ func TestGrepOutputByteCap(t *testing.T) {
 	if !ok || err != nil {
 		t.Fatalf("grep failed: ok=%v err=%v", ok, err)
 	}
-	if !strings.Contains(out, "output truncated") {
-		t.Fatalf("expected truncation marker, got %d chars", len(out))
+	if !strings.Contains(out, "line omitted") {
+		t.Fatalf("expected per-line clip, got: %s", out[:min(len(out), 400)])
 	}
-	// Head must survive so the model still sees real matches.
+	if strings.Contains(out, strings.Repeat("a", 1000)) {
+		t.Fatal("minified line leaked into in-band grep output")
+	}
 	if !strings.Contains(out, "match aaaa") {
-		t.Fatal("head of grep output missing after truncation")
+		t.Fatal("head of clipped line missing")
 	}
-	if len(out) > grepMaxOutputChars+200 {
-		t.Fatalf("output not bounded: %d chars, cap=%d", len(out), grepMaxOutputChars)
+}
+
+func TestGrepSkipsVendorAndMinified(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "src.js"), "onChange\n")
+	writeFile(t, filepath.Join(dir, "vendor", "lib.js"), "onChange\n")
+	writeFile(t, filepath.Join(dir, "chart.umd.min.js"), "onChange\n")
+
+	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+		"pattern":      "onChange",
+		"path":         dir,
+		"glob_pattern": "**/*.js",
+		"output_mode":  "files_with_matches",
+	}))
+	if !ok || err != nil {
+		t.Fatalf("grep failed: ok=%v err=%v", ok, err)
+	}
+	if !strings.Contains(out, "src.js") {
+		t.Fatalf("expected first-party hit, got: %s", out)
+	}
+	if strings.Contains(out, "vendor") || strings.Contains(out, ".min.js") {
+		t.Fatalf("vendor/minified should be skipped, got: %s", out)
+	}
+}
+
+func TestGrepSpillWhenManyMatches(t *testing.T) {
+	dir := t.TempDir()
+	var b strings.Builder
+	for i := 0; i < 250; i++ {
+		fmt.Fprintf(&b, "needle %s\n", strings.Repeat("z", 180))
+	}
+	writeFile(t, filepath.Join(dir, "many.txt"), b.String())
+
+	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+		"pattern":     "needle",
+		"path":        dir,
+		"output_mode": "content",
+		"max_results": 250,
+	}))
+	if !ok || err != nil {
+		t.Fatalf("grep failed: ok=%v err=%v", ok, err)
+	}
+	if !strings.Contains(out, "overflow_path:") {
+		t.Fatalf("expected spill for bulky match set, got %d chars:\n%s", len(out), out[:min(len(out), 500)])
+	}
+	path := overflowPathFrom(t, out)
+	t.Cleanup(func() { _ = os.Remove(path) })
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(saved), "needle") {
+		t.Fatal("spill file missing matches")
+	}
+	if len(out) > toolInlineMaxBytes+2048 {
+		t.Fatalf("in-band grep still too large: %d", len(out))
 	}
 }
 
