@@ -88,3 +88,32 @@ func TestValidatePluginID(t *testing.T) {
 		})
 	}
 }
+
+func TestPluginManifestValidateRemoteURL(t *testing.T) {
+	base := PluginManifest{ID: "notes", Name: "n", Version: "1", Icon: "x"}
+	cases := []struct {
+		name      string
+		transport PluginTransport
+		url       string
+		wantErr   bool
+	}{
+		{"http url ok", PluginTransportHTTP, "https://mcp.example.com/mcp", false},
+		{"sse url ok", PluginTransportSSE, "http://localhost:9999/sse", false},
+		{"missing url", PluginTransportHTTP, "", true},
+		{"non-http scheme", PluginTransportHTTP, "wss://mcp.example.com", true},
+		{"sse non-http scheme", PluginTransportSSE, "ftp://host/sse", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := base
+			m.MCP = PluginMCPConfig{Transport: tc.transport, URL: tc.url}
+			err := m.Validate()
+			if tc.wantErr && err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}

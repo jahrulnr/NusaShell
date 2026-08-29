@@ -137,6 +137,11 @@ func (m *PluginManifest) Validate() error {
 	if m.MCP.Transport != PluginTransportStdio && strings.TrimSpace(m.MCP.URL) == "" {
 		return fmt.Errorf("manifest: mcp.url is required for %s transport", m.MCP.Transport)
 	}
+	if m.MCP.Transport == PluginTransportSSE || m.MCP.Transport == PluginTransportHTTP {
+		if u := m.MCP.URL; !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+			return fmt.Errorf("manifest: mcp.url must start with http:// or https:// for %s transport", m.MCP.Transport)
+		}
+	}
 	if m.UI != nil {
 		if strings.TrimSpace(m.UI.Entry) == "" {
 			return fmt.Errorf("manifest: ui.entry is required when ui is present")

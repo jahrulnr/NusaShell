@@ -801,8 +801,10 @@ type PluginWindowDTO struct {
 type PluginMCPDTO struct {
 	Transport string            `json:"transport"`
 	Command   string            `json:"command,omitempty"`
+	URL       string            `json:"url,omitempty"`
 	Args      []string          `json:"args,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
 	Autostart bool              `json:"autostart,omitempty"`
 	KeepAlive bool              `json:"keepAliveOnClose,omitempty"`
 }
@@ -852,11 +854,18 @@ type PluginInstallResult struct {
 // plugin is persisted as <datadir>/plugins/<id>/manifest.json like any
 // installed plugin.
 type PluginSaveRequest struct {
-	ID        string            `json:"id,omitempty"`
-	Name      string            `json:"name"`
-	Command   string            `json:"command"`
+	ID string `json:"id,omitempty"`
+	// Name is required.
+	Name string `json:"name"`
+	// Transport selects the MCP transport: "stdio" (default), "sse", or
+	// "http" (Streamable HTTP). When omitted on update, the existing
+	// transport is kept; on create it defaults to stdio.
+	Transport string            `json:"transport,omitempty"`
+	Command   string            `json:"command,omitempty"`
+	URL       string            `json:"url,omitempty"`
 	Args      []string          `json:"args,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
 	Autostart bool              `json:"autostart,omitempty"`
 }
 

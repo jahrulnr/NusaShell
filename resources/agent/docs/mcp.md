@@ -1,27 +1,44 @@
 # Plugins (MCP servers + MCP+UI plugins)
 
 A **plugin** is the single concept for anything that exposes MCP tools:
-a manual MCP server (stdio) or an installed plugin from the catalog
-(MCP-only or MCP + UI). The shell spawns the plugin's MCP command and
-speaks JSON-RPC over stdin/stdout.
+a manual MCP server or an installed plugin from the catalog
+(MCP-only or MCP + UI). The shell connects to the plugin's MCP server
+over three transports: **stdio** (spawns the command and speaks
+JSON-RPC over stdin/stdout), **SSE**, and **HTTP** (Streamable HTTP —
+both connect to a remote endpoint URL, with optional HTTP headers for
+auth such as `Authorization: Bearer <token>`).
 
 MCP plugin tools are not advertised in `tools[]` — see Tool exposure below
 for the discovery and execution contract.
 
 ## Adding a plugin manually
 
-A manual MCP-server plugin needs a name, a command, arguments and optional
+A manual MCP-server plugin needs a name plus transport-specific
+connection fields. For **stdio**: a command, arguments, and optional
 environment entries (`KEY=VALUE`). Example:
 
-    name:     files
-    command:  npx
-    args:     -y @modelcontextprotocol/server-filesystem /path/to/dir
+    name:      files
+    transport: stdio
+    command:   npx
+    args:      -y @modelcontextprotocol/server-filesystem /path/to/dir
+
+For **SSE** or **HTTP** (Streamable HTTP): a URL and optional headers.
+Example (agent tool):
+
+    mcp_server_add(name="context7", transport="http", url="https://mcp.context7.com/mcp",
+                   headers={"Authorization": "Bearer <token>"})
+
+stdio servers require `command`; SSE/HTTP servers require an
+`http(s)` URL; other values are rejected at save time. When editing an
+existing server via `plugin.save` without a `transport` field, its
+current transport is kept — remote servers are never silently degraded
+back to stdio.
 
 It is stored as `plugins/<id>/manifest.json` exactly like a catalog
 installed plugin. Plugins with `mcp.autostart` (the Plugins drawer toggle)
 are connected when the Go process starts, so automations and the agent
 toolbox can use those tools immediately. Other plugins stay lazy: the first
-tool listing or **Start** (`plugin.test`) spawns the process. **Stop**
+tool listing or **Start** (`plugin.test`) opens the connection. **Stop**
 (`plugin.stop`) drops the cached connection and **Restart** stops then starts.
 
 ## Tool exposure

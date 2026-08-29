@@ -148,7 +148,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "mcp_disable", Description: "Stop/disconnect an MCP plugin. The definition stays installed; only the MCP subprocess is stopped. Tools from this server are no longer listed.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
 		{Name: "mcp_unregister", Description: "Remove an MCP plugin entirely and delete its installed folder. Ask the user for confirmation first. Use mcp_disable when the plugin only needs to stop.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
 		{Name: "mcp_install", Description: "Install an MCP plugin from the curated catalog or a GitHub repository (owner/repo or URL). After install, call mcp_enable with the resulting plugin id to connect and load its tools.", InputSchema: obj("object", props("source", strEnum("Install source", "catalog", "github"), "id", str("Catalog plugin id (required when source=catalog)"), "url", str("GitHub repo URL or owner/repo shorthand (required when source=github)"), "subdir", str("Optional subdirectory inside a monorepo (github)"), "ref", str("Optional branch or tag to pin (github)")), "source")},
-		{Name: "mcp_server_add", Description: "Register a manual MCP server (no manifest needed) by command/args/env — e.g. npx servers. Use for generic MCP servers; use mcp_register for NusaShell plugin folders. After adding, call mcp_enable with the server id to connect and load its tools.", InputSchema: obj("object", props("name", str("Human-readable server name"), "command", str("Command to launch the server (e.g. npx, node, python)"), "args", arr("Arguments (e.g. -y @modelcontextprotocol/server-github)"), "env", obj("object", props("additional", str("KEY=VALUE entries")), "additional"), "id", str("Optional stable id (default auto-generated)")), "name", "command")},
+		{Name: "mcp_server_add", Description: "Register a manual MCP server (no manifest needed). Transports: stdio (command/args/env, e.g. npx servers), sse, or http (Streamable HTTP) with url and optional headers for remote servers. Use for generic MCP servers; use mcp_register for NusaShell plugin folders. After adding, call mcp_enable with the server id to connect and load its tools.", InputSchema: obj("object", props("name", str("Human-readable server name"), "transport", strEnum("Transport kind", "stdio", "sse", "http"), "command", str("Command to launch the server (stdio transport, e.g. npx, node, python)"), "url", str("Server URL (required for sse/http transports, e.g. https://host/mcp)"), "args", arr("Arguments for the stdio command (e.g. -y @modelcontextprotocol/server-github)"), "env", obj("object", props("additional", str("KEY=VALUE entries for the stdio process")), "additional"), "headers", obj("object", props("additional", str("HTTP headers for sse/http transports, e.g. Authorization: Bearer <token>")), "additional"), "id", str("Optional stable id (default auto-generated)")), "name")},
 		{Name: "read_media", Description: "Load a media file (image, audio, video, or PDF document) from disk into your context. The media type is auto-detected from the file's binary magic bytes — no need to specify whether it's an image, audio, video, or PDF. When your active model supports the detected media kind natively, the file is attached to your context directly. For non-capable models, a fallback model transcribes/describes the content and returns the text, or a placeholder note with the file path is returned for documents.", InputSchema: obj("object", props("file_path", str("Absolute path of the media file on disk"), "question", str("Optional question about the media content")), "file_path")},
 		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
 		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
@@ -674,11 +674,14 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 
 	case name == "mcp_server_add":
 		var args struct {
-			ID      string            `json:"id"`
-			Name    string            `json:"name"`
-			Command string            `json:"command"`
-			Args    []string          `json:"args"`
-			Env     map[string]string `json:"env"`
+			ID        string            `json:"id"`
+			Name      string            `json:"name"`
+			Transport string            `json:"transport"`
+			Command   string            `json:"command"`
+			URL       string            `json:"url"`
+			Args      []string          `json:"args"`
+			Env       map[string]string `json:"env"`
+			Headers   map[string]string `json:"headers"`
 		}
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
@@ -686,11 +689,12 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if strings.TrimSpace(args.Name) == "" {
 			return "", fmt.Errorf("name is required")
 		}
-		if strings.TrimSpace(args.Command) == "" {
-			return "", fmt.Errorf("command is required")
-		}
 		if t.Plugins == nil {
 			return "", fmt.Errorf("plugin store not available")
+		}
+		transport := domain.PluginTransport(strings.TrimSpace(args.Transport))
+		if transport == "" {
+			transport = domain.PluginTransportStdio
 		}
 		id := strings.TrimSpace(args.ID)
 		if id == "" {
@@ -705,12 +709,17 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			Version: "0.1.0",
 			Icon:    "🧩",
 			MCP: domain.PluginMCPConfig{
-				Transport: domain.PluginTransportStdio,
+				Transport: transport,
 				Command:   strings.TrimSpace(args.Command),
+				URL:       strings.TrimSpace(args.URL),
 				Args:      args.Args,
 				Env:       args.Env,
+				Headers:   args.Headers,
 			},
 		}}
+		if err := p.Manifest.Validate(); err != nil {
+			return "", fmt.Errorf("mcp_server_add: %w", err)
+		}
 		if err := t.Plugins.Save(p); err != nil {
 			return "", fmt.Errorf("mcp_server_add: %w", err)
 		}

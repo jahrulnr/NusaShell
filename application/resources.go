@@ -224,8 +224,10 @@ func pluginToDTO(p *domain.Plugin) contracts.PluginDTO {
 			MCP: contracts.PluginMCPDTO{
 				Transport: string(p.Manifest.MCP.Transport),
 				Command:   p.Manifest.MCP.Command,
+				URL:       p.Manifest.MCP.URL,
 				Args:      p.Manifest.MCP.Args,
 				Env:       p.Manifest.MCP.Env,
+				Headers:   p.Manifest.MCP.Headers,
 				Autostart: p.Manifest.MCP.Autostart,
 				KeepAlive: p.Manifest.MCP.KeepAliveOnClose,
 			},
@@ -382,30 +384,30 @@ func (a *App) handlePluginSave(req contracts.PluginSaveRequest) (any, *contracts
 	if name == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "plugin name is required"}
 	}
-	command := strings.TrimSpace(req.Command)
-	if command == "" {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "command is required"}
-	}
-	var p *domain.Plugin
+	var existing *domain.Plugin
 	if req.ID != "" {
-		existing, err := a.Plugins.Get(req.ID)
+		var err error
+		existing, err = a.Plugins.Get(req.ID)
 		if err != nil {
 			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 		}
+	}
+	mcpCfg, rpcErr := resolveMCPConfig(req, existing)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	var p *domain.Plugin
+	if existing != nil {
 		p = existing
 	} else {
 		p = &domain.Plugin{Manifest: domain.PluginManifest{
 			ID:      domain.NewID("plugin"),
 			Version: "0.1.0",
 			Icon:    "🧩",
-			MCP:     domain.PluginMCPConfig{Transport: domain.PluginTransportStdio},
 		}}
 	}
 	p.Manifest.Name = name
-	p.Manifest.MCP.Command = command
-	p.Manifest.MCP.Args = req.Args
-	p.Manifest.MCP.Env = req.Env
-	p.Manifest.MCP.Autostart = req.Autostart
+	p.Manifest.MCP = mcpCfg
 	if err := a.Plugins.Save(p); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -419,6 +421,69 @@ func (a *App) handlePluginSave(req contracts.PluginSaveRequest) (any, *contracts
 	dto := pluginToDTO(p)
 	dto.Status, dto.Tools = a.pluginStatus(p)
 	return contracts.PluginListResult{Plugins: []contracts.PluginDTO{dto}}, nil
+}
+
+// resolveMCPConfig builds the persisted MCP config from a save request.
+// An omitted transport keeps the existing transport (so old callers can
+// edit a remote server without degrading it back to stdio) and defaults
+// to stdio for new servers. Stale fields from the other transport kind
+// are cleared so a manifest never carries both command and url.
+func resolveMCPConfig(req contracts.PluginSaveRequest, existing *domain.Plugin) (domain.PluginMCPConfig, *contracts.RPCError) {
+	prev := domain.PluginMCPConfig{Transport: domain.PluginTransportStdio}
+	if existing != nil {
+		prev = existing.Manifest.MCP
+	}
+	transport := domain.PluginTransport(strings.TrimSpace(req.Transport))
+	if transport == "" {
+		transport = prev.Transport
+		if transport == "" {
+			transport = domain.PluginTransportStdio
+		}
+	}
+	switch transport {
+	case domain.PluginTransportStdio, domain.PluginTransportSSE, domain.PluginTransportHTTP:
+	default:
+		return domain.PluginMCPConfig{}, &contracts.RPCError{Code: contracts.CodeValidation, Message: "unsupported mcp transport " + string(transport) + " (stdio, sse, http)"}
+	}
+
+	url := strings.TrimSpace(req.URL)
+	if url == "" && transport != domain.PluginTransportStdio && transport == prev.Transport {
+		url = prev.URL
+	}
+	headers := req.Headers
+	if headers == nil && transport != domain.PluginTransportStdio && transport == prev.Transport {
+		headers = prev.Headers
+	}
+	cfg := domain.PluginMCPConfig{
+		Transport:        transport,
+		URL:              url,
+		Args:             req.Args,
+		Env:              req.Env,
+		Headers:          headers,
+		Autostart:        req.Autostart,
+		KeepAliveOnClose: prev.KeepAliveOnClose,
+	}
+	switch transport {
+	case domain.PluginTransportStdio:
+		cfg.Command = strings.TrimSpace(req.Command)
+		if cfg.Command == "" {
+			return domain.PluginMCPConfig{}, &contracts.RPCError{Code: contracts.CodeValidation, Message: "command is required for stdio transport"}
+		}
+		if cfg.URL != "" {
+			cfg.URL = ""
+			cfg.Headers = nil
+		}
+	case domain.PluginTransportSSE, domain.PluginTransportHTTP:
+		if cfg.URL == "" {
+			return domain.PluginMCPConfig{}, &contracts.RPCError{Code: contracts.CodeValidation, Message: "url is required for " + string(transport) + " transport"}
+		}
+		if !strings.HasPrefix(cfg.URL, "http://") && !strings.HasPrefix(cfg.URL, "https://") {
+			return domain.PluginMCPConfig{}, &contracts.RPCError{Code: contracts.CodeValidation, Message: "url must start with http:// or https://"}
+		}
+		cfg.Command = ""
+		cfg.Args = nil
+	}
+	return cfg, nil
 }
 
 // handlePluginDelete removes a plugin. It works for both manual

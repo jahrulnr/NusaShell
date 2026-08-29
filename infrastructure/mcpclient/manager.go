@@ -119,26 +119,51 @@ func contentText(result *mcp.CallToolResult) string {
 
 func dial(ctx context.Context, p *domain.Plugin) (*conn, error) {
 	cfg := p.Manifest.MCP
-	env := append([]string{}, os.Environ()...)
-	for k, v := range cfg.Env {
-		env = append(env, k+"="+v)
+	var mcpClient *client.Client
+	switch cfg.Transport {
+	case domain.PluginTransportSSE:
+		c, err := client.NewSSEMCPClient(cfg.URL, transport.WithHeaders(cfg.Headers))
+		if err != nil {
+			return nil, fmt.Errorf("connect %s: %w", cfg.URL, err)
+		}
+		mcpClient = c
+	case domain.PluginTransportHTTP:
+		c, err := client.NewStreamableHttpClient(cfg.URL, transport.WithHTTPHeaders(cfg.Headers))
+		if err != nil {
+			return nil, fmt.Errorf("connect %s: %w", cfg.URL, err)
+		}
+		mcpClient = c
+	case domain.PluginTransportStdio:
+		env := append([]string{}, os.Environ()...)
+		for k, v := range cfg.Env {
+			env = append(env, k+"="+v)
+		}
+		var opts []transport.StdioOption
+		if p.InstallPath != "" {
+			opts = append(opts, transport.WithCommandFunc(func(_ context.Context, command string, env []string, args []string) (*exec.Cmd, error) {
+				cmd := exec.Command(command, args...)
+				cmd.Env = env
+				cmd.Dir = p.InstallPath
+				return cmd, nil
+			}))
+		}
+		c, err := client.NewStdioMCPClientWithOptions(cfg.Command, env, cfg.Args, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("start %s: %w", cfg.Command, err)
+		}
+		mcpClient = c
+	default:
+		return nil, fmt.Errorf("unsupported mcp transport %q", cfg.Transport)
 	}
-	var opts []transport.StdioOption
-	if p.InstallPath != "" {
-		opts = append(opts, transport.WithCommandFunc(func(_ context.Context, command string, env []string, args []string) (*exec.Cmd, error) {
-			cmd := exec.Command(command, args...)
-			cmd.Env = env
-			cmd.Dir = p.InstallPath
-			return cmd, nil
-		}))
-	}
-	mcpClient, err := client.NewStdioMCPClientWithOptions(cfg.Command, env, cfg.Args, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("start %s: %w", cfg.Command, err)
+	if cfg.Transport != domain.PluginTransportStdio {
+		if err := mcpClient.Start(ctx); err != nil {
+			_ = mcpClient.Close()
+			return nil, fmt.Errorf("start %s: %w", cfg.URL, err)
+		}
 	}
 	initCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	_, err = mcpClient.Initialize(initCtx, mcp.InitializeRequest{
+	_, err := mcpClient.Initialize(initCtx, mcp.InitializeRequest{
 		Params: mcp.InitializeParams{
 			ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION,
 			ClientInfo: mcp.Implementation{

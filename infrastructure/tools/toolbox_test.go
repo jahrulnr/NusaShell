@@ -1296,6 +1296,45 @@ func TestMcpServerAddValidation(t *testing.T) {
 	}
 }
 
+func TestMcpServerAddHTTPTransport(t *testing.T) {
+	store := newSavingStub(nil)
+	tb := &Toolbox{Plugins: store, MCP: &stubDropper{droppedServers: map[string]bool{}}}
+	out, err := tb.Execute(context.Background(), "mcp_server_add", []byte(`{"name":"Remote","transport":"http","url":"https://mcp.example.com/mcp","headers":{"Authorization":"Bearer tok"}}`))
+	if err != nil {
+		t.Fatalf("mcp_server_add: %v", err)
+	}
+	if !strings.Contains(out, "status: added") {
+		t.Fatalf("unexpected output %q", out)
+	}
+	if len(store.saved) != 1 {
+		t.Fatalf("expected 1 saved plugin, got %d", len(store.saved))
+	}
+	got := store.saved[0]
+	if got.Manifest.MCP.Transport != domain.PluginTransportHTTP {
+		t.Fatalf("transport = %q, want http", got.Manifest.MCP.Transport)
+	}
+	if got.Manifest.MCP.URL != "https://mcp.example.com/mcp" {
+		t.Fatalf("url not saved: %q", got.Manifest.MCP.URL)
+	}
+	if got.Manifest.MCP.Headers["Authorization"] != "Bearer tok" {
+		t.Fatalf("headers not saved: %v", got.Manifest.MCP.Headers)
+	}
+	if got.Manifest.MCP.Command != "" {
+		t.Fatalf("command must be empty for http transport, got %q", got.Manifest.MCP.Command)
+	}
+}
+
+func TestMcpServerAddRemoteRequiresURL(t *testing.T) {
+	for _, transport := range []string{"sse", "http"} {
+		tb := &Toolbox{Plugins: newSavingStub(nil), MCP: &stubDropper{droppedServers: map[string]bool{}}}
+		payload := fmt.Sprintf(`{"name":"remote","transport":%q}`, transport)
+		_, err := tb.Execute(context.Background(), "mcp_server_add", []byte(payload))
+		if err == nil || !strings.Contains(err.Error(), "url is required") {
+			t.Fatalf("transport %s without url: got %v, want url-required", transport, err)
+		}
+	}
+}
+
 func TestListToolsIncludesMcpServerAdd(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
 	names := map[string]bool{}

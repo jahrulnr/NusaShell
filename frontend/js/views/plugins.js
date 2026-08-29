@@ -303,13 +303,15 @@ function renderDrawerTools(server) {
 function renderDrawerManifest(server) {
   const info = document.getElementById('plugin-manifest-info');
   const mcp = server.manifest?.mcp ?? {};
+  const isRemote = mcp.transport === 'sse' || mcp.transport === 'http';
   const rows = [
     ['id', server.id],
     ['type', server.plugin ? (hasPluginUI(server) ? 'MCP + UI plugin' : 'MCP plugin') : 'MCP server'],
-    ['command', mcp.command || '—'],
-    ['args', (mcp.args || []).join(' ') || '—'],
-    ['status', server.status || 'idle'],
+    ['transport', mcp.transport || 'stdio'],
   ];
+  if (isRemote) rows.push(['url', mcp.url || '—']);
+  else rows.push(['command', mcp.command || '—'], ['args', (mcp.args || []).join(' ') || '—']);
+  rows.push(['status', server.status || 'idle']);
   if (server.plugin) {
     rows.splice(2, 0, ['version', server.version || '—']);
     if (server.category) rows.splice(3, 0, ['category', server.category]);
@@ -424,16 +426,27 @@ function openPluginWindow(server) {
   if (!opened) toast(`Allow pop-ups to open “${server.name}” in its own window.`, 'error');
 }
 
+const TRANSPORT_OPTIONS = [
+  { value: 'stdio', label: 'stdio — local child process' },
+  { value: 'sse', label: 'SSE — remote HTTP endpoint' },
+  { value: 'http', label: 'HTTP — remote Streamable HTTP endpoint' },
+];
+
 async function addMcp(server = null) {
   const mcp = server?.manifest?.mcp ?? {};
+  const transport = mcp.transport || 'stdio';
+
   const result = await dialog({
     title: server ? 'Edit MCP server' : 'Add MCP server',
-    message: 'A stdio MCP server launched as a child process. Environment entries use KEY=VALUE.',
+    message: 'MCP transports: stdio launches a child process; SSE/HTTP connect to a remote endpoint. Env uses KEY=VALUE; headers use "Key: value" per line.',
     fields: [
       { name: 'name', label: 'Name', value: server?.name ?? '', placeholder: 'e.g. filesystem' },
-      { name: 'command', label: 'Command', value: mcp.command ?? '', placeholder: 'e.g. npx' },
-      { name: 'args', label: 'Arguments (space separated)', value: (mcp.args ?? []).join(' '), placeholder: '-y @modelcontextprotocol/server-filesystem /path' },
-      { name: 'env', label: 'Environment (optional)', value: Object.entries(mcp.env ?? {}).map(([key, value]) => `${key}=${value}`).join('\n'), placeholder: 'KEY=VALUE', tag: 'textarea' },
+      { name: 'transport', label: 'Transport', tag: 'select', value: transport, options: TRANSPORT_OPTIONS, onChange: updateTransportFields },
+      { name: 'command', label: 'Command (stdio)', value: mcp.command ?? '', placeholder: 'e.g. npx' },
+      { name: 'args', label: 'Arguments (stdio, space separated)', value: (mcp.args ?? []).join(' '), placeholder: '-y @modelcontextprotocol/server-filesystem /path' },
+      { name: 'url', label: 'URL (SSE/HTTP)', value: mcp.url ?? '', placeholder: 'https://example.com/mcp' },
+      { name: 'headers', label: 'Headers (SSE/HTTP, optional)', value: Object.entries(mcp.headers ?? {}).map(([key, value]) => `${key}: ${value}`).join('\n'), placeholder: 'Authorization: Bearer <token>', tag: 'textarea' },
+      { name: 'env', label: 'Environment (stdio, optional)', value: Object.entries(mcp.env ?? {}).map(([key, value]) => `${key}=${value}`).join('\n'), placeholder: 'KEY=VALUE', tag: 'textarea' },
     ],
     actions: [
       { label: 'Cancel', value: null },
@@ -441,23 +454,32 @@ async function addMcp(server = null) {
     ],
   });
   if (result.value !== 'save') return;
-  const { name, command, args, env } = result.fields;
-  if (!name.trim() || !command.trim()) {
-    toast('Name and command are required', 'error');
+  const { name, transport: selected, command, args, url, headers, env } = result.fields;
+  const trimmedTransport = selected || 'stdio';
+  if (!name.trim()) {
+    toast('Name is required', 'error');
     return;
   }
-  const envObject = {};
-  for (const line of env.split('\n')) {
-    const separator = line.indexOf('=');
-    if (separator > 0) envObject[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
+  if (trimmedTransport === 'stdio' && !command.trim()) {
+    toast('Command is required for stdio servers', 'error');
+    return;
   }
+  if (trimmedTransport !== 'stdio' && !/^https?:\/\//.test(url.trim())) {
+    toast('An http(s) URL is required for SSE/HTTP servers', 'error');
+    return;
+  }
+  const envObject = parseKeyValueLines(env, '=');
+  const headerObject = parseKeyValueLines(headers, ':');
   try {
     await rpc('plugin.save', {
       id: server?.id || undefined,
       name: name.trim(),
-      command: command.trim(),
-      args: args.split(/\s+/).filter(Boolean),
-      env: envObject,
+      transport: trimmedTransport,
+      command: trimmedTransport === 'stdio' ? command.trim() : undefined,
+      args: trimmedTransport === 'stdio' ? args.split(/\s+/).filter(Boolean) : undefined,
+      env: trimmedTransport === 'stdio' ? envObject : undefined,
+      url: trimmedTransport !== 'stdio' ? url.trim() : undefined,
+      headers: trimmedTransport !== 'stdio' ? headerObject : undefined,
       autostart: mcp.autostart === true,
     });
     toast('MCP server saved', 'success');
@@ -465,6 +487,31 @@ async function addMcp(server = null) {
   } catch (error) {
     toast(error.message, 'error');
   }
+}
+
+// updateTransportFields shows stdio-only fields (command/args/env) for the
+// stdio transport and remote fields (url/headers) for SSE/HTTP, driven by
+// the transport select inside the add/edit dialog.
+function updateTransportFields(select, values) {
+  const isStdio = (select.value || 'stdio') === 'stdio';
+  for (const [name, input] of Object.entries(values)) {
+    if (name === 'name' || name === 'transport') continue;
+    const wrapper = input.closest('label');
+    if (!wrapper) continue;
+    const remoteField = name === 'url' || name === 'headers';
+    wrapper.hidden = isStdio === remoteField;
+  }
+}
+
+// parseKeyValueLines parses "KEY<sep>VALUE" lines into an object; the
+// separator is the first occurrence so values may contain it.
+function parseKeyValueLines(text, separator) {
+  const out = {};
+  for (const line of String(text || '').split('\n')) {
+    const idx = line.indexOf(separator);
+    if (idx > 0) out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+  }
+  return out;
 }
 
 function wireInstallDialog() {

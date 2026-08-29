@@ -164,6 +164,7 @@ export function dialog({ title, message, fields = [], actions = [{ label: 'Cance
     const body = el('div', { class: 'ui-dialog-body' });
     if (message) body.append(el('p', { class: 'ui-dialog-message', text: message }));
     const values = {};
+    const selectFields = [];
     for (const field of fields) {
       let input;
       if (field.tag === 'textarea') {
@@ -207,6 +208,15 @@ export function dialog({ title, message, fields = [], actions = [{ label: 'Cance
         });
         if (selected) ss.setSelected([selected]);
         slimInstances.push(ss);
+        selectFields.push(field);
+      }
+    }
+    // Fire onChange once for selects after every field exists, so
+    // dependent fields (e.g. visibility based on the selected value)
+    // start in sync.
+    for (const field of selectFields) {
+      if (typeof field.onChange === 'function' && values[field.name]) {
+        field.onChange(values[field.name], values);
       }
     }
     const actionBtns = actions.map((a) => {

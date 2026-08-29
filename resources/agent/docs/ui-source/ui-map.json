@@ -251,7 +251,7 @@
         {
           "heading": "Header",
           "paragraphs": [
-            "View title and two buttons: Add MCP opens the stdio server editor; Install plugin opens the plugin installer with catalog, GitHub, and ZIP options."
+            "View title and two buttons: Add MCP opens the MCP server editor (stdio child process, SSE, or Streamable HTTP remote endpoint); Install plugin opens the plugin installer with catalog, GitHub, and ZIP options."
           ],
           "controls": [
             "plugins-add-mcp",
@@ -304,7 +304,7 @@
         {
           "heading": "Detail drawer",
           "paragraphs": [
-            "A right-hand drawer that opens when a catalog row is clicked. Shows the state machine, actions, preferences, tools, and manifest summary. Native MCP rows expose Start, Stop, Restart, Edit, and Delete; plugin rows expose Start, Stop, Restart, and Uninstall; MCP + UI plugins also expose Open UI. When a catalog plugin has a newer release, an Update button appears that updates it in place (plugin.update). Close with the X button, overlay, or Escape.",
+            "A right-hand drawer that opens when a catalog row is clicked. Shows the state machine, actions, preferences, tools, and manifest summary. Native MCP rows expose Start, Stop, Restart, Edit, and Delete; plugin rows expose Start, Stop, Restart, and Uninstall; MCP + UI plugins also expose Open UI. When a catalog plugin has a newer release, an Update button appears that updates it in place (plugin.update). Close with the X button, overlay, or Escape. The manifest summary shows transport plus URL for SSE/HTTP servers, or command plus arguments for stdio servers. The same editor (opened via Add MCP or Edit) switches its fields per transport: command/args/env for stdio, URL/headers for SSE/HTTP.",
             "The Preferences area has an Auto start switch (shown for every entry) that launches the MCP server when NusaShell starts, and an Auto update switch (shown only for catalog-managed plugins) that updates the plugin automatically when a new version is released."
           ],
           "controls": [
