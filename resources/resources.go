@@ -78,6 +78,18 @@ const (
 	compactedSummaries          = "{{compacted_summaries}}"
 )
 
+func AudioVisionSystemPrompt() string {
+	return Prompt("audio-vision")
+}
+
+func ImageVisionSystemPrompt() string {
+	return Prompt("image-vision")
+}
+
+func VideoVisionSystemPrompt() string {
+	return Prompt("video-vision")
+}
+
 // ReviewPrompt loads the combined background review prompt
 // (review.md), substituting the {{skill_review_rules}} template
 // with skill-rules.md content. The {{primary_memory}} placeholder is left

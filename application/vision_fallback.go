@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"nusashell/domain"
+	"nusashell/resources"
 )
 
 // describeImagesWithFallback converts image attachments into text descriptions
@@ -157,7 +158,7 @@ func (a *App) describeOneImage(ctx context.Context, adapter ProviderContext, pro
 	}
 	req := ChatRequest{
 		Model:  model,
-		System: "Describe the attached image accurately and concisely for a text-only model that cannot see it.",
+		System: resources.ImageVisionSystemPrompt(),
 		Messages: []ChatMessage{
 			{
 				Role:        "user",

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"nusashell/domain"
+	"nusashell/resources"
 )
 
 // executeReadAudio handles the read_media tool call when the sniffed kind
@@ -173,7 +174,7 @@ func (a *App) transcribeAudioViaChat(run *TurnRun, caps ModelCapabilities, setti
 func (a *App) describeOneAudio(ctx context.Context, adapter ProviderContext, model string, audio domain.Attachment, prompt string) (string, error) {
 	req := ChatRequest{
 		Model:  model,
-		System: "You are an audio transcription assistant. Transcribe speech accurately and describe non-speech audio concisely.",
+		System: resources.AudioVisionSystemPrompt(),
 		Messages: []ChatMessage{
 			{
 				Role:        "user",

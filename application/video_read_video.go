@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"nusashell/domain"
+	"nusashell/resources"
 )
 
 // executeReadVideo handles the read_media tool call when the sniffed kind
@@ -103,7 +104,7 @@ func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps Mode
 func (a *App) describeOneVideo(ctx context.Context, adapter ProviderContext, model string, video domain.Attachment, prompt string) (string, error) {
 	req := ChatRequest{
 		Model:  model,
-		System: "Describe videos accurately and concisely for a text-only model that cannot see them.",
+		System: resources.VideoVisionSystemPrompt(),
 		Messages: []ChatMessage{
 			{
 				Role:        "user",
