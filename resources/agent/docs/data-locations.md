@@ -29,7 +29,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `plugins/<id>/` | plugins (manual MCP servers and installed plugins): `manifest.json` + optional `ui/` + optional `skills/` (mounted read-only as `plugin:<id>` skills) | JSON + files |
 | `memory/primary.md` | primary memory (always-injected working set, ~1k token cap; auto-created on first run) | Markdown |
 | `memory/fragments/*.md` | memory fragments (unlimited searchable archive; one markdown file per entry with YAML frontmatter) | Markdown + YAML |
-| `memory_project/{key}/` | per-workspace project memory (`index.md`, `guardrails.md`, … plus `archive/`). Default base; override with Settings `project_memory_base` (for example `~/.memory`) | Markdown |
+| `memory_project/{key}/` | per-workspace project memory (`index.md`, `guardrails.md`, … plus `archive/`). Default base; override with Settings → Project memory (`project_memory_base`, for example `~/.memory`) | Markdown |
 | `memory/legacy.jsonl` | legacy memory entries (pre-fragment system) | JSONL |
 | `learning/edges.jsonl` | learning edges (skill/memory similarity + token overlap) | JSONL |
 | `learning/embeddings.jsonl` | embedding cache for memory/skill entries | JSONL |

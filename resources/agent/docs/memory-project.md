@@ -8,9 +8,9 @@ tasks skip expensive rediscovery.
 The tool is advertised only when the conversation has a workspace. If
 it is not listed, do not call it.
 
-Default files live under `{dataDir}/memory_project/{key}/`. Settings
-`project_memory_base` can point at `~/.memory` to share the same on-disk
-layout with other agents.
+Default files live under `{dataDir}/memory_project/{key}/`. Settings →
+Project memory (`project_memory_base`, under Memory & search) can point
+at `~/.memory` to share the same on-disk layout with other agents.
 
 ## Admission, not mandatory writing
 

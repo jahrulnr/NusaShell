@@ -678,7 +678,7 @@ summary { outline: none; }
   .skills-workspace { grid-template-columns: 1fr; overflow: visible; }
   .skills-catalog { max-height: 300px; border-right: 0; border-bottom: 1px solid var(--border); }
   .skills-editor-pane { min-height: 420px; }
-  .settings-body { grid-template-columns: 1fr; }
+  .settings-group { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

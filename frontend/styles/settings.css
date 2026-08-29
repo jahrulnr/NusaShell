@@ -37,8 +37,33 @@
  * original cascade order after the field styles above so computed styles
  * are unchanged) ---- */
 
-.settings-body { display: grid; align-content: start; grid-template-columns: repeat(auto-fit, minmax(min(100%, 390px), 560px)); gap: 14px; }
+.settings-body { display: flex; flex-direction: column; gap: 28px; width: 100%; max-width: 100%; }
+.settings-group {
+  display: grid;
+  width: 100%;
+  align-content: start;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+@media (min-width: 1200px) {
+  .settings-group { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .settings-group > .settings-card:only-of-type,
+  .settings-group > .settings-card:last-child:nth-child(even) { grid-column: 1 / -1; }
+}
+.settings-group-title {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
 .settings-card {
+  min-width: 0;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
   padding: 18px;

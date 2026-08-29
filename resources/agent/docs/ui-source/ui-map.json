@@ -537,7 +537,7 @@
     },
     "settings": {
       "title": "Settings",
-      "purpose": "Control how this local NusaShell instance runs agent turns, manages context, picks embedding models, and presents the workspace. Browser-only preferences stay in local storage.",
+      "purpose": "Control how this local NusaShell instance runs agent turns, manages context, stores memory, picks models, and presents the workspace. Cards are grouped by boundary: Agent, Context, Memory & search, Media understanding, Media generation, Web, and Workspace. Browser-only preferences stay in local storage; the rest save with the instance.",
       "howToOpen": "Click the settings icon in the title bar, or press the Settings shortcut.",
       "sections": [
         {
@@ -551,30 +551,106 @@
           ]
         },
         {
+          "heading": "Card groups",
+          "paragraphs": [
+            "Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning review, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Answer. Workspace: appearance, connection, system."
+          ],
+          "controls": [
+            "settings-group-agent",
+            "settings-group-context",
+            "settings-group-memory",
+            "settings-group-understand",
+            "settings-group-generate",
+            "settings-group-web",
+            "settings-group-workspace"
+          ]
+        },
+        {
           "heading": "Agent runtime",
           "paragraphs": [
-            "Default model for new conversations, the maximum tool rounds per turn (default 8), the max parallel tools per round (default 6, range 1–64), and the plugin usage-contract enforcement mode. Existing conversations keep their selected model."
+            "Default model for new conversations, tool-round guards (max rounds, repeated-call limit, max parallel tools), max auto-continues after a successful turn with open todos, max output tokens, and optional sampling parameters. Existing conversations keep their selected model."
           ],
           "controls": [
             "settings-runtime-title",
             "settings-preferred-model",
             "settings-max-tool-rounds",
+            "settings-repeated-tool-limit",
             "settings-max-parallel-tools",
+            "settings-auto-continues",
+            "settings-max-output-tokens",
+            "settings-temperature",
+            "settings-top-p",
+            "settings-top-k",
+            "settings-frequency-penalty",
+            "settings-presence-penalty"
+          ]
+        },
+        {
+          "heading": "Instructions",
+          "paragraphs": [
+            "Custom instructions injected into every agent turn inside user_instructions tags. This is agent identity, not compaction or search. Editing it busts the prompt cache until a new shard stabilizes."
+          ],
+          "controls": [
+            "settings-instructions-title",
+            "settings-user-prompt"
+          ]
+        },
+        {
+          "heading": "Plugins",
+          "paragraphs": [
+            "How agents treat MCP plugin usage contracts. Install and enable plugins on the Plugins view. Empty = factory default (hint, advisory); off never notifies; hint attaches an advisory note until the contract is read; require blocks MCP calls until the contract is read."
+          ],
+          "controls": [
+            "settings-plugins-title",
             "settings-plugin-contract-mode"
+          ]
+        },
+        {
+          "heading": "Context compaction",
+          "paragraphs": [
+            "Toggle compaction, set max input tokens (fallback context window, default 200000), compaction threshold and summary quality knobs, pick an optional compaction model, and enable provider prompt caching. Completion limits and sampling are under Agent runtime."
+          ],
+          "controls": [
+            "settings-context-title",
+            "settings-compaction-enabled",
+            "settings-max-input-tokens",
+            "settings-compaction-threshold",
+            "settings-compaction-summary-max-tokens",
+            "settings-compaction-summary-min-chars",
+            "settings-compaction-model",
+            "settings-prompt-caching"
+          ]
+        },
+        {
+          "heading": "Learning",
+          "paragraphs": [
+            "Background review that extracts user learnings and skill-worthy patterns. The learning review threshold is turns (default 10, 0 disables turn-based review). The skill review threshold is tool calls (default 15, 0 disables). The review model routes autolearn reviews to a cheaper or faster model (default uses the conversation's active model)."
+          ],
+          "controls": [
+            "settings-learning-title",
+            "settings-learning-threshold",
+            "settings-skill-nudge-interval",
+            "settings-review-model"
+          ]
+        },
+        {
+          "heading": "Project memory",
+          "paragraphs": [
+            "Per-workspace durable notes (index.md, guardrails.md, and the rest of the skill-compatible layout). Separate from user memory on the Learning view and from the embedding model. Empty uses {dataDir}/memory_project/{key}/. An absolute path such as ~/.memory shares the layout with other agents."
+          ],
+          "controls": [
+            "settings-project-memory-title",
+            "settings-project-memory-base"
           ]
         },
         {
           "heading": "Embeddings",
           "paragraphs": [
-            "Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review). The review model routes background autolearn reviews to a cheaper or faster model (default uses the conversation's active model). Project memory directory overrides the default {dataDir}/memory_project store so a skill-compatible path such as ~/.memory can be shared with other agents."
+            "Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import."
           ],
           "controls": [
             "settings-embedding-title",
-            "settings-embedding-model",
-            "settings-learning-threshold",
-            "settings-skill-nudge-interval",
-            "settings-project-memory-base",
-            "settings-review-model"
+            "settings-embedding-model"
           ]
         },
         {
@@ -588,16 +664,6 @@
           ]
         },
         {
-          "heading": "Image generation",
-          "paragraphs": [
-            "Pick the model used by the generate_image tool. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images and OpenRouter Image API are supported. Import models on an OpenAI or OpenRouter provider. Leave disabled until you want the agent to be able to generate images."
-          ],
-          "controls": [
-            "settings-image-title",
-            "settings-image-model"
-          ]
-        },
-        {
           "heading": "Audio fallback",
           "paragraphs": [
             "When the active chat model cannot hear audio, NusaShell can transcribe or describe attached audio files using a separate audio-capable model so the conversation continues without errors. Pick any model that supports audio input. Leave disabled if you always use audio-capable chat models."
@@ -608,28 +674,13 @@
           ]
         },
         {
-          "heading": "Speech generation",
+          "heading": "Video fallback",
           "paragraphs": [
-            "Pick the model used by the generate_speech tool (text-to-speech). Online models use an OpenAI-compatible /audio/speech endpoint. The offline piper engine can be installed with one click: the install button opens a dialog with a voice picker (Bahasa Indonesia news_tts medium, English US lessac high), downloads the piper binary plus the selected voice model into the data directory with live progress, and the installed voice then appears as an option in the model picker (provider “piper”) so it can be selected directly — the automatic fallback works as soon as install finishes, no offline-mode checkbox needed. The old manual checkbox stays for PIPER_BIN/PATH setups."
+            "When the active chat model cannot see video, NusaShell can describe attached video files using a separate video-capable model so the conversation continues without errors. Pick any model that supports video input. Leave disabled if you always use video-capable chat models."
           ],
           "controls": [
-            "settings-tts-title",
-            "settings-tts-model",
-            "settings-tts-offline",
-            "settings-tts-install-btn",
-            "settings-tts-install-status",
-            "tts-install-overlay",
-            "tts-install-title",
-            "tts-install-close",
-            "tts-install-error",
-            "tts-install-voice",
-            "tts-install-progress",
-            "tts-install-phase",
-            "tts-install-bar-track",
-            "tts-install-bar",
-            "tts-install-bytes",
-            "tts-install-cancel",
-            "tts-install-confirm"
+            "settings-video-title",
+            "settings-video-model"
           ]
         },
         {
@@ -664,43 +715,70 @@
           ]
         },
         {
-          "heading": "Video fallback",
+          "heading": "Image generation",
           "paragraphs": [
-            "When the active chat model cannot see video, NusaShell can describe attached video files using a separate video-capable model so the conversation continues without errors. Pick any model that supports video input. Leave disabled if you always use video-capable chat models."
+            "Pick the model used by the generate_image tool. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images, OpenRouter Image API, and a signed-in Codex ChatGPT plan are supported. Import models on an OpenAI or OpenRouter provider. Leave disabled until you want the agent to be able to generate images."
           ],
           "controls": [
-            "settings-video-title",
-            "settings-video-model"
+            "settings-image-title",
+            "settings-image-model"
           ]
         },
         {
-          "heading": "Context compaction",
+          "heading": "Video generation",
           "paragraphs": [
-            "Toggle compaction, set max input tokens (fallback context window, default 200000), max output tokens (default 65536), pick an optional compaction model (default uses the active chat model), prompt caching, and optional sampling parameters (temperature, top-p, top-k, frequency penalty, presence penalty)."
+            "Pick the model used by the generate_video tool. This is separate from the chat model and the video fallback — any chat model can orchestrate, and the video backend is resolved here. OpenRouter's async /videos API is supported. Leave disabled until you want the agent to be able to generate videos."
           ],
           "controls": [
-            "settings-context-title",
-            "settings-compaction-enabled",
-            "settings-compaction-model",
-            "settings-max-input-tokens",
-            "settings-max-output-tokens",
-            "settings-prompt-caching",
-            "settings-sound-notifications",
-            "settings-temperature",
-            "settings-top-p",
-            "settings-top-k",
-            "settings-frequency-penalty",
-            "settings-presence-penalty"
+            "settings-video-gen-title",
+            "settings-video-gen-model"
+          ]
+        },
+        {
+          "heading": "Speech generation",
+          "paragraphs": [
+            "Pick the model used by the generate_speech tool (text-to-speech). Online models use an OpenAI-compatible /audio/speech endpoint. The offline piper engine can be installed with one click: the install button opens a dialog with a voice picker (Bahasa Indonesia news_tts medium, English US lessac high), downloads the piper binary plus the selected voice model into the data directory with live progress, and the installed voice then appears as an option in the model picker (provider “piper”) so it can be selected directly — the automatic fallback works as soon as install finishes."
+          ],
+          "controls": [
+            "settings-tts-title",
+            "settings-tts-model",
+            "settings-tts-install-btn",
+            "settings-tts-install-status",
+            "tts-install-overlay",
+            "tts-install-title",
+            "tts-install-close",
+            "tts-install-error",
+            "tts-install-voice",
+            "tts-install-progress",
+            "tts-install-phase",
+            "tts-install-bar-track",
+            "tts-install-bar",
+            "tts-install-bytes",
+            "tts-install-cancel",
+            "tts-install-confirm"
+          ]
+        },
+        {
+          "heading": "Web Answer",
+          "paragraphs": [
+            "Configure a web-grounded answer provider for the web_answer tool. This is separate from chat providers — pick a supported vendor and enter its API key. The key is stored in the credential store, not in settings JSON."
+          ],
+          "controls": [
+            "settings-web-answer-title",
+            "settings-web-answer-provider",
+            "settings-web-answer-api-key",
+            "settings-web-answer-model"
           ]
         },
         {
           "heading": "Appearance",
           "paragraphs": [
-            "Browser-only preferences stored locally, not sent to the agent."
+            "Sidebar layout is stored in this browser. Sound notifications save with the NusaShell instance and play when an agent turn completes or fails."
           ],
           "controls": [
             "settings-appearance-title",
-            "settings-sidebar-compact"
+            "settings-sidebar-compact",
+            "settings-sound-notifications"
           ]
         },
         {
@@ -720,7 +798,7 @@
         {
           "heading": "System",
           "paragraphs": [
-            "Local diagnostics: version, data directory, and transports. This browser version does not manage desktop tray or login startup."
+            "Local diagnostics: version and data directory. This browser version does not manage desktop tray or login startup."
           ],
           "controls": [
             "settings-system-title",
@@ -2082,6 +2160,333 @@
       "action": "Cancels the running turn for this tool call (agent.turns.stop). Shown only on streaming tools (exec) while the tool is running; the button hides once the tool settles.",
       "notes": "Appears inside the tool terminal card's summary row (class agent-tool-stop), next to the elapsed timer.",
       "selector": ".agent-tool-stop"
+    },
+    "settings-group-agent": {
+      "label": "Agent group",
+      "section": "Settings",
+      "type": "heading",
+      "notes": "Card group for runtime, instructions, and plugin contracts."
+    },
+    "settings-group-context": {
+      "label": "Context group",
+      "section": "Settings",
+      "type": "heading",
+      "notes": "Card group for compaction and prompt caching."
+    },
+    "settings-group-memory": {
+      "label": "Memory & search group",
+      "section": "Settings",
+      "type": "heading",
+      "notes": "Card group for learning review, project memory, and embeddings."
+    },
+    "settings-group-understand": {
+      "label": "Media understanding group",
+      "section": "Settings",
+      "type": "heading",
+      "notes": "Card group for vision/audio/video fallback and offline STT."
+    },
+    "settings-group-generate": {
+      "label": "Media generation group",
+      "section": "Settings",
+      "type": "heading",
+      "notes": "Card group for image, video, and speech generation."
+    },
+    "settings-group-web": {
+      "label": "Web group",
+      "section": "Settings",
+      "type": "heading",
+      "notes": "Card group for Web Answer."
+    },
+    "settings-group-workspace": {
+      "label": "Workspace group",
+      "section": "Settings",
+      "type": "heading",
+      "notes": "Card group for appearance, connection, and system diagnostics."
+    },
+    "settings-instructions-title": {
+      "label": "Instructions title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-plugins-title": {
+      "label": "Plugins title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-learning-title": {
+      "label": "Learning title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-project-memory-title": {
+      "label": "Project memory title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-repeated-tool-limit": {
+      "label": "Repeated tool call limit",
+      "section": "Settings",
+      "type": "number",
+      "notes": "Breaks identical tool loops; default 3, 0 disables."
+    },
+    "settings-auto-continues": {
+      "label": "Max auto-continues",
+      "section": "Settings",
+      "type": "number",
+      "notes": "Auto-starts the next turn while todos remain; default 10, 0 unlimited."
+    },
+    "settings-user-prompt": {
+      "label": "User prompt",
+      "section": "Settings",
+      "type": "textarea",
+      "notes": "Custom instructions injected into every agent turn."
+    },
+    "settings-compaction-threshold": {
+      "label": "Compaction threshold",
+      "section": "Settings",
+      "type": "number",
+      "notes": "Token count that triggers compaction. 0 = auto (80% of context window)."
+    },
+    "settings-compaction-summary-max-tokens": {
+      "label": "Compaction summary max tokens",
+      "section": "Settings",
+      "type": "number",
+      "notes": "Max output tokens for the compaction summarization call. 0 = default 64000."
+    },
+    "settings-compaction-summary-min-chars": {
+      "label": "Compaction summary min chars",
+      "section": "Settings",
+      "type": "number",
+      "notes": "Minimum summary length for the compaction quality guard. 0 = default 200."
+    },
+    "settings-video-gen-title": {
+      "label": "Video generation title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-video-gen-model": {
+      "label": "Video generation model",
+      "section": "Settings",
+      "type": "select",
+      "notes": "Auxiliary model for generate_video. Empty disables the tool."
+    },
+    "settings-web-answer-title": {
+      "label": "Web Answer title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-web-answer-provider": {
+      "label": "Answer provider",
+      "section": "Settings",
+      "type": "select",
+      "notes": "Vendor for web_answer. Empty disables the tool."
+    },
+    "settings-web-answer-api-key": {
+      "label": "Web Answer API key",
+      "section": "Settings",
+      "type": "password",
+      "notes": "Stored in the credential store. Leave blank while saving to keep the existing key."
+    },
+    "settings-web-answer-model": {
+      "label": "Web Answer model",
+      "section": "Settings",
+      "type": "text",
+      "notes": "Optional model or preset; blank uses the vendor default."
+    },
+    "settings-tts-title": {
+      "label": "Speech generation title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-tts-model": {
+      "label": "Speech generation model",
+      "section": "Settings",
+      "type": "select"
+    },
+    "settings-tts-install-btn": {
+      "label": "Install offline text-to-speech",
+      "section": "Settings",
+      "type": "button",
+      "action": "Opens the piper install dialog."
+    },
+    "settings-tts-install-status": {
+      "label": "TTS install status",
+      "section": "Settings",
+      "type": "status"
+    },
+    "tts-install-overlay": {
+      "label": "TTS install dialog",
+      "section": "Settings",
+      "type": "dialog"
+    },
+    "tts-install-title": {
+      "label": "TTS install title",
+      "section": "Settings",
+      "type": "heading"
+    },
+    "tts-install-close": {
+      "label": "Close TTS install",
+      "section": "Settings",
+      "type": "button",
+      "action": "Closes the TTS installer."
+    },
+    "tts-install-error": {
+      "label": "TTS install error",
+      "section": "Settings",
+      "type": "status"
+    },
+    "tts-install-voice": {
+      "label": "TTS voice picker",
+      "section": "Settings",
+      "type": "select"
+    },
+    "tts-install-progress": {
+      "label": "TTS install progress",
+      "section": "Settings",
+      "type": "status"
+    },
+    "tts-install-phase": {
+      "label": "TTS install phase",
+      "section": "Settings",
+      "type": "text"
+    },
+    "tts-install-bar-track": {
+      "label": "TTS install bar track",
+      "section": "Settings",
+      "type": "progress"
+    },
+    "tts-install-bar": {
+      "label": "TTS install bar",
+      "section": "Settings",
+      "type": "progress"
+    },
+    "tts-install-bytes": {
+      "label": "TTS install bytes",
+      "section": "Settings",
+      "type": "text"
+    },
+    "tts-install-cancel": {
+      "label": "Cancel TTS install",
+      "section": "Settings",
+      "type": "button"
+    },
+    "tts-install-confirm": {
+      "label": "Confirm TTS install",
+      "section": "Settings",
+      "type": "button",
+      "action": "Starts the piper download."
+    },
+    "settings-stt-title": {
+      "label": "Offline speech-to-text title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-stt-model": {
+      "label": "Offline STT model",
+      "section": "Settings",
+      "type": "select"
+    },
+    "settings-stt-install-btn": {
+      "label": "Install offline speech-to-text",
+      "section": "Settings",
+      "type": "button",
+      "action": "Opens the whisper.cpp install dialog."
+    },
+    "settings-stt-install-status": {
+      "label": "STT install status",
+      "section": "Settings",
+      "type": "status"
+    },
+    "stt-requirements-overlay": {
+      "label": "STT install dialog",
+      "section": "Settings",
+      "type": "dialog"
+    },
+    "stt-requirements-title": {
+      "label": "STT install title",
+      "section": "Settings",
+      "type": "heading"
+    },
+    "stt-requirements-close": {
+      "label": "Close STT install",
+      "section": "Settings",
+      "type": "button"
+    },
+    "stt-requirements-error": {
+      "label": "STT install error",
+      "section": "Settings",
+      "type": "status"
+    },
+    "stt-req-checklist": {
+      "label": "STT requirements checklist",
+      "section": "Settings",
+      "type": "list"
+    },
+    "stt-guide": {
+      "label": "STT install guide",
+      "section": "Settings",
+      "type": "panel"
+    },
+    "stt-guide-tab-linux": {
+      "label": "STT Linux guide tab",
+      "section": "Settings",
+      "type": "tab"
+    },
+    "stt-guide-tab-windows": {
+      "label": "STT Windows guide tab",
+      "section": "Settings",
+      "type": "tab"
+    },
+    "stt-guide-tab-macos": {
+      "label": "STT macOS guide tab",
+      "section": "Settings",
+      "type": "tab"
+    },
+    "stt-install-model": {
+      "label": "STT model picker",
+      "section": "Settings",
+      "type": "select"
+    },
+    "stt-install-progress": {
+      "label": "STT install progress",
+      "section": "Settings",
+      "type": "status"
+    },
+    "stt-install-phase": {
+      "label": "STT install phase",
+      "section": "Settings",
+      "type": "text"
+    },
+    "stt-install-bar-track": {
+      "label": "STT install bar track",
+      "section": "Settings",
+      "type": "progress"
+    },
+    "stt-install-bar": {
+      "label": "STT install bar",
+      "section": "Settings",
+      "type": "progress"
+    },
+    "stt-install-bytes": {
+      "label": "STT install bytes",
+      "section": "Settings",
+      "type": "text"
+    },
+    "stt-install-stop": {
+      "label": "Stop STT install",
+      "section": "Settings",
+      "type": "button"
+    },
+    "stt-requirements-cancel": {
+      "label": "Cancel STT install",
+      "section": "Settings",
+      "type": "button"
+    },
+    "stt-install-confirm": {
+      "label": "Confirm STT install",
+      "section": "Settings",
+      "type": "button",
+      "action": "Starts the whisper.cpp download."
     }
   }
 }

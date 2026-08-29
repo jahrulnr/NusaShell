@@ -80,7 +80,7 @@
   .mcp-row-info { min-width: calc(100% - 54px); }
   .mcp-row-state { margin-left: 54px; }
   .mcp-row-actions { margin-left: auto; }
-  .settings-body { grid-template-columns: 1fr; }
+  .settings-group { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 480px) {

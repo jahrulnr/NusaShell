@@ -642,291 +642,332 @@
           </div>
         </div>
         <div class="view-body settings-body">
-          <section class="settings-card settings-runtime-card" aria-labelledby="settings-runtime-title">
-            <div class="settings-card-title">Agent runtime</div>
-            <h2 id="settings-runtime-title" class="sr-only">Agent runtime</h2>
-            <p class="settings-card-copy">Choose the default model and guard how much work one agent turn can perform.</p>
-            <label class="settings-field" for="settings-preferred-model">Default model
-              <select id="settings-preferred-model">
-                <option value="">Automatic — choose in each conversation</option>
-              </select>
-              <small>Used by new conversations. Existing conversations keep their selected model.</small>
-            </label>
-            <label class="settings-field" for="settings-max-tool-rounds">Maximum tool rounds per turn
-              <input id="settings-max-tool-rounds" type="number" min="1" max="10000" step="1" inputmode="numeric" value="8">
-              <small>Stops a turn that keeps requesting more tool work. The default is 8.</small>
-            </label>
-            <label class="settings-field" for="settings-repeated-tool-limit">Repeated tool call limit
-              <input id="settings-repeated-tool-limit" type="number" min="0" max="100" step="1" inputmode="numeric" value="3">
-              <small>Breaks tool loops: if the model calls the same tool with the same args N rounds in a row without text, tools are stripped for one round (default 3). Set 0 to disable.</small>
-            </label>
-            <label class="settings-field" for="settings-max-parallel-tools">Max parallel tools per round
-              <input id="settings-max-parallel-tools" type="number" min="1" max="64" step="1" inputmode="numeric" value="6">
-              <small>How many tool calls from one assistant round run at once (default 6). Raising it cuts latency when the model emits many independent calls; lower it to reduce load.</small>
-            </label>
-            <label class="settings-field" for="settings-plugin-contract-mode">Plugin usage contracts
-              <select id="settings-plugin-contract-mode">
-                <option value="">Default — advisory hint on first use</option>
-                <option value="off">Off — never show contract notices</option>
-                <option value="hint">Hint — advisory note until the contract is read</option>
-                <option value="require">Require — block MCP calls until the contract is read</option>
-              </select>
-              <small>How agents are nudged toward a plugin's usage contract (best-practice rules read via <code>contract_read</code>). Default is advisory only; Require is strict and can lock out agents after a restart.</small>
-            </label>
-          </section>
-          <section class="settings-card settings-embedding-card" aria-labelledby="settings-embedding-title">
-            <div class="settings-card-title">Embeddings</div>
-            <h2 id="settings-embedding-title" class="sr-only">Embeddings</h2>
-            <p class="settings-card-copy">Choose the embedding model used by skill and memory search. Models tagged as embedding-capable appear here after you import them from a provider.</p>
-            <label class="settings-field" for="settings-embedding-model">Embedding model
-              <select id="settings-embedding-model">
-                <option value="">Automatic — use first available embedding model</option>
-              </select>
-              <small>Used globally for semantic search over skills and memory. Ollama models (e.g. nomic-embed-text) work locally without an API key.</small>
-            </label>
-            <label class="settings-field" for="settings-learning-threshold">Learning review threshold (turns)
-              <input id="settings-learning-threshold" type="number" min="0" max="1000" step="1" inputmode="numeric" value="10">
-              <small>How many turns to accumulate before extracting learnings (default 10). Set 0 to disable turn-based review; compaction-triggered review still runs.</small>
-            </label>
-            <label class="settings-field" for="settings-skill-nudge-interval">Skill review threshold (tool calls)
-              <input id="settings-skill-nudge-interval" type="number" min="0" max="1000" step="1" inputmode="numeric" value="15">
-              <small>How many tool calls to accumulate before reviewing for skill-worthy patterns (default 15). Catches tool-heavy coding sessions that don't reach the turn threshold. Set 0 to disable.</small>
-            </label>
-            <label class="settings-field" for="settings-project-memory-base">Project memory directory
-              <input id="settings-project-memory-base" type="text" spellcheck="false" placeholder="memory_project (under the data directory)">
-              <small>Leave empty to store project memory under the data directory (<code>memory_project/{key}/</code>). Set an absolute path such as <code>~/.memory</code> to share the skill-compatible layout with other agents.</small>
-            </label>
-            <label class="settings-field" for="settings-review-model">Review model
-              <select id="settings-review-model">
-                <option value="">Default — use the conversation's active model</option>
-              </select>
-              <small>Route background autolearn reviews to a cheaper or faster model. Reviews re-read the recent transcript, so this directly controls background cost. Leave as default to use the active model.</small>
-            </label>
-            <label class="settings-field" for="settings-auto-continues">Max auto-continues
-              <input id="settings-auto-continues" type="number" min="0" max="10000" step="1" inputmode="numeric" value="10">
-              <small>After a successful turn, if the todo list still has open items, the agent automatically starts the next turn (default 10). Set 0 for unlimited; the chain stops on error, question, or user stop.</small>
-            </label>
-          </section>
-          <section class="settings-card settings-vision-card" aria-labelledby="settings-vision-title">
-            <div class="settings-card-title">Vision fallback</div>
-            <h2 id="settings-vision-title" class="sr-only">Vision fallback</h2>
-            <p class="settings-card-copy">When the active chat model cannot see images, NusaShell can describe attached images using a separate vision-capable model so the conversation continues without errors. Pick any model that supports image input.</p>
-            <label class="settings-field" for="settings-vision-model">Vision fallback model
-              <select id="settings-vision-model">
-                <option value="">Disabled — non-vision models get a text placeholder instead</option>
-              </select>
-              <small>Only models with vision capability appear here. Leave disabled if you always use vision-capable chat models.</small>
-            </label>
-          </section>
-          <section class="settings-card settings-image-card" aria-labelledby="settings-image-title">
-            <div class="settings-card-title">Image generation</div>
-            <h2 id="settings-image-title" class="sr-only">Image generation</h2>
-            <p class="settings-card-copy">Pick the model used by the <code>generate_image</code> tool. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images, OpenRouter Image API, and a signed-in Codex ChatGPT plan are supported. Leave disabled until you want the agent to be able to generate images.</p>
-            <label class="settings-field" for="settings-image-model">Image generation model
-              <select id="settings-image-model">
-                <option value="">Disabled — generate_image is not available</option>
-              </select>
-              <small>Only image generators appear here (gpt-image, DALL·E, Flux, OpenRouter Image API, and Codex ChatGPT plan models). Import models on an OpenAI or OpenRouter provider, or use a signed-in Codex provider. Leave disabled if you do not want the agent to generate images.</small>
-            </label>
-          </section>
-          <section class="settings-card settings-video-gen-card" aria-labelledby="settings-video-gen-title">
-            <div class="settings-card-title">Video generation</div>
-            <h2 id="settings-video-gen-title" class="sr-only">Video generation</h2>
-            <p class="settings-card-copy">Pick the model used by the <code>generate_video</code> tool. This is separate from the chat model and the video fallback — any chat model can orchestrate, and the video backend is resolved here. OpenRouter's async <code>/videos</code> API is supported. Leave disabled until you want the agent to be able to generate videos.</p>
-            <label class="settings-field" for="settings-video-gen-model">Video generation model
-              <select id="settings-video-gen-model">
-                <option value="">Disabled — generate_video is not available</option>
-              </select>
-              <small>Only video generation models appear here (e.g. grok-imagine-video, wan-2.6). Import models on an OpenRouter provider. Leave disabled if you do not want the agent to generate videos.</small>
-            </label>
-          </section>
-          <section class="settings-card settings-audio-card" aria-labelledby="settings-audio-title">
-            <div class="settings-card-title">Audio fallback</div>
-            <h2 id="settings-audio-title" class="sr-only">Audio fallback</h2>
-            <p class="settings-card-copy">When the active chat model cannot hear audio, NusaShell can transcribe or describe attached audio files using a separate audio-capable model so the conversation continues without errors. Pick any model that supports audio input.</p>
-            <label class="settings-field" for="settings-audio-model">Audio fallback model
-              <select id="settings-audio-model">
-                <option value="">Disabled — non-audio models get a text placeholder instead</option>
-              </select>
-              <small>Only models with audio capability appear here. Leave disabled if you always use audio-capable chat models.</small>
-            </label>
-          </section>
-          <section class="settings-card settings-video-card" aria-labelledby="settings-video-title">
-            <div class="settings-card-title">Video fallback</div>
-            <h2 id="settings-video-title" class="sr-only">Video fallback</h2>
-            <p class="settings-card-copy">When the active chat model cannot see video, NusaShell can describe attached video files using a separate video-capable model so the conversation continues without errors. Pick any model that supports video input.</p>
-            <label class="settings-field" for="settings-video-model">Video fallback model
-              <select id="settings-video-model">
-                <option value="">Disabled — non-video models get a text placeholder instead</option>
-              </select>
-              <small>Only models with video capability appear here. Leave disabled if you always use video-capable chat models.</small>
-            </label>
-          </section>
-          <section class="settings-card settings-tts-card" aria-labelledby="settings-tts-title">
-            <div class="settings-card-title">Speech generation</div>
-            <h2 id="settings-tts-title" class="sr-only">Speech generation</h2>
-            <p class="settings-card-copy">Pick the model used by the <code>generate_speech</code> tool (text-to-speech). Online models use an OpenAI-compatible /audio/speech endpoint; the offline piper engine works without any API key when installed. If the online model fails, NusaShell automatically falls back to offline.</p>
-            <label class="settings-field" for="settings-tts-model">Speech generation model
-              <select id="settings-tts-model">
-                <option value="">Disabled — generate_speech needs the offline piper engine</option>
-              </select>
-              <small>Online speech models (tts-1, Kokoudo, etc.) plus any installed offline piper voice appear here. Select an offline voice to use the local engine directly; leave disabled to rely on automatic fallback only.</small>
-            </label>
-            <div class="settings-tts-install-row">
-              <button class="mini-btn" id="settings-tts-install-btn" type="button">Install offline text-to-speech…</button>
-              <span class="settings-tts-install-status" id="settings-tts-install-status"></span>
-            </div>
-          </section>
-          <section class="settings-card settings-stt-card" aria-labelledby="settings-stt-title">
-            <div class="settings-card-title">Offline speech-to-text</div>
-            <h2 id="settings-stt-title" class="sr-only">Offline speech-to-text</h2>
-            <p class="settings-card-copy">Lets <code>read_media</code> transcribe audio locally with whisper.cpp (whisper-cli) — no API key, no network. The engine binary is downloaded once during install; models land under <code>models/stt/</code> in your data directory.</p>
-            <label class="settings-field" for="settings-stt-model">Offline STT model
-              <select id="settings-stt-model">
-                <option value="">Auto — first installed GGML model</option>
-              </select>
-              <small>Only installed GGML models appear here. Install one with the button below.</small>
-            </label>
-            <label class="settings-field" for="settings-stt-language">Audio language
-              <select id="settings-stt-language">
-                <option value="">Auto-detect</option>
-                <option value="id">Bahasa Indonesia</option>
-                <option value="en">English</option>
-              </select>
-              <small>Leave on auto-detect to handle mixed conversations.</small>
-            </label>
-            <div class="settings-stt-install-row">
-              <button class="mini-btn" id="settings-stt-install-btn" type="button">Install offline speech-to-text…</button>
-              <span class="settings-stt-install-status" id="settings-stt-install-status"></span>
-            </div>
-          </section>
-          <section class="settings-card settings-web-answer-card" aria-labelledby="settings-web-answer-title">
-            <div class="settings-card-title">Web Answer</div>
-            <h2 id="settings-web-answer-title" class="sr-only">Web Answer</h2>
-            <p class="settings-card-copy">Configure a web-grounded answer provider for the <code>web_answer</code> tool. This is separate from your chat providers — pick a supported vendor and enter its API key. The key is stored securely in the credential store, not in settings JSON.</p>
-            <label class="settings-field" for="settings-web-answer-provider">Answer provider
-              <select id="settings-web-answer-provider">
-                <option value="">Disabled — web_answer tool is not available</option>
-                <option value="brave">Brave (Answers API)</option>
-                <option value="openrouter">OpenRouter (web_search server tool)</option>
-                <option value="openai">OpenAI (Responses API web_search)</option>
-                <option value="perplexity">Perplexity (Agent API)</option>
-                <option value="anthropic">Anthropic (Messages API web_search)</option>
-                <option value="xai">xAI (Responses API web_search)</option>
-              </select>
-              <small>Pick a vendor that supports web-grounded answers. Each requires its own API key.</small>
-            </label>
-            <label class="settings-field" for="settings-web-answer-api-key">API key
-              <input id="settings-web-answer-api-key" type="password" autocomplete="off" placeholder="Paste API key — leave blank to keep existing">
-              <small>Stored in the credential store. Leave blank while saving to keep the existing key.</small>
-            </label>
-            <label class="settings-field" for="settings-web-answer-model">Model / preset (optional)
-              <input id="settings-web-answer-model" type="text" autocomplete="off" placeholder="Vendor default">
-              <small>Leave blank to use the vendor's cost-focused default: OpenRouter <code>openrouter/auto</code>, OpenAI <code>gpt-5.6-luna</code>, Perplexity <code>low</code> preset, Anthropic <code>claude-haiku-4-5</code>, xAI <code>grok-4.5</code>. Brave does not use a model.</small>
-            </label>
-          </section>
-          <section class="settings-card" aria-labelledby="settings-context-title">
-            <div class="settings-card-title">Context compaction</div>
-            <h2 id="settings-context-title" class="sr-only">Context compaction</h2>
-            <p class="settings-card-copy">Tune context compaction and provider prompt caching.</p>
-            <label class="settings-toggle" for="settings-compaction-enabled">
-              <span><strong>Compact long conversations</strong><small>Summarize older messages before the context window fills.</small></span>
-              <input id="settings-compaction-enabled" type="checkbox">
-              <span class="toggle-slider" aria-hidden="true"></span>
-            </label>
-            <label class="settings-field" for="settings-max-input-tokens">Max input tokens (fallback context window)
-              <input id="settings-max-input-tokens" type="number" min="1000" max="2000000" step="1000" inputmode="numeric" value="200000">
-              <small>Fallback context window when a provider does not advertise one (default 200,000). Models that report their own window use that value instead.</small>
-            </label>
-            <label class="settings-field" for="settings-compaction-threshold">Compaction threshold (0 = auto)
-              <input id="settings-compaction-threshold" type="number" min="0" max="2000000" step="1000" inputmode="numeric" value="0">
-              <small>Token count that triggers compaction. 0 = auto (compact at 80% of the model's context window). Set a non-zero value to compact earlier.</small>
-            </label>
-            <label class="settings-field" for="settings-compaction-summary-max-tokens">Compaction summary max tokens (0 = default)
-              <input id="settings-compaction-summary-max-tokens" type="number" min="0" max="100000" step="500" inputmode="numeric" value="0">
-              <small>Max output tokens for the compaction summarization call. Reasoning models count reasoning against this budget. 0 = built-in default (64000). Increase if the model produces short or empty summaries.</small>
-            </label>
-            <label class="settings-field" for="settings-compaction-summary-min-chars">Compaction summary min chars (0 = default)
-              <input id="settings-compaction-summary-min-chars" type="number" min="0" max="100000" step="50" inputmode="numeric" value="0">
-              <small>Minimum summary length (in chars) for the compaction quality guard. Summaries shorter than this trigger a retry with doubled budget. 0 = built-in default (200).</small>
-            </label>
-            <label class="settings-field" for="settings-compaction-model">Compaction model
-              <select id="settings-compaction-model">
-                <option value="">Default — use the conversation's active model</option>
-              </select>
-              <small>Route compaction summarization to a cheaper or faster model while keeping the chat model for the conversation. Leave as default to use the active model.</small>
-            </label>
-            <label class="settings-field" for="settings-max-output-tokens">Max output tokens (default completion limit)
-              <input id="settings-max-output-tokens" type="number" min="256" max="1000000" step="256" inputmode="numeric" value="65536">
-              <small>Default max completion tokens per turn (default 65,536). Models that advertise their own limit use that instead.</small>
-            </label>
-            <label class="settings-toggle" for="settings-prompt-caching">
-              <span><strong>Prompt caching</strong><small>Use provider-side ephemeral prompt caching when supported.</small></span>
-              <input id="settings-prompt-caching" type="checkbox">
-              <span class="toggle-slider" aria-hidden="true"></span>
-            </label>
-            <label class="settings-toggle" for="settings-sound-notifications">
-              <span><strong>Sound notifications</strong><small>Play a sound when an agent turn completes or fails.</small></span>
-              <input id="settings-sound-notifications" type="checkbox">
-              <span class="toggle-slider" aria-hidden="true"></span>
-            </label>
-            <label class="settings-field" for="settings-user-prompt">User prompt (custom instructions)
-              <textarea id="settings-user-prompt" rows="4" placeholder="e.g. Always respond in Indonesian. Prefer concise answers. Use git rebase over merge."></textarea>
-              <small>Injected into every agent turn's system prompt inside &lt;user_instructions&gt; tags, after the base identity and tool protocol. Changing this will break the prompt cache for all subsequent turns until a new cache shard stabilizes — expect higher latency and cost on the first few turns after editing.</small>
-            </label>
-            <details class="settings-field settings-sampling">
-              <summary><strong>Sampling parameters</strong></summary>
-              <label class="settings-field" for="settings-temperature">Temperature (0-2, OpenAI / 0-1, Anthropic)
-                <input id="settings-temperature" type="number" min="0" max="2" step="0.1" inputmode="decimal" placeholder="provider default">
+          <div class="settings-group" role="group" aria-labelledby="settings-group-agent">
+            <h2 class="settings-group-title" id="settings-group-agent">Agent</h2>
+            <section class="settings-card settings-runtime-card" aria-labelledby="settings-runtime-title">
+              <div class="settings-card-title">Agent runtime</div>
+              <h2 id="settings-runtime-title" class="sr-only">Agent runtime</h2>
+              <p class="settings-card-copy">Default model, turn continuation, tool-round guards, completion budget, and sampling.</p>
+              <label class="settings-field" for="settings-preferred-model">Default model
+                <select id="settings-preferred-model">
+                  <option value="">Automatic — choose in each conversation</option>
+                </select>
+                <small>Used by new conversations. Existing conversations keep their selected model.</small>
               </label>
-              <label class="settings-field" for="settings-top-p">Top P (0-1, nucleus sampling)
-                <input id="settings-top-p" type="number" min="0" max="1" step="0.05" inputmode="decimal" placeholder="provider default">
+              <label class="settings-field" for="settings-max-tool-rounds">Maximum tool rounds per turn
+                <input id="settings-max-tool-rounds" type="number" min="1" max="10000" step="1" inputmode="numeric" value="8">
+                <small>Stops a turn that keeps requesting more tool work. The default is 8.</small>
               </label>
-              <label class="settings-field" for="settings-top-k">Top K (Anthropic only, &gt; 0)
-                <input id="settings-top-k" type="number" min="1" step="1" inputmode="numeric" placeholder="provider default">
+              <label class="settings-field" for="settings-repeated-tool-limit">Repeated tool call limit
+                <input id="settings-repeated-tool-limit" type="number" min="0" max="100" step="1" inputmode="numeric" value="3">
+                <small>Breaks tool loops: if the model calls the same tool with the same args N rounds in a row without text, tools are stripped for one round (default 3). Set 0 to disable.</small>
               </label>
-              <label class="settings-field" for="settings-frequency-penalty">Frequency penalty (-2 to 2, OpenAI only)
-                <input id="settings-frequency-penalty" type="number" min="-2" max="2" step="0.1" inputmode="decimal" placeholder="provider default">
+              <label class="settings-field" for="settings-max-parallel-tools">Max parallel tools per round
+                <input id="settings-max-parallel-tools" type="number" min="1" max="64" step="1" inputmode="numeric" value="6">
+                <small>How many tool calls from one assistant round run at once (default 6). Raising it cuts latency when the model emits many independent calls; lower it to reduce load.</small>
               </label>
-              <label class="settings-field" for="settings-presence-penalty">Presence penalty (-2 to 2, OpenAI only)
-                <input id="settings-presence-penalty" type="number" min="-2" max="2" step="0.1" inputmode="decimal" placeholder="provider default">
+              <label class="settings-field" for="settings-auto-continues">Max auto-continues
+                <input id="settings-auto-continues" type="number" min="0" max="10000" step="1" inputmode="numeric" value="10">
+                <small>After a successful turn, if the todo list still has open items, the agent automatically starts the next turn (default 10). Set 0 for unlimited; the chain stops on error, question, or user stop.</small>
               </label>
-            </details>
-          </section>
-          <section class="settings-card" aria-labelledby="settings-appearance-title">
-            <div class="settings-card-title">Appearance</div>
-            <h2 id="settings-appearance-title" class="sr-only">Appearance</h2>
-            <p class="settings-card-copy">These preferences are stored in this browser, not sent to your agent.</p>
-            <label class="settings-toggle" for="settings-sidebar-compact">
-              <span><strong>Use icon-only sidebar</strong><small>Keep more room for conversations on this device.</small></span>
-              <input id="settings-sidebar-compact" type="checkbox">
-              <span class="toggle-slider" aria-hidden="true"></span>
-            </label>
-          </section>
-          <section class="settings-card" aria-labelledby="settings-connection-title">
-            <div class="settings-card-title">Connection</div>
-            <h2 id="settings-connection-title" class="sr-only">Connection</h2>
-            <p class="settings-card-copy">The Go shell uses HTTP RPC for commands and WebSocket for live events.</p>
-            <div class="settings-row"><span>Backend status</span><span class="settings-connection"><span class="connection-orb" id="settings-conn-fill"></span><span id="settings-conn-label">Connecting…</span></span></div>
-            <label class="settings-toggle" for="settings-auto-reconnect">
-              <span><strong>Reconnect automatically</strong><small>Try again after the local backend or network is temporarily unavailable.</small></span>
-              <input id="settings-auto-reconnect" type="checkbox">
-              <span class="toggle-slider" aria-hidden="true"></span>
-            </label>
-            <div class="settings-actions settings-inline-action">
-              <span class="settings-save-status" id="settings-connection-status" role="status" aria-live="polite"></span>
-              <button class="mini-btn" id="settings-check-connection-btn" type="button">Check connection</button>
-            </div>
-          </section>
-          <section class="settings-card settings-system-card" aria-labelledby="settings-system-title">
-            <div class="settings-card-title">System</div>
-            <h2 id="settings-system-title" class="sr-only">System</h2>
-            <p class="settings-card-copy">Useful local diagnostics. This browser version does not manage desktop tray or login startup.</p>
-            <dl class="settings-definition-list">
-              <div><dt>Version</dt><dd id="settings-version">—</dd></div>
-              <div><dt>Data directory</dt><dd><code id="settings-data-dir">—</code></dd></div>
-            </dl>
-          </section>
+              <label class="settings-field" for="settings-max-output-tokens">Max output tokens (default completion limit)
+                <input id="settings-max-output-tokens" type="number" min="256" max="1000000" step="256" inputmode="numeric" value="65536">
+                <small>Default max completion tokens per turn (default 65,536). Models that advertise their own limit use that instead.</small>
+              </label>
+              <details class="settings-field settings-sampling">
+                <summary><strong>Sampling parameters</strong></summary>
+                <label class="settings-field" for="settings-temperature">Temperature (0-2, OpenAI / 0-1, Anthropic)
+                  <input id="settings-temperature" type="number" min="0" max="2" step="0.1" inputmode="decimal" placeholder="provider default">
+                </label>
+                <label class="settings-field" for="settings-top-p">Top P (0-1, nucleus sampling)
+                  <input id="settings-top-p" type="number" min="0" max="1" step="0.05" inputmode="decimal" placeholder="provider default">
+                </label>
+                <label class="settings-field" for="settings-top-k">Top K (Anthropic only, &gt; 0)
+                  <input id="settings-top-k" type="number" min="1" step="1" inputmode="numeric" placeholder="provider default">
+                </label>
+                <label class="settings-field" for="settings-frequency-penalty">Frequency penalty (-2 to 2, OpenAI only)
+                  <input id="settings-frequency-penalty" type="number" min="-2" max="2" step="0.1" inputmode="decimal" placeholder="provider default">
+                </label>
+                <label class="settings-field" for="settings-presence-penalty">Presence penalty (-2 to 2, OpenAI only)
+                  <input id="settings-presence-penalty" type="number" min="-2" max="2" step="0.1" inputmode="decimal" placeholder="provider default">
+                </label>
+              </details>
+            </section>
+            <section class="settings-card settings-instructions-card" aria-labelledby="settings-instructions-title">
+              <div class="settings-card-title">Instructions</div>
+              <h2 id="settings-instructions-title" class="sr-only">Instructions</h2>
+              <p class="settings-card-copy">Custom instructions injected into every agent turn. This is agent identity, not compaction or search.</p>
+              <label class="settings-field" for="settings-user-prompt">User prompt (custom instructions)
+                <textarea id="settings-user-prompt" rows="4" placeholder="e.g. Always respond in Indonesian. Prefer concise answers. Use git rebase over merge."></textarea>
+                <small>Injected into every agent turn's system prompt inside &lt;user_instructions&gt; tags, after the base identity and tool protocol. Changing this will break the prompt cache for all subsequent turns until a new cache shard stabilizes — expect higher latency and cost on the first few turns after editing.</small>
+              </label>
+            </section>
+            <section class="settings-card settings-plugins-card" aria-labelledby="settings-plugins-title">
+              <div class="settings-card-title">Plugins</div>
+              <h2 id="settings-plugins-title" class="sr-only">Plugins</h2>
+              <p class="settings-card-copy">How agents treat MCP plugin usage contracts. Install and enable plugins on the Plugins view.</p>
+              <label class="settings-field" for="settings-plugin-contract-mode">Plugin usage contracts
+                <select id="settings-plugin-contract-mode">
+                  <option value="">Default — advisory hint on first use</option>
+                  <option value="off">Off — never show contract notices</option>
+                  <option value="hint">Hint — advisory note until the contract is read</option>
+                  <option value="require">Require — block MCP calls until the contract is read</option>
+                </select>
+                <small>How agents are nudged toward a plugin's usage contract (best-practice rules read via <code>contract_read</code>). Default is advisory only; Require is strict and can lock out agents after a restart.</small>
+              </label>
+            </section>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-group-context">
+            <h2 class="settings-group-title" id="settings-group-context">Context</h2>
+            <section class="settings-card" aria-labelledby="settings-context-title">
+              <div class="settings-card-title">Context compaction</div>
+              <h2 id="settings-context-title" class="sr-only">Context compaction</h2>
+              <p class="settings-card-copy">Context window, compaction, and provider prompt caching. Completion limits and sampling live under Agent runtime.</p>
+              <label class="settings-toggle" for="settings-compaction-enabled">
+                <span><strong>Compact long conversations</strong><small>Summarize older messages before the context window fills.</small></span>
+                <input id="settings-compaction-enabled" type="checkbox">
+                <span class="toggle-slider" aria-hidden="true"></span>
+              </label>
+              <label class="settings-field" for="settings-max-input-tokens">Max input tokens (fallback context window)
+                <input id="settings-max-input-tokens" type="number" min="1000" max="2000000" step="1000" inputmode="numeric" value="200000">
+                <small>Fallback context window when a provider does not advertise one (default 200,000). Models that report their own window use that value instead.</small>
+              </label>
+              <label class="settings-field" for="settings-compaction-threshold">Compaction threshold (0 = auto)
+                <input id="settings-compaction-threshold" type="number" min="0" max="2000000" step="1000" inputmode="numeric" value="0">
+                <small>Token count that triggers compaction. 0 = auto (compact at 80% of the model's context window). Set a non-zero value to compact earlier.</small>
+              </label>
+              <label class="settings-field" for="settings-compaction-summary-max-tokens">Compaction summary max tokens (0 = default)
+                <input id="settings-compaction-summary-max-tokens" type="number" min="0" max="100000" step="500" inputmode="numeric" value="0">
+                <small>Max output tokens for the compaction summarization call. Reasoning models count reasoning against this budget. 0 = built-in default (64000). Increase if the model produces short or empty summaries.</small>
+              </label>
+              <label class="settings-field" for="settings-compaction-summary-min-chars">Compaction summary min chars (0 = default)
+                <input id="settings-compaction-summary-min-chars" type="number" min="0" max="100000" step="50" inputmode="numeric" value="0">
+                <small>Minimum summary length (in chars) for the compaction quality guard. Summaries shorter than this trigger a retry with doubled budget. 0 = built-in default (200).</small>
+              </label>
+              <label class="settings-field" for="settings-compaction-model">Compaction model
+                <select id="settings-compaction-model">
+                  <option value="">Default — use the conversation's active model</option>
+                </select>
+                <small>Route compaction summarization to a cheaper or faster model while keeping the chat model for the conversation. Leave as default to use the active model.</small>
+              </label>
+              <label class="settings-toggle" for="settings-prompt-caching">
+                <span><strong>Prompt caching</strong><small>Use provider-side ephemeral prompt caching when supported.</small></span>
+                <input id="settings-prompt-caching" type="checkbox">
+                <span class="toggle-slider" aria-hidden="true"></span>
+              </label>
+            </section>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-group-memory">
+            <h2 class="settings-group-title" id="settings-group-memory">Memory &amp; search</h2>
+            <section class="settings-card settings-learning-card" aria-labelledby="settings-learning-title">
+              <div class="settings-card-title">Learning</div>
+              <h2 id="settings-learning-title" class="sr-only">Learning</h2>
+              <p class="settings-card-copy">Background review that extracts user learnings and skill-worthy patterns. Separate from project memory and from the embedding model used for search.</p>
+              <label class="settings-field" for="settings-learning-threshold">Learning review threshold (turns)
+                <input id="settings-learning-threshold" type="number" min="0" max="1000" step="1" inputmode="numeric" value="10">
+                <small>How many turns to accumulate before extracting learnings (default 10). Set 0 to disable turn-based review; compaction-triggered review still runs.</small>
+              </label>
+              <label class="settings-field" for="settings-skill-nudge-interval">Skill review threshold (tool calls)
+                <input id="settings-skill-nudge-interval" type="number" min="0" max="1000" step="1" inputmode="numeric" value="15">
+                <small>How many tool calls to accumulate before reviewing for skill-worthy patterns (default 15). Catches tool-heavy coding sessions that don't reach the turn threshold. Set 0 to disable.</small>
+              </label>
+              <label class="settings-field" for="settings-review-model">Review model
+                <select id="settings-review-model">
+                  <option value="">Default — use the conversation's active model</option>
+                </select>
+                <small>Route background autolearn reviews to a cheaper or faster model. Reviews re-read the recent transcript, so this directly controls background cost. Leave as default to use the active model.</small>
+              </label>
+            </section>
+            <section class="settings-card settings-project-memory-card" aria-labelledby="settings-project-memory-title">
+              <div class="settings-card-title">Project memory</div>
+              <h2 id="settings-project-memory-title" class="sr-only">Project memory</h2>
+              <p class="settings-card-copy">Per-workspace durable notes (<code>index.md</code>, <code>guardrails.md</code>, …). This is not user memory on the Learning view, and not the embedding model.</p>
+              <label class="settings-field" for="settings-project-memory-base">Project memory directory
+                <input id="settings-project-memory-base" type="text" spellcheck="false" placeholder="memory_project (under the data directory)">
+                <small>Leave empty to store project memory under the data directory (<code>memory_project/{key}/</code>). Set an absolute path such as <code>~/.memory</code> to share the skill-compatible layout with other agents.</small>
+              </label>
+            </section>
+            <section class="settings-card settings-embedding-card" aria-labelledby="settings-embedding-title">
+              <div class="settings-card-title">Embeddings</div>
+              <h2 id="settings-embedding-title" class="sr-only">Embeddings</h2>
+              <p class="settings-card-copy">Choose the embedding model used by skill and memory search. Models tagged as embedding-capable appear here after you import them from a provider.</p>
+              <label class="settings-field" for="settings-embedding-model">Embedding model
+                <select id="settings-embedding-model">
+                  <option value="">Automatic — use first available embedding model</option>
+                </select>
+                <small>Used globally for semantic search over skills and memory. Ollama models (e.g. nomic-embed-text) work locally without an API key.</small>
+              </label>
+            </section>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-group-understand">
+            <h2 class="settings-group-title" id="settings-group-understand">Media understanding</h2>
+            <section class="settings-card settings-vision-card" aria-labelledby="settings-vision-title">
+              <div class="settings-card-title">Vision fallback</div>
+              <h2 id="settings-vision-title" class="sr-only">Vision fallback</h2>
+              <p class="settings-card-copy">When the active chat model cannot see images, NusaShell can describe attached images using a separate vision-capable model so the conversation continues without errors. Pick any model that supports image input.</p>
+              <label class="settings-field" for="settings-vision-model">Vision fallback model
+                <select id="settings-vision-model">
+                  <option value="">Disabled — non-vision models get a text placeholder instead</option>
+                </select>
+                <small>Only models with vision capability appear here. Leave disabled if you always use vision-capable chat models.</small>
+              </label>
+            </section>
+            <section class="settings-card settings-audio-card" aria-labelledby="settings-audio-title">
+              <div class="settings-card-title">Audio fallback</div>
+              <h2 id="settings-audio-title" class="sr-only">Audio fallback</h2>
+              <p class="settings-card-copy">When the active chat model cannot hear audio, NusaShell can transcribe or describe attached audio files using a separate audio-capable model so the conversation continues without errors. Pick any model that supports audio input.</p>
+              <label class="settings-field" for="settings-audio-model">Audio fallback model
+                <select id="settings-audio-model">
+                  <option value="">Disabled — non-audio models get a text placeholder instead</option>
+                </select>
+                <small>Only models with audio capability appear here. Leave disabled if you always use audio-capable chat models.</small>
+              </label>
+            </section>
+            <section class="settings-card settings-video-card" aria-labelledby="settings-video-title">
+              <div class="settings-card-title">Video fallback</div>
+              <h2 id="settings-video-title" class="sr-only">Video fallback</h2>
+              <p class="settings-card-copy">When the active chat model cannot see video, NusaShell can describe attached video files using a separate video-capable model so the conversation continues without errors. Pick any model that supports video input.</p>
+              <label class="settings-field" for="settings-video-model">Video fallback model
+                <select id="settings-video-model">
+                  <option value="">Disabled — non-video models get a text placeholder instead</option>
+                </select>
+                <small>Only models with video capability appear here. Leave disabled if you always use video-capable chat models.</small>
+              </label>
+            </section>
+            <section class="settings-card settings-stt-card" aria-labelledby="settings-stt-title">
+              <div class="settings-card-title">Offline speech-to-text</div>
+              <h2 id="settings-stt-title" class="sr-only">Offline speech-to-text</h2>
+              <p class="settings-card-copy">Lets <code>read_media</code> transcribe audio locally with whisper.cpp (whisper-cli) — no API key, no network. The engine binary is downloaded once during install; models land under <code>models/stt/</code> in your data directory.</p>
+              <label class="settings-field" for="settings-stt-model">Offline STT model
+                <select id="settings-stt-model">
+                  <option value="">Auto — first installed GGML model</option>
+                </select>
+                <small>Only installed GGML models appear here. Install one with the button below.</small>
+              </label>
+              <label class="settings-field" for="settings-stt-language">Audio language
+                <select id="settings-stt-language">
+                  <option value="">Auto-detect</option>
+                  <option value="id">Bahasa Indonesia</option>
+                  <option value="en">English</option>
+                </select>
+                <small>Leave on auto-detect to handle mixed conversations.</small>
+              </label>
+              <div class="settings-stt-install-row">
+                <button class="mini-btn" id="settings-stt-install-btn" type="button">Install offline speech-to-text…</button>
+                <span class="settings-stt-install-status" id="settings-stt-install-status"></span>
+              </div>
+            </section>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-group-generate">
+            <h2 class="settings-group-title" id="settings-group-generate">Media generation</h2>
+            <section class="settings-card settings-image-card" aria-labelledby="settings-image-title">
+              <div class="settings-card-title">Image generation</div>
+              <h2 id="settings-image-title" class="sr-only">Image generation</h2>
+              <p class="settings-card-copy">Pick the model used by the <code>generate_image</code> tool. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images, OpenRouter Image API, and a signed-in Codex ChatGPT plan are supported. Leave disabled until you want the agent to be able to generate images.</p>
+              <label class="settings-field" for="settings-image-model">Image generation model
+                <select id="settings-image-model">
+                  <option value="">Disabled — generate_image is not available</option>
+                </select>
+                <small>Only image generators appear here (gpt-image, DALL·E, Flux, OpenRouter Image API, and Codex ChatGPT plan models). Import models on an OpenAI or OpenRouter provider, or use a signed-in Codex provider. Leave disabled if you do not want the agent to generate images.</small>
+              </label>
+            </section>
+            <section class="settings-card settings-video-gen-card" aria-labelledby="settings-video-gen-title">
+              <div class="settings-card-title">Video generation</div>
+              <h2 id="settings-video-gen-title" class="sr-only">Video generation</h2>
+              <p class="settings-card-copy">Pick the model used by the <code>generate_video</code> tool. This is separate from the chat model and the video fallback — any chat model can orchestrate, and the video backend is resolved here. OpenRouter's async <code>/videos</code> API is supported. Leave disabled until you want the agent to be able to generate videos.</p>
+              <label class="settings-field" for="settings-video-gen-model">Video generation model
+                <select id="settings-video-gen-model">
+                  <option value="">Disabled — generate_video is not available</option>
+                </select>
+                <small>Only video generation models appear here (e.g. grok-imagine-video, wan-2.6). Import models on an OpenRouter provider. Leave disabled if you do not want the agent to generate videos.</small>
+              </label>
+            </section>
+            <section class="settings-card settings-tts-card" aria-labelledby="settings-tts-title">
+              <div class="settings-card-title">Speech generation</div>
+              <h2 id="settings-tts-title" class="sr-only">Speech generation</h2>
+              <p class="settings-card-copy">Pick the model used by the <code>generate_speech</code> tool (text-to-speech). Online models use an OpenAI-compatible /audio/speech endpoint; the offline piper engine works without any API key when installed. If the online model fails, NusaShell automatically falls back to offline.</p>
+              <label class="settings-field" for="settings-tts-model">Speech generation model
+                <select id="settings-tts-model">
+                  <option value="">Disabled — generate_speech needs the offline piper engine</option>
+                </select>
+                <small>Online speech models (tts-1, Kokoudo, etc.) plus any installed offline piper voice appear here. Select an offline voice to use the local engine directly; leave disabled to rely on automatic fallback only.</small>
+              </label>
+              <div class="settings-tts-install-row">
+                <button class="mini-btn" id="settings-tts-install-btn" type="button">Install offline text-to-speech…</button>
+                <span class="settings-tts-install-status" id="settings-tts-install-status"></span>
+              </div>
+            </section>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-group-web">
+            <h2 class="settings-group-title" id="settings-group-web">Web</h2>
+            <section class="settings-card settings-web-answer-card" aria-labelledby="settings-web-answer-title">
+              <div class="settings-card-title">Web Answer</div>
+              <h2 id="settings-web-answer-title" class="sr-only">Web Answer</h2>
+              <p class="settings-card-copy">Configure a web-grounded answer provider for the <code>web_answer</code> tool. This is separate from your chat providers — pick a supported vendor and enter its API key. The key is stored securely in the credential store, not in settings JSON.</p>
+              <label class="settings-field" for="settings-web-answer-provider">Answer provider
+                <select id="settings-web-answer-provider">
+                  <option value="">Disabled — web_answer tool is not available</option>
+                  <option value="brave">Brave (Answers API)</option>
+                  <option value="openrouter">OpenRouter (web_search server tool)</option>
+                  <option value="openai">OpenAI (Responses API web_search)</option>
+                  <option value="perplexity">Perplexity (Agent API)</option>
+                  <option value="anthropic">Anthropic (Messages API web_search)</option>
+                  <option value="xai">xAI (Responses API web_search)</option>
+                </select>
+                <small>Pick a vendor that supports web-grounded answers. Each requires its own API key.</small>
+              </label>
+              <label class="settings-field" for="settings-web-answer-api-key">API key
+                <input id="settings-web-answer-api-key" type="password" autocomplete="off" placeholder="Paste API key — leave blank to keep existing">
+                <small>Stored in the credential store. Leave blank while saving to keep the existing key.</small>
+              </label>
+              <label class="settings-field" for="settings-web-answer-model">Model / preset (optional)
+                <input id="settings-web-answer-model" type="text" autocomplete="off" placeholder="Vendor default">
+                <small>Leave blank to use the vendor's cost-focused default: OpenRouter <code>openrouter/auto</code>, OpenAI <code>gpt-5.6-luna</code>, Perplexity <code>low</code> preset, Anthropic <code>claude-haiku-4-5</code>, xAI <code>grok-4.5</code>. Brave does not use a model.</small>
+              </label>
+            </section>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-group-workspace">
+            <h2 class="settings-group-title" id="settings-group-workspace">Workspace</h2>
+            <section class="settings-card" aria-labelledby="settings-appearance-title">
+              <div class="settings-card-title">Appearance</div>
+              <h2 id="settings-appearance-title" class="sr-only">Appearance</h2>
+              <p class="settings-card-copy">Sidebar layout stays in this browser. Sound notifications save with this NusaShell instance.</p>
+              <label class="settings-toggle" for="settings-sidebar-compact">
+                <span><strong>Use icon-only sidebar</strong><small>Keep more room for conversations on this device.</small></span>
+                <input id="settings-sidebar-compact" type="checkbox">
+                <span class="toggle-slider" aria-hidden="true"></span>
+              </label>
+              <label class="settings-toggle" for="settings-sound-notifications">
+                <span><strong>Sound notifications</strong><small>Play a sound when an agent turn completes or fails.</small></span>
+                <input id="settings-sound-notifications" type="checkbox">
+                <span class="toggle-slider" aria-hidden="true"></span>
+              </label>
+            </section>
+            <section class="settings-card" aria-labelledby="settings-connection-title">
+              <div class="settings-card-title">Connection</div>
+              <h2 id="settings-connection-title" class="sr-only">Connection</h2>
+              <p class="settings-card-copy">The Go shell uses HTTP RPC for commands and WebSocket for live events.</p>
+              <div class="settings-row"><span>Backend status</span><span class="settings-connection"><span class="connection-orb" id="settings-conn-fill"></span><span id="settings-conn-label">Connecting…</span></span></div>
+              <label class="settings-toggle" for="settings-auto-reconnect">
+                <span><strong>Reconnect automatically</strong><small>Try again after the local backend or network is temporarily unavailable.</small></span>
+                <input id="settings-auto-reconnect" type="checkbox">
+                <span class="toggle-slider" aria-hidden="true"></span>
+              </label>
+              <div class="settings-actions settings-inline-action">
+                <span class="settings-save-status" id="settings-connection-status" role="status" aria-live="polite"></span>
+                <button class="mini-btn" id="settings-check-connection-btn" type="button">Check connection</button>
+              </div>
+            </section>
+            <section class="settings-card settings-system-card" aria-labelledby="settings-system-title">
+              <div class="settings-card-title">System</div>
+              <h2 id="settings-system-title" class="sr-only">System</h2>
+              <p class="settings-card-copy">Useful local diagnostics. This browser version does not manage desktop tray or login startup.</p>
+              <dl class="settings-definition-list">
+                <div><dt>Version</dt><dd id="settings-version">—</dd></div>
+                <div><dt>Data directory</dt><dd><code id="settings-data-dir">—</code></dd></div>
+              </dl>
+            </section>
+          </div>
         </div>
       </section>
 
