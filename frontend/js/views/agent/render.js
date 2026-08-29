@@ -209,6 +209,44 @@ export function mountLiveRound(bubble, source = {}) {
   return { reasoningEl, textBox, strip };
 }
 
+export function thinkingDots() {
+  return el('span', { class: 'agent-thinking-dots' }, el('span'), el('span'), el('span'));
+}
+
+function ensureThinkingDots(textBox) {
+  if (!textBox || textBox.querySelector('.agent-thinking-dots')) return;
+  textBox.append(thinkingDots());
+}
+
+function newPendingSlot() {
+  const bubble = el('div', { class: 'agent-bubble' });
+  const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
+  const refs = mountLiveRound(bubble, {});
+  refs.reasoningEl.hidden = true;
+  ensureThinkingDots(refs.textBox);
+  return { msgNode, bubble, ...refs };
+}
+
+// bindOptimisticTurn paints the user bubble and a single Thinking-dots
+// placeholder. If agent.turn.started already mounted a placeholder (WS
+// raced ahead of the turns.start HTTP response), the user is inserted
+// before that node and the placeholder is reused. Appending a second
+// pending node is what produced two "..." rows — one above the user and
+// one below.
+export function bindOptimisticTurn(thread, userMessage, existingSlot = null) {
+  const userNode = renderMessage(userMessage);
+  if (existingSlot?.msgNode?.isConnected) {
+    existingSlot.msgNode.before(userNode);
+    existingSlot.msgNode.classList.add('agent-pending');
+    ensureThinkingDots(existingSlot.textBox);
+    return existingSlot;
+  }
+  thread.append(userNode);
+  const slot = newPendingSlot();
+  thread.append(slot.msgNode);
+  return slot;
+}
+
 export function sealLiveNodeBeforeSteer(node) {
   if (!node) return;
   node.querySelectorAll('.agent-thinking-dots').forEach((dots) => dots.remove());

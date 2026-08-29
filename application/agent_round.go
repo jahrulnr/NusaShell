@@ -374,11 +374,11 @@ func estimateRequestTokens(system string, messages []ChatMessage, tools []ToolDe
 	return int64(float64(tokens) * 1.05)
 }
 
-func buildPromptCachePolicy(settings domain.Settings, providerID, model, conversationID string) *PromptCachePolicy {
-	if !settings.PromptCaching {
+func buildPromptCachePolicy(settings domain.Settings, p *domain.Provider, model, conversationID string) *PromptCachePolicy {
+	if !settings.PromptCaching || p == nil {
 		return nil
 	}
-	canonical, _ := json.Marshal([3]string{providerID, model, conversationID})
+	canonical, _ := json.Marshal([3]string{p.ID, model, conversationID})
 	sum := sha256.Sum256(canonical)
 	// OpenAI caps prompt_cache_key at 64 chars; use 32 total (pc_ + 29 hex
 	// chars from the sha256 digest) for a comfortable margin below the
@@ -387,12 +387,15 @@ func buildPromptCachePolicy(settings domain.Settings, providerID, model, convers
 	return &PromptCachePolicy{
 		Mode: "auto",
 		Key:  "pc_" + full[:29],
+		TTL:  domain.NormalizeCacheTTL(p.Kind, p.EffectiveDriver(), p.CacheTTL),
 	}
 }
 
 // persistHydration inserts the synthetic hydration messages (assistant
 // toolCalls + matching tool results) immediately after the FIRST user
-// message in the transcript.
+// message in the transcript. If there is no user yet the conversation is
+// left unchanged — an assistant+tool prefix under the system prompt is
+// invalid for OpenAI Chat Completions and Anthropic Messages.
 //
 // Hydration is an epoch marker anchored to the first user of the epoch: the
 // opening user of a fresh room, or the compaction handover user (which
@@ -436,21 +439,88 @@ func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage) *doma
 			}
 		}
 	}
-	c.Messages = slices.Insert(c.Messages, hydrationInsertIndex(c.Messages), built...)
+	idx := hydrationInsertIndex(c.Messages)
+	if idx < 0 {
+		// No user yet (empty-room workspace pick). Inserting here would
+		// park an assistant+tool turn under the system prompt; OpenAI and
+		// Claude reject or mis-handle that. The first turn persists after
+		// the user exists.
+		return c
+	}
+	c.Messages = slices.Insert(c.Messages, idx, built...)
 	return c
 }
 
 // hydrationInsertIndex is the slot immediately after the first user message
-// in the transcript, or append when there is no user. The first user is the
+// in the transcript, or -1 when there is no user. The first user is the
 // epoch anchor (fresh-room opening user or compaction handover), so the
-// checkpoint stays put across later follow-up users and steers.
+// checkpoint stays put across later follow-up users and steers. OpenAI Chat
+// Completions and Anthropic Messages require that user before any
+// assistant/tool hydration turn.
 func hydrationInsertIndex(msgs []domain.Message) int {
 	for i := range msgs {
 		if msgs[i].Role == domain.RoleUser {
 			return i + 1
 		}
 	}
-	return len(msgs)
+	return -1
+}
+
+// hydrationPrecedesFirstUser reports a protocol-invalid checkpoint: the
+// synthetic assistant+tool turn sits before any user message, so the
+// provider payload would be system → assistant → tool → user.
+func hydrationPrecedesFirstUser(msgs []domain.Message) bool {
+	for _, m := range msgs {
+		if m.Role == domain.RoleUser {
+			return false
+		}
+		if isHydrationMessage(m) {
+			return true
+		}
+	}
+	return false
+}
+
+// relocateHydrationAfterFirstUser moves a leading hydration checkpoint to
+// immediately after the first user. Existing call IDs are preserved so the
+// prompt-cache prefix is not rebuilt. If no user exists the orphan
+// checkpoint is dropped.
+func relocateHydrationAfterFirstUser(msgs []domain.Message) []domain.Message {
+	if !hydrationPrecedesFirstUser(msgs) {
+		return msgs
+	}
+	hyd := make([]domain.Message, 0, 1)
+	rest := make([]domain.Message, 0, len(msgs))
+	for _, m := range msgs {
+		if isHydrationMessage(m) {
+			hyd = append(hyd, m)
+			continue
+		}
+		rest = append(rest, m)
+	}
+	idx := hydrationInsertIndex(rest)
+	if idx < 0 {
+		return rest
+	}
+	return slices.Insert(rest, idx, hyd...)
+}
+
+// repairHydrationPlacement persists relocateHydrationAfterFirstUser when a
+// prior epoch parked the checkpoint before the first user (empty-room
+// workspace pick, then the opening turn appended the user after it).
+func (a *App) repairHydrationPlacement(run *TurnRun) {
+	if a == nil || a.Conversations == nil || run == nil {
+		return
+	}
+	conversation, err := a.Conversations.Get(run.ConversationID)
+	if err != nil || conversation == nil {
+		return
+	}
+	if !hydrationPrecedesFirstUser(conversation.Messages) {
+		return
+	}
+	conversation.Messages = relocateHydrationAfterFirstUser(conversation.Messages)
+	_ = a.Conversations.Save(conversation)
 }
 
 // buildHydration assembles a synthetic runtime-hydration checkpoint from the

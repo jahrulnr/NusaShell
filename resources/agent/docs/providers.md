@@ -52,6 +52,23 @@ OpenRouter regardless of host.
   `chat` hosts use the vanilla OpenAI Chat wire (see host detection above).
   Providers without an explicit driver retain host-detected routing.
 
+## Prompt cache TTL
+
+Settings → **Prompt caching** turns provider-side prompt cache on for a
+turn. The **Cache TTL** chips on a provider's detail pane pick the duration
+that NusaShell actually sends:
+
+- `messages` (Anthropic `cache_control`): `5m` or `1h`. Default `5m`.
+- `responses` (OpenAI `prompt_cache_options.ttl`): `30m`.
+- `chat` on the OpenRouter driver (`cache_control`): `5m` or `1h`. Default
+  `5m`. OpenRouter does not accept `30m` as `cache_control` TTL.
+- other `chat` hosts (OpenAI Chat `prompt_cache_key` +
+  `prompt_cache_options`): `30m`.
+
+The selected value is stored on the provider (`cache_ttl`) and applied on
+the next turn while prompt caching is enabled. Registry cards show the
+selected TTL, not the full enum.
+
 **Base URL is required for all three kinds.** The UI suggests a per-kind
 default (`https://api.anthropic.com` for Messages, `https://api.openai.com/v1`
 for Responses and Chat) — replace it with any endpoint or AI gateway that

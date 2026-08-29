@@ -136,6 +136,57 @@ func KindCaps(kind ProviderKind) KindCapabilities {
 	return kindCaps[ProviderChat]
 }
 
+// CacheTTLsFor returns the prompt-cache TTL values this kind+driver can
+// actually send. KindCaps.CacheTTLs is the protocol union; OpenRouter
+// cache_control only accepts 5m/1h, and OpenAI prompt_cache_options only
+// accepts 30m.
+func CacheTTLsFor(kind ProviderKind, driver ProviderDriver) []string {
+	switch kind {
+	case ProviderMessages:
+		return []string{"5m", "1h"}
+	case ProviderResponses:
+		return []string{"30m"}
+	case ProviderChat:
+		if driver == ProviderDriverOpenRouter {
+			return []string{"5m", "1h"}
+		}
+		return []string{"30m"}
+	default:
+		return append([]string(nil), KindCaps(kind).CacheTTLs...)
+	}
+}
+
+// ValidCacheTTL reports whether ttl may be stored for this kind+driver.
+// Empty ttl is valid and means "use the kind default".
+func ValidCacheTTL(kind ProviderKind, driver ProviderDriver, ttl string) bool {
+	if ttl == "" {
+		return true
+	}
+	for _, allowed := range CacheTTLsFor(kind, driver) {
+		if allowed == ttl {
+			return true
+		}
+	}
+	return false
+}
+
+// NormalizeCacheTTL returns ttl when it is advertised for this kind+driver,
+// otherwise the first advertised value (empty when the kind has no caching).
+func NormalizeCacheTTL(kind ProviderKind, driver ProviderDriver, ttl string) string {
+	allowed := CacheTTLsFor(kind, driver)
+	if ttl != "" {
+		for _, candidate := range allowed {
+			if candidate == ttl {
+				return ttl
+			}
+		}
+	}
+	if len(allowed) == 0 {
+		return ""
+	}
+	return allowed[0]
+}
+
 // ModelKind categorizes what a model produces, used to filter the model
 // picker so users don't accidentally select an image generator or TTS
 // model for chat. Detected from the models.dev catalog (modality + name
@@ -191,6 +242,10 @@ type Provider struct {
 	Enabled   bool
 	HasAPIKey bool
 	Models    []Model
+	// CacheTTL is the selected prompt-cache duration for this provider
+	// ("5m", "1h", or "30m"). Empty means use the first value from
+	// CacheTTLsFor(kind, driver).
+	CacheTTL  string
 	UpdatedAt time.Time
 }
 

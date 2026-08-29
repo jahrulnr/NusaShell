@@ -32,6 +32,8 @@ import {
   isStreamingTool,
   sealLiveNodeBeforeSteer,
   insertAfterOrAppend,
+  bindOptimisticTurn,
+  thinkingDots,
   parseShowImageOutput,
   parseShowAudioOutput,
   parseShowVideoOutput,
@@ -115,6 +117,10 @@ const state = {
   // (e.g. a fetch that resolves after the user switched to another room).
   todos: { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 } },
   todoRenderToken: 0,
+  // Composer is awaiting agent.turns.start / retry. WS agent.turn.started
+  // must queue instead of appending a Thinking placeholder — that race
+  // painted "..." above the user, then beginTurn painted a second "..." below.
+  localTurnPending: false,
   conversationLoadToken: 0,
   // Per-room live run buffers. While the user is looking at another room, the
   // deltas for this room keep arriving over the same WebSocket; they are
@@ -872,8 +878,7 @@ function reattachActiveRun() {
   if (!reasoningEl.hidden && !run.raw?.trim()) reasoningEl.classList.add('is-streaming');
   if (run.raw?.trim()) { textBox.innerHTML = renderMarkdown(run.raw); void renderMermaidDiagrams(textBox); void highlightCode(textBox); attachZoomButtons(textBox); }
   else {
-    textBox.append(el('span', { class: 'agent-thinking-dots' },
-      el('span'), el('span'), el('span')));
+    textBox.append(thinkingDots());
   }
   // Render buffered tool jobs so a switch-back shows the tool cards that
   // ran while this room was hidden. Standalone cards go to the bubble;
@@ -1031,7 +1036,7 @@ function applyBufferedRunToDOM(convId) {
     if (!reasoningEl.hidden && !source.raw?.trim()) reasoningEl.classList.add('is-streaming');
   }
   if (source.raw?.trim()) textBox.innerHTML = renderMarkdown(source.raw);
-  else textBox.append(el('span', { class: 'agent-thinking-dots' }, el('span'), el('span'), el('span')));
+  else textBox.append(thinkingDots());
   void renderMermaidDiagrams(textBox); void highlightCode(textBox); attachZoomButtons(textBox);
   for (const job of source.toolJobs.values()) placeToolCard(bubble, strip, job);
   // Write the slot refs back to the buffer: openConversation may re-register
@@ -1201,25 +1206,23 @@ function beginTurn(runId, userText, attachments = []) {
   // remove empty state
   const empty = thread.querySelector('.agent-empty');
   if (empty) empty.remove();
-  // optimistic user message
+  // optimistic user message + a single Thinking placeholder. If
+  // agent.turn.started already mounted one (HTTP/WS race), reuse it.
   const userMessage = { role: 'user', content: userText, attachments, created_at: new Date().toISOString() };
   state.messages.push(userMessage);
-  thread.append(renderMessage(userMessage));
-  // assistant placeholder: bubble holds a steps container that will be
-  // populated with reasoning/text/tool-strip elements per round, in order
-  const bubble = el('div', { class: 'agent-bubble' });
-  const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
-  thread.append(msgNode);
-  const { reasoningEl, textBox, strip } = mountLiveRound(bubble, {});
-  reasoningEl.hidden = true;
-  textBox.append(el('span', { class: 'agent-thinking-dots' },
-    el('span'), el('span'), el('span')));
+  const existing = state.runs.get(runId);
+  const slot = bindOptimisticTurn(thread, userMessage, existing?.msgNode?.isConnected ? existing : null);
   const previousBuffer = state.roomBuffers.get(state.activeId);
   if (previousBuffer?.done) state.roomBuffers.delete(state.activeId);
   state.runs.set(runId, {
-    msgNode, bubble, strip, textBox, reasoningEl,
-    toolJobs: new Map(), raw: '', rawReasoning: '',
-    round: 1, conversationId: state.activeId, runId,
+    msgNode: slot.msgNode, bubble: slot.bubble, strip: slot.strip,
+    textBox: slot.textBox, reasoningEl: slot.reasoningEl,
+    toolJobs: existing?.toolJobs || new Map(),
+    raw: existing?.raw || '',
+    rawReasoning: existing?.rawReasoning || '',
+    round: existing?.round || 1,
+    conversationId: state.activeId, runId,
+    messageId: existing?.messageId,
   });
   flushPendingEvents(runId);
   updateComposerStatus();
@@ -1235,52 +1238,71 @@ async function retryTurn(failedNode, failedMessageId) {
     return;
   }
   let runId;
+  state.localTurnPending = true;
   try {
-    const res = await rpc('agent.turns.retry', { conversation_id: state.activeId, model, effort: state.effort && state.effort !== 'auto' ? state.effort : undefined });
-    runId = res.run_id;
-  } catch (err) {
-    toast(err.message, 'error');
-    return;
-  }
-  stopButton().hidden = false;
-  updateSendAvailability(state);
-
-  const thread = agentThread();
-  // Remove the failed message's error UI (error text + retry button) from
-  // the turn node without wiping the entire turn — earlier successful
-  // assistant messages in the same turn group must stay visible.
-  if (failedMessageId) {
-    // Remove the error text and retry button that belong to the failed message.
-    failedNode.querySelectorAll('.agent-retry-btn, .agent-error-text').forEach((n) => n.remove());
-    // If the turn node has no bubble content left (no prior successful
-    // messages), remove the whole node; otherwise keep it and append the
-    // new retry bubble as a sibling.
-    const bubble = failedNode.querySelector('.agent-bubble');
-    if (bubble && bubble.children.length === 0) {
-      failedNode.remove();
-    } else {
-      failedNode.classList.remove('agent-message-error');
+    try {
+      const res = await rpc('agent.turns.retry', { conversation_id: state.activeId, model, effort: state.effort && state.effort !== 'auto' ? state.effort : undefined });
+      runId = res.run_id;
+    } catch (err) {
+      toast(err.message, 'error');
+      return;
     }
-  } else {
-    // Backward compat: no message ID — remove the whole node.
-    failedNode.remove();
+    stopButton().hidden = false;
+    updateSendAvailability(state);
+
+    const thread = agentThread();
+    // Remove the failed message's error UI (error text + retry button) from
+    // the turn node without wiping the entire turn — earlier successful
+    // assistant messages in the same turn group must stay visible.
+    if (failedMessageId) {
+      // Remove the error text and retry button that belong to the failed message.
+      failedNode.querySelectorAll('.agent-retry-btn, .agent-error-text').forEach((n) => n.remove());
+      // If the turn node has no bubble content left (no prior successful
+      // messages), remove the whole node; otherwise keep it and append the
+      // new retry bubble as a sibling.
+      const bubble = failedNode.querySelector('.agent-bubble');
+      if (bubble && bubble.children.length === 0) {
+        failedNode.remove();
+      } else {
+        failedNode.classList.remove('agent-message-error');
+      }
+    } else {
+      // Backward compat: no message ID — remove the whole node.
+      failedNode.remove();
+    }
+    const existing = state.runs.get(runId);
+    const previousBuffer = state.roomBuffers.get(state.activeId);
+    if (previousBuffer?.done) state.roomBuffers.delete(state.activeId);
+    if (existing?.msgNode?.isConnected) {
+      existing.msgNode.classList.add('agent-pending');
+      if (existing.textBox && !existing.raw) {
+        existing.textBox.replaceChildren(thinkingDots());
+      }
+      existing.round = existing.round || 1;
+      existing.conversationId = state.activeId;
+      existing.runId = runId;
+    } else {
+      const bubble = el('div', { class: 'agent-bubble' });
+      const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
+      thread.append(msgNode);
+      const { reasoningEl, textBox, strip } = mountLiveRound(bubble, {});
+      reasoningEl.hidden = true;
+      textBox.append(thinkingDots());
+      state.runs.set(runId, {
+        msgNode, bubble, strip, textBox, reasoningEl,
+        toolJobs: existing?.toolJobs || new Map(),
+        raw: existing?.raw || '',
+        rawReasoning: existing?.rawReasoning || '',
+        round: 1, conversationId: state.activeId, runId,
+        messageId: existing?.messageId,
+      });
+    }
+    flushPendingEvents(runId);
+    updateComposerStatus();
+    scrollToBottom(true);
+  } finally {
+    state.localTurnPending = false;
   }
-  const bubble = el('div', { class: 'agent-bubble' });
-  const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
-  thread.append(msgNode);
-  const { reasoningEl, textBox, strip } = mountLiveRound(bubble, {});
-  reasoningEl.hidden = true;
-  textBox.textContent = '…';
-  const previousBuffer = state.roomBuffers.get(state.activeId);
-  if (previousBuffer?.done) state.roomBuffers.delete(state.activeId);
-  state.runs.set(runId, {
-    msgNode, bubble, strip, textBox, reasoningEl,
-    toolJobs: new Map(), raw: '', rawReasoning: '',
-    round: 1, conversationId: state.activeId, runId,
-  });
-  flushPendingEvents(runId);
-  updateComposerStatus();
-  scrollToBottom(true);
 }
 
 function getRunOrQueue(type, payload) {
@@ -1851,8 +1873,7 @@ async function loadOlderChunk() {
           }
           if (prevRun.raw?.trim()) { slot.textBox.innerHTML = renderMarkdown(prevRun.raw); void renderMermaidDiagrams(slot.textBox); void highlightCode(slot.textBox); attachZoomButtons(slot.textBox); }
           else {
-            slot.textBox.append(el('span', { class: 'agent-thinking-dots' },
-              el('span'), el('span'), el('span')));
+            slot.textBox.append(thinkingDots());
           }
           for (const job of prevRun.toolJobs.values()) placeToolCard(slot.bubble, slot.strip, job);
           clearToolTimers(prevRun);
@@ -1885,7 +1906,10 @@ function bindEvents() {
       // entry so streaming events render instead of being silently queued
       // and dropped — which made the agent's response look like it was
       // replaced by the continue.md prompt (empty A2 bubble, no stream).
-      if (conversation_id !== state.activeId) {
+      // Also queue while the composer is still awaiting turns.start/retry:
+      // painting a placeholder here, then beginTurn appending another,
+      // produced two "..." rows around the user bubble.
+      if (conversation_id !== state.activeId || state.localTurnPending) {
         getRunOrQueue('agent.turn.started', payload);
         return;
       }
@@ -1936,8 +1960,7 @@ function bindEvents() {
         stampRunMessageId(run.msgNode, message_id);
         if (run.textBox) {
           run.textBox.textContent = '';
-          run.textBox.append(el('span', { class: 'agent-thinking-dots' },
-            el('span'), el('span'), el('span')));
+          run.textBox.append(thinkingDots());
         }
         return;
       }
@@ -1952,8 +1975,7 @@ function bindEvents() {
           stampRunMessageId(run.msgNode, message_id);
           if (run.textBox && !run.raw) {
             run.textBox.textContent = '';
-            run.textBox.append(el('span', { class: 'agent-thinking-dots' },
-              el('span'), el('span'), el('span')));
+            run.textBox.append(thinkingDots());
           }
         }
       }
@@ -1992,8 +2014,7 @@ function bindEvents() {
     clearToolTimers(run);
     run.toolJobs = new Map();
     if (run.textBox && !run.raw) {
-      run.textBox.append(el('span', { class: 'agent-thinking-dots' },
-        el('span'), el('span'), el('span')));
+      run.textBox.append(thinkingDots());
     }
     flushPendingEvents(run_id);
   });

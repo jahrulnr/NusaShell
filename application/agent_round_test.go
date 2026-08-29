@@ -25,7 +25,7 @@ func TestEstimateRequestTokensIncludesSystemAndTools(t *testing.T) {
 
 func TestBuildPromptCachePolicyKeyLength(t *testing.T) {
 	settings := domain.Settings{PromptCaching: true}
-	policy := buildPromptCachePolicy(settings, "prov1", "gpt-5", "conv_abc")
+	policy := buildPromptCachePolicy(settings, &domain.Provider{ID: "prov1", Kind: domain.ProviderChat}, "gpt-5", "conv_abc")
 	if policy == nil {
 		t.Fatal("expected non-nil policy when PromptCaching is true")
 	}
@@ -39,21 +39,43 @@ func TestBuildPromptCachePolicyKeyLength(t *testing.T) {
 
 func TestBuildPromptCachePolicyNilWhenDisabled(t *testing.T) {
 	settings := domain.Settings{PromptCaching: false}
-	if p := buildPromptCachePolicy(settings, "prov1", "gpt-5", "conv_abc"); p != nil {
+	if p := buildPromptCachePolicy(settings, &domain.Provider{ID: "prov1"}, "gpt-5", "conv_abc"); p != nil {
 		t.Errorf("expected nil policy when PromptCaching is false, got %+v", p)
 	}
 }
 
 func TestBuildPromptCachePolicyStableForSameInputs(t *testing.T) {
 	settings := domain.Settings{PromptCaching: true}
-	a := buildPromptCachePolicy(settings, "prov1", "gpt-5", "conv_abc")
-	b := buildPromptCachePolicy(settings, "prov1", "gpt-5", "conv_abc")
+	p := &domain.Provider{ID: "prov1", Kind: domain.ProviderChat}
+	a := buildPromptCachePolicy(settings, p, "gpt-5", "conv_abc")
+	b := buildPromptCachePolicy(settings, p, "gpt-5", "conv_abc")
 	if a.Key != b.Key {
 		t.Errorf("cache key should be stable for same inputs: %q vs %q", a.Key, b.Key)
 	}
-	c := buildPromptCachePolicy(settings, "prov1", "gpt-5", "conv_xyz")
+	c := buildPromptCachePolicy(settings, p, "gpt-5", "conv_xyz")
 	if a.Key == c.Key {
 		t.Errorf("cache key should differ for different conversation: %q vs %q", a.Key, c.Key)
+	}
+}
+
+func TestBuildPromptCachePolicyTTLFromProvider(t *testing.T) {
+	settings := domain.Settings{PromptCaching: true}
+	anthropic := &domain.Provider{ID: "anthropic", Driver: domain.ProviderDriverAnthropic, Kind: domain.ProviderMessages, CacheTTL: "1h"}
+	policy := buildPromptCachePolicy(settings, anthropic, "claude-sonnet-4-6", "conv_abc")
+	if policy == nil || policy.TTL != "1h" {
+		t.Fatalf("anthropic TTL = %+v, want 1h", policy)
+	}
+
+	openai := &domain.Provider{ID: "openai", Driver: domain.ProviderDriverOpenAI, Kind: domain.ProviderResponses}
+	policy = buildPromptCachePolicy(settings, openai, "gpt-5", "conv_abc")
+	if policy == nil || policy.TTL != "30m" {
+		t.Fatalf("openai default TTL = %+v, want 30m", policy)
+	}
+
+	openrouter := &domain.Provider{ID: "openrouter", Driver: domain.ProviderDriverOpenRouter, Kind: domain.ProviderChat, CacheTTL: "1h"}
+	policy = buildPromptCachePolicy(settings, openrouter, "anthropic/claude-sonnet-4", "conv_abc")
+	if policy == nil || policy.TTL != "1h" {
+		t.Fatalf("openrouter TTL = %+v, want 1h", policy)
 	}
 }
 

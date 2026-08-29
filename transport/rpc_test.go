@@ -539,6 +539,64 @@ func TestProviderDriversPersistForBuiltInsAndCustomProviders(t *testing.T) {
 	}
 }
 
+func TestProviderCacheTTLIsSelectableAndPersisted(t *testing.T) {
+	h := newHarness(t, nil)
+
+	res := h.rpc(t, "ai.providers.save", map[string]any{
+		"id": "anthropic", "driver": "anthropic", "kind": "messages", "name": "Anthropic",
+		"base_url": "https://api.anthropic.com", "api_key": "sk-ant", "enabled": true,
+		"cache_ttl": "30m",
+	})
+	if res.OK || res.Error == nil || res.Error.Code != "VALIDATION_ERROR" {
+		t.Fatalf("30m on messages must fail, got %+v", res)
+	}
+
+	res = h.rpcOK(t, "ai.providers.save", map[string]any{
+		"id": "anthropic", "driver": "anthropic", "kind": "messages", "name": "Anthropic",
+		"base_url": "https://api.anthropic.com", "api_key": "sk-ant", "enabled": true,
+		"cache_ttl": "1h",
+	})
+	var saved struct {
+		Providers []struct {
+			ID        string   `json:"id"`
+			CacheTTL  string   `json:"cache_ttl"`
+			CacheTTLs []string `json:"cache_ttls"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(res.Result, &saved); err != nil || len(saved.Providers) != 1 {
+		t.Fatalf("save result malformed: %s (%v)", res.Result, err)
+	}
+	if saved.Providers[0].CacheTTL != "1h" {
+		t.Fatalf("saved cache_ttl = %q, want 1h", saved.Providers[0].CacheTTL)
+	}
+	if len(saved.Providers[0].CacheTTLs) != 2 || saved.Providers[0].CacheTTLs[0] != "5m" {
+		t.Fatalf("cache_ttls = %v, want [5m 1h]", saved.Providers[0].CacheTTLs)
+	}
+
+	listed := h.rpcOK(t, "ai.providers.list", nil)
+	var list struct {
+		Providers []struct {
+			ID       string `json:"id"`
+			CacheTTL string `json:"cache_ttl"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(listed.Result, &list); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, p := range list.Providers {
+		if p.ID == "anthropic" {
+			found = true
+			if p.CacheTTL != "1h" {
+				t.Fatalf("listed cache_ttl = %q, want 1h", p.CacheTTL)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("anthropic missing from list")
+	}
+}
+
 func TestProviderTestProbesModelsEndpoint(t *testing.T) {
 	h := newHarness(t, nil)
 	h.llm.models = []string{"m1", "m2"}

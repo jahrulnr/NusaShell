@@ -141,18 +141,23 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
   async function startNewTurn(text) {
     if (!state.activeId) await createConversation(text.slice(0, 48));
     const attachments = [...state.attachments];
-    const { run_id: runID } = await rpc('agent.turns.start', {
-      conversation_id: state.activeId,
-      text,
-      model: state.model,
-      effort: state.effort && state.effort !== 'auto' ? state.effort : undefined,
-      attachments,
-    });
-    input.value = '';
-    autosize();
-    state.attachments = [];
-    renderAttachments();
-    beginTurn(runID, text, attachments);
+    state.localTurnPending = true;
+    try {
+      const { run_id: runID } = await rpc('agent.turns.start', {
+        conversation_id: state.activeId,
+        text,
+        model: state.model,
+        effort: state.effort && state.effort !== 'auto' ? state.effort : undefined,
+        attachments,
+      });
+      input.value = '';
+      autosize();
+      state.attachments = [];
+      renderAttachments();
+      beginTurn(runID, text, attachments);
+    } finally {
+      state.localTurnPending = false;
+    }
   }
 
   async function sendSteer(text) {

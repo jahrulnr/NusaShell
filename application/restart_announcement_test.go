@@ -45,6 +45,14 @@ func TestShouldAnnounceRestart(t *testing.T) {
 	if shouldAnnounceRestart(persisted, time.Time{}) {
 		t.Error("zero startedAt must disable announcements")
 	}
+
+	hydrationOnly := &domain.Conversation{
+		ID: "conv_hyd", UpdatedAt: before,
+		Messages: []domain.Message{hydrationCheckpointMessage()},
+	}
+	if shouldAnnounceRestart(hydrationOnly, startedAt) {
+		t.Error("hydration-only transcript is not durable history; must not announce")
+	}
 }
 
 func TestRestartAnnouncementShape(t *testing.T) {

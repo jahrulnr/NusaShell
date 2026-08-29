@@ -103,6 +103,70 @@ func TestRequiresKey(t *testing.T) {
 	}
 }
 
+func TestCacheTTLsFor(t *testing.T) {
+	tests := []struct {
+		kind   ProviderKind
+		driver ProviderDriver
+		want   []string
+	}{
+		{ProviderMessages, ProviderDriverAnthropic, []string{"5m", "1h"}},
+		{ProviderMessages, ProviderDriverOpenRouter, []string{"5m", "1h"}},
+		{ProviderResponses, ProviderDriverOpenAI, []string{"30m"}},
+		{ProviderResponses, ProviderDriverOpenRouter, []string{"30m"}},
+		{ProviderChat, ProviderDriverOpenRouter, []string{"5m", "1h"}},
+		{ProviderChat, ProviderDriverAuto, []string{"30m"}},
+		{ProviderChat, ProviderDriverOpenAI, []string{"30m"}},
+	}
+	for _, tc := range tests {
+		got := CacheTTLsFor(tc.kind, tc.driver)
+		if len(got) != len(tc.want) {
+			t.Errorf("CacheTTLsFor(%q,%q) = %v, want %v", tc.kind, tc.driver, got, tc.want)
+			continue
+		}
+		for i, ttl := range tc.want {
+			if got[i] != ttl {
+				t.Errorf("CacheTTLsFor(%q,%q)[%d] = %q, want %q", tc.kind, tc.driver, i, got[i], ttl)
+			}
+		}
+	}
+}
+
+func TestNormalizeCacheTTL(t *testing.T) {
+	if got := NormalizeCacheTTL(ProviderMessages, ProviderDriverAnthropic, ""); got != "5m" {
+		t.Errorf("empty messages TTL = %q, want 5m", got)
+	}
+	if got := NormalizeCacheTTL(ProviderMessages, ProviderDriverAnthropic, "1h"); got != "1h" {
+		t.Errorf("messages 1h = %q, want 1h", got)
+	}
+	if got := NormalizeCacheTTL(ProviderResponses, ProviderDriverOpenAI, ""); got != "30m" {
+		t.Errorf("empty responses TTL = %q, want 30m", got)
+	}
+	if got := NormalizeCacheTTL(ProviderResponses, ProviderDriverOpenAI, "1h"); got != "30m" {
+		t.Errorf("invalid responses TTL must fall back to 30m, got %q", got)
+	}
+	if got := NormalizeCacheTTL(ProviderChat, ProviderDriverOpenRouter, "30m"); got != "5m" {
+		t.Errorf("openrouter chat 30m must fall back to 5m, got %q", got)
+	}
+}
+
+func TestValidCacheTTL(t *testing.T) {
+	if !ValidCacheTTL(ProviderMessages, ProviderDriverAnthropic, "") {
+		t.Error("empty TTL is valid (means default)")
+	}
+	if !ValidCacheTTL(ProviderMessages, ProviderDriverAnthropic, "1h") {
+		t.Error("1h is valid for messages")
+	}
+	if ValidCacheTTL(ProviderMessages, ProviderDriverAnthropic, "30m") {
+		t.Error("30m is not valid for messages")
+	}
+	if ValidCacheTTL(ProviderChat, ProviderDriverOpenRouter, "30m") {
+		t.Error("30m is not valid for OpenRouter chat cache_control")
+	}
+	if !ValidCacheTTL(ProviderResponses, ProviderDriverOpenAI, "30m") {
+		t.Error("30m is valid for responses")
+	}
+}
+
 func TestProviderDrivers(t *testing.T) {
 	for _, driver := range []ProviderDriver{
 		ProviderDriverAuto,

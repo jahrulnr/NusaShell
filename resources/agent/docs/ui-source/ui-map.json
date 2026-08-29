@@ -350,12 +350,13 @@
         {
           "heading": "Chat providers",
           "paragraphs": [
-            "The registry always shows persistent Anthropic, OpenAI, and OpenRouter cards, even before configuration. Anthropic uses the Anthropic Messages driver; OpenAI uses the OpenAI Responses driver; OpenRouter and custom providers use the OpenRouter driver. OpenRouter and custom forms expose Messages, Responses, and Chat API kinds. Selecting a card opens the detail pane for editing its base URL, API key, enabled state, importing models, and testing connectivity. These models appear in the Agent composer."
+            "The registry always shows persistent Anthropic, OpenAI, and OpenRouter cards, even before configuration. Anthropic uses the Anthropic Messages driver; OpenAI uses the OpenAI Responses driver; OpenRouter and custom providers use the OpenRouter driver. OpenRouter and custom forms expose Messages, Responses, and Chat API kinds. Selecting a card opens the detail pane for editing its base URL, API key, enabled state, prompt-cache TTL, importing models, and testing connectivity. These models appear in the Agent composer."
           ],
           "controls": [
             "provider-llm-section",
             "provider-registry",
-            "provider-detail"
+            "provider-detail",
+            "provider-cache-ttl"
           ]
         },
         {
@@ -608,7 +609,7 @@
         {
           "heading": "Context compaction",
           "paragraphs": [
-            "Toggle compaction, set max input tokens (fallback context window, default 200000), compaction threshold and summary quality knobs, pick an optional compaction model, and enable provider prompt caching. Completion limits and sampling are under Agent runtime."
+            "Toggle compaction, set max input tokens (fallback context window, default 200000), compaction threshold and summary quality knobs, pick an optional compaction model, and enable provider prompt caching. Cache TTL is chosen per provider on the Providers detail pane. Completion limits and sampling are under Agent runtime."
           ],
           "controls": [
             "settings-context-title",
@@ -1362,7 +1363,15 @@
       "label": "Provider detail",
       "section": "Providers",
       "type": "container",
-      "notes": "Edit form for the selected provider."
+      "notes": "Edit form for the selected provider, including selectable prompt-cache TTL chips."
+    },
+    "provider-cache-ttl": {
+      "label": "Prompt cache TTL",
+      "section": "Providers",
+      "type": "chip-group",
+      "action": "Selects the prompt-cache duration sent to this provider when Settings prompt caching is on. Messages and OpenRouter chat offer 5m/1h; Responses and other Chat hosts offer 30m.",
+      "notes": "Buttons inside the provider detail pane (class provider-cache-ttl-chip). The registry card shows the selected value only.",
+      "selector": ".provider-cache-ttl-chip"
     },
     "learning-stat-memory": {
       "label": "Memory count",
@@ -1615,7 +1624,8 @@
     "settings-prompt-caching": {
       "label": "Prompt caching",
       "section": "Settings",
-      "type": "checkbox"
+      "type": "checkbox",
+      "notes": "Master switch for provider-side prompt caching. The cache duration is selected per provider (Cache TTL chips on the Providers detail pane)."
     },
     "settings-sound-notifications": {
       "label": "Sound notifications",

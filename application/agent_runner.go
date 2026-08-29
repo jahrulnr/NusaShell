@@ -201,7 +201,23 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 // conversations (created after startup) and empty conversations never
 // qualify; a zero startedAt (tests, unusual composition) disables it.
 func shouldAnnounceRestart(c *domain.Conversation, startedAt time.Time) bool {
-	return !startedAt.IsZero() && startedAt.After(c.UpdatedAt) && len(c.Messages) > 0
+	return !startedAt.IsZero() && startedAt.After(c.UpdatedAt) && hasDurableHistory(c)
+}
+
+// hasDurableHistory reports whether the conversation has any message the
+// model should treat as prior work. A hydration-only transcript is not
+// durable history: it was persisted by an empty-room workspace pick and
+// must not trigger a restart announcement on the first real user turn.
+func hasDurableHistory(c *domain.Conversation) bool {
+	if c == nil {
+		return false
+	}
+	for _, m := range c.Messages {
+		if !isHydrationMessage(m) {
+			return true
+		}
+	}
+	return false
 }
 
 // addTurnMessages appends the user message, an optional restart
@@ -516,8 +532,11 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 	// (same Save as Compact), so by the time the loop re-fetches the
 	// conversation after compaction the checkpoint is already present and
 	// this guard skips. Follow-up user messages, steers, and retries all
-	// reuse the existing checkpoint — the turn loop never touches hydration,
-	// which keeps the prompt-cache prefix frozen across rounds.
+	// reuse the existing checkpoint — the turn loop never rebuilds it,
+	// which keeps the prompt-cache prefix frozen across rounds. It does
+	// relocate a checkpoint that was persisted before any user (empty-room
+	// workspace pick) so OpenAI/Claude see user → hydration, not the reverse.
+	a.repairHydrationPlacement(run)
 	a.ensureFreshRoomHydration(run, asstMsgID, caps)
 	defer func() {
 		run.Cancel()
@@ -617,7 +636,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		toolDefs = filterACPToolDefs(toolDefs)
 	}
 	maxTokens := resolveMaxOutput(provider, model, settings)
-	promptCache := buildPromptCachePolicy(settings, provider.ID, model, run.ConversationID)
+	promptCache := buildPromptCachePolicy(settings, provider, model, run.ConversationID)
 
 	var totalUsage ChatUsage
 	// lastUsage holds the most recent round's provider usage. Its
@@ -1749,8 +1768,12 @@ func filterHydrationDomainMessages(msgs []domain.Message) []domain.Message {
 }
 
 func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabilities) []ChatMessage {
+	src := c.Messages
+	if hydrationPrecedesFirstUser(src) {
+		src = relocateHydrationAfterFirstUser(src)
+	}
 	var out []ChatMessage
-	for _, m := range c.Messages {
+	for _, m := range src {
 		switch m.Role {
 		case domain.RoleUser:
 			content := m.Content

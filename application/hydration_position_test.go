@@ -88,6 +88,84 @@ func TestPersistHydrationFallsBackToAppendWhenAnchorMissing(t *testing.T) {
 	}
 }
 
+// TestPersistHydrationDoesNotInsertWithoutUser pins the OpenAI/Claude
+// constraint: an assistant+tool turn cannot sit under the system prompt with
+// no user message yet. Workspace pick on an empty room used to persist the
+// checkpoint at index 0; the first user was then appended after it.
+func TestPersistHydrationDoesNotInsertWithoutUser(t *testing.T) {
+	app := &App{}
+	c := domain.NewConversation("conv_empty", "empty")
+
+	out := app.persistHydration(c, hydrationPositionMsgs())
+
+	if len(out.Messages) != 0 {
+		t.Fatalf("empty room must not persist hydration before a user exists, got %d messages: %+v", len(out.Messages), out.Messages)
+	}
+}
+
+// TestChatMessagesEmitsUserBeforeLeadingHydration is the wire invariant
+// OpenAI Chat Completions and Anthropic Messages require: after the system
+// prompt, the first history role is user, then the hydration assistant+tools.
+// A checkpoint persisted at index 0 (empty-room workspace pick) must not be
+// replayed in that leading position.
+func TestChatMessagesEmitsUserBeforeLeadingHydration(t *testing.T) {
+	c := &domain.Conversation{
+		ID: "c_lead",
+		Messages: []domain.Message{
+			hydrationCheckpointMessage(),
+			{ID: "u1", Role: domain.RoleUser, Content: "halo", Status: domain.StatusDone},
+			{ID: "a1", Role: domain.RoleAssistant, Content: "work", Status: domain.StatusDone},
+		},
+	}
+	msgs := chatMessages(c, "", ModelCapabilities{})
+	if len(msgs) < 2 {
+		t.Fatalf("got %d provider messages, want at least user + hydration", len(msgs))
+	}
+	if msgs[0].Role != "user" {
+		t.Fatalf("provider messages[0] role = %q, want user (got %+v)", msgs[0].Role, rolesOf(msgs))
+	}
+	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) == 0 ||
+		!domain.IsHydrationCallID(msgs[1].ToolCalls[0].ID) {
+		t.Fatalf("provider messages[1] must be the hydration assistant, got %+v", msgs[1])
+	}
+}
+
+// TestRelocateHydrationMovesCheckpointAfterFirstUser pins the stored
+// transcript repair: [hydration, user, work] becomes [user, hydration, work]
+// without rebuilding the checkpoint (prompt-cache IDs stay put).
+func TestRelocateHydrationMovesCheckpointAfterFirstUser(t *testing.T) {
+	hyd := hydrationCheckpointMessage()
+	msgs := []domain.Message{
+		hyd,
+		{ID: "u1", Role: domain.RoleUser, Content: "halo", Status: domain.StatusDone},
+		{ID: "a1", Role: domain.RoleAssistant, Content: "work", Status: domain.StatusDone},
+	}
+	got := relocateHydrationAfterFirstUser(msgs)
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	if got[0].ID != "u1" || !isHydrationMessage(got[1]) || got[2].ID != "a1" {
+		t.Fatalf("order = %s hyd=%v %s, want user, hydration, work", got[0].ID, isHydrationMessage(got[1]), got[2].ID)
+	}
+	if got[1].ID != hyd.ID {
+		t.Fatalf("checkpoint was rebuilt (id %s → %s); repair must move the existing message", hyd.ID, got[1].ID)
+	}
+}
+
+// TestRelocateHydrationIsNoOpWhenAlreadyAfterUser keeps a correctly parked
+// checkpoint from bouncing around (which would bust the prompt-cache prefix).
+func TestRelocateHydrationIsNoOpWhenAlreadyAfterUser(t *testing.T) {
+	msgs := []domain.Message{
+		{ID: "u1", Role: domain.RoleUser, Content: "halo", Status: domain.StatusDone},
+		hydrationCheckpointMessage(),
+		{ID: "a1", Role: domain.RoleAssistant, Content: "work", Status: domain.StatusDone},
+	}
+	got := relocateHydrationAfterFirstUser(msgs)
+	if len(got) != 3 || got[0].ID != "u1" || !isHydrationMessage(got[1]) || got[2].ID != "a1" {
+		t.Fatalf("correct order must stay put: %+v", got)
+	}
+}
+
 // TestPersistHydrationKeepsRoundTwoPrefixStable verifies the prompt-cache
 // property that motivated the insertion point: once round 1's assistant
 // message is filled in place, the provider prefix up to and including the
@@ -401,5 +479,67 @@ func TestFollowUpUserTurnDoesNotRelocateHydration(t *testing.T) {
 	}
 	if u2Idx >= 0 && hydIdx > u2Idx {
 		t.Fatalf("hydration at %d relocated after u2 at %d; it must stay after u1", hydIdx, u2Idx)
+	}
+}
+
+// TestFreshTurnRepairsHydrationLeadingTheUser is the live shape from an
+// empty-room workspace pick: checkpoint at index 0, then the first user.
+// OpenAI/Claude require user before any assistant/tool turn. The first
+// Stream must persist the repair and send user → hydration.
+func TestFreshTurnRepairsHydrationLeadingTheUser(t *testing.T) {
+	conv := &domain.Conversation{
+		ID: "c_lead_turn",
+		Messages: []domain.Message{
+			hydrationCheckpointMessage(),
+			{ID: "u1", Role: domain.RoleUser, Content: "halo", Status: domain.StatusDone},
+			{ID: "a1", Role: domain.RoleAssistant},
+		},
+	}
+	adapter := &freshTurnStreamAdapter{}
+	settings := domain.DefaultSettings()
+	settings.CompactionEnabled = false
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c_lead_turn": conv}},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		Toolbox:       &recordingToolbox{},
+		Settings:      &fakeSettingsStore{settings: settings},
+		Factory: func(context.Context, *domain.Provider, string) (core.Provider, error) {
+			return adapter, nil
+		},
+		runs: map[string]*TurnRun{},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &TurnRun{ID: "r1", ConversationID: "c_lead_turn", Ctx: ctx, Cancel: cancel}
+	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "a1", false, ModelCapabilities{})
+
+	if len(conv.Messages) < 3 {
+		t.Fatalf("len(Messages) = %d, want user + hydration + assistant", len(conv.Messages))
+	}
+	if conv.Messages[0].ID != "u1" || !isHydrationMessage(conv.Messages[1]) || conv.Messages[2].ID != "a1" {
+		t.Fatalf("repaired transcript order = %s hyd=%v %s, want user, hydration, a1",
+			conv.Messages[0].ID, isHydrationMessage(conv.Messages[1]), conv.Messages[2].ID)
+	}
+	if adapter.first == nil {
+		t.Fatal("first stream was not captured")
+	}
+	msgs := adapter.first.Messages
+	start := 0
+	if len(msgs) > 0 && msgs[0].Role == core.RoleSystem {
+		start = 1
+	}
+	if len(msgs) < start+2 || msgs[start].Role != core.RoleUser || msgs[start+1].Role != core.RoleAssistant {
+		t.Fatalf("first stream prefix after system = %+v, want user then hydration assistant", msgs[start:])
+	}
+	hyd := false
+	for _, b := range msgs[start+1].Blocks {
+		if tc, ok := b.(core.ToolUseBlock); ok && domain.IsHydrationCallID(tc.ID) {
+			hyd = true
+			break
+		}
+	}
+	if !hyd {
+		t.Fatal("message after the user must be the hydration assistant")
 	}
 }

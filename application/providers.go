@@ -29,15 +29,20 @@ func (a *App) providerNameByID(providerID string) string {
 
 func (a *App) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 	caps := domain.KindCaps(p.Kind)
+	driver := p.EffectiveDriver()
+	ttls := domain.CacheTTLsFor(p.Kind, driver)
 	dto := contracts.ProviderDTO{
 		ID:         p.ID,
-		Driver:     string(p.EffectiveDriver()),
+		Driver:     string(driver),
 		Kind:       string(p.Kind),
 		Name:       p.Name,
 		BaseURL:    p.BaseURL,
 		Enabled:    p.Enabled,
-		CacheTTLs:  append([]string(nil), caps.CacheTTLs...),
+		CacheTTLs:  append([]string(nil), ttls...),
 		CacheStyle: caps.PromptCacheStyle,
+	}
+	if len(ttls) > 0 {
+		dto.CacheTTL = domain.NormalizeCacheTTL(p.Kind, driver, p.CacheTTL)
 	}
 	_, hasKey, _ := a.Credentials.Get(p.ID)
 	dto.HasAPIKey = hasKey
@@ -173,6 +178,15 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 	p.BaseURL = baseURL
 	p.Enabled = req.Enabled
 	p.UpdatedAt = time.Now().UTC()
+	if req.CacheTTL != nil {
+		ttl := strings.TrimSpace(*req.CacheTTL)
+		if !domain.ValidCacheTTL(kind, driver, ttl) {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "cache_ttl is not supported for this provider"}
+		}
+		p.CacheTTL = ttl
+	} else if !domain.ValidCacheTTL(kind, driver, p.CacheTTL) {
+		p.CacheTTL = ""
+	}
 
 	if req.APIKey != "" {
 		if err := a.Credentials.Set(p.ID, req.APIKey); err != nil {

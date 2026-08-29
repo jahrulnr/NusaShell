@@ -273,6 +273,9 @@ func (a *App) handleConversationsPickWorkspace(req contracts.ConversationIDReque
 	// the next round.
 	c.Messages = domain.FilterHydrationDomainMessages(c.Messages)
 	if hydrationMsgs := a.buildHydration(c); len(hydrationMsgs) > 0 {
+		// persistHydration no-ops when there is no user yet (empty room);
+		// ensureFreshRoomHydration parks the checkpoint after the opening
+		// user on the first turn.
 		c = a.persistHydration(c, hydrationMsgs)
 	}
 	if err := a.Conversations.Save(c); err != nil {

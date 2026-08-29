@@ -92,6 +92,21 @@ export function mergeProviderRegistry(configured = []) {
   return [...fixed, ...custom];
 }
 
+export function cacheTTLsFor(provider = {}) {
+  if (Array.isArray(provider.cache_ttls) && provider.cache_ttls.length) return provider.cache_ttls;
+  if (provider.kind === 'messages') return ['5m', '1h'];
+  if (provider.kind === 'responses') return ['30m'];
+  if (provider.driver === 'openrouter') return ['5m', '1h'];
+  if (provider.kind === 'chat') return ['30m'];
+  return [];
+}
+
+export function effectiveCacheTTL(provider = {}) {
+  const ttls = cacheTTLsFor(provider);
+  if (provider.cache_ttl && ttls.includes(provider.cache_ttl)) return provider.cache_ttl;
+  return ttls[0] || '';
+}
+
 function providerMeta(provider) {
   const kindMeta = KIND_META[provider.kind] || KIND_META_FALLBACK;
   if (!provider.builtin || !DRIVER_META[provider.driver]) return kindMeta;
@@ -139,16 +154,15 @@ function renderRegistry() {
 }
 
 function renderCacheTTLBadge(p) {
-  const ttls = Array.isArray(p.cache_ttls) ? p.cache_ttls : [];
-  if (!ttls.length) return null;
-  // OpenRouter (chat via OpenRouter): show "5m · 1h · 30m · via upstream"
-  const label = p.id === 'openrouter' ? `${ttls.join(' · ')} · via upstream` : ttls.join(' · ');
+  const selected = effectiveCacheTTL(p);
+  if (!selected) return null;
   const style = p.cache_style || (p.kind === 'messages' ? 'anthropic' : 'openai');
   const title = style === 'anthropic'
-    ? `cache_control TTL: ${ttls.join(', ')} (from OpenAPI spec)`
-    : style === 'openai' && ttls.length === 1 && ttls[0] === '30m'
-      ? 'prompt_cache_options.ttl: 30m (from OpenAPI spec)'
-      : `cache TTLs: ${ttls.join(', ')} (from OpenAPI spec)`;
+    ? `Selected cache_control TTL: ${selected}`
+    : selected === '30m'
+      ? 'Selected prompt_cache_options.ttl: 30m'
+      : `Selected cache TTL: ${selected}`;
+  const label = p.id === 'openrouter' ? `${selected} · via upstream` : selected;
   return el('span', { class: 'provider-cache-ttl', title, text: `cache ${label}` });
 }
 
@@ -206,18 +220,34 @@ async function deleteProvider(provider, event) {
   } catch (err) { toast(err.message, 'error'); }
 }
 
+function providerSaveFields(provider, extra = {}) {
+  return {
+    id: provider.id,
+    driver: provider.driver || undefined,
+    kind: provider.kind,
+    name: provider.name,
+    base_url: provider.base_url,
+    enabled: provider.enabled !== false,
+    ...extra,
+  };
+}
+
+async function saveProviderCacheTTL(provider, ttl) {
+  if (!ttl || ttl === effectiveCacheTTL(provider)) return;
+  try {
+    await rpc('ai.providers.save', providerSaveFields(provider, { cache_ttl: ttl }));
+    toast(`Cache TTL ${ttl}`, 'success');
+    await refresh();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
 async function toggleProvider(provider, event) {
   const toggle = event.currentTarget;
   toggle.disabled = true;
   try {
-    await rpc('ai.providers.save', {
-      id: provider.id,
-      driver: provider.driver || undefined,
-      kind: provider.kind,
-      name: provider.name,
-      base_url: provider.base_url,
-      enabled: toggle.checked,
-    });
+    await rpc('ai.providers.save', providerSaveFields(provider, { enabled: toggle.checked }));
     toast(toggle.checked ? 'Provider enabled' : 'Provider disabled', 'success');
     await refresh();
   } catch (err) {
@@ -236,6 +266,30 @@ function showDetail(id) {
 function backToRegistry() {
   detailId = null;
   renderRegistry();
+}
+
+function renderCacheTTLPicks(p) {
+  const ttls = cacheTTLsFor(p);
+  const selected = effectiveCacheTTL(p);
+  const chips = ttls.map((ttl) => el('button', {
+    class: `provider-cache-ttl-chip${ttl === selected ? ' is-active' : ''}`,
+    type: 'button',
+    text: ttl,
+    dataset: { ttl },
+    'aria-pressed': ttl === selected ? 'true' : 'false',
+    title: `Use prompt cache TTL ${ttl}`,
+  }));
+  const picks = el('dd', { class: 'provider-cache-ttl-picks', id: 'provider-cache-ttl' },
+    ...chips,
+    p.id === 'openrouter' ? el('span', { class: 'provider-cache-ttl-note', text: 'via upstream' }) : null,
+  );
+  picks.querySelectorAll('.provider-cache-ttl-chip').forEach((chip) => {
+    chip.addEventListener('click', (event) => {
+      event.stopPropagation();
+      saveProviderCacheTTL(p, chip.dataset.ttl);
+    });
+  });
+  return picks;
 }
 
 function renderDetail(p) {
@@ -260,13 +314,10 @@ function renderDetail(p) {
       el('div', {}, el('dt', { text: 'Base URL' }), el('dd', { text: p.base_url || '—' })),
       el('div', {}, el('dt', { text: 'API key' }), el('dd', { text: p.has_api_key ? '••••••••' : '—' })),
       el('div', {}, el('dt', { text: 'Status' }), el('dd', { text: p.enabled === false ? 'disabled' : 'enabled' })),
-      ...(Array.isArray(p.cache_ttls) && p.cache_ttls.length
+      ...(cacheTTLsFor(p).length
         ? [el('div', {},
           el('dt', { text: 'Cache TTL' }),
-          el('dd', {},
-            ...p.cache_ttls.map((ttl) => el('span', { class: 'provider-cache-ttl-badge', text: ttl })),
-            p.id === 'openrouter' ? el('span', { class: 'provider-cache-ttl-note', text: ' via upstream' }) : null,
-          ),
+          renderCacheTTLPicks(p),
         )]
         : []),
     ),

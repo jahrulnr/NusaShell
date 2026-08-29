@@ -73,25 +73,12 @@ func ToCoreRequest(req ChatRequest, kind domain.ProviderKind, openRouter bool) *
 		out.Tools = append(out.Tools, tool)
 	}
 	out.ToolChoice = req.ToolChoice
-	if req.PromptCache != nil && req.PromptCache.Mode != "off" {
-		switch kind {
-		case domain.ProviderResponses:
-			if req.PromptCache.Key != "" {
-				out.ProviderOptions = core.ProviderOptions{"prompt_cache_key": req.PromptCache.Key}
-			}
-		}
-	}
+	applyPromptCache(out, req, kind, openRouter)
 	if req.CompactionBlob != "" && kind == domain.ProviderResponses {
-		if out.ProviderOptions == nil {
-			out.ProviderOptions = core.ProviderOptions{}
-		}
-		out.ProviderOptions["compaction_items"] = req.CompactionBlob
+		setProviderOption(out, "compaction_items", req.CompactionBlob)
 	}
 	if req.ContextManagement != nil && kind == domain.ProviderResponses {
-		if out.ProviderOptions == nil {
-			out.ProviderOptions = core.ProviderOptions{}
-		}
-		out.ProviderOptions["context_management"] = req.ContextManagement
+		setProviderOption(out, "context_management", req.ContextManagement)
 	}
 	return out
 }
@@ -129,10 +116,43 @@ func FromCoreResponse(resp *core.Response) ChatResponse {
 }
 
 func cacheControlFor(ttl string) *core.CacheControl {
+	cc := &core.CacheControl{Type: core.CacheTypeEphemeral, TTL: core.CacheTTL5m}
 	if ttl == "1h" {
-		return &core.CacheControl{Type: core.CacheTypeEphemeral, TTL: core.CacheTTL1h}
+		cc.TTL = core.CacheTTL1h
 	}
-	return &core.CacheControl{Type: core.CacheTypeEphemeral}
+	return cc
+}
+
+func applyPromptCache(out *core.Request, req ChatRequest, kind domain.ProviderKind, openRouter bool) {
+	if req.PromptCache == nil || req.PromptCache.Mode == "off" {
+		return
+	}
+	switch kind {
+	case domain.ProviderResponses:
+		if req.PromptCache.Key != "" {
+			setProviderOption(out, "prompt_cache_key", req.PromptCache.Key)
+		}
+		if req.PromptCache.TTL == "30m" {
+			setProviderOption(out, "prompt_cache_options", map[string]any{"ttl": "30m"})
+		}
+	case domain.ProviderChat:
+		if openRouter {
+			return
+		}
+		if req.PromptCache.Key != "" {
+			setProviderOption(out, "prompt_cache_key", req.PromptCache.Key)
+		}
+		if req.PromptCache.TTL == "30m" {
+			setProviderOption(out, "prompt_cache_options", map[string]any{"ttl": "30m"})
+		}
+	}
+}
+
+func setProviderOption(out *core.Request, key string, value any) {
+	if out.ProviderOptions == nil {
+		out.ProviderOptions = core.ProviderOptions{}
+	}
+	out.ProviderOptions[key] = value
 }
 
 func thinkingFromEffort(effort string) *core.Thinking {

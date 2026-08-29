@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend } from './js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots } from './js/views/agent/render.js';
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
   const previousDocument = globalThis.document;
@@ -649,6 +649,61 @@ test('mountLiveRound keeps every live round mounted (no trim, no stub)', () => {
     assert.equal(rounds[0].querySelector('.agent-reasoning')._reasoningRaw, 'think 0');
     assert.equal(bubble._liveRoundArchive, undefined, 'no parking archive');
     assert.ok(current.textBox.closest('.agent-round')?.isConnected, 'newest live round remains mounted');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('optimistic turn reuses a WS-first placeholder instead of painting a second ...', () => {
+  const dom = new JSDOM('<main id="thread"></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const thread = document.getElementById('thread');
+    const bubble = document.createElement('div');
+    bubble.className = 'agent-bubble';
+    const placeholder = document.createElement('div');
+    placeholder.className = 'agent-message assistant agent-pending';
+    placeholder.append(bubble);
+    const slot = mountLiveRound(bubble, {});
+    slot.reasoningEl.hidden = true;
+    slot.textBox.append(thinkingDots());
+    thread.append(placeholder);
+
+    const bound = bindOptimisticTurn(thread, {
+      role: 'user',
+      content: 'gimana menurut mu?',
+      created_at: '2026-08-29T16:05:00Z',
+    }, { msgNode: placeholder, bubble, ...slot });
+
+    const nodes = [...thread.children];
+    assert.equal(nodes.length, 2, 'user then one assistant placeholder');
+    assert.ok(nodes[0].classList.contains('user'));
+    assert.ok(nodes[1].classList.contains('assistant'));
+    assert.equal(thread.querySelectorAll('.agent-thinking-dots').length, 1);
+    assert.equal(bound.msgNode, placeholder);
+    assert.equal(nodes[1], placeholder);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('optimistic turn appends user then a single placeholder when WS has not arrived', () => {
+  const dom = new JSDOM('<main id="thread"></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const thread = document.getElementById('thread');
+    bindOptimisticTurn(thread, {
+      role: 'user',
+      content: 'hello',
+      created_at: '2026-08-29T16:05:00Z',
+    });
+    const nodes = [...thread.children];
+    assert.equal(nodes.length, 2);
+    assert.ok(nodes[0].classList.contains('user'));
+    assert.ok(nodes[1].classList.contains('agent-pending'));
+    assert.equal(thread.querySelectorAll('.agent-thinking-dots').length, 1);
   } finally {
     globalThis.document = previousDocument;
   }

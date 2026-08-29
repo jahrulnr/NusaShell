@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { BUILTIN_PROVIDERS, mergeProviderRegistry } from './js/views/providers.js';
+import { BUILTIN_PROVIDERS, cacheTTLsFor, effectiveCacheTTL, mergeProviderRegistry } from './js/views/providers.js';
 
 test('provider registry keeps the three built-in provider cards visible', () => {
   const providers = mergeProviderRegistry([]);
@@ -42,4 +42,14 @@ test('provider registry preserves custom providers and selected API kinds', () =
   assert.equal(providers[3].id, 'custom_1');
   assert.equal(providers[3].kind, 'messages');
   assert.equal(providers[3].driver, 'openrouter');
+});
+
+test('cache TTL chips use sendable values and keep a selected default', () => {
+  assert.deepEqual(cacheTTLsFor({ kind: 'messages', driver: 'anthropic' }), ['5m', '1h']);
+  assert.deepEqual(cacheTTLsFor({ kind: 'responses', driver: 'openai' }), ['30m']);
+  assert.deepEqual(cacheTTLsFor({ kind: 'chat', driver: 'openrouter' }), ['5m', '1h']);
+  assert.deepEqual(cacheTTLsFor({ kind: 'chat', driver: 'openai' }), ['30m']);
+  assert.equal(effectiveCacheTTL({ kind: 'messages', driver: 'anthropic' }), '5m');
+  assert.equal(effectiveCacheTTL({ kind: 'messages', driver: 'anthropic', cache_ttl: '1h' }), '1h');
+  assert.equal(effectiveCacheTTL({ kind: 'responses', driver: 'openai' }), '30m');
 });

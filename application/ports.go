@@ -345,7 +345,9 @@ type PromptCachePolicy struct {
 	// Mode: "auto" (default) or "off". "off" disables caching even when
 	// the provider supports it.
 	Mode string
-	// TTL: "5m" (default) or "1h". Anthropic supports 1h; OpenAI ignores it.
+	// TTL is the provider cache duration: "5m", "1h", or "30m".
+	// Anthropic and OpenRouter cache_control use 5m/1h; OpenAI Responses
+	// and OpenAI-compatible Chat send 30m as prompt_cache_options.ttl.
 	TTL string
 	// Key is a stable routing key sent to OpenAI-compatible providers as
 	// prompt_cache_key so they can dedup cache entries across requests in

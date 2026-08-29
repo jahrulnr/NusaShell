@@ -24,7 +24,7 @@ View title plus Add custom provider (unlimited OpenRouter-compatible gateways) a
 
 ## Chat providers
 
-The registry always shows persistent Anthropic, OpenAI, and OpenRouter cards, even before configuration. Anthropic uses the Anthropic Messages driver; OpenAI uses the OpenAI Responses driver; OpenRouter and custom providers use the OpenRouter driver. OpenRouter and custom forms expose Messages, Responses, and Chat API kinds. Selecting a card opens the detail pane for editing its base URL, API key, enabled state, importing models, and testing connectivity. These models appear in the Agent composer.
+The registry always shows persistent Anthropic, OpenAI, and OpenRouter cards, even before configuration. Anthropic uses the Anthropic Messages driver; OpenAI uses the OpenAI Responses driver; OpenRouter and custom providers use the OpenRouter driver. OpenRouter and custom forms expose Messages, Responses, and Chat API kinds. Selecting a card opens the detail pane for editing its base URL, API key, enabled state, prompt-cache TTL, importing models, and testing connectivity. These models appear in the Agent composer.
 
 - **Chat providers section** (`#provider-llm-section`):
   - Section: Providers
@@ -38,7 +38,13 @@ The registry always shows persistent Anthropic, OpenAI, and OpenRouter cards, ev
 - **Provider detail** (`#provider-detail`):
   - Section: Providers
   - Type: container
-  - Notes: Edit form for the selected provider.
+  - Notes: Edit form for the selected provider, including selectable prompt-cache TTL chips.
+
+- **Prompt cache TTL** (`.provider-cache-ttl-chip`):
+  - Section: Providers
+  - Type: chip-group
+  - Action: Selects the prompt-cache duration sent to this provider when Settings prompt caching is on. Messages and OpenRouter chat offer 5m/1h; Responses and other Chat hosts offer 30m.
+  - Notes: Buttons inside the provider detail pane (class provider-cache-ttl-chip). The registry card shows the selected value only.
 
 ## ACP subagents
 

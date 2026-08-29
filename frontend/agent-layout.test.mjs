@@ -136,6 +136,12 @@ test('Live compaction does not append a marker at the thread tail, and a new rou
   assert.match(agentView, /applyLiveCompaction/);
   assert.match(agentView, /stampRunMessageId/);
   assert.match(agentView, /reusePlaceholder/);
+  // turns.start HTTP vs agent.turn.started WS: queue the event while the
+  // composer is in-flight, then bind one placeholder (never dots-user-dots).
+  assert.match(agentView, /localTurnPending/);
+  assert.match(agentView, /bindOptimisticTurn/);
+  assert.match(agentRender, /export function bindOptimisticTurn/);
+  assert.match(agentComposer, /state\.localTurnPending = true/);
 });
 
 test('Steer application seals old dots and anchors the next round after the user bubble', () => {

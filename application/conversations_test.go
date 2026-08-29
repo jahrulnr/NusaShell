@@ -257,6 +257,35 @@ func TestHandleConversationsPickWorkspaceAcceptsAbsolutePath(t *testing.T) {
 	}
 }
 
+// TestHandleConversationsPickWorkspaceEmptyRoomDoesNotInsertHydration pins
+// that picking a workspace before the first user must not persist a
+// checkpoint at index 0. The first turn's ensureFreshRoomHydration parks it
+// after the user so OpenAI/Claude see system → user → hydration.
+func TestHandleConversationsPickWorkspaceEmptyRoomDoesNotInsertHydration(t *testing.T) {
+	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
+		"conv_1": {ID: "conv_1", Title: "Test"},
+	}}
+	workspace := t.TempDir()
+	app := &App{
+		Conversations: convStore,
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		Toolbox:       &recordingToolbox{},
+		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
+			return workspace, nil
+		}),
+	}
+	if _, rpcErr := app.handleConversationsPickWorkspace(contracts.ConversationIDRequest{ID: "conv_1"}); rpcErr != nil {
+		t.Fatalf("pick workspace: %v", rpcErr)
+	}
+	saved := convStore.convs["conv_1"]
+	for _, m := range saved.Messages {
+		if isHydrationMessage(m) {
+			t.Fatalf("empty room persisted hydration before any user: %+v", m)
+		}
+	}
+}
+
 // TestHandleConversationsPickWorkspaceInvalidatesHydration pins the
 // workspace-switch epoch reset: a persisted hydration checkpoint (stale
 // runtime_context + AGENTS.md for the OLD workspace) is stripped when the

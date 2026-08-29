@@ -618,6 +618,9 @@ type ProviderDTO struct {
 	// spec (or SDK fallback). Empty when the provider kind has no caching.
 	CacheTTLs  []string `json:"cache_ttls,omitempty"`
 	CacheStyle string   `json:"cache_style,omitempty"` // "anthropic" | "openai" | ""
+	// CacheTTL is the selected prompt-cache duration for this provider.
+	// Empty in the store means the first advertised cache_ttls value.
+	CacheTTL string `json:"cache_ttl,omitempty"`
 }
 
 type ProvidersListResult struct {
@@ -632,6 +635,9 @@ type ProviderSaveRequest struct {
 	BaseURL string `json:"base_url,omitempty"`
 	APIKey  string `json:"api_key,omitempty"`
 	Enabled bool   `json:"enabled"`
+	// CacheTTL is the selected prompt-cache duration. Omitted on update
+	// preserves the stored value; invalid values are rejected.
+	CacheTTL *string `json:"cache_ttl,omitempty"`
 }
 
 type ProviderIDRequest struct {

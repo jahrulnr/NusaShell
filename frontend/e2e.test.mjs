@@ -668,6 +668,27 @@ function hydrationSlotNames(hydration) {
   return hydration.calls.map((c) => c.function?.name);
 }
 
+// assertUserBeforeHydration pins OpenAI/Claude message order: after any
+// system prompt, the first user must precede the hydration assistant+tools.
+function assertUserBeforeHydration(messages, label) {
+  let firstUser = -1;
+  let hydAsst = -1;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (firstUser < 0 && m.role === 'user') firstUser = i;
+    if (hydAsst < 0 && m.role === 'assistant' && Array.isArray(m.tool_calls)
+        && m.tool_calls.some((c) => c.id?.startsWith('hydrate-'))) {
+      hydAsst = i;
+    }
+  }
+  assert.ok(firstUser >= 0, `${label}: request must contain a user message`);
+  assert.ok(hydAsst >= 0, `${label}: request must contain the hydration assistant`);
+  assert.ok(
+    hydAsst > firstUser,
+    `${label}: hydration assistant at index ${hydAsst} must follow first user at ${firstUser}`,
+  );
+}
+
 // HYDR-NEW-ROOM: A brand-new conversation's first turn must inject the
 // runtime-hydration transcript (dynamic: only slots with real content) into
 // the provider request. The transcript is ephemeral — never persisted — so
@@ -756,6 +777,7 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
     const lastStream = streamingReqs[streamingReqs.length - 1];
     const hydration = findHydration(lastStream.body.messages);
     assert.ok(hydration, 'HYDR-NEW-ROOM: hydration transcript must be present in the first turn request');
+    assertUserBeforeHydration(lastStream.body.messages, 'HYDR-NEW-ROOM');
 
     // Dynamic transcript: this harness has no plugins and no todos, so the
     // mcp_list / tool_list / todo_list slots are hidden. Seeded primary
@@ -949,6 +971,7 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
       hydration,
       'HYDR-POST-COMPACTION: hydration transcript must be re-injected after compaction',
     );
+    assertUserBeforeHydration(lastStream.body.messages, 'HYDR-POST-COMPACTION');
 
     // Dynamic transcript (see HYDR-NEW-ROOM): mcp/tool/todo slots are
     // hidden in this harness; memory + skill survive.

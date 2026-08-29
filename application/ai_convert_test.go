@@ -356,3 +356,78 @@ func TestToCoreRequestOmitsCompactionItemsForChatKind(t *testing.T) {
 		t.Fatal("compaction_items must not be set for chat kind")
 	}
 }
+
+func TestToCoreRequestMessagesCacheControlUsesTTL(t *testing.T) {
+	req := ChatRequest{
+		Model:         "claude-sonnet-4-6",
+		System:        "you are helpful",
+		PromptCaching: true,
+		PromptCache:   &PromptCachePolicy{Mode: "auto", TTL: "1h", Key: "pc_unused"},
+	}
+	cr := ToCoreRequest(req, domain.ProviderMessages, false)
+	if len(cr.Messages) == 0 {
+		t.Fatal("expected system message")
+	}
+	tb, ok := cr.Messages[0].Blocks[0].(core.TextBlock)
+	if !ok || tb.Cache == nil || tb.Cache.TTL != core.CacheTTL1h {
+		t.Fatalf("system cache = %#v, want ttl 1h", cr.Messages[0].Blocks)
+	}
+	if cr.ProviderOptions["prompt_cache_key"] != nil {
+		t.Fatal("messages kind must not send prompt_cache_key")
+	}
+}
+
+func TestToCoreRequestResponsesSendsPromptCacheOptions(t *testing.T) {
+	req := ChatRequest{
+		Model:          "gpt-5",
+		System:         "you are helpful",
+		PromptCaching:  true,
+		PromptCache:    &PromptCachePolicy{Mode: "auto", TTL: "30m", Key: "pc_abc"},
+		CompactionBlob: `[{"type":"compaction"}]`,
+	}
+	cr := ToCoreRequest(req, domain.ProviderResponses, false)
+	if got := cr.ProviderOptions["prompt_cache_key"]; got != "pc_abc" {
+		t.Fatalf("prompt_cache_key = %#v", got)
+	}
+	opts, ok := cr.ProviderOptions["prompt_cache_options"].(map[string]any)
+	if !ok || opts["ttl"] != "30m" {
+		t.Fatalf("prompt_cache_options = %#v, want ttl 30m", cr.ProviderOptions["prompt_cache_options"])
+	}
+	if got := cr.ProviderOptions["compaction_items"]; got != `[{"type":"compaction"}]` {
+		t.Fatalf("compaction_items dropped when merging cache options: %#v", got)
+	}
+}
+
+func TestToCoreRequestChatSendsPromptCacheKey(t *testing.T) {
+	req := ChatRequest{
+		Model:         "gpt-5",
+		System:        "you are helpful",
+		PromptCaching: true,
+		PromptCache:   &PromptCachePolicy{Mode: "auto", TTL: "30m", Key: "pc_chat"},
+	}
+	cr := ToCoreRequest(req, domain.ProviderChat, false)
+	if got := cr.ProviderOptions["prompt_cache_key"]; got != "pc_chat" {
+		t.Fatalf("chat prompt_cache_key = %#v", got)
+	}
+	opts, ok := cr.ProviderOptions["prompt_cache_options"].(map[string]any)
+	if !ok || opts["ttl"] != "30m" {
+		t.Fatalf("chat prompt_cache_options = %#v, want ttl 30m", cr.ProviderOptions["prompt_cache_options"])
+	}
+}
+
+func TestToCoreRequestOpenRouterChatDoesNotSendPromptCacheKey(t *testing.T) {
+	req := ChatRequest{
+		Model:         "anthropic/claude-sonnet-4",
+		System:        "you are helpful",
+		PromptCaching: true,
+		PromptCache:   &PromptCachePolicy{Mode: "auto", TTL: "1h", Key: "pc_or"},
+	}
+	cr := ToCoreRequest(req, domain.ProviderChat, true)
+	if _, ok := cr.ProviderOptions["prompt_cache_key"]; ok {
+		t.Fatal("OpenRouter chat must not send OpenAI prompt_cache_key")
+	}
+	tb, ok := cr.Messages[0].Blocks[0].(core.TextBlock)
+	if !ok || tb.Cache == nil || tb.Cache.TTL != core.CacheTTL1h {
+		t.Fatalf("openrouter system cache = %#v, want ttl 1h", cr.Messages[0].Blocks)
+	}
+}
