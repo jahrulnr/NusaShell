@@ -10,6 +10,8 @@ const appShell = await readFile(new URL('./js/app.js', import.meta.url), 'utf8')
 const agentRender = await readFile(new URL('./js/views/agent/render.js', import.meta.url), 'utf8');
 const agentComposer = await readFile(new URL('./js/views/agent/composer.js', import.meta.url), 'utf8');
 const agentModelPicker = await readFile(new URL('./js/views/agent/model-picker.js', import.meta.url), 'utf8');
+const subagentsView = await readFile(new URL('./js/views/agent/subagents.js', import.meta.url), 'utf8');
+const acpCSS = await readFile(new URL('./styles/acp.css', import.meta.url), 'utf8');
 
 test('Agent uses the Electron workspace shell without unsupported Todo UI', () => {
   assert.match(html, /class="agent-shell" id="agent-shell"/);
@@ -104,6 +106,14 @@ test('Agent delegates presentation, composer, and model picker responsibilities 
   assert.match(agentModelPicker, /export function bindModelPicker/);
 });
 
+test('Subagent drawer reuses the conversation sidebar design', () => {
+  assert.match(subagentsView, /class: 'agent-conversations acp-run-sidebar'/);
+  assert.match(subagentsView, /class: 'agent-conversation-list acp-run-list'/);
+  assert.match(subagentsView, /class: `agent-conversation-item/);
+  assert.doesNotMatch(subagentsView, /acp-run-switcher|acp-run-switch'/);
+  assert.match(acpCSS, /\.acp-drawer-shell \{[^}]*grid-template-columns:/s);
+});
+
 test('Thinking and tool markers share the same conversation rail', () => {
   assert.match(parityCSS, /\.agent-reasoning summary \{[^}]*margin-left: -12px;/s);
   assert.match(parityCSS, /\.agent-tool-terminal summary \{[^}]*margin-left: -12px;/s);
@@ -126,6 +136,19 @@ test('Live compaction does not append a marker at the thread tail, and a new rou
   assert.match(agentView, /applyLiveCompaction/);
   assert.match(agentView, /stampRunMessageId/);
   assert.match(agentView, /reusePlaceholder/);
+});
+
+test('Steer application seals old dots and anchors the next round after the user bubble', () => {
+  assert.match(agentView, /sealLiveNodeBeforeSteer/);
+  assert.match(agentView, /nextRoundAnchor/);
+  assert.match(agentView, /deferredRoundStart/);
+  assert.match(agentView, /insertAfterOrAppend/);
+  assert.match(agentView, /conversation_id === state\.activeId\s*&& state\.steerDraft/);
+  assert.match(agentView, /awaitingSteerRound: hasSteerAfterMessage\(active\.message_id\)/);
+  assert.match(agentView, /run\.nextRoundAnchor \|\| run\.deferredRoundStart \|\| run\.awaitingSteerRound/);
+  assert.match(agentView, /conversation_id !== state\.activeId\) \{\s*run\.nextRoundAnchor = null;\s*run\.awaitingSteerRound = false;/);
+  assert.match(agentView, /clearSavedSteerQueue\(conversation_id\)/);
+  assert.doesNotMatch(agentView, /Create a new assistant placeholder for the next round/);
 });
 
 test('Agent todo strip has race protection via render token and event filtering', () => {

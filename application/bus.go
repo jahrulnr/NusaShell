@@ -117,9 +117,19 @@ func isCriticalBusEvent(typ string) bool {
 	case contracts.EventTurnStarted,
 		contracts.EventTurnDone,
 		contracts.EventTurnError,
+		contracts.EventToolCompleted,
+		contracts.EventSteerQueued,
+		contracts.EventSteerApplied,
+		contracts.EventSteerCancelled,
+		contracts.EventAskPending,
+		contracts.EventAskAnswered,
+		contracts.EventAskCancelled,
 		contracts.EventCompacted,
 		contracts.EventCompactionFailed,
-		contracts.EventAutoContinue:
+		contracts.EventAutoContinue,
+		contracts.EventAcpRunDone,
+		contracts.EventAcpPermissionRequested,
+		contracts.EventAcpPermissionDecided:
 		return true
 	default:
 		return false

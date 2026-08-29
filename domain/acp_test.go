@@ -283,6 +283,23 @@ func TestAcpRunLiveAndTranscriptCap(t *testing.T) {
 	}
 }
 
+func TestAppendTranscriptCapsSingleMergedStreamingChunk(t *testing.T) {
+	run := &AcpRun{}
+	run.AppendTranscript(AcpTranscriptChunk{Kind: "text", Text: strings.Repeat("x", MaxAcpTranscriptBytes)})
+	run.AppendTranscript(AcpTranscriptChunk{Kind: "text", Text: "latest-tail"})
+
+	if len(run.Transcript) != 1 {
+		t.Fatalf("transcript len = %d, want one merged chunk", len(run.Transcript))
+	}
+	text := run.Transcript[0].Text
+	if len(text) > MaxAcpTranscriptBytes {
+		t.Fatalf("merged text exceeds cap: %d > %d", len(text), MaxAcpTranscriptBytes)
+	}
+	if !strings.HasSuffix(text, "latest-tail") {
+		t.Fatalf("merged cap dropped newest stream tail: %q", text[len(text)-32:])
+	}
+}
+
 // TestAppendTranscriptMergesConsecutiveTextChunks verifies that streaming
 // agent_message_chunk updates (often one char/token each) are merged into a
 // single text chunk so the UI does not render one line per delta.
@@ -315,6 +332,42 @@ func TestAppendTranscriptMergesConsecutiveTextChunks(t *testing.T) {
 		if w.text != "" && r.Transcript[i].Text != w.text {
 			t.Fatalf("chunk %d text = %q, want %q", i, r.Transcript[i].Text, w.text)
 		}
+	}
+}
+
+func TestAppendTranscriptUsageDoesNotSplitStreamingThought(t *testing.T) {
+	r := &AcpRun{}
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "thought", Text: "The"})
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "usage", Text: "1/100"})
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "thought", Text: " task"})
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "usage", Text: "2/100"})
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "thought", Text: " description"})
+
+	if len(r.Transcript) != 2 {
+		t.Fatalf("transcript len = %d, want thought + latest usage: %+v", len(r.Transcript), r.Transcript)
+	}
+	if got := r.Transcript[0]; got.Kind != "thought" || got.Text != "The task description" {
+		t.Fatalf("thought chunk = %+v", got)
+	}
+	if got := r.Transcript[1]; got.Kind != "usage" || got.Text != "2/100" {
+		t.Fatalf("usage chunk = %+v", got)
+	}
+}
+
+func TestAppendTranscriptUpdatesToolCallByID(t *testing.T) {
+	r := &AcpRun{}
+	r.AppendTranscript(AcpTranscriptChunk{
+		Kind: "tool", ToolID: "tool-1", ToolTitle: "Read file", ToolKind: "read", ToolStatus: "in_progress",
+	})
+	r.AppendTranscript(AcpTranscriptChunk{
+		Kind: "tool", ToolID: "tool-1", ToolTitle: "Read file", ToolKind: "read", ToolStatus: "completed",
+	})
+
+	if len(r.Transcript) != 1 {
+		t.Fatalf("transcript len = %d, want one updated tool chunk: %+v", len(r.Transcript), r.Transcript)
+	}
+	if got := r.Transcript[0]; got.ToolStatus != "completed" {
+		t.Fatalf("tool status = %q, want completed", got.ToolStatus)
 	}
 }
 

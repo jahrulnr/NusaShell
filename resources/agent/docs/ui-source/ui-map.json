@@ -122,7 +122,7 @@
         {
           "heading": "ACP subagent dock",
           "paragraphs": [
-            "Appears above the composer when ACP subagents are live (or recently finished in this room). Each chip opens the right-hand drawer; the peek control opens a popup for one run. Drawer and popup support steer, stop, mode changes, and risk promotion. Permission prompts use a global overlay that stays visible across views."
+            "Appears above the composer when ACP subagents are live (or recently finished in this room). Each chip opens the right-hand drawer; the peek control opens a popup for one run."
           ],
           "controls": [
             "acp-dock",
@@ -136,7 +136,7 @@
         {
           "heading": "ACP live views",
           "paragraphs": [
-            "The drawer lists every live spawn so you can switch between parallel subagents. The peek popup focuses one run. The permission overlay is fail-closed: timeout denies. Allow once, allow for this session, or deny."
+            "The drawer reuses the conversation-pane layout: subagent runs are listed in a left sidebar and the selected transcript fills the right pane. Growing text and reasoning chunks update in place, tool updates stay on one row, and token usage appears as run metadata instead of transcript noise. The peek popup focuses one run."
           ],
           "controls": [
             "acp-drawer-overlay",
@@ -168,7 +168,7 @@
         {
           "heading": "Steer queue",
           "paragraphs": [
-            "When a user sends a steer message mid-turn, it is queued here and applied at the next safe tool-round boundary."
+            "When a user sends a steer message mid-turn, it is queued here and applied at the next safe tool-round boundary. Once applied, the user bubble anchors the next assistant round: stale waiting dots from the completed round are removed and exactly one new waiting round appears after the user bubble."
           ],
           "controls": [
             "agent-steer-queue",
@@ -1899,7 +1899,7 @@
       "label": "ACP subagent drawer",
       "section": "Agent",
       "type": "drawer",
-      "notes": "Wider than the plugin drawer so a live transcript, steer box, and mode chips fit."
+      "notes": "Uses the Agent conversation-pane pattern with a run sidebar and a live transcript pane."
     },
     "acp-drawer-close": {
       "label": "Close ACP drawer",

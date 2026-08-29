@@ -133,9 +133,11 @@ type App struct {
 
 	Automation *Automation
 
-	runsMu  sync.Mutex
-	runs    map[string]*TurnRun
-	startMu sync.Mutex
+	runsMu              sync.Mutex
+	runs                map[string]*TurnRun
+	startMu             sync.Mutex
+	conversationTurnsMu sync.Mutex
+	conversationTurns   map[string]*sync.Mutex
 
 	// pendingSubagents tracks active (not-yet-completed) ACP subagent run
 	// IDs per conversation. Used to implement HasBackgroundJobs: while any
@@ -217,6 +219,20 @@ func (a *App) rootMutationLock(root string) *sync.Mutex {
 		a.journalRoots[root] = mu
 	}
 	return mu
+}
+
+func (a *App) conversationTurnLock(conversationID string) *sync.Mutex {
+	a.conversationTurnsMu.Lock()
+	defer a.conversationTurnsMu.Unlock()
+	if a.conversationTurns == nil {
+		a.conversationTurns = map[string]*sync.Mutex{}
+	}
+	lock, ok := a.conversationTurns[conversationID]
+	if !ok {
+		lock = &sync.Mutex{}
+		a.conversationTurns[conversationID] = lock
+	}
+	return lock
 }
 
 // journalArchiver is the optional lifecycle extension a ChangeJournal may
@@ -571,7 +587,7 @@ func NewApp(deps Deps) *App {
 			func(run *domain.AcpRun) { app.emitAcpRun(contracts.EventAcpRunUpdated, run) },
 			func(run *domain.AcpRun) {
 				app.emitAcpRun(contracts.EventAcpRunDone, run)
-				app.onAcpRunDone(run)
+				app.goSafe("acp", func() { app.onAcpRunDone(run) })
 			},
 			func(run *domain.AcpRun, req domain.AcpPermissionRequest) {
 				app.emitAcpRun(contracts.EventAcpRunUpdated, run)

@@ -356,11 +356,17 @@ func SamplePermissionPaths(paths []string) []string {
 // streaming agent_message_chunk updates (often one char/token each) do not
 // produce one transcript line per delta.
 func (r *AcpRun) AppendTranscript(chunk AcpTranscriptChunk) {
-	if (chunk.Kind == "text" || chunk.Kind == "thought") && len(r.Transcript) > 0 {
-		last := &r.Transcript[len(r.Transcript)-1]
-		if last.Kind == chunk.Kind {
-			last.Text += chunk.Text
-			r.trimTranscriptCap()
+	switch chunk.Kind {
+	case "text", "thought":
+		if r.mergeStreamingChunk(chunk) {
+			return
+		}
+	case "usage":
+		if r.replaceTranscriptChunk("usage", "", chunk) {
+			return
+		}
+	case "tool":
+		if chunk.ToolID != "" && r.replaceTranscriptChunk("tool", chunk.ToolID, chunk) {
 			return
 		}
 	}
@@ -368,18 +374,95 @@ func (r *AcpRun) AppendTranscript(chunk AcpTranscriptChunk) {
 	r.trimTranscriptCap()
 }
 
+func (r *AcpRun) mergeStreamingChunk(chunk AcpTranscriptChunk) bool {
+	lastContent := len(r.Transcript) - 1
+	for lastContent >= 0 && r.Transcript[lastContent].Kind == "usage" {
+		lastContent--
+	}
+	if lastContent < 0 || r.Transcript[lastContent].Kind != chunk.Kind {
+		return false
+	}
+	r.Transcript[lastContent].Text += chunk.Text
+	if !chunk.At.IsZero() {
+		r.Transcript[lastContent].At = chunk.At
+	}
+	r.trimTranscriptCap()
+	return true
+}
+
+func (r *AcpRun) replaceTranscriptChunk(kind, toolID string, chunk AcpTranscriptChunk) bool {
+	for i := len(r.Transcript) - 1; i >= 0; i-- {
+		existing := &r.Transcript[i]
+		if existing.Kind != kind || (toolID != "" && existing.ToolID != toolID) {
+			continue
+		}
+		if kind == "tool" {
+			mergeToolTranscript(existing, chunk)
+		} else {
+			*existing = chunk
+		}
+		r.trimTranscriptCap()
+		return true
+	}
+	return false
+}
+
+func mergeToolTranscript(existing *AcpTranscriptChunk, update AcpTranscriptChunk) {
+	if update.Text != "" {
+		existing.Text = update.Text
+	}
+	if update.ToolTitle != "" {
+		existing.ToolTitle = update.ToolTitle
+	}
+	if update.ToolKind != "" {
+		existing.ToolKind = update.ToolKind
+	}
+	if update.ToolStatus != "" {
+		existing.ToolStatus = update.ToolStatus
+	}
+	if !update.At.IsZero() {
+		existing.At = update.At
+	}
+}
+
 // trimTranscriptCap drops chunks from the front until the total text size is
 // under MaxAcpTranscriptBytes.
 func (r *AcpRun) trimTranscriptCap() {
 	total := 0
 	for _, c := range r.Transcript {
-		total += utf8.RuneCountInString(c.Text) + utf8.RuneCountInString(c.ToolTitle)
+		total += transcriptChunkSize(c)
 	}
 	for total > MaxAcpTranscriptBytes && len(r.Transcript) > 1 {
 		dropped := r.Transcript[0]
-		total -= utf8.RuneCountInString(dropped.Text) + utf8.RuneCountInString(dropped.ToolTitle)
+		total -= transcriptChunkSize(dropped)
 		r.Transcript = r.Transcript[1:]
 	}
+	if total <= MaxAcpTranscriptBytes || len(r.Transcript) == 0 {
+		return
+	}
+	chunk := &r.Transcript[0]
+	titleSize := utf8.RuneCountInString(chunk.ToolTitle)
+	if titleSize >= MaxAcpTranscriptBytes {
+		chunk.ToolTitle = runeTail(chunk.ToolTitle, MaxAcpTranscriptBytes)
+		chunk.Text = ""
+		return
+	}
+	chunk.Text = runeTail(chunk.Text, MaxAcpTranscriptBytes-titleSize)
+}
+
+func transcriptChunkSize(chunk AcpTranscriptChunk) int {
+	return utf8.RuneCountInString(chunk.Text) + utf8.RuneCountInString(chunk.ToolTitle)
+}
+
+func runeTail(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[len(runes)-limit:])
 }
 
 // Live reports whether the run still occupies a process/session.

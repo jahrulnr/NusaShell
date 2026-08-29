@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -431,6 +432,14 @@ func (a *App) handleAcpRunsStop(req contracts.AcpRunIDRequest) (any, *contracts.
 }
 
 func (a *App) handleAcpRunsWait(req contracts.AcpRunWaitRequest) (any, *contracts.RPCError) {
+	run, rpcErr := a.waitAcpRun(context.Background(), req)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	return acpRunDTO(run), nil
+}
+
+func (a *App) waitAcpRun(parent context.Context, req contracts.AcpRunWaitRequest) (*domain.AcpRun, *contracts.RPCError) {
 	_, rt, rpcErr := a.acpRun(req.ID)
 	if rpcErr != nil {
 		return nil, rpcErr
@@ -439,16 +448,25 @@ func (a *App) handleAcpRunsWait(req contracts.AcpRunWaitRequest) (any, *contract
 	if req.TimeoutMS > 0 {
 		timeout = time.Duration(req.TimeoutMS) * time.Millisecond
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	run, err := rt.Wait(ctx, req.ID)
+	if err != nil {
+		if parentErr := parent.Err(); parentErr != nil {
+			return nil, rpcInternal(parentErr)
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			return nil, rpcInternal(err)
+		}
+	}
 	if run == nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+		message := "acp run not found"
+		if err != nil {
+			message = err.Error()
+		}
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: message}
 	}
-	if err != nil && ctx.Err() != nil {
-		return acpRunDTO(run), nil
-	}
-	return acpRunDTO(run), nil
+	return run, nil
 }
 
 func (a *App) handleAcpRunsPromote(req contracts.AcpRunPromoteRequest) (any, *contracts.RPCError) {
@@ -712,12 +730,12 @@ func (a *App) WaitAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
 	if err := json.Unmarshal(argsJSON, &args); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
-	res, rpcErr := a.handleAcpRunsWait(contracts.AcpRunWaitRequest{ID: args.ID, TimeoutMS: args.TimeoutMS})
+	run, rpcErr := a.waitAcpRun(ctx, contracts.AcpRunWaitRequest{ID: args.ID, TimeoutMS: args.TimeoutMS})
 	if rpcErr != nil {
 		return "", fmt.Errorf("%s", rpcErr.Message)
 	}
-	b, _ := yaml.Marshal(res)
-	return "---\n" + strings.TrimRight(string(b), "\n") + "\n---", nil
+	outputPath := a.persistAcpRun(run)
+	return domain.SubagentCompletionResult(run, outputPath), nil
 }
 
 func (a *App) EnabledAcpAgents() []*domain.AcpAgent {
@@ -746,37 +764,10 @@ func (a *App) onAcpRunDone(run *domain.AcpRun) {
 		return
 	}
 
-	// 1. Persist the full transcript to JSONL storage.
-	outputPath := ""
-	if a.AcpRunStorage != nil {
-		record := domain.AcpRunRecord{
-			ID:               run.ID,
-			AgentID:          run.AgentID,
-			AgentName:        run.AgentName,
-			ConversationID:   run.ConversationID,
-			ParentToolCallID: run.ParentToolCallID,
-			Workspace:        run.Workspace,
-			Prompt:           run.Prompt,
-			Status:           run.Status,
-			ModelID:          run.CurrentModelID,
-			RiskTier:         run.RiskTier,
-			StopReason:       run.StopReason,
-			Error:            run.Error,
-			Transcript:       run.Transcript,
-			StartedAt:        run.StartedAt,
-			EndedAt:          run.EndedAt,
-		}
-		if err := a.AcpRunStorage.Save(record); err != nil {
-			a.log("error", "acp", "failed to persist run %s: %v", run.ID, err)
-		} else {
-			outputPath = a.AcpRunStorage.Path(run.ConversationID, run.ID)
-		}
-	}
+	// 1. Persist the full transcript.
+	outputPath := a.persistAcpRun(run)
 
-	// 2. Untrack the pending subagent.
-	wasPending := a.untrackPendingSubagent(run.ConversationID, run.ID)
-
-	// 3. Update the original `subagent` tool call to a brief terminal
+	// 2. Update the original `subagent` tool call to a brief terminal
 	// status (the full result travels in the synthetic subagent_result
 	// tool call below, so old history is not silently rewritten) and
 	// inject the synthetic subagent_result message carrying the full
@@ -790,6 +781,11 @@ func (a *App) onAcpRunDone(run *domain.AcpRun) {
 		a.completeSubagentRun(run.ConversationID, run.ParentToolCallID, status, run, outputPath)
 	}
 
+	// 3. Untrack only after the result is persisted. While completion waits
+	// for an active parent turn to release the conversation, the pending flag
+	// prevents that turn from auto-continuing without the subagent result.
+	wasPending := a.untrackPendingSubagent(run.ConversationID, run.ID)
+
 	// 4. Trigger a new parent-agent turn (tool injection). Only trigger
 	// if this run was pending (not already completed) and no turn is
 	// currently active for the conversation — the agent loop will pick
@@ -799,6 +795,34 @@ func (a *App) onAcpRunDone(run *domain.AcpRun) {
 	}
 }
 
+func (a *App) persistAcpRun(run *domain.AcpRun) string {
+	if run == nil || run.Live() || a.AcpRunStorage == nil {
+		return ""
+	}
+	record := domain.AcpRunRecord{
+		ID:               run.ID,
+		AgentID:          run.AgentID,
+		AgentName:        run.AgentName,
+		ConversationID:   run.ConversationID,
+		ParentToolCallID: run.ParentToolCallID,
+		Workspace:        run.Workspace,
+		Prompt:           run.Prompt,
+		Status:           run.Status,
+		ModelID:          run.CurrentModelID,
+		RiskTier:         run.RiskTier,
+		StopReason:       run.StopReason,
+		Error:            run.Error,
+		Transcript:       run.Transcript,
+		StartedAt:        run.StartedAt,
+		EndedAt:          run.EndedAt,
+	}
+	if err := a.AcpRunStorage.Save(record); err != nil {
+		a.log("error", "acp", "failed to persist run %s: %v", run.ID, err)
+		return ""
+	}
+	return a.AcpRunStorage.Path(run.ConversationID, run.ID)
+}
+
 // completeSubagentRun updates the original `subagent` tool call to its
 // brief terminal state and injects a synthetic assistant message carrying
 // the `subagent_result` tool call with the full result pre-filled
@@ -806,6 +830,10 @@ func (a *App) onAcpRunDone(run *domain.AcpRun) {
 // in later turns (auto-continue), and the UI renders it as a normal tool
 // card. Keeps the cache-stable system prompt untouched.
 func (a *App) completeSubagentRun(conversationID, toolCallID string, status domain.ToolCallStatus, run *domain.AcpRun, outputPath string) {
+	turnLock := a.conversationTurnLock(conversationID)
+	turnLock.Lock()
+	defer turnLock.Unlock()
+
 	conv, err := a.Conversations.Get(conversationID)
 	if err != nil {
 		a.log("error", "acp", "completeSubagentRun: conversation %s not found: %v", conversationID, err)
@@ -863,6 +891,9 @@ func (a *App) subagentResultMessage(run *domain.AcpRun, outputPath string, statu
 func (a *App) triggerSubagentCompletionTurn(conversationID string) {
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
+	turnLock := a.conversationTurnLock(conversationID)
+	turnLock.Lock()
+	defer turnLock.Unlock()
 
 	// If a turn is already active, the updated tool call will be picked
 	// up in the next round — no need to start a new one.

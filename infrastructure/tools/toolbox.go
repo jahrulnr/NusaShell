@@ -163,7 +163,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 			application.ToolInfo{Name: "subagent", Description: subagentDesc, InputSchema: obj("object", props("prompt", str("Self-contained task brief"), "agent_id", str("Optional ACP agent id from Providers; omit to use the default enabled agent"), "workspace", str("Optional absolute workspace path (defaults to the conversation workspace)"), "mode_id", str("Optional ACP session mode id advertised by the agent"), "model_id", str("Optional ACP model id advertised by the agent"), "count", intSchema("Number of parallel spawns of the same brief (1-6, default 1)")), "prompt")},
 			application.ToolInfo{Name: "subagent_steer", Description: "Send an additional instruction to a live ACP subagent without cancelling it. Applied at the next prompt boundary.", InputSchema: obj("object", props("id", str("ACP run id from subagent"), "text", str("Steer instruction")), "id", "text")},
 			application.ToolInfo{Name: "subagent_stop", Description: "Cancel a live ACP subagent run.", InputSchema: obj("object", props("id", str("ACP run id")), "id")},
-			application.ToolInfo{Name: "subagent_wait", Description: "Wait for an async ACP subagent run to finish.", InputSchema: obj("object", props("id", str("ACP run id"), "timeout_ms", intSchema("Optional wait timeout in milliseconds")), "id")},
+			application.ToolInfo{Name: "subagent_wait", Description: "Wait for an async ACP subagent run. Returns a persisted output_path and only the latest meaningful turn; read the path when full history is needed.", InputSchema: obj("object", props("id", str("ACP run id"), "timeout_ms", intSchema("Optional wait timeout in milliseconds")), "id")},
 		)
 	}
 	// MCP plugin tools are NOT advertised to the agent. The tool list must

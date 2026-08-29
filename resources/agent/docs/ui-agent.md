@@ -107,7 +107,7 @@ Streaming tools (exec) display their live output as it is produced and offer a p
 
 ## ACP subagent dock
 
-Appears above the composer when ACP subagents are live (or recently finished in this room). Each chip opens the right-hand drawer; the peek control opens a popup for one run. Drawer and popup support steer, stop, mode changes, and risk promotion. Permission prompts use a global overlay that stays visible across views.
+Appears above the composer when ACP subagents are live (or recently finished in this room). Each chip opens the right-hand drawer; the peek control opens a popup for one run.
 
 - **ACP subagent dock** (`#acp-dock`):
   - Section: Agent
@@ -138,7 +138,7 @@ Appears above the composer when ACP subagents are live (or recently finished in 
 
 ## ACP live views
 
-The drawer lists every live spawn so you can switch between parallel subagents. The peek popup focuses one run. The permission overlay is fail-closed: timeout denies. Allow once, allow for this session, or deny.
+The drawer reuses the conversation-pane layout: subagent runs are listed in a left sidebar and the selected transcript fills the right pane. Growing text and reasoning chunks update in place, tool updates stay on one row, and token usage appears as run metadata instead of transcript noise. The peek popup focuses one run.
 
 - **ACP drawer overlay** (`#acp-drawer-overlay`):
   - Section: Agent
@@ -148,7 +148,7 @@ The drawer lists every live spawn so you can switch between parallel subagents. 
 - **ACP subagent drawer** (`#acp-drawer`):
   - Section: Agent
   - Type: drawer
-  - Notes: Wider than the plugin drawer so a live transcript, steer box, and mode chips fit.
+  - Notes: Uses the Agent conversation-pane pattern with a run sidebar and a live transcript pane.
 
 - **Close ACP drawer** (`#acp-drawer-close`):
   - Section: Agent
@@ -219,7 +219,7 @@ A compact strip showing the agent's todo list for the current conversation. Item
 
 ## Steer queue
 
-When a user sends a steer message mid-turn, it is queued here and applied at the next safe tool-round boundary.
+When a user sends a steer message mid-turn, it is queued here and applied at the next safe tool-round boundary. Once applied, the user bubble anchors the next assistant round: stale waiting dots from the completed round are removed and exactly one new waiting round appears after the user bubble.
 
 - **Steer queue** (`#agent-steer-queue`):
   - Section: Agent

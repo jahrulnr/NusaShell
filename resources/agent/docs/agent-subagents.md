@@ -71,7 +71,9 @@ When a subagent finishes (completed, failed, or cancelled):
    plus the subagent's last-turn text summary) is injected into the
    conversation, announcement-style. It is persisted as a normal
    assistant tool call so the model sees it in fresh context and in
-   later turns (auto-continue) too.
+   later turns (auto-continue) too. If the parent is still mutating the
+   conversation, completion waits for that turn boundary and remains
+   pending so auto-continue cannot run ahead of the injected result.
 4. A new parent-agent turn is triggered (tool injection) so the parent
    processes the result without a user message. The parent agent sees
    the `subagent_result` tool call in its message history and acts on
@@ -90,15 +92,20 @@ turn. When all subagents complete, the chain resumes.
 
 `subagent` is always async. When you need the result before continuing,
 call `subagent_wait` with the run id; to adjust a live run use
-`subagent_steer`, and to cancel it use `subagent_stop`. All three return
-the full run DTO (status, workspace, transcript) to the frontend
-transcript drawer, but the model only receives a short text summary: run
-id, status, the LAST text chunk (the agent's final message, truncated to
-2000 chars), or the last reasoning chunk if no text was produced, or the
-error/stop reason + last tool as fallback. Intermediate progress,
-thought, tool, plan, status, and usage chunks are stripped — the full
-transcript stays in the persisted JSON (`output_path`) for reference via
-`file_read`.
+`subagent_steer`, and to cancel it use `subagent_stop`.
+
+When `subagent_wait` reaches a terminal result, it persists the full run
+before returning. Its tool result contains only `status`, `id`, `workspace`,
+`output_path`, and the last meaningful text turn (or a compact
+failure/cancellation fallback). If no text was produced, the last thought may
+be used as that bounded fallback. A timeout can return a still-running status
+without `output_path`. Read the path only when the full thought/tool
+transcript is needed. The Agent drawer receives live transcript events
+independently; the tool result never carries the full DTO.
+
+`subagent_steer` and `subagent_stop` acknowledge the current run status.
+Their provider-facing results are bounded and omit intermediate transcript
+noise.
 
 Good example — wait with a bounded timeout:
 

@@ -209,6 +209,29 @@ export function mountLiveRound(bubble, source = {}) {
   return { reasoningEl, textBox, strip };
 }
 
+export function sealLiveNodeBeforeSteer(node) {
+  if (!node) return;
+  node.querySelectorAll('.agent-thinking-dots').forEach((dots) => dots.remove());
+  node.querySelectorAll(':scope > .agent-bubble > .agent-round').forEach((round) => {
+    const reasoning = round.querySelector(':scope > .agent-reasoning');
+    const textBox = round.querySelector(':scope > .agent-bubble-text');
+    const strip = round.querySelector(':scope > .agent-tool-stack');
+    const hasReasoning = reasoningHasVisibleSource(reasoning?._reasoningRaw);
+    const hasText = Boolean(textBox?.textContent?.trim() || textBox?.querySelector('img, svg, video, canvas, table, hr, .mermaid'));
+    const hasTools = Boolean(strip?.children.length);
+    if (!hasReasoning && !hasText && !hasTools) round.remove();
+  });
+}
+
+export function insertAfterOrAppend(parent, node, anchor) {
+  if (!parent || !node) return;
+  if (anchor?.parentElement === parent) {
+    anchor.after(node);
+    return;
+  }
+  parent.append(node);
+}
+
 export function renderMessage(message) {
   if (message.role === 'system' || isCompactionSummary(message)) {
     return renderCompactionMessage(message);

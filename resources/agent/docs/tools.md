@@ -284,19 +284,18 @@ from the Agent dock / drawer / popup. Unattended pipeline agents never
 see these tools.
 
 `subagent_wait` blocks until a run reaches a terminal state (completed,
-failed, cancelled) or the timeout elapses. The tool returns the full run
-DTO (status, workspace, transcript) to the frontend for the transcript
-drawer, but the model only receives a short text summary: run id, status,
-the LAST text chunk (the agent's final message, truncated to 2000 chars),
-or the last reasoning chunk if no text was produced, or the error/stop
-reason + last tool as fallback. Intermediate progress, thought, tool,
-plan, status, and usage chunks are stripped — the full transcript stays
-in the persisted JSON (`output_path`) for reference via `file_read`.
+failed, cancelled) or the timeout elapses. For a terminal result, it persists
+the full run before returning. The result contains `status`, run id, workspace,
+`output_path`, and only the last meaningful text turn (or a compact
+failure/cancellation fallback). If the run produced no text, the final thought
+may be used as the bounded fallback. A timeout can return a still-running status
+without `output_path`. Intermediate progress and other thought, tool, plan,
+status, and usage chunks stay in the terminal JSON; use `file_read` only when that detail
+is necessary. The Agent drawer receives live transcript events separately.
 
-`subagent_steer` and `subagent_stop` return the same full run DTO shape
-to the frontend, and are likewise summarized for the model — the model
-only sees run id, status, the last text/reasoning chunk, and the
-workspace, not the full transcript history.
+`subagent_steer` and `subagent_stop` acknowledge the current run status.
+Their provider-facing results are bounded and omit intermediate transcript
+noise.
 
 ## Native web research (searchwire)
 

@@ -207,13 +207,9 @@ func TestFilterToolAttachmentsByCapsNotesInsideUntrustedEnvelope(t *testing.T) {
 	}
 }
 
-// subagent_wait results (YAML of the full AcpRunDTO including the complete
-// transcript — text, thought, tool, plan, status, usage chunks) are
-// summarized to a short text for the provider so the full transcript never
-// enters the provider request. Only the LAST text chunk is included —
-// intermediate progress stays in the persisted JSON. The frontend still
-// gets the full YAML via tc.Output — this function only controls what
-// goes into the provider-bound tool result content.
+// Full DTO-shaped subagent output from steer/stop and existing conversations
+// is summarized before it reaches the provider. Only the last text chunk is
+// included; intermediate progress stays in the persisted JSON.
 func TestProviderToolContentStripsSubagentWaitTranscript(t *testing.T) {
 	output := "---\n" +
 		"id: run_abc\n" +
@@ -294,14 +290,16 @@ func TestProviderToolContentSubagentWaitFailedNoText(t *testing.T) {
 	}
 }
 
-// TestProviderToolContentSubagentWaitMalformedFallback verifies that a
-// malformed subagent_wait output falls back to the full output (no data
-// loss).
+// TestProviderToolContentSubagentWaitMalformedFallback verifies that malformed
+// output is bounded instead of injecting an arbitrarily large payload.
 func TestProviderToolContentSubagentWaitMalformedFallback(t *testing.T) {
-	raw := "not yaml fenced output"
+	raw := "not yaml fenced output " + strings.Repeat("x", 10000)
 	out := providerToolContent("subagent_wait", raw)
-	if !strings.Contains(out, raw) {
-		t.Errorf("malformed subagent_wait output should fall back to raw, got: %s", out)
+	if !strings.Contains(out, "bounded tail") {
+		t.Errorf("malformed subagent_wait output should explain the bounded fallback, got: %s", out)
+	}
+	if len(out) > 2300 {
+		t.Errorf("malformed subagent_wait output is still too large: %d", len(out))
 	}
 }
 

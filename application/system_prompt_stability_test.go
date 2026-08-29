@@ -3,9 +3,25 @@ package application
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"nusashell/contracts"
 	"nusashell/domain"
 )
+
+type callbackAcpRuntime struct {
+	AcpRuntime
+	onDone func(*domain.AcpRun)
+}
+
+func (runtime *callbackAcpRuntime) SetCallbacks(
+	_ func(*domain.AcpRun),
+	onDone func(*domain.AcpRun),
+	_ func(*domain.AcpRun, domain.AcpPermissionRequest),
+	_ func(*domain.AcpRun, string),
+) {
+	runtime.onDone = onDone
+}
 
 // TestAppendContinuationTool verifies the interrupted-response notice is
 // delivered on the shared announcement channel as an ephemeral synthetic
@@ -192,5 +208,115 @@ func TestCompleteSubagentRunFailedStatus(t *testing.T) {
 	}
 	if !strings.Contains(stc.Output, "boom") {
 		t.Fatalf("synthetic output must include the error: %q", stc.Output)
+	}
+}
+
+func TestCompleteSubagentRunWaitsForActiveTurnMutation(t *testing.T) {
+	conv := &domain.Conversation{
+		ID: "c1",
+		Messages: []domain.Message{
+			{ID: "m1", Role: domain.RoleUser, Content: "delegate", Status: domain.StatusDone},
+			{
+				ID: "m2", Role: domain.RoleAssistant, Status: domain.StatusDone,
+				ToolCalls: []domain.ToolCall{{ID: "call_parent", Name: "subagent", Status: domain.ToolRunning}},
+			},
+		},
+	}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	app := &App{Conversations: store, Bus: NewBus()}
+	run := &domain.AcpRun{
+		ID:               "run_done",
+		Status:           domain.AcpRunCompleted,
+		ParentToolCallID: "call_parent",
+		Transcript:       []domain.AcpTranscriptChunk{{Kind: "text", Text: "done"}},
+	}
+
+	turnLock := app.conversationTurnLock("c1")
+	turnLock.Lock()
+	completed := make(chan struct{})
+	go func() {
+		app.completeSubagentRun("c1", run.ParentToolCallID, domain.ToolOK, run, "/data/run_done.json")
+		close(completed)
+	}()
+
+	select {
+	case <-completed:
+		t.Fatal("subagent completion mutated the conversation during an active turn")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	store.convs["c1"].AddMessage(domain.Message{
+		ID: "m3", Role: domain.RoleAssistant, Content: "latest parent round", Status: domain.StatusDone,
+	})
+	turnLock.Unlock()
+
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("subagent completion did not resume after the active turn released the conversation")
+	}
+
+	saved := store.convs["c1"]
+	if len(saved.Messages) != 4 {
+		t.Fatalf("messages = %d, want parent round and synthetic subagent result preserved", len(saved.Messages))
+	}
+	if saved.Messages[2].Content != "latest parent round" {
+		t.Fatalf("parent round was overwritten: %+v", saved.Messages)
+	}
+}
+
+func TestAcpDoneCallbackDoesNotBlockActiveParentTool(t *testing.T) {
+	conv := &domain.Conversation{
+		ID: "c1",
+		Messages: []domain.Message{
+			{ID: "m1", Role: domain.RoleUser, Content: "delegate", Status: domain.StatusDone},
+			{
+				ID: "m2", Role: domain.RoleAssistant, Status: domain.StatusDone,
+				ToolCalls: []domain.ToolCall{{ID: "call_parent", Name: "subagent", Status: domain.ToolRunning}},
+			},
+		},
+	}
+	runtime := &callbackAcpRuntime{}
+	app := NewApp(Deps{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
+		Acp:           runtime,
+	})
+	_, events, unsubscribe := app.Bus.Subscribe()
+	defer unsubscribe()
+	run := &domain.AcpRun{
+		ID:               "run_done",
+		ConversationID:   "c1",
+		ParentToolCallID: "call_parent",
+		Status:           domain.AcpRunCompleted,
+		Transcript:       []domain.AcpTranscriptChunk{{Kind: "text", Text: "done"}},
+	}
+
+	turnLock := app.conversationTurnLock("c1")
+	turnLock.Lock()
+	returned := make(chan struct{})
+	go func() {
+		runtime.onDone(run)
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+	case <-time.After(100 * time.Millisecond):
+		turnLock.Unlock()
+		t.Fatal("ACP completion callback blocked on the active parent turn")
+	}
+	turnLock.Unlock()
+
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case event := <-events:
+			if event.Type == contracts.EventToolCompleted {
+				return
+			}
+		case <-deadline.C:
+			t.Fatal("asynchronous ACP completion did not resume after the parent turn")
+		}
 	}
 }

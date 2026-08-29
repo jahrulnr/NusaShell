@@ -2,7 +2,7 @@
 
 import { rpc, on } from '../../rpc.js';
 import { el } from '../../ui.js';
-import { renderMarkdown } from '../../markdown.js';
+import { incrementalRender } from '../../incremental-render.js';
 import { highlightCode } from '../../highlight-render.js';
 import { attachZoomButtons } from '../../media-zoom.js';
 
@@ -15,10 +15,6 @@ const state = {
   drawerRunId: '',
   popupRunId: '',
   bound: false,
-  // runId -> number of transcript chunks already rendered into the DOM.
-  // Lets live delta updates patch the panel in place instead of rebuilding
-  // it (which reset scroll and made the view jump around).
-  renderedChunks: new Map(),
 };
 
 // Agent name cache: agent_id → name. Hydrated lazily from acp.agents.list
@@ -124,7 +120,7 @@ function upsertRun(run, { silent } = {}) {
 }
 
 // pruneRuns drops terminal runs that fell out of the recent window and are
-// not part of the active conversation (plus their rendered-chunk counters).
+// not part of the active conversation.
 // Without this the maps grow for the lifetime of the session even though
 // nothing can ever render those runs again.
 function pruneRuns() {
@@ -136,11 +132,7 @@ function pruneRuns() {
     const ended = Date.parse(run.ended_at || run.updated_at || '') || 0;
     if (!ended || now - ended > RECENT_MS) {
       state.runs.delete(id);
-      state.renderedChunks.delete(id);
     }
-  }
-  for (const id of [...state.renderedChunks.keys()]) {
-    if (!state.runs.has(id)) state.renderedChunks.delete(id);
   }
 }
 
@@ -304,21 +296,87 @@ function renderDrawer() {
     ? `${statusLabel(selected.status)} · ${shortPath(selected.workspace)}`
     : 'No subagents in this conversation';
   const body = document.getElementById('acp-drawer-body');
+  let shell = body.querySelector('.acp-drawer-shell');
+  if (!shell) {
+    const list = el('div', { class: 'agent-conversation-list acp-run-list', role: 'list' });
+    list.addEventListener('click', (event) => {
+      const item = event.target.closest('[data-run-id]');
+      if (!item) return;
+      state.drawerRunId = item.dataset.runId;
+      renderDrawer();
+    });
+    shell = el('div', { class: 'acp-drawer-shell' },
+      el('aside', { class: 'agent-conversations acp-run-sidebar', 'aria-label': 'Subagent runs' },
+        el('div', { class: 'agent-conversations-head' },
+          el('div', {},
+            el('span', { class: 'agent-panel-label', text: 'Subagents' }),
+            el('span', { class: 'agent-conversation-count acp-run-count' }),
+          ),
+        ),
+        list,
+      ),
+      el('div', { class: 'acp-run-content' }),
+    );
+    body.replaceChildren(shell);
+  }
+  renderRunSidebar(shell.querySelector('.acp-run-list'), runs, selected?.id || '');
+  const content = shell.querySelector('.acp-run-content');
   if (!selected) {
-    body.replaceChildren(el('p', { class: 'acp-empty', text: state.drawerRunId ? 'Loading transcript…' : 'No subagents in this conversation. The parent agent can spawn them with the subagent tool.' }));
+    content.replaceChildren(el('p', { class: 'acp-empty', text: state.drawerRunId ? 'Loading transcript…' : 'No subagents in this conversation. The parent agent can spawn them with the subagent tool.' }));
     return;
   }
   state.drawerRunId = selected.id;
-  const switcher = runSwitcher(runs, selected.id, (id) => { state.drawerRunId = id; renderDrawer(); });
-  // Same run: patch in place (status pill + transcript deltas) so the
-  // scroll position survives live updates. Different run: rebuild.
-  const existing = body.querySelector(`.acp-run-panel[data-run-id="${selected.id}"]`);
+  const existing = content.querySelector(`.acp-run-panel[data-run-id="${selected.id}"]`);
   if (!existing) {
-    body.replaceChildren(switcher, buildRunPanel(selected));
+    content.replaceChildren(buildRunPanel(selected));
   } else {
-    const prevSwitcher = body.querySelector('.acp-run-switcher');
-    if (prevSwitcher) prevSwitcher.replaceWith(switcher);
     patchRunPanel(existing, selected);
+  }
+}
+
+function renderRunSidebar(list, runs, selectedId) {
+  const count = list.closest('.acp-run-sidebar')?.querySelector('.acp-run-count');
+  if (count) count.textContent = `${runs.length} run${runs.length === 1 ? '' : 's'}`;
+  if (!runs.length) {
+    list.replaceChildren(el('div', { class: 'agent-conversation-empty', text: 'No subagent runs yet.' }));
+    return;
+  }
+  const existing = new Map(
+    [...list.querySelectorAll('[data-run-id]')].map((node) => [node.dataset.runId, node]),
+  );
+  const seen = new Set();
+  for (const run of runs) {
+    seen.add(run.id);
+    const item = existing.get(run.id) || buildRunSidebarItem(run);
+    updateRunSidebarItem(item, run, selectedId);
+    if (!item.parentNode) list.append(item);
+  }
+  for (const [id, item] of existing) {
+    if (!seen.has(id)) item.remove();
+  }
+}
+
+function buildRunSidebarItem(run) {
+  return el('div', {
+    class: `agent-conversation-item is-${run.status}`,
+    role: 'listitem',
+    'data-run-id': run.id,
+  },
+    el('button', { class: 'agent-conversation-open', type: 'button' },
+      el('span', { class: 'agent-conversation-title' }),
+      el('span', { class: 'agent-conversation-time' }),
+    ),
+  );
+}
+
+function updateRunSidebarItem(item, run, selectedId) {
+  const live = LIVE.has(run.status);
+  item.className = `agent-conversation-item is-${run.status}${run.id === selectedId ? ' is-active' : ''}${live ? ' is-running' : ''}`;
+  item.querySelector('.agent-conversation-title').textContent = run.agent_name || 'ACP';
+  const time = item.querySelector('.agent-conversation-time');
+  time.textContent = `${statusLabel(run.status)} · ${shortPath(run.workspace)}`;
+  if (live) {
+    time.append(el('span', { class: 'agent-conversation-dot', 'aria-hidden': 'true' }));
   }
 }
 
@@ -341,21 +399,6 @@ function renderPopup() {
   }
 }
 
-function runSwitcher(runs, selectedId, onSelect) {
-  if (runs.length < 2) return el('div');
-  const row = el('div', { class: 'acp-run-switcher' });
-  for (const run of runs) {
-    const btn = el('button', {
-      class: `acp-run-switch${run.id === selectedId ? ' is-active' : ''} is-${run.status}`,
-      type: 'button',
-      text: run.agent_name || 'ACP',
-    });
-    btn.addEventListener('click', () => onSelect(run.id));
-    row.append(btn);
-  }
-  return row;
-}
-
 function buildRunPanel(run) {
   const panel = el('div', { class: 'acp-run-panel', 'data-run-id': run.id },
     el('div', { class: 'acp-run-meta' },
@@ -367,24 +410,19 @@ function buildRunPanel(run) {
       el('span', { text: 'Workspace' }),
       el('code', { text: run.workspace || '—' }),
     ),
-    el('div', { class: 'acp-transcript', 'aria-label': 'Subagent transcript' },
-      ...(run.transcript || []).length
-        ? (run.transcript || []).map(transcriptLine)
-        : [el('p', { class: 'acp-empty', text: 'Waiting for the first update…' })],
-    ),
+    el('div', { class: 'acp-transcript', 'aria-label': 'Subagent transcript' }),
   );
 
   if (run.error) {
     panel.append(el('p', { class: 'acp-run-error', text: run.error }));
   }
-  state.renderedChunks.set(run.id, (run.transcript || []).length);
+  syncTranscript(panel, run.transcript || []);
   return panel;
 }
 
 // patchRunPanel updates a live panel in place: status pill + model pill +
-// error, then appends only the transcript chunks that arrived since the
-// last render. Auto-follows the bottom only when the user is already at
-// the bottom — reading earlier output is never interrupted.
+// error, then patches the transcript in place. Auto-follows the bottom only
+// when the user is already there — reading earlier output is never interrupted.
 function patchRunPanel(panel, run) {
   const pill = panel.querySelector('.acp-status-pill');
   if (pill) {
@@ -403,51 +441,133 @@ function patchRunPanel(panel, run) {
   if (run.error && !errEl) {
     panel.append(el('p', { class: 'acp-run-error', text: run.error }));
   }
-  appendTranscriptDeltas(panel, run);
+  syncTranscriptWithFollow(panel, run.transcript || []);
 }
 
-// appendTranscriptDeltas appends chunks that are not yet in the DOM and
-// keeps the view pinned to the bottom only while the user is already
-// there (same auto-follow behavior as the conversation thread). The
-// transcript flows inside the drawer/popup body, so the scrollable
-// ancestor is the follow target.
-function appendTranscriptDeltas(panel, run) {
+function syncTranscriptWithFollow(panel, transcript) {
   const box = panel.querySelector('.acp-transcript');
   if (!box) return;
-  const chunks = run.transcript || [];
-  const rendered = state.renderedChunks.get(run.id) || 0;
-  if (chunks.length <= rendered) return;
-  const empty = box.querySelector('.acp-empty');
-  if (empty) empty.remove();
-  const scroller = box.closest('.drawer-body, .acp-popup');
+  const scroller = box.closest('.acp-run-content, .acp-popup');
   const atBottom = !scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 60;
-  const frag = document.createDocumentFragment();
-  for (const c of chunks.slice(rendered)) frag.append(transcriptLine(c));
-  box.append(frag);
-  state.renderedChunks.set(run.id, chunks.length);
+  syncTranscript(panel, transcript);
   if (atBottom && scroller) scroller.scrollTop = scroller.scrollHeight;
 }
 
-function transcriptLine(chunk) {
-  if (chunk.kind === 'tool') {
-    return el('div', { class: 'acp-transcript-line is-tool' },
-      el('span', { class: 'acp-transcript-kind', text: chunk.tool_kind || 'tool' }),
-      el('span', { text: `${chunk.tool_title || chunk.tool_id || ''} ${chunk.tool_status || ''}`.trim() }),
-    );
+export function syncTranscript(panel, transcript) {
+  const box = panel?.querySelector('.acp-transcript');
+  if (!box) return;
+  const { chunks, usage } = normalizeTranscript(transcript);
+  syncUsagePill(panel, usage);
+  if (!chunks.length) {
+    box.replaceChildren(el('p', { class: 'acp-empty', text: 'Waiting for the first update…' }));
+    return;
   }
-  const line = el('div', { class: `acp-transcript-line is-${chunk.kind || 'text'}` });
-  if (chunk.kind === 'thought') line.append(el('span', { class: 'acp-transcript-kind', text: 'think' }));
-  const body = el('div', { class: 'acp-transcript-text' });
+  box.querySelector('.acp-empty')?.remove();
+  const lines = [...box.querySelectorAll(':scope > .acp-transcript-line')];
+  for (let index = 0; index < chunks.length; index++) {
+    const chunk = chunks[index];
+    const key = transcriptChunkKey(chunk, index);
+    let line = lines[index];
+    if (line?.dataset.transcriptKey !== key) {
+      const replacement = transcriptLine(chunk, key);
+      if (line) line.replaceWith(replacement);
+      else box.append(replacement);
+      line = replacement;
+    } else {
+      updateTranscriptLine(line, chunk);
+    }
+  }
+  for (const line of lines.slice(chunks.length)) line.remove();
+}
+
+function normalizeTranscript(transcript) {
+  const chunks = [];
+  const toolIndexes = new Map();
+  let usage = '';
+  for (const original of transcript || []) {
+    const chunk = { ...original };
+    if (chunk.kind === 'usage') {
+      usage = chunk.text || usage;
+      continue;
+    }
+    if (chunk.kind === 'tool' && chunk.tool_id) {
+      const existingIndex = toolIndexes.get(chunk.tool_id);
+      if (existingIndex !== undefined) {
+        chunks[existingIndex] = { ...chunks[existingIndex], ...withoutEmptyValues(chunk) };
+        continue;
+      }
+      toolIndexes.set(chunk.tool_id, chunks.length);
+    }
+    const previous = chunks.at(-1);
+    if ((chunk.kind === 'text' || chunk.kind === 'thought') && previous?.kind === chunk.kind) {
+      previous.text = (previous.text || '') + (chunk.text || '');
+      continue;
+    }
+    chunks.push(chunk);
+  }
+  return { chunks, usage };
+}
+
+function withoutEmptyValues(chunk) {
+  return Object.fromEntries(Object.entries(chunk).filter(([, value]) => value !== '' && value != null));
+}
+
+function syncUsagePill(panel, usage) {
+  const meta = panel.querySelector('.acp-run-meta');
+  if (!meta) return;
+  let pill = meta.querySelector('.acp-usage-pill');
+  if (!usage) {
+    pill?.remove();
+    return;
+  }
+  if (!pill) {
+    pill = el('span', { class: 'acp-usage-pill' });
+    meta.append(pill);
+  }
+  pill.textContent = usage;
+}
+
+function transcriptChunkKey(chunk, index) {
+  if (chunk.kind === 'tool' && chunk.tool_id) return `tool:${chunk.tool_id}`;
+  return `${chunk.kind || 'text'}:${index}`;
+}
+
+function transcriptLine(chunk, key) {
+  const line = el('div', {
+    class: `acp-transcript-line is-${chunk.kind || 'text'}`,
+    'data-transcript-key': key,
+  });
+  if (chunk.kind === 'tool' || chunk.kind === 'thought') {
+    line.append(el('span', { class: 'acp-transcript-kind' }));
+  }
+  line.append(el('div', { class: 'acp-transcript-text' }));
+  updateTranscriptLine(line, chunk);
+  return line;
+}
+
+function updateTranscriptLine(line, chunk) {
+  if (chunk.kind === 'tool') {
+    line.querySelector('.acp-transcript-kind').textContent = chunk.tool_kind || 'tool';
+    line.querySelector('.acp-transcript-text').textContent = `${chunk.tool_title || chunk.tool_id || ''} ${chunk.tool_status || ''}`.trim();
+    return;
+  }
+  if (chunk.kind === 'thought') {
+    line.querySelector('.acp-transcript-kind').textContent = 'think';
+  }
+  const body = line.querySelector('.acp-transcript-text');
   const text = chunk.text || chunk.kind || '';
   if (chunk.kind === 'thought' || chunk.kind === 'text') {
-    body.innerHTML = renderMarkdown(text);
-    void highlightCode(body);
-    attachZoomButtons(body);
-  } else {
-    body.textContent = text;
+    const previous = body._transcriptRaw || '';
+    if (previous && !text.startsWith(previous)) body.replaceChildren();
+    body._transcriptRaw = text;
+    const changed = incrementalRender(body, text);
+    for (const node of changed) {
+      void highlightCode(node);
+      attachZoomButtons(node);
+    }
+    return;
   }
-  line.append(body);
-  return line;
+  body.textContent = text;
 }
 
 function statusLabel(status) {

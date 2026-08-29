@@ -47,6 +47,7 @@ func summarizeToolContent(toolName, rawOutput string) string {
 		if summary, ok := summarizeSubagentWaitOutput(rawOutput); ok {
 			return summary
 		}
+		return boundedSubagentOutput(rawOutput)
 	}
 	return rawOutput
 }
@@ -128,19 +129,11 @@ func quotePath(s string) string {
 	return fmt.Sprintf("%q", s)
 }
 
-// summarizeSubagentWaitOutput parses a subagent_wait / subagent_steer /
-// subagent_stop tool result (YAML frontmatter produced by WaitAcpRun /
-// SteerAcpRun / StopAcpRun, which marshal the full AcpRunDTO including the
-// complete transcript — text, thought, tool, plan, status, and usage
-// chunks) and returns a short text summary for the provider. The full
-// transcript is UI/inspection-only; sending it to the model burns context
-// with reasoning and tool-call noise the parent agent does not need. The
-// full output is still persisted in tc.Output for the frontend.
-// Returns (summary, true) when the output is a recognized subagent tool
-// result, or (raw, false) when parsing fails so the caller falls back to
-// the full output.
+// summarizeSubagentWaitOutput parses compact subagent_wait frontmatter plus
+// its last-turn body. It also accepts the full DTO returned by steer/stop and
+// older wait results, but only returns a bounded provider-facing summary.
 func summarizeSubagentWaitOutput(rawOutput string) (string, bool) {
-	body, ok := stripYAMLFence(rawOutput)
+	header, compactBody, ok := splitYAMLFrontmatter(rawOutput)
 	if !ok {
 		return rawOutput, false
 	}
@@ -150,6 +143,7 @@ func summarizeSubagentWaitOutput(rawOutput string) (string, bool) {
 		StopReason string `yaml:"stopreason"`
 		Error      string `yaml:"error"`
 		Workspace  string `yaml:"workspace"`
+		OutputPath string `yaml:"output_path"`
 		Transcript []struct {
 			Kind       string `yaml:"kind"`
 			Text       string `yaml:"text"`
@@ -157,7 +151,7 @@ func summarizeSubagentWaitOutput(rawOutput string) (string, bool) {
 			ToolStatus string `yaml:"toolstatus"`
 		} `yaml:"transcript"`
 	}
-	if err := yaml.Unmarshal([]byte(body), &run); err != nil {
+	if err := yaml.Unmarshal([]byte(header), &run); err != nil {
 		return rawOutput, false
 	}
 
@@ -180,12 +174,14 @@ func summarizeSubagentWaitOutput(rawOutput string) (string, bool) {
 	// the full transcript is persisted in the run's JSON output file. Drop
 	// thought/tool/plan/status/usage noise. Truncate to keep the provider
 	// context small.
-	text := ""
-	for i := len(run.Transcript) - 1; i >= 0; i-- {
-		c := run.Transcript[i]
-		if c.Kind == "text" && strings.TrimSpace(c.Text) != "" {
-			text = strings.TrimSpace(c.Text)
-			break
+	text := strings.TrimSpace(compactBody)
+	if text == "" {
+		for i := len(run.Transcript) - 1; i >= 0; i-- {
+			c := run.Transcript[i]
+			if c.Kind == "text" && strings.TrimSpace(c.Text) != "" {
+				text = strings.TrimSpace(c.Text)
+				break
+			}
 		}
 	}
 	if text != "" {
@@ -251,19 +247,30 @@ func summarizeSubagentWaitOutput(rawOutput string) (string, bool) {
 		sb.WriteString("\n\nWorkspace: ")
 		sb.WriteString(run.Workspace)
 	}
+	if run.OutputPath != "" {
+		sb.WriteString("\n\nOutput path: ")
+		sb.WriteString(run.OutputPath)
+	}
 	return sb.String(), true
 }
 
-// stripYAMLFence extracts the YAML body from a "---\n<yaml>\n---" envelope
-// as produced by WaitAcpRun/StopAcpRun. Returns (body, true) when the fence
-// is present, or ("", false) otherwise.
-func stripYAMLFence(raw string) (string, bool) {
+func splitYAMLFrontmatter(raw string) (header, body string, ok bool) {
 	if !strings.HasPrefix(raw, "---\n") {
-		return "", false
+		return "", "", false
 	}
 	end := strings.Index(raw[4:], "\n---")
 	if end < 0 {
-		return "", false
+		return "", "", false
 	}
-	return raw[4 : 4+end], true
+	bodyStart := 4 + end + len("\n---")
+	return raw[4 : 4+end], strings.TrimSpace(raw[bodyStart:]), true
+}
+
+func boundedSubagentOutput(raw string) string {
+	const maxChars = 2000
+	raw = strings.TrimSpace(raw)
+	if len(raw) > maxChars {
+		raw = "…" + raw[len(raw)-maxChars:]
+	}
+	return "Subagent tool output could not be parsed; showing a bounded tail:\n\n" + raw
 }

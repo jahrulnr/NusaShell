@@ -46,6 +46,12 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
+	if a.activeRunForConversation(req.ConversationID) != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
+	}
+	turnLock := a.conversationTurnLock(req.ConversationID)
+	turnLock.Lock()
+	defer turnLock.Unlock()
 	c, rpcErr := a.getConversation(req.ConversationID)
 	if rpcErr != nil {
 		return nil, rpcErr
@@ -116,6 +122,12 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
+	if a.activeRunForConversation(req.ConversationID) != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
+	}
+	turnLock := a.conversationTurnLock(req.ConversationID)
+	turnLock.Lock()
+	defer turnLock.Unlock()
 	c, rpcErr := a.getConversation(req.ConversationID)
 	if rpcErr != nil {
 		return nil, rpcErr
@@ -492,6 +504,10 @@ func (a *App) handleTurnsCancelSteer(req contracts.TurnCancelSteerRequest) (any,
 }
 
 func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities) {
+	turnLock := a.conversationTurnLock(run.ConversationID)
+	turnLock.Lock()
+	defer turnLock.Unlock()
+
 	// Build the hydration checkpoint once per epoch, before the first Stream.
 	// A fresh room (the first user message of a conversation, no checkpoint
 	// yet) gets its checkpoint persisted here so the first provider request

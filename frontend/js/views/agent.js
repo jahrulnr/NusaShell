@@ -30,6 +30,8 @@ import {
   appendLiveError,
   bindToolStop,
   isStreamingTool,
+  sealLiveNodeBeforeSteer,
+  insertAfterOrAppend,
   parseShowImageOutput,
   parseShowAudioOutput,
   parseShowVideoOutput,
@@ -727,6 +729,7 @@ async function reattachActiveRunFromBackend() {
     round: hasLive ? (liveBuffer.round || 1) : 1,
     conversationId: conversationId, runId: active.run_id,
     messageId: hasLive ? (liveBuffer.messageId || active.message_id) : active.message_id,
+    awaitingSteerRound: hasSteerAfterMessage(active.message_id),
   });
   if (active.queued_steer) {
     state.steerDraft = active.queued_steer;
@@ -767,6 +770,12 @@ function roundAlreadyPersisted(messageId) {
   );
 }
 
+function hasSteerAfterMessage(messageId) {
+  const messageIndex = state.messages.findIndex((message) => message?.id === messageId);
+  if (messageIndex < 0) return false;
+  return state.messages.slice(messageIndex + 1).some((message) => message?.role === 'user' && message?.steer);
+}
+
 // appendRoundSection appends a fresh streaming section (reasoning + text box
 // + tool strip) to an EXISTING assistant node's bubble and returns the refs.
 // This replaces the old replaceWith approach: earlier tool rounds rendered
@@ -782,12 +791,12 @@ function appendRoundSection(node, source) {
 
 // buildStreamNode creates a brand-new streaming node for a message the
 // snapshot does not contain yet and appends it to the end of the thread.
-function buildStreamNode(thread, messageId, source) {
+function buildStreamNode(thread, messageId, source, anchor = null) {
   const bubble = el('div', { class: 'agent-bubble' });
   const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
   if (messageId) msgNode.dataset.messageIds = messageId;
   const refs = mountLiveRound(bubble, source);
-  thread.append(msgNode);
+  insertAfterOrAppend(thread, msgNode, anchor);
   return { msgNode, bubble, ...refs };
 }
 
@@ -813,11 +822,14 @@ function ensureRunSlot(run) {
   if (!thread) return null;
   const existing = findMessageNode(thread, run.messageId);
   if (existing) {
+    run.nextRoundAnchor = null;
     existing.classList.remove('agent-message-error');
     existing.querySelectorAll('.agent-retry-btn').forEach((n) => n.remove());
     return { msgNode: existing, ...appendRoundSection(existing, run) };
   }
-  return buildStreamNode(thread, run.messageId, run);
+  const slot = buildStreamNode(thread, run.messageId, run, run.nextRoundAnchor);
+  run.nextRoundAnchor = null;
+  return slot;
 }
 
 // reattachActiveRun checks if there's an active run for the current
@@ -829,6 +841,11 @@ function ensureRunSlot(run) {
 function reattachActiveRun() {
   const run = runForConversation(state.activeId);
   if (!run) return;
+  if (run.nextRoundAnchor && !run.nextRoundAnchor.isConnected) {
+    run.nextRoundAnchor = null;
+    run.awaitingSteerRound = true;
+  }
+  if (run.nextRoundAnchor || run.deferredRoundStart || run.awaitingSteerRound) return;
   const slot = ensureRunSlot(run);
   if (!slot) return;
   const { msgNode, bubble, reasoningEl, textBox, strip } = slot;
@@ -1268,10 +1285,11 @@ async function retryTurn(failedNode, failedMessageId) {
 
 function getRunOrQueue(type, payload) {
   const run = state.runs.get(payload?.run_id);
-  if (run || !payload?.run_id) return run;
+  if (run && !run.deferredRoundStart) return run;
+  if (!payload?.run_id) return run;
   const events = state.pendingEvents.get(payload.run_id) || [];
   events.push({ type, payload });
-  state.pendingEvents.set(payload.run_id, events.slice(-100));
+  state.pendingEvents.set(payload.run_id, run?.deferredRoundStart ? events : events.slice(-100));
   setTimeout(() => {
     if (!state.runs.has(payload.run_id)) state.pendingEvents.delete(payload.run_id);
   }, 10000);
@@ -1331,7 +1349,15 @@ function clearSavedSteerQueue(convId) {
   const saved = savedRooms.get(convId);
   if (saved) {
     saved.steerDraft = '';
+    saved.steerId = null;
   }
+}
+
+function saveQueuedSteerQueue(convId, text, steerId) {
+  const saved = savedRooms.get(convId);
+  if (!saved) return;
+  saved.steerDraft = text;
+  saved.steerId = steerId;
 }
 
 // wireSteerCancelStrip attaches the click handler to the steer queue strip's
@@ -1873,6 +1899,14 @@ function bindEvents() {
       stopButton().hidden = false;
       updateSendAvailability(state);
     }
+    run.awaitingSteerRound = false;
+    if ((round || 1) > 1
+      && conversation_id === state.activeId
+      && state.steerDraft
+      && !run.nextRoundAnchor) {
+      run.deferredRoundStart = payload;
+      return;
+    }
     // Auto-continue: the run entry was kept across turns (endTurn with
     // keepRun=true), but the new turn has a different assistant message
     // ID. Set up a fresh streaming slot for the new message instead of
@@ -1929,7 +1963,11 @@ function bindEvents() {
     run.round = round;
     resetLiveRoundText(run);
     resetRoomBufferMirror(conversation_id, run, round);
-    if (conversation_id !== state.activeId) return;
+    if (conversation_id !== state.activeId) {
+      run.nextRoundAnchor = null;
+      run.awaitingSteerRound = false;
+      return;
+    }
     // seal previous round: hide its tool strip if empty
     if (run.strip && run.strip.hidden) run.strip.remove();
     if (run.msgNode?.isConnected) {
@@ -1953,6 +1991,11 @@ function bindEvents() {
     }
     clearToolTimers(run);
     run.toolJobs = new Map();
+    if (run.textBox && !run.raw) {
+      run.textBox.append(el('span', { class: 'agent-thinking-dots' },
+        el('span'), el('span'), el('span')));
+    }
+    flushPendingEvents(run_id);
   });
   on('agent.message.delta', (payload) => {
     const { text, conversation_id } = payload;
@@ -2495,15 +2538,24 @@ function bindEvents() {
     if (conversation_id === state.activeId && (!run_id || run?.runId === run_id)) refreshActiveConversation();
   });
   on('agent.steer.queued', ({ conversation_id, steer_id, text }) => {
-    if (conversation_id !== state.activeId) return;
+    if (conversation_id !== state.activeId) {
+      saveQueuedSteerQueue(conversation_id, text, steer_id);
+      return;
+    }
     showSteerQueued(text, steer_id);
   });
   on('agent.steer.applied', ({ conversation_id, steer_id, text }) => {
-    if (conversation_id !== state.activeId) return;
+    if (conversation_id !== state.activeId) {
+      clearSavedSteerQueue(conversation_id);
+      return;
+    }
     promoteSteerToTranscript(text);
   });
   on('agent.steer.cancelled', ({ conversation_id, text, reason }) => {
-    if (conversation_id !== state.activeId) return;
+    if (conversation_id !== state.activeId) {
+      clearSavedSteerQueue(conversation_id);
+      return;
+    }
     clearSteerQueue();
     // User cancel already restored the draft in the cancel-button handler.
     if (reason === 'user') return;
@@ -2563,42 +2615,39 @@ function clearSteerQueue() {
 function promoteSteerToTranscript(text) {
   // The queued steer was applied at a safe boundary — clear the strip and
   // insert the steer as a real user message in the thread, BETWEEN the
-  // current assistant bubble (round 1) and the next assistant bubble
-  // (round 2+). A new assistant placeholder is created after the steer so
-  // the agent.turn.started round 2+ handler appends streaming elements to
-  // the new bubble, not the sealed one. Without this, the steer would be
-  // appended at the end of the thread (after the streaming assistant) and
-  // appear pushed down during live streaming.
+  // completed assistant round and the next live round. The user node becomes
+  // the insertion anchor; agent.turn.started creates exactly one placeholder
+  // after it, so stale dots cannot remain above the steer or race below it.
   clearSteerQueue();
   const thread = agentThread();
   if (!thread) return;
   const steerMessage = { role: 'user', content: text, steer: true, created_at: new Date().toISOString() };
   state.messages.push(steerMessage);
   const steerNode = renderMessage(steerMessage);
-  // Find the active run's assistant node. Insert the steer after it, then
-  // create a fresh assistant placeholder after the steer for round 2+.
   const run = runForConversation(state.activeId);
-  if (run?.msgNode) {
-    run.msgNode.after(steerNode);
-    // Seal the old bubble: remove empty tool strip, clear pending state.
-    run.msgNode.classList.remove('agent-pending');
-    if (run.strip && run.strip.hidden) run.strip.remove();
-    // Create a new assistant placeholder for the next round.
-    const newBubble = el('div', { class: 'agent-bubble' });
-    const newMsgNode = el('div', { class: 'agent-message assistant agent-pending' }, newBubble);
-    steerNode.after(newMsgNode);
-    // Update run references so agent.turn.started round 2+ appends to the
-    // new bubble. textBox/reasoningEl/strip will be set by the round 2+
-    // handler; clear them here so stale references are not used.
-    run.msgNode = newMsgNode;
-    run.bubble = newBubble;
+  if (run?.msgNode?.isConnected) {
+    const previousNode = run.msgNode;
+    sealLiveNodeBeforeSteer(previousNode);
+    previousNode.after(steerNode);
+    previousNode.classList.remove('agent-pending');
+    if (run.strip?.hidden) run.strip.remove();
+    if (!previousNode.querySelector(':scope > .agent-bubble')?.children.length) previousNode.remove();
+  } else {
+    thread.append(steerNode);
+  }
+  if (run) {
+    run.nextRoundAnchor = steerNode;
+    run.awaitingSteerRound = false;
+    run.msgNode = null;
+    run.bubble = null;
     run.textBox = null;
     run.reasoningEl = null;
     run.strip = null;
     clearToolTimers(run);
     run.toolJobs = new Map();
-  } else {
-    thread.append(steerNode);
+    const deferredRoundStart = run.deferredRoundStart;
+    run.deferredRoundStart = null;
+    if (deferredRoundStart) queueMicrotask(() => emit('agent.turn.started', deferredRoundStart));
   }
   // Bring the steer into view. It is inserted after the running assistant
   // node, which on a long multi-round turn sits thousands of pixels above

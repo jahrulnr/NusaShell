@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, mountLiveRound } from './js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend } from './js/views/agent/render.js';
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
   const previousDocument = globalThis.document;
@@ -649,6 +649,56 @@ test('mountLiveRound keeps every live round mounted (no trim, no stub)', () => {
     assert.equal(rounds[0].querySelector('.agent-reasoning')._reasoningRaw, 'think 0');
     assert.equal(bubble._liveRoundArchive, undefined, 'no parking archive');
     assert.ok(current.textBox.closest('.agent-round')?.isConnected, 'newest live round remains mounted');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('sealing a live node before steer removes only empty thinking rounds', () => {
+  const dom = new JSDOM('<main id="thread"><div class="agent-message assistant"><div class="agent-bubble"></div></div></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const node = document.querySelector('.agent-message.assistant');
+    const bubble = node.querySelector('.agent-bubble');
+    const settled = mountLiveRound(bubble, {});
+    settled.textBox.textContent = 'Keep this completed round';
+    const empty = mountLiveRound(bubble, {});
+    empty.textBox.append(document.createElement('span'));
+    empty.textBox.firstElementChild.className = 'agent-thinking-dots';
+
+    sealLiveNodeBeforeSteer(node);
+
+    assert.equal(node.querySelectorAll('.agent-thinking-dots').length, 0);
+    assert.equal(node.querySelectorAll('.agent-round').length, 1);
+    assert.match(node.textContent, /Keep this completed round/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('a delayed live round inserts immediately after its steer anchor', () => {
+  const dom = new JSDOM('<main id="thread"></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const thread = document.getElementById('thread');
+    const prior = document.createElement('div');
+    prior.dataset.order = 'prior';
+    const steer = document.createElement('div');
+    steer.dataset.order = 'steer';
+    const later = document.createElement('div');
+    later.dataset.order = 'later';
+    const response = document.createElement('div');
+    response.dataset.order = 'response';
+    thread.append(prior, steer, later);
+
+    insertAfterOrAppend(thread, response, steer);
+
+    assert.deepEqual(
+      [...thread.children].map((node) => node.dataset.order),
+      ['prior', 'steer', 'response', 'later'],
+    );
   } finally {
     globalThis.document = previousDocument;
   }

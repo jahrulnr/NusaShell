@@ -43,7 +43,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `piper/<goos>-<goarch>/` | managed piper engine installed by the one-click Settings installer (binary, `espeak-ng-data/`, shared libs); `PIPER_BIN`/PATH binaries still take precedence at runtime | files |
 | `docs/` | optional user-supplied docs that extend the embedded corpus | markdown |
 | `logs.jsonl` | activity log (bounded ring) | JSONL |
-| `conversations/<conv_id>.acp/` | completed ACP subagent run transcripts (one JSON file per run, linked to the parent conversation); legacy global `acp_runs.jsonl` migrates here automatically on first use | JSON |
+| `conversations/<conv_id>.acp/` | terminal ACP subagent transcripts (one JSON file per run, written by `subagent_wait` or the completion callback and linked to the parent conversation); legacy global `acp_runs.jsonl` migrates here automatically on first use | JSON |
 | `conversations/<conv_id>.journal/` | workspace change journal sidecar: `journal.jsonl` (live append-only event log), `journal.jsonl.gz` (archived gzip members, appended at each turn end), and `blobs/` (content-addressed pre-image objects). Records every file change the agent makes (declared, opaque exec, unobserved MCP) so the post-compaction hydration slot can show exactly what the session changed. Deleted together with the conversation. | JSONL + gzip + files |
 | `credentials.db` | API keys per provider | SQLite |
 | `ci/automation.db` | workflows, runs, schedules, events, waits, locks | SQLite |
