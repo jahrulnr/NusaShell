@@ -992,14 +992,12 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage,
 	var autoContinue *contracts.AutoContinueDTO
 	if a.Todos != nil {
 		items := a.Todos.Get(run.ConversationID)
-		lastText := lastAssistantText(conversation, messageID)
 		decision := domain.DecideAutoContinue(domain.AutoContinueInput{
 			Items:             items,
 			AutoContinueIndex: autoContinueIndex,
 			MaxAutoContinues:  a.Settings.Get().MaxAutoContinues,
 			TurnOK:            true,
 			HasConversation:   true,
-			TurnText:          lastText,
 			HasBackgroundJobs: a.hasPendingSubagents(run.ConversationID),
 		})
 		autoContinue = &contracts.AutoContinueDTO{
@@ -1031,13 +1029,6 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage,
 	a.incrementTurnCounter(conversation.ID)
 
 	return nil
-}
-
-// lastAssistantText returns the visible text content of the assistant message
-// with the given ID. Used by the auto-continue policy to detect whether the
-// turn ended with a question (which means the agent is waiting for the user).
-func lastAssistantText(c *domain.Conversation, messageID string) string {
-	return domain.LastAssistantText(c, messageID)
 }
 
 // incrementTurnCounter bumps the per-conversation turn counter and

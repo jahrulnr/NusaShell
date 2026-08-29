@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots } from './js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming } from './js/views/agent/render.js';
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
   const previousDocument = globalThis.document;
@@ -310,6 +310,62 @@ test('appendToolJobDelta accumulates streamed output and clears placeholder', ()
     assert.equal(output.textContent, 'PING 8.8.8.8 (8.8.8.8)\n64 bytes from 8.8.8.8\n');
     // Placeholder must not reappear.
     assert.doesNotMatch(output.textContent, /waiting/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('applyQueuedToolDeltas keeps chunks until the tool card exists', () => {
+  const dom = new JSDOM('<main id="thread"></main>', { url: 'http://localhost/' });
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const pending = new Map([['tool_1', 'hello from exec\n']]);
+    const emptyJobs = new Map();
+    const first = applyQueuedToolDeltas(emptyJobs, pending);
+    assert.equal(first.flushed, false, 'no card yet: nothing flushed');
+    assert.equal(first.remaining.get('tool_1'), 'hello from exec\n', 'chunk is kept, not dropped');
+
+    const job = renderToolJob({ id: 'tool_1', name: 'exec', args: { command: 'ping' }, status: 'running' });
+    const jobs = new Map([['tool_1', job]]);
+    const second = applyQueuedToolDeltas(jobs, first.remaining);
+    assert.equal(second.flushed, true);
+    assert.equal(second.remaining.size, 0);
+    assert.equal(job.querySelector('.agent-tool-terminal-output').textContent, 'hello from exec\n');
+    assert.doesNotMatch(job.querySelector('.agent-tool-terminal-output').textContent, /waiting/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('reasoningShouldStream is off once tools start or text arrives', () => {
+  assert.equal(reasoningShouldStream({ thinkingLive: true, hidden: false }), true);
+  assert.equal(reasoningShouldStream({ thinkingLive: true, hidden: false, hasText: true }), false);
+  assert.equal(reasoningShouldStream({ thinkingLive: true, hidden: false, toolsStarted: true }), false);
+  assert.equal(reasoningShouldStream({ thinkingLive: false, hidden: false }), false);
+  assert.equal(reasoningShouldStream({ thinkingLive: true, hidden: true }), false);
+});
+
+test('setReasoningStreaming and sealReasoningStreaming toggle is-streaming', () => {
+  const dom = new JSDOM('<main id="thread"></main>', { url: 'http://localhost/' });
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const first = reasoningDisclosure('step one');
+    first.hidden = false;
+    const second = reasoningDisclosure('step two');
+    second.hidden = false;
+    const bubble = document.createElement('div');
+    bubble.append(first, second);
+    setReasoningStreaming(first, true);
+    setReasoningStreaming(second, true);
+    assert.equal(first.classList.contains('is-streaming'), true);
+    assert.equal(second.classList.contains('is-streaming'), true);
+    sealReasoningStreaming(first);
+    assert.equal(first.classList.contains('is-streaming'), false);
+    assert.equal(second.classList.contains('is-streaming'), true, 'sealing one node leaves siblings');
+    sealReasoningStreaming(bubble);
+    assert.equal(second.classList.contains('is-streaming'), false);
   } finally {
     globalThis.document = previousDocument;
   }

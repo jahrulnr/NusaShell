@@ -1,17 +1,11 @@
 package domain
 
-import (
-	"strings"
-	"unicode"
-)
-
 // AutoContinueReason explains why the chain continues or stops.
 type AutoContinueReason string
 
 const (
 	AutoContinueContinue           AutoContinueReason = "continue"
 	AutoContinueAwaitingBackground AutoContinueReason = "awaiting-background-jobs"
-	AutoContinueAwaitingUser       AutoContinueReason = "awaiting-user"
 	AutoContinueNoOpenTodos        AutoContinueReason = "no-open-todos"
 	AutoContinueMaxReached         AutoContinueReason = "max-reached"
 	AutoContinueTurnNotOK          AutoContinueReason = "turn-not-ok"
@@ -33,21 +27,23 @@ type AutoContinueDecision struct {
 // AutoContinueInput is the input to DecideAutoContinue.
 type AutoContinueInput struct {
 	Items             []TodoItem
-	AutoContinueIndex int    // 0 = user-started turn; N > 0 = Nth auto-continue that just finished
-	MaxAutoContinues  int    // 0 = unlimited; negative = default
-	TurnOK            bool   // did the just-finished turn succeed?
-	HasConversation   bool   // without a conversation the chain has no todo SoT
-	TurnText          string // final visible text; a question means the agent is waiting for the user
-	HasBackgroundJobs bool   // a long-running async tool owns the next state transition
+	AutoContinueIndex int  // 0 = user-started turn; N > 0 = Nth auto-continue that just finished
+	MaxAutoContinues  int  // 0 = unlimited; negative = default
+	TurnOK            bool // did the just-finished turn succeed?
+	HasConversation   bool // without a conversation the chain has no todo SoT
+	HasBackgroundJobs bool // a long-running async tool owns the next state transition
 }
 
 // DecideAutoContinue is the pure multi-turn auto-continue policy
 // (Codex-inspired outer loop).
 //
 // Open todos = items whose status is pending or in_progress. The chain
-// continues only when the turn succeeded, open todos remain, the final
-// text does not end with a question, no background jobs are running,
-// and the chain has not exhausted MaxAutoContinues.
+// continues only when the turn succeeded, open todos remain, no background
+// jobs are running, and the chain has not exhausted MaxAutoContinues.
+//
+// A plain-text question in the assistant reply does not pause the chain.
+// The only user-decision gate is the ask_question tool, which blocks the
+// turn until the user answers.
 func DecideAutoContinue(input AutoContinueInput) AutoContinueDecision {
 	maxAutoContinues := NormalizeMaxAutoContinues(input.MaxAutoContinues)
 	continuesUsed := input.AutoContinueIndex
@@ -62,9 +58,6 @@ func DecideAutoContinue(input AutoContinueInput) AutoContinueDecision {
 	if !input.TurnOK {
 		return AutoContinueDecision{ShouldContinue: false, OpenTodoCount: openTodoCount, ContinuesUsed: continuesUsed, MaxAutoContinues: maxAutoContinues, Reason: AutoContinueTurnNotOK}
 	}
-	if endsWithQuestion(input.TurnText) {
-		return AutoContinueDecision{ShouldContinue: false, OpenTodoCount: openTodoCount, ContinuesUsed: continuesUsed, MaxAutoContinues: maxAutoContinues, Reason: AutoContinueAwaitingUser}
-	}
 	if openTodoCount == 0 {
 		return AutoContinueDecision{ShouldContinue: false, OpenTodoCount: openTodoCount, ContinuesUsed: continuesUsed, MaxAutoContinues: maxAutoContinues, Reason: AutoContinueNoOpenTodos}
 	}
@@ -76,18 +69,6 @@ func DecideAutoContinue(input AutoContinueInput) AutoContinueDecision {
 		return AutoContinueDecision{ShouldContinue: false, OpenTodoCount: openTodoCount, ContinuesUsed: continuesUsed, MaxAutoContinues: maxAutoContinues, Reason: AutoContinueMaxReached}
 	}
 	return AutoContinueDecision{ShouldContinue: true, OpenTodoCount: openTodoCount, ContinuesUsed: continuesUsed, MaxAutoContinues: maxAutoContinues, Reason: AutoContinueContinue}
-}
-
-// endsWithQuestion reports whether text ends with a "?" (ASCII or fullwidth).
-// Trailing whitespace is ignored.
-func endsWithQuestion(text string) bool {
-	trimmed := strings.TrimRightFunc(text, unicode.IsSpace)
-	if trimmed == "" {
-		return false
-	}
-	r := []rune(trimmed)
-	last := r[len(r)-1]
-	return last == '?' || last == '？'
 }
 
 // NormalizeMaxAutoContinues clamps the auto-continue budget.

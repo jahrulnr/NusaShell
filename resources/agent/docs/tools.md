@@ -24,7 +24,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `memory_project` | per-workspace project memory dispatcher (listed only with a workspace); `op` selects: `query` (AND selectors), `list`, `read`, `admit` (upsert + lint), `skip` (negative admission, no write), `archive`, `lint`. User prefs stay in `memory`. See `docs(op="read", id="memory-project")` |
 | `docs` | product documentation dispatcher; `op` selects: `search {query}` (ranked page ids) and `read {id}`. Long `read` pages are truncated in-band (~32KiB) with `overflow_path` — continue via `file_read` |
 | `todo` | manage the conversation task checklist. Two modes: `replace` (default) full-replaces Claude TodoWrite style (empty items clears the list); `patch` merges by ID — updates status/content of existing items, appends new ones, keeps untouched items unchanged (`content` optional in patch mode). Use `patch` to update a single item without re-emitting the full list. Item IDs are shown in the hydrated checklist so statuses can be patched after compaction. Max 50 items, 500 chars each; prefer exactly one `in_progress` at a time. The optional `brief` argument is a living planning document (max ~10k tokens) with required markdown sections `## Objective` and `## Done when`, plus optional `## Findings` and `## Approach` that grow as the task progresses. It stays available through conversation history and is re-injected with the fresh hydration checkpoint immediately after the compacted handover user (the epoch anchor), before retained assistant rounds. The brief is mirrored to a plan file on disk; the result returns `plan_path` (absolute) — `file_read` it to re-read the latest brief, and hand it to ACP subagents. Set `clear_brief: true` to delete the brief and its plan file (items untouched); an empty `brief` string alone never clears. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
-| `ask_question` | block for a structured user decision; use only when progress genuinely requires a choice or approval. Set `multi_select=true` whenever more than one option could fit (preferences, scope, priorities) so the user can pick several; the user can also add free text as a note/suggestion alongside the chosen options (when `allow_free_text=true`) |
+| `ask_question` | block for a structured user decision; use only when progress genuinely requires a choice or approval. This is the only way to pause the todo-driven auto-continue chain for a user answer — a plain-text question in the reply does not pause it. Set `multi_select=true` whenever more than one option could fit (preferences, scope, priorities) so the user can pick several; the user can also add free text as a note/suggestion alongside the chosen options (when `allow_free_text=true`) |
 | `mcp_list` | list all plugins (MCP servers) with runtime state: every plugin appears, running or idle |
 | `tool_list` | list ALL tools of a running MCP server (no query); accepts plugin id only; returns compact entries (ref, name, server, description) without parameter schemas — load the full schema with `tool_schema` when needed; call after `mcp_enable` to discover tools |
 | `tool_schema` | load one MCP tool's full definition as a single JSONL line (name, description, parameters with type/properties/required); accepts plugin id only; this is the only tool that serves schemas — mcp_search and tool_list stay schema-free |
@@ -153,6 +153,7 @@ Bad examples:
     todo(items=[{"id":"1","content":"Define MCP","status":"in_progress"}])
     skill(op="list")
     web_fetch(url="<guessed URL>")
+    # ending the turn with a plain-text question — auto-continue will keep going
 
 Use the skill catalog before repeating a `skill(op="list")` call. If the
 user says skills or plugin state changed, refresh with `skill(op="search")` or
@@ -263,6 +264,23 @@ Bad: replying "Thanks for the announcement!" or attributing it to the user
 ("as you asked, I continued...") — the user never wrote it. A newer real user
 message always wins; if the user said "stop" or "berhenti", stop immediately
 and preserve the open TODOs.
+
+## User decisions
+
+A material choice the user must make (target, approval, preference) is an
+`ask_question` call. The turn blocks until they answer. Auto-continue does
+not inspect assistant prose: ending a turn with a `?` does not pause the
+chain while open TODOs remain.
+
+Good:
+
+    ask_question(question="Which file should I edit?", options=[{"id":"a","label":"main.go"},{"id":"b","label":"handler.go"}])
+
+Bad:
+
+    Which file should I edit?
+
+    ask only in the assistant text, then end the turn
 
 ## ACP subagents
 

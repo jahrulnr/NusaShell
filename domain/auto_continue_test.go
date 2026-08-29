@@ -18,7 +18,7 @@ func TestDecideAutoContinue(t *testing.T) {
 	}{
 		{
 			name:  "continue: open todos, turn ok, budget left",
-			input: AutoContinueInput{Items: openItems, AutoContinueIndex: 0, MaxAutoContinues: 10, TurnOK: true, HasConversation: true, TurnText: "done with step 1"},
+			input: AutoContinueInput{Items: openItems, AutoContinueIndex: 0, MaxAutoContinues: 10, TurnOK: true, HasConversation: true},
 			want:  AutoContinueDecision{ShouldContinue: true, OpenTodoCount: 2, ContinuesUsed: 0, MaxAutoContinues: 10, Reason: AutoContinueContinue},
 		},
 		{
@@ -32,28 +32,18 @@ func TestDecideAutoContinue(t *testing.T) {
 			want:  AutoContinueDecision{ShouldContinue: false, OpenTodoCount: 2, ContinuesUsed: 0, MaxAutoContinues: 10, Reason: AutoContinueTurnNotOK},
 		},
 		{
-			name:  "awaiting-user: ends with question mark",
-			input: AutoContinueInput{Items: openItems, MaxAutoContinues: 10, TurnOK: true, HasConversation: true, TurnText: "which file should I edit?"},
-			want:  AutoContinueDecision{ShouldContinue: false, OpenTodoCount: 2, ContinuesUsed: 0, MaxAutoContinues: 10, Reason: AutoContinueAwaitingUser},
-		},
-		{
-			name:  "awaiting-user: ends with fullwidth question mark",
-			input: AutoContinueInput{Items: openItems, MaxAutoContinues: 10, TurnOK: true, HasConversation: true, TurnText: "どのファイルを編集しますか？"},
-			want:  AutoContinueDecision{ShouldContinue: false, OpenTodoCount: 2, ContinuesUsed: 0, MaxAutoContinues: 10, Reason: AutoContinueAwaitingUser},
-		},
-		{
-			name:  "awaiting-user: trailing whitespace ignored",
-			input: AutoContinueInput{Items: openItems, MaxAutoContinues: 10, TurnOK: true, HasConversation: true, TurnText: "which file?   \n"},
-			want:  AutoContinueDecision{ShouldContinue: false, OpenTodoCount: 2, ContinuesUsed: 0, MaxAutoContinues: 10, Reason: AutoContinueAwaitingUser},
+			name:  "plain-text question does not pause: ask_question is the only user gate",
+			input: AutoContinueInput{Items: openItems, MaxAutoContinues: 10, TurnOK: true, HasConversation: true},
+			want:  AutoContinueDecision{ShouldContinue: true, OpenTodoCount: 2, ContinuesUsed: 0, MaxAutoContinues: 10, Reason: AutoContinueContinue},
 		},
 		{
 			name:  "no-open-todos: all completed",
-			input: AutoContinueInput{Items: doneItems, MaxAutoContinues: 10, TurnOK: true, HasConversation: true, TurnText: "all done"},
+			input: AutoContinueInput{Items: doneItems, MaxAutoContinues: 10, TurnOK: true, HasConversation: true},
 			want:  AutoContinueDecision{ShouldContinue: false, OpenTodoCount: 0, ContinuesUsed: 0, MaxAutoContinues: 10, Reason: AutoContinueNoOpenTodos},
 		},
 		{
 			name:  "no-open-todos: empty list",
-			input: AutoContinueInput{Items: nil, MaxAutoContinues: 10, TurnOK: true, HasConversation: true, TurnText: "done"},
+			input: AutoContinueInput{Items: nil, MaxAutoContinues: 10, TurnOK: true, HasConversation: true},
 			want:  AutoContinueDecision{ShouldContinue: false, OpenTodoCount: 0, ContinuesUsed: 0, MaxAutoContinues: 10, Reason: AutoContinueNoOpenTodos},
 		},
 		{
@@ -63,17 +53,17 @@ func TestDecideAutoContinue(t *testing.T) {
 		},
 		{
 			name:  "max-reached: budget exhausted",
-			input: AutoContinueInput{Items: openItems, AutoContinueIndex: 10, MaxAutoContinues: 10, TurnOK: true, HasConversation: true, TurnText: "step done"},
+			input: AutoContinueInput{Items: openItems, AutoContinueIndex: 10, MaxAutoContinues: 10, TurnOK: true, HasConversation: true},
 			want:  AutoContinueDecision{ShouldContinue: false, OpenTodoCount: 2, ContinuesUsed: 10, MaxAutoContinues: 10, Reason: AutoContinueMaxReached},
 		},
 		{
 			name:  "unlimited: 0 budget skips check",
-			input: AutoContinueInput{Items: openItems, AutoContinueIndex: 999, MaxAutoContinues: 0, TurnOK: true, HasConversation: true, TurnText: "step done"},
+			input: AutoContinueInput{Items: openItems, AutoContinueIndex: 999, MaxAutoContinues: 0, TurnOK: true, HasConversation: true},
 			want:  AutoContinueDecision{ShouldContinue: true, OpenTodoCount: 2, ContinuesUsed: 999, MaxAutoContinues: 0, Reason: AutoContinueContinue},
 		},
 		{
 			name:  "negative index clamped to 0",
-			input: AutoContinueInput{Items: openItems, AutoContinueIndex: -5, MaxAutoContinues: 10, TurnOK: true, HasConversation: true, TurnText: "step"},
+			input: AutoContinueInput{Items: openItems, AutoContinueIndex: -5, MaxAutoContinues: 10, TurnOK: true, HasConversation: true},
 			want:  AutoContinueDecision{ShouldContinue: true, OpenTodoCount: 2, ContinuesUsed: 0, MaxAutoContinues: 10, Reason: AutoContinueContinue},
 		},
 	}
@@ -105,27 +95,6 @@ func TestNormalizeMaxAutoContinues(t *testing.T) {
 	for _, c := range cases {
 		if got := NormalizeMaxAutoContinues(c.input); got != c.want {
 			t.Errorf("NormalizeMaxAutoContinues(%d) = %d, want %d", c.input, got, c.want)
-		}
-	}
-}
-
-func TestEndsWithQuestion(t *testing.T) {
-	cases := []struct {
-		text string
-		want bool
-	}{
-		{"hello?", true},
-		{"hello？", true},
-		{"hello?   ", true},
-		{"hello?\n\n", true},
-		{"hello", false},
-		{"", false},
-		{"hello.", false},
-		{"? ", true},
-	}
-	for _, c := range cases {
-		if got := endsWithQuestion(c.text); got != c.want {
-			t.Errorf("endsWithQuestion(%q) = %v, want %v", c.text, got, c.want)
 		}
 	}
 }

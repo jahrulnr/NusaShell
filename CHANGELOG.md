@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Thinking pulse no longer sticks on finished rounds.** `is-streaming` is gated on the current round still being in the thinking phase (live reasoning, no text, no tools). Starting a tool, emitting text, or opening the next round seals prior Thinking disclosures.
+- **Exec terminals stream live output.** Round-stream tool deltas that arrived before the card existed were dropped, so the UI stayed on "… waiting for output" until `agent.tool.completed`. Pending chunks are kept and flushed when the card mounts; the first delta can also create the running card.
+- **Narrow agent windows no longer overflow tool/reasoning rows.** Collapsed tool meta ellipsizes instead of stretching the thread; the bubble/stack chain uses `min-width: 0`.
+
 ### Changed
 
+- **Auto-continue no longer stops on a trailing `?`.** A plain-text question is not a user-decision gate. Only `ask_question` blocks the turn; while TODOs remain, the chain continues and the continue prompt tells the model to call that tool.
 - **Live agent deltas moved from WebSocket to per-round SSE streams (`GET /stream`).** This is a **breaking wire change**: `agent.message.delta`, `agent.reasoning.delta`, and `agent.tool.delta` WS events are removed. The frontend now opens one SSE stream per round (`?run_id=&message_id=&after=<seq>`) on `agent.turn.started`, receives `round.delta` frames (`seq`, `kind` = text | reasoning | tool) and a terminal `round.done` frame (`state`, `usage`, `next`). `after=` replay makes reconnects, room switches, and page reloads self-healing: the server stages live round content in an in-memory registry (bounded, sealed TTL) and the round is committed to the conversation store atomically at seal, so snapshots never see torn mid-round state. `next` chaining carries tool-loop and auto-continue rounds forward, removing the previous room-buffer/pending-event workarounds. The WebSocket keeps signaling and lifecycle events (`agent.turn.started`, `agent.tool.started/completed`, `agent.turn.done/error`, steer, ask, compaction).
 
 ### Added

@@ -350,17 +350,19 @@ summary { outline: none; }
 .agent-tool-stack {
   display: grid;
   gap: 2px;
+  min-width: 0;
+  max-width: 100%;
   width: min(100%, 790px);
   margin: 2px 0 8px;
   border-left: 1px solid #2a3748;
   color: #91a0b3;
 }
-.agent-tool-terminal { color: #9aa8ba; }
+.agent-tool-terminal { min-width: 0; max-width: 100%; overflow: hidden; color: #9aa8ba; }
 .agent-tool-terminal summary {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto auto auto auto;
+  display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   min-height: 34px;
   margin-left: -12px;
   padding: 0 8px 0 0;
@@ -369,9 +371,8 @@ summary { outline: none; }
   list-style: none;
 }
 .agent-tool-elapsed {
-  flex: 0 0 auto;
+  flex: none;
   align-self: center;
-  justify-self: end;
   color: var(--text-faint);
   font: 10px var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -387,6 +388,7 @@ summary { outline: none; }
 .agent-tool-terminal summary:focus-visible { background: rgba(18, 28, 40, .72); outline: 1px solid #527edc; outline-offset: 2px; }
 .agent-tool-terminal-prompt {
   display: grid;
+  flex: none;
   width: 24px;
   height: 24px;
   place-items: center;
@@ -399,14 +401,14 @@ summary { outline: none; }
 .agent-tool-terminal.is-running .agent-tool-terminal-prompt { border-color: #4a6a8a; color: #7ab5d9; animation: agent-tool-terminal-pulse 1.2s ease-in-out infinite; }
 .agent-tool-terminal.is-success .agent-tool-terminal-prompt { border-color: rgba(85, 217, 150, .35); color: #66d59c; }
 .agent-tool-terminal.is-error .agent-tool-terminal-prompt { border-color: rgba(245, 91, 104, .4); color: #ff8f99; }
-.agent-tool-terminal-title { overflow: hidden; color: #aab7c7; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.agent-tool-terminal-badge { flex-shrink: 0; color: #5b8db8; font: 8px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; border: 1px solid rgba(91, 141, 184, .3); border-radius: 4px; padding: 2px 4px; }
-.agent-tool-terminal-meta { min-width: 0; max-width: 100%; overflow: hidden; color: #688079; font: 9px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.agent-tool-terminal-title { flex: 0 1 auto; min-width: 0; max-width: 8.5rem; overflow: hidden; color: #aab7c7; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.agent-tool-terminal-badge { flex: none; color: #5b8db8; font: 8px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; border: 1px solid rgba(91, 141, 184, .3); border-radius: 4px; padding: 2px 4px; }
+.agent-tool-terminal-meta { flex: 1 1 0; min-width: 0; overflow: hidden; color: #688079; font: 9px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .agent-tool-terminal.is-error .agent-tool-terminal-meta { color: #d68d94; }
 .agent-tool-terminal.is-running .agent-tool-terminal-meta { color: #7ab5d9; }
-.agent-tool-terminal-chevron { color: #66768a; transition: transform .15s ease; }
+.agent-tool-terminal-chevron { flex: none; color: #66768a; transition: transform .15s ease; }
 .agent-tool-terminal[open] .agent-tool-terminal-chevron { transform: rotate(180deg); }
-.agent-tool-terminal-body { display: grid; gap: 8px; margin: 2px 0 8px; padding: 0 0 2px 14px; font-size: 11px; }
+.agent-tool-terminal-body { display: grid; gap: 8px; min-width: 0; max-width: 100%; margin: 2px 0 8px; padding: 0 0 2px 14px; font-size: 11px; }
 .agent-tool-terminal:not([open]) > .agent-tool-terminal-body { display: none; }
 .agent-tool-terminal-panel-label { 
   font: 10px/1 var(--font-sans);
@@ -546,7 +548,7 @@ summary { outline: none; }
   letter-spacing: .02em;
 }
 .agent-subagent-card:hover .agent-subagent-cta { color: #7ab5d9; }
-.agent-reasoning { width: min(100%, 790px); margin: 2px 0 8px; }
+.agent-reasoning { min-width: 0; max-width: 100%; width: min(100%, 790px); margin: 2px 0 8px; }
 .agent-reasoning summary { margin-left: -12px; }
 .agent-reasoning-content { min-width: 0; max-width: calc(100% - 12px); margin: 2px 0 11px 12px; white-space: normal; }
 .agent-reasoning-content > :first-child { margin-top: 0; }

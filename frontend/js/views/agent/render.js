@@ -1288,6 +1288,52 @@ export function appendToolJobDelta(card, text) {
   outputEl.scrollTop = outputEl.scrollHeight;
 }
 
+// applyQueuedToolDeltas writes buffered live chunks onto tool cards that
+// already exist. Chunks whose card is not mounted yet stay in `remaining`
+// so a later tool.started (or first-delta ensure) can flush them. Dropping
+// unflushed entries is how "… waiting for output" never filled.
+export function applyQueuedToolDeltas(toolJobs, pending) {
+  const remaining = new Map();
+  let flushed = false;
+  if (!pending?.size) return { flushed, remaining };
+  for (const [id, text] of pending) {
+    const job = toolJobs?.get(id);
+    if (!job || !text) {
+      if (id && text) remaining.set(id, text);
+      continue;
+    }
+    appendToolJobDelta(job, text);
+    flushed = true;
+  }
+  return { flushed, remaining };
+}
+
+// reasoningShouldStream is the live pulse for the current round's Thinking
+// disclosure. It must turn off once the model emits visible text or starts
+// a tool — otherwise renderLiveRun re-adds is-streaming on every tool delta
+// and completed rounds keep the animation.
+export function reasoningShouldStream({
+  hidden = false,
+  hasText = false,
+  thinkingLive = false,
+  toolsStarted = false,
+} = {}) {
+  return Boolean(thinkingLive) && !hidden && !hasText && !toolsStarted;
+}
+
+export function setReasoningStreaming(details, live) {
+  if (!details) return;
+  details.classList.toggle('is-streaming', Boolean(live) && !details.hidden);
+}
+
+export function sealReasoningStreaming(root) {
+  if (!root) return;
+  if (root.classList?.contains('agent-reasoning')) {
+    root.classList.remove('is-streaming');
+  }
+  root.querySelectorAll?.('.agent-reasoning.is-streaming').forEach((n) => n.classList.remove('is-streaming'));
+}
+
 // formatTokens renders a token count with a human unit suffix
 // (e.g. 10680 → "10.68k", 27085560 → "27.09M", 137 → "137").
 export function formatTokens(value) {

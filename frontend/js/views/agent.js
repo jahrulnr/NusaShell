@@ -26,10 +26,13 @@ import {
   setToolTerminalStatus,
   toolTerminalMeta,
   toolTerminalOutput,
-  appendToolJobDelta,
+  applyQueuedToolDeltas,
   appendLiveError,
   bindToolStop,
   isStreamingTool,
+  reasoningShouldStream,
+  setReasoningStreaming,
+  sealReasoningStreaming,
   sealLiveNodeBeforeSteer,
   insertAfterOrAppend,
   bindOptimisticTurn,
@@ -279,15 +282,22 @@ function applyRoundDeltaFrame(run, frame) {
   switch (frame.kind) {
     case 'text':
       appendBoundedLiveText(run, 'raw', frame.text);
+      run.thinkingLive = false;
       if (run.conversationId === state.activeId) scheduleLiveRender(run);
       break;
     case 'reasoning':
       appendBoundedLiveText(run, 'rawReasoning', frame.text);
+      run.thinkingLive = true;
       if (run.conversationId === state.activeId) scheduleLiveRender(run);
       break;
     case 'tool':
-      if (!frame.text) break;
-      if (run.conversationId === state.activeId) queueToolDelta(run, frame.tool_call_id, frame.text);
+      if (!frame.tool_call_id) break;
+      run.thinkingLive = false;
+      run.toolsStarted = true;
+      if (run.conversationId !== state.activeId) break;
+      sealReasoningStreaming(run.reasoningEl);
+      ensureLiveToolJob(run, frame.tool_call_id, frame.name);
+      if (frame.text) queueToolDelta(run, frame.tool_call_id, frame.text);
       break;
   }
 }
@@ -335,10 +345,58 @@ function setLiveToolJob(toolJobs, toolCallID, job) {
   }
 }
 
+function startToolElapsed(job) {
+  if (!job || job._elapsedTimer) return;
+  const startTime = job._startedAt || Date.now();
+  job._startedAt = startTime;
+  const elapsedEl = job.querySelector('.agent-tool-elapsed') || el('span', { class: 'agent-tool-elapsed', text: '0s' });
+  if (!elapsedEl.parentElement) {
+    const head = job.querySelector('.agent-tool-job-card-head') || job.querySelector('summary') || job;
+    head.append(elapsedEl);
+  }
+  job._elapsedTimer = setInterval(() => {
+    const secs = Math.floor((Date.now() - startTime) / 1000);
+    elapsedEl.textContent = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
+  }, 1000);
+}
+
+// ensureLiveToolJob mounts (or reuses) the running tool card so SSE tool
+// deltas can paint before agent.tool.started arrives — and so a reload
+// that only replays the round stream still has a terminal to fill.
+function ensureLiveToolJob(run, toolCallId, name, args) {
+  if (!run || !toolCallId) return null;
+  if (!run.toolJobs) run.toolJobs = new Map();
+  const existing = run.toolJobs.get(toolCallId);
+  if (existing) {
+    if (args != null) {
+      existing._toolArgs = args;
+      existing._toolName = name || existing._toolName;
+      const meta = existing.querySelector('.agent-tool-terminal-meta');
+      if (meta) meta.textContent = toolTerminalMeta({ name: existing._toolName || name, args, status: 'running' });
+    }
+    startToolElapsed(existing);
+    return existing;
+  }
+  if (run.conversationId !== state.activeId || !run.strip) return null;
+  const toolName = name || 'exec';
+  const job = toolName === 'generate_image'
+    ? renderGenerateImageCard({ name: toolName, args: args ?? {}, status: 'running' })
+    : renderToolJob({ name: toolName, args: args ?? {}, status: 'running' });
+  if (isStreamingTool(toolName)) bindToolStop(job, () => run.runId);
+  setLiveToolJob(run.toolJobs, toolCallId, job);
+  placeToolCard(run.bubble, run.strip, job);
+  startToolElapsed(job);
+  updateRoomInfo(state.conversation, state.messages);
+  scrollToBottom();
+  return job;
+}
+
 function resetLiveRoundText(run) {
   if (!run) return;
   run.raw = '';
   run.rawReasoning = '';
+  run.thinkingLive = false;
+  run.toolsStarted = false;
 }
 
 // Active-message windowing sizes (messages, not turns). INITIAL_WINDOW keeps
@@ -960,9 +1018,14 @@ function reattachActiveRun() {
   // Re-render accumulated content for the current (unpersisted) round.
   setReasoningSource(reasoningEl, run.rawReasoning);
   reasoningEl.hidden = !reasoningHasVisibleSource(run.rawReasoning);
-  // If reasoning has content but no text yet, the agent is still thinking —
-  // resume the streaming pulse so the user doesn't think it's stuck.
-  if (!reasoningEl.hidden && !run.raw?.trim()) reasoningEl.classList.add('is-streaming');
+  run.toolsStarted = Boolean(run.toolsStarted) || (run.toolJobs?.size > 0);
+  run.thinkingLive = !run.toolsStarted && !run.raw?.trim() && Boolean(run.rawReasoning);
+  setReasoningStreaming(reasoningEl, reasoningShouldStream({
+    hidden: reasoningEl.hidden,
+    hasText: Boolean(run.raw?.trim()),
+    thinkingLive: Boolean(run.thinkingLive),
+    toolsStarted: Boolean(run.toolsStarted),
+  }));
   if (run.raw?.trim()) { textBox.innerHTML = renderMarkdown(run.raw); void renderMermaidDiagrams(textBox); void highlightCode(textBox); attachZoomButtons(textBox); }
   else {
     textBox.append(thinkingDots());
@@ -1387,7 +1450,7 @@ function clearToolTimers(run) {
 }
 
 function queueToolDelta(run, toolCallId, text) {
-  if (!run || !text) return;
+  if (!run || !text || !toolCallId) return;
   if (!run.pendingToolDeltas) run.pendingToolDeltas = new Map();
   if (!run.pendingToolDeltas.has(toolCallId) && run.pendingToolDeltas.size >= MAX_LIVE_TOOL_JOBS) {
     run.pendingToolDeltas.delete(run.pendingToolDeltas.keys().next().value);
@@ -1401,14 +1464,8 @@ function queueToolDelta(run, toolCallId, text) {
 
 function flushPendingToolDeltas(run) {
   if (!run?.pendingToolDeltas?.size) return false;
-  let flushed = false;
-  for (const [toolCallId, text] of run.pendingToolDeltas) {
-    const job = run.toolJobs?.get(toolCallId);
-    if (!job) continue;
-    appendToolJobDelta(job, text);
-    flushed = true;
-  }
-  run.pendingToolDeltas.clear();
+  const { flushed, remaining } = applyQueuedToolDeltas(run.toolJobs, run.pendingToolDeltas);
+  run.pendingToolDeltas = remaining;
   return flushed;
 }
 
@@ -1457,10 +1514,13 @@ function renderLiveRun(run) {
   if (reasoningEl) {
     setReasoningSource(reasoningEl, run.rawReasoning, { render: false });
     reasoningEl.hidden = !reasoningHasVisibleSource(run.rawReasoning);
-    if (reasoningEl.hidden || run.raw?.trim()) {
-      reasoningEl.classList.remove('is-streaming');
-    } else if (run.rawReasoning) {
-      reasoningEl.classList.add('is-streaming');
+    setReasoningStreaming(reasoningEl, reasoningShouldStream({
+      hidden: reasoningEl.hidden,
+      hasText: Boolean(run.raw?.trim()),
+      thinkingLive: Boolean(run.thinkingLive),
+      toolsStarted: Boolean(run.toolsStarted),
+    }));
+    if (run.thinkingLive && !run.raw?.trim()) {
       textBox?.querySelector('.agent-thinking-dots')?.remove();
     }
     if (reasoningEl.open) {
@@ -1472,7 +1532,7 @@ function renderLiveRun(run) {
   }
 
   if (textBox && run.raw?.trim()) {
-    run.reasoningEl?.classList.remove('is-streaming');
+    setReasoningStreaming(run.reasoningEl, false);
     textBox.querySelector('.agent-thinking-dots')?.remove();
     const banner = run.bubble?.querySelector('.agent-retry-banner');
     if (banner) banner.remove();
@@ -1554,7 +1614,9 @@ function endTurn(runId, keepRun = false) {
   // leave a textBox with dots per round that produced no text, so only
   // removing from run.textBox would leave stale dots above tool stacks.
   run.bubble?.querySelectorAll('.agent-thinking-dots').forEach((n) => n.remove());
-  run.bubble?.querySelectorAll('.agent-reasoning.is-streaming').forEach((n) => n.classList.remove('is-streaming'));
+  sealReasoningStreaming(run.bubble);
+  run.thinkingLive = false;
+  run.toolsStarted = false;
   run.bubble?.querySelector('.agent-retry-banner')?.remove();
   clearToolTimers(run);
   if (!keepRun) {
@@ -1927,8 +1989,9 @@ function bindEvents() {
       run.awaitingSteerRound = false;
       return;
     }
-    // seal previous round: hide its tool strip if empty
+    // seal previous round: hide its tool strip if empty, drop the thinking pulse
     if (run.strip && run.strip.hidden) run.strip.remove();
+    sealReasoningStreaming(run.bubble);
     if (run.msgNode?.isConnected) {
       // Same bubble, new round — one section only. Do not also call
       // ensureRunSlot when message_id changes; that appended a second
@@ -1949,6 +2012,7 @@ function bindEvents() {
       stampRunMessageId(run.msgNode, message_id);
     }
     clearToolTimers(run);
+    run.pendingToolDeltas = new Map();
     run.toolJobs = new Map();
     if (run.textBox && !run.raw) {
       run.textBox.append(thinkingDots());
@@ -2022,19 +2086,21 @@ function bindEvents() {
     const { tool_call_id, name, args, conversation_id } = payload;
     const run = getRunOrQueue('agent.tool.started', payload);
     if (!run) return;
-    // Non-active rooms get their tool cards via the round stream replay on
-    // switch-back; only the active room renders live tool cards here.
-    if (conversation_id !== state.activeId) return;
     // ask_question renders as an ask card (not a tool terminal). The card
     // is created when agent.ask.pending fires with the validated args.
     // Skip the tool terminal here to avoid a double card.
     if (name === 'ask_question') return;
+    run.toolsStarted = true;
+    run.thinkingLive = false;
+    // Non-active rooms get their tool cards via the round stream replay on
+    // switch-back; only the active room renders live tool cards here.
+    if (conversation_id !== state.activeId) return;
     // The model moved on to a tool call — no longer "thinking". Drop the
     // dots in the current round's textBox so they don't linger above the
     // tool stack when the round produced no text. If the box is empty
     // (tool-only round), remove it entirely so no blank bubble-text slot
     // sits above the tools.
-    run.reasoningEl?.classList.remove('is-streaming');
+    sealReasoningStreaming(run.reasoningEl);
     const tb = run.textBox;
     if (tb) {
       tb.querySelector('.agent-thinking-dots')?.remove();
@@ -2043,32 +2109,8 @@ function bindEvents() {
         run.textBox = null;
       }
     }
-    if (!run.strip) return;
-    const job = name === 'generate_image'
-      ? renderGenerateImageCard({ name, args: args ?? {}, status: 'running' })
-      : renderToolJob({ name, args: args ?? {}, status: 'running' });
-    if (isStreamingTool(name)) bindToolStop(job, () => run.runId);
-    setLiveToolJob(run.toolJobs, tool_call_id, job);
-    placeToolCard(run.bubble, run.strip, job);
-    // Appending a tool card grows the thread; follow it if the user is pinned.
-    // Without this, a burst of parallel tool.started events would leave the
-    // view stranded above the latest activity until some later event scrolled.
-    scrollToBottom();
-    // Keep room diagnostics live while tools execute.
-    updateRoomInfo(state.conversation, state.messages);
-    // Start an elapsed timer so the user can see how long the tool has been
-    // running. The timer is stored on the job element and cleared on complete.
-    const startTime = Date.now();
-    const elapsedEl = job.querySelector('.agent-tool-elapsed') || el('span', { class: 'agent-tool-elapsed', text: '0s' });
-    if (!elapsedEl.parentElement) {
-      const head = job.querySelector('.agent-tool-job-card-head') || job;
-      head.append(elapsedEl);
-    }
-    job._startedAt = startTime;
-    job._elapsedTimer = setInterval(() => {
-      const secs = Math.floor((Date.now() - startTime) / 1000);
-      elapsedEl.textContent = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
-    }, 1000);
+    const job = ensureLiveToolJob(run, tool_call_id, name, args);
+    if (job) flushPendingToolDeltas(run);
   });
   on('agent.tool.completed', (payload) => {
     const { tool_call_id, name, status, output, conversation_id } = payload;
@@ -2448,6 +2490,7 @@ function promoteSteerToTranscript(text) {
     run.reasoningEl = null;
     run.strip = null;
     clearToolTimers(run);
+    run.pendingToolDeltas = new Map();
     run.toolJobs = new Map();
     const deferredRoundStart = run.deferredRoundStart;
     run.deferredRoundStart = null;

@@ -567,10 +567,14 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 // prompt as a system prompt suffix. The chain stops when:
 //   - the turn fails or is interrupted
 //   - no open todos remain
-//   - the last assistant text ends with a question
+//   - background jobs (subagents) are still running
 //   - the chain budget is exhausted
 //   - the user stops the turn, sends a message, or switches conversations
 //     (detected via run.Ctx cancellation)
+//
+// A plain-text question in the assistant reply does not pause the chain.
+// The only user-decision gate is the ask_question tool, which blocks the
+// turn until the user answers.
 func (a *App) runTurnChain(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities, autoContinueIndex int) {
 	chainModel := model
 	chainEffort := effort
@@ -897,18 +901,12 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		return false, ""
 	}
 	items := a.Todos.Get(run.ConversationID)
-	conv, err := a.Conversations.Get(run.ConversationID)
-	if err != nil {
-		return false, ""
-	}
-	lastText := lastAssistantText(conv, currentMsgID)
 	decision := domain.DecideAutoContinue(domain.AutoContinueInput{
 		Items:             items,
 		AutoContinueIndex: autoContinueIndex,
 		MaxAutoContinues:  a.Settings.Get().MaxAutoContinues,
 		TurnOK:            true,
 		HasConversation:   true,
-		TurnText:          lastText,
 		HasBackgroundJobs: a.hasPendingSubagents(run.ConversationID),
 	})
 	if !decision.ShouldContinue {

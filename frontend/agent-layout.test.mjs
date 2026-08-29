@@ -119,6 +119,30 @@ test('Thinking and tool markers share the same conversation rail', () => {
   assert.match(parityCSS, /\.agent-tool-terminal summary \{[^}]*margin-left: -12px;/s);
 });
 
+test('Narrow windows ellipsize tool meta instead of overflowing the thread', () => {
+  assert.match(parityCSS, /\.agent-tool-terminal summary \{[^}]*display: flex;/s);
+  assert.match(parityCSS, /\.agent-tool-terminal-meta \{[^}]*flex: 1 1 0;/s);
+  assert.match(parityCSS, /\.agent-tool-stack \{[^}]*min-width: 0;/s);
+  assert.match(parityCSS, /\.agent-tool-terminal \{[^}]*max-width: 100%;/s);
+  assert.match(agentCSS, /\.agent-reasoning summary \{[^}]*display: flex;/s);
+  assert.match(agentCSS, /\.agent-bubble \{[^}]*min-width: 0;/s);
+  assert.match(agentCSS, /\.agent-bubble-text \{[^}]*overflow-wrap: anywhere;/s);
+  assert.match(agentCSS, /\.agent-conversation \{[^}]*min-width: 0;/s);
+  assert.match(agentCSS, /\.agent-thread \{[^}]*min-width: 0;/s);
+  assert.doesNotMatch(parityCSS, /grid-template-columns: 24px minmax\(0, 1fr\) auto auto auto auto/);
+});
+
+test('Live tool deltas stay queued until the card exists and thinking pulse is phase-gated', () => {
+  assert.match(agentRender, /export function applyQueuedToolDeltas/);
+  assert.match(agentView, /applyQueuedToolDeltas\(run\.toolJobs, run\.pendingToolDeltas\)/);
+  assert.doesNotMatch(agentView, /run\.pendingToolDeltas\.clear\(\)/);
+  assert.match(agentView, /function ensureLiveToolJob/);
+  assert.match(agentView, /run\.toolsStarted = true/);
+  assert.match(agentView, /run\.thinkingLive = true/);
+  assert.match(agentView, /reasoningShouldStream\(/);
+  assert.match(agentView, /sealReasoningStreaming\(run\.bubble\)/);
+});
+
 test('Agent live motion respects reduced-motion preferences', () => {
   assert.match(agentCSS, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(parityCSS, /animation-duration: \.001ms !important/);
