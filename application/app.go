@@ -31,6 +31,7 @@ type App struct {
 	Memory          MemoryStore
 	Primary         PrimaryStore
 	Fragments       FragmentStore
+	ProjectMemory   ProjectMemoryStore
 	LearningEdges   LearningEdgeStore
 	LearnedParams   LearnedParamStore
 	ModelOverrides  ModelOverrideStore
@@ -437,6 +438,7 @@ type Deps struct {
 	Memory                      MemoryStore
 	Primary                     PrimaryStore
 	Fragments                   FragmentStore
+	ProjectMemory               ProjectMemoryStore
 	LearningEdges               LearningEdgeStore
 	LearnedParams               LearnedParamStore
 	ModelOverrides              ModelOverrideStore
@@ -497,6 +499,7 @@ func NewApp(deps Deps) *App {
 		Memory:                      deps.Memory,
 		Primary:                     deps.Primary,
 		Fragments:                   deps.Fragments,
+		ProjectMemory:               deps.ProjectMemory,
 		LearningEdges:               deps.LearningEdges,
 		LearnedParams:               deps.LearnedParams,
 		Todos:                       deps.Todos,

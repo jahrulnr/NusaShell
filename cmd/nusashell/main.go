@@ -31,6 +31,7 @@ import (
 	"nusashell/infrastructure/pluginfs"
 	"nusashell/infrastructure/plugininstall"
 	"nusashell/infrastructure/pluginruntime"
+	"nusashell/infrastructure/projectmemory"
 	"nusashell/infrastructure/skillfs"
 	"nusashell/infrastructure/sqlitestore"
 	"nusashell/infrastructure/sttinstall"
@@ -217,11 +218,16 @@ func run() error {
 	if err != nil {
 		slog.Warn("fragment memory init failed", "error", err)
 	}
+	settingsPort := &jsonstore.Settings{S: store}
+	projectMemoryStore := projectmemory.New(dataDir, func() string {
+		return settingsPort.Get().ProjectMemoryBase
+	})
 	tb := &tools.Toolbox{
 		Skills:                 skillStore,
 		Memory:                 &jsonstore.Memory{S: store},
 		Primary:                primaryStore,
 		Fragments:              fragmentStore,
+		ProjectMemory:          projectMemoryStore,
 		Docs:                   docSource,
 		Plugins:                pluginStore,
 		PluginInstaller:        pluginInstaller,
@@ -244,6 +250,7 @@ func run() error {
 		Memory:                      &jsonstore.Memory{S: store},
 		Primary:                     primaryStore,
 		Fragments:                   fragmentStore,
+		ProjectMemory:               projectMemoryStore,
 		LearningEdges:               &jsonstore.LearningEdges{S: store},
 		LearnedParams:               &jsonstore.LearnedParams{S: store},
 		ModelOverrides:              &jsonstore.ModelOverrides{S: store},

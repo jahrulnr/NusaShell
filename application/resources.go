@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -1491,6 +1492,22 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if req.UserPrompt != nil {
 		s.UserPrompt = strings.TrimSpace(*req.UserPrompt)
 	}
+	if req.ProjectMemoryBase != nil {
+		raw := strings.TrimSpace(*req.ProjectMemoryBase)
+		if raw == "" {
+			s.ProjectMemoryBase = ""
+		} else {
+			expanded := os.ExpandEnv(raw)
+			expanded, err := domain.ExpandHomeDir(expanded)
+			if err != nil {
+				return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "project_memory_base: " + err.Error()}
+			}
+			if !filepath.IsAbs(expanded) {
+				return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "project_memory_base must be an absolute directory"}
+			}
+			s.ProjectMemoryBase = expanded
+		}
+	}
 	if err := a.Settings.Set(s); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -1541,6 +1558,7 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		MaxAutoContinues:           s.MaxAutoContinues,
 		SoundNotifications:         s.SoundNotifications,
 		UserPrompt:                 s.UserPrompt,
+		ProjectMemoryBase:          s.ProjectMemoryBase,
 	}
 }
 

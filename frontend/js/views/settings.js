@@ -183,6 +183,7 @@ export async function refresh() {
     sttLanguageSelect.setSelected([['id', 'en'].includes(settings.stt_offline_language) ? settings.stt_offline_language : '']);
     document.getElementById('settings-learning-threshold').value = settings.learning_review_threshold ?? 10;
     document.getElementById('settings-skill-nudge-interval').value = settings.skill_nudge_interval ?? 15;
+    document.getElementById('settings-project-memory-base').value = settings.project_memory_base ?? '';
     document.getElementById('settings-auto-continues').value = settings.max_auto_continues ?? 10;
     // Web answer: set provider dropdown and model field. API key is write-only.
     webAnswerProviderSelect.setSelected([state.webAnswerProvider || '']);
@@ -782,6 +783,7 @@ async function save() {
       web_answer_api_key: webAnswerAPIKey || null,
       learning_review_threshold: learningThreshold,
       skill_nudge_interval: skillNudgeInterval,
+      project_memory_base: document.getElementById('settings-project-memory-base').value.trim() || null,
       max_auto_continues: maxAutoContinues,
       temperature: optionalNumber('settings-temperature'),
       top_p: optionalNumber('settings-top-p'),

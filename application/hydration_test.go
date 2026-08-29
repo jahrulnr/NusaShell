@@ -769,3 +769,87 @@ func TestHydrationNonceUnique(t *testing.T) {
 		t.Error("expected different nonces for two builds")
 	}
 }
+
+type stubProjectMemoryStore struct {
+	extract domain.ProjectIndexExtract
+	ok      bool
+}
+
+func (s *stubProjectMemoryStore) Query(string, domain.ProjectMemoryQuery) ([]domain.ProjectMemoryHit, error) {
+	return nil, nil
+}
+func (s *stubProjectMemoryStore) List(string) ([]string, error) { return nil, nil }
+func (s *stubProjectMemoryStore) Read(string, string, string) (string, error) {
+	return "", nil
+}
+func (s *stubProjectMemoryStore) Admit(string, string, string, string) (domain.ProjectMemoryAdmitResult, error) {
+	return domain.ProjectMemoryAdmitResult{}, nil
+}
+func (s *stubProjectMemoryStore) Archive(string, string) error { return nil }
+func (s *stubProjectMemoryStore) Lint(string) ([]domain.ProjectMemoryLintProblem, error) {
+	return nil, nil
+}
+func (s *stubProjectMemoryStore) IndexExtract(string) (domain.ProjectIndexExtract, bool, error) {
+	return s.extract, s.ok, nil
+}
+
+func hydrationHasSlot(result HydrationResult, name string) bool {
+	if len(result.Messages) == 0 {
+		return false
+	}
+	for _, c := range result.Messages[0].ToolCalls {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func TestHydrationProjectMemoryPresent(t *testing.T) {
+	b := NewHydrationBuilder(HydrationSource{
+		RuntimeContext: RuntimeContextSnapshot{Workspace: "/apps/payments/api"},
+		ProjectMemory: &stubProjectMemoryStore{
+			ok: true,
+			extract: domain.ProjectIndexExtract{
+				Purpose: "payments API",
+				Locks:   "never rewrite auth",
+			},
+		},
+	})
+	result := b.Build()
+	if !hydrationHasSlot(result, "memory_project") {
+		t.Fatal("expected memory_project slot when index extract is present")
+	}
+	body := hydrationResultByName(t, result, "memory_project")
+	if !strings.Contains(body, "payments API") || !strings.Contains(body, "never rewrite auth") {
+		t.Fatalf("extract body = %s", body)
+	}
+}
+
+func TestHydrationProjectMemoryHiddenWithoutWorkspace(t *testing.T) {
+	b := NewHydrationBuilder(HydrationSource{
+		ProjectMemory: &stubProjectMemoryStore{
+			ok:      true,
+			extract: domain.ProjectIndexExtract{Purpose: "x"},
+		},
+	})
+	if hydrationHasSlot(b.Build(), "memory_project") {
+		t.Fatal("memory_project must hide without workspace")
+	}
+}
+
+func TestHydrationProjectMemoryHiddenOnEmptyStore(t *testing.T) {
+	b := NewHydrationBuilder(HydrationSource{
+		RuntimeContext: RuntimeContextSnapshot{Workspace: "/apps/x"},
+		ProjectMemory:  &stubProjectMemoryStore{ok: false},
+	})
+	if hydrationHasSlot(b.Build(), "memory_project") {
+		t.Fatal("memory_project must hide when index is missing")
+	}
+	b = NewHydrationBuilder(HydrationSource{
+		RuntimeContext: RuntimeContextSnapshot{Workspace: "/apps/x"},
+	})
+	if hydrationHasSlot(b.Build(), "memory_project") {
+		t.Fatal("memory_project must hide when store is nil")
+	}
+}

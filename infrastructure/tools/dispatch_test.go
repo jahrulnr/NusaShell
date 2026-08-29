@@ -120,6 +120,13 @@ func TestAllAdvertisedFamilyOpsRoute(t *testing.T) {
 		{"memory", `{"op":"delete","id":"nope"}`},
 		{"docs", `{"op":"search","query":"automation"}`},
 		{"docs", `{"op":"read","id":"automation"}`},
+		{"memory_project", `{"op":"list"}`},
+		{"memory_project", `{"op":"query","kind":"index"}`},
+		{"memory_project", `{"op":"read","kind":"index"}`},
+		{"memory_project", `{"op":"admit","kind":"debug","id":"BUG-x","content":"SCOPE: x"}`},
+		{"memory_project", `{"op":"skip","reason":"nothing durable"}`},
+		{"memory_project", `{"op":"archive","id":"BUG-x"}`},
+		{"memory_project", `{"op":"lint"}`},
 	}
 	for _, tc := range cases {
 		if _, err := tb.Execute(context.Background(), tc.name, []byte(tc.args)); err != nil && strings.Contains(err.Error(), "unknown") {

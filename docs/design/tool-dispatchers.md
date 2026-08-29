@@ -1,8 +1,8 @@
 # Tool dispatcher families
 
 One advertised tool per family instead of one tool per verb. `skill`,
-`memory`, `docs`, and `ci_pipeline` are dispatched by a required `op` field
-(`memory` + `op=save`), replacing 15 provider-facing schemas with 4. New
+`memory`, `docs`, and `memory_project` are dispatched by a required `op` field
+(`memory` + `op=save`), replacing per-verb schemas with one family each. New
 verbs cost an enum value, not a new schema — prompt growth per feature is
 sub-linear.
 
@@ -11,8 +11,9 @@ sub-linear.
 Root+op is the ONLY form of these tools anywhere in the system:
 
 - **Roster** — providers receive the family definitions
-  (`DispatcherToolInfos()`) plus every non-family built-in.
-  There are no per-verb names on any roster.
+  (`FilterDispatcherToolInfos(workspace)`, which is `DispatcherToolInfos()`
+  minus `memory_project` when the turn has no workspace) plus every
+  non-family built-in. There are no per-verb names on any roster.
 - **Persistence** — a call is stored exactly as emitted:
   `{name:"memory", args:{op:"save",…}}`. History, UI, and transcripts show
   the root form.

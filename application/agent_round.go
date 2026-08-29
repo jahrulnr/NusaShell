@@ -477,6 +477,7 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 		source.Todos = a.Todos
 		source.ConvID = c.ID
 	}
+	source.ProjectMemory = a.ProjectMemory
 	return NewHydrationBuilder(source).Build().Messages
 }
 
@@ -762,6 +763,7 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 		output, outputAttachments, err = a.executeGenerateMedia(run, toolCall, settings)
 	default:
 		toolCtx := WithConversationID(run.Ctx, run.ConversationID)
+		toolCtx = WithWorkspace(toolCtx, run.Workspace)
 		toolCtx = WithRunID(toolCtx, run.ID)
 		toolCtx = WithToolCallID(toolCtx, toolCall.ID)
 		executeTool := func() error {

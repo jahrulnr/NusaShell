@@ -309,6 +309,11 @@ type Settings struct {
 	// must stay empty in storage so future default changes reach saved
 	// configs (anti-stamping).
 	PluginContractMode string `json:"plugin_contract_mode,omitempty"`
+	// ProjectMemoryBase is an absolute directory that holds {key}/{kind}.md
+	// project-memory files. Empty uses {dataDir}/memory_project. Set to
+	// ~/.memory (expanded on save) to share with other agents using the
+	// automation-learning on-disk format.
+	ProjectMemoryBase string `json:"project_memory_base,omitempty"`
 }
 
 // DefaultSettings returns the factory defaults. PluginContractMode is

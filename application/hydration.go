@@ -48,6 +48,9 @@ type HydrationSource struct {
 	// Journal supplies workspace change state for the workspace_state slot.
 	// When nil, that slot is hidden.
 	Journal ChangeJournal
+	// ProjectMemory is the per-workspace project-memory store. When nil,
+	// the memory_project hydration slot is hidden.
+	ProjectMemory ProjectMemoryStore
 }
 
 // HydrationBuilder produces an ephemeral synthetic tool transcript
@@ -93,6 +96,7 @@ func (b *HydrationBuilder) Build() HydrationResult {
 		b.readRuntimeContext(),
 		b.readAgentsMD(),
 		b.readMemory(),
+		b.readProjectMemory(),
 		b.readSkills(),
 		b.readMcpList(),
 	} {
@@ -221,6 +225,29 @@ func (b *HydrationBuilder) readMemory() hydrationSlot {
 		"usage":   map[string]any{"chars": chars, "limit": limit, "pct": pct},
 	})
 	return hydrationSlot{name: "memory", args: args, content: string(content)}
+}
+
+// readProjectMemory injects a compact IDX-project extract (PURPOSE, LOCKS,
+// CURRENT_STATE, ROUTES). Hidden when there is no workspace, no store, or
+// no index.md snapshot.
+func (b *HydrationBuilder) readProjectMemory() hydrationSlot {
+	if b.source.ProjectMemory == nil {
+		return hydrationSlot{name: "memory_project", content: ""}
+	}
+	ws := strings.TrimSpace(b.source.RuntimeContext.Workspace)
+	if ws == "" {
+		return hydrationSlot{name: "memory_project", content: ""}
+	}
+	extract, ok, err := b.source.ProjectMemory.IndexExtract(ws)
+	if err != nil || !ok {
+		return hydrationSlot{name: "memory_project", content: ""}
+	}
+	if extract.Purpose == "" && extract.Locks == "" && extract.CurrentState == "" && extract.Routes == "" {
+		return hydrationSlot{name: "memory_project", content: ""}
+	}
+	content, _ := json.Marshal(extract)
+	args := `{"op":"query","kind":"index","full":true}`
+	return hydrationSlot{name: "memory_project", args: args, content: string(content)}
 }
 
 // stripYAMLFrontmatter removes a leading "---\n...\n---" block from text.

@@ -17,6 +17,10 @@ turn. Fragments are the cold archive — all new facts enter here first,
 and the background review agent edits the primary document to reflect
 the most durable facts.
 
+Fragments are **user-only**. Durable facts about the active workspace
+belong in `memory_project` (see `memory-project.md`), not in fragments
+with `category=project`.
+
 ## Primary document format
 
 `memory/primary.md` is a markdown file with YAML frontmatter followed by
@@ -100,8 +104,8 @@ triage, and it pushes the real fact down in search results.
 Good examples:
 
     memory(op="save", content="User prefers Indonesian for code comments", category="user", tags=["preference"])
-    memory(op="save", content="Repo policy: ignore untracked folders in root — they are research scratch", category="project", tags=["repo-policy"])
     memory(op="search", query="comment language")   # before saving, check for duplicates
+    memory_project(op="query", topic="deploy")      # project facts live in memory_project
 
 ## How the review agent edits primary
 

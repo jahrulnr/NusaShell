@@ -17,6 +17,8 @@ func TestDispatchOpRoutesOps(t *testing.T) {
 		{"memory", `{"op":"SAVE","content":"x"}`, "save"}, // op match is case-insensitive
 		{"memory", `{"op":" search ","query":"q"}`, "search"},
 		{"docs", `{"op":"search","query":"mcp"}`, "search"},
+		{"memory_project", `{"op":"query","kind":"index"}`, "query"},
+		{"memory_project", `{"op":"skip","reason":"nothing durable"}`, "skip"},
 	}
 	for _, tc := range cases {
 		got, err := DispatchOp(tc.root, []byte(tc.args))
@@ -45,7 +47,7 @@ func TestDispatchOpRejectsBadOp(t *testing.T) {
 }
 
 func TestIsDispatchRoot(t *testing.T) {
-	for _, root := range []string{"skill", "memory", "docs"} {
+	for _, root := range []string{"skill", "memory", "docs", "memory_project"} {
 		if !IsDispatchRoot(root) {
 			t.Fatalf("%q should be a dispatch root", root)
 		}
@@ -59,8 +61,8 @@ func TestIsDispatchRoot(t *testing.T) {
 
 func TestDispatcherToolInfosSchemaRequiresOp(t *testing.T) {
 	got := DispatcherToolInfos()
-	if len(got) != 3 {
-		t.Fatalf("family defs = %d, want 3", len(got))
+	if len(got) != 4 {
+		t.Fatalf("family defs = %d, want 4", len(got))
 	}
 	for _, def := range got {
 		req, ok := def.InputSchema["required"].([]string)
@@ -102,5 +104,28 @@ func TestRetiredPerOpNamesAreUnknownTools(t *testing.T) {
 		if _, err := DispatchOp(name, []byte(`{}`)); err == nil {
 			t.Fatalf("%q must fail DispatchOp loudly", name)
 		}
+	}
+}
+
+func TestFilterDispatcherToolInfosHidesProjectMemoryWithoutWorkspace(t *testing.T) {
+	hidden := FilterDispatcherToolInfos("")
+	for _, info := range hidden {
+		if info.Name == "memory_project" {
+			t.Fatal("memory_project must be hidden without a workspace")
+		}
+	}
+	shown := FilterDispatcherToolInfos("/apps/payments/api")
+	found := false
+	for _, info := range shown {
+		if info.Name == "memory_project" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("memory_project must be advertised when a workspace is set")
+	}
+	if len(shown) != 4 {
+		t.Fatalf("with workspace, family defs = %d, want 4", len(shown))
 	}
 }

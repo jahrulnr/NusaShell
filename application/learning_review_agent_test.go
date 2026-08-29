@@ -1682,3 +1682,24 @@ func TestReviewMarkerSaveDoesNotOverwriteConcurrentTurnProgress(t *testing.T) {
 		t.Fatalf("concurrent message was overwritten by stale review save; messages: %+v", got.Messages)
 	}
 }
+
+func TestReviewAllowedOpRejectsMemoryProject(t *testing.T) {
+	if reviewAllowedOp("memory_project", []byte(`{"op":"query","kind":"index"}`)) {
+		t.Fatal("review agent must not be allowed to call memory_project")
+	}
+	if reviewAllowedOp("memory_project", []byte(`{"op":"admit","kind":"debug","content":"x"}`)) {
+		t.Fatal("review agent must not admit into project memory")
+	}
+	if reviewToolWhitelist()["memory_project"] {
+		t.Fatal("memory_project must stay off the review whitelist")
+	}
+}
+
+func TestReviewToolsOmitMemoryProject(t *testing.T) {
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
+	for _, td := range agent.reviewTools() {
+		if td.Name == "memory_project" {
+			t.Fatal("reviewTools() must not list memory_project")
+		}
+	}
+}

@@ -592,7 +592,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	if !caps.Video && settings.VideoProviderID != "" && settings.VideoModelID != "" {
 		conversation = a.enrichWithVideoDescriptions(run.Ctx, conversation, asstMsgID, settings)
 	}
-	tools := append(a.Toolbox.ListTools(), DispatcherToolInfos()...)
+	tools := append(a.Toolbox.ListTools(), FilterDispatcherToolInfos(run.Workspace)...)
 	toolDefs := make([]ToolDef, 0, len(tools))
 	for _, tool := range tools {
 		toolDefs = append(toolDefs, ToolDef(tool))

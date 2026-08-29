@@ -32,6 +32,7 @@ type Toolbox struct {
 	Memory          application.MemoryStore   // legacy — used by lifecycle/learning subsystems
 	Primary         application.PrimaryStore
 	Fragments       application.FragmentStore
+	ProjectMemory   application.ProjectMemoryStore
 	Docs            application.DocsSource
 	Plugins         application.PluginStore
 	PluginInstaller application.PluginInstaller
@@ -256,7 +257,7 @@ func (t *Toolbox) videoGenerationConfigured() bool {
 }
 
 // executeFamily routes an ADVERTISED dispatcher-root call (skill, memory,
-// docs, ci_pipeline) to its op handler. This is the ONLY door to the family
+// docs, memory_project) to its op handler. This is the ONLY door to the family
 // handlers: the root+"_"+op strings below are private routing keys and are
 // not reachable as tool names, so retired per-op calls fail loud upstream.
 func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byte) (string, error) {
@@ -578,6 +579,9 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		}
 		return capToolOutput("docs", map[string]any{"title": doc.Title, "path": doc.Path}, doc.Content), nil
 
+	case strings.HasPrefix(name, "memory_project_"):
+		return t.executeProjectMemory(ctx, op, argsJSON)
+
 	default:
 		return "", fmt.Errorf("unknown %s op %q", name, op)
 	}
@@ -612,7 +616,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		return out, err
 	}
 	// Dispatcher families (advertised roots: skill, memory, docs,
-	// ci_pipeline) are routed exclusively through executeFamily: resolving
+	// memory_project) are routed exclusively through executeFamily: resolving
 	// the required `op` and reaching a family handler is impossible without
 	// going through it. Retired per-op names fall through to the plain
 	// switch below and end up as the honest "unknown tool" error.

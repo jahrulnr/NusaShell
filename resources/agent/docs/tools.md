@@ -21,6 +21,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `show` | render a file from disk in the UI. `op=html` reads an HTML file and displays it in a sandboxed iframe (write the file first with `file_write`, then `show` it — use `file_patch` for edits, `file_read` to inspect). `op=image` reads an image file and displays it inline. `op=audio` reads an audio file (mp3, wav, ogg, m4a) and displays an inline player. `op=video` reads a video file (mp4, webm, mov, avi) and displays an inline player. `width`/`height` control the iframe viewport (html only, default 720x400). The tool result to the model is metadata only (path, name, media_type, size_bytes for media; path, width, height, title for html) — no file content or base64 payload is ever embedded in the tool output, so it does not bloat the conversation JSON or enter the provider request. The frontend loads the file via `/local-file?path=` on demand. Use `read_media` instead when the model needs to see the image/audio/video content. Replaces the former `artifact_*` tools — file_* handles CRUD, `show` only handles display |
 | `skill` | skill library dispatcher; `op` selects: `list`, `search`, `save`. Skill files live on disk — read `SKILL.md` and support files with `file_read`, list a skill folder with `file_list` (see `docs(op="read", id="skills")` for the path layout) |
 | `memory` | long-term memory dispatcher; `op` selects: `save` (idempotent dedup), `replace` (primary substring/body rewrite or fragment update), `search` (BM25 ranked fragments), `list`, `delete` |
+| `memory_project` | per-workspace project memory dispatcher (listed only with a workspace); `op` selects: `query` (AND selectors), `list`, `read`, `admit` (upsert + lint), `skip` (negative admission, no write), `archive`, `lint`. User prefs stay in `memory`. See `docs(op="read", id="memory-project")` |
 | `docs` | product documentation dispatcher; `op` selects: `search {query}` (ranked page ids) and `read {id}`. Long `read` pages are truncated in-band (~32KiB) with `overflow_path` — continue via `file_read` |
 | `todo` | manage the conversation task checklist. Two modes: `replace` (default) full-replaces Claude TodoWrite style (empty items clears the list); `patch` merges by ID — updates status/content of existing items, appends new ones, keeps untouched items unchanged (`content` optional in patch mode). Use `patch` to update a single item without re-emitting the full list. Item IDs are shown in the hydrated checklist so statuses can be patched after compaction. Max 50 items, 500 chars each; prefer exactly one `in_progress` at a time. The optional `brief` argument is a living planning document (max ~10k tokens) with required markdown sections `## Objective` and `## Done when`, plus optional `## Findings` and `## Approach` that grow as the task progresses. It stays available through conversation history and is re-injected with the fresh hydration checkpoint immediately after the compacted handover user (the epoch anchor), before retained assistant rounds. The brief is mirrored to a plan file on disk; the result returns `plan_path` (absolute) — `file_read` it to re-read the latest brief, and hand it to ACP subagents. Set `clear_brief: true` to delete the brief and its plan file (items untouched); an empty `brief` string alone never clears. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
 | `ask_question` | block for a structured user decision; use only when progress genuinely requires a choice or approval. Set `multi_select=true` whenever more than one option could fit (preferences, scope, priorities) so the user can pick several; the user can also add free text as a note/suggestion alongside the chosen options (when `allow_free_text=true`) |
@@ -109,7 +110,7 @@ enabled.
 
 ### Dispatcher families
 
-`skill`, `memory`, and `docs` are **dispatcher tools**: one
+`skill`, `memory`, `docs`, and `memory_project` are **dispatcher tools**: one
 advertised tool per family whose required `op` field selects the action.
 Root+op is the SINGLE naming layer — the roster, execution routing, persisted
 history, hydration checkpoints, and internal callers all use exactly this
@@ -128,6 +129,10 @@ Ops per family:
   the primary document or one fragment; `search` is BM25-ranked with metadata
   filters; `list`; `delete {id}`.
 - `docs`: `search {query,limit?}`, then `read {id}`.
+- `memory_project` (only when a workspace is set): `query` (AND `topic` /
+  `kind` / `related` / `id`; `archive` / `full` / `limit` optional), `list`,
+  `read {kind|id}`, `admit {kind,content,id?}`, `skip {reason}`, `archive {id}`,
+  `lint`. See `docs(op="read", id="memory-project")`.
 
 ## Workflow routing
 

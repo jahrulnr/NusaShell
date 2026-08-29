@@ -566,13 +566,14 @@
         {
           "heading": "Embeddings",
           "paragraphs": [
-            "Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review). The review model routes background autolearn reviews to a cheaper or faster model (default uses the conversation's active model)."
+            "Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review). The review model routes background autolearn reviews to a cheaper or faster model (default uses the conversation's active model). Project memory directory overrides the default {dataDir}/memory_project store so a skill-compatible path such as ~/.memory can be shared with other agents."
           ],
           "controls": [
             "settings-embedding-title",
             "settings-embedding-model",
             "settings-learning-threshold",
             "settings-skill-nudge-interval",
+            "settings-project-memory-base",
             "settings-review-model"
           ]
         },
@@ -1492,6 +1493,12 @@
       "section": "Settings",
       "type": "number",
       "notes": "Tool calls before skill review; 0 disables tool-based review."
+    },
+    "settings-project-memory-base": {
+      "label": "Project memory directory",
+      "section": "Settings",
+      "type": "text",
+      "notes": "Absolute directory for {key}/{kind}.md project memory. Empty uses {dataDir}/memory_project. ~/.memory shares the skill-compatible layout."
     },
     "settings-review-model": {
       "label": "Review model",

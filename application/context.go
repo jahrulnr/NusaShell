@@ -17,6 +17,8 @@ const runIDKey ctxKey = "run_id"
 // context so barrier tools (ask_question) can key their pending state by call.
 const toolCallIDKey ctxKey = "tool_call_id"
 
+const workspaceKey ctxKey = "workspace"
+
 // WithConversationID returns a new context that carries the conversation id
 // so conversation-scoped tools (todo) can access it.
 func WithConversationID(ctx context.Context, conversationID string) context.Context {
@@ -56,6 +58,20 @@ func WithToolCallID(ctx context.Context, callID string) context.Context {
 // ToolCallIDFromContext returns the tool call id stored in ctx, or "".
 func ToolCallIDFromContext(ctx context.Context) string {
 	if v, ok := ctx.Value(toolCallIDKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// WithWorkspace returns a new context that carries the turn workspace path
+// so project-memory tools can key entries without re-reading the conversation.
+func WithWorkspace(ctx context.Context, workspace string) context.Context {
+	return context.WithValue(ctx, workspaceKey, workspace)
+}
+
+// WorkspaceFromContext returns the workspace path stored in ctx, or "".
+func WorkspaceFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(workspaceKey).(string); ok {
 		return v
 	}
 	return ""

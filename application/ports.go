@@ -146,6 +146,19 @@ type FragmentSaveIfAbsent interface {
 	SaveIfAbsent(f *domain.MemoryFragment) (existing *domain.MemoryFragment, saved bool, err error)
 }
 
+// ProjectMemoryStore is the per-workspace, skill-compatible project memory
+// adapter ({base}/{key}/{kind}.md). It is independent of user memory
+// (primary.md + fragments). Empty workspace is rejected by the tool layer.
+type ProjectMemoryStore interface {
+	Query(workspace string, q domain.ProjectMemoryQuery) ([]domain.ProjectMemoryHit, error)
+	List(workspace string) ([]string, error)
+	Read(workspace, kind, id string) (string, error)
+	Admit(workspace, kind, id, content string) (domain.ProjectMemoryAdmitResult, error)
+	Archive(workspace, id string) error
+	Lint(workspace string) ([]domain.ProjectMemoryLintProblem, error)
+	IndexExtract(workspace string) (domain.ProjectIndexExtract, bool, error)
+}
+
 // LearningEdgeStore persists bitemporal edges between learning nodes.
 type LearningEdgeStore interface {
 	List() []*domain.LearningEdge

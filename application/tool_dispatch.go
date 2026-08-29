@@ -7,7 +7,7 @@ import (
 )
 
 // Dispatcher families expose ONE advertised tool per family (skill, memory,
-// docs, ci_pipeline) selected by a required `op` argument. Root+op is the
+// docs, memory_project) selected by a required `op` argument. Root+op is the
 // SINGLE naming layer everywhere: provider roster, execution routing,
 // persisted history, hydration, and tests. There are no per-verb aliases —
 // a call named like an old verb is simply an unknown tool.
@@ -77,6 +77,26 @@ var dispatchFamilies = []dispatchFamily{
 			),
 		},
 	},
+	{
+		root:    "memory_project",
+		members: []string{"query", "list", "read", "admit", "skip", "archive", "lint"},
+		def: ToolInfo{
+			Name:        "memory_project",
+			Description: "Per-workspace project memory (skill-compatible anchored markdown); advertised only when a workspace is set. \"op\" selects: query {topic?|kind?|related?|id?, archive?, full?, limit?} AND selectors, at least one required; list files in read priority; read {kind} or {id}; admit {kind,content,id?} upsert then lint (debug also pattern-tracks); skip {reason} records a negative admission with no disk write; archive {id} moves a live entry to archive/; lint reports problems. Never store user prefs here — use memory (primary/fragments). See docs(op=\"read\", id=\"memory-project\").",
+			InputSchema: objSchema(
+				pEnum("op", "Operation", "query", "list", "read", "admit", "skip", "archive", "lint"),
+				pStr("topic", "Topic selector (op=query)"),
+				pStr("kind", "Kind file stem (query/read/admit); aliases: decision→decisions"),
+				pStr("related", "Entry ID whose inbound+outbound neighbors to return (op=query)"),
+				pStr("id", "Entry ID (query/read/admit/archive)"),
+				pBool("archive", "Include archive/ in query results"),
+				pBool("full", "Return anchored bodies instead of compact rows (op=query)"),
+				pInt("limit", "Max query hits (0 = unlimited)"),
+				pStr("content", "Entry body to admit (BEGIN/END wrappers optional)"),
+				pStr("reason", "Why nothing was written (op=skip; required)"),
+			),
+		},
+	},
 }
 
 var familyByRoot = map[string]*dispatchFamily{}
@@ -100,6 +120,10 @@ func pStr(name, desc string) schemaProp {
 
 func pInt(name, desc string) schemaProp {
 	return schemaProp{name, map[string]any{"type": "integer", "description": desc}}
+}
+
+func pBool(name, desc string) schemaProp {
+	return schemaProp{name, map[string]any{"type": "boolean", "description": desc}}
 }
 
 func pEnum(name, desc string, vals ...string) schemaProp {
@@ -173,6 +197,23 @@ func DispatcherToolInfos() []ToolInfo {
 	out := make([]ToolInfo, 0, len(dispatchFamilies))
 	for i := range dispatchFamilies {
 		out = append(out, dispatchFamilies[i].def)
+	}
+	return out
+}
+
+// FilterDispatcherToolInfos drops memory_project when the turn has no
+// workspace so the model cannot call a tool that would only error.
+func FilterDispatcherToolInfos(workspace string) []ToolInfo {
+	infos := DispatcherToolInfos()
+	if strings.TrimSpace(workspace) != "" {
+		return infos
+	}
+	out := make([]ToolInfo, 0, len(infos))
+	for _, info := range infos {
+		if info.Name == "memory_project" {
+			continue
+		}
+		out = append(out, info)
 	}
 	return out
 }

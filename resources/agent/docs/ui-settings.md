@@ -47,7 +47,7 @@ Default model for new conversations, the maximum tool rounds per turn (default 8
 
 ## Embeddings
 
-Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review). The review model routes background autolearn reviews to a cheaper or faster model (default uses the conversation's active model).
+Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review). The review model routes background autolearn reviews to a cheaper or faster model (default uses the conversation's active model). Project memory directory overrides the default {dataDir}/memory_project store so a skill-compatible path such as ~/.memory can be shared with other agents.
 
 - **Embeddings title** (`#settings-embedding-title`):
   - Section: Settings
@@ -66,6 +66,11 @@ Embedding model used by skill and memory search. Models tagged as embedding-capa
   - Section: Settings
   - Type: number
   - Notes: Tool calls before skill review; 0 disables tool-based review.
+
+- **Project memory directory** (`#settings-project-memory-base`):
+  - Section: Settings
+  - Type: text
+  - Notes: Absolute directory for {key}/{kind}.md project memory. Empty uses {dataDir}/memory_project. ~/.memory shares the skill-compatible layout.
 
 - **Review model** (`#settings-review-model`):
   - Section: Settings

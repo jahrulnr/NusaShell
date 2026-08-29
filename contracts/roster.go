@@ -1056,6 +1056,7 @@ type SettingsDTO struct {
 	SoundNotifications         bool     `json:"sound_notifications"`
 	UserPrompt                 string   `json:"user_prompt,omitempty"`
 	PluginContractMode         string   `json:"plugin_contract_mode,omitempty"`
+	ProjectMemoryBase          string   `json:"project_memory_base,omitempty"`
 }
 
 type SettingsGetResult struct {
@@ -1105,6 +1106,7 @@ type SettingsSetRequest struct {
 	SoundNotifications         *bool           `json:"sound_notifications,omitempty"`
 	UserPrompt                 *string         `json:"user_prompt,omitempty"`
 	PluginContractMode         *string         `json:"plugin_contract_mode,omitempty"`
+	ProjectMemoryBase          *string         `json:"project_memory_base,omitempty"`
 }
 
 // ---- offline TTS install ----
