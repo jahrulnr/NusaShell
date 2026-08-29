@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"nusashell/domain"
+	"nusashell/infrastructure/nusatemp"
 	"nusashell/infrastructure/pluginicon"
 )
 
@@ -221,7 +222,7 @@ func (i *Installer) Install(ctx context.Context, req domain.PluginInstallRequest
 		return nil, err
 	}
 
-	stage, err := os.MkdirTemp("", "nusashell-plugin-*")
+	stage, err := nusatemp.MkdirTemp("plugin-*")
 	if err != nil {
 		return nil, fmt.Errorf("plugin install: create stage: %w", err)
 	}

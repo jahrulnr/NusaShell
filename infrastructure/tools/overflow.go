@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
+
+	"nusashell/infrastructure/nusatemp"
 )
 
 // toolInlineMaxBytes is the Cursor-like in-band budget for grep, exec,
@@ -14,16 +16,8 @@ import (
 // model continues with the same offset_bytes contract.
 const toolInlineMaxBytes = 32 << 10
 
-// toolOverflowDirName is the per-process folder under the platform temp
-// directory (os.TempDir: %TEMP% on Windows, /tmp on Unix).
-const toolOverflowDirName = "nusashell"
-
 func toolOverflowDir() (string, error) {
-	dir := filepath.Join(os.TempDir(), toolOverflowDirName)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	return dir, nil
+	return nusatemp.Dir()
 }
 
 func sanitizeToolFileBase(tool string) string {

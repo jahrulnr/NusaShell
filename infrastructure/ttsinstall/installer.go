@@ -28,6 +28,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"nusashell/infrastructure/nusatemp"
 )
 
 // Progress phases reported by Install.
@@ -343,7 +345,7 @@ func (in *Installer) fetchArchive(ctx context.Context, url string, use func(*os.
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download failed: HTTP %d from %s", resp.StatusCode, url)
 	}
-	tmp, err := os.MkdirTemp("", "nusashell-tts-*")
+	tmp, err := nusatemp.MkdirTemp("tts-*")
 	if err != nil {
 		return err
 	}

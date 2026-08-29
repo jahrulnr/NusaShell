@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"nusashell/contracts"
+	"nusashell/infrastructure/nusatemp"
 )
 
 // Progress rides the stt.install.* bus events. BytesFetched/BytesTotal are
@@ -199,7 +200,11 @@ func (in *Installer) installEngine(ctx context.Context, report func(Progress)) e
 	if !ok {
 		return errors.New("stt: engine install — platform unsupported")
 	}
-	archive := filepath.Join(os.TempDir(), fmt.Sprintf("nusashell-stt-engine-%d.%s", os.Getpid(), asset.Kind))
+	dir, err := nusatemp.Dir()
+	if err != nil {
+		return err
+	}
+	archive := filepath.Join(dir, fmt.Sprintf("stt-engine-%d.%s", os.Getpid(), asset.Kind))
 	if err := downloadToFile(ctx, in.client, fmt.Sprintf("%s/%s", in.releaseBase, asset.Name), archive, func(p Progress) {
 		p.Phase = PhaseBinary
 		if p.BytesTotal < 0 {

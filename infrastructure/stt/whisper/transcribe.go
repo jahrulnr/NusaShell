@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"nusashell/application"
+	"nusashell/infrastructure/nusatemp"
 )
 
 // TranscribeOffline runs one local inference: the audio bytes are decoded to
@@ -46,7 +47,7 @@ func (e *Engine) TranscribeOffline(ctx context.Context, req application.OfflineS
 		return "", err
 	}
 
-	work, err := os.MkdirTemp("", "nusashell-stt-*")
+	work, err := nusatemp.MkdirTemp("stt-*")
 	if err != nil {
 		return "", fmt.Errorf("whisper: temp dir: %w", err)
 	}

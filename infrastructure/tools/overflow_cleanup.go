@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"nusashell/infrastructure/nusatemp"
 )
 
 // ToolOverflowMaxAge is how long spill files stay in the platform temp
@@ -13,12 +15,12 @@ const ToolOverflowMaxAge = 24 * time.Hour
 
 const toolOverflowSweepInterval = time.Hour
 
-// SweepToolOverflow deletes regular files under the overflow directory
-// whose mtime is at least maxAge before now. Missing dir is a no-op.
-// Subdirectories are left untouched.
+// SweepToolOverflow deletes regular files and directories under
+// nusatemp.Path whose mtime is at least maxAge before now. Missing dir is
+// a no-op. Aged installer/whisper staging dirs are RemoveAll'd so a
+// crash before defer cleanup does not leak past 24h.
 func SweepToolOverflow(now time.Time, maxAge time.Duration) (int, error) {
-	dir := filepath.Join(os.TempDir(), toolOverflowDirName)
-	return sweepToolOverflowDir(dir, now, maxAge)
+	return sweepToolOverflowDir(nusatemp.Path(), now, maxAge)
 }
 
 func sweepToolOverflowDir(dir string, now time.Time, maxAge time.Duration) (int, error) {
@@ -34,21 +36,23 @@ func sweepToolOverflowDir(dir string, now time.Time, maxAge time.Duration) (int,
 	}
 	removed := 0
 	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
 		info, err := e.Info()
 		if err != nil {
-			continue
-		}
-		if !info.Mode().IsRegular() {
 			continue
 		}
 		if now.Sub(info.ModTime()) < maxAge {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		var rm error
+		if info.IsDir() {
+			rm = os.RemoveAll(path)
+		} else if info.Mode().IsRegular() {
+			rm = os.Remove(path)
+		} else {
+			continue
+		}
+		if rm != nil && !os.IsNotExist(rm) {
 			continue
 		}
 		removed++

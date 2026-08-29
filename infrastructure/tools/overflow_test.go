@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"nusashell/application"
+	"nusashell/infrastructure/nusatemp"
 )
 
 func TestCapToolOutputSmallUnchanged(t *testing.T) {
@@ -32,7 +33,7 @@ func TestCapToolOutputSpillsToPlatformTemp(t *testing.T) {
 		t.Fatalf("expected next_offset_bytes for file_read: %s", out[:400])
 	}
 	path := overflowPathFrom(t, out)
-	wantDir := filepath.Join(os.TempDir(), toolOverflowDirName)
+	wantDir := nusatemp.Path()
 	if filepath.Dir(path) != wantDir {
 		t.Fatalf("overflow dir = %q, want platform temp %q", filepath.Dir(path), wantDir)
 	}
@@ -159,6 +160,7 @@ func TestSweepOverflowRemovesOnlyAgedFiles(t *testing.T) {
 	oldPath := filepath.Join(dir, "grep-old.txt")
 	freshPath := filepath.Join(dir, "grep-fresh.txt")
 	keepDir := filepath.Join(dir, "subdir")
+	oldDir := filepath.Join(dir, "plugin-old")
 	if err := os.WriteFile(oldPath, []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -166,6 +168,9 @@ func TestSweepOverflowRemovesOnlyAgedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir(keepDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(oldDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	oldTime := now.Add(-ToolOverflowMaxAge - time.Second)
@@ -176,22 +181,28 @@ func TestSweepOverflowRemovesOnlyAgedFiles(t *testing.T) {
 	if err := os.Chtimes(freshPath, freshTime, freshTime); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chtimes(oldDir, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
 
 	n, err := sweepToolOverflowDir(dir, now, ToolOverflowMaxAge)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 {
-		t.Fatalf("removed %d, want 1", n)
+	if n != 2 {
+		t.Fatalf("removed %d, want 2 (aged file + aged dir)", n)
 	}
 	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
 		t.Fatal("aged file should be removed")
+	}
+	if _, err := os.Stat(oldDir); !os.IsNotExist(err) {
+		t.Fatal("aged dir should be removed")
 	}
 	if _, err := os.Stat(freshPath); err != nil {
 		t.Fatalf("fresh file should remain: %v", err)
 	}
 	if _, err := os.Stat(keepDir); err != nil {
-		t.Fatalf("subdir should remain: %v", err)
+		t.Fatalf("fresh subdir should remain: %v", err)
 	}
 }
 
