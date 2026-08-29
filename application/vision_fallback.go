@@ -77,7 +77,7 @@ func (a *App) resolveFallbackProvider(providerID string) (*domain.Provider, stri
 	for _, p := range a.Providers.List() {
 		if p.ID == providerID && p.Enabled {
 			key, has, _ := a.Credentials.Get(p.ID)
-			if !has && requiresKey(p.Kind) {
+			if !has && domain.RequiresKey(p.Kind) {
 				return nil, "", false
 			}
 			return p, key, true

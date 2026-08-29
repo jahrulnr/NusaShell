@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"math"
+	"nusashell/application/internal/service/textsim"
 	"nusashell/domain"
 	"testing"
 )
@@ -22,7 +23,7 @@ func TestCosineSimilarity(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := cosineSimilarity(tc.a, tc.b)
+			got := textsim.CosineSimilarity(tc.a, tc.b)
 			if abs32(got-tc.want) > 0.001 {
 				t.Errorf("cosineSimilarity = %.4f, want %.4f", got, tc.want)
 			}
@@ -132,7 +133,7 @@ func TestSearchSkillsDisableEmbeddingSkipsEmbedder(t *testing.T) {
 func TestCosineSimilarity_MathSqrt(t *testing.T) {
 	a := []float32{3, 4}
 	b := []float32{3, 4}
-	got := cosineSimilarity(a, b)
+	got := textsim.CosineSimilarity(a, b)
 	// |a| = |b| = 5, dot = 25, cos = 25/(5*5) = 1.0
 	if math.Abs(float64(got)-1.0) > 0.001 {
 		t.Errorf("expected 1.0, got %.4f", got)

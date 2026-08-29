@@ -11,6 +11,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/internal/nonce"
 
 	"gopkg.in/yaml.v3"
 )
@@ -870,7 +871,7 @@ func (a *App) subagentResultMessage(run *domain.AcpRun, outputPath string, statu
 		CreatedAt: time.Now().UTC(),
 		Status:    domain.StatusDone,
 		ToolCalls: []domain.ToolCall{{
-			ID:     domain.SubagentResultPrefix + randomNonce(),
+			ID:     domain.SubagentResultPrefix + nonce.Random(),
 			Name:   domain.SubagentResultToolName,
 			Args:   domain.SubagentResultArgs(run.ID),
 			Status: status,

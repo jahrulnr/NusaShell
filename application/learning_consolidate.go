@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"strings"
 
+	"nusashell/application/internal/service/textsim"
 	"nusashell/domain"
 	"nusashell/infrastructure/jsonstore"
 )
@@ -123,7 +124,7 @@ func (c *Consolidator) Consolidate(ctx context.Context) (*ConsolidateResult, err
 			if vectors[j] == nil {
 				continue
 			}
-			sim := cosineSimilarity(vectors[i], vectors[j])
+			sim := textsim.CosineSimilarity(vectors[i], vectors[j])
 			if sim >= c.cfg.SimilarityThreshold {
 				// Merge j into i: i survives, j is absorbed.
 				c.mergeEntries(candidates[i], candidates[j])

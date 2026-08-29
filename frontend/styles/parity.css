@@ -357,7 +357,7 @@ summary { outline: none; }
   border-left: 1px solid #2a3748;
   color: #91a0b3;
 }
-.agent-tool-terminal { min-width: 0; max-width: 100%; overflow: hidden; color: #9aa8ba; }
+.agent-tool-terminal { min-width: 0; max-width: 100%; color: #9aa8ba; }
 .agent-tool-terminal summary {
   display: flex;
   align-items: center;

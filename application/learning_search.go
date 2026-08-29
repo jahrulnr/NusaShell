@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"nusashell/application/internal/service/textsim"
 	"nusashell/domain"
 	"nusashell/infrastructure/jsonstore"
 )
@@ -280,7 +281,7 @@ func (s *LearningSearcher) embeddingSearch(ctx context.Context, query string, do
 	}
 	results := make([]result, len(docVecs))
 	for i, dv := range docVecs {
-		results[i] = result{docs[i].ID, cosineSimilarity(qVec, dv)}
+		results[i] = result{docs[i].ID, textsim.CosineSimilarity(qVec, dv)}
 	}
 	sort.Slice(results, func(i, j int) bool { return results[i].score > results[j].score })
 	if topK > 0 && len(results) > topK {
@@ -291,23 +292,6 @@ func (s *LearningSearcher) embeddingSearch(ctx context.Context, query string, do
 		out[i] = r.id
 	}
 	return out, nil
-}
-
-// cosineSimilarity computes cosine similarity between two float32 vectors.
-func cosineSimilarity(a, b []float32) float32 {
-	if len(a) == 0 || len(a) != len(b) {
-		return 0
-	}
-	var dot, na, nb float32
-	for i := range a {
-		dot += a[i] * b[i]
-		na += a[i] * a[i]
-		nb += b[i] * b[i]
-	}
-	if na == 0 || nb == 0 {
-		return 0
-	}
-	return dot / float32(math.Sqrt(float64(na))*math.Sqrt(float64(nb)))
 }
 
 // rrfResult is a fused search result from multiple channels.

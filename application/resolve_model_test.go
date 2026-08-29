@@ -34,7 +34,7 @@ func TestSplitQualifiedModel(t *testing.T) {
 		{":model-only", "", "", false}, // empty provider is invalid
 	}
 	for _, tt := range tests {
-		gotProvider, gotModel, gotOk := splitQualifiedModel(tt.input)
+		gotProvider, gotModel, gotOk := domain.SplitQualifiedModel(tt.input)
 		if gotProvider != tt.wantProvider || gotModel != tt.wantModel || gotOk != tt.wantOk {
 			t.Errorf("splitQualifiedModel(%q) = (%q, %q, %v), want (%q, %q, %v)",
 				tt.input, gotProvider, gotModel, gotOk, tt.wantProvider, tt.wantModel, tt.wantOk)

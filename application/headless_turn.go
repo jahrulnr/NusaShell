@@ -119,7 +119,7 @@ func (a *App) resolveHeadlessModel(modelID string) (*domain.Provider, string, st
 		if err != nil {
 			return nil, "", "", fmt.Errorf("read credential for %s: %w", p.Name, err)
 		}
-		if !has && requiresKey(p.Kind) {
+		if !has && domain.RequiresKey(p.Kind) {
 			continue
 		}
 		m := &p.Models[0]

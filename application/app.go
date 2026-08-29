@@ -1111,7 +1111,7 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 	// disambiguate when the same model is available on multiple providers
 	// (e.g. deepseek-v4-flash on both tokenrouter and openrouter). When
 	// unqualified, fall back to first-match for backward compatibility.
-	if providerID, modelID, ok := splitQualifiedModel(model); ok {
+	if providerID, modelID, ok := domain.SplitQualifiedModel(model); ok {
 		p, err := a.Providers.Get(providerID)
 		if err != nil || p == nil || !p.Enabled {
 			return nil, nil, "", &contracts.RPCError{
@@ -1129,7 +1129,7 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 		if err != nil {
 			return nil, nil, "", rpcInternal(err)
 		}
-		if !has && requiresKey(p.Kind) {
+		if !has && domain.RequiresKey(p.Kind) {
 			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q has no API key", p.Name)}
 		}
 		m := p.FindModel(modelID)
@@ -1144,7 +1144,7 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 		if err != nil {
 			return nil, nil, "", rpcInternal(err)
 		}
-		if !has && requiresKey(p.Kind) {
+		if !has && domain.RequiresKey(p.Kind) {
 			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q has no API key", p.Name)}
 		}
 		m := p.FindModel(model)
@@ -1181,16 +1181,6 @@ func (a *App) applyModelOverrides(p *domain.Provider, m *domain.Model) {
 	if a.modelOverrides != nil && a.modelOverrides.Apply(m, p.ID, m.ID) {
 		a.log("info", "learning", "applied manual overrides to %s/%s (context=%d vision=%v)", p.ID, m.ID, m.Context, m.Vision)
 	}
-}
-
-// splitQualifiedModel splits a "provider_id:model_id" string on the first
-// colon. Returns ok=false when the string is a bare model ID (no colon).
-func splitQualifiedModel(s string) (providerID, modelID string, ok bool) {
-	return domain.SplitQualifiedModel(s)
-}
-
-func requiresKey(kind domain.ProviderKind) bool {
-	return domain.RequiresKey(kind)
 }
 
 func rpcInternal(err error) *contracts.RPCError {

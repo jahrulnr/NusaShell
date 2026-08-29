@@ -46,7 +46,7 @@ func (a *App) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 	}
 	_, hasKey, _ := a.Credentials.Get(p.ID)
 	dto.HasAPIKey = hasKey
-	dto.Configured = hasKey || !requiresKey(p.Kind)
+	dto.Configured = hasKey || !domain.RequiresKey(p.Kind)
 	for _, m := range p.Models {
 		dto.Models = append(dto.Models, contracts.ModelDTO{
 			ID:               m.ID,
@@ -226,7 +226,7 @@ func (a *App) providerWithKey(id string) (*domain.Provider, string, *contracts.R
 	if err != nil {
 		return nil, "", rpcInternal(err)
 	}
-	if !has && requiresKey(p.Kind) {
+	if !has && domain.RequiresKey(p.Kind) {
 		return nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: "provider has no API key configured"}
 	}
 	return p, key, nil
@@ -769,7 +769,7 @@ func (a *App) autoImportAllProviders(ctx context.Context) {
 			continue
 		}
 		key, has, _ := a.Credentials.Get(p.ID)
-		if !has && requiresKey(p.Kind) {
+		if !has && domain.RequiresKey(p.Kind) {
 			continue
 		}
 		importCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

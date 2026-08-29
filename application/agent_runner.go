@@ -14,6 +14,7 @@ import (
 	"nusashell/application/internal/service/tooloutput"
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/internal/nonce"
 	"nusashell/resources"
 )
 
@@ -249,7 +250,7 @@ func (a *App) restartAnnouncement() domain.Message {
 		CreatedAt: time.Now().UTC(),
 		Status:    domain.StatusDone,
 		ToolCalls: []domain.ToolCall{{
-			ID:     domain.AnnouncementToolCallPrefix + randomNonce(),
+			ID:     domain.AnnouncementToolCallPrefix + nonce.Random(),
 			Name:   domain.AnnouncementToolName,
 			Args:   "{}",
 			Status: domain.ToolOK,
@@ -269,7 +270,7 @@ func (a *App) autoContinueAnnouncement(decision domain.AutoContinueDecision) dom
 		CreatedAt: time.Now().UTC(),
 		Status:    domain.StatusDone,
 		ToolCalls: []domain.ToolCall{{
-			ID:     domain.AnnouncementToolCallPrefix + randomNonce(),
+			ID:     domain.AnnouncementToolCallPrefix + nonce.Random(),
 			Name:   domain.AnnouncementToolName,
 			Args:   domain.AutoContinueAnnouncementArgs(decision.ContinuesUsed, decision.OpenTodoCount),
 			Status: domain.ToolOK,

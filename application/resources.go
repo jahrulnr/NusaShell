@@ -18,15 +18,6 @@ import (
 
 // ---- skills ----
 
-// skillSlug normalizes a skill name into a filesystem-safe ID matching the
-// skillfs pattern: lowercase ASCII letters, digits, and hyphens. Spaces and
-// underscores become hyphens; other characters are dropped. A trailing
-// suffix is appended when the result is empty or already taken to keep IDs
-// unique and valid.
-func skillSlug(name string) string {
-	return domain.SkillSlug(name)
-}
-
 func skillDTO(s *domain.Skill) contracts.SkillDTO {
 	dto := contracts.SkillDTO{
 		ID:          s.ID,
@@ -170,7 +161,7 @@ func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.
 		s = existing
 	} else {
 		s = &domain.Skill{
-			ID:     skillSlug(name),
+			ID:     domain.SkillSlug(name),
 			State:  domain.SkillStateActive,
 			Origin: domain.SkillOriginUser,
 		}
@@ -1348,7 +1339,7 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	// absent (don't change), null (clear to nil), value (set). A *float64
 	// with omitempty cannot tell null from absent, so once set the parameter
 	// could never be cleared.
-	if err := applyOptionalFloat(req.Temperature, func(v float64) error {
+	if err := domain.ApplyOptionalFloat(req.Temperature, func(v float64) error {
 		if v < 0 || v > 2 {
 			return fmt.Errorf("temperature must be between 0 and 2")
 		}
@@ -1356,7 +1347,7 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	}, &s.Temperature); err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
 	}
-	if err := applyOptionalFloat(req.TopP, func(v float64) error {
+	if err := domain.ApplyOptionalFloat(req.TopP, func(v float64) error {
 		if v < 0 || v > 1 {
 			return fmt.Errorf("top_p must be between 0 and 1")
 		}
@@ -1364,7 +1355,7 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	}, &s.TopP); err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
 	}
-	if err := applyOptionalInt(req.TopK, func(v int) error {
+	if err := domain.ApplyOptionalInt(req.TopK, func(v int) error {
 		if v < 1 {
 			return fmt.Errorf("top_k must be at least 1")
 		}
@@ -1372,7 +1363,7 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	}, &s.TopK); err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
 	}
-	if err := applyOptionalFloat(req.FrequencyPenalty, func(v float64) error {
+	if err := domain.ApplyOptionalFloat(req.FrequencyPenalty, func(v float64) error {
 		if v < -2 || v > 2 {
 			return fmt.Errorf("frequency_penalty must be between -2 and 2")
 		}
@@ -1380,7 +1371,7 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	}, &s.FrequencyPenalty); err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
 	}
-	if err := applyOptionalFloat(req.PresencePenalty, func(v float64) error {
+	if err := domain.ApplyOptionalFloat(req.PresencePenalty, func(v float64) error {
 		if v < -2 || v > 2 {
 			return fmt.Errorf("presence_penalty must be between -2 and 2")
 		}
@@ -1560,17 +1551,4 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		UserPrompt:                 s.UserPrompt,
 		ProjectMemoryBase:          s.ProjectMemoryBase,
 	}
-}
-
-// applyOptionalFloat parses a json.RawMessage sampling parameter in three
-// states: nil (absent — don't change), "null" (clear to nil), or a float64
-// value (validate then set). A *float64 with omitempty cannot distinguish
-// null from absent, so json.RawMessage is used on the wire instead.
-func applyOptionalFloat(raw json.RawMessage, validate func(float64) error, target **float64) error {
-	return domain.ApplyOptionalFloat(raw, validate, target)
-}
-
-// applyOptionalInt is the integer variant of applyOptionalFloat for top_k.
-func applyOptionalInt(raw json.RawMessage, validate func(int) error, target **int) error {
-	return domain.ApplyOptionalInt(raw, validate, target)
 }

@@ -23,9 +23,9 @@ package application
 
 import (
 	"context"
-	"strings"
 	"sync"
 
+	"nusashell/application/internal/service/textsim"
 	"nusashell/domain"
 	"nusashell/infrastructure/jsonstore"
 )
@@ -132,7 +132,7 @@ func (b *EdgeBuilder) buildTokenOverlapEdges() {
 	}
 	memToks := make([]memTokens, 0, len(memories))
 	for _, m := range memories {
-		toks := tokenizeForOverlap(m.Content, minLen)
+		toks := textsim.TokenizeForOverlap(m.Content, minLen)
 		if len(toks) == 0 {
 			continue
 		}
@@ -146,7 +146,7 @@ func (b *EdgeBuilder) buildTokenOverlapEdges() {
 	for i, s := range skills {
 		skillToks[i] = skillTokens{
 			id:     s.ID,
-			tokens: tokenizeForOverlap(s.Name+" "+s.Description+" "+s.Content, minLen),
+			tokens: textsim.TokenizeForOverlap(s.Name+" "+s.Description+" "+s.Content, minLen),
 		}
 	}
 
@@ -156,7 +156,7 @@ func (b *EdgeBuilder) buildTokenOverlapEdges() {
 			if len(st.tokens) == 0 {
 				continue
 			}
-			jaccard := jaccardSimilarity(mt.tokens, st.tokens)
+			jaccard := textsim.JaccardSimilarity(mt.tokens, st.tokens)
 			if jaccard >= b.cfg.TokenOverlapThreshold {
 				weight := float64(jaccard) * 0.5 // cap at 0.5 for token overlap
 				_, _ = b.graph.AddEdge(mt.id, st.id, domain.EdgeRelated, weight)
@@ -169,7 +169,7 @@ func (b *EdgeBuilder) buildTokenOverlapEdges() {
 	// cluster and strengthen over time via CombineWeights.
 	for i := 0; i < len(memToks); i++ {
 		for j := i + 1; j < len(memToks); j++ {
-			jaccard := jaccardSimilarity(memToks[i].tokens, memToks[j].tokens)
+			jaccard := textsim.JaccardSimilarity(memToks[i].tokens, memToks[j].tokens)
 			if jaccard >= b.cfg.TokenOverlapThreshold {
 				weight := float64(jaccard) * 0.5
 				_, _ = b.graph.AddEdge(memToks[i].id, memToks[j].id, domain.EdgeRelated, weight)
@@ -224,7 +224,7 @@ func (b *EdgeBuilder) buildEmbeddingEdges(ctx context.Context) error {
 			if vectors[j] == nil {
 				continue
 			}
-			sim := cosineSimilarity(vectors[i], vectors[j])
+			sim := textsim.CosineSimilarity(vectors[i], vectors[j])
 			if sim >= threshold {
 				weight := float64(sim) * 0.8 // scale to [0, 0.8]
 				_, _ = b.graph.AddEdge(allEntries[i].id, allEntries[j].id, domain.EdgeRelated, weight)
@@ -267,35 +267,4 @@ func (b *EdgeBuilder) embedWithCache(ctx context.Context, texts []string) ([][]f
 	}
 
 	return vectors, nil
-}
-
-// tokenizeForOverlap returns a set of tokens (lowercase, ≥minLen chars)
-// from the input text. Matches Hermes' _tokenize pattern.
-func tokenizeForOverlap(text string, minLen int) map[string]bool {
-	tokens := map[string]bool{}
-	for _, t := range strings.Fields(strings.ToLower(text)) {
-		t = strings.Trim(t, ".,;:!?\"'()[]{}")
-		if len(t) >= minLen {
-			tokens[t] = true
-		}
-	}
-	return tokens
-}
-
-// jaccardSimilarity computes |A ∩ B| / |A ∪ B| for two token sets.
-func jaccardSimilarity(a, b map[string]bool) float32 {
-	if len(a) == 0 || len(b) == 0 {
-		return 0
-	}
-	intersection := 0
-	for t := range a {
-		if b[t] {
-			intersection++
-		}
-	}
-	union := len(a) + len(b) - intersection
-	if union == 0 {
-		return 0
-	}
-	return float32(intersection) / float32(union)
 }

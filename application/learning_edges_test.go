@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"nusashell/application/internal/service/textsim"
 	"nusashell/domain"
 )
 
@@ -95,14 +96,14 @@ func TestJaccardSimilarity(t *testing.T) {
 	a := map[string]bool{"docker": true, "container": true, "build": true}
 	b := map[string]bool{"docker": true, "container": true, "image": true}
 	// intersection=2, union=4, jaccard=0.5
-	got := jaccardSimilarity(a, b)
+	got := textsim.JaccardSimilarity(a, b)
 	if got < 0.49 || got > 0.51 {
 		t.Errorf("jaccard = %v, want ~0.5", got)
 	}
 }
 
 func TestTokenizeForOverlap(t *testing.T) {
-	toks := tokenizeForOverlap("Docker, container. Build!", 3)
+	toks := textsim.TokenizeForOverlap("Docker, container. Build!", 3)
 	if !toks["docker"] || !toks["container"] || !toks["build"] {
 		t.Errorf("missing tokens: %v", toks)
 	}

@@ -2,8 +2,6 @@ package application
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +11,7 @@ import (
 	"time"
 
 	"nusashell/domain"
+	"nusashell/internal/nonce"
 )
 
 // RuntimeContextSnapshot is the read-only runtime context payload for the
@@ -90,7 +89,7 @@ type HydrationResult struct {
 // a read error yields a structured error JSON for that one tool result while
 // the other results still contribute.
 func (b *HydrationBuilder) Build() HydrationResult {
-	nonce := randomNonce()
+	nonce := nonce.Random()
 	var slots []hydrationSlot
 	for _, slot := range []hydrationSlot{
 		b.readRuntimeContext(),
@@ -498,16 +497,6 @@ func HasHydration(messages []ChatMessage) bool {
 		}
 	}
 	return false
-}
-
-// randomNonce generates a random 8-byte hex nonce for hydration call IDs.
-func randomNonce() string {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback: timestamp-based nonce (non-crypto, but unique enough).
-		return fmt.Sprintf("%x", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b)
 }
 
 // DefaultRuntimeContext builds a RuntimeContextSnapshot from the current

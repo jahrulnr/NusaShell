@@ -18,6 +18,7 @@ import (
 	"nusashell/application/internal/service/mediaread"
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/internal/nonce"
 )
 
 // defaultMaxParallelTools is the fallback concurrency bound for tool calls
@@ -340,7 +341,7 @@ func serverCompactionContextManagement(model string) []map[string]any {
 // round after an interrupted response. Ephemeral: it exists only in this
 // request, never persisted to the conversation store.
 func appendContinuationTool(messages []ChatMessage) []ChatMessage {
-	id := domain.AnnouncementToolCallPrefix + randomNonce()
+	id := domain.AnnouncementToolCallPrefix + nonce.Random()
 	call := domain.ToolCall{ID: id, Name: domain.AnnouncementToolName, Args: "{}", Status: domain.ToolOK, Output: domain.AnnouncementInterruptedMessage}
 	return append(messages,
 		ChatMessage{Role: "assistant", ToolCalls: []domain.ToolCall{call}},
