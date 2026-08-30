@@ -226,6 +226,34 @@ test('tool job summary includes elapsed span before chevron', () => {
   }
 });
 
+test('tool terminals render as compact execution timeline events', () => {
+  const dom = new JSDOM('<main id="thread"></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const job = renderToolJob({
+      id: 'timeline-1',
+      name: 'file_list',
+      args: { path: '/workspace/telegram-research' },
+      status: 'ok',
+      output: 'count: 3\ntotal: 109K',
+    });
+    assert.equal(job.classList.contains('agent-tool-terminal'), true);
+    assert.equal(job.querySelector('.agent-tool-terminal-action')?.textContent, 'Files listed');
+    assert.equal(job.querySelector('.agent-tool-terminal-title')?.textContent, 'file_list');
+    assert.equal(job.querySelector('.agent-tool-terminal-prompt')?.textContent, '✓');
+    assert.equal(job.querySelector('.agent-tool-terminal-panel-label')?.textContent, 'Output');
+    assert.equal(job.querySelectorAll('.agent-tool-terminal-panel-label')[1]?.textContent, 'Request');
+    assert.match(job.querySelector('.agent-tool-terminal-output')?.textContent || '', /count: 3/);
+
+    const failed = renderToolJob({ name: 'file_list', args: {}, status: 'fail', output: 'permission denied' });
+    assert.equal(failed.querySelector('.agent-tool-terminal-action')?.textContent, 'File listing failed');
+    assert.equal(failed.querySelector('.agent-tool-terminal-prompt')?.textContent, '!');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
 test('empty thread renders starter chips that fill the composer', () => {
   const dom = new JSDOM(`
     <div id="agent-thread"></div>

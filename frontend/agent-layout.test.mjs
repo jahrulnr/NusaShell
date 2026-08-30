@@ -138,9 +138,12 @@ test('ACP transcripts use the agent conversation structure and historical run lo
   assert.match(agentRender, /extractSubagentRunIDs/);
 });
 
-test('Thinking and tool markers share the same conversation rail', () => {
+test('Thinking and tool markers use deliberate conversation rails', () => {
   assert.match(agentCSS, /\.agent-reasoning summary \{[^}]*margin-left: -12px;/s);
-  assert.match(agentCSS, /\.agent-tool-terminal summary \{[^}]*margin-left: -12px;/s);
+  assert.match(agentCSS, /\.agent-tool-stack::before \{[^}]*left: 0;/s);
+  assert.match(agentCSS, /--agent-tool-gutter: 32px;/);
+  assert.match(agentCSS, /--agent-tool-node-radius: 14px;/);
+  assert.match(agentCSS, /\.agent-tool-terminal summary \{[^}]*margin-left: calc\(-1 \* \(var\(--agent-tool-gutter\) \+ var\(--agent-tool-node-radius\)\)\);/s);
 });
 
 test('Expanded Thinking is capped to twenty lines and scrolls internally', () => {
@@ -320,6 +323,9 @@ test('Narrow agent layout can reopen the conversations pane', () => {
   assert.match(html, /id="agent-rooms-backdrop"/);
   assert.match(agentView, /agent-rooms-toggle/);
   assert.match(agentCSS, /agent-shell\.is-rooms-open/);
+  const mobileRules = agentCSS.slice(agentCSS.indexOf('@media (max-width: 760px)'));
+  assert.match(mobileRules, /\.agent-thread \{ padding: 52px 16px 16px; \}/,
+    'mobile transcript must clear the floating Rooms toggle');
 });
 
 test('Harbor palette is tokenized instead of acid-lime defaults', async () => {

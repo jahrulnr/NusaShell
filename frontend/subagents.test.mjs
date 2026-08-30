@@ -78,6 +78,8 @@ test('Subagent transcript merges legacy token fragments and tool updates', () =>
     const tools = [...panel.querySelectorAll('.agent-round.is-tool')];
     assert.equal(tools.length, 1);
     assert.match(tools[0].textContent, /completed/);
+    assert.equal(tools[0].querySelector('.agent-tool-terminal-action')?.textContent, 'Read file');
+    assert.equal(tools[0].querySelector('.agent-tool-terminal-title')?.textContent, 'read');
     assert.equal(panel.querySelector('.acp-usage-pill')?.textContent, '2/100');
   } finally {
     dom.window.close();

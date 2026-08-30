@@ -699,7 +699,9 @@ function updateTranscriptLine(line, chunk) {
     const status = normalizeAcpToolStatus(chunk.tool_status);
     setToolTerminalStatus(card, status);
     const title = card.querySelector('.agent-tool-terminal-title');
-    if (title) title.textContent = chunk.tool_title || chunk.tool_kind || chunk.tool_id || 'tool';
+    if (title) title.textContent = chunk.tool_kind || chunk.tool_id || chunk.tool_title || 'tool';
+    const action = card.querySelector('.agent-tool-terminal-action');
+    if (action) action.textContent = chunk.tool_title || chunk.tool_kind || chunk.tool_id || 'Tool';
     const meta = card.querySelector('.agent-tool-terminal-meta');
     if (meta) meta.textContent = acpToolMeta(chunk, status);
     const output = card.querySelector('.agent-tool-terminal-output');
@@ -732,11 +734,15 @@ function updateTranscriptLine(line, chunk) {
 
 function acpToolCard(chunk) {
   const card = renderToolJob({
-    name: chunk.tool_title || chunk.tool_kind || 'tool',
+    name: chunk.tool_kind || chunk.tool_title || 'tool',
     args: {},
     status: normalizeAcpToolStatus(chunk.tool_status),
     output: chunk.text || '',
   });
+  const action = card.querySelector('.agent-tool-terminal-action');
+  if (action) action.textContent = chunk.tool_title || chunk.tool_kind || 'Tool';
+  const title = card.querySelector('.agent-tool-terminal-title');
+  if (title) title.textContent = chunk.tool_kind || chunk.tool_id || chunk.tool_title || 'tool';
   if (chunk.tool_id) card.dataset.acpToolId = chunk.tool_id;
   return card;
 }

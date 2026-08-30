@@ -497,8 +497,8 @@ function appendAssistantSteps(bubble, message) {
 // show, generate_*, artifact, subagent — anything with its own frame) and
 // tool terminals (exec, grep, file_read — plain collapsible rows). Standalone
 // cards append directly to the bubble so they render without the
-// .agent-tool-stack border-left lane; terminals are grouped inside a stack
-// so the border-left visual cue applies only to terminal-style output.
+// execution rail; terminals are grouped inside a stack so the rail applies
+// only to terminal-style output.
 function appendToolCards(bubble, cards) {
   const terminals = [];
   for (const card of cards) {
@@ -534,8 +534,8 @@ function totalUsage(messages) {
 //
 // Cards with their own border/frame (ask_question, subagent, generate_*,
 // show, artifact) are marked dataset.standalone="true" so the caller can
-// place them outside the .agent-tool-stack lane — the stack's border-left
-// is a visual cue for tool terminals (exec, grep, file_read) only, and
+// place them outside the .agent-tool-stack rail — the stack's rail is a
+// visual cue for tool terminals (exec, grep, file_read) only, and
 // looks wrong around a media card or ask panel that already has its own
 // frame.
 export function isSubagentAuxiliaryTool(name) {
@@ -1316,6 +1316,7 @@ export function renderToolJob(toolCall) {
   const card = el('details', { class: 'agent-tool-terminal' });
   if (toolCall.id) card.dataset.toolCallId = String(toolCall.id);
   const name = toolCall.name || 'tool';
+  const status = toolCall.status || 'running';
   const isMcp = name.startsWith('mcp__');
   const isMcpCall = name === 'mcp_call';
   const mcpRef = isMcpCall ? (parseToolArgs(toolCall.args).ref || null) : null;
@@ -1329,7 +1330,8 @@ export function renderToolJob(toolCall) {
     : '';
   const streaming = isStreamingTool(name);
   const summary = el('summary', {},
-    el('span', { class: 'agent-tool-terminal-prompt', text: '›_' }),
+    el('span', { class: 'agent-tool-terminal-prompt', text: toolStatusGlyph(status), 'aria-hidden': 'true' }),
+    el('span', { class: 'agent-tool-terminal-action', text: toolTimelineTitle(name, status) }),
     el('span', { class: 'agent-tool-terminal-title', text: displayName }),
     (isMcp || isMcpCall) ? el('span', { class: 'agent-tool-terminal-badge', text: 'MCP' }) : null,
     el('span', { class: 'agent-tool-terminal-meta', text: toolTerminalMeta(toolCall) }),
@@ -1338,8 +1340,8 @@ export function renderToolJob(toolCall) {
     el('span', { class: 'agent-tool-terminal-chevron', text: '⌄' }),
   );
   const body = el('div', { class: 'agent-tool-terminal-body' },
-    toolTerminalPanel('tool', 'agent-tool-terminal-input', formatToolTerminalInput(toolCall.name, toolCall.args)),
     toolTerminalPanel('Output', 'agent-tool-terminal-output', toolTerminalOutput(toolCall)),
+    toolTerminalPanel('Request', 'agent-tool-terminal-input', formatToolTerminalInput(toolCall.name, toolCall.args)),
   );
   card._toolArgs = toolCall.args;
   card._toolName = name;
@@ -1493,10 +1495,48 @@ export function setToolTerminalStatus(card, status) {
   card.classList.toggle('is-success', success);
   card.classList.toggle('is-error', errored);
   card.dataset.status = normalized;
+  const prompt = card.querySelector('.agent-tool-terminal-prompt');
+  if (prompt) prompt.textContent = toolStatusGlyph(normalized);
+  const action = card.querySelector('.agent-tool-terminal-action');
+  if (action && card._toolName) action.textContent = toolTimelineTitle(card._toolName, normalized);
   // The per-call stop button lives on streaming tools only and disappears
   // once the tool settles.
   const stop = card.querySelector('.agent-tool-stop');
   if (stop) stop.hidden = running ? false : true;
+}
+
+function toolStatusGlyph(status) {
+  if (status === 'running') return '…';
+  if (status === 'fail' || status === 'interrupted') return '!';
+  return '✓';
+}
+
+function toolTimelineTitle(name, status) {
+  const labels = {
+    exec: ['Running command', 'Command completed', 'Command failed'],
+    file_list: ['Listing files', 'Files listed', 'File listing failed'],
+    file_read: ['Reading file', 'File read', 'File read failed'],
+    grep: ['Searching', 'Search completed', 'Search failed'],
+    file_search: ['Searching files', 'Search completed', 'Search failed'],
+    memory: ['Updating memory', 'Memory updated', 'Memory update failed'],
+    skill: ['Loading skill', 'Skill loaded', 'Skill load failed'],
+    mcp_call: ['Calling MCP tool', 'MCP call completed', 'MCP call failed'],
+  }[name];
+  if (labels) {
+    if (status === 'running') return labels[0];
+    if (status === 'fail' || status === 'interrupted') return labels[2];
+    return labels[1];
+  }
+  const readable = String(name || 'tool')
+    .replace(/^mcp__/, '')
+    .replace(/__/g, ' ')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || 'tool';
+  const noun = readable.charAt(0).toUpperCase() + readable.slice(1);
+  if (status === 'running') return `Running ${readable}`;
+  if (status === 'fail' || status === 'interrupted') return `${noun} failed`;
+  return `${noun} completed`;
 }
 
 export function attachmentChip(attachment, onRemove) {
