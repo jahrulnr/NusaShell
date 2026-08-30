@@ -127,7 +127,8 @@ type App struct {
 	journalRootsMu sync.Mutex
 	journalRoots   map[string]*sync.Mutex
 
-	// edgeBuilder pre-computes learning edges (similarity + token overlap)
+	// edgeBuilder pre-computes deterministic/semantic learning edges;
+	// used_with edges are recorded by successful turn tool usage.
 	// as a background job. Nil if not configured.
 	edgeBuilder *EdgeBuilder
 	// Trajectory records learning layer events to a JSONL log for
@@ -339,6 +340,12 @@ type TurnRun struct {
 
 	subagentDoneMu sync.Mutex
 	subagentDone   []pendingSubagentDone
+
+	// learningNodes records memory/skill IDs observed by successful tools in
+	// this turn. Tool calls may run concurrently, so access is synchronized;
+	// used_with edges are emitted later in deterministic persistence order.
+	learningNodesMu sync.Mutex
+	learningNodes   map[string]struct{}
 }
 
 // pendingSubagentDone is a finished ACP run waiting to be injected into the
@@ -664,8 +671,8 @@ func NewApp(deps Deps) *App {
 	}
 	// Wire the embedding cache + edge builder. The cache persists to
 	// learning/embeddings.jsonl and avoids re-embedding on every search.
-	// The edge builder pre-computes similarity + token overlap edges as
-	// a background job.
+	// The edge builder pre-computes similarity, metadata, and token-overlap
+	// edges as a background job; successful turns record used_with edges.
 	if deps.DataDir != "" {
 		if cache, err := jsonstore.NewEmbeddingCache(deps.DataDir); err == nil {
 			app.EmbeddingCache = cache
@@ -682,6 +689,7 @@ func NewApp(deps Deps) *App {
 			DefaultEdgeBuilderConfig(),
 			"", // model ID resolved lazily
 		)
+		app.edgeBuilder.SetPrimaryStore(deps.Primary)
 	}
 	return app
 }

@@ -72,6 +72,126 @@ func TestBuildTokenOverlapSkipsUnrelatedMemoryPairs(t *testing.T) {
 	}
 }
 
+func TestBuildRelatedEdgesUsesLearningMetadataWhenContentIsSparse(t *testing.T) {
+	mem := &fakeFragmentStore{frags: []*domain.MemoryFragment{
+		{ID: "frag_frontend_a", Content: "mobile shell", Project: "NusaShell", Tags: []string{"frontend", "mobile", "nusashell"}},
+		{ID: "frag_frontend_b", Content: "responsive shell", Project: "NusaShell", Tags: []string{"frontend", "mobile", "nusashell"}},
+		{ID: "frag_unrelated", Content: "recipe ingredients", Project: "Cooking", Tags: []string{"recipe"}},
+	}}
+	graph := NewLearningGraphService(&fakeEdgeStore{})
+	b := NewEdgeBuilder(mem, &fakeSkillStore{}, graph, nil, nil, DefaultEdgeBuilderConfig(), "")
+
+	if err := b.Build(context.Background()); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if !hasEdge(graph.AllEdges(), "frag_frontend_a", "frag_frontend_b", domain.EdgeRelated) {
+		t.Fatal("expected related edge from shared project/tags even when prose has little token overlap")
+	}
+	if hasEdge(graph.AllEdges(), "frag_frontend_a", "frag_unrelated", domain.EdgeRelated) {
+		t.Fatal("did not expect related edge for unrelated metadata")
+	}
+}
+
+func TestBuildPrunesDanglingEdges(t *testing.T) {
+	store := &fakeEdgeStore{edges: []*domain.LearningEdge{
+		{ID: "dangling", SourceID: "frag_live", TargetID: "frag_deleted", Type: domain.EdgeRelated},
+	}}
+	mem := &fakeFragmentStore{frags: []*domain.MemoryFragment{{ID: "frag_live", Content: "live fact"}}}
+	graph := NewLearningGraphService(store)
+	b := NewEdgeBuilder(mem, &fakeSkillStore{}, graph, nil, nil, DefaultEdgeBuilderConfig(), "")
+
+	if err := b.Build(context.Background()); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(graph.AllEdges()) != 0 {
+		t.Fatalf("edges = %+v, want dangling edge removed", graph.AllEdges())
+	}
+}
+
+func TestLearningNodeIDsFromToolOutput(t *testing.T) {
+	app := &App{
+		DataDir: "/tmp/nusashell",
+		Skills: &fakeSkillStore{items: map[string]*domain.Skill{
+			"skill_frontend": {ID: "skill_frontend", Name: "frontend"},
+		}},
+		Primary: &fakePrimaryStore{entries: []domain.PrimaryEntry{{ID: "primary_1", Content: "primary"}}},
+	}
+
+	memoryIDs := learningNodeIDsFromTool(app,
+		domain.ToolCall{Name: "memory", Args: `{"op":"search","query":"frontend"}`},
+		"---\ncount: 1\n---\n{\"id\":\"frag_1\",\"content\":\"frontend\"}",
+	)
+	if !containsString(memoryIDs, "frag_1") {
+		t.Fatalf("memory IDs = %v, want frag_1", memoryIDs)
+	}
+	savedMemoryIDs := learningNodeIDsFromTool(app,
+		domain.ToolCall{Name: "memory", Args: `{"op":"save","content":"frontend"}`},
+		"---\nstatus: saved\nfragment_id: frag_saved\n---",
+	)
+	if !containsString(savedMemoryIDs, "frag_saved") {
+		t.Fatalf("saved memory IDs = %v, want frag_saved", savedMemoryIDs)
+	}
+
+	skillIDs := learningNodeIDsFromTool(app,
+		domain.ToolCall{Name: "skill", Args: `{"op":"search","query":"frontend"}`},
+		"---\ncount: 1\n---\n{\"id\":\"skill_frontend\",\"name\":\"frontend\"}",
+	)
+	if !containsString(skillIDs, "skill_frontend") {
+		t.Fatalf("skill IDs = %v, want skill_frontend", skillIDs)
+	}
+}
+
+func TestRecordLearningTurnNodesConnectsAcrossToolRounds(t *testing.T) {
+	store := &fakeEdgeStore{}
+	app := &App{LearningEdges: store}
+	run := &TurnRun{}
+
+	app.recordLearningTurnNodes(run, []string{"frag_1"})
+	app.recordLearningTurnNodes(run, []string{"skill_1"})
+	app.recordLearningTurnNodes(run, []string{"frag_1", "skill_1"})
+
+	if got := len(store.edges); got != 1 {
+		t.Fatalf("edge count = %d, want one edge after repeated observations", got)
+	}
+	if !hasEdge(store.edges, "frag_1", "skill_1", domain.EdgeUsedWith) {
+		t.Fatalf("edges = %+v, want used_with edge", store.edges)
+	}
+}
+
+func TestRecordLearningUsageCreatesUsedWithEdges(t *testing.T) {
+	store := &fakeEdgeStore{}
+	app := &App{LearningEdges: store}
+	app.recordLearningUsage([]string{"frag_1", "skill_1", "frag_1"})
+
+	if !hasEdge(store.edges, "frag_1", "skill_1", domain.EdgeUsedWith) {
+		t.Fatalf("edges = %+v, want used_with edge", store.edges)
+	}
+	if got := len(store.edges); got != 1 {
+		t.Fatalf("edge count = %d, want one deduplicated used_with edge", got)
+	}
+}
+
+func hasEdge(edges []*domain.LearningEdge, left, right string, edgeType domain.LearningEdgeType) bool {
+	for _, edge := range edges {
+		if edge.Type != edgeType {
+			continue
+		}
+		if (edge.SourceID == left && edge.TargetID == right) || (edge.SourceID == right && edge.TargetID == left) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestBuildTokenOverlapMinLen(t *testing.T) {
 	mem := &fakeFragmentStore{frags: []*domain.MemoryFragment{
 		{ID: "frag_1", Content: "use go"},

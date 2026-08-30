@@ -768,9 +768,10 @@ function initGraph() {
 async function loadGraph() {
   if (!state.nodes) return;
   try {
-    // Fetch pre-computed graph from backend (nodes + edges).
-    // The backend builds edges via embedding similarity + token overlap,
-    // so we don't need to compute anything client-side.
+    // Fetch pre-computed graph from backend (nodes + edges). Related edges
+    // combine embedding, content/token overlap, and fragment metadata;
+    // used-with edges come from learning nodes observed in one successful
+    // agent or review turn. Nothing is computed client-side.
     const { nodes, edges } = await rpc('learning.graph');
 
     // Degree centrality: a node's size grows with how many edges touch

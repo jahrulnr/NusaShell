@@ -960,23 +960,23 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 
 // handleLearningGraph returns the full learning graph (nodes + edges)
 // for the frontend graph view. Nodes are skills + memory entries; edges
-// are pre-computed by the EdgeBuilder (similarity + token overlap).
+// are pre-computed by the EdgeBuilder (content/embedding similarity plus
+// fragment metadata); used_with edges come from successful tool usage.
 func (a *App) handleLearningGraph() (any, *contracts.RPCError) {
 	// Build edges if edge builder is configured (idempotent — strengthens
 	// existing edges, doesn't duplicate).
 	if a.edgeBuilder != nil {
 		// Resolve embedder lazily for embedding-based edges
-		if a.edgeBuilder.embed == nil {
-			if embedder, modelID := a.resolveEmbedder(); embedder != nil {
-				a.edgeBuilder.embed = embedder
-				a.edgeBuilder.modelID = modelID
-			}
+		if embedder, modelID := a.resolveEmbedder(); embedder != nil {
+			a.edgeBuilder.SetEmbedder(embedder, modelID)
 		}
-		_ = a.edgeBuilder.Build(context.Background())
+		if err := a.edgeBuilder.Build(context.Background()); err != nil {
+			a.log("warn", "learning", "graph build: %v", err)
+		}
 	}
 
 	// Collect nodes
-	var nodes []contracts.LearningGraphNode
+	nodes := make([]contracts.LearningGraphNode, 0)
 	for _, s := range a.Skills.List() {
 		nodes = append(nodes, contracts.LearningGraphNode{
 			ID:   s.ID,
@@ -1020,9 +1020,12 @@ func (a *App) handleLearningGraph() (any, *contracts.RPCError) {
 	for _, n := range nodes {
 		nodeIDs[n.ID] = struct{}{}
 	}
-	var edges []contracts.LearningGraphEdge
+	edges := make([]contracts.LearningGraphEdge, 0)
 	if gs := a.graph(); gs != nil {
 		for _, e := range gs.AllEdges() {
+			if e == nil || e.InvalidAt != nil {
+				continue
+			}
 			if _, ok := nodeIDs[e.SourceID]; !ok {
 				continue
 			}

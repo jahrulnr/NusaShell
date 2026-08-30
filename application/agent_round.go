@@ -725,9 +725,10 @@ func persistableText(s string) string {
 // toolExecResult is one tool's outcome from the concurrent execution phase,
 // held until results are persisted in tool-call order.
 type toolExecResult struct {
-	status domain.ToolCallStatus
-	output string
-	atts   []domain.Attachment
+	status          domain.ToolCallStatus
+	output          string
+	atts            []domain.Attachment
+	learningNodeIDs []string
 }
 
 func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall, caps ModelCapabilities, settings domain.Settings, round int) error {
@@ -806,6 +807,11 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 	// invalidating the prompt-cache prefix from the hydration byte onward.
 	if saveErr := a.Conversations.Save(conversation); saveErr != nil {
 		return saveErr
+	}
+	for i := range results {
+		if results[i].status == domain.ToolOK {
+			a.recordLearningTurnNodes(run, results[i].learningNodeIDs)
+		}
 	}
 	if err := run.Ctx.Err(); err != nil {
 		return err
@@ -923,6 +929,9 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 		status = domain.ToolRunning
 	}
 	res := toolExecResult{status: status, output: output, atts: outputAttachments}
+	if status == domain.ToolOK {
+		res.learningNodeIDs = learningNodeIDsFromTool(a, toolCall, output)
+	}
 	a.emitToolCompleted(run, toolCall, res)
 	a.emitLearningMutationEvents(toolCall.Name, status)
 	// Skill nudge: count tool calls per conversation so tool-heavy but

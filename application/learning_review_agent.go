@@ -550,6 +550,16 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 		return nil, nil, nil
 	}
 
+	// Keep the nodes inspected or changed by this review together so the
+	// resulting used_with edges describe one review turn, even when the LLM
+	// needs several tool rounds.
+	var reviewLearningIDs []string
+	defer func() {
+		if r.app != nil {
+			r.app.recordLearningUsage(reviewLearningIDs)
+		}
+	}()
+
 	// Resolve the conversation JSON file path so the agent can file_read
 	// the full conversation if the bounded segment lacks context.
 	convPath := ""
@@ -605,6 +615,11 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 		output, err := r.app.Toolbox.Execute(ctx, "file_read", []byte(fileReadArgs))
 		if err != nil {
 			output = "(primary memory file unavailable: " + err.Error() + ")"
+		} else {
+			reviewLearningIDs = append(reviewLearningIDs, learningNodeIDsFromTool(r.app, domain.ToolCall{
+				Name: "file_read",
+				Args: fileReadArgs,
+			}, output)...)
 		}
 		toolCalls = append(toolCalls, domain.ToolCall{ID: fileReadTCID, Name: "file_read", Args: fileReadArgs})
 		toolResults = append(toolResults, ChatMessage{
@@ -788,6 +803,7 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 				// call a non-existent tool).
 				r.app.log("warn", "learning", "review tool %q failed: %v", tc.Name, execErr)
 			} else {
+				reviewLearningIDs = append(reviewLearningIDs, learningNodeIDsFromTool(r.app, tc, output)...)
 				// Track mutations with enough detail for the learning log
 				// (which tool saved what, trimmed so the trajectory stays
 				// readable).

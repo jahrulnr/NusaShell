@@ -2,6 +2,7 @@ package application
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"nusashell/domain"
@@ -17,6 +18,7 @@ import (
 // so List() is fast and suitable for neighborhood queries.
 type LearningGraphService struct {
 	edges LearningEdgeStore
+	mu    sync.RWMutex
 }
 
 // NewLearningGraphService creates a graph service backed by the given store.
@@ -30,8 +32,16 @@ func NewLearningGraphService(edges LearningEdgeStore) *LearningGraphService {
 // ValidAt is set to now if creating a new edge; existing edges keep their
 // original ValidAt.
 func (g *LearningGraphService) AddEdge(sourceID, targetID string, edgeType domain.LearningEdgeType, weight float64) (*domain.LearningEdge, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if sourceID == "" || targetID == "" {
 		return nil, fmt.Errorf("learning graph: source and target IDs are required")
+	}
+	// Related and used_with are undirected relationships. Canonicalizing
+	// their endpoints prevents map iteration order from persisting both
+	// A→B and B→A across repeated graph rebuilds.
+	if (edgeType == domain.EdgeRelated || edgeType == domain.EdgeUsedWith) && sourceID > targetID {
+		sourceID, targetID = targetID, sourceID
 	}
 	if sourceID == targetID {
 		return nil, fmt.Errorf("learning graph: self-loops are not allowed")
@@ -44,9 +54,18 @@ func (g *LearningGraphService) AddEdge(sourceID, targetID string, edgeType domai
 	now := time.Now().UTC()
 	// Find existing valid edge with same (source, target, type).
 	for _, e := range g.edges.List() {
-		if e.SourceID == sourceID && e.TargetID == targetID && e.Type == edgeType && e.InvalidAt == nil {
+		if e.Type != edgeType || e.InvalidAt != nil {
+			continue
+		}
+		sameEndpoints := e.SourceID == sourceID && e.TargetID == targetID
+		if edgeType == domain.EdgeRelated || edgeType == domain.EdgeUsedWith {
+			sameEndpoints = sameEndpoints || (e.SourceID == targetID && e.TargetID == sourceID)
+		}
+		if sameEndpoints {
 			// Strengthen: combine weights, keep original ValidAt.
 			e.Weight = domain.CombineWeights(e.Weight, weight)
+			e.SourceID = sourceID
+			e.TargetID = targetID
 			if err := g.replaceEdge(e); err != nil {
 				return nil, err
 			}
@@ -72,6 +91,8 @@ func (g *LearningGraphService) AddEdge(sourceID, targetID string, edgeType domai
 // InvalidateEdge marks an edge as no longer current by setting InvalidAt.
 // Returns ErrNotFound if the edge does not exist or is already invalidated.
 func (g *LearningGraphService) InvalidateEdge(id string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	for _, e := range g.edges.List() {
 		if e.ID == id {
 			if e.InvalidAt != nil {
@@ -89,6 +110,8 @@ func (g *LearningGraphService) InvalidateEdge(id string) error {
 // edge type. Only edges with InvalidAt == nil are returned. Checks both
 // SourceID and TargetID so the graph is treated as undirected for traversal.
 func (g *LearningGraphService) Neighbors(nodeID string, edgeType domain.LearningEdgeType) []*domain.LearningEdge {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	var out []*domain.LearningEdge
 	for _, e := range g.edges.List() {
 		if e.InvalidAt != nil {
@@ -108,6 +131,8 @@ func (g *LearningGraphService) Neighbors(nodeID string, edgeType domain.Learning
 // NeighborIDs returns the IDs of nodes adjacent to nodeID (undirected),
 // optionally filtered by edge type. Excludes nodeID itself.
 func (g *LearningGraphService) NeighborIDs(nodeID string, edgeType domain.LearningEdgeType) []string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	seen := map[string]bool{nodeID: true}
 	var out []string
 	for _, e := range g.edges.List() {
@@ -168,17 +193,23 @@ func (g *LearningGraphService) BFS(seeds []string, maxHops int) []string {
 
 // AllEdges returns all edges (including invalidated ones) for inspection.
 func (g *LearningGraphService) AllEdges() []*domain.LearningEdge {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	return g.edges.List()
 }
 
 // DeleteEdge permanently removes an edge from the store.
 func (g *LearningGraphService) DeleteEdge(id string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	return g.edges.Delete(id)
 }
 
 // SaveEdge updates an existing edge in the store. Used by consolidation
 // to rewire edges when merging near-duplicate entries.
 func (g *LearningGraphService) SaveEdge(e *domain.LearningEdge) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	return g.edges.Save(e)
 }
 

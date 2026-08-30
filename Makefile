@@ -45,8 +45,8 @@ vet:
 
 ## fmt: format all Go source files in place.
 fmt:
-	gofmt -w .
-	gofmt -l .
+	find . -path './.git' -prune -o -path './.experimental' -prune -o -type f -name '*.go' -print0 | xargs -0 -r gofmt -w
+	find . -path './.git' -prune -o -path './.experimental' -prune -o -type f -name '*.go' -print0 | xargs -0 -r gofmt -l
 	@echo "gofmt: done"
 
 ## check: full verification baseline.
@@ -63,7 +63,7 @@ hooks:
 
 ## fmt-check: fail when any Go file is not gofmt-formatted.
 fmt-check:
-	@out="$$(gofmt -l .)"; \
+	@out="$$(find . -path './.git' -prune -o -path './.experimental' -prune -o -type f -name '*.go' -print0 | xargs -0 -r gofmt -l)"; \
 	if [ -n "$$out" ]; then \
 		echo "gofmt: the following files are not formatted:"; \
 		echo "$$out"; \

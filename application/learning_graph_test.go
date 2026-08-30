@@ -67,6 +67,26 @@ func TestAddEdgeStrengthensExisting(t *testing.T) {
 	}
 }
 
+func TestAddEdgeCanonicalizesUndirectedRelationships(t *testing.T) {
+	store := &fakeEdgeStore{}
+	g := NewLearningGraphService(store)
+	first, err := g.AddEdge("skill_b", "skill_a", domain.EdgeRelated, 0.4)
+	if err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if first.SourceID != "skill_a" || first.TargetID != "skill_b" {
+		t.Fatalf("related endpoints = %s → %s, want canonical order", first.SourceID, first.TargetID)
+	}
+	firstWeight := first.Weight
+	second, err := g.AddEdge("skill_b", "skill_a", domain.EdgeRelated, 0.4)
+	if err != nil {
+		t.Fatalf("AddEdge reverse: %v", err)
+	}
+	if second.Weight <= firstWeight || len(store.edges) != 1 {
+		t.Fatalf("reverse related edge = %+v, stored edges = %d; want one strengthened edge", second, len(store.edges))
+	}
+}
+
 func TestAddEdgeRejectsSelfLoop(t *testing.T) {
 	g := NewLearningGraphService(&fakeEdgeStore{})
 	_, err := g.AddEdge("a", "a", domain.EdgeRelated, 0.5)

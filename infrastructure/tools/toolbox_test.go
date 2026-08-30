@@ -137,6 +137,9 @@ func TestSkillSearch(t *testing.T) {
 	if !strings.Contains(out, "git-helper") {
 		t.Errorf("expected git-helper in results, got: %s", out)
 	}
+	if !strings.Contains(out, `"id":"s1"`) {
+		t.Errorf("skill search must expose the stable learning ID, got: %s", out)
+	}
 	if strings.Contains(out, "docker-pro") {
 		t.Errorf("docker-pro should not match git query, got: %s", out)
 	}
@@ -171,6 +174,9 @@ func TestSkillSearchUsesRankedSearcher(t *testing.T) {
 	}
 	if strings.Index(out, "git-advanced") > strings.Index(out, "git-helper") {
 		t.Errorf("searcher ranking should be preserved (s2 before s1), got: %s", out)
+	}
+	if !strings.Contains(out, `"id":"s2"`) {
+		t.Errorf("ranked skill search must expose the stable learning ID, got: %s", out)
 	}
 	if strings.Contains(out, "docker-pro") {
 		t.Errorf("docker-pro should not match git query, got: %s", out)

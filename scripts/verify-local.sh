@@ -25,7 +25,12 @@ check_gofmt() {
 	local unformatted
 
 	printf '\n[verify-local] Go formatting\n'
-	unformatted="$(gofmt -l .)"
+	# .experimental/ contains isolated spikes and may carry its own module or
+	# formatting policy; it is intentionally outside the repository gates.
+	unformatted="$(find . \
+		-path './.git' -prune -o \
+		-path './.experimental' -prune -o \
+		-type f -name '*.go' -print0 | xargs -0 -r gofmt -l)"
 	if [ -n "$unformatted" ]; then
 		printf 'gofmt: the following files are not formatted:\n%s\n' "$unformatted" >&2
 		return 1

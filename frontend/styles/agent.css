@@ -368,6 +368,15 @@
 .agent-message.user .agent-bubble p,
 .agent-message.user .agent-bubble ul,
 .agent-message.user .agent-bubble ol { margin: .75em 0; }
+.agent-message.user .agent-bubble-text > p,
+.agent-message.user .agent-bubble-text li {
+  /* Markdown keeps a single source newline inside text blocks. Preserve it
+     without making the formatter's whitespace between block tags visible. */
+  white-space: pre-line;
+}
+.agent-message.user .agent-bubble-text > p,
+.agent-message.user .agent-bubble-text > ul,
+.agent-message.user .agent-bubble-text > ol { margin: 0; }
 .agent-message.user .agent-bubble ul,
 .agent-message.user .agent-bubble ol { padding-left: 1.45em; }
 .agent-message.user .agent-bubble li + li { margin-top: .25em; }
@@ -411,6 +420,8 @@
 .agent-message.user .agent-bubble a { color: #d7fff2; }
 .agent-message.user .agent-bubble blockquote { margin: .75em 0; padding: 2px 12px; border-left: 2px solid rgba(110, 224, 196, .65); color: #d8ebe5; }
 .agent-message.user .agent-bubble .markdown-table-scroll { max-width: 100%; margin: .8em 0; overflow-x: auto; overscroll-behavior-x: contain; }
+.agent-message.user .agent-bubble-text .markdown-table-scroll,
+.agent-message.user .agent-bubble-text table { white-space: normal; }
 .agent-message.user .agent-bubble .markdown-table-scroll table { display: table; width: max-content; min-width: 100%; border-collapse: collapse; }
 .agent-message.user .agent-bubble th,
 .agent-message.user .agent-bubble td { min-width: 7rem; padding: 6px 8px; border: 1px solid rgba(7, 29, 31, .6); text-align: left; vertical-align: top; }

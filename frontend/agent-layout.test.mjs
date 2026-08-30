@@ -161,6 +161,10 @@ test('Expanded Thinking is capped to twenty lines and scrolls internally', () =>
 
 test('User Markdown bubbles keep prose normal and fenced code inside a scrollable card', () => {
   assert.match(agentCSS, /\.agent-message\.user \.agent-bubble \{[^}]*white-space: normal;/s);
+  assert.match(agentCSS, /\.agent-message\.user \.agent-bubble-text > p,[\s\S]*white-space: pre-line;/s,
+    'user prose must preserve Markdown soft line breaks');
+  assert.match(agentCSS, /\.agent-message\.user \.agent-bubble-text > p,\s*\.agent-message\.user \.agent-bubble-text > ul,\s*\.agent-message\.user \.agent-bubble-text > ol \{[^}]*margin: 0;/s,
+    'two source newlines must collapse to one visible block break');
   assert.match(agentCSS, /\.agent-message\.user \.agent-bubble pre \{[^}]*overflow-x: auto;/s);
   assert.match(agentCSS, /\.agent-message\.user \.agent-bubble pre code \{[^}]*display: block;/s);
 });

@@ -31,6 +31,23 @@ test('user bubbles render Markdown and fenced code as readable HTML cards', () =
   assert.doesNotMatch(bubble.textContent, /```/, 'fence markers are not shown to the user');
 });
 
+test('user bubbles keep soft line breaks and collapse blank Markdown lines', () => {
+  const thread = renderTranscript([{
+    role: 'user',
+    content: 'first line\nsecond line\n\nthird line',
+    created_at: '2026-08-30T00:00:00Z',
+  }]);
+  const content = thread.querySelector('.agent-message.user .agent-bubble-text');
+  assert.ok(content, 'user Markdown content is rendered inside its wrapper');
+  assert.deepEqual(
+    [...content.children].map((block) => block.tagName),
+    ['P', 'P'],
+    'a blank Markdown line creates blocks, not an empty visible paragraph',
+  );
+  assert.equal(content.children[0].textContent, 'first line\nsecond line');
+  assert.equal(content.children[1].textContent, 'third line');
+});
+
 // exec tool output persisted on the conversation is rendered verbatim when
 // the thread is reloaded from the snapshot (no live run in memory), so users
 // see the streamed output after a refresh / room switch.

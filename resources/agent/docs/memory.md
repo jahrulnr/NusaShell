@@ -21,6 +21,12 @@ Fragments are **user-only**. Durable facts about the active workspace
 belong in `memory_project` (see `memory-project.md`), not in fragments
 with `category=project`.
 
+The Learning knowledge graph rebuilds `related` links from content similarity
+and specific fragment metadata (project, task, and non-ubiquitous tags). It
+also records `used_with` links when successful agent or background-review
+tools observe multiple memory/skill nodes in the same turn. Edges whose
+endpoints were deleted are removed on the next graph rebuild.
+
 ## Primary document format
 
 `memory/primary.md` is a markdown file with YAML frontmatter followed by
