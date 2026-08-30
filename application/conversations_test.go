@@ -257,6 +257,107 @@ func TestHandleConversationsPickWorkspaceAcceptsAbsolutePath(t *testing.T) {
 	}
 }
 
+// TestHandleConversationsPickWorkspaceSerializesTurnSave reproduces the
+// workspace-picker/turn-completion race. The real JSON store returns clones;
+// if the picker saves its pre-picker clone after a turn saves the latest
+// message, that completed turn disappears from the conversation file.
+func TestHandleConversationsPickWorkspaceSerializesTurnSave(t *testing.T) {
+	workspace := t.TempDir()
+	store := &cloningConvStore{
+		conv: &domain.Conversation{
+			ID:    "conv_1",
+			Title: "Test",
+			Messages: []domain.Message{
+				{ID: "m1", Role: domain.RoleUser, Content: "first", Status: domain.StatusDone},
+			},
+		},
+	}
+	pickerStarted := make(chan struct{})
+	releasePicker := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(releasePicker)
+		}
+	}()
+	app := &App{
+		Conversations: store,
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
+			close(pickerStarted)
+			<-releasePicker
+			return workspace, nil
+		}),
+	}
+
+	pickDone := make(chan *contracts.RPCError, 1)
+	go func() {
+		_, rpcErr := app.handleConversationsPickWorkspace(contracts.ConversationIDRequest{ID: "conv_1"})
+		pickDone <- rpcErr
+	}()
+	<-pickerStarted
+
+	// Model the final persistence step of a concurrent turn. It is allowed to
+	// complete while the native picker is open; the picker must re-read the
+	// latest snapshot before it applies the workspace change.
+	turnSaveStarted := make(chan struct{})
+	turnSaveDone := make(chan struct{})
+	go func() {
+		close(turnSaveStarted)
+		turnLock := app.conversationTurnLock("conv_1")
+		turnLock.Lock()
+		defer turnLock.Unlock()
+		latest, err := store.Get("conv_1")
+		if err != nil {
+			t.Errorf("turn Get: %v", err)
+			close(turnSaveDone)
+			return
+		}
+		latest.AddMessage(domain.Message{ID: "m2", Role: domain.RoleAssistant, Content: "latest turn", Status: domain.StatusDone})
+		if err := store.Save(latest); err != nil {
+			t.Errorf("turn Save: %v", err)
+		}
+		close(turnSaveDone)
+	}()
+	<-turnSaveStarted
+
+	select {
+	case <-turnSaveDone:
+	case <-time.After(time.Second):
+		t.Fatal("turn save did not complete while workspace picker was open")
+	}
+
+	close(releasePicker)
+	released = true
+	if rpcErr := <-pickDone; rpcErr != nil {
+		t.Fatalf("pick workspace: %v", rpcErr)
+	}
+	select {
+	case <-turnSaveDone:
+	case <-time.After(time.Second):
+		t.Fatal("turn save did not complete after workspace picker released")
+	}
+
+	got, err := store.Get("conv_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Workspace != workspace {
+		t.Fatalf("workspace = %q, want %q", got.Workspace, workspace)
+	}
+	foundLatest := false
+	for _, message := range got.Messages {
+		if message.ID == "m2" && message.Content == "latest turn" {
+			foundLatest = true
+			break
+		}
+	}
+	if !foundLatest {
+		t.Fatalf("messages = %+v, want completed turn preserved", got.Messages)
+	}
+}
+
 // TestHandleConversationsPickWorkspaceEmptyRoomDoesNotInsertHydration pins
 // that picking a workspace before the first user must not persist a
 // checkpoint at index 0. The first turn's ensureFreshRoomHydration parks it

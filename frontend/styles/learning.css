@@ -733,24 +733,14 @@
 }
 
 /* Agent-style flow inside the activity panel: the tool cards reuse the
-   Agent view's .agent-tool-terminal component; only layout + note styles
-   are local. */
+   Agent view's .agent-tool-terminal component; only layout adjustments are
+   local. */
 .learning-log-activity details.agent-reasoning {
   margin: 10px 10px 0;
 }
 .learning-log-activity .agent-tool-terminal {
   margin: 6px 10px 0;
 }
-.learning-log-note {
-  margin: 8px 12px 0;
-  font-size: 12px;
-  color: var(--text-dim);
-  line-height: 1.5;
-  word-break: break-word;
-}
-.learning-log-note p:first-child { margin-top: 0; }
-.learning-log-note p:last-child { margin-bottom: 0; }
-
 /* Final verdict line: what the review agent decided (saved / nothing
    found...), rendered like a short agent reply at the end of the flow. */
 .learning-log-conclusion {

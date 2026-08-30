@@ -130,7 +130,47 @@ test('details show thinking, tool cards, and the final note - but never the repl
   assert.equal(view.querySelectorAll('.learning-log-tc-msg').length, 0);
 });
 
-test('assistant interstitial narration renders between steps', () => {
+test('assistant pre-tool text uses the same collapsed Thinking disclosure as Agent', () => {
+  const thinking = [
+    'Now I have a clear picture. Let me identify what is durable knowledge worth saving.',
+    '',
+    '1. Keep `table` output readable',
+    '2. Keep fenced output intact',
+    '',
+    '| Area | Value |',
+    '| --- | --- |',
+    '| Inline | `safe` |',
+    '',
+    '```go',
+    'func main() {}',
+    '```',
+  ].join('\n');
+  const view = withDocument(() => renderTranscript({
+    ...transcript,
+    messages: [
+      { role: 'assistant', content: thinking, tool_calls: [{ id: 'tc_thinking', name: 'memory', args: { op: 'search', query: 'user' } }] },
+      { role: 'tool', tool_result: { tool_call_id: 'tc_thinking', name: 'memory', content: 'No matching memories.' } },
+    ],
+  }));
+
+  const details = view.querySelector('details.agent-reasoning');
+  assert.ok(details, 'pre-tool assistant text should be a Thinking disclosure');
+  assert.equal(details.querySelector('.agent-reasoning-title')?.textContent, 'Thinking');
+  assert.equal(view.querySelectorAll('.learning-log-note').length, 0);
+
+  const EventCtor = details.ownerDocument?.defaultView?.Event || Event;
+  details.open = true;
+  details.dispatchEvent(new EventCtor('toggle'));
+  const content = details.querySelector('.agent-reasoning-content');
+  assert.ok(content?.textContent.includes('Keep table output readable'));
+  assert.ok(content?.querySelector('ol'), 'ordered list must render inside Thinking');
+  assert.ok(content?.querySelector('.markdown-table-scroll > table'), 'table must render inside its scroll wrapper');
+  assert.ok(content?.querySelector('.markdown-table-scroll code:not(pre code)'), 'inline backticks must stay inline in table cells');
+  assert.ok(content?.querySelector('pre[data-complete="true"] > code.language-go'), 'triple-backtick fence must render as a complete code block');
+  assert.doesNotMatch(content?.textContent || '', /```/, 'fence markers must stay hidden');
+});
+
+test('assistant pre-tool narration is collapsed as Thinking between steps', () => {
   const view = withDocument(() => renderTranscript({
     ...transcript,
     messages: [
@@ -139,9 +179,10 @@ test('assistant interstitial narration renders between steps', () => {
       { role: 'assistant', content: 'Now let me double check duplicates.', tool_calls: [{ id: 'tc_3', name: 'skill_search', args: { query: 'x' } }] },
     ],
   }));
-  const notes = view.querySelectorAll('.learning-log-note');
-  assert.ok(notes.length >= 1);
-  assert.ok(notes[0].textContent.includes('double check'));
+  const disclosures = view.querySelectorAll('details.agent-reasoning');
+  assert.equal(disclosures.length, 3);
+  assert.ok([...disclosures].some((details) => details._reasoningRaw.includes('double check')));
+  assert.equal(view.querySelectorAll('.learning-log-note').length, 0);
 });
 
 test('Learning ignores ACP wait/result bookkeeping without appending null nodes', () => {

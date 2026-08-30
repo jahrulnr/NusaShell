@@ -5,11 +5,21 @@ import { test } from 'node:test';
 import { hasPluginUI, pluginKind, canAutoUpdate, hasUpdate, hasContract } from './js/views/plugins-model.js';
 
 const html = await readFile(new URL('./index.html', import.meta.url), 'utf8');
+const pluginsCSS = await readFile(new URL('./styles/plugins.css', import.meta.url), 'utf8');
 
 test('Plugins view uses the Electron catalog name and controls', () => {
   assert.match(html, /data-view="plugins"/);
   assert.match(html, /id="plugins-add-mcp"/);
   assert.match(html, /id="plugin-table"/);
+});
+
+test('Plugins mobile layout gives the header and row metadata room to breathe', () => {
+  const mobileRules = pluginsCSS.slice(pluginsCSS.indexOf('@media (max-width: 620px)'));
+  assert.match(mobileRules, /.plugins-view \.view-header\s*\{[\s\S]*flex-direction:\s*column/);
+  assert.match(mobileRules, /.plugins-view \.view-header-actions\s*\{[\s\S]*width:\s*100%/);
+  assert.match(mobileRules, /.plugins-view \.view-header-actions \.action-btn\s*\{[\s\S]*flex:\s*1 1 160px/);
+  assert.match(mobileRules, /\.plugin-row-name\s*\{[\s\S]*flex-wrap:\s*wrap/);
+  assert.match(mobileRules, /\.plugin-row-badge,[\s\S]*\.plugin-row-contract\s*\{[\s\S]*white-space:\s*nowrap/);
 });
 
 test('Plugins distinguishes native MCP, headless plugin, and MCP plus UI', () => {

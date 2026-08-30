@@ -240,10 +240,38 @@
 .plugin-upload-zone span:last-child { font-size: 11.5px; color: var(--text-faint); }
 
 @media (max-width: 620px) {
+  .plugins-view .view-header {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .plugins-view .view-header > :first-child { min-width: 0; }
+  .plugins-view .view-header-actions {
+    width: 100%;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+  .plugins-view .view-header-actions .action-btn {
+    flex: 1 1 160px;
+    min-width: 0;
+  }
   .plugin-row { align-items: flex-start; }
+  .plugin-row-name {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    line-height: 1.35;
+  }
+  .plugin-row-name > span:first-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .plugin-row-badge,
+  .plugin-row-contract {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
   .plugin-row-state { margin-left: auto; }
   .plugin-row-tools { display: none; }
-  .view-header-actions { flex-wrap: wrap; }
 }
 
 .plugins-update-badge { display:inline-block; margin-left:8px; padding:2px 8px; border-radius:10px; background:#e8590c; color:#fff; font-size:12px; font-weight:600; }

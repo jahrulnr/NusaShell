@@ -420,10 +420,9 @@ async function toggleTranscript(reviewID, btn) {
   }
 }
 
-// oneLine collapses whitespace and truncates a snippet so log rows stay
-// oneLine collapses whitespace and truncates a snippet so log rows stay
-// scannable. Narration and conclusions go through this; full tool inputs
-// and outputs live inside their collapsible terminal cards instead.
+// oneLine collapses whitespace and truncates a mutation snippet so log rows
+// stay scannable. Full tool inputs and outputs live inside their collapsible
+// terminal cards instead.
 function oneLine(text, max) {
   const clean = (text || '').replace(/\s+/g, ' ').trim();
   if (!clean) return '';
@@ -431,10 +430,10 @@ function oneLine(text, max) {
 }
 
 // renderTranscript renders what the background review agent did as an
-// agent-style flow — thinking disclosures, terminal-style tool cards, and
-// interstitial narration — exactly like the Agent view conversation, minus
-// the user side: the replayed transcript message (role "user") is never
-// rendered. This answers "what did the agent do and store?".
+// agent-style flow — thinking disclosures, terminal-style tool cards, and a
+// final conclusion — exactly like the Agent view conversation, minus the user
+// side: the replayed transcript message (role "user") is never rendered. This
+// answers "what did the agent do and store?".
 export function renderTranscript(transcript) {
   const view = el('div', { class: 'learning-log-activity' });
   // Banner: makes it obvious this is background review agent activity.
@@ -461,24 +460,13 @@ export function renderTranscript(transcript) {
 
 // collectAgentFlow converts the review agent's message history into the
 // Agent view's visual language: a thinking disclosure per assistant round,
-// one tool call card per call (paired with its tool result), short
-// narration notes between rounds, and the final conclusion line.
+// one tool call card per call (paired with its tool result), and the final
+// conclusion line.
 // Replayed user messages are dropped — this view shows agent work only.
 function collectAgentFlow(messages) {
   const items = [];
   const cardsById = new Map();
   let lastCard = null;
-  let narration = '';
-
-  const flushNarration = () => {
-    const text = narration.trim();
-    if (text) {
-      const note = el('div', { class: 'learning-log-note' });
-      note.innerHTML = renderMarkdown(text);
-      items.push(note);
-    }
-    narration = '';
-  };
 
   const applyResult = (card, content) => {
     if (!card) return;
@@ -505,14 +493,17 @@ function collectAgentFlow(messages) {
     // The replayed source-conversation transcript (role "user") stays hidden.
     if (msg.role !== 'assistant') continue;
 
-    if (msg.reasoning?.trim()) {
-      flushNarration();
-      items.push(reasoningDisclosure(msg.reasoning));
-    }
     if (msg.tool_calls?.length) {
-      // Spoken text alongside tool calls reads as narration for the steps.
-      if (typeof msg.content === 'string' && msg.content.trim()) narration = msg.content;
-      flushNarration();
+      // Some OpenAI-compatible models (including Minimax through OpenRouter)
+      // put their pre-tool reasoning in the normal content field instead of
+      // the provider reasoning field. Treat that round text as Thinking so
+      // the background log has the same collapsed interaction as Agent.
+      const thinking = [msg.reasoning, msg.content]
+        .filter((text) => typeof text === 'string' && text.trim())
+        .join('\n\n');
+      if (thinking) {
+        items.push(reasoningDisclosure(thinking));
+      }
       for (const call of msg.tool_calls) {
         const card = renderToolCallCard({ id: call.id, name: call.name, args: call.args ?? '', status: 'running', output: '' });
         // ACP wait/result entries are provider bookkeeping for the same
@@ -525,16 +516,16 @@ function collectAgentFlow(messages) {
       }
       continue;
     }
+    if (msg.reasoning?.trim()) {
+      items.push(reasoningDisclosure(msg.reasoning));
+    }
     if (typeof msg.content === 'string' && msg.content.trim()) {
       // Terminal text response: the review's verdict.
-      flushNarration();
       const conclusion = el('div', { class: 'learning-log-conclusion' });
       conclusion.innerHTML = renderMarkdown(msg.content);
       items.push(conclusion);
     }
   }
-  // Narration captured just before an interrupted loop end still shows.
-  flushNarration();
   return items;
 }
 

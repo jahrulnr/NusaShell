@@ -241,19 +241,33 @@ func (a *App) handleConversationsDelete(req contracts.ConversationIDRequest) (an
 }
 
 func (a *App) handleConversationsPickWorkspace(req contracts.ConversationIDRequest) (any, *contracts.RPCError) {
-	c, rpcErr := a.getConversation(req.ID)
-	if rpcErr != nil {
+	// Validate the conversation before opening the native picker, but do not
+	// hold the turn lock while the user is choosing a folder. Once the picker
+	// returns, the latest conversation is read under the same lock as turn
+	// persistence so an older pre-picker snapshot cannot overwrite a completed
+	// message.
+	if _, rpcErr := a.getConversation(req.ID); rpcErr != nil {
 		return nil, rpcErr
 	}
+
 	if a.WorkspacePicker == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "workspace folder picker is unavailable"}
 	}
 	workspace, err := a.WorkspacePicker.Choose(context.Background())
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return contracts.ConversationGetResult{Conversation: convDTO(c)}, nil
-		}
+	if err != nil && !errors.Is(err, context.Canceled) {
 		return nil, rpcInternal(err)
+	}
+
+	turnLock := a.conversationTurnLock(req.ID)
+	turnLock.Lock()
+	defer turnLock.Unlock()
+
+	c, rpcErr := a.getConversation(req.ID)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if err != nil {
+		return contracts.ConversationGetResult{Conversation: convDTO(c)}, nil
 	}
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" {
