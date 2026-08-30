@@ -162,15 +162,15 @@
   opacity: .4;
   pointer-events: none;
 }
-.app-icon.has-image { overflow: visible; }
+.app-icon.has-image { overflow: hidden; }
 .bg-blue { background-color: var(--panel); }
 .bg-dashed { border-style: dashed; background: transparent; color: var(--text-faint); }
 
 .plugin-icon-image {
   position: relative;
   z-index: 1;
-  max-width: 62%;
-  max-height: 62%;
+  max-width: calc(100% - 44px);
+  max-height: calc(100% - 44px);
   object-fit: contain;
 }
 .plugin-icon-glyph {

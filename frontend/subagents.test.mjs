@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
 import { syncTranscript } from './js/views/agent/subagents.js';
+
+const acpCSS = await readFile(new URL('./styles/acp.css', import.meta.url), 'utf8');
 
 function makePanel() {
   const dom = new JSDOM('<!doctype html><html><body><div class="acp-run-panel"><div class="acp-run-meta"></div><div class="acp-transcript"></div></div></body></html>');
@@ -103,4 +106,30 @@ test('Subagent prompts render as user bubbles before and between assistant round
     dom.window.close();
     cleanup();
   }
+});
+
+test('Subagent delegation and steering prompts render the same Markdown user content', () => {
+  const { dom, panel } = makePanel();
+  try {
+    syncTranscript(panel, [
+      { kind: 'prompt', text: 'Inspect **the CSS** and `agent.css`.\n\n```css\n.agent-bubble {}\n```' },
+    ]);
+
+    const bubble = panel.querySelector('.acp-prompt-message .agent-bubble');
+    assert.ok(bubble.querySelector('strong'), 'prompt emphasis is rendered as HTML');
+    assert.ok(bubble.querySelector('code:not(pre code)'), 'prompt inline code is rendered as HTML');
+    assert.ok(bubble.querySelector('pre code.language-css'), 'prompt fenced code uses the code-card renderer');
+    assert.doesNotMatch(bubble.textContent, /```/, 'prompt fence markers are not shown');
+  } finally {
+    dom.window.close();
+    cleanup();
+  }
+});
+
+test('ACP drawer keeps the mobile run picker compact and transcript horizontally contained', () => {
+  const mobileRules = acpCSS.slice(acpCSS.indexOf('@media (max-width: 720px)'));
+  assert.match(mobileRules, /grid-template-rows:\s*minmax\(0,\s*auto\)\s+minmax\(0,\s*1fr\)/);
+  assert.match(mobileRules, /flex-direction:\s*row/);
+  assert.match(mobileRules, /overflow-x:\s*auto/);
+  assert.match(mobileRules, /overflow-x:\s*hidden/);
 });

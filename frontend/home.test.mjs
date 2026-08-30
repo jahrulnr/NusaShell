@@ -25,6 +25,11 @@ test('Home uses the Electron launcher controls and workbench sizing', () => {
   assert.match(homeCSS, /\.app-icon::after\s*\{/);
 });
 
+test('Home plugin artwork stays inside the icon plate', () => {
+  assert.match(homeCSS, /\.app-icon\.has-image\s*\{[\s\S]*overflow:\s*hidden;/);
+  assert.match(homeCSS, /\.plugin-icon-image\s*\{[\s\S]*max-width:\s*calc\(100% - 44px\);[\s\S]*max-height:\s*calc\(100% - 44px\);/);
+});
+
 test('Home search matches plugin name, id, and manifest description', () => {
   const plugins = [
     { id: 'notes.app', name: 'Notes', manifest: { description: 'Capture ideas' } },

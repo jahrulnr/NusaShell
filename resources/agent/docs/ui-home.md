@@ -26,7 +26,7 @@ A search input filters the app grid by name, id, or description. Category tabs n
 
 ## App grid
 
-A responsive grid of plugin tiles. Each tile shows the plugin icon (including local manifest icons resolved for the browser), name, and a runtime status when active. Clicking a tile opens the plugin UI in a new browser window sized from the plugin manifest.
+A responsive grid of plugin tiles. Each tile shows the plugin icon (including local manifest icons resolved for the browser), name, and a runtime status when active. Artwork is contained inside the instrument-style icon plate even when a manifest image has an unusual aspect ratio. Clicking a tile opens the plugin UI in a new browser window sized from the plugin manifest.
 
 - **App grid** (`#app-grid`):
   - Section: Home

@@ -32,7 +32,7 @@ Switches between Memory & Graph (search + graph) and Learning log (autolearn act
 
 ## Search bar
 
-Hybrid search across memory and skills, with a kind filter (All, Skills, Memory) and a Search button.
+Hybrid search across memory and skills, with a kind filter (All, Skills, Memory) and a Search button. On phones the query and filter/action controls use separate full-width rows so none of the controls are clipped.
 
 - **Learning search** (`#learning-search-input`):
   - Section: Learning
@@ -68,7 +68,7 @@ Draggable splitter between the results pane and the graph pane. Drag to resize t
 
 ## Knowledge graph
 
-Force-directed graph (vis-network) of skills, memory entries, and their edges. Refresh reloads the graph; Fit fits it to view. Legend distinguishes Skill, Memory, Related, and Used-with edges. The graph refreshes automatically when memory or skills change (via `memory.updated` / `skill.updated` events, debounced 300ms).
+Force-directed graph (vis-network) of skills, memory entries, and their edges. Refresh reloads the graph; Fit fits it to view. Legend distinguishes Skill, Memory, Related, and Used-with edges. The graph refreshes automatically when memory or skills change (via `memory.updated` / `skill.updated` events, debounced 300ms). On narrow screens results and graph stack into separate bounded panes with their own scrollable result list.
 
 - **Knowledge graph** (`#learning-graph`):
   - Section: Learning

@@ -9,6 +9,8 @@ import {
   initialWindowStart,
   previousWindowStart,
   conversationTail,
+  isThreadAtBottom,
+  syncThreadPin,
 } from './js/agent-ui.js';
 
 test('context usage uses the effective model window', () => {
@@ -40,6 +42,18 @@ test('previousWindowStart reveals one older batch at a time, clamped at 0', () =
   assert.equal(previousWindowStart(940, 40), 900);
   assert.equal(previousWindowStart(30, 40), 0);
   assert.equal(previousWindowStart(0, 40), 0);
+});
+
+test('terminal lifecycle can sync the pin from actual thread geometry', () => {
+  const thread = { scrollHeight: 1000, scrollTop: 300, clientHeight: 500 };
+  const state = { pinned: true };
+  assert.equal(isThreadAtBottom(thread), false);
+  assert.equal(syncThreadPin(state, thread), false);
+  assert.equal(state.pinned, false);
+
+  thread.scrollTop = 476;
+  assert.equal(syncThreadPin(state, thread), true);
+  assert.equal(state.pinned, true);
 });
 
 function msg(role, id) {

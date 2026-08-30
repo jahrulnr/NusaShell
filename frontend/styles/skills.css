@@ -187,9 +187,32 @@
 
 /* ============ Skills responsive ============ */
 @media (max-width: 760px) {
-  .skills-workspace { grid-template-columns: 1fr; overflow: visible; }
-  .skills-catalog { max-height: 300px; border-right: 0; border-bottom: 1px solid var(--border); }
-  .skills-editor-pane { min-height: 420px; }
+  .skills-view .view-body { margin-top: 0; padding-inline: 0; }
+  .skills-view-body { overflow: hidden; padding-bottom: 12px; }
+  .skills-workspace {
+    display: flex;
+    flex-direction: column;
+    grid-template-columns: 1fr !important;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .skills-catalog {
+    flex: 0 0 min(260px, 32vh);
+    min-height: 180px;
+    max-height: 260px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .skills-catalog .skills-list { flex: 1 1 auto; }
+  .skills-tree-pane {
+    display: flex;
+    flex: 0 0 min(220px, 28vh);
+    min-height: 180px;
+    max-height: 220px;
+    border-bottom: 1px solid var(--border);
+  }
+  .skills-editor-pane { flex: 1 0 360px; min-height: 360px; }
+  .skills-splitter { display: none; }
 }
 
 /* Owner badge + shadowed skill */

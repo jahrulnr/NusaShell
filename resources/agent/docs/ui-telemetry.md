@@ -6,7 +6,7 @@ Aggregate token usage, spend, and caching across all conversations. Mirrors the 
 
 ## Header
 
-Range selector (15m / 30m / 1h / 3h default / 1d / 2d / 1w / 1mo / 1y / All) and Refresh button.
+Range selector (15m / 30m / 1h / 3h default / 1d / 2d / 1w / 1mo / 1y / All) and Refresh button. Summary cards and charts collapse to phone-width columns without creating horizontal page overflow.
 
 - **Time range selector** (`#telemetry-range`):
   - Section: Telemetry header

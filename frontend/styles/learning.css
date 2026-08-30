@@ -38,6 +38,20 @@
   transition: border-color 0.15s, box-shadow 0.15s;
   flex: none;
 }
+.learning-search-query {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 8px;
+}
+.learning-search-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+  min-width: 0;
+}
 .learning-search-bar:focus-within {
   border-color: var(--accent-border);
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -48,6 +62,7 @@
 }
 .learning-search-bar input[type="search"] {
   flex: 1 1 auto;
+  min-width: 0;
   background: transparent;
   border: none;
   color: var(--text);
@@ -62,6 +77,10 @@
   filter: invert(0.6);
 }
 .learning-search-bar .select {
+  min-width: 100px;
+}
+.learning-search-actions .ss-main {
+  width: auto;
   min-width: 100px;
 }
 
@@ -287,13 +306,47 @@
 @media (max-width: 900px) {
   .learning-workspace {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(200px, 300px) 0 minmax(300px, 1fr);
+    grid-template-rows: minmax(150px, 1fr) minmax(220px, 1fr);
+    min-height: 0;
   }
   .learning-results-pane {
     border-right: none;
     border-bottom: 1px solid var(--border-soft);
   }
   .learning-splitter { display: none; }
+}
+
+@media (max-width: 680px) {
+  .learning-header {
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+  }
+  .learning-header .learning-header-stats {
+    margin: 0;
+    flex-wrap: wrap;
+  }
+  .learning-stat { padding: 4px 8px; font-size: 11px; }
+  .learning-tabs {
+    gap: 2px;
+    max-width: 100%;
+    overflow-x: auto;
+    padding-inline: 12px;
+  }
+  .learning-tabs > button { flex: 0 0 auto; }
+  .learning-body { gap: 10px; padding-bottom: 12px; }
+  .learning-search-bar {
+    flex-wrap: wrap;
+    padding: 8px 10px;
+  }
+  .learning-search-query { width: 100%; flex-basis: 100%; }
+  .learning-search-actions { width: 100%; }
+  .learning-search-actions .ss-main { flex: 1 1 auto; min-width: 0; }
+  .learning-search-actions .mini-btn { flex: 0 0 auto; }
+  .learning-pane-head { padding: 10px 12px; }
+  .learning-results { padding: 6px; }
+  .learning-graph-legend { gap: 8px 12px; padding: 7px 10px; }
 }
 
 .learning-result-header-right {

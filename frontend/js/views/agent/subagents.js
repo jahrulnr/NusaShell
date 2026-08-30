@@ -2,6 +2,7 @@
 
 import { rpc, on } from '../../rpc.js';
 import { el, fmtTime } from '../../ui.js';
+import { renderMarkdown } from '../../markdown.js';
 import { incrementalRender } from '../../incremental-render.js';
 import { highlightCode } from '../../highlight-render.js';
 import { attachZoomButtons } from '../../media-zoom.js';
@@ -577,10 +578,12 @@ function transcriptMessage(segment) {
 }
 
 function transcriptPromptMessage(segment) {
+  const body = el('div', { class: 'agent-bubble-text' });
+  renderPromptContent(body, segment.text);
   const message = el('div', {
     class: 'agent-message user acp-prompt-message',
     'data-transcript-segment-key': segment.key,
-  }, el('div', { class: 'agent-bubble' }, el('div', { text: segment.text })));
+  }, el('div', { class: 'agent-bubble' }, body));
   if (segment.at) {
     message.append(el('div', { class: 'agent-message-meta', text: fmtTime(segment.at) }));
   }
@@ -590,12 +593,19 @@ function transcriptPromptMessage(segment) {
 function updateTranscriptMessage(message, segment) {
   if (segment.kind === 'prompt') {
     const body = message.querySelector(':scope > .agent-bubble > div');
-    if (body) body.textContent = segment.text;
+    if (body) renderPromptContent(body, segment.text);
     const meta = message.querySelector(':scope > .agent-message-meta');
     if (segment.at && meta) meta.textContent = fmtTime(segment.at);
     return;
   }
   syncAssistantMessage(message, segment.chunks);
+}
+
+function renderPromptContent(body, text) {
+  if (!body) return;
+  const raw = typeof text === 'string' ? text : '';
+  body.innerHTML = raw ? renderMarkdown(raw) : '';
+  if (!body.innerHTML && raw) body.textContent = raw;
 }
 
 function syncAssistantMessage(message, entries) {

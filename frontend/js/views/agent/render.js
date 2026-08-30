@@ -188,6 +188,52 @@ export function reasoningDisclosure(reasoning, options = {}) {
   return details;
 }
 
+const disclosureSelector = 'details.agent-reasoning, details.agent-tool-terminal';
+
+function disclosureStateKeys(details, root) {
+  const kind = details.classList.contains('agent-tool-terminal') ? 'tool' : 'thinking';
+  const round = details.closest('.agent-round');
+  const message = details.closest('.agent-message');
+  const firstMessageID = message?.dataset.messageIds?.split(/\s+/).find(Boolean) || '';
+  const ownerKey = round?.dataset.messageId
+    || firstMessageID
+    || message?.dataset.messageId
+    || '';
+  const owner = round || message || root;
+  const siblings = [...owner.querySelectorAll(kind === 'tool'
+    ? 'details.agent-tool-terminal'
+    : 'details.agent-reasoning')];
+  const ordinal = Math.max(0, siblings.indexOf(details));
+  const all = [...root.querySelectorAll(disclosureSelector)];
+  const keys = [];
+  if (kind === 'tool' && details.dataset.toolCallId) {
+    keys.push(`${kind}:${ownerKey || 'conversation'}:${details.dataset.toolCallId}`);
+  }
+  if (ownerKey) keys.push(`${kind}:${ownerKey}:${ordinal}`);
+  keys.push(`${kind}:anonymous:${all.indexOf(details)}`);
+  return keys;
+}
+
+// captureDisclosureState records only user-controlled disclosure state. The
+// content itself remains owned by the conversation snapshot, so a refresh can
+// rebuild the transcript without surprising the reader by collapsing panels.
+export function captureDisclosureState(root) {
+  const states = new Map();
+  if (!root?.querySelectorAll) return states;
+  for (const details of root.querySelectorAll(disclosureSelector)) {
+    for (const key of disclosureStateKeys(details, root)) states.set(key, Boolean(details.open));
+  }
+  return states;
+}
+
+export function restoreDisclosureState(root, states) {
+  if (!root?.querySelectorAll || !(states instanceof Map)) return;
+  for (const details of root.querySelectorAll(disclosureSelector)) {
+    const key = disclosureStateKeys(details, root).find((candidate) => states.has(candidate));
+    if (key !== undefined && details.open !== states.get(key)) details.open = states.get(key);
+  }
+}
+
 // renderCompactionStatus renders the short-lived inline status shown while
 // the backend is folding the conversation context. It deliberately lives
 // outside the persisted message model: the matching compacted/failed event
@@ -302,7 +348,12 @@ export function renderMessage(message) {
   if (message.role === 'user') {
     const node = el('div', { class: `agent-message user${message.steer ? ' agent-steer' : ''}` });
     const bubble = el('div', { class: 'agent-bubble' });
-    bubble.append(el('div', { text: message.content || (message.attachments?.length ? 'Attached files' : '') }));
+    const content = el('div', { class: 'agent-bubble-text' });
+    const raw = typeof message.content === 'string' ? message.content : '';
+    if (raw) content.innerHTML = renderMarkdown(raw);
+    if (!content.innerHTML && raw) content.textContent = raw;
+    if (!content.innerHTML && message.attachments?.length) content.textContent = 'Attached files';
+    bubble.append(content);
     if (message.attachments?.length) bubble.append(renderMessageAttachments(message.attachments));
     node.append(bubble);
     const meta = el('div', { class: 'agent-message-meta' });
@@ -330,6 +381,7 @@ function isCompactionSummary(message) {
 // collapsed so a long handover does not take over the room on reload.
 function renderCompactionMessage(message) {
   const node = el('div', { class: 'agent-message assistant agent-compaction-marker' });
+  if (message.id) node.dataset.messageIds = message.id;
   const bubble = el('div', { class: 'agent-bubble' });
   const raw = typeof message.content === 'string' ? message.content : '';
   const handover = raw.startsWith('[COMPACTION CHECKPOINT]')
@@ -450,6 +502,7 @@ function appendAssistantSteps(bubble, message) {
 function appendToolCards(bubble, cards) {
   const terminals = [];
   for (const card of cards) {
+    if (!card) continue;
     if (card.dataset.standalone === 'true') {
       bubble.append(card);
     } else {
@@ -485,7 +538,15 @@ function totalUsage(messages) {
 // is a visual cue for tool terminals (exec, grep, file_read) only, and
 // looks wrong around a media card or ask panel that already has its own
 // frame.
+export function isSubagentAuxiliaryTool(name) {
+  return name === 'subagent_wait' || name === 'subagent_result';
+}
+
 export function renderToolCallCard(toolCall) {
+  // `subagent` is the user-facing delegation card. The wait call and the
+  // synthetic result call are provider bookkeeping for that same run; showing
+  // them as extra terminal rows duplicates the card and adds no affordance.
+  if (isSubagentAuxiliaryTool(toolCall.name)) return null;
   if (toolCall.name === 'ask_question') {
     // args arrives as a parsed object from the wire DTO (json.RawMessage);
     // parseToolArgs tolerates both object and JSON-string shapes.
@@ -1253,6 +1314,7 @@ function openImageLightbox({ src, name, caption }) {
 
 export function renderToolJob(toolCall) {
   const card = el('details', { class: 'agent-tool-terminal' });
+  if (toolCall.id) card.dataset.toolCallId = String(toolCall.id);
   const name = toolCall.name || 'tool';
   const isMcp = name.startsWith('mcp__');
   const isMcpCall = name === 'mcp_call';

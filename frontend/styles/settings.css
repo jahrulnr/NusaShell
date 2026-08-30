@@ -283,3 +283,16 @@
   .content:has(.settings-view.active) { padding: var(--space-2); }
   .settings-group { grid-template-columns: 1fr; }
 }
+
+@media (max-width: 480px) {
+  .settings-view .view-header {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .settings-header-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}

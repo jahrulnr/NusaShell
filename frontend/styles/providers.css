@@ -266,6 +266,20 @@
 
 /* ============ Providers responsive ============ */
 @media (max-width: 480px) {
+  .providers-view .view-header {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .providers-view .view-header-actions {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+  .providers-view .view-header-actions .action-btn {
+    flex: 1 1 140px;
+    margin: 0;
+  }
   .provider-detail-grid { grid-template-columns: 1fr; gap: 12px; }
   .provider-detail-actions { flex-wrap: wrap; }
 }

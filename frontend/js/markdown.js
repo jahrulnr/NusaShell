@@ -115,6 +115,7 @@ function extractBlocks(events, srcLen) {
 // 4. Image attributes: loading="lazy", onerror for broken-image styling
 // 5. External links: target="_blank" rel="noopener"
 // 6. Task list checkboxes: <input> → styled span (AGENTS.md: no native controls)
+// 7. GFM tables → a stable horizontal-scroll wrapper for narrow bubbles
 function postProcessBlockHtml(block, html) {
   // 1. Mermaid placeholder: replace <pre><code class="language-mermaid">…</code></pre>
   //    with <div class="mermaid-block" …><pre class="mermaid-src">…</pre></div>.
@@ -157,6 +158,15 @@ function postProcessBlockHtml(block, html) {
     '<span class="task-checkbox" data-checked="true" role="checkbox" aria-checked="true">✓</span>');
   html = html.replace(/<input\s+type="checkbox"\s+disabled=""\s*\/>/g,
     '<span class="task-checkbox" data-checked="false" role="checkbox" aria-checked="false">○</span>');
+
+  if (block.type === 'table') {
+    // Keep the byte-range anchor on the wrapper so incrementalRender can
+    // preserve/replace the complete table block as one DOM child.
+    const table = html
+      .replace(/\sdata-start="\d+"/, '')
+      .replace(/\sdata-end="\d+"/, '');
+    return `<div class="markdown-table-scroll" data-start="${block.start}" data-end="${block.end}">${table}</div>`;
+  }
 
   return html;
 }

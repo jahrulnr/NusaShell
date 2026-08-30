@@ -4,7 +4,7 @@ import { rpc, on, emit } from '../rpc.js';
 import { el, fmtTime, toast, confirmDialog, debounce } from '../ui.js';
 import { renderMarkdown } from '../markdown.js';
 import { incrementalRender } from '../incremental-render.js';
-import { estimateContextTokens, formatContextUsage, effectiveContextWindow, previousWindowStart, conversationTail } from '../agent-ui.js';
+import { estimateContextTokens, formatContextUsage, effectiveContextWindow, previousWindowStart, conversationTail, isThreadAtBottom, syncThreadPin } from '../agent-ui.js';
 import { bindComposer, updateSendAvailability } from './agent/composer.js';
 import { bindModelPicker } from './agent/model-picker.js';
 import { bindRoomInfo, updateRoomInfo } from './agent/room-info.js';
@@ -21,6 +21,7 @@ import {
   renderToolJob,
   renderToolCallCard,
   renderSubagentCard,
+  isSubagentAuxiliaryTool,
   renderGenerateImageCard,
   renderTodoItem,
   setToolTerminalStatus,
@@ -38,6 +39,8 @@ import {
   bindOptimisticTurn,
   thinkingDots,
   renderCompactionStatus,
+  captureDisclosureState,
+  restoreDisclosureState,
   parseShowImageOutput,
   parseShowAudioOutput,
   parseShowVideoOutput,
@@ -289,6 +292,7 @@ function applyRoundDeltaFrame(run, frame) {
       if (!frame.tool_call_id) break;
       run.thinkingLive = false;
       run.toolsStarted = true;
+      if (isSubagentAuxiliaryTool(frame.name)) break;
       if (run.conversationId !== state.activeId) break;
       sealReasoningStreaming(run.reasoningEl);
       ensureLiveToolJob(run, frame.tool_call_id, frame.name);
@@ -361,6 +365,10 @@ function startToolElapsed(job) {
 function ensureLiveToolJob(run, toolCallId, name, args) {
   if (!run || !toolCallId) return null;
   if (!run.toolJobs) run.toolJobs = new Map();
+  // The delegation card is the single user-facing representation for ACP
+  // runs. Wait/result calls only unblock or inform the provider and must not
+  // create a second terminal row in the visible transcript.
+  if (isSubagentAuxiliaryTool(name)) return null;
   const existing = run.toolJobs.get(toolCallId);
   if (existing) {
     if (args != null) {
@@ -375,8 +383,8 @@ function ensureLiveToolJob(run, toolCallId, name, args) {
   if (run.conversationId !== state.activeId || !run.strip) return null;
   const toolName = name || 'exec';
   const job = toolName === 'generate_image'
-    ? renderGenerateImageCard({ name: toolName, args: args ?? {}, status: 'running' })
-    : renderToolJob({ name: toolName, args: args ?? {}, status: 'running' });
+    ? renderGenerateImageCard({ id: toolCallId, name: toolName, args: args ?? {}, status: 'running' })
+    : renderToolJob({ id: toolCallId, name: toolName, args: args ?? {}, status: 'running' });
   if (isStreamingTool(toolName)) bindToolStop(job, () => run.runId);
   setLiveToolJob(run.toolJobs, toolCallId, job);
   placeToolCard(run.bubble, run.strip, job);
@@ -420,6 +428,89 @@ function applyConversationTail() {
 // away from a conversation, its per-room state is saved here. When they switch
 // back, it's restored. This prevents state from one room leaking into another.
 const savedRooms = new Map(); // conversationId -> { pinned, steerDraft, attachments, model }
+
+const THREAD_END_MARKER_ID = 'agent-thread-end-marker';
+let threadEndMarker = null;
+let threadEndMarkerThread = null;
+let threadEndObserver = null;
+let threadEndObserverThread = null;
+let threadMutationObserver = null;
+let threadMutationObserverThread = null;
+
+function observerConstructor(thread, name) {
+  return thread?.ownerDocument?.defaultView?.[name] || globalThis[name];
+}
+
+// Keep a tiny, invisible node at the end of the outer transcript. Its
+// intersection is the authoritative visual signal for whether the user is
+// still following the live tail. The marker is deliberately maintained here,
+// rather than in render.js, because every append/replace path in this view
+// must keep the scroll anchor after the newest content.
+function ensureThreadEndMarker() {
+  const thread = agentThread();
+  if (!thread) return null;
+
+  let marker = threadEndMarker?.parentElement === thread ? threadEndMarker : null;
+  if (!marker) {
+    marker = [...thread.children].find((child) => child.id === THREAD_END_MARKER_ID) || null;
+  }
+  if (!marker) {
+    marker = el('div', {
+      id: THREAD_END_MARKER_ID,
+      class: 'agent-thread-end-marker',
+      'aria-hidden': 'true',
+    });
+  }
+  if (marker.parentElement !== thread || thread.lastElementChild !== marker) {
+    thread.append(marker);
+  }
+
+  if (threadEndObserver && (threadEndObserverThread !== thread || threadEndMarker !== marker)) {
+    threadEndObserver.disconnect();
+    threadEndObserver = null;
+    threadEndObserverThread = null;
+  }
+  threadEndMarker = marker;
+  threadEndMarkerThread = thread;
+  if (!threadEndObserver) {
+    const IntersectionObserverCtor = observerConstructor(thread, 'IntersectionObserver');
+    if (typeof IntersectionObserverCtor === 'function') {
+      threadEndObserver = new IntersectionObserverCtor(([entry]) => {
+        if (!entry || entry.target !== threadEndMarker || threadEndMarkerThread !== thread) return;
+        // Keep the existing small bottom tolerance for a marker that is just
+        // outside the root while layout settles after a streamed delta.
+        state.pinned = entry.isIntersecting || isThreadAtBottom(thread);
+      }, { root: thread, threshold: 0.01 });
+      threadEndObserverThread = thread;
+      threadEndObserver.observe(marker);
+    }
+  } else {
+    // Re-observing is harmless and covers a marker that was detached by
+    // replaceChildren before being reused for this render.
+    threadEndObserver.observe(marker);
+  }
+
+  bindThreadEndMarker(thread);
+
+  return marker;
+}
+
+function bindThreadEndMarker(thread) {
+  const MutationObserverCtor = observerConstructor(thread, 'MutationObserver');
+  if (typeof MutationObserverCtor !== 'function') return;
+  if (threadMutationObserver && threadMutationObserverThread !== thread) {
+    threadMutationObserver.disconnect();
+    threadMutationObserver = null;
+    threadMutationObserverThread = null;
+  }
+  if (threadMutationObserver) return;
+  threadMutationObserver = new MutationObserverCtor(() => {
+    if (agentThread() !== thread) return;
+    ensureThreadEndMarker();
+  });
+  threadMutationObserverThread = thread;
+  threadMutationObserver.observe(thread, { childList: true });
+}
 
 export async function initAgent() {
   bindComposer({
@@ -610,6 +701,7 @@ async function createConversation(title = '') {
     state.todoRenderToken++;
     await refreshConversations();
     renderEmptyThread();
+    ensureThreadEndMarker();
     renderAttachments();
     renderTodoStrip();
     updateComposerStatus();
@@ -719,6 +811,7 @@ async function deleteConversation(id) {
       state.todoRenderToken++;
       clearSteerQueue();
       renderEmptyThread();
+      ensureThreadEndMarker();
       renderAttachments();
       renderTodoStrip();
       updateComposerStatus();
@@ -1040,14 +1133,17 @@ function reattachActiveRun() {
 // deferred scroll: true jumps to the bottom once fully rendered (opening a room
 // — idea: auto-scroll when loaded); false respects the pin so a background
 // refresh never yanks a user who scrolled up to read history.
-function renderThread(messages, force = true) {
+function renderThread(messages, force = true, disclosureState = null) {
   const thread = agentThread();
   if (!thread) return;
   if (!messages.length) {
     renderEmptyThread();
+    ensureThreadEndMarker();
     return;
   }
   thread.replaceChildren(renderConversation(messages, retryTurn));
+  restoreDisclosureState(thread, disclosureState);
+  ensureThreadEndMarker();
   mountCompactionStatus(state.activeId, runForConversation(state.activeId));
   // Render any Mermaid diagrams in the freshly painted thread (settle point,
   // not per-delta).
@@ -1336,8 +1432,16 @@ function mountCompactionStatus(conversationId, run = runForConversation(conversa
   if (!entry || !compactionRunMatches(run, entry.runId)) return;
   const host = run?.bubble?.isConnected ? run.bubble : agentThread();
   if (!host) return;
+  const thread = agentThread();
+  const marker = host === thread ? ensureThreadEndMarker() : null;
   if (!entry.node || !entry.node.isConnected) entry.node = renderCompactionStatus();
-  if (entry.node.parentElement !== host) host.append(entry.node);
+  if (entry.node.parentElement === host) {
+    if (marker?.parentElement === host && entry.node.nextSibling !== marker) host.insertBefore(entry.node, marker);
+  } else if (marker?.parentElement === host) {
+    host.insertBefore(entry.node, marker);
+  } else {
+    host.append(entry.node);
+  }
 }
 
 function markCompacting(conversationId, runId = '') {
@@ -1676,8 +1780,10 @@ function endTurn(runId, keepRun = false) {
 function bindScrollPin() {
   const thread = agentThread();
   if (!thread) return;
+  ensureThreadEndMarker();
+  bindThreadEndMarker(thread);
   thread.addEventListener('scroll', () => {
-    state.pinned = isAtBottom(thread);
+    state.pinned = isThreadAtBottom(thread);
     // Older *active* messages are revealed via the explicit "Load older"
     // button (a deliberate click keeps the scroll anchored — auto-loading
     // during a fast wheel scroll fights the browser's momentum and jumps the
@@ -1761,11 +1867,12 @@ function prependActiveBatch() {
   }
 }
 
-function isAtBottom(el) {
-  if (!el) return true;
-  // Small tolerance so streamed deltas that grow the container do not
-  // accidentally unpin a user who is still effectively at the latest line.
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
+// A terminal event can race the last scroll event while the final delta is
+// still settling. Sample the actual geometry before completion/error cleanup
+// so sounds and the authoritative refresh cannot mistake a reader's position
+// for the live tail.
+function syncActiveThreadPin() {
+  return syncThreadPin(state, agentThread());
 }
 
 // scrollThreadToBottomHard forces the thread to the bottom robustly after an
@@ -1776,6 +1883,7 @@ function isAtBottom(el) {
 function scrollThreadToBottomHard() {
   const thread = agentThread();
   if (!thread) return;
+  ensureThreadEndMarker();
   state.suppressTopLoad = true;
   const jump = () => {
     thread.scrollTop = thread.scrollHeight;
@@ -1795,6 +1903,7 @@ function scrollThreadToBottomHard() {
 function scrollToBottom(force = false) {
   const thread = agentThread();
   if (!thread) return;
+  ensureThreadEndMarker();
   if (!force && !state.pinned) return;
   thread.scrollTop = thread.scrollHeight;
   // Re-pin after a forced jump so the next delta keeps following.
@@ -2111,6 +2220,7 @@ function bindEvents() {
         run.textBox = null;
       }
     }
+    if (isSubagentAuxiliaryTool(name)) return;
     const job = ensureLiveToolJob(run, tool_call_id, name, args);
     if (job) flushPendingToolDeltas(run);
   });
@@ -2132,6 +2242,16 @@ function bindEvents() {
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
       return;
     }
+    // `subagent_wait` and the injected `subagent_result` are provider-side
+    // bookkeeping for the already visible delegation card. They intentionally
+    // have no separate transcript row.
+    if (isSubagentAuxiliaryTool(name)) {
+      const job = run.toolJobs.get(tool_call_id);
+      if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
+      job?.remove?.();
+      run.toolJobs.delete(tool_call_id);
+      return;
+    }
     // show (op=html): replace the tool terminal with an artifact card once
     // the tool settles. During execution the user sees a normal tool terminal
     // (so they know something is running); after completion the terminal is
@@ -2139,7 +2259,7 @@ function bindEvents() {
     if (name === 'show') {
       const job = run.toolJobs.get(tool_call_id);
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
-      const toolCall = { name, args: job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
+      const toolCall = { id: tool_call_id, name, args: job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
       const artifact = parseArtifactOutput(toolCall);
       if (artifact && job) {
         const card = renderArtifactCard(toolCall, artifact);
@@ -2172,7 +2292,7 @@ function bindEvents() {
     if (name === 'subagent') {
       const job = run.toolJobs.get(tool_call_id);
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
-      const toolCall = { name, args: job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
+      const toolCall = { id: tool_call_id, name, args: job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
       const card = renderSubagentCard(toolCall);
       card.dataset.standalone = 'true';
       if (job) {
@@ -2200,7 +2320,7 @@ function bindEvents() {
     // reload-after-complete works the same as the live delta stream.
     const job = run.toolJobs.get(tool_call_id);
     if (!job) {
-      const toolCall = { name, args: run.toolArgs?.get?.(tool_call_id) ?? {}, output: output ?? '', status: status || 'ok' };
+      const toolCall = { id: tool_call_id, name, args: run.toolArgs?.get?.(tool_call_id) ?? {}, output: output ?? '', status: status || 'ok' };
       const card = name === 'generate_image' ? renderGenerateImageCard(toolCall) : renderToolJob(toolCall);
       if (isStreamingTool(name)) bindToolStop(card, () => run.runId);
       setLiveToolJob(run.toolJobs, tool_call_id, card);
@@ -2234,6 +2354,7 @@ function bindEvents() {
   });
   on('agent.turn.done', (payload) => {
     const { run_id, message_id, model, usage, context_tokens, error, conversation_id } = payload;
+    if (conversation_id === state.activeId) syncActiveThreadPin();
     // Adopt the authoritative provider-measured context fill for the badge
     // (source of truth), so idle reflects real usage instead of an estimate.
     if (conversation_id === state.activeId && Number(context_tokens) > 0) {
@@ -2278,6 +2399,7 @@ function bindEvents() {
   });
   on('agent.turn.error', (payload) => {
     const { run_id, message, message_id, conversation_id } = payload;
+    if (conversation_id === state.activeId) syncActiveThreadPin();
     playError(state.settings?.sound_notifications !== false);
     const run = getRunOrQueue('agent.turn.error', payload);
     const fallbackNode = !run && conversation_id === state.activeId && message_id
@@ -2337,6 +2459,7 @@ function bindEvents() {
       const node = renderMessage(notice);
       const thread = agentThread();
       if (thread && node) thread.append(node);
+      ensureThreadEndMarker();
       thread?.scrollTo?.({ top: thread.scrollHeight, behavior: 'smooth' });
     }
   });
@@ -2492,6 +2615,7 @@ function promoteSteerToTranscript(text) {
   } else {
     thread.append(steerNode);
   }
+  ensureThreadEndMarker();
   if (run) {
     run.nextRoundAnchor = steerNode;
     run.awaitingSteerRound = false;
@@ -2533,6 +2657,7 @@ async function applyLiveCompaction(conversationId, run, expectedRunId = '') {
     state.loadingChunk = false;
 
     const thread = agentThread();
+    const disclosureState = captureDisclosureState(thread);
     const liveNode = run.msgNode?.isConnected ? run.msgNode : null;
     const renderedMessageIDs = new Set((liveNode?.dataset.messageIds || '').split(/\s+/).filter(Boolean));
     const snapshot = windowedActiveMessages().filter((message) => !renderedMessageIDs.has(message.id));
@@ -2546,9 +2671,10 @@ async function applyLiveCompaction(conversationId, run, expectedRunId = '') {
         after = next;
       }
       liveNode.before(frag);
+      restoreDisclosureState(thread, disclosureState);
       void renderMermaidDiagrams(thread); void highlightCode(thread); attachZoomButtons(thread);
     } else {
-      renderThread(windowedActiveMessages(), state.pinned);
+      renderThread(windowedActiveMessages(), state.pinned, disclosureState);
       reattachActiveRun();
     }
     updateOlderSentinel();
@@ -2584,6 +2710,7 @@ async function refreshActiveConversation() {
     state.loadedChunks = new Set();
     state.loadingChunk = false;
     const thread = agentThread();
+    const disclosureState = captureDisclosureState(thread);
     const liveNode = liveRun?.msgNode?.isConnected ? liveRun.msgNode : null;
     if (liveRun && liveNode && thread && runForConversation(conversationId) === liveRun) {
       const renderedMessageIDs = new Set((liveNode.dataset.messageIds || '').split(/\s+/).filter(Boolean));
@@ -2597,9 +2724,10 @@ async function refreshActiveConversation() {
         after = next;
       }
       liveNode.before(fragment);
+      restoreDisclosureState(thread, disclosureState);
       void renderMermaidDiagrams(thread); void highlightCode(thread); attachZoomButtons(thread);
     } else {
-      renderThread(windowedActiveMessages(), state.pinned);
+      renderThread(windowedActiveMessages(), state.pinned, disclosureState);
       if (liveRun && runForConversation(conversationId) === liveRun) reattachActiveRun();
     }
     updateOlderSentinel();

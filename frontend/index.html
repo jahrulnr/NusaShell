@@ -430,10 +430,14 @@
         <div class="view-body learning-body">
           <div class="learning-panel" id="learning-panel-memory" data-learning-panel="memory">
             <div class="learning-search-bar">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-              <input type="search" id="learning-search-input" placeholder="Search memories and skills…" autocomplete="off">
-              <select id="learning-kind-filter" class="select" aria-label="Filter learning entries by kind"></select>
-              <button class="mini-btn" id="learning-search-btn" type="button">Search</button>
+              <label class="learning-search-query">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                <input type="search" id="learning-search-input" placeholder="Search memories and skills…" autocomplete="off">
+              </label>
+              <div class="learning-search-actions">
+                <select id="learning-kind-filter" class="select" aria-label="Filter learning entries by kind"></select>
+                <button class="mini-btn" id="learning-search-btn" type="button">Search</button>
+              </div>
             </div>
             <div class="learning-workspace" id="learning-workspace">
               <div class="learning-results-pane" id="learning-results-pane">

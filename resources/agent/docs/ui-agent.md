@@ -50,7 +50,7 @@ Lists conversations with a search filter and a New conversation button. The coun
 
 Renders the active conversation. An empty thread offers starter prompt chips that fill the composer.
 
-Long conversations open showing only the most recent history, scrolled to the bottom. The complete trailing assistant run remains visible even when it contains dozens of tool or reasoning messages, so a finished answer is not hidden behind the history control. A 'Load older messages' button at the top reveals older in-memory messages, then archived pre-compaction chunks, one batch at a time. Chunks are never auto-loaded after a turn finishes or mid-turn compaction. Older complete turns stay windowed until explicitly revealed; live streaming coalesces delta rendering per animation frame. Thinking and compaction handover markdown are parsed only when their expandable disclosures are opened. While the backend compacts, the active room receives a room-scoped WebSocket status and shows an animated 'Context automatically compacting' row; it is removed when compaction completes or fails. Live streaming auto-follows only while the view is pinned to the bottom.
+Long conversations open showing only the most recent history, scrolled to the bottom. The complete trailing assistant run remains visible even when it contains dozens of tool or reasoning messages, so a finished answer is not hidden behind the history control. A 'Load older messages' button at the top reveals older in-memory messages, then archived pre-compaction chunks, one batch at a time. Chunks are never auto-loaded after a turn finishes or mid-turn compaction. Older complete turns stay windowed until explicitly revealed; live streaming coalesces delta rendering per animation frame. User messages and ACP prompts preserve Markdown as friendly HTML: inline backticks become code pills and fenced code becomes a bounded, horizontally scrollable code card. Thinking and compaction handover markdown are parsed only when their expandable disclosures are opened. While the backend compacts, the active room receives a room-scoped WebSocket status and shows an animated 'Context automatically compacting' row; it is removed when compaction completes or fails. Live streaming auto-follows only while the view is pinned to the bottom.
 
 - **Agent shell** (`#agent-shell`):
   - Section: Agent
@@ -63,7 +63,7 @@ Long conversations open showing only the most recent history, scrolled to the bo
 - **Thread log** (`#agent-thread`):
   - Section: Agent
   - Type: log
-  - Notes: Renders the active conversation messages. Long conversations are windowed: the last user bubble plus a short tail of a finished turn render on open (scrolled to bottom). A running turn keeps every persisted round of that turn mounted on reload. Older finished-turn rounds, earlier turns, and archived chunks load on demand via Load older or scroll-to-top. Thinking and compaction handover markdown are parsed when expanded. During backend compaction, a room-scoped WebSocket event drives an animated inline status until the matching completed or failed event arrives. An empty thread shows starter prompt chips.
+  - Notes: Renders the active conversation messages. Long conversations are windowed: the last user bubble plus a short tail of a finished turn render on open (scrolled to bottom). A running turn keeps every persisted round of that turn mounted on reload. Older finished-turn rounds, earlier turns, and archived chunks load on demand via Load older or scroll-to-top. User and ACP prompt bubbles render Markdown as HTML; inline backticks use code pills and fenced code uses a bounded horizontal-scroll card. Thinking and compaction handover markdown are parsed when expanded; the expanded Thinking body shows up to 20 rendered lines and scrolls internally beyond that without clipping list numbers behind the scrollbar. Live Thinking deltas follow the thread only while the invisible end marker is visible at the bottom; scrolling up pauses auto-follow until the user returns to the bottom. Completion/error events resync the actual scroll geometry before sound and refresh so a reader stays on the message being read. Refreshes also preserve which Thinking and tool disclosures the user opened. Markdown tables keep their intrinsic width inside a horizontal scroll container on narrow bubbles. During backend compaction, a room-scoped WebSocket event drives an animated inline status until the matching completed or failed event arrives. An empty thread shows starter prompt chips.
 
 - **Starter prompts** (`#agent-starter-prompts`):
   - Section: Agent
@@ -77,7 +77,7 @@ Long conversations open showing only the most recent history, scrolled to the bo
 
 ## Tool call strip
 
-Shows in-flight tool calls for the current turn, with one entry per MCP or built-in tool invocation.
+Shows in-flight MCP or built-in tool calls for the current turn. ACP delegation is represented by one clickable subagent card per run; subagent_wait and synthetic subagent_result bookkeeping stay out of the transcript so they do not duplicate that card. Ask Question cards render their question, option descriptions, and submitted answer as Markdown while keeping the interaction controls native and accessible.
 
 Streaming tools (exec) display their live output as it is produced and offer a per-call Stop button while running; the button cancels the underlying turn via agent.turns.stop (same as the composer Stop).
 
@@ -138,7 +138,7 @@ Appears above the composer when ACP subagents are live (or recently finished in 
 
 ## ACP live views
 
-The drawer reuses the conversation-pane layout: subagent runs are listed in a left sidebar and the selected transcript fills the right pane. The delegation prompt and each persisted steering prompt appear as user bubbles, while assistant text, reasoning, and tools reuse the normal Agent conversation structure. Growing text and reasoning chunks update in place, tool updates stay on one row, and token usage appears as run metadata instead of transcript noise. Completed cards retain their run ID and fetch the persisted transcript when the backend cache is empty or has restarted. The peek popup focuses one run.
+The drawer reuses the conversation-pane layout: subagent runs are listed in a left sidebar and the selected transcript fills the right pane. The delegation prompt and each persisted steering prompt appear as Markdown-rendered user bubbles, while assistant text, reasoning, and tools reuse the normal Agent conversation structure. Growing text and reasoning chunks update in place, tool updates stay on one row, and token usage appears as run metadata instead of transcript noise. Completed cards retain their run ID and fetch the persisted transcript when the backend cache is empty or has restarted. On phones, the run picker becomes a compact horizontal strip and the transcript owns the vertical scroll, so the selected run gets most of the drawer. The peek popup focuses one run.
 
 - **ACP drawer overlay** (`#acp-drawer-overlay`):
   - Section: Agent
@@ -251,7 +251,7 @@ When a user sends a steer message mid-turn, it is queued here and applied at the
 
 ## Composer
 
-The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (⌘↩ on Mac) sends. While a turn is running, Send becomes Steer. The whole conversation area accepts drag & drop of files and folders — folders are attached as path-only references (desktop only).
+The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Provider status shows server-authoritative used/window context tokens and remains visible as a compact status on narrow screens. Ctrl+Enter (⌘↩ on Mac) sends. While a turn is running, Send becomes Steer. The whole conversation area accepts drag & drop of files and folders — folders are attached as path-only references (desktop only).
 
 - **Composer form** (`#agent-form`):
   - Section: Agent

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { createAskCard } from './js/views/ask-card.js';
+import { createAskCard, sealAskCard } from './js/views/ask-card.js';
 
 function setupDom() {
   const dom = new JSDOM('<main id="thread"></main>', { url: 'http://localhost/' });
@@ -53,6 +53,30 @@ const MULTI = {
     { id: 'b', label: 'Option B' },
   ],
 };
+
+test('ask question content renders Markdown in pending and sealed states', () => {
+  const { dom, restore } = setupDom();
+  try {
+    const card = createAskCard('call_markdown', {
+      question: 'Choose **the provider** and use `X-API-KEY`.',
+      options: [{ id: 'a', label: '**Provider A**', description: 'Supports **free** search.' }],
+      allow_free_text: false,
+    }, { runId: 'run_1' });
+    document.getElementById('thread').append(card);
+
+    assert.ok(card.querySelector('.agent-ask-question strong'), 'question emphasis is rendered as HTML');
+    assert.ok(card.querySelector('.agent-ask-question code'), 'question inline code is rendered as HTML');
+    assert.ok(card.querySelector('.agent-ask-option-label strong'), 'option label emphasis is rendered as HTML');
+    assert.ok(card.querySelector('.agent-ask-option-desc strong'), 'option description emphasis is rendered as HTML');
+
+    sealAskCard(card, { answer: 'Use **Provider A** with `X-API-KEY`.' });
+    assert.ok(card.querySelector('.agent-ask-answer strong'), 'sealed answer emphasis is rendered as HTML');
+    assert.ok(card.querySelector('.agent-ask-answer code'), 'sealed answer inline code is rendered as HTML');
+    assert.doesNotMatch(card.querySelector('.agent-ask-question').textContent, /\*\*/, 'Markdown markers are not visible in the question');
+  } finally {
+    restore();
+  }
+});
 
 // Regression: in single-select, the default option is pre-selected. When the
 // user types a custom answer, it must become the SOLE answer (via='text') —

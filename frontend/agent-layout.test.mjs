@@ -94,6 +94,19 @@ test('Room snapshots keep the complete trailing run; older complete turns remain
   assert.match(agentView, /maybeAutoTitleConversation\(id, \{ conversation, messages \}\)/);
 });
 
+test('Context usage stays visible in the narrow composer', () => {
+  const narrowRules = agentCSS.slice(
+    agentCSS.indexOf('@media (max-width: 760px)'),
+    agentCSS.indexOf('@media (max-width: 680px)'),
+  );
+  assert.doesNotMatch(narrowRules, /\.agent-provider-status\s*\{\s*display:\s*none;\s*\}/,
+    'mobile must not hide the backend context usage badge');
+  assert.match(narrowRules, /\.agent-provider-status\s*\{[\s\S]*display:\s*inline-flex;/,
+    'mobile context usage should remain a visible compact status');
+  assert.match(narrowRules, /\.agent-composer-actions\s*\{[\s\S]*width:\s*100%;/,
+    'status and send controls need a full-width mobile action row');
+});
+
 test('Agent delegates presentation, composer, and model picker responsibilities to focused modules', () => {
   assert.match(agentView, /from '\.\/agent\/render\.js'/);
   assert.match(agentView, /from '\.\/agent\/composer\.js'/);
@@ -137,14 +150,65 @@ test('Expanded Thinking is capped to twenty lines and scrolls internally', () =>
   );
   assert.match(reasoningBody, /max-height: 33em;/);
   assert.match(reasoningBody, /overflow-y: auto;/);
+  assert.match(reasoningBody, /overflow-x: auto;/);
+  assert.match(reasoningBody, /scrollbar-gutter: stable;/);
   assert.match(reasoningBody, /overscroll-behavior: contain;/);
+  assert.match(agentCSS, /\.agent-reasoning-content ul,\s*\.agent-reasoning-content ol \{[^}]*padding-left: 1\.5em;/s);
+});
+
+test('User Markdown bubbles keep prose normal and fenced code inside a scrollable card', () => {
+  assert.match(agentCSS, /\.agent-message\.user \.agent-bubble \{[^}]*white-space: normal;/s);
+  assert.match(agentCSS, /\.agent-message\.user \.agent-bubble pre \{[^}]*overflow-x: auto;/s);
+  assert.match(agentCSS, /\.agent-message\.user \.agent-bubble pre code \{[^}]*display: block;/s);
+});
+
+test('Assistant tables keep their content width inside a horizontal scroller', () => {
+  const tableRules = agentCSS.slice(agentCSS.indexOf('.markdown-table-scroll {'));
+  assert.match(tableRules, /overflow-x:\s*auto/);
+  assert.match(tableRules, /\.markdown-table-scroll table\s*\{[\s\S]*display:\s*table/);
+  assert.match(tableRules, /\.markdown-table-scroll table\s*\{[\s\S]*width:\s*max-content/);
+  assert.match(tableRules, /\.markdown-table-scroll table\s*\{[\s\S]*min-width:\s*100%/);
 });
 
 test('Live Thinking follows only while the thread-end marker is visible', () => {
   assert.match(agentView, /agent-thread-end-marker/);
   assert.match(agentView, /new IntersectionObserver/);
-  assert.match(agentView, /state\.pinned = isAtBottom\(thread\)/);
+  assert.match(agentView, /state\.pinned = entry\.isIntersecting \|\| isThreadAtBottom\(thread\)/);
+  assert.match(agentView, /state\.pinned = isThreadAtBottom\(thread\)/);
   assert.match(agentView, /if \(!force && !state\.pinned\) return/);
+});
+
+test('Turn completion samples the real scroll position before playing its sound', () => {
+  const doneHandler = agentView.slice(
+    agentView.indexOf("on('agent.turn.done'"),
+    agentView.indexOf("on('agent.turn.error'"),
+  );
+  assert.match(doneHandler, /syncActiveThreadPin\(\);/);
+  assert.match(doneHandler, /playComplete\(/);
+  assert.match(doneHandler, /refreshActiveConversation\(\)/);
+});
+
+test('Transcript refresh restores user-controlled Thinking and tool disclosure state', () => {
+  const refreshHandler = agentView.slice(agentView.indexOf('async function refreshActiveConversation'));
+  assert.match(agentRender, /export function captureDisclosureState/);
+  assert.match(agentRender, /export function restoreDisclosureState/);
+  assert.match(refreshHandler, /const disclosureState = captureDisclosureState\(thread\);/);
+  assert.match(refreshHandler, /restoreDisclosureState\(thread, disclosureState\);/);
+  assert.match(refreshHandler, /renderThread\(windowedActiveMessages\(\), state\.pinned, disclosureState\)/);
+});
+
+test('Live tool terminals carry their call ID into disclosure restoration', () => {
+  const liveToolFactory = agentView.slice(
+    agentView.indexOf('function ensureLiveToolJob'),
+    agentView.indexOf('function resetLiveRoundText'),
+  );
+  assert.match(liveToolFactory, /renderToolJob\(\{ id: toolCallId, name: toolName/);
+});
+
+test('ACP wait/result bookkeeping never mounts a duplicate live tool row', () => {
+  assert.match(agentRender, /isSubagentAuxiliaryTool\(toolCall\.name\)/);
+  assert.match(agentView, /isSubagentAuxiliaryTool\(name\)\) return;/);
+  assert.match(agentView, /isSubagentAuxiliaryTool\(frame\.name\)\) break;/);
 });
 
 test('Narrow windows ellipsize tool meta instead of overflowing the thread', () => {

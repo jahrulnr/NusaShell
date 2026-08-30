@@ -7,6 +7,27 @@
 
 import { el } from '../ui.js';
 import { rpc } from '../rpc.js';
+import { renderMarkdown } from '../markdown.js';
+
+function askMarkdown(className, source) {
+  const node = el('div', { class: `${className} agent-ask-markdown` });
+  const raw = typeof source === 'string' ? source : '';
+  node.innerHTML = raw ? renderMarkdown(raw) : '';
+  if (!node.innerHTML && raw) node.textContent = raw;
+  return node;
+}
+
+function renderAskAnswer(answerEl, { ok = true, answer = '', error = '' } = {}) {
+  answerEl.replaceChildren();
+  if (ok === false) {
+    answerEl.textContent = error || 'Ask question failed.';
+    return;
+  }
+  answerEl.append(
+    el('span', { class: 'agent-ask-answer-label', text: 'Answer:' }),
+    askMarkdown('agent-ask-answer-content', answer || '—'),
+  );
+}
 
 // parseAskAnswer extracts the structured answer from a sealed tool output.
 function parseAskAnswer(output) {
@@ -51,7 +72,7 @@ export function createAskCard(callId, args, { sealed = false, output = '', ok = 
     ? 'Choose one or more responses so I can continue the task.'
     : 'Choose one response so I can continue the task.';
   body.append(
-    el('div', { class: 'agent-ask-question', text: question }),
+    askMarkdown('agent-ask-question', question),
     el('div', { class: 'agent-ask-hint', text: hintText }),
   );
 
@@ -92,11 +113,11 @@ export function createAskCard(callId, args, { sealed = false, output = '', ok = 
 
     const copy = el('div', { class: 'agent-ask-option-copy' });
     const titleRow = el('div', { class: 'agent-ask-option-title-row' });
-    titleRow.append(el('span', { class: 'agent-ask-option-label', text: label }));
+    titleRow.append(askMarkdown('agent-ask-option-label', label));
     if (option.default) titleRow.append(el('span', { class: 'agent-ask-option-badge', text: 'Recommended' }));
     copy.append(titleRow);
     if (typeof option.description === 'string' && option.description.trim()) {
-      copy.append(el('div', { class: 'agent-ask-option-desc', text: option.description.trim() }));
+      copy.append(askMarkdown('agent-ask-option-desc', option.description.trim()));
     }
 
     row.append(marker, media, copy);
@@ -175,7 +196,12 @@ export function createAskCard(callId, args, { sealed = false, output = '', ok = 
   }
 
   if (sealed) {
-    const answerLine = el('div', { class: 'agent-ask-answer', text: ok === false ? (error || 'Ask question failed.') : `Answer: ${parsedAnswer?.answer || output || '—'}` });
+    const answerLine = el('div', { class: 'agent-ask-answer' });
+    renderAskAnswer(answerLine, {
+      ok,
+      answer: parsedAnswer?.answer || output || '—',
+      error,
+    });
     body.append(answerLine);
   } else {
     const actions = el('div', { class: 'agent-ask-actions' });
@@ -257,7 +283,7 @@ export function sealAskCard(card, { ok = true, answer = '', via = '', optionIds 
     answerEl = el('div', { class: 'agent-ask-answer' });
     card.querySelector('.agent-ask-body')?.append(answerEl);
   }
-  answerEl.textContent = ok === false ? (error || 'Ask question failed.') : `Answer: ${answer || '—'}`;
+  renderAskAnswer(answerEl, { ok, answer, error });
   if (via === 'option' && optionIds?.length) {
     const chosen = new Set(optionIds);
     card.querySelectorAll('.agent-ask-option').forEach((node) => {

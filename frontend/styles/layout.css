@@ -436,14 +436,20 @@ body.mini-mode .agent-conversations { display: none; }
   .window .sidebar {
     display: flex;
     position: fixed;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    z-index: 60;
+    inset: 0 auto 0 0;
+    z-index: 70;
     width: min(78vw, 264px);
     min-width: 0;
-    transform: translateX(-105%);
-    transition: transform .22s ease;
+    max-width: calc(100vw - 24px);
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translate3d(-105%, 0, 0);
+    transition: transform .22s ease, visibility 0s linear .22s;
   }
   /* Compact mode persists across breakpoints; the drawer always shows the
    * wide labeled variant regardless of the stored preference. */
@@ -451,13 +457,16 @@ body.mini-mode .agent-conversations { display: none; }
   .window .sidebar .nav-label { display: inline; }
   .window .sidebar .storage { display: block; }
   .body.is-nav-open .sidebar {
-    transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
+    transform: translate3d(0, 0, 0);
+    transition-delay: 0s;
     box-shadow: 0 0 40px rgba(0, 0, 0, .5);
   }
   .mobile-nav-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 55;
+    z-index: 65;
     background: rgba(0, 0, 0, .45);
     opacity: 0;
     pointer-events: none;

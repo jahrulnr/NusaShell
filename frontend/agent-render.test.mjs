@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, renderCompactionStatus, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming } from './js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, renderCompactionStatus, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming, captureDisclosureState, restoreDisclosureState } from './js/views/agent/render.js';
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
   const previousDocument = globalThis.document;
@@ -15,6 +15,21 @@ function renderTranscript(messages) {
     globalThis.document = previousDocument;
   }
 }
+
+test('user bubbles render Markdown and fenced code as readable HTML cards', () => {
+  const thread = renderTranscript([{
+    role: 'user',
+    content: 'Use **the config** and `settings.css`.\n\n```css\nbody { color: red; }\n```',
+    created_at: '2026-08-30T00:00:00Z',
+  }]);
+  const bubble = thread.querySelector('.agent-message.user .agent-bubble');
+  assert.ok(bubble, 'user bubble is rendered');
+  assert.ok(bubble.querySelector('.agent-bubble-text'), 'user content has a renderable content wrapper');
+  assert.ok(bubble.querySelector('strong'), 'Markdown emphasis is rendered as HTML');
+  assert.ok(bubble.querySelector('code:not(pre code)'), 'inline backticks render as an inline code span');
+  assert.ok(bubble.querySelector('pre code.language-css'), 'fenced code renders as a language-aware code card');
+  assert.doesNotMatch(bubble.textContent, /```/, 'fence markers are not shown to the user');
+});
 
 // exec tool output persisted on the conversation is rendered verbatim when
 // the thread is reloaded from the snapshot (no live run in memory), so users
@@ -151,6 +166,29 @@ test('usage badges render compact token units instead of raw counts', () => {
   assert.match(meta, /↑27\.09M ↓137\.16k/);
   assert.match(meta, /cache 25\.94M/);
   assert.doesNotMatch(meta, /27085560|137158|25944438/);
+});
+
+test('subagent cards are the only transcript representation of ACP runs', () => {
+  const completion = 'Subagent run acprun_canonical123 completed. Full result delivered in the subagent_result tool call.';
+  const thread = renderTranscript([
+    { role: 'user', content: 'Delegate the CSS audit', created_at: '2026-08-30T00:00:00Z' },
+    {
+      role: 'assistant', created_at: '2026-08-30T00:00:01Z',
+      steps: [{ type: 'tool_calls', tool_calls: [
+        { id: 'spawn-1', name: 'subagent', args: { agent_id: 'acp_dev', prompt: 'Inspect the CSS' }, status: 'ok', output: completion },
+        { id: 'wait-1', name: 'subagent_wait', args: { id: 'acprun_canonical123' }, status: 'ok', output: '---\nstatus: completed\nid: acprun_canonical123\n---' },
+        { id: 'wait-2', name: 'subagent_wait', args: { id: 'acprun_canonical123' }, status: 'ok', output: '---\nstatus: completed\nid: acprun_canonical123\n---' },
+        { id: 'result-1', name: 'subagent_result', args: { id: 'acprun_canonical123' }, status: 'ok', output: '---\nstatus: completed\nid: acprun_canonical123\n---\nDone.' },
+      ] }],
+    },
+  ]);
+
+  assert.equal(thread.querySelectorAll('.agent-subagent-card').length, 1,
+    'one clickable card represents the delegated run');
+  assert.equal(thread.querySelectorAll('.agent-tool-terminal').length, 0,
+    'wait/result bookkeeping must not duplicate the card as tool rows');
+  assert.equal(renderToolCallCard({ name: 'subagent_wait', args: {}, status: 'ok', output: '' }), null);
+  assert.equal(renderToolCallCard({ name: 'subagent_result', args: {}, status: 'ok', output: '' }), null);
 });
 
 test('tool job summary includes elapsed span before chevron', () => {
@@ -659,6 +697,42 @@ test('reasoning markdown stays out of the DOM until the disclosure is opened', (
   } finally {
     globalThis.document = previousDocument;
   }
+});
+
+test('expanded Thinking and tool disclosures survive a transcript refresh', () => {
+  const messages = [
+    { role: 'user', content: 'Inspect the project', created_at: '2026-08-30T00:00:00Z' },
+    {
+      role: 'assistant', id: 'assistant-round-1', created_at: '2026-08-30T00:00:01Z',
+      steps: [
+        { type: 'reasoning', content: 'First round reasoning' },
+        { type: 'tool_calls', tool_calls: [{ id: 'tool-round-1', name: 'exec', args: { command: 'pwd' }, status: 'ok', output: '/workspace' }] },
+      ],
+    },
+    {
+      role: 'assistant', id: 'assistant-round-2', created_at: '2026-08-30T00:00:02Z',
+      steps: [{ type: 'reasoning', content: 'Second round reasoning' }],
+    },
+  ];
+  const before = renderTranscript(messages);
+  const thinking = before.querySelectorAll('.agent-reasoning');
+  const tools = before.querySelectorAll('.agent-tool-terminal');
+  // A live placeholder can carry the assistant turn's aggregate IDs before
+  // its first round has been stamped with the individual message ID.
+  before.querySelector('.agent-round').removeAttribute('data-message-id');
+  // A live tool card is also created before its persisted call ID is known.
+  tools[0].removeAttribute('data-tool-call-id');
+  thinking[0].open = true;
+  thinking[1].open = true;
+  tools[0].open = true;
+
+  const disclosureState = captureDisclosureState(before);
+  const refreshed = renderTranscript(messages);
+  restoreDisclosureState(refreshed, disclosureState);
+
+  assert.equal(refreshed.querySelectorAll('.agent-reasoning')[0].open, true, 'expanded live Thinking remains open');
+  assert.equal(refreshed.querySelectorAll('.agent-reasoning')[1].open, true, 'expanded Thinking remains open');
+  assert.equal(refreshed.querySelector('.agent-tool-terminal').open, true, 'expanded tool remains open');
 });
 
 test('whitespace-only reasoning stays hidden and unparsed', () => {

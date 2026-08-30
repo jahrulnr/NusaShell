@@ -259,3 +259,20 @@ test('incrementalRender handles headings, lists, and blockquotes with anchors', 
     for (const b of blocks) assert.ok(b.dataset.start != null);
   } finally { cleanup(); }
 });
+
+test('incrementalRender keeps scroll-wrapped tables as one anchored block', () => {
+  const dom = makeDom();
+  try {
+    const container = document.createElement('div');
+    const first = incrementalRender(container, '| a | b |\n|---|---|\n| 1 | 2 |');
+    assert.equal(first.length, 1);
+    assert.equal(first[0].className, 'markdown-table-scroll');
+    assert.equal(container.children.length, 1);
+
+    const second = incrementalRender(container, '| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |');
+    assert.equal(second.length, 1);
+    assert.equal(second[0].className, 'markdown-table-scroll');
+    assert.notEqual(second[0], first[0]);
+    assert.equal(container.children.length, 1);
+  } finally { cleanup(); }
+});

@@ -243,3 +243,27 @@
     max-height: 220px;
   }
 }
+
+@media (max-width: 680px) {
+  .automation-header {
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+  }
+  .automation-header .automation-header-stats {
+    margin: 0;
+    flex-wrap: wrap;
+  }
+  .automation-stat { padding: 4px 8px; font-size: 11px; }
+  .automation-body { min-height: 0; padding-bottom: 12px; }
+  .automation-toolbar { min-width: 0; }
+  .automation-toolbar .tabs {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    gap: 2px;
+  }
+  .automation-toolbar-actions { max-width: 100%; }
+}

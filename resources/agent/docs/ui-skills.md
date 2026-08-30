@@ -28,7 +28,7 @@ Searchable list of installed skills. Each row shows the skill name, an owner bad
 
 ## Detail
 
-Read-only viewer for the selected skill. Shows the skill name, description, and owner, plus a file tree (SKILL.md + support files) on the left and the selected file's content on the right. Plugin-owned skills are read-only.
+Read-only viewer for the selected skill. Shows the skill name, description, and owner, plus a file tree (SKILL.md + support files) on the left and the selected file's content on the right. Plugin-owned skills are read-only. On phones the catalog, file tree, and file viewer stack vertically inside one scrollable workspace so every file remains reachable.
 
 - **Editor title** (`#skill-editor-title`):
   - Section: Skills

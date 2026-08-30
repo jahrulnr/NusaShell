@@ -5,10 +5,13 @@
 // the title-bar hamburger toggles .body.is-nav-open, and the drawer closes
 // via backdrop click, Escape, or selecting a nav item.
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
 import { initMobileNav } from './js/mobile-nav.js';
+
+const layoutCSS = await readFile(new URL('./styles/layout.css', import.meta.url), 'utf8');
 
 const SHELL_HTML = `
 <div class="window">
@@ -27,8 +30,9 @@ const SHELL_HTML = `
   </div>
 </div>`;
 
-function withShell(fn) {
+function withShell(fn, innerWidth = 390) {
   const dom = new JSDOM(SHELL_HTML);
+  Object.defineProperty(dom.window, 'innerWidth', { configurable: true, value: innerWidth });
   const previousDocument = globalThis.document;
   const previousWindow = globalThis.window;
   globalThis.document = dom.window.document;
@@ -98,6 +102,46 @@ test('opening the drawer focuses the active nav item', async () => {
     await openDrawer(window);
     assert.equal(document.activeElement, document.querySelector('[data-view="home"]'));
   });
+});
+
+test('drawer state is exposed to assistive technology and restores focus on close', async () => {
+  await withShell(async (window) => {
+    initMobileNav();
+    const sidebar = document.getElementById('sidebar');
+    const backdrop = document.getElementById('mobile-nav-backdrop');
+
+    assert.equal(sidebar.getAttribute('aria-hidden'), 'true');
+    assert.ok(sidebar.hasAttribute('inert'));
+    assert.equal(backdrop.getAttribute('aria-hidden'), 'true');
+
+    click(window, toggleBtn());
+    assert.equal(sidebar.getAttribute('aria-hidden'), 'false');
+    assert.ok(!sidebar.hasAttribute('inert'));
+    assert.equal(backdrop.getAttribute('aria-hidden'), 'false');
+
+    click(window, toggleBtn());
+    assert.equal(sidebar.getAttribute('aria-hidden'), 'true');
+    assert.ok(sidebar.hasAttribute('inert'));
+    assert.equal(document.activeElement, toggleBtn());
+  });
+});
+
+test('desktop sidebar stays exposed and interactive when mobile drawer is unavailable', async () => {
+  await withShell(async () => {
+    initMobileNav();
+    const sidebar = document.getElementById('sidebar');
+    assert.equal(sidebar.getAttribute('aria-hidden'), 'false');
+    assert.ok(!sidebar.hasAttribute('inert'));
+  }, 1200);
+});
+
+test('mobile drawer is bounded, scrollable, and non-interactive while closed', () => {
+  const mobileRules = layoutCSS.slice(layoutCSS.indexOf('@media (max-width: 680px)'));
+  assert.match(mobileRules, /height:\s*100dvh/);
+  assert.match(mobileRules, /max-width:\s*calc\(100vw - 24px\)/);
+  assert.match(mobileRules, /overflow-y:\s*auto/);
+  assert.match(mobileRules, /visibility:\s*hidden/);
+  assert.match(mobileRules, /pointer-events:\s*none/);
 });
 
 test('returns null when shell pieces are missing', () => {

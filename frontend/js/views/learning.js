@@ -191,14 +191,26 @@ function initSplitter() {
 
   const STORAGE_KEY = 'nushell:learning-split';
   const SPLITTER_W = 6;
+  const isNarrow = () => typeof window !== 'undefined'
+    && (typeof window.matchMedia === 'function'
+      ? window.matchMedia('(max-width: 900px)').matches
+      : window.innerWidth <= 900);
+  const clearDesktopWidth = () => workspace.style.removeProperty('grid-template-columns');
   const applyWidth = (w) => {
+    if (isNarrow()) {
+      clearDesktopWidth();
+      return;
+    }
     workspace.style.gridTemplateColumns = `${w}px ${SPLITTER_W}px minmax(0, 1fr)`;
   };
 
   const saved = Number.parseInt(localStorage.getItem(STORAGE_KEY) || '', 10);
-  if (saved > 120 && saved < window.innerWidth - 200) {
-    applyWidth(saved);
-  }
+  const applySavedWidth = () => {
+    if (saved > 120 && saved < window.innerWidth - 200) applyWidth(saved);
+    else if (isNarrow()) clearDesktopWidth();
+  };
+  applySavedWidth();
+  window.addEventListener('resize', applySavedWidth, { passive: true });
 
   let dragging = false;
   let startX = 0;
@@ -503,6 +515,10 @@ function collectAgentFlow(messages) {
       flushNarration();
       for (const call of msg.tool_calls) {
         const card = renderToolCallCard({ id: call.id, name: call.name, args: call.args ?? '', status: 'running', output: '' });
+        // ACP wait/result entries are provider bookkeeping for the same
+        // delegation card. The shared renderer returns null for them, so do
+        // not put a non-node into the Learning activity fragment.
+        if (!card) continue;
         if (call.id) cardsById.set(call.id, card);
         lastCard = card;
         items.push(card);
@@ -829,5 +845,3 @@ async function loadGraph() {
     }
   }
 }
-
-

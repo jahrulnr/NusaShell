@@ -131,6 +131,8 @@
   position: fixed;
   top: 0; right: -780px; bottom: 0;
   width: min(780px, 100vw);
+  height: 100dvh;
+  max-height: 100dvh;
   background: var(--panel);
   border-left: 1px solid var(--border);
   z-index: 52;
@@ -249,14 +251,36 @@
   .acp-drawer { right: -100%; }
   .acp-drawer-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(110px, 34vh) minmax(0, 1fr);
+    grid-template-rows: minmax(0, auto) minmax(0, 1fr);
   }
   .acp-drawer .acp-run-sidebar {
     inset: auto;
-    max-height: none;
+    min-height: 0;
+    max-height: min(220px, 30dvh);
+    overflow: hidden;
+    padding: 12px 14px;
     border-right: 0;
     border-bottom: 1px solid var(--border-soft);
   }
-  .acp-run-content { padding: 16px; }
+  .acp-run-sidebar .agent-conversations-head { padding: 0 2px 8px; }
+  .acp-run-sidebar .agent-conversation-list {
+    flex-direction: row;
+    gap: 8px;
+    min-height: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 0 4px;
+  }
+  .acp-run-sidebar .agent-conversation-item {
+    flex: 0 0 min(220px, 72vw);
+    grid-template-columns: minmax(0, 1fr);
+    padding: 4px;
+  }
+  .acp-run-sidebar .agent-conversation-open { padding: 8px 9px; }
+  .acp-run-content {
+    min-width: 0;
+    overflow-x: hidden;
+    padding: 16px;
+  }
   .acp-mode-config { grid-template-columns: 1fr; }
 }

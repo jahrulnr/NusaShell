@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
 import { renderLogEntry, renderTranscript } from './js/views/learning.js';
+
+const learningCSS = await readFile(new URL('./styles/learning.css', import.meta.url), 'utf8');
+const learningView = await readFile(new URL('./js/views/learning.js', import.meta.url), 'utf8');
 
 function withDocument(fn) {
   const dom = new JSDOM('<body></body>');
@@ -140,8 +144,37 @@ test('assistant interstitial narration renders between steps', () => {
   assert.ok(notes[0].textContent.includes('double check'));
 });
 
+test('Learning ignores ACP wait/result bookkeeping without appending null nodes', () => {
+  const view = withDocument(() => renderTranscript({
+    ...transcript,
+    messages: [{
+      role: 'assistant',
+      tool_calls: [
+        { id: 'spawn-1', name: 'subagent', args: { agent_id: 'acp_dev', prompt: 'Inspect the CSS' } },
+        { id: 'wait-1', name: 'subagent_wait', args: { id: 'acprun_1' } },
+        { id: 'result-1', name: 'subagent_result', args: { id: 'acprun_1' } },
+      ],
+    }],
+  }));
+
+  assert.equal(view.querySelectorAll('.agent-subagent-card').length, 1);
+  assert.equal(view.querySelectorAll('.agent-tool-terminal').length, 0);
+});
+
 test('empty transcript still shows the banner and quiet empty state', () => {
   const view = withDocument(() => renderTranscript({ ...transcript, messages: [] }));
   assert.ok(view.querySelector('.learning-log-detail'));
   assert.equal(view.querySelectorAll('details.agent-tool-terminal').length, 0);
+});
+
+test('Learning mobile layout gives search controls and both panes room to scroll', () => {
+  const mobileRules = learningCSS.slice(learningCSS.indexOf('@media (max-width: 900px)'));
+  assert.match(mobileRules, /flex-wrap:\s*wrap/);
+  assert.match(mobileRules, /grid-template-rows:\s*minmax\(150px,\s*1fr\)\s+minmax\(220px,\s*1fr\)/);
+  assert.match(mobileRules, /min-height:\s*0/);
+  assert.match(mobileRules, /overflow-y:\s*auto/);
+});
+
+test('Learning splitter does not leave desktop inline columns active on narrow screens', () => {
+  assert.match(learningView, /removeProperty\(['"]grid-template-columns['"]\)/);
 });

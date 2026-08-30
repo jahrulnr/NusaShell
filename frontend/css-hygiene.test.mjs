@@ -102,5 +102,5 @@ test('view parity and responsive rules live in their owner stylesheets', () => {
   assert.match(read('providers.css'), /@media \(max-width: 480px\)[\s\S]*?\.provider-detail-grid \{ grid-template-columns: 1fr/, '480px provider grid belongs in providers.css');
   assert.match(read('logs.css'), /@media \(max-width: 480px\)[\s\S]*?\.log-line \{ grid-template-columns: 76px/, '480px log-line grid belongs in logs.css');
   assert.match(read('settings.css'), /@media \(max-width: 760px\)[\s\S]*?\.settings-group \{ grid-template-columns: 1fr/, '760px settings-group collapse belongs in settings.css');
-  assert.match(read('skills.css'), /@media \(max-width: 760px\)[\s\S]*?\.skills-catalog \{ max-height: 300px/, '760px skills catalog collapse belongs in skills.css');
+  assert.match(read('skills.css'), /@media \(max-width: 760px\)[\s\S]*?\.skills-catalog\s*\{[\s\S]*?max-height:\s*260px/, '760px skills catalog collapse belongs in skills.css');
 });

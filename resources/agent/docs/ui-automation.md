@@ -6,7 +6,7 @@ Manage durable once/every/when automations, inspect DAG runs, and see waiting or
 
 ## Header stats
 
-Counts of runnable, blocked, and waiting automations so provider outages are visible without opening a run.
+Counts of runnable, blocked, and waiting automations so provider outages are visible without opening a run. On small screens the stats wrap below the header copy.
 
 - **`#auto-stat-runnable`** (missing map entry)
 
@@ -16,7 +16,7 @@ Counts of runnable, blocked, and waiting automations so provider outages are vis
 
 ## Toolbar
 
-Tabs switch between Workflows, Runs, Schedules, and Events. New automation opens a once/every/when/manual wizard. Pipeline files from the data directory appear alongside saved automations in the Workflows tab.
+Tabs switch between Workflows, Runs, Schedules, and Events. New automation opens a once/every/when/manual wizard. Pipeline files from the data directory appear alongside saved automations in the Workflows tab. On phones the tabs can scroll horizontally without widening the page.
 
 - **`#auto-tabs`** (missing map entry)
 

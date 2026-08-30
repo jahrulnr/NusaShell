@@ -35,7 +35,7 @@ Identifies NusaShell with its brand mark and wordmark, followed by compact backe
 
 ## Sidebar
 
-Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Automation, Plugins, Providers, and Logs. It can show icons with labels or icons only, and remembers that choice locally. Below 680px viewport width the sidebar becomes an off-canvas drawer: the title-bar hamburger toggles it open, and it closes on backdrop click, Escape, or selecting a nav item.
+Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Automation, Plugins, Providers, and Logs. It can show icons with labels or icons only, and remembers that choice locally. Below 680px viewport width the sidebar becomes a bounded, vertically scrollable off-canvas drawer: the title-bar hamburger toggles it open, and it closes on backdrop click, Escape, or selecting a nav item. While closed, the drawer is hidden from keyboard and assistive-technology navigation; focus returns to the hamburger after dismissal.
 
 Keyboard: Ctrl/Cmd+K or / focuses the search box on the current view. Escape dismisses dialogs, toasts stay on hover, and Ctrl/Cmd+N starts a new agent conversation when the Agent view is open.
 

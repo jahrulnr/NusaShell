@@ -81,6 +81,12 @@ test('GFM table renders with thead and tbody', () => {
   assert.match(html, /<td>1<\/td>/);
 });
 
+test('GFM tables render inside a stable horizontal-scroll wrapper', () => {
+  const html = renderMarkdown('| narrow | wide |\n|---|---|\n| 1 | content that should remain readable |\n');
+  assert.match(html, /<div class="markdown-table-scroll" data-start="\d+" data-end="\d+"><table>/);
+  assert.doesNotMatch(html, /<table[^>]*data-start=/);
+});
+
 test('GFM autolink literal renders bare URLs as links', () => {
   const html = renderMarkdown('visit https://example.com today\n');
   assert.match(html, /<a href="https:\/\/example\.com"/);

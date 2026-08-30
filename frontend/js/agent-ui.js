@@ -51,6 +51,19 @@ export function previousWindowStart(currentStart, batch) {
   return Math.max(0, s - b);
 }
 
+// Keep the scroll-pin geometry in a pure helper so terminal lifecycle paths
+// can sample the real viewport even when the browser has not delivered its
+// latest scroll event yet.
+export function isThreadAtBottom(thread, tolerance = 24) {
+  if (!thread) return true;
+  return thread.scrollHeight - thread.scrollTop - thread.clientHeight <= tolerance;
+}
+
+export function syncThreadPin(state, thread) {
+  if (thread) state.pinned = isThreadAtBottom(thread);
+  return state.pinned;
+}
+
 // conversationTail is the snapshot window for a long thread: keep the last
 // user (or compaction) bubble, keep the complete trailing assistant run, and
 // leave only older complete turns to Load older. A trailing run can contain
