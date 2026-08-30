@@ -32,8 +32,11 @@ type ChangeJournal interface {
 
 	// SessionState returns the accumulated workspace change state for a
 	// conversation, used to build the post-compaction hydration slot. It
-	// renders a unified diff per changed file so a fresh context can see
-	// exactly what the session changed without the prior conversation.
+	// reports the absolute paths that were changed/added/deleted (with kind
+	// and origin) plus the journal sidecar location, so a fresh context knows
+	// which files the session touched without the prior conversation. It does
+	// not render file contents or diffs; the journal sidecar remains the
+	// authoritative restore source.
 	SessionState(ctx context.Context, conversationID, workspaceRoot string) (*WorkspaceState, error)
 }
 
@@ -69,13 +72,16 @@ type WorkspaceState struct {
 	ConversationID string
 	WorkspaceRoot  string
 
-	// Changes is the accumulated file changes for the session.
+	// Changes is the accumulated file changes for the session. Each entry
+	// carries the absolute path, kind (added/modified/deleted), origin, and
+	// size/hash metadata — enough for the agent to know what was touched
+	// without re-reading file contents.
 	Changes []domain.FileChange
 
-	// Diffs maps absolute path → rendered unified diff (before → current).
-	// Binary or oversized files may be omitted from Diffs while still
-	// appearing in Changes.
-	Diffs map[string]string
+	// JournalPath is the absolute path of the conversation's journal sidecar
+	// directory (the authoritative restore source). Empty when the sidecar
+	// path cannot be resolved.
+	JournalPath string
 }
 
 // ClassifyMutation maps a tool call to its mutation class and extracts the

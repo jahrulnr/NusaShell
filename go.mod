@@ -8,7 +8,6 @@ require (
 	github.com/jahrulnr/searchwire v0.0.0-20260830052402-48754c68261a
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/ncruces/zenity v0.10.15
-	github.com/pmezard/go-difflib v1.0.0
 	golang.org/x/sys v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.57.0

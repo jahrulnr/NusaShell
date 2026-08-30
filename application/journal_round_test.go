@@ -210,7 +210,6 @@ func TestHydrationWorkspaceStateSlot(t *testing.T) {
 					Path: "/tmp/ws/changed.go",
 					Kind: domain.ChangeModified,
 				}},
-				Diffs: map[string]string{"/tmp/ws/changed.go": "diff"},
 			}, nil
 		},
 	}

@@ -64,10 +64,6 @@ func TestWrapMutation_declaredWritePatchDelete(t *testing.T) {
 	if last.Kind != domain.ChangeDeleted {
 		t.Fatalf("last kind: got %q", last.Kind)
 	}
-	diff := st.Diffs[file]
-	if !strings.Contains(diff, "-v1") && !strings.Contains(diff, "-v2") {
-		t.Fatalf("diff should show removed content: %q", diff)
-	}
 }
 
 func TestWrapMutation_declaredMove(t *testing.T) {
@@ -201,139 +197,6 @@ func TestSessionState_missingSidecarEmpty(t *testing.T) {
 	}
 	if len(st.Changes) != 0 {
 		t.Fatalf("expected empty changes, got %d", len(st.Changes))
-	}
-}
-
-func TestSessionState_unifiedDiff(t *testing.T) {
-	workspace := t.TempDir()
-	dataDir := t.TempDir()
-	j := New(dataDir)
-	conv := "conv_diff"
-	file := filepath.Join(workspace, "note.txt")
-
-	_ = j.WrapMutation(context.Background(), application.MutationRequest{
-		ConversationID: conv,
-		RunID:          "run1",
-		ToolCallID:     "tc1",
-		ToolName:       "file_write",
-		Class:          domain.MutationDeclared,
-		WorkspaceRoot:  workspace,
-		Paths:          []string{file},
-	}, func() error {
-		return os.WriteFile(file, []byte("alpha\nbeta\n"), 0o644)
-	})
-	_ = j.WrapMutation(context.Background(), application.MutationRequest{
-		ConversationID: conv,
-		RunID:          "run1",
-		ToolCallID:     "tc2",
-		ToolName:       "file_patch",
-		Class:          domain.MutationDeclared,
-		WorkspaceRoot:  workspace,
-		Paths:          []string{file},
-	}, func() error {
-		return os.WriteFile(file, []byte("alpha\ngamma\n"), 0o644)
-	})
-
-	st, err := j.SessionState(context.Background(), conv, workspace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	diff := st.Diffs[file]
-	if !strings.Contains(diff, "-beta") || !strings.Contains(diff, "+gamma") {
-		t.Fatalf("diff missing expected lines:\n%s", diff)
-	}
-}
-
-func TestSessionState_deletedFileDiff(t *testing.T) {
-	workspace := t.TempDir()
-	dataDir := t.TempDir()
-	j := New(dataDir)
-	conv := "conv_del_diff"
-	file := filepath.Join(workspace, "gone.txt")
-
-	_ = j.WrapMutation(context.Background(), application.MutationRequest{
-		ConversationID: conv, RunID: "r", ToolCallID: "tc1", ToolName: "file_write",
-		Class: domain.MutationDeclared, WorkspaceRoot: workspace, Paths: []string{file},
-	}, func() error {
-		return os.WriteFile(file, []byte("bye\n"), 0o644)
-	})
-	_ = j.WrapMutation(context.Background(), application.MutationRequest{
-		ConversationID: conv, RunID: "r", ToolCallID: "tc2", ToolName: "file_delete",
-		Class: domain.MutationDeclared, WorkspaceRoot: workspace, Paths: []string{file},
-	}, func() error {
-		return os.Remove(file)
-	})
-
-	st, err := j.SessionState(context.Background(), conv, workspace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	diff := st.Diffs[file]
-	if !strings.Contains(diff, "-bye") {
-		t.Fatalf("expected deletion diff:\n%s", diff)
-	}
-}
-
-func TestSessionState_binarySkippedFromDiffs(t *testing.T) {
-	workspace := t.TempDir()
-	dataDir := t.TempDir()
-	j := New(dataDir)
-	conv := "conv_bin"
-	file := filepath.Join(workspace, "data.bin")
-
-	_ = j.WrapMutation(context.Background(), application.MutationRequest{
-		ConversationID: conv, RunID: "r", ToolCallID: "tc1", ToolName: "file_write",
-		Class: domain.MutationDeclared, WorkspaceRoot: workspace, Paths: []string{file},
-	}, func() error {
-		return os.WriteFile(file, []byte{0, 1, 2, 3}, 0o644)
-	})
-
-	st, err := j.SessionState(context.Background(), conv, workspace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(st.Changes) == 0 {
-		t.Fatal("expected change entry")
-	}
-	if _, ok := st.Diffs[file]; ok {
-		t.Fatal("binary file should be omitted from Diffs")
-	}
-}
-
-func TestSessionState_diffHeaderUsesWorkspaceRelPath(t *testing.T) {
-	workspace := t.TempDir()
-	dataDir := t.TempDir()
-	j := New(dataDir)
-	conv := "conv_relpath"
-	sub := filepath.Join(workspace, "sub", "dir")
-	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	file := filepath.Join(sub, "file.go")
-
-	_ = j.WrapMutation(context.Background(), application.MutationRequest{
-		ConversationID: conv, RunID: "r", ToolCallID: "tc1", ToolName: "file_write",
-		Class: domain.MutationDeclared, WorkspaceRoot: workspace, Paths: []string{file},
-	}, func() error {
-		return os.WriteFile(file, []byte("package main\n"), 0o644)
-	})
-	_ = j.WrapMutation(context.Background(), application.MutationRequest{
-		ConversationID: conv, RunID: "r", ToolCallID: "tc2", ToolName: "file_patch",
-		Class: domain.MutationDeclared, WorkspaceRoot: workspace, Paths: []string{file},
-	}, func() error {
-		return os.WriteFile(file, []byte("package main\n\nfunc main() {}\n"), 0o644)
-	})
-
-	st, err := j.SessionState(context.Background(), conv, workspace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	diff := st.Diffs[file]
-	if !strings.Contains(diff, "a/sub/dir/file.go") || !strings.Contains(diff, "b/sub/dir/file.go") {
-		t.Fatalf("diff header should use workspace-relative path:\n%s", diff)
-	}
-	if strings.Contains(diff, "a/file.go") {
-		t.Fatalf("diff header must not fall back to basename:\n%s", diff)
 	}
 }
 
@@ -551,10 +414,6 @@ func TestArchive_multiMemberPreservesHistory(t *testing.T) {
 	if !sawA || !sawB {
 		t.Fatalf("multi-member archive lost history: sawA=%v sawB=%v changes=%+v", sawA, sawB, st.Changes)
 	}
-	// Diff for a.txt must show the full session arc (baseline alpha -> current).
-	if !strings.Contains(st.Diffs[fileA], "+more") {
-		t.Fatalf("a.txt diff: %q", st.Diffs[fileA])
-	}
 }
 
 func TestRemove_deletesSidecar(t *testing.T) {
@@ -626,8 +485,5 @@ func TestArchive_sessionStateReadsGzip(t *testing.T) {
 	}
 	if len(st.Changes) == 0 {
 		t.Fatal("expected changes after archive")
-	}
-	if !strings.Contains(st.Diffs[file], "+more") {
-		t.Fatalf("diff: %q", st.Diffs[file])
 	}
 }

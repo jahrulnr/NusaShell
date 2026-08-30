@@ -4,12 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
-
-	"github.com/pmezard/go-difflib/difflib"
 
 	"nusashell/application"
 	"nusashell/domain"
@@ -394,105 +390,21 @@ func (j *Journal) SessionState(ctx context.Context, conversationID, workspaceRoo
 	if err != nil {
 		return nil, err
 	}
+	journalPath, _ := sidecarPath(j.dataDir, conversationID)
 	if len(events) == 0 {
 		return &application.WorkspaceState{
 			ConversationID: conversationID,
 			WorkspaceRoot:  workspaceRoot,
-			Diffs:          map[string]string{},
+			JournalPath:    journalPath,
 		}, nil
 	}
 	rs := replayEvents(events)
-	diffs := make(map[string]string)
-
-	dir, err := sidecarPath(j.dataDir, conversationID)
-	var blobs *blobStore
-	if err == nil {
-		blobs = newBlobStore(dir)
-	}
-
-	seen := make(map[string]struct{})
-	for path, pt := range rs.paths {
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		diff, ok := renderDiff(blobs, workspaceRoot, path, pt)
-		if ok {
-			diffs[path] = diff
-		}
-	}
-
 	return &application.WorkspaceState{
 		ConversationID: conversationID,
 		WorkspaceRoot:  workspaceRoot,
 		Changes:        rs.changes,
-		Diffs:          diffs,
+		JournalPath:    journalPath,
 	}, nil
-}
-
-// renderDiff renders the unified diff between the recorded baseline and the
-// current file content. Diff headers use the path relative to the workspace
-// root so the agent sees "a/sub/dir/file.go", not a bare basename.
-func renderDiff(blobs *blobStore, workspaceRoot, path string, pt *pathTrack) (string, bool) {
-	var beforeBytes []byte
-	if blobs != nil && pt != nil && pt.baselineHash != "" && blobs.exists(pt.baselineHash) {
-		data, err := blobs.get(pt.baselineHash)
-		if err != nil {
-			return "", false
-		}
-		beforeBytes = data
-	}
-	var afterBytes []byte
-	if info, err := os.Stat(path); err == nil && !info.IsDir() {
-		data, err := readFileLimited(path, maxDiffBytes)
-		if err != nil {
-			afterBytes = nil
-		} else {
-			afterBytes = data
-		}
-	}
-	if !isTextDiffEligible(beforeBytes, maxDiffBytes) || !isTextDiffEligible(afterBytes, maxDiffBytes) {
-		return "", false
-	}
-	beforeLines := splitLines(string(beforeBytes))
-	afterLines := splitLines(string(afterBytes))
-	ud := difflib.UnifiedDiff{
-		A:        beforeLines,
-		B:        afterLines,
-		FromFile: "a/" + displayPath(workspaceRoot, path),
-		ToFile:   "b/" + displayPath(workspaceRoot, path),
-		Context:  3,
-	}
-	text, err := difflib.GetUnifiedDiffString(ud)
-	if err != nil {
-		return "", false
-	}
-	return text, true
-}
-
-// displayPath returns the path relative to the workspace root when possible,
-// falling back to the absolute path for files outside the workspace.
-func displayPath(workspaceRoot, path string) string {
-	if workspaceRoot != "" {
-		if rel, err := filepath.Rel(workspaceRoot, path); err == nil && !strings.HasPrefix(rel, "..") {
-			return filepath.ToSlash(rel)
-		}
-	}
-	return path
-}
-
-func splitLines(s string) []string {
-	if s == "" {
-		return []string{}
-	}
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	if strings.HasSuffix(s, "\n") {
-		s = s[:len(s)-1]
-	}
-	if s == "" {
-		return []string{}
-	}
-	return strings.Split(s, "\n")
 }
 
 // Archive compresses the live journal into the gzip archive as a new
