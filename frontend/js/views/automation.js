@@ -187,6 +187,8 @@ function renderWorkflowDetail(w, detail, actions) {
     )),
   );
   const runBtn = el('button', { class: 'mini-btn', type: 'button', text: 'Run' });
+  const invalid = w.availability === 'invalid';
+  runBtn.disabled = invalid;
   runBtn.addEventListener('click', async () => {
     try {
       await rpc('automation.run', { id: w.id });
@@ -198,6 +200,7 @@ function renderWorkflowDetail(w, detail, actions) {
     }
   });
   const toggle = el('button', { class: 'mini-btn ghost', type: 'button', text: w.enabled ? 'Disable' : 'Enable' });
+  if (invalid && !w.enabled) toggle.disabled = true;
   toggle.addEventListener('click', async () => {
     try {
       await rpc(w.enabled ? 'automation.disable' : 'automation.enable', { id: w.id });

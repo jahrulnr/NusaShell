@@ -1,0 +1,1428 @@
+/* ============ Agent built-in tools ============
+ *
+ * Layer: view — per-built-in dressing for timeline tool events. Shared
+ * timeline chrome (stack, head, node, elapsed, output scroll cap) stays in
+ * agent.css. Duplicate path/result/details declarations across tools are
+ * intentional: edit one section without restyling another.
+ *
+ * Standalone cards keep their own families in agent.css:
+ *   ask_question → .agent-ask-* (+ .agent-tool-ask-question on the card)
+ *   todo composer → .agent-todo-strip-*
+ *   generate_image/speech/video → .agent-genimage-* / .agent-genaudio-* / .agent-genvideo-*
+ *   subagent → .agent-subagent-*
+ *   show(op=html) → .artifact-*
+ *
+ * Plugin MCP tools (mcp__*) share the mcp section. mcp_call is a built-in.
+ */
+
+/* ---- exec ---- */
+.agent-tool-exec-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-exec-output {
+  color: #d5dde8;
+  max-height: calc(5 * 1.55em);
+  overflow-y: auto;
+  margin: 0;
+  border-radius: 8px !important;
+}
+
+/* ---- mcp_call ---- */
+.agent-tool-mcp-call-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-mcp-call-output {
+  color: #d5dde8;
+  max-height: calc(5 * 1.55em);
+  overflow-y: auto;
+  margin: 0;
+  border-radius: 8px !important;
+}
+
+/* ---- mcp plugin tools (mcp__*) ---- */
+.agent-tool-mcp-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-mcp-output {
+  color: #d5dde8;
+  max-height: calc(5 * 1.55em);
+  overflow-y: auto;
+  margin: 0;
+  border-radius: 8px !important;
+}
+
+/* ---- file_read ---- */
+.agent-tool-file-read-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-file-read-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-file-read-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- file_write ---- */
+.agent-tool-file-write-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-file-write-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-file-write-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- file_patch ---- */
+.agent-tool-file-patch-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-file-patch-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-file-patch-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- file_list ---- */
+.agent-tool-file-list-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-file-list-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-file-list-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- file_mkdir ---- */
+.agent-tool-file-mkdir-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-file-mkdir-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-file-mkdir-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- file_delete ---- */
+.agent-tool-file-delete-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-file-delete-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-file-delete-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- file_move ---- */
+.agent-tool-file-move-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-file-move-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-file-move-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- file_copy ---- */
+.agent-tool-file-copy-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-file-copy-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-file-copy-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- file_info ---- */
+.agent-tool-file-info-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-file-info-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-file-info-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- grep ---- */
+.agent-tool-grep-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-grep-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-grep-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- find_file ---- */
+.agent-tool-find-file-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-find-file-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-find-file-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- file_search ---- */
+.agent-tool-file-search-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-file-search-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-file-search-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- show ---- */
+.agent-tool-show-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-show-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-show-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- skill ---- */
+.agent-tool-skill-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-skill-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-skill-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- memory ---- */
+.agent-tool-memory-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-memory-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-memory-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- memory_project ---- */
+.agent-tool-memory-project-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-memory-project-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-memory-project-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- docs ---- */
+.agent-tool-docs-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-docs-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-docs-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- todo ---- */
+.agent-tool-todo-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-todo-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-todo-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- mcp_list ---- */
+.agent-tool-mcp-list-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-mcp-list-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-mcp-list-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- tool_list ---- */
+.agent-tool-tool-list-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-tool-list-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-tool-list-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- tool_schema ---- */
+.agent-tool-tool-schema-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-tool-schema-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-tool-schema-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- mcp_search ---- */
+.agent-tool-mcp-search-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-mcp-search-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-mcp-search-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- contract_read ---- */
+.agent-tool-contract-read-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-contract-read-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-contract-read-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- mcp_register ---- */
+.agent-tool-mcp-register-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-mcp-register-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-mcp-register-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- mcp_enable ---- */
+.agent-tool-mcp-enable-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-mcp-enable-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-mcp-enable-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- mcp_disable ---- */
+.agent-tool-mcp-disable-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-mcp-disable-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-mcp-disable-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- mcp_unregister ---- */
+.agent-tool-mcp-unregister-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-mcp-unregister-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-mcp-unregister-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- mcp_install ---- */
+.agent-tool-mcp-install-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-mcp-install-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-mcp-install-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- mcp_server_add ---- */
+.agent-tool-mcp-server-add-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-mcp-server-add-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-mcp-server-add-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- read_media ---- */
+.agent-tool-read-media-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-read-media-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-read-media-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- web_search ---- */
+.agent-tool-web-search-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-web-search-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-web-search-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- web_fetch ---- */
+.agent-tool-web-fetch-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-web-fetch-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-web-fetch-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- web_answer ---- */
+.agent-tool-web-answer-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-web-answer-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-web-answer-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- ci_run ---- */
+.agent-tool-ci-run-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-ci-run-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-ci-run-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- ci_wait ---- */
+.agent-tool-ci-wait-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-ci-wait-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-ci-wait-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- ci_run_status ---- */
+.agent-tool-ci-run-status-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-ci-run-status-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-ci-run-status-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- ci_logs ---- */
+.agent-tool-ci-logs-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-ci-logs-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-ci-logs-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- ci_cancel ---- */
+.agent-tool-ci-cancel-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-ci-cancel-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-ci-cancel-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- ci_steer ---- */
+.agent-tool-ci-steer-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-ci-steer-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-ci-steer-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- automation_list ---- */
+.agent-tool-automation-list-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-automation-list-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-automation-list-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- automation_read ---- */
+.agent-tool-automation-read-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-automation-read-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-automation-read-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- automation_validate ---- */
+.agent-tool-automation-validate-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-automation-validate-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-automation-validate-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- automation_create ---- */
+.agent-tool-automation-create-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-automation-create-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-automation-create-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- automation_enable ---- */
+.agent-tool-automation-enable-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-automation-enable-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-automation-enable-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- automation_disable ---- */
+.agent-tool-automation-disable-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-automation-disable-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-automation-disable-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- automation_status ---- */
+.agent-tool-automation-status-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-automation-status-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-automation-status-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- schedule_once ---- */
+.agent-tool-schedule-once-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-schedule-once-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-schedule-once-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- schedule_every ---- */
+.agent-tool-schedule-every-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-schedule-every-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-schedule-every-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- wait_until ---- */
+.agent-tool-wait-until-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-wait-until-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-wait-until-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- sleep ---- */
+.agent-tool-sleep-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-sleep-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-sleep-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- subagent_steer ---- */
+.agent-tool-subagent-steer-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-subagent-steer-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-subagent-steer-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- subagent_stop ---- */
+.agent-tool-subagent-stop-path {
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0 0 -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-subagent-stop-result {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(16, 25, 29, .78);
+}
+.agent-tool-subagent-stop-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: -4px 8px 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}

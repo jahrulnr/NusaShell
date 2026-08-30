@@ -127,11 +127,11 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "ci_logs", Description: "Retrieve job logs (tail 200 by default). Prefer failed jobs.", InputSchema: obj("object", props("job_id", str("Job run id"), "run_id", str("Run id"), "limit", intSchema("Max chunks")), "job_id")},
 		{Name: "ci_cancel", Description: "Cancel a running pipeline/automation run.", InputSchema: obj("object", props("run_id", str("Run id")), "run_id")},
 		{Name: "ci_steer", Description: "Send additional instructions to a running agent step without canceling.", InputSchema: obj("object", props("run_id", str("Run id"), "text", str("Steer instructions")), "run_id", "text")},
-		{Name: "automation_list", Description: "List saved automations with availability (runnable/blocked/disabled).", InputSchema: obj("object", nil)},
+		{Name: "automation_list", Description: "List saved automations with availability (runnable/blocked/disabled/invalid). Invalid YAML stays listed and cannot be enabled or run until it is fixed.", InputSchema: obj("object", nil)},
 		{Name: "automation_read", Description: "Read one automation definition and capability bindings.", InputSchema: obj("object", props("id", str("Automation id")), "id")},
 		{Name: "automation_validate", Description: "Validate a workflow YAML. Distinguishes INVALID vs BLOCKED (provider disabled/missing).", InputSchema: obj("object", props("yaml", str("Workflow YAML")), "yaml")},
 		{Name: "automation_create", Description: "Create an automation from YAML (once/every/when triggers). NusaShell owns durable scheduling — do not keep timers yourself.", InputSchema: obj("object", props("yaml", str("Workflow YAML"), "enabled", obj("boolean", nil)), "yaml")},
-		{Name: "automation_enable", Description: "Enable an automation and restore event subscriptions/schedules.", InputSchema: obj("object", props("id", str("Automation id")), "id")},
+		{Name: "automation_enable", Description: "Enable an automation and restore event subscriptions/schedules. Rejects invalid YAML (listed as availability=invalid) until the definition is fixed.", InputSchema: obj("object", props("id", str("Automation id")), "id")},
 		{Name: "automation_disable", Description: "Disable an automation without deleting it.", InputSchema: obj("object", props("id", str("Automation id")), "id")},
 		{Name: "automation_status", Description: "Inspect a run, including waiting/blocked states.", InputSchema: obj("object", props("run_id", str("Run id")), "run_id")},
 		{Name: "schedule_once", Description: "Create a one-shot scheduled automation at an RFC3339 timestamp.", InputSchema: obj("object", props("at", str("RFC3339 time"), "yaml", str("Jobs YAML or a full workflow"), "name", str("Automation name")), "at")},
@@ -1615,6 +1615,25 @@ func strEnum(desc string, values ...string) map[string]any {
 // callable. The single MCP execution contract is mcp_call with a ref
 // (<server>:<tool>) from mcp_search / tool_list.
 
+// automationRunYAML is the agent-facing run snapshot for ci_wait /
+// ci_run_status. WakeAt is formatted as RFC3339 (or omitted) so it is
+// not stuffed into map[string]any as *time.Time — yaml.v3 panics on that.
+func automationRunYAML(run *domain.WorkflowRun, extra map[string]any) map[string]any {
+	out := map[string]any{
+		"run_id":         run.ID,
+		"status":         run.Status,
+		"summary":        run.Summary(),
+		"blocked_reason": run.BlockedReason,
+	}
+	if run.WakeAt != nil {
+		out["wake_at"] = run.WakeAt.UTC().Format(time.RFC3339)
+	}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out
+}
+
 func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON []byte) (string, bool, error) {
 	if t.Automation == nil {
 		switch name {
@@ -1672,22 +1691,15 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 		if err != nil {
 			return "", true, err
 		}
-		sum := run.Summary()
-		return encode(map[string]any{
-			"run_id": run.ID, "status": run.Status, "wake_at": run.WakeAt,
-			"summary": sum, "blocked_reason": run.BlockedReason,
+		return encode(automationRunYAML(run, map[string]any{
 			"timed_out": !run.Status.IsTerminal(),
-		}, nil)
+		}), nil)
 	case "ci_run_status", "automation_status":
 		run, err := a.Runs.Get(ctx, str("run_id"))
 		if err != nil {
 			return "", true, err
 		}
-		sum := run.Summary()
-		return encode(map[string]any{
-			"run_id": run.ID, "status": run.Status, "wake_at": run.WakeAt,
-			"summary": sum, "blocked_reason": run.BlockedReason,
-		}, nil)
+		return encode(automationRunYAML(run, nil), nil)
 	case "ci_logs":
 		chunks, err := a.Logs.Read(ctx, str("job_id"), 0, 200)
 		return encode(chunks, err)
@@ -1724,13 +1736,13 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 			return "", true, err
 		}
 		type row struct {
-			ID, Name, Availability string
-			Enabled                bool
+			ID, Name, Availability, Reason string
+			Enabled                        bool
 		}
 		var out []row
 		for _, w := range list {
-			avail, _ := a.AvailabilityOf(ctx, w)
-			out = append(out, row{ID: w.ID, Name: w.Name, Enabled: w.Enabled, Availability: avail})
+			avail, reason := a.AvailabilityOf(ctx, w)
+			out = append(out, row{ID: w.ID, Name: w.Name, Enabled: w.Enabled, Availability: avail, Reason: reason})
 		}
 		return encode(out, nil)
 	case "automation_read":
@@ -1761,10 +1773,10 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 		if err != nil {
 			return "", true, err
 		}
-		w.Enabled = name == "automation_enable"
-		if w.Enabled {
+		if name == "automation_enable" {
 			err = a.Auto.EnableWorkflow(ctx, w)
 		} else {
+			w.Enabled = false
 			err = a.Workflows.Put(ctx, w)
 		}
 		return encode(map[string]any{"id": w.ID, "enabled": w.Enabled}, err)

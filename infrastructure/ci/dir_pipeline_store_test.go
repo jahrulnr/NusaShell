@@ -65,7 +65,7 @@ jobs:
 	}
 }
 
-func TestDirPipelineStoreDiscoverSkipsCorrupt(t *testing.T) {
+func TestDirPipelineStoreDiscoverListsInvalid(t *testing.T) {
 	dir := t.TempDir()
 	pipelinesDir := filepath.Join(dir, "ci", "pipelines")
 	if err := os.MkdirAll(pipelinesDir, 0o755); err != nil {
@@ -89,10 +89,24 @@ jobs:
 	store := DirPipelineStore{Root: pipelinesDir}
 	defs, err := store.Discover()
 	if err != nil {
-		t.Fatalf("Discover should skip corrupt files, got: %v", err)
+		t.Fatalf("Discover should list invalid files, got: %v", err)
 	}
-	if len(defs) != 1 || defs[0].ID != "good" {
-		t.Fatalf("expected only good pipeline, got %+v", defs)
+	if len(defs) != 2 {
+		t.Fatalf("expected good + invalid pipelines, got %+v", defs)
+	}
+	byID := map[string]*domain.WorkflowDefinition{}
+	for _, d := range defs {
+		byID[d.ID] = d
+	}
+	bad := byID["bad"]
+	if bad == nil {
+		t.Fatal("invalid yaml must still be listed")
+	}
+	if bad.Enabled {
+		t.Fatal("invalid yaml must not be enabled")
+	}
+	if bad.Source.ParseError == "" {
+		t.Fatal("invalid yaml must record ParseError")
 	}
 }
 

@@ -1773,3 +1773,79 @@ func TestListToolsGenerateImageIsConditional(t *testing.T) {
 		t.Fatal("generate_media missing when image provider is configured")
 	}
 }
+
+func TestCIRunStatusDoesNotPanicOnNilWakeAt(t *testing.T) {
+	store := application.NewAutoStore()
+	if err := store.Create(context.Background(), &domain.WorkflowRun{
+		ID:     "run_1",
+		Status: domain.StatusSuccess,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tb := &Toolbox{Automation: &application.Automation{
+		Runs: application.RunMem{AutoStore: store},
+	}}
+	out, err := tb.Execute(context.Background(), "ci_run_status", []byte(`{"run_id":"run_1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "marshal error") {
+		t.Fatalf("yaml marshal failed:\n%s", out)
+	}
+	if !strings.Contains(out, "run_1") {
+		t.Fatalf("expected run_id in output:\n%s", out)
+	}
+	if strings.Contains(out, "wake_at") {
+		t.Fatalf("nil WakeAt must be omitted, got:\n%s", out)
+	}
+}
+
+func TestCIWaitDoesNotPanicOnNilWakeAt(t *testing.T) {
+	store := application.NewAutoStore()
+	runs := application.RunMem{AutoStore: store}
+	if err := store.Create(context.Background(), &domain.WorkflowRun{
+		ID:     "run_1",
+		Status: domain.StatusSuccess,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tb := &Toolbox{Automation: &application.Automation{
+		Runs: runs,
+		Exec: &application.ExecutionScheduler{Runs: runs},
+	}}
+	out, err := tb.Execute(context.Background(), "ci_wait", []byte(`{"run_id":"run_1","timeout_ms":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "marshal error") {
+		t.Fatalf("yaml marshal failed:\n%s", out)
+	}
+	if !strings.Contains(out, "run_1") {
+		t.Fatalf("expected run_id in output:\n%s", out)
+	}
+	if !strings.Contains(out, "timed_out: false") {
+		t.Fatalf("expected timed_out in output:\n%s", out)
+	}
+}
+
+func TestCIRunStatusFormatsWakeAt(t *testing.T) {
+	store := application.NewAutoStore()
+	wake := time.Date(2026, 8, 31, 2, 0, 0, 0, time.UTC)
+	if err := store.Create(context.Background(), &domain.WorkflowRun{
+		ID:     "run_wait",
+		Status: domain.StatusWaiting,
+		WakeAt: &wake,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tb := &Toolbox{Automation: &application.Automation{
+		Runs: application.RunMem{AutoStore: store},
+	}}
+	out, err := tb.Execute(context.Background(), "ci_run_status", []byte(`{"run_id":"run_wait"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "2026-08-31T02:00:00Z") {
+		t.Fatalf("expected RFC3339 wake_at, got:\n%s", out)
+	}
+}

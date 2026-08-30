@@ -9,10 +9,12 @@ import (
 	"nusashell/domain"
 )
 
-// RunHeadlessTurn executes a full agent turn synchronously (no streaming UI)
+// RunHeadlessTurn executes a full agent turn synchronously (no Agent room)
 // and returns the final assistant text as {"output": text}. It is the backing
-// implementation for pipeline agent steps. ACP subagent tools are filtered
-// out so permission prompts never stall a headless run.
+// implementation for pipeline agent steps. The persisted conversation is
+// marked Origin=pipeline so it stays out of agent.conversations.list while
+// remaining addressable for ci_steer. ACP subagent tools are filtered out
+// so permission prompts never stall a headless run.
 func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error) {
 	provider, bareModel, apiKey, err := a.resolveHeadlessModel(model)
 	if err != nil {
@@ -22,6 +24,7 @@ func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust d
 	convID := domain.NewID("conv")
 	now := time.Now().UTC()
 	conv := domain.NewConversation(convID, "[pipeline] "+truncate(prompt, 60))
+	conv.Origin = domain.ConversationOriginPipeline
 	conv.Model = provider.ID + ":" + bareModel
 	conv.Status = "running"
 	conv.AddMessage(domain.Message{

@@ -55,7 +55,8 @@ export function createAskCard(callId, args, { sealed = false, output = '', ok = 
   const allowFreeText = args?.allow_free_text !== false;
   const parsedAnswer = sealed ? parseAskAnswer(output) : null;
 
-  const card = el('div', { class: `agent-ask-card${sealed ? ' is-sealed' : ' is-pending'}${ok === false ? ' is-error' : ''}` });
+  const card = el('div', { class: `agent-ask-card agent-tool-ask-question${sealed ? ' is-sealed' : ' is-pending'}${ok === false ? ' is-error' : ''}` });
+  card.dataset.tool = 'ask_question';
   card.dataset.callId = callId || '';
   card.dataset.runId = runId || '';
   card._toolArgs = args && typeof args === 'object' ? args : {};

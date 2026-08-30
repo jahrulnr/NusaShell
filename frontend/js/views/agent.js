@@ -606,7 +606,8 @@ function deriveTitle(messages, fallback = 'Untitled') {
 async function maybeAutoTitleConversation(conversationId, snapshot = null) {
   if (!conversationId) return;
   const conv = state.conversations.find((c) => c.id === conversationId);
-  if (conv?.title && conv.title !== 'Untitled') return;
+  if (!conv) return;
+  if (conv.title && conv.title !== 'Untitled') return;
   let messages = [];
   try {
     // Always read the authoritative snapshot. The active room may still have
@@ -2444,14 +2445,19 @@ function bindEvents() {
     // when the chain ends (turn.done without should_continue).
     const willAutoContinue = Boolean(payload.auto_continue?.should_continue);
     endTurn(run_id, willAutoContinue);
-    if (error) {
-      toast(error, 'error');
-      playError(state.settings?.sound_notifications !== false);
-    } else {
-      playComplete(state.settings?.sound_notifications !== false);
+    const isAgentRoom = conversation_id === state.activeId
+      || state.conversations.some((c) => c.id === conversation_id);
+    if (isAgentRoom) {
+      if (error) {
+        toast(error, 'error');
+        playError(state.settings?.sound_notifications !== false);
+      } else {
+        playComplete(state.settings?.sound_notifications !== false);
+      }
     }
     if (conversation_id === state.activeId && !willAutoContinue) refreshActiveConversation();
     void maybeAutoTitleConversation(conversation_id).finally(() => {
+      if (!isAgentRoom) return;
       void refreshConversations().catch(() => {
         // The completed turn is already rendered; a transient list refresh
         // failure should not create an unhandled rejection.
@@ -2460,8 +2466,10 @@ function bindEvents() {
   });
   on('agent.turn.error', (payload) => {
     const { run_id, message, message_id, conversation_id } = payload;
+    const isAgentRoom = conversation_id === state.activeId
+      || state.conversations.some((c) => c.id === conversation_id);
     if (conversation_id === state.activeId) syncActiveThreadPin();
-    playError(state.settings?.sound_notifications !== false);
+    if (isAgentRoom) playError(state.settings?.sound_notifications !== false);
     const run = getRunOrQueue('agent.turn.error', payload);
     const fallbackNode = !run && conversation_id === state.activeId && message_id
       ? findMessageNode(agentThread(), message_id)
@@ -2481,9 +2489,9 @@ function bindEvents() {
       }
     }
     endTurn(run_id);
-    toast(message || 'Turn failed', 'error');
+    if (isAgentRoom) toast(message || 'Turn failed', 'error');
     if (conversation_id === state.activeId) refreshActiveConversation();
-    else refreshConversations();
+    else if (isAgentRoom) refreshConversations();
   });
   on('agent.auto_continue', (payload) => {
     const { conversation_id, decision, continue_text } = payload;

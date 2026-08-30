@@ -6,7 +6,7 @@ The default view: multi-conversation chat against any configured provider model.
 
 ## Conversations pane
 
-Lists conversations with a search filter and a New conversation button. The count reflects persisted threads. On narrow widths the pane hides behind a Rooms button and a backdrop; Escape or choosing a room closes it. Ctrl/Cmd+K focuses this search; Ctrl/Cmd+N creates a thread.
+Lists conversations with a search filter and a New conversation button. The count reflects Agent rooms only; pipeline agent-step conversations are omitted. On narrow widths the pane hides behind a Rooms button and a backdrop; Escape or choosing a room closes it. Ctrl/Cmd+K focuses this search; Ctrl/Cmd+N creates a thread.
 
 - **Conversations pane** (`#agent-conversations`):
   - Section: Agent
@@ -19,6 +19,7 @@ Lists conversations with a search filter and a New conversation button. The coun
 - **Thread count** (`#conversation-count`):
   - Section: Agent
   - Type: text
+  - Notes: Counts Agent rooms only. Pipeline agent-step conversations are omitted.
 
 - **New conversation** (`#new-conversation-btn`):
   - Section: Agent
@@ -35,6 +36,7 @@ Lists conversations with a search filter and a New conversation button. The coun
 - **Conversation list** (`#conversation-list`):
   - Section: Agent
   - Type: list
+  - Notes: Interactive Agent rooms only. Pipeline agent-step conversations do not appear here.
 
 - **Rooms** (`#agent-rooms-toggle`):
   - Section: Agent

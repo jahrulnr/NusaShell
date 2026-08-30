@@ -36,7 +36,7 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 		}
 		run, err := auto.RunWorkflow(ctx, req.ID, "ui")
 		if err != nil && run == nil {
-			return nil, rpcInternal(err)
+			return nil, rpcWorkflowRunError(err)
 		}
 		if run == nil {
 			return nil, rpcInternal(err)
@@ -237,10 +237,12 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 		if err != nil {
 			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 		}
-		w.Enabled = method == contracts.MethodAutomationEnable
-		if w.Enabled {
-			_ = auto.Auto.EnableWorkflow(ctx, w)
+		if method == contracts.MethodAutomationEnable {
+			if err := auto.Auto.EnableWorkflow(ctx, w); err != nil {
+				return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
+			}
 		} else {
+			w.Enabled = false
 			_ = auto.Workflows.Put(ctx, w)
 		}
 		avail, reason := auto.AvailabilityOf(ctx, w)
@@ -252,7 +254,7 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 		}
 		run, err := auto.RunWorkflow(ctx, req.ID, "ui")
 		if err != nil && run == nil {
-			return nil, rpcInternal(err)
+			return nil, rpcWorkflowRunError(err)
 		}
 		return runDTO(run), nil
 	case contracts.MethodAutomationEvents:
@@ -326,4 +328,11 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 	default:
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "unknown ci method"}
 	}
+}
+
+func rpcWorkflowRunError(err error) *contracts.RPCError {
+	if strings.Contains(err.Error(), "invalid workflow") {
+		return &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
+	}
+	return rpcInternal(err)
 }

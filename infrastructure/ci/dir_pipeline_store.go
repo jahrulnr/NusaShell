@@ -17,8 +17,9 @@ const PipelinesDir = "ci/pipelines"
 
 // DirPipelineStore discovers pipeline YAML files under a data
 // directory. Each <name>.yaml file becomes a WorkflowDefinition with
-// ID <name> and Source.Kind "file". Corrupt files are skipped (logged
-// but not fatal) so one bad file does not block discovery.
+// ID <name> and Source.Kind "file". Unparseable files are still listed
+// (Enabled=false, Source.ParseError set) so they appear as invalid
+// instead of vanishing from the registry.
 type DirPipelineStore struct {
 	Root string // absolute path to the pipelines directory
 }
@@ -44,11 +45,17 @@ func (s DirPipelineStore) Discover() ([]*domain.WorkflowDefinition, error) {
 		if err != nil {
 			continue
 		}
+		id := strings.TrimSuffix(e.Name(), ".yaml")
 		w, err := ParseYAML(raw)
 		if err != nil {
+			out = append(out, &domain.WorkflowDefinition{
+				ID:      id,
+				Name:    id,
+				Enabled: false,
+				Source:  domain.WorkflowSource{Kind: "file", Path: path, ParseError: err.Error()},
+			})
 			continue
 		}
-		id := strings.TrimSuffix(e.Name(), ".yaml")
 		w.ID = id
 		if w.Name == "" {
 			w.Name = id

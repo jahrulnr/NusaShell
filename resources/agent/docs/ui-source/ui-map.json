@@ -78,7 +78,7 @@
         {
           "heading": "Conversations pane",
           "paragraphs": [
-            "Lists conversations with a search filter and a New conversation button. The count reflects persisted threads. On narrow widths the pane hides behind a Rooms button and a backdrop; Escape or choosing a room closes it. Ctrl/Cmd+K focuses this search; Ctrl/Cmd+N creates a thread."
+            "Lists conversations with a search filter and a New conversation button. The count reflects Agent rooms only; pipeline agent-step conversations are omitted. On narrow widths the pane hides behind a Rooms button and a backdrop; Escape or choosing a room closes it. Ctrl/Cmd+K focuses this search; Ctrl/Cmd+N creates a thread."
           ],
           "controls": [
             "agent-conversations",
@@ -495,7 +495,7 @@
         {
           "heading": "List and detail",
           "paragraphs": [
-            "The list shows the active tab. The detail pane renders job needs as a DAG, waiting wake times, and run/enable/disable/cancel actions."
+            "The list shows the active tab. The detail pane renders job needs as a DAG, waiting wake times, and run/enable/disable/cancel actions. Invalid YAML stays listed with an invalid pill; Run and Enable are disabled until the file is fixed."
           ],
           "controls": [
             "auto-list",
@@ -962,7 +962,8 @@
     "conversation-count": {
       "label": "Thread count",
       "section": "Agent",
-      "type": "text"
+      "type": "text",
+      "notes": "Counts Agent rooms only. Pipeline agent-step conversations are omitted."
     },
     "new-conversation-btn": {
       "label": "New conversation",
@@ -981,7 +982,8 @@
     "conversation-list": {
       "label": "Conversation list",
       "section": "Agent",
-      "type": "list"
+      "type": "list",
+      "notes": "Interactive Agent rooms only. Pipeline agent-step conversations do not appear here."
     },
     "agent-rooms-toggle": {
       "label": "Rooms",

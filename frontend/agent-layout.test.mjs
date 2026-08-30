@@ -32,19 +32,15 @@ test('Agent uses the Electron workspace shell without unsupported Todo UI', () =
   // block-level Markdown (<p>, <h2>, <ul>) is invalid inside a <p>.
   assert.match(html, /<div class="agent-todo-strip-brief" id="agent-todo-strip-brief" hidden><\/div>/);
   assert.match(agentView, /briefEl\.innerHTML = renderMarkdown\(brief\.trim\(\)\)/);
-  const tabletRules = agentCSS.slice(
-    agentCSS.indexOf('@media (max-width: 900px)'),
-    agentCSS.indexOf('@media (max-width: 760px)'),
-  );
-  assert.match(tabletRules, /\.agent-conversations \{ display: none; \}/);
+  assert.match(agentCSS, /@media \(max-width: 900px\)[\s\S]*?\.agent-conversations \{[\s\S]*?display: none;/, '900px hides the room list');
 });
 
 test('Agent tool transcripts start collapsed, cap output at ten lines, and lazy-render reasoning', () => {
   // Tool events are collapsible <details> (open by default, collapse via the
   // head row), and both the event output and the exec/MCP terminal panel cap
   // long output with their own scroll.
-  assert.match(agentRender, /class: 'agent-tool-event'/);
-  assert.match(agentRender, /el\('details', \{ class: 'agent-tool-event'/);
+  assert.match(agentRender, /class: `agent-tool-event agent-tool-\$\{slug\}`/);
+  assert.match(agentRender, /el\('details', \{ class: `agent-tool-event/);
   assert.match(agentRender, /function materializeReasoning/);
   assert.doesNotMatch(agentRender, /content\.innerHTML = renderMarkdown\(reasoning\)/);
   assert.doesNotMatch(agentView, /content\.innerHTML = renderMarkdown\(run\.rawReasoning\)/);
@@ -98,15 +94,15 @@ test('Room snapshots keep the complete trailing run; older complete turns remain
 });
 
 test('Context usage stays visible in the narrow composer', () => {
-  const narrowRules = agentCSS.slice(
-    agentCSS.indexOf('@media (max-width: 760px)'),
-    agentCSS.indexOf('@media (max-width: 680px)'),
+  const providerStatus = agentCSS.slice(
+    agentCSS.indexOf('.agent-provider-status {'),
+    agentCSS.indexOf('.agent-reasoning {'),
   );
-  assert.doesNotMatch(narrowRules, /\.agent-provider-status\s*\{\s*display:\s*none;\s*\}/,
+  assert.doesNotMatch(providerStatus, /display:\s*none;/,
     'mobile must not hide the backend context usage badge');
-  assert.match(narrowRules, /\.agent-provider-status\s*\{[\s\S]*display:\s*inline-flex;/,
+  assert.match(providerStatus, /@media \(max-width: 760px\)[\s\S]*display:\s*inline-flex;/,
     'mobile context usage should remain a visible compact status');
-  assert.match(narrowRules, /\.agent-composer-actions\s*\{[\s\S]*width:\s*100%;/,
+  assert.match(agentCSS, /@media \(max-width: 760px\)[\s\S]*?\.agent-composer-actions \{[\s\S]*?width:\s*100%;/,
     'status and send controls need a full-width mobile action row');
 });
 

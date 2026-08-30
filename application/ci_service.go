@@ -92,6 +92,9 @@ func (a *Automation) runWorkflow(ctx context.Context, id, requestedBy string, as
 	if err != nil {
 		return nil, err
 	}
+	if reason := a.invalidReason(ctx, w); reason != "" {
+		return nil, fmt.Errorf("invalid workflow: %s", reason)
+	}
 	run := NewWorkflowRun(*w, requestedBy)
 	var startErr error
 	if async {
@@ -210,25 +213,51 @@ func validationDTO(r domain.ValidationResult) contracts.ValidationDTO {
 }
 
 func (a *Automation) AvailabilityOf(ctx context.Context, w *domain.WorkflowDefinition) (string, string) {
-	if a.Auto == nil {
-		return "runnable", ""
+	if reason := a.invalidReason(ctx, w); reason != "" {
+		return "invalid", reason
 	}
-	r := a.Auto.Validate(ctx, w)
-	switch r.Verdict() {
-	case "BLOCKED":
-		msg := ""
-		if len(r.Issues) > 0 {
-			msg = r.Issues[len(r.Issues)-1].Message
-		}
-		return "blocked", msg
-	case "INVALID":
-		return "invalid", ""
-	default:
+	if a.Auto == nil {
 		if !w.Enabled {
 			return "disabled", ""
 		}
 		return "runnable", ""
 	}
+	r := a.Auto.Validate(ctx, w)
+	if r.Verdict() == "BLOCKED" {
+		msg := ""
+		if len(r.Issues) > 0 {
+			msg = r.Issues[len(r.Issues)-1].Message
+		}
+		return "blocked", msg
+	}
+	if !w.Enabled {
+		return "disabled", ""
+	}
+	return "runnable", ""
+}
+
+func (a *Automation) invalidReason(ctx context.Context, w *domain.WorkflowDefinition) string {
+	if a.Auto != nil {
+		return a.Auto.invalidReason(ctx, w)
+	}
+	if w == nil {
+		return "workflow is empty"
+	}
+	if msg := strings.TrimSpace(w.Source.ParseError); msg != "" {
+		return msg
+	}
+	r := domain.ValidateSyntax(w)
+	if r.Verdict() != "INVALID" {
+		return ""
+	}
+	return firstValidationMessage(r)
+}
+
+func firstValidationMessage(r domain.ValidationResult) string {
+	if len(r.Issues) == 0 {
+		return "invalid workflow"
+	}
+	return r.Issues[0].Message
 }
 
 func (a *Automation) ParseDefinition(src string) (*domain.WorkflowDefinition, error) {
@@ -248,8 +277,9 @@ func (a *Automation) ParseDefinition(src string) (*domain.WorkflowDefinition, er
 
 // DiscoverPipelines scans the pipeline directory for YAML files, upserts
 // each into the WorkflowStore, and registers triggers with the scheduler.
-// It is idempotent: running it twice does not duplicate workflows or
-// schedules. Call once on boot after wiring is complete.
+// Invalid YAML is still listed (Enabled=false, availability=invalid) and
+// is not activated. It is idempotent: running it twice does not duplicate
+// workflows or schedules. Call once on boot after wiring is complete.
 func (a *Automation) DiscoverPipelines(ctx context.Context) ([]*domain.WorkflowDefinition, error) {
 	if a.Pipelines == nil {
 		return nil, nil
@@ -260,6 +290,14 @@ func (a *Automation) DiscoverPipelines(ctx context.Context) ([]*domain.WorkflowD
 	}
 	loaded := make([]*domain.WorkflowDefinition, 0, len(defs))
 	for _, w := range defs {
+		if reason := a.invalidReason(ctx, w); reason != "" {
+			w.Enabled = false
+			if err := a.Workflows.Put(ctx, w); err != nil {
+				continue
+			}
+			loaded = append(loaded, w)
+			continue
+		}
 		w.Enabled = true
 		if err := a.Workflows.Put(ctx, w); err != nil {
 			continue

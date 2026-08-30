@@ -46,6 +46,19 @@ Pipeline files use the same YAML schema as `automation_create` — `name`, `trig
 
 Availability is `runnable`, `blocked`, `disabled`, or `invalid`. Blocked means a required MCP provider is disabled or not running. Enable the provider and turn on **Auto start** in Plugins if the workflow should have that MCP ready as soon as NusaShell boots; do not rewrite the YAML.
 
+`invalid` means the YAML failed to parse or failed syntax/capability validation. The workflow stays listed. It cannot be enabled or run until the YAML is fixed. Unparseable pipeline files under `<data-dir>/ci/pipelines/` appear the same way — they are not skipped.
+
+Good example:
+
+    automation_list()                         # → [{id: "broken", availability: "invalid", reason: "yaml: ..."}, ...]
+    # fix the YAML, then:
+    automation_enable(id="broken")
+
+Bad examples:
+
+    automation_enable(id="broken")            # rejected while availability is invalid
+    ci_run(workflow_id="broken")              # invalid YAML cannot start a run
+
 ## Waiting
 
 A step may set `wait_until: <RFC3339>`. The run status becomes `waiting` and the executor is released. After restart, due waits resume automatically.
@@ -83,10 +96,13 @@ Bad examples:
     sleep(seconds=5)                                     # instead of a single ci_wait
 
 Pipeline `agent:` steps run a full agent turn (tool loop, compaction, skills,
-memory, docs) synchronously via `RunHeadlessTurn`. They do not receive ACP
-tools (`subagent`, `subagent_steer`, `subagent_stop`, `subagent_wait`) —
-permission prompts are interactive and must not stall an unattended run. The
-composer agent still sees those tools when an ACP provider is enabled.
+memory, docs) synchronously via `RunHeadlessTurn`. They persist a conversation
+so `ci_steer` can address the running step, but that conversation is not an
+Agent room: it is omitted from `agent.conversations.list` and the Rooms pane.
+They do not receive ACP tools (`subagent`, `subagent_steer`, `subagent_stop`,
+`subagent_wait`) — permission prompts are interactive and must not stall an
+unattended run. The composer agent still sees those tools when an ACP provider
+is enabled.
 
 An `agent:` step accepts an optional `model` field (`provider_id:model_id` or
 bare model ID). When omitted, the first enabled provider's first model is

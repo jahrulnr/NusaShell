@@ -27,9 +27,10 @@ type PipelineDefinition = WorkflowDefinition
 
 // WorkflowSource records where a definition came from.
 type WorkflowSource struct {
-	Kind      string // file | store | agent | ui
-	Workspace string
-	Path      string
+	Kind       string // file | store | agent | ui
+	Workspace  string
+	Path       string
+	ParseError string // unparseable YAML; workflow is listed as invalid
 }
 
 // TrustLevel is the user-visible execution trust of a workflow.

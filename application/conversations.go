@@ -157,6 +157,9 @@ func (a *App) handleConversationsList() (any, *contracts.RPCError) {
 	list := a.Conversations.List()
 	out := make([]contracts.ConversationDTO, 0, len(list))
 	for _, c := range list {
+		if c.HiddenFromRoomList() {
+			continue
+		}
 		out = append(out, convDTO(c))
 	}
 	return contracts.ConversationsListResult{Conversations: out}, nil

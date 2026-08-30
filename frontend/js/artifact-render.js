@@ -118,6 +118,7 @@ export function renderArtifactCard(toolCall, artifact) {
 
   const card = el('div', {
     class: 'artifact-card',
+    'data-tool': toolCall?.name || 'show',
     'data-artifact-id': id,
     role: 'button',
     tabindex: '0',

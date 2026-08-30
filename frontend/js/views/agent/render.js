@@ -855,6 +855,7 @@ export function renderSubagentCard(toolCall) {
 
   const runIDs = [...new Set(runs.map((run) => run.id).filter(Boolean))];
   const card = el('div', { class: `agent-subagent-card is-${status}`, role: 'button', tabindex: '0', 'aria-label': `Open ${agentName} transcript` });
+  card.dataset.tool = 'subagent';
   card._toolArgs = toolCall.args;
   if (runIDs.length === 1) card.dataset.runId = runIDs[0];
 
@@ -1424,17 +1425,32 @@ function toolEventRawText(name, presentation, output) {
 // renderToolEventResult paints the result box: summary line, then the
 // compact body the presentation format asks for (list rows, meta chips, or a
 // capped text preview). Falls back to the status line while running.
+// toolCssSlug is the CSS owner for a built-in tool event. Plugin MCP tools
+// (mcp__*) share `mcp` so their dressing stays in one section; built-ins
+// such as mcp_call keep their own slug.
+function toolCssSlug(name) {
+  const raw = String(name || 'tool');
+  if (raw.startsWith('mcp__')) return 'mcp';
+  const slug = raw.toLowerCase().replace(/_/g, '-').replace(/[^a-z0-9-]+/g, '');
+  return slug || 'tool';
+}
+
+function toolPartClass(name, part) {
+  return `agent-tool-event-${part} agent-tool-${toolCssSlug(name)}-${part}`;
+}
+
 function renderToolEventResult(toolCall) {
+  const name = toolCall?.name || '';
   const result = toolCall?.presentation?.result;
   if (result?.format === 'list' && Array.isArray(result.items) && result.items.length) {
-    return renderToolPresentationList(result.items, 'agent-tool-event-rows');
+    return renderToolPresentationList(result.items, toolPartClass(name, 'rows'));
   }
-  if (result?.format === 'status') return renderToolPresentationStatus(result, 'agent-tool-event-status');
+  if (result?.format === 'status') return renderToolPresentationStatus(result, toolPartClass(name, 'status'));
   const text = toolTerminalOutput(toolCall);
   if (text === '…' || text === '… waiting for output') {
-    return el('div', { class: 'agent-tool-event-wait', text: 'Running…' });
+    return el('div', { class: toolPartClass(name, 'wait'), text: 'Running…' });
   }
-  const pre = el('pre', { class: 'agent-tool-event-output', text: text === 'ok' ? '' : text });
+  const pre = el('pre', { class: toolPartClass(name, 'output'), text: text === 'ok' ? '' : text });
   if (result?.language) pre.dataset.language = String(result.language);
   return pre;
 }
@@ -1462,8 +1478,10 @@ function renderToolEvent(toolCall, { terminalOutput = false, mcp = false } = {})
   // summary-first result (never a nested toggle), and the raw request/output
   // folded away. exec/MCP replace the result box with a terminal output
   // panel (live-streamed for exec).
-  const card = el('details', { class: 'agent-tool-event' });
+  const slug = toolCssSlug(name);
+  const card = el('details', { class: `agent-tool-event agent-tool-${slug}` });
   card.open = true;
+  card.dataset.tool = name;
   if (terminalOutput) card.classList.add('is-terminal');
   if (toolCall.id) card.dataset.toolCallId = String(toolCall.id);
   if (presentation?.variant) card.dataset.presentationVariant = String(presentation.variant);
@@ -1489,20 +1507,20 @@ function renderToolEvent(toolCall, { terminalOutput = false, mcp = false } = {})
 
   const body = el('div', { class: 'agent-tool-event-body' });
   const primary = toolEventPrimary(name, toolCall.args);
-  if (primary) body.append(el('p', { class: 'agent-tool-event-path', text: primary }));
+  if (primary) body.append(el('p', { class: toolPartClass(name, 'path'), text: primary }));
 
   if (terminalOutput) {
     // exec streams deltas into this panel via appendToolJobDelta; MCP shows
     // the raw passthrough, capped with its own scroll.
-    body.append(el('pre', { class: 'agent-tool-terminal-output', text: toolTerminalOutput(toolCall) }));
+    body.append(el('pre', { class: `agent-tool-terminal-output agent-tool-${slug}-output`, text: toolTerminalOutput(toolCall) }));
   } else {
-    const result = el('div', { class: 'agent-tool-event-result' },
-      el('div', { class: 'agent-tool-event-summary-text', text: toolEventSummary(toolCall) }),
+    const result = el('div', { class: toolPartClass(name, 'result') },
+      el('div', { class: toolPartClass(name, 'summary-text'), text: toolEventSummary(toolCall) }),
     );
     const resultContent = renderToolEventResult(toolCall);
     if (resultContent) result.append(resultContent);
     body.append(result);
-    const raw = el('details', { class: 'agent-tool-event-details' },
+    const raw = el('details', { class: toolPartClass(name, 'details') },
       el('summary', { text: 'show request and raw output' }),
       el('pre', { text: toolEventRawText(name, presentation, toolCall.output) }),
     );
@@ -1711,7 +1729,8 @@ export function setToolTerminalPresentation(card, presentation) {
   const output = card.querySelector('.agent-tool-terminal-output');
   if (output) {
     // exec/MCP terminal panel: repaint the settled output in place.
-    output.replaceWith(renderToolPresentationResult(merged.result || {}, 'agent-tool-terminal-output', card._toolOutput));
+    const slug = toolCssSlug(card._toolName || card.dataset.tool);
+    output.replaceWith(renderToolPresentationResult(merged.result || {}, `agent-tool-terminal-output agent-tool-${slug}-output`, card._toolOutput));
     return;
   }
   // Event card: repaint the summary line and the result body in place; the

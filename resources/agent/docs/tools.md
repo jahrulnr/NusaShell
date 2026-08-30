@@ -48,11 +48,11 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `ci_logs` | job log tail (prefer failed jobs) |
 | `ci_cancel` | cancel a run |
 | `ci_steer` | send additional instructions to a running pipeline agent step |
-| `automation_list` | saved automations with availability |
+| `automation_list` | saved automations with availability (`runnable` / `blocked` / `disabled` / `invalid`); `invalid` stays listed and cannot be enabled or run until the YAML is fixed |
 | `automation_read` | one automation plus capability bindings |
 | `automation_validate` | validate YAML |
 | `automation_create` | persist a once/every/when/manual workflow (NusaShell owns the schedule) |
-| `automation_enable` / `automation_disable` | lifecycle without deleting |
+| `automation_enable` / `automation_disable` | lifecycle without deleting; `automation_enable` rejects `invalid` YAML |
 | `automation_status` | inspect waiting/blocked runs |
 | `schedule_once` | one-shot RFC3339 automation |
 | `schedule_every` | cron or interval automation (not equivalent) |

@@ -94,7 +94,21 @@ test('Agent parity and responsive rules live in agent.css', () => {
   const css = read('agent.css');
   assert.match(css, /\.agent-tool-terminal-output \{[\s\S]*?max-height: calc\(10 \* 1\.55em\)/, 'agent tool terminal cap belongs in agent.css');
   assert.match(css, /\.agent-subagent-card \{/, 'subagent card belongs in agent.css');
-  assert.match(css, /@media \(max-width: 900px\)[\s\S]*?\.agent-conversations \{ display: none; \}/, '900px agent conversations hide belongs in agent.css');
+  assert.match(css, /@media \(max-width: 900px\)[\s\S]*?\.agent-conversations \{[\s\S]*?display: none;/, '900px agent conversations hide belongs in agent.css');
+});
+
+test('built-in tool path/result dressing is per-tool, not a shared timeline rule', () => {
+  const sharedPath = read('agent.css').match(/\.agent-tool-event-path \{[^}]+\}/);
+  assert.ok(sharedPath, 'shared path hook still exists for layout');
+  assert.doesNotMatch(sharedPath[0], /max-width:\s*300px/, 'tab max-width must not leak from the shared path class');
+  assert.doesNotMatch(sharedPath[0], /accent-ink/, 'tab background must not leak from the shared path class');
+  const tools = read('agent-tools.css');
+  assert.match(tools, /\.agent-tool-file-read-path \{/, 'file_read owns its path tab');
+  assert.match(tools, /\.agent-tool-grep-path \{/, 'grep owns its path tab');
+  assert.match(tools, /\.agent-tool-exec-path \{/, 'exec owns its path tab');
+  assert.match(tools, /\.agent-tool-todo-path \{/, 'transcript todo owns its path tab');
+  const html = readFileSync(join(root, '..', 'index.html'), 'utf8');
+  assert.match(html, /styles\/agent-tools\.css/, 'agent-tools.css is loaded after agent.css');
 });
 
 test('view parity and responsive rules live in their owner stylesheets', () => {

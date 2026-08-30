@@ -947,7 +947,7 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 	// Skill nudge: count tool calls per conversation so tool-heavy but
 	// user-turn-light coding sessions trigger skill review independently
 	// of the turn threshold.
-	if status == domain.ToolOK || status == domain.ToolFailed {
+	if !run.Headless && (status == domain.ToolOK || status == domain.ToolFailed) {
 		a.incrementToolCallCounter(run.ConversationID)
 	}
 	return res
@@ -1061,7 +1061,10 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage,
 	// compaction hook (subscribeCompactionReview) fires independently
 	// when a conversation is compacted, so learning still happens for
 	// long conversations that compact before reaching the threshold.
-	a.incrementTurnCounter(conversation.ID)
+	// Pipeline agent steps are unattended automation, not user rooms.
+	if !run.Headless {
+		a.incrementTurnCounter(conversation.ID)
+	}
 
 	return nil
 }

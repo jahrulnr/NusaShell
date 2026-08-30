@@ -42,7 +42,7 @@ When a saved automation depends on a disabled MCP provider it stays BLOCKED rath
 
 ## List and detail
 
-The list shows the active tab. The detail pane renders job needs as a DAG, waiting wake times, and run/enable/disable/cancel actions.
+The list shows the active tab. The detail pane renders job needs as a DAG, waiting wake times, and run/enable/disable/cancel actions. Invalid YAML stays listed with an invalid pill; Run and Enable are disabled until the file is fixed.
 
 - **`#auto-list`** (missing map entry)
 

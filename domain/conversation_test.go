@@ -443,3 +443,22 @@ func TestRecoverOrphanedTurnDefaultsReasonWhenEmpty(t *testing.T) {
 		t.Fatalf("error = %q, want default OrphanedTurnError", c.Messages[0].Error)
 	}
 }
+
+func TestHiddenFromRoomList(t *testing.T) {
+	if (*Conversation)(nil).HiddenFromRoomList() {
+		t.Fatal("nil conversation must not be hidden")
+	}
+	user := NewConversation("conv_user", "Daily standup")
+	if user.HiddenFromRoomList() {
+		t.Fatal("interactive rooms must stay in the Agent list")
+	}
+	origin := NewConversation("conv_pipe", "lint the repo")
+	origin.Origin = ConversationOriginPipeline
+	if !origin.HiddenFromRoomList() {
+		t.Fatal("pipeline-origin conversations must be hidden from the Agent list")
+	}
+	legacy := NewConversation("conv_legacy", "[pipeline] lint the repo")
+	if !legacy.HiddenFromRoomList() {
+		t.Fatal("legacy [pipeline] titles must stay hidden after Origin is introduced")
+	}
+}

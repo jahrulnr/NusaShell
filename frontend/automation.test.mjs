@@ -26,6 +26,7 @@ test('Automation view talks to CI and automation RPC', () => {
     assert.match(view, new RegExp(method.replace('.', '\\.')));
   }
   assert.match(view, /createWizard/);
-  assert.match(css, /\.auto-pill\.waiting/);
-  assert.match(css, /\.auto-pill\.blocked/);
+  assert.match(view, /availability === 'invalid'/);
+  assert.match(view, /runBtn\.disabled = invalid/);
+  assert.match(css, /\.auto-pill\.invalid/);
 });

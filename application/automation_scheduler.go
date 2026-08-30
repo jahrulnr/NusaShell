@@ -34,6 +34,9 @@ func (s *AutomationScheduler) now() time.Time {
 
 // EnableWorkflow persists schedules/subscriptions for an enabled workflow.
 func (s *AutomationScheduler) EnableWorkflow(ctx context.Context, w *domain.WorkflowDefinition) error {
+	if reason := s.invalidReason(ctx, w); reason != "" {
+		return fmt.Errorf("invalid workflow: %s", reason)
+	}
 	w.Enabled = true
 	if err := s.Workflows.Put(ctx, w); err != nil {
 		return err
@@ -77,6 +80,20 @@ func (s *AutomationScheduler) EnableWorkflow(ctx context.Context, w *domain.Work
 		}
 	}
 	return nil
+}
+
+func (s *AutomationScheduler) invalidReason(ctx context.Context, w *domain.WorkflowDefinition) string {
+	if w == nil {
+		return "workflow is empty"
+	}
+	if msg := strings.TrimSpace(w.Source.ParseError); msg != "" {
+		return msg
+	}
+	r := s.Validate(ctx, w)
+	if r.Verdict() != "INVALID" {
+		return ""
+	}
+	return firstValidationMessage(r)
 }
 
 func (s *AutomationScheduler) blockWorkflow(ctx context.Context, w *domain.WorkflowDefinition, b domain.CapabilityBinding) error {

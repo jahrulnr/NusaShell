@@ -287,6 +287,11 @@ test('tool terminals render as compact execution timeline events', () => {
     assert.match(raw, /count: 3/);
     assert.match(job.querySelector('.agent-tool-event-rows')?.textContent || '', /file-a/);
     assert.equal(job.querySelector('.agent-tool-event-tool'), null, 'head never duplicates the tool name next to the action title');
+    assert.equal(job.dataset.tool, 'file_list');
+    assert.ok(job.classList.contains('agent-tool-file-list'), 'each built-in owns a dedicated class');
+    assert.ok(job.querySelector('.agent-tool-file-list-path'), 'path dressing is scoped to file_list');
+    assert.ok(job.querySelector('.agent-tool-file-list-result'), 'result dressing is scoped to file_list');
+    assert.ok(job.querySelector('.agent-tool-file-list-details'), 'raw-fold dressing is scoped to file_list');
 
     const failed = renderToolJob({ name: 'file_list', args: {}, status: 'fail', output: 'permission denied' });
     assert.equal(failed.querySelector('.agent-tool-event-title')?.textContent, 'File listing failed');
@@ -308,6 +313,10 @@ test('exec and MCP calls render one event with a live terminal output panel', ()
     assert.ok(execJob.querySelector('.agent-tool-terminal-output'), 'output panel present');
     assert.equal(execJob.querySelector('.agent-tool-event-result'), null, 'no nested result box for exec');
     assert.ok(execJob.querySelector('.agent-tool-stop'), 'streaming exec keeps the stop button');
+    assert.equal(execJob.dataset.tool, 'exec');
+    assert.ok(execJob.classList.contains('agent-tool-exec'));
+    assert.ok(execJob.querySelector('.agent-tool-exec-path'));
+    assert.ok(execJob.querySelector('.agent-tool-exec-output'));
 
     const mcp = renderToolJob({
       id: 'm1', name: 'mcp_call', args: { ref: 'nusashell.files:read', arguments_json: '{"path":"/workspace/a.txt"}' },
@@ -318,6 +327,54 @@ test('exec and MCP calls render one event with a live terminal output panel', ()
     assert.equal(mcp.querySelector('.agent-tool-event-path')?.textContent, 'nusashell.files:read', 'path line shows the tool ref');
     assert.equal(mcp.querySelector('.agent-tool-event-badge')?.textContent, 'MCP', 'MCP badge marks the call');
     assert.match(mcp.querySelector('.agent-tool-terminal-output')?.textContent || '', /done/);
+    assert.equal(mcp.dataset.tool, 'mcp_call');
+    assert.ok(mcp.classList.contains('agent-tool-mcp-call'));
+    assert.ok(mcp.querySelector('.agent-tool-mcp-call-path'));
+    assert.ok(mcp.querySelector('.agent-tool-mcp-call-output'));
+
+    const plugin = renderToolJob({
+      id: 'p1', name: 'mcp__files__read', args: { path: '/a.txt' }, status: 'ok', output: 'ok',
+    });
+    assert.equal(plugin.dataset.tool, 'mcp__files__read');
+    assert.ok(plugin.classList.contains('agent-tool-mcp'), 'plugin MCP tools share one dressing class');
+    assert.equal(plugin.classList.contains('agent-tool-mcp-files-read'), false);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('built-in tool events isolate dressing classes so file_read does not share grep path/result hooks', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const read = renderToolJob({
+      name: 'file_read', args: { path: '/workspace/a.txt' }, status: 'ok', output: 'hello',
+    });
+    const grep = renderToolJob({
+      name: 'grep', args: { pattern: 'hello', path: '/workspace' }, status: 'ok', output: '1 match',
+    });
+    assert.equal(read.dataset.tool, 'file_read');
+    assert.equal(grep.dataset.tool, 'grep');
+    assert.ok(read.classList.contains('agent-tool-file-read'));
+    assert.ok(grep.classList.contains('agent-tool-grep'));
+    assert.ok(read.querySelector('.agent-tool-file-read-path'));
+    assert.ok(grep.querySelector('.agent-tool-grep-path'));
+    assert.equal(read.querySelector('.agent-tool-grep-path'), null);
+    assert.equal(grep.querySelector('.agent-tool-file-read-path'), null);
+    assert.ok(read.querySelector('.agent-tool-file-read-result'));
+    assert.ok(grep.querySelector('.agent-tool-grep-result'));
+
+    const ask = renderToolCallCard({
+      name: 'ask_question',
+      id: 'ask-1',
+      args: { question: 'Pick one', options: [{ id: 'a', label: 'A' }] },
+      status: 'ok',
+      output: '{"answer":"A"}',
+    });
+    assert.equal(ask.dataset.tool, 'ask_question');
+    assert.ok(ask.classList.contains('agent-ask-card'));
+    assert.ok(ask.classList.contains('agent-tool-ask-question'));
   } finally {
     globalThis.document = previousDocument;
   }
@@ -336,7 +393,7 @@ test('status presentations render compact metadata chips instead of a raw YAML d
       },
     });
     assert.ok(job.querySelector('.agent-tool-event-status'));
-    assert.match(job.querySelector('.agent-tool-event-status')?.textContent || '', /Written/);
+    assert.match(job.querySelector('.agent-tool-event-summary-text')?.textContent || '', /Written/);
     assert.match(job.querySelector('.agent-tool-event-status')?.textContent || '', /bytes:12/);
     assert.doesNotMatch(job.querySelector('.agent-tool-event-status')?.textContent || '', /abcdef0123456789/);
   } finally {

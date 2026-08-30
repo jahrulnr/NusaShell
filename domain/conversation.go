@@ -147,7 +147,17 @@ type Conversation struct {
 	// LastReviewedMsgCount onward, avoiding re-reading already reviewed
 	// content. Zero means "never reviewed" (review from the start).
 	LastReviewedMsgCount int `json:"last_reviewed_msg_count,omitempty"`
+	// Origin marks conversations that are not Agent rooms. Pipeline agent
+	// steps persist a conversation so the turn loop and ci_steer can work;
+	// those must not appear in agent.conversations.list.
+	Origin string `json:"Origin,omitempty"`
 }
+
+// ConversationOriginPipeline is stored on conversations created by
+// pipeline agent steps. They are implementation details, not Agent rooms.
+const ConversationOriginPipeline = "pipeline"
+
+const pipelineRoomTitlePrefix = "[pipeline] "
 
 // NewConversation creates an empty conversation.
 func NewConversation(id, title string) *Conversation {
@@ -162,6 +172,20 @@ func NewConversation(id, title string) *Conversation {
 }
 
 func (c *Conversation) Touch() { c.UpdatedAt = time.Now().UTC() }
+
+// HiddenFromRoomList reports whether this conversation is a pipeline
+// agent-step transcript rather than an interactive Agent room. Origin is
+// authoritative; the historical "[pipeline] " title prefix covers files
+// written before Origin existed.
+func (c *Conversation) HiddenFromRoomList() bool {
+	if c == nil {
+		return false
+	}
+	if c.Origin == ConversationOriginPipeline {
+		return true
+	}
+	return strings.HasPrefix(c.Title, pipelineRoomTitlePrefix)
+}
 
 // AbandonedTurnError is stored on in-flight assistant messages when a process
 // restart finds a conversation still marked running. No live turn can exist

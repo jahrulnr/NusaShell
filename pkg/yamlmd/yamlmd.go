@@ -9,6 +9,7 @@ package yamlmd
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -16,12 +17,45 @@ import (
 // Block marshals v as YAML and wraps it in YAML front matter delimited
 // by --- lines (Jekyll/Hugo style). Used by all built-in tool handlers
 // for consistent, readable output.
-func Block(v any) string {
-	b, err := yaml.Marshal(v)
+func Block(v any) (out string) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			out = fmt.Sprintf("---\n# marshal error: %v\n---", rec)
+		}
+	}()
+	b, err := yaml.Marshal(sanitize(v))
 	if err != nil {
 		return fmt.Sprintf("---\n# marshal error: %v\n---", err)
 	}
 	return "---\n" + strings.TrimRight(string(b), "\n") + "\n---"
+}
+
+// sanitize rewrites values yaml.v3 cannot encode without panicking.
+// A *time.Time boxed in interface{} (map[string]any / []any) hits
+// encoder.timev, which type-asserts the elem to time.Time and panics
+// on both nil and non-nil pointers (gopkg.in/yaml.v3@v3.0.1).
+func sanitize(v any) any {
+	switch t := v.(type) {
+	case *time.Time:
+		if t == nil {
+			return nil
+		}
+		return t.UTC().Format(time.RFC3339)
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			out[k] = sanitize(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = sanitize(val)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // MD produces a YAML front matter block followed by an optional body.
