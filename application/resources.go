@@ -1178,6 +1178,7 @@ func (a *App) handleLearningReviewTranscript(req contracts.LearningReviewTranscr
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "review transcript not found"}
 	}
 	msgs := make([]contracts.LearningReviewTranscriptMessageDTO, 0, len(t.Messages))
+	toolCallsByID := make(map[string]domain.ToolCall)
 	for _, m := range t.Messages {
 		dto := contracts.LearningReviewTranscriptMessageDTO{
 			Role:      m.Role,
@@ -1185,20 +1186,27 @@ func (a *App) handleLearningReviewTranscript(req contracts.LearningReviewTranscr
 			Reasoning: m.Reasoning,
 		}
 		for _, tc := range m.ToolCalls {
-			dto.ToolCalls = append(dto.ToolCalls, contracts.ToolCallDTO{
-				ID:     tc.ID,
-				Name:   tc.Name,
-				Args:   json.RawMessage(tc.Args),
-				Status: string(tc.Status),
-				Output: tc.Output,
-				Opaque: tc.Opaque,
-			})
+			dto.ToolCalls = append(dto.ToolCalls, toolCallDTO(tc))
+			if tc.ID != "" {
+				toolCallsByID[tc.ID] = tc
+			}
 		}
 		if m.ToolResult != nil {
+			resultName := m.ToolResult.Name
+			resultArgs := ""
+			if call, ok := toolCallsByID[m.ToolResult.ToolCallID]; ok {
+				// Tool results do not carry args in the review transcript wire
+				// shape. Reuse the matching call so the frontend presentation
+				// can keep the real Request panel instead of falling back to
+				// `tool()` or an empty dispatcher payload.
+				resultName = call.Name
+				resultArgs = call.Args
+			}
 			dto.ToolResult = &contracts.ToolResultDTO{
-				ToolCallID: m.ToolResult.ToolCallID,
-				Name:       m.ToolResult.Name,
-				Content:    m.ToolResult.Content,
+				ToolCallID:   m.ToolResult.ToolCallID,
+				Name:         resultName,
+				Content:      m.ToolResult.Content,
+				Presentation: buildToolPresentation(resultName, resultArgs, toolResultPresentationStatus(m.ToolResult.Content), m.ToolResult.Content),
 			}
 		}
 		msgs = append(msgs, dto)

@@ -197,14 +197,43 @@ type UsageDTO struct {
 	CacheWrite   int `json:"cache_write,omitempty"`
 }
 
+// ToolPresentationDTO is the frontend-only view of a tool call. The raw
+// Args/Output fields on ToolCallDTO remain the canonical provider transcript;
+// this additive view lets the browser render predictable built-ins without
+// parsing provider-facing envelopes or guessing which panel should be shown.
+//
+// Variant is intentionally small and visual: terminal is used for open-ended
+// tools such as exec and mcp_call, while built-ins use file-list,
+// file-content, search-results, collection, document, status, or media.
+type ToolPresentationDTO struct {
+	Variant string                    `json:"variant"`
+	Action  string                    `json:"action"`
+	Request string                    `json:"request"`
+	Result  ToolPresentationResultDTO `json:"result"`
+}
+
+// ToolPresentationResultDTO contains display-oriented data extracted from a
+// built-in tool result. Text is the body without the YAML front matter;
+// Items carries JSONL results; Meta carries compact front-matter fields.
+// Generic terminal tools put their complete raw output in Text.
+type ToolPresentationResultDTO struct {
+	Format   string           `json:"format"`
+	Summary  string           `json:"summary,omitempty"`
+	Meta     map[string]any   `json:"meta,omitempty"`
+	Items    []map[string]any `json:"items,omitempty"`
+	Text     string           `json:"text,omitempty"`
+	Language string           `json:"language,omitempty"`
+}
+
 type ToolCallDTO struct {
-	ID                string          `json:"id"`
-	Name              string          `json:"name"`
-	Args              json.RawMessage `json:"args,omitempty"`
-	Status            string          `json:"status,omitempty"`
-	Output            string          `json:"output,omitempty"`
-	OutputAttachments []AttachmentDTO `json:"output_attachments,omitempty"`
-	Opaque            map[string]any  `json:"opaque,omitempty"`
+	ID                string               `json:"id"`
+	Name              string               `json:"name"`
+	Args              json.RawMessage      `json:"args,omitempty"`
+	Status            string               `json:"status,omitempty"`
+	Output            string               `json:"output,omitempty"`
+	OutputAttachments []AttachmentDTO      `json:"output_attachments,omitempty"`
+	Opaque            map[string]any       `json:"opaque,omitempty"`
+	Presentation      *ToolPresentationDTO `json:"presentation,omitempty"`
 }
 
 type MessageStepDTO struct {
@@ -359,13 +388,16 @@ const (
 	RoundDeltaTool      = "tool"
 )
 
-// RoundDeltaFrame is one incremental chunk of a live round.
+// RoundDeltaFrame is one incremental chunk of a live round. Tool start frames
+// may carry Presentation so a reconnecting browser can build the card before
+// streamed tool text arrives; subsequent tool chunks carry only Text.
 type RoundDeltaFrame struct {
-	Seq        int64  `json:"seq"`
-	Kind       string `json:"kind"` // "text" | "reasoning" | "tool"
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	Name       string `json:"name,omitempty"` // tool name for kind="tool"
-	Text       string `json:"text,omitempty"`
+	Seq          int64                `json:"seq"`
+	Kind         string               `json:"kind"` // "text" | "reasoning" | "tool"
+	ToolCallID   string               `json:"tool_call_id,omitempty"`
+	Name         string               `json:"name,omitempty"` // tool name for kind="tool"
+	Text         string               `json:"text,omitempty"`
+	Presentation *ToolPresentationDTO `json:"presentation,omitempty"`
 }
 
 // RoundDoneState discriminates round.done frames.
@@ -404,21 +436,23 @@ type ContextEstimateEvent struct {
 }
 
 type ToolStartedEvent struct {
-	RunID          string          `json:"run_id"`
-	ConversationID string          `json:"conversation_id"`
-	ToolCallID     string          `json:"tool_call_id"`
-	Name           string          `json:"name"`
-	Args           json.RawMessage `json:"args,omitempty"`
+	RunID          string               `json:"run_id"`
+	ConversationID string               `json:"conversation_id"`
+	ToolCallID     string               `json:"tool_call_id"`
+	Name           string               `json:"name"`
+	Args           json.RawMessage      `json:"args,omitempty"`
+	Presentation   *ToolPresentationDTO `json:"presentation,omitempty"`
 }
 
 type ToolCompletedEvent struct {
-	RunID          string          `json:"run_id"`
-	ConversationID string          `json:"conversation_id"`
-	ToolCallID     string          `json:"tool_call_id"`
-	Name           string          `json:"name"`
-	Status         string          `json:"status"`
-	Output         string          `json:"output,omitempty"`
-	Attachments    []AttachmentDTO `json:"attachments,omitempty"`
+	RunID          string               `json:"run_id"`
+	ConversationID string               `json:"conversation_id"`
+	ToolCallID     string               `json:"tool_call_id"`
+	Name           string               `json:"name"`
+	Status         string               `json:"status"`
+	Output         string               `json:"output,omitempty"`
+	Attachments    []AttachmentDTO      `json:"attachments,omitempty"`
+	Presentation   *ToolPresentationDTO `json:"presentation,omitempty"`
 }
 
 type TodoUpdatedEvent struct {
@@ -1324,9 +1358,10 @@ type LearningReviewTranscriptRequest struct {
 }
 
 type ToolResultDTO struct {
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	Name       string `json:"name,omitempty"`
-	Content    string `json:"content,omitempty"`
+	ToolCallID   string               `json:"tool_call_id,omitempty"`
+	Name         string               `json:"name,omitempty"`
+	Content      string               `json:"content,omitempty"`
+	Presentation *ToolPresentationDTO `json:"presentation,omitempty"`
 }
 
 type LearningReviewTranscriptMessageDTO struct {

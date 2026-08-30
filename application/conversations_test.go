@@ -474,3 +474,41 @@ func TestMsgDTOIncludesToolOutputAttachmentsWithoutDataURL(t *testing.T) {
 		t.Fatalf("attachment = %+v, DataURL must be omitted", att)
 	}
 }
+
+func TestMsgDTOSeparatesRawToolOutputFromFrontendPresentation(t *testing.T) {
+	rawOutput := "---\ncount: 2\ntotal: 12K\n---\n-rw-r--r-- 4K Aug 30 15:36 file-a\n-rw-r--r-- 8K Aug 30 15:38 file with spaces-b"
+	dto := msgDTO(domain.Message{
+		ID:        "m1",
+		Role:      domain.RoleAssistant,
+		CreatedAt: time.Time{},
+		ToolCalls: []domain.ToolCall{{
+			ID: "tc1", Name: "file_list", Args: `{"path":"/workspace"}`,
+			Status: domain.ToolOK, Output: rawOutput,
+		}},
+	})
+	if len(dto.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %+v", dto.ToolCalls)
+	}
+	call := dto.ToolCalls[0]
+	if call.Output != rawOutput {
+		t.Fatalf("raw output changed: got %q, want %q", call.Output, rawOutput)
+	}
+	if call.Presentation == nil {
+		t.Fatal("frontend presentation is missing")
+	}
+	if call.Presentation.Variant != "file-list" || call.Presentation.Action != "Files listed" {
+		t.Fatalf("presentation header = %+v", call.Presentation)
+	}
+	if call.Presentation.Request != "file_list({\n  \"path\": \"/workspace\"\n})" {
+		t.Errorf("presentation request = %q", call.Presentation.Request)
+	}
+	if call.Presentation.Result.Summary != "2 entries · 12K" || call.Presentation.Result.Format != "list" {
+		t.Errorf("presentation result = %+v", call.Presentation.Result)
+	}
+	if len(call.Presentation.Result.Items) != 2 {
+		t.Fatalf("presentation items = %+v", call.Presentation.Result.Items)
+	}
+	if got := call.Presentation.Result.Items[1]["name"]; got != "file with spaces-b" {
+		t.Errorf("file-list item name = %v", got)
+	}
+}

@@ -248,27 +248,63 @@ func TestEventFieldNames(t *testing.T) {
 
 	b, _ = json.Marshal(ToolCompletedEvent{
 		RunID: "r", ConversationID: "c", ToolCallID: "t", Name: "generate_image", Status: "ok",
+		Presentation: &ToolPresentationDTO{
+			Variant: "media", Action: "Image generated", Request: "generate_image(...)",
+			Result: ToolPresentationResultDTO{Format: "status", Summary: "1 image"},
+		},
 		Attachments: []AttachmentDTO{{Type: "image", Name: "gen.png", FilePath: "/tmp/gen.png"}},
 	})
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"tool_call_id", "attachments"} {
+	for _, k := range []string{"tool_call_id", "attachments", "presentation"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("missing field %q in ToolCompletedEvent JSON", k)
 		}
 	}
+	if got := m["presentation"].(map[string]any)["variant"]; got != "media" {
+		t.Errorf("presentation.variant = %v, want media", got)
+	}
 
 	b, _ = json.Marshal(RoundDeltaFrame{
 		Seq: 1, Kind: RoundDeltaTool, ToolCallID: "t", Name: "exec", Text: "line1\n",
+		Presentation: &ToolPresentationDTO{Variant: "terminal", Action: "Running command", Result: ToolPresentationResultDTO{Format: "terminal"}},
 	})
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"seq", "kind", "tool_call_id", "name", "text"} {
+	for _, k := range []string{"seq", "kind", "tool_call_id", "name", "text", "presentation"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("missing field %q in RoundDeltaFrame JSON", k)
 		}
+	}
+}
+
+func TestToolCallPresentationRoundTripKeepsRawOutputSeparate(t *testing.T) {
+	in := ToolCallDTO{
+		ID: "tc_1", Name: "file_list", Args: json.RawMessage(`{"path":"/workspace"}`),
+		Status: "ok", Output: "---\ncount: 2\n---\n-rw file-a\n-rw file-b",
+		Presentation: &ToolPresentationDTO{
+			Variant: "file-list", Action: "Files listed", Request: "file_list({\n  \"path\": \"/workspace\"\n})",
+			Result: ToolPresentationResultDTO{
+				Format: "list", Summary: "2 entries", Meta: map[string]any{"count": 2},
+				Items: []map[string]any{{"name": "file-a"}, {"name": "file-b"}},
+			},
+		},
+	}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out ToolCallDTO
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Output != in.Output {
+		t.Fatalf("raw output changed: got %q, want %q", out.Output, in.Output)
+	}
+	if out.Presentation == nil || out.Presentation.Result.Summary != "2 entries" {
+		t.Fatalf("presentation was not round-tripped: %+v", out.Presentation)
 	}
 }
 

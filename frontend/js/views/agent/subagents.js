@@ -170,19 +170,18 @@ function activeConversationId() {
 }
 
 // Dock chips: live runs of the active conversation plus runs that settled
-// within RECENT_MS. Sorted by start time (stable) — never by recency, so
-// live delta updates cannot reshuffle chips under the cursor.
+// within RECENT_MS. Newest runs are shown first so the active/latest work is
+// immediately reachable on a tall mobile drawer.
 function visibleRuns() {
   const now = Date.now();
   const active = activeConversationId();
-  return [...state.runs.values()]
+  return sortRunsNewestFirst([...state.runs.values()]
     .filter((run) => {
       if (active && run.conversation_id !== active) return false;
       if (LIVE.has(run.status)) return true;
       const ended = Date.parse(run.ended_at || run.updated_at || '') || 0;
       return ended && now - ended < RECENT_MS;
-    })
-    .sort((a, b) => startedAtMs(a) - startedAtMs(b));
+    }));
 }
 
 // Every run of the active conversation, settled included — the drawer's
@@ -190,13 +189,23 @@ function visibleRuns() {
 // as long as the conversation exists.
 function conversationRuns() {
   const active = activeConversationId();
-  return [...state.runs.values()]
+  return sortRunsNewestFirst([...state.runs.values()]
     .filter((run) => !active || run.conversation_id === active)
-    .sort((a, b) => startedAtMs(a) - startedAtMs(b));
+  );
 }
 
 function startedAtMs(run) {
-  return Date.parse(run.started_at || run.updated_at || '') || 0;
+  return Date.parse(run.started_at || run.created_at || run.updated_at || '') || 0;
+}
+
+// sortRunsNewestFirst also handles old persisted ACP records without a
+// timestamp. The index tie-breaker preserves the newest insertion at the top
+// for those records, matching the backend's historical ascending list order.
+export function sortRunsNewestFirst(runs) {
+  return (runs || [])
+    .map((run, index) => ({ run, index, startedAt: startedAtMs(run) }))
+    .sort((a, b) => b.startedAt - a.startedAt || b.index - a.index)
+    .map(({ run }) => run);
 }
 
 export function firstVisibleRunId() {
@@ -225,19 +234,19 @@ function renderDock() {
   title.textContent = `${runs.length} subagent${runs.length === 1 ? '' : 's'}`;
   meta.textContent = live ? `${live} live` : 'settled';
   // Patch in place: existing chips keep their DOM node (hover/focus and
-  // position preserved across live deltas); only new runs are appended
-  // and settled runs removed. Runs are appended in spawn order, so the
-  // DOM order matches the stable sort without reshuffling.
+  // listeners), while append() moves each node into the requested
+  // newest-first position. This matters when a newly-started run arrives
+  // after older chips already exist.
   const seen = new Set();
   for (const run of runs) {
     seen.add(run.id);
     let chip = list.querySelector(`[data-run-id="${run.id}"]`);
     if (!chip) {
       chip = buildDockChip(run);
-      list.append(chip);
     } else {
       updateDockChip(chip, run);
     }
+    list.append(chip);
   }
   for (const chip of [...list.querySelectorAll('[data-run-id]')]) {
     if (!seen.has(chip.dataset.runId)) chip.remove();
@@ -386,7 +395,9 @@ function renderRunSidebar(list, runs, selectedId) {
     seen.add(run.id);
     const item = existing.get(run.id) || buildRunSidebarItem(run);
     updateRunSidebarItem(item, run, selectedId);
-    if (!item.parentNode) list.append(item);
+    // append() preserves the item and its focus/listener state while moving
+    // it into the newest-first order on every refresh.
+    list.append(item);
   }
   for (const [id, item] of existing) {
     if (!seen.has(id)) item.remove();
@@ -581,7 +592,7 @@ function transcriptPromptMessage(segment) {
   const body = el('div', { class: 'agent-bubble-text' });
   renderPromptContent(body, segment.text);
   const message = el('div', {
-    class: 'agent-message user acp-prompt-message',
+    class: 'agent-message acp-prompt-message',
     'data-transcript-segment-key': segment.key,
   }, el('div', { class: 'agent-bubble' }, body));
   if (segment.at) {
@@ -733,11 +744,23 @@ function updateTranscriptLine(line, chunk) {
 }
 
 function acpToolCard(chunk) {
+  const status = normalizeAcpToolStatus(chunk.tool_status);
+  const actionText = chunk.tool_title || chunk.tool_kind || chunk.tool_id || 'Tool';
   const card = renderToolJob({
     name: chunk.tool_kind || chunk.tool_title || 'tool',
     args: {},
-    status: normalizeAcpToolStatus(chunk.tool_status),
+    status,
     output: chunk.text || '',
+    presentation: {
+      variant: 'terminal',
+      action: actionText,
+      request: '',
+      result: {
+        format: 'terminal',
+        summary: acpToolMeta(chunk, status),
+        text: chunk.text || '',
+      },
+    },
   });
   const action = card.querySelector('.agent-tool-terminal-action');
   if (action) action.textContent = chunk.tool_title || chunk.tool_kind || 'Tool';

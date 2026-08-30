@@ -137,12 +137,13 @@ func msgDTO(m domain.Message) contracts.MessageDTO {
 
 func toolCallDTO(tc domain.ToolCall) contracts.ToolCallDTO {
 	dto := contracts.ToolCallDTO{
-		ID:     tc.ID,
-		Name:   tc.Name,
-		Args:   []byte(tc.Args),
-		Status: string(tc.Status),
-		Output: tc.Output,
-		Opaque: tc.Opaque,
+		ID:           tc.ID,
+		Name:         tc.Name,
+		Args:         []byte(tc.Args),
+		Status:       string(tc.Status),
+		Output:       tc.Output,
+		Opaque:       tc.Opaque,
+		Presentation: toolPresentationDTO(tc),
 	}
 	for _, att := range tc.OutputAttachments {
 		dto.OutputAttachments = append(dto.OutputAttachments, contracts.AttachmentDTO{

@@ -863,6 +863,7 @@ func (a *App) completeSubagentRunLocked(conversationID, toolCallID string, statu
 			Name:           "subagent",
 			Status:         string(status),
 			Output:         domain.SubagentBriefResult(run),
+			Presentation:   buildToolPresentation("subagent", "", status, domain.SubagentBriefResult(run)),
 		})
 	}
 	return nil

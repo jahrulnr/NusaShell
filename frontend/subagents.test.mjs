@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { syncTranscript } from './js/views/agent/subagents.js';
+import { sortRunsNewestFirst, syncTranscript } from './js/views/agent/subagents.js';
 
 const acpCSS = await readFile(new URL('./styles/acp.css', import.meta.url), 'utf8');
 
@@ -18,6 +18,19 @@ function cleanup() {
   delete global.window;
   delete global.document;
 }
+
+test('ACP runs are ordered newest first, including legacy records without timestamps', () => {
+  const ordered = sortRunsNewestFirst([
+    { id: 'old', started_at: '2026-08-30T08:00:00Z' },
+    { id: 'new', started_at: '2026-08-30T08:02:00Z' },
+    { id: 'legacy-a' },
+    { id: 'legacy-b' },
+  ]);
+  assert.deepEqual(
+    ordered.map((run) => run.id),
+    ['new', 'old', 'legacy-b', 'legacy-a'],
+  );
+});
 
 test('Subagent transcript updates a growing chunk in place', () => {
   const { dom, panel } = makePanel();
@@ -87,7 +100,7 @@ test('Subagent transcript merges legacy token fragments and tool updates', () =>
   }
 });
 
-test('Subagent prompts render as user bubbles before and between assistant rounds', () => {
+test('Subagent prompts render as isolated prompt events before and between assistant rounds', () => {
   const { dom, panel } = makePanel();
   try {
     syncTranscript(panel, [
@@ -96,11 +109,12 @@ test('Subagent prompts render as user bubbles before and between assistant round
       { kind: 'text', text: 'continued work' },
     ], 'initial delegation brief');
 
-    const userMessages = [...panel.querySelectorAll('.acp-transcript > .agent-message.user')];
-    assert.equal(userMessages.length, 2);
-    assert.equal(userMessages[0].querySelector('.agent-bubble').textContent, 'initial delegation brief');
-    assert.equal(userMessages[1].querySelector('.agent-bubble').textContent, 'steer from the parent');
-    assert.equal(userMessages[0].querySelector('.agent-bubble').classList.contains('acp-transcript'), false);
+    const promptMessages = [...panel.querySelectorAll('.acp-transcript > .acp-prompt-message')];
+    assert.equal(promptMessages.length, 2);
+    assert.equal(promptMessages[0].querySelector('.agent-bubble').textContent, 'initial delegation brief');
+    assert.equal(promptMessages[1].querySelector('.agent-bubble').textContent, 'steer from the parent');
+    assert.equal(promptMessages[0].classList.contains('user'), false, 'ACP prompt must not inherit the main user bubble');
+    assert.equal(promptMessages[0].querySelector('.agent-bubble').classList.contains('acp-transcript'), false);
     assert.equal(panel.querySelectorAll('.acp-transcript > .agent-message.assistant').length, 2);
     assert.equal(panel.querySelectorAll('.agent-round.is-thought').length, 1);
     assert.equal(panel.querySelectorAll('.agent-round.is-text').length, 1);
@@ -134,4 +148,10 @@ test('ACP drawer keeps the mobile run picker compact and transcript horizontally
   assert.match(mobileRules, /flex-direction:\s*row/);
   assert.match(mobileRules, /overflow-x:\s*auto/);
   assert.match(mobileRules, /overflow-x:\s*hidden/);
+});
+
+test('ACP prompt styling is bounded and scoped away from the main user bubble', () => {
+  assert.match(acpCSS, /\.acp-transcript \.acp-prompt-message \{[^}]*align-self:\s*stretch;/s);
+  assert.match(acpCSS, /\.acp-transcript \.acp-prompt-message \.agent-bubble \{[^}]*max-height:\s*min\(/s);
+  assert.match(acpCSS, /\.acp-transcript \.acp-prompt-message \.agent-bubble \{[^}]*overflow-y:\s*auto;/s);
 });

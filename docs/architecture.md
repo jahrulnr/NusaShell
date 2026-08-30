@@ -216,6 +216,14 @@ return the same `ref`-shaped items), then executes them via `mcp_call`
 with the observed `ref` — `mcp__<server>__<tool>` names are not callable.
 Stdio connections are lazy and cached per process.
 
+Tool transcript data and frontend display data are separate by contract.
+`ToolCallDTO` and tool lifecycle events keep raw `args`/`output` for the
+provider-facing transcript and add an optional `presentation` view for the
+browser. Predictable built-ins expose variants such as file-list,
+search-results, collection, document, and media; `exec` and `mcp_call` stay
+generic terminal views. See
+[`decisions/002-tool-presentation-contract.md`](decisions/002-tool-presentation-contract.md).
+
 ## Verification baseline
 
 ```text

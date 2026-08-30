@@ -289,6 +289,17 @@ function ensureThinkingDots(textBox) {
   textBox.append(thinkingDots());
 }
 
+// setThinkingDots controls the one generic wait indicator for a live round.
+// Compaction has its own more descriptive status row, so callers can suppress
+// these dots while compaction is active and restore them when the provider is
+// ready to continue. Keeping the operation idempotent prevents event-order
+// races from creating duplicate loading indicators.
+export function setThinkingDots(textBox, visible) {
+  if (!textBox) return;
+  textBox.querySelectorAll('.agent-thinking-dots').forEach((dots) => dots.remove());
+  if (visible && !textBox.textContent.trim()) ensureThinkingDots(textBox);
+}
+
 function newPendingSlot() {
   const bubble = el('div', { class: 'agent-bubble' });
   const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
@@ -542,6 +553,10 @@ export function isSubagentAuxiliaryTool(name) {
   return name === 'subagent_wait' || name === 'subagent_result';
 }
 
+export function isMediaGenerationTool(name) {
+  return name === 'generate_media' || name === 'generate_image' || name === 'generate_speech' || name === 'generate_video';
+}
+
 export function renderToolCallCard(toolCall) {
   // `subagent` is the user-facing delegation card. The wait call and the
   // synthetic result call are provider bookkeeping for that same run; showing
@@ -564,18 +579,8 @@ export function renderToolCallCard(toolCall) {
     card.dataset.standalone = 'true';
     return card;
   }
-  if (toolCall.name === 'generate_image') {
-    const card = renderGenerateImageCard(toolCall);
-    card.dataset.standalone = 'true';
-    return card;
-  }
-  if (toolCall.name === 'generate_speech') {
-    const card = renderGenerateSpeechCard(toolCall);
-    card.dataset.standalone = 'true';
-    return card;
-  }
-  if (toolCall.name === 'generate_video') {
-    const card = renderGenerateVideoCard(toolCall);
+  if (isMediaGenerationTool(toolCall.name)) {
+    const card = renderMediaGenerationCard(toolCall);
     card.dataset.standalone = 'true';
     return card;
   }
@@ -604,6 +609,20 @@ export function renderToolCallCard(toolCall) {
     return card;
   }
   return renderToolJob(toolCall);
+}
+
+function renderMediaGenerationCard(toolCall) {
+  if (toolCall.name !== 'generate_media') {
+    if (toolCall.name === 'generate_image') return renderGenerateImageCard(toolCall);
+    if (toolCall.name === 'generate_speech') return renderGenerateSpeechCard(toolCall);
+    if (toolCall.name === 'generate_video') return renderGenerateVideoCard(toolCall);
+    return renderToolJob(toolCall);
+  }
+  const args = parseToolArgs(toolCall.args);
+  const kind = String(args.media_type || '').toLowerCase();
+  const normalizedName = kind === 'image' ? 'generate_image' : kind === 'speech' ? 'generate_speech' : kind === 'video' ? 'generate_video' : '';
+  if (!normalizedName) return renderToolJob(toolCall);
+  return renderMediaGenerationCard({ ...toolCall, name: normalizedName });
 }
 
 // parseShowImageOutput extracts a show(op=image) result from a tool call's
@@ -967,6 +986,17 @@ function parseToolArgs(args) {
   return {};
 }
 
+function toolPresentationParts(toolCall) {
+  const result = toolCall?.presentation?.result;
+  if (result && result.format === 'media') {
+    return {
+      meta: result.meta && typeof result.meta === 'object' ? result.meta : {},
+      body: result.text ? String(result.text) : '',
+    };
+  }
+  return parseSubagentResult(toolCall?.output || '');
+}
+
 function imageSrc(attachment) {
   if (!attachment) return '';
   if (attachment.data_url) return attachment.data_url;
@@ -983,12 +1013,13 @@ function formatImageCost(value) {
 
 export function renderGenerateImageCard(toolCall) {
   const args = parseToolArgs(toolCall.args);
-  const parsed = parseSubagentResult(toolCall.output || '');
+  const parsed = toolPresentationParts(toolCall);
   const meta = parsed.meta || {};
   const attachments = [...(toolCall.output_attachments || toolCall.attachments || [])]
     .filter((item) => !item.type || item.type === 'image');
   const isFailed = toolCall.status === 'fail' || meta.status === 'failed';
-  const isRunning = !isFailed && (toolCall.status === 'running' || !toolCall.output);
+  const hasPresentationResult = Boolean(toolCall.presentation?.result?.text || meta.file_path || attachments.length);
+  const isRunning = !isFailed && (toolCall.status === 'running' || (!toolCall.output && !hasPresentationResult));
   const status = isRunning ? 'running' : (isFailed ? 'error' : 'success');
   const prompt = String(args.prompt || '').trim();
   const promptPreview = prompt.split('\n')[0].slice(0, 140);
@@ -1080,14 +1111,15 @@ export function renderGenerateImageCard(toolCall) {
 // URL is absent (large audio payloads, replayed history).
 function renderGenerateSpeechCard(toolCall) {
   const args = parseToolArgs(toolCall.args);
-  const parsed = parseSubagentResult(toolCall.output || '');
+  const parsed = toolPresentationParts(toolCall);
   const meta = parsed.meta || {};
   // output_attachments is the wire field; older history may use
   // .attachments. We accept either.
   const attachments = [...(toolCall.output_attachments || toolCall.attachments || [])]
     .filter((item) => !item.type || item.type === 'audio');
   const isFailed = toolCall.status === 'fail' || meta.status === 'failed';
-  const isRunning = !isFailed && (toolCall.status === 'running' || !toolCall.output);
+  const hasPresentationResult = Boolean(toolCall.presentation?.result?.text || meta.file_path || attachments.length);
+  const isRunning = !isFailed && (toolCall.status === 'running' || (!toolCall.output && !hasPresentationResult));
   const status = isRunning ? 'running' : (isFailed ? 'error' : 'success');
   const prompt = String(args.text || args.prompt || '').trim();
   const promptPreview = prompt.split('\n')[0].slice(0, 140);
@@ -1174,14 +1206,15 @@ function renderGenerateSpeechCard(toolCall) {
 // link.
 function renderGenerateVideoCard(toolCall) {
   const args = parseToolArgs(toolCall.args);
-  const parsed = parseSubagentResult(toolCall.output || '');
+  const parsed = toolPresentationParts(toolCall);
   const meta = parsed.meta || {};
   // output_attachments is the wire field; older history may use
   // .attachments. We accept either.
   const attachments = [...(toolCall.output_attachments || toolCall.attachments || [])]
     .filter((item) => !item.type || item.type === 'video');
   const isFailed = toolCall.status === 'fail' || meta.status === 'failed';
-  const isRunning = !isFailed && (toolCall.status === 'running' || !toolCall.output);
+  const hasPresentationResult = Boolean(toolCall.presentation?.result?.text || meta.file_path || attachments.length);
+  const isRunning = !isFailed && (toolCall.status === 'running' || (!toolCall.output && !hasPresentationResult));
   const status = isRunning ? 'running' : (isFailed ? 'error' : 'success');
   const prompt = String(args.prompt || '').trim();
   const promptPreview = prompt.split('\n')[0].slice(0, 140);
@@ -1317,6 +1350,9 @@ export function renderToolJob(toolCall) {
   if (toolCall.id) card.dataset.toolCallId = String(toolCall.id);
   const name = toolCall.name || 'tool';
   const status = toolCall.status || 'running';
+  const presentation = toolCall.presentation || null;
+  if (presentation?.variant) card.dataset.presentationVariant = String(presentation.variant);
+  if (presentation?.result?.format) card.dataset.resultFormat = String(presentation.result.format);
   const isMcp = name.startsWith('mcp__');
   const isMcpCall = name === 'mcp_call';
   const mcpRef = isMcpCall ? (parseToolArgs(toolCall.args).ref || null) : null;
@@ -1331,7 +1367,7 @@ export function renderToolJob(toolCall) {
   const streaming = isStreamingTool(name);
   const summary = el('summary', {},
     el('span', { class: 'agent-tool-terminal-prompt', text: toolStatusGlyph(status), 'aria-hidden': 'true' }),
-    el('span', { class: 'agent-tool-terminal-action', text: toolTimelineTitle(name, status) }),
+    el('span', { class: 'agent-tool-terminal-action', text: presentation?.action || toolTimelineTitle(name, status) }),
     el('span', { class: 'agent-tool-terminal-title', text: displayName }),
     (isMcp || isMcpCall) ? el('span', { class: 'agent-tool-terminal-badge', text: 'MCP' }) : null,
     el('span', { class: 'agent-tool-terminal-meta', text: toolTerminalMeta(toolCall) }),
@@ -1340,11 +1376,15 @@ export function renderToolJob(toolCall) {
     el('span', { class: 'agent-tool-terminal-chevron', text: '⌄' }),
   );
   const body = el('div', { class: 'agent-tool-terminal-body' },
-    toolTerminalPanel('Output', 'agent-tool-terminal-output', toolTerminalOutput(toolCall)),
-    toolTerminalPanel('Request', 'agent-tool-terminal-input', formatToolTerminalInput(toolCall.name, toolCall.args)),
+    // Keep this order stable: the request explains the action, then the
+    // result confirms what happened. The backend presentation contract owns
+    // the display text; the formatter remains a legacy fallback.
+    toolTerminalPanel('Request', 'agent-tool-terminal-input', toolPresentationRequest(toolCall)),
+    toolTerminalPanel('Output', 'agent-tool-terminal-output', toolTerminalOutput(toolCall), presentation?.result),
   );
   card._toolArgs = toolCall.args;
   card._toolName = name;
+  card._toolPresentation = presentation;
   card.append(summary, body);
   setToolTerminalStatus(card, toolCall.status || 'running');
   return card;
@@ -1461,6 +1501,8 @@ export function formatTokens(value) {
 }
 
 export function toolTerminalMeta(toolCall) {
+  const summary = toolCall?.presentation?.result?.summary;
+  if (summary) return String(summary);
   const status = toolCall.status || 'running';
   if (status === 'running') return 'Running';
   if (toolCall.name === 'mcp_call') {
@@ -1475,6 +1517,14 @@ export function toolTerminalMeta(toolCall) {
 }
 
 export function toolTerminalOutput(toolCall) {
+  const result = toolCall?.presentation?.result;
+  if (result) {
+    if (result.format === 'list' && Array.isArray(result.items)) {
+      return result.items.length ? '' : (result.summary ? String(result.summary) : 'No results');
+    }
+    if (result.text !== undefined && result.text !== null && result.text !== '') return truncate(String(result.text), 12000);
+    if (result.summary) return String(result.summary);
+  }
   if (toolCall.output !== undefined && toolCall.output !== null && toolCall.output !== '') return truncate(String(toolCall.output), 12000);
   if (toolCall.status === 'running') {
     // Streaming tools start with the placeholder, which live deltas replace.
@@ -1498,11 +1548,39 @@ export function setToolTerminalStatus(card, status) {
   const prompt = card.querySelector('.agent-tool-terminal-prompt');
   if (prompt) prompt.textContent = toolStatusGlyph(normalized);
   const action = card.querySelector('.agent-tool-terminal-action');
-  if (action && card._toolName) action.textContent = toolTimelineTitle(card._toolName, normalized);
+  if (action && card._toolName) action.textContent = card._toolPresentation?.action || toolTimelineTitle(card._toolName, normalized);
   // The per-call stop button lives on streaming tools only and disappears
   // once the tool settles.
   const stop = card.querySelector('.agent-tool-stop');
   if (stop) stop.hidden = running ? false : true;
+}
+
+// setToolTerminalPresentation updates a live card when the backend sends the
+// frontend view after the initial SSE delta created the card. Raw tool output
+// is deliberately not reconstructed here; only presentation fields are
+// painted into the browser.
+export function setToolTerminalPresentation(card, presentation) {
+  if (!card || !presentation) return;
+  const previous = card._toolPresentation || {};
+  const merged = {
+    ...previous,
+    ...presentation,
+    // A review ToolResult can be generated without args. Keep the call's
+    // request/action while replacing only the result that just completed.
+    action: presentation.action || previous.action || '',
+    request: presentation.request || previous.request || '',
+    result: { ...(previous.result || {}), ...(presentation.result || {}) },
+  };
+  card._toolPresentation = merged;
+  if (merged.variant) card.dataset.presentationVariant = String(merged.variant);
+  if (merged.result?.format) card.dataset.resultFormat = String(merged.result.format);
+  const action = card.querySelector('.agent-tool-terminal-action');
+  if (action && merged.action) action.textContent = String(merged.action);
+  const request = card.querySelector('.agent-tool-terminal-input');
+  if (request && merged.request !== undefined) request.textContent = String(merged.request || '');
+  const output = card.querySelector('.agent-tool-terminal-output');
+  if (!output) return;
+  output.replaceWith(renderToolPresentationResult(merged.result || {}, 'agent-tool-terminal-output'));
 }
 
 function toolStatusGlyph(status) {
@@ -1557,11 +1635,104 @@ export function attachmentChip(attachment, onRemove) {
   return chip;
 }
 
-function toolTerminalPanel(label, codeClass, text) {
+function toolTerminalPanel(label, codeClass, text, result) {
+  const content = label === 'Output' && result
+    ? renderToolPresentationResult(result, codeClass, text)
+    : el('pre', { class: codeClass, text });
   return el('div', { class: 'agent-tool-terminal-panel' },
     el('div', { class: 'agent-tool-terminal-panel-label', text: label }),
-    el('pre', { class: codeClass, text }),
+    content,
   );
+}
+
+function renderToolPresentationResult(result, className, fallbackText = '') {
+  if (result?.format === 'list' && Array.isArray(result.items) && result.items.length) {
+    return renderToolPresentationList(result.items, className);
+  }
+  if (result?.format === 'status') {
+    return renderToolPresentationStatus(result, className);
+  }
+  const text = result?.text !== undefined && result?.text !== null && result.text !== ''
+    ? String(result.text)
+    : (result?.summary ? String(result.summary) : fallbackText);
+  const output = el('pre', { class: className, text });
+  if (result?.language) output.dataset.language = String(result.language);
+  if (result?.format === 'document') output.classList.add('agent-tool-terminal-document');
+  return output;
+}
+
+function renderToolPresentationStatus(result, className) {
+  const root = el('div', { class: `${className} agent-tool-terminal-status-result` });
+  if (result?.summary) {
+    root.append(el('div', { class: 'agent-tool-terminal-status-summary', text: String(result.summary) }));
+  }
+  const chips = renderToolPresentationMeta(result?.meta);
+  if (chips) root.append(chips);
+  if (!root.children.length) root.textContent = 'Completed';
+  return root;
+}
+
+function renderToolPresentationMeta(meta) {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return null;
+  const chips = el('div', { class: 'agent-tool-terminal-meta-chips' });
+  const hidden = new Set(['count', 'total', 'status', 'ok', 'summary']);
+  for (const [key, value] of Object.entries(meta)) {
+    if (hidden.has(key)) continue;
+    const display = compactToolMetaValue(key, value);
+    if (!display) continue;
+    const label = key.replace(/[_-]+/g, ' ');
+    chips.append(el('span', { class: 'agent-tool-terminal-meta-chip', title: `${label}: ${display}` },
+      el('b', { text: `${label}:` }),
+      el('span', { text: display }),
+    ));
+  }
+  return chips.children.length ? chips : null;
+}
+
+function compactToolMetaValue(key, value) {
+  if (value === null || value === undefined || value === '') return '';
+  if (Array.isArray(value)) {
+    const scalar = value.filter((item) => item !== null && item !== undefined && typeof item !== 'object');
+    if (scalar.length === value.length && scalar.length <= 3) return scalar.map(String).join(', ');
+    return `${value.length} item${value.length === 1 ? '' : 's'}`;
+  }
+  if (typeof value === 'object') return '';
+  let text = String(value);
+  if (key === 'sha256' && text.length > 12) text = `${text.slice(0, 12)}…`;
+  return text.length > 72 ? `${text.slice(0, 69)}…` : text;
+}
+
+function renderToolPresentationList(items, className = 'agent-tool-terminal-output') {
+  const list = el('div', { class: `${className} agent-tool-terminal-result-list`, role: 'list' });
+  for (const item of items.slice(0, 100)) {
+    if (!item || typeof item !== 'object') continue;
+    const title = item.name || item.title || item.id || item.path || item.ref || 'Result';
+    const detail = toolPresentationItemDetail(item);
+    list.append(el('div', { class: 'agent-tool-terminal-result-item', role: 'listitem' },
+      el('strong', { text: String(title) }),
+      detail ? el('span', { text: String(detail).slice(0, 240) }) : null,
+    ));
+  }
+  return list;
+}
+
+function toolPresentationItemDetail(item) {
+  if (item.mode || item.size || item.modified) {
+    return [item.mode, item.size, item.modified].filter((value) => value !== undefined && value !== null && value !== '').join(' · ');
+  }
+  if (item.line !== undefined && item.line !== null) {
+    const content = item.content ? ` · ${item.content}` : '';
+    return `line ${item.line}${content}`;
+  }
+  if (item.matches !== undefined && item.matches !== null) return `${item.matches} matches`;
+  return item.description || item.snippet || item.content || item.path || item.status || '';
+}
+
+function toolPresentationRequest(toolCall) {
+  const request = toolCall?.presentation?.request;
+  return request !== undefined && request !== null
+    ? String(request)
+    : formatToolTerminalInput(toolCall?.name, toolCall?.args);
 }
 
 function summarizeToolArgs(args) {

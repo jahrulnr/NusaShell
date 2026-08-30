@@ -127,7 +127,7 @@ test('ACP transcripts use the agent conversation structure and historical run lo
   assert.match(subagentsView, /acp\.runs\.get/);
   assert.match(subagentsView, /class: 'agent-message assistant acp-run-message'/);
   assert.match(subagentsView, /class: 'agent-bubble acp-transcript-body'/);
-  assert.match(subagentsView, /class: 'agent-message user acp-prompt-message'/);
+  assert.match(subagentsView, /class: 'agent-message acp-prompt-message'/);
   assert.match(subagentsView, /kind === 'prompt'/);
   assert.match(subagentsView, /syncTranscript\(panel, run\.transcript \|\| \[\], run\.prompt, run\.started_at\)/);
   assert.match(subagentsView, /class: `agent-round acp-transcript-round/);
@@ -277,6 +277,9 @@ test('Compaction lifecycle is room-scoped and reuses the Thinking disclosure for
   assert.match(agentRender, /title: 'Compacted context'/);
   assert.match(agentRender, /collapsedHint: 'Show handover'/);
   assert.match(agentCSS, /\.agent-compaction-status[\s\S]*agent-compaction-dot/);
+  assert.match(agentView, /function syncRunLoadingIndicator/);
+  assert.match(agentView, /setThinkingDots\(run\.textBox, !compacting/);
+  assert.match(agentRender, /export function setThinkingDots/);
 });
 
 test('Steer application seals old dots and anchors the next round after the user bubble', () => {

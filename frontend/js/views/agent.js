@@ -22,9 +22,10 @@ import {
   renderToolCallCard,
   renderSubagentCard,
   isSubagentAuxiliaryTool,
-  renderGenerateImageCard,
+  isMediaGenerationTool,
   renderTodoItem,
   setToolTerminalStatus,
+  setToolTerminalPresentation,
   toolTerminalMeta,
   toolTerminalOutput,
   applyQueuedToolDeltas,
@@ -38,6 +39,7 @@ import {
   insertAfterOrAppend,
   bindOptimisticTurn,
   thinkingDots,
+  setThinkingDots,
   renderCompactionStatus,
   captureDisclosureState,
   restoreDisclosureState,
@@ -295,7 +297,7 @@ function applyRoundDeltaFrame(run, frame) {
       if (isSubagentAuxiliaryTool(frame.name)) break;
       if (run.conversationId !== state.activeId) break;
       sealReasoningStreaming(run.reasoningEl);
-      ensureLiveToolJob(run, frame.tool_call_id, frame.name);
+      ensureLiveToolJob(run, frame.tool_call_id, frame.name, undefined, frame.presentation);
       if (frame.text) queueToolDelta(run, frame.tool_call_id, frame.text);
       break;
   }
@@ -362,7 +364,7 @@ function startToolElapsed(job) {
 // ensureLiveToolJob mounts (or reuses) the running tool card so SSE tool
 // deltas can paint before agent.tool.started arrives — and so a reload
 // that only replays the round stream still has a terminal to fill.
-function ensureLiveToolJob(run, toolCallId, name, args) {
+function ensureLiveToolJob(run, toolCallId, name, args, presentation) {
   if (!run || !toolCallId) return null;
   if (!run.toolJobs) run.toolJobs = new Map();
   // The delegation card is the single user-facing representation for ACP
@@ -377,14 +379,15 @@ function ensureLiveToolJob(run, toolCallId, name, args) {
       const meta = existing.querySelector('.agent-tool-terminal-meta');
       if (meta) meta.textContent = toolTerminalMeta({ name: existing._toolName || name, args, status: 'running' });
     }
+    if (presentation) setToolTerminalPresentation(existing, presentation);
     startToolElapsed(existing);
     return existing;
   }
   if (run.conversationId !== state.activeId || !run.strip) return null;
   const toolName = name || 'exec';
-  const job = toolName === 'generate_image'
-    ? renderGenerateImageCard({ id: toolCallId, name: toolName, args: args ?? {}, status: 'running' })
-    : renderToolJob({ id: toolCallId, name: toolName, args: args ?? {}, status: 'running' });
+  const job = isMediaGenerationTool(toolName)
+    ? renderToolCallCard({ id: toolCallId, name: toolName, args: args ?? {}, status: 'running', presentation })
+    : renderToolJob({ id: toolCallId, name: toolName, args: args ?? {}, status: 'running', presentation });
   if (isStreamingTool(toolName)) bindToolStop(job, () => run.runId);
   setLiveToolJob(run.toolJobs, toolCallId, job);
   placeToolCard(run.bubble, run.strip, job);
@@ -1119,6 +1122,7 @@ function reattachActiveRun() {
   run.reasoningEl = reasoningEl;
   run.textBox = textBox;
   run.strip = strip;
+  syncRunLoadingIndicator(run);
   clearToolTimers(run);
   run.toolJobs = toolJobs;
   scrollToBottom(true);
@@ -1397,6 +1401,9 @@ async function retryTurn(failedNode, failedMessageId) {
         messageId: existing?.messageId,
       });
     }
+    const retryRun = state.runs.get(runId);
+    mountCompactionStatus(state.activeId, retryRun);
+    syncRunLoadingIndicator(retryRun);
     flushPendingEvents(runId);
     updateComposerStatus();
     scrollToBottom(true);
@@ -1422,6 +1429,27 @@ function compactionRunMatches(run, runId) {
   return !run || !runId || run.runId === runId;
 }
 
+function runIsWaitingForProvider(run) {
+  const textBox = run?.textBox;
+  return Boolean(
+    textBox?.isConnected
+    && !String(run.raw || '').trim()
+    && !String(run.rawReasoning || '').trim()
+    && !run.toolsStarted
+    && !(run.toolJobs?.size)
+  );
+}
+
+// There are two possible live statuses: the generic three-dot wait state and
+// the descriptive compaction state. They are mutually exclusive. This helper
+// is called at every transition that can race (turn start, room reattach, and
+// compaction start/end), so out-of-order events cannot paint both rows.
+function syncRunLoadingIndicator(run) {
+  if (!run?.textBox) return;
+  const compacting = state.compactionStatus.has(run.conversationId);
+  setThinkingDots(run.textBox, !compacting && runIsWaitingForProvider(run));
+}
+
 // mountCompactionStatus attaches the transient status to the live assistant
 // bubble when possible. The thread fallback covers the short race before the
 // run placeholder is registered; the node is moved into the bubble the next
@@ -1442,6 +1470,7 @@ function mountCompactionStatus(conversationId, run = runForConversation(conversa
   } else {
     host.append(entry.node);
   }
+  syncRunLoadingIndicator(run);
 }
 
 function markCompacting(conversationId, runId = '') {
@@ -1465,6 +1494,7 @@ function clearCompactionStatus(conversationId, runId = '') {
   if (runId && entry.runId && entry.runId !== runId) return;
   entry.node?.remove();
   state.compactionStatus.delete(conversationId);
+  syncRunLoadingIndicator(runForConversation(conversationId));
   if (conversationId === state.activeId) updateComposerStatus();
 }
 
@@ -1695,27 +1725,6 @@ function scheduleLiveEnhancement(run, changedNodes = []) {
       attachZoomButtons(node);
     }
   }, 120);
-}
-
-function replaceGenerateImageJob(job, payload, assign) {
-  const elapsed = job?.querySelector('.agent-tool-elapsed')?.textContent || '';
-  if (job?._elapsedTimer) {
-    clearInterval(job._elapsedTimer);
-    job._elapsedTimer = null;
-  }
-  const card = renderGenerateImageCard({
-    name: 'generate_image',
-    args: job?._toolArgs ?? {},
-    output: payload.output ?? '',
-    status: payload.status || 'ok',
-    output_attachments: payload.attachments || [],
-  });
-  if (elapsed) {
-    const elapseNode = card.querySelector('.agent-tool-elapsed');
-    if (elapseNode) elapseNode.textContent = elapsed;
-  }
-  if (job) job.replaceWith(card);
-  assign(card);
 }
 
 function endTurn(runId, keepRun = false) {
@@ -1987,6 +1996,7 @@ async function loadOlderChunk() {
           clearToolTimers(prevRun);
           prevRun.toolJobs = new Map();
         }
+        syncRunLoadingIndicator(prevRun);
       }
     }
   } catch (err) {
@@ -2032,6 +2042,10 @@ function bindEvents() {
       updateSendAvailability(state);
     }
     run.awaitingSteerRound = false;
+    // A compaction event can arrive before or between turn-start events. Move
+    // its status onto the current bubble and suppress any dots that the new
+    // round is about to create.
+    mountCompactionStatus(conversation_id, run);
     if ((round || 1) > 1
       && conversation_id === state.activeId
       && state.steerDraft
@@ -2069,6 +2083,7 @@ function bindEvents() {
           run.textBox.textContent = '';
           run.textBox.append(thinkingDots());
         }
+        syncRunLoadingIndicator(run);
         // Open the per-round SSE stream for this round (live deltas).
         void openRoundStream(run);
         return;
@@ -2086,6 +2101,7 @@ function bindEvents() {
             run.textBox.textContent = '';
             run.textBox.append(thinkingDots());
           }
+          syncRunLoadingIndicator(run);
           // Open the per-round SSE stream for this round (live deltas).
           void openRoundStream(run);
         }
@@ -2128,6 +2144,7 @@ function bindEvents() {
     if (run.textBox && !run.raw) {
       run.textBox.append(thinkingDots());
     }
+    syncRunLoadingIndicator(run);
     flushPendingEvents(run_id);
     // Open the per-round SSE stream for this round (live deltas). The final
     // round.done frame chains to the next round via next, so auto-continue
@@ -2194,7 +2211,7 @@ function bindEvents() {
     void openRoundStream(run);
   });
   on('agent.tool.started', (payload) => {
-    const { tool_call_id, name, args, conversation_id } = payload;
+    const { tool_call_id, name, args, presentation, conversation_id } = payload;
     const run = getRunOrQueue('agent.tool.started', payload);
     if (!run) return;
     // ask_question renders as an ask card (not a tool terminal). The card
@@ -2221,11 +2238,11 @@ function bindEvents() {
       }
     }
     if (isSubagentAuxiliaryTool(name)) return;
-    const job = ensureLiveToolJob(run, tool_call_id, name, args);
+    const job = ensureLiveToolJob(run, tool_call_id, name, args, presentation);
     if (job) flushPendingToolDeltas(run);
   });
   on('agent.tool.completed', (payload) => {
-    const { tool_call_id, name, status, output, conversation_id } = payload;
+    const { tool_call_id, name, status, output, presentation, conversation_id } = payload;
     const run = getRunOrQueue('agent.tool.completed', payload);
     if (!run) {
       if (conversation_id === state.activeId) void refreshActiveConversation();
@@ -2259,7 +2276,7 @@ function bindEvents() {
     if (name === 'show') {
       const job = run.toolJobs.get(tool_call_id);
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
-      const toolCall = { id: tool_call_id, name, args: job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
+      const toolCall = { id: tool_call_id, name, args: job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok', presentation };
       const artifact = parseArtifactOutput(toolCall);
       if (artifact && job) {
         const card = renderArtifactCard(toolCall, artifact);
@@ -2292,7 +2309,7 @@ function bindEvents() {
     if (name === 'subagent') {
       const job = run.toolJobs.get(tool_call_id);
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
-      const toolCall = { id: tool_call_id, name, args: job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
+      const toolCall = { id: tool_call_id, name, args: job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok', presentation };
       const card = renderSubagentCard(toolCall);
       card.dataset.standalone = 'true';
       if (job) {
@@ -2305,12 +2322,31 @@ function bindEvents() {
       }
       return;
     }
-    if (name === 'generate_image') {
+    if (isMediaGenerationTool(name)) {
       const job = run.toolJobs.get(tool_call_id);
-      replaceGenerateImageJob(job, payload, (card) => {
-        setLiveToolJob(run.toolJobs, tool_call_id, card);
-        if (!job) placeToolCard(run.bubble, run.strip, card);
-      });
+      const toolCall = {
+        id: tool_call_id,
+        name,
+        args: job?._toolArgs ?? run.toolArgs?.get?.(tool_call_id) ?? {},
+        output: output ?? '',
+        status: status || 'ok',
+        attachments: payload.attachments || [],
+        output_attachments: payload.attachments || [],
+        presentation,
+      };
+      const card = renderToolCallCard(toolCall);
+      if (job) {
+        const elapsed = job.querySelector('.agent-tool-elapsed')?.textContent || '';
+        if (job._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
+        if (elapsed) {
+          const elapsedNode = card.querySelector('.agent-tool-elapsed');
+          if (elapsedNode) elapsedNode.textContent = elapsed;
+        }
+        swapToolCard(job, card, run.bubble, run.strip);
+      } else if (run.strip) {
+        placeToolCard(run.bubble, run.strip, card);
+      }
+      setLiveToolJob(run.toolJobs, tool_call_id, card);
       return;
     }
     // When the job is missing — typically because a page refresh re-attached
@@ -2320,8 +2356,8 @@ function bindEvents() {
     // reload-after-complete works the same as the live delta stream.
     const job = run.toolJobs.get(tool_call_id);
     if (!job) {
-      const toolCall = { id: tool_call_id, name, args: run.toolArgs?.get?.(tool_call_id) ?? {}, output: output ?? '', status: status || 'ok' };
-      const card = name === 'generate_image' ? renderGenerateImageCard(toolCall) : renderToolJob(toolCall);
+      const toolCall = { id: tool_call_id, name, args: run.toolArgs?.get?.(tool_call_id) ?? {}, output: output ?? '', status: status || 'ok', presentation };
+      const card = isMediaGenerationTool(name) ? renderToolCallCard(toolCall) : renderToolJob(toolCall);
       if (isStreamingTool(name)) bindToolStop(card, () => run.runId);
       setLiveToolJob(run.toolJobs, tool_call_id, card);
       if (run.strip) {
@@ -2339,7 +2375,8 @@ function bindEvents() {
     }
     // Clear the elapsed timer — the final duration stays displayed.
     if (job._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
-    const next = { name: job._toolName || name, args: job._toolArgs, status: status || 'ok', output };
+    const next = { name: job._toolName || name, args: job._toolArgs, status: status || 'ok', output, presentation };
+    if (presentation) setToolTerminalPresentation(job, presentation);
     setToolTerminalStatus(job, next.status);
     job.open = false;
     const meta = job.querySelector('.agent-tool-terminal-meta');
@@ -2349,7 +2386,9 @@ function bindEvents() {
     const outputEl = job.querySelector('.agent-tool-terminal-output');
     if (outputEl) {
       outputEl.classList.toggle('is-error', next.status === 'fail');
-      outputEl.textContent = toolTerminalOutput(next);
+      if (!presentation) {
+        outputEl.textContent = toolTerminalOutput(next);
+      }
     }
   });
   on('agent.turn.done', (payload) => {

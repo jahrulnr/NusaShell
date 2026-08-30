@@ -573,9 +573,9 @@ func (s *streamedRecordingToolbox) Execute(ctx context.Context, name string, arg
 }
 
 // TestRunOneToolStreamsDeltas verifies that a streaming-capable toolbox
-// stages one round-delta frame per output chunk into the round stream
-// registry (SSE /stream) during tool execution, with ordered seq numbers,
-// and that the final result is preserved.
+// stages one presentation-bearing tool-start frame followed by one
+// round-delta frame per output chunk into the round stream registry (SSE
+// /stream), with ordered seq numbers, and that the final result is preserved.
 func TestRunOneToolStreamsDeltas(t *testing.T) {
 	reg := NewRoundStreamRegistry()
 	app := &App{RoundStreams: reg, Bus: NewBus(), Toolbox: &streamedRecordingToolbox{recordingToolbox: &recordingToolbox{}}}
@@ -595,26 +595,32 @@ func TestRunOneToolStreamsDeltas(t *testing.T) {
 		select {
 		case f := <-sub.Frames():
 			frames = append(frames, f)
-			if len(frames) == 2 {
+			if len(frames) == 3 {
 				goto collected
 			}
 		case <-time.After(2 * time.Second):
-			t.Fatal("delta stream never delivered both frames")
+			t.Fatal("delta stream never delivered the tool start and both output frames")
 		}
 	}
 collected:
-	if len(frames) != 2 {
-		t.Fatalf("expected 2 frames, got %d", len(frames))
+	if len(frames) != 3 {
+		t.Fatalf("expected 3 frames, got %d", len(frames))
 	}
 	for _, f := range frames {
 		if f.Kind != contracts.RoundDeltaTool || f.ToolCallID != "t1" || f.Name != "exec" {
 			t.Fatalf("bad frame metadata: %+v", f)
 		}
 	}
-	if frames[0].Text != "line-1\n" || frames[1].Text != "line-2\n" {
+	if frames[0].Text != "" || frames[0].Presentation == nil || frames[0].Presentation.Variant != "terminal" {
+		t.Fatalf("tool start frame should carry terminal presentation: %+v", frames[0])
+	}
+	if frames[1].Text != "line-1\n" || frames[2].Text != "line-2\n" {
 		t.Fatalf("frame text order wrong: %+v", frames)
 	}
-	if frames[0].Seq != 1 || frames[1].Seq != 2 {
+	if frames[1].Presentation != nil || frames[2].Presentation != nil {
+		t.Fatalf("streamed chunks should not repeat the presentation: %+v", frames)
+	}
+	if frames[0].Seq != 1 || frames[1].Seq != 2 || frames[2].Seq != 3 {
 		t.Fatalf("frame seq order wrong: %+v", frames)
 	}
 }

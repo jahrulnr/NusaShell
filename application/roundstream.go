@@ -262,8 +262,21 @@ func (r *RoundStreamRegistry) Exists(runID, messageID string) bool {
 // Publish appends a delta to the round stream, creating the stream on first
 // use (rounds that produce no deltas are created by Seal instead).
 func (r *RoundStreamRegistry) Publish(runID, messageID string, round int, kind, toolCallID, name, text string) {
+	r.publish(runID, messageID, round, kind, toolCallID, name, text, nil)
+}
+
+// PublishWithPresentation is the tool-delta variant of Publish. The first
+// tool delta may be the only live signal a reconnecting browser receives, so
+// carry the same frontend presentation contract that the WebSocket lifecycle
+// event carries. Existing callers can keep using Publish for text/reasoning
+// deltas and older tests remain source-compatible.
+func (r *RoundStreamRegistry) PublishWithPresentation(runID, messageID string, round int, kind, toolCallID, name, text string, presentation *contracts.ToolPresentationDTO) {
+	r.publish(runID, messageID, round, kind, toolCallID, name, text, presentation)
+}
+
+func (r *RoundStreamRegistry) publish(runID, messageID string, round int, kind, toolCallID, name, text string, presentation *contracts.ToolPresentationDTO) {
 	st := r.streamFor(runID, messageID, round)
-	st.publish(contracts.RoundDeltaFrame{Kind: kind, ToolCallID: toolCallID, Name: name, Text: text})
+	st.publish(contracts.RoundDeltaFrame{Kind: kind, ToolCallID: toolCallID, Name: name, Text: text, Presentation: presentation})
 	r.maybeGC()
 }
 

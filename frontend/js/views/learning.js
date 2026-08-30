@@ -6,7 +6,7 @@ import { el, debounce, createSelect, toast, fmtTime } from '../ui.js';
 import { renderMarkdown } from '../markdown.js';
 // Reuse the Agent view's thinking/tool components so the review activity
 // reads exactly like a live agent conversation (minus the user side).
-import { reasoningDisclosure, renderToolCallCard, setToolTerminalStatus, toolTerminalMeta } from './agent/render.js';
+import { reasoningDisclosure, renderToolCallCard, setToolTerminalStatus, setToolTerminalPresentation, toolTerminalMeta } from './agent/render.js';
 import { DataSet, Network } from '../../vendor/vis-network/vis-network.esm.min.js';
 
 const state = {
@@ -468,11 +468,16 @@ function collectAgentFlow(messages) {
   const cardsById = new Map();
   let lastCard = null;
 
-  const applyResult = (card, content) => {
+  const applyResult = (card, content, presentation) => {
     if (!card) return;
     const output = String(content || '');
     const failed = /^error:/i.test(output.trim());
     const status = failed ? 'fail' : 'ok';
+    if (presentation) {
+      setToolTerminalPresentation(card, presentation);
+      setToolTerminalStatus(card, status);
+      return;
+    }
     const panel = card.querySelector('.agent-tool-terminal-output');
     if (panel) panel.textContent = output.length > 12000 ? `${output.slice(0, 12000)}\n… (truncated)` : (output || 'ok');
     // Refresh the summary-line meta that was rendered as "Running".
@@ -487,7 +492,7 @@ function collectAgentFlow(messages) {
     // Tool results merge into their call card. Never rendered standalone.
     if (msg.role === 'tool' && msg.tool_result) {
       const id = msg.tool_result.tool_call_id;
-      applyResult((id && cardsById.get(id)) || lastCard, msg.tool_result.content);
+      applyResult((id && cardsById.get(id)) || lastCard, msg.tool_result.content, msg.tool_result.presentation);
       continue;
     }
     // The replayed source-conversation transcript (role "user") stays hidden.
@@ -505,7 +510,7 @@ function collectAgentFlow(messages) {
         items.push(reasoningDisclosure(thinking));
       }
       for (const call of msg.tool_calls) {
-        const card = renderToolCallCard({ id: call.id, name: call.name, args: call.args ?? '', status: 'running', output: '' });
+        const card = renderToolCallCard({ id: call.id, name: call.name, args: call.args ?? '', status: 'running', output: '', presentation: call.presentation });
         // ACP wait/result entries are provider bookkeeping for the same
         // delegation card. The shared renderer returns null for them, so do
         // not put a non-node into the Learning activity fragment.

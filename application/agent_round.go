@@ -701,6 +701,12 @@ func (a *App) publishRoundDelta(runID, messageID string, round int, kind, toolCa
 	}
 }
 
+func (a *App) publishRoundToolStart(runID, messageID string, round int, toolCallID, name string, presentation *contracts.ToolPresentationDTO) {
+	if a.RoundStreams != nil {
+		a.RoundStreams.PublishWithPresentation(runID, messageID, round, contracts.RoundDeltaTool, toolCallID, name, "", presentation)
+	}
+}
+
 // visibleText is the assistant text worth persisting or sending. Models such
 // as Qwen3.8 emit a blank paragraph ("\n\n") as the first/last content tokens
 // after thinking; storing that makes empty rounds look like real turns.
@@ -740,6 +746,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 					a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
 						RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
 						Name: toolCall.Name, Status: string(domain.ToolInterrupted), Output: "interrupted by user",
+						Presentation: buildToolPresentation(toolCall.Name, toolCall.Args, domain.ToolInterrupted, "interrupted by user"),
 					})
 					conversation = a.updateToolResult(conversation, messageID, toolCall.ID, domain.ToolInterrupted, "interrupted by user", nil)
 				}
@@ -825,6 +832,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCall, caps ModelCapabilities, settings domain.Settings, round int) toolExecResult {
 	a.Bus.Emit(contracts.EventToolStarted, contracts.ToolStartedEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: []byte(toolCall.Args),
+		Presentation: buildToolPresentation(toolCall.Name, toolCall.Args, domain.ToolRunning, ""),
 	})
 	a.log("info", "tools", "tool call: %s", toolCall.Name)
 
@@ -868,10 +876,12 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 		toolCtx = WithWorkspace(toolCtx, run.Workspace)
 		toolCtx = WithRunID(toolCtx, run.ID)
 		toolCtx = WithToolCallID(toolCtx, toolCall.ID)
+		toolPresentation := buildToolPresentation(toolCall.Name, toolCall.Args, domain.ToolRunning, "")
 		executeTool := func() error {
 			if s, ok := a.Toolbox.(interface {
 				ExecuteStreamed(ctx context.Context, name string, argsJSON []byte, onChunk func(string)) (string, error)
 			}); ok {
+				a.publishRoundToolStart(run.ID, messageID, round, toolCall.ID, toolCall.Name, toolPresentation)
 				var e error
 				output, e = s.ExecuteStreamed(toolCtx, toolCall.Name, []byte(toolCall.Args), func(text string) {
 					if text != "" {
@@ -947,6 +957,7 @@ func (a *App) emitToolCompleted(run *TurnRun, toolCall domain.ToolCall, res tool
 	event := contracts.ToolCompletedEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
 		Name: toolCall.Name, Status: string(res.status), Output: res.output,
+		Presentation: buildToolPresentation(toolCall.Name, toolCall.Args, res.status, res.output),
 	}
 	for _, att := range res.atts {
 		event.Attachments = append(event.Attachments, contracts.AttachmentDTO{

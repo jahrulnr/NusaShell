@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, renderCompactionStatus, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming, captureDisclosureState, restoreDisclosureState } from './js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, setToolTerminalPresentation, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, renderCompactionStatus, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, setThinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming, captureDisclosureState, restoreDisclosureState } from './js/views/agent/render.js';
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
   const previousDocument = globalThis.document;
@@ -133,6 +133,32 @@ test('compaction status is an accessible animated inline status', () => {
   }
 });
 
+test('compaction status replaces generic loading dots instead of showing both', () => {
+  const dom = new JSDOM('<main id="thread"></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const bubble = document.createElement('div');
+    const textBox = document.createElement('div');
+    textBox.append(thinkingDots());
+    const status = renderCompactionStatus();
+    bubble.append(textBox, status);
+
+    setThinkingDots(textBox, false);
+
+    assert.equal(bubble.querySelectorAll('.agent-thinking-dots').length, 0);
+    assert.equal(bubble.querySelectorAll('.agent-compaction-status').length, 1);
+
+    // When compaction ends, the same waiting slot may be restored idempotently
+    // if the provider has not emitted its first token yet.
+    setThinkingDots(textBox, true);
+    setThinkingDots(textBox, true);
+    assert.equal(bubble.querySelectorAll('.agent-thinking-dots').length, 1);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
 test('renders one model and usage summary for all assistant rounds in a user turn', () => {
   const thread = renderTranscript([
     { role: 'user', content: 'Run the checks', created_at: '2026-08-13T18:00:00Z' },
@@ -237,18 +263,75 @@ test('tool terminals render as compact execution timeline events', () => {
       args: { path: '/workspace/telegram-research' },
       status: 'ok',
       output: 'count: 3\ntotal: 109K',
+      presentation: {
+        variant: 'file-list',
+        action: 'Files listed',
+        request: 'file_list({\n  "path": "/workspace/telegram-research"\n})',
+        result: {
+          format: 'list',
+          summary: '3 entries · 109K',
+          text: '-rw file-a\n-rw file-b\n-rw file-c',
+          items: [{ name: 'file-a' }, { name: 'file-b' }, { name: 'file-c' }],
+        },
+      },
     });
     assert.equal(job.classList.contains('agent-tool-terminal'), true);
     assert.equal(job.querySelector('.agent-tool-terminal-action')?.textContent, 'Files listed');
     assert.equal(job.querySelector('.agent-tool-terminal-title')?.textContent, 'file_list');
     assert.equal(job.querySelector('.agent-tool-terminal-prompt')?.textContent, '✓');
-    assert.equal(job.querySelector('.agent-tool-terminal-panel-label')?.textContent, 'Output');
-    assert.equal(job.querySelectorAll('.agent-tool-terminal-panel-label')[1]?.textContent, 'Request');
-    assert.match(job.querySelector('.agent-tool-terminal-output')?.textContent || '', /count: 3/);
+    assert.equal(job.querySelector('.agent-tool-terminal-panel-label')?.textContent, 'Request');
+    assert.equal(job.querySelectorAll('.agent-tool-terminal-panel-label')[1]?.textContent, 'Output');
+    assert.equal(job.querySelector('.agent-tool-terminal-input')?.textContent, 'file_list({\n  "path": "/workspace/telegram-research"\n})');
+    assert.match(job.querySelector('.agent-tool-terminal-output')?.textContent || '', /file-a/);
+    assert.equal(job.querySelector('.agent-tool-terminal-meta')?.textContent, '3 entries · 109K');
 
     const failed = renderToolJob({ name: 'file_list', args: {}, status: 'fail', output: 'permission denied' });
     assert.equal(failed.querySelector('.agent-tool-terminal-action')?.textContent, 'File listing failed');
     assert.equal(failed.querySelector('.agent-tool-terminal-prompt')?.textContent, '!');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('status presentations render compact metadata chips instead of a raw YAML dump', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const job = renderToolJob({
+      name: 'file_write', args: { path: '/workspace/a.txt' }, status: 'ok',
+      presentation: {
+        variant: 'status', action: 'File written', request: 'file_write(...)',
+        result: { format: 'status', summary: 'Written', meta: { bytes: 12, written: true, sha256: 'abcdef0123456789' } },
+      },
+    });
+    assert.ok(job.querySelector('.agent-tool-terminal-status-result'));
+    assert.match(job.querySelector('.agent-tool-terminal-output')?.textContent || '', /Written/);
+    assert.match(job.querySelector('.agent-tool-terminal-output')?.textContent || '', /bytes:12/);
+    assert.doesNotMatch(job.querySelector('.agent-tool-terminal-output')?.textContent || '', /abcdef0123456789/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('late result presentation keeps the original Request panel', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const job = renderToolJob({
+      name: 'file_list', args: { path: '/workspace' }, status: 'running',
+      presentation: {
+        variant: 'file-list', action: 'Listing files', request: 'file_list({\n  "path": "/workspace"\n})',
+        result: { format: 'list', summary: 'Running' },
+      },
+    });
+    setToolTerminalPresentation(job, {
+      variant: 'file-list', action: 'Files listed', request: '',
+      result: { format: 'list', summary: '1 entries', items: [{ name: 'a.txt', size: '12' }] },
+    });
+    assert.equal(job.querySelector('.agent-tool-terminal-input')?.textContent, 'file_list({\n  "path": "/workspace"\n})');
+    assert.match(job.querySelector('.agent-tool-terminal-output')?.textContent || '', /a\.txt/);
   } finally {
     globalThis.document = previousDocument;
   }
@@ -311,6 +394,28 @@ test('generate_image renders a proof card instead of a tool terminal', () => {
     assert.equal(failed.classList.contains('is-error'), true);
     assert.match(failed.textContent, /Settings/);
     assert.equal(failed.querySelectorAll('img').length, 0);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('unified generate_media uses the presentation metadata and media card', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const card = renderToolCallCard({
+      id: 'media-1', name: 'generate_media', args: { media_type: 'image', prompt: 'a harbor at dusk' }, status: 'ok',
+      presentation: {
+        variant: 'media', action: 'Media generated', request: 'generate_media(...)',
+        result: { format: 'media', meta: { status: 'completed', model: 'image-model', file_path: '/tmp/harbor.png' }, text: 'Image saved.' },
+      },
+      output_attachments: [{ type: 'image', name: 'harbor.png', media_type: 'image/png', file_path: '/tmp/harbor.png' }],
+    });
+    assert.ok(card.classList.contains('agent-genimage-card'));
+    assert.equal(card.querySelectorAll('.agent-tool-terminal').length, 0);
+    assert.match(card.textContent, /image-model/);
+    assert.ok(card.querySelector('img'));
   } finally {
     globalThis.document = previousDocument;
   }

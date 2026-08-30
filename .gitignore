@@ -15,6 +15,7 @@
 .vtcode/
 .experimental/
 /.playwright-mcp/
+/docs/decisions
 *.swp
 # Local env
 .env
