@@ -64,7 +64,7 @@ test('exec tool output is rendered from the persisted conversation', () => {
       ],
     },
   ]);
-  const terminal = thread.querySelector('.agent-tool-terminal');
+  const terminal = thread.querySelector('.agent-tool-event.is-terminal');
   assert.ok(terminal, 'exec card rendered from snapshot');
   assert.equal(terminal.classList.contains('is-success'), true, 'card is success');
   const out = terminal.querySelector('.agent-tool-terminal-output');
@@ -89,7 +89,7 @@ test('exec tool with interrupted status renders persisted partial output', () =>
       ],
     },
   ]);
-  const terminal = thread.querySelector('.agent-tool-terminal');
+  const terminal = thread.querySelector('.agent-tool-event.is-terminal');
   assert.equal(terminal.classList.contains('is-error'), true, 'interrupted status flagged as error styling');
   const out = terminal.querySelector('.agent-tool-terminal-output');
   assert.match(out.textContent, /first chunk/);
@@ -189,7 +189,7 @@ test('renders one model and usage summary for all assistant rounds in a user tur
   const assistantTurns = thread.querySelectorAll('.agent-message.assistant');
   assert.equal(assistantTurns.length, 2);
   assert.equal(assistantTurns[0].querySelectorAll('.agent-turn-meta').length, 1);
-  assert.equal(assistantTurns[0].querySelectorAll('.agent-tool-terminal').length, 2);
+  assert.equal(assistantTurns[0].querySelectorAll('.agent-tool-event').length, 2);
   assert.match(assistantTurns[0].querySelector('.agent-turn-meta').textContent, /deepseek/);
   assert.match(assistantTurns[0].querySelector('.agent-turn-meta').textContent, /↑300 ↓60/);
   assert.match(assistantTurns[0].querySelector('.agent-turn-meta').textContent, /cache 8/);
@@ -241,12 +241,12 @@ test('tool job summary includes elapsed span before chevron', () => {
   try {
     const job = renderToolJob({ id: 'c1', name: 'exec', args: { command: 'ls' }, status: 'running' });
     const summary = job.querySelector('summary');
-    const classes = [...summary.children].map((node) => node.className);
-    const elapsedIdx = classes.indexOf('agent-tool-elapsed');
-    const chevronIdx = classes.indexOf('agent-tool-terminal-chevron');
-    assert.ok(elapsedIdx >= 0, 'elapsed span present');
-    assert.ok(chevronIdx >= 0, 'chevron span present');
-    assert.ok(elapsedIdx < chevronIdx, 'elapsed sits left of chevron');
+    assert.ok(summary.querySelector('.agent-tool-elapsed'), 'elapsed span present');
+    const chevron = summary.querySelector('.agent-tool-event-chevron');
+    assert.ok(chevron, 'chevron span present');
+    // The chevron is the last direct child of the head row; elapsed lives in
+    // the middle text column, so it always sits left of the chevron.
+    assert.ok([...summary.children].indexOf(chevron) === summary.children.length - 1, 'chevron is the rightmost element');
   } finally {
     globalThis.document = previousDocument;
   }
@@ -275,19 +275,49 @@ test('tool terminals render as compact execution timeline events', () => {
         },
       },
     });
-    assert.equal(job.classList.contains('agent-tool-terminal'), true);
-    assert.equal(job.querySelector('.agent-tool-terminal-action')?.textContent, 'Files listed');
-    assert.equal(job.querySelector('.agent-tool-terminal-title')?.textContent, 'file_list');
-    assert.equal(job.querySelector('.agent-tool-terminal-prompt')?.textContent, '✓');
-    assert.equal(job.querySelector('.agent-tool-terminal-panel-label')?.textContent, 'Request');
-    assert.equal(job.querySelectorAll('.agent-tool-terminal-panel-label')[1]?.textContent, 'Output');
-    assert.equal(job.querySelector('.agent-tool-terminal-input')?.textContent, 'file_list({\n  "path": "/workspace/telegram-research"\n})');
-    assert.match(job.querySelector('.agent-tool-terminal-output')?.textContent || '', /file-a/);
-    assert.equal(job.querySelector('.agent-tool-terminal-meta')?.textContent, '3 entries · 109K');
+    assert.equal(job.classList.contains('agent-tool-event'), true);
+    assert.equal(job.open, true, 'event results are visible by default');
+    assert.equal(job.querySelector('.agent-tool-event-title')?.textContent, 'Files listed');
+    assert.equal(job.querySelector('.agent-tool-event-node')?.textContent, '✓');
+    assert.equal(job.querySelector('.agent-tool-event-path')?.textContent, '/workspace/telegram-research');
+    assert.match(job.querySelector('.agent-tool-event-summary-text')?.textContent || '', /3 entries · 109K/);
+    const raw = job.querySelector('.agent-tool-event-details pre')?.textContent || '';
+    assert.match(raw, /file_list\(/);
+    assert.match(raw, /"path": "\/workspace\/telegram-research"/);
+    assert.match(raw, /count: 3/);
+    assert.match(job.querySelector('.agent-tool-event-rows')?.textContent || '', /file-a/);
+    assert.equal(job.querySelector('.agent-tool-event-tool'), null, 'head never duplicates the tool name next to the action title');
 
     const failed = renderToolJob({ name: 'file_list', args: {}, status: 'fail', output: 'permission denied' });
-    assert.equal(failed.querySelector('.agent-tool-terminal-action')?.textContent, 'File listing failed');
-    assert.equal(failed.querySelector('.agent-tool-terminal-prompt')?.textContent, '!');
+    assert.equal(failed.querySelector('.agent-tool-event-title')?.textContent, 'File listing failed');
+    assert.equal(failed.querySelector('.agent-tool-event-node')?.textContent, '!');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('exec and MCP calls render one event with a live terminal output panel', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const execJob = renderToolJob({ id: 'e1', name: 'exec', args: { command: 'git status --short' }, status: 'running', output: '' });
+    assert.ok(execJob.classList.contains('agent-tool-event'), 'exec uses the timeline event');
+    assert.ok(execJob.classList.contains('is-terminal'), 'with the terminal output panel');
+    assert.equal(execJob.querySelector('.agent-tool-event-path')?.textContent, 'git status --short');
+    assert.ok(execJob.querySelector('.agent-tool-terminal-output'), 'output panel present');
+    assert.equal(execJob.querySelector('.agent-tool-event-result'), null, 'no nested result box for exec');
+    assert.ok(execJob.querySelector('.agent-tool-stop'), 'streaming exec keeps the stop button');
+
+    const mcp = renderToolJob({
+      id: 'm1', name: 'mcp_call', args: { ref: 'nusashell.files:read', arguments_json: '{"path":"/workspace/a.txt"}' },
+      status: 'ok', output: 'done',
+      presentation: { variant: 'terminal', action: 'MCP call completed', request: 'mcp_call(nusashell.files:read) {...}', result: { format: 'terminal', summary: '1 result', text: 'done' } },
+    });
+    assert.ok(mcp.classList.contains('is-terminal'));
+    assert.equal(mcp.querySelector('.agent-tool-event-path')?.textContent, 'nusashell.files:read', 'path line shows the tool ref');
+    assert.equal(mcp.querySelector('.agent-tool-event-badge')?.textContent, 'MCP', 'MCP badge marks the call');
+    assert.match(mcp.querySelector('.agent-tool-terminal-output')?.textContent || '', /done/);
   } finally {
     globalThis.document = previousDocument;
   }
@@ -305,16 +335,16 @@ test('status presentations render compact metadata chips instead of a raw YAML d
         result: { format: 'status', summary: 'Written', meta: { bytes: 12, written: true, sha256: 'abcdef0123456789' } },
       },
     });
-    assert.ok(job.querySelector('.agent-tool-terminal-status-result'));
-    assert.match(job.querySelector('.agent-tool-terminal-output')?.textContent || '', /Written/);
-    assert.match(job.querySelector('.agent-tool-terminal-output')?.textContent || '', /bytes:12/);
-    assert.doesNotMatch(job.querySelector('.agent-tool-terminal-output')?.textContent || '', /abcdef0123456789/);
+    assert.ok(job.querySelector('.agent-tool-event-status'));
+    assert.match(job.querySelector('.agent-tool-event-status')?.textContent || '', /Written/);
+    assert.match(job.querySelector('.agent-tool-event-status')?.textContent || '', /bytes:12/);
+    assert.doesNotMatch(job.querySelector('.agent-tool-event-status')?.textContent || '', /abcdef0123456789/);
   } finally {
     globalThis.document = previousDocument;
   }
 });
 
-test('late result presentation keeps the original Request panel', () => {
+test('late result presentation repaints the event result and keeps the raw request', () => {
   const dom = new JSDOM('<main></main>');
   const previousDocument = globalThis.document;
   globalThis.document = dom.window.document;
@@ -330,8 +360,11 @@ test('late result presentation keeps the original Request panel', () => {
       variant: 'file-list', action: 'Files listed', request: '',
       result: { format: 'list', summary: '1 entries', items: [{ name: 'a.txt', size: '12' }] },
     });
-    assert.equal(job.querySelector('.agent-tool-terminal-input')?.textContent, 'file_list({\n  "path": "/workspace"\n})');
-    assert.match(job.querySelector('.agent-tool-terminal-output')?.textContent || '', /a\.txt/);
+    assert.equal(job.querySelector('.agent-tool-event-title')?.textContent, 'Files listed');
+    assert.match(job.querySelector('.agent-tool-event-summary-text')?.textContent || '', /1 entries/);
+    assert.match(job.querySelector('.agent-tool-event-rows')?.textContent || '', /a\.txt/);
+    const raw = job.querySelector('.agent-tool-event-details pre')?.textContent || '';
+    assert.match(raw, /file_list\(/, 'raw request survives the late presentation patch');
   } finally {
     globalThis.document = previousDocument;
   }
@@ -907,7 +940,7 @@ test('expanded Thinking and tool disclosures survive a transcript refresh', () =
   ];
   const before = renderTranscript(messages);
   const thinking = before.querySelectorAll('.agent-reasoning');
-  const tools = before.querySelectorAll('.agent-tool-terminal');
+  const tools = before.querySelectorAll('.agent-tool-event');
   // A live placeholder can carry the assistant turn's aggregate IDs before
   // its first round has been stamped with the individual message ID.
   before.querySelector('.agent-round').removeAttribute('data-message-id');
@@ -915,7 +948,7 @@ test('expanded Thinking and tool disclosures survive a transcript refresh', () =
   tools[0].removeAttribute('data-tool-call-id');
   thinking[0].open = true;
   thinking[1].open = true;
-  tools[0].open = true;
+  tools[0].open = false;
 
   const disclosureState = captureDisclosureState(before);
   const refreshed = renderTranscript(messages);
@@ -923,7 +956,7 @@ test('expanded Thinking and tool disclosures survive a transcript refresh', () =
 
   assert.equal(refreshed.querySelectorAll('.agent-reasoning')[0].open, true, 'expanded live Thinking remains open');
   assert.equal(refreshed.querySelectorAll('.agent-reasoning')[1].open, true, 'expanded Thinking remains open');
-  assert.equal(refreshed.querySelector('.agent-tool-terminal').open, true, 'expanded tool remains open');
+  assert.equal(refreshed.querySelector('.agent-tool-event').open, false, 'collapsed tool event stays collapsed across refresh');
 });
 
 test('whitespace-only reasoning stays hidden and unparsed', () => {

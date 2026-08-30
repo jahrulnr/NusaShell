@@ -11,6 +11,7 @@ import {
   conversationTail,
   isThreadAtBottom,
   syncThreadPin,
+  updateScrollPin,
 } from './js/agent-ui.js';
 
 test('context usage uses the effective model window', () => {
@@ -53,6 +54,49 @@ test('terminal lifecycle can sync the pin from actual thread geometry', () => {
 
   thread.scrollTop = 476;
   assert.equal(syncThreadPin(state, thread), true);
+  assert.equal(state.pinned, true);
+});
+
+test('updateScrollPin keeps the pin while content grows ahead of the follow scroll', () => {
+  // Tool spam: content grows faster than the follow-scroll, so the bottom
+  // distance is large even though the user never scrolled up. The pin must
+  // survive (the observer keeps the marker visible → follow continues).
+  const thread = { scrollHeight: 2000, scrollTop: 900, clientHeight: 500 };
+  const state = { pinned: true };
+  assert.equal(updateScrollPin(state, thread), true, 'growth alone never unpins');
+
+  // A follow-scroll that lands short of the bottom (layout still settling)
+  // is also not a user scroll-up.
+  thread.scrollTop = 900;
+  thread.scrollHeight = 1400;
+  assert.equal(updateScrollPin(state, thread), true, 'downward/level movement keeps the pin');
+});
+
+test('updateScrollPin releases on a real upward scroll and re-pins at the bottom', () => {
+  const thread = { scrollHeight: 2000, scrollTop: 900, clientHeight: 500 };
+  const state = { pinned: true };
+  assert.equal(updateScrollPin(state, thread), true);
+
+  // User scrolls up 100px — well beyond the follow-scroll slack.
+  thread.scrollTop = 800;
+  assert.equal(updateScrollPin(state, thread), false);
+  // Content keeps growing while the user reads; stays released.
+  thread.scrollHeight = 2400;
+  assert.equal(updateScrollPin(state, thread), false);
+
+  // User returns to the bottom → re-pin.
+  thread.scrollTop = 1900;
+  assert.equal(updateScrollPin(state, thread), true);
+});
+
+test('updateScrollPin ignores geometry from a different thread element', () => {
+  const threadA = { scrollHeight: 1000, scrollTop: 900, clientHeight: 500 };
+  const threadB = { scrollHeight: 1000, scrollTop: 100, clientHeight: 500 };
+  const state = { pinned: true };
+  updateScrollPin(state, threadA);
+  // Switching rooms hands us a fresh element with scrollTop 0 — that must
+  // not read as "user scrolled to the top".
+  assert.equal(updateScrollPin(state, threadB), true);
   assert.equal(state.pinned, true);
 });
 

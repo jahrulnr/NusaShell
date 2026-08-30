@@ -4,7 +4,7 @@ import { rpc, on, emit } from '../rpc.js';
 import { el, fmtTime, toast, confirmDialog, debounce } from '../ui.js';
 import { renderMarkdown } from '../markdown.js';
 import { incrementalRender } from '../incremental-render.js';
-import { estimateContextTokens, formatContextUsage, effectiveContextWindow, previousWindowStart, conversationTail, isThreadAtBottom, syncThreadPin } from '../agent-ui.js';
+import { estimateContextTokens, formatContextUsage, effectiveContextWindow, previousWindowStart, conversationTail, isThreadAtBottom, updateScrollPin } from '../agent-ui.js';
 import { bindComposer, updateSendAvailability } from './agent/composer.js';
 import { bindModelPicker } from './agent/model-picker.js';
 import { bindRoomInfo, updateRoomInfo } from './agent/room-info.js';
@@ -480,9 +480,12 @@ function ensureThreadEndMarker() {
     if (typeof IntersectionObserverCtor === 'function') {
       threadEndObserver = new IntersectionObserverCtor(([entry]) => {
         if (!entry || entry.target !== threadEndMarker || threadEndMarkerThread !== thread) return;
-        // Keep the existing small bottom tolerance for a marker that is just
-        // outside the root while layout settles after a streamed delta.
-        state.pinned = entry.isIntersecting || isThreadAtBottom(thread);
+        // The marker is a RE-PIN signal only. It must never unpin: while tool
+        // cards spam the tail, content growth pushes the marker out of the
+        // viewport between follow-scrolls, and treating that as "the user
+        // scrolled up" killed autoscroll mid-turn. Unpinning is decided
+        // exclusively by updateScrollPin (direction-aware scroll events).
+        if (entry.isIntersecting || isThreadAtBottom(thread)) state.pinned = true;
       }, { root: thread, threshold: 0.01 });
       threadEndObserverThread = thread;
       threadEndObserver.observe(marker);
@@ -1792,7 +1795,10 @@ function bindScrollPin() {
   ensureThreadEndMarker();
   bindThreadEndMarker(thread);
   thread.addEventListener('scroll', () => {
-    state.pinned = isThreadAtBottom(thread);
+    // Direction-aware: only a real upward user scroll releases the pin.
+    // Content growth and programmatic follow-scrolls can never unpin, so
+    // autoscroll survives tool-card spam without fighting the user.
+    updateScrollPin(state, thread);
     // Older *active* messages are revealed via the explicit "Load older"
     // button (a deliberate click keeps the scroll anchored — auto-loading
     // during a fast wheel scroll fights the browser's momentum and jumps the
@@ -1879,9 +1885,10 @@ function prependActiveBatch() {
 // A terminal event can race the last scroll event while the final delta is
 // still settling. Sample the actual geometry before completion/error cleanup
 // so sounds and the authoritative refresh cannot mistake a reader's position
-// for the live tail.
+// for the live tail. Uses the direction-aware update so content growth in the
+// final frames cannot masquerade as the user scrolling up.
 function syncActiveThreadPin() {
-  return syncThreadPin(state, agentThread());
+  return updateScrollPin(state, agentThread());
 }
 
 // scrollThreadToBottomHard forces the thread to the bottom robustly after an
@@ -1915,8 +1922,10 @@ function scrollToBottom(force = false) {
   ensureThreadEndMarker();
   if (!force && !state.pinned) return;
   thread.scrollTop = thread.scrollHeight;
-  // Re-pin after a forced jump so the next delta keeps following.
-  state.pinned = true;
+  // A follow-scroll only ever moves down; the next scroll event re-evaluates
+  // the pin from real geometry. Only a forced jump (new turn, room open)
+  // re-pins unconditionally.
+  if (force) state.pinned = true;
 }
 
 // ---- chunk-based lazy load ----
@@ -2376,9 +2385,22 @@ function bindEvents() {
     // Clear the elapsed timer — the final duration stays displayed.
     if (job._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
     const next = { name: job._toolName || name, args: job._toolArgs, status: status || 'ok', output, presentation };
-    if (presentation) setToolTerminalPresentation(job, presentation);
+    // Event cards paint the settled output from the payload: the raw fold
+    // and the summary line read card._toolOutput, so it must be current
+    // before the presentation repaint. Status goes first too — the event
+    // summary/result computation reads card.dataset.status and must not see
+    // the stale "running".
+    job._toolOutput = output ?? '';
     setToolTerminalStatus(job, next.status);
-    job.open = false;
+    if (presentation) {
+      setToolTerminalPresentation(job, presentation);
+    } else if (job.classList.contains('agent-tool-event')) {
+      setToolTerminalOutput(job, output, next.status, toolTerminalMeta(next));
+    }
+    // Only the terminal card auto-collapses on completion; the event card
+    // keeps its result summary visible (the whole event still collapses via
+    // its head row).
+    if (job.classList.contains('agent-tool-terminal')) job.open = false;
     const meta = job.querySelector('.agent-tool-terminal-meta');
     if (meta) meta.textContent = toolTerminalMeta(next);
     // Room diagnostics stay current after the tool settles.

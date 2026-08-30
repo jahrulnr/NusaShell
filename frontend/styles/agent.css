@@ -289,25 +289,12 @@
 .agent-message.assistant .agent-bubble h1 { font-size: 1.35em; }
 .agent-message.assistant .agent-bubble h2 { font-size: 1.2em; }
 .agent-message.assistant .agent-bubble h3 { font-size: 1.05em; }
-.agent-message.assistant .agent-bubble p, .agent-message.assistant .agent-bubble ul, .agent-message.assistant .agent-bubble ol { margin: .75em 0; }
-.agent-message.assistant .agent-bubble ul, .agent-message.assistant .agent-bubble ol { padding-left: 1.45em; }
+.agent-message.assistant .agent-bubble ul, .agent-message.assistant .agent-bubble ol { 
+  padding-left: 1.45em; 
+  margin: .75em 0; 
+}
 .agent-message.assistant .agent-bubble li + li { margin-top: .25em; }
 .agent-message.assistant .agent-bubble code { padding: .1em .35em; border-radius: 4px; background: var(--panel-alt); font-family: var(--font-mono); font-size: .9em; overflow-wrap: anywhere; word-break: break-word; }
-.agent-tool-terminal-input,
-.agent-tool-terminal-output {
-  box-sizing: border-box;
-  max-width: 100%;
-  margin: 0;
-  overflow-x: auto;
-  padding: 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: 0 1rem 1rem;
-  background: var(--bg);
-  color: #c5d0de;
-  font: 11.5px/1.55 var(--font-mono);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
 .agent-tool-terminal-result-list {
   display: grid;
   gap: 6px;
@@ -345,11 +332,6 @@
   max-width: 100%;
   max-height: calc(10 * 1.55em + 24px);
   overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.agent-tool-terminal-status-summary {
-  color: #d5dde8;
-  font: 600 12px/1.45 var(--font-body);
 }
 .agent-tool-terminal-meta-chips {
   display: flex;
@@ -379,16 +361,20 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.agent-tool-terminal-output { color: #d5dde8; max-height: calc(10 * 1.55em); overflow-y: auto; overscroll-behavior: contain; }
+.agent-tool-terminal-output { 
+  color: #d5dde8; 
+  max-height: calc(5 * 1.55em); 
+  overflow-y: auto; 
+  margin: 0;
+  border-radius: 8px !important;
+}
 .agent-tool-terminal-output.is-error { color: #d68d94; }
 .agent-message.assistant .agent-bubble pre {
   box-sizing: border-box;
   max-width: 100%;
-  margin: 0px 0px 0.8em;
   overflow-x: auto;
   padding: 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 0 1rem 1rem;;
   background: var(--bg);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1045,11 +1031,144 @@
   letter-spacing: .06em;
   text-transform: uppercase;
 }
-.agent-tool-terminal-input,
-.agent-tool-terminal-output { border-radius: 7px; }
-.agent-tool-terminal-output { border-left: 2px solid var(--accent-border); }
 .agent-tool-terminal-input { border-color: rgba(132, 184, 200, .24); color: var(--text-faint); }
 @keyframes agent-tool-terminal-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
+/* ---- built-in tool event (execution timeline) ----
+ * One collapsible event per tool call, open by default: the head row (status
+ * node, action title, MCP badge / stop button, elapsed) collapses the card
+ * to a single line. The body leads with the primary argument as a path line,
+ * then the result — visible without any nested toggle — and a single folded
+ * show-request-and-raw-output details for debugging, mirroring production
+ * tools (IDE call inspectors, CI logs) that never surface raw payloads by
+ * default. exec and MCP calls (is-terminal) swap the result box for a
+ * terminal output panel (live-streamed for exec). */
+.agent-tool-event {
+  min-width: 0;
+  max-width: 100%;
+  color: #9aa8ba;
+}
+/* Inside the tool stack the event pulls left so its node sits on the rail;
+ * outside a stack (learning digest, standalone contexts) it stays inset. */
+.agent-tool-stack > .agent-tool-event {
+  margin-left: calc(-1 * (var(--agent-tool-gutter) + var(--agent-tool-node-radius)));
+}
+.agent-tool-event-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 3px 8px 3px 0;
+  border-radius: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+.agent-tool-event-head::-webkit-details-marker { display: none; }
+.agent-tool-event-head:hover { background: rgba(18, 28, 40, .72); }
+.agent-tool-event-head:focus-visible { background: rgba(18, 28, 40, .72); outline: 1px solid var(--accent); outline-offset: 2px; }
+.agent-tool-event-head-text { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1; }
+.agent-tool-event-node {
+  display: grid;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid #334155;
+  border-radius: 50%;
+  background: var(--harbor);
+  color: #8ca4c2;
+  font: 11px var(--font-mono);
+  z-index: 1;
+}
+.agent-tool-event.is-running .agent-tool-event-node { border-color: #4a6a8a; color: #7ab5d9; animation: agent-tool-terminal-pulse 1.2s ease-in-out infinite; }
+.agent-tool-event.is-success .agent-tool-event-node { border-color: rgba(85, 217, 150, .35); color: #66d59c; }
+.agent-tool-event.is-error .agent-tool-event-node { border-color: rgba(245, 91, 104, .4); color: #ff8f99; }
+.agent-tool-event-body { display: grid; gap: 4px; min-width: 0; padding: 2px 0 4px 36px; }
+.agent-tool-event-title { min-width: 0; overflow: hidden; color: #c5d0de; font: 600 12px/1.2 var(--font-body); text-overflow: ellipsis; white-space: nowrap; }
+.agent-tool-event.is-error .agent-tool-event-title { color: #ff9ca5; }
+.agent-tool-event.is-running .agent-tool-event-title { color: #c5d0de; }
+.agent-tool-event-badge {
+  flex: none;
+  color: #5b8db8;
+  font: 8px/1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  border: 1px solid rgba(91, 141, 184, .3);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+.agent-tool-event[data-status="running"] .agent-tool-elapsed { color: var(--accent); animation: agent-tool-tick 2s ease-in-out infinite; }
+.agent-tool-event:not(.is-running) .agent-tool-stop { display: none; }
+.agent-tool-event-path { 
+  overflow: hidden;
+  font: 10px/1.4 var(--font-mono); 
+  text-overflow: ellipsis; 
+  white-space: nowrap; 
+  padding: 6px 10px 4px 10px !important;
+  border: 1px var(--ss-border-color) solid;
+  margin: 0px 0px -4px 8px;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-ink);
+  color: var(--text);
+  width: fit-content;
+  max-width: 300px;
+}
+.agent-tool-event-result { min-width: 0; overflow: hidden; border: 1px solid var(--border-soft); border-radius: 8px; background: rgba(16, 25, 29, .78); }
+.agent-tool-event-summary-text { min-width: 0; overflow: hidden; padding: 8px 10px 3px; color: #aebccb; font: 10px/1.4 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.agent-tool-event-chevron { flex: none; color: #66768a; font-size: 10px; transition: transform .15s ease; }
+.agent-tool-event[open] > .agent-tool-event-head .agent-tool-event-chevron { transform: rotate(180deg); }
+.agent-tool-event-wait { padding: 0 11px 8px; color: #7ab5d9; font: 10px var(--font-mono); animation: agent-tool-terminal-pulse 1.2s ease-in-out infinite; }
+.agent-tool-event-output {
+  box-sizing: border-box;
+  max-width: 100%;
+  max-height: calc(10 * 1.55em);
+  margin: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 11px 10px;
+  color: #c5d0de;
+  font: 10.5px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.agent-tool-event-result > .agent-tool-terminal-result-list,
+.agent-tool-event-result > .agent-tool-terminal-status-result {
+  padding: 4px 10px 10px;
+}
+.agent-tool-event-details {
+  border: 1px solid var(--border);
+  border-top: none;
+  margin: 0px 8px;
+    margin-top: 0px;
+  margin-top: -4px;
+  border-radius: 0 0px 10px 10px;
+  background: var(--bg);
+  padding: 0;
+}
+.agent-tool-event-details summary { padding: 7px 11px; color: var(--text-faint); cursor: pointer; font: 9px var(--font-mono); list-style: none; }
+.agent-tool-event-details summary::-webkit-details-marker { display: none; }
+.agent-tool-event-details summary::before { margin-right: 6px; color: #66d59c; content: "↳"; }
+.agent-tool-event-details summary:hover { color: #c5d0de; }
+.agent-tool-event-details > pre { 
+  max-height: 220px; 
+  margin: 0 !important; 
+  overflow: auto; 
+  padding: 0 11px 10px; 
+  color: var(--text-faint); 
+  font: 9.5px/1.6 var(--font-mono); 
+  white-space: pre-wrap; 
+  word-break: break-word; 
+  border: 0 !important;
+  border-top: 1px solid var(--accent-soft) !important;
+  border-radius: 0 !important;
+}
+.agent-tool-event.is-error .agent-tool-event-summary-text { color: #ff9ca5; }
+@media (max-width: 480px) {
+  .agent-tool-event-body { padding-left: 34px; }
+  .agent-tool-event-node { width: 26px; height: 26px; }
+}
 
 /* ---- subagent delegation card ---- */
 .agent-subagent-card {

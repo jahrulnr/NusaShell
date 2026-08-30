@@ -6,7 +6,7 @@ import { el, debounce, createSelect, toast, fmtTime } from '../ui.js';
 import { renderMarkdown } from '../markdown.js';
 // Reuse the Agent view's thinking/tool components so the review activity
 // reads exactly like a live agent conversation (minus the user side).
-import { reasoningDisclosure, renderToolCallCard, setToolTerminalStatus, setToolTerminalPresentation, toolTerminalMeta } from './agent/render.js';
+import { reasoningDisclosure, renderToolCallCard, setToolTerminalOutput, setToolTerminalPresentation, setToolTerminalStatus, toolTerminalMeta } from './agent/render.js';
 import { DataSet, Network } from '../../vendor/vis-network/vis-network.esm.min.js';
 
 const state = {
@@ -478,14 +478,11 @@ function collectAgentFlow(messages) {
       setToolTerminalStatus(card, status);
       return;
     }
-    const panel = card.querySelector('.agent-tool-terminal-output');
-    if (panel) panel.textContent = output.length > 12000 ? `${output.slice(0, 12000)}\n… (truncated)` : (output || 'ok');
     // Refresh the summary-line meta that was rendered as "Running".
-    const meta = card.querySelector('.agent-tool-terminal-meta');
-    if (meta && card._toolName) {
-      meta.textContent = toolTerminalMeta({ name: card._toolName, args: card._toolArgs, status });
-    }
-    setToolTerminalStatus(card, status);
+    const meta = card._toolName
+      ? toolTerminalMeta({ name: card._toolName, args: card._toolArgs, status })
+      : '';
+    setToolTerminalOutput(card, output, status, meta);
   };
 
   for (const msg of messages) {
@@ -768,6 +765,15 @@ function initGraph() {
     },
   };
   state.network = new Network(container, { nodes: state.nodes, edges: state.edges }, options);
+  // After the initial layout stabilizes, freeze the graph. This prevents
+  // the physics engine from running indefinitely (which causes the
+  // "constant jitter / noise" bug when loadGraph is re-triggered by
+  // WebSocket events like memory.updated or skill.updated). loadGraph
+  // re-enables physics + stabilization before pushing new data, so updates
+  // still lay out and freeze again here.
+  state.network.on('stabilizationIterationsDone', () => {
+    state.network.setOptions({ physics: false });
+  });
 }
 
 async function loadGraph() {
@@ -778,6 +784,18 @@ async function loadGraph() {
     // used-with edges come from learning nodes observed in one successful
     // agent or review turn. Nothing is computed client-side.
     const { nodes, edges } = await rpc('learning.graph');
+
+    // New data is coming: let the physics engine re-lay-out the graph, then
+    // the stabilizationIterationsDone handler freezes it again. Without this
+    // the frozen graph would pile new nodes at the origin.
+    if (state.network) {
+      state.network.setOptions({
+        physics: {
+          enabled: true,
+          stabilization: { enabled: true, iterations: 200, updateInterval: 25, onlyDynamicEdges: false, fit: true },
+        },
+      });
+    }
 
     // Degree centrality: a node's size grows with how many edges touch
     // it, so well-connected hubs (frequently-relevant memories, used

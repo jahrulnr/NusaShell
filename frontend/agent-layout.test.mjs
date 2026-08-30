@@ -40,12 +40,15 @@ test('Agent uses the Electron workspace shell without unsupported Todo UI', () =
 });
 
 test('Agent tool transcripts start collapsed, cap output at ten lines, and lazy-render reasoning', () => {
-  assert.match(agentRender, /class: 'agent-tool-terminal'/);
-  assert.match(agentRender, /el\('details', \{ class: 'agent-tool-terminal'/);
+  // Tool events are collapsible <details> (open by default, collapse via the
+  // head row), and both the event output and the exec/MCP terminal panel cap
+  // long output with their own scroll.
+  assert.match(agentRender, /class: 'agent-tool-event'/);
+  assert.match(agentRender, /el\('details', \{ class: 'agent-tool-event'/);
   assert.match(agentRender, /function materializeReasoning/);
   assert.doesNotMatch(agentRender, /content\.innerHTML = renderMarkdown\(reasoning\)/);
   assert.doesNotMatch(agentView, /content\.innerHTML = renderMarkdown\(run\.rawReasoning\)/);
-  assert.match(agentCSS, /\.agent-tool-terminal-output \{[^}]*max-height: calc\(10 \* 1\.55em\);[^}]*overflow-y: auto;/s);
+  assert.match(agentCSS, /\.agent-tool-event-output \{[^}]*max-height: calc\(10 \* 1\.55em\);[^}]*overflow-y: auto;/s);
 });
 
 test('Archived chunks load only on explicit Load older or scroll-to-top, never after turn.done or live compaction', () => {
@@ -183,8 +186,12 @@ test('Assistant tables keep their content width inside a horizontal scroller', (
 test('Live Thinking follows only while the thread-end marker is visible', () => {
   assert.match(agentView, /agent-thread-end-marker/);
   assert.match(agentView, /new IntersectionObserver/);
-  assert.match(agentView, /state\.pinned = entry\.isIntersecting \|\| isThreadAtBottom\(thread\)/);
-  assert.match(agentView, /state\.pinned = isThreadAtBottom\(thread\)/);
+  // The marker is a re-pin signal only: it must never unpin, because tool
+  // spam pushes it out of the viewport between follow-scrolls. Unpinning is
+  // decided by the direction-aware updateScrollPin on scroll events.
+  assert.match(agentView, /if \(entry\.isIntersecting \|\| isThreadAtBottom\(thread\)\) state\.pinned = true;/);
+  assert.doesNotMatch(agentView, /state\.pinned = entry\.isIntersecting/);
+  assert.match(agentView, /updateScrollPin\(state, thread\)/);
   assert.match(agentView, /if \(!force && !state\.pinned\) return/);
 });
 

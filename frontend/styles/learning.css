@@ -741,6 +741,9 @@
 .learning-log-activity .agent-tool-terminal {
   margin: 6px 10px 0;
 }
+.learning-log-activity .agent-tool-event {
+  margin: 6px 10px 0;
+}
 /* Final verdict line: what the review agent decided (saved / nothing
    found...), rendered like a short agent reply at the end of the flow. */
 .learning-log-conclusion {

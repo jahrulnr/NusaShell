@@ -110,14 +110,15 @@ test('details show thinking, tool cards, and the final note - but never the repl
   assert.ok(text.includes('The user stated a durable preference'));
   assert.ok(text.includes('Not stored yet. Saving now.'));
 
-  const cards = view.querySelectorAll('details.agent-tool-terminal');
+  const cards = view.querySelectorAll('.agent-tool-event');
   assert.equal(cards.length, 2);
-  assert.match(cards[0].querySelector('.agent-tool-terminal-title')?.textContent || '', /memory/);
+  assert.ok(cards[0].open, 'event results are visible by default');
+  assert.match(cards[0].querySelector('.agent-tool-event-title')?.textContent || '', /memory/i);
   // Meta summarizes the args (single-arg tools show just the value).
-  assert.match(cards[0].querySelector('.agent-tool-terminal-meta')?.textContent || '', /Indonesian/, 'tool meta summarizes args');
-  assert.match(cards[1].querySelector('.agent-tool-terminal-meta')?.textContent || '', /Indonesian/, 'memory save meta shows the stored snippet');
-  assert.ok(cards[0].querySelector('.agent-tool-terminal-output'), 'output panel exists');
-  assert.ok(!cards[0].open, 'tool details are collapsed by default');
+  assert.match(cards[0].querySelector('.agent-tool-event-summary-text')?.textContent || '', /Indonesian/, 'tool meta summarizes args');
+  assert.match(cards[1].querySelector('.agent-tool-event-summary-text')?.textContent || '', /Indonesian/, 'memory save meta shows the stored snippet');
+  assert.ok(cards[0].querySelector('.agent-tool-event-details'), 'raw request/output fold exists');
+  assert.ok(!cards[0].querySelector('.agent-tool-event-details').open, 'raw fold is collapsed by default');
 
   // The final assistant summary renders as a plain conclusion line.
   const conclusion = view.querySelector('.learning-log-conclusion');

@@ -28,21 +28,21 @@ func buildToolPresentation(name, args string, status domain.ToolCallStatus, rawO
 	presentation := &contracts.ToolPresentationDTO{
 		Variant: toolPresentationVariant(name, args),
 		Action:  toolPresentationAction(name, status, rawOutput),
-		Request: limitToolPresentation(formatToolPresentationRequest(name, args), toolPresentationRequestLimit),
+		Request: formatToolPresentationRequest(name, args),
 		Result: contracts.ToolPresentationResultDTO{
 			Format: toolPresentationFormat(name, args),
 		},
 	}
 
 	if presentation.Variant == "terminal" {
-		presentation.Result.Text = limitToolPresentation(rawOutput, toolPresentationTextLimit)
+		presentation.Result.Text = rawOutput
 		presentation.Result.Summary = toolPresentationSummary(name, status, nil, nil, rawOutput)
 		return presentation
 	}
 
 	parsed := parseToolPresentationOutput(rawOutput)
 	presentation.Result.Meta = parsed.meta
-	presentation.Result.Text = limitToolPresentation(parsed.body, toolPresentationTextLimit)
+	presentation.Result.Text = parsed.body
 	if presentation.Result.Format == "list" {
 		var items []map[string]any
 		switch presentation.Variant {
@@ -554,7 +554,7 @@ func toolPresentationSummary(name string, status domain.ToolCallStatus, meta map
 		return "Answer ready"
 	case "docs_read", "web_fetch":
 		if title, ok := meta["title"].(string); ok && strings.TrimSpace(title) != "" {
-			return "Loaded " + limitToolPresentation(title, 72)
+			return "Loaded " + title
 		}
 	}
 	for _, key := range []string{"written", "created", "deleted", "moved", "copied"} {
@@ -720,14 +720,7 @@ func firstToolPresentationLine(text string, limit int) string {
 		if line == "" {
 			continue
 		}
-		return limitToolPresentation(line, limit)
+		return line
 	}
 	return ""
-}
-
-func limitToolPresentation(value string, limit int) string {
-	if len(value) <= limit {
-		return value
-	}
-	return value[:limit] + "\n… (truncated)"
 }

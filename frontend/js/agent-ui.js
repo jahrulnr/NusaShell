@@ -64,6 +64,35 @@ export function syncThreadPin(state, thread) {
   return state.pinned;
 }
 
+// updateScrollPin is the race-free pin decision for a growing thread.
+//
+// It is direction-aware: only a real upward user scroll releases the pin.
+// Programmatic follow-scrolls always move down (or stay), and content growth
+// between scroll events only increases the bottom distance — so neither can
+// ever be mistaken for "the user scrolled up". This is what keeps autoscroll
+// alive while tool cards spam the tail: the old geometry-only check read the
+// post-growth distance and mistook content growth for the user reading up.
+//
+// - pinned + still at (or near) the bottom → stay pinned.
+// - pinned + scrollTop moved up beyond the tolerance a follow-scroll can
+//   leave → released (user intent: read history).
+// - released + user returned near the bottom → re-pinned.
+export function updateScrollPin(state, thread, tolerance = 24) {
+  if (!thread) return state.pinned;
+  const scrollTop = thread.scrollTop;
+  const distance = thread.scrollHeight - scrollTop - thread.clientHeight;
+  const previous = state.pinGeom;
+  if (previous && previous.thread === thread && scrollTop < previous.scrollTop - tolerance) {
+    // Upward movement beyond what a follow-scroll could produce: the user is
+    // scrolling up. Release the pin regardless of where the bottom now is.
+    state.pinned = false;
+  } else if (distance <= tolerance) {
+    state.pinned = true;
+  }
+  state.pinGeom = { thread, scrollTop };
+  return state.pinned;
+}
+
 // conversationTail is the snapshot window for a long thread: keep the last
 // user (or compaction) bubble, keep the complete trailing assistant run, and
 // leave only older complete turns to Load older. A trailing run can contain

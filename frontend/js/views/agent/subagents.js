@@ -2,11 +2,12 @@
 
 import { rpc, on } from '../../rpc.js';
 import { el, fmtTime } from '../../ui.js';
+import { updateScrollPin } from '../../agent-ui.js';
 import { renderMarkdown } from '../../markdown.js';
 import { incrementalRender } from '../../incremental-render.js';
 import { highlightCode } from '../../highlight-render.js';
 import { attachZoomButtons } from '../../media-zoom.js';
-import { renderToolJob, reasoningDisclosure, setReasoningSource, setToolTerminalStatus } from './render.js';
+import { renderToolJob, reasoningDisclosure, setReasoningSource, setToolTerminalOutput } from './render.js';
 
 const LIVE = new Set(['starting', 'running']);
 const RECENT_MS = 2 * 60 * 1000;
@@ -374,8 +375,9 @@ function renderDrawer() {
   state.drawerRunId = selected.id;
   const existing = content.querySelector(`.acp-run-panel[data-run-id="${selected.id}"]`);
   if (!existing) {
-    content.replaceChildren(buildRunPanel(selected));
+    mountRunPanel(content, selected);
   } else {
+    bindTranscriptFollow(existing);
     patchRunPanel(existing, selected);
   }
 }
@@ -447,8 +449,9 @@ function renderPopup() {
   // Same run: patch in place so the popup transcript doesn't reset.
   const existing = body.querySelector(`.acp-run-panel[data-run-id="${run.id}"]`);
   if (!existing) {
-    body.replaceChildren(buildRunPanel(run));
+    mountRunPanel(body, run);
   } else {
+    bindTranscriptFollow(existing);
     patchRunPanel(existing, run);
   }
 }
@@ -478,6 +481,17 @@ function buildRunPanel(run) {
   return panel;
 }
 
+// A freshly opened panel always starts pinned to the live tail; the user can
+// scroll up from there (which releases the follow via updateScrollPin).
+function mountRunPanel(container, run) {
+  const panel = buildRunPanel(run);
+  container.replaceChildren(panel);
+  bindTranscriptFollow(panel);
+  const scroller = transcriptScroller(panel);
+  if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  return panel;
+}
+
 // patchRunPanel updates a live panel in place: status pill + model pill +
 // error, then patches the transcript in place. Auto-follows the bottom only
 // when the user is already there — reading earlier output is never interrupted.
@@ -502,13 +516,41 @@ function patchRunPanel(panel, run) {
   syncTranscriptWithFollow(panel, run.transcript || [], run.prompt, run.started_at);
 }
 
+// Transcript follow state lives on the scrolling element (drawer content or
+// popup), keyed by WeakMap so panels can come and go. The decision is
+// direction-aware (updateScrollPin): only a real upward user scroll releases
+// the follow. Measuring the bottom distance before a patch — the old
+// approach — read post-growth geometry and silently killed the follow while
+// a subagent streamed tool output.
+const followStates = new WeakMap();
+
+function transcriptScroller(panel) {
+  return panel?.querySelector('.acp-transcript')?.closest('.acp-run-content, .acp-popup') || null;
+}
+
+function bindTranscriptFollow(panel) {
+  const scroller = transcriptScroller(panel);
+  if (!scroller || followStates.has(scroller)) return;
+  const follow = { pinned: true };
+  followStates.set(scroller, follow);
+  scroller.addEventListener('scroll', () => {
+    updateScrollPin(follow, scroller);
+  }, { passive: true });
+}
+
+// followTranscriptBottom scrolls the transcript to its newest output unless
+// the user has scrolled up to read. Scrolling back to the bottom re-arms it.
+function followTranscript(panel) {
+  const scroller = transcriptScroller(panel);
+  if (!scroller) return;
+  const follow = followStates.get(scroller);
+  if (follow && !follow.pinned) return;
+  scroller.scrollTop = scroller.scrollHeight;
+}
+
 function syncTranscriptWithFollow(panel, transcript, prompt, promptAt) {
-  const box = panel.querySelector('.acp-transcript');
-  if (!box) return;
-  const scroller = box.closest('.acp-run-content, .acp-popup');
-  const atBottom = !scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 60;
   syncTranscript(panel, transcript, prompt, promptAt);
-  if (atBottom && scroller) scroller.scrollTop = scroller.scrollHeight;
+  followTranscript(panel);
 }
 
 export function syncTranscript(panel, transcript, initialPrompt = '', initialPromptAt = '') {
@@ -705,21 +747,21 @@ function transcriptLine(chunk, key) {
 
 function updateTranscriptLine(line, chunk) {
   if (chunk.kind === 'tool') {
-    const card = line.querySelector('.agent-tool-terminal');
+    const card = line.querySelector('.agent-tool-terminal, .agent-tool-event');
     if (!card) return;
     const status = normalizeAcpToolStatus(chunk.tool_status);
-    setToolTerminalStatus(card, status);
-    const title = card.querySelector('.agent-tool-terminal-title');
-    if (title) title.textContent = chunk.tool_kind || chunk.tool_id || chunk.tool_title || 'tool';
-    const action = card.querySelector('.agent-tool-terminal-action');
-    if (action) action.textContent = chunk.tool_title || chunk.tool_kind || chunk.tool_id || 'Tool';
-    const meta = card.querySelector('.agent-tool-terminal-meta');
-    if (meta) meta.textContent = acpToolMeta(chunk, status);
-    const output = card.querySelector('.agent-tool-terminal-output');
-    if (output) {
-      output.textContent = chunk.text || (status === 'running' ? '…' : status === 'fail' ? 'Tool failed.' : 'ok');
-      output.classList.toggle('is-error', status === 'fail');
-    }
+    const name = chunk.tool_kind || chunk.tool_id || chunk.tool_title || 'tool';
+    const action = chunk.tool_title || chunk.tool_kind || chunk.tool_id || 'Tool';
+    // setToolTerminalOutput repaints summary/result/raw; setToolTerminalStatus
+    // inside it recomputes the title from the tool name, so the ACP-provided
+    // title is applied after.
+    setToolTerminalOutput(card, chunk.text || '', status, acpToolMeta(chunk, status));
+    const terminalTitle = card.querySelector('.agent-tool-terminal-title');
+    if (terminalTitle) terminalTitle.textContent = name;
+    const terminalAction = card.querySelector('.agent-tool-terminal-action');
+    if (terminalAction) terminalAction.textContent = chunk.tool_title || name;
+    const eventTitle = card.querySelector('.agent-tool-event-title');
+    if (eventTitle) eventTitle.textContent = chunk.tool_title || name;
     return;
   }
   if (chunk.kind === 'thought') {
