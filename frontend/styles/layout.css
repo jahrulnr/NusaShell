@@ -456,6 +456,12 @@ body.mini-mode .agent-conversations { display: none; }
   .window .sidebar.is-compact { width: min(78vw, 264px); }
   .window .sidebar .nav-label { display: inline; }
   .window .sidebar .storage { display: block; }
+  .window .sidebar .nav-item,
+  .window .sidebar .sidebar-mode-toggle {
+    justify-content: flex-start;
+    width: 100%;
+    padding-inline: var(--space-4);
+  }
   .body.is-nav-open .sidebar {
     visibility: visible;
     pointer-events: auto;

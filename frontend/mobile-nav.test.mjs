@@ -144,6 +144,14 @@ test('mobile drawer is bounded, scrollable, and non-interactive while closed', (
   assert.match(mobileRules, /pointer-events:\s*none/);
 });
 
+test('mobile drawer gives the collapsed shell sidebar enough width for labels', () => {
+  const mobileRules = layoutCSS.slice(layoutCSS.indexOf('@media (max-width: 680px)'));
+  assert.match(
+    mobileRules,
+    /\.window \.sidebar \.nav-item,\s*\.window \.sidebar \.sidebar-mode-toggle\s*\{[\s\S]*?justify-content:\s*flex-start;[\s\S]*?width:\s*100%;[\s\S]*?padding-inline:\s*var\(--space-4\);/
+  );
+});
+
 test('returns null when shell pieces are missing', () => {
   const dom = new JSDOM('<body><div class="body"></div></body>');
   const nav = initMobileNav(dom.window.document);
