@@ -81,3 +81,26 @@ test('Subagent transcript merges legacy token fragments and tool updates', () =>
     cleanup();
   }
 });
+
+test('Subagent prompts render as user bubbles before and between assistant rounds', () => {
+  const { dom, panel } = makePanel();
+  try {
+    syncTranscript(panel, [
+      { kind: 'thought', text: 'planning' },
+      { kind: 'prompt', text: 'steer from the parent' },
+      { kind: 'text', text: 'continued work' },
+    ], 'initial delegation brief');
+
+    const userMessages = [...panel.querySelectorAll('.acp-transcript > .agent-message.user')];
+    assert.equal(userMessages.length, 2);
+    assert.equal(userMessages[0].querySelector('.agent-bubble').textContent, 'initial delegation brief');
+    assert.equal(userMessages[1].querySelector('.agent-bubble').textContent, 'steer from the parent');
+    assert.equal(userMessages[0].querySelector('.agent-bubble').classList.contains('acp-transcript'), false);
+    assert.equal(panel.querySelectorAll('.acp-transcript > .agent-message.assistant').length, 2);
+    assert.equal(panel.querySelectorAll('.agent-round.is-thought').length, 1);
+    assert.equal(panel.querySelectorAll('.agent-round.is-text').length, 1);
+  } finally {
+    dom.window.close();
+    cleanup();
+  }
+});

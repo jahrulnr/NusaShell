@@ -204,6 +204,11 @@
 /* Transcript content deliberately reuses agent.css. The view only owns the
  * drawer shell and ACP metadata; subagent rounds are rendered as the same
  * .agent-message/.agent-bubble/.agent-round structure as the main agent. */
+.acp-run-panel > .agent-thread {
+  flex: none;
+  overflow: visible;
+  padding: 0;
+}
 .acp-run-error { color: #ff9ca5; font-size: 12px; }
 .acp-empty { color: var(--text-faint); font-size: 12.5px; }
 

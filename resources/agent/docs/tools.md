@@ -7,16 +7,16 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | Tool | Purpose |
 | --- | --- |
 | `exec` | run a shell command as a child process; combined stdout/stderr streamed live to the tool terminal as it is produced (head/tail elision for huge output) plus an optional per-call Stop button while running; default shell is POSIX `sh` on Unix/macOS, on Windows `auto` resolves Git Bash first (POSIX syntax works best) then PowerShell — `cmd` only via explicit `shell="cmd"`, plus optional kinds `bash`/`powershell`/`pwsh`/`wsl` (wsl maps cwd under /mnt); no absolute wall-clock limit — running commands keep producing, but silence longer than `idle_timeout_ms` (default 180000) fails the run; optional explicit `timeout_ms`; optional absolute `cwd`; the whole child tree dies on cancel/timeout (Stop button or composer Stop); on Windows select shells via `shell=` instead of invoking cmd.exe/powershell.exe inside a bash command line (MSYS path conversion mangles drive-letter paths like `Z:/x`). When the full log exceeds ~32KiB, YAML includes `overflow_path` (absolute file under the platform temp dir `nusashell/`) with the complete stdout/stderr — `file_read` it from offset 0 |
-| `file_read` | read a text file by absolute path (up to `max_bytes`, default 32768; continue with `offset_bytes` when truncated — the result echoes `offset_bytes`/`next_offset_bytes`, always byte counts, never line numbers; binary files are reported, not dumped) |
-| `file_write` | create or overwrite a text file atomically (temp file + rename); parent directories created automatically; `encoding` utf8 or base64; transient Windows file-lock errors during the rename are retried briefly |
-| `file_patch` | exact substring replace; errors unless `old_string` matches exactly once — disambiguate repeated matches with 1-based `occurrence`; `preview=true` returns the result without writing |
+| `file_read` | read a text file by absolute path (up to `max_bytes`, default 32768; continue with `offset_bytes` when truncated — the result echoes `offset_bytes`/`next_offset_bytes`, always byte counts, never line numbers; `sha256` is the version of the complete file, including bytes outside the returned page; metadata also reports `line_ending`, `tabs`, `carriage_returns`, and `trailing_whitespace_lines`; use `show_whitespace=true` to render invisible whitespace as visible markers; binary files are reported, not dumped) |
+| `file_write` | create or overwrite a text file atomically (temp file + rename); parent directories created automatically; `encoding` is utf8, escaped visible-whitespace text, or base64; escaped text understands `\t`, `\r`, `\n`, and `\\` and preserves the resulting bytes; transient Windows file-lock errors during the rename are retried briefly; the result includes the written file's `sha256` and whitespace metadata |
+| `file_patch` | exact substring replace; after an exact miss, safely auto-heals one unique whitespace-equivalent match by default and reports `healed: true`; set `auto_heal=false` for exact-only behavior; repeated exact matches still require 1-based `occurrence`, while ambiguous whitespace matches never write and report the current version; use `encoding=escaped` when copying markers from `file_read(show_whitespace=true)`; pass `expected_sha256` from `file_read` to fail closed if the file changed; success returns the new `sha256` and whitespace metadata; a no-match context failure returns the current version, whitespace statistics, and a nearby excerpt with invisible characters rendered visibly; `preview=true` returns the result without writing |
 | `file_list` | list directory entries with name, type, size, modified time |
 | `file_mkdir` | create a directory including any missing parents |
 | `file_delete` | delete a file or directory (non-empty directories require `recursive=true`); irreversible |
 | `file_move` | move/rename a path; overwrites an existing destination; falls back to copy+delete across filesystems (transient Windows rename locks are retried briefly first) |
 | `file_copy` | copy a file or directory recursively |
 | `file_info` | metadata for a path: `exists`, size, mode, type, modified time. Does NOT error on missing paths — returns `exists: false` (use it for existence checks too) |
-| `grep` | search file contents with regex (RE2 syntax); filters by `glob_pattern`, returns matching lines with optional `context_lines`; `output_mode`: content (default), files_with_matches, count; case-insensitive via `case_insensitive=true`; content rows are `path:LINE:text` where LINE is a 1-based line number (context rows use `path-LINE-text`), and the header tallies them as `line_matches` (count mode: `file:N` = match count, `total_line_matches`); skips `.git`, `node_modules`, `vendor`, and `*.min.js`/`*.min.css`/`*.map`; each content line is clipped at 200 bytes; in-band body caps at ~32KiB with `overflow_path` / `next_offset_bytes` so `file_read` can page the rest from the platform temp dir; prefer this over exec+shell grep — structured output, no process spawn, works without rg installed |
+| `grep` | search file contents with regex (RE2 syntax); filters by `glob_pattern`, returns matching lines with optional `context_lines`; `output_mode`: content (default), files_with_matches, count; case-insensitive via `case_insensitive=true`; set `show_whitespace=true` in content mode to render tabs and carriage returns visibly; content rows are `path:LINE:text` where LINE is a 1-based line number (context rows use `path-LINE-text`), and the header tallies them as `line_matches` (count mode: `file:N` = match count, `total_line_matches`); skips `.git`, `node_modules`, `vendor`, and `*.min.js`/`*.min.css`/`*.map`; each content line is clipped at 200 bytes; in-band body caps at ~32KiB with `overflow_path` / `next_offset_bytes` so `file_read` can page the rest from the platform temp dir; prefer this over exec+shell grep — structured output, no process spawn, works without rg installed |
 | `find_file` | find files by glob pattern with `**` recursive matching (e.g. `**/*.go`) and brace expansion (e.g. `*.{go,ts}`); skips .git/node_modules/vendor; returns matching paths sorted alphabetically |
 | `show` | render a file from disk in the UI. `op=html` reads an HTML file and displays it in a sandboxed iframe (write the file first with `file_write`, then `show` it — use `file_patch` for edits, `file_read` to inspect). `op=image` reads an image file and displays it inline. `op=audio` reads an audio file (mp3, wav, ogg, m4a) and displays an inline player. `op=video` reads a video file (mp4, webm, mov, avi) and displays an inline player. `width`/`height` control the iframe viewport (html only, default 720x400). The tool result to the model is metadata only (path, name, media_type, size_bytes for media; path, width, height, title for html) — no file content or base64 payload is ever embedded in the tool output, so it does not bloat the conversation JSON or enter the provider request. The frontend loads the file via `/local-file?path=` on demand. Use `read_media` instead when the model needs to see the image/audio/video content. Replaces the former `artifact_*` tools — file_* handles CRUD, `show` only handles display |
 | `skill` | skill library dispatcher; `op` selects: `list`, `search`, `save`. Skill files live on disk — read `SKILL.md` and support files with `file_read`, list a skill folder with `file_list` (see `docs(op="read", id="skills")` for the path layout) |
@@ -101,6 +101,44 @@ file_read(path="big.log", offset_bytes=900)   # lands mid-line ~14, not line 900
 file_read(...) → next_offset_bytes: 32768
 grep(..., "line 32768")                        # bytes ≠ lines
 ```
+
+### Invisible whitespace discipline
+
+`file_read` preserves bytes and reports whitespace metadata for the complete
+file. When tabs or CRLF are suspected, request `show_whitespace=true`; its
+body is an inspection representation, not silently normalized content. Use
+`encoding="escaped"` on `file_write` or `file_patch` when copying that
+representation back. The escaped form supports `\t`, `\r`, `\n`, and
+`\\`; literal backslashes must therefore be escaped as `\\`.
+
+`file_patch` tries an exact match first. If that misses, its default
+`auto_heal=true` compares line endings and horizontal whitespace only; it
+writes only when exactly one candidate is found, reports `healed: true`, and
+preserves the current file's line-ending convention in the replacement. It
+leaves horizontal whitespace in `new_string` as supplied; use the escaped
+encoding when the replacement itself must contain exact tabs. Set
+`auto_heal=false` when the edit must remain byte-exact, or when whitespace may
+be meaningful data rather than formatting.
+
+```text
+# GOOD — inspect, then patch with the same byte-level representation
+file_read(path="styles.css", show_whitespace=true)
+  → line_ending: crlf, tabs: 1, carriage_returns: 3
+  → a {\r
+    \tcolor: red;\r
+file_patch(path="styles.css", encoding="escaped",
+  old_string="a {\r\n\tcolor: red;\r\n}",
+  new_string="a {\r\n\tcolor: blue;\r\n}")
+
+# BAD — reconstructing the context with spaces and LF from a visual guess
+file_patch(path="styles.css",
+  old_string="a {\n  color: red;\n}", ...)
+```
+
+A `PATCH_CONTEXT_NOT_FOUND` error includes the current SHA-256, whitespace
+statistics, and a nearby excerpt with `\t`/`\r` visible. Re-read that
+version before retrying; do not convert grep line numbers into file-read byte
+offsets.
 
 The provider receives the current `Toolbox.ListTools` roster. `web_answer` is
 listed only when configured, `generate_image` is listed only when an image

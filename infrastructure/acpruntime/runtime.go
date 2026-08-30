@@ -412,7 +412,7 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 	rt.mu.Unlock()
 	rt.emitUpdate(lr.snapshot())
 
-	go lr.drivePrompt(req.Prompt)
+	go lr.drivePrompt(req.Prompt, false)
 	return lr.snapshot(), nil
 }
 
@@ -638,15 +638,31 @@ func containedPath(workspace, p string) (string, error) {
 	return clean, nil
 }
 
-func (lr *liveRun) drivePrompt(text string) {
+// drivePrompt sends one prompt to the ACP session. The initial delegation is
+// already carried by AcpRun.Prompt, so only follow-up/steering prompts are
+// recorded as transcript chunks. Recording at dispatch time (rather than
+// when Steer queues text) avoids showing a prompt that was replaced before
+// the ACP session actually received it.
+func (lr *liveRun) drivePrompt(text string, recordPrompt bool) {
 	lr.mu.Lock()
 	if lr.closed {
 		lr.mu.Unlock()
 		return
 	}
+	if recordPrompt {
+		lr.run.AppendTranscript(domain.AcpTranscriptChunk{
+			Kind: "prompt",
+			Text: text,
+			At:   time.Now().UTC(),
+		})
+	}
 	lr.prompting = true
 	sessionID := lr.run.SessionID
+	snap := cloneRun(lr.run)
 	lr.mu.Unlock()
+	if recordPrompt {
+		lr.conn.runtime.emitUpdate(snap)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -683,7 +699,7 @@ func (lr *liveRun) drivePrompt(text string) {
 		lr.run.UpdatedAt = time.Now().UTC()
 		lr.mu.Unlock()
 		lr.conn.runtime.emitUpdate(cloneRun(lr.run))
-		lr.drivePrompt(steer)
+		lr.drivePrompt(steer, true)
 		return
 	}
 	lr.finishLocked(domain.AcpRunCompleted, "", res.StopReason)
@@ -749,7 +765,7 @@ func (rt *Runtime) Steer(runID, text string) error {
 	lr.mu.Unlock()
 	rt.emitUpdate(snap)
 	if startNow {
-		go lr.drivePrompt(text)
+		go lr.drivePrompt(text, true)
 	}
 	return nil
 }

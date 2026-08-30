@@ -53,6 +53,13 @@ promotion are handled by the orchestrator (parent agent), not the user.
 Permissions are auto-allowed — the orchestrator delegates authority
 when it spawns a subagent.
 
+The drawer and peek transcript use the same Agent conversation structure as
+the parent room. The initial delegation brief is shown as a user bubble, and
+each steering prompt that reaches the ACP session is recorded as another user
+bubble before the assistant rounds that follow it. Steering text is persisted
+with the terminal run, so it remains visible when the room is reopened after a
+backend restart.
+
 ## Async completion (tool injection)
 
 When a subagent finishes (completed, failed, or cancelled):

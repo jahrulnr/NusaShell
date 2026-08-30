@@ -718,6 +718,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				a.log("info", "agent", "mid-turn compaction for %s round %d: est=%d trigger=%d window=%d",
 					run.ID, round, est, trigger, cw)
 				compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, adapter, model, cw, settings)
+				a.emitCompactionStarted(run, conversation.ID)
 				summary, compErr := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings)
 				if compErr == nil {
 					a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{RunID: run.ID, ConversationID: conversation.ID, Summary: summary})
@@ -815,6 +816,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				compactionAttempts++
 				a.log("warn", "agent", "request too large for turn %s (est=%d trigger=%d), forcing emergency compaction", run.ID, preEmg, trigger)
 				compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, adapter, model, cw, settings)
+				a.emitCompactionStarted(run, conversation.ID)
 				summary, compErr := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings)
 				if compErr == nil {
 					a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{RunID: run.ID, ConversationID: conversation.ID, Summary: summary})

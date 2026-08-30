@@ -2,7 +2,10 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -84,6 +87,236 @@ func TestFileWriteAndPatch(t *testing.T) {
 	after, _ := os.ReadFile(path)
 	if string(before) != string(after) {
 		t.Fatalf("preview modified the file")
+	}
+}
+
+func TestFileReadAndPatchExposeContentVersion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "versioned.txt")
+	content := "alpha\nbeta\n"
+
+	if _, err := testTB.Execute(context.Background(), "file_write", fileJSON(map[string]any{"path": path, "content": content})); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	wantBefore := sha256.Sum256([]byte(content))
+	beforeHash := hex.EncodeToString(wantBefore[:])
+
+	readOut, err := testTB.Execute(context.Background(), "file_read", []byte(`{"path":"`+jsonPath(path)+`"}`))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(readOut, "sha256: "+beforeHash) {
+		t.Fatalf("file_read must expose the content version: %q", readOut)
+	}
+
+	patchOut, err := testTB.Execute(context.Background(), "file_patch", fileJSON(map[string]any{"path": path, "old_string": "beta", "new_string": "BETA", "expected_sha256": beforeHash}))
+	if err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	wantAfter := sha256.Sum256([]byte("alpha\nBETA\n"))
+	if !strings.Contains(patchOut, "sha256: "+hex.EncodeToString(wantAfter[:])) {
+		t.Fatalf("file_patch must expose the new content version: %q", patchOut)
+	}
+}
+
+func TestFilePatchFailureExplainsStaleContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "layout.css")
+	content := ".sidebar {\n  width: 240px;\n}\n"
+	if _, err := testTB.Execute(context.Background(), "file_write", fileJSON(map[string]any{"path": path, "content": content})); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, err := testTB.Execute(context.Background(), "file_patch", fileJSON(map[string]any{
+		"path":       path,
+		"old_string": ".sidebar {\n  width: 230px;\n}",
+		"new_string": ".sidebar {\n  width: 280px;\n}",
+	}))
+	if err == nil {
+		t.Fatal("expected stale-context error")
+	}
+	for _, want := range []string{
+		"PATCH_CONTEXT_NOT_FOUND",
+		"current_sha256=",
+		"old_string_bytes=",
+		"re-read",
+		"encoding=escaped",
+		"nearby_context",
+		"line 1:",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("stale-context error missing %q: %v", want, err)
+		}
+	}
+}
+
+func TestFilePatchRejectsStaleExpectedVersionWithoutWriting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "versioned.txt")
+	if _, err := testTB.Execute(context.Background(), "file_write", fileJSON(map[string]any{"path": path, "content": "one\ntwo\n"})); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, err := testTB.Execute(context.Background(), "file_patch", fileJSON(map[string]any{
+		"path": path, "old_string": "two", "new_string": "TWO",
+		"expected_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "FILE_CHANGED_SINCE_READ") {
+		t.Fatalf("expected stale-version error, got %v", err)
+	}
+	out, readErr := testTB.Execute(context.Background(), "file_read", []byte(`{"path":"`+jsonPath(path)+`"}`))
+	if readErr != nil || !strings.Contains(out, "two") || strings.Contains(out, "TWO") {
+		t.Fatalf("stale precondition must not write: err=%v out=%q", readErr, out)
+	}
+}
+
+func TestFileToolsPreserveAndShowInvisibleWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "styles.css")
+	escaped := "a {\\r\\n\\tcolor: red;  \\r\\n}\\r\\n"
+
+	writeOut, err := testTB.Execute(context.Background(), "file_write", fileJSON(map[string]any{
+		"path": path, "content": escaped, "encoding": "escaped",
+	}))
+	if err != nil {
+		t.Fatalf("escaped file_write: %v", err)
+	}
+	for _, want := range []string{"line_ending: crlf", "tabs: 1", "carriage_returns: 3", "trailing_whitespace_lines: 1"} {
+		if !strings.Contains(writeOut, want) {
+			t.Errorf("file_write metadata missing %q: %s", want, writeOut)
+		}
+	}
+
+	wantRaw := []byte("a {\r\n\tcolor: red;  \r\n}\r\n")
+	gotRaw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read raw file: %v", err)
+	}
+	if string(gotRaw) != string(wantRaw) {
+		t.Fatalf("escaped file_write changed bytes: got %q want %q", gotRaw, wantRaw)
+	}
+
+	readOut, err := testTB.Execute(context.Background(), "file_read", fileJSON(map[string]any{
+		"path": path, "show_whitespace": true,
+	}))
+	if err != nil {
+		t.Fatalf("visible file_read: %v", err)
+	}
+	for _, want := range []string{`\r`, `\tcolor: red`, "line_ending: crlf", "tabs: 1"} {
+		if !strings.Contains(readOut, want) {
+			t.Errorf("visible file_read missing %q: %s", want, readOut)
+		}
+	}
+
+	patchOut, err := testTB.Execute(context.Background(), "file_patch", fileJSON(map[string]any{
+		"path":       path,
+		"old_string": escaped,
+		"new_string": "a {\\r\\n\\tcolor: blue;\\r\\n}\\r\\n",
+		"encoding":   "escaped",
+	}))
+	if err != nil {
+		t.Fatalf("escaped file_patch: %v", err)
+	}
+	for _, want := range []string{"line_ending: crlf", "tabs: 1", "carriage_returns: 3", "trailing_whitespace_lines: 0"} {
+		if !strings.Contains(patchOut, want) {
+			t.Errorf("file_patch metadata missing %q: %s", want, patchOut)
+		}
+	}
+	wantPatched := []byte("a {\r\n\tcolor: blue;\r\n}\r\n")
+	gotPatched, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read patched file: %v", err)
+	}
+	if string(gotPatched) != string(wantPatched) {
+		t.Fatalf("escaped file_patch changed bytes: got %q want %q", gotPatched, wantPatched)
+	}
+}
+
+func TestFilePatchAutoHealsUniqueWhitespaceMismatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "styles.css")
+	content := "a {\r\n\tcolor: red;\r\n}\r\n"
+	if _, err := testTB.Execute(context.Background(), "file_write", fileJSON(map[string]any{
+		"path": path, "content": content,
+	})); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	patchOut, err := testTB.Execute(context.Background(), "file_patch", fileJSON(map[string]any{
+		"path":       path,
+		"old_string": "a {\n  color: red;\n}",
+		"new_string": "a {\n  color: blue;\n}",
+	}))
+	if err != nil {
+		t.Fatalf("unique whitespace mismatch should auto-heal: %v", err)
+	}
+	for _, want := range []string{"healed: true", "match_mode: whitespace", "line_ending: crlf"} {
+		if !strings.Contains(patchOut, want) {
+			t.Errorf("auto-heal result missing %q: %s", want, patchOut)
+		}
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read patched file: %v", err)
+	}
+	want := "a {\r\n  color: blue;\r\n}\r\n"
+	if string(got) != want {
+		t.Fatalf("auto-heal introduced mixed line endings: got %q want %q", got, want)
+	}
+}
+
+func TestFilePatchAutoHealRejectsAmbiguousWhitespaceMatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "values.txt")
+	content := "key\tvalue\r\nkey  value\r\n"
+	if _, err := testTB.Execute(context.Background(), "file_write", fileJSON(map[string]any{
+		"path": path, "content": content,
+	})); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, err := testTB.Execute(context.Background(), "file_patch", fileJSON(map[string]any{
+		"path": path, "old_string": "key value", "new_string": "key changed",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "PATCH_CONTEXT_AMBIGUOUS") {
+		t.Fatalf("expected ambiguous whitespace error, got %v", err)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil || string(got) != content {
+		t.Fatalf("ambiguous auto-heal must not write: err=%v got=%q", readErr, got)
+	}
+}
+
+func TestFilePatchWhitespaceFailureShowsVisibleContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "styles.css")
+	content := "a {\\r\\n\\tcolor: red;\\r\\n}\\r\\n"
+	if _, err := testTB.Execute(context.Background(), "file_write", fileJSON(map[string]any{
+		"path": path, "content": content, "encoding": "escaped",
+	})); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, err := testTB.Execute(context.Background(), "file_patch", fileJSON(map[string]any{
+		"path":       path,
+		"old_string": "a {\n  color: red;\n}",
+		"new_string": "a {\n  color: blue;\n}",
+		"auto_heal":  false,
+	}))
+	if err == nil {
+		t.Fatal("expected whitespace-sensitive patch error")
+	}
+	for _, want := range []string{
+		"PATCH_CONTEXT_NOT_FOUND",
+		"line_ending=crlf",
+		"tabs=1",
+		"carriage_returns=3",
+		`\r`,
+		`\t`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("whitespace diagnostic missing %q: %v", want, err)
+		}
 	}
 }
 
@@ -214,6 +447,14 @@ func TestFileToolInfosRegistered(t *testing.T) {
 func jsonPath(p string) string {
 	r := strings.NewReplacer("\\", "\\\\", "\"", "\\\"")
 	return r.Replace(p)
+}
+
+func fileJSON(v map[string]any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
 
 func TestWriteFileAtomicRetriesTransientRenameFailure(t *testing.T) {

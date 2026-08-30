@@ -1,7 +1,7 @@
 /* ACP subagent live UI: dock chips, right drawer, peek popup. */
 
 import { rpc, on } from '../../rpc.js';
-import { el } from '../../ui.js';
+import { el, fmtTime } from '../../ui.js';
 import { incrementalRender } from '../../incremental-render.js';
 import { highlightCode } from '../../highlight-render.js';
 import { attachZoomButtons } from '../../media-zoom.js';
@@ -452,15 +452,17 @@ function buildRunPanel(run) {
       el('span', { text: 'Workspace' }),
       el('code', { text: run.workspace || '—' }),
     ),
-    el('div', { class: 'agent-message assistant acp-run-message' },
-      el('div', { class: 'agent-bubble acp-transcript', 'aria-label': 'Subagent transcript' }),
-    ),
+    el('div', {
+      class: 'agent-thread acp-transcript',
+      role: 'log',
+      'aria-label': 'Subagent transcript',
+    }),
   );
 
   if (run.error) {
     panel.append(el('p', { class: 'acp-run-error', text: run.error }));
   }
-  syncTranscript(panel, run.transcript || []);
+  syncTranscript(panel, run.transcript || [], run.prompt, run.started_at);
   return panel;
 }
 
@@ -485,43 +487,134 @@ function patchRunPanel(panel, run) {
   if (run.error && !errEl) {
     panel.append(el('p', { class: 'acp-run-error', text: run.error }));
   }
-  syncTranscriptWithFollow(panel, run.transcript || []);
+  syncTranscriptWithFollow(panel, run.transcript || [], run.prompt, run.started_at);
 }
 
-function syncTranscriptWithFollow(panel, transcript) {
+function syncTranscriptWithFollow(panel, transcript, prompt, promptAt) {
   const box = panel.querySelector('.acp-transcript');
   if (!box) return;
   const scroller = box.closest('.acp-run-content, .acp-popup');
   const atBottom = !scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 60;
-  syncTranscript(panel, transcript);
+  syncTranscript(panel, transcript, prompt, promptAt);
   if (atBottom && scroller) scroller.scrollTop = scroller.scrollHeight;
 }
 
-export function syncTranscript(panel, transcript) {
+export function syncTranscript(panel, transcript, initialPrompt = '', initialPromptAt = '') {
   const box = panel?.querySelector('.acp-transcript');
   if (!box) return;
   const { chunks, usage } = normalizeTranscript(transcript);
   syncUsagePill(panel, usage);
-  if (!chunks.length) {
+  const segments = transcriptSegments(chunks, initialPrompt, initialPromptAt);
+  if (!segments.length) {
     box.replaceChildren(el('p', { class: 'acp-empty', text: 'Waiting for the first update…' }));
     return;
   }
   box.querySelector('.acp-empty')?.remove();
-  const lines = [...box.querySelectorAll(':scope > .agent-round')];
-  for (let index = 0; index < chunks.length; index++) {
-    const chunk = chunks[index];
-    const key = transcriptChunkKey(chunk, index);
+  const messages = [...box.querySelectorAll(':scope > .agent-message')];
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index];
+    let message = messages[index];
+    if (message?.dataset.transcriptSegmentKey !== segment.key) {
+      const replacement = transcriptMessage(segment);
+      if (message) message.replaceWith(replacement);
+      else box.append(replacement);
+      message = replacement;
+    } else {
+      updateTranscriptMessage(message, segment);
+    }
+  }
+  for (const message of messages.slice(segments.length)) message.remove();
+}
+
+// ACP exposes the initial delegation as run.prompt and follow-up steering as
+// transcript chunks. Split the transcript at each prompt so every prompt is
+// a real user message and the assistant output after it gets its own normal
+// agent bubble, matching the main conversation structure.
+function transcriptSegments(chunks, initialPrompt, initialPromptAt) {
+  const segments = [];
+  const prompt = typeof initialPrompt === 'string' ? initialPrompt.trim() : '';
+  if (prompt) segments.push({
+    kind: 'prompt',
+    key: 'prompt:initial',
+    text: initialPrompt,
+    at: initialPromptAt,
+  });
+
+  let assistantChunks = [];
+  let assistantIndex = 0;
+  let promptIndex = 0;
+  const flushAssistant = () => {
+    if (!assistantChunks.length) return;
+    segments.push({ kind: 'assistant', key: `assistant:${assistantIndex++}`, chunks: assistantChunks });
+    assistantChunks = [];
+  };
+
+  for (const [index, chunk] of chunks.entries()) {
+    if (chunk.kind === 'prompt') {
+      flushAssistant();
+      segments.push({
+        kind: 'prompt',
+        key: `prompt:${++promptIndex}`,
+        text: chunk.text || '',
+        at: chunk.at,
+      });
+      continue;
+    }
+    assistantChunks.push({ chunk, index });
+  }
+  flushAssistant();
+  return segments;
+}
+
+function transcriptMessage(segment) {
+  if (segment.kind === 'prompt') return transcriptPromptMessage(segment);
+  const message = el('div', {
+    class: 'agent-message assistant acp-run-message',
+    'data-transcript-segment-key': segment.key,
+  }, el('div', { class: 'agent-bubble acp-transcript-body' }));
+  syncAssistantMessage(message, segment.chunks);
+  return message;
+}
+
+function transcriptPromptMessage(segment) {
+  const message = el('div', {
+    class: 'agent-message user acp-prompt-message',
+    'data-transcript-segment-key': segment.key,
+  }, el('div', { class: 'agent-bubble' }, el('div', { text: segment.text })));
+  if (segment.at) {
+    message.append(el('div', { class: 'agent-message-meta', text: fmtTime(segment.at) }));
+  }
+  return message;
+}
+
+function updateTranscriptMessage(message, segment) {
+  if (segment.kind === 'prompt') {
+    const body = message.querySelector(':scope > .agent-bubble > div');
+    if (body) body.textContent = segment.text;
+    const meta = message.querySelector(':scope > .agent-message-meta');
+    if (segment.at && meta) meta.textContent = fmtTime(segment.at);
+    return;
+  }
+  syncAssistantMessage(message, segment.chunks);
+}
+
+function syncAssistantMessage(message, entries) {
+  const body = message.querySelector(':scope > .acp-transcript-body');
+  if (!body) return;
+  const lines = [...body.querySelectorAll(':scope > .agent-round')];
+  for (let index = 0; index < entries.length; index++) {
+    const { chunk, index: sourceIndex } = entries[index];
+    const key = transcriptChunkKey(chunk, sourceIndex ?? index);
     let line = lines[index];
     if (line?.dataset.transcriptKey !== key) {
       const replacement = transcriptLine(chunk, key);
       if (line) line.replaceWith(replacement);
-      else box.append(replacement);
-      line = replacement;
+      else body.append(replacement);
     } else {
       updateTranscriptLine(line, chunk);
     }
   }
-  for (const line of lines.slice(chunks.length)) line.remove();
+  for (const line of lines.slice(entries.length)) line.remove();
 }
 
 function normalizeTranscript(transcript) {

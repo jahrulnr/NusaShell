@@ -86,7 +86,7 @@ func TestRosterUniqueness(t *testing.T) {
 
 	events := []string{
 		EventTurnStarted, EventToolStarted, EventToolCompleted,
-		EventTurnDone, EventTurnError, EventCompacted, EventCompactionFailed, EventSteerQueued, EventSteerApplied,
+		EventTurnDone, EventTurnError, EventCompacting, EventCompacted, EventCompactionFailed, EventSteerQueued, EventSteerApplied,
 		EventSteerCancelled, EventProviderRetry, EventLogAppend, EventTodoUpdated,
 		EventCIRunCreated, EventCIRunStarted, EventCIRunCompleted, EventCIRunFailed,
 		EventCIRunCancelled, EventCIRunWaiting, EventCIRunBlocked,

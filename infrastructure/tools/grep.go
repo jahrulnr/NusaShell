@@ -44,6 +44,7 @@ type grepArgs struct {
 	ContextLines    int    `json:"context_lines"`
 	CaseInsensitive bool   `json:"case_insensitive"`
 	MaxResults      int    `json:"max_results"`
+	ShowWhitespace  bool   `json:"show_whitespace"`
 }
 
 func executeGrep(argsJSON []byte) (bool, string, error) {
@@ -124,7 +125,7 @@ func executeGrep(argsJSON []byte) (bool, string, error) {
 		via = "go"
 	}
 
-	return true, formatRgResults(matches, mode, via, capped), nil
+	return true, formatRgResults(matches, mode, via, capped, args.ShowWhitespace), nil
 }
 
 type grepMatch struct {
@@ -289,7 +290,7 @@ func parseRgJSON(r io.Reader, contextLines, maxResults int) ([]grepMatch, bool) 
 // lines (the :N in content rows is a 1-based line number, not a byte
 // offset), which backend ran (via: rg|go), and capped: true when
 // max_results cut the result short.
-func formatRgResults(matches []grepMatch, mode, via string, capped bool) string {
+func formatRgResults(matches []grepMatch, mode, via string, capped, showWhitespace bool) string {
 	meta := map[string]any{"via": via}
 	if capped {
 		meta["capped"] = true
@@ -346,11 +347,11 @@ func formatRgResults(matches []grepMatch, mode, via string, capped bool) string 
 			sort.Slice(before, func(i, j int) bool { return before[i].Line < before[j].Line })
 			sort.Slice(after, func(i, j int) bool { return after[i].Line < after[j].Line })
 			for _, c := range before {
-				fmt.Fprintf(&b, "%s-%d-%s\n", m.File, c.Line, clipGrepLine(c.Content))
+				fmt.Fprintf(&b, "%s-%d-%s\n", m.File, c.Line, clipGrepLine(c.Content, showWhitespace))
 			}
-			fmt.Fprintf(&b, "%s:%d:%s\n", m.File, m.Line, clipGrepLine(m.Content))
+			fmt.Fprintf(&b, "%s:%d:%s\n", m.File, m.Line, clipGrepLine(m.Content, showWhitespace))
 			for _, c := range after {
-				fmt.Fprintf(&b, "%s-%d-%s\n", m.File, c.Line, clipGrepLine(c.Content))
+				fmt.Fprintf(&b, "%s-%d-%s\n", m.File, c.Line, clipGrepLine(c.Content, showWhitespace))
 			}
 		}
 		meta["line_matches"] = len(matches)
@@ -450,7 +451,10 @@ func grepSkipNoiseFile(name string) bool {
 	return strings.HasSuffix(lower, ".min.js") || strings.HasSuffix(lower, ".min.css") || strings.HasSuffix(lower, ".map")
 }
 
-func clipGrepLine(s string) string {
+func clipGrepLine(s string, showWhitespace bool) string {
+	if showWhitespace {
+		s = escapeVisibleWhitespace(s)
+	}
 	if len(s) <= grepMaxLineBytes {
 		return s
 	}

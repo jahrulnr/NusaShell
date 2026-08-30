@@ -108,6 +108,60 @@ func TestSpawnWaitCompletes(t *testing.T) {
 	}
 }
 
+func TestSteerPersistsAsPromptTranscript(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	run, err := rt.Spawn(ctx, application.AcpSpawnRequest{
+		Agent: testAgent(ws), Prompt: "SLOW initial instruction", Workspace: ws,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait until the fake agent has accepted the first prompt. This keeps the
+	// steer on the runtime's queued-steer path instead of racing the initial
+	// drivePrompt goroutine.
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	for {
+		current, ok := rt.Get(run.ID)
+		if ok {
+			for _, chunk := range current.Transcript {
+				if strings.Contains(chunk.Text, "working: SLOW initial instruction") {
+					goto initialUpdateSeen
+				}
+			}
+		}
+		select {
+		case <-deadline.C:
+			t.Fatal("timed out waiting for initial ACP update")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+initialUpdateSeen:
+	if err := rt.Steer(run.ID, "follow-up from parent"); err != nil {
+		t.Fatal(err)
+	}
+	finished, err := rt.Wait(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found domain.AcpTranscriptChunk
+	for _, chunk := range finished.Transcript {
+		if chunk.Kind == "prompt" && chunk.Text == "follow-up from parent" {
+			found = chunk
+			break
+		}
+	}
+	if found.Kind != "prompt" {
+		t.Fatalf("steering prompt missing from transcript: %+v", finished.Transcript)
+	}
+}
+
 func TestMultiSpawnSharesProcess(t *testing.T) {
 	rt := New()
 	defer rt.Close()

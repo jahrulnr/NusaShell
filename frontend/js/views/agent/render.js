@@ -160,14 +160,20 @@ export function setReasoningSource(details, raw, options = {}) {
   if (details.open && options.render !== false) materializeReasoning(details);
 }
 
-export function reasoningDisclosure(reasoning) {
+export function reasoningDisclosure(reasoning, options = {}) {
   const raw = typeof reasoning === 'string' ? reasoning : '';
+  const title = typeof options.title === 'string' && options.title.trim() ? options.title : 'Thinking';
+  const collapsedHint = typeof options.collapsedHint === 'string' && options.collapsedHint.trim()
+    ? options.collapsedHint : 'Show reasoning';
+  const openHint = typeof options.openHint === 'string' && options.openHint.trim()
+    ? options.openHint : 'Hide reasoning';
+  const mark = typeof options.mark === 'string' && options.mark ? options.mark : '⌁';
   const content = el('div', { class: 'agent-reasoning-content' });
   const details = el('details', { class: 'agent-reasoning' },
     el('summary', {},
-      el('span', { class: 'agent-reasoning-mark', text: '⌁' }),
-      el('span', { class: 'agent-reasoning-title', text: 'Thinking' }),
-      el('span', { class: 'agent-reasoning-hint', text: 'Show reasoning' }),
+      el('span', { class: 'agent-reasoning-mark', text: mark }),
+      el('span', { class: 'agent-reasoning-title', text: title }),
+      el('span', { class: 'agent-reasoning-hint', text: collapsedHint }),
       el('span', { class: 'agent-reasoning-chevron', text: '⌄' }),
     ),
     content,
@@ -176,10 +182,29 @@ export function reasoningDisclosure(reasoning) {
   details.hidden = !reasoningHasVisibleSource(raw);
   details.addEventListener('toggle', () => {
     const hint = details.querySelector('.agent-reasoning-hint');
-    if (hint) hint.textContent = details.open ? 'Hide reasoning' : 'Show reasoning';
+    if (hint) hint.textContent = details.open ? openHint : collapsedHint;
     if (details.open) materializeReasoning(details);
   });
   return details;
+}
+
+// renderCompactionStatus renders the short-lived inline status shown while
+// the backend is folding the conversation context. It deliberately lives
+// outside the persisted message model: the matching compacted/failed event
+// removes it when the operation reaches a terminal state.
+export function renderCompactionStatus() {
+  return el('div', {
+    class: 'agent-compaction-status',
+    role: 'status',
+    'aria-live': 'polite',
+    'aria-atomic': 'true',
+  },
+  el('span', { class: 'agent-compaction-status-mark', text: '↻', 'aria-hidden': 'true' }),
+  el('span', { class: 'agent-compaction-status-text', text: 'Context automatically compacting' }),
+  el('span', { class: 'agent-compaction-status-dots', 'aria-hidden': 'true' },
+    el('span'), el('span'), el('span'),
+  ),
+  );
 }
 
 export function appendLiveError(bubble, message = 'Turn failed') {
@@ -300,17 +325,24 @@ function isCompactionSummary(message) {
   return typeof message.content === 'string' && message.content.startsWith('[COMPACTION CHECKPOINT]');
 }
 
-// renderCompactionMessage renders a compaction handover message as
-// an assistant-style bubble so the summary content is readable, not crammed
-// into a tiny dashed pill. A "Compacted context" label distinguishes it from
-// a regular assistant response.
+// renderCompactionMessage renders a compaction handover inside the same
+// expandable disclosure used by Thinking. The summary is intentionally
+// collapsed so a long handover does not take over the room on reload.
 function renderCompactionMessage(message) {
   const node = el('div', { class: 'agent-message assistant agent-compaction-marker' });
   const bubble = el('div', { class: 'agent-bubble' });
-  bubble.append(el('div', { class: 'agent-compaction-label', text: '⬇ Compacted context' }));
-  const textBox = el('div', { class: 'agent-bubble-text' });
-  if (message.content) textBox.innerHTML = renderMarkdown(message.content);
-  bubble.append(textBox);
+  const raw = typeof message.content === 'string' ? message.content : '';
+  const handover = raw.startsWith('[COMPACTION CHECKPOINT]')
+    ? raw.slice('[COMPACTION CHECKPOINT]'.length).trimStart()
+    : raw;
+  const details = reasoningDisclosure(handover, {
+    title: 'Compacted context',
+    collapsedHint: 'Show handover',
+    openHint: 'Hide handover',
+    mark: '↳',
+  });
+  details.classList.add('agent-compaction-reasoning');
+  bubble.append(details);
   node.append(bubble);
   node.append(el('div', { class: 'agent-turn-meta' },
     el('span', { class: 'agent-message-meta', text: fmtTime(message.created_at) }),

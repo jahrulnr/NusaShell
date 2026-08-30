@@ -37,6 +37,7 @@ import {
   insertAfterOrAppend,
   bindOptimisticTurn,
   thinkingDots,
+  renderCompactionStatus,
   parseShowImageOutput,
   parseShowAudioOutput,
   parseShowVideoOutput,
@@ -124,6 +125,11 @@ const state = {
   // must queue instead of appending a Thinking placeholder — that race
   // painted "..." above the user, then beginTurn painted a second "..." below.
   localTurnPending: false,
+  // Compaction is a transient per-room lifecycle. Keep it outside the run
+  // object so a start event that arrives before turns.start resolves, or a
+  // room switch during compaction, can still be rendered when the room is
+  // visible again.
+  compactionStatus: new Map(), // conversation_id -> { runId, node }
   conversationLoadToken: 0,
   // Live runs are tracked in state.runs. Deltas for the ACTIVE room travel a
   // per-round SSE stream (see openRoundStream); rooms the user is not looking
@@ -700,6 +706,7 @@ async function deleteConversation(id) {
   try {
     await rpc('agent.conversations.delete', { id });
     savedRooms.delete(id);
+    clearCompactionStatus(id);
     if (state.activeId === id) {
       state.activeId = null;
       state.conversation = null;
@@ -778,6 +785,7 @@ async function openConversation(id) {
   reattachActiveRun();
   const attachedRun = runForConversation(state.activeId);
   if (attachedRun) flushPendingEvents(attachedRun.runId);
+  mountCompactionStatus(state.activeId, attachedRun);
   renderConversationList();
   // Restore the steer queue strip if a steer is still pending for this room.
   // The strip is composer chrome, not part of the thread — it is re-shown
@@ -873,6 +881,7 @@ async function reattachActiveRunFromBackend() {
     messageId: active.message_id,
     awaitingSteerRound: hasSteerAfterMessage(active.message_id),
   });
+  mountCompactionStatus(conversationId, state.runs.get(active.run_id));
   if (active.queued_steer) {
     state.steerDraft = active.queued_steer;
     state.steerId = active.queued_steer_id ?? null;
@@ -1039,6 +1048,7 @@ function renderThread(messages, force = true) {
     return;
   }
   thread.replaceChildren(renderConversation(messages, retryTurn));
+  mountCompactionStatus(state.activeId, runForConversation(state.activeId));
   // Render any Mermaid diagrams in the freshly painted thread (settle point,
   // not per-delta).
   void renderMermaidDiagrams(thread); void highlightCode(thread); attachZoomButtons(thread);
@@ -1219,6 +1229,7 @@ function beginTurn(runId, userText, attachments = []) {
     conversationId: state.activeId, runId,
     messageId: existing?.messageId,
   });
+  mountCompactionStatus(state.activeId, state.runs.get(runId));
   flushPendingEvents(runId);
   updateComposerStatus();
   scrollToBottom(true);
@@ -1309,6 +1320,48 @@ function getRunOrQueue(type, payload) {
     if (!state.runs.has(payload.run_id)) state.pendingEvents.delete(payload.run_id);
   }, 10000);
   return null;
+}
+
+function compactionRunMatches(run, runId) {
+  return !run || !runId || run.runId === runId;
+}
+
+// mountCompactionStatus attaches the transient status to the live assistant
+// bubble when possible. The thread fallback covers the short race before the
+// run placeholder is registered; the node is moved into the bubble the next
+// time this function runs.
+function mountCompactionStatus(conversationId, run = runForConversation(conversationId)) {
+  if (!conversationId || conversationId !== state.activeId) return;
+  const entry = state.compactionStatus.get(conversationId);
+  if (!entry || !compactionRunMatches(run, entry.runId)) return;
+  const host = run?.bubble?.isConnected ? run.bubble : agentThread();
+  if (!host) return;
+  if (!entry.node || !entry.node.isConnected) entry.node = renderCompactionStatus();
+  if (entry.node.parentElement !== host) host.append(entry.node);
+}
+
+function markCompacting(conversationId, runId = '') {
+  if (!conversationId) return;
+  const activeRun = runForConversation(conversationId);
+  if (activeRun && runId && activeRun.runId !== runId) return;
+  const previous = state.compactionStatus.get(conversationId);
+  if (previous?.runId && runId && previous.runId !== runId) previous.node?.remove();
+  state.compactionStatus.set(conversationId, {
+    runId: runId || previous?.runId || '',
+    node: previous?.runId === runId ? previous.node : null,
+  });
+  mountCompactionStatus(conversationId, runForConversation(conversationId));
+  if (conversationId === state.activeId) updateComposerStatus();
+}
+
+function clearCompactionStatus(conversationId, runId = '') {
+  if (!conversationId) return;
+  const entry = state.compactionStatus.get(conversationId);
+  if (!entry) return;
+  if (runId && entry.runId && entry.runId !== runId) return;
+  entry.node?.remove();
+  state.compactionStatus.delete(conversationId);
+  if (conversationId === state.activeId) updateComposerStatus();
 }
 
 // runForConversation returns the active run for a conversation, if any.
@@ -1571,6 +1624,7 @@ function endTurn(runId, keepRun = false) {
     return;
   }
   const convId = run.conversationId;
+  clearCompactionStatus(convId, run.runId);
   // Turn is terminal on the wire — mirror it so composer routing stops
   // treating the room as running (see beginTurn).
   const conv = state.conversations.find((c) => c.id === convId);
@@ -2323,7 +2377,11 @@ function bindEvents() {
     if (!card || !card.classList?.contains('agent-ask-card')) return;
     cancelAskCard(card, reason);
   });
+  on('agent.compacting', ({ conversation_id, run_id }) => {
+    markCompacting(conversation_id, run_id);
+  });
   on('agent.compacted', ({ conversation_id, run_id }) => {
+    clearCompactionStatus(conversation_id, run_id);
     const run = runForConversation(conversation_id);
     if (run) {
       if (!run_id || run.runId === run_id) void applyLiveCompaction(conversation_id, run, run_id);
@@ -2332,6 +2390,7 @@ function bindEvents() {
     refreshActiveConversation();
   });
   on('agent.compaction.failed', ({ conversation_id, run_id, error }) => {
+    clearCompactionStatus(conversation_id, run_id);
     // Compaction failed but the turn continues with the un-compacted
     // conversation. Warn the user so they know context may fill up soon;
     // this is not turn-fatal (emergency compaction will catch overflow).
@@ -2637,6 +2696,12 @@ function updateComposerStatus() {
 
   const status = providerStatus();
   const stopBtn = stopButton();
+  if (state.activeId && state.compactionStatus.has(state.activeId)) {
+    status.classList.add('is-running');
+    if (stopBtn) stopBtn.hidden = false;
+    status.textContent = 'Context automatically compacting';
+    return;
+  }
   // Only consider a run that actually belongs to the room the user is
   // looking at; a turn running in another room should not flip this room's
   // header into "running". A live buffer for the active room counts as
@@ -2705,13 +2770,3 @@ function maybeRenderConversationList() {
   const view = document.querySelector('.view.agent-view');
   if (!view || view.classList.contains('active')) renderConversationList();
 }
-
-
-
-
-
-
-
-
-
-

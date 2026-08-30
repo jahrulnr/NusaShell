@@ -18,6 +18,8 @@
 # Local env
 .env
 .env.local
+# Tasks
+/tasks/
 
 # NusaShell runtime artifacts (todo brief plan mirrors, generated per
 # conversation — never commit)

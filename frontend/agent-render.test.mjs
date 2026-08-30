@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming } from './js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, renderCompactionStatus, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming } from './js/views/agent/render.js';
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
   const previousDocument = globalThis.document;
@@ -72,11 +72,33 @@ test('compaction summary renders above retained chronological turns, not after t
   ]);
   const nodes = [...thread.children];
   assert.equal(nodes[0].classList.contains('agent-compaction-marker'), true, 'handover is the first live bubble');
-  assert.match(nodes[0].textContent, /Compacted context/);
+  const handover = nodes[0].querySelector('.agent-reasoning');
+  assert.ok(handover, 'handover reuses the Thinking disclosure');
+  assert.equal(handover.querySelector('.agent-reasoning-title').textContent, 'Compacted context');
+  assert.equal(handover.open, false, 'handover starts collapsed');
+  assert.doesNotMatch(handover.textContent, /Goal: fix ordering/);
+  openDetails(handover);
+  assert.match(handover.textContent, /Goal: fix ordering/);
   assert.equal(nodes[1].classList.contains('user'), true);
   assert.match(nodes[1].textContent, /keep going/);
   assert.equal(nodes[2].classList.contains('assistant'), true);
   assert.match(nodes[2].textContent, /live delta continues here/);
+});
+
+test('compaction status is an accessible animated inline status', () => {
+  const dom = new JSDOM('<main id="thread"></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const status = renderCompactionStatus();
+    document.body.append(status);
+    assert.equal(status.classList.contains('agent-compaction-status'), true);
+    assert.equal(status.getAttribute('role'), 'status');
+    assert.equal(status.getAttribute('aria-live'), 'polite');
+    assert.match(status.textContent, /Context automatically compacting/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
 });
 
 test('renders one model and usage summary for all assistant rounds in a user turn', () => {

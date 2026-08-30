@@ -458,8 +458,23 @@ func TestAgentTurnCompaction(t *testing.T) {
 		if frames == nil {
 			t.Fatal("no compaction event")
 		}
-		for _, f := range frames {
+		seenCompacting := false
+		compactingIndex := -1
+		compactedIndex := -1
+		for index, f := range frames {
+			if f["type"] == contracts.EventCompacting {
+				payload := f["payload"].(map[string]any)
+				if payload["conversation_id"] != convID {
+					t.Fatalf("compacting event conversation_id = %v, want %s", payload["conversation_id"], convID)
+				}
+				if payload["run_id"] == "" {
+					t.Fatal("compacting event missing run_id")
+				}
+				seenCompacting = true
+				compactingIndex = index
+			}
 			if f["type"] == contracts.EventCompacted {
+				compactedIndex = index
 				payload := f["payload"].(map[string]any)
 				if payload["run_id"] == "" {
 					t.Fatal("compaction event missing run_id")
@@ -469,6 +484,12 @@ func TestAgentTurnCompaction(t *testing.T) {
 					t.Fatalf("summary = %q", summary)
 				}
 			}
+		}
+		if !seenCompacting {
+			t.Fatal("compaction did not emit agent.compacting before agent.compacted")
+		}
+		if compactingIndex < 0 || compactedIndex < 0 || compactingIndex >= compactedIndex {
+			t.Fatalf("compaction lifecycle order = compacting:%d compacted:%d, want compacting before compacted", compactingIndex, compactedIndex)
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for compaction")

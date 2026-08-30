@@ -109,6 +109,7 @@ const (
 	EventToolCompleted    = "agent.tool.completed"
 	EventTurnDone         = "agent.turn.done"
 	EventTurnError        = "agent.turn.error"
+	EventCompacting       = "agent.compacting"
 	EventCompacted        = "agent.compacted"
 	EventCompactionFailed = "agent.compaction.failed"
 	EventSteerQueued      = "agent.steer.queued"
@@ -475,6 +476,14 @@ type CompactedEvent struct {
 	RunID          string `json:"run_id,omitempty"`
 	ConversationID string `json:"conversation_id"`
 	Summary        string `json:"summary"`
+}
+
+// CompactingEvent is emitted immediately before the backend starts a context
+// compaction pass. ConversationID keeps the notification scoped when one
+// WebSocket is watching multiple rooms.
+type CompactingEvent struct {
+	RunID          string `json:"run_id,omitempty"`
+	ConversationID string `json:"conversation_id"`
 }
 
 // CompactionFailedEvent is emitted when context compaction fails so the UI

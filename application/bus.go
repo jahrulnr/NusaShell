@@ -124,6 +124,7 @@ func isCriticalBusEvent(typ string) bool {
 		contracts.EventAskPending,
 		contracts.EventAskAnswered,
 		contracts.EventAskCancelled,
+		contracts.EventCompacting,
 		contracts.EventCompacted,
 		contracts.EventCompactionFailed,
 		contracts.EventAutoContinue,

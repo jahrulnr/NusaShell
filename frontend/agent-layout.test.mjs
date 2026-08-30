@@ -113,9 +113,13 @@ test('Subagent drawer reuses the conversation sidebar design', () => {
 test('ACP transcripts use the agent conversation structure and historical run lookup', () => {
   assert.match(subagentsView, /acp\.runs\.get/);
   assert.match(subagentsView, /class: 'agent-message assistant acp-run-message'/);
-  assert.match(subagentsView, /class: 'agent-bubble acp-transcript'/);
+  assert.match(subagentsView, /class: 'agent-bubble acp-transcript-body'/);
+  assert.match(subagentsView, /class: 'agent-message user acp-prompt-message'/);
+  assert.match(subagentsView, /kind === 'prompt'/);
+  assert.match(subagentsView, /syncTranscript\(panel, run\.transcript \|\| \[\], run\.prompt, run\.started_at\)/);
   assert.match(subagentsView, /class: `agent-round acp-transcript-round/);
   assert.match(subagentsView, /class: 'agent-tool-stack'/);
+  assert.match(acpCSS, /\.acp-run-panel > \.agent-thread \{[^}]*overflow: visible;[^}]*padding: 0;/s);
   assert.doesNotMatch(subagentsView, /acp-transcript-line/);
   assert.doesNotMatch(acpCSS, /\.acp-transcript-line/);
   assert.match(agentRender, /extractSubagentRunIDs/);
@@ -124,6 +128,23 @@ test('ACP transcripts use the agent conversation structure and historical run lo
 test('Thinking and tool markers share the same conversation rail', () => {
   assert.match(agentCSS, /\.agent-reasoning summary \{[^}]*margin-left: -12px;/s);
   assert.match(agentCSS, /\.agent-tool-terminal summary \{[^}]*margin-left: -12px;/s);
+});
+
+test('Expanded Thinking is capped to twenty lines and scrolls internally', () => {
+  const reasoningBody = agentCSS.slice(
+    agentCSS.indexOf('.agent-reasoning-content {'),
+    agentCSS.indexOf('.agent-reasoning-content > :first-child'),
+  );
+  assert.match(reasoningBody, /max-height: 33em;/);
+  assert.match(reasoningBody, /overflow-y: auto;/);
+  assert.match(reasoningBody, /overscroll-behavior: contain;/);
+});
+
+test('Live Thinking follows only while the thread-end marker is visible', () => {
+  assert.match(agentView, /agent-thread-end-marker/);
+  assert.match(agentView, /new IntersectionObserver/);
+  assert.match(agentView, /state\.pinned = isAtBottom\(thread\)/);
+  assert.match(agentView, /if \(!force && !state\.pinned\) return/);
 });
 
 test('Narrow windows ellipsize tool meta instead of overflowing the thread', () => {
@@ -173,6 +194,15 @@ test('Live compaction does not append a marker at the thread tail, and a new rou
   assert.match(agentView, /bindOptimisticTurn/);
   assert.match(agentRender, /export function bindOptimisticTurn/);
   assert.match(agentComposer, /state\.localTurnPending = true/);
+});
+
+test('Compaction lifecycle is room-scoped and reuses the Thinking disclosure for handover', () => {
+  assert.match(agentView, /on\('agent\.compacting'/);
+  assert.match(agentView, /markCompacting\(conversation_id, run_id\)/);
+  assert.match(agentView, /clearCompactionStatus\(conversation_id, run_id\)/);
+  assert.match(agentRender, /title: 'Compacted context'/);
+  assert.match(agentRender, /collapsedHint: 'Show handover'/);
+  assert.match(agentCSS, /\.agent-compaction-status[\s\S]*agent-compaction-dot/);
 });
 
 test('Steer application seals old dots and anchors the next round after the user bubble', () => {

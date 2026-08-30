@@ -192,9 +192,11 @@ type AcpRun struct {
 	EndedAt              time.Time
 }
 
-// AcpTranscriptChunk is one live update from session/update.
+// AcpTranscriptChunk is one live update from session/update, or a parent
+// prompt sent to the ACP session. Prompt chunks keep steering visible in the
+// persisted transcript alongside the agent's response.
 type AcpTranscriptChunk struct {
-	Kind       string // text | thought | tool | plan | status | usage
+	Kind       string // prompt | text | thought | tool | plan | status | usage
 	Text       string
 	ToolID     string
 	ToolTitle  string

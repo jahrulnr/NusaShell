@@ -56,6 +56,7 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 	a.log("info", "agent", "compaction triggered for %s: est=%d trigger=%d window=%d maxOut=%d",
 		conversation.ID, beforeTokens, compactionTrigger, contextWindow, maxOutput)
 	compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, pc, model, contextWindow, settings)
+	a.emitCompactionStarted(run, conversation.ID)
 	summary, err := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings)
 	if err != nil {
 		a.log("warn", "agent", "compaction failed for %s: %v", conversation.ID, err)

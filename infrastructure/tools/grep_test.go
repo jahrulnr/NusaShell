@@ -34,6 +34,27 @@ func TestGrepContentMode(t *testing.T) {
 	}
 }
 
+func TestGrepCanShowInvisibleWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "styles.css")
+	writeFile(t, path, "a {\r\n\tMATCH\t\r\n}\r\n")
+
+	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+		"pattern":         "MATCH",
+		"path":            path,
+		"output_mode":     "content",
+		"show_whitespace": true,
+	}))
+	if !ok || err != nil {
+		t.Fatalf("grep failed: ok=%v err=%v", ok, err)
+	}
+	for _, want := range []string{`\tMATCH\t\r`, "line_matches: 1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("visible grep output missing %q: %s", want, out)
+		}
+	}
+}
+
 func TestGrepFilesWithMatchesMode(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "a.go"), "func foo() {}\n")
@@ -422,28 +443,33 @@ func TestFormatRgResultsShapes(t *testing.T) {
 		{File: "b.go", Line: 1, Content: "hit three"},
 	}
 
-	out := formatRgResults(matches, "content", "go", false)
+	out := formatRgResults(matches, "content", "go", false, false)
 	for _, want := range []string{"a.go-1-ctx", "a.go:2:hit one", "a.go:9:hit two", "b.go:1:hit three", "line_matches: 3", "via: go"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("content mode missing %q:\n%s", want, out)
 		}
 	}
 
-	out = formatRgResults(matches, "files_with_matches", "rg", false)
+	out = formatRgResults(matches, "files_with_matches", "rg", false, false)
 	if !strings.Contains(out, "files: 2") || strings.Contains(out, "hit one") {
 		t.Errorf("files_with_matches shape wrong:\n%s", out)
 	}
 
-	out = formatRgResults(matches, "count", "rg", true)
+	out = formatRgResults(matches, "count", "rg", true, false)
 	for _, want := range []string{"a.go:2", "b.go:1", "total_line_matches: 3", "capped: true"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("count mode missing %q:\n%s", want, out)
 		}
 	}
 
-	out = formatRgResults(nil, "content", "go", false)
+	out = formatRgResults(nil, "content", "go", false, false)
 	if !strings.Contains(out, "line_matches: 0") || !strings.Contains(out, "via: go") {
 		t.Errorf("empty result shape wrong:\n%s", out)
+	}
+
+	visible := formatRgResults([]grepMatch{{File: "styles.css", Line: 2, Content: "\tMATCH\t\r"}}, "content", "go", false, true)
+	if !strings.Contains(visible, `styles.css:2:\tMATCH\t\r`) {
+		t.Errorf("show_whitespace formatter lost invisible markers:\n%s", visible)
 	}
 }
 
