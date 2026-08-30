@@ -241,10 +241,14 @@ func abandonTool(tc *ToolCall) bool {
 func (c *Conversation) DefaultTitle() string {
 	for _, m := range c.Messages {
 		if m.Role == RoleUser {
-			if utf8.RuneCountInString(m.Content) <= 48 {
-				return m.Content
+			content := strings.Join(strings.Fields(m.Content), " ")
+			if content == "" {
+				continue
 			}
-			return string([]rune(m.Content)[:48]) + "…"
+			if utf8.RuneCountInString(content) <= 48 {
+				return content
+			}
+			return string([]rune(content)[:48]) + "…"
 		}
 	}
 	return "Untitled"

@@ -71,6 +71,14 @@ function pluginManifest(plugin) {
   return plugin?.manifest || plugin || {};
 }
 
+// pluginIconValue accepts both the current /plugins DTO and older entries
+// where the icon only lived inside manifest. The backend resolves local file
+// icons to data URLs; the manifest fallback keeps the launcher compatible
+// while a stale backend response is being refreshed.
+export function pluginIconValue(plugin) {
+  return plugin?.icon || pluginManifest(plugin).icon || '🧩';
+}
+
 function hasPluginUI(plugin) {
   const manifest = pluginManifest(plugin);
   return Boolean(plugin?.hasUI || plugin?.ui?.entry || manifest.ui?.entry);
@@ -129,7 +137,7 @@ function renderAppGrid() {
 
     const icon = document.createElement('div');
     icon.className = 'app-icon';
-    setPluginIcon(icon, plugin.icon || '🧩', 60);
+    setPluginIcon(icon, pluginIconValue(plugin), 60);
 
     const name = document.createElement('div');
     name.className = 'app-name';

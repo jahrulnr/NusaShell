@@ -20,15 +20,15 @@ test('Subagent transcript updates a growing chunk in place', () => {
   const { dom, panel } = makePanel();
   try {
     syncTranscript(panel, [{ kind: 'thought', text: 'The' }]);
-    const firstLine = panel.querySelector('.acp-transcript-line.is-thought');
+    const firstLine = panel.querySelector('.agent-round.is-thought');
     assert.ok(firstLine);
-    assert.equal(firstLine.textContent.trim(), 'thinkThe');
+    assert.equal(firstLine.querySelector('.agent-reasoning')._reasoningRaw, 'The');
 
     syncTranscript(panel, [{ kind: 'thought', text: 'The task description uses the correct paths.' }]);
-    const updatedLine = panel.querySelector('.acp-transcript-line.is-thought');
+    const updatedLine = panel.querySelector('.agent-round.is-thought');
     assert.strictEqual(updatedLine, firstLine, 'same logical chunk keeps its transcript row');
-    assert.equal(updatedLine.textContent.trim(), 'thinkThe task description uses the correct paths.');
-    assert.equal(panel.querySelectorAll('.acp-transcript-line.is-thought').length, 1);
+    assert.equal(updatedLine.querySelector('.agent-reasoning')._reasoningRaw, 'The task description uses the correct paths.');
+    assert.equal(panel.querySelectorAll('.agent-round.is-thought').length, 1);
   } finally {
     dom.window.close();
     cleanup();
@@ -39,11 +39,11 @@ test('Subagent transcript patches same-length text without replacing its row', (
   const { dom, panel } = makePanel();
   try {
     syncTranscript(panel, [{ kind: 'text', text: 'abc' }]);
-    const firstLine = panel.querySelector('.acp-transcript-line.is-text');
+    const firstLine = panel.querySelector('.agent-round.is-text');
 
     syncTranscript(panel, [{ kind: 'text', text: 'xyz' }]);
 
-    const updatedLine = panel.querySelector('.acp-transcript-line.is-text');
+    const updatedLine = panel.querySelector('.agent-round.is-text');
     assert.strictEqual(updatedLine, firstLine, 'same logical chunk keeps its transcript row');
     assert.equal(updatedLine.textContent.trim(), 'xyz');
   } finally {
@@ -66,13 +66,13 @@ test('Subagent transcript merges legacy token fragments and tool updates', () =>
       { kind: 'thought', text: ' checking.' },
     ]);
 
-    const thoughts = [...panel.querySelectorAll('.acp-transcript-line.is-thought')];
+    const thoughts = [...panel.querySelectorAll('.agent-round.is-thought')];
     assert.equal(thoughts.length, 2);
-    assert.match(thoughts[0].textContent, /The task/);
-    assert.match(thoughts[1].textContent, /Done checking\./);
-    assert.equal(panel.querySelectorAll('.acp-transcript-line.is-usage').length, 0);
+    assert.match(thoughts[0].querySelector('.agent-reasoning')._reasoningRaw, /The task/);
+    assert.match(thoughts[1].querySelector('.agent-reasoning')._reasoningRaw, /Done checking\./);
+    assert.equal(panel.querySelectorAll('.agent-round.is-usage').length, 0);
 
-    const tools = [...panel.querySelectorAll('.acp-transcript-line.is-tool')];
+    const tools = [...panel.querySelectorAll('.agent-round.is-tool')];
     assert.equal(tools.length, 1);
     assert.match(tools[0].textContent, /completed/);
     assert.equal(panel.querySelector('.acp-usage-pill')?.textContent, '2/100');

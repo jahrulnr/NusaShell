@@ -56,14 +56,14 @@ test('Archived chunks load only on explicit Load older or scroll-to-top, never a
   assert.match(agentView, /hasOlderActiveMessages\(\) \|\| state\.nextChunkIndex >= 0/);
 });
 
-test('Live turns keep every round mounted; perf comes from content-visibility + targeted enhancement, not DOM removal', () => {
+test('Room snapshots keep the complete trailing run; older complete turns remain explicit', () => {
   // The hide-bubble workaround (park rounds, "N earlier rounds trimmed"
   // stub) is removed — it traded UX away for performance.
   assert.doesNotMatch(agentRender, /KEEP_VISIBLE_ROUNDS|MAX_PARKED_LIVE_ROUNDS|parkLiveRound|restoreParkedLiveRounds|pruneOverflowLiveRounds|agent-round-stub/);
   assert.match(agentRender, /export function mountLiveRound/);
-  // Snapshot history windowing keeps its own constant (agent.js), still
-  // backed by the conversation tail + explicit Load older.
-  assert.match(agentView, /SNAPSHOT_KEEP_ROUNDS = 12/);
+  // Snapshot history is backed by the conversation tail + explicit Load
+  // older, but the current assistant run is never trimmed.
+  assert.doesNotMatch(agentView, /SNAPSHOT_KEEP_ROUNDS|assistKeepStart/);
   assert.doesNotMatch(agentView, /KEEP_VISIBLE_ROUNDS/);
   // The browser-level guard rails that replace the trimming: per-delta
   // enhancement only touches newly rendered blocks (incrementalRender).
@@ -89,13 +89,9 @@ test('Live turns keep every round mounted; perf comes from content-visibility + 
   assert.match(html, /id="agent-provider-status" aria-live="polite" aria-atomic="true"/);
   assert.match(agentView, /conversationTail\(/);
   assert.doesNotMatch(agentRender, /function earlierRoundsDisclosure/);
-  // Reloading a running turn must keep every persisted round of that turn.
-  // Snapshot keepRounds would otherwise hide older tool rounds / announcements
-  // and Load older used to refuse to reveal them while a run was attached.
-  assert.match(agentView, /keepAllTrailing: keepLiveTurnMounted\(\)/);
-  assert.match(agentView, /function keepLiveTurnMounted/);
-  assert.match(agentView, /hasOlderTurnRounds\(\)/);
-  assert.doesNotMatch(agentView, /hasOlderTurnRounds\(\) && !runForConversation/);
+  assert.match(agentView, /complete trailing assistant run/);
+  assert.doesNotMatch(agentView, /keepAllTrailing|hasOlderTurnRounds/);
+  assert.match(agentView, /maybeAutoTitleConversation\(id, \{ conversation, messages \}\)/);
 });
 
 test('Agent delegates presentation, composer, and model picker responsibilities to focused modules', () => {
@@ -112,6 +108,17 @@ test('Subagent drawer reuses the conversation sidebar design', () => {
   assert.match(subagentsView, /class: `agent-conversation-item/);
   assert.doesNotMatch(subagentsView, /acp-run-switcher|acp-run-switch'/);
   assert.match(acpCSS, /\.acp-drawer-shell \{[^}]*grid-template-columns:/s);
+});
+
+test('ACP transcripts use the agent conversation structure and historical run lookup', () => {
+  assert.match(subagentsView, /acp\.runs\.get/);
+  assert.match(subagentsView, /class: 'agent-message assistant acp-run-message'/);
+  assert.match(subagentsView, /class: 'agent-bubble acp-transcript'/);
+  assert.match(subagentsView, /class: `agent-round acp-transcript-round/);
+  assert.match(subagentsView, /class: 'agent-tool-stack'/);
+  assert.doesNotMatch(subagentsView, /acp-transcript-line/);
+  assert.doesNotMatch(acpCSS, /\.acp-transcript-line/);
+  assert.match(agentRender, /extractSubagentRunIDs/);
 });
 
 test('Thinking and tool markers share the same conversation rail', () => {

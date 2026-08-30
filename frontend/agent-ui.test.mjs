@@ -46,22 +46,22 @@ function msg(role, id) {
   return { role, id };
 }
 
-test('conversationTail keeps the last user bubble and only the last keepRounds of the trailing run', () => {
+test('conversationTail keeps the last user bubble and the complete trailing run', () => {
   const messages = [msg('user', 'u0')];
   for (let i = 0; i < 6; i++) messages.push(msg('assistant', `a${i}`));
   const tail = conversationTail(messages, { prefixWindow: 60, keepRounds: 3 });
-  assert.deepEqual(tail.visible.map((m) => m.id), ['u0', 'a3', 'a4', 'a5']);
+  assert.deepEqual(tail.visible.map((m) => m.id), ['u0', 'a0', 'a1', 'a2', 'a3', 'a4', 'a5']);
   assert.equal(tail.prefixStart, 0);
   assert.equal(tail.runStart, 1);
-  assert.equal(tail.assistKeepStart, 4);
+  assert.equal(tail.assistKeepStart, 1);
 });
 
-test('conversationTail without a user still shows only the last keepRounds assistants', () => {
+test('conversationTail without a user still shows the complete assistant run', () => {
   const messages = Array.from({ length: 6 }, (_, i) => msg('assistant', `a${i}`));
   const tail = conversationTail(messages, { keepRounds: 3 });
-  assert.deepEqual(tail.visible.map((m) => m.id), ['a3', 'a4', 'a5']);
+  assert.deepEqual(tail.visible.map((m) => m.id), ['a0', 'a1', 'a2', 'a3', 'a4', 'a5']);
   assert.equal(tail.runStart, 0);
-  assert.equal(tail.assistKeepStart, 3);
+  assert.equal(tail.assistKeepStart, 0);
 });
 
 test('conversationTail does not drop a short trailing run', () => {
@@ -79,10 +79,10 @@ test('conversationTail prefix window leaves older complete turns behind Load old
   for (let i = 0; i < 10; i++) messages.push(msg('assistant', `tail${i}`));
   const tail = conversationTail(messages, { prefixWindow: 10, keepRounds: 3 });
   assert.equal(tail.visible.at(-1).id, 'tail9');
-  assert.equal(tail.visible.filter((m) => m.role === 'assistant' && String(m.id).startsWith('tail')).length, 3);
+  assert.equal(tail.visible.filter((m) => m.role === 'assistant' && String(m.id).startsWith('tail')).length, 10);
   assert.ok(tail.visible.some((m) => m.role === 'user'));
   assert.ok(tail.prefixStart > 0);
-  assert.ok(tail.assistKeepStart > tail.runStart);
+  assert.equal(tail.assistKeepStart, tail.runStart);
 });
 
 test('conversationTail keeps the immediate user bubble when the prefix budget is exhausted', () => {
@@ -95,7 +95,7 @@ test('conversationTail keeps the immediate user bubble when the prefix budget is
 
   const tail = conversationTail(messages, { prefixWindow: 3, keepRounds: 3 });
 
-  assert.deepEqual(tail.visible.map((m) => m.id), ['current-user', 'current-a3', 'current-a4', 'current-a5']);
+  assert.deepEqual(tail.visible.map((m) => m.id), ['current-user', 'current-a0', 'current-a1', 'current-a2', 'current-a3', 'current-a4', 'current-a5']);
   assert.equal(tail.prefixStart, tail.runStart - 1);
 });
 
@@ -111,6 +111,7 @@ test('conversationTail keeps a compaction marker immediately before the live ass
 
   assert.deepEqual(tail.visible.map((m) => m.id), [
     '[COMPACTION CHECKPOINT] preserve this marker',
+    'post-compact-a0',
     'post-compact-a1',
     'post-compact-a2',
     'post-compact-a3',
@@ -134,10 +135,10 @@ test('conversationTail treats the auto-continue announcement like any assistant 
 
   const tail = conversationTail(messages, { prefixWindow: 2, keepRounds: 3 });
 
-  assert.deepEqual(tail.visible.map((m) => m.id), ['original-user', 'continued-a1', 'continued-a2', 'continued-a3']);
+  assert.deepEqual(tail.visible.map((m) => m.id), ['original-user', 'first-assistant', 'auto-continue-announcement', 'continued-a0', 'continued-a1', 'continued-a2', 'continued-a3']);
 });
 
-test('conversationTail keepAllTrailing keeps the full live run including announcements', () => {
+test('conversationTail keeps the full live run including announcements without a live hint', () => {
   const messages = [
     msg('user', 'original-user'),
     msg('assistant', 'first-assistant'),
@@ -152,7 +153,7 @@ test('conversationTail keepAllTrailing keeps the full live run including announc
     msg('assistant', 'continued-a3'),
   ];
 
-  const tail = conversationTail(messages, { prefixWindow: 2, keepRounds: 3, keepAllTrailing: true });
+  const tail = conversationTail(messages, { prefixWindow: 2, keepRounds: 3 });
 
   assert.equal(tail.assistKeepStart, tail.runStart);
   assert.deepEqual(tail.visible.map((m) => m.id), [

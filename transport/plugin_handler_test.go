@@ -5,14 +5,54 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
+	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/mcpclient"
 	"nusashell/infrastructure/pluginfs"
 	"nusashell/infrastructure/pluginruntime"
 )
+
+func TestPluginHandlerListResolvesLocalIconForHomepage(t *testing.T) {
+	store, err := pluginfs.New(filepath.Join(t.TempDir(), "plugins"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plugin := &domain.Plugin{Manifest: domain.PluginManifest{
+		ID: "test.icon", Name: "Icon plugin", Version: "1.0.0", Icon: "icon.png",
+		UI:  &domain.PluginUIConfig{Entry: "index.html"},
+		MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "icon-plugin"},
+	}}
+	if err := store.Save(plugin); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store.Root(), "test.icon", "icon.png"), []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+	}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewPluginHandler(store, nil)
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/plugins", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /plugins = %d, want 200", response.Code)
+	}
+	var body struct {
+		Plugins []contracts.PluginUIEntryDTO `json:"plugins"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Plugins) != 1 || body.Plugins[0].Icon != "data:image/png;base64,iVBORw0KGgo=" {
+		t.Fatalf("homepage plugin icon = %+v, want resolved PNG data URL", body.Plugins)
+	}
+}
 
 // TestPluginHandlerCallToolForwardsStructuredContent verifies that the
 // plugin UI bridge forwards the full MCP CallToolResult (content +

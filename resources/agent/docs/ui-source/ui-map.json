@@ -62,7 +62,7 @@
         {
           "heading": "App grid",
           "paragraphs": [
-            "A responsive grid of plugin tiles. Each tile shows the plugin icon, name, and a runtime status when active. Clicking a tile opens the plugin UI in a new browser window sized from the plugin manifest."
+            "A responsive grid of plugin tiles. Each tile shows the plugin icon (including local manifest icons resolved for the browser), name, and a runtime status when active. Clicking a tile opens the plugin UI in a new browser window sized from the plugin manifest."
           ],
           "controls": [
             "app-grid"
@@ -95,7 +95,7 @@
           "heading": "Thread",
           "paragraphs": [
             "Renders the active conversation. An empty thread offers starter prompt chips that fill the composer.",
-            "Long conversations open showing only the most recent messages, scrolled to the bottom. A 'Load older messages' button at the top reveals earlier in-memory messages (including older rounds of a finished assistant turn), then archived pre-compaction chunks, one batch at a time. Chunks are never auto-loaded after a turn finishes or mid-turn compaction. Snapshot render keeps the immediate user or compaction bubble and a short tail of a finished turn. A running turn keeps every persisted round of that turn mounted on open and reload — Load older still reveals earlier complete turns and archived chunks. Live streaming coalesces delta rendering per animation frame. Thinking is parsed when the disclosure is opened. Live streaming auto-follows only while the view is pinned to the bottom."
+            "Long conversations open showing only the most recent history, scrolled to the bottom. The complete trailing assistant run remains visible even when it contains dozens of tool or reasoning messages, so a finished answer is not hidden behind the history control. A 'Load older messages' button at the top reveals older in-memory messages, then archived pre-compaction chunks, one batch at a time. Chunks are never auto-loaded after a turn finishes or mid-turn compaction. Older complete turns stay windowed until explicitly revealed; live streaming coalesces delta rendering per animation frame. Thinking is parsed when the disclosure is opened. Live streaming auto-follows only while the view is pinned to the bottom."
           ],
           "controls": [
             "agent-shell",
@@ -136,7 +136,7 @@
         {
           "heading": "ACP live views",
           "paragraphs": [
-            "The drawer reuses the conversation-pane layout: subagent runs are listed in a left sidebar and the selected transcript fills the right pane. Growing text and reasoning chunks update in place, tool updates stay on one row, and token usage appears as run metadata instead of transcript noise. The peek popup focuses one run."
+            "The drawer reuses the conversation-pane layout: subagent runs are listed in a left sidebar and the selected transcript fills the right pane. Growing text and reasoning chunks update in place, tool updates stay on one row, and token usage appears as run metadata instead of transcript noise. Completed cards retain their run ID and fetch the persisted transcript when the backend cache is empty or has restarted. The peek popup focuses one run."
           ],
           "controls": [
             "acp-drawer-overlay",

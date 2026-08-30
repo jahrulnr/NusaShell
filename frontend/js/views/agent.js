@@ -103,12 +103,12 @@ const state = {
   nextChunkIndex: -1,
   loadedChunks: new Set(),
   loadingChunk: false,
-  // Active-message windowing: only the last INITIAL_WINDOW messages are
-  // rendered on open; activeWindowStart is the index of the first rendered
-  // active message. Older active messages are prepended in WINDOW_BATCH-sized
-  // batches on scroll-up (before falling back to archived chunks).
+  // Active-message windowing: the older prefix is capped on open while the
+  // complete trailing assistant run stays mounted; activeWindowStart is the
+  // index of the first rendered active message. Older active messages are
+  // prepended in WINDOW_BATCH-sized batches on scroll-up (before falling back
+  // to archived chunks).
   activeWindowStart: 0,
-  assistKeepStart: 0,
   // While a room is opening we scroll to the bottom; suppress the
   // scroll-to-top "load older" trigger until that settles so the initial
   // scrollTop≈0 is not mistaken for the user scrolling up (which would strand
@@ -132,17 +132,6 @@ const state = {
   // mirrors were removed with the round-stream refactor.
 };
 
-// Snapshot-history windowing: how many trailing assistant rounds a full
-// thread re-render keeps visible before the explicit "Load older" affordance
-// (agent-layout.test.mjs pins this). Kept generous — 12 covers a whole long
-// turn at first paint — because per-delta cost is already bounded by
-// targeted enhancement + block-diffed markdown (see render.js's strategy
-// comment); this window only bounds the one-time markdown parse + DOM
-// insert on open. Live / running turns never trim: keepAllTrailing mounts
-// every persisted round of the current turn so a reload cannot hide tool
-// cards or announcements behind a Load older path that used to no-op while
-// a run was attached.
-const SNAPSHOT_KEEP_ROUNDS = 12;
 const MAX_LIVE_ROUND_CHARS = 512 * 1024;
 const MAX_LIVE_TOOL_JOBS = 128;
 
@@ -406,38 +395,19 @@ const INITIAL_WINDOW = 60;
 const WINDOW_BATCH = 30;
 
 // windowedActiveMessages returns the currently-rendered slice: older complete
-// turns from activeWindowStart, plus the trailing assistant-run tail from
-// assistKeepStart, so a 50-round turn cannot hide the last user bubble.
-function keepLiveTurnMounted() {
-  return state.conversation?.status === 'running' || Boolean(runForConversation(state.activeId));
-}
-
+// turns from activeWindowStart plus the complete trailing assistant run. A
+// long current turn must not hide its own tool/reasoning messages.
 function windowedActiveMessages() {
-  const live = keepLiveTurnMounted();
   return conversationTail(state.messages, {
     prefixStart: state.activeWindowStart,
-    assistKeepStart: live ? undefined : state.assistKeepStart,
-    keepRounds: SNAPSHOT_KEEP_ROUNDS,
-    keepAllTrailing: live,
   }).visible;
 }
 
 function applyConversationTail() {
   const tail = conversationTail(state.messages, {
     prefixWindow: INITIAL_WINDOW,
-    keepRounds: SNAPSHOT_KEEP_ROUNDS,
-    keepAllTrailing: keepLiveTurnMounted(),
   });
   state.activeWindowStart = tail.prefixStart;
-  state.assistKeepStart = tail.assistKeepStart;
-}
-
-function trailingRunStart() {
-  return conversationTail(state.messages, {
-    prefixStart: state.activeWindowStart,
-    assistKeepStart: state.assistKeepStart,
-    keepRounds: SNAPSHOT_KEEP_ROUNDS,
-  }).runStart;
 }
 
 // Per-room state that survives conversation switches. When the user switches
@@ -523,24 +493,35 @@ function deriveTitle(messages, fallback = 'Untitled') {
   for (const message of messages ?? []) {
     if (message?.role === 'user' && message.content?.trim()) {
       const text = String(message.content).trim().replace(/\s+/g, ' ');
-      return text.length > 60 ? `${text.slice(0, 60)}…` : text;
+      const runes = Array.from(text);
+      return runes.length > 48 ? `${runes.slice(0, 48).join('')}…` : text;
     }
   }
   return fallback;
 }
 
-async function maybeAutoTitleConversation(conversationId) {
+async function maybeAutoTitleConversation(conversationId, snapshot = null) {
   if (!conversationId) return;
   const conv = state.conversations.find((c) => c.id === conversationId);
-  if (!conv || (conv.title && conv.title !== 'Untitled')) return;
-  let messages = state.messages;
-  if (state.activeId !== conversationId) {
-    try {
-      const gotten = await rpc('agent.conversations.get', { id: conversationId });
-      messages = gotten?.messages ?? [];
-    } catch {
+  if (conv?.title && conv.title !== 'Untitled') return;
+  let messages = [];
+  try {
+    // Always read the authoritative snapshot. The active room may still have
+    // a pre-refresh state.messages value when turn.done and this callback
+    // race; deriving from it is why titles were intermittently empty/stale.
+    const gotten = snapshot || await rpc('agent.conversations.get', { id: conversationId });
+    const authoritative = gotten?.conversation;
+    const target = state.conversations.find((c) => c.id === conversationId);
+    if (authoritative?.title && authoritative.title !== 'Untitled') {
+      if (target) target.title = authoritative.title;
+      renderConversationList();
       return;
     }
+    messages = gotten?.messages ?? [];
+  } catch {
+    // A server-side title is preferred, but a transient read failure must not
+    // make the cosmetic fallback fail the completed turn.
+    messages = state.activeId === conversationId ? state.messages : [];
   }
   const title = deriveTitle(messages);
   if (!title || title === 'Untitled') return;
@@ -763,8 +744,8 @@ async function openConversation(id) {
   // fill preferred, else server heuristic). Resetting here prevents another
   // room's number from leaking across a switch.
   state.contextEstimate = Number(conversation?.context_tokens) || Number(conversation?.estimated_tokens) || 0;
-  // Only render the most recent INITIAL_WINDOW messages on open; older active
-  // messages are revealed on scroll-up. Keeps opening a long conversation fast.
+  // Window only the older prefix on open; the complete trailing assistant run
+  // stays visible even when it contains many persisted tool rounds.
   applyConversationTail();
   // Reset chunk lazy-load state for the new conversation.
   state.chunkCount = conversation?.chunk_count ?? 0;
@@ -781,6 +762,9 @@ async function openConversation(id) {
   }
   renderConversationList();
   renderThread(windowedActiveMessages(), true);
+  // Repair legacy Untitled rooms as soon as their persisted first user
+  // message is available, not only after the next completed turn.
+  void maybeAutoTitleConversation(id, { conversation, messages });
   // Archived chunks stay on disk until the user asks for them (Load older
   // or scroll-to-top). Auto-loading after open/compaction re-inflated the
   // just-archived long turn into the DOM and froze the thread.
@@ -791,13 +775,6 @@ async function openConversation(id) {
   // backend for the active run first.
   await reattachActiveRunFromBackend();
   if (token !== state.conversationLoadToken) return;
-  // Status can lag the in-memory run (turns.active found a live turn while
-  // conversations.get still said idle). Expand the trailing-run window before
-  // wiring the stream so reload does not paint a 12-round stub.
-  if (keepLiveTurnMounted() && hasOlderTurnRounds()) {
-    applyConversationTail();
-    renderThread(windowedActiveMessages(), true);
-  }
   reattachActiveRun();
   const attachedRun = runForConversation(state.activeId);
   if (attachedRun) flushPendingEvents(attachedRun.runId);
@@ -1659,14 +1636,10 @@ function bindScrollPin() {
 }
 
 // hasOlderActiveMessages reports whether older active messages are held back by
-// the window and can be revealed with the "Load older" button.
-function hasOlderTurnRounds() {
-  return state.assistKeepStart > trailingRunStart();
-}
-
+// the window and can be revealed with the "Load older" button. The complete
+// trailing run is always rendered, so only the older prefix can be windowed.
 function hasOlderActiveMessages() {
-  if (state.activeWindowStart > 0) return true;
-  return hasOlderTurnRounds();
+  return state.activeWindowStart > 0;
 }
 
 function hasOlderHistory() {
@@ -1698,33 +1671,8 @@ function updateOlderSentinel() {
 }
 
 function revealOlderHistory() {
-  if (hasOlderTurnRounds()) {
-    revealOlderTurnRounds();
-    return;
-  }
   if (state.activeWindowStart > 0) prependActiveBatch();
   else loadOlderChunk();
-}
-
-function revealOlderTurnRounds() {
-  const thread = agentThread();
-  if (!thread || state.loadingActiveBatch) return;
-  const runStart = trailingRunStart();
-  if (state.assistKeepStart <= runStart) return;
-  state.loadingActiveBatch = true;
-  try {
-    const userNode = [...thread.querySelectorAll('.agent-message.user, .agent-compaction-marker')].at(-1);
-    const userTop = userNode ? userNode.getBoundingClientRect().top : 0;
-    state.assistKeepStart = Math.max(runStart, state.assistKeepStart - SNAPSHOT_KEEP_ROUNDS);
-    renderThread(windowedActiveMessages(), false);
-    if (runForConversation(state.activeId)) reattachActiveRun();
-    if (userNode) {
-      const nextUser = [...thread.querySelectorAll('.agent-message.user, .agent-compaction-marker')].at(-1);
-      if (nextUser) thread.scrollTop += nextUser.getBoundingClientRect().top - userTop;
-    }
-  } finally {
-    state.loadingActiveBatch = false;
-  }
 }
 
 // prependActiveBatch renders the previous WINDOW_BATCH of already-loaded active
@@ -2267,8 +2215,12 @@ function bindEvents() {
       playComplete(state.settings?.sound_notifications !== false);
     }
     if (conversation_id === state.activeId && !willAutoContinue) refreshActiveConversation();
-    void maybeAutoTitleConversation(conversation_id);
-    refreshConversations();
+    void maybeAutoTitleConversation(conversation_id).finally(() => {
+      void refreshConversations().catch(() => {
+        // The completed turn is already rendered; a transient list refresh
+        // failure should not create an unhandled rejection.
+      });
+    });
   });
   on('agent.turn.error', (payload) => {
     const { run_id, message, message_id, conversation_id } = payload;
@@ -2753,14 +2705,6 @@ function maybeRenderConversationList() {
   const view = document.querySelector('.view.agent-view');
   if (!view || view.classList.contains('active')) renderConversationList();
 }
-
-
-
-
-
-
-
-
 
 
 

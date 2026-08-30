@@ -5,6 +5,7 @@ import { el } from '../../ui.js';
 import { incrementalRender } from '../../incremental-render.js';
 import { highlightCode } from '../../highlight-render.js';
 import { attachZoomButtons } from '../../media-zoom.js';
+import { renderToolJob, reasoningDisclosure, setReasoningSource, setToolTerminalStatus } from './render.js';
 
 const LIVE = new Set(['starting', 'running']);
 const RECENT_MS = 2 * 60 * 1000;
@@ -14,6 +15,8 @@ const state = {
   conversationId: '',
   drawerRunId: '',
   popupRunId: '',
+  runLoads: new Map(),
+  runLoadErrors: new Map(),
   bound: false,
 };
 
@@ -87,6 +90,7 @@ export function bindSubagents({ getActiveConversationId } = {}) {
 
 export function setSubagentConversation(id) {
   state.conversationId = id || '';
+  void hydrate();
   renderDock();
   if (!document.getElementById('acp-drawer')?.hidden) {
     // A drawer showing a run from the previous room must not follow the
@@ -112,8 +116,32 @@ async function hydrate() {
   }
 }
 
+// A room can render a persisted subagent card before the global run list has
+// hydrated (for example while the backend WebSocket is reconnecting). Load the
+// exact run on demand instead of making a card depend on process-local cache.
+function ensureRun(runId) {
+  if (!runId || state.runs.has(runId)) return Promise.resolve(state.runs.get(runId));
+  if (state.runLoads.has(runId)) return state.runLoads.get(runId);
+  const request = rpc('acp.runs.get', { id: runId })
+    .then((result) => {
+      const run = result?.run || result;
+      if (!run?.id) throw new Error('ACP run response did not include an id');
+      upsertRun(run);
+      return run;
+    })
+    .catch((error) => {
+      state.runLoadErrors.set(runId, error);
+      renderAll();
+      return null;
+    })
+    .finally(() => state.runLoads.delete(runId));
+  state.runLoads.set(runId, request);
+  return request;
+}
+
 function upsertRun(run, { silent } = {}) {
   if (!run?.id) return;
+  state.runLoadErrors.delete(run.id);
   state.runs.set(run.id, run);
   pruneRuns();
   if (!silent) renderAll();
@@ -248,6 +276,7 @@ function updateDockChip(chip, run) {
 
 export function openDrawer(runId) {
   state.drawerRunId = runId || firstVisibleRunId();
+  state.runLoadErrors.delete(state.drawerRunId);
   const drawer = document.getElementById('acp-drawer');
   const overlay = document.getElementById('acp-drawer-overlay');
   drawer.hidden = false;
@@ -257,6 +286,7 @@ export function openDrawer(runId) {
   overlay.classList.add('active');
   overlay.setAttribute('aria-hidden', 'false');
   renderDrawer();
+  if (state.drawerRunId && !state.runs.has(state.drawerRunId)) void ensureRun(state.drawerRunId);
   document.getElementById('acp-drawer-close')?.focus();
 }
 
@@ -274,9 +304,11 @@ function closeDrawer() {
 
 function openPopup(runId) {
   state.popupRunId = runId;
+  state.runLoadErrors.delete(runId);
   const overlay = document.getElementById('acp-popup-overlay');
   overlay.hidden = false;
   renderPopup();
+  if (runId && !state.runs.has(runId)) void ensureRun(runId);
   document.getElementById('acp-popup-close')?.focus();
 }
 
@@ -322,7 +354,11 @@ function renderDrawer() {
   renderRunSidebar(shell.querySelector('.acp-run-list'), runs, selected?.id || '');
   const content = shell.querySelector('.acp-run-content');
   if (!selected) {
-    content.replaceChildren(el('p', { class: 'acp-empty', text: state.drawerRunId ? 'Loading transcript…' : 'No subagents in this conversation. The parent agent can spawn them with the subagent tool.' }));
+    const text = state.drawerRunId
+      ? (state.runLoadErrors.has(state.drawerRunId) ? 'Unable to load this transcript. Click the card again to retry.' : 'Loading transcript…')
+      : 'No subagents in this conversation. The parent agent can spawn them with the subagent tool.';
+    content.replaceChildren(el('p', { class: 'acp-empty', text }));
+    if (state.drawerRunId && !state.runLoadErrors.has(state.drawerRunId)) void ensureRun(state.drawerRunId);
     return;
   }
   state.drawerRunId = selected.id;
@@ -386,7 +422,13 @@ function renderPopup() {
   const body = document.getElementById('acp-popup-body');
   if (!run) {
     title.textContent = 'Subagent';
-    body.replaceChildren(el('p', { class: 'acp-empty', text: 'This subagent is no longer available.' }));
+    body.replaceChildren(el('p', {
+      class: 'acp-empty',
+      text: state.runLoadErrors.has(state.popupRunId)
+        ? 'Unable to load this transcript. Close and try again.'
+        : 'Loading transcript…',
+    }));
+    if (state.popupRunId && !state.runLoadErrors.has(state.popupRunId)) void ensureRun(state.popupRunId);
     return;
   }
   title.textContent = run.agent_name || 'Subagent';
@@ -410,7 +452,9 @@ function buildRunPanel(run) {
       el('span', { text: 'Workspace' }),
       el('code', { text: run.workspace || '—' }),
     ),
-    el('div', { class: 'acp-transcript', 'aria-label': 'Subagent transcript' }),
+    el('div', { class: 'agent-message assistant acp-run-message' },
+      el('div', { class: 'agent-bubble acp-transcript', 'aria-label': 'Subagent transcript' }),
+    ),
   );
 
   if (run.error) {
@@ -463,7 +507,7 @@ export function syncTranscript(panel, transcript) {
     return;
   }
   box.querySelector('.acp-empty')?.remove();
-  const lines = [...box.querySelectorAll(':scope > .acp-transcript-line')];
+  const lines = [...box.querySelectorAll(':scope > .agent-round')];
   for (let index = 0; index < chunks.length; index++) {
     const chunk = chunks[index];
     const key = transcriptChunkKey(chunk, index);
@@ -533,30 +577,43 @@ function transcriptChunkKey(chunk, index) {
 }
 
 function transcriptLine(chunk, key) {
+  const kind = chunk.kind || 'text';
   const line = el('div', {
-    class: `acp-transcript-line is-${chunk.kind || 'text'}`,
+    class: `agent-round acp-transcript-round is-${kind}`,
     'data-transcript-key': key,
   });
-  if (chunk.kind === 'tool' || chunk.kind === 'thought') {
-    line.append(el('span', { class: 'acp-transcript-kind' }));
-  }
-  line.append(el('div', { class: 'acp-transcript-text' }));
+  if (kind === 'thought') line.append(reasoningDisclosure(chunk.text || ''));
+  else if (kind === 'tool') line.append(el('div', { class: 'agent-tool-stack' }, acpToolCard(chunk)));
+  else line.append(el('div', { class: 'agent-bubble-text' }));
   updateTranscriptLine(line, chunk);
   return line;
 }
 
 function updateTranscriptLine(line, chunk) {
   if (chunk.kind === 'tool') {
-    line.querySelector('.acp-transcript-kind').textContent = chunk.tool_kind || 'tool';
-    line.querySelector('.acp-transcript-text').textContent = `${chunk.tool_title || chunk.tool_id || ''} ${chunk.tool_status || ''}`.trim();
+    const card = line.querySelector('.agent-tool-terminal');
+    if (!card) return;
+    const status = normalizeAcpToolStatus(chunk.tool_status);
+    setToolTerminalStatus(card, status);
+    const title = card.querySelector('.agent-tool-terminal-title');
+    if (title) title.textContent = chunk.tool_title || chunk.tool_kind || chunk.tool_id || 'tool';
+    const meta = card.querySelector('.agent-tool-terminal-meta');
+    if (meta) meta.textContent = acpToolMeta(chunk, status);
+    const output = card.querySelector('.agent-tool-terminal-output');
+    if (output) {
+      output.textContent = chunk.text || (status === 'running' ? '…' : status === 'fail' ? 'Tool failed.' : 'ok');
+      output.classList.toggle('is-error', status === 'fail');
+    }
     return;
   }
   if (chunk.kind === 'thought') {
-    line.querySelector('.acp-transcript-kind').textContent = 'think';
+    setReasoningSource(line.querySelector('.agent-reasoning'), chunk.text || '');
+    return;
   }
-  const body = line.querySelector('.acp-transcript-text');
+  const body = line.querySelector('.agent-bubble-text');
+  if (!body) return;
   const text = chunk.text || chunk.kind || '';
-  if (chunk.kind === 'thought' || chunk.kind === 'text') {
+  if (chunk.kind === 'text' || chunk.kind === 'plan' || chunk.kind === 'status') {
     const previous = body._transcriptRaw || '';
     if (previous && !text.startsWith(previous)) body.replaceChildren();
     body._transcriptRaw = text;
@@ -568,6 +625,41 @@ function updateTranscriptLine(line, chunk) {
     return;
   }
   body.textContent = text;
+}
+
+function acpToolCard(chunk) {
+  const card = renderToolJob({
+    name: chunk.tool_title || chunk.tool_kind || 'tool',
+    args: {},
+    status: normalizeAcpToolStatus(chunk.tool_status),
+    output: chunk.text || '',
+  });
+  if (chunk.tool_id) card.dataset.acpToolId = chunk.tool_id;
+  return card;
+}
+
+function normalizeAcpToolStatus(status) {
+  switch (status) {
+    case 'completed':
+    case 'success':
+    case 'ok':
+      return 'ok';
+    case 'failed':
+    case 'error':
+    case 'fail':
+    case 'cancelled':
+    case 'interrupted':
+      return 'fail';
+    default:
+      return 'running';
+  }
+}
+
+function acpToolMeta(chunk, status) {
+  if (chunk.tool_status) return chunk.tool_status.replaceAll('_', ' ');
+  if (status === 'running') return 'Running';
+  if (status === 'fail') return 'Failed';
+  return 'Completed';
 }
 
 function statusLabel(status) {

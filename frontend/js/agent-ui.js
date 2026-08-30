@@ -52,15 +52,13 @@ export function previousWindowStart(currentStart, batch) {
 }
 
 // conversationTail is the snapshot window for a long thread: keep the last
-// user (or compaction) bubble, cap the trailing assistant run at keepRounds,
-// and leave older complete turns to Load older. A live (running) turn must
-// pass keepAllTrailing so a reload does not hide earlier tool rounds or
-// announcements behind a Load older path that cannot run while the stream
-// is attached. This function must not flatten history into an "N earlier
-// rounds" stub.
+// user (or compaction) bubble, keep the complete trailing assistant run, and
+// leave only older complete turns to Load older. A trailing run can contain
+// dozens of tool rounds after one user message; trimming it makes most of the
+// actual answer disappear behind an older-history affordance. This function
+// must not flatten history into an "N earlier rounds" stub.
 export function conversationTail(messages = [], options = {}) {
   const prefixWindow = Math.max(1, Math.floor(Number(options.prefixWindow) || 60));
-  const keepRounds = Math.max(1, Math.floor(Number(options.keepRounds) || 3));
   const n = Array.isArray(messages) ? messages.length : 0;
   if (n === 0) {
     return { visible: [], prefixStart: 0, runStart: 0, assistKeepStart: 0 };
@@ -70,14 +68,12 @@ export function conversationTail(messages = [], options = {}) {
     lastNonAssistant--;
   }
   const runStart = lastNonAssistant + 1;
-  let assistKeepStart;
-  if (options.assistKeepStart != null && Number.isFinite(Number(options.assistKeepStart))) {
-    assistKeepStart = Math.min(n, Math.max(runStart, Math.floor(Number(options.assistKeepStart))));
-  } else if (options.keepAllTrailing) {
-    assistKeepStart = runStart;
-  } else {
-    assistKeepStart = Math.max(runStart, n - keepRounds);
-  }
+  // The current assistant run is one logical response, even when the
+  // provider persisted many intermediate tool/reasoning messages. Keep it
+  // mounted for both idle snapshots and live turns. `assistKeepStart` stays
+  // in the return shape for callers that inspect the split; it now always
+  // points at the beginning of the complete trailing run.
+  const assistKeepStart = runStart;
   let prefixStart;
   if (options.prefixStart != null && Number.isFinite(Number(options.prefixStart))) {
     prefixStart = Math.min(runStart, Math.max(0, Math.floor(Number(options.prefixStart))));

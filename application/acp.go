@@ -351,17 +351,16 @@ func (a *App) handleAcpAgentsRefreshCatalog(req contracts.AcpAgentIDRequest) (an
 }
 
 func (a *App) handleAcpRunsList(req contracts.AcpRunsListRequest) (any, *contracts.RPCError) {
-	if a.Acp == nil {
-		return contracts.AcpRunsListResult{Runs: []contracts.AcpRunDTO{}}, nil
-	}
 	// Live runtime runs first; persisted records fill in settled runs so
 	// the UI can reopen a completed subagent's transcript from the drawer
 	// even after it left the dock (or after a restart).
 	seen := make(map[string]bool)
 	out := make([]contracts.AcpRunDTO, 0, 8)
-	for _, r := range a.Acp.List(req.ConversationID) {
-		seen[r.ID] = true
-		out = append(out, acpRunDTO(r))
+	if a.Acp != nil {
+		for _, r := range a.Acp.List(req.ConversationID) {
+			seen[r.ID] = true
+			out = append(out, acpRunDTO(r))
+		}
 	}
 	if a.AcpRunStorage != nil {
 		for _, rec := range a.AcpRunStorage.List(req.ConversationID) {
@@ -400,12 +399,20 @@ func acpRunFromRecord(rec domain.AcpRunRecord) *domain.AcpRun {
 }
 
 func (a *App) handleAcpRunsGet(req contracts.AcpRunIDRequest) (any, *contracts.RPCError) {
-	run, rt, rpcErr := a.acpRun(req.ID)
-	if rpcErr != nil {
-		return nil, rpcErr
+	if a.Acp != nil {
+		if run, ok := a.Acp.Get(req.ID); ok {
+			return acpRunDTO(run), nil
+		}
 	}
-	_ = rt
-	return acpRunDTO(run), nil
+	// The runtime only owns live runs. Terminal runs survive in the per-room
+	// .acp store and must remain readable after a backend restart so a room's
+	// persisted subagent card can reopen its transcript.
+	if a.AcpRunStorage != nil {
+		if record, ok := a.AcpRunStorage.Load(req.ID); ok {
+			return acpRunDTO(acpRunFromRecord(record)), nil
+		}
+	}
+	return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "acp run not found"}
 }
 
 func (a *App) handleAcpRunsSteer(req contracts.AcpRunSteerRequest) (any, *contracts.RPCError) {

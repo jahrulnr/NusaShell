@@ -196,3 +196,24 @@ func TestAddTurnMessagesSkipsFreshOrEmpty(t *testing.T) {
 		t.Fatalf("empty conversation must only get user + assistant, got %d messages", len(empty.Messages))
 	}
 }
+
+func TestAddTurnMessagesDerivesTitleFromFirstUserMessage(t *testing.T) {
+	conv := domain.NewConversation("conv_title", "Untitled")
+	app := &App{}
+	app.addTurnMessages(conv,
+		domain.Message{ID: "m_user", Role: domain.RoleUser, Content: "Fix the room history window", Status: domain.StatusDone},
+		domain.Message{ID: "m_asst", Role: domain.RoleAssistant},
+	)
+	if conv.Title != "Fix the room history window" {
+		t.Fatalf("title = %q, want first user message", conv.Title)
+	}
+
+	conv.Title = "My custom room"
+	app.addTurnMessages(conv,
+		domain.Message{ID: "m_user2", Role: domain.RoleUser, Content: "Do not replace this title", Status: domain.StatusDone},
+		domain.Message{ID: "m_asst2", Role: domain.RoleAssistant},
+	)
+	if conv.Title != "My custom room" {
+		t.Fatalf("custom title was overwritten: %q", conv.Title)
+	}
+}

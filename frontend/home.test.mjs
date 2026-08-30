@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
-import { filterLauncherPlugins } from './js/views/home.js';
+import { filterLauncherPlugins, pluginIconValue } from './js/views/home.js';
 
 const html = await readFile(new URL('./index.html', import.meta.url), 'utf8');
 const homeView = await readFile(new URL('./js/views/home.js', import.meta.url), 'utf8');
@@ -33,4 +33,12 @@ test('Home search matches plugin name, id, and manifest description', () => {
   assert.deepEqual(filterLauncherPlugins(plugins, 'capture'), [plugins[0]]);
   assert.deepEqual(filterLauncherPlugins(plugins, 'mail.app'), [plugins[1]]);
   assert.deepEqual(filterLauncherPlugins(plugins, 'NOTES'), [plugins[0]]);
+});
+
+test('Home accepts the resolved icon and falls back to the manifest icon', () => {
+  const resolved = { icon: 'data:image/png;base64,abc', manifest: { icon: '📝' } };
+  const legacy = { manifest: { icon: '📝' } };
+  assert.equal(pluginIconValue(resolved), resolved.icon);
+  assert.equal(pluginIconValue(legacy), '📝');
+  assert.equal(pluginIconValue({}), '🧩');
 });

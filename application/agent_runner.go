@@ -233,6 +233,9 @@ func hasDurableHistory(c *domain.Conversation) bool {
 func (a *App) addTurnMessages(c *domain.Conversation, userMsg, asstMsg domain.Message) {
 	announce := shouldAnnounceRestart(c, a.startedAt)
 	c.AddMessage(userMsg)
+	if c.Title == "" || c.Title == "Untitled" {
+		c.Title = c.DefaultTitle()
+	}
 	if announce {
 		c.AddMessage(a.restartAnnouncement())
 	}

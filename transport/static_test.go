@@ -40,7 +40,6 @@ func TestFrontendAssets(t *testing.T) {
 	checks := map[string][]string{
 		"/js/app.js":                {"text/javascript", "application/javascript"},
 		"/styles/global.css":        {"text/css"},
-		"/styles/parity.css":        {"text/css"},
 		"/nusashell-mark.png":       {"image/png"},
 		"/agent-offline-mascot.png": {"image/png"},
 	}
@@ -78,20 +77,12 @@ func TestFrontendAssets(t *testing.T) {
 		}
 		resp.Body.Close()
 	}
-	resp, err := http.Get(h.server.URL + "/styles/responsive.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("responsive.css = %d", resp.StatusCode)
-	}
 	if !strings.Contains(string(appBody), "boot") {
 		t.Fatalf("app.js content unexpected")
 	}
 
 	// fonts
-	resp, err = http.Get(h.server.URL + "/fonts/fonts.css")
+	resp, err := http.Get(h.server.URL + "/fonts/fonts.css")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,8 @@
 /* ACP subagent dock, drawer, peek popup, permission overlay, provider cards.
  *
- * Layer: view — scoped to the Providers view's ACP section and the global
- * permission overlay it owns.
+ * Layer: view — scoped to ACP provider controls, the Agent subagent shell,
+ * and the global permission overlay it owns. Transcript content belongs to
+ * agent.css so ACP and normal agent rounds stay visually aligned.
  */
 
 .accent-acp .provider-mark,
@@ -200,48 +201,9 @@
   white-space: nowrap;
 }
 .acp-run-panel { display: grid; gap: 12px; }
-/* Transcript flows with the drawer/popup body (like the conversation
- * thread) — no fixed-height "textarea" box. The scrollable ancestor is
- * the follow target for live deltas. */
-.acp-transcript {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-.acp-transcript-line { color: var(--text); font: 13px/1.55 "IBM Plex Sans", system-ui, sans-serif; overflow-wrap: anywhere; min-width: 0; }
-/* No content-visibility here on purpose: its paint containment clips the
-   bordered transcript chrome at line edges (same reason it was reverted on
-   .agent-round). Subagent transcripts are patched in place per chunk, so
-   there is no per-delta rescan to guard against. */
-.acp-transcript-line.is-thought { color: var(--text-faint); font-style: italic; }
-.acp-transcript-line.is-plan { color: var(--text-dim); }
-.acp-transcript-line.is-status { color: var(--text-dim); font-size: 11.5px; }
-.acp-transcript-line.is-tool {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  justify-self: start;
-  max-width: 100%;
-  border: 1px solid #2a3d4e;
-  border-radius: 6px;
-  padding: 4px 9px;
-  background: #101a24;
-  color: #9ad7c2;
-  font: 11px var(--font-mono);
-}
-.acp-transcript-kind {
-  color: #7f91a8;
-  font: 10px var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: .05em;
-}
-.acp-transcript-line.is-tool .acp-transcript-kind { color: #688079; }
-.acp-transcript-text { min-width: 0; }
-.acp-transcript-text > :first-child { margin-top: 0; }
-.acp-transcript-text > :last-child { margin-bottom: 0; }
-.acp-transcript-text p,
-.acp-transcript-text ul,
-.acp-transcript-text ol { margin: .5em 0; }
+/* Transcript content deliberately reuses agent.css. The view only owns the
+ * drawer shell and ACP metadata; subagent rounds are rendered as the same
+ * .agent-message/.agent-bubble/.agent-round structure as the main agent. */
 .acp-run-error { color: #ff9ca5; font-size: 12px; }
 .acp-empty { color: var(--text-faint); font-size: 12.5px; }
 

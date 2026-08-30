@@ -27,6 +27,15 @@ func (f *fakeAcpRuntime) List(conversationID string) []*domain.AcpRun {
 	return out
 }
 
+func (f *fakeAcpRuntime) Get(runID string) (*domain.AcpRun, bool) {
+	for _, run := range f.runs {
+		if run.ID == runID {
+			return run, true
+		}
+	}
+	return nil, false
+}
+
 // fakeAcpRunStorage implements domain.AcpRunStorage for list-merge tests.
 type fakeAcpRunStorage struct {
 	recs []domain.AcpRunRecord
@@ -139,5 +148,48 @@ func TestHandleAcpRunsListScopesToConversation(t *testing.T) {
 		if r.ConversationID != "conv_a" {
 			t.Fatalf("leaked run from another conversation: %+v", r)
 		}
+	}
+}
+
+func TestHandleAcpRunsGetLoadsPersistedRecordAfterRuntimeRestart(t *testing.T) {
+	app := &App{
+		Bus: NewBus(),
+		Acp: &fakeAcpRuntime{},
+		AcpRunStorage: &fakeAcpRunStorage{recs: []domain.AcpRunRecord{
+			{
+				ID: "acprun_historic", ConversationID: "conv_1", AgentName: "Devin",
+				Status:     domain.AcpRunCompleted,
+				Transcript: []domain.AcpTranscriptChunk{{Kind: "text", Text: "persisted result"}},
+			},
+		}},
+	}
+
+	result, rpcErr := app.handleAcpRunsGet(contracts.AcpRunIDRequest{ID: "acprun_historic"})
+	if rpcErr != nil {
+		t.Fatalf("runs.get: %v", rpcErr)
+	}
+	run, ok := result.(contracts.AcpRunDTO)
+	if !ok {
+		t.Fatalf("runs.get result = %T, want contracts.AcpRunDTO", result)
+	}
+	if run.ID != "acprun_historic" || run.AgentName != "Devin" || len(run.Transcript) != 1 {
+		t.Fatalf("persisted run not restored: %+v", run)
+	}
+}
+
+func TestHandleAcpRunsListLoadsPersistedRecordsWithoutRuntime(t *testing.T) {
+	app := &App{
+		AcpRunStorage: &fakeAcpRunStorage{recs: []domain.AcpRunRecord{
+			{ID: "acprun_after_restart", ConversationID: "conv_1", Status: domain.AcpRunCompleted},
+		}},
+	}
+
+	result, rpcErr := app.handleAcpRunsList(contracts.AcpRunsListRequest{ConversationID: "conv_1"})
+	if rpcErr != nil {
+		t.Fatalf("runs.list: %v", rpcErr)
+	}
+	out, ok := result.(contracts.AcpRunsListResult)
+	if !ok || len(out.Runs) != 1 || out.Runs[0].ID != "acprun_after_restart" {
+		t.Fatalf("persisted runs without runtime = %+v, want one historical run", result)
 	}
 }

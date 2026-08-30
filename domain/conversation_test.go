@@ -97,6 +97,16 @@ func TestDefaultTitleDoesNotSplitUTF8Rune(t *testing.T) {
 	}
 }
 
+func TestDefaultTitleSkipsBlankMessagesAndNormalizesWhitespace(t *testing.T) {
+	c := &Conversation{Messages: []Message{
+		{Role: RoleUser, Content: " \n\t "},
+		{Role: RoleUser, Content: "Fix   the\nroom history"},
+	}}
+	if got := c.DefaultTitle(); got != "Fix the room history" {
+		t.Fatalf("DefaultTitle() = %q, want normalized first non-empty user message", got)
+	}
+}
+
 // TestCompactCountsToolCallsInTokenBudget: Compact must count tool call
 // tokens when deciding which messages to retain. A conversation full of
 // tool-only messages (empty content, non-trivial tool calls) must not

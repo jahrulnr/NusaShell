@@ -689,6 +689,10 @@ type PluginUIPort interface {
 	List() ([]*domain.Plugin, error)
 	Get(id string) (*domain.Plugin, error)
 	UIDir(p *domain.Plugin) string
+	// ToUIEntry resolves presentation values such as local file icons for the
+	// browser-facing /plugins list. The adapter owns filesystem resolution;
+	// transport stays independent from infrastructure packages.
+	ToUIEntry(p *domain.Plugin) contracts.PluginUIEntryDTO
 }
 
 // PluginRuntimePort is the plugin runtime surface needed by the plugin UI

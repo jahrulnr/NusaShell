@@ -15,7 +15,6 @@ import (
 
 	"nusashell/application"
 	"nusashell/contracts"
-	"nusashell/domain"
 )
 
 // PluginHandler serves plugin UI static files and routes tool calls
@@ -57,7 +56,7 @@ func (h *PluginHandler) handleList(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]contracts.PluginUIEntryDTO, 0, len(plugins))
 	for _, p := range plugins {
-		out = append(out, pluginToDTO(p))
+		out = append(out, h.Store.ToUIEntry(p))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"plugins": out})
 }
@@ -208,25 +207,6 @@ func (h *PluginHandler) handleStatic(w http.ResponseWriter, r *http.Request, plu
 
 	// Non-HTML files: serve directly from the filesystem.
 	http.ServeFile(w, r, fullPath)
-}
-
-// pluginToDTO converts a domain.Plugin to a contracts.PluginUIEntryDTO. The
-// icon is left empty here; icon resolution to a PNG data URL is an
-// infrastructure concern (pluginicon) and is applied by the
-// pluginfs.ToDTO helper used by the application resources handler. The
-// plugin UI handler serves icons as static files from the UI directory,
-// so it does not need the data URL.
-func pluginToDTO(p *domain.Plugin) contracts.PluginUIEntryDTO {
-	return contracts.PluginUIEntryDTO{
-		ID:          p.Manifest.ID,
-		Name:        p.Manifest.Name,
-		Version:     p.Manifest.Version,
-		Category:    p.Manifest.Category,
-		HasUI:       p.HasUI,
-		InstallPath: p.InstallPath,
-		InstalledAt: p.InstalledAt,
-		Manifest:    &p.Manifest,
-	}
 }
 
 // readFile is a helper that reads a file and returns its contents.

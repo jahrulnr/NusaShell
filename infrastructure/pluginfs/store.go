@@ -271,3 +271,10 @@ func ToDTO(p *domain.Plugin) contracts.PluginUIEntryDTO {
 		Manifest:    &p.Manifest,
 	}
 }
+
+// ToUIEntry implements application.PluginUIPort. Keep icon resolution in the
+// filesystem adapter so local manifest paths become browser-loadable data URLs
+// before the /plugins endpoint returns them.
+func (s *Store) ToUIEntry(p *domain.Plugin) contracts.PluginUIEntryDTO {
+	return ToDTO(p)
+}

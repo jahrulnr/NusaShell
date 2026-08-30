@@ -701,7 +701,7 @@ function renderShowVideoCard(toolCall, showVideo) {
 export function renderSubagentCard(toolCall) {
   const args = parseToolArgs(toolCall.args);
   let runs = [];
-  let meta = null;       // parsed YAML header
+  let meta = {};          // parsed YAML header
   let outputText = '';   // markdown body (summary)
   try {
     const parsed = JSON.parse(toolCall.output || '{}');
@@ -709,10 +709,16 @@ export function renderSubagentCard(toolCall) {
   } catch {
     // Not JSON — try YAML frontmatter + markdown body
     const parsed = parseSubagentResult(toolCall.output || '');
-    meta = parsed.meta;
+    meta = parsed.meta || {};
     outputText = parsed.body;
     if (parsed.meta?.runs?.length) runs = parsed.meta.runs;
   }
+  // The original `subagent` tool call is replaced with a short completion
+  // sentence after the run finishes. That sentence still contains the stable
+  // acprun_* ID; recover it so a reloaded card can ask the backend for the
+  // historical transcript instead of falling back to whichever run is cached.
+  const embeddedRunIDs = extractSubagentRunIDs(toolCall.output || '');
+  if (!runs.length && embeddedRunIDs.length) runs = embeddedRunIDs.map((id) => ({ id }));
 
   const agentName = agentNameForId(args.agent_id) || 'Subagent';
   const promptPreview = (args.prompt || '').split('\n')[0].slice(0, 120);
@@ -733,8 +739,10 @@ export function renderSubagentCard(toolCall) {
   const isCancelled = meta?.status === 'cancelled';
   const status = isRunning ? 'running' : (isCancelled ? 'cancelled' : (isFailed ? 'error' : 'success'));
 
+  const runIDs = [...new Set(runs.map((run) => run.id).filter(Boolean))];
   const card = el('div', { class: `agent-subagent-card is-${status}`, role: 'button', tabindex: '0', 'aria-label': `Open ${agentName} transcript` });
   card._toolArgs = toolCall.args;
+  if (runIDs.length === 1) card.dataset.runId = runIDs[0];
 
   // Header: icon + agent name + status
   const header = el('div', { class: 'agent-subagent-header' },
@@ -782,7 +790,7 @@ export function renderSubagentCard(toolCall) {
 
   card.addEventListener('click', (event) => {
     const runRow = event.target.closest('[data-run-id]');
-    const runId = runRow?.dataset.runId || runs[0]?.id || meta?.id || firstVisibleRunId();
+    const runId = runRow?.dataset.runId || card.dataset.runId || runs[0]?.id || meta?.id || embeddedRunIDs[0] || firstVisibleRunId();
     if (runId) openDrawer(runId);
   });
   card.addEventListener('keydown', (event) => {
@@ -792,6 +800,17 @@ export function renderSubagentCard(toolCall) {
   });
 
   return card;
+}
+
+function extractSubagentRunIDs(raw) {
+  const ids = [];
+  const seen = new Set();
+  for (const match of String(raw).matchAll(/\bacprun_[A-Za-z0-9_-]+/g)) {
+    if (seen.has(match[0])) continue;
+    seen.add(match[0]);
+    ids.push(match[0]);
+  }
+  return ids;
 }
 
 // parseSubagentResult splits a YAML frontmatter + markdown body tool
