@@ -4,12 +4,12 @@
 // genuinely shared primitives (used by 2+ views). View-specific rules live in
 // that view's own stylesheet, and shared components must not be hosted inside
 // another view's file. These tests pin that contract so "helper" rules stop
-// leaking into the wrong layer and silently breaking other views (the final
-// cascade also includes the parity overlay, which made such leaks very hard
-// to trace).
+// leaking into the wrong layer and silently breaking other views. The old
+// parity.css/responsive.css overlay layers were dissolved into the owning
+// stylesheets; these tests also guard that they do not return.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -65,11 +65,42 @@ test('every stylesheet declares its layer in a leading header', () => {
   }
 });
 
-test('parity overlay stays the last NusaShell-authored stylesheet', () => {
-  // parity.css intentionally re-skins shared primitives; that contract only
-  // holds while it loads after every other authored sheet.
+test('anonymous overlay stylesheets are dissolved into owner files', () => {
+  // parity.css and responsive.css were cross-cutting overlays loaded last,
+  // which made the cascade ambiguous and leaks hard to trace. They must not
+  // return as files or as <link> tags in index.html.
   const html = readFileSync(join(root, '..', 'index.html'), 'utf8');
-  const order = [...html.matchAll(/styles\/([\w-]+)\.css/g)].map((m) => m[1]);
-  assert.ok(order.length > 0, 'expected stylesheet links in index.html');
-  assert.equal(order[order.length - 1], 'parity', `parity.css must be last, found order: ${order.join(' -> ')}`);
+  assert.ok(!html.includes('styles/parity.css'), 'parity.css link must be removed from index.html');
+  assert.ok(!html.includes('styles/responsive.css'), 'responsive.css link must be removed from index.html');
+  assert.ok(!existsSync(join(root, 'parity.css')), 'parity.css file must be deleted');
+  assert.ok(!existsSync(join(root, 'responsive.css')), 'responsive.css file must be deleted');
+});
+
+test('document-wide reset, focus, and reduced-motion live in global.css', () => {
+  const css = read('global.css');
+  assert.match(css, /:where\(button,[^)]*\):focus-visible/, 'shared focus-visible reset belongs in global.css');
+  assert.match(css, /prefers-reduced-motion: reduce\)[\s\S]*animation-duration: \.001ms !important/, 'document-wide reduced-motion belongs in global.css');
+});
+
+test('shell chrome and mobile-nav drawer breakpoints live in layout.css', () => {
+  const css = read('layout.css');
+  assert.match(css, /@media \(max-width: 1100px\)[\s\S]*?\.sidebar \{ width: 220px/, '1100px sidebar breakpoint belongs in layout.css');
+  assert.match(css, /@media \(max-width: 900px\)[\s\S]*?\.sidebar \{ width: 68px/, '900px sidebar collapse belongs in layout.css');
+  assert.match(css, /@media \(max-width: 680px\)[\s\S]*?\.window \.sidebar \{/, '680px off-canvas drawer belongs in layout.css');
+  assert.match(css, /\.mobile-nav-toggle \{ display: none; \}/, 'mobile-nav toggle base rule belongs in layout.css');
+});
+
+test('Agent parity and responsive rules live in agent.css', () => {
+  const css = read('agent.css');
+  assert.match(css, /\.agent-tool-terminal-output \{[\s\S]*?max-height: calc\(10 \* 1\.55em\)/, 'agent tool terminal cap belongs in agent.css');
+  assert.match(css, /\.agent-subagent-card \{/, 'subagent card belongs in agent.css');
+  assert.match(css, /@media \(max-width: 900px\)[\s\S]*?\.agent-conversations \{ display: none; \}/, '900px agent conversations hide belongs in agent.css');
+});
+
+test('view parity and responsive rules live in their owner stylesheets', () => {
+  assert.match(read('mcp.css'), /@media \(max-width: 680px\)[\s\S]*?\.mcp-row \{ align-items: flex-start/, '680px mcp-row wrap belongs in mcp.css');
+  assert.match(read('providers.css'), /@media \(max-width: 480px\)[\s\S]*?\.provider-detail-grid \{ grid-template-columns: 1fr/, '480px provider grid belongs in providers.css');
+  assert.match(read('logs.css'), /@media \(max-width: 480px\)[\s\S]*?\.log-line \{ grid-template-columns: 76px/, '480px log-line grid belongs in logs.css');
+  assert.match(read('settings.css'), /@media \(max-width: 760px\)[\s\S]*?\.settings-group \{ grid-template-columns: 1fr/, '760px settings-group collapse belongs in settings.css');
+  assert.match(read('skills.css'), /@media \(max-width: 760px\)[\s\S]*?\.skills-catalog \{ max-height: 300px/, '760px skills catalog collapse belongs in skills.css');
 });

@@ -1,63 +1,103 @@
-/* App shell layout: titlebar, sidebar, content frame.
+/* App shell layout: titlebar, sidebar, content frame, and the shell
+ * breakpoints / mobile-nav drawer.
  *
  * Layer: shell — chrome that wraps every view. Hosts no per-view rules;
- * view workspaces live in their own stylesheets.
+ * view workspaces live in their own stylesheets. Shell-wide media queries
+ * (sidebar collapse, off-canvas drawer) live here; per-view breakpoints
+ * live in the view that owns the resized element.
  */
+
+/* ============ Window frame ============ */
+/* Size/display/overflow live in global.css; the workbench border/radius/
+ * shadow dressing lives here with the rest of the shell chrome. */
+.window {
+  position: relative;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 0 0 1px #050605,
+    0 16px 48px rgba(0, 0, 0, .44),
+    inset 0 1px rgba(255, 255, 255, .035);
+}
+.window::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  z-index: 30;
+  border: 1px solid rgba(255, 255, 255, .025);
+  border-radius: calc(var(--radius-lg) - 3px);
+  pointer-events: none;
+}
+
+/* Body inset: the 4px harbor margin around the window. display/overflow
+ * stay in global.css; this is the visual shell dressing. */
+body {
+  padding: 4px;
+  background:
+    linear-gradient(135deg, rgba(110, 224, 196, .045), transparent 22%),
+    var(--ink);
+}
 
 /* ============ Title bar ============ */
 .titlebar {
-  height: 56px;
-  min-height: 56px;
+  height: 68px;
+  min-height: 68px;
   display: flex;
   align-items: center;
   gap: 20px;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--border-soft);
-  background: var(--panel);
+  padding: 0 var(--space-5) 0 var(--space-6);
+  border-bottom: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .03), transparent 72%),
+    var(--panel);
+  box-shadow: inset 0 -3px var(--ink);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 700;
-  font-size: 15px;
-  letter-spacing: -0.01em;
+  gap: var(--space-3);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: -.025em;
   white-space: nowrap;
 }
 
 .brand-logo {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 30px;
+  height: 30px;
   place-items: center;
-  filter: drop-shadow(0 0 7px rgba(110, 224, 196, .28));
+  filter: none;
 }
-.brand-logo img { display: block; width: 24px; height: 24px; }
+.brand-logo img { display: block; width: 30px; height: 30px; }
 
 .titlebar-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   margin-left: auto;
 }
 
 .connection-state {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin-left: 6px;
-  color: var(--text-faint);
-  font-size: 11px;
+  gap: var(--space-2);
+  margin-left: var(--space-3);
+  color: var(--accent);
+  font: 500 12px var(--font-mono);
+  letter-spacing: -.02em;
 }
 .connection-orb {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--text-faint);
+  box-shadow: 0 0 0 3px rgba(133, 139, 132, .08);
   transition: background .2s;
 }
-.connection-orb.online { background: var(--green); box-shadow: 0 0 0 3px rgba(185, 237, 88, .15); }
+.connection-orb.online { background: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
 .connection-orb.offline { background: var(--red); box-shadow: 0 0 0 3px rgba(255, 121, 111, .15); }
 .connection-orb.connecting { background: var(--amber); animation: pulse 1s ease-in-out infinite; }
 
@@ -68,47 +108,95 @@
   flex: 1;
   display: flex;
   min-height: 0;
+  gap: 6px;
+  padding: 6px;
+  background:
+    linear-gradient(90deg, rgba(110, 224, 196, .03) 1px, transparent 1px) 0 0 / 6px 6px,
+    var(--ink);
 }
 
 /* ============ Sidebar ============ */
 .sidebar {
-  width: 232px;
-  min-width: 232px;
-  background: var(--panel);
-  border-right: 1px solid var(--border-soft);
-  padding: 18px 14px;
+  position: relative;
+  width: 230px;
+  min-width: 230px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .025), transparent 28%),
+    var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-4) var(--space-3) var(--space-3);
   display: flex;
   flex-direction: column;
+  box-shadow:
+    inset 0 0 0 3px var(--harbor),
+    inset 0 1px rgba(255, 255, 255, .035);
+  transition: width .18s ease, min-width .18s ease, padding .18s ease;
+}
+
+/* Instrument-frame registration dots shared by sidebar + content. */
+.sidebar::before,
+.content::before {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  top: 7px;
+  left: 7px;
+  border: 1px solid #737a72;
+  border-radius: 50%;
+  background: #242724;
+  box-shadow: inset 0 0 0 1px #111311;
+  pointer-events: none;
 }
 
 .nav-main {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 10px;
-  border-radius: 9px;
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   color: var(--text-dim);
-  font-size: 13px;
-  font-weight: 500;
+  font: 500 15px var(--font-mono);
+  letter-spacing: -.025em;
   text-decoration: none;
   cursor: pointer;
   transition: background .15s, color .15s;
-  border: none;
   background: transparent;
 }
-.nav-item svg { flex-shrink: 0; opacity: 0.8; }
-.nav-item:hover { background: var(--panel-alt); color: var(--text); }
-.nav-item.active {
-  background: var(--accent-soft);
-  color: var(--accent);
+.nav-item svg { width: 20px; height: 20px; flex-shrink: 0; opacity: .88; }
+.nav-item:hover {
+  border-color: var(--border-soft);
+  background: rgba(255, 255, 255, .025);
+  color: var(--text);
 }
-.nav-item.active svg { opacity: 1; }
+.nav-item.active {
+  position: relative;
+  border-color: var(--accent-border);
+  background:
+    linear-gradient(90deg, var(--accent-wash), transparent 70%),
+    var(--panel-alt);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .8);
+}
+.nav-item.active::before {
+  content: "";
+  position: absolute;
+  inset: 7px auto 7px -1px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+.nav-item.active svg { opacity: 1; color: var(--text); }
 
 .nav-section-label {
   font-size: 10.5px;
@@ -121,8 +209,8 @@
 
 .storage {
   margin-top: auto;
-  padding: 14px 10px 4px;
-  border-top: 1px solid var(--border-soft);
+  padding: var(--space-3) 10px 4px;
+  border-top: 1px solid var(--border);
 }
 .storage-text { color: var(--text-faint); font-family: var(--font-mono); font-size: 10.5px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .storage-label { display: block; margin-bottom: 4px; color: var(--text-faint); font: 600 9px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
@@ -143,21 +231,31 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  margin: 13px 10px 0;
-  padding: 8px 0;
-  border: 0;
-  border-top: 1px solid var(--border-soft);
+  min-height: 40px;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-faint);
-  font: 10.5px var(--font-mono);
+  font: 500 12px var(--font-mono);
   cursor: pointer;
   text-align: left;
 }
-.sidebar-mode-toggle:hover { color: var(--text); }
-.sidebar.is-compact { width: 64px; min-width: 64px; padding-inline: 10px; }
+.sidebar-mode-toggle:hover {
+  border-color: var(--border-soft);
+  background: rgba(255, 255, 255, .025);
+  color: var(--text);
+}
+.sidebar.is-compact { width: 72px; min-width: 72px; padding-inline: 9px; }
 .sidebar.is-compact .nav-label { display: none; }
-.sidebar.is-compact .nav-item { justify-content: center; padding-inline: 9px; }
-.sidebar.is-compact .sidebar-mode-toggle { justify-content: center; margin-inline: 0; }
+.sidebar.is-compact .nav-item,
+.sidebar.is-compact .sidebar-mode-toggle {
+  justify-content: center;
+  width: 50px;
+  padding-inline: 0;
+}
 .sidebar.is-compact .sidebar-mode-toggle svg { transform: rotate(180deg); }
 
 /* ============ Content ============ */
@@ -166,6 +264,39 @@
   min-width: 0;
   overflow-y: auto;
   position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background:
+    radial-gradient(circle at 64% 10%, rgba(110, 224, 196, .04), transparent 32%),
+    linear-gradient(115deg, var(--panel-raised), var(--panel) 62%, var(--panel-alt));
+  box-shadow:
+    inset 0 0 0 4px var(--harbor),
+    inset 0 0 0 5px var(--border-soft);
+}
+.content::after {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border: 1px solid rgba(255, 255, 255, .025);
+  pointer-events: none;
+}
+.view { position: relative; z-index: 1; }
+
+/* Shared workbench view frame for the dense views (Agent/Skills/Logs/
+ * Providers/MCP). Agent/MCP content-gutter overrides live in their own
+ * stylesheets; this is the common bordered panel treatment. */
+.view.active.agent-view,
+.view.active.skills-view,
+.view.active.logs-view,
+.view.active.providers-view,
+.view.active.mcp-view {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .025);
 }
 
 /* ============ Full-window offline state ============ */
@@ -245,3 +376,97 @@ body.mini-mode .window {
 body.mini-mode .window::after { display: none; }
 body.mini-mode .agent-shell { grid-template-columns: 1fr; }
 body.mini-mode .agent-conversations { display: none; }
+
+/* ============ Shell breakpoints ============ */
+/* Shell-wide media queries. Per-view breakpoints (the elements a view
+ * owns) live in that view's stylesheet; only the sidebar/titlebar/window
+ * frame adjustments live here. */
+
+@media (max-width: 1100px) {
+  .sidebar { width: 220px; min-width: 220px; }
+}
+
+@media (max-width: 900px) {
+  .brand { font-size: 17px; }
+  .connection-state { font-size: 10px; }
+  .sidebar { width: 68px; min-width: 68px; padding-inline: 8px; }
+  .sidebar .nav-label,
+  .sidebar .storage { display: none; }
+  .sidebar .nav-item,
+  .sidebar .sidebar-mode-toggle { justify-content: center; width: 50px; padding-inline: 0; }
+}
+
+@media (max-width: 760px) {
+  body { padding: 0; }
+  .window { border: 0; border-radius: 0; }
+  .titlebar { min-height: 58px; height: 58px; padding-inline: var(--space-3); }
+  .brand-logo,
+  .brand-logo img { width: 26px; height: 26px; }
+  .connection-state span:last-child { display: none; }
+  .body { gap: 0; padding: 0; }
+  .sidebar { display: none; }
+  .content { border: 0; border-radius: 0; box-shadow: none; }
+  .content::before,
+  .content::after { display: none; }
+  /* Agent/MCP content gutters are owned by their view stylesheets; the
+   * remaining dense views get a small inset here. Settings owns its own
+   * gutter in settings.css. */
+  .content:has(.skills-view.active),
+  .content:has(.logs-view.active),
+  .content:has(.providers-view.active) { padding: var(--space-2); }
+  .view.active.skills-view,
+  .view.active.logs-view,
+  .view.active.providers-view,
+  .view.active.mcp-view { border-radius: var(--radius-sm); }
+}
+
+/* ============ Mobile navigation drawer (<=680px) ============ */
+/* The hamburger lives in the title bar and stays hidden on wide screens
+ * where the sidebar is always visible. Below 680px the sidebar leaves
+ * normal flow and slides in over the content when js/mobile-nav.js sets
+ * .body.is-nav-open. Drawer rules are scoped under .window (higher
+ * specificity than the 760px .sidebar { display: none }) so the drawer
+ * wins the cascade. */
+.mobile-nav-toggle { display: none; }
+
+@media (max-width: 680px) {
+  .mobile-nav-toggle { display: inline-flex; }
+  .titlebar { padding-inline: 13px; }
+  .content { overflow-y: auto; }
+  .window .sidebar {
+    display: flex;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 60;
+    width: min(78vw, 264px);
+    min-width: 0;
+    transform: translateX(-105%);
+    transition: transform .22s ease;
+  }
+  /* Compact mode persists across breakpoints; the drawer always shows the
+   * wide labeled variant regardless of the stored preference. */
+  .window .sidebar.is-compact { width: min(78vw, 264px); }
+  .window .sidebar .nav-label { display: inline; }
+  .window .sidebar .storage { display: block; }
+  .body.is-nav-open .sidebar {
+    transform: translateX(0);
+    box-shadow: 0 0 40px rgba(0, 0, 0, .5);
+  }
+  .mobile-nav-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, .45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s;
+  }
+  .body.is-nav-open .mobile-nav-backdrop { opacity: 1; pointer-events: auto; }
+}
+
+@media (max-width: 480px) {
+  .brand { font-size: 13px; }
+  .connection-state { margin-left: 2px; }
+}

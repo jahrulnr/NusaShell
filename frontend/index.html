@@ -24,8 +24,6 @@
 <link rel="stylesheet" href="styles/logs.css">
 <link rel="stylesheet" href="styles/telemetry.css">
 <link rel="stylesheet" href="styles/modals.css">
-<link rel="stylesheet" href="styles/responsive.css">
-<link rel="stylesheet" href="styles/parity.css">
 <link rel="stylesheet" href="vendor/slim-select/slimselect.css">
 <link rel="stylesheet" href="vendor/slim-select/nusashell-override.css">
 <link rel="stylesheet" href="vendor/highlightjs/github-dark.min.css">
@@ -312,7 +310,7 @@
           <button class="action-btn" id="install-skill-btn" type="button">Install skill</button>
         </div>
         <input type="file" id="skill-file-input" accept=".skill,.zip" hidden>
-        <div class="view-body" style="display:flex;flex-direction:column;min-height:0;padding-bottom:22px;">
+        <div class="view-body skills-view-body">
           <div class="skills-workspace" id="skills-workspace">
             <div class="skills-catalog">
               <div class="skills-pane-head">
@@ -548,7 +546,7 @@
             <p>Runtime events streamed live from the shell.</p>
           </div>
         </div>
-        <div class="view-body" style="display:flex;flex-direction:column;min-height:0;">
+        <div class="view-body logs-view-body">
           <div class="log-filters">
             <select class="select" id="log-level-filter">
               <option value="">All levels</option>

@@ -3,8 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 const html = await readFile(new URL('./index.html', import.meta.url), 'utf8');
-const parityCSS = await readFile(new URL('./styles/parity.css', import.meta.url), 'utf8');
 const agentCSS = await readFile(new URL('./styles/agent.css', import.meta.url), 'utf8');
+const globalCSS = await readFile(new URL('./styles/global.css', import.meta.url), 'utf8');
 const agentView = await readFile(new URL('./js/views/agent.js', import.meta.url), 'utf8');
 const appShell = await readFile(new URL('./js/app.js', import.meta.url), 'utf8');
 const agentRender = await readFile(new URL('./js/views/agent/render.js', import.meta.url), 'utf8');
@@ -32,9 +32,9 @@ test('Agent uses the Electron workspace shell without unsupported Todo UI', () =
   // block-level Markdown (<p>, <h2>, <ul>) is invalid inside a <p>.
   assert.match(html, /<div class="agent-todo-strip-brief" id="agent-todo-strip-brief" hidden><\/div>/);
   assert.match(agentView, /briefEl\.innerHTML = renderMarkdown\(brief\.trim\(\)\)/);
-  const tabletRules = parityCSS.slice(
-    parityCSS.indexOf('@media (max-width: 900px)'),
-    parityCSS.indexOf('@media (max-width: 760px)'),
+  const tabletRules = agentCSS.slice(
+    agentCSS.indexOf('@media (max-width: 900px)'),
+    agentCSS.indexOf('@media (max-width: 760px)'),
   );
   assert.match(tabletRules, /\.agent-conversations \{ display: none; \}/);
 });
@@ -45,7 +45,7 @@ test('Agent tool transcripts start collapsed, cap output at ten lines, and lazy-
   assert.match(agentRender, /function materializeReasoning/);
   assert.doesNotMatch(agentRender, /content\.innerHTML = renderMarkdown\(reasoning\)/);
   assert.doesNotMatch(agentView, /content\.innerHTML = renderMarkdown\(run\.rawReasoning\)/);
-  assert.match(parityCSS, /\.agent-tool-terminal-output \{[^}]*max-height: calc\(10 \* 1\.55em\);[^}]*overflow-y: auto;/s);
+  assert.match(agentCSS, /\.agent-tool-terminal-output \{[^}]*max-height: calc\(10 \* 1\.55em\);[^}]*overflow-y: auto;/s);
 });
 
 test('Archived chunks load only on explicit Load older or scroll-to-top, never after turn.done or live compaction', () => {
@@ -70,7 +70,7 @@ test('Live turns keep every round mounted; perf comes from content-visibility + 
   // No CSS containment on .agent-round — content-visibility there clipped
   // the reasoning mark / tool-terminal chrome drawn at the round edges.
   assert.doesNotMatch(agentCSS, /\.agent-round \{[^}]*content-visibility/s);
-  assert.doesNotMatch(parityCSS, /\.agent-round \{[^}]*content-visibility/s);
+  assert.doesNotMatch(agentCSS, /\.agent-round \{[^}]*content-visibility/s);
   assert.match(agentView, /incrementalRender\(/);
   assert.match(agentView, /scheduleLiveEnhancement\(/);
   assert.match(agentView, /mountLiveRound\(/);
@@ -85,7 +85,7 @@ test('Live turns keep every round mounted; perf comes from content-visibility + 
   assert.doesNotMatch(agentCSS, /agent-live-trimmed/);
   assert.doesNotMatch(agentView, /updateLiveTrimNotice|rawCapped|rawReasoningCapped/);
   assert.doesNotMatch(agentCSS, /agent-round-stub/);
-  assert.doesNotMatch(parityCSS, /agent-round-stub/);
+  assert.doesNotMatch(agentCSS, /agent-round-stub/);
   assert.match(html, /id="agent-provider-status" aria-live="polite" aria-atomic="true"/);
   assert.match(agentView, /conversationTail\(/);
   assert.doesNotMatch(agentRender, /function earlierRoundsDisclosure/);
@@ -115,21 +115,21 @@ test('Subagent drawer reuses the conversation sidebar design', () => {
 });
 
 test('Thinking and tool markers share the same conversation rail', () => {
-  assert.match(parityCSS, /\.agent-reasoning summary \{[^}]*margin-left: -12px;/s);
-  assert.match(parityCSS, /\.agent-tool-terminal summary \{[^}]*margin-left: -12px;/s);
+  assert.match(agentCSS, /\.agent-reasoning summary \{[^}]*margin-left: -12px;/s);
+  assert.match(agentCSS, /\.agent-tool-terminal summary \{[^}]*margin-left: -12px;/s);
 });
 
 test('Narrow windows ellipsize tool meta instead of overflowing the thread', () => {
-  assert.match(parityCSS, /\.agent-tool-terminal summary \{[^}]*display: flex;/s);
-  assert.match(parityCSS, /\.agent-tool-terminal-meta \{[^}]*flex: 1 1 0;/s);
-  assert.match(parityCSS, /\.agent-tool-stack \{[^}]*min-width: 0;/s);
-  assert.match(parityCSS, /\.agent-tool-terminal \{[^}]*max-width: 100%;/s);
+  assert.match(agentCSS, /\.agent-tool-terminal summary \{[^}]*display: flex;/s);
+  assert.match(agentCSS, /\.agent-tool-terminal-meta \{[^}]*flex: 1 1 0;/s);
+  assert.match(agentCSS, /\.agent-tool-stack \{[^}]*min-width: 0;/s);
+  assert.match(agentCSS, /\.agent-tool-terminal \{[^}]*max-width: 100%;/s);
   assert.match(agentCSS, /\.agent-reasoning summary \{[^}]*display: flex;/s);
   assert.match(agentCSS, /\.agent-bubble \{[^}]*min-width: 0;/s);
   assert.match(agentCSS, /\.agent-bubble-text \{[^}]*overflow-wrap: anywhere;/s);
   assert.match(agentCSS, /\.agent-conversation \{[^}]*min-width: 0;/s);
   assert.match(agentCSS, /\.agent-thread \{[^}]*min-width: 0;/s);
-  assert.doesNotMatch(parityCSS, /grid-template-columns: 24px minmax\(0, 1fr\) auto auto auto auto/);
+  assert.doesNotMatch(agentCSS, /grid-template-columns: 24px minmax\(0, 1fr\) auto auto auto auto/);
 });
 
 test('Live tool deltas stay queued until the card exists and thinking pulse is phase-gated', () => {
@@ -145,7 +145,7 @@ test('Live tool deltas stay queued until the card exists and thinking pulse is p
 
 test('Agent live motion respects reduced-motion preferences', () => {
   assert.match(agentCSS, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(parityCSS, /animation-duration: \.001ms !important/);
+  assert.match(globalCSS, /animation-duration: \.001ms !important/);
 });
 
 test('Agent surfaces an unavailable backend promptly instead of waiting for a normal RPC timeout', () => {
@@ -211,7 +211,7 @@ test('Narrow agent layout can reopen the conversations pane', () => {
   assert.match(html, /id="agent-rooms-toggle"/);
   assert.match(html, /id="agent-rooms-backdrop"/);
   assert.match(agentView, /agent-rooms-toggle/);
-  assert.match(parityCSS, /agent-shell\.is-rooms-open/);
+  assert.match(agentCSS, /agent-shell\.is-rooms-open/);
 });
 
 test('Harbor palette is tokenized instead of acid-lime defaults', async () => {

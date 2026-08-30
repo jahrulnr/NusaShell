@@ -9,8 +9,8 @@
   gap: 14px;
   padding: 14px 16px;
   background: var(--panel);
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   transition: border-color .15s, box-shadow .15s;
   cursor: pointer;
 }
@@ -67,3 +67,18 @@
 .mcp-tools-table th, .mcp-tools-table td { padding: 6px 8px; border: 1px solid var(--border-soft); text-align: left; vertical-align: top; }
 .mcp-tools-table th { background: var(--panel-alt); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
 .mcp-tools-table code { font-family: var(--font-mono); color: var(--accent); }
+
+/* MCP view content gutter — the workbench panel sits in a clamped gutter
+ * rather than flush to the content edge. */
+.content:has(.mcp-view.active) {
+  --workspace-gutter: clamp(12px, 2vw, 24px);
+  padding: var(--workspace-gutter);
+}
+
+/* ============ MCP responsive ============ */
+@media (max-width: 680px) {
+  .mcp-row { align-items: flex-start; flex-wrap: wrap; }
+  .mcp-row-info { min-width: calc(100% - 54px); }
+  .mcp-row-state { margin-left: 54px; }
+  .mcp-row-actions { margin-left: auto; }
+}

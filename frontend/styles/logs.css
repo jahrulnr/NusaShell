@@ -3,12 +3,14 @@
  * Layer: view — scoped to [data-view="logs"].
  */
 .log-header { margin: auto 0; display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.logs-view-body { display: flex; flex-direction: column; min-height: 0; }
 .log-count { margin: auto 0; color: var(--text-faint); font-family: var(--font-mono); font-size: 11px; }
 .log-filters { margin-top: 1rem; display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
 .log-tail {
   height: min(62vh, 620px);
   overflow: auto;
-  background: var(--input-bg);
+  background: var(--harbor);
+  color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 8px 0;
@@ -32,6 +34,12 @@
 .log-level.info { color: var(--blue-info); }
 .log-level.warn { color: var(--amber); }
 .log-level.error { color: var(--red); }
-.log-source { color: var(--purple); }
+.log-source { color: var(--accent); }
 .log-msg { color: var(--text-dim); }
 .log-auto-scroll { display: flex; align-items: center; gap: 6px; color: var(--text-faint); font-size: 11px; }
+
+/* ============ Logs responsive ============ */
+@media (max-width: 480px) {
+  .log-line { grid-template-columns: 76px 45px minmax(0, 1fr); }
+  .log-source { display: none; }
+}

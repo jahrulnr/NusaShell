@@ -4,8 +4,7 @@
  * and primitives consumed by two or more views (.view-header, .mini-btn,
  * .action-btn, .tab, .select, .toggle, .empty-state). Single-view rules do
  * NOT belong here; put them in that view's stylesheet and guard yourself
- * with frontend/css-hygiene.test.mjs. parity.css loads last on purpose to
- * re-skin these primitives — check it before debugging "wrong" styles.
+ * with frontend/css-hygiene.test.mjs.
  */
 :root {
   --ink: #070c0e;
@@ -56,6 +55,25 @@
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
+
+/* ============ Element resets ============ */
+button,
+input,
+textarea,
+select { font: inherit; }
+
+button,
+[role="button"],
+a,
+input,
+textarea,
+select,
+summary { outline: none; }
+
+:where(button, [role="button"], a, input, textarea, select, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 html, body {
   margin: 0;
@@ -111,19 +129,22 @@ body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 22px 26px 14px;
+  min-height: 48px;
+  padding: var(--space-2) var(--space-5);
   margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(17, 19, 17, .82);
 }
 .view-kicker {
   display: flex;
   align-items: center;
   gap: 7px;
   margin-bottom: 6px;
-  color: var(--text-faint);
+  color: var(--accent);
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 600;
-  letter-spacing: .06em;
+  letter-spacing: .14em;
   text-transform: uppercase;
 }
 .view-kicker-dot {
@@ -133,8 +154,8 @@ body {
   background: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
-.view-header h1 { margin: 0; font-family: var(--font-display); font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
-.view-header p { margin: 5px 0 0; color: var(--text-faint); font-size: 12px; }
+.view-header h1 { margin: 0; font-family: var(--font-display); font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+.view-header p { margin: 5px 0 0; color: var(--text-dim); font: 400 11px/1.45 var(--font-mono); }
 .view-body { flex: 1; min-height: 0; padding: 0 26px 22px; }
 .view.active.providers-view .view-body,
 .view.active.mcp-view .view-body,
@@ -147,30 +168,31 @@ body {
   justify-content: center;
   gap: 6px;
   border: 1px solid var(--accent);
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   padding: 8px 14px;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
   font-size: 12px;
   font-weight: 600;
-  font-family: inherit;
+  font-family: var(--font-mono);
   cursor: pointer;
   transition: background .15s, color .15s, box-shadow .15s;
   white-space: nowrap;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .22);
 }
-.action-btn:hover { background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px var(--accent-soft); }
+.action-btn:hover { background: var(--accent-strong); color: var(--accent-ink); box-shadow: 0 0 0 3px var(--accent-soft); }
 .action-btn:disabled { cursor: not-allowed; opacity: .45; }
 
 .mini-btn {
   background: var(--accent-soft);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--accent-border);
   color: var(--accent);
   font-size: 11.5px;
   font-weight: 600;
   padding: 6px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  font-family: inherit;
+  font-family: var(--font-mono);
   transition: background .15s, box-shadow .15s;
 }
 .mini-btn:hover { background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -182,10 +204,10 @@ body {
 
 .icon-btn {
   position: relative;
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
   background: transparent;
   color: var(--text-dim);
   display: flex;
@@ -194,7 +216,19 @@ body {
   cursor: pointer;
   transition: background .15s, color .15s;
 }
-.icon-btn:hover { background: var(--panel-alt); color: var(--text); }
+.icon-btn:hover { border-color: var(--border); background: var(--panel-alt); color: var(--text); }
+.icon-btn.is-active {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+/* Window controls (title bar): share the icon-btn treatment. */
+.wc {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+}
+.wc:hover { border-color: var(--border); background: var(--panel-alt); color: var(--text); }
 
 /* ============ Shared tabs ============ */
 /* Segmented tab buttons used by multiple views (Home categories,
@@ -293,4 +327,49 @@ kbd {
   background: var(--panel-alt);
   color: var(--text-dim);
   font: 500 10px var(--font-mono);
+}
+
+/* ============ Shared workbench surfaces ============ */
+/* Low-specificity (:where, specificity 0) frame shared by the workbench
+ * cards/inputs across views. View stylesheets override these per-element;
+ * keep them here so every view gets the same baseline without cross-file
+ * coupling. Single-view surfaces (e.g. .settings-card) own their own
+ * frame in their view stylesheet. */
+:where(.skills-workspace, .agent-shell, .agent-composer,
+  .mcp-row, .provider-registry-card, .provider-detail-card, .provider-models-card,
+  .log-tail) {
+  border-color: var(--border);
+  border-radius: var(--radius-md);
+  background-color: var(--panel);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .025);
+}
+
+:where(input, textarea, select, .select,
+  .agent-conversation-search, .agent-composer textarea) {
+  border-color: var(--border);
+  border-radius: var(--radius-sm);
+  background-color: var(--input-bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+:where(input, textarea, select, .select,
+  .agent-conversation-search, .agent-composer textarea):focus {
+  border-color: var(--accent-border-strong);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/* ============ Document-wide reduced motion ============ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .001ms !important;
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/* Narrow viewports: tighten the shared view-body gutter. Per-view body
+ * overrides (e.g. skills.css) are more specific and still win. */
+@media (max-width: 680px) {
+  .view-body { padding-inline: 12px; }
 }

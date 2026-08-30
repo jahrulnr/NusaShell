@@ -9,26 +9,28 @@
   border: 1px solid #243341;
   border-radius: 11px;
   padding: 14px;
-  background: #0d151d;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, .018), transparent 34%),
+    var(--panel);
   cursor: pointer;
   transition: border-color .16s, background .16s;
   display: flex;
   flex-direction: column;
 }
-.provider-registry-card:hover { border-color: rgba(110, 163, 255, .7); background: #0d1520; }
-.provider-registry-card.is-active { border-color: var(--accent); }
+.provider-registry-card:hover { border-color: var(--border-strong); background: var(--panel-alt); }
+.provider-registry-card.is-active { border-color: var(--accent-border-strong); box-shadow: inset 3px 0 var(--accent); }
 .provider-card-head { display: flex; align-items: center; gap: 10px; }
-.provider-card-head h2 { margin: 0; font-size: 14px; }
+.provider-card-head h2 { margin: 0; font-size: 14px; font-family: var(--font-display); font-weight: 600; }
 .provider-card-head p { margin: 3px 0 0; color: var(--text-faint); font: 10px var(--font-mono); }
 .provider-mark {
   display: grid;
   place-items: center;
   width: 34px;
   height: 34px;
-  border: 1px solid #405064;
+  border: 1px solid var(--border);
   border-radius: 8px;
   color: #9aaabd;
-  background: #172330;
+  background: var(--panel-raised);
   font: 10px var(--font-mono);
   flex: none;
 }
@@ -48,7 +50,7 @@
 .provider-detail-head { display: flex; justify-content: space-between; margin: 10px 0 18px; }
 .provider-back { border: 0; padding: 0; background: transparent; color: var(--text-faint); font: 11px var(--font-mono); cursor: pointer; }
 .provider-back:hover { color: var(--text); }
-.provider-detail-card, .provider-models-card { border: 1px solid #243341; border-radius: 12px; padding: 16px; background: #0d151d; }
+.provider-detail-card, .provider-models-card { border: 1px solid #243341; border-radius: 12px; padding: 16px; background: linear-gradient(145deg, rgba(255, 255, 255, .018), transparent 34%), var(--panel); }
 .provider-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 28px; margin: 0; }
 .provider-detail-grid div { min-width: 0; }
 .provider-detail-grid dt { margin-bottom: 5px; color: var(--text-faint); font: 9px var(--font-mono); text-transform: uppercase; }
@@ -83,7 +85,7 @@
 .provider-detail-error { margin: 12px 0 0; border-left: 2px solid var(--red); padding: 8px 10px; background: rgba(245,91,104,.08); color: #ff9ca5; font-size: 11px; }
 .provider-models-card { margin-top: 14px; }
 .provider-models-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
-.provider-models-head h2 { margin: 0; font-size: 14px; }
+.provider-models-head h2 { margin: 0; font-size: 14px; font-family: var(--font-display); font-weight: 600; }
 .provider-models-head p { margin: 3px 0 0; color: var(--text-faint); font: 9px var(--font-mono); }
 .provider-model-list { max-height: 520px; overflow: auto; }
 .provider-model-item { border-top: 1px solid var(--border-soft); padding: 11px 0; }
@@ -118,9 +120,9 @@
 .provider-modal-close { flex: 0 0 auto; width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--text-faint); cursor: pointer; font-size: 22px; line-height: 1; }
 .provider-modal-close:hover { background: var(--accent-soft); color: var(--text); }
 .provider-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-soft); }
-.provider-card { display: grid; gap: 3px; border: 1px solid var(--border); border-radius: 8px; padding: 9px; background: #0a0f19; color: var(--text); cursor: pointer; text-align: left; font: inherit; font-size: 11px; }
+.provider-card { display: grid; gap: 3px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px; background: var(--harbor); color: var(--text); cursor: pointer; text-align: left; font: inherit; font-family: var(--font-mono); font-size: 11px; }
 .provider-card small { color: var(--text-faint); font-size: 9.5px; }
-.provider-card:hover { border-color: var(--accent); }
+.provider-card:hover { border-color: var(--accent-border-strong); }
 .provider-card-custom { grid-column: span 2; color: var(--blue-info); }
 .provider-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 10px 0 4px; }
 
@@ -260,4 +262,10 @@
   border-top: 1px solid var(--border-soft);
   color: #53c9d8;
   font: 10px var(--font-mono);
+}
+
+/* ============ Providers responsive ============ */
+@media (max-width: 480px) {
+  .provider-detail-grid { grid-template-columns: 1fr; gap: 12px; }
+  .provider-detail-actions { flex-wrap: wrap; }
 }
