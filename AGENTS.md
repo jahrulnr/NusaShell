@@ -51,8 +51,10 @@ Instructions for humans and coding agents working in this repository.
 
 ## Provider adapters (core port)
 
-The AI provider adapters under `infrastructure/ai/` are ported from the
-core provider tree and must stay structurally close to upstream:
+The ported chat provider wire packages under `infrastructure/ai/` are
+ported from the core provider tree and must stay structurally close to
+upstream. This rule applies to the wire implementations, not to every
+infrastructure adapter or the AI composition root:
 
 - `infrastructure/ai/core/` — core Blocks-based types (`Request`,
   `Message`, `Block`, `Thinking`, `Tool`, `Response`, `Stream`, error
@@ -65,10 +67,17 @@ core provider tree and must stay structurally close to upstream:
   `application.AIProvider`: translates `application.ChatRequest` →
   `core.Request` (blocks, attachments, effort, strip params, prompt
   cache) and maps core errors → `application.UpstreamError`. It is the
-  only place allowed to import both worlds.
-- The `.experimental/litellm` clone is the sync source; new provider
-  features should be ported from there, keeping the file layout identical
-  so diffs stay reviewable.
+  only request/response translation bridge between the application chat
+  contract and the core provider contract.
+- `infrastructure/ai/factory.go`, `handler.go`, `models.go`, `internal/`,
+  and the media client packages (`imagegen`, `stt`, `tts`, `videogen`) are
+  outer adapters/composition helpers, not ported wire implementations. They
+  may import application ports and domain entities when constructing or
+  adapting those ports. Likewise, infrastructure adapters such as
+  `acpruntime`, `tools`, and `journal` may import application interfaces and
+  domain entities; this is the intended adapter → inner-layer direction, not
+  a dependency-rule exception. They must not import concrete application
+  services or make domain depend on infrastructure.
 
 Supported provider kinds are `messages`, `responses`, and `chat`
 (OpenRouter hosts are auto-detected by Base URL). There is intentionally

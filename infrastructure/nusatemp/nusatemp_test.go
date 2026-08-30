@@ -3,6 +3,7 @@ package nusatemp
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -10,7 +11,11 @@ import (
 func isolateTemp(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	t.Setenv("TMPDIR", root)
+	// os.TempDir uses TMPDIR on Unix and TMP/TEMP on Windows. Set all
+	// supported names so the tests exercise the same isolated root everywhere.
+	for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(name, root)
+	}
 	return root
 }
 
@@ -45,7 +50,10 @@ func TestDirCreates0700(t *testing.T) {
 	if !st.IsDir() {
 		t.Fatalf("%s is not a directory", dir)
 	}
-	if st.Mode().Perm() != 0o700 {
+	// Windows does not expose the requested Unix permission bits through
+	// FileMode.Perm; a normal writable directory reports 0777 there. The
+	// platform-specific ACL semantics are outside this package's contract.
+	if runtime.GOOS != "windows" && st.Mode().Perm() != 0o700 {
 		t.Fatalf("Dir() mode = %o, want 0700", st.Mode().Perm())
 	}
 }

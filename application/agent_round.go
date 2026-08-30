@@ -82,60 +82,7 @@ func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversatio
 		if err == nil || retry >= maxProviderAttempts || visibleText(roundResult.Content) != "" || visibleText(roundResult.Reasoning) != "" {
 			return roundResult, err
 		}
-		// Dynamic 400-learning: classify the error body and, when it
-		// matches a known pattern (unsupported param / required field /
-		// text-only model), record it to the persisted registry. If the
-		// learned action upgrades ReasoningReplay (inject
-		// reasoning_content) or disables a modality (text-only model
-		// rejecting images), refresh caps so the next retry adapts.
-		// This catches models not in the catalog (e.g. stealth/ox-alpha
-		// on OpenRouter that 400s with "reasoning_content must be passed
-		// back", or Qwen3.8 that 400s with "text-only; must be a text
-		// part").
-		//
-		// adapted is set when learning produced a recoverable action
-		// (strip / inject / disable-modality). 400s are not normally
-		// retryable, but an adapted 400 means the next request will be
-		// rebuilt with the fix applied (stripped param, injected
-		// reasoning_content, or image/audio/video stripped via caps), so
-		// we force a retry instead of failing the turn on the first 400.
-		// The retry >= maxProviderAttempts guard above still bounds the
-		// total attempts.
-		adapted := false
-		if isLearnable400(err) {
-			body := extractErrBody(err)
-			action, param := a.learnedParams.LearnFrom400(run.ProviderID, model, body)
-			if action != "" && param != "" && action != domain.LearnedActionCapContext {
-				adapted = true
-			}
-			providerName := a.providerNameByID(run.ProviderID)
-			if action == domain.LearnedActionCapContext {
-				a.log("info", "learning", "capped context window for %s/%s to %s tokens from 400", providerName, model, param)
-			}
-			if action == domain.LearnedActionInject && strings.EqualFold(param, learnedparams.StripReasoningContentParam) {
-				if !caps.ReasoningReplay {
-					caps.ReasoningReplay = true
-					a.log("info", "learning", "upgraded ReasoningReplay for %s/%s from 400 learning", providerName, model)
-				}
-			}
-			if action == domain.LearnedActionDisableModality {
-				if strings.EqualFold(param, "vision") && caps.Vision {
-					caps.Vision = false
-					a.log("info", "learning", "disabled Vision for %s/%s from 400 learning (text-only model)", providerName, model)
-				}
-				if strings.EqualFold(param, "audio") && caps.Audio {
-					caps.Audio = false
-					a.log("info", "learning", "disabled Audio for %s/%s from 400 learning", providerName, model)
-				}
-				if strings.EqualFold(param, "video") && caps.Video {
-					caps.Video = false
-					a.log("info", "learning", "disabled Video for %s/%s from 400 learning", providerName, model)
-				}
-			}
-			if action == domain.LearnedActionNudgeUser {
-				a.log("info", "learning", "learned nudge_user for %s/%s from 400 learning (provider requires user message)", providerName, model)
-			}
-		}
+		adapted := a.learnFromStreamError(run, model, err, &caps)
 		delay, retryable := providerRetryDelay(err, retry)
 		if !retryable && !adapted {
 			return roundResult, err
@@ -146,31 +93,75 @@ func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversatio
 			// request valid.
 			delay = retryBaseDelay
 		}
-		a.log("warn", "ai", "retrying provider stream for turn %s (%d/%d) after %s: %s", run.ID, retry, maxProviderAttempts, delay.Round(time.Millisecond), describeProviderError(err))
-		retryEvt := contracts.ProviderRetryEvent{
-			RunID:          run.ID,
-			ConversationID: run.ConversationID,
-			MessageID:      messageID,
-			Attempt:        retry + 1,
-			MaxAttempts:    maxProviderAttempts,
-			DelayMS:        delay.Milliseconds(),
-			Error:          err.Error(),
-		}
-		var upstream *UpstreamError
-		if errors.As(err, &upstream) {
-			retryEvt.Kind = string(upstream.Kind)
-			retryEvt.Status = upstream.StatusCode
-		}
-		a.Bus.Emit(contracts.EventProviderRetry, retryEvt)
-		// A retry restarts the round stream from a clean slate: the failed
-		// attempt's buffered deltas must not replay into the retry's stream
-		// (mixed output). Consumers re-subscribe with after=0 after the event.
-		if a.RoundStreams != nil {
-			a.RoundStreams.Reset(run.ID, messageID)
-		}
+		a.prepareStreamRetry(run, messageID, retry, delay, err)
 		if err := a.retrySleeper(run.Ctx, delay); err != nil {
 			return roundResult, err
 		}
+	}
+}
+
+// learnFromStreamError records a recoverable provider 400 and updates the
+// capabilities used to rebuild the next request. It returns true only when
+// learning produced an adaptation that makes an otherwise non-retryable 400
+// worth retrying in the current round.
+func (a *App) learnFromStreamError(run *TurnRun, model string, err error, caps *ModelCapabilities) bool {
+	if !isLearnable400(err) {
+		return false
+	}
+
+	body := extractErrBody(err)
+	action, param := a.learnedParams.LearnFrom400(run.ProviderID, model, body)
+	adapted := action != "" && param != "" && action != domain.LearnedActionCapContext
+	providerName := a.providerNameByID(run.ProviderID)
+
+	switch {
+	case action == domain.LearnedActionCapContext:
+		a.log("info", "learning", "capped context window for %s/%s to %s tokens from 400", providerName, model, param)
+	case action == domain.LearnedActionInject && strings.EqualFold(param, learnedparams.StripReasoningContentParam):
+		if !caps.ReasoningReplay {
+			caps.ReasoningReplay = true
+			a.log("info", "learning", "upgraded ReasoningReplay for %s/%s from 400 learning", providerName, model)
+		}
+	case action == domain.LearnedActionDisableModality:
+		if strings.EqualFold(param, "vision") && caps.Vision {
+			caps.Vision = false
+			a.log("info", "learning", "disabled Vision for %s/%s from 400 learning (text-only model)", providerName, model)
+		}
+		if strings.EqualFold(param, "audio") && caps.Audio {
+			caps.Audio = false
+			a.log("info", "learning", "disabled Audio for %s/%s from 400 learning", providerName, model)
+		}
+		if strings.EqualFold(param, "video") && caps.Video {
+			caps.Video = false
+			a.log("info", "learning", "disabled Video for %s/%s from 400 learning", providerName, model)
+		}
+	case action == domain.LearnedActionNudgeUser:
+		a.log("info", "learning", "learned nudge_user for %s/%s from 400 learning (provider requires user message)", providerName, model)
+	}
+	return adapted
+}
+
+// prepareStreamRetry publishes the retry state and clears buffered deltas so
+// subscribers never replay a partial failed attempt together with its retry.
+func (a *App) prepareStreamRetry(run *TurnRun, messageID string, retry int, delay time.Duration, err error) {
+	a.log("warn", "ai", "retrying provider stream for turn %s (%d/%d) after %s: %s", run.ID, retry, maxProviderAttempts, delay.Round(time.Millisecond), describeProviderError(err))
+	retryEvt := contracts.ProviderRetryEvent{
+		RunID:          run.ID,
+		ConversationID: run.ConversationID,
+		MessageID:      messageID,
+		Attempt:        retry + 1,
+		MaxAttempts:    maxProviderAttempts,
+		DelayMS:        delay.Milliseconds(),
+		Error:          err.Error(),
+	}
+	var upstream *UpstreamError
+	if errors.As(err, &upstream) {
+		retryEvt.Kind = string(upstream.Kind)
+		retryEvt.Status = upstream.StatusCode
+	}
+	a.Bus.Emit(contracts.EventProviderRetry, retryEvt)
+	if a.RoundStreams != nil {
+		a.RoundStreams.Reset(run.ID, messageID)
 	}
 }
 
