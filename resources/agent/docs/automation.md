@@ -2,6 +2,31 @@
 
 NusaShell embeds a local CI runner and an automation engine in the same Go process. Humans use the **Automation** sidebar view. The agent uses structured tools. Do not invent shell `sleep` loops or scrape the UI for job IDs.
 
+## Repository verification before push
+
+For source changes, the repository provides one local quality gate:
+`make verify-local`. It checks formatting, UI documentation drift, `go vet`,
+native Go tests (with `-race` when the local C compiler is available), the Go
+build, frontend tests, and compile-only test/build targets for Windows and
+macOS. Compile-only checks catch source portability but cannot execute a test
+binary on a different kernel; the GitHub Actions matrix remains the runtime
+check for all three operating systems.
+
+Run `make hooks` once per clone to enable `.githooks/pre-push`, which invokes
+the same gate before a push. The hook is opt-in because Git hook configuration
+is local to each clone. It changes that clone’s repository-local
+`core.hooksPath`; preserve or chain any global hooks before enabling it.
+
+Good:
+
+    make verify-local
+    make hooks
+
+Bad:
+
+    go test ./...       # skips formatting, vet, frontend, and other OS compile checks
+    git push            # pushes before the repository gate has run
+
 ## Pipeline files
 
 Pipeline definitions live as YAML files under `<data-dir>/ci/pipelines/<name>.yaml`. NusaShell discovers them on boot, parses each into a workflow, and registers it in the automation registry (`ci/automation.db`). Triggers in pipeline files are activated immediately — there is no separate "register" step.

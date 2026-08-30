@@ -153,7 +153,10 @@ test('Expanded Thinking is capped to twenty lines and scrolls internally', () =>
   assert.match(reasoningBody, /overflow-x: auto;/);
   assert.match(reasoningBody, /scrollbar-gutter: stable;/);
   assert.match(reasoningBody, /overscroll-behavior: contain;/);
-  assert.match(agentCSS, /\.agent-reasoning-content ul,\s*\.agent-reasoning-content ol \{[^}]*padding-left: 1\.5em;/s);
+  assert.match(agentCSS, /\.agent-reasoning-content ul \{[^}]*padding-left: 1\.5em;/s,
+    'bullet indentation remains compact');
+  assert.match(agentCSS, /\.agent-message\.assistant \.agent-bubble \.agent-reasoning-content ol \{[^}]*padding-left: 2\.25em;/s,
+    'ordered-list markers need enough left gutter to stay outside the scroll clip');
 });
 
 test('User Markdown bubbles keep prose normal and fenced code inside a scrollable card', () => {

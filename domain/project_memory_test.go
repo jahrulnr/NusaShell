@@ -7,19 +7,24 @@ import (
 )
 
 func TestProjectMemoryKey(t *testing.T) {
-	got := ProjectMemoryKey("/apps/payments/api")
-	if got != "apps-payments-api" {
-		t.Fatalf("Key(/apps/payments/api) = %q, want apps-payments-api", got)
+	workspaceRoot := t.TempDir()
+	workspace := filepath.Join(workspaceRoot, "apps", "payments", "api")
+	got := ProjectMemoryKey(workspace)
+	if !strings.HasSuffix(got, "-apps-payments-api") {
+		t.Fatalf("Key(%s) = %q, want suffix -apps-payments-api", workspace, got)
 	}
 	if ProjectMemoryKey("") != "unknown-project" {
 		t.Fatalf("empty path should be unknown-project")
 	}
-	if ProjectMemoryKey("///") != "unknown-project" {
-		t.Fatalf("slash-only path should be unknown-project, got %q", ProjectMemoryKey("///"))
+	for _, rootOnly := range []string{"///", strings.Repeat("\\", 3)} {
+		if ProjectMemoryKey(rootOnly) != "unknown-project" {
+			t.Fatalf("root-only path %q should be unknown-project, got %q", rootOnly, ProjectMemoryKey(rootOnly))
+		}
 	}
-	mixed := ProjectMemoryKey("/Apps/Pay:ments/API extra")
-	if mixed != "apps-pay-ments-api-extra" {
-		t.Fatalf("mixed sanitization = %q", mixed)
+	mixedPath := filepath.Join(workspaceRoot, "Apps", "Pay:ments", "API extra")
+	mixed := ProjectMemoryKey(mixedPath)
+	if !strings.HasSuffix(mixed, "-apps-pay-ments-api-extra") {
+		t.Fatalf("mixed sanitization for %s = %q, want suffix -apps-pay-ments-api-extra", mixedPath, mixed)
 	}
 }
 
@@ -68,16 +73,18 @@ func TestRejectProjectUserKind(t *testing.T) {
 }
 
 func TestResolveProjectMemoryBase(t *testing.T) {
-	got := ResolveProjectMemoryBase("/data/nusashell", "")
-	want := filepath.Join("/data/nusashell", ProjectMemoryDirName)
+	dataDir := t.TempDir()
+	got := ResolveProjectMemoryBase(dataDir, "")
+	want := filepath.Join(dataDir, ProjectMemoryDirName)
 	if got != want {
 		t.Fatalf("default base = %q, want %q", got, want)
 	}
+	homeDir := t.TempDir()
 	prev := osUserHomeDir
-	osUserHomeDir = func() (string, error) { return "/home/tester", nil }
+	osUserHomeDir = func() (string, error) { return homeDir, nil }
 	defer func() { osUserHomeDir = prev }()
-	got = ResolveProjectMemoryBase("/data", "~/.memory")
-	if got != filepath.Join("/home/tester", ".memory") {
+	got = ResolveProjectMemoryBase(dataDir, "~/.memory")
+	if got != filepath.Join(homeDir, ".memory") {
 		t.Fatalf("~ override = %q", got)
 	}
 }

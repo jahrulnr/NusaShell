@@ -3,7 +3,7 @@
 # Gates follow the repository verification baseline:
 # gofmt, go test, go test -race, go vet, go build.
 
-.PHONY: all build test race vet fmt check run install test-frontend test-frontend-e2e scan-ui-docs scan-ui-docs-check gen-catalog gen-catalog-check
+.PHONY: all build test race vet fmt check verify-local hooks run install test-frontend test-frontend-e2e scan-ui-docs scan-ui-docs-check gen-catalog gen-catalog-check
 
 all: check
 
@@ -51,6 +51,15 @@ fmt:
 
 ## check: full verification baseline.
 check: fmt-check test vet build
+
+## verify-local: run native repository gates plus Windows/macOS compile checks.
+verify-local:
+	bash ./scripts/verify-local.sh
+
+## hooks: enable the repository-managed pre-push hook for this clone.
+hooks:
+	git config --local core.hooksPath .githooks
+	@echo "Git hooks enabled: .githooks"
 
 ## fmt-check: fail when any Go file is not gofmt-formatted.
 fmt-check:

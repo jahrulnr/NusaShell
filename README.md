@@ -41,7 +41,7 @@ streaming tool timeline, and expandable reasoning and tool output.
 Requirements:
 
 - Go 1.26.5 or newer
-- Node.js 24 or newer only for the frontend E2E test
+- Node.js 24 or newer for frontend tests and E2E checks
 - A desktop folder-dialog provider on Linux (install `zenity` if no compatible
   provider is already available). Windows and macOS use their system dialogs.
 
@@ -81,11 +81,28 @@ go test -race ./...      # race-enabled test run
 go vet ./...             # static analysis
 go build ./...           # compile every package
 make check               # fmt-check + race test + vet + build
+make verify-local        # full local gate + Windows/macOS compile checks
 ```
 
-The production frontend is plain browser JavaScript, but its smoke test uses
-JSDOM. Install the development dependency once, then run the browser-facing
-checks:
+The local gate also runs the frontend test suite. Install its development
+dependency once with `npm ci`. To run the same gate automatically before every
+push, enable the repository hook once per clone:
+
+```bash
+make hooks
+```
+
+`make verify-local` runs native tests (with `-race` when the local C compiler is
+available), formatting, UI documentation drift checks, vet, builds, frontend
+tests, and compile-only checks for the Windows and macOS CI targets. A
+cross-compiled test binary cannot run on a different kernel, so runtime
+behavior remains covered by the native runners in GitHub Actions.
+
+`make hooks` changes this clone’s repository-local `core.hooksPath`. If you
+already use global Git hooks, preserve or chain them before enabling it.
+
+The production frontend is plain browser JavaScript, but its browser-facing
+checks use JSDOM:
 
 ```bash
 npm ci

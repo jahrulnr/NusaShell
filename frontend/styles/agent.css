@@ -635,8 +635,11 @@
 .agent-reasoning-content p,
 .agent-reasoning-content ul,
 .agent-reasoning-content ol { margin: .65em 0; }
-.agent-reasoning-content ul,
-.agent-reasoning-content ol { padding-left: 1.5em; }
+.agent-reasoning-content ul { padding-left: 1.5em; }
+/* Outside decimal markers are wider than bullets and otherwise sit inside
+   the reasoning rail's horizontal clip area. Match the assistant Markdown
+   rule's specificity so this gutter is applied to Thinking lists too. */
+.agent-message.assistant .agent-bubble .agent-reasoning-content ol { padding-left: 2.25em; }
 .agent-reasoning-content code { border-radius: 4px; padding: .08em .3em; background: #151f2c; color: #bac8dc; overflow-wrap: anywhere; word-break: break-word; }
 .agent-reasoning-content pre { box-sizing: border-box; max-width: 100%; overflow-x: auto; white-space: pre; }
 .agent-reasoning-content a { color: #c9a66b; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; word-break: break-word; }

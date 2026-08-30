@@ -173,6 +173,10 @@ func ProjectMemoryKey(workspacePath string) string {
 	if workspacePath == "" {
 		return "unknown-project"
 	}
+	// A path made only of separators has no workspace component to key.
+	if strings.Trim(workspacePath, "/\\") == "" {
+		return "unknown-project"
+	}
 	abs, err := filepath.Abs(workspacePath)
 	if err != nil {
 		abs = workspacePath

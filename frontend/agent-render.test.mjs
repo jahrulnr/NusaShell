@@ -699,6 +699,47 @@ test('reasoning markdown stays out of the DOM until the disclosure is opened', (
   }
 });
 
+test('Thinking renders ordered markers and mixed table/backtick Markdown safely', () => {
+  const dom = new JSDOM('<body></body>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const tick = String.fromCharCode(96);
+    const fence = tick.repeat(3);
+    const source = [
+      `1. Create ${tick}server.go${tick}`,
+      '2. Wire the handler',
+      '3. Run the tests',
+      '',
+      '| Area | Value |',
+      '| --- | --- |',
+      `| Inline | ${tick}safe${tick} |`,
+      '',
+      `${fence}go`,
+      'func main() {}',
+      fence,
+    ].join('\n');
+    const details = reasoningDisclosure(source);
+    document.body.append(details);
+    const content = details.querySelector('.agent-reasoning-content');
+
+    openDetails(details);
+
+    const ordered = content.querySelector('ol');
+    assert.ok(ordered, 'ordered Markdown list renders as <ol>');
+    assert.deepEqual(
+      [...ordered.querySelectorAll(':scope > li')].map((item) => item.textContent.trim()),
+      ['Create server.go', 'Wire the handler', 'Run the tests'],
+    );
+    assert.ok(content.querySelector('.markdown-table-scroll > table'), 'table stays inside its scroll wrapper');
+    assert.ok(content.querySelector('.markdown-table-scroll code:not(pre code)'), 'inline backtick code stays inline in a table cell');
+    assert.ok(content.querySelector('pre[data-complete="true"] > code.language-go'), 'triple-backtick fence becomes a complete code block');
+    assert.doesNotMatch(content.textContent, /```/, 'fence markers are not exposed as visible text');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
 test('expanded Thinking and tool disclosures survive a transcript refresh', () => {
   const messages = [
     { role: 'user', content: 'Inspect the project', created_at: '2026-08-30T00:00:00Z' },

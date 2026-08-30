@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+exec bash "$repo_root/scripts/verify-local.sh"
