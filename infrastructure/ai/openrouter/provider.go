@@ -26,6 +26,7 @@ const (
 	APIResponses = "responses"
 
 	ProviderOptionCacheRetention = "cache_retention"
+	ProviderOptionPromptCacheKey = "prompt_cache_key"
 	ProviderOptionSessionID      = "session_id"
 	ProviderOptionRouting        = "provider"
 	structuredOutputsBeta        = "structured-outputs-2025-11-13"
@@ -53,6 +54,7 @@ func New(cfg Config) (*compat.Provider, error) {
 			CleanSchema:        cleanStrictSchema,
 			AllowedProviderOptions: map[string]struct{}{
 				ProviderOptionCacheRetention: {},
+				ProviderOptionPromptCacheKey: {},
 				ProviderOptionSessionID:      {},
 				ProviderOptionRouting:        {},
 			},
@@ -98,15 +100,16 @@ func NewForAPI(cfg Config, api string) (core.Provider, error) {
 			cfgBaseURL = defaultBaseURL
 		}
 		provider, err := openai.New(openai.Config{
-			API:        openai.APIResponses,
-			APIKey:     cfg.APIKey,
-			APIKeyFunc: cfg.APIKeyFunc,
-			BaseURL:    cfgBaseURL,
-			HTTPClient: cfg.HTTPClient,
-			Transport:  cfg.Transport,
-			Retry:      cfg.Retry,
-			UserAgent:  cfg.UserAgent,
-			Headers:    openRouterHeaders(cfg.Headers),
+			API:            openai.APIResponses,
+			APIKey:         cfg.APIKey,
+			APIKeyFunc:     cfg.APIKeyFunc,
+			BaseURL:        cfgBaseURL,
+			HTTPClient:     cfg.HTTPClient,
+			Transport:      cfg.Transport,
+			Retry:          cfg.Retry,
+			UserAgent:      cfg.UserAgent,
+			Headers:        openRouterHeaders(cfg.Headers),
+			RequestHeaders: mapSessionHeader,
 		})
 		if err != nil {
 			return nil, err
@@ -118,14 +121,15 @@ func NewForAPI(cfg Config, api string) (core.Provider, error) {
 			cfgBaseURL = defaultBaseURL
 		}
 		provider, err := anthropic.New(anthropic.Config{
-			APIKey:     cfg.APIKey,
-			APIKeyFunc: cfg.APIKeyFunc,
-			BaseURL:    cfgBaseURL,
-			HTTPClient: cfg.HTTPClient,
-			Transport:  cfg.Transport,
-			Retry:      cfg.Retry,
-			UserAgent:  cfg.UserAgent,
-			Headers:    openRouterHeaders(cfg.Headers),
+			APIKey:         cfg.APIKey,
+			APIKeyFunc:     cfg.APIKeyFunc,
+			BaseURL:        cfgBaseURL,
+			HTTPClient:     cfg.HTTPClient,
+			Transport:      cfg.Transport,
+			Retry:          cfg.Retry,
+			UserAgent:      cfg.UserAgent,
+			Headers:        openRouterHeaders(cfg.Headers),
+			RequestHeaders: mapSessionHeader,
 		})
 		if err != nil {
 			return nil, err
@@ -168,6 +172,20 @@ func mapHeaders(headers http.Header, req *core.Request) {
 			appendHeaderValue(headers, "x-anthropic-beta", structuredOutputsBeta)
 			return
 		}
+	}
+}
+
+// mapSessionHeader carries OpenRouter's per-request session affinity through
+// the delegated Anthropic Messages and OpenAI Responses adapters. Those wire
+// formats do not expose OpenRouter's session_id body field, but OpenRouter
+// accepts the same value in x-session-id.
+func mapSessionHeader(headers http.Header, options core.ProviderOptions) {
+	if options == nil {
+		return
+	}
+	sessionID, ok := options[ProviderOptionSessionID].(string)
+	if ok && strings.TrimSpace(sessionID) != "" {
+		headers.Set("x-session-id", sessionID)
 	}
 }
 
@@ -251,6 +269,12 @@ func mapExtra(options core.ProviderOptions, body map[string]any, req *core.Reque
 				return fmt.Errorf("openrouter: provider option %q must be at most 256 characters", key)
 			}
 			body["session_id"] = sessionID
+		case ProviderOptionPromptCacheKey:
+			promptCacheKey, ok := value.(string)
+			if !ok {
+				return fmt.Errorf("openrouter: provider option %q must be string", key)
+			}
+			body["prompt_cache_key"] = promptCacheKey
 		case ProviderOptionRouting:
 			routing, ok := value.(map[string]any)
 			if !ok {

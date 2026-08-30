@@ -371,19 +371,39 @@ func estimateRequestTokens(system string, messages []ChatMessage, tools []ToolDe
 	return int64(float64(tokens) * 1.05)
 }
 
-func buildPromptCachePolicy(settings domain.Settings, p *domain.Provider, model, conversationID string) *PromptCachePolicy {
+const (
+	promptCacheKeyLength          = 32
+	promptCacheConversationPrefix = "nusashell_cv_"
+	promptCacheBackgroundPrefix   = "nusashell_bg_"
+)
+
+func promptCachePrefixForRun(run *TurnRun) string {
+	if run != nil && run.Headless {
+		return promptCacheBackgroundPrefix
+	}
+	return promptCacheConversationPrefix
+}
+
+func buildPromptCachePolicy(settings domain.Settings, p *domain.Provider, model, conversationID, prefix string) *PromptCachePolicy {
 	if !settings.PromptCaching || p == nil {
 		return nil
 	}
-	canonical, _ := json.Marshal([3]string{p.ID, model, conversationID})
+	if prefix == "" {
+		prefix = promptCacheConversationPrefix
+	}
+	canonical, _ := json.Marshal([4]string{prefix, p.ID, model, conversationID})
 	sum := sha256.Sum256(canonical)
-	// OpenAI caps prompt_cache_key at 64 chars; use 32 total (pc_ + 29 hex
-	// chars from the sha256 digest) for a comfortable margin below the
-	// limit while keeping plenty of cardinality for cache routing.
 	full := hex.EncodeToString(sum[:])
+	// Keep the established 32-byte budget while reserving a visible namespace
+	// for the caller. Both namespaces are ASCII, so byte and character counts
+	// are identical and safe for provider key limits.
+	suffixLength := promptCacheKeyLength - len(prefix)
+	if suffixLength <= 0 || suffixLength > len(full) {
+		return nil
+	}
 	return &PromptCachePolicy{
 		Mode: "auto",
-		Key:  "pc_" + full[:29],
+		Key:  prefix + full[:suffixLength],
 		TTL:  domain.NormalizeCacheTTL(p.Kind, p.EffectiveDriver(), p.CacheTTL),
 	}
 }

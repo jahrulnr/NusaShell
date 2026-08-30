@@ -415,19 +415,38 @@ func TestToCoreRequestChatSendsPromptCacheKey(t *testing.T) {
 	}
 }
 
-func TestToCoreRequestOpenRouterChatDoesNotSendPromptCacheKey(t *testing.T) {
+func TestToCoreRequestOpenRouterChatSendsPromptCacheKeyAndSessionID(t *testing.T) {
 	req := ChatRequest{
 		Model:         "anthropic/claude-sonnet-4",
 		System:        "you are helpful",
 		PromptCaching: true,
-		PromptCache:   &PromptCachePolicy{Mode: "auto", TTL: "1h", Key: "pc_or"},
+		PromptCache:   &PromptCachePolicy{Mode: "auto", TTL: "1h", Key: "nusashell_cv_0123456789012345678"},
 	}
 	cr := ToCoreRequest(req, domain.ProviderChat, true)
-	if _, ok := cr.ProviderOptions["prompt_cache_key"]; ok {
-		t.Fatal("OpenRouter chat must not send OpenAI prompt_cache_key")
+	if got := cr.ProviderOptions["prompt_cache_key"]; got != req.PromptCache.Key {
+		t.Fatalf("OpenRouter chat prompt_cache_key = %#v, want %q", got, req.PromptCache.Key)
+	}
+	if got := cr.ProviderOptions["session_id"]; got != req.PromptCache.Key {
+		t.Fatalf("OpenRouter chat session_id = %#v, want %q", got, req.PromptCache.Key)
 	}
 	tb, ok := cr.Messages[0].Blocks[0].(core.TextBlock)
 	if !ok || tb.Cache == nil || tb.Cache.TTL != core.CacheTTL1h {
 		t.Fatalf("openrouter system cache = %#v, want ttl 1h", cr.Messages[0].Blocks)
+	}
+}
+
+func TestToCoreRequestOpenRouterDelegatedKindsCarrySessionID(t *testing.T) {
+	for _, kind := range []domain.ProviderKind{domain.ProviderMessages, domain.ProviderResponses} {
+		t.Run(string(kind), func(t *testing.T) {
+			key := "nusashell_bg_0123456789012345678"
+			cr := ToCoreRequest(ChatRequest{
+				Model:         "model",
+				PromptCaching: true,
+				PromptCache:   &PromptCachePolicy{Mode: "auto", Key: key},
+			}, kind, true)
+			if got := cr.ProviderOptions["session_id"]; got != key {
+				t.Fatalf("session_id = %#v, want %q", got, key)
+			}
+		})
 	}
 }

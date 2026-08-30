@@ -302,11 +302,13 @@ type ChatRequest struct {
 	PresencePenalty  *float64
 	// PromptCache controls provider-side prompt caching. When non-nil and
 	// PromptCaching is true, adapters translate the policy to their native
-	// wire format (prompt_cache_key for OpenAI, cache_control for Anthropic).
+	// wire format (prompt_cache_key for OpenAI/OpenRouter Chat, cache_control
+	// for Anthropic/OpenRouter block caching). OpenRouter also uses the key as
+	// its session affinity/grouping identifier.
 	PromptCache *PromptCachePolicy
 	// ConversationID is the stable ID of the conversation this request
-	// belongs to. Adapters may use it for server-side prompt cache routing
-	// across requests in the same conversation.
+	// belongs to. It is included in the application-generated PromptCache key
+	// so requests from separate conversations do not share a cache namespace.
 	ConversationID string
 	// ReasoningReplay is true when the target upstream requires
 	// reasoning_content (Chat Completions) or reasoning items (Responses
@@ -350,9 +352,10 @@ type PromptCachePolicy struct {
 	// Anthropic and OpenRouter cache_control use 5m/1h; OpenAI Responses
 	// and OpenAI-compatible Chat send 30m as prompt_cache_options.ttl.
 	TTL string
-	// Key is a stable routing key sent to OpenAI-compatible providers as
-	// prompt_cache_key so they can dedup cache entries across requests in
-	// the same conversation. Format: "pc_<sha256>".
+	// Key is a stable routing key sent as prompt_cache_key where the selected
+	// wire supports it. NusaShell keeps it at 32 ASCII characters and uses a
+	// visible agent namespace: "nusashell_cv_<digest>" for normal conversation
+	// turns and "nusashell_bg_<digest>" for headless/background review turns.
 	Key string
 	// StableSystemMessages is the number of leading system messages that
 	// are cache-stable. Anthropic marks only the last of these with

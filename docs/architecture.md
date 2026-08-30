@@ -186,8 +186,13 @@ process.
 
 Messages-format providers mark the system prompt and tool definitions with
 `cache_control: ephemeral`; cache hits appear in `usage.cache_read`.
-OpenAI-compatible endpoints have no standard caching knob, so the flag is a
-no-op there.
+OpenAI Responses and Chat providers receive a stable `prompt_cache_key`; the
+key is 32 ASCII characters and is namespaced as `nusashell_cv_` for normal
+conversation turns or `nusashell_bg_` for headless/background review turns.
+OpenRouter Chat receives that key plus `session_id` so its provider routing and
+Logs → Sessions grouping remain stable. OpenRouter Messages/Responses carry
+the same session value in the documented `x-session-id` header. A provider
+cache key is a routing hint, not a guarantee of a cache hit.
 
 ## Persistence
 

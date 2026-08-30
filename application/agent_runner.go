@@ -667,7 +667,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		toolDefs = filterACPToolDefs(toolDefs)
 	}
 	maxTokens := resolveMaxOutput(provider, model, settings)
-	promptCache := buildPromptCachePolicy(settings, provider, model, run.ConversationID)
+	promptCache := buildPromptCachePolicy(settings, provider, model, run.ConversationID, promptCachePrefixForRun(run))
 
 	var totalUsage ChatUsage
 	// lastUsage holds the most recent round's provider usage. Its

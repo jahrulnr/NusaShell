@@ -112,12 +112,18 @@ func TestCacheRetentionValidation(t *testing.T) {
 
 func TestSessionIDProviderOption(t *testing.T) {
 	body := captureBody(t, nil, nil, &core.Request{
-		Model:           "anthropic/claude-sonnet-4",
-		Messages:        []core.Message{core.UserText("hi")},
-		ProviderOptions: core.ProviderOptions{ProviderOptionSessionID: "agent-session"},
+		Model:    "anthropic/claude-sonnet-4",
+		Messages: []core.Message{core.UserText("hi")},
+		ProviderOptions: core.ProviderOptions{
+			ProviderOptionSessionID:      "agent-session",
+			ProviderOptionPromptCacheKey: "nusashell_cv_0123456789012345678",
+		},
 	})
 	if body["session_id"] != "agent-session" {
 		t.Fatalf("body = %#v", body)
+	}
+	if body["prompt_cache_key"] != "nusashell_cv_0123456789012345678" {
+		t.Fatalf("prompt_cache_key = %#v", body["prompt_cache_key"])
 	}
 
 	p, err := New(compat.Config{APIKey: "key", BaseURL: "https://openrouter.test", HTTPClient: roundTripFunc(nil)})
@@ -131,6 +137,67 @@ func TestSessionIDProviderOption(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "at most 256") {
 		t.Fatalf("expected session_id length error, got %v", err)
+	}
+}
+
+func TestDelegatedAPIsSendSessionIDAsOpenRouterHeader(t *testing.T) {
+	const sessionID = "nusashell_bg_0123456789012345678"
+	for _, tc := range []struct {
+		name      string
+		api       string
+		model     string
+		maxTokens *int
+		response  string
+	}{
+		{
+			name:  "messages",
+			api:   APIMessages,
+			model: "anthropic/claude-sonnet-4",
+			maxTokens: func() *int {
+				v := 128
+				return &v
+			}(),
+			response: `{"id":"msg_1","type":"message","role":"assistant","model":"claude","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`,
+		},
+		{
+			name:     "responses",
+			api:      APIResponses,
+			model:    "openai/gpt-5.6",
+			response: `{"model":"openai/gpt-5.6","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotSessionID string
+			provider, err := NewForAPI(compat.Config{
+				APIKey:  "key",
+				BaseURL: "https://openrouter.test",
+				HTTPClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					gotSessionID = req.Header.Get("x-session-id")
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       io.NopCloser(strings.NewReader(tc.response)),
+						Header:     make(http.Header),
+					}, nil
+				}),
+			}, tc.api)
+			if err != nil {
+				t.Fatalf("NewForAPI: %v", err)
+			}
+			_, err = provider.Chat(context.Background(), &core.Request{
+				Model:     tc.model,
+				MaxTokens: tc.maxTokens,
+				Messages:  []core.Message{core.UserText("hi")},
+				ProviderOptions: core.ProviderOptions{
+					ProviderOptionSessionID: sessionID,
+				},
+			})
+			if err != nil {
+				t.Fatalf("Chat: %v", err)
+			}
+			if gotSessionID != sessionID {
+				t.Fatalf("x-session-id = %q, want %q", gotSessionID, sessionID)
+			}
+		})
 	}
 }
 

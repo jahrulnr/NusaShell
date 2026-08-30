@@ -624,15 +624,23 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 	messages = append(messages, toolResults...)
 
 	var mutations []ReviewMutation
+	reviewSettings := domain.Settings{}
+	if r.app != nil && r.app.Settings != nil {
+		reviewSettings = r.app.Settings.Get()
+	}
+	promptCache := buildPromptCachePolicyForContext(reviewSettings, adapter, model, conversation.ID, promptCacheBackgroundPrefix)
 	for round := 0; round < r.settings.MaxToolRounds; round++ {
 		if err := ctx.Err(); err != nil {
 			return mutations, messages, err
 		}
 		req := ChatRequest{
-			Model:    model,
-			System:   systemPrompt,
-			Messages: messages,
-			Tools:    tools,
+			Model:          model,
+			System:         systemPrompt,
+			Messages:       messages,
+			Tools:          tools,
+			PromptCaching:  reviewSettings.PromptCaching,
+			PromptCache:    promptCache,
+			ConversationID: conversation.ID,
 		}
 		// Stream instead of a single non-streaming completion: deltas (text,
 		// reasoning, tool-call fragments) keep arriving while the provider is

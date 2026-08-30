@@ -34,6 +34,10 @@ type Config struct {
 	StreamIdleTimeout time.Duration
 	UserAgent         string
 	Headers           map[string]string
+	// RequestHeaders can add per-request transport headers derived from
+	// provider options. OpenRouter uses this for x-session-id when it
+	// delegates Responses to the OpenAI wire adapter.
+	RequestHeaders func(http.Header, core.ProviderOptions)
 
 	// APIKeyOptional allows construction and request sending without an API
 	// key. Used by chat-kind providers on local/OpenAI-compatible endpoints
@@ -111,7 +115,7 @@ func (p *Provider) Chat(ctx context.Context, req *core.Request) (*core.Response,
 	if err != nil {
 		return nil, fmt.Errorf("openai: create request: %w", err)
 	}
-	if err := p.setHeaders(ctx, httpReq); err != nil {
+	if err := p.setHeaders(ctx, httpReq, req.ProviderOptions); err != nil {
 		return nil, core.WrapValidationError(p.Name(), err)
 	}
 	resp, err := p.cfg.HTTPClient.Do(httpReq)
@@ -155,7 +159,7 @@ func (p *Provider) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 	if err != nil {
 		return nil, fmt.Errorf("openai: create stream request: %w", err)
 	}
-	if err := p.setHeaders(ctx, httpReq); err != nil {
+	if err := p.setHeaders(ctx, httpReq, req.ProviderOptions); err != nil {
 		return nil, core.WrapValidationError(p.Name(), err)
 	}
 	resp, err := p.cfg.HTTPClient.Do(httpReq)
@@ -187,7 +191,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]core.ModelInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("openai: create models request: %w", err)
 	}
-	if err := p.setHeaders(ctx, httpReq); err != nil {
+	if err := p.setHeaders(ctx, httpReq, nil); err != nil {
 		return nil, core.WrapValidationError(p.Name(), err)
 	}
 	resp, err := p.cfg.HTTPClient.Do(httpReq)
@@ -215,7 +219,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]core.ModelInfo, error) {
 	return models, nil
 }
 
-func (p *Provider) setHeaders(ctx context.Context, req *http.Request) error {
+func (p *Provider) setHeaders(ctx context.Context, req *http.Request, options core.ProviderOptions) error {
 	key := p.cfg.APIKey
 	if p.cfg.APIKeyFunc != nil {
 		resolved, err := p.cfg.APIKeyFunc(ctx)
@@ -243,6 +247,9 @@ func (p *Provider) setHeaders(ctx context.Context, req *http.Request) error {
 			continue
 		}
 		req.Header.Set(name, value)
+	}
+	if p.cfg.RequestHeaders != nil {
+		p.cfg.RequestHeaders(req.Header, options)
 	}
 	return nil
 }

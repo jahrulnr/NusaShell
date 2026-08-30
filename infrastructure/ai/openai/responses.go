@@ -356,7 +356,7 @@ func (p *Provider) Responses(ctx context.Context, req *ResponsesRequest) (*core.
 	if err != nil {
 		return nil, core.NewProviderErrorWithCause(p.Name(), core.ErrorTypeInternal, "openai: create responses request", err)
 	}
-	if err := p.setHeaders(ctx, httpReq); err != nil {
+	if err := p.setHeaders(ctx, httpReq, core.ProviderOptions(req.providerOptions)); err != nil {
 		return nil, core.WrapValidationError(p.Name(), err)
 	}
 	resp, err := p.cfg.HTTPClient.Do(httpReq)
@@ -410,7 +410,7 @@ func (p *Provider) ResponsesStream(ctx context.Context, req *ResponsesRequest) (
 		}
 		return nil, core.NewProviderErrorWithCause(p.Name(), core.ErrorTypeInternal, "openai: create responses stream request", err)
 	}
-	if err := p.setHeaders(streamCtx, httpReq); err != nil {
+	if err := p.setHeaders(streamCtx, httpReq, core.ProviderOptions(req.providerOptions)); err != nil {
 		if cancel != nil {
 			cancel()
 		}
@@ -652,6 +652,10 @@ func applyResponsesProviderOptions(req *ResponsesRequest, stream bool) error {
 				return err
 			}
 			req.PromptCacheKey = v
+		case ProviderOptionSessionID:
+			if _, err := optionString(key, value); err != nil {
+				return err
+			}
 		case ProviderOptionPromptCacheOptions:
 			v, err := optionPromptCacheOptions(key, value)
 			if err != nil {

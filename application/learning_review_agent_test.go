@@ -64,12 +64,14 @@ type reviewStubAdapter struct {
 	calls           int
 	failOnCall      int
 	failErr         error
+	requests        []*core.Request
 }
 
 func (a *reviewStubAdapter) Name() string { return "review-stub" }
 
-func (a *reviewStubAdapter) Chat(ctx context.Context, _ *core.Request) (*core.Response, error) {
+func (a *reviewStubAdapter) Chat(ctx context.Context, req *core.Request) (*core.Response, error) {
 	a.calls++
+	a.requests = append(a.requests, req)
 	if a.failOnCall > 0 && a.calls == a.failOnCall {
 		err := a.failErr
 		if err == nil {
@@ -78,6 +80,33 @@ func (a *reviewStubAdapter) Chat(ctx context.Context, _ *core.Request) (*core.Re
 		return nil, err
 	}
 	return a.coreResponse(), nil
+}
+
+func TestReviewLoopUsesBackgroundPromptCacheNamespace(t *testing.T) {
+	if resources.ReviewPrompt() == "" {
+		t.Fatal("review prompt must be non-empty for the loop to run")
+	}
+	app := newReviewApp(&reviewStubToolbox{})
+	app.Settings = &fakeSettings{Settings: domain.DefaultSettings()}
+	conv := &domain.Conversation{
+		ID:       "conv_review_cache",
+		Messages: []domain.Message{{Role: domain.RoleUser, Content: "hello"}},
+	}
+	adapter := &reviewStubAdapter{terminalContent: "Nothing to save."}
+	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	if _, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv); err != nil {
+		t.Fatalf("runReviewLoop: %v", err)
+	}
+	if len(adapter.requests) != 1 {
+		t.Fatalf("provider requests = %d, want 1", len(adapter.requests))
+	}
+	key, ok := adapter.requests[0].ProviderOptions["prompt_cache_key"].(string)
+	if !ok {
+		t.Fatalf("prompt_cache_key = %#v, want string", adapter.requests[0].ProviderOptions["prompt_cache_key"])
+	}
+	if len(key) != 32 || !strings.HasPrefix(key, "nusashell_bg_") {
+		t.Fatalf("review prompt cache key = %q, want 32 chars with nusashell_bg_ prefix", key)
+	}
 }
 
 func (a *reviewStubAdapter) Stream(ctx context.Context, req *core.Request) (core.Stream, error) {

@@ -89,6 +89,9 @@ func warning(code, message string) core.Warning {
 const (
 	ProviderOptionMetadata       = "metadata"
 	ProviderOptionMetadataUserID = "metadata_user_id"
+	// ProviderOptionSessionID is transport-only for OpenRouter delegated
+	// requests. The Anthropic Messages endpoint itself does not use it.
+	ProviderOptionSessionID = "session_id"
 )
 
 func (p *Provider) buildRequest(req *core.Request, stream bool) (*anthropicRequest, []core.Warning, error) {
@@ -248,6 +251,10 @@ func anthropicMetadata(options core.ProviderOptions) (map[string]any, error) {
 	for key := range options {
 		switch key {
 		case ProviderOptionMetadata, ProviderOptionMetadataUserID:
+		case ProviderOptionSessionID:
+			if _, ok := options[key].(string); !ok {
+				return nil, fmt.Errorf("anthropic: provider option %q must be string", key)
+			}
 		default:
 			return nil, fmt.Errorf("anthropic: unsupported provider option %q", key)
 		}

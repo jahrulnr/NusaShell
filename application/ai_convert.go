@@ -127,6 +127,13 @@ func applyPromptCache(out *core.Request, req ChatRequest, kind domain.ProviderKi
 	if req.PromptCache == nil || req.PromptCache.Mode == "off" {
 		return
 	}
+	if openRouter && req.PromptCache.Key != "" {
+		// OpenRouter uses session_id for explicit provider stickiness and for
+		// grouping requests in its Logs → Sessions view. Delegated Messages
+		// and Responses adapters carry this option to the x-session-id header;
+		// native Chat maps it to the documented body field.
+		setProviderOption(out, "session_id", req.PromptCache.Key)
+	}
 	switch kind {
 	case domain.ProviderResponses:
 		if req.PromptCache.Key != "" {
@@ -136,9 +143,6 @@ func applyPromptCache(out *core.Request, req ChatRequest, kind domain.ProviderKi
 			setProviderOption(out, "prompt_cache_options", map[string]any{"ttl": "30m"})
 		}
 	case domain.ProviderChat:
-		if openRouter {
-			return
-		}
 		if req.PromptCache.Key != "" {
 			setProviderOption(out, "prompt_cache_key", req.PromptCache.Key)
 		}
@@ -305,6 +309,7 @@ func intPtrIf(cond bool, v int) *int {
 // call core.Provider.Chat/Stream + ToCoreRequest/FromCoreResponse/MapCoreError.
 type ProviderContext struct {
 	Provider   core.Provider
+	ProviderID string
 	Kind       domain.ProviderKind
 	OpenRouter bool
 }
@@ -326,9 +331,23 @@ func (pc ProviderContext) Stream(ctx context.Context, req ChatRequest, onDelta, 
 func NewProviderContext(p *domain.Provider, provider core.Provider) ProviderContext {
 	return ProviderContext{
 		Provider:   provider,
+		ProviderID: p.ID,
 		Kind:       p.Kind,
 		OpenRouter: p.EffectiveDriver() == domain.ProviderDriverOpenRouter || domain.IsOpenRouterHost(p.Kind, p.BaseURL),
 	}
+}
+
+// buildPromptCachePolicyForContext preserves the provider identity needed for
+// a stable key after a provider has been reduced to ProviderContext. The
+// context keeps only the routing facts the application needs, so reconstruct
+// the effective driver for cache TTL normalization here.
+func buildPromptCachePolicyForContext(settings domain.Settings, adapter ProviderContext, model, conversationID, prefix string) *PromptCachePolicy {
+	driver := domain.ProviderDriverAuto
+	if adapter.OpenRouter {
+		driver = domain.ProviderDriverOpenRouter
+	}
+	provider := &domain.Provider{ID: adapter.ProviderID, Kind: adapter.Kind, Driver: driver}
+	return buildPromptCachePolicy(settings, provider, model, conversationID, prefix)
 }
 
 // MapCoreError translates litellm/core errors into application.UpstreamError

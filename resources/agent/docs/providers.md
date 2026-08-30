@@ -69,6 +69,50 @@ The selected value is stored on the provider (`cache_ttl`) and applied on
 the next turn while prompt caching is enabled. Registry cards show the
 selected TTL, not the full enum.
 
+## Prompt-cache keys and sessions
+
+When prompt caching is enabled, NusaShell creates one stable 32-character
+ASCII key per provider/model/conversation. The visible prefix separates agent
+workloads without increasing the key length:
+
+- `nusashell_cv_` + 19 hexadecimal characters — normal conversation turns.
+- `nusashell_bg_` + 19 hexadecimal characters — headless/background and
+  learning-review turns.
+
+The key is sent through the wire only where the selected adapter has a useful
+path:
+
+- OpenAI Responses and vanilla OpenAI Chat: `prompt_cache_key` in the request
+  body, as documented by OpenAI.
+- Anthropic Messages: no synthetic `prompt_cache_key`; caching remains native
+  `cache_control` breakpoints because the Messages API does not document a
+  caller-supplied cache-key field.
+- Native OpenRouter Chat: both `prompt_cache_key` and `session_id` are sent in
+  the body. Reusing the key as `session_id` enables OpenRouter sticky routing
+  and Logs → Sessions grouping.
+- OpenRouter Messages and Responses: the same session value is sent as the
+  documented `x-session-id` header; Responses also retains
+  `prompt_cache_key` in the body through its OpenAI-compatible adapter.
+
+An unknown HTTP header is normally ignored by an HTTP server, but that is not
+a cross-gateway contract and it does not make an unknown JSON body field safe.
+Strict gateways can reject unsupported body parameters: LiteLLM documents that
+unsupported OpenAI parameters raise by default, while provider-specific
+parameters are forwarded to the upstream body. Therefore NusaShell sends the
+stable key on the documented/known OpenAI-compatible paths and uses the
+OpenRouter-specific session header only for OpenRouter. It does not inject an
+arbitrary `X-NusaShell-*` header or an undocumented cache-key field into
+Anthropic or unrelated gateways.
+
+OpenRouter's current prompt-caching guide documents `prompt_cache_key`,
+`session_id`/`x-session-id`, the 256-character session limit, and Sessions-view
+grouping. OpenAI documents `prompt_cache_key` as a routing/cache hint (not a
+guaranteed cache hit). Anthropic documents `cache_control` TTLs and breakpoint
+rules. See [OpenRouter prompt caching](https://openrouter.ai/docs/guides/best-practices/prompt-caching),
+[OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching),
+[Claude prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching),
+and [LiteLLM input parameters](https://docs.litellm.ai/docs/completion/input).
+
 **Base URL is required for all three kinds.** The UI suggests a per-kind
 default (`https://api.anthropic.com` for Messages, `https://api.openai.com/v1`
 for Responses and Chat) — replace it with any endpoint or AI gateway that

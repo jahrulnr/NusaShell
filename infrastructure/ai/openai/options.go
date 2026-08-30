@@ -30,6 +30,9 @@ const (
 	ProviderOptionSeed                 = "seed"
 	ProviderOptionCompactionItems      = "compaction_items"
 	ProviderOptionContextManagement    = "context_management"
+	// ProviderOptionSessionID is transport-only for OpenRouter delegated
+	// requests. The OpenAI endpoint itself does not use this field.
+	ProviderOptionSessionID = "session_id"
 )
 
 var providerOptionKeys = map[string]struct{}{
@@ -58,6 +61,7 @@ var providerOptionKeys = map[string]struct{}{
 	ProviderOptionSeed:                 {},
 	ProviderOptionCompactionItems:      {},
 	ProviderOptionContextManagement:    {},
+	ProviderOptionSessionID:            {},
 }
 
 func applyProviderOptions(req *chatRequest, options map[string]any) error {
@@ -130,6 +134,10 @@ func applyProviderOptions(req *chatRequest, options map[string]any) error {
 				return err
 			}
 			req.PromptCacheKey = v
+		case ProviderOptionSessionID:
+			if _, err := optionString(key, value); err != nil {
+				return err
+			}
 		case ProviderOptionPromptCacheOptions:
 			v, err := optionPromptCacheOptions(key, value)
 			if err != nil {
