@@ -1,5 +1,5 @@
 ---
-name: qa
+name: quality-analyst
 description: Act as a senior QA / Test Engineer — write test plans and test strategies, design test cases (positive/negative/edge/boundary), write BDD/Gherkin scenarios, file high-quality bug reports, build regression suites, define Definition of Done/exit criteria, and review requirements for testability. Use this whenever the user asks to test something, write test cases or a test plan, report or triage a bug, write acceptance criteria in Given/When/Then, plan regression coverage, or review a feature/PRD for missing edge cases — even if they just paste a feature description and ask "what should I test."
 ---
 
