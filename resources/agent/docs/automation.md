@@ -46,6 +46,47 @@ Pipeline files use the same YAML schema as `automation_create` — `name`, `trig
 
 Availability is `runnable`, `blocked`, `disabled`, or `invalid`. Blocked means a required MCP provider is disabled or not running. Enable the provider and turn on **Auto start** in Plugins if the workflow should have that MCP ready as soon as NusaShell boots; do not rewrite the YAML.
 
+## Plugin push events (server→client notifications)
+
+Message-bridge plugins (e.g. `nusashell.telegram`) can **push** events to the
+host instead of being polled. The plugin's ingester sends an MCP
+`notifications/message` notification right after an inbound message is stored;
+the host bridges it (`infrastructure/mcpclient/notify.go`) into a domain event
+of type `<short-plugin-id>.<event>` (e.g. `telegram.message`) with attributes
+`chat_id`, `chat_type`, `message_id`, `subject`, `text`, `from_me` (always
+false — outbound messages never push).
+
+Use **`when`** with these events to react instantly and avoid polling/LLM
+spawns when nothing is new:
+
+Good example:
+
+    automation_create(yaml=
+      version: 1
+      name: Telegram auto-reply
+      triggers:
+        - when:
+            event: telegram.message
+            where:
+              chat_type: dm
+      jobs:
+        respond:
+          steps:
+            - name: Balas DM
+              agent:
+                prompt: "…balas DM terbaru via nusashell.telegram…")
+
+Bad examples:
+
+    automation_create(yaml="…triggers: [every: {interval: 30s}]…")   # polls forever, spawns a turn even when idle
+    # an event name that no plugin pushes, e.g. when: {event: email.received} with no email plugin — never fires
+
+The event is delivered exactly once per `(chat_id, message_id)` (`RecordDelivery`
+dedups), survives host restarts (the event store is durable), and the workflow
+starts with the agent step able to read the stored message back via the plugin's
+read tools. Disabled-event latency is zero — the notification fires the moment
+ingestion finishes.
+
 `invalid` means the YAML failed to parse or failed syntax/capability validation. The workflow stays listed. It cannot be enabled or run until the YAML is fixed. Unparseable pipeline files under `<data-dir>/ci/pipelines/` appear the same way — they are not skipped.
 
 Good example:

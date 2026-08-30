@@ -166,9 +166,9 @@ func (w *WorkflowDefinition) JobIDs() []string {
 	return out
 }
 
-// ReferencedCapabilities lists logical action/event names used by the
-// workflow (triggers + uses steps). Definitions persist these names, not
-// provider IDs.
+// ReferencedCapabilities lists logical action names used by `uses:` steps.
+// Trigger events are intentionally excluded — they are event types (e.g.
+// "telegram.message"), not capabilities that providers resolve.
 func (w *WorkflowDefinition) ReferencedCapabilities() []string {
 	if w == nil {
 		return nil
@@ -185,11 +185,10 @@ func (w *WorkflowDefinition) ReferencedCapabilities() []string {
 		seen[name] = struct{}{}
 		out = append(out, name)
 	}
-	for _, t := range w.Triggers {
-		if t.Event != "" {
-			add(t.Event)
-		}
-	}
+	// Only `uses:` steps reference capabilities. Trigger events are event
+	// types (e.g. "telegram.message", "ci.run.completed"), not capabilities
+	// a plugin provides — including them here makes validation fail with
+	// unknown_capability for valid when-triggers.
 	for _, j := range w.Jobs {
 		for _, s := range j.Steps {
 			add(s.Uses)

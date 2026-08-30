@@ -61,6 +61,15 @@ tools of a server, no query) complements `mcp_search` (query-based,
 ranked) — use `mcp_search` to find a specific tool, `tool_list` to see
 everything a server offers.
 
+### Server→client notifications
+
+Plugins may push MCP notifications (e.g. `notifications/message`) to the host
+to signal "something happened" without being polled. The host bridges them
+into automation events (`infrastructure/mcpclient/notify.go`); see
+Automation → Plugin push events for the `when:` trigger contract. As an
+agent you do not act on notifications directly — they are consumed by the
+automation engine, which starts the matching workflow.
+
 ### Idle plugin enable workflow
 
 An idle plugin (listed in `mcp_list` with `running: false`) must be enabled

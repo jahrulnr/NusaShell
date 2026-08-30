@@ -134,6 +134,31 @@ func TestValidateSyntaxDoesNotConflateMissingCapability(t *testing.T) {
 	}
 }
 
+// TestReferencedCapabilitiesExcludesTriggerEvents locks the rule that when-
+// trigger event names are event types, not capabilities: a workflow with
+// when: {event: "telegram.message"} plus a uses step must report only the
+// uses capability, so capability validation never rejects valid event
+// triggers as unknown_capability.
+func TestReferencedCapabilitiesExcludesTriggerEvents(t *testing.T) {
+	w := &WorkflowDefinition{
+		Name: "auto-reply",
+		Triggers: []Trigger{
+			{Kind: TriggerEvent, Event: "telegram.message", Where: map[string]any{"chat_type": "dm"}},
+		},
+		Jobs: []Job{{ID: "respond", Steps: []Step{{Agent: &AgentStep{Prompt: "reply"}}}}},
+	}
+	got := w.ReferencedCapabilities()
+	if len(got) != 0 {
+		t.Fatalf("ReferencedCapabilities = %v, want empty (event triggers are not capabilities)", got)
+	}
+
+	w.Jobs[0].Steps = append(w.Jobs[0].Steps, Step{Uses: "Telegram.status"})
+	got = w.ReferencedCapabilities()
+	if len(got) != 1 || got[0] != "Telegram.status" {
+		t.Fatalf("ReferencedCapabilities = %v, want [Telegram.status]", got)
+	}
+}
+
 func TestValidateSyntaxCycleIsInvalid(t *testing.T) {
 	w := &WorkflowDefinition{
 		Name: "x",

@@ -24,6 +24,10 @@ import (
 type Manager struct {
 	mu    sync.Mutex
 	conns map[string]*conn
+
+	// onNotification receives server→client notifications pushed by a plugin
+	// (e.g. "a message arrived"). Registered per connection at dial time.
+	onNotification func(serverID string, n mcp.JSONRPCNotification)
 }
 
 type conn struct {
@@ -36,6 +40,17 @@ func NewManager() *Manager {
 	return &Manager{conns: map[string]*conn{}}
 }
 
+// SetNotificationHandler registers the callback invoked for every MCP
+// notification a plugin pushes to the host. It must be set before the
+// plugin connections are made (e.g. before the autostart pass) to catch
+// every notification. The callback is called on the connection's read
+// goroutine — keep it fast and non-blocking.
+func (m *Manager) SetNotificationHandler(fn func(serverID string, n mcp.JSONRPCNotification)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onNotification = fn
+}
+
 // Connect returns the plugin's MCP tools, connecting on first use. The
 // returned connection is cached until Drop or the process exits.
 func (m *Manager) Connect(ctx context.Context, p *domain.Plugin) ([]contracts.MCPToolDTO, error) {
@@ -44,7 +59,7 @@ func (m *Manager) Connect(ctx context.Context, p *domain.Plugin) ([]contracts.MC
 	if c, ok := m.conns[p.Manifest.MCPServerID()]; ok {
 		return c.tools, nil
 	}
-	c, err := dial(ctx, p)
+	c, err := dial(ctx, p, m.onNotification)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +132,7 @@ func contentText(result *mcp.CallToolResult) string {
 	return strings.TrimSpace(sb.String())
 }
 
-func dial(ctx context.Context, p *domain.Plugin) (*conn, error) {
+func dial(ctx context.Context, p *domain.Plugin, onNotification func(serverID string, n mcp.JSONRPCNotification)) (*conn, error) {
 	cfg := p.Manifest.MCP
 	var mcpClient *client.Client
 	switch cfg.Transport {
@@ -155,11 +170,24 @@ func dial(ctx context.Context, p *domain.Plugin) (*conn, error) {
 	default:
 		return nil, fmt.Errorf("unsupported mcp transport %q", cfg.Transport)
 	}
-	if cfg.Transport != domain.PluginTransportStdio {
-		if err := mcpClient.Start(ctx); err != nil {
-			_ = mcpClient.Close()
-			return nil, fmt.Errorf("start %s: %w", cfg.URL, err)
-		}
+	// Start the client. For stdio, the constructor auto-starts the underlying
+	// transport but NOT client.Client.Start, which is what wires
+	// transport.SetNotificationHandler (the bridge that delivers
+	// server→client notifications to OnNotification). Calling Start again is
+	// idempotent for stdio and required so plugin push notifications are not
+	// silently dropped.
+	if err := mcpClient.Start(ctx); err != nil {
+		_ = mcpClient.Close()
+		return nil, fmt.Errorf("start %s: %w", p.Manifest.Name, err)
+	}
+	// Route server→client notifications (push) to the manager's handler.
+	// Captures the server id so automation can attribute the event to the
+	// right plugin even for shared notification method names.
+	if onNotification != nil {
+		serverID := p.Manifest.MCPServerID()
+		mcpClient.OnNotification(func(n mcp.JSONRPCNotification) {
+			onNotification(serverID, n)
+		})
 	}
 	initCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()

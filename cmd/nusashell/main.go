@@ -41,6 +41,7 @@ import (
 	"nusashell/transport"
 
 	"github.com/jahrulnr/searchwire"
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // version is the single source of truth for the Go port until a VERSION file
@@ -305,6 +306,25 @@ func run() error {
 			slog.Info("pipelines discovered", "count", len(loaded))
 		}
 	}
+
+	// Bridge plugin push notifications (MCP server→client) into the
+	// automation engine so when-triggered workflows react to events such as
+	// an incoming Telegram message without polling. Registered before the
+	// autostart pass so no plugin notification is missed.
+	mcpManager.SetNotificationHandler(func(serverID string, n mcp.JSONRPCNotification) {
+		if autoSvc == nil {
+			return
+		}
+		ev, ok := mcpclient.NotificationToEvent(serverID, n)
+		if !ok {
+			return
+		}
+		ictx, cancelEv := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancelEv()
+		if err := autoSvc.Auto.IngestEvent(ictx, ev); err != nil {
+			slog.Warn("mcp notification ingest failed", "server", serverID, "event", ev.Type, "error", err)
+		}
+	})
 	srv := transport.New(app, logger, transport.StaticHandler(frontend.FS, dev), dev)
 	// Register plugin routes: serve plugin UI static files and route
 	// tool calls from plugin UIs to the plugin's MCP server.
