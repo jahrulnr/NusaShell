@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"nusashell/application"
+	clock "nusashell/pkg/time"
 )
 
 const (
@@ -78,7 +79,7 @@ func executeExecToolChunks(ctx context.Context, name string, argsJSON []byte, on
 	applyPlatformAttrs(cmd)
 
 	var lastOutput atomic.Int64
-	lastOutput.Store(time.Now().UnixNano())
+	lastOutput.Store(clock.NewTime().EpochNano())
 	out := newTailBuffer(execHeadBytes, execTailBytes)
 	spill, spillPath, spillErr := createToolOverflowFile("exec")
 	w := &outputWatcher{buf: out, last: &lastOutput, chunk: onChunk}
@@ -88,7 +89,7 @@ func executeExecToolChunks(ctx context.Context, name string, argsJSON []byte, on
 	cmd.Stdout = w
 	cmd.Stderr = w
 
-	started := time.Now()
+	started := clock.NewTime().Time()
 	if err := cmd.Start(); err != nil {
 		return true, "", fmt.Errorf("start: %w", err)
 	}
@@ -108,7 +109,7 @@ func executeExecToolChunks(ctx context.Context, name string, argsJSON []byte, on
 		select {
 		case waitErr := <-done:
 			meta := map[string]any{
-				"duration_ms": time.Since(started).Milliseconds(),
+				"duration_ms": clock.NewTime().Since(started).Milliseconds(),
 			}
 			body := strings.TrimRight(out.Snapshot(), "\n")
 			if waitErr == nil {
@@ -135,7 +136,7 @@ func executeExecToolChunks(ctx context.Context, name string, argsJSON []byte, on
 			closeAndDropSpill(spill, spillPath)
 			return true, "", fmt.Errorf("timeout_ms reached; partial output:\n%s", out.Snapshot())
 		case <-tick.C:
-			silentFor := time.Since(time.Unix(0, lastOutput.Load()))
+			silentFor := clock.NewTime().Since(clock.NewTime(time.Unix(0, lastOutput.Load())).Time())
 			if silentFor >= idle {
 				killProcessTree(cmd)
 				<-done
@@ -177,7 +178,7 @@ type outputWatcher struct {
 
 func (w *outputWatcher) Write(p []byte) (int, error) {
 	w.mu.Lock()
-	w.last.Store(time.Now().UnixNano())
+	w.last.Store(clock.NewTime().EpochNano())
 	if w.chunk != nil {
 		w.chunk(string(p))
 	}

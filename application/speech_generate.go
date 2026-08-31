@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"nusashell/application/service/ttserr"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 	"nusashell/pkg/yamlmd"
 )
 
@@ -102,12 +102,12 @@ func (a *App) executeGenerateSpeech(run *TurnRun, toolCall domain.ToolCall, sett
 	return ttsUnconfigured, nil, fmt.Errorf("no TTS backend available")
 }
 
-func (a *App) persistTTSText(run *TurnRun, toolCallID string, result *TTSResult) (string, []domain.Attachment, error) {
+func (a *App) persistTTSText(run *TurnRun, _ string, result *TTSResult) (string, []domain.Attachment, error) {
 	if result == nil || len(result.Audio) == 0 {
 		return failGenerateSpeech("speech synthesizer returned no audio")
 	}
 	att, path, err := a.saveGeneratedMedia(run.ConversationID,
-		fmt.Sprintf("speech_%s", time.Now().Format("20060102_150405")), "audio", result.Audio, true)
+		fmt.Sprintf("speech_%s", clock.NewTime().Format("20060102_150405")), "audio", result.Audio, true)
 	if err != nil {
 		return failGenerateSpeech(err.Error())
 	}

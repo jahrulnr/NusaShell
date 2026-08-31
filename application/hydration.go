@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"nusashell/domain"
 	"nusashell/pkg/nonce"
+	clock "nusashell/pkg/time"
 )
 
 // RuntimeContextSnapshot is the read-only runtime context payload for the
@@ -149,7 +149,7 @@ type hydrationSlot struct {
 func (b *HydrationBuilder) readRuntimeContext() hydrationSlot {
 	ctx := b.source.RuntimeContext
 	if ctx.CurrentDate == "" {
-		ctx.CurrentDate = time.Now().UTC().Format(time.RFC3339)
+		ctx.CurrentDate = clock.NewTime().RFC3339()
 	}
 	if ctx.Environment == "" {
 		ctx.Environment = "nusashell"
@@ -430,7 +430,7 @@ func DefaultRuntimeContext(workspace string) RuntimeContextSnapshot {
 		env = "nusashell"
 	}
 	return RuntimeContextSnapshot{
-		CurrentDate: time.Now().UTC().Format(time.RFC3339),
+		CurrentDate: clock.NewTime().RFC3339(),
 		Environment: env,
 		RuntimeOS:   runtime.GOOS + "/" + runtime.GOARCH,
 		Workspace:   strings.TrimSpace(workspace),

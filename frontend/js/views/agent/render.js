@@ -7,6 +7,7 @@ import { renderArtifactCard, parseArtifactOutput } from '../../artifact-render.j
 import { openAudioLightbox, openVideoLightbox, openTextPreviewPopup, attachZoomButtons } from '../../media-zoom.js';
 import { renderMermaidDiagrams } from '../../mermaid-render.js';
 import { highlightCode } from '../../highlight-render.js';
+import { normalizeToolCall, toolContractClass, toolContractRef } from './tool-contracts.js';
 import { agentThread, composerInput, toolJobStrip } from './domrefs.js';
 
 // Live-turn performance strategy: every streaming round stays mounted in the
@@ -566,11 +567,42 @@ export function isMediaGenerationTool(name) {
   return name === 'generate_media' || name === 'generate_image' || name === 'generate_speech' || name === 'generate_video';
 }
 
+// decorateToolCard is the shared DOM boundary for built-in tools. The
+// backend contract owns the stable class identity; data attributes make the
+// request/result contract addressable without coupling future styling to a
+// renderer's internal layout classes.
+export function decorateToolCard(card, toolCall) {
+  if (!card) return card;
+  const normalized = normalizeToolCall(toolCall);
+  const name = normalized.name || 'tool';
+  const ref = toolContractRef(name, normalized.presentation);
+  card.classList.add('agent-tool-card', ref.css_class);
+  card.dataset.tool = name;
+  card.dataset.toolContract = ref.id;
+  card.dataset.toolContractVersion = String(ref.version);
+  card.dataset.toolClass = ref.css_class;
+  if (normalized.presentation?.variant) card.dataset.presentationVariant = String(normalized.presentation.variant);
+  if (normalized.presentation?.result?.format) card.dataset.resultFormat = String(normalized.presentation.result.format);
+  if (card.matches?.('.artifact-card')) {
+    card.classList.add('agent-tool-result', `${ref.css_class}-result`);
+  }
+  const markParts = (selector, part) => {
+    card.querySelectorAll(selector).forEach((node) => {
+      node.classList.add(`agent-tool-${part}`, `${ref.css_class}-${part}`);
+    });
+  };
+  markParts('.agent-tool-event-path, .agent-ask-question, .agent-subagent-prompt, .agent-genimage-head, .agent-genaudio-head, .agent-genvideo-head, .agent-genimage-prompt, .agent-genaudio-prompt, .agent-genvideo-prompt', 'request');
+  markParts('.agent-tool-event-result, .agent-tool-terminal-output, .agent-ask-answer, .agent-subagent-summary, .agent-genimage-plate, .agent-genaudio-plate, .agent-genvideo-plate, .artifact-card', 'result');
+  return card;
+}
+
 export function renderToolCallCard(toolCall) {
   // `subagent` is the user-facing delegation card. The wait call and the
   // synthetic result call are provider bookkeeping for that same run; showing
   // them as extra terminal rows duplicates the card and adds no affordance.
+  toolCall = normalizeToolCall(toolCall);
   if (isSubagentAuxiliaryTool(toolCall.name)) return null;
+  const finish = (card) => decorateToolCard(card, toolCall);
   if (toolCall.name === 'ask_question') {
     // args arrives as a parsed object from the wire DTO (json.RawMessage);
     // parseToolArgs tolerates both object and JSON-string shapes.
@@ -581,43 +613,43 @@ export function renderToolCallCard(toolCall) {
       ok: toolCall.status !== 'fail',
     });
     card.dataset.standalone = 'true';
-    return card;
+    return finish(card);
   }
   if (toolCall.name === 'subagent') {
     const card = renderSubagentCard(toolCall);
     card.dataset.standalone = 'true';
-    return card;
+    return finish(card);
   }
   if (isMediaGenerationTool(toolCall.name)) {
     const card = renderMediaGenerationCard(toolCall);
     card.dataset.standalone = 'true';
-    return card;
+    return finish(card);
   }
   const artifact = parseArtifactOutput(toolCall);
   if (artifact) {
     const card = renderArtifactCard(toolCall, artifact);
     card.dataset.standalone = 'true';
-    return card;
+    return finish(card);
   }
   const showImage = parseShowImageOutput(toolCall);
   if (showImage) {
     const card = renderShowImageCard(toolCall, showImage);
     card.dataset.standalone = 'true';
-    return card;
+    return finish(card);
   }
   const showAudio = parseShowAudioOutput(toolCall);
   if (showAudio) {
     const card = renderShowAudioCard(toolCall, showAudio);
     card.dataset.standalone = 'true';
-    return card;
+    return finish(card);
   }
   const showVideo = parseShowVideoOutput(toolCall);
   if (showVideo) {
     const card = renderShowVideoCard(toolCall, showVideo);
     card.dataset.standalone = 'true';
-    return card;
+    return finish(card);
   }
-  return renderToolJob(toolCall);
+  return finish(renderToolJob(toolCall));
 }
 
 function renderMediaGenerationCard(toolCall) {
@@ -739,6 +771,7 @@ function renderShowImageCard(toolCall, showImage) {
     }));
   }
   if (caption.children.length) card.append(caption);
+  decorateToolCard(card, toolCall);
   return card;
 }
 
@@ -776,6 +809,7 @@ function renderShowAudioCard(toolCall, showAudio) {
     }));
   }
   if (caption.children.length) card.append(caption);
+  decorateToolCard(card, toolCall);
   return card;
 }
 
@@ -813,6 +847,7 @@ function renderShowVideoCard(toolCall, showVideo) {
     }));
   }
   if (caption.children.length) card.append(caption);
+  decorateToolCard(card, toolCall);
   return card;
 }
 // Async flow: saat spawn, output = YAML frontmatter
@@ -820,6 +855,7 @@ function renderShowVideoCard(toolCall, showVideo) {
 // output = YAML frontmatter (status, workspace, output_path) + markdown
 // body (summary). Card re-render via EventToolCompleted.
 export function renderSubagentCard(toolCall) {
+  toolCall = normalizeToolCall(toolCall);
   const args = parseToolArgs(toolCall.args);
   let runs = [];
   let meta = {};          // parsed YAML header
@@ -921,6 +957,7 @@ export function renderSubagentCard(toolCall) {
     card.click();
   });
 
+  decorateToolCard(card, toolCall);
   return card;
 }
 
@@ -1014,6 +1051,49 @@ function imageSrc(attachment) {
   return '';
 }
 
+// renderToolAttachments is the canonical output attachment renderer. Tool
+// output uses its own class namespace so a future tool can be styled without
+// changing the message attachment layout.
+export function renderToolAttachments(attachments, className = 'agent-tool-output-attachments') {
+  const items = Array.isArray(attachments) ? attachments.filter((item) => item && typeof item === 'object') : [];
+  if (!items.length) return null;
+  const root = el('div', {
+    class: `${className} agent-tool-attachment-list`,
+    role: 'list',
+    'aria-label': `${items.length} tool output attachment${items.length === 1 ? '' : 's'}`,
+  });
+  for (const attachment of items) {
+    const type = String(attachment.type || 'file').toLowerCase();
+    const name = String(attachment.name || 'Tool output');
+    const src = imageSrc(attachment);
+    const item = el('div', { class: `agent-tool-attachment-item agent-tool-attachment-${type}`, role: 'listitem' });
+    if (type === 'image' && src) {
+      const image = el('img', { src, alt: name, loading: 'lazy' });
+      image.addEventListener('error', () => image.classList.add('img-load-error'));
+      item.append(image, el('span', { class: 'agent-tool-attachment-name', text: name }));
+    } else if (type === 'video' && src) {
+      const video = el('video', { controls: true, preload: 'metadata', src });
+      video.addEventListener('error', () => video.classList.add('video-load-error'));
+      item.append(video, el('span', { class: 'agent-tool-attachment-name', text: name }));
+    } else if (type === 'audio' && src) {
+      const audio = el('audio', { controls: true, preload: 'metadata', src });
+      audio.addEventListener('error', () => audio.classList.add('audio-load-error'));
+      item.append(audio, el('span', { class: 'agent-tool-attachment-name', text: name }));
+    } else {
+      const label = src
+        ? el('a', { class: 'agent-tool-attachment-link', href: src, download: name, text: name })
+        : el('span', { class: 'agent-tool-attachment-name', text: name });
+      item.append(
+        el('span', { class: 'agent-tool-attachment-kind', text: type.toUpperCase() }),
+        label,
+        attachment.content ? el('pre', { class: 'agent-tool-attachment-text', text: String(attachment.content) }) : null,
+      );
+    }
+    root.append(item);
+  }
+  return root;
+}
+
 function formatImageCost(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return '';
@@ -1022,6 +1102,7 @@ function formatImageCost(value) {
 }
 
 export function renderGenerateImageCard(toolCall) {
+  toolCall = normalizeToolCall(toolCall);
   const args = parseToolArgs(toolCall.args);
   const parsed = toolPresentationParts(toolCall);
   const meta = parsed.meta || {};
@@ -1110,6 +1191,7 @@ export function renderGenerateImageCard(toolCall) {
     }));
   }
   if (caption.children.length) card.append(caption);
+  decorateToolCard(card, toolCall);
   return card;
 }
 
@@ -1120,6 +1202,7 @@ export function renderGenerateImageCard(toolCall) {
 // tool already has. Falls back to /local-file?path= when the inline data
 // URL is absent (large audio payloads, replayed history).
 function renderGenerateSpeechCard(toolCall) {
+  toolCall = normalizeToolCall(toolCall);
   const args = parseToolArgs(toolCall.args);
   const parsed = toolPresentationParts(toolCall);
   const meta = parsed.meta || {};
@@ -1206,6 +1289,7 @@ function renderGenerateSpeechCard(toolCall) {
     }));
   }
   if (caption.children.length) card.append(caption);
+  decorateToolCard(card, toolCall);
   return card;
 }
 
@@ -1215,6 +1299,7 @@ function renderGenerateSpeechCard(toolCall) {
 // output frontmatter plus a click-to-play <video> plate and a Download
 // link.
 function renderGenerateVideoCard(toolCall) {
+  toolCall = normalizeToolCall(toolCall);
   const args = parseToolArgs(toolCall.args);
   const parsed = toolPresentationParts(toolCall);
   const meta = parsed.meta || {};
@@ -1303,6 +1388,7 @@ function renderGenerateVideoCard(toolCall) {
     }));
   }
   if (caption.children.length) card.append(caption);
+  decorateToolCard(card, toolCall);
   return card;
 }
 
@@ -1415,6 +1501,15 @@ function toolEventPrimary(name, args) {
   return '';
 }
 
+function toolEventRequest(name, args, presentation) {
+  const primary = toolEventPrimary(name, args);
+  if (primary) return primary;
+  const request = String(presentation?.request || '').trim().replace(/\s+/g, ' ');
+  if (request && request.length <= 180) return request;
+  const parsed = parseToolArgs(args);
+  return Object.keys(parsed).length ? (summarizeToolArgs(parsed) || `${name}()`) : `${name}()`;
+}
+
 function toolEventRawText(name, presentation, output) {
   const request = presentation?.request !== undefined && presentation?.request !== null
     ? String(presentation.request)
@@ -1443,7 +1538,7 @@ function toolCssSlug(name) {
 }
 
 function toolPartClass(name, part) {
-  return `agent-tool-event-${part} agent-tool-${toolCssSlug(name)}-${part}`;
+  return `agent-tool-event-${part} agent-tool-${toolCssSlug(name)}-${part} ${toolContractClass(name)}-${part}`;
 }
 
 function renderToolEventResult(toolCall) {
@@ -1453,6 +1548,15 @@ function renderToolEventResult(toolCall) {
     return renderToolPresentationList(result.items, toolPartClass(name, 'rows'));
   }
   if (result?.format === 'status') return renderToolPresentationStatus(result, toolPartClass(name, 'status'));
+  if (result?.format === 'media') {
+    const root = el('div', { class: toolPartClass(name, 'media') });
+    const attachments = Array.isArray(result.attachments) ? result.attachments : [];
+    if (attachments.length) root.append(renderToolAttachments(attachments, toolPartClass(name, 'attachments')));
+    const text = result.text ? String(result.text) : '';
+    if (text) root.append(el('pre', { class: toolPartClass(name, 'output'), text }));
+    if (!root.children.length && result.summary) root.append(el('p', { class: toolPartClass(name, 'summary'), text: String(result.summary) }));
+    return root.children.length ? root : null;
+  }
   const text = toolTerminalOutput(toolCall);
   if (text === '…' || text === '… waiting for output') {
     return el('div', { class: toolPartClass(name, 'wait'), text: 'Running…' });
@@ -1476,6 +1580,7 @@ function toolEventSummary(toolCall) {
 }
 
 function renderToolEvent(toolCall, { terminalOutput = false, mcp = false } = {}) {
+  toolCall = normalizeToolCall(toolCall);
   const name = toolCall.name || 'tool';
   const status = toolCall.status || 'running';
   const presentation = toolCall.presentation || null;
@@ -1486,9 +1591,15 @@ function renderToolEvent(toolCall, { terminalOutput = false, mcp = false } = {})
   // folded away. exec/MCP replace the result box with a terminal output
   // panel (live-streamed for exec).
   const slug = toolCssSlug(name);
+  const contract = toolContractRef(name, presentation);
+  const contractClass = toolContractClass(name, presentation);
   const card = el('details', { class: `agent-tool-event agent-tool-${slug}` });
+  card.classList.add('agent-tool-card', contractClass);
   card.open = true;
   card.dataset.tool = name;
+  card.dataset.toolContract = contract.id;
+  card.dataset.toolContractVersion = String(contract.version);
+  card.dataset.toolClass = contract.css_class;
   if (terminalOutput) card.classList.add('is-terminal');
   if (toolCall.id) card.dataset.toolCallId = String(toolCall.id);
   if (presentation?.variant) card.dataset.presentationVariant = String(presentation.variant);
@@ -1513,21 +1624,21 @@ function renderToolEvent(toolCall, { terminalOutput = false, mcp = false } = {})
   );
 
   const body = el('div', { class: 'agent-tool-event-body' });
-  const primary = toolEventPrimary(name, toolCall.args);
-  if (primary) body.append(el('p', { class: toolPartClass(name, 'path'), text: primary }));
+  const primary = toolEventRequest(name, toolCall.args, presentation);
+  if (primary) body.append(el('p', { class: `${toolPartClass(name, 'path')} agent-tool-request ${contractClass}-request`, text: primary }));
 
   if (terminalOutput) {
     // exec streams deltas into this panel via appendToolJobDelta; MCP shows
     // the raw passthrough, capped with its own scroll.
-    body.append(el('pre', { class: `agent-tool-terminal-output agent-tool-${slug}-output`, text: toolTerminalOutput(toolCall) }));
+    body.append(el('pre', { class: `agent-tool-terminal-output agent-tool-${slug}-output ${contractClass}-output ${contractClass}-result agent-tool-result`, text: toolTerminalOutput(toolCall) }));
   } else {
-    const result = el('div', { class: toolPartClass(name, 'result') },
+    const result = el('div', { class: `${toolPartClass(name, 'result')} agent-tool-result` },
       el('div', { class: toolPartClass(name, 'summary-text'), text: toolEventSummary(toolCall) }),
     );
     const resultContent = renderToolEventResult(toolCall);
     if (resultContent) result.append(resultContent);
     body.append(result);
-    const raw = el('details', { class: toolPartClass(name, 'details') },
+    const raw = el('details', { class: `${toolPartClass(name, 'details')} agent-tool-raw` },
       el('summary', { text: 'show request and raw output' }),
       el('pre', { text: toolEventRawText(name, presentation, toolCall.output) }),
     );
@@ -1672,6 +1783,9 @@ export function toolTerminalOutput(toolCall) {
     }
     if (result.text !== undefined && result.text !== null && result.text !== '') return truncate(String(result.text), 12000);
     if (result.summary) return String(result.summary);
+    if (result.format === 'media' && Array.isArray(result.attachments) && result.attachments.length) {
+      return `${result.attachments.length} attachment${result.attachments.length === 1 ? '' : 's'}`;
+    }
   }
   if (toolCall.output !== undefined && toolCall.output !== null && toolCall.output !== '') return truncate(String(toolCall.output), 12000);
   if (toolCall.status === 'running') {
@@ -1725,6 +1839,15 @@ export function setToolTerminalPresentation(card, presentation) {
     result: { ...(previous.result || {}), ...(presentation.result || {}) },
   };
   card._toolPresentation = merged;
+  const contract = toolContractRef(card._toolName || card.dataset.tool, merged);
+  decorateToolCard(card, {
+    name: card._toolName || card.dataset.tool,
+    presentation: merged,
+  });
+  card.classList.add('agent-tool-card', contract.css_class);
+  card.dataset.toolContract = contract.id;
+  card.dataset.toolContractVersion = String(contract.version);
+  card.dataset.toolClass = contract.css_class;
   if (merged.variant) card.dataset.presentationVariant = String(merged.variant);
   if (merged.result?.format) card.dataset.resultFormat = String(merged.result.format);
   const action = card.querySelector('.agent-tool-terminal-action');
@@ -1737,7 +1860,12 @@ export function setToolTerminalPresentation(card, presentation) {
   if (output) {
     // exec/MCP terminal panel: repaint the settled output in place.
     const slug = toolCssSlug(card._toolName || card.dataset.tool);
-    output.replaceWith(renderToolPresentationResult(merged.result || {}, `agent-tool-terminal-output agent-tool-${slug}-output`, card._toolOutput));
+    const contractClass = toolContractClass(card._toolName || card.dataset.tool, merged);
+    output.replaceWith(renderToolPresentationResult(
+      merged.result || {},
+      `agent-tool-terminal-output agent-tool-${slug}-output ${contractClass}-output ${contractClass}-result agent-tool-result`,
+      card._toolOutput,
+    ));
     return;
   }
   // Event card: repaint the summary line and the result body in place; the
@@ -1863,6 +1991,15 @@ function renderToolPresentationResult(result, className, fallbackText = '') {
   }
   if (result?.format === 'status') {
     return renderToolPresentationStatus(result, className);
+  }
+  if (result?.format === 'media') {
+    const root = el('div', { class: `${className} agent-tool-media-result` });
+    const attachments = renderToolAttachments(result.attachments, `${className}-attachments`);
+    if (attachments) root.append(attachments);
+    const text = result.text !== undefined && result.text !== null ? String(result.text) : '';
+    if (text) root.append(el('pre', { class: `${className}-text`, text }));
+    if (!root.children.length && result.summary) root.textContent = String(result.summary);
+    return root;
   }
   const text = result?.text !== undefined && result?.text !== null && result.text !== ''
     ? String(result.text)

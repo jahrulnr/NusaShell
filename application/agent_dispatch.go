@@ -12,6 +12,12 @@ import (
 // first segment is "agent".
 func (a *App) dispatchAgent(ctx context.Context, method string, payload json.RawMessage) (any, *contracts.RPCError) {
 	switch method {
+	case contracts.MethodToolContracts:
+		var req contracts.ToolContractsRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleToolContracts(req)
 	case contracts.MethodConversationsList:
 		return a.handleConversationsList()
 	case contracts.MethodConversationsCreate:

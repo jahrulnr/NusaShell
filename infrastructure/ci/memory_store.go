@@ -13,6 +13,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // MemoryStore is an in-process implementation of the automation ports.
@@ -367,7 +368,7 @@ func (s FSArtifactStore) Put(_ context.Context, req application.ArtifactPutReque
 	}
 	return domain.Artifact{
 		ID: id, RunID: req.RunID, JobID: req.JobID, Name: req.Name,
-		Paths: req.Paths, Size: n, CreatedAt: time.Now().UTC(), ExpiresAt: req.Expires, Path: path,
+		Paths: req.Paths, Size: n, CreatedAt: clock.NewTime().Time(), ExpiresAt: req.Expires, Path: path,
 	}, nil
 }
 

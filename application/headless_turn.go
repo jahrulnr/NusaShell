@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // RunHeadlessTurn executes a full agent turn synchronously (no Agent room)
@@ -33,7 +33,7 @@ func (a *App) runHeadlessTurnKind(ctx context.Context, prompt, model string, tru
 	conv.Origin = domain.ConversationOriginPipeline
 	conv.Model = provider.ID + ":" + bareModel
 	conv.Status = "running"
-	now := time.Now().UTC()
+	now := clock.NewTime().Time()
 	asstMsgID := domain.NewID(domain.IDPrefixMsg)
 	a.addTurnMessages(conv, domain.Message{
 		ID:        domain.NewID(domain.IDPrefixMsg),

@@ -24,6 +24,7 @@ import (
 	"nusashell/domain"
 	"nusashell/infrastructure/nusatemp"
 	"nusashell/infrastructure/pluginicon"
+	clock "nusashell/pkg/time"
 )
 
 // Installer fetches and installs plugins from the curated catalog, a GitHub
@@ -69,7 +70,7 @@ func New(store pluginStore, logger *slog.Logger) *Installer {
 // cached for five minutes to avoid hammering GitHub on every dialog open.
 func (i *Installer) Catalog(ctx context.Context) ([]domain.PluginCatalogEntry, error) {
 	i.mu.Lock()
-	if i.catalogCache != nil && time.Since(i.catalogAt) < 5*time.Minute {
+	if i.catalogCache != nil && clock.NewTime().Since(i.catalogAt) < 5*time.Minute {
 		out := i.catalogCache
 		i.mu.Unlock()
 		return out, nil
@@ -138,7 +139,7 @@ func (i *Installer) Catalog(ctx context.Context) ([]domain.PluginCatalogEntry, e
 
 	i.mu.Lock()
 	i.catalogCache = result
-	i.catalogAt = time.Now()
+	i.catalogAt = clock.NewTime().Time()
 	i.mu.Unlock()
 
 	return result, nil

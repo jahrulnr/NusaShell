@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	clock "nusashell/pkg/time"
 )
 
 // LearnedParamAction is the recovery action to apply for a learned parameter.
@@ -99,7 +101,7 @@ func (r *LearnedParamRegistry) record(provider, model, param string, action Lear
 		Param:     strings.ToLower(strings.TrimSpace(param)),
 		Action:    action,
 		Reason:    truncateReason(reason),
-		LearnedAt: time.Now().UTC(),
+		LearnedAt: clock.NewTime().Time(),
 		HitCount:  1,
 	}
 	r.Entries[k] = e

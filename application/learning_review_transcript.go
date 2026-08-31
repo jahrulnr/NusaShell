@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	clock "nusashell/pkg/time"
 )
 
 // ReviewTranscript is the persisted record of one background review run:
@@ -34,7 +36,7 @@ func saveReviewTranscript(dataDir, conversationID, model string, messages []Chat
 	if dataDir == "" || len(messages) == 0 {
 		return ""
 	}
-	id := time.Now().UTC().Format("20060102T150405Z") + "_" + safeID(conversationID)
+	id := clock.NewTime().Format("20060102T150405-0700") + "_" + safeID(conversationID)
 	dir := reviewTranscriptDir(dataDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return ""
@@ -43,7 +45,7 @@ func saveReviewTranscript(dataDir, conversationID, model string, messages []Chat
 		ID:             id,
 		ConversationID: conversationID,
 		Model:          model,
-		CreatedAt:      time.Now().UTC(),
+		CreatedAt:      clock.NewTime().Time(),
 		Messages:       messages,
 	}
 	b, err := json.MarshalIndent(t, "", "  ")

@@ -18,11 +18,24 @@ contracts/       wire types, method roster, golden JSON fixtures
 infrastructure/  jsonstore, sqlitestore, ai adapters, mcpclient, tools, docs, ci
 cmd/nusashell/   composition root (env config, wiring, lifecycle)
 testdata/        fake stdio MCP server used by handler-level tests
+pkg/time/        stdlib-only machine-local timestamp wrapper
 ```
 
-The dependency rule points inward: domain imports nothing outside stdlib;
-application imports domain + contracts; transport imports application and
-contracts; infrastructure implements application ports.
+The dependency rule points inward: domain imports no application or
+infrastructure code; stdlib-only leaf helpers are allowed. Application imports
+domain + contracts; transport imports application and contracts; infrastructure
+implements application ports.
+
+## Clock and timestamp policy
+
+Application-generated timestamps have one source: `pkg/time.NewTime`. It
+captures the operating system's machine-local timezone (`time.Local`), so a
+machine configured for `Asia/Jakarta` emits `+07:00` while another machine
+uses its own local offset. Use `Time()` for a `time.Time`, `Epoch*` for numeric
+timestamps, and `Format`/`RFC3339`/`DMY` for strings. Existing timestamps are
+normalized through the same wrapper when rendered or persisted. A trigger
+without an explicit timezone also follows the machine timezone; a configured
+trigger's explicit `timezone` remains authoritative for scheduling.
 
 Automation (CI runner + trigger engine) is wired in `cmd/nusashell`: SQLite
 `automation.db`, local executor, and a 15s `FireDue` loop. Domain types are
@@ -54,7 +67,9 @@ with a per-stream monotonic `seq`. The frontend opens `GET
 /stream?run_id=&message_id=` when `agent.turn.started` fires (or when
 re-attaching to a running turn after reload/room switch), receives
 `round.delta` frames (`seq`, `kind` = `text` | `reasoning` | `tool`, text),
-and closes on `round.done` (`state`, `usage`, `next`). Re-opening with
+and closes on `round.done` (`state`, `usage`, `next`). A `kind: "tool"`
+start frame also carries the raw `args` and normalized `presentation`; later
+chunks for that tool carry only `text`. Re-opening with
 `after=<lastSeq>` replays exactly the missed frames (idempotent resume), so
 a dropped connection self-heals; `next` chaining carries tool-loop and
 auto-continue rounds forward without WebSocket round bookkeeping. The round
@@ -231,9 +246,11 @@ Stdio connections are lazy and cached per process.
 Tool transcript data and frontend display data are separate by contract.
 `ToolCallDTO` and tool lifecycle events keep raw `args`/`output` for the
 provider-facing transcript and add an optional `presentation` view for the
-browser. Predictable built-ins expose variants such as file-list,
-search-results, collection, document, and media; `exec` and `mcp_call` stay
-generic terminal views. See
+browser. `agent.tools.contracts` exposes the same workspace-sensitive roster
+used by `ToolFactory`, including input schemas, versioned CSS identities, and
+the normalized request/result shapes. Predictable built-ins expose variants
+such as file-list, search-results, collection, document, and media; `exec`
+and `mcp_call` stay generic terminal views. See
 [`decisions/002-tool-presentation-contract.md`](decisions/002-tool-presentation-contract.md).
 
 ## Verification baseline

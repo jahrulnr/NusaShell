@@ -35,6 +35,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 	"nusashell/resources"
 )
 
@@ -141,7 +142,7 @@ func SeedBuiltinSkills(root string) error {
 		// Record provenance.
 		provenance[skillID] = provenanceEntry{
 			CreatedBy: "builtin",
-			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+			CreatedAt: clock.NewTime().RFC3339(),
 		}
 	}
 
@@ -348,7 +349,7 @@ func (s *Store) Save(skill *domain.Skill) error {
 		return fmt.Errorf("skillfs: write SKILL.md: %w", err)
 	}
 	// Update metadata.
-	skill.Touch(time.Now().UTC())
+	skill.Touch(clock.NewTime().Time())
 	s.json.set(skill)
 	if err := s.json.save(); err != nil {
 		return err
@@ -362,7 +363,7 @@ func (s *Store) Save(skill *domain.Skill) error {
 		}
 		prov[skill.ID] = provenanceEntry{
 			CreatedBy: origin,
-			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+			CreatedAt: clock.NewTime().RFC3339(),
 		}
 		_ = saveProvenance(s.root, prov)
 	}
@@ -390,7 +391,7 @@ func (s *Store) Delete(id, ownedBy string) error {
 	prov, _ := loadProvenance(s.root)
 	if entry, ok := prov[id]; ok && entry.CreatedBy == "builtin" {
 		deleted, _ := loadDeletedBuiltin(s.root)
-		deleted[id] = deletedEntry{DeletedAt: time.Now().UTC().Format(time.RFC3339)}
+		deleted[id] = deletedEntry{DeletedAt: clock.NewTime().RFC3339()}
 		_ = saveDeletedBuiltin(s.root, deleted)
 	}
 	// Remove the directory.
@@ -790,7 +791,7 @@ func (s *Store) WriteFile(id, ownedBy, path, content string) error {
 		return fmt.Errorf("skillfs: write %s: %w", rel, err)
 	}
 	// Touch skill metadata so UpdatedAt reflects the change.
-	skill.Touch(time.Now().UTC())
+	skill.Touch(clock.NewTime().Time())
 	s.json.set(skill)
 	_ = s.json.save()
 	return nil
@@ -955,7 +956,7 @@ func (s *Store) Install(zipData []byte) (string, error) {
 		State:       domain.SkillStateActive,
 		Origin:      domain.SkillOriginUser,
 		OwnedBy:     "user",
-		UpdatedAt:   time.Now().UTC(),
+		UpdatedAt:   clock.NewTime().Time(),
 	}
 	s.json.set(skill)
 	if err := s.json.save(); err != nil {
@@ -966,7 +967,7 @@ func (s *Store) Install(zipData []byte) (string, error) {
 	prov, _ := loadProvenance(s.root)
 	prov[topLevel] = provenanceEntry{
 		CreatedBy: "user",
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		CreatedAt: clock.NewTime().RFC3339(),
 	}
 	_ = saveProvenance(s.root, prov)
 
@@ -1036,7 +1037,7 @@ func (s *Store) MountPluginSkills(pluginID, pluginSkillsDir string) error {
 		}
 		skill.SetOwner(owner, pluginSkillsDir)
 		skill.Origin = domain.SkillOriginUser // placeholder; OwnedBy is authoritative
-		skill.Touch(time.Now().UTC())
+		skill.Touch(clock.NewTime().Time())
 		s.json.set(skill)
 	}
 	return s.json.save()

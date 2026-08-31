@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	clock "nusashell/pkg/time"
 )
 
 // TrajectoryEvent is one recorded learning layer event.
@@ -57,7 +59,7 @@ func (r *TrajectoryRecorder) Record(eventType string, detail map[string]interfac
 		return
 	}
 	event := TrajectoryEvent{
-		Timestamp: time.Now(),
+		Timestamp: clock.NewTime().Time(),
 		Type:      eventType,
 		Detail:    detail,
 	}

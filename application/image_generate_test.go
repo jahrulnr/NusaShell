@@ -321,7 +321,7 @@ func jsonGenerateArgs(refPath string) (string, error) {
 }
 
 func jsonMarshalPrompt(refPath string) ([]byte, error) {
-	return []byte(fmt.Sprintf(`{"prompt":"make it dusk","referenced_image_paths":[%q]}`, refPath)), nil
+	return fmt.Appendf(nil, `{"prompt":"make it dusk","referenced_image_paths":[%q]}`, refPath), nil
 }
 
 func TestGenerateImageWithRetryRetries503(t *testing.T) {

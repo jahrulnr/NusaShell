@@ -15,6 +15,123 @@
  * Plugin MCP tools (mcp__*) share the mcp section. mcp_call is a built-in.
  */
 
+/* ---- contract-owned card boundary ----
+ *
+ * Every card carries the backend's `css_class`, `data-tool`, and contract
+ * version. The request/result hooks are added by render.js to both generic
+ * timeline cards and standalone cards, so a tool can receive its own dressing
+ * without reaching into another tool's markup.
+ */
+.agent-tool-card[data-tool] {
+  --agent-tool-contract-accent: var(--accent);
+  min-width: 0;
+}
+.agent-tool-card[data-tool] .agent-tool-request {
+  border-inline-start: 2px solid color-mix(in srgb, var(--agent-tool-contract-accent) 44%, transparent);
+}
+.agent-tool-card[data-tool] .agent-tool-result {
+  min-width: 0;
+}
+.agent-tool-card[data-tool] .agent-tool-raw {
+  opacity: .88;
+}
+
+/* The contract classes below are deliberately tool-specific, even when two
+ * tools share the same compact layout. They are the stable selectors for the
+ * next frontend pass. */
+.agent-tool-file-read .agent-tool-file-read-request,
+.agent-tool-file-write .agent-tool-file-write-request,
+.agent-tool-file-patch .agent-tool-file-patch-request,
+.agent-tool-file-list .agent-tool-file-list-request,
+.agent-tool-grep .agent-tool-grep-request,
+.agent-tool-find-file .agent-tool-find-file-request,
+.agent-tool-ask-question .agent-tool-ask-question-request,
+.agent-tool-exec .agent-tool-exec-request,
+.agent-tool-read-media .agent-tool-read-media-request,
+.agent-tool-generate-media .agent-tool-generate-media-request,
+.agent-tool-subagent-wait .agent-tool-subagent-wait-request,
+.agent-tool-web-search .agent-tool-web-search-request,
+.agent-tool-web-fetch .agent-tool-web-fetch-request,
+.agent-tool-mcp-call .agent-tool-mcp-call-request {
+  color: var(--text);
+}
+.agent-tool-file-read .agent-tool-file-read-result,
+.agent-tool-file-write .agent-tool-file-write-result,
+.agent-tool-file-patch .agent-tool-file-patch-result,
+.agent-tool-file-list .agent-tool-file-list-result,
+.agent-tool-grep .agent-tool-grep-result,
+.agent-tool-find-file .agent-tool-find-file-result,
+.agent-tool-ask-question .agent-tool-ask-question-result,
+.agent-tool-exec .agent-tool-exec-result,
+.agent-tool-read-media .agent-tool-read-media-result,
+.agent-tool-generate-media .agent-tool-generate-media-result,
+.agent-tool-subagent-wait .agent-tool-subagent-wait-result,
+.agent-tool-web-search .agent-tool-web-search-result,
+.agent-tool-web-fetch .agent-tool-web-fetch-result,
+.agent-tool-mcp-call .agent-tool-mcp-call-result {
+  background: rgba(16, 25, 29, .78);
+}
+
+/* ---- read_media output attachments ---- */
+.agent-tool-read-media-attachments {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
+  padding: 8px 10px 10px;
+}
+.agent-tool-attachment-item {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(7, 13, 17, .5);
+}
+.agent-tool-attachment-item img,
+.agent-tool-attachment-item video {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  object-fit: contain;
+  background: #05090c;
+}
+.agent-tool-attachment-item audio {
+  display: block;
+  width: calc(100% - 16px);
+  margin: 10px 8px 4px;
+}
+.agent-tool-attachment-name,
+.agent-tool-attachment-link {
+  display: block;
+  overflow: hidden;
+  padding: 6px 8px;
+  color: var(--text-faint);
+  font: 10px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-tool-attachment-link { color: var(--accent); }
+.agent-tool-attachment-kind {
+  display: inline-block;
+  margin: 8px 8px 0;
+  color: var(--text-faint);
+  font: 9px var(--font-mono);
+  letter-spacing: .08em;
+}
+.agent-tool-attachment-text {
+  max-height: 160px;
+  margin: 0 8px 8px;
+  overflow: auto;
+  color: var(--text);
+  font: 10px/1.45 var(--font-mono);
+  white-space: pre-wrap;
+}
+
+/* ---- tools whose cards are hidden/standalone but still contract-addressable ---- */
+.agent-tool-delegate-request,
+.agent-tool-subagent-request { color: var(--text); }
+.agent-tool-delegate-result,
+.agent-tool-subagent-result { color: var(--text-faint); }
+
 /* ---- exec ---- */
 .agent-tool-exec-path {
   padding: 6px 10px 4px 10px !important;

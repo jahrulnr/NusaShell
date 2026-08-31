@@ -10,6 +10,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 const (
@@ -50,14 +51,14 @@ func (s *ExecutionScheduler) lockRun(id string) *sync.Mutex {
 
 func (s *ExecutionScheduler) now() time.Time {
 	if s.Clock == nil {
-		return time.Now()
+		return clock.NewTime().Time()
 	}
-	return s.Clock.Now()
+	return clock.NewTime(s.Clock.Now()).Time()
 }
 
 // StartRun persists a snapshot and begins scheduling.
 func (s *ExecutionScheduler) StartRun(ctx context.Context, run *domain.WorkflowRun) error {
-	run.StartRun(s.now().UTC())
+	run.StartRun(s.now())
 	if err := s.Runs.Create(ctx, run); err != nil {
 		return err
 	}
@@ -71,7 +72,7 @@ func (s *ExecutionScheduler) StartRun(ctx context.Context, run *domain.WorkflowR
 // Cancel still works: it sets terminal status, which the Tick loop observes
 // on its next iteration.
 func (s *ExecutionScheduler) StartRunAsync(ctx context.Context, run *domain.WorkflowRun) error {
-	run.StartRun(s.now().UTC())
+	run.StartRun(s.now())
 	if err := s.Runs.Create(ctx, run); err != nil {
 		return err
 	}
@@ -111,7 +112,7 @@ func (s *ExecutionScheduler) Tick(ctx context.Context, runID string) error {
 		}
 		dag, issues := domain.BuildDAG(run.Definition.Jobs)
 		if len(issues) > 0 {
-			run.FailDAG(s.now().UTC())
+			run.FailDAG(s.now())
 			_ = s.persist(ctx, run)
 			s.emit(contracts.EventCIRunFailed, map[string]any{"run_id": run.ID, "error": issues[0].Message})
 			s.notifyWebhook(ctx, run)
@@ -174,10 +175,10 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 		return s.failJob(ctx, run, jr, err.Error())
 	}
 	if !ok {
-		jr.Skip(s.now().UTC())
+		jr.Skip(s.now())
 		return s.persist(ctx, run)
 	}
-	t := s.now().UTC()
+	t := s.now()
 	jr.BeginRunning(t)
 	run.BeginRunning(t)
 	if err := s.persist(ctx, run); err != nil {
@@ -221,7 +222,7 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 				return s.parkWait(ctx, run, jr, sr, step)
 			}
 		}
-		sr.BeginRunning(s.now().UTC())
+		sr.BeginRunning(s.now())
 		_ = s.persist(ctx, run)
 		s.emit(contracts.EventCIStepStarted, map[string]any{"run_id": run.ID, "job_id": jobID, "step_id": sr.ID})
 
@@ -263,7 +264,7 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 				},
 			})
 		}
-		ft := s.now().UTC()
+		ft := s.now()
 		if err != nil || result.ExitCode != 0 || result.Error != "" {
 			errMsg := result.Error
 			if err != nil && errMsg == "" {
@@ -284,7 +285,7 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 		_ = s.persist(ctx, run)
 		s.emit(contracts.EventCIStepCompleted, map[string]any{"run_id": run.ID, "job_id": jobID, "step_id": sr.ID})
 	}
-	jr.Succeed(outputs, s.now().UTC())
+	jr.Succeed(outputs, s.now())
 	if err := s.persist(ctx, run); err != nil {
 		return err
 	}
@@ -349,7 +350,7 @@ func (s *ExecutionScheduler) runUses(ctx context.Context, run *domain.WorkflowRu
 }
 
 func (s *ExecutionScheduler) failJob(ctx context.Context, run *domain.WorkflowRun, jr *domain.JobRun, reason string) error {
-	jr.Fail(reason, s.now().UTC())
+	jr.Fail(reason, s.now())
 	dag, _ := domain.BuildDAG(run.Definition.Jobs)
 	cont := false
 	if j := run.Definition.JobByID(jr.JobID); j != nil {
@@ -373,7 +374,7 @@ func (s *ExecutionScheduler) failJob(ctx context.Context, run *domain.WorkflowRu
 
 func (s *ExecutionScheduler) maybeFinalize(ctx context.Context, run *domain.WorkflowRun) error {
 	sum := run.Summary()
-	run.Finalize(s.now().UTC(), sum)
+	run.Finalize(s.now(), sum)
 	if run.Status == domain.StatusFailed {
 		s.emit(contracts.EventCIRunFailed, map[string]any{"run_id": run.ID})
 	} else if run.Status == domain.StatusSuccess {
@@ -417,7 +418,7 @@ func (s *ExecutionScheduler) Cancel(ctx context.Context, runID string) error {
 		delete(s.cancelOwner, id)
 	}
 	s.mu.Unlock()
-	run.Cancel(s.now().UTC())
+	run.Cancel(s.now())
 	_ = s.persist(ctx, run)
 	s.emit(contracts.EventCIRunCancelled, map[string]any{"run_id": run.ID})
 	return nil
@@ -477,7 +478,7 @@ func NewWorkflowRun(def domain.WorkflowDefinition, requestedBy string) *domain.W
 		Workspace:   def.Source.Workspace,
 		Definition:  def,
 		RequestedBy: requestedBy,
-		CreatedAt:   time.Now().UTC(),
+		CreatedAt:   clock.NewTime().Time(),
 	}
 	if run.WorkflowID == "" {
 		run.WorkflowID = "pipeline"

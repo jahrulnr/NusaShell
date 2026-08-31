@@ -12,6 +12,7 @@ import (
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/pkg/nonce"
+	clock "nusashell/pkg/time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -127,7 +128,7 @@ func (a *App) acpAgentDTO(agent *domain.AcpAgent) contracts.AcpAgentDTO {
 		},
 	}
 	if !agent.UpdatedAt.IsZero() {
-		dto.UpdatedAt = agent.UpdatedAt.Format(timeRFC3339)
+		dto.UpdatedAt = clock.NewTime(agent.UpdatedAt).Format(timeRFC3339)
 	}
 	for _, m := range agent.ModeRiskMappings {
 		dto.ModeRiskMappings = append(dto.ModeRiskMappings, contracts.AcpModeRiskDTO{ModeID: m.ModeID, Tier: string(m.Tier)})
@@ -169,13 +170,13 @@ func acpRunDTO(run *domain.AcpRun) contracts.AcpRunDTO {
 		QueuedSteer:          run.QueuedSteer,
 	}
 	if !run.StartedAt.IsZero() {
-		dto.StartedAt = run.StartedAt.Format(timeRFC3339)
+		dto.StartedAt = clock.NewTime(run.StartedAt).Format(timeRFC3339)
 	}
 	if !run.UpdatedAt.IsZero() {
-		dto.UpdatedAt = run.UpdatedAt.Format(timeRFC3339)
+		dto.UpdatedAt = clock.NewTime(run.UpdatedAt).Format(timeRFC3339)
 	}
 	if !run.FinishedAt.IsZero() {
-		dto.EndedAt = run.FinishedAt.Format(timeRFC3339)
+		dto.EndedAt = clock.NewTime(run.FinishedAt).Format(timeRFC3339)
 	}
 	for _, m := range run.AvailableModes {
 		dto.AvailableModes = append(dto.AvailableModes, contracts.AcpModeDTO{
@@ -189,7 +190,7 @@ func acpRunDTO(run *domain.AcpRun) contracts.AcpRunDTO {
 			ToolKind: c.ToolKind, ToolStatus: c.ToolStatus,
 		}
 		if !c.At.IsZero() {
-			chunk.At = c.At.Format(timeRFC3339)
+			chunk.At = clock.NewTime(c.At).Format(timeRFC3339)
 		}
 		dto.Transcript = append(dto.Transcript, chunk)
 	}
@@ -200,7 +201,7 @@ func acpRunDTO(run *domain.AcpRun) contracts.AcpRunDTO {
 			Paths: p.Paths, PathCount: len(p.Paths),
 		}
 		if !p.RequestedAt.IsZero() {
-			dto.PendingPermission.RequestedAt = p.RequestedAt.Format(timeRFC3339)
+			dto.PendingPermission.RequestedAt = clock.NewTime(p.RequestedAt).Format(timeRFC3339)
 		}
 		for _, o := range p.Options {
 			dto.PendingPermission.Options = append(dto.PendingPermission.Options, contracts.AcpPermissionOptionDTO{
@@ -270,7 +271,7 @@ func (a *App) handleAcpAgentsSave(req contracts.AcpAgentSaveRequest) (any, *cont
 			agent.ModeRiskMappings = append(agent.ModeRiskMappings, domain.ModeRiskMapping{ModeID: m.ModeID, Tier: tier})
 		}
 	}
-	agent.UpdatedAt = time.Now().UTC()
+	agent.UpdatedAt = clock.NewTime().Time()
 	if err := a.AcpAgents.Save(agent); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -304,7 +305,7 @@ func (a *App) handleAcpAgentsProbe(req contracts.AcpAgentIDRequest) (any, *contr
 		a.log("warn", "acp", "probe failed: %s: %v", agent.Name, err)
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
 	}
-	updated.UpdatedAt = time.Now().UTC()
+	updated.UpdatedAt = clock.NewTime().Time()
 	if err := a.AcpAgents.Save(&updated); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -325,7 +326,7 @@ func (a *App) handleAcpAgentsAuthenticate(req contracts.AcpAuthenticateRequest) 
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
 	}
 	agent.AuthMethodID = req.MethodID
-	agent.UpdatedAt = time.Now().UTC()
+	agent.UpdatedAt = clock.NewTime().Time()
 	if err := a.AcpAgents.Save(agent); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -343,7 +344,7 @@ func (a *App) handleAcpAgentsRefreshCatalog(req contracts.AcpAgentIDRequest) (an
 	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
 	}
-	updated.UpdatedAt = time.Now().UTC()
+	updated.UpdatedAt = clock.NewTime().Time()
 	if err := a.AcpAgents.Save(&updated); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -683,20 +684,26 @@ func withParentPlan(prompt, planPath, brief, workspace string) string {
 	sb.WriteString("\n\n")
 	if planPath != "" {
 		if _, err := os.Stat(planPath); err == nil {
-			sb.WriteString("Parent plan file (read this first): " + planPath + "\n")
+			sb.WriteString("Parent plan file (read this first): ")
+			sb.WriteString(planPath)
+			sb.WriteString("\n")
 			if workspace != "" && !strings.HasPrefix(planPath, workspace+string(os.PathSeparator)) {
 				// The plan file lives outside the subagent workspace;
 				// include a summary as a fallback in case the sandbox
 				// refuses to read it.
 				if summary := domain.SummarizeBrief(brief); summary != "" {
-					sb.WriteString("\nParent plan summary (in case the file is unreadable):\n" + summary + "\n")
+					sb.WriteString("\nParent plan summary (in case the file is unreadable):\n")
+					sb.WriteString(summary)
+					sb.WriteString("\n")
 				}
 			}
 			return sb.String()
 		}
 	}
 	if summary := domain.SummarizeBrief(brief); summary != "" {
-		sb.WriteString("Parent plan summary:\n" + summary + "\n")
+		sb.WriteString("Parent plan summary:\n")
+		sb.WriteString(summary)
+		sb.WriteString("\n")
 	}
 	return sb.String()
 }
@@ -856,6 +863,7 @@ func (a *App) completeSubagentRunLocked(conversationID, toolCallID string, statu
 		return err
 	}
 	conv := repo.Conversation()
+	toolArgs := toolCallArgsFromConversation(conv, toolCallID)
 	if toolCallID != "" {
 		conv = a.updateToolResult(conv, "", toolCallID, status, domain.SubagentBriefResult(run), nil)
 	}
@@ -878,8 +886,9 @@ func (a *App) completeSubagentRunLocked(conversationID, toolCallID string, statu
 			ToolCallID:     toolCallID,
 			Name:           "subagent",
 			Status:         string(status),
+			Args:           toolArgsRaw(toolArgs),
 			Output:         domain.SubagentBriefResult(run),
-			Presentation:   buildToolPresentation("subagent", "", status, domain.SubagentBriefResult(run)),
+			Presentation:   buildToolPresentation("subagent", toolArgs, status, domain.SubagentBriefResult(run)),
 		})
 	}
 	return nil
@@ -893,7 +902,7 @@ func (a *App) subagentResultMessage(run *domain.AcpRun, outputPath string, statu
 	return domain.Message{
 		ID:        domain.NewID(domain.IDPrefixMsg),
 		Role:      domain.RoleAssistant,
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: clock.NewTime().Time(),
 		Status:    domain.StatusDone,
 		ToolCalls: []domain.ToolCall{{
 			ID:     domain.SubagentResultPrefix + nonce.Random(),
@@ -946,7 +955,7 @@ func (a *App) triggerBackgroundCompletionTurn(conversationID string) {
 		return
 	}
 
-	now := time.Now().UTC()
+	now := clock.NewTime().Time()
 	asstMsg := domain.Message{
 		ID:         domain.NewID(domain.IDPrefixMsg),
 		Role:       domain.RoleAssistant,

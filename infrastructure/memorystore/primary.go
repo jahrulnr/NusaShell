@@ -13,11 +13,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // ---- Primary store (primary.md) ----
@@ -136,7 +136,7 @@ func (p *Primary) Update(entries []domain.PrimaryEntry) error {
 	p.entry = domain.PrimaryEntry{
 		ID:        primaryID(content),
 		Content:   content,
-		UpdatedAt: time.Now().UTC(),
+		UpdatedAt: clock.NewTime().Time(),
 	}
 	err := p.writeFile()
 	p.mu.Unlock()
@@ -165,7 +165,7 @@ func (p *Primary) Replace(oldText, content string) error {
 	p.entry = domain.PrimaryEntry{
 		ID:        primaryID(newBody),
 		Content:   newBody,
-		UpdatedAt: time.Now().UTC(),
+		UpdatedAt: clock.NewTime().Time(),
 	}
 	return p.writeFile()
 }
@@ -176,7 +176,7 @@ func (p *Primary) Replace(oldText, content string) error {
 // hold p.mu.
 func (p *Primary) writeFile() error {
 	fm := primaryFrontmatter{
-		LastUpdated: time.Now().UTC().Format(time.RFC3339),
+		LastUpdated: clock.NewTime().RFC3339(),
 		Version:     PrimaryVersion,
 	}
 	fmBytes, _ := yaml.Marshal(fm)
@@ -196,7 +196,7 @@ func (p *Primary) writeFile() error {
 // followed by an empty body.
 func emptyPrimaryFile() string {
 	fm := primaryFrontmatter{
-		LastUpdated: time.Now().UTC().Format(time.RFC3339),
+		LastUpdated: clock.NewTime().RFC3339(),
 		Version:     PrimaryVersion,
 	}
 	fmBytes, _ := yaml.Marshal(fm)
@@ -231,7 +231,7 @@ func parsePrimary(raw string) (domain.PrimaryEntry, error) {
 	return domain.PrimaryEntry{
 		ID:        primaryID(body),
 		Content:   body,
-		UpdatedAt: time.Now().UTC(),
+		UpdatedAt: clock.NewTime().Time(),
 	}, nil
 }
 

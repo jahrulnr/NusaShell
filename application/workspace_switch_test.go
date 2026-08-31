@@ -219,10 +219,19 @@ func TestAddTurnMessagesInjectsWorkspaceSwitchNotice(t *testing.T) {
 	if ann.Status != domain.ToolOK {
 		t.Fatalf("announcement status = %s", ann.Status)
 	}
-	for _, want := range []string{`"type":"workspace_changed"`, oldWS, newWS} {
-		if !strings.Contains(ann.Args, want) {
-			t.Fatalf("announcement args %s must contain %s", ann.Args, want)
-		}
+	var payload struct {
+		Type string `json:"type"`
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if err := json.Unmarshal([]byte(ann.Args), &payload); err != nil {
+		t.Fatalf("announcement args must be JSON: %v (args=%s)", err, ann.Args)
+	}
+	// Compare the parsed fields, not raw substrings: args is JSON-escaped,
+	// so a Windows path (backslashes) in the raw text differs from the
+	// plain path value (e.g. C:\\Users vs C:\Users).
+	if payload.Type != "workspace_changed" || payload.From != oldWS || payload.To != newWS {
+		t.Fatalf("announcement args = type %q from %q to %q, want type=workspace_changed from=%q to=%q", payload.Type, payload.From, payload.To, oldWS, newWS)
 	}
 	if !strings.Contains(ann.Output, oldWS) || !strings.Contains(ann.Output, newWS) {
 		t.Fatalf("announcement output must name both paths: %q", ann.Output)

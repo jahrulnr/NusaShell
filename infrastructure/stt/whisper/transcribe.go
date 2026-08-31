@@ -12,6 +12,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/infrastructure/nusatemp"
+	clock "nusashell/pkg/time"
 )
 
 // TranscribeOffline runs one local inference: the audio bytes are decoded to
@@ -75,9 +76,9 @@ func (e *Engine) TranscribeOffline(ctx context.Context, req application.OfflineS
 	cmd := exec.CommandContext(timeoutCtx, bin, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	start := time.Now()
+	start := clock.NewTime().Time()
 	err = cmd.Run()
-	elapsed := time.Since(start)
+	elapsed := clock.NewTime().Since(start)
 
 	if timeoutCtx.Err() == context.DeadlineExceeded {
 		return "", fmt.Errorf("whisper: timed out after %s of inference", elapsed.Round(time.Millisecond))

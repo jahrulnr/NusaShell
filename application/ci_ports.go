@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // Clock is injected so schedulers are deterministic in tests.
@@ -17,7 +18,7 @@ type Clock interface {
 // SystemClock is the production clock.
 type SystemClock struct{}
 
-func (SystemClock) Now() time.Time { return time.Now() }
+func (SystemClock) Now() time.Time { return clock.NewTime().Time() }
 
 // FrozenClock is a test clock.
 type FrozenClock struct{ T time.Time }

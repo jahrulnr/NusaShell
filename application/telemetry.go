@@ -8,6 +8,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // dispatchTelemetry routes telemetry.* RPC methods to their handlers.
@@ -56,7 +57,7 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 	// Determine the cutoff date for the lookback window.
 	var cutoff time.Time
 	if req.Minutes > 0 {
-		cutoff = time.Now().Add(-time.Duration(req.Minutes) * time.Minute)
+		cutoff = clock.NewTime().Time().Add(-time.Duration(req.Minutes) * time.Minute)
 	}
 
 	// Determine bucket size based on the lookback window. Shorter windows
@@ -209,7 +210,7 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 
 			// Bucket by dynamic size.
 			bucketStart := t.Truncate(bucketSize)
-			bk := bucketKey(bucketStart.Unix())
+			bk := bucketKey(clock.NewTime(bucketStart).Epoch())
 			da, ok := buckets[bk]
 			if !ok {
 				da = &dayAgg{
@@ -254,13 +255,13 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 		CacheHitPercent:  roundCost(cacheHitPercent),
 	}
 	if !earliest.IsZero() {
-		summary.PeriodStart = earliest.UTC().Format(time.RFC3339)
-		summary.PeriodEnd = latest.UTC().Format(time.RFC3339)
+		summary.PeriodStart = clock.NewTime(earliest).RFC3339()
+		summary.PeriodEnd = clock.NewTime(latest).RFC3339()
 	}
 
 	// Build series. Fill empty buckets between cutoff and now so the chart
 	// always shows the full selected range, not just active periods.
-	now := time.Now()
+	now := clock.NewTime().Time()
 	var startBucket time.Time
 	if !cutoff.IsZero() {
 		startBucket = cutoff.Truncate(bucketSize)
@@ -274,7 +275,7 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 	series := make([]contracts.TelemetryDayBucketDTO, 0)
 	if !startBucket.IsZero() {
 		for bt := startBucket; !bt.After(endBucket); bt = bt.Add(bucketSize) {
-			bk := bucketKey(bt.Unix())
+			bk := bucketKey(clock.NewTime(bt).Epoch())
 			da := buckets[bk]
 			bucket := contracts.TelemetryDayBucketDTO{
 				Date: formatBucketLabel(bt, bucketSize),
@@ -422,10 +423,10 @@ func formatBucketLabel(t time.Time, bucketSize time.Duration) string {
 	// Truncate to bucket boundary (already done by caller, but be safe).
 	t = t.Truncate(bucketSize)
 	if bucketSize >= 24*time.Hour {
-		return t.Format("2006-01-02")
+		return clock.NewTime(t).Format("2006-01-02")
 	}
 	// Sub-day: show HH:MM.
-	return t.Format("15:04")
+	return clock.NewTime(t).Format("15:04")
 }
 
 // (unused import guard: strings is used by future filter helpers)

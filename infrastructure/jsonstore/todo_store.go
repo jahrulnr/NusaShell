@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // TodoStore is a durable, per-conversation todo checklist store backed by a
@@ -164,7 +164,7 @@ func (t *TodoStore) writePlanFile(path, conversationID, brief string) {
 	var sb strings.Builder
 	sb.WriteString("---\n")
 	sb.WriteString("conversation_id: " + conversationID + "\n")
-	sb.WriteString("updated_at: " + time.Now().UTC().Format(time.RFC3339) + "\n")
+	sb.WriteString("updated_at: " + clock.NewTime().RFC3339() + "\n")
 	sb.WriteString("---\n\n")
 	sb.WriteString(strings.TrimRight(brief, "\n"))
 	sb.WriteString("\n")

@@ -50,6 +50,7 @@ func TestRosterUniqueness(t *testing.T) {
 		MethodConversationsRename, MethodConversationsDelete, MethodConversationsPickWorkspace,
 		MethodConversationsChunk, MethodTurnsStart, MethodTurnsStop,
 		MethodTurnsRetry, MethodTurnsSteer, MethodTurnsCancelSteer, MethodTurnsActive,
+		MethodToolContracts,
 		MethodProvidersList, MethodProvidersSave, MethodProvidersDelete, MethodProvidersTest,
 		MethodProvidersImport, MethodModelsList,
 		MethodSkillsList, MethodSkillsRead, MethodSkillsSave, MethodSkillsDelete,
@@ -247,7 +248,7 @@ func TestEventFieldNames(t *testing.T) {
 	}
 
 	b, _ = json.Marshal(ToolCompletedEvent{
-		RunID: "r", ConversationID: "c", ToolCallID: "t", Name: "generate_image", Status: "ok",
+		RunID: "r", ConversationID: "c", ToolCallID: "t", Name: "generate_image", Args: json.RawMessage(`{"prompt":"x"}`), Status: "ok",
 		Presentation: &ToolPresentationDTO{
 			Variant: "media", Action: "Image generated", Request: "generate_image(...)",
 			Result: ToolPresentationResultDTO{Format: "status", Summary: "1 image"},
@@ -257,7 +258,7 @@ func TestEventFieldNames(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"tool_call_id", "attachments", "presentation"} {
+	for _, k := range []string{"tool_call_id", "args", "attachments", "presentation"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("missing field %q in ToolCompletedEvent JSON", k)
 		}
@@ -267,13 +268,13 @@ func TestEventFieldNames(t *testing.T) {
 	}
 
 	b, _ = json.Marshal(RoundDeltaFrame{
-		Seq: 1, Kind: RoundDeltaTool, ToolCallID: "t", Name: "exec", Text: "line1\n",
+		Seq: 1, Kind: RoundDeltaTool, ToolCallID: "t", Name: "exec", Args: json.RawMessage(`{"command":"printf hi"}`), Text: "line1\n",
 		Presentation: &ToolPresentationDTO{Variant: "terminal", Action: "Running command", Result: ToolPresentationResultDTO{Format: "terminal"}},
 	})
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"seq", "kind", "tool_call_id", "name", "text", "presentation"} {
+	for _, k := range []string{"seq", "kind", "tool_call_id", "name", "args", "text", "presentation"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("missing field %q in RoundDeltaFrame JSON", k)
 		}

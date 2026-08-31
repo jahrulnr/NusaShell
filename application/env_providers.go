@@ -3,9 +3,9 @@ package application
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // envProviderSpec describes a provider whose API key can be supplied through
@@ -73,7 +73,7 @@ func (a *App) SeedProvidersFromEnv(getenv func(string) string) []string {
 				BaseURL:   spec.BaseURL,
 				Enabled:   true,
 				HasAPIKey: true,
-				UpdatedAt: time.Now().UTC(),
+				UpdatedAt: clock.NewTime().Time(),
 			}
 			if err := a.Providers.Save(p); err != nil {
 				a.log("warn", "ai", "env seed: failed to save provider %s: %v", spec.Name, err)
@@ -96,7 +96,7 @@ func (a *App) SeedProvidersFromEnv(getenv func(string) string) []string {
 			continue
 		}
 		existing.HasAPIKey = true
-		existing.UpdatedAt = time.Now().UTC()
+		existing.UpdatedAt = clock.NewTime().Time()
 		if err := a.Providers.Save(existing); err != nil {
 			a.log("warn", "ai", "env seed: failed to persist %s: %v", spec.Name, err)
 			continue

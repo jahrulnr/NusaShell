@@ -1,6 +1,7 @@
 package application
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -132,6 +133,7 @@ func TestCompleteSubagentRun(t *testing.T) {
 				ID: "m2", Role: domain.RoleAssistant, Status: domain.StatusDone,
 				ToolCalls: []domain.ToolCall{{
 					ID: "call_parent", Name: "subagent", Status: domain.ToolRunning,
+					Args:   `{"prompt":"inspect the workspace"}`,
 					Output: "---\nstatus: starting",
 				}},
 			},
@@ -139,6 +141,8 @@ func TestCompleteSubagentRun(t *testing.T) {
 	}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{Conversations: store, Bus: NewBus()}
+	_, events, unsubscribe := app.Bus.Subscribe()
+	defer unsubscribe()
 
 	run := &domain.AcpRun{
 		TaskState:        domain.TaskState[domain.AcpRunStatus]{ID: "run_xyz", Status: domain.AcpRunCompleted},
@@ -174,6 +178,24 @@ func TestCompleteSubagentRun(t *testing.T) {
 	}
 	if !strings.Contains(stc.Output, "done") {
 		t.Fatalf("synthetic tool call must carry the full result: %q", stc.Output)
+	}
+	select {
+	case event := <-events:
+		if event.Type != contracts.EventToolCompleted {
+			t.Fatalf("event type = %q, want %q", event.Type, contracts.EventToolCompleted)
+		}
+		var completed contracts.ToolCompletedEvent
+		if err := json.Unmarshal(event.Payload, &completed); err != nil {
+			t.Fatalf("decode tool completion: %v", err)
+		}
+		if string(completed.Args) != `{"prompt":"inspect the workspace"}` {
+			t.Fatalf("completion args = %s, want original subagent args", completed.Args)
+		}
+		if completed.Presentation == nil || !strings.Contains(completed.Presentation.Request, "inspect the workspace") {
+			t.Fatalf("completion presentation must retain the request: %+v", completed.Presentation)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("subagent completion event was not published")
 	}
 }
 

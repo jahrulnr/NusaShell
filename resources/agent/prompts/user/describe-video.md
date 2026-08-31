@@ -1,1 +1,1 @@
-Describe this video concisely. Focus on visible actions, people, settings, text on screen, and notable events. Keep it factual and under 300 words.
+Describe this video concisely. Focus on visible actions, people, settings, text on screen, and notable events. Keep it factual and under 600 words.

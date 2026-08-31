@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, setToolTerminalPresentation, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, renderCompactionStatus, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, setThinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming, captureDisclosureState, restoreDisclosureState } from '../js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, setToolTerminalPresentation, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, renderToolAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, renderCompactionStatus, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, setThinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming, captureDisclosureState, restoreDisclosureState } from '../js/views/agent/render.js';
+import { normalizeToolCall, registerToolContracts, toolContractFor, toolContractClass } from '../js/views/agent/tool-contracts.js';
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
   const previousDocument = globalThis.document;
@@ -317,6 +318,7 @@ test('exec and MCP calls render one event with a live terminal output panel', ()
     assert.ok(execJob.classList.contains('agent-tool-exec'));
     assert.ok(execJob.querySelector('.agent-tool-exec-path'));
     assert.ok(execJob.querySelector('.agent-tool-exec-output'));
+    assert.ok(execJob.querySelector('.agent-tool-exec-result'), 'terminal output has the contract result hook');
 
     const mcp = renderToolJob({
       id: 'm1', name: 'mcp_call', args: { ref: 'nusashell.files:read', arguments_json: '{"path":"/workspace/a.txt"}' },
@@ -365,6 +367,10 @@ test('built-in tool events isolate dressing classes so file_read does not share 
     assert.ok(read.querySelector('.agent-tool-file-read-result'));
     assert.ok(grep.querySelector('.agent-tool-grep-result'));
 
+    const predictable = renderToolJob({ name: 'automation_list', args: {}, status: 'ok', output: 'No automations.' });
+    assert.ok(predictable.querySelector('.agent-tool-automation-list-request'));
+    assert.ok(predictable.querySelector('.agent-tool-automation-list-result'));
+
     const ask = renderToolCallCard({
       name: 'ask_question',
       id: 'ask-1',
@@ -375,6 +381,60 @@ test('built-in tool events isolate dressing classes so file_read does not share 
     assert.equal(ask.dataset.tool, 'ask_question');
     assert.ok(ask.classList.contains('agent-ask-card'));
     assert.ok(ask.classList.contains('agent-tool-ask-question'));
+    assert.ok(ask.querySelector('.agent-tool-ask-question-result'), 'ask output has the contract result hook');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('backend tool contracts own card identity and normalize media output attachments', () => {
+  registerToolContracts({
+    version: 1,
+    tools: [
+      {
+        name: 'read_media', id: 'tool.read_media.v1', version: 1, css_class: 'agent-tool-read-media',
+        description: 'Read media',
+        input_schema: { type: 'object', properties: { file_path: { type: 'string' } } },
+        presentation: { variants: ['media'], formats: ['media'], request_fields: ['file_path'], result_fields: ['attachments'] },
+      },
+    ],
+  });
+  const normalized = normalizeToolCall({
+    name: 'read_media',
+    output_attachments: [{ type: 'image', name: 'a.png', file_path: '/tmp/a.png' }],
+    presentation: { variant: 'media', action: 'Media read', result: { format: 'media', summary: '1 image' } },
+  });
+  assert.equal(toolContractFor('read_media').css_class, 'agent-tool-read-media');
+  assert.equal(toolContractFor('read_media').description, 'Read media');
+  assert.equal(toolContractClass('weird__tool'), 'agent-tool-weird-tool');
+  assert.equal(normalized.presentation.contract.id, 'tool.read_media.v1');
+  assert.equal(normalized.presentation.result.attachments.length, 1);
+  const canonicalOnly = normalizeToolCall({
+    name: 'read_media',
+    output_attachments: [],
+    presentation: {
+      variant: 'media',
+      result: { format: 'media', attachments: [{ type: 'image', name: 'canonical.png', file_path: '/tmp/canonical.png' }] },
+    },
+  });
+  assert.equal(canonicalOnly.output_attachments.length, 1, 'canonical attachments fill an empty legacy array');
+
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const card = renderToolJob({
+      ...normalized,
+      args: { file_path: '/tmp/a.png' },
+      status: 'ok',
+    });
+    assert.equal(card.dataset.tool, 'read_media');
+    assert.equal(card.dataset.toolContract, 'tool.read_media.v1');
+    assert.ok(card.classList.contains('agent-tool-read-media'));
+    assert.ok(card.querySelector('.agent-tool-read-media-path'));
+    assert.ok(card.querySelector('.agent-tool-read-media-result'));
+    assert.ok(card.querySelector('.agent-tool-attachment-image img'));
+    assert.equal(card.querySelector('img').getAttribute('src'), '/local-file?path=%2Ftmp%2Fa.png');
   } finally {
     globalThis.document = previousDocument;
   }
@@ -422,6 +482,31 @@ test('late result presentation repaints the event result and keeps the raw reque
     assert.match(job.querySelector('.agent-tool-event-rows')?.textContent || '', /a\.txt/);
     const raw = job.querySelector('.agent-tool-event-details pre')?.textContent || '';
     assert.match(raw, /file_list\(/, 'raw request survives the late presentation patch');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('late terminal presentation preserves the contract-owned result hook', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const job = renderToolJob({
+      name: 'exec', args: { command: 'echo ok' }, status: 'running',
+      presentation: {
+        variant: 'terminal', action: 'Running command', request: 'exec(...)',
+        result: { format: 'terminal', text: '… waiting for output' },
+      },
+    });
+    setToolTerminalPresentation(job, {
+      variant: 'terminal', action: 'Command completed', request: 'exec(...)',
+      result: { format: 'terminal', summary: 'ok', text: 'ok' },
+    });
+    const output = job.querySelector('.agent-tool-terminal-output');
+    assert.ok(output, 'terminal output remains mounted');
+    assert.ok(output.classList.contains('agent-tool-exec-result'), 'backend tool result hook remains mounted');
+    assert.ok(output.classList.contains('agent-tool-result'), 'generic result hook remains mounted');
   } finally {
     globalThis.document = previousDocument;
   }
@@ -503,6 +588,9 @@ test('unified generate_media uses the presentation metadata and media card', () 
       output_attachments: [{ type: 'image', name: 'harbor.png', media_type: 'image/png', file_path: '/tmp/harbor.png' }],
     });
     assert.ok(card.classList.contains('agent-genimage-card'));
+    assert.ok(card.classList.contains('agent-tool-generate-media'));
+    assert.ok(card.querySelector('.agent-tool-generate-media-request'));
+    assert.ok(card.querySelector('.agent-tool-generate-media-result'));
     assert.equal(card.querySelectorAll('.agent-tool-terminal').length, 0);
     assert.match(card.textContent, /image-model/);
     assert.ok(card.querySelector('img'));
@@ -759,6 +847,9 @@ test('renderToolCallCard renders an audio card for show(op=audio)', () => {
     });
     assert.equal(card.classList.contains('agent-genaudio-card'), true,
       'audio card carries its own class for parallel layout with image');
+    assert.ok(card.classList.contains('agent-tool-show'));
+    assert.ok(card.querySelector('.agent-tool-show-request'));
+    assert.ok(card.querySelector('.agent-tool-show-result'));
     const audio = card.querySelector('audio');
     assert.ok(audio, 'audio card renders an <audio> element');
     assert.equal(audio.getAttribute('controls'), '');

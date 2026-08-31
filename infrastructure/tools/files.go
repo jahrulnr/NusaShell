@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"nusashell/application"
+	clock "nusashell/pkg/time"
 )
 
 const (
@@ -226,14 +227,17 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			autoHeal = value
 		}
 		if count == 0 && autoHeal {
-			span, candidates := findWhitespacePatch(raw, oldStr)
+			span, candidates, candidatesLines := findWhitespacePatch(raw, oldStr)
+			// findWhitespacePatch early-returns on the second candidate, so
+			// candidates is 0, 1, or 2: 1 heals, 2 is ambiguous, and 0 falls
+			// through to the rich PATCH_CONTEXT_NOT_FOUND diagnostic below.
 			switch candidates {
 			case 1:
 				healed = true
 				healedStart, healedEnd = span.start, span.end
 				newStr = preserveFileLineEndings(newStr, whitespace.lineEnding)
 			case 2:
-				return true, "", fmt.Errorf("PATCH_CONTEXT_AMBIGUOUS: old_string has no exact match and matches multiple locations after whitespace normalization in %s (current_sha256=%s %s); re-read the file or pass auto_heal=false", path, currentSHA, whitespace.summary())
+				return true, "", fmt.Errorf("PATCH_CONTEXT_AMBIGUOUS: old_string has no exact match and matches %d locations after whitespace normalization in %s (current_sha256=%s %s candidate_lines=%v); re-read the file or pass auto_heal=false", candidates, path, currentSHA, whitespace.summary(), candidatesLines)
 			}
 		}
 		if count == 0 && !healed {
@@ -291,7 +295,7 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			return true, "", err
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-		now := time.Now()
+		now := clock.NewTime().Time()
 		lines := make([]string, 0, len(entries))
 		var totalSize int64
 		for _, e := range entries {
@@ -393,7 +397,7 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			"size":     info.Size(),
 			"dir":      info.IsDir(),
 			"mode":     info.Mode().String(),
-			"modified": info.ModTime().UTC().Format(time.RFC3339),
+			"modified": clock.NewTime(info.ModTime()).Format(time.RFC3339),
 		}
 		return true, yamlBlock(meta), nil
 	}
@@ -523,20 +527,21 @@ func normalizePatchText(s string) normalizedPatchText {
 	return normalized
 }
 
-func findWhitespacePatch(raw []byte, oldString string) (patchSpan, int) {
+func findWhitespacePatch(raw []byte, oldString string) (patchSpan, int, []int) {
 	if !strings.ContainsAny(string(raw), "\t\r") && !strings.ContainsAny(oldString, "\t\r") {
-		return patchSpan{}, 0
+		return patchSpan{}, 0, nil
 	}
 	needle := normalizePatchText(oldString)
 	if needle.text == "" || !patchTextHasNonWhitespace(needle.text) {
-		return patchSpan{}, 0
+		return patchSpan{}, 0, nil
 	}
 	haystack := normalizePatchText(string(raw))
 	if len(needle.text) > len(haystack.text) {
-		return patchSpan{}, 0
+		return patchSpan{}, 0, nil
 	}
 
 	var match patchSpan
+	var starts []int
 	count := 0
 	for from := 0; from <= len(haystack.text)-len(needle.text); {
 		idx := strings.Index(haystack.text[from:], needle.text)
@@ -545,16 +550,27 @@ func findWhitespacePatch(raw []byte, oldString string) (patchSpan, int) {
 		}
 		start := from + idx
 		end := start + len(needle.text)
+		starts = append(starts, haystack.start[start])
 		count++
 		if count == 1 {
 			match = patchSpan{start: haystack.start[start], end: haystack.end[end-1]}
 		}
 		if count >= 2 {
-			return match, count
+			return match, count, patchLineNumbers(raw, starts)
 		}
 		from = end
 	}
-	return match, count
+	return match, count, patchLineNumbers(raw, starts)
+}
+
+// patchLineNumbers converts candidate byte offsets into 1-based line
+// numbers so an ambiguous patch error can point the agent at each location.
+func patchLineNumbers(raw []byte, offsets []int) []int {
+	lines := make([]int, 0, len(offsets))
+	for _, off := range offsets {
+		lines = append(lines, 1+bytes.Count(raw[:off], []byte{'\n'}))
+	}
+	return lines
 }
 
 func patchTextHasNonWhitespace(s string) bool {

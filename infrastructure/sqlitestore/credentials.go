@@ -8,7 +8,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"time"
+
+	clock "nusashell/pkg/time"
 
 	_ "modernc.org/sqlite"
 )
@@ -66,7 +67,7 @@ func (c *CredentialStore) Set(providerID, key string) error {
 		INSERT INTO credentials (provider_id, api_key, updated_at)
 		VALUES (?, ?, ?)
 		ON CONFLICT(provider_id) DO UPDATE SET api_key = excluded.api_key, updated_at = excluded.updated_at`,
-		providerID, key, time.Now().UTC().Format(time.RFC3339),
+		providerID, key, clock.NewTime().RFC3339(),
 	)
 	return err
 }

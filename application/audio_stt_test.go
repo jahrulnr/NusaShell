@@ -155,8 +155,12 @@ type fakeSpeechTranscriber struct {
 
 func (f *fakeSpeechTranscriber) Transcribe(ctx context.Context, req STTRequest) (string, error) {
 	body := &strings.Builder{}
-	body.WriteString("--x\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n" + req.Model + "\r\n")
-	body.WriteString("--x\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + req.Filename + "\"\r\n\r\n")
+	body.WriteString("--x\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n")
+	body.WriteString(req.Model)
+	body.WriteString("\r\n")
+	body.WriteString("--x\r\nContent-Disposition: form-data; name=\"file\"; filename=\"")
+	body.WriteString(req.Filename)
+	body.WriteString("\"\r\n\r\n")
 	body.Write(req.Data)
 	body.WriteString("\r\n--x--\r\n")
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, f.base+"/audio/transcriptions", strings.NewReader(body.String()))

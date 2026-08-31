@@ -10,6 +10,7 @@ import (
 	"nusashell/application/service/textsim"
 	"nusashell/domain"
 	"nusashell/infrastructure/jsonstore"
+	clock "nusashell/pkg/time"
 )
 
 // SearchResult is a ranked search hit from the learning search layer.
@@ -219,7 +220,7 @@ func (s *LearningSearcher) applyTemporalDecay(fused []rrfResult, skills []*domai
 	if len(fused) == 0 {
 		return fused
 	}
-	now := time.Now()
+	now := clock.NewTime().Time()
 	halfLifeDays := 30.0 // 30-day half-life
 	decayFactor := 0.15  // max 15% boost
 

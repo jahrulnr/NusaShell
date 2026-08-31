@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	clock "nusashell/pkg/time"
 )
 
 func TestYAMLV3PanicsOnNilTimePointerInMap(t *testing.T) {
@@ -41,7 +43,7 @@ func TestBlockMarshalsTimePointerInMapAsRFC3339(t *testing.T) {
 	if strings.Contains(got, "marshal error") {
 		t.Fatalf("Block must not panic on non-nil *time.Time in map:\n%s", got)
 	}
-	if !strings.Contains(got, "2026-08-31T02:00:00Z") {
+	if !strings.Contains(got, clock.NewTime(wake).RFC3339()) {
 		t.Fatalf("expected RFC3339 wake_at, got:\n%s", got)
 	}
 }

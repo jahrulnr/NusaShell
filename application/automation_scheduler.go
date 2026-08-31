@@ -8,6 +8,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // AutomationScheduler wakes time-based triggers, consumes events, and
@@ -27,9 +28,9 @@ type AutomationScheduler struct {
 
 func (s *AutomationScheduler) now() time.Time {
 	if s.Clock == nil {
-		return time.Now()
+		return clock.NewTime().Time()
 	}
-	return s.Clock.Now()
+	return clock.NewTime(s.Clock.Now()).Time()
 }
 
 // EnableWorkflow persists schedules/subscriptions for an enabled workflow.
@@ -73,7 +74,7 @@ func (s *AutomationScheduler) EnableWorkflow(ctx context.Context, w *domain.Work
 		rec := &domain.ScheduleRecord{
 			ID: id, WorkflowID: w.ID, TriggerID: id, Kind: t.Kind,
 			RunAt: *next, NextRunAt: *next, Timezone: t.Timezone,
-			Status: domain.SchedulePending, CreatedAt: now.UTC(),
+			Status: domain.SchedulePending, CreatedAt: now,
 		}
 		if err := s.Schedules.Put(ctx, rec); err != nil {
 			return err
@@ -178,7 +179,7 @@ func (s *AutomationScheduler) IngestEvent(ctx context.Context, ev domain.Event) 
 		ev.ID = domain.NewID(domain.IDPrefixEvt)
 	}
 	if ev.Time.IsZero() {
-		ev.Time = s.now().UTC()
+		ev.Time = s.now()
 	}
 	if s.Events != nil {
 		_ = s.Events.PutEvent(ctx, &ev)

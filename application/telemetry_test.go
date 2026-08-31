@@ -6,10 +6,11 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 func TestHandleTelemetryReportAggregatesUsage(t *testing.T) {
-	now := time.Now().UTC()
+	now := clock.NewTime().Time()
 	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
 		"conv_1": {
 			ID: "conv_1",
@@ -323,15 +324,18 @@ func TestChooseBucketSize(t *testing.T) {
 func TestFormatBucketLabel(t *testing.T) {
 	// Daily bucket → YYYY-MM-DD
 	daily := chooseBucketSize(0)
-	got := formatBucketLabel(time.Date(2026, 8, 17, 14, 30, 0, 0, time.UTC), daily)
+	dailyAt := clock.NewTime(time.Date(2026, 8, 17, 14, 30, 0, 0, time.UTC)).Time()
+	got := formatBucketLabel(dailyAt, daily)
 	if got != "2026-08-17" {
 		t.Fatalf("daily label = %q, want 2026-08-17", got)
 	}
 	// 5-min bucket → HH:MM
 	fiveMin := chooseBucketSize(180)
-	got = formatBucketLabel(time.Date(2026, 8, 17, 14, 32, 0, 0, time.UTC), fiveMin)
-	// 14:32 truncated to 5-min bucket = 14:30
-	if got != "14:30" {
-		t.Fatalf("5m label = %q, want 14:30", got)
+	fiveMinAt := clock.NewTime(time.Date(2026, 8, 17, 14, 32, 0, 0, time.UTC)).Time()
+	got = formatBucketLabel(fiveMinAt, fiveMin)
+	// 14:32 truncated to 5-min bucket = 14:30 in machine time.
+	wantFiveMin := clock.NewTime(fiveMinAt.Truncate(fiveMin)).Format("15:04")
+	if got != wantFiveMin {
+		t.Fatalf("5m label = %q, want %s", got, wantFiveMin)
 	}
 }

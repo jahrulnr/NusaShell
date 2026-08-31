@@ -14,6 +14,7 @@ import (
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/pluginicon"
+	clock "nusashell/pkg/time"
 )
 
 // ---- skills ----
@@ -29,10 +30,10 @@ func skillDTO(s *domain.Skill) contracts.SkillDTO {
 		OwnedBy:     s.EffectiveOwnedBy(),
 		Pinned:      s.Pinned,
 		UsageCount:  s.UsageCount,
-		UpdatedAt:   s.UpdatedAt.Format(timeRFC3339),
+		UpdatedAt:   clock.NewTime(s.UpdatedAt).Format(timeRFC3339),
 	}
 	if !s.LastUsedAt.IsZero() {
-		dto.LastUsedAt = s.LastUsedAt.Format(timeRFC3339)
+		dto.LastUsedAt = clock.NewTime(s.LastUsedAt).Format(timeRFC3339)
 	}
 	if s.State == "" {
 		dto.State = string(domain.SkillStateActive)
@@ -169,7 +170,7 @@ func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.
 	s.Name = name
 	s.Description = strings.TrimSpace(req.Description)
 	s.Content = req.Content
-	s.UpdatedAt = time.Now().UTC()
+	s.UpdatedAt = clock.NewTime().Time()
 	if err := a.Skills.Save(s); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -678,7 +679,7 @@ func fragmentDTO(f *domain.MemoryFragment) contracts.MemoryEntryDTO {
 		Content:   f.Content,
 		Tags:      f.Tags,
 		Source:    f.Source,
-		CreatedAt: f.CreatedAt.Format(timeRFC3339),
+		CreatedAt: clock.NewTime(f.CreatedAt).Format(timeRFC3339),
 		Category:  f.Category,
 		Project:   f.Project,
 		Task:      f.Task,
@@ -696,7 +697,7 @@ func primaryDTO(e *domain.PrimaryEntry) contracts.MemoryEntryDTO {
 		ID:        e.ID,
 		Content:   e.Content,
 		Source:    e.Source,
-		CreatedAt: e.UpdatedAt.Format(timeRFC3339),
+		CreatedAt: clock.NewTime(e.UpdatedAt).Format(timeRFC3339),
 		Tier:      "primary",
 	}
 	if dto.Source == "" {
@@ -1099,7 +1100,7 @@ func (a *App) handleLearningLog(req contracts.LearningLogRequest) (any, *contrac
 	out := make([]contracts.LearningLogEntryDTO, 0, len(events))
 	for _, e := range events {
 		entry := contracts.LearningLogEntryDTO{
-			TS:   e.Timestamp.UTC().Format(time.RFC3339),
+			TS:   clock.NewTime(e.Timestamp).RFC3339(),
 			Type: e.Type,
 		}
 		if convID, ok := e.Detail["conversation"].(string); ok && convID != "" {
@@ -1215,7 +1216,7 @@ func (a *App) handleLearningReviewTranscript(req contracts.LearningReviewTranscr
 		ID:             t.ID,
 		ConversationID: t.ConversationID,
 		Model:          t.Model,
-		CreatedAt:      t.CreatedAt.Format(time.RFC3339),
+		CreatedAt:      clock.NewTime(t.CreatedAt).Format(time.RFC3339),
 		Messages:       msgs,
 	}, nil
 }
@@ -1269,7 +1270,7 @@ func (a *App) handleLogsList(req contracts.LogsListRequest) (any, *contracts.RPC
 	out := make([]contracts.LogEntryDTO, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, contracts.LogEntryDTO{
-			ID: e.ID, Time: e.Time.Format(timeRFC3339), Level: e.Level, Source: e.Source, Message: e.Message,
+			ID: e.ID, Time: clock.NewTime(e.Time).Format(timeRFC3339), Level: e.Level, Source: e.Source, Message: e.Message,
 		})
 	}
 	return contracts.LogsListResult{Entries: out}, nil

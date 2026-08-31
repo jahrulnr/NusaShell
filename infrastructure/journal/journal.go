@@ -9,6 +9,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // Journal implements application.ChangeJournal.
@@ -111,7 +112,7 @@ func (j *Journal) snapPath(path string) fileSnap {
 		return fileSnap{exists: true, size: info.Size()}
 	}
 	size := info.Size()
-	modTime := info.ModTime().UnixNano()
+	modTime := clock.NewTime(info.ModTime()).EpochNano()
 
 	j.mu.Lock()
 	entry, ok := j.hashCache[path]
@@ -246,7 +247,7 @@ func (j *Journal) appendChange(req application.MutationRequest, rs *replayState,
 		AfterSize:  post.size,
 		EventID:    req.ToolCallID,
 	}
-	now := time.Now().UTC()
+	now := clock.NewTime().Time()
 	ev := journalEvent{
 		Type:    eventTypeChange,
 		TS:      now,
@@ -374,7 +375,7 @@ func (j *Journal) wrapOpaque(req application.MutationRequest, exec func() error)
 func (j *Journal) wrapUnobserved(req application.MutationRequest) {
 	ev := journalEvent{
 		Type:    eventTypeUnobserved,
-		TS:      time.Now().UTC(),
+		TS:      clock.NewTime().Time(),
 		EventID: req.ToolCallID,
 		RunID:   req.RunID,
 		Tool:    req.ToolName,

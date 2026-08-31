@@ -9,6 +9,7 @@ import (
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/config"
+	clock "nusashell/pkg/time"
 )
 
 // providerNameByID resolves a provider ID to its human-readable name. Falls
@@ -177,7 +178,7 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 	p.Name = name
 	p.BaseURL = baseURL
 	p.Enabled = req.Enabled
-	p.UpdatedAt = time.Now().UTC()
+	p.UpdatedAt = clock.NewTime().Time()
 	if req.CacheTTL != nil {
 		ttl := strings.TrimSpace(*req.CacheTTL)
 		if !domain.ValidCacheTTL(kind, driver, ttl) {
@@ -253,7 +254,7 @@ func (a *App) handleProvidersTest(req contracts.ProviderIDRequest) (any, *contra
 	if !ok {
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: "this provider kind does not support a connectivity probe"}
 	}
-	start := time.Now()
+	start := clock.NewTime().Time()
 	models, err := lister.ListModels(ctx, key)
 	if err != nil {
 		a.log("warn", "ai", "provider test failed: %s [%s, probe /models]: %v", p.Name, p.Kind, err)
@@ -264,7 +265,7 @@ func (a *App) handleProvidersTest(req contracts.ProviderIDRequest) (any, *contra
 	}
 	return map[string]any{
 		"ok":         true,
-		"latency_ms": time.Since(start).Milliseconds(),
+		"latency_ms": clock.NewTime().Since(start).Milliseconds(),
 		"models":     len(models),
 	}, nil
 }
@@ -502,7 +503,7 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 		}
 	}
 	p.Models = models
-	p.UpdatedAt = time.Now().UTC()
+	p.UpdatedAt = clock.NewTime().Time()
 	if err := a.Providers.Save(p); err != nil {
 		return nil, err
 	}

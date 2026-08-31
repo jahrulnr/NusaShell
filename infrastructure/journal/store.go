@@ -14,12 +14,13 @@ import (
 	"time"
 
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // JSONL event schema (one object per line, lowercase-camel field names):
 //
-//	{"type":"change","ts":"2006-01-02T15:04:05.999999999Z","eventId":"...","runId":"...","tool":"...","change":{...domain.FileChange...}}
-//	{"type":"unobserved","ts":"2006-01-02T15:04:05.999999999Z","eventId":"...","runId":"...","tool":"..."}
+//	{"type":"change","ts":"2006-01-02T15:04:05.999999999Z07:00","eventId":"...","runId":"...","tool":"...","change":{...domain.FileChange...}}
+//	{"type":"unobserved","ts":"2006-01-02T15:04:05.999999999Z07:00","eventId":"...","runId":"...","tool":"..."}
 
 const (
 	eventTypeChange     = "change"
@@ -118,7 +119,7 @@ func (s *store) journalGzipPath(conversationID string) (string, error) {
 
 func (s *store) append(conversationID string, ev journalEvent) error {
 	if ev.TS.IsZero() {
-		ev.TS = time.Now().UTC()
+		ev.TS = clock.NewTime().Time()
 	}
 	line, err := json.Marshal(ev)
 	if err != nil {

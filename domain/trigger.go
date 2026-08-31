@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"time"
+
+	clock "nusashell/pkg/time"
+)
 
 // TriggerKind is the normalized internal trigger type.
 type TriggerKind string
@@ -39,14 +43,14 @@ type Trigger struct {
 	AutoStart AutoStartPolicy
 }
 
-// Location loads the IANA timezone, defaulting to UTC.
+// Location loads the IANA timezone, defaulting to the machine timezone.
 func (t Trigger) Location() *time.Location {
 	if t.Timezone == "" {
-		return time.UTC
+		return clock.NewTime().Time().Location()
 	}
 	loc, err := time.LoadLocation(t.Timezone)
 	if err != nil {
-		return time.UTC
+		return clock.NewTime().Time().Location()
 	}
 	return loc
 }

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	clock "nusashell/pkg/time"
 )
 
 // ModelOverride is a manual, field-level correction of a model's catalog
@@ -112,12 +114,12 @@ func (r *ModelOverrideRegistry) Set(o *ModelOverride) error {
 		stored := *o
 		stored.Provider = strings.ToLower(strings.TrimSpace(o.Provider))
 		stored.Model = strings.ToLower(strings.TrimSpace(o.Model))
-		stored.UpdatedAt = time.Now().UTC()
+		stored.UpdatedAt = clock.NewTime().Time()
 		r.Entries[k] = &stored
 		return nil
 	}
 	mergeOverrideFields(existing, o)
-	existing.UpdatedAt = time.Now().UTC()
+	existing.UpdatedAt = clock.NewTime().Time()
 	return nil
 }
 

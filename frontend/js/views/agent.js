@@ -20,7 +20,6 @@ import {
   renderMessage,
   renderToolJob,
   renderToolCallCard,
-  renderSubagentCard,
   isSubagentAuxiliaryTool,
   isMediaGenerationTool,
   renderTodoItem,
@@ -46,15 +45,17 @@ import {
   parseShowImageOutput,
   parseShowAudioOutput,
   parseShowVideoOutput,
+  decorateToolCard,
 } from './agent/render.js';
 import { bindSubagents, setSubagentConversation } from './agent/subagents.js';
 import { agentThread, composerInput, stopButton, attachmentsContainer, workspaceButton, workspaceLabel, providerStatus } from './agent/domrefs.js';
 import { renderMermaidDiagrams } from '../mermaid-render.js';
 import { highlightCode } from '../highlight-render.js';
 import { attachZoomButtons } from '../media-zoom.js';
-import { renderArtifactCard, parseArtifactOutput } from '../artifact-render.js';
+import { parseArtifactOutput } from '../artifact-render.js';
 import { createAskCard, sealAskCard, cancelAskCard } from './ask-card.js';
 import { playComplete, playError } from '../sounds.js';
+import { loadToolContracts, normalizeToolCall } from './agent/tool-contracts.js';
 
 // placeToolCard appends a tool card to the right container: standalone cards
 // (ask_question, show, generate_*, artifact, subagent — anything with
@@ -293,7 +294,7 @@ function applyRoundDeltaFrame(run, frame) {
       if (isSubagentAuxiliaryTool(frame.name)) break;
       if (run.conversationId !== state.activeId) break;
       sealReasoningStreaming(run.reasoningEl);
-      ensureLiveToolJob(run, frame.tool_call_id, frame.name, undefined, frame.presentation);
+      ensureLiveToolJob(run, frame.tool_call_id, frame.name, frame.args, frame.presentation);
       if (frame.text) queueToolDelta(run, frame.tool_call_id, frame.text);
       break;
   }
@@ -363,10 +364,12 @@ function startToolElapsed(job) {
 function ensureLiveToolJob(run, toolCallId, name, args, presentation) {
   if (!run || !toolCallId) return null;
   if (!run.toolJobs) run.toolJobs = new Map();
+  if (!run.toolArgs) run.toolArgs = new Map();
   // The delegation card is the single user-facing representation for ACP
   // runs. Wait/result calls only unblock or inform the provider and must not
   // create a second terminal row in the visible transcript.
   if (isSubagentAuxiliaryTool(name)) return null;
+  if (args != null) run.toolArgs.set(toolCallId, args);
   const existing = run.toolJobs.get(toolCallId);
   if (existing) {
     if (args != null) {
@@ -381,9 +384,10 @@ function ensureLiveToolJob(run, toolCallId, name, args, presentation) {
   }
   if (run.conversationId !== state.activeId || !run.strip) return null;
   const toolName = name || 'exec';
+  const resolvedArgs = args ?? run.toolArgs.get(toolCallId) ?? {};
   const job = isMediaGenerationTool(toolName)
-    ? renderToolCallCard({ id: toolCallId, name: toolName, args: args ?? {}, status: 'running', presentation })
-    : renderToolJob({ id: toolCallId, name: toolName, args: args ?? {}, status: 'running', presentation });
+    ? renderToolCallCard({ id: toolCallId, name: toolName, args: resolvedArgs, status: 'running', presentation })
+    : renderToolJob({ id: toolCallId, name: toolName, args: resolvedArgs, status: 'running', presentation });
   if (isStreamingTool(toolName)) bindToolStop(job, () => run.runId);
   setLiveToolJob(run.toolJobs, toolCallId, job);
   placeToolCard(run.bubble, run.strip, job);
@@ -843,6 +847,15 @@ async function openConversation(id) {
   if (token !== state.conversationLoadToken) return;
   state.conversation = conversation;
   state.messages = messages ?? [];
+  // Load the exact workspace-sensitive execution roster before rendering
+  // cards. Cards still have a legacy fallback if an older backend is offline,
+  // but a healthy session always gets backend-owned contract classes.
+  try {
+    await loadToolContracts(conversation?.workspace || '');
+  } catch (err) {
+    console.warn('built-in tool contracts unavailable; using compatibility renderer', err);
+  }
+  if (token !== state.conversationLoadToken) return;
   // Seed the context badge from the backend for this room (provider-measured
   // fill preferred, else server heuristic). Resetting here prevents another
   // room's number from leaking across a switch.
@@ -935,6 +948,7 @@ async function restorePendingAsks(conversationId, token) {
       onSubmit: (err) => toast(err instanceof Error ? err.message : 'Could not send answer', 'error'),
       onStop: () => rpc('agent.turns.stop', { run_id: runId }).catch(() => {}),
     });
+    decorateToolCard(card, { name: 'ask_question', args: card._toolArgs, status: 'running' });
     const existing = cards.find((c) => c.dataset.callId === a.tool_call_id);
     if (existing) existing.replaceWith(card);
     else if (run.strip) {
@@ -970,6 +984,7 @@ async function reattachActiveRunFromBackend() {
   state.runs.set(active.run_id, {
     msgNode: null, bubble: null, strip: null, textBox: null, reasoningEl: null,
     toolJobs: new Map(),
+    toolArgs: new Map(),
     raw: '',
     rawReasoning: '',
     round: 1,
@@ -1323,6 +1338,7 @@ function beginTurn(runId, userText, attachments = []) {
     msgNode: slot.msgNode, bubble: slot.bubble, strip: slot.strip,
     textBox: slot.textBox, reasoningEl: slot.reasoningEl,
     toolJobs: existing?.toolJobs || new Map(),
+    toolArgs: existing?.toolArgs || new Map(),
     raw: existing?.raw || '',
     rawReasoning: existing?.rawReasoning || '',
     round: existing?.round || 1,
@@ -1395,6 +1411,7 @@ async function retryTurn(failedNode, failedMessageId) {
       state.runs.set(runId, {
         msgNode, bubble, strip, textBox, reasoningEl,
         toolJobs: existing?.toolJobs || new Map(),
+        toolArgs: existing?.toolArgs || new Map(),
         raw: existing?.raw || '',
         rawReasoning: existing?.rawReasoning || '',
         round: 1, conversationId: state.activeId, runId,
@@ -2071,7 +2088,7 @@ function bindEvents() {
       }
       run = {
         msgNode: null, bubble: null, strip: null, textBox: null, reasoningEl: null,
-        toolJobs: new Map(), raw: '', rawReasoning: '',
+        toolJobs: new Map(), toolArgs: new Map(), raw: '', rawReasoning: '',
         round: 1, conversationId: conversation_id, runId: run_id,
         messageId: message_id,
       };
@@ -2280,7 +2297,7 @@ function bindEvents() {
     if (job) flushPendingToolDeltas(run);
   });
   on('agent.tool.completed', (payload) => {
-    const { tool_call_id, name, status, output, presentation, conversation_id } = payload;
+    const { tool_call_id, name, args, status, output, attachments, presentation, conversation_id } = payload;
     const run = getRunOrQueue('agent.tool.completed', payload);
     if (!run) {
       if (conversation_id === state.activeId) void refreshActiveConversation();
@@ -2314,10 +2331,10 @@ function bindEvents() {
     if (name === 'show') {
       const job = run.toolJobs.get(tool_call_id);
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
-      const toolCall = { id: tool_call_id, name, args: job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok', presentation };
+      const toolCall = normalizeToolCall({ id: tool_call_id, name, args: args ?? job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok', attachments, output_attachments: attachments, presentation });
       const artifact = parseArtifactOutput(toolCall);
       if (artifact && job) {
-        const card = renderArtifactCard(toolCall, artifact);
+        const card = renderToolCallCard(toolCall);
         card._toolArgs = toolCall.args;
         card.dataset.standalone = 'true';
         swapToolCard(job, card, run.bubble, run.strip);
@@ -2347,8 +2364,8 @@ function bindEvents() {
     if (name === 'subagent') {
       const job = run.toolJobs.get(tool_call_id);
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
-      const toolCall = { id: tool_call_id, name, args: job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok', presentation };
-      const card = renderSubagentCard(toolCall);
+      const toolCall = normalizeToolCall({ id: tool_call_id, name, args: args ?? job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok', attachments, output_attachments: attachments, presentation });
+      const card = renderToolCallCard(toolCall);
       card.dataset.standalone = 'true';
       if (job) {
         swapToolCard(job, card, run.bubble, run.strip);
@@ -2362,16 +2379,16 @@ function bindEvents() {
     }
     if (isMediaGenerationTool(name)) {
       const job = run.toolJobs.get(tool_call_id);
-      const toolCall = {
+      const toolCall = normalizeToolCall({
         id: tool_call_id,
         name,
-        args: job?._toolArgs ?? run.toolArgs?.get?.(tool_call_id) ?? {},
+        args: args ?? job?._toolArgs ?? run.toolArgs?.get?.(tool_call_id) ?? {},
         output: output ?? '',
         status: status || 'ok',
-        attachments: payload.attachments || [],
-        output_attachments: payload.attachments || [],
+        attachments: attachments || [],
+        output_attachments: attachments || [],
         presentation,
-      };
+      });
       const card = renderToolCallCard(toolCall);
       if (job) {
         const elapsed = job.querySelector('.agent-tool-elapsed')?.textContent || '';
@@ -2394,7 +2411,7 @@ function bindEvents() {
     // reload-after-complete works the same as the live delta stream.
     const job = run.toolJobs.get(tool_call_id);
     if (!job) {
-      const toolCall = { id: tool_call_id, name, args: run.toolArgs?.get?.(tool_call_id) ?? {}, output: output ?? '', status: status || 'ok', presentation };
+      const toolCall = normalizeToolCall({ id: tool_call_id, name, args: args ?? run.toolArgs?.get?.(tool_call_id) ?? {}, output: output ?? '', status: status || 'ok', attachments, output_attachments: attachments, presentation });
       const card = isMediaGenerationTool(name) ? renderToolCallCard(toolCall) : renderToolJob(toolCall);
       if (isStreamingTool(name)) bindToolStop(card, () => run.runId);
       setLiveToolJob(run.toolJobs, tool_call_id, card);
@@ -2413,7 +2430,16 @@ function bindEvents() {
     }
     // Clear the elapsed timer — the final duration stays displayed.
     if (job._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
-    const next = { name: job._toolName || name, args: job._toolArgs, status: status || 'ok', output, presentation };
+    const next = normalizeToolCall({
+      id: tool_call_id,
+      name: job._toolName || name,
+      args: args ?? job._toolArgs ?? run.toolArgs?.get?.(tool_call_id) ?? {},
+      status: status || 'ok',
+      output: output ?? '',
+      attachments,
+      output_attachments: attachments,
+      presentation,
+    });
     // Event cards paint the settled output from the payload: the raw fold
     // and the summary line read card._toolOutput, so it must be current
     // before the presentation repaint. Status goes first too — the event
@@ -2583,6 +2609,7 @@ function bindEvents() {
       onSubmit: (err) => toast(err instanceof Error ? err.message : 'Could not send answer', 'error'),
       onStop: () => rpc('agent.turns.stop', { run_id }).catch(() => {}),
     });
+    decorateToolCard(card, { name: 'ask_question', args: card._toolArgs, status: 'running' });
     card.dataset.standalone = 'true';
     setLiveToolJob(run.toolJobs, tool_call_id, card);
     placeToolCard(run.bubble, run.strip, card);
@@ -2597,6 +2624,7 @@ function bindEvents() {
     const card = run.toolJobs.get(tool_call_id);
     if (!card || !card.classList?.contains('agent-ask-card')) return;
     sealAskCard(card, { ok: true, answer, via, optionIds: payload.option_ids || [], text: payload.text || '' });
+    decorateToolCard(card, { name: 'ask_question', args: card._toolArgs, status: 'ok' });
   });
   on('agent.ask.cancelled', (payload) => {
     const { run_id, tool_call_id, reason } = payload;
@@ -2605,6 +2633,7 @@ function bindEvents() {
     const card = run.toolJobs.get(tool_call_id);
     if (!card || !card.classList?.contains('agent-ask-card')) return;
     cancelAskCard(card, reason);
+    decorateToolCard(card, { name: 'ask_question', args: card._toolArgs, status: 'interrupted' });
   });
   on('agent.compacting', ({ conversation_id, run_id }) => {
     markCompacting(conversation_id, run_id);

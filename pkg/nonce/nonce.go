@@ -8,7 +8,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"time"
+
+	clock "nusashell/pkg/time"
 )
 
 // Random returns an 8-byte hex-encoded random string. On crypto/rand
@@ -17,7 +18,7 @@ import (
 func Random() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%x", time.Now().UnixNano())
+		return fmt.Sprintf("%x", clock.NewTime().EpochNano())
 	}
 	return hex.EncodeToString(b)
 }

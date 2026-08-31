@@ -1,1 +1,1 @@
-Describe this image concisely. Focus on visible objects, text, people, settings, and any notable details. Keep it factual and under 200 words.
+Describe this image concisely. Focus on visible objects, design, color, text, people, settings, and any notable details. Keep it factual and under 400 words.

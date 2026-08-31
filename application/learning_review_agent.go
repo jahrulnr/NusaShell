@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 	"nusashell/resources"
 )
 
@@ -392,9 +393,9 @@ func (r *BackgroundReviewAgent) releaseReview(conversationID string, failed ...b
 
 func (r *BackgroundReviewAgent) reviewNow() time.Time {
 	if r.now != nil {
-		return r.now()
+		return clock.NewTime(r.now()).Time()
 	}
-	return time.Now()
+	return clock.NewTime().Time()
 }
 
 // recordReviewSkipped keeps coalesced/deferred decisions visible in the

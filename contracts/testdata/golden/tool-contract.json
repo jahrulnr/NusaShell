@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "name": "file_read",
+      "description": "Read a file",
+      "id": "tool.file_read.v1",
+      "version": 1,
+      "css_class": "agent-tool-file-read",
+      "input_schema": {
+        "type": "object"
+      },
+      "presentation": {
+        "variants": [
+          "file-content"
+        ],
+        "formats": [
+          "code"
+        ],
+        "request_fields": [
+          "path"
+        ],
+        "result_fields": [
+          "summary",
+          "text",
+          "language",
+          "attachments"
+        ],
+        "attachment_types": [
+          "file"
+        ]
+      }
+    }
+  ]
+}

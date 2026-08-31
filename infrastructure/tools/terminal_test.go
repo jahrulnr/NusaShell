@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	clock "nusashell/pkg/time"
 )
 
 func TestHumanSize(t *testing.T) {
@@ -30,11 +32,12 @@ func TestHumanSize(t *testing.T) {
 }
 
 func TestLsTime(t *testing.T) {
-	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	now := clock.NewTime(time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)).Time()
 	recent := now.Add(-24 * time.Hour)
 	old := now.Add(-400 * 24 * time.Hour)
-	if got := lsTime(recent, now); got != "Aug 26 12:00" {
-		t.Errorf("recent = %q, want %q", got, "Aug 26 12:00")
+	wantRecent := clock.NewTime(recent).Format("Jan 02 15:04")
+	if got := lsTime(recent, now); got != wantRecent {
+		t.Errorf("recent = %q, want %q", got, wantRecent)
 	}
 	if got := lsTime(old, now); !strings.Contains(got, "2025") {
 		t.Errorf("old file should show year, got %q", got)
@@ -51,7 +54,7 @@ func TestLsLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	line := lsLine(info, time.Now())
+	line := lsLine(info, clock.NewTime().Time())
 	if !strings.Contains(line, "hello.txt") || !strings.Contains(line, "2") {
 		t.Errorf("lsLine missing name/size: %q", line)
 	}

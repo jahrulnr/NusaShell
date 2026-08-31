@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"nusashell/application"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // LocalExecutor runs steps on the host shell in the selected workspace.
@@ -129,7 +129,7 @@ func (w *chunkWriter) Write(p []byte) (int, error) {
 			RunID:     w.req.Run.ID,
 			JobID:     w.req.JobRun.ID,
 			StepID:    w.req.StepRun.ID,
-			Timestamp: time.Now().UTC(),
+			Timestamp: clock.NewTime().Time(),
 			Stream:    w.stream,
 			Text:      string(p),
 		})

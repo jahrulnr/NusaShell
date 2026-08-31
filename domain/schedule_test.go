@@ -3,7 +3,18 @@ package domain
 import (
 	"testing"
 	"time"
+
+	clock "nusashell/pkg/time"
 )
+
+func TestTriggerLocationDefaultsToMachineTime(t *testing.T) {
+	want := clock.NewTime().Time().Location()
+	for _, trigger := range []Trigger{{}, {Timezone: "not/a-real-timezone"}} {
+		if got := trigger.Location(); got != want {
+			t.Fatalf("trigger location = %v, want machine location %v", got, want)
+		}
+	}
+}
 
 func TestNextFireOnceFuture(t *testing.T) {
 	loc, err := time.LoadLocation("Asia/Jakarta")

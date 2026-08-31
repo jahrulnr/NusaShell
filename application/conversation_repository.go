@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // ErrConversationImmutable is returned by ConversationRepository.Save when
@@ -138,7 +138,7 @@ func (r *ConversationRepository) Add(role domain.MessageRole, args ...any) error
 	msg := domain.Message{
 		ID:        domain.NewID(domain.IDPrefixMsg),
 		Role:      role,
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: clock.NewTime().Time(),
 		Status:    domain.StatusDone,
 	}
 	templated := false
@@ -150,7 +150,7 @@ func (r *ConversationRepository) Add(role domain.MessageRole, args ...any) error
 				msg.ID = domain.NewID(domain.IDPrefixMsg)
 			}
 			if msg.CreatedAt.IsZero() {
-				msg.CreatedAt = time.Now().UTC()
+				msg.CreatedAt = clock.NewTime().Time()
 			}
 			templated = true
 			continue

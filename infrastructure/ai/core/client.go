@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync/atomic"
 	"time"
+
+	clock "nusashell/pkg/time"
 )
 
 type Client struct {
@@ -106,7 +108,7 @@ func (c *Client) Chat(ctx context.Context, req Request) (*Response, error) {
 		resp.Warnings = append(warnings, resp.Warnings...)
 		finalizeResponse(resp, c.provider.Name(), prepared.Model)
 	}
-	meta.Duration = time.Since(start)
+	meta.Duration = clock.NewTime().Since(start)
 	c.notifyAfterResponse(ctx, meta, resp, err)
 	return resp, err
 }
@@ -131,7 +133,7 @@ func (c *Client) Stream(ctx context.Context, req Request) (Stream, error) {
 	} else if stream == nil {
 		err = NewProviderError(c.provider.Name(), ErrorTypeInternal, "provider returned nil stream without error")
 	}
-	meta.Duration = time.Since(start)
+	meta.Duration = clock.NewTime().Since(start)
 	c.notifyAfterResponse(streamCtx, meta, nil, err)
 	if err != nil {
 		if cancel != nil {
@@ -217,7 +219,7 @@ func (c *Client) newCallMeta(operation, model string, streaming bool) CallMeta {
 		Operation: operation,
 		Model:     model,
 		Streaming: streaming,
-		StartedAt: time.Now(),
+		StartedAt: clock.NewTime().Time(),
 	}
 }
 

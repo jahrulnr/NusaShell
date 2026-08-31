@@ -75,15 +75,16 @@ func NextFire(t Trigger, now time.Time, last *time.Time, missed MissedRunPolicy)
 		}
 		next := base.Add(t.Interval)
 		policy := ResolveMissed(missed, TriggerInterval)
-		if policy == MissedSkip {
+		switch policy {
+		case MissedSkip:
 			for next.Before(now) {
 				next = next.Add(t.Interval)
 			}
-		} else if policy == MissedRunOnce {
+		case MissedRunOnce:
 			if next.Before(now) {
 				next = now
 			}
-		} else if policy == MissedCatchUpAll {
+		case MissedCatchUpAll:
 			if next.Before(now) && last != nil {
 				next = last.In(loc).Add(t.Interval)
 			}
@@ -103,11 +104,12 @@ func NextFire(t Trigger, now time.Time, last *time.Time, missed MissedRunPolicy)
 			from = last.In(loc)
 		}
 		next := spec.Next(from, loc)
-		if policy == MissedSkip {
+		switch policy {
+		case MissedSkip:
 			if !next.After(now) {
 				next = spec.Next(now, loc)
 			}
-		} else if policy == MissedRunOnce {
+		case MissedRunOnce:
 			if next.Before(now) {
 				next = now
 			}

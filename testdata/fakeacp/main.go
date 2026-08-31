@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	clock "nusashell/pkg/time"
 )
 
 type request struct {
@@ -108,7 +110,7 @@ func handle(req request) {
 			fail(req.ID, "authentication required")
 			return
 		}
-		id := fmt.Sprintf("sess_%d_%d", time.Now().UnixNano(), sessionSeq.Add(1))
+		id := fmt.Sprintf("sess_%d_%d", clock.NewTime().EpochNano(), sessionSeq.Add(1))
 		mu.Lock()
 		sessions[id] = "plan"
 		cancels[id] = make(chan struct{}, 1)

@@ -13,6 +13,7 @@ import (
 
 	"nusashell/domain"
 	"nusashell/infrastructure/jsonstore"
+	clock "nusashell/pkg/time"
 )
 
 // FragmentsDir is the subdirectory under the data dir that holds one
@@ -141,8 +142,8 @@ func serializeFragment(f *domain.MemoryFragment) string {
 		Task:      f.Task,
 		Tags:      f.Tags,
 		Source:    f.Source,
-		CreatedAt: f.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: f.UpdatedAt.Format(time.RFC3339),
+		CreatedAt: clock.NewTime(f.CreatedAt).Format(time.RFC3339),
+		UpdatedAt: clock.NewTime(f.UpdatedAt).Format(time.RFC3339),
 	}
 	fmBytes, _ := yaml.Marshal(fm)
 	var b strings.Builder
@@ -198,7 +199,7 @@ func (f *Fragments) Save(frag *domain.MemoryFragment) error {
 	if frag.Category == "" {
 		frag.Category = domain.FragmentCategoryGeneral
 	}
-	now := time.Now().UTC()
+	now := clock.NewTime().Time()
 	if frag.ID == "" {
 		frag.ID = domain.NewULID(domain.IDPrefixFrag)
 		frag.CreatedAt = now
@@ -240,7 +241,7 @@ func (f *Fragments) SaveIfAbsent(frag *domain.MemoryFragment) (existing *domain.
 			return cloneFragment(candidate), false, nil
 		}
 	}
-	now := time.Now().UTC()
+	now := clock.NewTime().Time()
 	if frag.ID == "" {
 		frag.ID = domain.NewULID(domain.IDPrefixFrag)
 		frag.CreatedAt = now

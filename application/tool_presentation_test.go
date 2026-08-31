@@ -6,6 +6,18 @@ import (
 	"nusashell/domain"
 )
 
+func TestBuildToolPresentationCarriesContractAndOutputAttachments(t *testing.T) {
+	got := buildToolPresentation("read_media", `{"file_path":"/tmp/a.png"}`, domain.ToolOK, "image loaded", []domain.Attachment{{
+		Type: "image", Name: "a.png", MediaType: "image/png", FilePath: "/tmp/a.png",
+	}})
+	if got.Contract == nil || got.Contract.ID != "tool.read_media.v1" || got.Contract.CSSClass != "agent-tool-read-media" {
+		t.Fatalf("contract ref = %+v", got.Contract)
+	}
+	if len(got.Result.Attachments) != 1 || got.Result.Attachments[0].FilePath != "/tmp/a.png" {
+		t.Fatalf("result attachments = %+v", got.Result.Attachments)
+	}
+}
+
 func TestBuildToolPresentationExtractsCompactBuiltInResult(t *testing.T) {
 	raw := "---\ncount: 2\ntotal: 109K\n---\n-rw-r--r-- 4K Aug 30 15:36 file-a\n-rw-r--r-- 8K Aug 30 15:38 file with spaces-b"
 	got := buildToolPresentation("file_list", `{"path":"/workspace"}`, domain.ToolOK, raw)

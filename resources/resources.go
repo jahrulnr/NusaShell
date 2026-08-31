@@ -115,15 +115,7 @@ func TranscribeAudioPrompt() string {
 // avoid the redundancy bug where memory contains skill fragments and
 // vice versa.
 func ReviewPrompt() string {
-	base := Prompt("review")
-	if base == "" {
-		return ""
-	}
-	rules := Prompt("skill-rules")
-	if rules == "" {
-		return base
-	}
-	return strings.Replace(base, skillReviewRulesPlaceholder, strings.TrimSpace(rules), 1)
+	return Prompt("review")
 }
 
 // ReviewUserPrompt loads the user-role review prompt
