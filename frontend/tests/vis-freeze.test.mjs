@@ -50,6 +50,7 @@ const ctxStub = new Proxy(
 dom.window.HTMLCanvasElement.prototype.getContext = () => ctxStub;
 
 const { DataSet, Network } = await import('../vendor/vis-network/vis-network.esm.min.js');
+const { GRAPH_NODE_GAP, freezeGraphLayout } = await import('../js/views/learning.js');
 
 // Physics options mirror frontend/js/views/learning.js initGraph().
 const options = {
@@ -61,12 +62,12 @@ const options = {
     forceAtlas2Based: {
       gravitationalConstant: -26,
       centralGravity: 0.1,
-      springLength: 120,
+      springLength: 180,
       springConstant: 0.04,
       damping: 0.4,
-      avoidOverlap: 0.5,
+      avoidOverlap: 1,
     },
-    maxVelocity: 50,
+    maxVelocity: 12,
     timestep: 0.5,
     stabilization: {
       enabled: true,
@@ -79,26 +80,23 @@ const options = {
   interaction: { hover: true, tooltipDelay: 200, navigationButtons: false, keyboard: false },
 };
 
-function fixture(offset = 0) {
+function fixture(offset = 0, count = 25) {
   const nodes = [];
-  for (let i = 0; i < 25; i++) nodes.push({ id: `n${offset + i}`, label: `node ${offset + i}` });
+  for (let i = 0; i < count; i++) nodes.push({ id: `n${offset + i}`, label: `node ${offset + i}` });
   const edges = [];
-  for (let i = 0; i < 30; i++) {
-    const from = `n${offset + (i % 25)}`;
-    const to = `n${offset + ((i * 7 + 3) % 25)}`;
+  for (let i = 0; i < Math.ceil(count * 1.2); i++) {
+    const from = `n${offset + (i % count)}`;
+    const to = `n${offset + ((i * 7 + 3) % count)}`;
     if (from !== to) edges.push({ id: `e${offset + i}`, from, to });
   }
   return { nodes, edges };
 }
 
-// Freeze handler copied from learning.js initGraph(): disable physics and
-// release layout pins (positions stay put because physics is already off).
+// Use the production freeze path: resolve residual node collisions, disable
+// physics, and release temporary refresh pins.
 function installFreezeHandler(network, nodes) {
   network.on('stabilizationIterationsDone', () => {
-    network.setOptions({ physics: false });
-    for (const node of nodes.get()) {
-      if (node.fixed) nodes.update({ id: node.id, fixed: { x: false, y: false } });
-    }
+    freezeGraphLayout(network, nodes);
   });
 }
 
@@ -113,6 +111,17 @@ function maxDelta(a, b) {
   return max;
 }
 
+function minimumCenterDistance(positions) {
+  const points = Object.values(positions);
+  let minimum = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      minimum = Math.min(minimum, Math.hypot(points[i].x - points[j].x, points[i].y - points[j].y));
+    }
+  }
+  return minimum;
+}
+
 test('bounded stabilize() fires stabilizationIterationsDone and freezes the graph', async () => {
   const nodes = new DataSet([]);
   const edges = new DataSet([]);
@@ -121,7 +130,7 @@ test('bounded stabilize() fires stabilizationIterationsDone and freezes the grap
   let fired = 0;
   network.on('stabilizationIterationsDone', () => { fired += 1; });
 
-  const data = fixture();
+  const data = fixture(0, 80);
   nodes.add(data.nodes);
   edges.add(data.edges);
   network.stabilize(80);
@@ -137,6 +146,31 @@ test('bounded stabilize() fires stabilizationIterationsDone and freezes the grap
   const after = network.getPositions();
   assert.ok(maxDelta(before, after) < 0.1, 'graph must be frozen after stabilization');
   network.destroy();
+});
+
+test('bounded layout leaves visible space between every node', async () => {
+  const nodes = new DataSet([]);
+  const edges = new DataSet([]);
+  const network = new Network(document.getElementById('graph'), { nodes, edges }, options);
+  installFreezeHandler(network, nodes);
+  let fired = false;
+  network.on('stabilizationIterationsDone', () => { fired = true; });
+
+  const data = fixture(0, 80);
+  nodes.add(data.nodes);
+  edges.add(data.edges);
+  network.stabilize(80);
+
+  const deadline = Date.now() + 3000;
+  while (!fired && Date.now() < deadline) await delay(50);
+  assert.ok(fired, 'layout must finish before measuring node spacing');
+  await delay(50);
+  const minimumDistance = minimumCenterDistance(network.getPositions());
+  network.destroy();
+  assert.ok(
+    minimumDistance >= 32 + GRAPH_NODE_GAP - 0.05,
+    `16px-radius nodes must keep the configured visible surface gap (got ${minimumDistance.toFixed(1)}px center distance)`,
+  );
 });
 
 test('old setOptions physics re-enable never fires stabilizationIterationsDone and keeps nodes moving', async () => {

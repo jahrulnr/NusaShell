@@ -4,7 +4,7 @@ import { autoReconnectEnabled, on, rpc, setAutoReconnect } from '../rpc.js';
 import { toast, createSelect, el } from '../ui.js';
 
 let bound = false;
-const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', imageProviderId: '', imageModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', videoGenProviderId: '', videoGenModelId: '', ttsProviderId: '', ttsModelId: '', webAnswerProvider: '', webAnswerModel: '', compactionModel: '', reviewModel: '' };
+const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', imageProviderId: '', imageModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', videoGenProviderId: '', videoGenModelId: '', ttsProviderId: '', ttsModelId: '', webAnswerProvider: '', webAnswerModel: '', webSearchStrategy: '', compactionModel: '', reviewModel: '' };
 let preferredSelect;
 let embeddingSelect;
 let visionSelect;
@@ -16,6 +16,7 @@ let videoSelect;
 let videoGenSelect;
 let ttsSelect;
 let webAnswerProviderSelect;
+let webSearchStrategySelect;
 let contractModeSelect;
 let sttModelSelect;
 let sttLanguageSelect;
@@ -100,6 +101,20 @@ export async function initSettings() {
         { text: 'xAI (Responses API web_search)', value: 'xai' },
       ],
     });
+    webSearchStrategySelect = createSelect(document.getElementById('settings-web-search-strategy'), {
+      placeholder: 'Auto — merge all sources (default)',
+      data: [
+        { text: 'Auto — merge all sources (default)', value: '', placeholder: true },
+        { text: 'Round robin — rotate API providers per query', value: 'round_robin' },
+        { text: 'Random — pick one API provider per query', value: 'random' },
+        { text: 'Brave only', value: 'brave' },
+        { text: 'Serper (Google API) only', value: 'serper' },
+        { text: 'Tavily only', value: 'tavily' },
+        { text: 'Startpage only', value: 'startpage' },
+        { text: 'Wikipedia only', value: 'wikipedia' },
+        { text: 'GitHub only', value: 'github' },
+      ],
+    });
     window.addEventListener('hashchange', () => {
       if (location.hash === '#settings') void refresh();
     });
@@ -178,6 +193,7 @@ export async function refresh() {
     state.ttsModelId = settings.tts_model_id ?? '';
     state.webAnswerProvider = settings.web_answer_provider ?? '';
     state.webAnswerModel = settings.web_answer_model ?? '';
+    state.webSearchStrategy = settings.web_search_strategy ?? '';
     state.compactionModel = settings.compaction_model ?? '';
     state.reviewModel = settings.review_model ?? '';
     sttLanguageSelect.setSelected([['id', 'en'].includes(settings.stt_offline_language) ? settings.stt_offline_language : '']);
@@ -189,6 +205,11 @@ export async function refresh() {
     webAnswerProviderSelect.setSelected([state.webAnswerProvider || '']);
     document.getElementById('settings-web-answer-model').value = state.webAnswerModel;
     document.getElementById('settings-web-answer-api-key').value = '';
+    // Web search: set strategy dropdown. API keys are write-only.
+    webSearchStrategySelect.setSelected([state.webSearchStrategy || '']);
+    document.getElementById('settings-web-search-brave-api-key').value = '';
+    document.getElementById('settings-web-search-serper-api-key').value = '';
+    document.getElementById('settings-web-search-tavily-api-key').value = '';
   } else {
     setStatus(`Could not load runtime settings: ${settingsResult.reason.message}`, true);
   }
@@ -746,6 +767,10 @@ async function save() {
     const webAnswerProvider = webAnswerProviderSelect.getSelected()?.[0] ?? '';
     const webAnswerModel = document.getElementById('settings-web-answer-model')?.value?.trim() ?? '';
     const webAnswerAPIKey = document.getElementById('settings-web-answer-api-key')?.value?.trim() ?? '';
+    const webSearchStrategy = webSearchStrategySelect.getSelected()?.[0] ?? '';
+    const webSearchBraveAPIKey = document.getElementById('settings-web-search-brave-api-key')?.value?.trim() ?? '';
+    const webSearchSerperAPIKey = document.getElementById('settings-web-search-serper-api-key')?.value?.trim() ?? '';
+    const webSearchTavilyAPIKey = document.getElementById('settings-web-search-tavily-api-key')?.value?.trim() ?? '';
     await rpc('settings.set', {
       compaction_enabled: document.getElementById('settings-compaction-enabled').checked,
       prompt_caching: document.getElementById('settings-prompt-caching').checked,
@@ -781,6 +806,10 @@ async function save() {
       web_answer_provider: webAnswerProvider || null,
       web_answer_model: webAnswerModel || null,
       web_answer_api_key: webAnswerAPIKey || null,
+      web_search_strategy: webSearchStrategy || null,
+      web_search_brave_api_key: webSearchBraveAPIKey || null,
+      web_search_serper_api_key: webSearchSerperAPIKey || null,
+      web_search_tavily_api_key: webSearchTavilyAPIKey || null,
       learning_review_threshold: learningThreshold,
       skill_nudge_interval: skillNudgeInterval,
       project_memory_base: document.getElementById('settings-project-memory-base').value.trim() || null,

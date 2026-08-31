@@ -1156,6 +1156,7 @@ type SettingsDTO struct {
 	VideoGenModelID            string   `json:"video_gen_model_id,omitempty"`
 	WebAnswerProvider          string   `json:"web_answer_provider,omitempty"`
 	WebAnswerModel             string   `json:"web_answer_model,omitempty"`
+	WebSearchStrategy          string   `json:"web_search_strategy,omitempty"`
 	Temperature                *float64 `json:"temperature,omitempty"`
 	TopP                       *float64 `json:"top_p,omitempty"`
 	TopK                       *int     `json:"top_k,omitempty"`
@@ -1175,49 +1176,58 @@ type SettingsGetResult struct {
 }
 
 type SettingsSetRequest struct {
-	CompactionEnabled          *bool           `json:"compaction_enabled,omitempty"`
-	CompactionThreshold        *int            `json:"compaction_threshold,omitempty"`
-	CompactionModel            *string         `json:"compaction_model,omitempty"`
-	CompactionSummaryMaxTokens *int            `json:"compaction_summary_max_tokens,omitempty"`
-	CompactionSummaryMinChars  *int            `json:"compaction_summary_min_chars,omitempty"`
-	PromptCaching              *bool           `json:"prompt_caching,omitempty"`
-	MaxToolRounds              *int            `json:"max_tool_rounds,omitempty"`
-	RepeatedToolLimit          *int            `json:"repeated_tool_limit,omitempty"`
-	MaxInputTokens             *int            `json:"max_input_tokens,omitempty"`
-	MaxOutputTokens            *int            `json:"max_output_tokens,omitempty"`
-	MaxParallelTools           *int            `json:"max_parallel_tools,omitempty"`
-	ReviewModel                *string         `json:"review_model,omitempty"`
-	EmbeddingProviderID        *string         `json:"embedding_provider_id,omitempty"`
-	EmbeddingModelID           *string         `json:"embedding_model_id,omitempty"`
-	VisionProviderID           *string         `json:"vision_provider_id,omitempty"`
-	VisionModelID              *string         `json:"vision_model_id,omitempty"`
-	AudioProviderID            *string         `json:"audio_provider_id,omitempty"`
-	AudioModelID               *string         `json:"audio_model_id,omitempty"`
-	STTOfflineModel            *string         `json:"stt_offline_model,omitempty"`
-	STTOfflineLanguage         *string         `json:"stt_offline_language,omitempty"`
-	VideoProviderID            *string         `json:"video_provider_id,omitempty"`
-	VideoModelID               *string         `json:"video_model_id,omitempty"`
-	TTSProviderID              *string         `json:"tts_provider_id,omitempty"`
-	TTSModelID                 *string         `json:"tts_model_id,omitempty"`
-	ImageProviderID            *string         `json:"image_provider_id,omitempty"`
-	ImageModelID               *string         `json:"image_model_id,omitempty"`
-	VideoGenProviderID         *string         `json:"video_gen_provider_id,omitempty"`
-	VideoGenModelID            *string         `json:"video_gen_model_id,omitempty"`
-	WebAnswerProvider          *string         `json:"web_answer_provider,omitempty"`
-	WebAnswerModel             *string         `json:"web_answer_model,omitempty"`
-	WebAnswerAPIKey            *string         `json:"web_answer_api_key,omitempty"`
-	Temperature                json.RawMessage `json:"temperature,omitempty"`
-	TopP                       json.RawMessage `json:"top_p,omitempty"`
-	TopK                       json.RawMessage `json:"top_k,omitempty"`
-	FrequencyPenalty           json.RawMessage `json:"frequency_penalty,omitempty"`
-	PresencePenalty            json.RawMessage `json:"presence_penalty,omitempty"`
-	LearningReviewThreshold    *int            `json:"learning_review_threshold,omitempty"`
-	SkillNudgeInterval         *int            `json:"skill_nudge_interval,omitempty"`
-	MaxAutoContinues           *int            `json:"max_auto_continues,omitempty"`
-	SoundNotifications         *bool           `json:"sound_notifications,omitempty"`
-	UserPrompt                 *string         `json:"user_prompt,omitempty"`
-	PluginContractMode         *string         `json:"plugin_contract_mode,omitempty"`
-	ProjectMemoryBase          *string         `json:"project_memory_base,omitempty"`
+	CompactionEnabled          *bool   `json:"compaction_enabled,omitempty"`
+	CompactionThreshold        *int    `json:"compaction_threshold,omitempty"`
+	CompactionModel            *string `json:"compaction_model,omitempty"`
+	CompactionSummaryMaxTokens *int    `json:"compaction_summary_max_tokens,omitempty"`
+	CompactionSummaryMinChars  *int    `json:"compaction_summary_min_chars,omitempty"`
+	PromptCaching              *bool   `json:"prompt_caching,omitempty"`
+	MaxToolRounds              *int    `json:"max_tool_rounds,omitempty"`
+	RepeatedToolLimit          *int    `json:"repeated_tool_limit,omitempty"`
+	MaxInputTokens             *int    `json:"max_input_tokens,omitempty"`
+	MaxOutputTokens            *int    `json:"max_output_tokens,omitempty"`
+	MaxParallelTools           *int    `json:"max_parallel_tools,omitempty"`
+	ReviewModel                *string `json:"review_model,omitempty"`
+	EmbeddingProviderID        *string `json:"embedding_provider_id,omitempty"`
+	EmbeddingModelID           *string `json:"embedding_model_id,omitempty"`
+	VisionProviderID           *string `json:"vision_provider_id,omitempty"`
+	VisionModelID              *string `json:"vision_model_id,omitempty"`
+	AudioProviderID            *string `json:"audio_provider_id,omitempty"`
+	AudioModelID               *string `json:"audio_model_id,omitempty"`
+	STTOfflineModel            *string `json:"stt_offline_model,omitempty"`
+	STTOfflineLanguage         *string `json:"stt_offline_language,omitempty"`
+	VideoProviderID            *string `json:"video_provider_id,omitempty"`
+	VideoModelID               *string `json:"video_model_id,omitempty"`
+	TTSProviderID              *string `json:"tts_provider_id,omitempty"`
+	TTSModelID                 *string `json:"tts_model_id,omitempty"`
+	ImageProviderID            *string `json:"image_provider_id,omitempty"`
+	ImageModelID               *string `json:"image_model_id,omitempty"`
+	VideoGenProviderID         *string `json:"video_gen_provider_id,omitempty"`
+	VideoGenModelID            *string `json:"video_gen_model_id,omitempty"`
+	WebAnswerProvider          *string `json:"web_answer_provider,omitempty"`
+	WebAnswerModel             *string `json:"web_answer_model,omitempty"`
+	WebAnswerAPIKey            *string `json:"web_answer_api_key,omitempty"`
+	// WebSearchStrategy selects how the web_search tool routes queries
+	// across searchwire sources: "auto" (default, all sources),
+	// "round_robin", "random", or a bare source name. The per-provider API
+	// keys are write-only — they are stored in the credential store and
+	// never returned by settings.get.
+	WebSearchStrategy       *string         `json:"web_search_strategy,omitempty"`
+	WebSearchBraveAPIKey    *string         `json:"web_search_brave_api_key,omitempty"`
+	WebSearchSerperAPIKey   *string         `json:"web_search_serper_api_key,omitempty"`
+	WebSearchTavilyAPIKey   *string         `json:"web_search_tavily_api_key,omitempty"`
+	Temperature             json.RawMessage `json:"temperature,omitempty"`
+	TopP                    json.RawMessage `json:"top_p,omitempty"`
+	TopK                    json.RawMessage `json:"top_k,omitempty"`
+	FrequencyPenalty        json.RawMessage `json:"frequency_penalty,omitempty"`
+	PresencePenalty         json.RawMessage `json:"presence_penalty,omitempty"`
+	LearningReviewThreshold *int            `json:"learning_review_threshold,omitempty"`
+	SkillNudgeInterval      *int            `json:"skill_nudge_interval,omitempty"`
+	MaxAutoContinues        *int            `json:"max_auto_continues,omitempty"`
+	SoundNotifications      *bool           `json:"sound_notifications,omitempty"`
+	UserPrompt              *string         `json:"user_prompt,omitempty"`
+	PluginContractMode      *string         `json:"plugin_contract_mode,omitempty"`
+	ProjectMemoryBase       *string         `json:"project_memory_base,omitempty"`
 }
 
 // ---- offline TTS install ----

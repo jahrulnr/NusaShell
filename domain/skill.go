@@ -297,6 +297,15 @@ type Settings struct {
 	// When WebAnswerProvider is empty, web_answer is not available.
 	WebAnswerProvider string `json:"web_answer_provider,omitempty"`
 	WebAnswerModel    string `json:"web_answer_model,omitempty"`
+	// WebSearchStrategy routes web_search queries across searchwire's
+	// sources: empty/"auto" merges every registered source (default),
+	// "round_robin" rotates one API-keyed provider per query, "random"
+	// picks one at random, and a bare source name (brave, serper, tavily,
+	// startpage, wikipedia, github) pins the query to that source. The
+	// per-provider API keys are stored in the CredentialStore under
+	// web_search_brave / web_search_serper / web_search_tavily, not in
+	// settings JSON.
+	WebSearchStrategy string `json:"web_search_strategy,omitempty"`
 	// Sampling parameters. nil = use provider default (do not send the
 	// field). Non-nil overrides the provider default for every turn.
 	// Ranges: temperature 0–2 (OpenAI) / 0–1 (Anthropic), top_p 0–1,

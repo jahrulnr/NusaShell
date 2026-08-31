@@ -19,7 +19,7 @@ View title and a Save settings button with a live status indicator.
 
 ## Card groups
 
-Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning review, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Answer. Workspace: appearance, connection, system.
+Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning review, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system.
 
 - **Agent group** (`#settings-group-agent`):
   - Section: Settings
@@ -463,6 +463,35 @@ Pick the model used by the generate_speech tool (text-to-speech). Online models 
   - Section: Settings
   - Type: button
   - Action: Starts the piper download.
+
+## Web Search
+
+Provider strategy for the web_search tool: auto merges all searchwire sources (default), round robin rotates one API-keyed provider (Brave, Serper, Tavily) per query, random picks one at random, and a bare source name pins every query to that source. Per-provider API keys are write-only, stored in the credential store; each input falls back to its standard environment variable (BRAVE_SEARCH_API_KEY, SERPER_API_KEY, TAVILY_API_KEY) when left blank.
+
+- **Web Search title** (`#settings-web-search-title`):
+  - Section: Settings
+  - Type: heading
+  - Notes: Web Search card heading.
+
+- **Provider strategy** (`#settings-web-search-strategy`):
+  - Section: Settings
+  - Type: select
+  - Notes: web_search routing: auto, round_robin, random, or a bare source name (brave, serper, tavily, startpage, wikipedia, github).
+
+- **Brave API key** (`#settings-web-search-brave-api-key`):
+  - Section: Settings
+  - Type: password
+  - Notes: Stored in the credential store (web_search_brave). Empty falls back to BRAVE_SEARCH_API_KEY; without a key Brave uses public HTML results.
+
+- **Serper API key** (`#settings-web-search-serper-api-key`):
+  - Section: Settings
+  - Type: password
+  - Notes: Stored in the credential store (web_search_serper). Empty falls back to SERPER_API_KEY; required to register the Serper source.
+
+- **Tavily API key** (`#settings-web-search-tavily-api-key`):
+  - Section: Settings
+  - Type: password
+  - Notes: Stored in the credential store (web_search_tavily). Empty falls back to TAVILY_API_KEY; required to register the Tavily source.
 
 ## Web Answer
 

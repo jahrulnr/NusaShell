@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"nusashell/domain"
+
+	"github.com/jahrulnr/searchwire"
 )
 
 type swTestCreds struct {
@@ -101,5 +103,55 @@ func TestSearchwireConfigFromProvidersNil(t *testing.T) {
 	cfg := SearchwireConfigFromProviders(nil, nil)
 	if cfg.OpenRouter.APIKey != "" {
 		t.Error("nil stores should produce empty config")
+	}
+}
+
+func TestSearchwireSearchConfigWiresKeyedSources(t *testing.T) {
+	creds := &swTestCreds{keys: map[string]string{
+		CredentialBraveWebSearch:  "brave-key",
+		CredentialSerperWebSearch: "serper-key",
+		CredentialTavilyWebSearch: "tavily-key",
+	}}
+	cfg := SearchwireSearchConfig(creds)
+	if cfg.Brave.APIKey != "brave-key" {
+		t.Errorf("brave key = %q, want brave-key", cfg.Brave.APIKey)
+	}
+	if cfg.Serper.APIKey != "serper-key" || cfg.Serper.Enabled == nil || !*cfg.Serper.Enabled {
+		t.Errorf("serper = %#v, want key serper-key and enabled", cfg.Serper)
+	}
+	if cfg.Tavily.APIKey != "tavily-key" || cfg.Tavily.Enabled == nil || !*cfg.Tavily.Enabled {
+		t.Errorf("tavily = %#v, want key tavily-key and enabled", cfg.Tavily)
+	}
+}
+
+func TestSearchwireSearchConfigDeclaresKeyedSourcesWithoutStoredKeys(t *testing.T) {
+	cfg := SearchwireSearchConfig(&swTestCreds{keys: map[string]string{}})
+	// Keys may be empty (env fallback), but Serper/Tavily must be declared
+	// enabled so searchwire can pick up their env vars.
+	if cfg.Brave.APIKey != "" || cfg.Serper.APIKey != "" || cfg.Tavily.APIKey != "" {
+		t.Errorf("expected empty stored keys, got %#v", cfg)
+	}
+	if cfg.Serper.Enabled == nil || !*cfg.Serper.Enabled || cfg.Tavily.Enabled == nil || !*cfg.Tavily.Enabled {
+		t.Errorf("serper/tavily must be declared enabled for env fallback: %#v", cfg)
+	}
+}
+
+func TestSearchwireSearchConfigNilCreds(t *testing.T) {
+	cfg := SearchwireSearchConfig(nil)
+	if cfg.Brave.APIKey != "" || cfg.Serper.APIKey != "" || cfg.Tavily.APIKey != "" {
+		t.Errorf("nil creds must yield empty keys, got %#v", cfg)
+	}
+}
+
+func TestSearchwireSearchConfigEnvFallbackRegistersSources(t *testing.T) {
+	// No stored keys; env vars alone must register Serper/Tavily.
+	t.Setenv("SERPER_API_KEY", "env-serper")
+	t.Setenv("TAVILY_API_KEY", "env-tavily")
+	cfg := SearchwireSearchConfig(&swTestCreds{keys: map[string]string{}})
+	names := searchwire.New(cfg).Sources()
+	for _, want := range []string{"serper", "tavily"} {
+		if !containsString(names, want) {
+			t.Errorf("source %q not registered from env: %#v", want, names)
+		}
 	}
 }

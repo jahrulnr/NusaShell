@@ -39,7 +39,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `mcp_server_add` | register a manual MCP server from command, arguments, and environment entries |
 | `read_media` | load any media file (image, audio, video, or PDF document) from disk by absolute path into the model's context — the media kind is auto-detected from binary magic bytes, no need to specify image/audio/video/pdf. Any path works, not just conversation attachments. Vision/audio/video-capable models see/hear it directly; document-capable models receive the PDF natively (Anthropic `document`, OpenAI `input_file`); non-capable models get a text description/transcript via the configured fallback (vision fallback, cloud STT + offline whisper for audio, video fallback) or a placeholder note with the file path (document) |
 | `generate_media` | generate media from a prompt and save it for the user: media_type=image (PNG/JPEG/WebP; referenced_image_paths enables image-to-image editing), speech (mp3/wav/opus via OpenAI-compatible /audio/speech or offline piper), or video (async /videos API; duration/resolution minimums reported verbatim on rejection; referenced_image_paths enables image-to-video — first image becomes the first frame, additional images are style references). Only listed when at least one mode is configured; unconfigured modes are rejected with guidance. Speech routing: an explicitly picked offline piper voice (Settings → Speech generation, provider "piper", appears once installed via one-click install under `<data>/models/tts/`) wins, then the configured online model, then offline piper as automatic fallback — the fallback is live as soon as the engine is installed, no enable/disable flag involved |
-| `web_search` | search the web across Brave, Startpage, Wikipedia, and GitHub; returns ranked results with title, URL, and snippet. Oversized JSONL is truncated in-band (~32KiB) with `overflow_path` |
+| `web_search` | search the web across Brave, Serper, Tavily, Startpage, Wikipedia, and GitHub (pool configurable in Settings → Web Search); returns ranked results with title, URL, and snippet. Oversized JSONL is truncated in-band (~32KiB) with `overflow_path` |
 | `web_fetch` | fetch a URL and return readable text; supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes` (extract cap, default 2MB); in-band body caps at ~32KiB with `overflow_path` / `next_offset_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
 | `ci_run` | start a saved automation by `workflow_id`; set `async: true` to return immediately with a `run_id` while the pipeline runs in the background |
@@ -372,9 +372,14 @@ NusaShell ships with built-in web research tools powered by
 [searchwire](https://github.com/jahrulnr/searchwire). These are native tools,
 not MCP plugins — they work with zero configuration and no installed plugin.
 
-- **`web_search`**: metasearch across Brave, Startpage, Wikipedia, and
-  GitHub. No API key required for the default path (HTML scraping + public
-  APIs). Returns ranked, deduplicated results with snippets.
+- **`web_search`**: metasearch across Brave, Serper, Tavily, Startpage,
+  Wikipedia, and GitHub. No API key required for the default path (HTML
+  scraping + public APIs); Serper/Tavily register when their API key is
+  set (Settings → Web Search, or the `SERPER_API_KEY`/`TAVILY_API_KEY`
+  env vars). Settings → Web Search also picks a routing strategy: auto
+  merges all sources, round-robin/random rotate one API-keyed provider
+  per query, or a bare provider name pins the query to that source.
+  Returns ranked, deduplicated results with snippets.
 - **`web_fetch`**: fetches a URL and returns readable text. Supports HTML
   (nav/footer/aside/form stripped, `<pre>`/`<code>` preserved, links
   collected, `og:title`/`<h1>` title fallbacks), JSON (pretty-printed;

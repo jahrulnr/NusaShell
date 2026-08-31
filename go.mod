@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/go-audio/wav v1.1.0
-	github.com/jahrulnr/searchwire v0.0.0-20260830052402-48754c68261a
+	github.com/jahrulnr/searchwire v0.0.0-20260831161543-127103723435
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/ncruces/zenity v0.10.15
 	golang.org/x/sys v0.47.0

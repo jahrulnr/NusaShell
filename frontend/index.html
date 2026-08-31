@@ -903,6 +903,37 @@
           </div>
           <div class="settings-group" role="group" aria-labelledby="settings-group-web">
             <h2 class="settings-group-title" id="settings-group-web">Web</h2>
+            <section class="settings-card settings-web-search-card" aria-labelledby="settings-web-search-title">
+              <div class="settings-card-title">Web Search</div>
+              <h2 id="settings-web-search-title" class="sr-only">Web Search</h2>
+              <p class="settings-card-copy">Configure how the <code>web_search</code> tool routes queries across search providers. API keys are stored securely in the credential store (write-only); each provider also falls back to its environment variable when the field is left blank.</p>
+              <label class="settings-field" for="settings-web-search-strategy">Provider strategy
+                <select id="settings-web-search-strategy">
+                  <option value="">Auto — merge all sources (default)</option>
+                  <option value="round_robin">Round robin — rotate API providers per query</option>
+                  <option value="random">Random — pick one API provider per query</option>
+                  <option value="brave">Brave only</option>
+                  <option value="serper">Serper (Google API) only</option>
+                  <option value="tavily">Tavily only</option>
+                  <option value="startpage">Startpage only</option>
+                  <option value="wikipedia">Wikipedia only</option>
+                  <option value="github">GitHub only</option>
+                </select>
+                <small>Round robin and random rotate across Brave, Serper, and Tavily when their API keys are set; without a keyed provider they merge all sources. A pinned provider without a key also merges all sources.</small>
+              </label>
+              <label class="settings-field" for="settings-web-search-brave-api-key">Brave API key
+                <input id="settings-web-search-brave-api-key" type="password" autocomplete="off" placeholder="Paste Brave Search API key — leave blank to keep existing">
+                <small>Env fallback: <code>BRAVE_SEARCH_API_KEY</code>. Without a key, Brave falls back to public HTML results.</small>
+              </label>
+              <label class="settings-field" for="settings-web-search-serper-api-key">Serper API key
+                <input id="settings-web-search-serper-api-key" type="password" autocomplete="off" placeholder="Paste Serper.dev API key — leave blank to keep existing">
+                <small>Env fallback: <code>SERPER_API_KEY</code>. Required to register the Serper (Google) source.</small>
+              </label>
+              <label class="settings-field" for="settings-web-search-tavily-api-key">Tavily API key
+                <input id="settings-web-search-tavily-api-key" type="password" autocomplete="off" placeholder="Paste Tavily API key — leave blank to keep existing">
+                <small>Env fallback: <code>TAVILY_API_KEY</code>. Required to register the Tavily source.</small>
+              </label>
+            </section>
             <section class="settings-card settings-web-answer-card" aria-labelledby="settings-web-answer-title">
               <div class="settings-card-title">Web Answer</div>
               <h2 id="settings-web-answer-title" class="sr-only">Web Answer</h2>

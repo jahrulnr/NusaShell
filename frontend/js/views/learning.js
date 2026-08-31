@@ -47,7 +47,10 @@ export async function initLearning() {
     onChange: () => doSearch(),
   });
   searchBtn.addEventListener('click', () => doSearch());
-  refreshBtn.addEventListener('click', () => loadGraph());
+  // A manual refresh is also an explicit re-layout request. Background
+  // refreshes keep established positions, but this control must be able to
+  // repair a cramped layout instead of pinning the same bad coordinates.
+  refreshBtn.addEventListener('click', () => loadGraph({ preservePositions: false }));
   fitBtn.addEventListener('click', () => {
     if (state.network) state.network.fit({ animation: { duration: 300 } });
   });
@@ -64,7 +67,7 @@ export async function initLearning() {
   // pane is populated immediately (backend returns an unfiltered listing
   // for empty queries). The graph loads in parallel. The learning log
   // loads lazily on first tab switch to keep init light.
-  await Promise.all([doSearch(), loadGraph()]);
+  await Promise.all([doSearch(), loadGraph({ preservePositions: false })]);
 }
 
 // Tab switching between "Memory & Graph" and "Learning log". The log is
@@ -715,8 +718,134 @@ function confirmDelete(id) {
 // setOptions({ physics: { enabled: true, ... } }) would restart an UNBOUNDED
 // simulation that never fires that event — the "nodes jitter while idle" bug.)
 export const GRAPH_LAYOUT_ITERATIONS = 80;
+export const GRAPH_NODE_GAP = 12;
+const GRAPH_PROJECTION_BUFFER = 2;
 export function relayoutGraph(network) {
   if (network) network.stabilize(GRAPH_LAYOUT_ITERATIONS);
+}
+
+function graphNodeIsFixed(node) {
+  return node.fixed === true || (node.fixed?.x === true && node.fixed?.y === true);
+}
+
+function pairDirection(firstID, secondID) {
+  // Coincident nodes have no vector to push along. Derive a stable angle
+  // from their ids so a dense zero-position cluster fans out instead of all
+  // pairs choosing the same axis.
+  const key = `${firstID}\u0000${secondID}`;
+  let hash = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const angle = ((hash >>> 0) / 0xffffffff) * Math.PI * 2;
+  return { x: Math.cos(angle), y: Math.sin(angle) };
+}
+
+// Resolve the residual overlaps that a bounded physics run can leave behind.
+// vis-network's avoidOverlap is a force preference, not a hard constraint;
+// on dense graphs it may stop with circles still touching. This projection
+// step makes node spacing an explicit layout invariant while respecting the
+// positions pinned during background refreshes.
+export function spaceGraphPositions(nodes, positions, gap = GRAPH_NODE_GAP) {
+  const points = {};
+  for (const [id, point] of Object.entries(positions || {})) {
+    points[id] = { x: point.x, y: point.y };
+  }
+  const active = (nodes || []).filter((node) => points[node.id]);
+  // Keep a small canvas-space buffer because vis-network performs its final
+  // stabilization bookkeeping after emitting stabilizationIterationsDone.
+  // The public invariant remains GRAPH_NODE_GAP after that sub-pixel drift.
+  const projectedGap = gap + GRAPH_PROJECTION_BUFFER;
+  const allFree = active.every((node) => !graphNodeIsFixed(node));
+  // A full layout only needs a few passes to give coincident points distinct
+  // directions; the uniform expansion below enforces the final gap. Pinned
+  // refresh layouts cannot expand globally, so let their local relaxation
+  // converge instead.
+  const maxPasses = allFree ? 4 : 160;
+
+  for (let pass = 0; pass < maxPasses; pass++) {
+    let adjusted = false;
+    for (let i = 0; i < active.length; i++) {
+      const first = active[i];
+      const firstPoint = points[first.id];
+      for (let j = i + 1; j < active.length; j++) {
+        const second = active[j];
+        const secondPoint = points[second.id];
+        let dx = secondPoint.x - firstPoint.x;
+        let dy = secondPoint.y - firstPoint.y;
+        let distance = Math.hypot(dx, dy);
+        const required = (first.size || 16) + (second.size || 16) + projectedGap;
+        if (distance >= required - 0.01) continue;
+
+        const firstFixed = graphNodeIsFixed(first);
+        const secondFixed = graphNodeIsFixed(second);
+        if (firstFixed && secondFixed) continue;
+        if (distance < 0.001) {
+          const direction = pairDirection(first.id, second.id);
+          dx = direction.x;
+          dy = direction.y;
+          distance = 1;
+        }
+        const push = required - distance + 0.01;
+        const unitX = dx / distance;
+        const unitY = dy / distance;
+        const firstShare = firstFixed ? 0 : (secondFixed ? 1 : 0.5);
+        const secondShare = secondFixed ? 0 : (firstFixed ? 1 : 0.5);
+        firstPoint.x -= unitX * push * firstShare;
+        firstPoint.y -= unitY * push * firstShare;
+        secondPoint.x += unitX * push * secondShare;
+        secondPoint.y += unitY * push * secondShare;
+        adjusted = true;
+      }
+    }
+    if (!adjusted) break;
+  }
+
+  // On a fresh/full layout no node is pinned. A final uniform expansion is
+  // both cheaper and stricter than asking pairwise relaxation to converge to
+  // sub-pixel precision: every pairwise distance grows by the same factor,
+  // so the closest pair is guaranteed to satisfy the configured gap without
+  // distorting the force-directed shape.
+  if (active.length > 1 && allFree) {
+    let scale = 1;
+    for (let i = 0; i < active.length; i++) {
+      for (let j = i + 1; j < active.length; j++) {
+        const first = active[i];
+        const second = active[j];
+        const firstPoint = points[first.id];
+        const secondPoint = points[second.id];
+        const distance = Math.hypot(secondPoint.x - firstPoint.x, secondPoint.y - firstPoint.y);
+        const required = (first.size || 16) + (second.size || 16) + projectedGap;
+        if (distance > 0.001) scale = Math.max(scale, required / distance);
+      }
+    }
+    if (scale > 1) {
+      const center = active.reduce((sum, node) => ({
+        x: sum.x + points[node.id].x / active.length,
+        y: sum.y + points[node.id].y / active.length,
+      }), { x: 0, y: 0 });
+      for (const node of active) {
+        const point = points[node.id];
+        point.x = center.x + (point.x - center.x) * (scale + 0.001);
+        point.y = center.y + (point.y - center.y) * (scale + 0.001);
+      }
+    }
+  }
+  return points;
+}
+
+export function freezeGraphLayout(network, nodes) {
+  if (!network || !nodes) return;
+  const records = nodes.get();
+  const positions = spaceGraphPositions(records, network.getPositions());
+  network.setOptions({ physics: false });
+  for (const [id, point] of Object.entries(positions)) {
+    network.moveNode(id, point.x, point.y);
+  }
+  for (const node of records) {
+    if (node.fixed) nodes.update({ id: node.id, fixed: { x: false, y: false } });
+  }
 }
 
 // Keep unchanged nodes exactly where they are across refreshes: they get
@@ -766,10 +895,10 @@ function initGraph() {
       forceAtlas2Based: {
         gravitationalConstant: -26,
         centralGravity: 0.1,
-        springLength: 120,
+        springLength: 180,
         springConstant: 0.04,
         damping: 0.4,
-        avoidOverlap: 0.5,
+        avoidOverlap: 1,
       },
       maxVelocity: 12,
       timestep: 0.5,
@@ -797,14 +926,11 @@ function initGraph() {
   // Layout pins on kept nodes are released while physics is already off, so
   // the graph stays exactly where it is.
   state.network.on('stabilizationIterationsDone', () => {
-    state.network.setOptions({ physics: false });
-    for (const node of state.nodes.get()) {
-      if (node.fixed) state.nodes.update({ id: node.id, fixed: { x: false, y: false } });
-    }
+    freezeGraphLayout(state.network, state.nodes);
   });
 }
 
-async function loadGraph() {
+async function loadGraph({ preservePositions = true } = {}) {
   if (!state.nodes) return;
   try {
     // Fetch pre-computed graph from backend (nodes + edges). Related edges
@@ -816,7 +942,7 @@ async function loadGraph() {
     // Keep current positions (pinned for the layout) so unchanged nodes
     // stay exactly where they are across refreshes; only new nodes are
     // laid out by the bounded stabilize() below.
-    const prevPositions = state.network ? state.network.getPositions() : {};
+    const prevPositions = preservePositions && state.network ? state.network.getPositions() : {};
 
     // Degree centrality: a node's size grows with how many edges touch
     // it, so well-connected hubs (frequently-relevant memories, used

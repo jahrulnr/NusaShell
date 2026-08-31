@@ -1454,6 +1454,31 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 			}
 		}
 	}
+	if req.WebSearchStrategy != nil {
+		strategy := strings.TrimSpace(*req.WebSearchStrategy)
+		if !domain.ValidWebSearchStrategy(strategy) {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "web_search_strategy must be auto, round_robin, random, or one of: brave, serper, tavily, startpage, wikipedia, github"}
+		}
+		s.WebSearchStrategy = strategy
+	}
+	// Web search provider API keys are write-only: they live in the
+	// credential store (web_search_brave / _serper / _tavily), never in
+	// settings JSON. An empty value clears the stored key.
+	if req.WebSearchBraveAPIKey != nil {
+		if err := setWebSearchCredential(a.Credentials, "web_search_brave", *req.WebSearchBraveAPIKey); err != nil {
+			return nil, rpcInternal(err)
+		}
+	}
+	if req.WebSearchSerperAPIKey != nil {
+		if err := setWebSearchCredential(a.Credentials, "web_search_serper", *req.WebSearchSerperAPIKey); err != nil {
+			return nil, rpcInternal(err)
+		}
+	}
+	if req.WebSearchTavilyAPIKey != nil {
+		if err := setWebSearchCredential(a.Credentials, "web_search_tavily", *req.WebSearchTavilyAPIKey); err != nil {
+			return nil, rpcInternal(err)
+		}
+	}
 	if req.PluginContractMode != nil {
 		mode := strings.TrimSpace(*req.PluginContractMode)
 		switch mode {
@@ -1519,6 +1544,17 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	return contracts.SettingsGetResult{Settings: settingsDTO(s)}, nil
 }
 
+// setWebSearchCredential upserts or clears one web search provider API
+// key in the credential store. Empty values delete the stored key so the
+// provider falls back to its environment variable.
+func setWebSearchCredential(creds CredentialStore, id, raw string) error {
+	key := strings.TrimSpace(raw)
+	if key == "" {
+		return creds.Delete(id)
+	}
+	return creds.Set(id, key)
+}
+
 func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 	return contracts.SettingsDTO{
 		CompactionEnabled:          s.CompactionEnabled,
@@ -1549,6 +1585,7 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		VideoGenModelID:            s.VideoGenModelID,
 		WebAnswerProvider:          s.WebAnswerProvider,
 		WebAnswerModel:             s.WebAnswerModel,
+		WebSearchStrategy:          s.WebSearchStrategy,
 		PluginContractMode:         s.PluginContractMode,
 		Temperature:                s.Temperature,
 		TopP:                       s.TopP,

@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"nusashell/application"
@@ -37,7 +39,7 @@ type Toolbox struct {
 	Plugins         application.PluginStore
 	PluginInstaller application.PluginInstaller
 	Todos           application.ConversationTodoPort
-	Searcher        *searchwire.Searcher // zero-config searcher for web_search + web_fetch
+	Searcher        *searchwire.Searcher // startup searcher for web_fetch + web_search fallback when settings are unavailable
 	Settings        application.SettingsStore
 	Credentials     application.CredentialStore
 	AskQuestions    *application.AskQuestionService
@@ -72,6 +74,10 @@ type Toolbox struct {
 	// Initialized lazily via gate(); safe on the zero value.
 	contractsGateOnce sync.Once
 	contractsGate     *contractGate
+	// webSearchRR is the round-robin cursor for the web_search provider
+	// strategy (Settings → Web Search). Atomic so concurrent tool calls
+	// rotate without coordination.
+	webSearchRR atomic.Uint64
 }
 
 // webAnswerSearcher builds a searchwire.Searcher on-demand from the web
@@ -122,6 +128,66 @@ func (t *Toolbox) webAnswerSearcher() *searchwire.Searcher {
 	return searchwire.New(cfg)
 }
 
+// webSearchSearcher builds the searchwire.Searcher for web_search on
+// demand from the credential store, so provider API keys apply without a
+// restart (searchwire falls back to the standard env vars per call).
+func (t *Toolbox) webSearchSearcher() *searchwire.Searcher {
+	return searchwire.New(SearchwireSearchConfig(t.Credentials))
+}
+
+// webSearchSources resolves the Settings WebSearchStrategy into a per-call
+// searchwire source restriction for the given searcher:
+//
+//   - ""/auto: nil — every registered source merges (default)
+//   - round_robin: one API-keyed provider (brave, serper, tavily) that
+//     resolves a key (stored or env), rotating in registration order per
+//     query to spread paid-API quota; nil when none carry a key
+//   - random: one keyed provider picked at random per query; nil when none
+//     carry a key
+//   - a bare source name: pin the query to that source when registered;
+//     nil (all sources) when it is not — e.g. a keyed provider whose API
+//     key is not configured yet
+func (t *Toolbox) webSearchSources(strategy string, searcher *searchwire.Searcher) []string {
+	if searcher == nil {
+		return nil
+	}
+	strategy = strings.TrimSpace(strategy)
+	if strategy == "" || strategy == domain.WebSearchStrategyAuto {
+		return nil
+	}
+	registered := searcher.Sources()
+	if strategy == domain.WebSearchStrategyRoundRobin || strategy == domain.WebSearchStrategyRandom {
+		pool := make([]string, 0, len(webSearchKeyEnv))
+		for _, p := range webSearchKeyEnv {
+			if containsString(registered, p.name) && webSearchResolvedKey(t.Credentials, p.id, p.env) != "" {
+				pool = append(pool, p.name)
+			}
+		}
+		if len(pool) == 0 {
+			return nil
+		}
+		if strategy == domain.WebSearchStrategyRoundRobin {
+			n := t.webSearchRR.Add(1) - 1
+			return []string{pool[n%uint64(len(pool))]}
+		}
+		return []string{pool[rand.IntN(len(pool))]}
+	}
+	if containsString(registered, strategy) {
+		return []string{strategy}
+	}
+	return nil
+}
+
+// containsString reports whether s contains v.
+func containsString(s []string, v string) bool {
+	for _, item := range s {
+		if item == v {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *Toolbox) ListTools() []application.ToolInfo {
 	tools := []application.ToolInfo{
 		{Name: "todo", Description: "Manage the conversation task checklist. Two modes: `replace` (default, full-replace Claude TodoWrite style — empty items clears the list) and `patch` (merge by ID — update status/content of existing items, add new items, keep untouched items unchanged). Use `patch` to update a single item's status without re-emitting the full list (saves tokens). In patch mode, `content` may be empty (meaning \"don't change content, only update status\"). The user can delete items from the UI — treat deleted items as gone and do not re-add them. The optional `brief` argument is a living planning document that survives compaction and is re-injected via hydration. Format: markdown with required sections — `## Objective` (what the user asked for, in their words), `## Done when` (acceptance criteria — what the finished result looks like) — and optional sections that grow as the task progresses: `## Findings` (what you discovered during exploration: paths, line numbers, relevant files), `## Approach` (key steps/strategy). Set the brief at the start of a task; update it as findings emerge and the approach solidifies (e.g. after exploration, add concrete paths/lines to Findings; before execution, refine Approach). The brief is mirrored to a plan file on disk; the result returns `plan_path` (absolute) — `file_read` that path to re-read the latest brief, and pass it to ACP subagents that need the plan. Set `clear_brief: true` to delete the brief and its plan file (items are untouched unless you also clear them); an empty `brief` string alone never clears. The current hydration checkpoint is reused until compaction; the brief remains in tool history and is included in the fresh post-compaction checkpoint. Legacy `goal` arg is accepted for backward compat and mapped to `brief`.", InputSchema: obj("object", props("items", arrObj("Todo items (max 50). In replace mode: full list. In patch mode: only items to update/add.", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars). Required in replace mode; optional in patch mode (empty = keep existing)."), "status", strEnum("Item status; prefer exactly one in_progress at a time", "pending", "in_progress", "completed")), "id", "content", "status"), "mode", strEnum("Update mode: replace (default, full-replace) or patch (merge by ID)", "replace", "patch"), "brief", str("Living planning document. Required markdown sections: `## Objective` (user intent in their words), `## Done when` (acceptance criteria). Optional, grows over time: `## Findings` (paths, line numbers, relevant files discovered), `## Approach` (key steps/strategy). Set at task start; update as findings emerge. Survives compaction. Max ~10000 tokens."), "clear_brief", obj("boolean", nil)), "items")},
@@ -156,7 +222,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "mcp_install", Description: "Install an MCP plugin from the curated catalog or a GitHub repository (owner/repo or URL). After install, call mcp_enable with the resulting plugin id to connect and load its tools.", InputSchema: obj("object", props("source", strEnum("Install source", "catalog", "github"), "id", str("Catalog plugin id (required when source=catalog)"), "url", str("GitHub repo URL or owner/repo shorthand (required when source=github)"), "subdir", str("Optional subdirectory inside a monorepo (github)"), "ref", str("Optional branch or tag to pin (github)")), "source")},
 		{Name: "mcp_server_add", Description: "Register a manual MCP server (no manifest needed). Transports: stdio (command/args/env, e.g. npx servers), sse, or http (Streamable HTTP) with url and optional headers for remote servers. Use for generic MCP servers; use mcp_register for NusaShell plugin folders. After adding, call mcp_enable with the server id to connect and load its tools.", InputSchema: obj("object", props("name", str("Human-readable server name"), "transport", strEnum("Transport kind", "stdio", "sse", "http"), "command", str("Command to launch the server (stdio transport, e.g. npx, node, python)"), "url", str("Server URL (required for sse/http transports, e.g. https://host/mcp)"), "args", arr("Arguments for the stdio command (e.g. -y @modelcontextprotocol/server-github)"), "env", obj("object", props("additional", str("KEY=VALUE entries for the stdio process")), "additional"), "headers", obj("object", props("additional", str("HTTP headers for sse/http transports, e.g. Authorization: Bearer <token>")), "additional"), "id", str("Optional stable id (default auto-generated)")), "name")},
 		{Name: "read_media", Description: "Load a media file (image, audio, video, or PDF document) from disk into your context. The media type is auto-detected from the file's binary magic bytes — no need to specify whether it's an image, audio, video, or PDF. When your active model supports the detected media kind natively, the file is attached to your context directly. For non-capable models, a fallback model transcribes/describes the content and returns the text, or a placeholder note with the file path is returned for documents.", InputSchema: obj("object", props("file_path", str("Absolute path of the media file on disk"), "question", str("Optional question about the media content")), "file_path")},
-		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content. Oversized result lists are truncated in-band (~32KiB) with overflow_path pointing at the full JSONL in the platform temp dir; continue with file_read.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
+		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Serper, Tavily, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content. Oversized result lists are truncated in-band (~32KiB) with overflow_path pointing at the full JSONL in the platform temp dir; continue with file_read.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
 		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only. Extraction may read up to max_bytes (default 2MB); the in-band tool result is capped at ~32KiB. When truncated, overflow_path is an absolute temp file — page with file_read using next_offset_bytes.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
 	}
 	if t.Acp != nil && len(t.Acp.EnabledAcpAgents()) > 0 {
@@ -1090,9 +1156,6 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		return t.Acp.WaitAcpRun(ctx, argsJSON)
 	case name == "web_search":
-		if t.Searcher == nil {
-			return "", fmt.Errorf("search is not available")
-		}
 		var args struct {
 			Query string `json:"query"`
 			Limit int    `json:"limit"`
@@ -1107,7 +1170,25 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if limit <= 0 {
 			limit = 10
 		}
-		resp, err := t.Searcher.SearchWithOptions(ctx, args.Query, searchwire.SearchOptions{Limit: args.Limit})
+		// A fresh searcher per call keeps the provider API keys and the
+		// strategy from Settings live without a restart. The startup
+		// searcher remains the fallback when settings are unavailable.
+		searcher := t.webSearchSearcher()
+		if searcher == nil {
+			searcher = t.Searcher
+		}
+		if searcher == nil {
+			return "", fmt.Errorf("search is not available")
+		}
+		strategy := ""
+		if t.Settings != nil {
+			strategy = t.Settings.Get().WebSearchStrategy
+		}
+		opts := searchwire.SearchOptions{
+			Limit:   args.Limit,
+			Sources: t.webSearchSources(strategy, searcher),
+		}
+		resp, err := searcher.SearchWithOptions(ctx, args.Query, opts)
 		if err != nil {
 			return "", fmt.Errorf("search failed: %w", err)
 		}
@@ -1119,6 +1200,12 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			items = append(items, map[string]any{"title": r.Title, "url": r.URL, "snippet": r.Snippet, "sources": r.Sources})
 		}
 		meta := map[string]any{"count": len(items)}
+		if strategy != "" {
+			meta["strategy"] = strategy
+		}
+		if len(opts.Sources) == 1 {
+			meta["provider"] = opts.Sources[0]
+		}
 		if len(resp.Errors) > 0 {
 			var errs []any
 			for _, e := range resp.Errors {
