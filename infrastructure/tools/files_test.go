@@ -281,6 +281,9 @@ func TestFilePatchAutoHealRejectsAmbiguousWhitespaceMatch(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "PATCH_CONTEXT_AMBIGUOUS") {
 		t.Fatalf("expected ambiguous whitespace error, got %v", err)
 	}
+	if !strings.Contains(err.Error(), "candidate_lines=[1 2]") {
+		t.Fatalf("ambiguous error should list candidate line numbers, got %v", err)
+	}
 	got, readErr := os.ReadFile(path)
 	if readErr != nil || string(got) != content {
 		t.Fatalf("ambiguous auto-heal must not write: err=%v got=%q", readErr, got)

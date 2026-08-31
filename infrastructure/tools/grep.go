@@ -90,13 +90,14 @@ func executeGrep(argsJSON []byte) (bool, string, error) {
 		matches []grepMatch
 		via     string
 		capped  bool
+		total   = -1 // true total of matched lines; -1 = unknown (fallback dir walk stopped early)
 	)
 	if rgAvailable() {
-		ms, cp, err := rgSearch(args, mode, contextLines, maxResults)
+		ms, cp, tot, err := rgSearch(args, mode, contextLines, maxResults)
 		if err != nil {
 			return true, "", err
 		}
-		matches, via, capped = ms, "rg", cp
+		matches, via, capped, total = ms, "rg", cp, tot
 	} else {
 		pat := args.Pattern
 		if args.CaseInsensitive {
@@ -112,8 +113,9 @@ func executeGrep(argsJSON []byte) (bool, string, error) {
 		}
 		if !info.IsDir() {
 			matches, err = grepFile(args.Path, re, contextLines)
+			total = len(matches) // single file: grepFile returns every match
 		} else {
-			matches, err = grepDir(args.Path, args.GlobPattern, re, contextLines, maxResults)
+			matches, total, err = grepDir(args.Path, args.GlobPattern, re, contextLines, maxResults)
 		}
 		if err != nil {
 			return true, "", err
@@ -125,7 +127,7 @@ func executeGrep(argsJSON []byte) (bool, string, error) {
 		via = "go"
 	}
 
-	return true, formatRgResults(matches, mode, via, capped, args.ShowWhitespace), nil
+	return true, formatRgResults(matches, mode, via, capped, total, args.ShowWhitespace), nil
 }
 
 type grepMatch struct {
@@ -158,20 +160,27 @@ func rgAvailable() bool {
 	return rgPath != ""
 }
 
-// rgJSONLine is the subset of ripgrep's --json records we consume.
+// rgJSONLine is the subset of ripgrep's --json records we consume. The final
+// stats record carries the true totals even when match collection was capped,
+// so capped content results can report total_line_matches.
 type rgJSONLine struct {
 	Type string `json:"type"`
 	Data struct {
 		Path  struct{ Text string } `json:"path"`
 		Lines struct{ Text string } `json:"lines"`
 		Line  int                   `json:"line_number"`
+		Stats struct {
+			MatchedLines int `json:"matched_lines"`
+			Matches      int `json:"matches"`
+		} `json:"stats"`
 	} `json:"data"`
 }
 
 // rgSearch runs ripgrep and parses its --json stream into grepMatch records.
 // The second return reports whether the stream hit maxResults (more matches
-// exist than were kept).
-func rgSearch(args grepArgs, mode string, contextLines, maxResults int) ([]grepMatch, bool, error) {
+// exist than were kept); the third carries the true total of matched lines
+// from rg's final stats record (-1 when unavailable).
+func rgSearch(args grepArgs, mode string, contextLines, maxResults int) ([]grepMatch, bool, int, error) {
 	rgArgs := []string{"--json", "--color", "never"}
 	if args.CaseInsensitive {
 		rgArgs = append(rgArgs, "-i")
@@ -190,37 +199,40 @@ func rgSearch(args grepArgs, mode string, contextLines, maxResults int) ([]grepM
 	cmd := exec.Command(rgPath, rgArgs...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, false, err
+		return nil, false, -1, err
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
-		return nil, false, err
+		return nil, false, -1, err
 	}
-	matches, capped := parseRgJSON(stdout, contextLines, maxResults)
+	matches, capped, total := parseRgJSON(stdout, contextLines, maxResults)
 	waitErr := cmd.Wait()
 	if waitErr != nil && len(matches) == 0 {
 		if ee, ok := waitErr.(*exec.ExitError); ok && ee.ExitCode() == 1 {
-			return matches, capped, nil // exit 1 == no matches
+			return matches, capped, total, nil // exit 1 == no matches
 		}
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = waitErr.Error()
 		}
-		return nil, false, fmt.Errorf("rg: %s", msg)
+		return nil, false, -1, fmt.Errorf("rg: %s", msg)
 	}
-	return matches, capped, nil
+	return matches, capped, total, nil
 }
 
 // parseRgJSON consumes ripgrep --json records, grouping context lines with
 // their match. It drains the stream fully (so cmd.Wait never deadlocks) but
 // stops collecting once maxResults matches are kept; the second return is
-// true when that cap was hit.
-func parseRgJSON(r io.Reader, contextLines, maxResults int) ([]grepMatch, bool) {
+// true when that cap was hit. The third return carries the total matched
+// lines reported by rg's final stats record (-1 when the stream had none),
+// which stays accurate even when collection was capped.
+func parseRgJSON(r io.Reader, contextLines, maxResults int) ([]grepMatch, bool, int) {
 	var matches []grepMatch
 	prevIdx := -1
 	var ctxBuf []grepContextLine
 	capped := false
+	total := -1
 
 	// Attach any trailing context as after-context of the last match.
 	flush := func() {
@@ -239,21 +251,33 @@ func parseRgJSON(r io.Reader, contextLines, maxResults int) ([]grepMatch, bool) 
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64*1024), 16*1024*1024) // tolerate very long lines
 	for sc.Scan() {
-		if capped {
-			continue // drain only
-		}
 		var rec rgJSONLine
 		if json.Unmarshal(sc.Bytes(), &rec) != nil {
 			continue
 		}
 		switch rec.Type {
+		case "stats", "summary":
+			if rec.Data.Stats.MatchedLines > 0 {
+				total = rec.Data.Stats.MatchedLines
+			} else if rec.Data.Stats.Matches > 0 {
+				total = rec.Data.Stats.Matches
+			}
 		case "begin", "end":
+			if capped {
+				continue // drain only
+			}
 			flush()
 		case "context":
+			if capped {
+				continue // drain only
+			}
 			ctxBuf = append(ctxBuf, grepContextLine{
 				Line: rec.Data.Line, Content: strings.TrimRight(rec.Data.Lines.Text, "\n"),
 			})
 		case "match":
+			if capped {
+				continue // drain only
+			}
 			L := rec.Data.Line
 			m := grepMatch{
 				File: rec.Data.Path.Text, Line: L,
@@ -278,7 +302,7 @@ func parseRgJSON(r io.Reader, contextLines, maxResults int) ([]grepMatch, bool) 
 		}
 	}
 	flush()
-	return matches, capped
+	return matches, capped, total
 }
 
 // --- shared rg-style formatter ---------------------------------------------
@@ -289,8 +313,10 @@ func parseRgJSON(r io.Reader, contextLines, maxResults int) ([]grepMatch, bool) 
 // carries the tallies with unit-labeled keys — line_matches counts matched
 // lines (the :N in content rows is a 1-based line number, not a byte
 // offset), which backend ran (via: rg|go), and capped: true when
-// max_results cut the result short.
-func formatRgResults(matches []grepMatch, mode, via string, capped, showWhitespace bool) string {
+// max_results cut the result short. When capped, totalMatches (>= 0) is
+// reported as total_line_matches so the reader knows how many matches
+// exist beyond the truncated page; -1 means the true total is unknown.
+func formatRgResults(matches []grepMatch, mode, via string, capped bool, totalMatches int, showWhitespace bool) string {
 	meta := map[string]any{"via": via}
 	if capped {
 		meta["capped"] = true
@@ -355,19 +381,24 @@ func formatRgResults(matches []grepMatch, mode, via string, capped, showWhitespa
 			}
 		}
 		meta["line_matches"] = len(matches)
+		if capped && totalMatches >= 0 {
+			meta["total_line_matches"] = totalMatches
+		}
 		return capToolOutput("grep", meta, strings.TrimRight(b.String(), "\n"))
 	}
 }
 
 // --- pure-Go fallback backend ----------------------------------------------
 
-func grepDir(root, glob string, re *regexp.Regexp, contextLines, maxResults int) ([]grepMatch, error) {
+func grepDir(root, glob string, re *regexp.Regexp, contextLines, maxResults int) ([]grepMatch, int, error) {
 	var matches []grepMatch
+	stopped := false
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries
 		}
 		if len(matches) >= maxResults {
+			stopped = true
 			return filepath.SkipDir
 		}
 		if d.IsDir() {
@@ -391,7 +422,7 @@ func grepDir(root, glob string, re *regexp.Regexp, contextLines, maxResults int)
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
 	sort.Slice(matches, func(i, j int) bool {
 		if matches[i].File != matches[j].File {
@@ -399,7 +430,11 @@ func grepDir(root, glob string, re *regexp.Regexp, contextLines, maxResults int)
 		}
 		return matches[i].Line < matches[j].Line
 	})
-	return matches, nil
+	total := len(matches)
+	if stopped {
+		total = -1 // walk aborted at maxResults; the real total is unknown
+	}
+	return matches, total, nil
 }
 
 func grepFile(path string, re *regexp.Regexp, contextLines int) ([]grepMatch, error) {

@@ -101,6 +101,30 @@ func TestGrepCountMode(t *testing.T) {
 	}
 }
 
+func TestGrepContentModeCappedReportsTotal(t *testing.T) {
+	dir := t.TempDir()
+	var b strings.Builder
+	for i := 0; i < 150; i++ {
+		fmt.Fprintf(&b, "needle line %03d\n", i)
+	}
+	writeFile(t, filepath.Join(dir, "big.txt"), b.String())
+
+	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+		"pattern":     "needle line",
+		"path":        filepath.Join(dir, "big.txt"),
+		"output_mode": "content",
+		"max_results": 100,
+	}))
+	if !ok || err != nil {
+		t.Fatalf("grep failed: ok=%v err=%v", ok, err)
+	}
+	for _, want := range []string{"capped: true", "total_line_matches: 150"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("capped grep missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestGrepGlobFilter(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "a.go"), "target\n")
@@ -348,7 +372,7 @@ func TestParseRgJSONContextGrouping(t *testing.T) {
 {"type":"match","data":{"path":{"text":"a.go"},"lines":{"text":"hit two\n"},"line_number":4}}
 {"type":"context","data":{"path":{"text":"a.go"},"lines":{"text":"ctx5\n"},"line_number":5}}
 {"type":"end","data":{"path":{"text":"a.go"}}}`
-	matches, capped := parseRgJSON(strings.NewReader(stream), 1, 10)
+	matches, capped, _ := parseRgJSON(strings.NewReader(stream), 1, 10)
 	if capped {
 		t.Error("should not be capped with maxResults=10")
 	}
@@ -371,7 +395,7 @@ func TestParseRgJSONCap(t *testing.T) {
 	stream := `{"type":"match","data":{"path":{"text":"a.go"},"lines":{"text":"hit\n"},"line_number":1}}
 {"type":"match","data":{"path":{"text":"a.go"},"lines":{"text":"hit\n"},"line_number":2}}
 {"type":"match","data":{"path":{"text":"a.go"},"lines":{"text":"hit\n"},"line_number":3}}`
-	matches, capped := parseRgJSON(strings.NewReader(stream), 0, 2)
+	matches, capped, _ := parseRgJSON(strings.NewReader(stream), 0, 2)
 	if !capped {
 		t.Error("3 matches with maxResults=2 must report capped")
 	}
@@ -389,9 +413,12 @@ func TestGrepGoFallbackWalker(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "node_modules", "skip.js"), "alpha\n")
 
 	re := regexp.MustCompile("alpha")
-	matches, err := grepDir(dir, "*.go", re, 0, 100)
+	matches, total, err := grepDir(dir, "*.go", re, 0, 100)
 	if err != nil {
 		t.Fatalf("grepDir: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("grepDir total = %d, want 2", total)
 	}
 	if len(matches) != 2 {
 		t.Fatalf("want 2 matches (glob *.go, node_modules skipped), got %d: %+v", len(matches), matches)
@@ -443,31 +470,31 @@ func TestFormatRgResultsShapes(t *testing.T) {
 		{File: "b.go", Line: 1, Content: "hit three"},
 	}
 
-	out := formatRgResults(matches, "content", "go", false, false)
+	out := formatRgResults(matches, "content", "go", false, -1, false)
 	for _, want := range []string{"a.go-1-ctx", "a.go:2:hit one", "a.go:9:hit two", "b.go:1:hit three", "line_matches: 3", "via: go"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("content mode missing %q:\n%s", want, out)
 		}
 	}
 
-	out = formatRgResults(matches, "files_with_matches", "rg", false, false)
+	out = formatRgResults(matches, "files_with_matches", "rg", false, -1, false)
 	if !strings.Contains(out, "files: 2") || strings.Contains(out, "hit one") {
 		t.Errorf("files_with_matches shape wrong:\n%s", out)
 	}
 
-	out = formatRgResults(matches, "count", "rg", true, false)
+	out = formatRgResults(matches, "count", "rg", true, -1, false)
 	for _, want := range []string{"a.go:2", "b.go:1", "total_line_matches: 3", "capped: true"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("count mode missing %q:\n%s", want, out)
 		}
 	}
 
-	out = formatRgResults(nil, "content", "go", false, false)
+	out = formatRgResults(nil, "content", "go", false, -1, false)
 	if !strings.Contains(out, "line_matches: 0") || !strings.Contains(out, "via: go") {
 		t.Errorf("empty result shape wrong:\n%s", out)
 	}
 
-	visible := formatRgResults([]grepMatch{{File: "styles.css", Line: 2, Content: "\tMATCH\t\r"}}, "content", "go", false, true)
+	visible := formatRgResults([]grepMatch{{File: "styles.css", Line: 2, Content: "\tMATCH\t\r"}}, "content", "go", false, -1, true)
 	if !strings.Contains(visible, `styles.css:2:\tMATCH\t\r`) {
 		t.Errorf("show_whitespace formatter lost invisible markers:\n%s", visible)
 	}
