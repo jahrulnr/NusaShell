@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"github.com/coder/websocket"
 
 	"nusashell/contracts"
+	"nusashell/domain"
+	"nusashell/infrastructure/jsonstore"
 )
 
 // readSSEUntilClosed consumes a /stream response until the server closes it
@@ -1895,5 +1898,67 @@ func TestTurnContextTokensIsLastRoundNotSum(t *testing.T) {
 	}
 	if conv.Conversation.ContextTokens != 15 {
 		t.Fatalf("persisted context_tokens = %d, want 15", conv.Conversation.ContextTokens)
+	}
+}
+
+// TestAgentTurnRetryAfterAutoContinueRateLimit reproduces the exact repro for
+// the "no failed assistant turn to retry" pop-up: turn 0 succeeds with open
+// todos, the auto-continue chain starts turn 1 (a fresh assistant message),
+// turn 1 hits a 429 rate limit and fails with the friendly message, then the
+// user clicks Retry. The failed assistant message must still be in error
+// status, so the retry must succeed instead of answering NOT_FOUND.
+func TestAgentTurnRetryAfterAutoContinueRateLimit(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	convID := h.newConversation(t)
+
+	// The harness does not wire a todo store; without open todos the
+	// auto-continue chain never starts. Wire one and leave a todo open so
+	// turn 0 chains into turn 1.
+	h.app.Todos = jsonstore.NewTodoStore(filepath.Join(t.TempDir(), "todos.json"), t.TempDir(), nil)
+	h.app.Todos.Set(convID, []domain.TodoItem{{ID: "t1", Content: "keep working", Status: domain.TodoInProgress}})
+
+	// Turn 0 completes normally; the auto-continue turn 1 hits 429 on the
+	// streaming request (mirrors OpenRouter's ~5 req/min window).
+	h.llm.setRounds([][]llmStep{
+		{{Text: "First answer."}},
+		{{Text: "Second answer."}},
+	})
+	h.llm.failStatus = http.StatusTooManyRequests
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_id": convID, "text": "hello", "model": "fake-model-1",
+	})
+	waitTurnDone(t, h, convID)
+	h.llm.failStatus = 0 // clear before the retry below
+
+	// The last assistant message is in error status with the friendly
+	// rate-limit message (this is the state the frontend shows Retry on).
+	gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
+	var conv struct {
+		Messages []struct {
+			Role   string `json:"role"`
+			Status string `json:"status"`
+			Error  string `json:"error"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
+		t.Fatal(err)
+	}
+	last := conv.Messages[len(conv.Messages)-1]
+	if last.Role != "assistant" || last.Status != "error" {
+		t.Fatalf("last message = %+v, want assistant/error (all: %+v)", last, conv.Messages)
+	}
+	if !strings.Contains(last.Error, "rate-limited") {
+		t.Fatalf("last error = %q, want rate-limited message", last.Error)
+	}
+
+	// Retry the failed turn: must succeed, not answer NOT_FOUND.
+	h.llm.setScript([]llmStep{{Text: "Recovered after rate limit."}})
+	res := h.rpc(t, "agent.turns.retry", map[string]any{
+		"conversation_id": convID, "model": "fake-model-2",
+	})
+	if !res.OK {
+		t.Fatalf("retry after auto-continue rate-limit failure failed: %+v", res.Error)
 	}
 }

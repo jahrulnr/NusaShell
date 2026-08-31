@@ -440,7 +440,14 @@ export function renderConversation(messages, onRetry) {
 
 function renderAssistantTurn(messages, onRetry) {
   const finalMessage = messages[messages.length - 1];
-  const failedMessage = messages.find((message) => message.status === 'error');
+  // Retry is offered only for a failed message that is STILL the last
+  // message of this turn group. A failed message followed by a completed
+  // assistant message was already recovered (a successful retry or a later
+  // turn — the error status stays in formed history by design). Showing
+  // Retry on it made the backend answer NOT_FOUND ("no failed assistant
+  // turn to retry") because its lastFailedAssistantIndex scan stops at
+  // the first done assistant from the end.
+  const failedMessage = finalMessage?.status === 'error' ? finalMessage : null;
   // Stamp the persisted message ids this node was rendered from so runtime
   // code can locate the node that owns a specific in-flight message. Reattach
   // must convert ONLY that node into a streaming slot — replacing the last

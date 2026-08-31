@@ -1230,3 +1230,40 @@ test('live rounds stay mounted no matter how many arrive (performance is CSS + t
     globalThis.document = previousDocument;
   }
 });
+
+test('retry button only for a failed message still last in its turn group (recovered errors must not offer retry)', () => {
+  const dom = new JSDOM('<main id="thread"></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  const onRetry = () => {};
+  try {
+    // A failed assistant followed by a completed assistant was already
+    // recovered (error status stays in formed history by design). The
+    // backend's lastFailedAssistantIndex stops at the first done assistant
+    // from the end, so offering Retry here produced the NOT_FOUND
+    // "no failed assistant turn to retry" pop-up.
+    const recovered = [
+      { role: 'user', content: 'go', created_at: '2026-08-31T10:00:00Z' },
+      { role: 'assistant', id: 'msg_failed', status: 'error', error: 'OpenRouter is rate-limited', created_at: '2026-08-31T10:01:00Z' },
+      { role: 'assistant', id: 'msg_ok', status: 'done', content: 'recovered answer', created_at: '2026-08-31T10:02:00Z' },
+    ];
+    let thread = document.getElementById('thread');
+    thread.append(renderConversation(recovered, onRetry));
+    assert.equal(thread.querySelector('.agent-retry-btn'), null, 'recovered error must not offer retry');
+    assert.equal(thread.querySelector('.agent-error-text'), null, 'recovered error text must not be shown as active error');
+    assert.match(thread.textContent, /recovered answer/);
+
+    // A failed assistant that IS the last message still offers retry.
+    thread = document.getElementById('thread');
+    thread.replaceChildren();
+    const stillFailed = [
+      { role: 'user', content: 'go', created_at: '2026-08-31T11:00:00Z' },
+      { role: 'assistant', id: 'msg_failed2', status: 'error', error: 'provider exploded', created_at: '2026-08-31T11:01:00Z' },
+    ];
+    thread.append(renderConversation(stillFailed, onRetry));
+    assert.ok(thread.querySelector('.agent-retry-btn'), 'last failed message must offer retry');
+    assert.match(thread.textContent, /provider exploded/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});

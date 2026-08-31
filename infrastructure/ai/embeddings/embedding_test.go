@@ -176,6 +176,68 @@ func TestEmbedBatchTruncatesWithDefaultTokenCap(t *testing.T) {
 	}
 }
 
+func TestEmbedBatchRetriesProviderTokenOverflowWithSmallerInputs(t *testing.T) {
+	var requests int
+	var receivedTokens []int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var payload struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		// Reproduce the reported provider behavior exactly: the local 3-char
+		// estimate fills 512 tokens, then the model tokenizer adds 3 tokens.
+		tokens := (len([]rune(payload.Input[0]))+2)/3 + 3
+		receivedTokens = append(receivedTokens, tokens)
+		if tokens > 512 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"HTTP 400: {\"message\":\"Embedding input has 515 tokens, exceeding the model maximum of 512.\"}"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1,0.2]}]}`))
+	}))
+	defer server.Close()
+
+	e := NewEmbedder(server.URL, "", "test-embed", 512)
+	e.Client = server.Client()
+	got, err := e.EmbedBatch(context.Background(), []string{strings.Repeat("abc", 512)})
+	if err != nil {
+		t.Fatalf("EmbedBatch failed after provider reported its exact token count: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want one rejected request plus one bounded retry", requests)
+	}
+	if len(got) != 1 || len(got[0]) != 2 {
+		t.Fatalf("EmbedBatch = %#v, want one 2-dimensional vector", got)
+	}
+	if receivedTokens[0] != 515 || receivedTokens[1] > 512 {
+		t.Fatalf("provider token counts = %v, want first 515 and retry <= 512", receivedTokens)
+	}
+}
+
+func TestEmbedBatchBoundsProviderTokenOverflowRetries(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"Embedding input has 515 tokens, exceeding the model maximum of 512."}}`))
+	}))
+	defer server.Close()
+
+	e := NewEmbedder(server.URL, "", "test-embed", 512)
+	e.Client = server.Client()
+	_, err := e.EmbedBatch(context.Background(), []string{strings.Repeat("abc", 512)})
+	if err == nil || !strings.Contains(err.Error(), "515 tokens") {
+		t.Fatalf("EmbedBatch error = %v, want final provider overflow", err)
+	}
+	if requests != 1+embeddingOverflowMaxRetries {
+		t.Fatalf("requests = %d, want initial request plus %d bounded retries", requests, embeddingOverflowMaxRetries)
+	}
+}
+
 func TestEmbedBatchReportsHTTPAndDecodeErrors(t *testing.T) {
 	tests := []struct {
 		name string

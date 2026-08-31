@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -22,6 +24,13 @@ const EmbeddingMaxTokens = 512
 // fit embedding inputs under the token cap without a local tokenizer.
 // Latin text tokenizes at ~3.5-4.5 chars/token, so 3 leaves headroom.
 const embeddingCharsPerToken = 3
+
+// Retry a provider-reported token overflow at most twice. The response gives
+// the tokenizer's actual count, so the retry can shrink proportionally
+// without imposing an overly conservative byte cap on every normal request.
+const embeddingOverflowMaxRetries = 2
+
+var embeddingTokenOverflowRE = regexp.MustCompile(`(?i)Embedding input has\s+(\d+)\s+tokens?,\s+exceeding the model maximum of\s+(\d+)`)
 
 // Embedder talks to any OpenAI-compatible /v1/embeddings endpoint.
 // Works with OpenAI Platform, OpenRouter, and other gateways that expose
@@ -91,43 +100,52 @@ func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32,
 	for i, t := range texts {
 		inputs[i] = truncateInput(t, maxTokens)
 	}
-	payload := map[string]any{"model": e.Model, "input": inputs}
-	body, _ := json.Marshal(payload)
+	for attempt := 0; ; attempt++ {
+		payload := map[string]any{"model": e.Model, "input": inputs}
+		body, _ := json.Marshal(payload)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", e.BaseURL+"/embeddings", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("embeddings: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+e.APIKey)
+		req, err := http.NewRequestWithContext(ctx, "POST", e.BaseURL+"/embeddings", bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("embeddings: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+e.APIKey)
 
-	resp, err := e.Client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("embeddings: %w", err)
-	}
-	defer resp.Body.Close()
+		resp, err := e.Client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("embeddings: %w", err)
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("embeddings: %s: %s", resp.Status, b)
-	}
+		if resp.StatusCode != http.StatusOK {
+			responseBody, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			actual, limit, overflow := parseEmbeddingTokenOverflow(string(responseBody))
+			if overflow && attempt < embeddingOverflowMaxRetries {
+				inputs = shrinkEmbeddingInputs(inputs, actual, limit)
+				continue
+			}
+			return nil, fmt.Errorf("embeddings: %s: %s", resp.Status, responseBody)
+		}
 
-	var result struct {
-		Data []struct {
-			Embedding []float32 `json:"embedding"`
-		} `json:"data"`
+		var result struct {
+			Data []struct {
+				Embedding []float32 `json:"embedding"`
+			} `json:"data"`
+		}
+		decodeErr := json.NewDecoder(resp.Body).Decode(&result)
+		_ = resp.Body.Close()
+		if decodeErr != nil {
+			return nil, fmt.Errorf("embeddings: decode: %w", decodeErr)
+		}
+		out := make([][]float32, len(result.Data))
+		for i, d := range result.Data {
+			out[i] = d.Embedding
+		}
+		if len(out) > 0 && e.dim == 0 {
+			e.dim = len(out[0])
+		}
+		return out, nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("embeddings: decode: %w", err)
-	}
-	out := make([][]float32, len(result.Data))
-	for i, d := range result.Data {
-		out[i] = d.Embedding
-	}
-	if len(out) > 0 && e.dim == 0 {
-		e.dim = len(out[0])
-	}
-	return out, nil
 }
 
 // truncationMarker signals that an embedding input was cut; it is counted
@@ -138,14 +156,49 @@ const truncationMarker = "…[truncated]"
 // embeddingCharsPerToken chars each) of s and appends an omission marker so
 // callers can tell the input was cut. Rune-safe for non-ASCII content.
 func truncateInput(s string, maxTokens int) string {
-	limit := maxTokens * embeddingCharsPerToken
+	return truncateInputRunes(s, maxTokens*embeddingCharsPerToken)
+}
+
+func truncateInputRunes(s string, limit int) string {
 	runes := []rune(s)
+	if limit <= 0 {
+		return ""
+	}
 	if len(runes) <= limit {
 		return s
 	}
-	head := limit - len([]rune(truncationMarker))
-	if head < 0 {
-		head = 0
+	marker := []rune(truncationMarker)
+	if limit <= len(marker) {
+		return string(runes[:limit])
 	}
+	head := limit - len(marker)
 	return string(runes[:head]) + truncationMarker
+}
+
+func parseEmbeddingTokenOverflow(body string) (actual, limit int, ok bool) {
+	match := embeddingTokenOverflowRE.FindStringSubmatch(body)
+	if len(match) != 3 {
+		return 0, 0, false
+	}
+	actual, actualErr := strconv.Atoi(match[1])
+	limit, limitErr := strconv.Atoi(match[2])
+	if actualErr != nil || limitErr != nil || actual <= limit || limit <= 0 {
+		return 0, 0, false
+	}
+	return actual, limit, true
+}
+
+func shrinkEmbeddingInputs(inputs []string, actualTokens, maxTokens int) []string {
+	// Leave up to eight tokens for provider-added BOS/EOS or other special
+	// tokens and for integer rounding. Applying the provider's measured ratio
+	// retains substantially more content than a universal one-byte-per-token
+	// limit while still correcting tokenizer-specific underestimation.
+	reserve := max(1, min(8, maxTokens/64))
+	targetTokens := max(1, maxTokens-reserve)
+	out := make([]string, len(inputs))
+	for i, input := range inputs {
+		limit := len([]rune(input)) * targetTokens / actualTokens
+		out[i] = truncateInputRunes(input, limit)
+	}
+	return out
 }

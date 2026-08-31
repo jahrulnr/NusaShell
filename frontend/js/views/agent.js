@@ -2502,7 +2502,16 @@ function bindEvents() {
     const fallbackNode = !run && conversation_id === state.activeId && message_id
       ? findMessageNode(agentThread(), message_id)
       : null;
-    if (run || fallbackNode) {
+    // A turn.error event without a live run can be stale: the failed
+    // message may already have been recovered by a successful retry or a
+    // later turn (the error status stays in formed history by design).
+    // Only surface the error UI when the message is still the LAST message
+    // of the active snapshot — a recovered failure must not show a Retry
+    // button the backend rejects with NOT_FOUND ("no failed assistant turn
+    // to retry").
+    const lastActiveMsg = state.messages[state.messages.length - 1];
+    const stillFailed = lastActiveMsg?.id === message_id && lastActiveMsg?.status === 'error';
+    if ((run || fallbackNode) && (run || stillFailed)) {
       const node = run?.msgNode || fallbackNode;
       const bubble = node?.querySelector('.agent-bubble');
       appendLiveError(bubble, message);
@@ -2517,7 +2526,7 @@ function bindEvents() {
       }
     }
     endTurn(run_id);
-    if (isAgentRoom) toast(message || 'Turn failed', 'error');
+    if (isAgentRoom && (run || stillFailed)) toast(message || 'Turn failed', 'error');
     if (conversation_id === state.activeId) refreshActiveConversation();
     else if (isAgentRoom) refreshConversations();
   });
