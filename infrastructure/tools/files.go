@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"nusashell/application"
+	clock "nusashell/pkg/time"
 )
 
 const (
@@ -291,7 +292,7 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			return true, "", err
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-		now := time.Now()
+		now := clock.NewTime().Time()
 		lines := make([]string, 0, len(entries))
 		var totalSize int64
 		for _, e := range entries {
@@ -393,7 +394,7 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			"size":     info.Size(),
 			"dir":      info.IsDir(),
 			"mode":     info.Mode().String(),
-			"modified": info.ModTime().UTC().Format(time.RFC3339),
+			"modified": clock.NewTime(info.ModTime()).Format(time.RFC3339),
 		}
 		return true, yamlBlock(meta), nil
 	}

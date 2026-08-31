@@ -44,6 +44,12 @@ Pipeline files use the same YAML schema as `automation_create` — `name`, `trig
 - **when** — event type plus optional `where` filters. Duplicate `(event, trigger, workflow)` deliveries are ignored.
 - **manual** — UI, RPC, or `automation.run` only.
 
+Runtime timestamps in automation results use the host machine's local
+timezone and include the RFC3339 offset (for example, `+07:00` on an
+`Asia/Jakarta` machine). A trigger's `timezone` remains explicit scheduling
+configuration and is not inferred from the timestamp display. If that field is
+omitted, scheduling uses the host machine's timezone.
+
 Availability is `runnable`, `blocked`, `disabled`, or `invalid`. Blocked means a required MCP provider is disabled or not running. Enable the provider and turn on **Auto start** in Plugins if the workflow should have that MCP ready as soon as NusaShell boots; do not rewrite the YAML.
 
 ## Plugin push events (server→client notifications)

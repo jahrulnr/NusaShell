@@ -36,15 +36,23 @@ func SubagentCompletionResult(run *AcpRun, outputPath string) string {
 	body := SubagentCompletionBody(run)
 	var y strings.Builder
 	y.WriteString("---\n")
-	y.WriteString("status: " + YamlScalar(string(run.Status)) + "\n")
+	y.WriteString("status: ")
+	y.WriteString(YamlScalar(string(run.Status)))
+	y.WriteString("\n")
 	if run.ID != "" {
-		y.WriteString("id: " + YamlScalar(run.ID) + "\n")
+		y.WriteString("id: ")
+		y.WriteString(YamlScalar(run.ID))
+		y.WriteString("\n")
 	}
 	if run.Workspace != "" {
-		y.WriteString("workspace: " + YamlScalar(run.Workspace) + "\n")
+		y.WriteString("workspace: ")
+		y.WriteString(YamlScalar(run.Workspace))
+		y.WriteString("\n")
 	}
 	if outputPath != "" {
-		y.WriteString("output_path: " + YamlScalar(outputPath) + "\n")
+		y.WriteString("output_path: ")
+		y.WriteString(YamlScalar(outputPath))
+		y.WriteString("\n")
 	}
 	y.WriteString("---\n\n")
 	y.WriteString(body)

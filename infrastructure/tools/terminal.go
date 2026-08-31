@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	clock "nusashell/pkg/time"
 )
 
 // Terminal-style rendering helpers for tool output bodies. The header stays
@@ -37,9 +39,9 @@ func humanSize(n int64) string {
 func lsTime(t, now time.Time) string {
 	const recent = 6 * 30 * 24 * time.Hour // ~6 months
 	if now.Sub(t) > recent || t.After(now) {
-		return t.Format("Jan 02  2006")
+		return clock.NewTime(t).Format("Jan 02  2006")
 	}
-	return t.Format("Jan 02 15:04")
+	return clock.NewTime(t).Format("Jan 02 15:04")
 }
 
 // lsLine renders one directory entry as an ls -l style line:

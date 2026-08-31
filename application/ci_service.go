@@ -9,6 +9,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // YAMLParser decodes a workflow document.
@@ -31,9 +32,9 @@ type Automation struct {
 
 func (a *Automation) now() time.Time {
 	if a.Clock == nil {
-		return time.Now()
+		return clock.NewTime().Time()
 	}
-	return a.Clock.Now()
+	return clock.NewTime(a.Clock.Now()).Time()
 }
 
 func (a *Automation) ValidateYAML(raw []byte) (domain.ValidationResult, *domain.WorkflowDefinition) {
@@ -59,9 +60,9 @@ func (a *Automation) SaveWorkflow(ctx context.Context, w *domain.WorkflowDefinit
 		w.ID = domain.NewID(domain.IDPrefixWF)
 	}
 	if w.CreatedAt.IsZero() {
-		w.CreatedAt = a.now().UTC()
+		w.CreatedAt = clock.NewTime(a.now()).Time()
 	}
-	w.UpdatedAt = a.now().UTC()
+	w.UpdatedAt = clock.NewTime(a.now()).Time()
 	r := domain.ValidateSyntax(w)
 	if a.Auto != nil {
 		r = a.Auto.Validate(ctx, w)
@@ -112,7 +113,7 @@ func (a *Automation) runWorkflow(ctx context.Context, id, requestedBy string, as
 // expires. Returns the latest run snapshot. A non-positive timeout means
 // poll once and return immediately.
 func (a *Automation) WaitRun(ctx context.Context, runID string, timeout time.Duration) (*domain.WorkflowRun, error) {
-	deadline := time.Now().Add(timeout)
+	deadline := clock.NewTime().Time().Add(timeout)
 	for {
 		run, err := a.Exec.Runs.Get(ctx, runID)
 		if err != nil {
@@ -121,7 +122,7 @@ func (a *Automation) WaitRun(ctx context.Context, runID string, timeout time.Dur
 		if run.Status.IsTerminal() {
 			return run, nil
 		}
-		if timeout > 0 && time.Now().After(deadline) {
+		if timeout > 0 && clock.NewTime().Time().After(deadline) {
 			return run, nil
 		}
 		select {
@@ -140,7 +141,7 @@ func workflowDTO(w *domain.WorkflowDefinition, avail string, reason string) cont
 			Event: t.Event, Cron: t.Cron, Timezone: t.Timezone, Interval: t.Interval.String(),
 		}
 		if t.At != nil {
-			td.At = t.At.Format(time.RFC3339)
+			td.At = clock.NewTime(*t.At).Format(time.RFC3339)
 		}
 		trigs = append(trigs, td)
 	}
@@ -160,7 +161,7 @@ func workflowDTO(w *domain.WorkflowDefinition, avail string, reason string) cont
 	return contracts.AutomationDTO{
 		ID: w.ID, Name: w.Name, Enabled: w.Enabled, Availability: avail,
 		BlockedReason: reason, Triggers: trigs, Jobs: jobs, Capabilities: caps,
-		UpdatedAt: w.UpdatedAt.Format(time.RFC3339),
+		UpdatedAt: clock.NewTime(w.UpdatedAt).Format(time.RFC3339),
 	}
 }
 
@@ -171,13 +172,13 @@ func runDTO(r *domain.WorkflowRun) contracts.CIRunDTO {
 		for _, s := range j.Steps {
 			st := contracts.CIStepDTO{ID: s.ID, Name: s.Name, Status: string(s.Status), ExitCode: s.ExitCode, Error: s.Error, Output: s.Output}
 			if !s.StartedAt.IsZero() {
-				st.StartedAt = s.StartedAt.Format(time.RFC3339)
+				st.StartedAt = clock.NewTime(s.StartedAt).Format(time.RFC3339)
 			}
 			steps = append(steps, st)
 		}
 		jd := contracts.CIJobDTO{ID: j.JobID, Name: j.Name, Status: string(j.Status), ExitCode: j.ExitCode, Error: j.Error, Steps: steps}
 		if !j.StartedAt.IsZero() {
-			jd.StartedAt = j.StartedAt.Format(time.RFC3339)
+			jd.StartedAt = clock.NewTime(j.StartedAt).Format(time.RFC3339)
 		}
 		jobs = append(jobs, jd)
 	}
@@ -190,13 +191,13 @@ func runDTO(r *domain.WorkflowRun) contracts.CIRunDTO {
 			Success: sum.Success, Failed: sum.Failed, Running: sum.Running, Queued: sum.Queued,
 			Blocked: sum.Blocked, Waiting: sum.Waiting,
 		},
-		CreatedAt: r.CreatedAt.Format(time.RFC3339),
+		CreatedAt: clock.NewTime(r.CreatedAt).Format(time.RFC3339),
 	}
 	if r.WakeAt != nil {
-		dto.WakeAt = r.WakeAt.Format(time.RFC3339)
+		dto.WakeAt = clock.NewTime(*r.WakeAt).Format(time.RFC3339)
 	}
 	if !r.FinishedAt.IsZero() {
-		dto.FinishedAt = r.FinishedAt.Format(time.RFC3339)
+		dto.FinishedAt = clock.NewTime(r.FinishedAt).Format(time.RFC3339)
 	}
 	return dto
 }

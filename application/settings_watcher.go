@@ -11,6 +11,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // settingsWatchInterval is the poll cadence for config/settings.json. Two
@@ -66,7 +67,7 @@ func (w *SettingsWatcher) fingerprint() (settingsFileState, bool) {
 	if err != nil {
 		return settingsFileState{}, false
 	}
-	return settingsFileState{modNano: fi.ModTime().UnixNano(), size: fi.Size(), valid: true}, true
+	return settingsFileState{modNano: clock.NewTime(fi.ModTime()).EpochNano(), size: fi.Size(), valid: true}, true
 }
 
 // Run polls until ctx is cancelled. The first tick records the baseline

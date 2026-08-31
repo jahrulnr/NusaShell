@@ -19,6 +19,7 @@ import (
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/pkg/nonce"
+	clock "nusashell/pkg/time"
 )
 
 // defaultMaxParallelTools is the fallback concurrency bound for tool calls
@@ -415,7 +416,7 @@ func buildHydrationDomainMessages(msgs []ChatMessage) []domain.Message {
 				Role:      domain.RoleAssistant,
 				ToolCalls: m.ToolCalls,
 				Status:    domain.StatusDone,
-				CreatedAt: time.Now().UTC(),
+				CreatedAt: clock.NewTime().Time(),
 			}
 			built = append(built, *hyd)
 			continue
@@ -602,9 +603,9 @@ func (a *App) publishRoundDelta(runID, messageID string, round int, kind, toolCa
 	}
 }
 
-func (a *App) publishRoundToolStart(runID, messageID string, round int, toolCallID, name string, presentation *contracts.ToolPresentationDTO) {
+func (a *App) publishRoundToolStart(runID, messageID string, round int, toolCallID, name, args string, presentation *contracts.ToolPresentationDTO) {
 	if a.RoundStreams != nil {
-		a.RoundStreams.PublishWithPresentation(runID, messageID, round, contracts.RoundDeltaTool, toolCallID, name, "", presentation)
+		a.RoundStreams.PublishWithArgsAndPresentation(runID, messageID, round, contracts.RoundDeltaTool, toolCallID, name, "", toolArgsRaw(args), presentation)
 	}
 }
 
@@ -647,7 +648,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 				for _, toolCall := range toolCalls {
 					a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
 						RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
-						Name: toolCall.Name, Status: string(domain.ToolInterrupted), Output: "interrupted by user",
+						Name: toolCall.Name, Args: toolArgsRaw(toolCall.Args), Status: string(domain.ToolInterrupted), Output: "interrupted by user",
 						Presentation: buildToolPresentation(toolCall.Name, toolCall.Args, domain.ToolInterrupted, "interrupted by user"),
 					})
 					c = a.updateToolResult(c, messageID, toolCall.ID, domain.ToolInterrupted, "interrupted by user", nil)
@@ -734,7 +735,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 // store, so it is safe to run concurrently for the tool calls of one round.
 func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCall, caps ModelCapabilities, settings domain.Settings, round int) toolExecResult {
 	a.Bus.Emit(contracts.EventToolStarted, contracts.ToolStartedEvent{
-		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: []byte(toolCall.Args),
+		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: toolArgsRaw(toolCall.Args),
 		Presentation: buildToolPresentation(toolCall.Name, toolCall.Args, domain.ToolRunning, ""),
 	})
 	a.log("info", "tools", "tool call: %s", toolCall.Name)
@@ -784,7 +785,7 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 			if s, ok := a.Toolbox.(interface {
 				ExecuteStreamed(ctx context.Context, name string, argsJSON []byte, onChunk func(string)) (string, error)
 			}); ok {
-				a.publishRoundToolStart(run.ID, messageID, round, toolCall.ID, toolCall.Name, toolPresentation)
+				a.publishRoundToolStart(run.ID, messageID, round, toolCall.ID, toolCall.Name, toolCall.Args, toolPresentation)
 				var e error
 				output, e = s.ExecuteStreamed(toolCtx, toolCall.Name, []byte(toolCall.Args), func(text string) {
 					if text != "" {
@@ -859,14 +860,10 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 func (a *App) emitToolCompleted(run *TurnRun, toolCall domain.ToolCall, res toolExecResult) {
 	event := contracts.ToolCompletedEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
-		Name: toolCall.Name, Status: string(res.status), Output: res.output,
-		Presentation: buildToolPresentation(toolCall.Name, toolCall.Args, res.status, res.output),
+		Name: toolCall.Name, Args: toolArgsRaw(toolCall.Args), Status: string(res.status), Output: res.output,
+		Presentation: buildToolPresentation(toolCall.Name, toolCall.Args, res.status, res.output, res.atts),
 	}
-	for _, att := range res.atts {
-		event.Attachments = append(event.Attachments, contracts.AttachmentDTO{
-			Type: att.Type, Name: att.Name, MediaType: att.MediaType, FilePath: att.FilePath,
-		})
-	}
+	event.Attachments = toolAttachmentDTOs(res.atts)
 	a.Bus.Emit(contracts.EventToolCompleted, event)
 }
 
@@ -899,7 +896,7 @@ func (a *App) appendTurnAssistant(conversationID string) (*domain.Conversation, 
 	if err != nil {
 		return nil, "", err
 	}
-	next := domain.Message{ID: domain.NewID(domain.IDPrefixMsg), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC()}
+	next := domain.Message{ID: domain.NewID(domain.IDPrefixMsg), Role: domain.RoleAssistant, CreatedAt: clock.NewTime().Time()}
 	if err := repo.Add(domain.RoleAssistant, next); err != nil {
 		return nil, "", err
 	}

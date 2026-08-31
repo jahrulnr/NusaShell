@@ -5,7 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"time"
+
+	clock "nusashell/pkg/time"
 )
 
 // NewID generates a random hex identifier with the given prefix.
@@ -23,7 +24,7 @@ func NewID(prefix string) string {
 // Format: 10-char timestamp + 16-char random (26 chars total, ULID-spec
 // compatible).
 func NewULID(prefix string) string {
-	ts := uint64(time.Now().UnixMilli())
+	ts := uint64(clock.NewTime().EpochMilli())
 	timeBytes := make([]byte, 6)
 	for i := 5; i >= 0; i-- {
 		timeBytes[i] = byte(ts & 0xff)

@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"sync/atomic"
-	"time"
+
+	clock "nusashell/pkg/time"
 )
 
 type MessageRepairPolicy uint
@@ -172,7 +173,7 @@ func validToolUseID(id string) bool {
 }
 
 func synthesizeToolUseID() string {
-	return fmt.Sprintf("call_%d_%d", time.Now().UnixNano(), toolUseIDSeq.Add(1))
+	return fmt.Sprintf("call_%d_%d", clock.NewTime().EpochNano(), toolUseIDSeq.Add(1))
 }
 
 func stampWarnings(warnings []Warning, provider string) {

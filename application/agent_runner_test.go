@@ -644,6 +644,12 @@ collected:
 	if frames[0].Text != "" || frames[0].Presentation == nil || frames[0].Presentation.Variant != "terminal" {
 		t.Fatalf("tool start frame should carry terminal presentation: %+v", frames[0])
 	}
+	if string(frames[0].Args) != `{"command":"echo hi"}` {
+		t.Fatalf("tool start frame args = %q", frames[0].Args)
+	}
+	if len(frames[1].Args) != 0 || len(frames[2].Args) != 0 {
+		t.Fatalf("streamed chunks must not repeat args: %+v", frames)
+	}
 	if frames[1].Text != "line-1\n" || frames[2].Text != "line-2\n" {
 		t.Fatalf("frame text order wrong: %+v", frames)
 	}

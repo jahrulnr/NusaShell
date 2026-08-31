@@ -8,6 +8,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // isHydrationMessage returns true when a message is a pure hydration
@@ -28,8 +29,8 @@ func convDTO(c *domain.Conversation) contracts.ConversationDTO {
 	return contracts.ConversationDTO{
 		ID:              c.ID,
 		Title:           c.Title,
-		CreatedAt:       c.CreatedAt.Format(timeRFC3339),
-		UpdatedAt:       c.UpdatedAt.Format(timeRFC3339),
+		CreatedAt:       clock.NewTime(c.CreatedAt).Format(timeRFC3339),
+		UpdatedAt:       clock.NewTime(c.UpdatedAt).Format(timeRFC3339),
 		MessageCount:    len(c.Messages),
 		Model:           c.Model,
 		Effort:          c.Effort,
@@ -58,7 +59,7 @@ func msgDTO(m domain.Message) contracts.MessageDTO {
 		Reasoning:      m.Reasoning,
 		Model:          m.Model,
 		ProviderID:     m.ProviderID,
-		CreatedAt:      m.CreatedAt.Format(timeRFC3339),
+		CreatedAt:      clock.NewTime(m.CreatedAt).Format(timeRFC3339),
 		Status:         string(m.Status),
 		Error:          m.Error,
 		Steer:          m.Steer,
@@ -104,11 +105,7 @@ func toolCallDTO(tc domain.ToolCall) contracts.ToolCallDTO {
 		Opaque:       tc.Opaque,
 		Presentation: toolPresentationDTO(tc),
 	}
-	for _, att := range tc.OutputAttachments {
-		dto.OutputAttachments = append(dto.OutputAttachments, contracts.AttachmentDTO{
-			Type: att.Type, Name: att.Name, MediaType: att.MediaType, FilePath: att.FilePath,
-		})
-	}
+	dto.OutputAttachments = toolAttachmentDTOs(tc.OutputAttachments)
 	return dto
 }
 

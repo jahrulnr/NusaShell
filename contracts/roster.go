@@ -28,6 +28,7 @@ const (
 	MethodAskAnswer                  = "agent.ask.answer"
 	MethodAskCancel                  = "agent.ask.cancel"
 	MethodAskPending                 = "agent.ask.pending"
+	MethodToolContracts              = "agent.tools.contracts"
 
 	MethodProvidersList   = "ai.providers.list"
 	MethodProvidersSave   = "ai.providers.save"
@@ -206,10 +207,11 @@ type UsageDTO struct {
 // tools such as exec and mcp_call, while built-ins use file-list,
 // file-content, search-results, collection, document, status, or media.
 type ToolPresentationDTO struct {
-	Variant string                    `json:"variant"`
-	Action  string                    `json:"action"`
-	Request string                    `json:"request"`
-	Result  ToolPresentationResultDTO `json:"result"`
+	Variant  string                    `json:"variant"`
+	Action   string                    `json:"action"`
+	Request  string                    `json:"request"`
+	Contract *ToolContractRefDTO       `json:"contract,omitempty"`
+	Result   ToolPresentationResultDTO `json:"result"`
 }
 
 // ToolPresentationResultDTO contains display-oriented data extracted from a
@@ -217,12 +219,13 @@ type ToolPresentationDTO struct {
 // Items carries JSONL results; Meta carries compact front-matter fields.
 // Generic terminal tools put their complete raw output in Text.
 type ToolPresentationResultDTO struct {
-	Format   string           `json:"format"`
-	Summary  string           `json:"summary,omitempty"`
-	Meta     map[string]any   `json:"meta,omitempty"`
-	Items    []map[string]any `json:"items,omitempty"`
-	Text     string           `json:"text,omitempty"`
-	Language string           `json:"language,omitempty"`
+	Format      string           `json:"format"`
+	Summary     string           `json:"summary,omitempty"`
+	Meta        map[string]any   `json:"meta,omitempty"`
+	Items       []map[string]any `json:"items,omitempty"`
+	Text        string           `json:"text,omitempty"`
+	Language    string           `json:"language,omitempty"`
+	Attachments []AttachmentDTO  `json:"attachments,omitempty"`
 }
 
 type ToolCallDTO struct {
@@ -389,13 +392,15 @@ const (
 )
 
 // RoundDeltaFrame is one incremental chunk of a live round. Tool start frames
-// may carry Presentation so a reconnecting browser can build the card before
-// streamed tool text arrives; subsequent tool chunks carry only Text.
+// carry Args and Presentation so a reconnecting browser can build a complete
+// card before streamed tool text arrives; subsequent tool chunks carry only
+// Text.
 type RoundDeltaFrame struct {
 	Seq          int64                `json:"seq"`
 	Kind         string               `json:"kind"` // "text" | "reasoning" | "tool"
 	ToolCallID   string               `json:"tool_call_id,omitempty"`
 	Name         string               `json:"name,omitempty"` // tool name for kind="tool"
+	Args         json.RawMessage      `json:"args,omitempty"` // tool args on the start frame
 	Text         string               `json:"text,omitempty"`
 	Presentation *ToolPresentationDTO `json:"presentation,omitempty"`
 }
@@ -449,6 +454,7 @@ type ToolCompletedEvent struct {
 	ConversationID string               `json:"conversation_id"`
 	ToolCallID     string               `json:"tool_call_id"`
 	Name           string               `json:"name"`
+	Args           json.RawMessage      `json:"args,omitempty"`
 	Status         string               `json:"status"`
 	Output         string               `json:"output,omitempty"`
 	Attachments    []AttachmentDTO      `json:"attachments,omitempty"`

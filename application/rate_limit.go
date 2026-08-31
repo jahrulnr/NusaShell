@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // DefaultRateLimitWindow is assumed when a 429 response carries no
@@ -40,7 +41,7 @@ func (a *App) MarkProviderRateLimited(providerID string, nextAllowed time.Time) 
 	a.rlMu.Lock()
 	defer a.rlMu.Unlock()
 	if nextAllowed.IsZero() {
-		nextAllowed = time.Now().Add(DefaultRateLimitWindow)
+		nextAllowed = clock.NewTime().Time().Add(DefaultRateLimitWindow)
 	}
 	a.rlWindows[providerID] = nextAllowed
 }
@@ -59,7 +60,7 @@ func (a *App) ProviderRateLimitWait(providerID string) time.Duration {
 	if !ok {
 		return 0
 	}
-	wait := time.Until(next)
+	wait := clock.NewTime().Until(next)
 	if wait <= 0 {
 		delete(a.rlWindows, providerID)
 		return 0
@@ -105,7 +106,7 @@ func (a *App) decorateRateLimitError(providerID string, err error) error {
 		return err
 	}
 	// Record the window: prefer the provider's Retry-After, else our default.
-	next := time.Now()
+	next := clock.NewTime().Time()
 	if upstream.RetryAfter > 0 {
 		next = next.Add(upstream.RetryAfter)
 	} else {

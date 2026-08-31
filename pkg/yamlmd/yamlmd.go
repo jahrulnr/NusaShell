@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	clock "nusashell/pkg/time"
 )
 
 // Block marshals v as YAML and wraps it in YAML front matter delimited
@@ -40,7 +42,7 @@ func sanitize(v any) any {
 		if t == nil {
 			return nil
 		}
-		return t.UTC().Format(time.RFC3339)
+		return clock.NewTime(*t).RFC3339()
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, val := range t {

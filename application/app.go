@@ -18,6 +18,7 @@ import (
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/core"
 	"nusashell/infrastructure/jsonstore"
+	clock "nusashell/pkg/time"
 )
 
 // App is the application service: it owns the use cases and dispatches RPC
@@ -496,7 +497,7 @@ func newSteerEntry(text string, attachments []domain.Attachment) *SteerEntry {
 			Role:        domain.RoleUser,
 			Content:     text,
 			Attachments: attachments,
-			CreatedAt:   time.Now().UTC(),
+			CreatedAt:   clock.NewTime().Time(),
 			Status:      domain.StatusDone,
 			Steer:       true,
 		},
@@ -612,7 +613,7 @@ func NewApp(deps Deps) *App {
 		AcpRunStorage:               deps.AcpRunStorage,
 		retrySleeper:                deps.RetrySleeper,
 		imageGenSem:                 make(chan struct{}, maxConcurrentImageGens),
-		startedAt:                   time.Now().UTC(),
+		startedAt:                   clock.NewTime().Time(),
 		Logger:                      deps.Logger,
 		Automation:                  deps.Automation,
 		runs:                        map[string]*TurnRun{},
@@ -657,7 +658,7 @@ func NewApp(deps Deps) *App {
 					Paths: req.Paths, PathCount: len(req.Paths),
 				}
 				if !req.RequestedAt.IsZero() {
-					perm.RequestedAt = req.RequestedAt.Format(timeRFC3339)
+					perm.RequestedAt = clock.NewTime(req.RequestedAt).Format(timeRFC3339)
 				}
 				for _, o := range req.Options {
 					perm.Options = append(perm.Options, contracts.AcpPermissionOptionDTO{ID: o.ID, Name: o.Name, Kind: o.Kind})
@@ -1044,7 +1045,7 @@ func (a *App) Close() {
 func (a *App) log(level, source, format string, args ...any) {
 	e := &domain.LogEntry{
 		ID:      domain.NewID(domain.IDPrefixLog),
-		Time:    time.Now().UTC(),
+		Time:    clock.NewTime().Time(),
 		Level:   level,
 		Source:  source,
 		Message: fmt.Sprintf(format, args...),
@@ -1054,7 +1055,7 @@ func (a *App) log(level, source, format string, args ...any) {
 	}
 	if a.Bus != nil {
 		a.Bus.Emit(contracts.EventLogAppend, contracts.LogAppendEvent{Entry: contracts.LogEntryDTO{
-			ID: e.ID, Time: e.Time.Format(timeRFC3339), Level: e.Level, Source: e.Source, Message: e.Message,
+			ID: e.ID, Time: clock.NewTime(e.Time).Format(timeRFC3339), Level: e.Level, Source: e.Source, Message: e.Message,
 		}})
 	}
 }

@@ -17,6 +17,9 @@ turn. Fragments are the cold archive — all new facts enter here first,
 and the background review agent edits the primary document to reflect
 the most durable facts.
 
+Generated timestamps use the host machine's local timezone and RFC3339 offset;
+the examples below use `Asia/Jakarta` (`+07:00`).
+
 Fragments are **user-only**. Durable facts about the active workspace
 belong in `memory_project` (see `memory-project.md`), not in fragments
 with `category=project`.
@@ -34,7 +37,7 @@ a free-form prose body:
 
 ```markdown
 ---
-last_updated: "2026-08-20T00:00:00Z"
+last_updated: "2026-08-20T00:00:00+07:00"
 version: 2
 ---
 
@@ -62,8 +65,8 @@ project: nusashell         # optional workspace/project label
 task: memory-tier          # optional task label
 tags: [go, arch]           # optional free-form tags
 source: agent              # agent | user
-created_at: 2026-08-19T12:00:00Z
-updated_at: 2026-08-19T12:30:00Z
+created_at: 2026-08-19T12:00:00+07:00
+updated_at: 2026-08-19T12:30:00+07:00
 ---
 The repo uses Go with Clean Architecture and strict layer dependencies.
 ```

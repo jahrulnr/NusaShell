@@ -19,6 +19,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // DefaultIdleTimeout is the per-chunk stall window for SSE streams. The timer
@@ -286,7 +287,7 @@ func OpenSSE(ctx context.Context, client *http.Client, url string, headers map[s
 	return nil, &application.UpstreamError{
 		Kind:       application.KindHTTPStatus,
 		StatusCode: resp.StatusCode,
-		RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), clock.NewTime().Time()),
 		Err:        fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(message)),
 	}
 }
@@ -321,7 +322,7 @@ func DoJSON(ctx context.Context, client *http.Client, method, url string, header
 		return &application.UpstreamError{
 			Kind:       application.KindHTTPStatus,
 			StatusCode: resp.StatusCode,
-			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), clock.NewTime().Time()),
 			Err:        fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(msg))),
 		}
 	}

@@ -8,6 +8,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessage) (any, *contracts.RPCError) {
@@ -266,7 +267,7 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 		for _, e := range evs {
 			out = append(out, contracts.EventDTO{
 				ID: e.ID, Type: e.Type, Source: e.Source, Subject: e.Subject,
-				Time: e.Time.Format(time.RFC3339), Attrs: e.Attributes,
+				Time: clock.NewTime(e.Time).Format(time.RFC3339), Attrs: e.Attributes,
 			})
 		}
 		return map[string]any{"events": out}, nil
@@ -275,7 +276,7 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 		if err := contracts.DecodePayload(payload, &req); err != nil {
 			return nil, err
 		}
-		ev := domain.Event{ID: req.ID, Type: req.Type, Source: req.Source, Subject: req.Subject, Attributes: req.Attributes, Time: time.Now().UTC()}
+		ev := domain.Event{ID: req.ID, Type: req.Type, Source: req.Source, Subject: req.Subject, Attributes: req.Attributes, Time: clock.NewTime().Time()}
 		if err := auto.Auto.IngestEvent(ctx, ev); err != nil {
 			return nil, rpcInternal(err)
 		}
@@ -289,7 +290,7 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 		for _, rec := range list {
 			out = append(out, contracts.ScheduleDTO{
 				ID: rec.ID, WorkflowID: rec.WorkflowID, Kind: string(rec.Kind),
-				NextRunAt: rec.NextRunAt.Format(time.RFC3339), Status: string(rec.Status), Timezone: rec.Timezone,
+				NextRunAt: clock.NewTime(rec.NextRunAt).Format(time.RFC3339), Status: string(rec.Status), Timezone: rec.Timezone,
 			})
 		}
 		return map[string]any{"schedules": out}, nil

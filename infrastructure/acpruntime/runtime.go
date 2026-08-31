@@ -13,6 +13,7 @@ import (
 	"nusashell/application"
 	"nusashell/domain"
 	"nusashell/infrastructure/acpclient"
+	clock "nusashell/pkg/time"
 )
 
 func New() *Runtime {
@@ -383,7 +384,7 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 		}
 	}
 
-	now := time.Now().UTC()
+	now := clock.NewTime().Time()
 	run := &domain.AcpRun{
 		TaskState: domain.TaskState[domain.AcpRunStatus]{
 			ID:        domain.NewID(domain.IDPrefixAcpRun),
@@ -476,7 +477,7 @@ func (pc *pooledConn) SessionUpdate(params acpclient.SessionUpdateParams) {
 	}
 	lr.mu.Lock()
 	u := params.Update
-	now := time.Now().UTC()
+	now := clock.NewTime().Time()
 	var chunk domain.AcpTranscriptChunk
 	switch u.SessionUpdate {
 	case "agent_message_chunk", "agent_thought_chunk", "user_message_chunk":
@@ -511,7 +512,7 @@ func (pc *pooledConn) SessionUpdate(params acpclient.SessionUpdateParams) {
 	if params.Update.SessionUpdate == "current_mode_update" && params.Update.CurrentModeID != "" {
 		lr.run.CurrentModeID = params.Update.CurrentModeID
 		lr.run.RiskTier = domain.InferRiskTier(params.Update.CurrentModeID, pc.agent.ModeRiskMappings)
-		lr.run.UpdatedAt = time.Now().UTC()
+		lr.run.UpdatedAt = clock.NewTime().Time()
 		run := cloneRun(lr.run)
 		lr.mu.Unlock()
 		if pc.runtime.OnModeChange != nil {
@@ -520,7 +521,7 @@ func (pc *pooledConn) SessionUpdate(params acpclient.SessionUpdateParams) {
 		pc.runtime.emitUpdate(run)
 		return
 	}
-	lr.run.UpdatedAt = time.Now().UTC()
+	lr.run.UpdatedAt = clock.NewTime().Time()
 	run := cloneRun(lr.run)
 	lr.mu.Unlock()
 	pc.runtime.emitUpdate(run)
@@ -655,7 +656,7 @@ func (lr *liveRun) drivePrompt(text string, recordPrompt bool) {
 		lr.run.AppendTranscript(domain.AcpTranscriptChunk{
 			Kind: "prompt",
 			Text: text,
-			At:   time.Now().UTC(),
+			At:   clock.NewTime().Time(),
 		})
 	}
 	lr.prompting = true
@@ -697,7 +698,7 @@ func (lr *liveRun) drivePrompt(text string, recordPrompt bool) {
 		return
 	}
 	if steer != "" {
-		lr.run.BeginRunning(time.Now().UTC())
+		lr.run.BeginRunning(clock.NewTime().Time())
 		lr.mu.Unlock()
 		lr.conn.runtime.emitUpdate(cloneRun(lr.run))
 		lr.drivePrompt(steer, true)
@@ -720,7 +721,7 @@ func (lr *liveRun) finishLocked(status domain.AcpRunStatus, errMsg, stop string)
 		return
 	}
 	lr.closed = true
-	lr.run.Finish(status, errMsg, stop, time.Now().UTC())
+	lr.run.Finish(status, errMsg, stop, clock.NewTime().Time())
 	if lr.permCh != nil {
 		select {
 		case lr.permCh <- acpclient.RequestPermissionResult{Outcome: acpclient.PermissionOutcome{Outcome: "cancelled"}}:
@@ -748,13 +749,13 @@ func (rt *Runtime) Steer(runID, text string) error {
 	}
 	if lr.prompting {
 		lr.run.QueuedSteer = text
-		lr.run.UpdatedAt = time.Now().UTC()
+		lr.run.UpdatedAt = clock.NewTime().Time()
 		snap := cloneRun(lr.run)
 		lr.mu.Unlock()
 		rt.emitUpdate(snap)
 		return nil
 	}
-	lr.run.BeginRunning(time.Now().UTC())
+	lr.run.BeginRunning(clock.NewTime().Time())
 	startNow = true
 	snap := cloneRun(lr.run)
 	lr.mu.Unlock()
@@ -850,7 +851,7 @@ func (rt *Runtime) DecidePermission(runID, requestID, optionID string, outcome d
 	}
 	lr.permCh = nil
 	lr.permID = ""
-	lr.run.ResolvePermission(time.Now().UTC())
+	lr.run.ResolvePermission(clock.NewTime().Time())
 	rt.emitUpdate(cloneRun(lr.run))
 	return nil
 }
@@ -869,7 +870,7 @@ func (rt *Runtime) PromoteRisk(runID string, tier domain.RiskTier) error {
 		return fmt.Errorf("run is not active")
 	}
 	lr.run.RiskTier = tier
-	lr.run.UpdatedAt = time.Now().UTC()
+	lr.run.UpdatedAt = clock.NewTime().Time()
 	rt.emitUpdate(cloneRun(lr.run))
 	return nil
 }
@@ -885,7 +886,7 @@ func (rt *Runtime) SetMode(ctx context.Context, runID, modeID string) error {
 	lr.mu.Lock()
 	lr.run.CurrentModeID = modeID
 	lr.run.RiskTier = domain.InferRiskTier(modeID, lr.conn.agent.ModeRiskMappings)
-	lr.run.UpdatedAt = time.Now().UTC()
+	lr.run.UpdatedAt = clock.NewTime().Time()
 	run := cloneRun(lr.run)
 	lr.mu.Unlock()
 	if rt.OnModeChange != nil {

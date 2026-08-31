@@ -1,10 +1,12 @@
 package application
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
+	"nusashell/contracts"
 	"nusashell/domain"
 )
 
@@ -85,12 +87,14 @@ func TestCompleteDelegateRunInjectsSyntheticMessage(t *testing.T) {
 			{ID: "m1", Role: domain.RoleUser, Content: "work", Status: domain.StatusDone},
 			{
 				ID: "m2", Role: domain.RoleAssistant, Status: domain.StatusDone,
-				ToolCalls: []domain.ToolCall{{ID: "call_parent", Name: "delegate", Status: domain.ToolRunning}},
+				ToolCalls: []domain.ToolCall{{ID: "call_parent", Name: "delegate", Args: `{"prompt":"delegate this"}`, Status: domain.ToolRunning}},
 			},
 		},
 	}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{Conversations: store, Bus: NewBus()}
+	_, events, unsubscribe := app.Bus.Subscribe()
+	defer unsubscribe()
 
 	if err := app.completeDelegateRunLocked("c1", "run_del", "call_parent", domain.ToolOK, "all done", "run_del_conv"); err != nil {
 		t.Fatalf("completeDelegateRunLocked: %v", err)
@@ -115,6 +119,24 @@ func TestCompleteDelegateRunInjectsSyntheticMessage(t *testing.T) {
 	}
 	if !strings.Contains(stc.Args, "run_del") || !strings.Contains(stc.Args, "run_del_conv") {
 		t.Fatalf("synthetic args must carry run + conversation ids: %q", stc.Args)
+	}
+	select {
+	case event := <-events:
+		if event.Type != contracts.EventToolCompleted {
+			t.Fatalf("event type = %q, want %q", event.Type, contracts.EventToolCompleted)
+		}
+		var completed contracts.ToolCompletedEvent
+		if err := json.Unmarshal(event.Payload, &completed); err != nil {
+			t.Fatalf("decode tool completion: %v", err)
+		}
+		if string(completed.Args) != `{"prompt":"delegate this"}` {
+			t.Fatalf("completion args = %s, want original delegate args", completed.Args)
+		}
+		if completed.Presentation == nil || !strings.Contains(completed.Presentation.Request, "delegate this") {
+			t.Fatalf("completion presentation must retain the request: %+v", completed.Presentation)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("delegate completion event was not published")
 	}
 }
 

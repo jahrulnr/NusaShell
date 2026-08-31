@@ -24,14 +24,18 @@ const (
 // already use YAML front matter and JSONL bodies, so the presentation can
 // expose those parts directly instead of making the browser parse an LLM
 // envelope on every render.
-func buildToolPresentation(name, args string, status domain.ToolCallStatus, rawOutput string) *contracts.ToolPresentationDTO {
+func buildToolPresentation(name, args string, status domain.ToolCallStatus, rawOutput string, attachments ...[]domain.Attachment) *contracts.ToolPresentationDTO {
 	presentation := &contracts.ToolPresentationDTO{
-		Variant: toolPresentationVariant(name, args),
-		Action:  toolPresentationAction(name, status, rawOutput),
-		Request: formatToolPresentationRequest(name, args),
+		Variant:  toolPresentationVariant(name, args),
+		Action:   toolPresentationAction(name, status, rawOutput),
+		Request:  formatToolPresentationRequest(name, args),
+		Contract: toolContractRef(name),
 		Result: contracts.ToolPresentationResultDTO{
 			Format: toolPresentationFormat(name, args),
 		},
+	}
+	if len(attachments) > 0 {
+		presentation.Result.Attachments = toolAttachmentDTOs(attachments[0])
 	}
 
 	if presentation.Variant == "terminal" {
@@ -72,7 +76,105 @@ func buildToolPresentation(name, args string, status domain.ToolCallStatus, rawO
 // events. Keeping it in application means the domain ToolCall remains free of
 // browser-specific fields and provider-facing ChatMessage stays unchanged.
 func toolPresentationDTO(tc domain.ToolCall) *contracts.ToolPresentationDTO {
-	return buildToolPresentation(tc.Name, tc.Args, tc.Status, tc.Output)
+	return buildToolPresentation(tc.Name, tc.Args, tc.Status, tc.Output, tc.OutputAttachments)
+}
+
+func toolContractID(name string) string {
+	if strings.TrimSpace(name) == "" {
+		name = "tool"
+	}
+	return "tool." + name + ".v1"
+}
+
+func toolContractRef(name string) *contracts.ToolContractRefDTO {
+	return &contracts.ToolContractRefDTO{
+		ID:       toolContractID(name),
+		Version:  contracts.ToolContractVersion,
+		CSSClass: toolContractCSSClass(name),
+	}
+}
+
+func toolContractCSSClass(name string) string {
+	raw := strings.ToLower(strings.TrimSpace(name))
+	if strings.HasPrefix(raw, "mcp__") {
+		raw = "mcp"
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastDash = false
+		case r == '_' || r == '-' || r == ' ':
+			if b.Len() > 0 && !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	if slug == "" {
+		slug = "tool"
+	}
+	return "agent-tool-" + slug
+}
+
+// toolCallArgsFromConversation recovers the original request for a tool call
+// when an asynchronous completion only has the call ID. ToolCalls and Steps
+// are durable mirrors, but older conversations may contain only one of them.
+func toolCallArgsFromConversation(c *domain.Conversation, callID string) string {
+	if c == nil || strings.TrimSpace(callID) == "" {
+		return ""
+	}
+	for _, message := range c.Messages {
+		for _, call := range message.ToolCalls {
+			if call.ID != callID {
+				continue
+			}
+			if strings.TrimSpace(call.Args) != "" {
+				return call.Args
+			}
+		}
+		for _, step := range message.Steps {
+			if step.Type != domain.StepToolCalls {
+				continue
+			}
+			for _, call := range step.ToolCalls {
+				if call.ID != callID {
+					continue
+				}
+				if strings.TrimSpace(call.Args) != "" {
+					return call.Args
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// toolArgsRaw keeps optional wire args valid JSON. Synthetic or legacy calls
+// can legitimately have no args; emitting an invalid json.RawMessage would
+// replace the whole event payload with a marshal error.
+func toolArgsRaw(args string) json.RawMessage {
+	trimmed := strings.TrimSpace(args)
+	if trimmed == "" || !json.Valid([]byte(trimmed)) {
+		return nil
+	}
+	return json.RawMessage(trimmed)
+}
+
+func toolAttachmentDTOs(atts []domain.Attachment) []contracts.AttachmentDTO {
+	if len(atts) == 0 {
+		return nil
+	}
+	out := make([]contracts.AttachmentDTO, 0, len(atts))
+	for _, att := range atts {
+		out = append(out, contracts.AttachmentDTO{
+			Type: att.Type, Name: att.Name, MediaType: att.MediaType, FilePath: att.FilePath,
+		})
+	}
+	return out
 }
 
 func toolResultPresentationStatus(output string) domain.ToolCallStatus {

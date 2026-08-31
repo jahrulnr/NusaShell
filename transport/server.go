@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"nusashell/application"
 	"nusashell/contracts"
+	clock "nusashell/pkg/time"
 	"nusashell/resources"
 )
 
@@ -49,9 +49,9 @@ func (s *Server) RoutesMux() *http.ServeMux { return s.mux }
 
 func (s *Server) Routes() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
+		start := clock.NewTime().Time()
 		s.mux.ServeHTTP(w, r)
-		s.Logger.Debug("http", "method", r.Method, "path", r.URL.Path, "elapsed_ms", time.Since(start).Milliseconds())
+		s.Logger.Debug("http", "method", r.Method, "path", r.URL.Path, "elapsed_ms", clock.NewTime().Since(start).Milliseconds())
 	})
 }
 
@@ -74,14 +74,14 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, contracts.ErrResult(contracts.CodeValidation, "malformed request body"))
 		return
 	}
-	start := time.Now()
+	start := clock.NewTime().Time()
 	result, rpcErr := s.App.Dispatch(r.Context(), method, req.Payload)
 	if rpcErr != nil {
-		s.Logger.Debug("rpc error", "method", method, "code", rpcErr.Code, "elapsed_ms", time.Since(start).Milliseconds())
+		s.Logger.Debug("rpc error", "method", method, "code", rpcErr.Code, "elapsed_ms", clock.NewTime().Since(start).Milliseconds())
 		writeJSON(w, http.StatusOK, contracts.ErrResult(rpcErr.Code, rpcErr.Message))
 		return
 	}
-	s.Logger.Debug("rpc", "method", method, "elapsed_ms", time.Since(start).Milliseconds())
+	s.Logger.Debug("rpc", "method", method, "elapsed_ms", clock.NewTime().Since(start).Milliseconds())
 	writeJSON(w, http.StatusOK, contracts.OKResult(result))
 }
 

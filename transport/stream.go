@@ -12,7 +12,9 @@ package transport
 //     replays exactly the missed frames (idempotent resume).
 //
 // Frames (event: name, data: JSON):
-//   - round.delta: contracts.RoundDeltaFrame {seq, kind, text, ...}
+//   - round.delta: contracts.RoundDeltaFrame {seq, kind, tool_call_id, name,
+//     args?, text, presentation?}; tool start frames carry args and the
+//     versioned presentation contract, later chunks carry text only.
 //   - round.done:  contracts.RoundDoneFrame {state, run_id, message_id,
 //     round, usage, next, error} — terminal. next is non-nil when the agent
 //     continues with another round (tool loop or auto-continue).

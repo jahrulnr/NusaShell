@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"nusashell/contracts"
+	clock "nusashell/pkg/time"
 )
 
 const (
@@ -106,7 +107,7 @@ func (s *RoundStream) publish(frame contracts.RoundDeltaFrame) bool {
 	if len(s.deltas) > roundStreamFrameCap {
 		s.deltas = append([]contracts.RoundDeltaFrame(nil), s.deltas[len(s.deltas)-roundStreamFrameCap:]...)
 	}
-	s.lastActive = time.Now()
+	s.lastActive = clock.NewTime().Time()
 	subs := make([]*roundSubscriber, 0, len(s.subs))
 	for _, sub := range s.subs {
 		subs = append(subs, sub)
@@ -153,7 +154,7 @@ func (s *RoundStream) subscribe(after int64) *RoundStreamSub {
 	s.mu.Lock()
 	sub.id = s.nextSubID
 	s.nextSubID++
-	s.lastActive = time.Now()
+	s.lastActive = clock.NewTime().Time()
 	sealed := s.sealed
 	var replay []contracts.RoundDeltaFrame
 	for _, f := range s.deltas {
@@ -177,9 +178,7 @@ func (s *RoundStream) subscribe(after int64) *RoundStreamSub {
 // unsubscribe detaches a live subscriber (transport closed the stream early).
 func (s *RoundStream) unsubscribe(sub *roundSubscriber) {
 	s.mu.Lock()
-	if _, ok := s.subs[sub.id]; ok {
-		delete(s.subs, sub.id)
-	}
+	delete(s.subs, sub.id)
 	s.mu.Unlock()
 }
 
@@ -254,7 +253,7 @@ func (r *RoundStreamRegistry) Reset(runID, messageID string) {
 	st.seq = 0
 	old := st.subs
 	st.subs = map[int]*roundSubscriber{}
-	st.lastActive = time.Now()
+	st.lastActive = clock.NewTime().Time()
 	st.mu.Unlock()
 	for _, sub := range old {
 		close(sub.done)
@@ -275,19 +274,27 @@ func (r *RoundStreamRegistry) Publish(runID, messageID string, round int, kind, 
 	r.publish(runID, messageID, round, kind, toolCallID, name, text, nil)
 }
 
-// PublishWithPresentation is the tool-delta variant of Publish. The first
-// tool delta may be the only live signal a reconnecting browser receives, so
-// carry the same frontend presentation contract that the WebSocket lifecycle
-// event carries. Existing callers can keep using Publish for text/reasoning
-// deltas and older tests remain source-compatible.
+// PublishWithPresentation is the legacy tool-delta variant of Publish. The
+// first tool delta may be the only live signal a reconnecting browser
+// receives, so it carries the same frontend presentation contract as the
+// WebSocket lifecycle event. New tool starts should use
+// PublishWithArgsAndPresentation so the frame is self-contained.
 func (r *RoundStreamRegistry) PublishWithPresentation(runID, messageID string, round int, kind, toolCallID, name, text string, presentation *contracts.ToolPresentationDTO) {
-	r.publish(runID, messageID, round, kind, toolCallID, name, text, presentation)
+	r.PublishWithArgsAndPresentation(runID, messageID, round, kind, toolCallID, name, text, nil, presentation)
+}
+
+// PublishWithArgsAndPresentation publishes a tool frame with the raw args
+// that started the call. Args are additive and normally present only on the
+// first tool frame, making a replayed start frame self-contained without
+// repeating the payload on every streamed output chunk.
+func (r *RoundStreamRegistry) PublishWithArgsAndPresentation(runID, messageID string, round int, kind, toolCallID, name, text string, args []byte, presentation *contracts.ToolPresentationDTO) {
+	st := r.streamFor(runID, messageID, round)
+	st.publish(contracts.RoundDeltaFrame{Kind: kind, ToolCallID: toolCallID, Name: name, Args: args, Text: text, Presentation: presentation})
+	r.maybeGC()
 }
 
 func (r *RoundStreamRegistry) publish(runID, messageID string, round int, kind, toolCallID, name, text string, presentation *contracts.ToolPresentationDTO) {
-	st := r.streamFor(runID, messageID, round)
-	st.publish(contracts.RoundDeltaFrame{Kind: kind, ToolCallID: toolCallID, Name: name, Text: text, Presentation: presentation})
-	r.maybeGC()
+	r.PublishWithArgsAndPresentation(runID, messageID, round, kind, toolCallID, name, text, nil, presentation)
 }
 
 func (r *RoundStreamRegistry) streamFor(runID, messageID string, round int) *RoundStream {
@@ -304,8 +311,8 @@ func (r *RoundStreamRegistry) streamFor(runID, messageID string, round int) *Rou
 		messageID:  messageID,
 		round:      round,
 		subs:       map[int]*roundSubscriber{},
-		createdAt:  time.Now(),
-		lastActive: time.Now(),
+		createdAt:  clock.NewTime().Time(),
+		lastActive: clock.NewTime().Time(),
 	}
 	r.streams[key] = st
 	for _, ch := range r.waiters[key] {
@@ -408,7 +415,7 @@ func (r *RoundStreamRegistry) maybeGC() {
 		return
 	}
 	r.publishesSinceGC = 0
-	now := time.Now()
+	now := clock.NewTime().Time()
 	for key, st := range r.streams {
 		st.mu.Lock()
 		sealed := st.sealed

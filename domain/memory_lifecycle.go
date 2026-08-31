@@ -3,6 +3,8 @@ package domain
 import (
 	"math"
 	"time"
+
+	clock "nusashell/pkg/time"
 )
 
 // MaxMemoryEntries is the hard capacity limit for memory entries. The
@@ -63,7 +65,7 @@ func MemoryStrength(e *MemoryEntry, cfg LifecycleConfig) float64 {
 	if cfg.DecayHalfLife <= 0 {
 		return clamp01(base)
 	}
-	hoursSince := time.Since(e.CreatedAt).Hours()
+	hoursSince := clock.NewTime().Since(e.CreatedAt).Hours()
 	lambda := math.Ln2 / cfg.DecayHalfLife
 	stability := 1.0
 	strength := base * math.Exp(-lambda*hoursSince/stability)

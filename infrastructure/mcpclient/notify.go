@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // Notification method names understood from plugins.
@@ -91,7 +91,7 @@ func messageToEvent(serverID string, p map[string]any) (domain.Event, bool) {
 		Type:       evType,
 		Source:     serverID,
 		Subject:    subject,
-		Time:       time.Now().UTC(),
+		Time:       clock.NewTime().Time(),
 		Attributes: attrs,
 		Data:       json.RawMessage(`{}`),
 	}, true

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	clock "nusashell/pkg/time"
 )
 
 type MessageRole string
@@ -172,7 +174,7 @@ const pipelineRoomTitlePrefix = "[pipeline] "
 
 // NewConversation creates an empty conversation.
 func NewConversation(id, title string) *Conversation {
-	now := time.Now().UTC()
+	now := clock.NewTime().Time()
 	return &Conversation{
 		ID:        id,
 		Title:     title,
@@ -182,7 +184,7 @@ func NewConversation(id, title string) *Conversation {
 	}
 }
 
-func (c *Conversation) Touch() { c.UpdatedAt = time.Now().UTC() }
+func (c *Conversation) Touch() { c.UpdatedAt = clock.NewTime().Time() }
 
 // HiddenFromRoomList reports whether this conversation is a pipeline
 // agent-step transcript rather than an interactive Agent room. Origin is
@@ -477,7 +479,7 @@ func (c *Conversation) Compact(summary, handoverContent string, keepTokenBudget 
 		ID:        NewID(IDPrefixMsg),
 		Role:      RoleUser,
 		Content:   handoverContent,
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: clock.NewTime().Time(),
 		Status:    StatusDone,
 	}
 

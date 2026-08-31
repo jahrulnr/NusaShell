@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // Store persists project memory on disk. Base is resolved on every call
@@ -29,7 +30,7 @@ func New(dataDir string, override func() string) *Store {
 	if override == nil {
 		override = func() string { return "" }
 	}
-	return &Store{dataDir: dataDir, override: override, now: time.Now}
+	return &Store{dataDir: dataDir, override: override, now: func() time.Time { return clock.NewTime().Time() }}
 }
 
 func (s *Store) base() string {
@@ -397,7 +398,7 @@ func (s *Store) trackPatternsLocked(dir, sourceKind string) (string, error) {
 		return "", err
 	}
 	patterns := prev
-	today := s.now().UTC().Format("2006-01-02")
+	today := clock.NewTime(s.now()).Format("2006-01-02")
 	changed := false
 	var notes []string
 	for _, key := range qualifying {

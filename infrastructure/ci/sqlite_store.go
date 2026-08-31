@@ -12,6 +12,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 
 	_ "modernc.org/sqlite"
 )
@@ -76,7 +77,7 @@ func (s *SQLite) Close() error { return s.db.Close() }
 func (s *SQLite) Put(ctx context.Context, w *domain.WorkflowDefinition) error {
 	b, _ := json.Marshal(w)
 	_, err := s.db.ExecContext(ctx, `INSERT INTO workflows(id,json,updated_at) VALUES(?,?,?)
-		ON CONFLICT(id) DO UPDATE SET json=excluded.json, updated_at=excluded.updated_at`, w.ID, string(b), time.Now().UTC().Format(time.RFC3339))
+		ON CONFLICT(id) DO UPDATE SET json=excluded.json, updated_at=excluded.updated_at`, w.ID, string(b), clock.NewTime().RFC3339())
 	return err
 }
 
@@ -123,7 +124,7 @@ func (s *SQLite) Delete(ctx context.Context, id string) error {
 func (s *SQLite) Create(ctx context.Context, run *domain.WorkflowRun) error {
 	b, _ := json.Marshal(run)
 	_, err := s.db.ExecContext(ctx, `INSERT INTO runs(id,workflow_id,workspace,status,json,created_at) VALUES(?,?,?,?,?,?)`,
-		run.ID, run.WorkflowID, run.Workspace, string(run.Status), string(b), run.CreatedAt.UTC().Format(time.RFC3339))
+		run.ID, run.WorkflowID, run.Workspace, string(run.Status), string(b), clock.NewTime(run.CreatedAt).RFC3339())
 	return err
 }
 
@@ -192,13 +193,13 @@ func (s *SQLite) PutSchedule(ctx context.Context, rec *domain.ScheduleRecord) er
 	b, _ := json.Marshal(rec)
 	_, err := s.db.ExecContext(ctx, `INSERT INTO schedules(id,workflow_id,status,next_run_at,json) VALUES(?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET workflow_id=excluded.workflow_id, status=excluded.status, next_run_at=excluded.next_run_at, json=excluded.json`,
-		rec.ID, rec.WorkflowID, string(rec.Status), rec.NextRunAt.UTC().Format(time.RFC3339Nano), string(b))
+		rec.ID, rec.WorkflowID, string(rec.Status), clock.NewTime(rec.NextRunAt).Format(time.RFC3339Nano), string(b))
 	return err
 }
 
 func (s *SQLite) DueSchedules(ctx context.Context, now time.Time, limit int) ([]*domain.ScheduleRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT json FROM schedules WHERE status=? AND next_run_at<=? ORDER BY next_run_at LIMIT ?`,
-		string(domain.SchedulePending), now.UTC().Format(time.RFC3339Nano), limit)
+		string(domain.SchedulePending), clock.NewTime(now).Format(time.RFC3339Nano), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +242,7 @@ func (s *SQLite) ClaimSchedule(ctx context.Context, id string, now time.Time) (*
 		return nil, err
 	}
 	rec.Status = domain.ScheduleFired
-	t := now.UTC()
+	t := clock.NewTime(now).Time()
 	rec.FiredAt = &t
 	b, _ := json.Marshal(rec)
 	// Compare-and-set: only the writer that flips pending->fired wins;
@@ -285,13 +286,13 @@ func (s *SQLite) ListSchedules(ctx context.Context) ([]*domain.ScheduleRecord, e
 
 func (s *SQLite) PutEvent(ctx context.Context, ev *domain.Event) error {
 	b, _ := json.Marshal(ev)
-	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO events(id,json,created_at) VALUES(?,?,?)`, ev.ID, string(b), ev.Time.UTC().Format(time.RFC3339))
+	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO events(id,json,created_at) VALUES(?,?,?)`, ev.ID, string(b), clock.NewTime(ev.Time).RFC3339())
 	return err
 }
 
 func (s *SQLite) RecordDelivery(ctx context.Context, eventID, triggerID, workflowID, runID string, matchedAt time.Time) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO deliveries(event_id,trigger_id,workflow_id,run_id,matched_at) VALUES(?,?,?,?,?)`,
-		eventID, triggerID, workflowID, runID, matchedAt.UTC().Format(time.RFC3339))
+		eventID, triggerID, workflowID, runID, clock.NewTime(matchedAt).RFC3339())
 	if err != nil {
 		return false, err
 	}
@@ -328,7 +329,7 @@ func (s *SQLite) PutWait(ctx context.Context, rec *domain.WaitRecord) error {
 	b, _ := json.Marshal(rec)
 	wake := ""
 	if rec.WakeAt != nil {
-		wake = rec.WakeAt.UTC().Format(time.RFC3339Nano)
+		wake = clock.NewTime(*rec.WakeAt).Format(time.RFC3339Nano)
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO waits(id,status,wake_at,event_type,json) VALUES(?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET status=excluded.status, wake_at=excluded.wake_at, event_type=excluded.event_type, json=excluded.json`,
@@ -338,7 +339,7 @@ func (s *SQLite) PutWait(ctx context.Context, rec *domain.WaitRecord) error {
 
 func (s *SQLite) DueWaits(ctx context.Context, now time.Time, limit int) ([]*domain.WaitRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT json FROM waits WHERE status=? AND wake_at!='' AND wake_at<=? LIMIT ?`,
-		string(domain.SchedulePending), now.UTC().Format(time.RFC3339Nano), limit)
+		string(domain.SchedulePending), clock.NewTime(now).Format(time.RFC3339Nano), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -536,7 +537,7 @@ func (s *SQLite) Last(ctx context.Context, workflowID, triggerID string) (time.T
 }
 
 func (s *SQLite) Touch(ctx context.Context, workflowID, triggerID string, at time.Time) error {
-	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO debounce(id,at) VALUES(?,?)`, workflowID+"/"+triggerID, at.UTC().Format(time.RFC3339Nano))
+	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO debounce(id,at) VALUES(?,?)`, workflowID+"/"+triggerID, clock.NewTime(at).Format(time.RFC3339Nano))
 	return err
 }
 

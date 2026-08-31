@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	clock "nusashell/pkg/time"
 )
 
 const maxListingEntries = 50000
@@ -77,7 +79,7 @@ func snapshotDir(root string) (map[string]fileMeta, error) {
 		}
 		out[rel] = fileMeta{
 			Size:    info.Size(),
-			ModTime: info.ModTime().UnixNano(),
+			ModTime: clock.NewTime(info.ModTime()).EpochNano(),
 		}
 		count++
 		return nil

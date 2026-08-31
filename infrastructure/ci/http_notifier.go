@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // HTTPNotifier sends workflow run completion notifications as JSON POST
@@ -46,10 +47,10 @@ func (n *HTTPNotifier) NotifyRunCompleted(ctx context.Context, url string, run *
 		Success:  sum.Success,
 	}
 	if !run.StartedAt.IsZero() {
-		payload.StartedAt = run.StartedAt.Format(time.RFC3339)
+		payload.StartedAt = clock.NewTime(run.StartedAt).Format(time.RFC3339)
 	}
 	if !run.FinishedAt.IsZero() {
-		payload.FinishedAt = run.FinishedAt.Format(time.RFC3339)
+		payload.FinishedAt = clock.NewTime(run.FinishedAt).Format(time.RFC3339)
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

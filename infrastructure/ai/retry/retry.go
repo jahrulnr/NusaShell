@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	clock "nusashell/pkg/time"
 )
 
 type Policy struct {
@@ -192,7 +194,7 @@ func parseRetryAfter(resp *http.Response) time.Duration {
 		return time.Duration(seconds) * time.Second
 	}
 	if when, err := http.ParseTime(value); err == nil {
-		if delay := time.Until(when); delay > 0 {
+		if delay := clock.NewTime().Until(when); delay > 0 {
 			return delay
 		}
 	}

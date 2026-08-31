@@ -15,6 +15,7 @@ import (
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/pkg/nonce"
+	clock "nusashell/pkg/time"
 	"nusashell/resources"
 )
 
@@ -69,7 +70,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 		a.healOrphanedRunningConversation(c)
 	}
 
-	now := time.Now().UTC()
+	now := clock.NewTime().Time()
 	userMsg := domain.Message{
 		ID:          domain.NewID(domain.IDPrefixMsg),
 		Role:        domain.RoleUser,
@@ -163,7 +164,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 		failed.Status = domain.StatusDone
 		failed.Error = ""
 	}
-	next := domain.Message{ID: domain.NewID(domain.IDPrefixMsg), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC(), ProviderID: provider.ID}
+	next := domain.Message{ID: domain.NewID(domain.IDPrefixMsg), Role: domain.RoleAssistant, CreatedAt: clock.NewTime().Time(), ProviderID: provider.ID}
 	if err := repo.Add(domain.RoleAssistant, next); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -314,7 +315,7 @@ func (a *App) workspaceSwitchNotice(from, to string) domain.Message {
 	return domain.Message{
 		ID:        domain.NewID(domain.IDPrefixMsg),
 		Role:      domain.RoleAssistant,
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: clock.NewTime().Time(),
 		Status:    domain.StatusDone,
 		ToolCalls: calls,
 	}
@@ -338,7 +339,7 @@ func (a *App) restartAnnouncement() domain.Message {
 	return domain.Message{
 		ID:        domain.NewID(domain.IDPrefixMsg),
 		Role:      domain.RoleAssistant,
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: clock.NewTime().Time(),
 		Status:    domain.StatusDone,
 		ToolCalls: []domain.ToolCall{{
 			ID:     domain.AnnouncementToolCallPrefix + nonce.Random(),
@@ -358,7 +359,7 @@ func (a *App) autoContinueAnnouncement(decision domain.AutoContinueDecision) dom
 	return domain.Message{
 		ID:        domain.NewID(domain.IDPrefixMsg),
 		Role:      domain.RoleAssistant,
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: clock.NewTime().Time(),
 		Status:    domain.StatusDone,
 		ToolCalls: []domain.ToolCall{{
 			ID:     domain.AnnouncementToolCallPrefix + nonce.Random(),

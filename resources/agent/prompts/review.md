@@ -160,55 +160,6 @@ specific passage, or omit `old_text` to rewrite the entire body.
 
 When writing memory, use diary writing style instead of technical writing. When you found any technical writing like code, comparation tech, or any non-durable memory; remove or replace that before another ai agent broke the rule.
 
-## Skill routing
-
-Before saving a fact, decide whether it is a **static fact about the user**
-or a **reusable procedure**.
-
-A static fact belongs in memory.
-
-A reusable procedure or workflow belongs in an agent-owned skill.
-
-Do not turn a user's temporary work procedure into a skill merely because it
-appears in one conversation. A skill should represent a reusable procedure
-that NusaShell can apply repeatedly.
-
-For a static fact, use `memory` `op=save` for a fragment or
-`memory` `op=replace` with `target=primary` for primary.
-
-For a reusable procedure/workflow, use the `skill-creator` skill if available.
-If `skill-creator` is not installed, save the procedure as a fragment with
-`category="task"` and tags `["skill-candidate"]` so a future review can
-promote it to a skill.
-
-## Model metadata correction
-
-Sometimes the transcript shows a model capability error that is really a
-metadata problem: the catalog says a model has no vision, a wrong context
-window, or a wrong max output, and the provider rejects or truncates the
-request because of it. Auto-learn already captures these from error logs,
-but it can learn the wrong value (a false positive) or miss the correction
-entirely.
-
-When the transcript contains clear evidence that a model's metadata is
-wrong — e.g. an upstream error saying the model does not support images
-while the user successfully used images with it, or a context-length error
-at a size the model actually supports — use `model_override` to record the
-corrected value.
-
-`model_override` writes a durable, per-model correction that survives
-catalog re-imports and wins over both the catalog and auto-learned values.
-
-Rules:
-
-- Only override with evidence from the transcript. Do not guess from the
-  model name or from general knowledge about a model family.
-- Override only the fields the evidence contradicts. Do not touch unrelated
-  fields.
-- Use `op="remove"` to clear an override that turned out to be wrong.
-- A model override is not user memory. Do not also save it as a memory
-  fragment.
-
 ## Memory rules
 
 Use `memory` with `op=save` to save new durable facts as fragments.
@@ -259,6 +210,61 @@ Before saving, distinguish between:
 Only the latter two should normally become memory, and the second should be
 saved only when the ongoing activity has genuine long-term relevance.
 
+## Skill routing
+
+Before saving a fact, decide whether it is a **static fact about the user**
+or a **reusable procedure**.
+
+A static fact belongs in memory.
+
+A reusable procedure or workflow belongs in an agent-owned skill.
+
+Do not turn a user's temporary work procedure into a skill merely because it
+appears in one conversation. A skill should represent a reusable procedure
+that NusaShell can apply repeatedly.
+
+For a static fact, use `memory` `op=save` for a fragment or
+`memory` `op=replace` with `target=primary` for primary.
+
+For a reusable procedure/workflow, use the `skill-creator` skill if available.
+If `skill-creator` is not installed, save the procedure as a fragment with
+`category="task"` and tags `["skill-candidate"]` so a future review can
+promote it to a skill.
+
+`model_override` writes a durable, per-model correction that survives
+catalog re-imports and wins over both the catalog and auto-learned values.
+
+Rules:
+
+- Only override with evidence from the transcript. Do not guess from the
+  model name or from general knowledge about a model family.
+- Override only the fields the evidence contradicts. Do not touch unrelated
+  fields.
+- Use `op="remove"` to clear an override that turned out to be wrong.
+- A model override is not user memory. Do not also save it as a memory
+  fragment.
+
+## Skill rules
+
+- Decide first whether the transcript contains a skill-worthy gap. If not, do not call `skill` with `op=save`.
+- When a gap is plausible, use `skill` with `op=list` and `op=search` to find related skills, then read the closest matching skill with `op=read` before deciding whether to create or extend.
+- Create a new skill only when no existing agent-owned skill covers the gap; otherwise extend the closest suitable agent-owned skill without duplicating its guidance.
+- Use `skill` with `op=save` to create a new skill (omit `id`) or update an existing one (pass `id`). To write a support file inside an existing skill, pass `path` (e.g. `references/errors.md`, `templates/config.yaml`, `scripts/verify.sh`) instead of `id` — the skill must already exist.
+- `content` is the SKILL.md BODY only. Never include YAML frontmatter: `skill` with `op=save` generates the `---` header from `name` and `description`, so pasting frontmatter into `content` yields a double-headed SKILL.md.
+- Prefer updating an existing skill's support files over rewriting the entire SKILL.md body. Use `skill` with `op=read` and `path` to inspect a support file before patching it with `op=save` and the same `path.
+- Support file directories: `references/` for session-specific detail and condensed knowledge banks, `templates/` for starter files meant to be copied, `scripts/` for statically re-runnable actions. Add a one-line pointer in SKILL.md when you create a new support file so future agents find it.
+- Create only class-level skills: reusable procedures, tool usage patterns, or domain knowledge that applies across conversations.
+- Never edit or create skills owned by the user (provenance-protected).
+- Do not encode environment-failure folklore or one-off debugging steps.
+- Skill descriptions must be <=1024 characters and the skill name must match the folder name (lowercase with hyphens).
+
+## What not to save as skills
+
+- Transient task state or one-off requests
+- Debugging workarounds for temporary issues
+- Information already in existing skills or documentation
+- User-specific configuration that belongs in memory
+
 ## Review quality bar
 
 Prefer fewer, higher-signal memories over many low-signal memories.
@@ -280,7 +286,20 @@ existing memory instead of creating a competing memory.
 Never infer unsupported personal characteristics. Do not turn temporary
 circumstances into permanent traits.
 
-{{skill_review_rules}}
+## Model metadata correction
+
+Sometimes the transcript shows a model capability error that is really a
+metadata problem: the catalog says a model has no vision, a wrong context
+window, or a wrong max output, and the provider rejects or truncates the
+request because of it. Auto-learn already captures these from error logs,
+but it can learn the wrong value (a false positive) or miss the correction
+entirely.
+
+When the transcript contains clear evidence that a model's metadata is
+wrong — e.g. an upstream error saying the model does not support images
+while the user successfully used images with it, or a context-length error
+at a size the model actually supports — use `model_override` to record the
+corrected value.
 
 ## Output
 

@@ -14,6 +14,7 @@ import (
 	"nusashell/application/service/attachments"
 	"nusashell/application/service/generatedmedia"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 	"nusashell/pkg/yamlmd"
 )
 
@@ -90,7 +91,7 @@ func validateImageEnum(field, value string, allowed ...string) error {
 }
 
 func (a *App) executeGenerateImage(run *TurnRun, toolCall domain.ToolCall, settings domain.Settings) (string, []domain.Attachment, error) {
-	started := time.Now()
+	started := clock.NewTime().Time()
 	if a.imageGenSem != nil {
 		select {
 		case a.imageGenSem <- struct{}{}:
@@ -163,7 +164,7 @@ func (a *App) executeGenerateImage(run *TurnRun, toolCall domain.ToolCall, setti
 	if err != nil {
 		return failGenerateImage(err.Error())
 	}
-	elapsed := time.Since(started).Milliseconds()
+	elapsed := clock.NewTime().Since(started).Milliseconds()
 	meta := map[string]any{
 		"status":     "completed",
 		"provider":   result.Provider,

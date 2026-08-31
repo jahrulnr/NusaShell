@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/pkg/nonce"
+	clock "nusashell/pkg/time"
 )
 
 // SpawnDelegate is the `delegate` tool implementation: it spawns an
@@ -115,6 +115,7 @@ func (a *App) completeDelegateRunLocked(conversationID, runID, toolCallID string
 		return err
 	}
 	conv := repo.Conversation()
+	toolArgs := toolCallArgsFromConversation(conv, toolCallID)
 	brief := domain.DelegateBriefResult(runID, status == domain.ToolOK)
 	if toolCallID != "" {
 		conv = a.updateToolResult(conv, "", toolCallID, status, brief, nil)
@@ -138,8 +139,9 @@ func (a *App) completeDelegateRunLocked(conversationID, runID, toolCallID string
 			ToolCallID:     toolCallID,
 			Name:           domain.DelegateToolName,
 			Status:         string(status),
+			Args:           toolArgsRaw(toolArgs),
 			Output:         brief,
-			Presentation:   buildToolPresentation(domain.DelegateToolName, "", status, brief),
+			Presentation:   buildToolPresentation(domain.DelegateToolName, toolArgs, status, brief),
 		})
 	}
 	return nil
@@ -153,7 +155,7 @@ func (a *App) delegateResultMessage(runID string, status domain.ToolCallStatus, 
 	return domain.Message{
 		ID:        domain.NewID(domain.IDPrefixMsg),
 		Role:      domain.RoleAssistant,
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: clock.NewTime().Time(),
 		Status:    domain.StatusDone,
 		ToolCalls: []domain.ToolCall{{
 			ID:     domain.DelegateResultPrefix + nonce.Random(),

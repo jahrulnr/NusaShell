@@ -3,9 +3,9 @@ package application
 import (
 	"fmt"
 	"sync"
-	"time"
 
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // LearningGraphService manages the bitemporal edge graph between learning
@@ -51,7 +51,7 @@ func (g *LearningGraphService) AddEdge(sourceID, targetID string, edgeType domai
 	} else if weight > 1 {
 		weight = 1
 	}
-	now := time.Now().UTC()
+	now := clock.NewTime().Time()
 	// Find existing valid edge with same (source, target, type).
 	for _, e := range g.edges.List() {
 		if e.Type != edgeType || e.InvalidAt != nil {
@@ -98,7 +98,7 @@ func (g *LearningGraphService) InvalidateEdge(id string) error {
 			if e.InvalidAt != nil {
 				return fmt.Errorf("learning graph: edge %s already invalidated", id)
 			}
-			now := time.Now().UTC()
+			now := clock.NewTime().Time()
 			e.InvalidAt = &now
 			return g.replaceEdge(e)
 		}

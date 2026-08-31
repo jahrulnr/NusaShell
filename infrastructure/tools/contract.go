@@ -15,6 +15,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 // maxContractChars bounds a single contract body. Larger files are
@@ -62,7 +63,7 @@ func (r *FileContractReader) ReadContract(p *domain.Plugin) (string, bool, error
 	key := p.Manifest.ID + ":" + entry
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if c, ok := r.cache[key]; ok && c.size == info.Size() && c.modTime == info.ModTime().UnixNano() {
+	if c, ok := r.cache[key]; ok && c.size == info.Size() && c.modTime == clock.NewTime(info.ModTime()).EpochNano() {
 		return c.content, c.truncated, nil
 	}
 	raw, err := os.ReadFile(path)
@@ -77,7 +78,7 @@ func (r *FileContractReader) ReadContract(p *domain.Plugin) (string, bool, error
 	}
 	r.cache[key] = contractCacheEntry{
 		content: content, truncated: truncated,
-		size: info.Size(), modTime: info.ModTime().UnixNano(),
+		size: info.Size(), modTime: clock.NewTime(info.ModTime()).EpochNano(),
 	}
 	return content, truncated, nil
 }

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"nusashell/infrastructure/config"
+	clock "nusashell/pkg/time"
 )
 
 // CatalogURL is the public, key-less models.dev endpoint.
@@ -249,7 +250,7 @@ func stripProviderSuffix(id string) string {
 // ensureLoaded fetches the catalog if stale or not yet loaded.
 func (c *Catalog) ensureLoaded(ctx context.Context) error {
 	c.mu.RLock()
-	fresh := c.loaded && time.Since(c.fetched) < CacheTTL
+	fresh := c.loaded && clock.NewTime().Since(c.fetched) < CacheTTL
 	c.mu.RUnlock()
 	if fresh {
 		return nil
@@ -395,7 +396,7 @@ func (c *Catalog) indexEntries(entries []flatEntry) {
 	c.byID = byID
 	c.byBareID = byBareID
 	c.byName = byName
-	c.fetched = time.Now()
+	c.fetched = clock.NewTime().Time()
 	c.loaded = true
 	c.mu.Unlock()
 }

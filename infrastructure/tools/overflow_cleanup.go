@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"nusashell/infrastructure/nusatemp"
+	clock "nusashell/pkg/time"
 )
 
 // ToolOverflowMaxAge is how long spill files stay in the platform temp
@@ -63,7 +64,9 @@ func sweepToolOverflowDir(dir string, now time.Time, maxAge time.Duration) (int,
 // RunOverflowCleanup sweeps immediately, then every hour, until ctx is
 // cancelled. Intended as a single goSafe background loop.
 func RunOverflowCleanup(ctx context.Context) {
-	runOverflowCleanup(ctx, ToolOverflowMaxAge, toolOverflowSweepInterval, time.Now)
+	runOverflowCleanup(ctx, ToolOverflowMaxAge, toolOverflowSweepInterval, func() time.Time {
+		return clock.NewTime().Time()
+	})
 }
 
 func runOverflowCleanup(ctx context.Context, maxAge, interval time.Duration, now func() time.Time) {

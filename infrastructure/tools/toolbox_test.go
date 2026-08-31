@@ -19,6 +19,7 @@ import (
 	"nusashell/infrastructure/jsonstore"
 	"nusashell/infrastructure/memorystore"
 	"nusashell/infrastructure/pluginfs"
+	clock "nusashell/pkg/time"
 	"nusashell/resources"
 )
 
@@ -1842,7 +1843,7 @@ func TestCIRunStatusFormatsWakeAt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "2026-08-31T02:00:00Z") {
+	if !strings.Contains(out, clock.NewTime(wake).RFC3339()) {
 		t.Fatalf("expected RFC3339 wake_at, got:\n%s", out)
 	}
 }

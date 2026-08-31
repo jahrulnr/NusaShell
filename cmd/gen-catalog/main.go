@@ -30,6 +30,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	clock "nusashell/pkg/time"
 )
 
 const (
@@ -533,7 +535,7 @@ func extractYAMLEnum(yaml, schema string) []string {
 // PromptCacheTTLEnum, PromptCacheModeEnum, and prompt_cache_retention
 // enums via string scanning. Falls back to hardcoded values on failure.
 func fetchOpenAICacheTTL(ctx context.Context) cacheTTLInfo {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := clock.NewTime().RFC3339()
 	info := cacheTTLInfo{
 		Provider:        "openai",
 		Source:          openAISpecURL,
@@ -569,7 +571,7 @@ func fetchOpenAICacheTTL(ctx context.Context) cacheTTLInfo {
 // components.schemas.AnthropicCacheControlTtl.enum. Falls back to the
 // known Anthropic TTLs on failure.
 func fetchOpenRouterCacheTTL(ctx context.Context) cacheTTLInfo {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := clock.NewTime().RFC3339()
 	info := cacheTTLInfo{
 		Provider:  "openrouter",
 		Source:    openRouterSpecURL,
@@ -615,7 +617,7 @@ func fallbackAnthropicCacheTTL() cacheTTLInfo {
 		Provider:        "anthropic",
 		Source:          "hardcoded: anthropics/anthropic-sdk-typescript",
 		CacheControlTTL: []string{"5m", "1h"},
-		FetchedAt:       time.Now().UTC().Format(time.RFC3339),
+		FetchedAt:       clock.NewTime().RFC3339(),
 	}
 }
 
