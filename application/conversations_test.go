@@ -360,8 +360,8 @@ func TestHandleConversationsPickWorkspaceSerializesTurnSave(t *testing.T) {
 
 // TestHandleConversationsPickWorkspaceEmptyRoomDoesNotInsertHydration pins
 // that picking a workspace before the first user must not persist a
-// checkpoint at index 0. The first turn's ensureFreshRoomHydration parks it
-// after the user so OpenAI/Claude see system → user → hydration.
+// checkpoint at index 0. The first turn's addTurnMessages parks it after
+// the user so OpenAI/Claude see system → user → hydration.
 func TestHandleConversationsPickWorkspaceEmptyRoomDoesNotInsertHydration(t *testing.T) {
 	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
 		"conv_1": {ID: "conv_1", Title: "Test"},
@@ -387,13 +387,10 @@ func TestHandleConversationsPickWorkspaceEmptyRoomDoesNotInsertHydration(t *test
 	}
 }
 
-// TestHandleConversationsPickWorkspaceInvalidatesHydration pins the
-// workspace-switch epoch reset: a persisted hydration checkpoint (stale
-// runtime_context + AGENTS.md for the OLD workspace) is stripped when the
-// workspace changes, and a fresh checkpoint for the NEW workspace is rebuilt
-// in the same Save — same epoch semantics as compaction. The turn loop no
-// longer re-injects hydration, so the rebuild must happen here.
-func TestHandleConversationsPickWorkspaceInvalidatesHydration(t *testing.T) {
+// TestHandleConversationsPickWorkspaceKeepsFormedHydration pins that a
+// mid-conversation workspace pick must not strip or rebuild formed hydration.
+// The visible workspace_changed notice is queued for the next user turn.
+func TestHandleConversationsPickWorkspaceKeepsFormedHydration(t *testing.T) {
 	hydID := domain.HydrateToolCallPrefix + "abc123_0"
 	conv := &domain.Conversation{
 		ID:    "conv_1",
@@ -425,30 +422,20 @@ func TestHandleConversationsPickWorkspaceInvalidatesHydration(t *testing.T) {
 	if saved.Workspace != newWS {
 		t.Fatalf("workspace = %q, want %q", saved.Workspace, newWS)
 	}
-	// The OLD hydration checkpoint is gone; a fresh one is rebuilt in its
-	// place (after the first user, same epoch anchor). Real messages survive.
-	oldHydGone := true
-	freshHydCount := 0
+	if !saved.PendingWorkspaceAnnouncement {
+		t.Fatal("mid-conversation pick must queue a visible notice; formed hydration stays")
+	}
+	foundOld := false
 	for _, m := range saved.Messages {
-		for _, tc := range m.ToolCalls {
-			if domain.IsHydrationCallID(tc.ID) {
-				freshHydCount++
-				// The old checkpoint's runtime_context output referenced /old/ws.
-				if tc.Name == "runtime_context" && strings.Contains(tc.Output, "/old/ws") {
-					oldHydGone = false
-				}
-			}
+		if m.ID == "m2" {
+			foundOld = true
+		}
+		if m.ID != "m1" && m.ID != "m2" && m.ID != "m3" {
+			t.Fatalf("pick must not splice messages, got extra %+v", m)
 		}
 	}
-	if !oldHydGone {
-		t.Fatal("stale hydration checkpoint referencing /old/ws survived workspace switch")
-	}
-	if freshHydCount == 0 {
-		t.Fatal("no fresh hydration checkpoint rebuilt after workspace switch; the turn loop no longer re-injects")
-	}
-	// Real messages survive and keep their order: user first, assistant last.
-	if saved.Messages[0].Content != "hello" {
-		t.Errorf("first real message lost or reordered: %+v", saved.Messages[0])
+	if !foundOld {
+		t.Fatal("formed hydration message must remain (append-only)")
 	}
 }
 

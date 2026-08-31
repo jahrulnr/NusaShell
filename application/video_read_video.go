@@ -24,9 +24,10 @@ import (
 //     explaining that the model cannot see video and no fallback is configured.
 //
 // defaultDescribeVideoPrompt is the description request used when the video
-// read/fallback path has no explicit question. Kept as a single constant so
-// both call sites share one string.
-const defaultDescribeVideoPrompt = "Describe this video concisely. Focus on visible actions, people, settings, text on screen, and notable events. Keep it factual and under 300 words."
+// read/fallback path has no explicit question. Loaded from
+// resources/agent/prompts/user/describe-video.md so both call sites share
+// one source of truth.
+var defaultDescribeVideoPrompt = resources.DescribeVideoPrompt()
 
 func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps ModelCapabilities, settings domain.Settings) (string, []domain.Attachment, error) {
 	var args struct {
@@ -215,10 +216,15 @@ func (a *App) enrichWithVideoDescriptions(ctx context.Context, conversation *dom
 		return conversation
 	}
 
-	a.updateMessage(conversation, userMsg.ID, func(msg *domain.Message) {
+	repo, err := a.loadRepo(conversation.ID)
+	if err != nil {
+		a.log("warn", "video", "failed to load conversation for video descriptions: %v", err)
+		return conversation
+	}
+	a.updateMessage(repo.Conversation(), userMsg.ID, func(msg *domain.Message) {
 		msg.Attachments = described
 	})
-	if err := a.Conversations.Save(conversation); err != nil {
+	if err := repo.Save(); err != nil {
 		a.log("warn", "video", "failed to persist video descriptions: %v", err)
 		return conversation
 	}

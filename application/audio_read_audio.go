@@ -13,6 +13,12 @@ import (
 	"nusashell/resources"
 )
 
+// defaultTranscribeAudioPrompt is the transcription/description request
+// sent to the audio fallback model when no explicit question is provided.
+// Loaded from resources/agent/prompts/user/transcribe-audio.md so all
+// call sites share one source of truth.
+var defaultTranscribeAudioPrompt = resources.TranscribeAudioPrompt()
+
 // executeReadAudio handles the read_media tool call when the sniffed kind
 // is "audio". It loads the audio
 // directly from disk by absolute path, then either:
@@ -149,7 +155,7 @@ func (a *App) transcribeAudioViaChat(run *TurnRun, caps ModelCapabilities, setti
 	adapter := NewProviderContext(provider, rawAdapter)
 
 	if question == "" {
-		question = "Transcribe this audio. If there is speech, provide a full transcript. If there is music or ambient sound, describe it concisely."
+		question = defaultTranscribeAudioPrompt
 	} else {
 		question = "Transcribe/describe this audio and answer the following question:\n" + question
 	}
@@ -238,7 +244,7 @@ func (a *App) describeAudiosWithFallback(ctx context.Context, settings domain.Se
 	out = append(out, attachments...)
 	for _, idx := range audioIdxs {
 		aud := attachments[idx]
-		prompt := "Transcribe this audio. If there is speech, provide a full transcript. If there is music or ambient sound, describe it concisely."
+		prompt := defaultTranscribeAudioPrompt
 		description, err := a.describeOneAudio(ctx, adapter, settings.AudioModelID, aud, prompt)
 		if err != nil {
 			a.log("warn", "audio", "audio transcription failed for %q: %v", aud.Name, err)
@@ -285,10 +291,15 @@ func (a *App) enrichWithAudioDescriptions(ctx context.Context, conversation *dom
 		return conversation
 	}
 
-	a.updateMessage(conversation, userMsg.ID, func(msg *domain.Message) {
+	repo, err := a.loadRepo(conversation.ID)
+	if err != nil {
+		a.log("warn", "audio", "failed to load conversation for audio transcripts: %v", err)
+		return conversation
+	}
+	a.updateMessage(repo.Conversation(), userMsg.ID, func(msg *domain.Message) {
 		msg.Attachments = described
 	})
-	if err := a.Conversations.Save(conversation); err != nil {
+	if err := repo.Save(); err != nil {
 		a.log("warn", "audio", "failed to persist audio transcripts: %v", err)
 		return conversation
 	}
@@ -301,29 +312,17 @@ func (a *App) enrichWithAudioDescriptions(ctx context.Context, conversation *dom
 }
 
 const (
-	mediaDescPrefixVision = "vision:"
-	mediaDescPrefixAudio  = "audio:"
-	mediaDescPrefixVideo  = "video:"
+	mediaDescPrefixVision = domain.MediaDescPrefixVision
+	mediaDescPrefixAudio  = domain.MediaDescPrefixAudio
+	mediaDescPrefixVideo  = domain.MediaDescPrefixVideo
 )
 
 func hasMediaDescription(atts []domain.Attachment, prefix, name string) bool {
-	want := prefix + name
-	for _, att := range atts {
-		if att.Type == "text" && att.Name == want {
-			return true
-		}
-	}
-	return false
+	return domain.HasMediaDescription(atts, prefix, name)
 }
 
 // undescribedMediaIndexes returns attachments of mediaType that do not yet
 // have a matching prefix+name text description (e.g. vision:cat.png).
 func undescribedMediaIndexes(atts []domain.Attachment, mediaType, prefix string) []int {
-	var idxs []int
-	for i, att := range atts {
-		if att.Type == mediaType && !hasMediaDescription(atts, prefix, att.Name) {
-			idxs = append(idxs, i)
-		}
-	}
-	return idxs
+	return domain.UndescribedMediaIndexes(atts, mediaType, prefix)
 }

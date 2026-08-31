@@ -21,29 +21,29 @@ func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust d
 		return nil, "", err
 	}
 
-	convID := domain.NewID("conv")
-	now := time.Now().UTC()
-	conv := domain.NewConversation(convID, "[pipeline] "+truncate(prompt, 60))
+	repo := NewConversation(a.Conversations, "[pipeline] "+truncate(prompt, 60))
+	conv := repo.Conversation()
 	conv.Origin = domain.ConversationOriginPipeline
 	conv.Model = provider.ID + ":" + bareModel
 	conv.Status = "running"
-	conv.AddMessage(domain.Message{
+	now := time.Now().UTC()
+	asstMsgID := domain.NewID("msg")
+	a.addTurnMessages(conv, domain.Message{
 		ID:        domain.NewID("msg"),
 		Role:      domain.RoleUser,
 		Content:   prompt,
 		CreatedAt: now,
 		Status:    domain.StatusDone,
-	})
-	asstMsgID := domain.NewID("msg")
-	conv.AddMessage(domain.Message{
+	}, domain.Message{
 		ID:         asstMsgID,
 		Role:       domain.RoleAssistant,
 		CreatedAt:  now,
 		ProviderID: provider.ID,
 	})
-	if err := a.Conversations.Save(conv); err != nil {
+	if err := repo.Save(); err != nil {
 		return nil, "", fmt.Errorf("headless turn: save conversation: %w", err)
 	}
+	convID := repo.ID()
 
 	turnCtx, cancel := context.WithCancel(ctx)
 	run := &TurnRun{

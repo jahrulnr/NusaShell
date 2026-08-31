@@ -76,11 +76,15 @@ test('Room snapshots keep the complete trailing run; older complete turns remain
   assert.match(agentView, /scheduleLiveRender/);
   assert.match(agentView, /run\.toolJobs = toolJobs/);
   assert.match(agentView, /retryTurn\(node, message_id\)/);
-  assert.match(agentView, /MAX_LIVE_ROUND_CHARS = 512 \* 1024/);
+  // Live round text is unbounded: a hidden 512KB cap truncated the user's
+  // view of long assistant turns in the middle of streaming. The tool-job
+  // cap stays — that one is about visual clutter from runaway agentic
+  // loops, not memory safety (each tool card is small).
+  assert.doesNotMatch(agentView, /MAX_LIVE_ROUND_CHARS = 512 \* 1024/);
+  assert.doesNotMatch(agentView, /appendBoundedLiveText/);
   assert.match(agentView, /MAX_LIVE_TOOL_JOBS = 128/);
   assert.match(agentView, /setLiveToolJob/);
-  // The raw-cap banner was taken out too: nothing in the live thread may be
-  // hidden or replaced by a notice — the 512KB memory caps stay, silently.
+  // Nothing in the live thread may be hidden or replaced by a trim notice.
   assert.doesNotMatch(agentCSS, /agent-live-trimmed/);
   assert.doesNotMatch(agentView, /updateLiveTrimNotice|rawCapped|rawReasoningCapped/);
   assert.doesNotMatch(agentCSS, /agent-round-stub/);

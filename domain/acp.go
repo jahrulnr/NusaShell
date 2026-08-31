@@ -479,6 +479,43 @@ func (r *AcpRun) Live() bool {
 	return false
 }
 
+// BeginRunning transitions the run to running and stamps UpdatedAt. Used
+// on session start, steer, and resume after permission.
+func (r *AcpRun) BeginRunning(now time.Time) {
+	if r == nil {
+		return
+	}
+	r.Status = AcpRunRunning
+	r.UpdatedAt = now
+}
+
+// Finish transitions the run to a terminal status, records error and stop
+// reason, clears any pending permission, and stamps EndedAt + UpdatedAt.
+func (r *AcpRun) Finish(status AcpRunStatus, errMsg, stop string, now time.Time) {
+	if r == nil {
+		return
+	}
+	r.Status = status
+	r.Error = errMsg
+	r.StopReason = stop
+	r.PendingPermission = nil
+	r.EndedAt = now
+	r.UpdatedAt = now
+}
+
+// ResolvePermission clears the pending permission and, if the run was
+// waiting for permission, transitions it back to running.
+func (r *AcpRun) ResolvePermission(now time.Time) {
+	if r == nil {
+		return
+	}
+	r.PendingPermission = nil
+	if r.Status == AcpRunWaitingPermission {
+		r.Status = AcpRunRunning
+	}
+	r.UpdatedAt = now
+}
+
 // PathRooted reports whether p is an absolute location that must not be
 // joined onto a workspace prefix. On Windows, slash-rooted paths such as
 // `\etc\passwd` and Unix-style `/etc/passwd` are rooted even though

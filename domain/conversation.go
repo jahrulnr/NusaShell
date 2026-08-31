@@ -151,6 +151,17 @@ type Conversation struct {
 	// steps persist a conversation so the turn loop and ci_steer can work;
 	// those must not appear in agent.conversations.list.
 	Origin string `json:"Origin,omitempty"`
+	// PendingWorkspaceAnnouncement is set when the user picks a new
+	// workspace on a room that already has a user message. The next
+	// addTurnMessages injects a visible announcement (+ AGENTS.md
+	// file_read when the file exists) immediately after that user, then
+	// clears the flag. Empty-room picks do not set this — the first turn
+	// parks hidden hydration after the opening user instead.
+	PendingWorkspaceAnnouncement bool `json:"pending_workspace_announcement,omitempty"`
+	// WorkspaceSwitchFrom is the previous workspace path captured when
+	// PendingWorkspaceAnnouncement is set. Empty when the room had no
+	// workspace yet.
+	WorkspaceSwitchFrom string `json:"workspace_switch_from,omitempty"`
 }
 
 // ConversationOriginPipeline is stored on conversations created by

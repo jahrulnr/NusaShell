@@ -59,10 +59,11 @@ func TestServerCompactionContextManagementIneligibleModel(t *testing.T) {
 }
 
 func TestServerCompactionContextManagementFloorEnforced(t *testing.T) {
-	// Temporarily lower the floor to verify it clamps.
-	original := serverCompactionThresholdFloor
-	serverCompactionThresholdFloor = 200000
-	defer func() { serverCompactionThresholdFloor = original }()
+	// Temporarily raise the floor to verify it clamps. The threshold is
+	// computed in the domain, so the floor must be mutated there.
+	original := domain.ServerCompactionThresholdFloor
+	domain.ServerCompactionThresholdFloor = 200000
+	defer func() { domain.ServerCompactionThresholdFloor = original }()
 
 	// o3 has 200k context, 0.9 * 200k = 180k < 200k floor → should use floor
 	cm := serverCompactionContextManagement("o3")

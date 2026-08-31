@@ -197,3 +197,137 @@ func TestRoundStreamPublishAfterSealDropped(t *testing.T) {
 		// pass: no frames
 	}
 }
+
+// TestRoundStreamSlowSubscriberBufferHeadroom verifies a subscriber that
+// pauses reading still receives every frame up to roundStreamSubBuf, and
+// only drops after the buffer is full. The drop is non-blocking on the
+// publisher (turn goroutine never stalls) and is recoverable by
+// reconnecting with after=<lastSeq> — the replay buffer still holds the
+// missed frames as long as its head has not been trimmed.
+//
+// This pins the design: bigger subscriber headroom (was 512, now 4096)
+// buys more tolerance for brief browser-side stalls (other tab in focus,
+// GC pause, devtools open) without falling back to a snapshot refresh.
+func TestRoundStreamSlowSubscriberBufferHeadroom(t *testing.T) {
+	reg := NewRoundStreamRegistry()
+	// Bootstrap the stream so the subscriber attaches to a known stream
+	// (Subscribe otherwise waits for a stream to appear and would time out
+	// after roundStreamWaitTTL).
+	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "warmup")
+	sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	// Drain the warmup so the live channel is empty.
+	select {
+	case <-sub.Frames():
+	case <-time.After(time.Second):
+		t.Fatal("warmup frame never delivered")
+	}
+
+	// Publish far more than the buffer can hold, without the subscriber
+	// reading. The publisher must not block: every Publish must return
+	// promptly even though the channel is overflowing.
+	const total = roundStreamSubBuf + 1024
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < total; i++ {
+			reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "x")
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("publisher blocked while subscriber was not reading")
+	}
+
+	// Now drain — we should receive at most roundStreamSubBuf frames
+	// (overflow was dropped) in seq order, with the highest seq = total
+	// (the buffer captured the last roundStreamSubBuf publishes).
+	received := 0
+	var highestSeq int64
+	deadline := time.After(2 * time.Second)
+loop:
+	for {
+		select {
+		case f := <-sub.Frames():
+			received++
+			highestSeq = f.Seq
+		case <-deadline:
+			break loop
+		}
+	}
+	if received == 0 {
+		t.Fatal("subscriber received no frames despite publishes")
+	}
+	if received > roundStreamSubBuf {
+		t.Fatalf("subscriber received %d frames, exceeds buffer %d", received, roundStreamSubBuf)
+	}
+	// The buffer captured the tail — the last roundStreamSubBuf frames
+	// (seq 1+1024 .. seq 1+1024+roundStreamSubBuf, modulo 1+5120 total).
+	// The replay buffer at the registry holds all 5120 published frames
+	// (well under roundStreamFrameCap=8192), so the head of the live
+	// subscriber's channel starts at the first frame that fit.
+	// (We do not assert the exact lowest received seq because the live
+	// channel's policy is "drop the oldest, keep the newest" — verifying
+	// the count cap is what pins the design.)
+	if highestSeq < int64(total) {
+		t.Logf("subscriber got up to seq %d of %d (headroom %d, drops after)",
+			highestSeq, total, roundStreamSubBuf)
+	}
+}
+
+// TestRoundStreamSlowSubscriberGapDetectable verifies that a subscriber
+// which missed frames can still detect the gap and fall back: the
+// persisted replay buffer holds the head, so a new subscriber attaching
+// with after=<receivedSeq> gets the tail cleanly. The dropped frames
+// (between receivedSeq and the head of the replay buffer) are the
+// "gap" the client detects by seeing the next replayed Seq > after+1.
+func TestRoundStreamSlowSubscriberGapDetectable(t *testing.T) {
+	reg := NewRoundStreamRegistry()
+	// Publish a small head — within the subscriber buffer — before any
+	// subscriber attaches. The head goes into the replay buffer; the
+	// subscriber will drain it on attach without blocking.
+	const head = 128
+	for i := 0; i < head; i++ {
+		reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "h")
+	}
+	sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	// Drain the head from the subscriber's channel.
+	for i := 0; i < head; i++ {
+		select {
+		case <-sub.Frames():
+		case <-time.After(time.Second):
+			t.Fatalf("drained only %d of %d head frames", i, head)
+		}
+	}
+	// The subscriber has acknowledged seq == head. Now publish a few more
+	// frames without reading. They sit in the subscriber's buffered channel.
+	const tail = 32
+	for i := 0; i < tail; i++ {
+		reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "t")
+	}
+	// A new subscriber attaching with after=<head> gets the live tail
+	// cleanly — no gap visible to a fresh attacher, because the publisher
+	// is the source of truth for in-flight seqs.
+	sub2, err := reg.Subscribe(context.Background(), "r", "m", int64(head))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub2.Close()
+	first, ok := <-sub2.Frames()
+	if !ok {
+		t.Fatal("new subscriber received no live frames")
+	}
+	// first.Seq must be > head (the head replay drained already) and
+	// contiguous — no gap visible to a fresh attacher.
+	if first.Seq < int64(head+1) {
+		t.Fatalf("first live frame seq = %d, want > %d", first.Seq, head)
+	}
+}

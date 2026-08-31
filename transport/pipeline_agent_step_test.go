@@ -134,6 +134,60 @@ func TestPipelineAgentStepDoesNotAppearInRoomList(t *testing.T) {
 	}
 }
 
+func TestPipelineAgentStepRendersEventPlaceholders(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+
+	// LLM echoes the rendered user prompt so the test can assert what the
+	// model actually saw.
+	h.llm.setRounds([][]llmStep{
+		{{Text: "echo: halo bos"}},
+	})
+
+	ev := &domain.Event{
+		ID:   "evt_42",
+		Type: "telegram.message",
+		Attributes: map[string]any{
+			"chat_id":    "9999",
+			"message_id": "m_test",
+			"text":       "halo bos",
+		},
+	}
+	// Apply the same rendering the production scheduler would do, so this
+	// test exercises the contract used by ci_scheduler.go.
+	rendered := domain.RenderAgentPrompt("balas chat ${event.chat_id}: ${event.text}", ev)
+	if !strings.Contains(rendered, "balas chat 9999: halo bos") {
+		t.Fatalf("RenderAgentPrompt: got %q, want substring %q", rendered, "balas chat 9999: halo bos")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, convID, err := h.app.RunHeadlessTurn(ctx, rendered, "", domain.TrustSafe, nil)
+	if err != nil {
+		t.Fatalf("RunHeadlessTurn: %v", err)
+	}
+	if out["output"] != "echo: halo bos" {
+		t.Fatalf("output = %v, want %q", out["output"], "echo: halo bos")
+	}
+	// And the saved conversation should hold the rendered user message —
+	// not the raw template.
+	conv, err := h.app.Conversations.Get(convID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	for _, m := range conv.Messages {
+		if m.Role == domain.RoleUser {
+			got = m.Content
+			break
+		}
+	}
+	if got != rendered {
+		t.Fatalf("saved user prompt = %q, want %q", got, rendered)
+	}
+}
+
 func TestLegacyPipelineTitleRoomsAreHiddenFromList(t *testing.T) {
 	h := newHarness(t, nil)
 	legacy := domain.NewConversation("conv_legacy_pipe", "[pipeline] old run")

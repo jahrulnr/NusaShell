@@ -149,6 +149,53 @@ An `agent:` step accepts an optional `model` field (`provider_id:model_id` or
 bare model ID). When omitted, the first enabled provider's first model is
 used. The step output is `{"output": "<final assistant text>"}`.
 
+### Event interpolation in agent prompts
+
+When a workflow is triggered by a `when:` event, the agent step's `prompt:`
+template can reference event attributes with `${event.<key>}` placeholders.
+The template is rendered **before** the headless turn starts, so the model
+sees a fully-resolved user message — not the raw template.
+
+Supported keys (via `domain.Event.lookupAttr`):
+
+- `${event.chat_id}`, `${event.message_id}`, `${event.chat_type}` — the
+  identifiers pushed by message-bridge plugins (telegram, whatsapp).
+- `${event.text}` — the inbound message text (already truncated by the
+  plugin's notification payload; fetch the full text from the plugin's
+  read tools when needed).
+- `${event.subject}` — the sender or chat display label.
+- `${event.type}` — the event type (e.g. `telegram.message`).
+- `${event.<any>}` — any other attribute key pushed on the event, including
+  dotted paths into nested `Attributes` (e.g. `${event.mailbox.folder}`).
+- `${event.<missing>}` renders as the empty string (no error, no panic).
+
+Example (auto-reply to a Telegram DM):
+
+```yaml
+triggers:
+  - when:
+      event: telegram.message
+      where: { chat_type: dm }
+jobs:
+  respond:
+    steps:
+      - name: Reply
+        agent:
+          prompt: |
+            You are a concise assistant. Reply to this Telegram DM.
+            chat_id: ${event.chat_id}
+            sender:   ${event.subject}
+            message:  ${event.text}
+```
+
+Templates without `${event.}` placeholders are passed through untouched, so
+existing `agent:` steps keep their current behavior. Event interpolation is
+inert for `schedule`, `every`, and `manual` triggers — `run.Event` is nil
+and every placeholder resolves to the empty string (so a placeholder inside
+a schedule-triggered step will not error; it just produces an empty
+substring, which the model will see as a literal gap — wrap the template
+with `when:` if you need the data).
+
 A running agent step can be steered (additional instructions queued without
 canceling) via `ci.runs.steer` RPC or the `ci_steer` agent tool. The steer
 text is injected at the next tool-round boundary.

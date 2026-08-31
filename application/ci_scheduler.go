@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	jobLease     = 30 * time.Second
-	jobHeartbeat = 10 * time.Second
-	maxParallel  = 4
-	maxFanout    = 32
+	jobLease     = domain.JobLease
+	jobHeartbeat = domain.JobHeartbeat
+	maxParallel  = domain.MaxParallelJobs
+	maxFanout    = domain.MaxFanout
 )
 
 // ExecutionScheduler evaluates the DAG, matches runners, and runs jobs.
@@ -57,11 +57,7 @@ func (s *ExecutionScheduler) now() time.Time {
 
 // StartRun persists a snapshot and begins scheduling.
 func (s *ExecutionScheduler) StartRun(ctx context.Context, run *domain.WorkflowRun) error {
-	if run.Status == "" {
-		run.Status = domain.StatusQueued
-	}
-	t := s.now().UTC()
-	run.CreatedAt = t
+	run.StartRun(s.now().UTC())
 	if err := s.Runs.Create(ctx, run); err != nil {
 		return err
 	}
@@ -75,11 +71,7 @@ func (s *ExecutionScheduler) StartRun(ctx context.Context, run *domain.WorkflowR
 // Cancel still works: it sets terminal status, which the Tick loop observes
 // on its next iteration.
 func (s *ExecutionScheduler) StartRunAsync(ctx context.Context, run *domain.WorkflowRun) error {
-	if run.Status == "" {
-		run.Status = domain.StatusQueued
-	}
-	t := s.now().UTC()
-	run.CreatedAt = t
+	run.StartRun(s.now().UTC())
 	if err := s.Runs.Create(ctx, run); err != nil {
 		return err
 	}
@@ -101,18 +93,7 @@ func (s *ExecutionScheduler) Tick(ctx context.Context, runID string) error {
 		if run.WakeAt != nil && s.now().Before(*run.WakeAt) {
 			return nil
 		}
-		run.Status = domain.StatusQueued
-		run.WakeAt = nil
-		for i := range run.Jobs {
-			if run.Jobs[i].Status == domain.StatusWaiting {
-				run.Jobs[i].Status = domain.StatusQueued
-				for j := range run.Jobs[i].Steps {
-					if run.Jobs[i].Steps[j].Status == domain.StatusWaiting {
-						run.Jobs[i].Steps[j].Status = domain.StatusQueued
-					}
-				}
-			}
-		}
+		domain.WakeWaitingRun(run)
 		if err := s.persist(ctx, run); err != nil {
 			return err
 		}
@@ -130,9 +111,7 @@ func (s *ExecutionScheduler) Tick(ctx context.Context, runID string) error {
 		}
 		dag, issues := domain.BuildDAG(run.Definition.Jobs)
 		if len(issues) > 0 {
-			run.Status = domain.StatusFailed
-			t := s.now().UTC()
-			run.FinishedAt = &t
+			run.FailDAG(s.now().UTC())
 			_ = s.persist(ctx, run)
 			s.emit(contracts.EventCIRunFailed, map[string]any{"run_id": run.ID, "error": issues[0].Message})
 			s.notifyWebhook(ctx, run)
@@ -195,20 +174,12 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 		return s.failJob(ctx, run, jr, err.Error())
 	}
 	if !ok {
-		jr.Status = domain.StatusSkipped
-		t := s.now().UTC()
-		jr.FinishedAt = &t
+		jr.Skip(s.now().UTC())
 		return s.persist(ctx, run)
 	}
-	jr.Status = domain.StatusRunning
 	t := s.now().UTC()
-	jr.StartedAt = &t
-	if run.Status != domain.StatusWaiting {
-		run.Status = domain.StatusRunning
-		if run.StartedAt == nil {
-			run.StartedAt = &t
-		}
-	}
+	jr.BeginRunning(t)
+	run.BeginRunning(t)
 	if err := s.persist(ctx, run); err != nil {
 		return err
 	}
@@ -241,10 +212,7 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 	outputs := map[string]any{}
 	for i := range job.Steps {
 		step := job.Steps[i]
-		if i >= len(jr.Steps) {
-			jr.Steps = append(jr.Steps, domain.StepRun{ID: domain.NewID("step"), StepID: step.ID, Name: step.Name, Status: domain.StatusQueued})
-		}
-		sr := &jr.Steps[i]
+		sr := jr.EnsureStep(step)
 		if sr.Status.IsTerminal() {
 			continue // finished before a wait_until pause; never re-run side effects
 		}
@@ -253,9 +221,7 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 				return s.parkWait(ctx, run, jr, sr, step)
 			}
 		}
-		st := s.now().UTC()
-		sr.Status = domain.StatusRunning
-		sr.StartedAt = &st
+		sr.BeginRunning(s.now().UTC())
 		_ = s.persist(ctx, run)
 		s.emit(contracts.EventCIStepStarted, map[string]any{"run_id": run.ID, "job_id": jobID, "step_id": sr.ID})
 
@@ -270,14 +236,13 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 				result, err = StepResult{Error: "agent steps are not configured"}, fmt.Errorf("agent steps are not configured")
 				break
 			}
-			out, convID, agentErr := s.Agent.RunAgentStep(jobCtx, step.Agent.Prompt, step.Agent.Model, run.Definition.Trust, step.Agent.OutputSchema)
+			prompt := domain.RenderAgentPrompt(step.Agent.Prompt, run.Event)
+			out, convID, agentErr := s.Agent.RunAgentStep(jobCtx, prompt, step.Agent.Model, run.Definition.Trust, step.Agent.OutputSchema)
 			if agentErr != nil {
 				result, err = StepResult{Error: agentErr.Error()}, agentErr
 				break
 			}
-			if sr != nil {
-				sr.ConversationID = convID
-			}
+			sr.ConversationID = convID
 			result, err = StepResult{ExitCode: 0, Outputs: out}, nil
 		default:
 			envMap := domain.MergeEnv(run.Definition.Env, job.Env, step.Env)
@@ -299,18 +264,15 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 			})
 		}
 		ft := s.now().UTC()
-		sr.FinishedAt = &ft
 		if err != nil || result.ExitCode != 0 || result.Error != "" {
-			sr.Status = domain.StatusFailed
-			sr.ExitCode = result.ExitCode
-			sr.Error = result.Error
-			if err != nil && sr.Error == "" {
-				sr.Error = err.Error()
+			errMsg := result.Error
+			if err != nil && errMsg == "" {
+				errMsg = err.Error()
 			}
+			sr.Fail(result.ExitCode, errMsg, ft)
 			return s.failJob(ctx, run, jr, sr.Error)
 		}
-		sr.Status = domain.StatusSuccess
-		sr.ExitCode = result.ExitCode
+		sr.Succeed(result.ExitCode, ft)
 		if step.Agent != nil && result.Outputs != nil {
 			if text, ok := result.Outputs["output"].(string); ok {
 				sr.Output = text
@@ -322,10 +284,7 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 		_ = s.persist(ctx, run)
 		s.emit(contracts.EventCIStepCompleted, map[string]any{"run_id": run.ID, "job_id": jobID, "step_id": sr.ID})
 	}
-	jr.Status = domain.StatusSuccess
-	jr.Outputs = outputs
-	done := s.now().UTC()
-	jr.FinishedAt = &done
+	jr.Succeed(outputs, s.now().UTC())
 	if err := s.persist(ctx, run); err != nil {
 		return err
 	}
@@ -334,11 +293,9 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 }
 
 func (s *ExecutionScheduler) parkWait(ctx context.Context, run *domain.WorkflowRun, jr *domain.JobRun, sr *domain.StepRun, step domain.Step) error {
-	sr.Status = domain.StatusWaiting
-	sr.WakeAt = step.WaitUntil
-	jr.Status = domain.StatusWaiting
-	run.Status = domain.StatusWaiting
-	run.WakeAt = step.WaitUntil
+	sr.ParkWait(*step.WaitUntil)
+	jr.ParkWait()
+	run.ParkWait(*step.WaitUntil)
 	if s.Waits != nil {
 		_ = s.Waits.Put(ctx, &domain.WaitRecord{
 			ID: domain.NewID("wait"), WorkflowRunID: run.ID, JobID: jr.JobID, StepID: sr.StepID,
@@ -373,8 +330,8 @@ func (s *ExecutionScheduler) runUses(ctx context.Context, run *domain.WorkflowRu
 	}
 	avail := domain.MapAvailability(binding.Status, domain.AllowsAutoStart(binding.Status, policy, true))
 	if avail == domain.AvailBlocked || avail == domain.AvailError {
-		run.Status = domain.StatusBlocked
-		run.BlockedReason = fmt.Sprintf("Required capability %q is provided by %s (%s). status=%s", binding.Capability, binding.ProviderID, binding.Kind, binding.Status)
+		reason := fmt.Sprintf("Required capability %q is provided by %s (%s). status=%s", binding.Capability, binding.ProviderID, binding.Kind, binding.Status)
+		run.ParkBlocked(reason)
 		_ = s.persist(ctx, run)
 		s.emit(contracts.EventCIRunBlocked, map[string]any{
 			"run_id": run.ID, "capability": binding.Capability, "provider": binding.ProviderID, "status": binding.Status, "reason": binding.Reason,
@@ -392,10 +349,7 @@ func (s *ExecutionScheduler) runUses(ctx context.Context, run *domain.WorkflowRu
 }
 
 func (s *ExecutionScheduler) failJob(ctx context.Context, run *domain.WorkflowRun, jr *domain.JobRun, reason string) error {
-	jr.Status = domain.StatusFailed
-	jr.FailureReason = reason
-	t := s.now().UTC()
-	jr.FinishedAt = &t
+	jr.Fail(reason, s.now().UTC())
 	dag, _ := domain.BuildDAG(run.Definition.Jobs)
 	cont := false
 	if j := run.Definition.JobByID(jr.JobID); j != nil {
@@ -407,8 +361,7 @@ func (s *ExecutionScheduler) failJob(ctx context.Context, run *domain.WorkflowRu
 	}
 	for _, id := range domain.BlockedByFailure(dag, jr.JobID, cont, status) {
 		if dep := run.JobRunByID(id); dep != nil {
-			dep.Status = domain.StatusBlocked
-			dep.BlockedReason = "upstream failed: " + jr.JobID
+			dep.ParkBlocked("upstream failed: " + jr.JobID)
 		}
 	}
 	if err := s.persist(ctx, run); err != nil {
@@ -419,26 +372,16 @@ func (s *ExecutionScheduler) failJob(ctx context.Context, run *domain.WorkflowRu
 }
 
 func (s *ExecutionScheduler) maybeFinalize(ctx context.Context, run *domain.WorkflowRun) error {
-	if run.Status == domain.StatusWaiting || run.Status == domain.StatusBlocked {
-		return s.persist(ctx, run)
-	}
 	sum := run.Summary()
-	if sum.Running > 0 || sum.Queued > 0 || sum.Waiting > 0 {
-		return s.persist(ctx, run)
-	}
-	t := s.now().UTC()
-	run.FinishedAt = &t
-	if sum.Failed > 0 {
-		run.Status = domain.StatusFailed
+	run.Finalize(s.now().UTC(), sum)
+	if run.Status == domain.StatusFailed {
 		s.emit(contracts.EventCIRunFailed, map[string]any{"run_id": run.ID})
-	} else if sum.Blocked > 0 && sum.Success+sum.Skipped < sum.Total {
-		run.Status = domain.StatusFailed
-		s.emit(contracts.EventCIRunFailed, map[string]any{"run_id": run.ID})
-	} else {
-		run.Status = domain.StatusSuccess
+	} else if run.Status == domain.StatusSuccess {
 		s.emit(contracts.EventCIRunCompleted, map[string]any{"run_id": run.ID})
 	}
-	s.notifyWebhook(ctx, run)
+	if run.Status.IsTerminal() {
+		s.notifyWebhook(ctx, run)
+	}
 	return s.persist(ctx, run)
 }
 
@@ -474,15 +417,7 @@ func (s *ExecutionScheduler) Cancel(ctx context.Context, runID string) error {
 		delete(s.cancelOwner, id)
 	}
 	s.mu.Unlock()
-	run.Status = domain.StatusCancelled
-	t := s.now().UTC()
-	run.FinishedAt = &t
-	for i := range run.Jobs {
-		if run.Jobs[i].Status.IsActive() {
-			run.Jobs[i].Status = domain.StatusCancelled
-			run.Jobs[i].FinishedAt = &t
-		}
-	}
+	run.Cancel(s.now().UTC())
 	_ = s.persist(ctx, run)
 	s.emit(contracts.EventCIRunCancelled, map[string]any{"run_id": run.ID})
 	return nil

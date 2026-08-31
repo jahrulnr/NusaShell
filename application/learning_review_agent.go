@@ -43,17 +43,17 @@ type ReviewSettings struct {
 	ReviewCooldown      time.Duration // minimum interval per conversation (default 15m)
 }
 
-const defaultReviewCooldown = 15 * time.Minute
+const defaultReviewCooldown = domain.DefaultReviewCooldown
 
 // DefaultReviewSettings returns sensible defaults.
 func DefaultReviewSettings() ReviewSettings {
 	return ReviewSettings{
 		Enabled:             true,
-		MemoryEveryNTurns:   10,
-		MaxToolRounds:       6,
-		TranscriptTailMsgs:  40,
-		MaxTranscriptChars:  4000,
-		MaxTranscriptTokens: 30000,
+		MemoryEveryNTurns:   domain.DefaultReviewMemoryEveryNTurns,
+		MaxToolRounds:       domain.DefaultReviewMaxToolRounds,
+		TranscriptTailMsgs:  domain.DefaultReviewTranscriptTailMsgs,
+		MaxTranscriptChars:  domain.DefaultReviewMaxTranscriptChars,
+		MaxTranscriptTokens: domain.DefaultReviewMaxTranscriptTokens,
 		ReviewCooldown:      defaultReviewCooldown,
 	}
 }
@@ -88,13 +88,13 @@ func NewBackgroundReviewAgent(app *App, settings ReviewSettings) *BackgroundRevi
 		settings.MaxToolRounds = 6
 	}
 	if settings.TranscriptTailMsgs <= 0 {
-		settings.TranscriptTailMsgs = 40
+		settings.TranscriptTailMsgs = domain.DefaultReviewTranscriptTailMsgs
 	}
 	if settings.MaxTranscriptChars <= 0 {
-		settings.MaxTranscriptChars = 4000
+		settings.MaxTranscriptChars = domain.DefaultReviewMaxTranscriptChars
 	}
 	if settings.MaxTranscriptTokens <= 0 {
-		settings.MaxTranscriptTokens = 30000
+		settings.MaxTranscriptTokens = domain.DefaultReviewMaxTranscriptTokens
 	}
 	if settings.ReviewCooldown <= 0 {
 		settings.ReviewCooldown = defaultReviewCooldown
@@ -282,13 +282,16 @@ func (r *BackgroundReviewAgent) runReservedReview(ctx context.Context, conversat
 			// the turn goroutine added messages and tool results. Saving
 			// the stale snapshot fetched at the start of the review would
 			// overwrite that progress — the "disappearing turn" race.
-			latest, err := r.app.Conversations.Get(conversationID)
+			latestRepo, err := r.app.loadRepo(conversationID)
 			if err != nil {
 				r.app.log("warn", "learning", "failed to re-fetch conversation for review marker: conv=%s err=%v", conversationID, err)
-			} else if newMarker > latest.LastReviewedMsgCount {
-				latest.LastReviewedMsgCount = newMarker
-				if err := r.app.Conversations.Save(latest); err != nil {
-					r.app.log("warn", "learning", "failed to persist review marker: conv=%s err=%v", conversationID, err)
+			} else {
+				latest := latestRepo.Conversation()
+				if newMarker > latest.LastReviewedMsgCount {
+					latest.LastReviewedMsgCount = newMarker
+					if err := latestRepo.Save(); err != nil {
+						r.app.log("warn", "learning", "failed to persist review marker: conv=%s err=%v", conversationID, err)
+					}
 				}
 			}
 		}
@@ -1076,6 +1079,6 @@ func (r *BackgroundReviewAgent) executeReviewTranscript(c *domain.Conversation, 
 }
 
 const (
-	maxToolArgsChars   = 500 // per tool-call args cap in the transcript
-	maxToolOutputChars = 800 // per tool-result cap in the transcript
+	maxToolArgsChars   = domain.ReviewMaxToolArgsChars   // per tool-call args cap in the transcript
+	maxToolOutputChars = domain.ReviewMaxToolOutputChars // per tool-result cap in the transcript
 )

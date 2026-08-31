@@ -1,6 +1,10 @@
 package domain
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
 
 // Harness announcements: synthetic tool calls injected by the NusaShell
 // harness into a conversation's history to deliver runtime facts and chain
@@ -8,9 +12,10 @@ import "encoding/json"
 // `announcement` tool channel — one concept for the model to learn — and
 // are differentiated by their self-describing args type and result text:
 //
-//   - restart:       the backend restarted (MCP plugins, tool availability)
-//   - auto_continue: the todo-driven chain continues into a new turn
-//   - interrupted:   a transient upstream failure cut the response; continue it
+//   - restart:            the backend restarted (MCP plugins, tool availability)
+//   - auto_continue:      the todo-driven chain continues into a new turn
+//   - interrupted:        a transient upstream failure cut the response; continue it
+//   - workspace_changed:  the user picked a new workspace; file tools now run there
 //
 // The model processes an announcement like any tool output — as runtime
 // state, never as user speech. This is the deliberate alternative to
@@ -50,6 +55,31 @@ func AutoContinueAnnouncementArgs(continuesUsed, openTodos int) string {
 		return "{}"
 	}
 	return string(b)
+}
+
+// WorkspaceChangedAnnouncementArgs builds the self-describing args payload
+// for a workspace-switch announcement: type plus the previous and new
+// absolute paths so the model reads the change from the data itself.
+func WorkspaceChangedAnnouncementArgs(from, to string) string {
+	b, err := json.Marshal(struct {
+		Type string `json:"type"`
+		From string `json:"from,omitempty"`
+		To   string `json:"to"`
+	}{Type: "workspace_changed", From: from, To: to})
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// WorkspaceChangedAnnouncementMessage is the announcement tool result text
+// for a workspace switch. An empty from means the conversation had no
+// workspace yet (first pick on a room that already has history).
+func WorkspaceChangedAnnouncementMessage(from, to string) string {
+	if strings.TrimSpace(from) == "" {
+		return fmt.Sprintf("Workspace set to %s. File tools now run against this workspace.", to)
+	}
+	return fmt.Sprintf("Workspace changed from %s to %s. File tools now run against the new workspace.", from, to)
 }
 
 // IsAnnouncementCallID returns true when a tool call ID belongs to an

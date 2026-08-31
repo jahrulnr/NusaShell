@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom';
 
 import { renderMarkdown } from './js/markdown.js';
 import { renderMermaidDiagrams } from './js/mermaid-render.js';
+import { incrementalRender } from './js/incremental-render.js';
 
 test('markdown emits a mermaid placeholder (no SVG) so streaming deltas stay cheap', () => {
   const html = renderMarkdown('intro\n\n```mermaid\nflowchart TD\n A-->B\n```\n\nend');
@@ -84,6 +85,70 @@ test('renderMermaidDiagrams falls back to source for invalid mermaid without thr
     // The raw source is preserved so the user still sees what the model produced.
     assert.match(block.textContent, /INVALID/);
     assert.ok(block.querySelector('.mermaid-error-note'), 'shows an explanatory note');
+  } finally {
+    delete global.window;
+    delete global.document;
+  }
+});
+
+// Per-delta idempotency: a Mermaid block whose fence just closed must be
+// rendered to SVG the very next enhancement pass (no debounce), and a burst
+// of text deltas that follows must not re-render or replace the SVG. This
+// mirrors what scheduleLiveMermaid does for the live thread: call
+// renderMermaidDiagrams on the changed node synchronously, with no setTimeout
+// — and rely on the content-hash lock inside the renderer to make repeated
+// calls free.
+test('mermaid renders per-delta when fence closes and stays idempotent under a text burst', async () => {
+  const dom = makeDom();
+  let renderCount = 0;
+  let parseCount = 0;
+  dom.window.mermaid = {
+    initialize() {},
+    async parse(code) { parseCount += 1; return !/INVALID/.test(code); },
+    async render(id, code) { renderCount += 1; return { svg: `<svg data-mmd="${id}"><g>ok</g></svg>` }; },
+  };
+  try {
+    const container = document.createElement('div');
+
+    // Delta 1: fence opens, source grows. The block is incomplete —
+    // renderMermaidDiagrams must skip it (data-complete="false") even when
+    // called from the per-delta path.
+    incrementalRender(container, 'intro\n\n```mermaid\nflowchart TD\n A-->B');
+    await renderMermaidDiagrams(container);
+    let block = container.querySelector('.mermaid-block');
+    assert.ok(block, 'mermaid block exists');
+    assert.equal(block.dataset.complete, 'false', 'fence still open');
+    assert.equal(renderCount, 0, 'must not render while fence is open');
+    assert.equal(parseCount, 0, 'must not parse while fence is open');
+
+    // Delta 2: fence closes. The next per-delta renderMermaidDiagrams MUST
+    // turn the placeholder into SVG synchronously — this is the bug fix:
+    // before the fix, the only place mermaid rendered was a settle point,
+    // so the user saw the raw ```mermaid``` placeholder until the turn
+    // sealed.
+    incrementalRender(container, 'intro\n\n```mermaid\nflowchart TD\n A-->B\n```');
+    await renderMermaidDiagrams(container);
+    block = container.querySelector('.mermaid-block');
+    assert.equal(block.dataset.complete, 'true', 'fence closed');
+    assert.ok(block.querySelector('svg'), 'mermaid SVG is in the DOM after fence close');
+    const renderedSvg = block.querySelector('svg');
+    assert.ok(block.dataset.rendered, 'rendered flag set on the block');
+    assert.equal(renderCount, 1, 'one render for the closed fence');
+    assert.equal(parseCount, 1, 'one parse for the closed fence');
+
+    // Delta 3..N: text burst after the fence. The mermaid block is byte-
+    // range-locked by incrementalRender (start+end unchanged), so it is NOT
+    // in the changed[] set; even if it were, the renderer's content-hash
+    // lock short-circuits any second call. Either way, no re-render, no
+    // replacement of the settled SVG.
+    for (const tail of ['\n\nafter 1', '\n\nafter 2', '\n\nafter 3', '\n\nafter 4']) {
+      incrementalRender(container, 'intro\n\n```mermaid\nflowchart TD\n A-->B\n```' + tail);
+      await renderMermaidDiagrams(container);
+      const after = container.querySelector('.mermaid-block svg');
+      assert.strictEqual(after, renderedSvg, 'SVG identity preserved across text deltas');
+    }
+    assert.equal(renderCount, 1, 'text burst must not trigger additional renders');
+    assert.equal(parseCount, 1, 'text burst must not trigger additional parses');
   } finally {
     delete global.window;
     delete global.document;

@@ -695,8 +695,7 @@ func (lr *liveRun) drivePrompt(text string, recordPrompt bool) {
 		return
 	}
 	if steer != "" {
-		lr.run.Status = domain.AcpRunRunning
-		lr.run.UpdatedAt = time.Now().UTC()
+		lr.run.BeginRunning(time.Now().UTC())
 		lr.mu.Unlock()
 		lr.conn.runtime.emitUpdate(cloneRun(lr.run))
 		lr.drivePrompt(steer, true)
@@ -719,12 +718,7 @@ func (lr *liveRun) finishLocked(status domain.AcpRunStatus, errMsg, stop string)
 		return
 	}
 	lr.closed = true
-	lr.run.Status = status
-	lr.run.Error = errMsg
-	lr.run.StopReason = stop
-	lr.run.PendingPermission = nil
-	lr.run.EndedAt = time.Now().UTC()
-	lr.run.UpdatedAt = lr.run.EndedAt
+	lr.run.Finish(status, errMsg, stop, time.Now().UTC())
 	if lr.permCh != nil {
 		select {
 		case lr.permCh <- acpclient.RequestPermissionResult{Outcome: acpclient.PermissionOutcome{Outcome: "cancelled"}}:
@@ -758,8 +752,7 @@ func (rt *Runtime) Steer(runID, text string) error {
 		rt.emitUpdate(snap)
 		return nil
 	}
-	lr.run.Status = domain.AcpRunRunning
-	lr.run.UpdatedAt = time.Now().UTC()
+	lr.run.BeginRunning(time.Now().UTC())
 	startNow = true
 	snap := cloneRun(lr.run)
 	lr.mu.Unlock()
@@ -855,11 +848,7 @@ func (rt *Runtime) DecidePermission(runID, requestID, optionID string, outcome d
 	}
 	lr.permCh = nil
 	lr.permID = ""
-	lr.run.PendingPermission = nil
-	if lr.run.Status == domain.AcpRunWaitingPermission {
-		lr.run.Status = domain.AcpRunRunning
-	}
-	lr.run.UpdatedAt = time.Now().UTC()
+	lr.run.ResolvePermission(time.Now().UTC())
 	rt.emitUpdate(cloneRun(lr.run))
 	return nil
 }

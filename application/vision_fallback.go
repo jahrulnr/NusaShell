@@ -120,10 +120,15 @@ func (a *App) enrichWithVisionDescriptions(ctx context.Context, conversation *do
 	}
 
 	// Update the message in the conversation store.
-	a.updateMessage(conversation, userMsg.ID, func(msg *domain.Message) {
+	repo, err := a.loadRepo(conversation.ID)
+	if err != nil {
+		a.log("warn", "vision", "failed to load conversation for image descriptions: %v", err)
+		return conversation
+	}
+	a.updateMessage(repo.Conversation(), userMsg.ID, func(msg *domain.Message) {
 		msg.Attachments = described
 	})
-	if err := a.Conversations.Save(conversation); err != nil {
+	if err := repo.Save(); err != nil {
 		a.log("warn", "vision", "failed to persist image descriptions: %v", err)
 		return conversation
 	}
@@ -137,9 +142,10 @@ func (a *App) enrichWithVisionDescriptions(ctx context.Context, conversation *do
 }
 
 // defaultDescribeImagePrompt is the description request used when the image
-// read/fallback path has no explicit question. Kept as a single constant so
-// all call sites share one string.
-const defaultDescribeImagePrompt = "Describe this image concisely. Focus on visible objects, text, people, settings, and any notable details. Keep it factual and under 200 words."
+// read/fallback path has no explicit question. Loaded from
+// resources/agent/prompts/user/describe-image.md so all call sites share
+// one source of truth.
+var defaultDescribeImagePrompt = resources.DescribeImagePrompt()
 
 func (a *App) describeOneImage(ctx context.Context, adapter ProviderContext, providerName, model string, image domain.Attachment, prompt string) (string, error) {
 	if strings.TrimSpace(prompt) == "" {

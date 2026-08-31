@@ -317,7 +317,7 @@ type TurnStartRequest struct {
 // with a different model picked by the user. When the failed message has
 // partial content (and no tool calls), the partial is frozen as a completed
 // step and the new model is asked to continue from where it stopped; otherwise
-// the failed message is re-run from scratch.
+// the failed message is kept and a new assistant is appended.
 type TurnRetryRequest struct {
 	ConversationID string `json:"conversation_id"`
 	Model          string `json:"model"`

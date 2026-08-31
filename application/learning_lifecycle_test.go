@@ -8,26 +8,26 @@ import (
 )
 
 func TestComputeStrengthDecays(t *testing.T) {
-	m := NewLifecycleManager(&fakeMemoryStore{}, &fakeSkillStore{}, DefaultLifecycleConfig())
+	cfg := DefaultLifecycleConfig()
 	// Fresh entry (0 hours old) → full base strength.
 	fresh := &domain.MemoryEntry{Content: "test", Tags: []string{"fact"}, CreatedAt: time.Now()}
-	if s := m.computeStrength(fresh); s < 0.79 || s > 0.81 {
+	if s := domain.MemoryStrength(fresh, cfg); s < 0.79 || s > 0.81 {
 		t.Errorf("fresh fact strength = %v, want ~0.8", s)
 	}
 	// Old entry (1 week = 168h = 1 half-life) → half strength.
 	old := &domain.MemoryEntry{Content: "test", Tags: []string{"fact"}, CreatedAt: time.Now().Add(-168 * time.Hour)}
-	if s := m.computeStrength(old); s < 0.39 || s > 0.41 {
+	if s := domain.MemoryStrength(old, cfg); s < 0.39 || s > 0.41 {
 		t.Errorf("1-week-old fact strength = %v, want ~0.4", s)
 	}
 	// Very old entry (4 weeks) → near zero.
 	ancient := &domain.MemoryEntry{Content: "test", Tags: []string{"fact"}, CreatedAt: time.Now().Add(-672 * time.Hour)}
-	if s := m.computeStrength(ancient); s > 0.05 {
+	if s := domain.MemoryStrength(ancient, cfg); s > 0.05 {
 		t.Errorf("4-week-old fact strength = %v, want < 0.05", s)
 	}
 }
 
 func TestComputeStrengthByTag(t *testing.T) {
-	m := NewLifecycleManager(&fakeMemoryStore{}, &fakeSkillStore{}, DefaultLifecycleConfig())
+	cfg := DefaultLifecycleConfig()
 	now := time.Now()
 	tests := []struct {
 		tags []string
@@ -41,7 +41,7 @@ func TestComputeStrengthByTag(t *testing.T) {
 	}
 	for _, tc := range tests {
 		e := &domain.MemoryEntry{Content: "test", Tags: tc.tags, CreatedAt: now}
-		got := m.computeStrength(e)
+		got := domain.MemoryStrength(e, cfg)
 		if got < tc.want-0.01 || got > tc.want+0.01 {
 			t.Errorf("tags=%v strength = %v, want ~%v", tc.tags, got, tc.want)
 		}

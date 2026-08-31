@@ -1,0 +1,1 @@
+Transcribe this audio. If there is speech, provide a full transcript. If there is music or ambient sound, describe it concisely.

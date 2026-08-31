@@ -838,16 +838,20 @@ func (a *App) completeSubagentRun(conversationID, toolCallID string, status doma
 }
 
 func (a *App) completeSubagentRunLocked(conversationID, toolCallID string, status domain.ToolCallStatus, run *domain.AcpRun, outputPath string) error {
-	conv, err := a.Conversations.Get(conversationID)
+	repo, err := a.loadRepo(conversationID)
 	if err != nil {
 		a.log("error", "acp", "completeSubagentRun: conversation %s not found: %v", conversationID, err)
 		return err
 	}
+	conv := repo.Conversation()
 	if toolCallID != "" {
 		conv = a.updateToolResult(conv, "", toolCallID, status, domain.SubagentBriefResult(run), nil)
 	}
-	conv.AddMessage(a.subagentResultMessage(run, outputPath, status))
-	if err := a.Conversations.Save(conv); err != nil {
+	if err := repo.Add(domain.RoleAssistant, a.subagentResultMessage(run, outputPath, status)); err != nil {
+		a.log("error", "acp", "completeSubagentRun: add result failed: %v", err)
+		return err
+	}
+	if err := repo.Save(); err != nil {
 		a.log("error", "acp", "completeSubagentRun: save failed: %v", err)
 		return err
 	}
@@ -911,11 +915,12 @@ func (a *App) triggerSubagentCompletionTurn(conversationID string) {
 		return
 	}
 
-	conv, err := a.Conversations.Get(conversationID)
+	repo, err := a.loadRepo(conversationID)
 	if err != nil {
 		a.log("error", "acp", "triggerSubagentCompletionTurn: conversation %s not found: %v", conversationID, err)
 		return
 	}
+	conv := repo.Conversation()
 	if conv.Status != "idle" {
 		return
 	}
@@ -935,9 +940,12 @@ func (a *App) triggerSubagentCompletionTurn(conversationID string) {
 		CreatedAt:  now,
 		ProviderID: provider.ID,
 	}
-	conv.AddMessage(asstMsg)
+	if err := repo.Add(domain.RoleAssistant, asstMsg); err != nil {
+		a.log("error", "acp", "triggerSubagentCompletionTurn: add failed: %v", err)
+		return
+	}
 	conv.Status = "running"
-	if err := a.Conversations.Save(conv); err != nil {
+	if err := repo.Save(); err != nil {
 		a.log("error", "acp", "triggerSubagentCompletionTurn: save failed: %v", err)
 		return
 	}

@@ -23,9 +23,9 @@ import (
 
 // defaultMaxParallelTools is the fallback concurrency bound for tool calls
 // from a single assistant round when settings.MaxParallelTools is not set.
-// The actual bound is settings.MaxParallelTools (default 6, range 1–64,
-// configurable in Settings).
-const defaultMaxParallelTools = 6
+// The actual bound is settings.MaxParallelTools (range 1–64, configurable
+// in Settings); this constant mirrors the domain factory default.
+const defaultMaxParallelTools = domain.DefaultMaxParallelTools
 
 type streamedTurnRound struct {
 	Content   string
@@ -223,7 +223,9 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 		})
 		if conversation.EstimatedTokens != est {
 			conversation.EstimatedTokens = est
-			_ = a.Conversations.Save(conversation)
+			if repo := bindConversation(a.Conversations, conversation); repo != nil {
+				_ = repo.Save()
+			}
 		}
 	}
 	response, err := adapter.Stream(run.Ctx, ChatRequest{
@@ -270,7 +272,9 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 		} else {
 			conversation.CompactionBlob = string(blob)
 			conversation.Summary = ""
-			_ = a.Conversations.Save(conversation)
+			if repo := bindConversation(a.Conversations, conversation); repo != nil {
+				_ = repo.Save()
+			}
 			a.log("info", "agent", "server-side compaction captured for %s (%d items)", run.ConversationID, len(response.CompactionItems))
 		}
 	}
@@ -284,17 +288,11 @@ func reasoningDeltaVisible(accumulated string) bool {
 	return strings.TrimSpace(accumulated) != ""
 }
 
-// serverCompactionThresholdFloor is the minimum compact_threshold we ever
-// send. It matches the client-side compaction trigger so the server does not
-// wait longer than the client would have. Models with larger context windows
-// get a higher threshold (90% of window), but never below this floor.
-var serverCompactionThresholdFloor = 120_000
-
 // userNudgeText is the minimal content injected as a synthetic user message
 // when the provider requires a user message but none is present. A single
 // "." is the smallest valid user turn that satisfies the constraint without
 // adding semantic content the model would act on.
-const userNudgeText = "."
+const userNudgeText = domain.UserNudgeText
 
 // hasUserMessage reports whether the messages slice contains at least one
 // message with Role "user". Used to decide whether to inject a nudge user
@@ -319,10 +317,7 @@ func serverCompactionContextManagement(model string) []map[string]any {
 		return nil
 	}
 	window := domain.OpenAIServerCompactionContextWindow(model)
-	threshold := int(float64(window) * 0.9)
-	if threshold < serverCompactionThresholdFloor {
-		threshold = serverCompactionThresholdFloor
-	}
+	threshold := domain.ServerCompactionThreshold(window)
 	return []map[string]any{
 		{"type": "compaction", "compact_threshold": threshold},
 	}
@@ -347,7 +342,7 @@ func appendContinuationTool(messages []ChatMessage) []ChatMessage {
 // tokens per image attachment, plus a 5% safety buffer.
 func estimateRequestTokens(system string, messages []ChatMessage, tools []ToolDef) int64 {
 	chars := int64(len(system))
-	totalOverhead := int64(4 * len(messages))
+	totalOverhead := int64(domain.RequestTokenPerMessageOverhead * len(messages))
 	images := 0
 	raw, _ := json.Marshal(messages)
 	chars += int64(len(raw))
@@ -366,15 +361,15 @@ func estimateRequestTokens(system string, messages []ChatMessage, tools []ToolDe
 			}
 		}
 	}
-	chars += int64(images * 150)
-	tokens := (chars + totalOverhead) / 4
-	return int64(float64(tokens) * 1.05)
+	chars += int64(images * domain.RequestTokenImageCost)
+	tokens := (chars + totalOverhead) / int64(domain.RequestTokenCharsPerToken)
+	return int64(float64(tokens) * domain.RequestTokenSafetyBuffer)
 }
 
 const (
-	promptCacheKeyLength          = 32
-	promptCacheConversationPrefix = "nusashell_cv_"
-	promptCacheBackgroundPrefix   = "nusashell_bg_"
+	promptCacheKeyLength          = domain.PromptCacheKeyLength
+	promptCacheConversationPrefix = domain.PromptCacheConversationPrefix
+	promptCacheBackgroundPrefix   = domain.PromptCacheBackgroundPrefix
 )
 
 func promptCachePrefixForRun(run *TurnRun) string {
@@ -408,31 +403,9 @@ func buildPromptCachePolicy(settings domain.Settings, p *domain.Provider, model,
 	}
 }
 
-// persistHydration inserts the synthetic hydration messages (assistant
-// toolCalls + matching tool results) immediately after the FIRST user
-// message in the transcript. If there is no user yet the conversation is
-// left unchanged — an assistant+tool prefix under the system prompt is
-// invalid for OpenAI Chat Completions and Anthropic Messages.
-//
-// Hydration is an epoch marker anchored to the first user of the epoch: the
-// opening user of a fresh room, or the compaction handover user (which
-// Compact places at messages[0]). Anchoring after the first user — not after
-// the last user before the in-flight placeholder — keeps the checkpoint
-// stable across follow-up user messages and steers. The poison dump showed
-// the old last-user-before-placeholder index relocating the checkpoint after
-// a "." follow-up once a brief-change strip removed the original, breaking
-// the prompt-cache prefix from the hydration byte onward.
-//
-// Does not save — the caller persists once after related mutations. Returns
-// the updated conversation.
-func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage) *domain.Conversation {
-	if len(msgs) == 0 {
-		return c
-	}
-	// Build the durable messages first: one assistant message carrying all
-	// hydration tool calls, then each tool result attached to its matching
-	// call's Output. ToolCalls is a shared slice backing, so mutating hyd
-	// after appending to built updates the stored copy as well.
+// buildHydrationDomainMessages converts synthetic hydration ChatMessages
+// into a single persisted assistant message with tool outputs attached.
+func buildHydrationDomainMessages(msgs []ChatMessage) []domain.Message {
 	built := make([]domain.Message, 0, len(msgs))
 	var hyd *domain.Message
 	for _, m := range msgs {
@@ -456,12 +429,24 @@ func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage) *doma
 			}
 		}
 	}
+	return built
+}
+
+// persistHydration inserts the synthetic hydration messages (assistant
+// toolCalls + matching tool results) immediately after the FIRST user
+// message in the transcript. If there is no user yet the conversation is
+// left unchanged — an assistant+tool prefix under the system prompt is
+// invalid for OpenAI Chat Completions and Anthropic Messages.
+//
+// Used only to shape an in-memory post-compaction transcript before
+// ResetTranscript+Add. Live rooms append hydration in addTurnMessages.
+func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage) *domain.Conversation {
+	built := buildHydrationDomainMessages(msgs)
+	if len(built) == 0 {
+		return c
+	}
 	idx := hydrationInsertIndex(c.Messages)
 	if idx < 0 {
-		// No user yet (empty-room workspace pick). Inserting here would
-		// park an assistant+tool turn under the system prompt; OpenAI and
-		// Claude reject or mis-handle that. The first turn persists after
-		// the user exists.
 		return c
 	}
 	c.Messages = slices.Insert(c.Messages, idx, built...)
@@ -475,27 +460,14 @@ func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage) *doma
 // Completions and Anthropic Messages require that user before any
 // assistant/tool hydration turn.
 func hydrationInsertIndex(msgs []domain.Message) int {
-	for i := range msgs {
-		if msgs[i].Role == domain.RoleUser {
-			return i + 1
-		}
-	}
-	return -1
+	return domain.HydrationInsertIndex(msgs)
 }
 
 // hydrationPrecedesFirstUser reports a protocol-invalid checkpoint: the
 // synthetic assistant+tool turn sits before any user message, so the
 // provider payload would be system → assistant → tool → user.
 func hydrationPrecedesFirstUser(msgs []domain.Message) bool {
-	for _, m := range msgs {
-		if m.Role == domain.RoleUser {
-			return false
-		}
-		if isHydrationMessage(m) {
-			return true
-		}
-	}
-	return false
+	return domain.HydrationPrecedesFirstUser(msgs)
 }
 
 // relocateHydrationAfterFirstUser moves a leading hydration checkpoint to
@@ -503,41 +475,7 @@ func hydrationPrecedesFirstUser(msgs []domain.Message) bool {
 // prompt-cache prefix is not rebuilt. If no user exists the orphan
 // checkpoint is dropped.
 func relocateHydrationAfterFirstUser(msgs []domain.Message) []domain.Message {
-	if !hydrationPrecedesFirstUser(msgs) {
-		return msgs
-	}
-	hyd := make([]domain.Message, 0, 1)
-	rest := make([]domain.Message, 0, len(msgs))
-	for _, m := range msgs {
-		if isHydrationMessage(m) {
-			hyd = append(hyd, m)
-			continue
-		}
-		rest = append(rest, m)
-	}
-	idx := hydrationInsertIndex(rest)
-	if idx < 0 {
-		return rest
-	}
-	return slices.Insert(rest, idx, hyd...)
-}
-
-// repairHydrationPlacement persists relocateHydrationAfterFirstUser when a
-// prior epoch parked the checkpoint before the first user (empty-room
-// workspace pick, then the opening turn appended the user after it).
-func (a *App) repairHydrationPlacement(run *TurnRun) {
-	if a == nil || a.Conversations == nil || run == nil {
-		return
-	}
-	conversation, err := a.Conversations.Get(run.ConversationID)
-	if err != nil || conversation == nil {
-		return
-	}
-	if !hydrationPrecedesFirstUser(conversation.Messages) {
-		return
-	}
-	conversation.Messages = relocateHydrationAfterFirstUser(conversation.Messages)
-	_ = a.Conversations.Save(conversation)
+	return domain.RelocateHydrationAfterFirstUser(msgs)
 }
 
 // buildHydration assembles a synthetic runtime-hydration checkpoint from the
@@ -568,38 +506,6 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	return NewHydrationBuilder(source).Build().Messages
 }
 
-// ensureFreshRoomHydration persists the hydration checkpoint at the start of a
-// turn when the conversation is on its first user message and has no
-// checkpoint yet. This is the only turn-loop entry point that builds
-// hydration; post-compaction checkpoints are built inside
-// persistCompactedConversation. Follow-up turns, steers, and retries all
-// return early (checkpoint present, or not a fresh room) so the cached prefix
-// is never relocated.
-func (a *App) ensureFreshRoomHydration(run *TurnRun, messageID string, caps ModelCapabilities) {
-	if a.Conversations == nil {
-		return
-	}
-	conversation, err := a.Conversations.Get(run.ConversationID)
-	if err != nil || conversation == nil {
-		return
-	}
-	if HasHydration(chatMessages(conversation, messageID, caps)) {
-		return
-	}
-	if !isFreshRoom(conversation) {
-		return
-	}
-	hydrationMsgs := a.buildHydration(conversation)
-	if len(hydrationMsgs) == 0 {
-		return
-	}
-	conversation = a.persistHydration(conversation, hydrationMsgs)
-	a.updateMessage(conversation, messageID, func(message *domain.Message) {
-		message.ContextUpdated = true
-	})
-	_ = a.Conversations.Save(conversation)
-}
-
 // isFreshRoom reports whether the conversation is on its first user turn: at
 // most one user message and no hydration checkpoint. A fresh room has exactly
 // the opening user; follow-up turns and post-steer turns have two or more
@@ -609,13 +515,7 @@ func (a *App) ensureFreshRoomHydration(run *TurnRun, messageID string, caps Mode
 // it has no prior user — which compaction never produces (the handover is a
 // user, and the checkpoint is built in the same Save).
 func isFreshRoom(c *domain.Conversation) bool {
-	userCount := 0
-	for _, m := range c.Messages {
-		if m.Role == domain.RoleUser {
-			userCount++
-		}
-	}
-	return userCount <= 1
+	return domain.IsFreshRoom(c)
 }
 
 func (a *App) completeWithRetry(ctx context.Context, adapter ProviderContext, request ChatRequest) (ChatResponse, error) {
@@ -636,10 +536,11 @@ func (a *App) completeWithRetry(ctx context.Context, adapter ProviderContext, re
 }
 
 func (a *App) persistTurnRound(conversationID, messageID, model string, round streamedTurnRound) error {
-	conversation, err := a.Conversations.Get(conversationID)
+	repo, err := a.loadRepo(conversationID)
 	if err != nil {
 		return err
 	}
+	conversation := repo.Conversation()
 
 	a.updateMessage(conversation, messageID, func(message *domain.Message) {
 		applyStreamRound(message, model, round)
@@ -676,7 +577,7 @@ func (a *App) persistTurnRound(conversationID, messageID, model string, round st
 			message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepToolCalls, ToolCalls: newToolCalls})
 		})
 	}
-	return a.Conversations.Save(conversation)
+	return repo.Save()
 }
 
 func applyStreamRound(message *domain.Message, model string, round streamedTurnRound) {
@@ -740,17 +641,18 @@ type toolExecResult struct {
 func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall, caps ModelCapabilities, settings domain.Settings, round int) error {
 	if err := run.Ctx.Err(); err != nil {
 		if len(toolCalls) > 0 {
-			conversation, gerr := a.Conversations.Get(run.ConversationID)
+			conversation, gerr := a.loadRepo(run.ConversationID)
 			if gerr == nil {
+				c := conversation.Conversation()
 				for _, toolCall := range toolCalls {
 					a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
 						RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
 						Name: toolCall.Name, Status: string(domain.ToolInterrupted), Output: "interrupted by user",
 						Presentation: buildToolPresentation(toolCall.Name, toolCall.Args, domain.ToolInterrupted, "interrupted by user"),
 					})
-					conversation = a.updateToolResult(conversation, messageID, toolCall.ID, domain.ToolInterrupted, "interrupted by user", nil)
+					c = a.updateToolResult(c, messageID, toolCall.ID, domain.ToolInterrupted, "interrupted by user", nil)
 				}
-				_ = a.Conversations.Save(conversation)
+				_ = conversation.Save()
 			}
 		}
 		return err
@@ -782,10 +684,11 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 	// Phase 2: persist results in tool-call order and emit todo updates. This
 	// runs on the single turn goroutine, so conversation snapshot writes never
 	// race with each other.
-	conversation, err := a.Conversations.Get(run.ConversationID)
+	repo, err := a.loadRepo(run.ConversationID)
 	if err != nil {
 		return err
 	}
+	conversation := repo.Conversation()
 	for i := range toolCalls {
 		toolCall := toolCalls[i]
 		r := results[i]
@@ -812,7 +715,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 	// the agent can call todo/todo_list live. Stripping + rebuilding relocated
 	// the checkpoint after whatever user was last (the cache-poison dump),
 	// invalidating the prompt-cache prefix from the hydration byte onward.
-	if saveErr := a.Conversations.Save(conversation); saveErr != nil {
+	if saveErr := repo.Save(); saveErr != nil {
 		return saveErr
 	}
 	for i := range results {
@@ -992,23 +895,26 @@ func (a *App) emitLearningMutationEvents(toolName string, status domain.ToolCall
 }
 
 func (a *App) appendTurnAssistant(conversationID string) (*domain.Conversation, string, error) {
-	conversation, err := a.Conversations.Get(conversationID)
+	repo, err := a.loadRepo(conversationID)
 	if err != nil {
 		return nil, "", err
 	}
 	next := domain.Message{ID: domain.NewID("msg"), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC()}
-	conversation.AddMessage(next)
-	if err := a.Conversations.Save(conversation); err != nil {
+	if err := repo.Add(domain.RoleAssistant, next); err != nil {
 		return nil, "", err
 	}
-	return conversation, next.ID, nil
+	if err := repo.Save(); err != nil {
+		return nil, "", err
+	}
+	return repo.Conversation(), next.ID, nil
 }
 
 func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage, contextTokens, autoContinueIndex int) error {
-	conversation, err := a.Conversations.Get(run.ConversationID)
+	repo, err := a.loadRepo(run.ConversationID)
 	if err != nil {
 		return err
 	}
+	conversation := repo.Conversation()
 	conversation.Status = "idle"
 	// Record the authoritative provider-measured context fill (last round's
 	// input + cached input + output) as the source of truth for the idle
@@ -1018,7 +924,7 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage,
 		conversation.ContextTokens = int64(contextTokens)
 	}
 	conversation.Touch()
-	if err := a.Conversations.Save(conversation); err != nil {
+	if err := repo.Save(); err != nil {
 		return err
 	}
 

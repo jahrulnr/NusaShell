@@ -43,6 +43,26 @@ func TestUpdateToolResultUpdatesChronologicalToolCallStep(t *testing.T) {
 	}
 }
 
+func TestLastFailedAssistantIndex(t *testing.T) {
+	hyd := domain.Message{
+		ID: "h1", Role: domain.RoleAssistant, Status: domain.StatusDone,
+		ToolCalls: []domain.ToolCall{{ID: domain.HydrateToolCallPrefix + "x_0", Name: "runtime_context"}},
+	}
+	failed := domain.Message{ID: "a1", Role: domain.RoleAssistant, Status: domain.StatusError, Content: "oops"}
+	ok := domain.Message{ID: "a2", Role: domain.RoleAssistant, Status: domain.StatusDone, Content: "recovered"}
+	user := domain.Message{ID: "u1", Role: domain.RoleUser, Status: domain.StatusDone, Content: "hi"}
+
+	if got := lastFailedAssistantIndex([]domain.Message{user, hyd, failed}); got != 2 {
+		t.Fatalf("last failed = %d, want 2", got)
+	}
+	if got := lastFailedAssistantIndex([]domain.Message{user, hyd, failed, ok}); got != -1 {
+		t.Fatalf("after successful retry last failed = %d, want -1", got)
+	}
+	if got := lastFailedAssistantIndex([]domain.Message{user, ok}); got != -1 {
+		t.Fatalf("successful turn last failed = %d, want -1", got)
+	}
+}
+
 func TestShouldContinueFailedTurn(t *testing.T) {
 	if !shouldContinueFailedTurn(domain.Message{Content: "partial"}) {
 		t.Fatal("partial text without tools should continue")
@@ -56,28 +76,26 @@ func TestShouldContinueFailedTurn(t *testing.T) {
 }
 
 // TestHydrationCheckpointPersistsOnceUntilCompaction verifies the epoch-based
-// hydration lifecycle: a fresh room gets one checkpoint via
-// ensureFreshRoomHydration, follow-up user messages do NOT add another, and
-// persistCompactedConversation rebuilds exactly one fresh checkpoint after
-// compaction. The turn loop no longer touches hydration, so the checkpoint
-// stays at its epoch anchor (after the first user / handover) across rounds.
+// hydration lifecycle: a fresh room gets one checkpoint via addTurnMessages,
+// follow-up user messages do NOT add another, and persistCompactedConversation
+// rebuilds exactly one fresh checkpoint after compaction. The turn loop no
+// longer touches hydration, so the checkpoint stays at its epoch anchor
+// (after the first user / handover) across rounds.
 func TestHydrationCheckpointPersistsOnceUntilCompaction(t *testing.T) {
-	conversation := &domain.Conversation{
-		ID: "c1",
-		Messages: []domain.Message{
-			{ID: "u1", Role: domain.RoleUser, Content: "first"},
-			{ID: "a1", Role: domain.RoleAssistant},
-		},
-	}
+	conversation := &domain.Conversation{ID: "c1"}
 	app := &App{
 		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conversation}},
 		Toolbox:       &recordingToolbox{},
 		Bus:           NewBus(),
 	}
-	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background()}
 	countCheckpoints := func() int {
+		saved, err := app.Conversations.Get("c1")
+		if err != nil {
+			t.Helper()
+			t.Fatalf("Get: %v", err)
+		}
 		count := 0
-		for _, message := range conversation.Messages {
+		for _, message := range saved.Messages {
 			if isHydrationMessage(message) {
 				count++
 			}
@@ -85,25 +103,37 @@ func TestHydrationCheckpointPersistsOnceUntilCompaction(t *testing.T) {
 		return count
 	}
 
-	// Fresh room: one user, no checkpoint → ensureFreshRoomHydration builds one.
-	app.ensureFreshRoomHydration(run, "a1", ModelCapabilities{})
+	app.addTurnMessages(conversation,
+		domain.Message{ID: "u1", Role: domain.RoleUser, Content: "first", Status: domain.StatusDone},
+		domain.Message{ID: "a1", Role: domain.RoleAssistant},
+	)
+	if err := bindConversation(app.Conversations, conversation).Save(); err != nil {
+		t.Fatal(err)
+	}
 	if got := countCheckpoints(); got != 1 {
 		t.Fatalf("initial checkpoints = %d, want 1", got)
 	}
 
 	// Follow-up user message: two users now, checkpoint already present.
-	// ensureFreshRoomHydration must skip (not fresh, and HasHydration is true).
-	conversation.Messages = append(conversation.Messages,
-		domain.Message{ID: "u2", Role: domain.RoleUser, Content: "follow up"},
+	repo, err := app.loadRepo("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.addTurnMessages(repo.Conversation(),
+		domain.Message{ID: "u2", Role: domain.RoleUser, Content: "follow up", Status: domain.StatusDone},
 		domain.Message{ID: "a2", Role: domain.RoleAssistant},
 	)
-	app.ensureFreshRoomHydration(run, "a2", ModelCapabilities{})
+	if err := repo.Save(); err != nil {
+		t.Fatal(err)
+	}
 	if got := countCheckpoints(); got != 1 {
 		t.Fatalf("checkpoints after later user message = %d, want 1", got)
 	}
 
-	// Compaction epoch: persistCompactedConversation strips the old checkpoint
-	// and rebuilds a fresh one in the same Save.
+	conversation, err = app.Conversations.Get("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := app.persistCompactedConversation(conversation, "summary", 1_000_000); err != nil {
 		t.Fatalf("persistCompactedConversation: %v", err)
 	}
@@ -1079,17 +1109,21 @@ func TestEmergencyCompactionSkippedWhenEstimateBelowTrigger(t *testing.T) {
 	if adapter.streams != 1 {
 		t.Fatalf("streams = %d, want 1 failed attempt", adapter.streams)
 	}
-	// Locate the turn's assistant message by ID: the hydration checkpoint is
-	// inserted before the placeholder, so its index depends on injection.
+	// Locate the turn's assistant message by ID after Save cloned the
+	// transcript; the original fixture pointer is stale.
+	saved, err := app.Conversations.Get("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var asst *domain.Message
-	for i := range conv.Messages {
-		if conv.Messages[i].ID == "m1" {
-			asst = &conv.Messages[i]
+	for i := range saved.Messages {
+		if saved.Messages[i].ID == "m1" {
+			asst = &saved.Messages[i]
 			break
 		}
 	}
 	if asst == nil {
-		t.Fatalf("assistant message m1 missing from transcript (%d messages)", len(conv.Messages))
+		t.Fatalf("assistant message m1 missing from transcript (%d messages)", len(saved.Messages))
 	}
 	if asst.Status != domain.StatusError {
 		t.Fatalf("status = %q, want error", asst.Status)

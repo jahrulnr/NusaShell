@@ -1652,7 +1652,7 @@ func TestAgentTurnReasoningInterleaved(t *testing.T) {
 
 // TestAgentTurnRetryWithDifferentModel: a turn that fails with a non-retryable
 // 4xx can be retried with a different model picked by the user. The failed
-// assistant message is re-run from scratch with the new model and completes.
+// assistant stays in formed history; a new assistant is appended and completes.
 func TestAgentTurnRetryWithDifferentModel(t *testing.T) {
 	h := newHarness(t, nil)
 	pid := h.addOpenAIProvider(t, "Fake")
@@ -1697,11 +1697,26 @@ func TestAgentTurnRetryWithDifferentModel(t *testing.T) {
 	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
 		t.Fatal(err)
 	}
-	if len(conv.Messages) != 2 || conv.Messages[1].Status != "done" {
+	if len(conv.Messages) < 3 {
+		t.Fatalf("expected user + failed assistant + retry assistant, got %+v", conv.Messages)
+	}
+	failed := conv.Messages[len(conv.Messages)-2]
+	retried := conv.Messages[len(conv.Messages)-1]
+	if failed.Status != "error" || !strings.Contains(failed.Error, "HTTP 400") {
+		t.Fatalf("expected kept failed assistant, got %+v", conv.Messages)
+	}
+	if retried.Status != "done" {
 		t.Fatalf("expected done after retry, got %+v", conv.Messages)
 	}
-	if conv.Messages[1].Model != "fake-model-2" {
-		t.Fatalf("expected model fake-model-2, got %q", conv.Messages[1].Model)
+	if retried.Model != "fake-model-2" {
+		t.Fatalf("expected model fake-model-2, got %q", retried.Model)
+	}
+
+	res := h.rpc(t, "agent.turns.retry", map[string]any{
+		"conversation_id": convID, "model": "fake-model-2",
+	})
+	if res.Error == nil || res.Error.Code != string(contracts.CodeNotFound) {
+		t.Fatalf("expected NOT_FOUND after successful retry, got %+v", res.Error)
 	}
 }
 

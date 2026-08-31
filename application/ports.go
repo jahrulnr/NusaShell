@@ -14,6 +14,10 @@ import (
 
 // ---- persistence ports ----
 
+// ConversationStore is the persistence adapter for conversation JSON files.
+// Transcript writes from application code should go through
+// ConversationRepository (NewConversation, Add, Save) so formed messages
+// stay append-only. Compaction and new chats create a new conversation.
 type ConversationStore interface {
 	List() []*domain.Conversation
 	Get(id string) (*domain.Conversation, error)

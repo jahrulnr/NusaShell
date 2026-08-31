@@ -38,8 +38,18 @@ const (
 	// back to a snapshot refresh).
 	roundStreamFrameCap = 8192
 	// roundStreamSubBuf is the per-subscriber live queue. Publishers never
-	// block on it; overflow drops and is recovered by replay.
-	roundStreamSubBuf = 512
+	// block on it; overflow drops and is recovered by replay (the SSE
+	// client reconnects with after=<lastSeq> and the registry replays the
+	// buffered tail). The buffer is sized large enough that a normal reader
+	// (browser tab rendering a live turn) absorbs the full burst between
+	// the SSE poll loop and the next animation frame, even when the
+	// provider emits many small deltas per second and the user is briefly
+	// doing other work in the tab. The previous 512-frame headroom was
+	// undersized for sustained long output (a few hundred-token deltas at
+	// dozens per second would overflow the buffer between browser paints
+	// and the live frames would be lost; recovery via after= only works
+	// when the cursor is still inside the replay buffer headroom).
+	roundStreamSubBuf = 4096
 	// roundStreamSealedTTL keeps sealed streams available for late joiners
 	// (new tab, room switch) before pruning.
 	roundStreamSealedTTL = 90 * time.Second

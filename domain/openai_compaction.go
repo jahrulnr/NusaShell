@@ -99,3 +99,21 @@ func OpenAISupportsServerCompaction(modelID string) bool {
 func OpenAIServerCompactionContextWindow(modelID string) int {
 	return serverCompactionWindows[modelLookupKey(modelID)]
 }
+
+// ServerCompactionThresholdFloor is the minimum compact_threshold we ever
+// send. It matches the client-side compaction trigger so the server does not
+// wait longer than the client would have. Models with larger context windows
+// get a higher threshold (90% of window), but never below this floor.
+var ServerCompactionThresholdFloor = 120_000
+
+// ServerCompactionThreshold returns the compact_threshold value for a model
+// with the given context window: max(window*0.9, floor). Small-window
+// eligible models (200k) trigger at a reasonable point while large-window
+// models (400k–1M) use most of their window before compacting.
+func ServerCompactionThreshold(window int) int {
+	threshold := int(float64(window) * 0.9)
+	if threshold < ServerCompactionThresholdFloor {
+		threshold = ServerCompactionThresholdFloor
+	}
+	return threshold
+}

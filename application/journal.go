@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 
 	"nusashell/domain"
 )
@@ -93,47 +92,12 @@ type WorkspaceState struct {
 // to mutate is MutationNone, and mcp_call is MutationUnobserved because the
 // runtime cannot see which files a plugin tool touches.
 func ClassifyMutation(toolName string, argsJSON []byte) MutationRequest {
-	req := MutationRequest{ToolName: toolName, Class: domain.MutationNone}
-
-	switch toolName {
-	case "exec":
-		req.Class = domain.MutationOpaque
-		var args struct {
-			Command string `json:"command"`
-			Cwd     string `json:"cwd"`
-		}
-		if json.Unmarshal(argsJSON, &args) == nil {
-			req.Command = args.Command
-			req.Cwd = args.Cwd
-		}
-
-	case "mcp_call":
-		req.Class = domain.MutationUnobserved
-
-	case "file_write", "file_patch", "file_delete", "file_mkdir":
-		req.Class = domain.MutationDeclared
-		var args struct {
-			Path string `json:"path"`
-		}
-		if json.Unmarshal(argsJSON, &args) == nil && args.Path != "" {
-			req.Paths = []string{args.Path}
-		}
-
-	case "file_move", "file_copy":
-		req.Class = domain.MutationDeclared
-		var args struct {
-			Source      string `json:"source"`
-			Destination string `json:"destination"`
-		}
-		if json.Unmarshal(argsJSON, &args) == nil {
-			if args.Source != "" {
-				req.Paths = append(req.Paths, args.Source)
-			}
-			if args.Destination != "" {
-				req.Paths = append(req.Paths, args.Destination)
-			}
-		}
+	class, paths, command, cwd := domain.ClassifyMutation(toolName, argsJSON)
+	return MutationRequest{
+		ToolName: toolName,
+		Class:    class,
+		Paths:    paths,
+		Command:  command,
+		Cwd:      cwd,
 	}
-
-	return req
 }

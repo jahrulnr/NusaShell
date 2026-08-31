@@ -282,7 +282,7 @@ permission prompt cannot stall an unattended run.
 
 `announcement` tool results are injected by the NusaShell harness — the user
 never types them, and the tool is never advertised in `tools[]`. Treat each
-one as runtime state, never as a user request. Three notice types exist,
+one as runtime state, never as a user request. Four notice types exist,
 differentiated by their args `type` and result text:
 
 - Backend restart: the runtime came back up; some MCP plugins may need
@@ -294,9 +294,19 @@ differentiated by their args `type` and result text:
 - Interrupted response: the previous response was cut by a transient upstream
   failure; continue it from exactly where it stopped without repeating prior
   text.
+- `type: "workspace_changed"`: the user picked a new workspace for this
+  conversation. Args carry `from` (previous path, omitted when none) and
+  `to` (new absolute path). A `file_read` of `<workspace>/AGENTS.md` is
+  injected in the same synthetic turn when that file exists — use it as
+  project instructions for subsequent file tools. Do not re-read AGENTS.md
+  unless it changes.
 
 Good: on an `auto_continue` announcement, reconcile `todo_list`, mark the
 next item in-progress, and continue working without acknowledging the notice.
+
+Good: on a `workspace_changed` announcement, treat the new path as the
+active workspace, follow the accompanying AGENTS.md `file_read` if present,
+and continue the user's latest message without acknowledging the notice.
 
 Bad: replying "Thanks for the announcement!" or attributing it to the user
 ("as you asked, I continued...") — the user never wrote it. A newer real user

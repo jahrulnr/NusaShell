@@ -14,55 +14,14 @@ import (
 // checkpoint — all tool calls have the "hydrate-" prefix and there is no
 // visible content or reasoning. These messages are hidden from the UI.
 func isHydrationMessage(m domain.Message) bool {
-	if len(m.ToolCalls) == 0 || visibleText(m.Content) != "" || visibleText(m.Reasoning) != "" {
-		return false
-	}
-	for _, tc := range m.ToolCalls {
-		if !domain.IsHydrationCallID(tc.ID) {
-			return false
-		}
-	}
-	return true
+	return domain.IsHydrationMessage(m)
 }
 
 // filterHydrationToolCalls strips hydration tool calls from a message that
 // has both real and hydration tool calls (mixed). Returns the message
 // unchanged if it has no hydration tool calls.
 func filterHydrationToolCalls(m domain.Message) domain.Message {
-	if len(m.ToolCalls) == 0 {
-		return m
-	}
-	hasHydration := false
-	for _, tc := range m.ToolCalls {
-		if domain.IsHydrationCallID(tc.ID) {
-			hasHydration = true
-			break
-		}
-	}
-	if !hasHydration {
-		return m
-	}
-	filtered := make([]domain.ToolCall, 0, len(m.ToolCalls))
-	for _, tc := range m.ToolCalls {
-		if !domain.IsHydrationCallID(tc.ID) {
-			filtered = append(filtered, tc)
-		}
-	}
-	m.ToolCalls = filtered
-	// Also filter hydration tool calls from steps.
-	for i := range m.Steps {
-		if len(m.Steps[i].ToolCalls) == 0 {
-			continue
-		}
-		stepFiltered := make([]domain.ToolCall, 0, len(m.Steps[i].ToolCalls))
-		for _, tc := range m.Steps[i].ToolCalls {
-			if !domain.IsHydrationCallID(tc.ID) {
-				stepFiltered = append(stepFiltered, tc)
-			}
-		}
-		m.Steps[i].ToolCalls = stepFiltered
-	}
-	return m
+	return domain.FilterHydrationToolCalls(m)
 }
 
 func convDTO(c *domain.Conversation) contracts.ConversationDTO {
@@ -166,11 +125,12 @@ func (a *App) handleConversationsList() (any, *contracts.RPCError) {
 }
 
 func (a *App) handleConversationsCreate(req contracts.ConversationCreateRequest) (any, *contracts.RPCError) {
-	c := domain.NewConversation(domain.NewID("conv"), strings.TrimSpace(req.Title))
-	if c.Title == "" {
-		c.Title = "Untitled"
+	repo := NewConversation(a.Conversations, strings.TrimSpace(req.Title))
+	if err := repo.Save(); err != nil {
+		return nil, rpcInternal(err)
 	}
-	if err := a.Conversations.Save(c); err != nil {
+	c, err := a.Conversations.Get(repo.ID())
+	if err != nil {
 		return nil, rpcInternal(err)
 	}
 	a.log("info", "agent", "conversation created: %s", c.ID)
@@ -210,17 +170,18 @@ func (a *App) handleConversationsChunk(req contracts.ConversationChunkRequest) (
 }
 
 func (a *App) handleConversationsRename(req contracts.ConversationRenameRequest) (any, *contracts.RPCError) {
-	c, rpcErr := a.getConversation(req.ID)
+	repo, rpcErr := a.loadRepoRPC(req.ID)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
+	c := repo.Conversation()
 	title := strings.TrimSpace(req.Title)
 	if title == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "title is required"}
 	}
 	c.Title = title
 	c.Touch()
-	if err := a.Conversations.Save(c); err != nil {
+	if err := repo.Save(); err != nil {
 		return nil, rpcInternal(err)
 	}
 	return contracts.ConversationGetResult{Conversation: convDTO(c)}, nil
@@ -280,27 +241,37 @@ func (a *App) handleConversationsPickWorkspace(req contracts.ConversationIDReque
 	if !filepath.IsAbs(workspace) {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "workspace path must be absolute"}
 	}
+	repo := bindConversation(a.Conversations, c)
+	oldWorkspace := strings.TrimSpace(c.Workspace)
+	changed := filepath.Clean(oldWorkspace) != filepath.Clean(workspace)
 	c.Workspace = workspace
 	c.Touch()
-	// A workspace switch is an epoch reset: the persisted hydration
-	// checkpoint's runtime_context (workspace path) and AGENTS.md slot
-	// describe the OLD workspace. Strip the stale checkpoint and rebuild a
-	// fresh one for the new workspace in the same Save — same epoch
-	// semantics as compaction. The turn loop no longer re-injects
-	// hydration, so the checkpoint must be rebuilt here, not deferred to
-	// the next round.
-	c.Messages = domain.FilterHydrationDomainMessages(c.Messages)
-	if hydrationMsgs := a.buildHydration(c); len(hydrationMsgs) > 0 {
-		// persistHydration no-ops when there is no user yet (empty room);
-		// ensureFreshRoomHydration parks the checkpoint after the opening
-		// user on the first turn.
-		c = a.persistHydration(c, hydrationMsgs)
+	// Visible notice (announcement + AGENTS.md file_read) waits for the
+	// next user message — same injection point as restart announcements.
+	// Empty rooms skip it: there is no "after my chat" slot yet.
+	// Stale hidden hydration stays in formed history (append-only); the
+	// visible notice carries the new AGENTS.md on the next user turn.
+	if changed && conversationHasUser(c) {
+		c.PendingWorkspaceAnnouncement = true
+		c.WorkspaceSwitchFrom = oldWorkspace
 	}
-	if err := a.Conversations.Save(c); err != nil {
+	if err := repo.Save(); err != nil {
 		return nil, rpcInternal(err)
 	}
 	a.log("info", "agent", "workspace selected for conversation %s", c.ID)
 	return contracts.ConversationGetResult{Conversation: convDTO(c)}, nil
+}
+
+func conversationHasUser(c *domain.Conversation) bool {
+	if c == nil {
+		return false
+	}
+	for _, m := range c.Messages {
+		if m.Role == domain.RoleUser {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) getConversation(id string) (*domain.Conversation, *contracts.RPCError) {

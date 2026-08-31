@@ -54,9 +54,9 @@ type EdgeBuilderConfig struct {
 // DefaultEdgeBuilderConfig returns sensible defaults.
 func DefaultEdgeBuilderConfig() EdgeBuilderConfig {
 	return EdgeBuilderConfig{
-		EmbeddingThreshold:    0.85,
-		TokenOverlapThreshold: 0.3,
-		MinTokenLen:           3,
+		EmbeddingThreshold:    domain.DefaultEdgeEmbeddingThreshold,
+		TokenOverlapThreshold: domain.DefaultEdgeTokenOverlapThreshold,
+		MinTokenLen:           domain.DefaultEdgeMinTokenLen,
 	}
 }
 
@@ -244,7 +244,7 @@ func (b *EdgeBuilder) buildTokenOverlapEdges() {
 
 // Tags used by more than this many fragments are too broad to be useful as a
 // deterministic relation (for example, a tag shared by an entire catalog).
-const maxSpecificTagFrequency = 12
+const maxSpecificTagFrequency = domain.MaxSpecificTagFrequency
 
 // buildMetadataEdges adds cheap deterministic relations for sparse fragments
 // whose useful context lives in frontmatter rather than prose. It also links

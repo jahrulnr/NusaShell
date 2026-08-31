@@ -143,23 +143,19 @@ const state = {
   // mirrors were removed with the round-stream refactor.
 };
 
-const MAX_LIVE_ROUND_CHARS = 512 * 1024;
 const MAX_LIVE_TOOL_JOBS = 128;
 
-function appendBoundedLiveText(target, field, text) {
+// appendLiveText appends a single delta to the given field on the run state.
+// Live round text is unbounded on purpose: the round ends at the next
+// round.done frame, the persisted transcript is the source of truth, and a
+// hidden cap truncated the user's view of long assistant turns in the
+// middle of streaming. A long-running round is bounded server-side by the
+// RoundStream idle TTL (10 min, see application/roundstream.go) and the
+// in-memory run entry is dropped on endTurn — so per-room memory cost is
+// bounded by the active turn, not by an arbitrary character cap.
+function appendLiveText(target, field, text) {
   if (!target || !text) return;
-  const value = String(text);
-  const current = String(target[field] || '');
-  if (value.length >= MAX_LIVE_ROUND_CHARS) {
-    target[field] = value.slice(-MAX_LIVE_ROUND_CHARS);
-    return;
-  }
-  const next = current + value;
-  if (next.length <= MAX_LIVE_ROUND_CHARS) {
-    target[field] = next;
-    return;
-  }
-  target[field] = next.slice(-MAX_LIVE_ROUND_CHARS);
+  target[field] = (target[field] || '') + text;
 }
 
 // ---- per-round SSE stream ----
@@ -281,12 +277,12 @@ function applyRoundDeltaFrame(run, frame) {
   run.lastSeq = frame.seq;
   switch (frame.kind) {
     case 'text':
-      appendBoundedLiveText(run, 'raw', frame.text);
+      appendLiveText(run, 'raw', frame.text);
       run.thinkingLive = false;
       if (run.conversationId === state.activeId) scheduleLiveRender(run);
       break;
     case 'reasoning':
-      appendBoundedLiveText(run, 'rawReasoning', frame.text);
+      appendLiveText(run, 'rawReasoning', frame.text);
       run.thinkingLive = true;
       if (run.conversationId === state.activeId) scheduleLiveRender(run);
       break;
@@ -1707,14 +1703,47 @@ function renderLiveRun(run) {
     enhanced.push(...incrementalRender(textBox, run.raw));
   }
   scheduleLiveEnhancement(run, enhanced);
+  scheduleLiveMermaid(run, enhanced);
   scrollToBottom();
 }
 
-// scheduleLiveEnhancement runs mermaid/highlight/zoom enhancement ONLY on the
-// blocks this delta just created or changed (from incrementalRender) — never
-// over the whole bubble. This is what keeps long live turns cheap without
-// trimming rounds: enhancement cost stays proportional to the delta, and
-// settled blocks (hash-locked highlight/mermaid) are never re-scanned.
+// scheduleLiveMermaid kicks a Mermaid render IMMEDIATELY (no debounce) for
+// every block this delta just created or changed. Mermaid is event-driven:
+// it only matters when a fence closes (the source is then final and
+// parseable). Per-delta idempotency lives inside renderMermaidDiagrams via
+// its content-hash lock, so calling it on every delta is safe — already-
+// rendered diagrams short-circuit and the work is proportional to the
+// number of newly-closed fences, not the number of text deltas.
+//
+// Mermaid is split out from the highlight debounce for two reasons:
+//   1. Highlighting is cheap and idempotent; debouncing 120ms coalesces the
+//      burst of text deltas that follow a fence close without losing any
+//      work. Mermaid loads a ~3MB UMD script on first use — losing that
+//      render to a debounce means the user sees a placeholder until the
+//      text burst stops.
+//   2. A long burst of text deltas after a fence close keeps resetting the
+//      120ms timer, so without the split Mermaid would never render until
+//      the burst ends. Tuan observed this as "mermaid only renders after
+//      complete/settle, not per-delta".
+function scheduleLiveMermaid(run, changedNodes = []) {
+  if (!run) return;
+  const targets = changedNodes.filter((node) => node?.isConnected);
+  if (!targets.length) return;
+  for (const node of targets) {
+    // Fire-and-forget: renderMermaidDiagrams is async (loadMermaid +
+    // mermaid.parse + mermaid.render) and its own content-hash lock keeps
+    // it idempotent per block. We never await here so a slow render on one
+    // block cannot stall text rendering for the rest of the bubble.
+    void renderMermaidDiagrams(node);
+  }
+}
+
+// scheduleLiveEnhancement runs highlight/zoom enhancement on the blocks
+// this delta just created or changed (from incrementalRender) — never over
+// the whole bubble. Mermaid is NOT debounced here (see scheduleLiveMermaid
+// above): highlight is cheap enough that coalescing the text-delta burst
+// with a small debounce keeps cost proportional to the delta, while the
+// settled content's hash lock guarantees settled blocks are never re-scanned.
 function scheduleLiveEnhancement(run, changedNodes = []) {
   if (!run) return;
   const targets = changedNodes.filter((node) => node?.isConnected);
@@ -1724,7 +1753,6 @@ function scheduleLiveEnhancement(run, changedNodes = []) {
     run.enhanceTimer = null;
     for (const node of targets) {
       if (!node.isConnected) continue;
-      void renderMermaidDiagrams(node);
       void highlightCode(node);
       attachZoomButtons(node);
     }

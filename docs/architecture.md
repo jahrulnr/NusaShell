@@ -139,8 +139,10 @@ content, reasoning, or tool-call fields.
 When the conversation's estimated tokens exceed the lesser of
 `settings.compaction_threshold` (default 0 = auto, which means 80% of the
 model's available input budget) and 80% of that budget, the provider
-summarizes the history non-streaming, the summary replaces the oldest
-messages behind a marker, and `agent.compacted` is emitted.
+summarizes the history non-streaming, the oldest messages are archived,
+and a new epoch is written onto the **same conversation ID** (journal,
+todos, chunks, and the open room stay attached) via `ResetTranscript`
+then `Add`. `agent.compacted` is emitted.
 
 The summarization input is text-only and bounded: media/file attachments are
 replaced with a short note (compaction models are often not vision- or
@@ -169,7 +171,9 @@ continuation request with the saved history and a prompt to continue without
 repeating text. Tool calls are executed only after a complete provider round,
 so recovery never reruns a tool; a continuation also does not consume the
 configured tool-round budget. When the continuation cannot complete, the
-partial message remains visible and is marked as failed.
+partial message remains visible and is marked as failed. A user Retry with
+a different model appends a new assistant after that failed message; formed
+message IDs are never deleted.
 
 ### Runtime settings
 
@@ -205,6 +209,14 @@ cache key is a routing hint, not a guarantee of a cache hit.
 
 Credentials never touch the JSON/JSONL files. All writes are atomic
 (temp + rename). The log file is a bounded ring (2000 entries).
+
+Conversation transcripts are owned by `application.ConversationRepository`.
+`NewConversation` is the only constructor for a new room. Compaction keeps
+the same conversation ID and starts a new epoch with `ResetTranscript`.
+`GetAll` / `GetFrom(start, end)` / `GetById(id)` read the current room;
+`Add(role, args...)` is the only way to grow the transcript; `Save()`
+persists and rejects any rewrite, reorder, or shrink of formed message IDs.
+jsonstore `ConversationStore.Save` remains the file adapter underneath.
 
 ## Tools
 

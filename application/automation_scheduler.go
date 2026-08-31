@@ -301,6 +301,7 @@ func (s *AutomationScheduler) startFromTrigger(ctx context.Context, w *domain.Wo
 	run.TriggerID = triggerID
 	run.EventID = eventID
 	if ev != nil {
+		run.Event = ev
 		run.RequestedBy = "event"
 	}
 	if s.Locks != nil && policy != domain.ConcurrencyAllow {

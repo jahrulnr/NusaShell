@@ -225,8 +225,7 @@ func (s *Store) List() []*domain.Skill {
 			if err != nil {
 				continue
 			}
-			skill.OwnedBy = owner
-			skill.PluginDir = dir
+			skill.SetOwner(owner, dir)
 			out = append(out, skill)
 		}
 	}
@@ -294,8 +293,7 @@ func (s *Store) getWithOwner(id, ownedBy string) (*domain.Skill, error) {
 	if err != nil {
 		return nil, fmt.Errorf("skill %q not found", id)
 	}
-	skill.OwnedBy = ownedBy
-	skill.PluginDir = dir
+	skill.SetOwner(ownedBy, dir)
 	return skill, nil
 }
 
@@ -316,8 +314,7 @@ func (s *Store) skillsByID(id string) []*domain.Skill {
 	s.mu.RUnlock()
 	for owner, dir := range mounts {
 		if skill, err := s.loadSkillFromDir(id, dir); err == nil {
-			skill.OwnedBy = owner
-			skill.PluginDir = dir
+			skill.SetOwner(owner, dir)
 			out = append(out, skill)
 		}
 	}
@@ -351,7 +348,7 @@ func (s *Store) Save(skill *domain.Skill) error {
 		return fmt.Errorf("skillfs: write SKILL.md: %w", err)
 	}
 	// Update metadata.
-	skill.UpdatedAt = time.Now().UTC()
+	skill.Touch(time.Now().UTC())
 	s.json.set(skill)
 	if err := s.json.save(); err != nil {
 		return err
@@ -449,9 +446,7 @@ func (s *Store) loadSkillFromDir(id, dir string) (*domain.Skill, error) {
 		applyMeta(meta)
 	}
 	// If no metadata, set defaults from provenance.
-	if skill.State == "" {
-		skill.State = domain.SkillStateActive
-	}
+	skill.EnsureStateDefault()
 	if skill.Origin == "" {
 		prov, _ := loadProvenance(s.root)
 		if entry, ok := prov[id]; ok {
@@ -795,7 +790,7 @@ func (s *Store) WriteFile(id, ownedBy, path, content string) error {
 		return fmt.Errorf("skillfs: write %s: %w", rel, err)
 	}
 	// Touch skill metadata so UpdatedAt reflects the change.
-	skill.UpdatedAt = time.Now().UTC()
+	skill.Touch(time.Now().UTC())
 	s.json.set(skill)
 	_ = s.json.save()
 	return nil
@@ -1039,10 +1034,9 @@ func (s *Store) MountPluginSkills(pluginID, pluginSkillsDir string) error {
 		if err != nil {
 			continue
 		}
-		skill.OwnedBy = owner
-		skill.PluginDir = pluginSkillsDir
+		skill.SetOwner(owner, pluginSkillsDir)
 		skill.Origin = domain.SkillOriginUser // placeholder; OwnedBy is authoritative
-		skill.UpdatedAt = time.Now().UTC()
+		skill.Touch(time.Now().UTC())
 		s.json.set(skill)
 	}
 	return s.json.save()

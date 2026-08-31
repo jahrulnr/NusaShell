@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"math"
 	"time"
 
 	"nusashell/domain"
@@ -10,26 +9,14 @@ import (
 
 // MaxMemoryEntries is the hard capacity limit for memory entries. The
 // lifecycle manager prunes low-strength entries when this is exceeded.
-const MaxMemoryEntries = 500
+const MaxMemoryEntries = domain.MaxMemoryEntries
 
 // LifecycleConfig controls the decay and prune cycle for learning memory.
-type LifecycleConfig struct {
-	DecayInterval  time.Duration // default 1h
-	PruneInterval  time.Duration // default 24h
-	DecayHalfLife  float64       // hours, default 168 (1 week)
-	PruneThreshold float64       // default 0.05
-	MaxMemory      int           // default 500 — hard capacity limit
-}
+type LifecycleConfig = domain.LifecycleConfig
 
 // DefaultLifecycleConfig returns sensible defaults for a personal shell.
 func DefaultLifecycleConfig() LifecycleConfig {
-	return LifecycleConfig{
-		DecayInterval:  1 * time.Hour,
-		PruneInterval:  24 * time.Hour,
-		DecayHalfLife:  168, // 1 week
-		PruneThreshold: 0.05,
-		MaxMemory:      MaxMemoryEntries,
-	}
+	return domain.DefaultLifecycleConfig()
 }
 
 // LifecycleManager runs background decay and prune operations on the
@@ -113,7 +100,7 @@ func (m *LifecycleManager) runPrune() {
 		// avoid mutating the slice while iterating.
 		var toDelete []string
 		for _, e := range entries {
-			if m.computeStrength(e) < m.cfg.PruneThreshold {
+			if domain.MemoryStrength(e, m.cfg) < m.cfg.PruneThreshold {
 				toDelete = append(toDelete, e.ID)
 			}
 		}
@@ -134,7 +121,7 @@ func (m *LifecycleManager) runPrune() {
 	}
 	scored := make([]entry, len(entries))
 	for i, e := range entries {
-		scored[i] = entry{id: e.ID, score: m.computeStrength(e)}
+		scored[i] = entry{id: e.ID, score: domain.MemoryStrength(e, m.cfg)}
 	}
 	// Simple sort: weakest first.
 	for i := 0; i < len(scored); i++ {
@@ -149,43 +136,6 @@ func (m *LifecycleManager) runPrune() {
 		_ = m.memory.Delete(scored[i].id)
 	}
 	m.logf("info", "pruned %d over-capacity entries (had %d, target=%d)", toPrune, len(entries), target)
-}
-
-// computeStrength returns the decayed strength of a memory entry.
-// Formula (from memex temporal.go):
-//
-//	lambda = ln(2) / halfLifeHours
-//	stability = 1 + log1p(accessCount)  — but we don't track access
-//	count yet, so stability = 1 (flat decay).
-//	multiplier = baseStrength * exp(-lambda * hoursSinceCreated / stability)
-//
-// baseStrength is derived from the signal tag: fact=0.8, error=0.7,
-// decision=0.6, preference=0.5, default=0.5.
-func (m *LifecycleManager) computeStrength(e *domain.MemoryEntry) float64 {
-	base := 0.5
-	for _, tag := range e.Tags {
-		switch tag {
-		case "fact":
-			base = 0.8
-		case "error", "fix":
-			base = 0.7
-		case "decision":
-			base = 0.6
-		case "preference":
-			base = 0.5
-		}
-	}
-	hoursSince := time.Since(e.CreatedAt).Hours()
-	lambda := math.Ln2 / m.cfg.DecayHalfLife
-	stability := 1.0
-	strength := base * math.Exp(-lambda*hoursSince/stability)
-	// Clamp to [0, 1] — decay never goes negative, and we don't exceed 1.
-	if strength < 0 {
-		strength = 0
-	} else if strength > 1 {
-		strength = 1
-	}
-	return strength
 }
 
 // PruneOnce runs a single prune cycle immediately. Used by tests and

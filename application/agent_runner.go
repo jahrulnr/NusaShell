@@ -57,10 +57,11 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	turnLock := a.conversationTurnLock(req.ConversationID)
 	turnLock.Lock()
 	defer turnLock.Unlock()
-	c, rpcErr := a.getConversation(req.ConversationID)
+	repo, rpcErr := a.loadRepoRPC(req.ConversationID)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
+	c := repo.Conversation()
 	if c.Status == "running" {
 		if a.activeRunForConversation(c.ID) != nil {
 			return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
@@ -87,7 +88,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	c.Model = qualifiedModel
 	c.Effort = req.Effort
 	c.Status = "running"
-	if err := a.Conversations.Save(c); err != nil {
+	if err := repo.Save(); err != nil {
 		return nil, rpcInternal(err)
 	}
 
@@ -112,8 +113,8 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 // handleTurnsRetry re-runs the last failed assistant message with a different
 // model picked by the user. When the failed message has partial content (and
 // no tool calls), the partial is frozen as a completed step and the new model
-// is asked to continue from where it stopped; otherwise the failed message is
-// cleared and re-run from scratch.
+// is asked to continue from where it stopped; otherwise a new assistant
+// message is appended after the failed one (formed history is never deleted).
 func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryRequest) (any, *contracts.RPCError) {
 	// Existence check before validation; the conversation is re-fetched
 	// under startMu below.
@@ -133,10 +134,11 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	turnLock := a.conversationTurnLock(req.ConversationID)
 	turnLock.Lock()
 	defer turnLock.Unlock()
-	c, rpcErr := a.getConversation(req.ConversationID)
+	repo, rpcErr := a.loadRepoRPC(req.ConversationID)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
+	c := repo.Conversation()
 	if c.Status == "running" {
 		if a.activeRunForConversation(c.ID) != nil {
 			return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
@@ -144,13 +146,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 		a.healOrphanedRunningConversation(c)
 	}
 
-	failedIdx := -1
-	for i := len(c.Messages) - 1; i >= 0; i-- {
-		if c.Messages[i].Role == domain.RoleAssistant && c.Messages[i].Status == domain.StatusError {
-			failedIdx = i
-			break
-		}
-	}
+	failedIdx := lastFailedAssistantIndex(c.Messages)
 	if failedIdx < 0 {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "no failed assistant turn to retry"}
 	}
@@ -163,27 +159,19 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 
 	failed := &c.Messages[failedIdx]
 	continuation := shouldContinueFailedTurn(*failed)
-	var targetMsgID string
 	if continuation {
 		failed.Status = domain.StatusDone
 		failed.Error = ""
-		next := domain.Message{ID: domain.NewID("msg"), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC(), ProviderID: provider.ID}
-		c.AddMessage(next)
-		targetMsgID = next.ID
-	} else {
-		// Delete the failed message entirely and create a fresh one.
-		// Wiping content in-place leaves a ghost "done" message with empty
-		// content that shows up as a gap when the UI re-renders from server
-		// state on turn completion.
-		c.Messages = append(c.Messages[:failedIdx], c.Messages[failedIdx+1:]...)
-		next := domain.Message{ID: domain.NewID("msg"), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC(), ProviderID: provider.ID}
-		c.AddMessage(next)
-		targetMsgID = next.ID
 	}
+	next := domain.Message{ID: domain.NewID("msg"), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC(), ProviderID: provider.ID}
+	if err := repo.Add(domain.RoleAssistant, next); err != nil {
+		return nil, rpcInternal(err)
+	}
+	targetMsgID := next.ID
 	c.Model = qualifiedModel
 	c.Effort = req.Effort
 	c.Status = "running"
-	if err := a.Conversations.Save(c); err != nil {
+	if err := repo.Save(); err != nil {
 		return nil, rpcInternal(err)
 	}
 
@@ -198,6 +186,23 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	})
 	a.log("info", "agent", "turn retried: %s (model %s)", run.ID, bareModel)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
+}
+
+// lastFailedAssistantIndex returns the index of the last real (non-hydration)
+// assistant message when that message is in error status. Earlier failed
+// assistants stay in formed history after retry, so scanning for any error
+// would retry a recovered turn.
+func lastFailedAssistantIndex(msgs []domain.Message) int {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != domain.RoleAssistant || isHydrationMessage(msgs[i]) {
+			continue
+		}
+		if msgs[i].Status == domain.StatusError {
+			return i
+		}
+		return -1
+	}
+	return -1
 }
 
 // shouldAnnounceRestart reports whether a persisted conversation predates
@@ -225,21 +230,104 @@ func hasDurableHistory(c *domain.Conversation) bool {
 	return false
 }
 
-// addTurnMessages appends the user message, an optional restart
-// announcement, and the assistant turn message, in that order. The
-// announcement decision is taken BEFORE AddMessage because AddMessage
+// addTurnMessages appends the user message, optional harness notices
+// (workspace-switch then restart), and the assistant turn message, in that
+// order. The restart decision is taken BEFORE AddMessage because AddMessage
 // touches UpdatedAt past startedAt — deciding after would defeat the
-// predates-restart check and break the one-shot-per-restart guarantee.
+// predates-restart check and break the one-shot-per-restart guarantee. The
+// workspace-switch notice is taken at the same moment so a pick that raced
+// this Save cannot double-inject.
 func (a *App) addTurnMessages(c *domain.Conversation, userMsg, asstMsg domain.Message) {
 	announce := shouldAnnounceRestart(c, a.startedAt)
+	wsNotice := a.takeWorkspaceSwitchNotice(c)
 	c.AddMessage(userMsg)
 	if c.Title == "" || c.Title == "Untitled" {
 		c.Title = c.DefaultTitle()
+	}
+	// Fresh-room hydration is appended after the opening user and before the
+	// assistant placeholder so Save stays append-only (no mid-history insert).
+	if isFreshRoom(c) && !hasHydrationCheckpoint(c) {
+		if hyd := a.buildHydration(c); len(hyd) > 0 {
+			for _, m := range buildHydrationDomainMessages(hyd) {
+				c.AddMessage(m)
+			}
+		}
+	}
+	if wsNotice != nil {
+		c.AddMessage(*wsNotice)
 	}
 	if announce {
 		c.AddMessage(a.restartAnnouncement())
 	}
 	c.AddMessage(asstMsg)
+}
+
+func hasHydrationCheckpoint(c *domain.Conversation) bool {
+	if c == nil {
+		return false
+	}
+	for _, m := range c.Messages {
+		if isHydrationMessage(m) {
+			return true
+		}
+	}
+	return false
+}
+
+// takeWorkspaceSwitchNotice consumes a queued workspace-switch notice and
+// returns the synthetic assistant message to persist immediately after the
+// new user turn. One-shot: the pending flag is cleared even if the notice
+// is announcement-only (no AGENTS.md).
+func (a *App) takeWorkspaceSwitchNotice(c *domain.Conversation) *domain.Message {
+	if c == nil || !c.PendingWorkspaceAnnouncement {
+		return nil
+	}
+	from := c.WorkspaceSwitchFrom
+	to := c.Workspace
+	c.PendingWorkspaceAnnouncement = false
+	c.WorkspaceSwitchFrom = ""
+	msg := a.workspaceSwitchNotice(from, to)
+	return &msg
+}
+
+// workspaceSwitchNotice builds the visible synthetic assistant message for
+// a workspace switch: an `announcement` tool result plus, when the file
+// exists, a real `file_read` of <workspace>/AGENTS.md. Call IDs are not
+// hydrate- prefixed so the UI and conversation JSON show the tools.
+func (a *App) workspaceSwitchNotice(from, to string) domain.Message {
+	calls := []domain.ToolCall{{
+		ID:     domain.AnnouncementToolCallPrefix + nonce.Random(),
+		Name:   domain.AnnouncementToolName,
+		Args:   domain.WorkspaceChangedAnnouncementArgs(from, to),
+		Status: domain.ToolOK,
+		Output: domain.WorkspaceChangedAnnouncementMessage(from, to),
+	}}
+	if slot := a.readWorkspaceAgentsMD(to); slot.content != "" {
+		calls = append(calls, domain.ToolCall{
+			ID:     domain.NewID("call"),
+			Name:   slot.name,
+			Args:   slot.args,
+			Status: domain.ToolOK,
+			Output: slot.content,
+		})
+	}
+	return domain.Message{
+		ID:        domain.NewID("msg"),
+		Role:      domain.RoleAssistant,
+		CreatedAt: time.Now().UTC(),
+		Status:    domain.StatusDone,
+		ToolCalls: calls,
+	}
+}
+
+func (a *App) readWorkspaceAgentsMD(ws string) hydrationSlot {
+	if a == nil || a.Toolbox == nil {
+		return hydrationSlot{}
+	}
+	return NewHydrationBuilder(HydrationSource{
+		Executor:       a.Toolbox,
+		RuntimeContext: RuntimeContextSnapshot{Workspace: ws},
+	}).readAgentsMD()
 }
 
 // restartAnnouncement builds the synthetic assistant message carrying the
@@ -331,7 +419,6 @@ func (a *App) healOrphanedRunningConversation(c *domain.Conversation) bool {
 		return false
 	}
 	a.log("warn", "agent", "healed orphaned running conversation %s (no active run found)", c.ID)
-	_ = a.Conversations.Save(c)
 	return true
 }
 
@@ -351,11 +438,12 @@ func (a *App) recoverOrphanedTurn(run *TurnRun) {
 	if err != nil || c.Status != "running" {
 		return
 	}
+	repo := bindConversation(a.Conversations, c)
 	if !c.RecoverOrphanedTurn(domain.OrphanedTurnError) {
 		return
 	}
 	a.log("error", "agent", "turn %s exited without terminal state, recovered conversation %s", run.ID, c.ID)
-	_ = a.Conversations.Save(c)
+	_ = repo.Save()
 	a.Bus.Emit(contracts.EventTurnError, contracts.TurnErrorEvent{
 		RunID:          run.ID,
 		ConversationID: run.ConversationID,
@@ -535,20 +623,11 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 	turnLock := a.conversationTurnLock(run.ConversationID)
 	turnLock.Lock()
 
-	// Build the hydration checkpoint once per epoch, before the first Stream.
-	// A fresh room (the first user message of a conversation, no checkpoint
-	// yet) gets its checkpoint persisted here so the first provider request
-	// already carries runtime_context / AGENTS.md / tool_list / todo_list.
-	// Post-compaction epochs are handled inside persistCompactedConversation
-	// (same Save as Compact), so by the time the loop re-fetches the
-	// conversation after compaction the checkpoint is already present and
-	// this guard skips. Follow-up user messages, steers, and retries all
-	// reuse the existing checkpoint — the turn loop never rebuilds it,
-	// which keeps the prompt-cache prefix frozen across rounds. It does
-	// relocate a checkpoint that was persisted before any user (empty-room
-	// workspace pick) so OpenAI/Claude see user → hydration, not the reverse.
-	a.repairHydrationPlacement(run)
-	a.ensureFreshRoomHydration(run, asstMsgID, caps)
+	// Hydration is appended in addTurnMessages on a fresh room (and inside
+	// persistCompactedConversation after compaction). The turn loop never
+	// splices it. Leading checkpoints from older empty-room workspace picks
+	// are relocated only in chatMessages so the provider sees user →
+	// hydration without rewriting formed message IDs.
 	convID := run.ConversationID
 	flushed := false
 	defer func() {
@@ -974,13 +1053,16 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	// model sees it in this turn and in later turns, and the UI renders it
 	// as a normal tool card.
 	notice := a.autoContinueAnnouncement(decision)
-	conv, convErr := a.Conversations.Get(run.ConversationID)
+	conv, convErr := a.loadRepo(run.ConversationID)
 	if convErr != nil {
 		a.log("error", "agent", "auto-continue: failed to get conversation: %v", convErr)
 		return false, ""
 	}
-	conv.AddMessage(notice)
-	if saveErr := a.Conversations.Save(conv); saveErr != nil {
+	if err := conv.Add(domain.RoleAssistant, notice); err != nil {
+		a.log("error", "agent", "auto-continue: failed to add announcement: %v", err)
+		return false, ""
+	}
+	if saveErr := conv.Save(); saveErr != nil {
 		a.log("error", "agent", "auto-continue: failed to save announcement: %v", saveErr)
 		return false, ""
 	}
@@ -1014,13 +1096,16 @@ func (a *App) applyQueuedSteer(run *TurnRun) (bool, error) {
 	if entry == nil {
 		return false, nil
 	}
-	c, err := a.Conversations.Get(run.ConversationID)
+	repo, err := a.loadRepo(run.ConversationID)
 	if err != nil {
 		run.requeueSteer(entry)
 		return false, err
 	}
-	c.AddMessage(entry.Message)
-	if err := a.Conversations.Save(c); err != nil {
+	if err := repo.Add(entry.Message.Role, entry.Message); err != nil {
+		run.requeueSteer(entry)
+		return false, err
+	}
+	if err := repo.Save(); err != nil {
 		run.requeueSteer(entry)
 		return false, err
 	}
@@ -1162,23 +1247,12 @@ func (a *App) resolveContextWindow(provider *domain.Provider, model string, sett
 }
 
 const (
-	compactionKeepTokenBudget = 64000 // retained recent messages token budget
-	compactionSummaryMaxOut   = 64000 // default max_output_tokens for compaction summarization
-	compactionSystemReserve   = 300   // system prompt + framing overhead
-	// compactionSummaryMinChars is the minimum summary length for the quality
-	// guard. Summaries shorter than this are considered failed and retried.
-	compactionSummaryMinChars = 200
-	// compactionSummaryMaxRetries is the max number of retry attempts when the
-	// summary is too short. Each retry doubles the max_output_tokens budget.
-	compactionSummaryMaxRetries = 2
-	// compactionMaxToolCallChars caps a single tool call's args/output when
-	// building the compaction input. Tool results can be unbounded (grep over
-	// huge lines, mcp_call, file_write content), and one oversized call must
-	// still fit inside the compaction model's context window — otherwise the
-	// summarization pass overflows and compaction fails (the turn then dies
-	// with a context-overflow 400). Truncated payloads keep an omission marker
-	// so the summary model knows content was dropped.
-	compactionMaxToolCallChars = 200_000
+	compactionKeepTokenBudget   = domain.CompactionKeepTokenBudget
+	compactionSummaryMaxOut     = domain.CompactionSummaryMaxOut
+	compactionSystemReserve     = domain.CompactionSystemReserve
+	compactionSummaryMinChars   = domain.CompactionSummaryMinChars
+	compactionSummaryMaxRetries = domain.CompactionSummaryMaxRetries
+	compactionMaxToolCallChars  = domain.CompactionMaxToolCallChars
 )
 
 // compactionSummaryToolName is the single tool advertised to the compaction
@@ -1537,17 +1611,7 @@ func compactionPassAvailable(contextWindow int, runningSummary string, summaryMa
 // fits in available. A single oversized message is still taken so compaction
 // cannot stall. System markers should already have been stripped.
 func takeCompactionChunk(msgs []domain.Message, available int) (chunk, rest []domain.Message) {
-	var current []domain.Message
-	currentTokens := 0
-	for i, m := range msgs {
-		mt := m.EstimateTokens()
-		if currentTokens+mt > available && len(current) > 0 {
-			return current, msgs[i:]
-		}
-		current = append(current, m)
-		currentTokens += mt
-	}
-	return current, nil
+	return domain.TakeCompactionChunk(msgs, available)
 }
 
 // appendCompactionHandoffUser appends the handoff command as the last user
@@ -1560,23 +1624,14 @@ func appendCompactionHandoffUser(msgs []ChatMessage) []ChatMessage {
 	return append(msgs, ChatMessage{Role: "user", Content: closer})
 }
 
-// persistCompactedConversation archives dropped messages (without hydration
-// checkpoints), strips hydration from the live transcript, applies Compact, and
-// rebuilds the hydration checkpoint for the new epoch — all in the same Save.
-//
-// Compact places the handover user at messages[0]; persistHydration inserts the
-// checkpoint immediately after it (the first user is the epoch anchor), so the
-// provider sees handover → hydration → retained suffix. Anchoring after the
-// handover — not after a later steer user that may live in the retained suffix
-// — keeps the checkpoint at a stable prefix position so the prompt cache
-// survives the compaction boundary.
-//
-// The handover message content is built from the compacted-continue.md template
-// (single source of truth for the handover prompt text) — domain layer stores
-// it as-is without owning any prompt text.
 func (a *App) persistCompactedConversation(c *domain.Conversation, summary string, keepBudget int) error {
-	c.Messages = filterHydrationDomainMessages(c.Messages)
-	toArchive := c.ArchiveMessages(keepBudget)
+	if c == nil {
+		return fmt.Errorf("conversation is required")
+	}
+	repo := bindConversation(a.Conversations, c)
+	tmp := cloneConversation(c)
+	tmp.Messages = filterHydrationDomainMessages(tmp.Messages)
+	toArchive := tmp.ArchiveMessages(keepBudget)
 	if len(toArchive) > 0 {
 		idx, err := a.Conversations.ArchiveChunk(c.ID, toArchive)
 		if err != nil {
@@ -1585,17 +1640,41 @@ func (a *App) persistCompactedConversation(c *domain.Conversation, summary strin
 			c.ChunkCount = idx + 1
 		}
 	}
-	c.Summary = ""
+	tmp.Summary = ""
 	handoverContent := resources.CompactedUserPrompt(summary)
-	c.Compact(summary, handoverContent, keepBudget)
-	// Rebuild the hydration checkpoint for the new epoch in the same Save.
-	// Compact already stripped the old one (filterHydrationDomainMessages +
-	// retention), so this is the only place a post-compaction checkpoint is
-	// created — the turn loop no longer re-arms hydration.
-	if hydrationMsgs := a.buildHydration(c); len(hydrationMsgs) > 0 {
-		c = a.persistHydration(c, hydrationMsgs)
+	tmp.Compact(summary, handoverContent, keepBudget)
+	if hydrationMsgs := a.buildHydration(tmp); len(hydrationMsgs) > 0 {
+		tmp = a.persistHydration(tmp, hydrationMsgs)
 	}
-	return a.Conversations.Save(c)
+	chunkCount := c.ChunkCount
+	workspace := c.Workspace
+	model := c.Model
+	effort := c.Effort
+	origin := c.Origin
+	title := c.Title
+	status := c.Status
+	pending := c.PendingWorkspaceAnnouncement
+	switchFrom := c.WorkspaceSwitchFrom
+	blob := tmp.CompactionBlob
+	epochSummary := tmp.Summary
+	repo.ResetTranscript()
+	c.ChunkCount = chunkCount
+	c.Workspace = workspace
+	c.Model = model
+	c.Effort = effort
+	c.Origin = origin
+	c.Title = title
+	c.Status = status
+	c.PendingWorkspaceAnnouncement = pending
+	c.WorkspaceSwitchFrom = switchFrom
+	c.CompactionBlob = blob
+	c.Summary = epochSummary
+	for _, m := range tmp.Messages {
+		if err := repo.Add(m.Role, m); err != nil {
+			return err
+		}
+	}
+	return repo.Save()
 }
 
 func (a *App) updateMessage(c *domain.Conversation, msgID string, fn func(*domain.Message)) {
@@ -1652,13 +1731,14 @@ func (a *App) failTurn(run *TurnRun, msgID string, err error) {
 		msgID = run.currentMessageID()
 	}
 	a.log("error", "agent", "turn failed: %s: %v", run.ID, err)
-	if c, e := a.Conversations.Get(run.ConversationID); e == nil {
+	if repo, e := a.loadRepo(run.ConversationID); e == nil {
+		c := repo.Conversation()
 		a.updateMessage(c, msgID, func(m *domain.Message) {
 			m.Status = domain.StatusError
 			m.Error = err.Error()
 		})
 		c.Status = "idle"
-		_ = a.Conversations.Save(c)
+		_ = repo.Save()
 	}
 	a.discardQueuedSteer(run)
 	a.sealRound(run, msgID, 0, contracts.RoundStateError, nil, nil, err.Error())
@@ -1672,7 +1752,8 @@ func (a *App) failStreamTurn(run *TurnRun, msgID, model string, round streamedTu
 		msgID = run.currentMessageID()
 	}
 	a.log("error", "agent", "turn failed: %s: %v", run.ID, err)
-	if c, getErr := a.Conversations.Get(run.ConversationID); getErr == nil {
+	if repo, getErr := a.loadRepo(run.ConversationID); getErr == nil {
+		c := repo.Conversation()
 		a.updateMessage(c, msgID, func(message *domain.Message) {
 			applyStreamRound(message, model, round)
 			message.Status = domain.StatusError
@@ -1686,7 +1767,7 @@ func (a *App) failStreamTurn(run *TurnRun, msgID, model string, round streamedTu
 		// falls back to the server-side EstimatedTokens heuristic instead of
 		// showing a misleading number.
 		c.ContextTokens = 0
-		_ = a.Conversations.Save(c)
+		_ = repo.Save()
 	}
 	a.discardQueuedSteer(run)
 	a.sealRound(run, msgID, 0, contracts.RoundStateError, nil, nil, err.Error())
@@ -1697,7 +1778,8 @@ func (a *App) failStreamTurn(run *TurnRun, msgID, model string, round streamedTu
 
 func (a *App) interruptTurn(run *TurnRun, msgID string, round streamedTurnRound, usage ChatUsage, contextTokens int, model string) {
 	a.log("warn", "agent", "turn interrupted: %s", run.ID)
-	if c, e := a.Conversations.Get(run.ConversationID); e == nil {
+	if repo, e := a.loadRepo(run.ConversationID); e == nil {
+		c := repo.Conversation()
 		a.updateMessage(c, msgID, func(m *domain.Message) {
 			if visibleText(m.Content) == "" && visibleText(m.Reasoning) == "" && len(m.Steps) == 0 {
 				applyStreamRound(m, model, round)
@@ -1713,7 +1795,7 @@ func (a *App) interruptTurn(run *TurnRun, msgID string, round streamedTurnRound,
 		if contextTokens > 0 {
 			c.ContextTokens = int64(contextTokens)
 		}
-		_ = a.Conversations.Save(c)
+		_ = repo.Save()
 	}
 	a.sealRound(run, msgID, 0, contracts.RoundStateInterrupted, nil, usageDTO(usage), "")
 	a.discardQueuedSteer(run)

@@ -13,6 +13,12 @@ const MaxAutoContinuesCap = 10000
 // auto-continue budget when the user has not configured one.
 const DefaultMaxAutoContinues = 10
 
+// DefaultMaxParallelTools is the fallback concurrency bound for tool calls
+// from a single assistant round when settings.MaxParallelTools is not set.
+// The actual bound is settings.MaxParallelTools (range 1–64, configurable
+// in Settings); this constant is the factory default.
+const DefaultMaxParallelTools = 6
+
 // SkillState controls the skill lifecycle: active skills are surfaced to
 // the agent, stale skills are still searchable but de-prioritized, and
 // archived skills are hidden from default listings.
@@ -59,6 +65,34 @@ func (s *Skill) EffectiveOwnedBy() string {
 	return string(s.Origin)
 }
 
+// Touch stamps UpdatedAt with the given time.
+func (s *Skill) Touch(now time.Time) {
+	if s == nil {
+		return
+	}
+	s.UpdatedAt = now
+}
+
+// SetOwner records the owning key (e.g. "user", "builtin",
+// "plugin:<plugin-id>") and the mount source directory for plugin-owned
+// skills. PluginDir is empty for user/builtin skills.
+func (s *Skill) SetOwner(ownedBy, pluginDir string) {
+	if s == nil {
+		return
+	}
+	s.OwnedBy = ownedBy
+	s.PluginDir = pluginDir
+}
+
+// EnsureStateDefault defaults an empty State to active. Non-empty states
+// are preserved.
+func (s *Skill) EnsureStateDefault() {
+	if s == nil || s.State != "" {
+		return
+	}
+	s.State = SkillStateActive
+}
+
 // SkillOwnerPriority returns the resolution priority for an owner.
 // Lower = higher priority. User wins, then builtin, then plugin (alpha).
 func SkillOwnerPriority(ownedBy string) int {
@@ -100,6 +134,29 @@ type MemoryEntry struct {
 	Tags      []string
 	Source    string // "user" | "agent" | "system" (default "user")
 	CreatedAt time.Time
+}
+
+// MergeFrom absorbs another entry's tags and content into the receiver.
+// Tags are unioned without duplicates. Content is appended with a merge
+// marker only when it differs (exact duplicate content is not appended).
+// A nil absorbed entry is a no-op.
+func (e *MemoryEntry) MergeFrom(absorbed *MemoryEntry) {
+	if e == nil || absorbed == nil {
+		return
+	}
+	tagSet := make(map[string]bool, len(e.Tags))
+	for _, t := range e.Tags {
+		tagSet[t] = true
+	}
+	for _, t := range absorbed.Tags {
+		if !tagSet[t] {
+			e.Tags = append(e.Tags, t)
+			tagSet[t] = true
+		}
+	}
+	if e.Content != absorbed.Content {
+		e.Content = e.Content + "\n— merged: " + absorbed.Content
+	}
 }
 
 // Memory target constants and per-target character limits.
@@ -330,7 +387,7 @@ func DefaultSettings() Settings {
 		MaxToolRounds:              8,
 		MaxInputTokens:             200000,
 		MaxOutputTokens:            65536,
-		MaxParallelTools:           6,
+		MaxParallelTools:           DefaultMaxParallelTools,
 		LearningReviewThreshold:    10,
 		SkillNudgeInterval:         15,
 		MaxAutoContinues:           DefaultMaxAutoContinues,

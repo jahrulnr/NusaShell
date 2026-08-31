@@ -90,6 +90,25 @@ func VideoVisionSystemPrompt() string {
 	return Prompt("video-vision")
 }
 
+// DescribeImagePrompt returns the user-role prompt sent to the vision
+// fallback model when describing an image for a non-vision chat model.
+func DescribeImagePrompt() string {
+	return UserPrompt("describe-image")
+}
+
+// DescribeVideoPrompt returns the user-role prompt sent to the video
+// fallback model when describing a video for a non-video chat model.
+func DescribeVideoPrompt() string {
+	return UserPrompt("describe-video")
+}
+
+// TranscribeAudioPrompt returns the user-role prompt sent to the audio
+// fallback model when transcribing/describing audio for a non-audio chat
+// model.
+func TranscribeAudioPrompt() string {
+	return UserPrompt("transcribe-audio")
+}
+
 // ReviewPrompt loads the combined background review prompt
 // (review.md), substituting the {{skill_review_rules}} template
 // with skill-rules.md content. The {{primary_memory}} placeholder is left

@@ -34,8 +34,8 @@ type ConsolidationConfig struct {
 // DefaultConsolidationConfig returns sensible defaults.
 func DefaultConsolidationConfig() ConsolidationConfig {
 	return ConsolidationConfig{
-		SimilarityThreshold: 0.92,
-		MinContentLen:       20,
+		SimilarityThreshold: domain.DefaultConsolidationSimilarityThreshold,
+		MinContentLen:       domain.DefaultConsolidationMinContentLen,
 	}
 }
 
@@ -140,21 +140,7 @@ func (c *Consolidator) Consolidate(ctx context.Context) (*ConsolidateResult, err
 // mergeEntries absorbs the old entry into the new entry: union tags,
 // rewire edges, delete the old entry.
 func (c *Consolidator) mergeEntries(survivor, absorbed *domain.MemoryEntry) {
-	// Union tags
-	tagSet := map[string]bool{}
-	for _, t := range survivor.Tags {
-		tagSet[t] = true
-	}
-	for _, t := range absorbed.Tags {
-		if !tagSet[t] {
-			survivor.Tags = append(survivor.Tags, t)
-			tagSet[t] = true
-		}
-	}
-	// Append absorbed content if it adds new info (avoid exact dup)
-	if survivor.Content != absorbed.Content {
-		survivor.Content = survivor.Content + "\n— merged: " + absorbed.Content
-	}
+	survivor.MergeFrom(absorbed)
 	_ = c.memory.Save(survivor)
 
 	// Rewire edges: any edge pointing to absorbed → point to survivor

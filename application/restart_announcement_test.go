@@ -192,8 +192,15 @@ func TestAddTurnMessagesSkipsFreshOrEmpty(t *testing.T) {
 		domain.Message{ID: "m_user", Role: domain.RoleUser, Content: "hi", Status: domain.StatusDone},
 		domain.Message{ID: "m_asst", Role: domain.RoleAssistant},
 	)
-	if len(empty.Messages) != 2 {
-		t.Fatalf("empty conversation must only get user + assistant, got %d messages", len(empty.Messages))
+	if empty.Messages[0].ID != "m_user" || empty.Messages[len(empty.Messages)-1].ID != "m_asst" {
+		t.Fatalf("empty conversation messages = %+v, want user first and assistant last", empty.Messages)
+	}
+	for _, m := range empty.Messages {
+		for _, tc := range m.ToolCalls {
+			if tc.Name == domain.AnnouncementToolName {
+				t.Fatalf("empty conversation must not get an announcement: %+v", tc)
+			}
+		}
 	}
 }
 

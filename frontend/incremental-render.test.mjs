@@ -276,3 +276,29 @@ test('incrementalRender keeps scroll-wrapped tables as one anchored block', () =
     assert.equal(container.children.length, 1);
   } finally { cleanup(); }
 });
+
+// Live round text is unbounded on purpose. incrementalRender must accept
+// raw text much larger than the old 512KB cap (which used to truncate the
+// user's view of long assistant turns mid-stream) without dropping or
+// re-anchoring any block. The byte-range keys are derived from the raw
+// source, so the largest legal anchor (data-end) is at the end of the
+// input — which is fine as long as the underlying DOM string fields can
+// hold it. This test simulates the worst case: a 2 MiB paragraph.
+test('incrementalRender handles multi-MiB raw text without losing the head', () => {
+  const dom = makeDom();
+  try {
+    const c = document.createElement('div');
+    const filler = 'x'.repeat(2 * 1024 * 1024);
+    const raw = `intro\n\n${filler}\n\nend`;
+    const changed = incrementalRender(c, raw);
+    assert.equal(changed.length, 3, 'all three blocks reported as new');
+    // The first paragraph ("intro") must still be at start=0 end=5 — the
+    // head must not be silently dropped by a hidden cap.
+    const blocks = [...c.querySelectorAll('[data-start]')];
+    assert.equal(blocks[0].dataset.start, '0');
+    assert.equal(blocks[0].dataset.end, '5');
+    // "intro" (5) + "\n\n" (2) + filler (2 MiB) + "\n\n" (2) = 5 + 2 + 2*1024*1024 + 2 = 2097161
+    assert.equal(blocks[2].dataset.start, String(5 + 2 + filler.length + 2));
+    assert.equal(blocks[2].dataset.end, String(5 + 2 + filler.length + 2 + 3));
+  } finally { cleanup(); }
+});

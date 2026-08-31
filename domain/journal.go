@@ -1,5 +1,7 @@
 package domain
 
+import "encoding/json"
+
 // MutationClass classifies how a tool interacts with the filesystem.
 // The journal uses this to decide what observation strategy to apply:
 // declared tools capture specific paths, opaque tools require a full
@@ -84,4 +86,57 @@ type FileChange struct {
 	// EventID is the tool event that caused this change. Empty for
 	// external changes.
 	EventID string `json:"eventId,omitempty"`
+}
+
+// ClassifyMutation maps a tool call to its mutation class and extracts the
+// journal-relevant fields (declared paths, exec command + cwd). It is a
+// pure function with no I/O. Callers wrap the result into a request
+// carrying the runtime causal IDs (ConversationID/RunID/ToolCallID) and
+// WorkspaceRoot.
+//
+// Classification is intentionally conservative: anything not explicitly
+// known to mutate is MutationNone, and mcp_call is MutationUnobserved
+// because the runtime cannot see which files a plugin tool touches.
+func ClassifyMutation(toolName string, argsJSON []byte) (class MutationClass, paths []string, command, cwd string) {
+	class = MutationNone
+	switch toolName {
+	case "exec":
+		class = MutationOpaque
+		var args struct {
+			Command string `json:"command"`
+			Cwd     string `json:"cwd"`
+		}
+		if json.Unmarshal(argsJSON, &args) == nil {
+			command = args.Command
+			cwd = args.Cwd
+		}
+
+	case "mcp_call":
+		class = MutationUnobserved
+
+	case "file_write", "file_patch", "file_delete", "file_mkdir":
+		class = MutationDeclared
+		var args struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(argsJSON, &args) == nil && args.Path != "" {
+			paths = []string{args.Path}
+		}
+
+	case "file_move", "file_copy":
+		class = MutationDeclared
+		var args struct {
+			Source      string `json:"source"`
+			Destination string `json:"destination"`
+		}
+		if json.Unmarshal(argsJSON, &args) == nil {
+			if args.Source != "" {
+				paths = append(paths, args.Source)
+			}
+			if args.Destination != "" {
+				paths = append(paths, args.Destination)
+			}
+		}
+	}
+	return class, paths, command, cwd
 }

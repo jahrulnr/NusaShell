@@ -13,15 +13,15 @@ import (
 )
 
 const (
-	maxProviderAttempts = 5
-	retryBaseDelay      = 250 * time.Millisecond
-	retryMaxDelay       = 4 * time.Second
+	maxProviderAttempts = domain.MaxProviderAttempts
+	retryBaseDelay      = domain.RetryBaseDelay
+	retryMaxDelay       = domain.RetryMaxDelay
 	// retryAfterCutoff is the maximum Retry-After the agent will honor. If a
 	// provider advertises a longer reset window (e.g. OpenRouter proxying an
 	// upstream with an 81-hour rate-limit reset), the error is not retried —
 	// the turn fails immediately so the user sees the error and can retry
 	// manually when the rate limit clears.
-	retryAfterCutoff = 5 * time.Minute
+	retryAfterCutoff = domain.RetryAfterCutoff
 )
 
 // UpstreamError carries retry metadata from a provider adapter without making
@@ -171,37 +171,14 @@ func isRetryableUpstream(err *UpstreamError) bool {
 // permanentFailurePhrases are body substrings that indicate a billing/credit
 // failure rather than a transient server issue. Matched case-insensitively.
 // Mirrors the TS isPermanentProviderFailure phrase list.
-var permanentFailurePhrases = []string{
-	"insufficient balance",
-	"no resource package",
-	"please recharge",
-	"payment required",
-	"out of credits",
-	"credit balance",
-	"billing",
-	"top up",
-	"top-up",
-	"topup",
-	"account suspended",
-	`"code":"1113"`,
-	`"code":1113`,
-}
+var permanentFailurePhrases = domain.PermanentFailurePhrases
 
 // isPermanentProviderFailure reports whether the HTTP status + body indicate
 // a billing/credit exhaustion that will not resolve on retry. A 503 with
 // "insufficient balance" is permanent; a 503 with "internal server error" is
 // not. Status 402 is always permanent.
 func isPermanentProviderFailure(status int, body string) bool {
-	if status == 402 {
-		return true
-	}
-	normalized := strings.ToLower(body)
-	for _, phrase := range permanentFailurePhrases {
-		if strings.Contains(normalized, phrase) {
-			return true
-		}
-	}
-	return false
+	return domain.IsPermanentProviderFailure(status, body)
 }
 
 // describeProviderError renders a provider error for the retry log so
@@ -255,13 +232,7 @@ func isContextOverflowError(err error) bool {
 	return false
 }
 
-var contextOverflowPhrases = []string{
-	"maximum context length",
-	"context_length_exceeded",
-	"reduce the length of the input prompt",
-	"too many input tokens",
-	"prompt is too long",
-}
+var contextOverflowPhrases = domain.ContextOverflowPhrases
 
 // contextLimitFromError extracts the explicit context-window limit from a
 // provider 400 overflow error, if one is present. Used to force emergency

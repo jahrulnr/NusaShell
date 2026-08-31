@@ -1,5 +1,42 @@
 package domain
 
+// Compaction budget policy constants.
+//
+// These are domain policy: they govern how the compaction summarization
+// pass allocates the model's context window across retained messages,
+// the summary output budget, system framing overhead, and the quality
+// guard. The application compaction path reads them when building the
+// per-pass request; lifting them here keeps the policy visible at the
+// layer that owns the conversation model.
+const (
+	// CompactionKeepTokenBudget is the retained recent-messages token
+	// budget after compaction.
+	CompactionKeepTokenBudget = 64000
+	// CompactionSummaryMaxOut is the default max_output_tokens for the
+	// compaction summarization request.
+	CompactionSummaryMaxOut = 64000
+	// CompactionSystemReserve is the token reserve for the system prompt
+	// and framing overhead when computing the per-pass content budget.
+	CompactionSystemReserve = 300
+	// CompactionSummaryMinChars is the minimum summary length for the
+	// quality guard. Summaries shorter than this are considered failed
+	// and retried.
+	CompactionSummaryMinChars = 200
+	// CompactionSummaryMaxRetries is the max number of retry attempts
+	// when the summary is too short. Each retry doubles the
+	// max_output_tokens budget.
+	CompactionSummaryMaxRetries = 2
+	// CompactionMaxToolCallChars caps a single tool call's args/output
+	// when building the compaction input. Tool results can be unbounded
+	// (grep over huge lines, mcp_call, file_write content), and one
+	// oversized call must still fit inside the compaction model's
+	// context window — otherwise the summarization pass overflows and
+	// compaction fails (the turn then dies with a context-overflow 400).
+	// Truncated payloads keep an omission marker so the summary model
+	// knows content was dropped.
+	CompactionMaxToolCallChars = 200_000
+)
+
 // CompactionTriggerTokens is the estimated-token watermark that starts
 // compaction. When CompactionThreshold is 0 (auto, the default), compaction
 // triggers at 80% of the model's available input budget (contextWindow minus
@@ -26,4 +63,22 @@ func CompactionTriggerTokens(contextWindow, maxOutput int, settings Settings) in
 		return budgetCap
 	}
 	return trigger
+}
+
+// TakeCompactionChunk takes the longest prefix of msgs whose token
+// estimate fits in available. A single oversized message is still taken
+// so compaction cannot stall. System markers should already have been
+// stripped by the caller.
+func TakeCompactionChunk(msgs []Message, available int) (chunk, rest []Message) {
+	var current []Message
+	currentTokens := 0
+	for i, m := range msgs {
+		mt := m.EstimateTokens()
+		if currentTokens+mt > available && len(current) > 0 {
+			return current, msgs[i:]
+		}
+		current = append(current, m)
+		currentTokens += mt
+	}
+	return current, nil
 }

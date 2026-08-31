@@ -260,22 +260,17 @@ func (a *freshTurnStreamAdapter) Stream(ctx context.Context, req *core.Request) 
 }
 
 // TestFreshTurnHydrationSitsBetweenUserAndAssistant pins the never-compacted
-// room: user → hydration checkpoint → first working assistant. conv_f16
-// already had this shape; the post-compaction insert-after-last-user change
-// must not move the checkpoint past the placeholder on a fresh turn.
+// room: user → hydration checkpoint → first working assistant. Hydration is
+// appended in addTurnMessages before the placeholder so Save stays
+// append-only; runTurn must not move it past the assistant.
 func TestFreshTurnHydrationSitsBetweenUserAndAssistant(t *testing.T) {
-	conv := &domain.Conversation{
-		ID: "c_fresh",
-		Messages: []domain.Message{
-			{ID: "u1", Role: domain.RoleUser, Content: "halo", Status: domain.StatusDone},
-			{ID: "a1", Role: domain.RoleAssistant},
-		},
-	}
+	conv := &domain.Conversation{ID: "c_fresh"}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c_fresh": conv}}
 	adapter := &freshTurnStreamAdapter{}
 	settings := domain.DefaultSettings()
 	settings.CompactionEnabled = false
 	app := &App{
-		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c_fresh": conv}},
+		Conversations: store,
 		Logs:          &fakeLogStore{},
 		Bus:           NewBus(),
 		Toolbox:       &recordingToolbox{},
@@ -285,20 +280,31 @@ func TestFreshTurnHydrationSitsBetweenUserAndAssistant(t *testing.T) {
 		},
 		runs: map[string]*TurnRun{},
 	}
+	app.addTurnMessages(conv,
+		domain.Message{ID: "u1", Role: domain.RoleUser, Content: "halo", Status: domain.StatusDone},
+		domain.Message{ID: "a1", Role: domain.RoleAssistant},
+	)
+	if err := bindConversation(store, conv).Save(); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c_fresh", Ctx: ctx, Cancel: cancel}
 	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "a1", false, ModelCapabilities{})
 
-	if len(conv.Messages) < 3 {
-		t.Fatalf("len(Messages) = %d, want user + hydration + assistant", len(conv.Messages))
+	saved, err := app.Conversations.Get("c_fresh")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if conv.Messages[0].ID != "u1" || !isHydrationMessage(conv.Messages[1]) || conv.Messages[2].ID != "a1" {
+	if len(saved.Messages) < 3 {
+		t.Fatalf("len(Messages) = %d, want user + hydration + assistant", len(saved.Messages))
+	}
+	if saved.Messages[0].ID != "u1" || !isHydrationMessage(saved.Messages[1]) || saved.Messages[2].ID != "a1" {
 		t.Fatalf("fresh transcript order = %s %v %s, want user, hydration, a1",
-			conv.Messages[0].ID, isHydrationMessage(conv.Messages[1]), conv.Messages[2].ID)
+			saved.Messages[0].ID, isHydrationMessage(saved.Messages[1]), saved.Messages[2].ID)
 	}
-	if conv.Messages[2].Content != "hello" {
-		t.Fatalf("assistant content = %q", conv.Messages[2].Content)
+	if saved.Messages[2].Content != "hello" {
+		t.Fatalf("assistant content = %q", saved.Messages[2].Content)
 	}
 	if adapter.first == nil || !coreHasHydration(adapter.first.Messages) {
 		t.Fatal("first stream must include the hydration checkpoint")
@@ -483,9 +489,9 @@ func TestFollowUpUserTurnDoesNotRelocateHydration(t *testing.T) {
 }
 
 // TestFreshTurnRepairsHydrationLeadingTheUser is the live shape from an
-// empty-room workspace pick: checkpoint at index 0, then the first user.
-// OpenAI/Claude require user before any assistant/tool turn. The first
-// Stream must persist the repair and send user → hydration.
+// older empty-room workspace pick: checkpoint at index 0, then the first
+// user. Formed IDs stay put (append-only). chatMessages relocates the
+// checkpoint so the first Stream still sends user → hydration.
 func TestFreshTurnRepairsHydrationLeadingTheUser(t *testing.T) {
 	conv := &domain.Conversation{
 		ID: "c_lead_turn",
@@ -514,12 +520,19 @@ func TestFreshTurnRepairsHydrationLeadingTheUser(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c_lead_turn", Ctx: ctx, Cancel: cancel}
 	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "a1", false, ModelCapabilities{})
 
-	if len(conv.Messages) < 3 {
-		t.Fatalf("len(Messages) = %d, want user + hydration + assistant", len(conv.Messages))
+	saved, err := app.Conversations.Get("c_lead_turn")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if conv.Messages[0].ID != "u1" || !isHydrationMessage(conv.Messages[1]) || conv.Messages[2].ID != "a1" {
-		t.Fatalf("repaired transcript order = %s hyd=%v %s, want user, hydration, a1",
-			conv.Messages[0].ID, isHydrationMessage(conv.Messages[1]), conv.Messages[2].ID)
+	if len(saved.Messages) < 3 {
+		t.Fatalf("len(Messages) = %d, want hydration + user + assistant", len(saved.Messages))
+	}
+	if !isHydrationMessage(saved.Messages[0]) || saved.Messages[1].ID != "u1" || saved.Messages[2].ID != "a1" {
+		t.Fatalf("persisted order = hyd=%v %s %s, want leading hydration, u1, a1",
+			isHydrationMessage(saved.Messages[0]), saved.Messages[1].ID, saved.Messages[2].ID)
+	}
+	if saved.Messages[2].Content != "hello" {
+		t.Fatalf("assistant content = %q", saved.Messages[2].Content)
 	}
 	if adapter.first == nil {
 		t.Fatal("first stream was not captured")
