@@ -2,7 +2,6 @@ package domain
 
 import (
 	"fmt"
-	"path"
 	"strings"
 )
 
@@ -359,13 +358,4 @@ func lintOrphans(file, raw string) []ProjectMemoryLintProblem {
 		File:    file,
 		Message: "text found outside any anchored entry (invisible to anchor-based reads)",
 	}}
-}
-
-// DisplayProjectFile returns the query/list relative path for a kind file.
-func DisplayProjectFile(kind string, archived bool) string {
-	name := NormalizeProjectKindFile(kind) + ".md"
-	if archived {
-		return path.Join("archive", name)
-	}
-	return name
 }

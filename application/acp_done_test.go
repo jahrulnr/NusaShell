@@ -22,13 +22,12 @@ func TestOnAcpRunDoneQueuesWhileParentTurnActive(t *testing.T) {
 	app := &App{Conversations: store, Bus: NewBus(), runs: map[string]*TurnRun{}}
 	parent := &TurnRun{ID: "turn1", ConversationID: "c1"}
 	app.runs[parent.ID] = parent
-	app.trackPendingSubagent("c1", "run_done")
+	app.trackPendingRun("c1", "run_done")
 
 	acpRun := &domain.AcpRun{
-		ID:               "run_done",
+		TaskState:        domain.TaskState[domain.AcpRunStatus]{ID: "run_done", Status: domain.AcpRunCompleted},
 		ConversationID:   "c1",
 		ParentToolCallID: "call_parent",
-		Status:           domain.AcpRunCompleted,
 		Transcript:       []domain.AcpTranscriptChunk{{Kind: "text", Text: "done"}},
 	}
 
@@ -53,13 +52,13 @@ func TestOnAcpRunDoneQueuesWhileParentTurnActive(t *testing.T) {
 	if len(store.convs["c1"].Messages) != 2 {
 		t.Fatalf("messages = %d, want 2 before drain", len(store.convs["c1"].Messages))
 	}
-	if !app.hasPendingSubagents("c1") {
+	if !app.hasPendingRuns("c1") {
 		t.Fatal("must stay pending until the parent turn drains the result")
 	}
 
-	applied, err := app.applyQueuedSubagentResults(parent)
+	applied, err := app.applyQueuedRunResults(parent)
 	if err != nil {
-		t.Fatalf("applyQueuedSubagentResults: %v", err)
+		t.Fatalf("applyQueuedRunResults: %v", err)
 	}
 	if !applied {
 		t.Fatal("queued subagent completion was not applied")
@@ -71,7 +70,7 @@ func TestOnAcpRunDoneQueuesWhileParentTurnActive(t *testing.T) {
 	if len(saved.Messages) != 3 || saved.Messages[2].ToolCalls[0].Name != domain.SubagentResultToolName {
 		t.Fatalf("synthetic subagent_result missing: %+v", saved.Messages)
 	}
-	if app.hasPendingSubagents("c1") {
+	if app.hasPendingRuns("c1") {
 		t.Fatal("pending subagent must be untracked after drain")
 	}
 }
@@ -89,12 +88,11 @@ func TestOnAcpRunDoneInjectsImmediatelyWhenParentIdle(t *testing.T) {
 	}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{Conversations: store, Bus: NewBus(), runs: map[string]*TurnRun{}}
-	app.trackPendingSubagent("c1", "run_done")
+	app.trackPendingRun("c1", "run_done")
 	acpRun := &domain.AcpRun{
-		ID:               "run_done",
+		TaskState:        domain.TaskState[domain.AcpRunStatus]{ID: "run_done", Status: domain.AcpRunCompleted},
 		ConversationID:   "c1",
 		ParentToolCallID: "call_parent",
-		Status:           domain.AcpRunCompleted,
 		Transcript:       []domain.AcpTranscriptChunk{{Kind: "text", Text: "done"}},
 	}
 
@@ -107,7 +105,7 @@ func TestOnAcpRunDoneInjectsImmediatelyWhenParentIdle(t *testing.T) {
 	if len(saved.Messages) != 3 || saved.Messages[2].ToolCalls[0].Name != domain.SubagentResultToolName {
 		t.Fatalf("idle completion must append subagent_result: %+v", saved.Messages)
 	}
-	if app.hasPendingSubagents("c1") {
+	if app.hasPendingRuns("c1") {
 		t.Fatal("idle completion must untrack the run")
 	}
 }

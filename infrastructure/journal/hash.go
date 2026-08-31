@@ -6,8 +6,6 @@ import (
 	"os"
 )
 
-const maxDiffBytes = 1 << 20 // 1 MiB
-
 func hashContent(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -27,28 +25,3 @@ func hashFile(path string) (hash string, size int64, err error) {
 	}
 	return hashContent(data), int64(len(data)), nil
 }
-
-func isTextDiffEligible(data []byte, maxSize int64) bool {
-	if int64(len(data)) > maxSize {
-		return false
-	}
-	for _, b := range data {
-		if b == 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func readFileLimited(path string, maxSize int64) ([]byte, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	if info.Size() > maxSize {
-		return nil, errOversized
-	}
-	return os.ReadFile(path)
-}
-
-var errOversized = os.ErrInvalid

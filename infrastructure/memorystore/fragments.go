@@ -200,7 +200,7 @@ func (f *Fragments) Save(frag *domain.MemoryFragment) error {
 	}
 	now := time.Now().UTC()
 	if frag.ID == "" {
-		frag.ID = domain.NewULID("frag")
+		frag.ID = domain.NewULID(domain.IDPrefixFrag)
 		frag.CreatedAt = now
 	}
 	if frag.CreatedAt.IsZero() {
@@ -242,7 +242,7 @@ func (f *Fragments) SaveIfAbsent(frag *domain.MemoryFragment) (existing *domain.
 	}
 	now := time.Now().UTC()
 	if frag.ID == "" {
-		frag.ID = domain.NewULID("frag")
+		frag.ID = domain.NewULID(domain.IDPrefixFrag)
 		frag.CreatedAt = now
 	}
 	if frag.CreatedAt.IsZero() {

@@ -26,6 +26,7 @@ import (
 	"nusashell/infrastructure/mcpclient"
 	"nusashell/infrastructure/memorystore"
 	"nusashell/infrastructure/pluginfs"
+	"nusashell/infrastructure/skillfs"
 	"nusashell/infrastructure/sqlitestore"
 	"nusashell/infrastructure/tools"
 
@@ -611,8 +612,12 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 		t.Fatal(err)
 	}
 	acpRuntime := acpruntime.New()
+	skillStore, err := skillfs.New(filepath.Join(dataDir, "skills"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	tb := &tools.Toolbox{
-		Skills:    &jsonstore.Skills{S: store},
+		Skills:    skillStore,
 		Memory:    &jsonstore.Memory{S: store},
 		Primary:   primaryStore,
 		Fragments: fragmentStore,
@@ -626,7 +631,7 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 		Conversations: store,
 		Providers:     &jsonstore.Providers{S: store},
 		Credentials:   creds,
-		Skills:        &jsonstore.Skills{S: store},
+		Skills:        skillStore,
 		Memory:        &jsonstore.Memory{S: store},
 		Primary:       primaryStore,
 		Fragments:     fragmentStore,

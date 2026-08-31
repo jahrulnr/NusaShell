@@ -41,16 +41,3 @@ func TestHashFile_missing(t *testing.T) {
 		t.Fatal("expected error for missing file")
 	}
 }
-
-func TestIsTextDiffEligible_textAndLimits(t *testing.T) {
-	if !isTextDiffEligible([]byte("line\n"), maxDiffBytes) {
-		t.Fatal("small text should be eligible")
-	}
-	if isTextDiffEligible([]byte{0, 1, 2}, maxDiffBytes) {
-		t.Fatal("binary with NUL should be ineligible")
-	}
-	big := make([]byte, maxDiffBytes+1)
-	if isTextDiffEligible(big, maxDiffBytes) {
-		t.Fatal("oversized content should be ineligible")
-	}
-}

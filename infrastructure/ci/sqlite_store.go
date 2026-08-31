@@ -57,6 +57,16 @@ func OpenSQLite(path string) (*SQLite, error) {
 		db.Close()
 		return nil, err
 	}
+	// One-time TaskState migration: JobRun's "FailureReason" key was
+	// renamed to TaskState's "Error" in the 2026-08-31 domain
+	// normalization (docs/decisions/003-agent-engine.md). Old rows still
+	// load — encoding/json ignores unknown keys — but would silently lose
+	// the failure message. Idempotent: only rows still carrying the old
+	// key are rewritten.
+	if err := migrateTaskStateJSON(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	_ = os.Chmod(path, 0o600)
 	return &SQLite{db: db}, nil
 }
@@ -587,4 +597,75 @@ func (a WaitSQL) Claim(ctx context.Context, id string) (*domain.WaitRecord, erro
 }
 func (a ProviderStateSQL) Get(ctx context.Context, providerID string) (bool, bool, error) {
 	return a.GetDisabled(ctx, providerID)
+}
+
+// migrateTaskStateJSON rewrites persisted workflow runs that still carry
+// the pre-TaskState JobRun key "FailureReason" into the unified "Error"
+// key, at any nesting depth. Runs without the old key are left untouched,
+// so the migration is idempotent across restarts and new stores. Rows
+// whose JSON cannot be parsed are skipped (they would not unmarshal as a
+// WorkflowRun anyway); query/update failures abort the open.
+func migrateTaskStateJSON(db *sql.DB) error {
+	rows, err := db.Query(`SELECT id, json FROM runs`)
+	if err != nil {
+		return err
+	}
+	type staleRow struct{ id, body string }
+	var stale []staleRow
+	for rows.Next() {
+		var r staleRow
+		if err := rows.Scan(&r.id, &r.body); err != nil {
+			rows.Close()
+			return err
+		}
+		if strings.Contains(r.body, `"FailureReason"`) {
+			stale = append(stale, r)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, r := range stale {
+		fixed, err := renameJSONKey(r.body, "FailureReason", "Error")
+		if err != nil {
+			continue // unparsable row: leave as-is, it cannot be read either way
+		}
+		if _, err := db.Exec(`UPDATE runs SET json = ? WHERE id = ?`, fixed, r.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// renameJSONKey renames every occurrence of oldKey to newKey at any
+// nesting depth of a JSON document.
+func renameJSONKey(body, oldKey, newKey string) (string, error) {
+	var v any
+	if err := json.Unmarshal([]byte(body), &v); err != nil {
+		return "", err
+	}
+	renameKeyInValue(v, oldKey, newKey)
+	out, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func renameKeyInValue(v any, oldKey, newKey string) {
+	switch t := v.(type) {
+	case map[string]any:
+		if val, ok := t[oldKey]; ok {
+			delete(t, oldKey)
+			t[newKey] = val
+		}
+		for _, child := range t {
+			renameKeyInValue(child, oldKey, newKey)
+		}
+	case []any:
+		for _, child := range t {
+			renameKeyInValue(child, oldKey, newKey)
+		}
+	}
 }

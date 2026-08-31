@@ -35,12 +35,3 @@ func MkdirTemp(pattern string) (string, error) {
 	}
 	return os.MkdirTemp(dir, pattern)
 }
-
-// CreateTemp creates a unique file under Dir().
-func CreateTemp(pattern string) (*os.File, error) {
-	dir, err := Dir()
-	if err != nil {
-		return nil, err
-	}
-	return os.CreateTemp(dir, pattern)
-}

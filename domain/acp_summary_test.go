@@ -7,7 +7,7 @@ import (
 
 func TestSubagentCompletionResultNormalText(t *testing.T) {
 	run := &AcpRun{
-		Status:    AcpRunCompleted,
+		TaskState: TaskState[AcpRunStatus]{Status: AcpRunCompleted},
 		Workspace: "/tmp/proj",
 		Transcript: []AcpTranscriptChunk{
 			{Kind: "text", Text: "I fixed the bug by updating the handler."},
@@ -38,8 +38,7 @@ func TestSubagentCompletionResultNormalText(t *testing.T) {
 
 func TestSubagentCompletionResultFailedWithText(t *testing.T) {
 	run := &AcpRun{
-		Status:    AcpRunFailed,
-		Error:     "connection refused",
+		TaskState: TaskState[AcpRunStatus]{Status: AcpRunFailed, Error: "connection refused"},
 		Workspace: "/tmp/proj",
 		Transcript: []AcpTranscriptChunk{
 			{Kind: "text", Text: "I started the refactor."},
@@ -59,8 +58,7 @@ func TestSubagentCompletionResultFailedWithText(t *testing.T) {
 
 func TestSubagentCompletionResultFailedNoText(t *testing.T) {
 	run := &AcpRun{
-		Status:     AcpRunFailed,
-		Error:      "timeout",
+		TaskState:  TaskState[AcpRunStatus]{Status: AcpRunFailed, Error: "timeout"},
 		StopReason: "max_tokens",
 		Transcript: []AcpTranscriptChunk{{Kind: "thought", Text: "thinking..."}},
 	}
@@ -79,7 +77,7 @@ func TestSubagentCompletionResultFailedNoText(t *testing.T) {
 
 func TestSubagentCompletionResultToolOnly(t *testing.T) {
 	run := &AcpRun{
-		Status:     AcpRunCompleted,
+		TaskState:  TaskState[AcpRunStatus]{Status: AcpRunCompleted},
 		StopReason: "end_turn",
 		Transcript: []AcpTranscriptChunk{
 			{Kind: "tool", ToolTitle: "edit_file", ToolStatus: "completed"},
@@ -96,7 +94,7 @@ func TestSubagentCompletionResultToolOnly(t *testing.T) {
 
 func TestSubagentCompletionResultEmpty(t *testing.T) {
 	run := &AcpRun{
-		Status:     AcpRunCompleted,
+		TaskState:  TaskState[AcpRunStatus]{Status: AcpRunCompleted},
 		StopReason: "end_turn",
 	}
 	got := SubagentCompletionResult(run, "")
@@ -107,7 +105,7 @@ func TestSubagentCompletionResultEmpty(t *testing.T) {
 
 func TestSubagentCompletionResultThinkingOnly(t *testing.T) {
 	run := &AcpRun{
-		Status: AcpRunCompleted,
+		TaskState: TaskState[AcpRunStatus]{Status: AcpRunCompleted},
 		Transcript: []AcpTranscriptChunk{
 			{Kind: "thought", Text: "I should consider the edge cases..."},
 		},
@@ -121,7 +119,7 @@ func TestSubagentCompletionResultThinkingOnly(t *testing.T) {
 
 func TestSubagentCompletionResultCancelledWithText(t *testing.T) {
 	run := &AcpRun{
-		Status: AcpRunCancelled,
+		TaskState: TaskState[AcpRunStatus]{Status: AcpRunCancelled},
 		Transcript: []AcpTranscriptChunk{
 			{Kind: "text", Text: "Partial work done."},
 		},
@@ -139,7 +137,7 @@ func TestSubagentCompletionResultCancelledWithText(t *testing.T) {
 }
 
 func TestSubagentCompletionResultCancelledNoText(t *testing.T) {
-	run := &AcpRun{Status: AcpRunCancelled}
+	run := &AcpRun{TaskState: TaskState[AcpRunStatus]{Status: AcpRunCancelled}}
 	got := SubagentCompletionResult(run, "")
 	if !strings.Contains(got, "status: cancelled") {
 		t.Fatalf("expected status: cancelled, got %q", got)
@@ -155,7 +153,7 @@ func TestSubagentCompletionResultCancelledNoText(t *testing.T) {
 // persisted JSON output file.
 func TestSubagentCompletionResultLastTextOnly(t *testing.T) {
 	run := &AcpRun{
-		Status: AcpRunCompleted,
+		TaskState: TaskState[AcpRunStatus]{Status: AcpRunCompleted},
 		Transcript: []AcpTranscriptChunk{
 			{Kind: "text", Text: "Starting the refactor."},
 			{Kind: "tool", ToolTitle: "edit_file", ToolStatus: "completed"},
@@ -179,7 +177,7 @@ func TestSubagentCompletionResultLastTextOnly(t *testing.T) {
 func TestSubagentCompletionResultTruncatesLongText(t *testing.T) {
 	longText := strings.Repeat("x", 5000)
 	run := &AcpRun{
-		Status:     AcpRunCompleted,
+		TaskState:  TaskState[AcpRunStatus]{Status: AcpRunCompleted},
 		Transcript: []AcpTranscriptChunk{{Kind: "text", Text: longText}},
 	}
 	got := SubagentCompletionResult(run, "")
@@ -195,7 +193,7 @@ func TestSubagentCompletionResultTruncatesLongText(t *testing.T) {
 
 func TestSubagentCompletionResultYAMLHeaderFormat(t *testing.T) {
 	run := &AcpRun{
-		Status:    AcpRunCompleted,
+		TaskState: TaskState[AcpRunStatus]{Status: AcpRunCompleted},
 		Workspace: "/home/user/project",
 	}
 	got := SubagentCompletionResult(run, "/data/acp_runs.jsonl")

@@ -233,21 +233,6 @@ func TestHostRootedPathPortable(t *testing.T) {
 	}
 }
 
-func TestSamplePermissionPaths(t *testing.T) {
-	paths := make([]string, MaxAcpPermissionPaths+3)
-	for i := range paths {
-		paths[i] = "p"
-	}
-	got := SamplePermissionPaths(paths)
-	if len(got) != MaxAcpPermissionPaths+1 || got[len(got)-1] != "…" {
-		t.Fatalf("got %#v", got)
-	}
-	small := SamplePermissionPaths([]string{"a", "b"})
-	if len(small) != 2 {
-		t.Fatalf("small: %#v", small)
-	}
-}
-
 func TestClassifyModelTierUnclassifiedByDefault(t *testing.T) {
 	if got := ClassifyModelTier("mystery-model", ""); got != ModelTierUnclassified {
 		t.Fatalf("got %s", got)
@@ -261,7 +246,7 @@ func TestClassifyModelTierUnclassifiedByDefault(t *testing.T) {
 }
 
 func TestAcpRunLiveAndTranscriptCap(t *testing.T) {
-	r := &AcpRun{Status: AcpRunRunning}
+	r := &AcpRun{TaskState: TaskState[AcpRunStatus]{Status: AcpRunRunning}}
 	if !r.Live() {
 		t.Fatal("running should be live")
 	}

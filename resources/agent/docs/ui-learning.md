@@ -68,7 +68,7 @@ Draggable splitter between the results pane and the graph pane. Drag to resize t
 
 ## Knowledge graph
 
-Force-directed graph (vis-network) of skills, memory entries, and their edges. Related edges are rebuilt from content similarity plus specific fragment metadata (project, task, and non-ubiquitous tags); stale edges to deleted nodes are removed. Used-with edges connect learning nodes observed together during one successful agent/review turn. Refresh reloads the graph; Fit fits it to view. Legend distinguishes Skill, Memory, Related, and Used-with edges. The graph refreshes automatically when memory or skills change (via `memory.updated` / `skill.updated` events, debounced 300ms). On narrow screens results and graph stack into separate bounded panes with their own scrollable result list.
+Force-directed graph (vis-network) of skills, memory entries, and their edges. Related edges are rebuilt from content similarity plus specific fragment metadata (project, task, and non-ubiquitous tags); stale edges to deleted nodes are removed. Used-with edges connect learning nodes observed together during one successful agent/review turn. Refresh reloads the graph; Fit fits it to view. Legend distinguishes Skill, Memory, Related, and Used-with edges. The graph refreshes automatically when memory or skills change or a review finishes (via `memory.updated` / `skill.updated` / `learning.review.done` events, coalesced with a 300ms debounce); refreshes keep existing node positions and run a short bounded layout, so the graph stays still while idle. On narrow screens results and graph stack into separate bounded panes with their own scrollable result list.
 
 - **Knowledge graph** (`#learning-graph`):
   - Section: Learning

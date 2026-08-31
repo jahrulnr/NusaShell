@@ -62,7 +62,7 @@ run_frontend_tests() {
 		printf 'frontend dependencies are missing; run npm ci first.\n' >&2
 		return 1
 	fi
-	run_step "frontend tests" node --test frontend/*.test.mjs
+	run_step "frontend tests" node --test frontend/tests/*.test.mjs
 }
 
 compile_target() {

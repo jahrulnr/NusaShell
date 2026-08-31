@@ -32,14 +32,6 @@ func ModelCapabilitiesOf(provider *Provider, model string) ModelCapabilities {
 	return ModelCapabilities{Vision: m.Vision, Audio: m.Audio, Video: m.Video, Document: m.Document}
 }
 
-// ModelSupportsVision reports whether the given model on the given provider
-// supports image input. Returns true when the model metadata is unknown
-// (not in catalog) — vision is common enough that defaulting to true is
-// safe; providers reject unsupported images gracefully.
-func ModelSupportsVision(provider *Provider, model string) bool {
-	return ModelCapabilitiesOf(provider, model).Vision
-}
-
 // ResolveMaxOutput picks the per-turn completion token ceiling. The model's
 // advertised max output is used when known, but capped by the global settings
 // default — the setting acts as a ceiling, not just a fallback. This prevents

@@ -74,7 +74,7 @@ func (g *LearningGraphService) AddEdge(sourceID, targetID string, edgeType domai
 	}
 	// Create new edge.
 	edge := &domain.LearningEdge{
-		ID:        domain.NewULID("edge"),
+		ID:        domain.NewULID(domain.IDPrefixEdge),
 		SourceID:  sourceID,
 		TargetID:  targetID,
 		Type:      edgeType,

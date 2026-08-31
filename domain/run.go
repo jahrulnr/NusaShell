@@ -65,8 +65,8 @@ func (r *WorkflowRun) BeginRunning(now time.Time) {
 		return
 	}
 	r.Status = StatusRunning
-	if r.StartedAt == nil {
-		r.StartedAt = &now
+	if r.StartedAt.IsZero() {
+		r.StartedAt = now
 	}
 }
 
@@ -95,7 +95,7 @@ func (r *WorkflowRun) FailDAG(now time.Time) {
 		return
 	}
 	r.Status = StatusFailed
-	r.FinishedAt = &now
+	r.FinishedAt = now
 }
 
 // Finalize transitions the run to a terminal state based on the job
@@ -111,7 +111,7 @@ func (r *WorkflowRun) Finalize(now time.Time, sum RunSummary) {
 	if sum.Running > 0 || sum.Queued > 0 || sum.Waiting > 0 {
 		return
 	}
-	r.FinishedAt = &now
+	r.FinishedAt = now
 	switch {
 	case sum.Failed > 0:
 		r.Status = StatusFailed
@@ -129,11 +129,11 @@ func (r *WorkflowRun) Cancel(now time.Time) {
 		return
 	}
 	r.Status = StatusCancelled
-	r.FinishedAt = &now
+	r.FinishedAt = now
 	for i := range r.Jobs {
 		if r.Jobs[i].Status.IsActive() {
 			r.Jobs[i].Status = StatusCancelled
-			r.Jobs[i].FinishedAt = &now
+			r.Jobs[i].FinishedAt = now
 		}
 	}
 }
@@ -146,7 +146,7 @@ func (j *JobRun) Skip(now time.Time) {
 		return
 	}
 	j.Status = StatusSkipped
-	j.FinishedAt = &now
+	j.FinishedAt = now
 }
 
 // BeginRunning transitions the job to running and stamps StartedAt.
@@ -155,7 +155,7 @@ func (j *JobRun) BeginRunning(now time.Time) {
 		return
 	}
 	j.Status = StatusRunning
-	j.StartedAt = &now
+	j.StartedAt = now
 }
 
 // Succeed transitions the job to success, records outputs, and stamps
@@ -166,7 +166,7 @@ func (j *JobRun) Succeed(outputs map[string]any, now time.Time) {
 	}
 	j.Status = StatusSuccess
 	j.Outputs = outputs
-	j.FinishedAt = &now
+	j.FinishedAt = now
 }
 
 // ParkWait transitions the job to waiting (a step parked for wait_until).
@@ -183,8 +183,8 @@ func (j *JobRun) Fail(reason string, now time.Time) {
 		return
 	}
 	j.Status = StatusFailed
-	j.FailureReason = reason
-	j.FinishedAt = &now
+	j.Error = reason
+	j.FinishedAt = now
 }
 
 // ParkBlocked transitions the job to blocked with a reason (upstream
@@ -210,10 +210,9 @@ func (j *JobRun) EnsureStep(step Step) *StepRun {
 		}
 	}
 	j.Steps = append(j.Steps, StepRun{
-		ID:     NewID("step"),
-		StepID: step.ID,
-		Name:   step.Name,
-		Status: StatusQueued,
+		TaskState: TaskState[RunStatus]{ID: NewID(IDPrefixStep), Status: StatusQueued},
+		StepID:    step.ID,
+		Name:      step.Name,
 	})
 	return &j.Steps[len(j.Steps)-1]
 }
@@ -226,7 +225,7 @@ func (s *StepRun) BeginRunning(now time.Time) {
 		return
 	}
 	s.Status = StatusRunning
-	s.StartedAt = &now
+	s.StartedAt = now
 }
 
 // Fail transitions the step to failed with exit code and error, and
@@ -238,7 +237,7 @@ func (s *StepRun) Fail(exitCode int, errMsg string, now time.Time) {
 	s.Status = StatusFailed
 	s.ExitCode = exitCode
 	s.Error = errMsg
-	s.FinishedAt = &now
+	s.FinishedAt = now
 }
 
 // Succeed transitions the step to success with exit code and stamps
@@ -249,7 +248,7 @@ func (s *StepRun) Succeed(exitCode int, now time.Time) {
 	}
 	s.Status = StatusSuccess
 	s.ExitCode = exitCode
-	s.FinishedAt = &now
+	s.FinishedAt = now
 }
 
 // ParkWait transitions the step to waiting and records the wake time.
@@ -301,10 +300,9 @@ func (s RunStatus) IsActive() bool {
 // WorkflowRun is an immutable snapshot of a definition plus runtime
 // metadata. Never execute from a mutable file after the run has started.
 type WorkflowRun struct {
-	ID            string
+	TaskState[RunStatus]
 	WorkflowID    string
 	Name          string
-	Status        RunStatus
 	BlockedReason string
 	TriggerID     string
 	EventID       string
@@ -318,8 +316,6 @@ type WorkflowRun struct {
 	Definition   WorkflowDefinition
 	Jobs         []JobRun
 	CreatedAt    time.Time
-	StartedAt    *time.Time
-	FinishedAt   *time.Time
 	WakeAt       *time.Time
 	PipelineHash string
 	RequestedBy  string // ui | agent | schedule | event | manual
@@ -330,18 +326,14 @@ type PipelineRun = WorkflowRun
 
 // JobRun is the runtime state of one job in a run.
 type JobRun struct {
-	ID            string
+	TaskState[RunStatus]
 	JobID         string
 	Name          string
-	Status        RunStatus
 	BlockedReason string
 	RunnerID      string
 	Executor      string
 	ExitCode      int
-	FailureReason string
 	QueuedAt      *time.Time
-	StartedAt     *time.Time
-	FinishedAt    *time.Time
 	HeartbeatAt   *time.Time
 	LeaseUntil    *time.Time
 	Outputs       map[string]any
@@ -350,16 +342,12 @@ type JobRun struct {
 
 // StepRun is the runtime state of one step.
 type StepRun struct {
-	ID             string
+	TaskState[RunStatus]
 	StepID         string
 	Name           string
-	Status         RunStatus
 	ExitCode       int
-	Error          string
 	Output         string
 	ConversationID string
-	StartedAt      *time.Time
-	FinishedAt     *time.Time
 	WakeAt         *time.Time
 }
 

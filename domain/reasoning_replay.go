@@ -83,10 +83,3 @@ func RequiresReasoningReplay(provider, model, interleavedField string) bool {
 // response decoder strips it from user-visible output. Mirrors OmniRoute's
 // NON_ANTHROPIC_THINKING_PLACEHOLDER.
 const ReasoningPlaceholder = "(Continue from the current context.)"
-
-// IsReasoningPlaceholder reports whether value is the internal replay
-// sentinel. Use to avoid caching or re-replaying the placeholder (which
-// causes an echo loop — OmniRoute #9573).
-func IsReasoningPlaceholder(value string) bool {
-	return strings.TrimSpace(value) == ReasoningPlaceholder
-}

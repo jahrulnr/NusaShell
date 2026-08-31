@@ -68,36 +68,6 @@ func IconPath(icon string) string {
 	return ""
 }
 
-// FileURL classifies an icon value into one of three forms:
-//   - http(s):// → left as-is (browser loads from the internet)
-//   - file://    → normalized to an absolute file:/// URL rooted at the
-//     plugin directory (e.g. "file://asset/icon.png" →
-//     "file:///abs/plugin/asset/icon.png")
-//   - anything else (text/emoji, relative or absolute plain paths) → left
-//     as-is; the frontend treats it as text.
-func FileURL(icon, baseDir string) string {
-	t := strings.TrimSpace(icon)
-	if t == "" {
-		return t
-	}
-	if IsRemoteURL(t) {
-		return t
-	}
-	if !strings.HasPrefix(strings.ToLower(t), "file://") {
-		return t
-	}
-	p, relative, ok := fileURLPath(t)
-	if !ok {
-		return t
-	}
-	if relative {
-		p = filepath.Join(filepath.Clean(baseDir), filepath.FromSlash(p))
-	} else {
-		p = filepath.Clean(filepath.FromSlash(p))
-	}
-	return "file://" + filepath.ToSlash(p)
-}
-
 // ResolveLocal resolves an icon against a local plugin directory. Text and
 // http(s) icons pass through; file-style icons become PNG data URLs; anything
 // invalid falls back to FallbackIcon.

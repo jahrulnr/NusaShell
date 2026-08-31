@@ -6,7 +6,6 @@
 package learnedparams
 
 import (
-	"strings"
 	"sync"
 
 	"nusashell/domain"
@@ -179,43 +178,4 @@ func (c *Cache) BumpHit(provider, model, param string) {
 	if c.store != nil {
 		_ = c.store.Save(c.registry)
 	}
-}
-
-// ApplyStrippedParams deletes learned-strip params from a request body
-// map (in place). Returns the list of stripped param names for logging.
-func ApplyStrippedParams(body map[string]any, provider, model string, cache *Cache) []string {
-	if cache == nil || body == nil {
-		return nil
-	}
-	strip := cache.StripParams(provider, model)
-	if len(strip) == 0 {
-		return nil
-	}
-	var stripped []string
-	for _, p := range strip {
-		if _, ok := body[p]; ok {
-			delete(body, p)
-			stripped = append(stripped, p)
-			cache.BumpHit(provider, model, p)
-		}
-	}
-	return stripped
-}
-
-// HasReasoningReplay reports whether the cache has learned that
-// provider+model requires reasoning_content injection. This complements
-// the catalog signal: a model not in models.dev (e.g. stealth/ox-alpha)
-// that 400s with "reasoning_content must be passed back" gets learned
-// here, and future turns inject it without waiting for the catalog to
-// catch up.
-func HasReasoningReplay(cache *Cache, provider, model string) bool {
-	if cache == nil {
-		return false
-	}
-	for _, p := range cache.InjectParams(provider, model) {
-		if strings.EqualFold(p, StripReasoningContentParam) {
-			return true
-		}
-	}
-	return false
 }

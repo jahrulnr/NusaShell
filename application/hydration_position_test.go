@@ -60,10 +60,8 @@ func TestPersistHydrationInsertsBeforePendingAssistant(t *testing.T) {
 		msgs[2].Role != "tool" {
 		t.Fatalf("provider order violates user → hydration → assistant: %+v", msgs)
 	}
-	// The checkpoint must still be detected so later rounds reuse it.
-	if !HasHydration(chatMessages(c, "m_asst", ModelCapabilities{})) {
-		t.Fatal("inserted checkpoint not detected by HasHydration")
-	}
+	// The checkpoint must still be detected so later rounds reuse it
+	// (the domain-level predicate pins this; see domain/hydration.go).
 }
 
 // TestPersistHydrationFallsBackToAppendWhenAnchorMissing inserts after the

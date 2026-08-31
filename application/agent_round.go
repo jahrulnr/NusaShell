@@ -411,7 +411,7 @@ func buildHydrationDomainMessages(msgs []ChatMessage) []domain.Message {
 	for _, m := range msgs {
 		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
 			hyd = &domain.Message{
-				ID:        domain.NewID("msg"),
+				ID:        domain.NewID(domain.IDPrefixMsg),
 				Role:      domain.RoleAssistant,
 				ToolCalls: m.ToolCalls,
 				Status:    domain.StatusDone,
@@ -838,7 +838,7 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 	// Keep the tool call marked as running so the UI shows a spinner; the
 	// OnDone callback will update it to ok/fail with the summary when the
 	// subagent finishes.
-	if toolCall.Name == "subagent" && err == nil {
+	if (toolCall.Name == "subagent" || toolCall.Name == domain.DelegateToolName) && err == nil {
 		status = domain.ToolRunning
 	}
 	res := toolExecResult{status: status, output: output, atts: outputAttachments}
@@ -899,7 +899,7 @@ func (a *App) appendTurnAssistant(conversationID string) (*domain.Conversation, 
 	if err != nil {
 		return nil, "", err
 	}
-	next := domain.Message{ID: domain.NewID("msg"), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC()}
+	next := domain.Message{ID: domain.NewID(domain.IDPrefixMsg), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC()}
 	if err := repo.Add(domain.RoleAssistant, next); err != nil {
 		return nil, "", err
 	}
@@ -939,7 +939,7 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage,
 			MaxAutoContinues:  a.Settings.Get().MaxAutoContinues,
 			TurnOK:            true,
 			HasConversation:   true,
-			HasBackgroundJobs: a.hasPendingSubagents(run.ConversationID),
+			HasBackgroundJobs: a.hasPendingRuns(run.ConversationID),
 		})
 		autoContinue = &contracts.AutoContinueDTO{
 			ShouldContinue:   decision.ShouldContinue,

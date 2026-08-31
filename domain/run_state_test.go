@@ -18,7 +18,7 @@ func TestWorkflowRunStartRun(t *testing.T) {
 		}
 	})
 	t.Run("already queued stays queued but stamps CreatedAt", func(t *testing.T) {
-		run := &WorkflowRun{Status: StatusQueued}
+		run := &WorkflowRun{TaskState: TaskState[RunStatus]{Status: StatusQueued}}
 		now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 		run.StartRun(now)
 		if run.Status != StatusQueued {
@@ -29,7 +29,7 @@ func TestWorkflowRunStartRun(t *testing.T) {
 		}
 	})
 	t.Run("terminal run is not restarted", func(t *testing.T) {
-		run := &WorkflowRun{Status: StatusSuccess}
+		run := &WorkflowRun{TaskState: TaskState[RunStatus]{Status: StatusSuccess}}
 		run.StartRun(time.Now())
 		if run.Status != StatusSuccess {
 			t.Fatalf("Status = %v, want %v (terminal must not restart)", run.Status, StatusSuccess)
@@ -39,19 +39,19 @@ func TestWorkflowRunStartRun(t *testing.T) {
 
 func TestWorkflowRunBeginRunning(t *testing.T) {
 	t.Run("queued becomes running with StartedAt", func(t *testing.T) {
-		run := &WorkflowRun{Status: StatusQueued}
+		run := &WorkflowRun{TaskState: TaskState[RunStatus]{Status: StatusQueued}}
 		now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 		run.BeginRunning(now)
 		if run.Status != StatusRunning {
 			t.Fatalf("Status = %v, want %v", run.Status, StatusRunning)
 		}
-		if run.StartedAt == nil || !run.StartedAt.Equal(now) {
+		if run.StartedAt.IsZero() || !run.StartedAt.Equal(now) {
 			t.Fatalf("StartedAt = %v, want %v", run.StartedAt, now)
 		}
 	})
 	t.Run("waiting run is not disturbed", func(t *testing.T) {
 		wakeAt := time.Date(2026, 9, 1, 13, 0, 0, 0, time.UTC)
-		run := &WorkflowRun{Status: StatusWaiting, WakeAt: &wakeAt}
+		run := &WorkflowRun{TaskState: TaskState[RunStatus]{Status: StatusWaiting}, WakeAt: &wakeAt}
 		run.BeginRunning(time.Now())
 		if run.Status != StatusWaiting {
 			t.Fatalf("Status = %v, want %v (waiting must not be disturbed)", run.Status, StatusWaiting)
@@ -62,16 +62,16 @@ func TestWorkflowRunBeginRunning(t *testing.T) {
 	})
 	t.Run("running run keeps first StartedAt", func(t *testing.T) {
 		first := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-		run := &WorkflowRun{Status: StatusRunning, StartedAt: &first}
+		run := &WorkflowRun{TaskState: TaskState[RunStatus]{Status: StatusRunning, StartedAt: first}}
 		run.BeginRunning(time.Now())
-		if run.StartedAt == nil || !run.StartedAt.Equal(first) {
+		if run.StartedAt.IsZero() || !run.StartedAt.Equal(first) {
 			t.Fatalf("StartedAt = %v, want %v (first must be kept)", run.StartedAt, first)
 		}
 	})
 }
 
 func TestWorkflowRunParkWait(t *testing.T) {
-	run := &WorkflowRun{Status: StatusRunning}
+	run := &WorkflowRun{TaskState: TaskState[RunStatus]{Status: StatusRunning}}
 	wakeAt := time.Date(2026, 9, 1, 13, 0, 0, 0, time.UTC)
 	run.ParkWait(wakeAt)
 	if run.Status != StatusWaiting {
@@ -83,7 +83,7 @@ func TestWorkflowRunParkWait(t *testing.T) {
 }
 
 func TestWorkflowRunParkBlocked(t *testing.T) {
-	run := &WorkflowRun{Status: StatusRunning}
+	run := &WorkflowRun{TaskState: TaskState[RunStatus]{Status: StatusRunning}}
 	reason := "capability missing"
 	run.ParkBlocked(reason)
 	if run.Status != StatusBlocked {
@@ -95,13 +95,13 @@ func TestWorkflowRunParkBlocked(t *testing.T) {
 }
 
 func TestWorkflowRunFailDAG(t *testing.T) {
-	run := &WorkflowRun{Status: StatusRunning}
+	run := &WorkflowRun{TaskState: TaskState[RunStatus]{Status: StatusRunning}}
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	run.FailDAG(now)
 	if run.Status != StatusFailed {
 		t.Fatalf("Status = %v, want %v", run.Status, StatusFailed)
 	}
-	if run.FinishedAt == nil || !run.FinishedAt.Equal(now) {
+	if run.FinishedAt.IsZero() || !run.FinishedAt.Equal(now) {
 		t.Fatalf("FinishedAt = %v, want %v", run.FinishedAt, now)
 	}
 }
@@ -110,21 +110,21 @@ func TestWorkflowRunFinalize(t *testing.T) {
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	t.Run("all success becomes success", func(t *testing.T) {
 		run := &WorkflowRun{
-			Status: StatusRunning,
-			Jobs:   []JobRun{{Status: StatusSuccess}, {Status: StatusSkipped}},
+			TaskState: TaskState[RunStatus]{Status: StatusRunning},
+			Jobs:      []JobRun{{TaskState: TaskState[RunStatus]{Status: StatusSuccess}}, {TaskState: TaskState[RunStatus]{Status: StatusSkipped}}},
 		}
 		run.Finalize(now, run.Summary())
 		if run.Status != StatusSuccess {
 			t.Fatalf("Status = %v, want %v", run.Status, StatusSuccess)
 		}
-		if run.FinishedAt == nil {
+		if run.FinishedAt.IsZero() {
 			t.Fatal("FinishedAt must be set on success")
 		}
 	})
 	t.Run("any failed becomes failed", func(t *testing.T) {
 		run := &WorkflowRun{
-			Status: StatusRunning,
-			Jobs:   []JobRun{{Status: StatusSuccess}, {Status: StatusFailed}},
+			TaskState: TaskState[RunStatus]{Status: StatusRunning},
+			Jobs:      []JobRun{{TaskState: TaskState[RunStatus]{Status: StatusSuccess}}, {TaskState: TaskState[RunStatus]{Status: StatusFailed}}},
 		}
 		run.Finalize(now, run.Summary())
 		if run.Status != StatusFailed {
@@ -133,8 +133,8 @@ func TestWorkflowRunFinalize(t *testing.T) {
 	})
 	t.Run("blocked with incomplete becomes failed", func(t *testing.T) {
 		run := &WorkflowRun{
-			Status: StatusRunning,
-			Jobs:   []JobRun{{Status: StatusSuccess}, {Status: StatusBlocked}},
+			TaskState: TaskState[RunStatus]{Status: StatusRunning},
+			Jobs:      []JobRun{{TaskState: TaskState[RunStatus]{Status: StatusSuccess}}, {TaskState: TaskState[RunStatus]{Status: StatusBlocked}}},
 		}
 		run.Finalize(now, run.Summary())
 		if run.Status != StatusFailed {
@@ -143,17 +143,17 @@ func TestWorkflowRunFinalize(t *testing.T) {
 	})
 	t.Run("waiting run is not finalized", func(t *testing.T) {
 		wakeAt := time.Date(2026, 9, 1, 13, 0, 0, 0, time.UTC)
-		run := &WorkflowRun{Status: StatusWaiting, WakeAt: &wakeAt}
+		run := &WorkflowRun{TaskState: TaskState[RunStatus]{Status: StatusWaiting}, WakeAt: &wakeAt}
 		run.Finalize(now, run.Summary())
 		if run.Status != StatusWaiting {
 			t.Fatalf("Status = %v, want %v (waiting must not finalize)", run.Status, StatusWaiting)
 		}
-		if run.FinishedAt != nil {
+		if !run.FinishedAt.IsZero() {
 			t.Fatal("FinishedAt must not be set while waiting")
 		}
 	})
 	t.Run("blocked run is not finalized", func(t *testing.T) {
-		run := &WorkflowRun{Status: StatusBlocked, BlockedReason: "cap missing"}
+		run := &WorkflowRun{TaskState: TaskState[RunStatus]{Status: StatusBlocked}, BlockedReason: "cap missing"}
 		run.Finalize(now, run.Summary())
 		if run.Status != StatusBlocked {
 			t.Fatalf("Status = %v, want %v (blocked must not finalize)", run.Status, StatusBlocked)
@@ -161,14 +161,14 @@ func TestWorkflowRunFinalize(t *testing.T) {
 	})
 	t.Run("in-flight jobs prevent finalize", func(t *testing.T) {
 		run := &WorkflowRun{
-			Status: StatusRunning,
-			Jobs:   []JobRun{{Status: StatusSuccess}, {Status: StatusRunning}},
+			TaskState: TaskState[RunStatus]{Status: StatusRunning},
+			Jobs:      []JobRun{{TaskState: TaskState[RunStatus]{Status: StatusSuccess}}, {TaskState: TaskState[RunStatus]{Status: StatusRunning}}},
 		}
 		run.Finalize(now, run.Summary())
 		if run.Status != StatusRunning {
 			t.Fatalf("Status = %v, want %v (in-flight must not finalize)", run.Status, StatusRunning)
 		}
-		if run.FinishedAt != nil {
+		if !run.FinishedAt.IsZero() {
 			t.Fatal("FinishedAt must not be set while jobs in-flight")
 		}
 	})
@@ -178,18 +178,18 @@ func TestWorkflowRunCancel(t *testing.T) {
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	t.Run("cancels run and active jobs", func(t *testing.T) {
 		run := &WorkflowRun{
-			Status: StatusRunning,
+			TaskState: TaskState[RunStatus]{Status: StatusRunning},
 			Jobs: []JobRun{
-				{Status: StatusRunning},
-				{Status: StatusQueued},
-				{Status: StatusSuccess},
+				{TaskState: TaskState[RunStatus]{Status: StatusRunning}},
+				{TaskState: TaskState[RunStatus]{Status: StatusQueued}},
+				{TaskState: TaskState[RunStatus]{Status: StatusSuccess}},
 			},
 		}
 		run.Cancel(now)
 		if run.Status != StatusCancelled {
 			t.Fatalf("Status = %v, want %v", run.Status, StatusCancelled)
 		}
-		if run.FinishedAt == nil || !run.FinishedAt.Equal(now) {
+		if run.FinishedAt.IsZero() || !run.FinishedAt.Equal(now) {
 			t.Fatalf("FinishedAt = %v, want %v", run.FinishedAt, now)
 		}
 		if run.Jobs[0].Status != StatusCancelled {
@@ -203,7 +203,7 @@ func TestWorkflowRunCancel(t *testing.T) {
 		}
 	})
 	t.Run("already terminal run is not re-cancelled", func(t *testing.T) {
-		run := &WorkflowRun{Status: StatusSuccess}
+		run := &WorkflowRun{TaskState: TaskState[RunStatus]{Status: StatusSuccess}}
 		run.Cancel(now)
 		if run.Status != StatusSuccess {
 			t.Fatalf("Status = %v, want %v (terminal must not be re-cancelled)", run.Status, StatusSuccess)

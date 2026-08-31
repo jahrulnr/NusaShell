@@ -84,8 +84,7 @@ func TestAcpDelegationDescription(t *testing.T) {
 // the full result, persisted as an assistant message.
 func TestSubagentResultMessageShape(t *testing.T) {
 	run := &domain.AcpRun{
-		ID:               "run_abc",
-		Status:           domain.AcpRunCompleted,
+		TaskState:        domain.TaskState[domain.AcpRunStatus]{ID: "run_abc", Status: domain.AcpRunCompleted},
 		ParentToolCallID: "call_parent",
 		Transcript: []domain.AcpTranscriptChunk{
 			{Kind: "text", Text: "work done"},
@@ -142,12 +141,17 @@ func TestCompleteSubagentRun(t *testing.T) {
 	app := &App{Conversations: store, Bus: NewBus()}
 
 	run := &domain.AcpRun{
-		ID:               "run_xyz",
-		Status:           domain.AcpRunCompleted,
+		TaskState:        domain.TaskState[domain.AcpRunStatus]{ID: "run_xyz", Status: domain.AcpRunCompleted},
 		ParentToolCallID: "call_parent",
 		Transcript:       []domain.AcpTranscriptChunk{{Kind: "text", Text: "done"}},
 	}
-	app.completeSubagentRun("c1", run.ParentToolCallID, domain.ToolOK, run, "/data/run_xyz.json")
+	turnLock := app.conversationTurnLock("c1")
+	turnLock.Lock()
+	err := app.completeSubagentRunLocked("c1", run.ParentToolCallID, domain.ToolOK, run, "/data/run_xyz.json")
+	turnLock.Unlock()
+	if err != nil {
+		t.Fatalf("completeSubagentRunLocked: %v", err)
+	}
 
 	saved := store.convs["c1"]
 	if len(saved.Messages) != 3 {
@@ -191,12 +195,16 @@ func TestCompleteSubagentRunFailedStatus(t *testing.T) {
 	app := &App{Conversations: store, Bus: NewBus()}
 
 	run := &domain.AcpRun{
-		ID:               "run_fail",
-		Status:           domain.AcpRunFailed,
+		TaskState:        domain.TaskState[domain.AcpRunStatus]{ID: "run_fail", Status: domain.AcpRunFailed, Error: "boom"},
 		ParentToolCallID: "call_parent",
-		Error:            "boom",
 	}
-	app.completeSubagentRun("c1", run.ParentToolCallID, domain.ToolFailed, run, "")
+	turnLock := app.conversationTurnLock("c1")
+	turnLock.Lock()
+	err := app.completeSubagentRunLocked("c1", run.ParentToolCallID, domain.ToolFailed, run, "")
+	turnLock.Unlock()
+	if err != nil {
+		t.Fatalf("completeSubagentRunLocked: %v", err)
+	}
 
 	saved := store.convs["c1"]
 	if saved.Messages[1].ToolCalls[0].Status != domain.ToolFailed {
@@ -225,8 +233,7 @@ func TestCompleteSubagentRunWaitsForActiveTurnMutation(t *testing.T) {
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{Conversations: store, Bus: NewBus()}
 	run := &domain.AcpRun{
-		ID:               "run_done",
-		Status:           domain.AcpRunCompleted,
+		TaskState:        domain.TaskState[domain.AcpRunStatus]{ID: "run_done", Status: domain.AcpRunCompleted},
 		ParentToolCallID: "call_parent",
 		Transcript:       []domain.AcpTranscriptChunk{{Kind: "text", Text: "done"}},
 	}
@@ -235,7 +242,11 @@ func TestCompleteSubagentRunWaitsForActiveTurnMutation(t *testing.T) {
 	turnLock.Lock()
 	completed := make(chan struct{})
 	go func() {
-		app.completeSubagentRun("c1", run.ParentToolCallID, domain.ToolOK, run, "/data/run_done.json")
+		turnLock.Lock()
+		defer turnLock.Unlock()
+		if err := app.completeSubagentRunLocked("c1", run.ParentToolCallID, domain.ToolOK, run, "/data/run_done.json"); err != nil {
+			t.Errorf("completeSubagentRunLocked: %v", err)
+		}
 		close(completed)
 	}()
 
@@ -284,10 +295,9 @@ func TestAcpDoneCallbackDoesNotBlockActiveParentTool(t *testing.T) {
 	_, events, unsubscribe := app.Bus.Subscribe()
 	defer unsubscribe()
 	run := &domain.AcpRun{
-		ID:               "run_done",
+		TaskState:        domain.TaskState[domain.AcpRunStatus]{ID: "run_done", Status: domain.AcpRunCompleted},
 		ConversationID:   "c1",
 		ParentToolCallID: "call_parent",
-		Status:           domain.AcpRunCompleted,
 		Transcript:       []domain.AcpTranscriptChunk{{Kind: "text", Text: "done"}},
 	}
 

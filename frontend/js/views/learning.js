@@ -21,8 +21,7 @@ const state = {
   runningReviews: new Set(), // conversation IDs with in-flight reviews
   reviewEventHandlers: null, // cleanup funcs for event listeners
   learningEventHandlers: null, // cleanup funcs for memory/skill update listeners
-  memoryRefreshTimer: null, // debounce timer for memory.updated refresh
-  skillRefreshTimer: null, // debounce timer for skill.updated refresh
+  graphRefreshTimer: null, // debounce timer coalescing background graph refreshes
 };
 
 export async function initLearning() {
@@ -111,7 +110,7 @@ function initReviewEventListeners() {
     // A review may have promoted/demoted memory or saved skills —
     // refresh the memory & graph panes too.
     loadStats();
-    loadGraph();
+    scheduleGraphRefresh();
     doSearch();
   };
   const onError = (payload) => {
@@ -133,32 +132,36 @@ function initReviewEventListeners() {
 // Real-time memory & skill updates: when a tool or review agent mutates
 // memory or skills, the backend emits memory.updated / skill.updated so
 // the Learning tab can refresh its stats, search results, and graph
-// without polling. A short debounce coalesces bursts (e.g. a review that
-// saves several fragments in quick succession).
+// without polling. A single debounced graph refresh coalesces bursts
+// (e.g. a review that saves several fragments in quick succession, or a
+// review.done landing right after its memory.updated events) so the
+// layout is not restarted repeatedly.
+let graphRefreshTimer = null;
+function scheduleGraphRefresh() {
+  if (graphRefreshTimer) clearTimeout(graphRefreshTimer);
+  graphRefreshTimer = setTimeout(() => {
+    graphRefreshTimer = null;
+    loadGraph();
+  }, 300);
+}
+
 function initLearningUpdateListeners() {
   if (state.learningEventHandlers) return;
   const onMemoryUpdated = () => {
-    if (state.memoryRefreshTimer) clearTimeout(state.memoryRefreshTimer);
-    state.memoryRefreshTimer = setTimeout(() => {
-      state.memoryRefreshTimer = null;
-      loadStats();
-      loadGraph();
-      doSearch();
-    }, 300);
+    loadStats();
+    scheduleGraphRefresh();
+    doSearch();
   };
   const onSkillUpdated = () => {
-    if (state.skillRefreshTimer) clearTimeout(state.skillRefreshTimer);
-    state.skillRefreshTimer = setTimeout(() => {
-      state.skillRefreshTimer = null;
-      loadGraph();
-      doSearch();
-    }, 300);
+    scheduleGraphRefresh();
+    doSearch();
   };
   on('memory.updated', onMemoryUpdated);
   on('skill.updated', onSkillUpdated);
   state.learningEventHandlers = [
     () => off('memory.updated', onMemoryUpdated),
     () => off('skill.updated', onSkillUpdated),
+    () => { if (graphRefreshTimer) clearTimeout(graphRefreshTimer); },
   ];
 }
 
@@ -706,6 +709,27 @@ function confirmDelete(id) {
   });
 }
 
+// Bounded re-layout for graph refreshes. network.stabilize() always
+// completes and fires stabilizationIterationsDone, so the freeze handler in
+// initGraph() applies and the graph ends still. (Re-enabling physics via
+// setOptions({ physics: { enabled: true, ... } }) would restart an UNBOUNDED
+// simulation that never fires that event — the "nodes jitter while idle" bug.)
+export const GRAPH_LAYOUT_ITERATIONS = 80;
+export function relayoutGraph(network) {
+  if (network) network.stabilize(GRAPH_LAYOUT_ITERATIONS);
+}
+
+// Keep unchanged nodes exactly where they are across refreshes: they get
+// their current x/y back plus a temporary layout pin, so the graph stays
+// still while idle and only new nodes are laid out. The freeze handler
+// releases the pins once physics is off.
+export function keepGraphPositions(nodes, prevPositions) {
+  return (nodes || []).map((n) => {
+    const p = prevPositions[n.id];
+    return p ? { ...n, x: p.x, y: p.y, fixed: { x: true, y: true } } : n;
+  });
+}
+
 function initGraph() {
   const container = document.getElementById('learning-graph');
   if (!container) return;
@@ -747,11 +771,11 @@ function initGraph() {
         damping: 0.4,
         avoidOverlap: 0.5,
       },
-      maxVelocity: 50,
+      maxVelocity: 12,
       timestep: 0.5,
       stabilization: {
         enabled: true,
-        iterations: 200,
+        iterations: GRAPH_LAYOUT_ITERATIONS,
         updateInterval: 25,
         onlyDynamicEdges: false,
         fit: true,
@@ -765,14 +789,18 @@ function initGraph() {
     },
   };
   state.network = new Network(container, { nodes: state.nodes, edges: state.edges }, options);
-  // After the initial layout stabilizes, freeze the graph. This prevents
-  // the physics engine from running indefinitely (which causes the
-  // "constant jitter / noise" bug when loadGraph is re-triggered by
-  // WebSocket events like memory.updated or skill.updated). loadGraph
-  // re-enables physics + stabilization before pushing new data, so updates
-  // still lay out and freeze again here.
+  // After a layout stabilizes, freeze the graph. Without this the physics
+  // engine runs indefinitely (the "constant jitter / noise" bug when
+  // loadGraph is re-triggered by WebSocket events like memory.updated or
+  // skill.updated). loadGraph pushes new data then runs a bounded
+  // stabilize(), so every refresh lays out briefly and freezes again here.
+  // Layout pins on kept nodes are released while physics is already off, so
+  // the graph stays exactly where it is.
   state.network.on('stabilizationIterationsDone', () => {
     state.network.setOptions({ physics: false });
+    for (const node of state.nodes.get()) {
+      if (node.fixed) state.nodes.update({ id: node.id, fixed: { x: false, y: false } });
+    }
   });
 }
 
@@ -785,17 +813,10 @@ async function loadGraph() {
     // agent or review turn. Nothing is computed client-side.
     const { nodes, edges } = await rpc('learning.graph');
 
-    // New data is coming: let the physics engine re-lay-out the graph, then
-    // the stabilizationIterationsDone handler freezes it again. Without this
-    // the frozen graph would pile new nodes at the origin.
-    if (state.network) {
-      state.network.setOptions({
-        physics: {
-          enabled: true,
-          stabilization: { enabled: true, iterations: 200, updateInterval: 25, onlyDynamicEdges: false, fit: true },
-        },
-      });
-    }
+    // Keep current positions (pinned for the layout) so unchanged nodes
+    // stay exactly where they are across refreshes; only new nodes are
+    // laid out by the bounded stabilize() below.
+    const prevPositions = state.network ? state.network.getPositions() : {};
 
     // Degree centrality: a node's size grows with how many edges touch
     // it, so well-connected hubs (frequently-relevant memories, used
@@ -812,7 +833,7 @@ async function loadGraph() {
       return Math.round(10 + Math.sqrt(deg) * 3.5);
     };
 
-    const newNodes = (nodes || []).map((n) => {
+    const newNodes = keepGraphPositions((nodes || []).map((n) => {
       const group = n.kind === 'memory' && n.tier === 'primary' ? 'memory-primary' : n.kind;
       return {
         id: n.id,
@@ -821,7 +842,7 @@ async function loadGraph() {
         size: nodeSize(group, degree.get(n.id) || 0),
         title: group === 'memory-primary' ? `Primary memory: ${n.name || n.id}` : (n.name || n.id),
       };
-    });
+    }), prevPositions);
 
     const edgeColors = { related: '#1f6feb', used_with: '#6ee0c4', derived_from: '#c1a6ff' };
     const newEdges = (edges || []).map((e, i) => ({
@@ -843,9 +864,12 @@ async function loadGraph() {
     const memCount = newNodes.filter((n) => n.group === 'memory' || n.group === 'memory-primary').length;
     document.getElementById('learning-stat-memory').textContent =
       `${memCount} memor${memCount === 1 ? 'y' : 'ies'}`;
+    // Bounded re-layout for the new/changed nodes, then the
+    // stabilizationIterationsDone handler freezes the graph again.
     // Auto-fit after data load + render settled. Defer to next frame so
     // the container has its final dimensions (view switch, CSS layout).
     if (state.network && newNodes.length > 0) {
+      relayoutGraph(state.network);
       requestAnimationFrame(() => {
         setTimeout(() => {
           state.network.fit({ animation: { duration: 400 } });

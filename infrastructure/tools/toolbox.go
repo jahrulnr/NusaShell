@@ -60,6 +60,11 @@ type Toolbox struct {
 		WaitAcpRun(ctx context.Context, argsJSON []byte) (string, error)
 		EnabledAcpAgents() []*domain.AcpAgent
 	}
+	// Delegate spawns internal NusaShell background agents (the
+	// `delegate` tool). Optional: nil means the tool is not advertised.
+	Delegate interface {
+		SpawnDelegate(ctx context.Context, argsJSON []byte) (string, error)
+	}
 	Steerer interface {
 		SteerHeadlessTurn(conversationID, text string) error
 	}
@@ -173,6 +178,13 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 	// executes them only through mcp_call with a ref (<plugin-id>:<tool>) —
 	// mcp__<server>__<tool> names are not callable. MCP tools are available
 	// to pipeline workflow steps (capability resolution) and the Plugins UI.
+	if t.Delegate != nil {
+		tools = append(tools, application.ToolInfo{
+			Name:        "delegate",
+			Description: "Delegate a self-contained task to an internal NusaShell background agent: the same engine as this conversation, running headless in a hidden pipeline room with the standard toolbox (no subagent/delegate tools, no permission prompts). It does not receive this conversation's history — pass a compact brief with absolute paths. Always async: returns immediately with a run id; the tool call stays \"running\" until the delegate finishes, then a synthetic `delegate_result` tool call is injected at the next steer-style round boundary (or a new turn if idle) so you process it.",
+			InputSchema: obj("object", props("prompt", str("Self-contained task brief"), "workspace", str("Optional absolute workspace path (defaults to the conversation workspace)")), "prompt"),
+		})
+	}
 	if sw := t.webAnswerSearcher(); sw != nil && sw.CanAnswer() {
 		providers := sw.AvailableAnswerProviders()
 		providerList := strings.Join(providers, ", ")
@@ -702,7 +714,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		id := strings.TrimSpace(args.ID)
 		if id == "" {
-			id = domain.NewID("mcp")
+			id = domain.NewID(domain.IDPrefixMcp)
 		} else if !domain.ValidatePluginID(id) {
 			return "", fmt.Errorf("id %q is not a valid plugin identifier", id)
 		}
@@ -1052,6 +1064,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 	case name == "contract_read":
 		return t.execContractRead(ctx, argsJSON)
 
+	case name == "delegate":
+		if t.Delegate == nil {
+			return "", fmt.Errorf("delegation is not available in this build")
+		}
+		return t.Delegate.SpawnDelegate(ctx, argsJSON)
 	case name == "subagent":
 		if t.Acp == nil {
 			return "", fmt.Errorf("no ACP agents configured")
@@ -1532,7 +1549,7 @@ func (t *Toolbox) execAskQuestion(ctx context.Context, argsJSON []byte) (string,
 	// a composite key from runID + question hash to avoid collisions.
 	callID := application.ToolCallIDFromContext(ctx)
 	if callID == "" {
-		callID = domain.NewID("ask")
+		callID = domain.NewID(domain.IDPrefixAsk)
 	}
 	ch, err := t.AskQuestions.Ask(runID, callID, conversationID, req)
 	if err != nil {

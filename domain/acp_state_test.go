@@ -6,7 +6,7 @@ import (
 )
 
 func TestAcpRunBeginRunning(t *testing.T) {
-	run := &AcpRun{Status: AcpRunStarting}
+	run := &AcpRun{TaskState: TaskState[AcpRunStatus]{Status: AcpRunStarting}}
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	run.BeginRunning(now)
 	if run.Status != AcpRunRunning {
@@ -21,7 +21,7 @@ func TestAcpRunFinish(t *testing.T) {
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	t.Run("completed clears pending permission and stamps EndedAt", func(t *testing.T) {
 		run := &AcpRun{
-			Status:            AcpRunRunning,
+			TaskState:         TaskState[AcpRunStatus]{Status: AcpRunRunning},
 			PendingPermission: &AcpPermissionRequest{ID: "perm1"},
 		}
 		run.Finish(AcpRunCompleted, "", "stop_done", now)
@@ -34,15 +34,15 @@ func TestAcpRunFinish(t *testing.T) {
 		if run.PendingPermission != nil {
 			t.Fatal("PendingPermission must be cleared on finish")
 		}
-		if !run.EndedAt.Equal(now) {
-			t.Fatalf("EndedAt = %v, want %v", run.EndedAt, now)
+		if !run.FinishedAt.Equal(now) {
+			t.Fatalf("FinishedAt = %v, want %v", run.FinishedAt, now)
 		}
 		if !run.UpdatedAt.Equal(now) {
 			t.Fatalf("UpdatedAt = %v, want %v", run.UpdatedAt, now)
 		}
 	})
 	t.Run("failed records error", func(t *testing.T) {
-		run := &AcpRun{Status: AcpRunRunning}
+		run := &AcpRun{TaskState: TaskState[AcpRunStatus]{Status: AcpRunRunning}}
 		run.Finish(AcpRunFailed, "connection lost", "stop_error", now)
 		if run.Status != AcpRunFailed {
 			t.Fatalf("Status = %v, want %v", run.Status, AcpRunFailed)
@@ -52,7 +52,7 @@ func TestAcpRunFinish(t *testing.T) {
 		}
 	})
 	t.Run("cancelled", func(t *testing.T) {
-		run := &AcpRun{Status: AcpRunRunning}
+		run := &AcpRun{TaskState: TaskState[AcpRunStatus]{Status: AcpRunRunning}}
 		run.Finish(AcpRunCancelled, "", "cancelled", now)
 		if run.Status != AcpRunCancelled {
 			t.Fatalf("Status = %v, want %v", run.Status, AcpRunCancelled)
@@ -64,7 +64,7 @@ func TestAcpRunResolvePermission(t *testing.T) {
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	t.Run("waiting permission returns to running", func(t *testing.T) {
 		run := &AcpRun{
-			Status:            AcpRunWaitingPermission,
+			TaskState:         TaskState[AcpRunStatus]{Status: AcpRunWaitingPermission},
 			PendingPermission: &AcpPermissionRequest{ID: "perm1"},
 		}
 		run.ResolvePermission(now)
@@ -80,7 +80,7 @@ func TestAcpRunResolvePermission(t *testing.T) {
 	})
 	t.Run("non-waiting run keeps its status", func(t *testing.T) {
 		run := &AcpRun{
-			Status:            AcpRunRunning,
+			TaskState:         TaskState[AcpRunStatus]{Status: AcpRunRunning},
 			PendingPermission: &AcpPermissionRequest{ID: "perm1"},
 		}
 		run.ResolvePermission(now)

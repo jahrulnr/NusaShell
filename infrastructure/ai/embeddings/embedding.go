@@ -11,27 +11,42 @@ import (
 	"time"
 )
 
+// EmbeddingMaxTokens is the default token cap applied to embedding inputs.
+// Many small and self-hosted embedding models (voyage-3-lite, Ollama models,
+// llama.cpp builds) cap inputs at 512 tokens; providers with a larger
+// documented context pass their real limit via NewEmbedder. Sending more
+// tokens than the model accepts makes the whole batch fail with HTTP 400.
+const EmbeddingMaxTokens = 512
+
+// embeddingCharsPerToken is the conservative chars-per-token ratio used to
+// fit embedding inputs under the token cap without a local tokenizer.
+// Latin text tokenizes at ~3.5-4.5 chars/token, so 3 leaves headroom.
+const embeddingCharsPerToken = 3
+
 // Embedder talks to any OpenAI-compatible /v1/embeddings endpoint.
 // Works with OpenAI Platform, OpenRouter, and other gateways that expose
 // the standard embeddings API. Requires an API key with platform billing.
 type Embedder struct {
-	BaseURL string
-	APIKey  string
-	Model   string
-	Client  *http.Client
-	dim     int
+	BaseURL   string
+	APIKey    string
+	Model     string
+	Client    *http.Client
+	MaxTokens int // per-input token cap; 0 = EmbeddingMaxTokens
+	dim       int
 }
 
 // NewEmbedder creates an OpenAI-compatible embedding provider.
 // baseURL should be the API root (e.g. "https://api.openai.com/v1" or
 // "https://openrouter.ai/api/v1"). model is the embedding model ID
 // (e.g. "text-embedding-3-small" or "openai/text-embedding-3-small").
-func NewEmbedder(baseURL, apiKey, model string) *Embedder {
+// maxTokens caps each input (0 = EmbeddingMaxTokens).
+func NewEmbedder(baseURL, apiKey, model string, maxTokens int) *Embedder {
 	return &Embedder{
-		BaseURL: strings.TrimRight(baseURL, "/"),
-		APIKey:  apiKey,
-		Model:   model,
-		Client:  &http.Client{Timeout: 300 * time.Second},
+		BaseURL:   strings.TrimRight(baseURL, "/"),
+		APIKey:    apiKey,
+		Model:     model,
+		Client:    &http.Client{Timeout: 300 * time.Second},
+		MaxTokens: maxTokens,
 	}
 }
 
@@ -66,7 +81,17 @@ func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32,
 	if len(texts) == 0 {
 		return nil, nil
 	}
-	payload := map[string]any{"model": e.Model, "input": texts}
+	// Fit every input under the model's token cap up front: one oversized
+	// entry fails the whole batch (HTTP 400 "exceeding the model maximum").
+	maxTokens := e.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = EmbeddingMaxTokens
+	}
+	inputs := make([]string, len(texts))
+	for i, t := range texts {
+		inputs[i] = truncateInput(t, maxTokens)
+	}
+	payload := map[string]any{"model": e.Model, "input": inputs}
 	body, _ := json.Marshal(payload)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", e.BaseURL+"/embeddings", bytes.NewReader(body))
@@ -103,4 +128,24 @@ func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32,
 		e.dim = len(out[0])
 	}
 	return out, nil
+}
+
+// truncationMarker signals that an embedding input was cut; it is counted
+// inside the token budget so the sent text never exceeds the cap.
+const truncationMarker = "…[truncated]"
+
+// truncateInput keeps the first maxTokens tokens (estimated at
+// embeddingCharsPerToken chars each) of s and appends an omission marker so
+// callers can tell the input was cut. Rune-safe for non-ASCII content.
+func truncateInput(s string, maxTokens int) string {
+	limit := maxTokens * embeddingCharsPerToken
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	head := limit - len([]rune(truncationMarker))
+	if head < 0 {
+		head = 0
+	}
+	return string(runes[:head]) + truncationMarker
 }

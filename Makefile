@@ -33,7 +33,7 @@ test-frontend:
 
 ## test-frontend-e2e: one cross-layer UI smoke flow against a real Go server.
 test-frontend-e2e:
-	node --test frontend/e2e.test.mjs
+	node --test frontend/tests/e2e.test.mjs
 
 ## race: run race-enabled tests.
 race:

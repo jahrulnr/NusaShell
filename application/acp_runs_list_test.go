@@ -68,7 +68,7 @@ func TestHandleAcpRunsListMergesSettledStorageRecords(t *testing.T) {
 	app := &App{
 		Bus: NewBus(),
 		Acp: &fakeAcpRuntime{runs: []*domain.AcpRun{
-			{ID: "acprun_live", ConversationID: "conv_1", Status: domain.AcpRunRunning, AgentName: "Live Agent"},
+			{TaskState: domain.TaskState[domain.AcpRunStatus]{ID: "acprun_live", Status: domain.AcpRunRunning}, ConversationID: "conv_1", AgentName: "Live Agent"},
 		}},
 		AcpRunStorage: &fakeAcpRunStorage{recs: []domain.AcpRunRecord{
 			{
@@ -103,7 +103,7 @@ func TestHandleAcpRunsListDedupesLiveAndStorage(t *testing.T) {
 	app := &App{
 		Bus: NewBus(),
 		Acp: &fakeAcpRuntime{runs: []*domain.AcpRun{
-			{ID: "acprun_shared", ConversationID: "conv_1", Status: domain.AcpRunRunning},
+			{TaskState: domain.TaskState[domain.AcpRunStatus]{ID: "acprun_shared", Status: domain.AcpRunRunning}, ConversationID: "conv_1"},
 		}},
 		AcpRunStorage: &fakeAcpRunStorage{recs: []domain.AcpRunRecord{
 			{ID: "acprun_shared", ConversationID: "conv_1", Status: domain.AcpRunCompleted},
@@ -127,8 +127,8 @@ func TestHandleAcpRunsListScopesToConversation(t *testing.T) {
 	app := &App{
 		Bus: NewBus(),
 		Acp: &fakeAcpRuntime{runs: []*domain.AcpRun{
-			{ID: "acprun_a", ConversationID: "conv_a", Status: domain.AcpRunRunning},
-			{ID: "acprun_b", ConversationID: "conv_b", Status: domain.AcpRunRunning},
+			{TaskState: domain.TaskState[domain.AcpRunStatus]{ID: "acprun_a", Status: domain.AcpRunRunning}, ConversationID: "conv_a"},
+			{TaskState: domain.TaskState[domain.AcpRunStatus]{ID: "acprun_b", Status: domain.AcpRunRunning}, ConversationID: "conv_b"},
 		}},
 		AcpRunStorage: &fakeAcpRunStorage{recs: []domain.AcpRunRecord{
 			{ID: "acprun_old", ConversationID: "conv_a", Status: domain.AcpRunCompleted},

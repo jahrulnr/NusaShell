@@ -106,7 +106,7 @@ checks use JSDOM:
 
 ```bash
 npm ci
-node --test frontend/*.test.mjs
+node --test frontend/tests/*.test.mjs
 ```
 
 The E2E test starts the real Go server and exercises a representative flow

@@ -39,21 +39,6 @@ func (b *blobStore) put(hash string, data []byte) error {
 	return os.Rename(tmp, final)
 }
 
-func (b *blobStore) get(hash string) ([]byte, error) {
-	if hash == "" {
-		return nil, nil
-	}
-	return os.ReadFile(b.path(hash))
-}
-
-func (b *blobStore) exists(hash string) bool {
-	if hash == "" {
-		return false
-	}
-	_, err := os.Stat(b.path(hash))
-	return err == nil
-}
-
 func sidecarPath(dataDir, conversationID string) (string, error) {
 	if err := safeSegment(conversationID); err != nil {
 		return "", fmt.Errorf("journal: conversation %w", err)

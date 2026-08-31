@@ -163,18 +163,18 @@ func TestModelSupportsVision(t *testing.T) {
 		{ID: "gpt-5.5", Vision: true},
 		{ID: "gpt-4", Vision: false},
 	}}
-	if !modelSupportsVision(p, "gpt-5.5") {
+	if !domain.ModelCapabilitiesOf(p, "gpt-5.5").Vision {
 		t.Error("gpt-5.5 should support vision")
 	}
-	if modelSupportsVision(p, "gpt-4") {
+	if domain.ModelCapabilitiesOf(p, "gpt-4").Vision {
 		t.Error("gpt-4 should NOT support vision")
 	}
 	// Unknown model: default true (backward compat)
-	if !modelSupportsVision(p, "unknown-model") {
+	if !domain.ModelCapabilitiesOf(p, "unknown-model").Vision {
 		t.Error("unknown model should default to vision=true")
 	}
 	// Nil provider: default true
-	if !modelSupportsVision(nil, "any") {
+	if !domain.ModelCapabilitiesOf(nil, "any").Vision {
 		t.Error("nil provider should default to vision=true")
 	}
 }

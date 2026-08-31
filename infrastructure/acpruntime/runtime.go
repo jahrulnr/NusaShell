@@ -385,7 +385,11 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 
 	now := time.Now().UTC()
 	run := &domain.AcpRun{
-		ID:                   domain.NewID("acprun"),
+		TaskState: domain.TaskState[domain.AcpRunStatus]{
+			ID:        domain.NewID(domain.IDPrefixAcpRun),
+			Status:    domain.AcpRunRunning,
+			StartedAt: now,
+		},
 		AgentID:              req.Agent.ID,
 		AgentName:            req.Agent.Name,
 		ConversationID:       req.ConversationID,
@@ -393,13 +397,11 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 		SessionID:            sess.SessionID,
 		Workspace:            workspace,
 		Prompt:               req.Prompt,
-		Status:               domain.AcpRunRunning,
 		CurrentModeID:        modeID,
 		AvailableModes:       req.Agent.CachedModes,
 		CurrentModelID:       currentModel,
 		ModelSelectionStatus: modelStatus,
 		RiskTier:             domain.InferRiskTier(modeID, req.Agent.ModeRiskMappings),
-		StartedAt:            now,
 		UpdatedAt:            now,
 	}
 	lr := &liveRun{

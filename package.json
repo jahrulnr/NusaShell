@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:frontend:e2e": "node --test frontend/e2e.test.mjs"
+    "test:frontend:e2e": "node --test frontend/tests/e2e.test.mjs"
   },
   "devDependencies": {
     "jsdom": "^30.0.1"

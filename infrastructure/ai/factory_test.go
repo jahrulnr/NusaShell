@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/embeddings"
 )
 
 type stubCreds struct {
@@ -105,5 +106,67 @@ func TestNewImageGeneratorFactoryRejectsMessages(t *testing.T) {
 	_, err := f(&domain.Provider{Kind: domain.ProviderMessages, BaseURL: "https://api.anthropic.com"}, "key")
 	if err == nil || !strings.Contains(err.Error(), "no image generation API") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNewEmbedderFactoryPassesModelContextAsTokenCap(t *testing.T) {
+	f := NewEmbedderFactory()
+	p := &domain.Provider{
+		Kind:    domain.ProviderChat,
+		BaseURL: "https://example.test/v1",
+		Models: []domain.Model{
+			{ID: "embed-small", Kind: domain.ModelKindEmbedding, Context: 512},
+			{ID: "chat-model", Kind: domain.ModelKindChat, Context: 128000},
+		},
+	}
+	embed, err := f(p, "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok := embed.(*embeddings.Embedder)
+	if !ok {
+		t.Fatalf("embedder = %T, want *embeddings.Embedder", embed)
+	}
+	if e.MaxTokens != 512 {
+		t.Fatalf("MaxTokens = %d, want the embedding model's Context 512", e.MaxTokens)
+	}
+	if e.Model != "embed-small" {
+		t.Fatalf("model = %q, want first embedding model", e.Model)
+	}
+}
+
+func TestNewEmbedderFactoryFallsBackToDefaultCapWithoutCatalogContext(t *testing.T) {
+	f := NewEmbedderFactory()
+	p := &domain.Provider{
+		Kind:    domain.ProviderChat,
+		BaseURL: "https://example.test/v1",
+		Models:  []domain.Model{{ID: "embed-local", Kind: domain.ModelKindEmbedding}}, // Context 0 = unknown
+	}
+	embed, err := f(p, "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok := embed.(*embeddings.Embedder)
+	if !ok {
+		t.Fatalf("embedder = %T, want *embeddings.Embedder", embed)
+	}
+	if e.MaxTokens != 0 {
+		t.Fatalf("MaxTokens = %d, want 0 (caller falls back to EmbeddingMaxTokens)", e.MaxTokens)
+	}
+}
+
+func TestNewEmbedderFactoryNilWithoutEmbeddingModel(t *testing.T) {
+	f := NewEmbedderFactory()
+	p := &domain.Provider{
+		Kind:    domain.ProviderChat,
+		BaseURL: "https://example.test/v1",
+		Models:  []domain.Model{{ID: "chat-model", Kind: domain.ModelKindChat}},
+	}
+	embed, err := f(p, "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if embed != nil {
+		t.Fatalf("embedder = %#v, want nil for a provider without embedding models", embed)
 	}
 }

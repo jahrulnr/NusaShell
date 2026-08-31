@@ -136,17 +136,3 @@ func (w *chunkWriter) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
-
-func CIEnv(run *domain.WorkflowRun, job domain.JobRun, step domain.StepRun, workspace string) map[string]string {
-	return map[string]string{
-		"NUSASHELL":             "true",
-		"NUSASHELL_CI":          "true",
-		"NUSASHELL_PIPELINE_ID": run.WorkflowID,
-		"NUSASHELL_RUN_ID":      run.ID,
-		"NUSASHELL_JOB_ID":      job.JobID,
-		"NUSASHELL_STEP_ID":     step.StepID,
-		"NUSASHELL_WORKSPACE":   workspace,
-		"NUSASHELL_OS":          runtime.GOOS,
-		"NUSASHELL_ARCH":        runtime.GOARCH,
-	}
-}

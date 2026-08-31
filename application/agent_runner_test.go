@@ -319,10 +319,10 @@ func TestResolveContextWindowModelWinsOverGlobalCap(t *testing.T) {
 	if got := app.resolveContextWindow(provider, "unknown", settings); got != 200_000 {
 		t.Fatalf("unknown model context = %d, want fallback 200000", got)
 	}
-	if got := effectiveContextWindow(1_000_000, 0); got != 1_000_000 {
+	if got := domain.EffectiveContextWindow(1_000_000, 0); got != 1_000_000 {
 		t.Fatalf("uncapped model context = %d, want 1000000", got)
 	}
-	if got := effectiveContextWindow(1_000_000, 200_000); got != 1_000_000 {
+	if got := domain.EffectiveContextWindow(1_000_000, 200_000); got != 1_000_000 {
 		t.Fatalf("catalog model should ignore global cap, got %d", got)
 	}
 }

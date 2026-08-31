@@ -106,8 +106,8 @@ func TestEvalIf(t *testing.T) {
 	env := ConditionEnv{
 		Event: Event{Subject: "urgent: down"},
 		Jobs: map[string]JobRun{
-			"check":  {Status: StatusSuccess, Outputs: map[string]any{"status": "unhealthy"}},
-			"decide": {Status: StatusSuccess, Outputs: map[string]any{"decision": "approve"}},
+			"check":  {TaskState: TaskState[RunStatus]{Status: StatusSuccess}, Outputs: map[string]any{"status": "unhealthy"}},
+			"decide": {TaskState: TaskState[RunStatus]{Status: StatusSuccess}, Outputs: map[string]any{"decision": "approve"}},
 		},
 	}
 	cases := []struct {
@@ -184,10 +184,10 @@ func TestValidationResultDoesNotConflate(t *testing.T) {
 
 func TestRunSummary(t *testing.T) {
 	run := WorkflowRun{Jobs: []JobRun{
-		{Status: StatusSuccess},
-		{Status: StatusFailed},
-		{Status: StatusWaiting},
-		{Status: StatusBlocked},
+		{TaskState: TaskState[RunStatus]{Status: StatusSuccess}},
+		{TaskState: TaskState[RunStatus]{Status: StatusFailed}},
+		{TaskState: TaskState[RunStatus]{Status: StatusWaiting}},
+		{TaskState: TaskState[RunStatus]{Status: StatusBlocked}},
 	}}
 	s := run.Summary()
 	if s.Success != 1 || s.Failed != 1 || s.Waiting != 1 || s.Blocked != 1 {

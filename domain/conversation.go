@@ -474,7 +474,7 @@ func (c *Conversation) Compact(summary, handoverContent string, keepTokenBudget 
 	retained, _ := c.compactionRetention(keepTokenBudget)
 
 	summaryMsg := Message{
-		ID:        NewID("msg"),
+		ID:        NewID(IDPrefixMsg),
 		Role:      RoleUser,
 		Content:   handoverContent,
 		CreatedAt: time.Now().UTC(),

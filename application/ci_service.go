@@ -56,7 +56,7 @@ func (a *Automation) ValidateYAML(raw []byte) (domain.ValidationResult, *domain.
 
 func (a *Automation) SaveWorkflow(ctx context.Context, w *domain.WorkflowDefinition) (*domain.WorkflowDefinition, domain.ValidationResult, error) {
 	if w.ID == "" {
-		w.ID = domain.NewID("wf")
+		w.ID = domain.NewID(domain.IDPrefixWF)
 	}
 	if w.CreatedAt.IsZero() {
 		w.CreatedAt = a.now().UTC()
@@ -170,13 +170,13 @@ func runDTO(r *domain.WorkflowRun) contracts.CIRunDTO {
 		steps := make([]contracts.CIStepDTO, 0, len(j.Steps))
 		for _, s := range j.Steps {
 			st := contracts.CIStepDTO{ID: s.ID, Name: s.Name, Status: string(s.Status), ExitCode: s.ExitCode, Error: s.Error, Output: s.Output}
-			if s.StartedAt != nil {
+			if !s.StartedAt.IsZero() {
 				st.StartedAt = s.StartedAt.Format(time.RFC3339)
 			}
 			steps = append(steps, st)
 		}
-		jd := contracts.CIJobDTO{ID: j.JobID, Name: j.Name, Status: string(j.Status), ExitCode: j.ExitCode, Error: j.FailureReason, Steps: steps}
-		if j.StartedAt != nil {
+		jd := contracts.CIJobDTO{ID: j.JobID, Name: j.Name, Status: string(j.Status), ExitCode: j.ExitCode, Error: j.Error, Steps: steps}
+		if !j.StartedAt.IsZero() {
 			jd.StartedAt = j.StartedAt.Format(time.RFC3339)
 		}
 		jobs = append(jobs, jd)
@@ -195,7 +195,7 @@ func runDTO(r *domain.WorkflowRun) contracts.CIRunDTO {
 	if r.WakeAt != nil {
 		dto.WakeAt = r.WakeAt.Format(time.RFC3339)
 	}
-	if r.FinishedAt != nil {
+	if !r.FinishedAt.IsZero() {
 		dto.FinishedAt = r.FinishedAt.Format(time.RFC3339)
 	}
 	return dto

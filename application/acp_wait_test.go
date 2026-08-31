@@ -48,12 +48,12 @@ func (f *waitAcpStorage) Path(string, string) string {
 
 func TestWaitAcpRunReturnsPersistedPathAndLastTurnOnly(t *testing.T) {
 	run := &domain.AcpRun{
-		ID:             "acprun_1",
+		TaskState:      domain.TaskState[domain.AcpRunStatus]{ID: "acprun_1", Status: domain.AcpRunCompleted},
 		AgentID:        "acp_1",
 		ConversationID: "conv_1",
 		Workspace:      "/tmp/project",
 		Prompt:         "private parent prompt that must not be repeated",
-		Status:         domain.AcpRunCompleted,
+
 		Transcript: []domain.AcpTranscriptChunk{
 			{Kind: "thought", Text: "long private reasoning"},
 			{Kind: "text", Text: "Intermediate progress."},
@@ -109,9 +109,8 @@ func TestWaitAcpRunReturnsPersistedPathAndLastTurnOnly(t *testing.T) {
 
 func TestWaitAcpRunDoesNotPersistRunningTimeoutSnapshot(t *testing.T) {
 	run := &domain.AcpRun{
-		ID:             "acprun_live",
+		TaskState:      domain.TaskState[domain.AcpRunStatus]{ID: "acprun_live", Status: domain.AcpRunRunning},
 		ConversationID: "conv_1",
-		Status:         domain.AcpRunRunning,
 		Transcript:     []domain.AcpTranscriptChunk{{Kind: "text", Text: "Still working."}},
 	}
 	storage := &waitAcpStorage{path: "/data/conversations/conv_1.acp/acprun_live.json"}
@@ -134,9 +133,8 @@ func TestWaitAcpRunDoesNotPersistRunningTimeoutSnapshot(t *testing.T) {
 
 func TestWaitAcpRunReturnsParentCancellation(t *testing.T) {
 	run := &domain.AcpRun{
-		ID:             "acprun_live",
+		TaskState:      domain.TaskState[domain.AcpRunStatus]{ID: "acprun_live", Status: domain.AcpRunRunning},
 		ConversationID: "conv_1",
-		Status:         domain.AcpRunRunning,
 	}
 	app := &App{
 		Acp: &waitAcpRuntime{run: run, waitErr: context.Canceled},

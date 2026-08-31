@@ -14,7 +14,7 @@ func TestBlobStore_roundtrip(t *testing.T) {
 	if err := bs.put(hash, data); err != nil {
 		t.Fatal(err)
 	}
-	got, err := bs.get(hash)
+	got, err := os.ReadFile(bs.path(hash))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -168,7 +168,7 @@ const (
 
 // AcpRun is one spawned subagent session. It is in-memory only.
 type AcpRun struct {
-	ID                   string
+	TaskState[AcpRunStatus]
 	AgentID              string
 	AgentName            string
 	ConversationID       string
@@ -176,20 +176,16 @@ type AcpRun struct {
 	SessionID            string
 	Workspace            string
 	Prompt               string
-	Status               AcpRunStatus
 	CurrentModeID        string
 	AvailableModes       []AcpMode
 	CurrentModelID       string
 	ModelSelectionStatus ModelSelectionStatus
 	RiskTier             RiskTier
 	StopReason           string
-	Error                string
 	Transcript           []AcpTranscriptChunk
 	PendingPermission    *AcpPermissionRequest
 	QueuedSteer          string
-	StartedAt            time.Time
 	UpdatedAt            time.Time
-	EndedAt              time.Time
 }
 
 // AcpTranscriptChunk is one live update from session/update, or a parent
@@ -343,16 +339,6 @@ func DecideAcpPermission(tier RiskTier, toolKind string, paths []string, workspa
 	return PermissionAutoDecision{Auto: false, Reason: "prompt_user"}
 }
 
-// SamplePermissionPaths keeps a compact sample for the UI.
-func SamplePermissionPaths(paths []string) []string {
-	if len(paths) <= MaxAcpPermissionPaths {
-		return append([]string(nil), paths...)
-	}
-	out := append([]string(nil), paths[:MaxAcpPermissionPaths]...)
-	out = append(out, "…")
-	return out
-}
-
 // AppendTranscript adds a chunk and drops from the front when over the cap.
 // Consecutive text and thought chunks are merged into a single chunk so
 // streaming agent_message_chunk updates (often one char/token each) do not
@@ -490,7 +476,7 @@ func (r *AcpRun) BeginRunning(now time.Time) {
 }
 
 // Finish transitions the run to a terminal status, records error and stop
-// reason, clears any pending permission, and stamps EndedAt + UpdatedAt.
+// reason, clears any pending permission, and stamps FinishedAt + UpdatedAt.
 func (r *AcpRun) Finish(status AcpRunStatus, errMsg, stop string, now time.Time) {
 	if r == nil {
 		return
@@ -499,7 +485,7 @@ func (r *AcpRun) Finish(status AcpRunStatus, errMsg, stop string, now time.Time)
 	r.Error = errMsg
 	r.StopReason = stop
 	r.PendingPermission = nil
-	r.EndedAt = now
+	r.FinishedAt = now
 	r.UpdatedAt = now
 }
 

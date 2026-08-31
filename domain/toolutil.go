@@ -133,24 +133,14 @@ func DocumentAttachmentContent(attachment Attachment) string {
 	return "[Attached document: " + attachment.Name + " (" + attachment.MediaType + ")]"
 }
 
-// DataURLBase64 extracts the base64 payload from a data: URL.
+// DataURLBase64 extracts the base64 payload from a data: URL. Used by the
+// ported provider tree (infrastructure/ai/internal) to render attachments.
 func DataURLBase64(dataURL string) string {
 	_, data, ok := strings.Cut(dataURL, ",")
 	if !ok {
 		return ""
 	}
 	return data
-}
-
-// IsOpenAIDirectURL reports whether baseURL points to a direct OpenAI host
-// (api.openai.com), not an aggregator.
-func IsOpenAIDirectURL(baseURL string) bool {
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return false
-	}
-	host := strings.ToLower(u.Hostname())
-	return host == "api.openai.com" || strings.HasSuffix(host, ".api.openai.com")
 }
 
 // isOpenRouterBaseURL reports whether baseURL points at a genuine OpenRouter

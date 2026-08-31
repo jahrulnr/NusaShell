@@ -143,15 +143,18 @@ type App struct {
 	conversationTurnsMu sync.Mutex
 	conversationTurns   map[string]*sync.Mutex
 
-	// pendingSubagents tracks active (not-yet-completed) ACP subagent run
-	// IDs per conversation. Used to implement HasBackgroundJobs: while any
-	// subagent is running, the parent agent's auto-continue chain pauses
-	// with reason "awaiting-background-jobs" instead of ending the turn.
-	// When a subagent completes, the result is injected at the next
-	// steer-style turn boundary (or a new turn if the parent is idle)
-	// and then removed from this map.
-	pendingSubagentsMu sync.Mutex
-	pendingSubagents   map[string]map[string]bool // conversationID → set of runIDs
+	// pendingRuns tracks active (not-yet-completed) background run IDs
+	// per conversation — the shared push-completion registry. Today the
+	// only producer is ACP subagents; future async tools (delegated
+	// agents, long-running jobs) queue their completion here too. Used to
+	// implement HasBackgroundJobs: while any run is pending, the parent
+	// agent's auto-continue chain pauses with reason
+	// "awaiting-background-jobs" instead of ending the turn. When a run
+	// completes, its result is injected at the next steer-style turn
+	// boundary (or a new turn if the parent is idle) and then removed
+	// from this map.
+	pendingRunsMu sync.Mutex
+	pendingRuns   map[string]map[string]bool // conversationID → set of runIDs
 
 	// rlMu guards per-provider rate-limit windows (see rate_limit.go).
 	// MarkProviderRateLimited records when a 429 window clears so client
@@ -164,29 +167,29 @@ type App struct {
 	Logger *slog.Logger
 }
 
-// trackPendingSubagent records that a subagent run is active for a
-// conversation. Called when the subagent tool spawns a run.
-func (a *App) trackPendingSubagent(conversationID, runID string) {
+// trackPendingRun records that a background run is active for a
+// conversation. Called when an async tool spawns a run (subagent today).
+func (a *App) trackPendingRun(conversationID, runID string) {
 	if conversationID == "" || runID == "" {
 		return
 	}
-	a.pendingSubagentsMu.Lock()
-	defer a.pendingSubagentsMu.Unlock()
-	if a.pendingSubagents == nil {
-		a.pendingSubagents = map[string]map[string]bool{}
+	a.pendingRunsMu.Lock()
+	defer a.pendingRunsMu.Unlock()
+	if a.pendingRuns == nil {
+		a.pendingRuns = map[string]map[string]bool{}
 	}
-	if a.pendingSubagents[conversationID] == nil {
-		a.pendingSubagents[conversationID] = map[string]bool{}
+	if a.pendingRuns[conversationID] == nil {
+		a.pendingRuns[conversationID] = map[string]bool{}
 	}
-	a.pendingSubagents[conversationID][runID] = true
+	a.pendingRuns[conversationID][runID] = true
 }
 
-// untrackPendingSubagent removes a completed subagent run. Returns true
+// untrackPendingRun removes a completed subagent run. Returns true
 // if the run was found and removed, false if it was not tracked.
-func (a *App) untrackPendingSubagent(conversationID, runID string) bool {
-	a.pendingSubagentsMu.Lock()
-	defer a.pendingSubagentsMu.Unlock()
-	set := a.pendingSubagents[conversationID]
+func (a *App) untrackPendingRun(conversationID, runID string) bool {
+	a.pendingRunsMu.Lock()
+	defer a.pendingRunsMu.Unlock()
+	set := a.pendingRuns[conversationID]
 	if set == nil {
 		return false
 	}
@@ -195,18 +198,18 @@ func (a *App) untrackPendingSubagent(conversationID, runID string) bool {
 	}
 	delete(set, runID)
 	if len(set) == 0 {
-		delete(a.pendingSubagents, conversationID)
+		delete(a.pendingRuns, conversationID)
 	}
 	return true
 }
 
-// hasPendingSubagents reports whether any subagent runs are still active
+// hasPendingRuns reports whether any subagent runs are still active
 // for the given conversation. Used by the auto-continue policy to decide
 // whether to pause (awaiting-background-jobs) or proceed.
-func (a *App) hasPendingSubagents(conversationID string) bool {
-	a.pendingSubagentsMu.Lock()
-	defer a.pendingSubagentsMu.Unlock()
-	return len(a.pendingSubagents[conversationID]) > 0
+func (a *App) hasPendingRuns(conversationID string) bool {
+	a.pendingRunsMu.Lock()
+	defer a.pendingRunsMu.Unlock()
+	return len(a.pendingRuns[conversationID]) > 0
 }
 
 // rootMutationLock returns a mutex serializing mutating tool calls against
@@ -325,6 +328,10 @@ type TurnRun struct {
 	// ACP subagent tools are filtered from the tool set so permission
 	// prompts never stall a headless run.
 	Headless bool
+	// ToolKind overrides the ToolFactory agent kind for this run (empty =
+	// default by Headless: conversation vs automation). Internal delegates
+	// set AgentDelegate so the delegate tool itself is not advertised.
+	ToolKind AgentKind
 	// RiskTierCap is the maximum ACP RiskTier that may be promoted to
 	// during a headless turn. Derived from the workflow TrustLevel via
 	// domain.TrustLevelToRiskTierCap. Empty means no cap (interactive turns).
@@ -338,8 +345,8 @@ type TurnRun struct {
 	steerMu     sync.Mutex
 	steerQueued *SteerEntry
 
-	subagentDoneMu sync.Mutex
-	subagentDone   []pendingSubagentDone
+	runDoneMu sync.Mutex
+	runDone   []pendingRunDone
 
 	// learningNodes records memory/skill IDs observed by successful tools in
 	// this turn. Tool calls may run concurrently, so access is synchronized;
@@ -348,12 +355,14 @@ type TurnRun struct {
 	learningNodes   map[string]struct{}
 }
 
-// pendingSubagentDone is a finished ACP run waiting to be injected into the
-// parent turn at the next steer-style tool-round boundary.
-type pendingSubagentDone struct {
-	Run        *domain.AcpRun
-	OutputPath string
-	Status     domain.ToolCallStatus
+// pendingRunDone is a finished background run waiting to be injected
+// into the parent turn at the next steer-style tool-round boundary.
+// Complete delivers the result into the parent conversation (patch the
+// original tool call + inject the synthetic result message); producers
+// are subagents today, delegates tomorrow.
+type pendingRunDone struct {
+	RunID    string
+	Complete func(conversationID string) error
 }
 
 // SteerEntry is a user message queued for injection at the next tool round
@@ -447,43 +456,43 @@ func (r *TurnRun) requeueSteer(entry *SteerEntry) bool {
 	return true
 }
 
-func (r *TurnRun) queueSubagentDone(entry pendingSubagentDone) {
-	if r == nil || entry.Run == nil {
+func (r *TurnRun) queueRunDone(entry pendingRunDone) {
+	if r == nil || entry.Complete == nil {
 		return
 	}
-	r.subagentDoneMu.Lock()
-	defer r.subagentDoneMu.Unlock()
-	r.subagentDone = append(r.subagentDone, entry)
+	r.runDoneMu.Lock()
+	defer r.runDoneMu.Unlock()
+	r.runDone = append(r.runDone, entry)
 }
 
-func (r *TurnRun) drainSubagentDone() []pendingSubagentDone {
+func (r *TurnRun) drainRunDone() []pendingRunDone {
 	if r == nil {
 		return nil
 	}
-	r.subagentDoneMu.Lock()
-	defer r.subagentDoneMu.Unlock()
-	out := r.subagentDone
-	r.subagentDone = nil
+	r.runDoneMu.Lock()
+	defer r.runDoneMu.Unlock()
+	out := r.runDone
+	r.runDone = nil
 	return out
 }
 
-func (r *TurnRun) requeueSubagentDone(entries []pendingSubagentDone) {
+func (r *TurnRun) requeueRunDone(entries []pendingRunDone) {
 	if r == nil || len(entries) == 0 {
 		return
 	}
-	r.subagentDoneMu.Lock()
-	defer r.subagentDoneMu.Unlock()
-	r.subagentDone = append(entries, r.subagentDone...)
+	r.runDoneMu.Lock()
+	defer r.runDoneMu.Unlock()
+	r.runDone = append(entries, r.runDone...)
 }
 
 // newSteerEntry builds a queued steer with a persistable user message.
 func newSteerEntry(text string, attachments []domain.Attachment) *SteerEntry {
 	return &SteerEntry{
-		ID:     domain.NewID("steer"),
+		ID:     domain.NewID(domain.IDPrefixSteer),
 		Text:   text,
 		Status: "queued",
 		Message: domain.Message{
-			ID:          domain.NewID("msg"),
+			ID:          domain.NewID(domain.IDPrefixMsg),
 			Role:        domain.RoleUser,
 			Content:     text,
 			Attachments: attachments,
@@ -609,7 +618,7 @@ func NewApp(deps Deps) *App {
 		runs:                        map[string]*TurnRun{},
 		turnsSinceReview:            map[string]int{},
 		toolCallsSinceReview:        map[string]int{},
-		pendingSubagents:            map[string]map[string]bool{},
+		pendingRuns:                 map[string]map[string]bool{},
 		learnedParams:               learnedparams.New(deps.LearnedParams),
 		modelOverrides:              modeloverrides.New(deps.ModelOverrides),
 	}
@@ -1034,7 +1043,7 @@ func (a *App) Close() {
 
 func (a *App) log(level, source, format string, args ...any) {
 	e := &domain.LogEntry{
-		ID:      domain.NewID("log"),
+		ID:      domain.NewID(domain.IDPrefixLog),
 		Time:    time.Now().UTC(),
 		Level:   level,
 		Source:  source,

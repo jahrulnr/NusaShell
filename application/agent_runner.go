@@ -71,7 +71,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 
 	now := time.Now().UTC()
 	userMsg := domain.Message{
-		ID:          domain.NewID("msg"),
+		ID:          domain.NewID(domain.IDPrefixMsg),
 		Role:        domain.RoleUser,
 		Content:     text,
 		Attachments: attachments,
@@ -79,7 +79,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 		Status:      domain.StatusDone,
 	}
 	asstMsg := domain.Message{
-		ID:         domain.NewID("msg"),
+		ID:         domain.NewID(domain.IDPrefixMsg),
 		Role:       domain.RoleAssistant,
 		CreatedAt:  now,
 		ProviderID: provider.ID,
@@ -98,7 +98,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	// is not killed when the HTTP response is sent. The turn is cancelled
 	// explicitly via handleTurnsStop or server shutdown.
 	turnCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	run := &TurnRun{ID: domain.NewID("run"), ConversationID: c.ID, MessageID: asstMsg.ID, Ctx: turnCtx, Cancel: cancel, ProviderID: provider.ID, Workspace: c.Workspace}
+	run := &TurnRun{ID: domain.NewID(domain.IDPrefixRun), ConversationID: c.ID, MessageID: asstMsg.ID, Ctx: turnCtx, Cancel: cancel, ProviderID: provider.ID, Workspace: c.Workspace}
 	a.runsMu.Lock()
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
@@ -163,7 +163,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 		failed.Status = domain.StatusDone
 		failed.Error = ""
 	}
-	next := domain.Message{ID: domain.NewID("msg"), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC(), ProviderID: provider.ID}
+	next := domain.Message{ID: domain.NewID(domain.IDPrefixMsg), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC(), ProviderID: provider.ID}
 	if err := repo.Add(domain.RoleAssistant, next); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -176,7 +176,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	}
 
 	turnCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	run := &TurnRun{ID: domain.NewID("run"), ConversationID: c.ID, MessageID: targetMsgID, Ctx: turnCtx, Cancel: cancel, ProviderID: provider.ID, Workspace: c.Workspace}
+	run := &TurnRun{ID: domain.NewID(domain.IDPrefixRun), ConversationID: c.ID, MessageID: targetMsgID, Ctx: turnCtx, Cancel: cancel, ProviderID: provider.ID, Workspace: c.Workspace}
 	a.runsMu.Lock()
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
@@ -304,7 +304,7 @@ func (a *App) workspaceSwitchNotice(from, to string) domain.Message {
 	}}
 	if slot := a.readWorkspaceAgentsMD(to); slot.content != "" {
 		calls = append(calls, domain.ToolCall{
-			ID:     domain.NewID("call"),
+			ID:     domain.NewID(domain.IDPrefixCall),
 			Name:   slot.name,
 			Args:   slot.args,
 			Status: domain.ToolOK,
@@ -312,7 +312,7 @@ func (a *App) workspaceSwitchNotice(from, to string) domain.Message {
 		})
 	}
 	return domain.Message{
-		ID:        domain.NewID("msg"),
+		ID:        domain.NewID(domain.IDPrefixMsg),
 		Role:      domain.RoleAssistant,
 		CreatedAt: time.Now().UTC(),
 		Status:    domain.StatusDone,
@@ -336,7 +336,7 @@ func (a *App) readWorkspaceAgentsMD(ws string) hydrationSlot {
 // turns (auto-continue), and the UI renders it as a normal tool card.
 func (a *App) restartAnnouncement() domain.Message {
 	return domain.Message{
-		ID:        domain.NewID("msg"),
+		ID:        domain.NewID(domain.IDPrefixMsg),
 		Role:      domain.RoleAssistant,
 		CreatedAt: time.Now().UTC(),
 		Status:    domain.StatusDone,
@@ -356,7 +356,7 @@ func (a *App) restartAnnouncement() domain.Message {
 // self-describing the chain state (rounds used, open todos).
 func (a *App) autoContinueAnnouncement(decision domain.AutoContinueDecision) domain.Message {
 	return domain.Message{
-		ID:        domain.NewID("msg"),
+		ID:        domain.NewID(domain.IDPrefixMsg),
 		Role:      domain.RoleAssistant,
 		CreatedAt: time.Now().UTC(),
 		Status:    domain.StatusDone,
@@ -634,7 +634,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		defer func() {
 			turnLock.Unlock()
 			if flushed {
-				a.triggerSubagentCompletionTurn(convID)
+				a.triggerBackgroundCompletionTurn(convID)
 			}
 		}()
 		run.Cancel()
@@ -644,11 +644,11 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 			a.AskQuestions.RejectRun(run.ID, "Agent turn ended")
 		}
 		a.runsMu.Lock()
-		leftovers := run.drainSubagentDone()
+		leftovers := run.drainRunDone()
 		delete(a.runs, run.ID)
 		a.runsMu.Unlock()
 		if len(leftovers) > 0 {
-			if _, err := a.applySubagentDoneList(convID, leftovers); err != nil {
+			if _, err := a.applyRunDoneList(convID, leftovers); err != nil {
 				a.log("error", "acp", "flush queued subagent results for %s: %v", convID, err)
 			} else {
 				flushed = true
@@ -737,275 +737,24 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	if !caps.Video && settings.VideoProviderID != "" && settings.VideoModelID != "" {
 		conversation = a.enrichWithVideoDescriptions(run.Ctx, conversation, asstMsgID, settings)
 	}
-	tools := append(a.Toolbox.ListTools(), FilterDispatcherToolInfos(run.Workspace)...)
-	toolDefs := make([]ToolDef, 0, len(tools))
-	for _, tool := range tools {
-		toolDefs = append(toolDefs, ToolDef(tool))
-	}
-	if run.Headless {
-		toolDefs = filterACPToolDefs(toolDefs)
-	}
+	toolDefs := a.turnToolDefs(run)
 	maxTokens := resolveMaxOutput(provider, model, settings)
 	promptCache := buildPromptCachePolicy(settings, provider, model, run.ConversationID, promptCachePrefixForRun(run))
 
-	var totalUsage ChatUsage
-	// lastUsage holds the most recent round's provider usage. Its
-	// ContextTokens() is the authoritative context fill for the whole turn
-	// (the final request re-sends the full history), unlike totalUsage which
-	// sums per-round tokens for the ↑/↓ display tags.
-	var lastUsage ChatUsage
-	currentMsgID := asstMsgID
-	round := 0
-	toolRounds := 0
-	continuation := initialContinuation
-	continuedPartialStream := initialContinuation
-	// Round-stream bookkeeping: the previous round's stream is sealed when
-	// the next round starts, carrying the next-round reference so SSE
-	// consumers can chain to the following stream.
-	var prevMsgID, prevState string
-	prevRound := 0
-	// Safety net for context overflow. Unlike a bool, a counter lets the
-	// loop retry emergency compaction a bounded number of times in one
-	// turn, so a compaction that fails to shrink the transcript below the
-	// window does not permanently lock this turn out of retrying. Reset
-	// per turn (this function is the per-turn entry).
-	compactionAttempts := 0
-	repeatedGuard := &repeatedToolGuard{limit: settings.RepeatedToolLimit}
-	for {
-		round++
-		toolsForRound := toolDefs
-		if toolRounds >= settings.MaxToolRounds {
-			// One final provider response after the last tool result lets the
-			// model answer the user without being able to start another tool
-			// round.
-			toolsForRound = nil
+	// The round loop (stream → persist → execute tools → drain at the
+	// boundary → repeat) is the AgentEngine with the AgentConversation
+	// rule set (conversation_agent_rules.go): proactive/emergency
+	// compaction, partial-stream continuation, steer/subagent drains,
+	// repeated-tool guard, and usage accounting all live in the rules.
+	pr := a.newConversationRules(run, adapter, conversation, settings, provider, model, effort, asstMsgID, caps, toolDefs, maxTokens, promptCache, initialContinuation)
+	if _, runErr := (&AgentEngine{}).Run(run.Ctx, pr.rules(), 0); runErr != nil {
+		if !pr.turnEnded {
+			a.failTurn(run, pr.messageID(), runErr)
 		}
-		// Pre-API proactive compaction check (mirrors Hermes pre-API pressure
-		// check). Between rounds, tool results grow the context. Without this
-		// check, context can exceed the window mid-turn and only the emergency
-		// compaction (reactive, after a 400 overflow) would fire — too late,
-		// too lossy, and the agent's mid-thought work is lost. This check fires
-		// proactively before each API call (round > 1; round 1 is covered by
-		// initializeTurn), so compaction happens while context is still
-		// manageable. Shares the compactionAttempts budget with emergency
-		// compaction so the combined per-turn backstop is bounded.
-		if settings.CompactionEnabled && round > 1 && compactionAttempts < 3 {
-			cw := a.resolveContextWindow(provider, model, settings)
-			trigger := compactionTriggerTokens(cw, resolveMaxOutput(provider, model, settings), settings)
-			if est := conversation.EstimateTokens(); est > trigger {
-				compactionAttempts++
-				a.log("info", "agent", "mid-turn compaction for %s round %d: est=%d trigger=%d window=%d",
-					run.ID, round, est, trigger, cw)
-				compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, adapter, model, cw, settings)
-				a.emitCompactionStarted(run, conversation.ID)
-				summary, compErr := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings)
-				if compErr == nil {
-					a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{RunID: run.ID, ConversationID: conversation.ID, Summary: summary})
-					refreshed, getErr := a.Conversations.Get(run.ConversationID)
-					if getErr != nil {
-						a.failTurn(run, currentMsgID, getErr)
-						return false, ""
-					}
-					conversation = refreshed
-					postEst := conversation.EstimateTokens()
-					a.log("info", "agent", "mid-turn compaction done for %s round %d: before=%d after=%d (msgs=%d)",
-						run.ID, round, est, postEst, len(conversation.Messages))
-					// persistCompactedConversation already rebuilt the hydration
-					// checkpoint in the same Save as Compact, so the re-fetched
-					// conversation carries it. No re-arm flag; the next round
-					// reads the frozen transcript.
-				} else {
-					a.log("warn", "agent", "mid-turn compaction failed for %s round %d: %v", run.ID, round, compErr)
-					a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: run.ID, ConversationID: conversation.ID, Error: compErr.Error()})
-					// Don't fail the turn — let the stream attempt proceed.
-					// If it overflows, emergency compaction is the fallback.
-				}
-			}
-		}
-		// Seal the previous round's stream now that the next round starts.
-		// Consumers get the terminal round.done frame with the next-round
-		// reference, so they can chain to the following stream. Partial
-		// continuation rounds (provider error mid-stream) seal as "partial";
-		// the persisted first half continues in the new message.
-		if prevMsgID != "" && prevMsgID != currentMsgID {
-			a.sealRound(run, prevMsgID, prevRound, prevState, &contracts.RoundRef{RunID: run.ID, MessageID: currentMsgID, Round: round}, nil, "")
-		}
-		prevMsgID, prevRound, prevState = currentMsgID, round, "done"
-		a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
-			RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Round: round,
-		})
-		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, promptCache, caps, round)
-		continuation = false
-		totalUsage = mergeUsage(totalUsage, roundResult.Response.Usage)
-		if roundResult.Response.Usage.ContextTokens() > 0 {
-			lastUsage = roundResult.Response.Usage
-		}
-		if streamErr != nil {
-			if run.Ctx.Err() != nil {
-				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, lastUsage.ContextTokens(), model)
-				return false, ""
-			}
-			// Capture the raw error before decoration: decorateRateLimitError
-			// replaces an HTTP 429 with a friendly message that drops the
-			// UpstreamError type, which the overflow/TPM classifiers below need.
-			rawStreamErr := streamErr
-			streamErr = a.decorateRateLimitError(provider.ID, streamErr)
-			if !continuedPartialStream && isRetryableProviderError(streamErr) && len(roundResult.Response.ToolCalls) == 0 && (visibleText(roundResult.Content) != "" || visibleText(roundResult.Reasoning) != "") {
-				// A partial stream must never carry an unconfirmed tool call into the next
-				// continuation request. Tools run only after a fully completed round.
-				roundResult.Response.ToolCalls = nil
-				err = a.persistTurnRound(run.ConversationID, currentMsgID, model, roundResult)
-				if err != nil {
-					a.failTurn(run, currentMsgID, err)
-					return false, ""
-				}
-				a.log("warn", "ai", "continuing partial provider stream for turn %s", run.ID)
-				conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)
-				if err != nil {
-					a.failTurn(run, currentMsgID, err)
-					return false, ""
-				}
-				run.setMessageID(currentMsgID)
-				continuation = true
-				continuedPartialStream = true
-				// This replaces the interrupted provider attempt; it is not an
-				// additional tool round and must not reduce the user's tool budget.
-				// The interrupted round's stream is sealed as "partial" when the
-				// next round starts, so SSE consumers know the text continues
-				// in the next round instead of ending mid-word.
-				prevState = "partial"
-				round--
-				continue
-			} else if compactionAttempts < 3 && (isContextOverflowError(rawStreamErr) || isTPMOverflowError(rawStreamErr)) {
-				// Emergency compaction safety net: the request is too large for
-				// the provider — either it overflowed the model's context window
-				// (input + max_output > window) or it structurally exceeds the
-				// tokens-per-minute budget (one request needs more tokens than the
-				// whole per-minute limit). Both can happen when the local estimate
-				// is inaccurate or compaction was disabled. Force compaction once,
-				// then retry the round.
-				cw := a.resolveContextWindow(provider, model, settings)
-				trigger := compactionTriggerTokens(cw, resolveMaxOutput(provider, model, settings), settings)
-				preEmg := conversation.EstimateTokens()
-				if !shouldEmergencyCompact(rawStreamErr, preEmg, trigger) {
-					a.log("warn", "agent", "overflow-like 400 for turn %s but est=%d <= trigger=%d; skipping emergency compaction", run.ID, preEmg, trigger)
-					a.failStreamTurn(run, currentMsgID, model, roundResult, streamErr)
-					return false, ""
-				}
-				compactionAttempts++
-				a.log("warn", "agent", "request too large for turn %s (est=%d trigger=%d), forcing emergency compaction", run.ID, preEmg, trigger)
-				compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, adapter, model, cw, settings)
-				a.emitCompactionStarted(run, conversation.ID)
-				summary, compErr := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings)
-				if compErr == nil {
-					a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{RunID: run.ID, ConversationID: conversation.ID, Summary: summary})
-					refreshed, getErr := a.Conversations.Get(run.ConversationID)
-					if getErr != nil {
-						a.failStreamTurn(run, currentMsgID, model, roundResult, getErr)
-						return false, ""
-					}
-					conversation = refreshed
-					postEmg := conversation.EstimateTokens()
-					a.log("info", "agent", "emergency compaction done for %s: before=%d after=%d (msgs=%d)",
-						conversation.ID, preEmg, postEmg, len(conversation.Messages))
-					// persistCompactedConversation rebuilt the hydration checkpoint
-					// in the same Save as Compact; the re-fetched conversation
-					// already carries it, so no re-arm flag is needed.
-					round--
-					continue
-				}
-				a.log("warn", "agent", "emergency compaction failed for %s: %v", conversation.ID, compErr)
-				a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: run.ID, ConversationID: conversation.ID, Error: compErr.Error()})
-				a.failStreamTurn(run, currentMsgID, model, roundResult, streamErr)
-			} else {
-				a.failStreamTurn(run, currentMsgID, model, roundResult, streamErr)
-			}
-			return false, ""
-		}
-
-		if toolRounds >= settings.MaxToolRounds && len(roundResult.Response.ToolCalls) > 0 {
-			a.log("warn", "agent", "turn %s requested a tool after reaching the %d-round limit", run.ID, settings.MaxToolRounds)
-			roundResult.Response.ToolCalls = nil
-		}
-		if err := a.persistTurnRound(run.ConversationID, currentMsgID, model, roundResult); err != nil {
-			a.failTurn(run, currentMsgID, err)
-			return false, ""
-		}
-
-		if len(roundResult.Response.ToolCalls) == 0 {
-			// The model finished without requesting tools. Before exiting the
-			// turn, drain queued steer and completed subagent results — if
-			// either is pending, inject and continue so the model sees them
-			// at this round boundary instead of waiting for subagent_wait.
-			appliedSteer, steerErr := a.applyQueuedSteer(run)
-			if steerErr != nil {
-				a.failTurn(run, currentMsgID, steerErr)
-				return false, ""
-			}
-			appliedSub, subErr := a.applyQueuedSubagentResults(run)
-			if subErr != nil {
-				a.failTurn(run, currentMsgID, subErr)
-				return false, ""
-			}
-			if appliedSteer || appliedSub {
-				conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)
-				if err != nil {
-					a.failTurn(run, currentMsgID, err)
-					return false, ""
-				}
-				run.setMessageID(currentMsgID)
-				continue
-			}
-			break
-		}
-
-		if err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls, caps, settings, round); err != nil {
-			if run.Ctx.Err() != nil {
-				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, lastUsage.ContextTokens(), model)
-				return false, ""
-			}
-			a.failTurn(run, currentMsgID, err)
-			return false, ""
-		}
-		toolRounds++
-
-		// Repeated-tool-call guard: if the model calls the same set of tools
-		// with the same arguments multiple rounds in a row without producing
-		// any text, it is stuck in a loop. This catches both single-tool and
-		// parallel-tool loops (e.g. GPT-5.6 Luna re-enabling 6 MCP plugins
-		// every round). Break the cycle by stripping tools for the next round
-		// so the model is forced to respond with text.
-		// RepeatedToolLimit = 0 disables the guard.
-		if repeatedGuard.check(roundResult.Response.ToolCalls, roundResult.Content) {
-			a.log("warn", "agent", "turn %s: detected repeated tool round (%dx identical set), forcing text-only round", run.ID, repeatedGuard.limit)
-			toolRounds = settings.MaxToolRounds // strip tools for next round
-		}
-
-		// Drain any queued steer message at this safe boundary (between tool
-		// completion and the next provider round). The steer is appended as a
-		// real user message so the provider sees it in the next round's context.
-		// Steer is not a hydration epoch: it must not relocate the checkpoint.
-		// The existing checkpoint (after the first user / handover) stays put;
-		// the steer user lands later in the transcript and the cache prefix up
-		// to the checkpoint is preserved.
-		if _, steerErr := a.applyQueuedSteer(run); steerErr != nil {
-			a.failTurn(run, currentMsgID, steerErr)
-			return false, ""
-		}
-		if _, subErr := a.applyQueuedSubagentResults(run); subErr != nil {
-			a.failTurn(run, currentMsgID, subErr)
-			return false, ""
-		}
-		conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)
-		if err != nil {
-			a.failTurn(run, currentMsgID, err)
-			return false, ""
-		}
-		run.setMessageID(currentMsgID)
+		return false, ""
 	}
-
-	if err := a.finishTurn(run, currentMsgID, model, totalUsage, lastUsage.ContextTokens(), autoContinueIndex); err != nil {
-		a.failTurn(run, currentMsgID, err)
+	if err := a.finishTurn(run, pr.messageID(), model, pr.totalUsageTokens(), pr.contextTokens(), autoContinueIndex); err != nil {
+		a.failTurn(run, pr.messageID(), err)
 		return false, ""
 	}
 	a.discardQueuedSteer(run)
@@ -1014,7 +763,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	// TurnDone with the decision attached, but we need the raw decision
 	// here to decide whether to start the next turn.
 	if a.Todos == nil {
-		a.sealRound(run, currentMsgID, round, "done", nil, usageDTO(totalUsage), "")
+		a.sealRound(run, pr.messageID(), pr.roundNumber(), "done", nil, usageDTO(pr.totalUsageTokens()), "")
 		return false, ""
 	}
 	items := a.Todos.Get(run.ConversationID)
@@ -1024,11 +773,11 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		MaxAutoContinues:  a.Settings.Get().MaxAutoContinues,
 		TurnOK:            true,
 		HasConversation:   true,
-		HasBackgroundJobs: a.hasPendingSubagents(run.ConversationID),
+		HasBackgroundJobs: a.hasPendingRuns(run.ConversationID),
 	})
 	if !decision.ShouldContinue {
 		a.log("info", "agent", "auto-continue chain stopped: %s (open todos: %d)", decision.Reason, decision.OpenTodoCount)
-		a.sealRound(run, currentMsgID, round, "done", nil, usageDTO(totalUsage), "")
+		a.sealRound(run, pr.messageID(), pr.roundNumber(), "done", nil, usageDTO(pr.totalUsageTokens()), "")
 		return false, ""
 	}
 	// Emit an event so the UI can show "Continuing tasks… (N/M)" and insert
@@ -1077,7 +826,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	// Seal the final round of this turn, chaining to the first round of the
 	// auto-continue turn so SSE consumers keep streaming without waiting for
 	// the next agent.turn.started only.
-	a.sealRound(run, currentMsgID, round, "done", &contracts.RoundRef{RunID: run.ID, MessageID: nextMsgID, Round: 1}, usageDTO(totalUsage), "")
+	a.sealRound(run, pr.messageID(), pr.roundNumber(), "done", &contracts.RoundRef{RunID: run.ID, MessageID: nextMsgID, Round: 1}, usageDTO(pr.totalUsageTokens()), "")
 	return true, nextMsgID
 }
 
@@ -1116,33 +865,35 @@ func (a *App) applyQueuedSteer(run *TurnRun) (bool, error) {
 	return true, nil
 }
 
-// applyQueuedSubagentResults drains finished ACP runs queued on this turn
-// and injects them as synthetic subagent_result messages, same boundary as
-// steer. Returns true when at least one result was injected.
-func (a *App) applyQueuedSubagentResults(run *TurnRun) (bool, error) {
-	pending := run.drainSubagentDone()
+// applyQueuedRunResults drains finished background runs queued on this
+// turn and injects them as synthetic result messages, same boundary as
+// steer. Returns true when at least one result was injected. The only
+// producer today is ACP subagents (subagent_result); the queue itself is
+// the shared push-completion path for any async tool.
+func (a *App) applyQueuedRunResults(run *TurnRun) (bool, error) {
+	pending := run.drainRunDone()
 	if len(pending) == 0 {
 		return false, nil
 	}
-	applied, err := a.applySubagentDoneList(run.ConversationID, pending)
+	applied, err := a.applyRunDoneList(run.ConversationID, pending)
 	if err != nil {
-		run.requeueSubagentDone(pending[applied:])
+		run.requeueRunDone(pending[applied:])
 		return applied > 0, err
 	}
 	return applied > 0, nil
 }
 
-func (a *App) applySubagentDoneList(conversationID string, pending []pendingSubagentDone) (int, error) {
+func (a *App) applyRunDoneList(conversationID string, pending []pendingRunDone) (int, error) {
 	applied := 0
 	for _, p := range pending {
-		if p.Run == nil {
+		if p.Complete == nil {
 			applied++
 			continue
 		}
-		if err := a.completeSubagentRunLocked(conversationID, p.Run.ParentToolCallID, p.Status, p.Run, p.OutputPath); err != nil {
+		if err := p.Complete(conversationID); err != nil {
 			return applied, err
 		}
-		a.untrackPendingSubagent(conversationID, p.Run.ID)
+		a.untrackPendingRun(conversationID, p.RunID)
 		applied++
 	}
 	return applied, nil
@@ -1208,14 +959,6 @@ func (a *App) resolveCompactionAdapter(ctx context.Context, defaultAdapter Provi
 // it) which cause credit/balance rejections on gateways like OpenRouter.
 func resolveMaxOutput(provider *domain.Provider, model string, settings domain.Settings) int {
 	return domain.ResolveMaxOutput(provider, model, settings)
-}
-
-// effectiveContextWindow picks the window shown/used for a model: the
-// model-advertised window wins (catalog value); the configured max_input_tokens
-// is only a fallback for models that do not advertise one. Capping catalog
-// models to the global setting confused users ("1M model, why 200k?").
-func effectiveContextWindow(modelWindow, maxInputTokens int) int {
-	return domain.EffectiveContextWindow(modelWindow, maxInputTokens)
 }
 
 // resolveContextWindow picks the effective context window for compaction
@@ -1490,45 +1233,23 @@ func (a *App) compactConversation(ctx context.Context, adapter ProviderContext, 
 		if passBudget > maxBudget {
 			passBudget = maxBudget
 		}
-		var summary string
-		var lastErr error
-		for attempt := 0; attempt <= compactionSummaryMaxRetries; attempt++ {
-			resp, err := a.completeWithRetry(ctx, adapter, ChatRequest{
-				Model:      model,
-				System:     systemPrompt,
-				Messages:   msgs,
-				Tools:      []ToolDef{compactionSummaryToolDef},
-				ToolChoice: compactionToolChoice(adapter.Kind),
-				MaxTokens:  passBudget,
-			})
-			if err != nil {
-				lastErr = err
-				a.log("warn", "agent", "compaction pass %d failed for %s: %v", attempt+1, c.ID, err)
-				continue
-			}
-			summary = extractCompactionSummary(resp)
-			if compactionSummaryEchoesAssistant(summary, msgs) {
-				summary = ""
-			}
-			if len(strings.TrimSpace(summary)) >= summaryMinChars {
-				runningSummary = summary
-				break
-			}
-			nextBudget := passBudget * 2
-			if nextBudget > maxBudget {
-				nextBudget = maxBudget
-			}
-			a.log("warn", "agent", "compaction pass %d produced short summary (%d chars, min %d) for %s, retrying with budget %d",
-				attempt+1, len(summary), summaryMinChars, c.ID, nextBudget)
-			passBudget = nextBudget
-			lastErr = fmt.Errorf("compaction summary too short (%d chars, min %d) after %d attempts",
-				len(summary), summaryMinChars, attempt+1)
+		// One pass = one AgentEngine run: summary() is forced via
+		// ToolChoice, retries double the token budget until the summary
+		// is long enough or the budget is exhausted. On failure, return
+		// an error so the caller emits EventCompactionFailed and the user
+		// cannot continue until compaction succeeds (retry re-enters
+		// compaction).
+		pass := &compactionPass{
+			app: a, adapter: adapter, model: model,
+			system: systemPrompt, msgs: msgs,
+			budget: passBudget, maxBudget: maxBudget, minChars: summaryMinChars,
+			convID: c.ID,
 		}
-		if len(strings.TrimSpace(summary)) < summaryMinChars {
+		if !pass.run(ctx) {
 			return "", fmt.Errorf("compaction failed: summary too short after %d retries (last=%d chars, min=%d): %w",
-				compactionSummaryMaxRetries, len(summary), summaryMinChars, lastErr)
+				compactionSummaryMaxRetries, pass.lastLen, summaryMinChars, pass.lastErr)
 		}
-		runningSummary = summary
+		runningSummary = pass.summary
 	}
 
 	return runningSummary, a.persistCompactedConversation(c, runningSummary, effectiveKeepBudget)
@@ -1860,23 +1581,8 @@ type ModelCapabilities struct {
 	ReasoningReplay bool
 }
 
-// modelCapabilities resolves the input modalities the given model on the
-// given provider supports. Unknown models (not in catalog) default to
-// Vision=true but Audio=false and Video=false — see domain.ModelCapabilities
-// for rationale. ReasoningReplay is resolved from the model's
-// InterleavedField (catalog signal) with a provider/model pattern fallback.
-//
-// Learned disabled modalities (from 400-learning) override the catalog:
-// if a previous 400 taught us that this provider+model is text-only
-// (or lacks a specific modality), the corresponding caps field is forced
-// to false so the first request strips those attachments instead of
-// waiting for a 400 and retrying.
-func modelCapabilities(provider *domain.Provider, model string) ModelCapabilities {
-	return modelCapabilitiesWithLearned(provider, model, nil, nil)
-}
-
-// modelCapabilitiesWithLearned is the testable form of modelCapabilities
-// that accepts a learnedParamsCache for applying learned disabled
+// modelCapabilitiesWithLearned is the testable form of model capabilities
+// resolution: it accepts a learnedParamsCache for applying learned disabled
 // modalities and a modelOverridesCache for applying manual overrides. When
 // cache is nil, no learned overrides are applied; when manual is nil, no
 // manual overrides are applied. Precedence: catalog → learned → manual
@@ -1935,14 +1641,6 @@ func modelCapabilitiesWithLearned(provider *domain.Provider, model string, cache
 		}
 	}
 	return caps
-}
-
-// modelSupportsVision reports whether the given model on the given provider
-// supports image input. Returns true when the model metadata is unknown
-// (not in catalog) to preserve backward compatibility — providers will
-// reject the image if unsupported, and the reactive error path handles that.
-func modelSupportsVision(provider *domain.Provider, model string) bool {
-	return domain.ModelSupportsVision(provider, model)
 }
 
 // filterHydrationDomainMessages strips hydration checkpoint messages (pure

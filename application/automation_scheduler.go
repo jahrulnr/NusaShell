@@ -175,7 +175,7 @@ func (s *AutomationScheduler) resumeWaits(ctx context.Context) error {
 // IngestEvent matches when-triggers and creates at-most-one run per delivery key.
 func (s *AutomationScheduler) IngestEvent(ctx context.Context, ev domain.Event) error {
 	if ev.ID == "" {
-		ev.ID = domain.NewID("evt")
+		ev.ID = domain.NewID(domain.IDPrefixEvt)
 	}
 	if ev.Time.IsZero() {
 		ev.Time = s.now().UTC()

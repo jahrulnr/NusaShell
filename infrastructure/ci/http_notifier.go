@@ -45,10 +45,10 @@ func (n *HTTPNotifier) NotifyRunCompleted(ctx context.Context, url string, run *
 		Failed:   sum.Failed,
 		Success:  sum.Success,
 	}
-	if run.StartedAt != nil {
+	if !run.StartedAt.IsZero() {
 		payload.StartedAt = run.StartedAt.Format(time.RFC3339)
 	}
-	if run.FinishedAt != nil {
+	if !run.FinishedAt.IsZero() {
 		payload.FinishedAt = run.FinishedAt.Format(time.RFC3339)
 	}
 	body, err := json.Marshal(payload)

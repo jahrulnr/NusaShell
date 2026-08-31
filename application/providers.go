@@ -153,7 +153,7 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 		}
 	} else {
 		p = &domain.Provider{
-			ID:      domain.NewID("prov"),
+			ID:      domain.NewID(domain.IDPrefixProv),
 			Kind:    kind,
 			Name:    name,
 			BaseURL: baseURL,
@@ -522,28 +522,6 @@ func isFreeTierModel(id string) bool {
 		}
 	}
 	return false
-}
-
-// catalogHintForProvider maps a NusaShell provider to a models.dev provider
-// ID, used to disambiguate model lookups when the same bare model ID exists
-// under multiple providers (e.g. "gpt-5.5" under "openai" and "ai-router").
-func catalogHintForProvider(p *domain.Provider) string {
-	// Kind-level hints are fixed wire formats, not vendor detection:
-	// Responses speaks the OpenAI wire format, Messages speaks the
-	// Anthropic one. These are not per-provider hardcodes.
-	switch p.Kind {
-	case domain.ProviderResponses:
-		return "openai"
-	case domain.ProviderMessages:
-		return "anthropic"
-	}
-	// Chat-kind providers are fully dynamic: the hint is derived from the
-	// model ID prefix itself (e.g. "deepseek/deepseek-v4-flash" ->
-	// "deepseek"), which is the output of the /models API. No provider
-	// registry, no base-URL sniffing, no vendor hardcodes — any new
-	// provider (TokenRouter, OpenRouter, a future gateway) enriches
-	// automatically.
-	return ""
 }
 
 // catalogHintFromModelID derives the catalog hint from a model ID prefix.

@@ -34,7 +34,7 @@ func NewConversation(store ConversationStore, title string) *ConversationReposit
 	}
 	return &ConversationRepository{
 		store: store,
-		inner: domain.NewConversation(domain.NewID("conv"), title),
+		inner: domain.NewConversation(domain.NewID(domain.IDPrefixConv), title),
 	}
 }
 
@@ -136,7 +136,7 @@ func (r *ConversationRepository) Add(role domain.MessageRole, args ...any) error
 		return fmt.Errorf("unknown message role %q", role)
 	}
 	msg := domain.Message{
-		ID:        domain.NewID("msg"),
+		ID:        domain.NewID(domain.IDPrefixMsg),
 		Role:      role,
 		CreatedAt: time.Now().UTC(),
 		Status:    domain.StatusDone,
@@ -147,7 +147,7 @@ func (r *ConversationRepository) Add(role domain.MessageRole, args ...any) error
 			msg = copied
 			msg.Role = role
 			if msg.ID == "" {
-				msg.ID = domain.NewID("msg")
+				msg.ID = domain.NewID(domain.IDPrefixMsg)
 			}
 			if msg.CreatedAt.IsZero() {
 				msg.CreatedAt = time.Now().UTC()

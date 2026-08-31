@@ -51,6 +51,46 @@ func NewULID(prefix string) string {
 
 const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
+// ---- ID prefix registry ----
+//
+// The full registry of NewID/NewULID prefixes used across the codebase,
+// kept in one place so future prefixes stay collision-free. Prefixes are
+// embedded in persisted IDs (conv_..., msg_..., run_...), so renaming one
+// is a data migration, not a code change.
+const (
+	IDPrefixAcpAgent = "acp"    // ACP agent records
+	IDPrefixAcpRun   = "acprun" // ACP subagent runs
+	IDPrefixArt      = "art"    // CI artifacts
+	IDPrefixAsk      = "ask"    // ask_question tool calls
+	IDPrefixCall     = "call"   // provider tool calls (message transcripts)
+	IDPrefixConv     = "conv"   // conversations
+	IDPrefixEdge     = "edge"   // learning graph edges (ULID)
+	IDPrefixEvt      = "evt"    // automation events
+	IDPrefixFrag     = "frag"   // memory fragments (ULID)
+	IDPrefixJob      = "job"    // CI jobs
+	IDPrefixLog      = "log"    // log entries
+	IDPrefixMcp      = "mcp"    // MCP tool call IDs
+	IDPrefixMem      = "mem"    // memory entries (ULID)
+	IDPrefixMsg      = "msg"    // conversation messages
+	IDPrefixPlugin   = "plugin" // plugins
+	IDPrefixProv     = "prov"   // providers
+	IDPrefixRun      = "run"    // agent turns and CI runs
+	IDPrefixSkill    = "skill"  // skills (ULID)
+	IDPrefixSteer    = "steer"  // queued steers
+	IDPrefixStep     = "step"   // CI steps
+	IDPrefixWait     = "wait"   // wait_until wakeups
+	IDPrefixWF       = "wf"     // workflow definitions
+)
+
+// Reserved provider-facing tool-call ID namespaces: synthetic call IDs
+// that must never be produced by NewID/NewULID (hyphenated, not
+// underscore). Declared alongside the prefix registry so new code does
+// not collide with them:
+//   - AnnouncementToolCallPrefix ("announce-") — announcement.go
+//   - the hydration tool-call prefix ("hydrate-") — hydration.go
+//   - SubagentResultPrefix ("subagent-result-") — acp_storage.go
+//   - prompt-cache keys "nusashell_cv_" / "nusashell_bg_" — prompt_cache.go
+
 // CombineWeights merges two edge weights using probability-union:
 // w = 1 - (1-w1) * (1-w2). This strengthens edges that are observed
 // repeatedly without ever reaching exactly 1.0.

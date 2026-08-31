@@ -19,13 +19,6 @@ func TestCatalogHintIsNotVendorHardcoded(t *testing.T) {
 	// NOT be special-cased in code: the hint comes from the model ID
 	// prefix, which is output of the /models API. This is the regression
 	// test for the "every new provider needs a code edit" bug.
-	p := &domain.Provider{
-		Kind:    domain.ProviderChat,
-		BaseURL: "https://api.tokenrouter.com/v1",
-	}
-	if got := catalogHintForProvider(p); got != "" {
-		t.Fatalf("catalogHintForProvider(tokenrouter) = %q, want \"\" (no vendor special-case)", got)
-	}
 	if got := catalogHintFromModelID("deepseek/deepseek-v4-flash"); got != "deepseek" {
 		t.Fatalf("dynamic hint = %q, want deepseek", got)
 	}
@@ -46,22 +39,6 @@ func TestCatalogHintFromModelIDIsDynamic(t *testing.T) {
 	for _, c := range cases {
 		if got := catalogHintFromModelID(c.id); got != c.want {
 			t.Fatalf("catalogHintFromModelID(%q) = %q, want %q", c.id, got, c.want)
-		}
-	}
-}
-
-func TestCatalogHintForProviderKindStillWorks(t *testing.T) {
-	// Kind-level hints (wire-format hints) are still fixed, but only for
-	// the three official wire kinds — not per-vendor.
-	for _, tc := range []struct {
-		kind domain.ProviderKind
-		want string
-	}{
-		{domain.ProviderResponses, "openai"},
-		{domain.ProviderMessages, "anthropic"},
-	} {
-		if got := catalogHintForProvider(&domain.Provider{Kind: tc.kind}); got != tc.want {
-			t.Fatalf("catalogHintForProvider(kind %v) = %q, want %q", tc.kind, got, tc.want)
 		}
 	}
 }

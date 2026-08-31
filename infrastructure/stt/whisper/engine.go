@@ -148,13 +148,3 @@ func resolveModel(dir, fileName string) (string, error) {
 	}
 	return matches[0], nil
 }
-
-// FirstModel returns the path of the first installed ggml model in dir, or
-// "" when none.
-func FirstModel(dir string) string {
-	path, err := resolveModel(dir, "")
-	if err != nil {
-		return ""
-	}
-	return path
-}

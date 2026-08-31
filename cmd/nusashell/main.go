@@ -289,6 +289,7 @@ func run() error {
 		Logger:                      logger,
 	})
 	tb.Acp = app
+	tb.Delegate = app
 	tb.Steerer = app
 	tb.SkillSearcher = app
 	var autoSvc *application.Automation

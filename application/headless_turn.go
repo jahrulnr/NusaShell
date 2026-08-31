@@ -16,6 +16,13 @@ import (
 // remaining addressable for ci_steer. ACP subagent tools are filtered out
 // so permission prompts never stall a headless run.
 func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error) {
+	return a.runHeadlessTurnKind(ctx, prompt, model, trust, schema, AgentAutomation)
+}
+
+// runHeadlessTurnKind is RunHeadlessTurn parameterized by the agent kind:
+// pipeline steps use AgentAutomation, internal delegates use AgentDelegate
+// (which also removes the delegate tool itself to prevent recursion).
+func (a *App) runHeadlessTurnKind(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind) (map[string]any, string, error) {
 	provider, bareModel, apiKey, err := a.resolveHeadlessModel(model)
 	if err != nil {
 		return nil, "", err
@@ -27,9 +34,9 @@ func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust d
 	conv.Model = provider.ID + ":" + bareModel
 	conv.Status = "running"
 	now := time.Now().UTC()
-	asstMsgID := domain.NewID("msg")
+	asstMsgID := domain.NewID(domain.IDPrefixMsg)
 	a.addTurnMessages(conv, domain.Message{
-		ID:        domain.NewID("msg"),
+		ID:        domain.NewID(domain.IDPrefixMsg),
 		Role:      domain.RoleUser,
 		Content:   prompt,
 		CreatedAt: now,
@@ -47,12 +54,13 @@ func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust d
 
 	turnCtx, cancel := context.WithCancel(ctx)
 	run := &TurnRun{
-		ID:             domain.NewID("run"),
+		ID:             domain.NewID(domain.IDPrefixRun),
 		ConversationID: convID,
 		MessageID:      asstMsgID,
 		Ctx:            turnCtx,
 		Cancel:         cancel,
 		Headless:       true,
+		ToolKind:       kind,
 		RiskTierCap:    domain.TrustLevelToRiskTierCap(trust),
 		Workspace:      conv.Workspace,
 	}

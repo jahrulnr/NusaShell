@@ -33,11 +33,8 @@ func TestHTTPNotifierPostsRunCompletion(t *testing.T) {
 	n := NewHTTPNotifier()
 	now := time.Now().UTC()
 	run := &domain.WorkflowRun{
-		ID:         "run_1",
-		Status:     domain.StatusSuccess,
+		TaskState:  domain.TaskState[domain.RunStatus]{ID: "run_1", Status: domain.StatusSuccess, StartedAt: now, FinishedAt: now},
 		Definition: domain.WorkflowDefinition{Name: "test-workflow"},
-		StartedAt:  &now,
-		FinishedAt: &now,
 	}
 	if err := n.NotifyRunCompleted(context.Background(), srv.URL, run); err != nil {
 		t.Fatalf("NotifyRunCompleted: %v", err)
@@ -60,7 +57,7 @@ func TestHTTPNotifierFailsOn4xx(t *testing.T) {
 	defer srv.Close()
 
 	n := NewHTTPNotifier()
-	run := &domain.WorkflowRun{ID: "run_2", Status: domain.StatusFailed}
+	run := &domain.WorkflowRun{TaskState: domain.TaskState[domain.RunStatus]{ID: "run_2", Status: domain.StatusFailed}}
 	err := n.NotifyRunCompleted(context.Background(), srv.URL, run)
 	if err == nil || !strings.Contains(err.Error(), "400") {
 		t.Fatalf("want 400 error, got %v", err)
@@ -69,7 +66,7 @@ func TestHTTPNotifierFailsOn4xx(t *testing.T) {
 
 func TestHTTPNotifierSkipsEmptyURL(t *testing.T) {
 	n := NewHTTPNotifier()
-	run := &domain.WorkflowRun{ID: "run_3"}
+	run := &domain.WorkflowRun{TaskState: domain.TaskState[domain.RunStatus]{ID: "run_3"}}
 	// Notifier with empty URL should return an error from http.NewRequest,
 	// not panic.
 	err := n.NotifyRunCompleted(context.Background(), "", run)

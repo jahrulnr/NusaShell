@@ -50,18 +50,3 @@ func TestRequiresReasoningReplay(t *testing.T) {
 		})
 	}
 }
-
-func TestIsReasoningPlaceholder(t *testing.T) {
-	if !IsReasoningPlaceholder(ReasoningPlaceholder) {
-		t.Errorf("IsReasoningPlaceholder(%q) = false, want true", ReasoningPlaceholder)
-	}
-	if !IsReasoningPlaceholder("  " + ReasoningPlaceholder + "  ") {
-		t.Errorf("IsReasoningPlaceholder with surrounding whitespace = false, want true")
-	}
-	if IsReasoningPlaceholder("actual reasoning text") {
-		t.Errorf("IsReasoningPlaceholder with real text = true, want false")
-	}
-	if IsReasoningPlaceholder("") {
-		t.Errorf("IsReasoningPlaceholder(\"\") = true, want false")
-	}
-}

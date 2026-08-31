@@ -10,7 +10,7 @@ import (
 )
 
 func TestNewEmbedderNormalizesBaseURLAndNamesModel(t *testing.T) {
-	e := NewEmbedder("https://example.test/v1///", "key", "text-embedding-3-small")
+	e := NewEmbedder("https://example.test/v1///", "key", "text-embedding-3-small", 0)
 
 	if e.BaseURL != "https://example.test/v1" {
 		t.Fatalf("BaseURL = %q, want trailing slashes removed", e.BaseURL)
@@ -55,7 +55,7 @@ func TestEmbedBatchPostsRequestAndCachesDimension(t *testing.T) {
 	}))
 	defer server.Close()
 
-	e := NewEmbedder(server.URL+"/v1", "test-key", "test-embed")
+	e := NewEmbedder(server.URL+"/v1", "test-key", "test-embed", 0)
 	e.Client = server.Client()
 	got, err := e.EmbedBatch(context.Background(), []string{"first", "second"})
 	if err != nil {
@@ -79,7 +79,7 @@ func TestEmbedReturnsFirstVector(t *testing.T) {
 	}))
 	defer server.Close()
 
-	e := NewEmbedder(server.URL, "", "model")
+	e := NewEmbedder(server.URL, "", "model", 0)
 	e.Client = server.Client()
 	got, err := e.Embed(context.Background(), "hello")
 	if err != nil {
@@ -99,7 +99,7 @@ func TestEmbedBatchHandlesEmptyInputAndEmptyResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	e := NewEmbedder(server.URL, "", "model")
+	e := NewEmbedder(server.URL, "", "model", 0)
 	e.Client = server.Client()
 	got, err := e.EmbedBatch(context.Background(), nil)
 	if err != nil || got != nil {
@@ -110,6 +110,69 @@ func TestEmbedBatchHandlesEmptyInputAndEmptyResponse(t *testing.T) {
 	}
 	if _, err := e.Embed(context.Background(), "empty"); err == nil || !strings.Contains(err.Error(), "empty response") {
 		t.Fatalf("Embed(empty response) error = %v, want empty response error", err)
+	}
+}
+
+func TestEmbedBatchTruncatesOversizedInputsToTokenCap(t *testing.T) {
+	var received []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		received = payload.Input
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1]},{"embedding":[0.2]}]}`))
+	}))
+	defer server.Close()
+
+	// ~6000 runes ≈ 1500 tokens at 4 chars/token — far over any small-model cap.
+	long := strings.Repeat("lorem ipsum dolor sit amet ", 500) // 25 runes per repeat
+	short := "keep me as-is"
+	e := NewEmbedder(server.URL, "", "test-embed", 512)
+	e.Client = server.Client()
+	if _, err := e.EmbedBatch(context.Background(), []string{long, short}); err != nil {
+		t.Fatalf("EmbedBatch failed: %v", err)
+	}
+
+	if len(received) != 2 {
+		t.Fatalf("received %d inputs, want 2", len(received))
+	}
+	if got := len([]rune(received[0])); got > 512*embeddingCharsPerToken {
+		t.Fatalf("oversized input sent as %d runes, want <= %d", got, 512*embeddingCharsPerToken)
+	}
+	if !strings.Contains(received[0], "[truncated]") {
+		t.Fatalf("truncated input %q missing omission marker", received[0])
+	}
+	if received[1] != short {
+		t.Fatalf("short input = %q, want unchanged %q", received[1], short)
+	}
+}
+
+func TestEmbedBatchTruncatesWithDefaultTokenCap(t *testing.T) {
+	var received []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Input []string `json:"input"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		received = payload.Input
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1]}]}`))
+	}))
+	defer server.Close()
+
+	long := strings.Repeat("abcdefghij ", 3000)       // ~33000 runes
+	e := NewEmbedder(server.URL, "", "test-embed", 0) // no cap passed → EmbeddingMaxTokens
+	e.Client = server.Client()
+	if _, err := e.EmbedBatch(context.Background(), []string{long}); err != nil {
+		t.Fatalf("EmbedBatch failed: %v", err)
+	}
+	if got := len([]rune(received[0])); got > EmbeddingMaxTokens*embeddingCharsPerToken {
+		t.Fatalf("input sent as %d runes, want <= %d", got, EmbeddingMaxTokens*embeddingCharsPerToken)
 	}
 }
 
@@ -131,7 +194,7 @@ func TestEmbedBatchReportsHTTPAndDecodeErrors(t *testing.T) {
 			}))
 			defer server.Close()
 
-			e := NewEmbedder(server.URL, "", "model")
+			e := NewEmbedder(server.URL, "", "model", 0)
 			e.Client = server.Client()
 			_, err := e.EmbedBatch(context.Background(), []string{"hello"})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {

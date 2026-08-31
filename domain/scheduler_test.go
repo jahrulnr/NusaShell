@@ -22,17 +22,17 @@ func TestSchedulerPolicyConstants(t *testing.T) {
 
 func TestWakeWaitingRunTransitionsToQueued(t *testing.T) {
 	run := &WorkflowRun{
-		Status: StatusWaiting,
-		WakeAt: ptrTime(time.Now().Add(-time.Hour)),
+		TaskState: TaskState[RunStatus]{Status: StatusWaiting},
+		WakeAt:    ptrTime(time.Now().Add(-time.Hour)),
 		Jobs: []JobRun{
 			{
-				Status: StatusWaiting,
+				TaskState: TaskState[RunStatus]{Status: StatusWaiting},
 				Steps: []StepRun{
-					{Status: StatusWaiting},
-					{Status: StatusSuccess},
+					{TaskState: TaskState[RunStatus]{Status: StatusWaiting}},
+					{TaskState: TaskState[RunStatus]{Status: StatusSuccess}},
 				},
 			},
-			{Status: StatusQueued},
+			{TaskState: TaskState[RunStatus]{Status: StatusQueued}},
 		},
 	}
 	WakeWaitingRun(run)
@@ -57,7 +57,7 @@ func TestWakeWaitingRunTransitionsToQueued(t *testing.T) {
 }
 
 func TestWakeWaitingRunNoOpWhenNotWaiting(t *testing.T) {
-	run := &WorkflowRun{Status: StatusRunning}
+	run := &WorkflowRun{TaskState: TaskState[RunStatus]{Status: StatusRunning}}
 	WakeWaitingRun(run)
 	if run.Status != StatusRunning {
 		t.Fatalf("status = %v, want %v (must not touch non-waiting)", run.Status, StatusRunning)

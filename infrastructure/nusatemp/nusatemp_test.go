@@ -72,17 +72,3 @@ func TestMkdirTempLandsUnderDir(t *testing.T) {
 		t.Fatalf("unexpected name: %s", tmp)
 	}
 }
-
-func TestCreateTempLandsUnderDir(t *testing.T) {
-	isolateTemp(t)
-	f, err := CreateTemp("stt-engine-*.bin")
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := f.Name()
-	_ = f.Close()
-	t.Cleanup(func() { _ = os.Remove(path) })
-	if filepath.Dir(path) != Path() {
-		t.Fatalf("CreateTemp dir = %q, want %q", filepath.Dir(path), Path())
-	}
-}

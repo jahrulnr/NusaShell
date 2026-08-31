@@ -74,7 +74,6 @@ func UserPrompt(name string) string {
 
 const (
 	skillReviewRulesPlaceholder = "{{skill_review_rules}}"
-	primaryMemoryPlaceholder    = "{{primary_memory}}"
 	compactedSummaries          = "{{compacted_summaries}}"
 )
 
@@ -111,12 +110,10 @@ func TranscribeAudioPrompt() string {
 
 // ReviewPrompt loads the combined background review prompt
 // (review.md), substituting the {{skill_review_rules}} template
-// with skill-rules.md content. The {{primary_memory}} placeholder is left
-// intact here and substituted by the caller with the live primary memory
-// content (so the review agent sees what is already in primary.md before
-// editing it). There is intentionally only one review agent — it decides
-// both memory and skill writes in a single pass to avoid the redundancy
-// bug where memory contains skill fragments and vice versa.
+// with skill-rules.md content. There is intentionally only one review
+// agent — it decides both memory and skill writes in a single pass to
+// avoid the redundancy bug where memory contains skill fragments and
+// vice versa.
 func ReviewPrompt() string {
 	base := Prompt("review")
 	if base == "" {
@@ -137,25 +134,6 @@ func ReviewPrompt() string {
 // not a long system-prompt directive.
 func ReviewUserPrompt() string {
 	return UserPrompt("review")
-}
-
-// PrimaryMemoryPlaceholder returns the placeholder token used in review.md
-// to mark where the live primary memory content should be injected.
-func PrimaryMemoryPlaceholder() string { return primaryMemoryPlaceholder }
-
-// SubstitutePrimaryMemory replaces the {{primary_memory}} placeholder in a
-// review system prompt with the formatted content of the primary memory
-// document. When the document is empty or the placeholder is absent, the
-// prompt is returned unchanged. The caller passes the live PrimaryMemory
-// (read from disk) so the review agent sees the current state.
-func SubstitutePrimaryMemory(prompt string, entries []string) string {
-	if prompt == "" || len(entries) == 0 {
-		// Either nothing to inject or no entries — strip the placeholder
-		// so the agent does not see a raw {{primary_memory}} token.
-		return strings.ReplaceAll(prompt, primaryMemoryPlaceholder, "(empty)")
-	}
-	body := strings.Join(entries, "\n")
-	return strings.Replace(prompt, primaryMemoryPlaceholder, body, 1)
 }
 
 // Brief new agent after compaction to continue conversation

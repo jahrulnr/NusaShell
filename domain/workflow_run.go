@@ -24,10 +24,10 @@ func MergeRun(dst, src *WorkflowRun) {
 	if src.BlockedReason != "" {
 		dst.BlockedReason = src.BlockedReason
 	}
-	if src.StartedAt != nil {
+	if !src.StartedAt.IsZero() {
 		dst.StartedAt = src.StartedAt
 	}
-	if src.FinishedAt != nil {
+	if !src.FinishedAt.IsZero() {
 		dst.FinishedAt = src.FinishedAt
 	}
 	if src.Status == StatusWaiting {

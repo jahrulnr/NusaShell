@@ -26,9 +26,9 @@ func sleepTen() string {
 func TestLocalExecutorRunsEcho(t *testing.T) {
 	ex := &LocalExecutor{Root: t.TempDir()}
 	dir := t.TempDir()
-	run := &domain.WorkflowRun{ID: "run1", WorkflowID: "wf"}
-	jr := &domain.JobRun{ID: "jr1", JobID: "j"}
-	sr := &domain.StepRun{ID: "s1", StepID: "step_1"}
+	run := &domain.WorkflowRun{TaskState: domain.TaskState[domain.RunStatus]{ID: "run1"}, WorkflowID: "wf"}
+	jr := &domain.JobRun{TaskState: domain.TaskState[domain.RunStatus]{ID: "jr1"}, JobID: "j"}
+	sr := &domain.StepRun{TaskState: domain.TaskState[domain.RunStatus]{ID: "s1"}, StepID: "step_1"}
 	ws, err := ex.Prepare(context.Background(), application.PrepareRequest{
 		Run: run, Job: domain.Job{ID: "j"}, JobRun: jr, Workspace: dir,
 	})
@@ -42,7 +42,6 @@ func TestLocalExecutorRunsEcho(t *testing.T) {
 		Run: run, Job: domain.Job{ID: "j"}, JobRun: jr,
 		Step: domain.Step{Run: echoHello()}, StepRun: sr,
 		Workspace: ws,
-		Env:       CIEnv(run, *jr, *sr, ws.Dir),
 		OnOutput:  func(c domain.LogChunk) { logs = append(logs, c) },
 	})
 	if err != nil {
@@ -67,9 +66,9 @@ func TestLocalExecutorRunsEcho(t *testing.T) {
 
 func TestLocalExecutorCancel(t *testing.T) {
 	ex := &LocalExecutor{Root: t.TempDir()}
-	run := &domain.WorkflowRun{ID: "run2"}
-	jr := &domain.JobRun{ID: "jr2", JobID: "j"}
-	sr := &domain.StepRun{ID: "s2"}
+	run := &domain.WorkflowRun{TaskState: domain.TaskState[domain.RunStatus]{ID: "run2"}}
+	jr := &domain.JobRun{TaskState: domain.TaskState[domain.RunStatus]{ID: "jr2"}, JobID: "j"}
+	sr := &domain.StepRun{TaskState: domain.TaskState[domain.RunStatus]{ID: "s2"}}
 	ws, err := ex.Prepare(context.Background(), application.PrepareRequest{
 		Run: run, Job: domain.Job{ID: "j"}, JobRun: jr, Workspace: t.TempDir(),
 	})

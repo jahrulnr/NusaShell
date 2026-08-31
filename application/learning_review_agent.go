@@ -27,7 +27,6 @@ import (
 	"sync"
 	"time"
 
-	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/resources"
 )
@@ -363,13 +362,6 @@ func (r *BackgroundReviewAgent) acquireReview(conversationID string) (bool, stri
 	return true, "reserved", false
 }
 
-// tryAcquireReview is retained for focused in-package callers/tests. It uses
-// the same coalescing and retry-only cooldown policy as reserveReview.
-func (r *BackgroundReviewAgent) tryAcquireReview(conversationID string) bool {
-	reserved, _, _ := r.acquireReview(conversationID)
-	return reserved
-}
-
 // releaseReview clears the active slot. Both successful and failed reviews
 // enter the cooldown — this prevents the threshold trigger from launching a
 // redundant review immediately after a completed one (the incremental marker
@@ -555,13 +547,9 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 
 	// Keep the nodes inspected or changed by this review together so the
 	// resulting used_with edges describe one review turn, even when the LLM
-	// needs several tool rounds.
+	// needs several tool rounds. Seeded by the pre-injected file_read and
+	// grown by the review rules during the engine run.
 	var reviewLearningIDs []string
-	defer func() {
-		if r.app != nil {
-			r.app.recordLearningUsage(reviewLearningIDs)
-		}
-	}()
 
 	// Resolve the conversation JSON file path so the agent can file_read
 	// the full conversation if the bounded segment lacks context.
@@ -641,210 +629,46 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 	}
 	messages = append(messages, toolResults...)
 
-	var mutations []ReviewMutation
 	reviewSettings := domain.Settings{}
 	if r.app != nil && r.app.Settings != nil {
 		reviewSettings = r.app.Settings.Get()
 	}
 	promptCache := buildPromptCachePolicyForContext(reviewSettings, adapter, model, conversation.ID, promptCacheBackgroundPrefix)
-	for round := 0; round < r.settings.MaxToolRounds; round++ {
-		if err := ctx.Err(); err != nil {
-			return mutations, messages, err
-		}
-		req := ChatRequest{
-			Model:          model,
-			System:         systemPrompt,
-			Messages:       messages,
-			Tools:          tools,
-			PromptCaching:  reviewSettings.PromptCaching,
-			PromptCache:    promptCache,
-			ConversationID: conversation.ID,
-		}
-		// Stream instead of a single non-streaming completion: deltas (text,
-		// reasoning, tool-call fragments) keep arriving while the provider is
-		// working, so a long-thinking reasoning model never hits a wall-clock
-		// deadline. The adapter's ReadSSE layer enforces a per-chunk idle
-		// timeout (resets on every delta); a hung stream surfaces as
-		// KindIdleTimeout — a genuine failure, not "slow".
-		var resp ChatResponse
-		resp, err := adapter.Stream(ctx, req, func(delta string) {
-			resp.Content += delta
-		}, func(delta string) {
-			resp.Reasoning += delta
-		})
-		if err != nil {
-			return mutations, messages, err
-		}
-		// "Nothing to save." (case-insensitive, trimmed) is the prompt's
-		// explicit signal that the review found no durable knowledge. The
-		// LLM may add trailing punctuation or whitespace, so we check for
-		// the phrase as a substring rather than exact equality.
-		if strings.TrimSpace(resp.Content) == "" && strings.TrimSpace(resp.Reasoning) == "" && len(resp.ToolCalls) == 0 {
-			return mutations, messages, fmt.Errorf("empty response from review model")
-		}
-		if isNothingToSave(resp.Content) {
-			// Persist the terminal response so the learning log can show the
-			// review's conclusion ("Nothing to save." or a short summary)
-			// instead of ending the transcript on the last tool result.
-			messages = append(messages, ChatMessage{
-				Role:      "assistant",
-				Content:   resp.Content,
-				Reasoning: resp.Reasoning,
-			})
-			break
-		}
-		if len(resp.ToolCalls) == 0 {
-			// Terminal text response without tool calls: persist it as the
-			// review's conclusion.
-			if strings.TrimSpace(resp.Content) != "" || strings.TrimSpace(resp.Reasoning) != "" {
-				messages = append(messages, ChatMessage{
-					Role:      "assistant",
-					Content:   resp.Content,
-					Reasoning: resp.Reasoning,
-				})
-			}
-			break
-		}
-		// Append assistant message with tool calls (reasoning kept for the
-		// learning log's thinking disclosure).
-		messages = append(messages, ChatMessage{
-			Role:      "assistant",
-			Content:   resp.Content,
-			Reasoning: resp.Reasoning,
-			ToolCalls: resp.ToolCalls,
-		})
-		// Execute each tool call and append results.
-		for _, tc := range resp.ToolCalls {
-			// The hydration tools are executed locally — they are NOT in
-			// Toolbox and NOT subject to reviewAllowedOp (which only
-			// gates dispatcher roots). Check them BEFORE the gate, or the
-			// whitelist rejects them first and every review dies on its
-			// mandatory opening call.
-			if tc.Name == reviewTranscriptToolName {
-				// Parse optional start/end from the agent's call args.
-				// Default to the pre-injected range when omitted.
-				ts, te := start, end
-				var p string
-				if len(tc.Args) > 0 {
-					var args struct {
-						MessagesStart *int   `json:"messages_start"`
-						MessagesEnd   *int   `json:"messages_end"`
-						Path          string `json:"path"`
-					}
-					if json.Unmarshal([]byte(tc.Args), &args) == nil {
-						if args.MessagesStart != nil {
-							ts = *args.MessagesStart
-						}
-						if args.MessagesEnd != nil {
-							te = *args.MessagesEnd
-						}
-						p = args.Path
-					}
-				}
-				if p == "" {
-					p = convPath
-				}
-				output := r.executeReviewTranscript(conversation, ts, te, p)
-				messages = append(messages, ChatMessage{
-					Role: "tool",
-					ToolResult: &ToolResult{
-						ToolCallID: tc.ID,
-						Name:       tc.Name,
-						Content:    output,
-					},
-				})
-				continue
-			}
-			// model_override is a local tool (like review_transcript): it
-			// touches the modelOverridesCache directly and is NOT subject to
-			// reviewAllowedOp. Execute it before the gate. Mutations are
-			// tracked and emitted here because the local path `continue`s
-			// before the dispatcher mutation-tracking block below.
-			if tc.Name == modelOverrideToolName {
-				output, snippet, _ := r.executeModelOverride([]byte(tc.Args))
-				if snippet != "" {
-					mutations = append(mutations, ReviewMutation{
-						Kind:    "model_override",
-						Tool:    tc.Name,
-						Snippet: snippet,
-					})
-					if r.app.Bus != nil {
-						r.app.Bus.Emit(contracts.EventModelOverrideUpdated, map[string]any{
-							"source": "review",
-							"tool":   tc.Name,
-						})
-					}
-				}
-				messages = append(messages, ChatMessage{
-					Role: "tool",
-					ToolResult: &ToolResult{
-						ToolCallID: tc.ID,
-						Name:       tc.Name,
-						Content:    output,
-					},
-				})
-				continue
-			}
-			if !reviewAllowedOp(tc.Name, []byte(tc.Args)) {
-				messages = append(messages, ChatMessage{
-					Role: "tool",
-					ToolResult: &ToolResult{
-						ToolCallID: tc.ID,
-						Name:       tc.Name,
-						Content:    fmt.Sprintf("error: tool %q (with this op) is not allowed in background review", tc.Name),
-					},
-				})
-				continue
-			}
-			output, execErr := r.app.Toolbox.Execute(ctx, tc.Name, []byte(tc.Args))
-			if execErr != nil {
-				output = "error: " + execErr.Error()
-				// Only count a mutation when the tool actually succeeded.
-				// Recording it on failure produced misleading trajectory
-				// entries ("saved") with nothing persisted, and hid the
-				// real cause (e.g. the review prompt telling the model to
-				// call a non-existent tool).
-				r.app.log("warn", "learning", "review tool %q failed: %v", tc.Name, execErr)
-			} else {
-				reviewLearningIDs = append(reviewLearningIDs, learningNodeIDsFromTool(r.app, tc, output)...)
-				// Track mutations with enough detail for the learning log
-				// (which tool saved what, trimmed so the trajectory stays
-				// readable).
-				op := OpArg([]byte(tc.Args))
-				switch {
-				case tc.Name == "memory" && (op == "save" || op == "replace"):
-					mutations = append(mutations, ReviewMutation{Kind: "memory", Tool: tc.Name, Snippet: mutationSnippet(tc.Args, "content")})
-				case tc.Name == "skill" && op == "save":
-					mutations = append(mutations, ReviewMutation{Kind: "skills", Tool: tc.Name, Snippet: mutationSnippet(tc.Args, "name")})
-				}
-				// Emit learning mutation events so the Learning UI can
-				// refresh memory/skill panes in real time during a review.
-				if r.app.Bus != nil {
-					switch {
-					case tc.Name == "memory" && (op == "save" || op == "replace"):
-						r.app.Bus.Emit(contracts.EventMemoryUpdated, map[string]any{
-							"source": "review",
-							"tool":   tc.Name,
-						})
-					case tc.Name == "skill" && op == "save":
-						r.app.Bus.Emit(contracts.EventSkillUpdated, map[string]any{
-							"source": "review",
-							"tool":   tc.Name,
-						})
-					}
-				}
-			}
-			messages = append(messages, ChatMessage{
-				Role: "tool",
-				ToolResult: &ToolResult{
-					ToolCallID: tc.ID,
-					Name:       tc.Name,
-					Content:    output,
-				},
-			})
-		}
+	// The bounded tool loop (stream → whitelisted/local tools → repeat)
+	// is the AgentEngine with the AgentReview rule set
+	// (review_agent_rules.go): virtual conversation, mutation tracking,
+	// and the "Nothing to save" early exit. MaxToolRounds bounds rounds.
+	pr := &reviewAgentRules{
+		agent:       r,
+		adapter:     adapter,
+		model:       model,
+		conv:        conversation,
+		start:       start,
+		end:         end,
+		convPath:    convPath,
+		tools:       tools,
+		base:        messages,
+		settings:    reviewSettings,
+		promptC:     promptCache,
+		ctx:         ctx,
+		learningIDs: reviewLearningIDs,
 	}
-	return mutations, messages, nil
+	defer func() {
+		if r.app != nil {
+			r.app.recordLearningUsage(pr.learningIDs)
+		}
+	}()
+	st, loopErr := (&AgentEngine{}).Run(ctx, pr.rules(), r.settings.MaxToolRounds)
+	// The returned history is the full review conversation: the
+	// pre-injected opening (user prompt + synthetic tool results) plus
+	// everything the engine appended across rounds.
+	full := make([]ChatMessage, 0, len(messages)+len(st.Messages))
+	full = append(full, messages...)
+	full = append(full, st.Messages...)
+	if loopErr != nil {
+		return pr.mutations, full, loopErr
+	}
+	return pr.mutations, full, nil
 }
 
 // isNothingToSave reports whether the LLM's response signals that the
@@ -864,62 +688,10 @@ func isNothingToSave(content string) bool {
 // LLM call — the agent does not need to call it to get the initial data.
 // Whitelisted tools (memory, skill, file_read) come from the Toolbox.
 func (r *BackgroundReviewAgent) reviewTools() []ToolDef {
-	out := []ToolDef{reviewTranscriptToolDef, modelOverrideToolDef}
-	all := append(r.app.Toolbox.ListTools(), DispatcherToolInfos()...)
-	for _, t := range all {
-		if reviewToolWhitelist()[t.Name] && t.Name != reviewTranscriptToolName {
-			out = append(out, ToolDef(t))
-		}
+	if r.app == nil || r.app.Toolbox == nil {
+		return nil
 	}
-	return out
-}
-
-// buildTranscript extracts the recent messages from the conversation and
-// formats them as a plain-text transcript for the review agent. Tool calls
-// and their outputs are included inline so the review agent can see what
-// tools were used and what they returned — this is essential for spotting
-// skill-worthy patterns (e.g. a multi-step tool workflow the agent should
-// remember) and for understanding the context around a memory-worthy fact.
-// The transcript is bounded by both message count and total tokens: the tail
-// is truncated per message, then the whole transcript is trimmed from the
-// oldest line until it fits the token cap, so tool-heavy conversations
-// (dozens of tool calls per turn) cannot overflow the review model's window.
-func (r *BackgroundReviewAgent) buildTranscript(c *domain.Conversation) string {
-	tail := r.transcriptMessages(c)
-	if len(tail) > r.settings.TranscriptTailMsgs {
-		tail = tail[len(tail)-r.settings.TranscriptTailMsgs:]
-	}
-	var lines []string
-	for _, m := range tail {
-		role := string(m.Role)
-		content := m.Content
-		if len(content) > r.settings.MaxTranscriptChars {
-			content = content[:r.settings.MaxTranscriptChars] + "…[truncated]"
-		}
-		// Render tool calls and their outputs inline with the message so
-		// the review agent sees the full tool interaction, not just the
-		// surrounding text. Tool args and outputs are truncated to keep
-		// the transcript within the token budget.
-		var parts []string
-		if strings.TrimSpace(content) != "" {
-			parts = append(parts, content)
-		}
-		for _, tc := range m.ToolCalls {
-			args := truncate(strings.TrimSpace(tc.Args), maxToolArgsChars)
-			output := truncate(strings.TrimSpace(tc.Output), maxToolOutputChars)
-			toolLine := fmt.Sprintf("→ tool: %s(%s)", tc.Name, args)
-			if output != "" {
-				toolLine += "\n  result: " + output
-			}
-			parts = append(parts, toolLine)
-		}
-		if len(parts) == 0 {
-			continue
-		}
-		lines = append(lines, fmt.Sprintf("[%s] %s", role, strings.Join(parts, "\n")))
-	}
-	lines = r.trimTranscriptLines(lines)
-	return strings.Join(lines, "\n\n")
+	return toolFactoryFor(r.app).Get(AgentReview, "")
 }
 
 // transcriptMessages returns the messages to review. Compaction retains real
@@ -950,26 +722,6 @@ func (r *BackgroundReviewAgent) transcriptMessages(c *domain.Conversation) []dom
 		return merged[i].CreatedAt.Before(merged[j].CreatedAt)
 	})
 	return merged
-}
-
-// trimTranscriptLines drops the oldest lines until the transcript fits the
-// configured token cap (~chars/4), keeping the most recent detail. The most
-// recent line is always kept even when it alone exceeds the cap (best effort).
-func (r *BackgroundReviewAgent) trimTranscriptLines(lines []string) []string {
-	charCap := r.settings.MaxTranscriptTokens * 4
-	total := 0
-	start := 0
-	for i, line := range lines {
-		total += len(line)
-		for total > charCap && start < i {
-			total -= len(lines[start])
-			start++
-		}
-	}
-	if start == 0 {
-		return lines
-	}
-	return lines[start:]
 }
 
 // transcriptMessageJSON is one message in the structured JSON transcript

@@ -317,10 +317,6 @@ const (
 	mediaDescPrefixVideo  = domain.MediaDescPrefixVideo
 )
 
-func hasMediaDescription(atts []domain.Attachment, prefix, name string) bool {
-	return domain.HasMediaDescription(atts, prefix, name)
-}
-
 // undescribedMediaIndexes returns attachments of mediaType that do not yet
 // have a matching prefix+name text description (e.g. vision:cat.png).
 func undescribedMediaIndexes(atts []domain.Attachment, mediaType, prefix string) []int {

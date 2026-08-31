@@ -1607,7 +1607,7 @@ func TestAgentToolsDocMatchesBuiltInRoster(t *testing.T) {
 	conditional := map[string]bool{
 		"web_answer": true, "subagent": true, "subagent_steer": true,
 		"subagent_stop": true, "subagent_wait": true,
-		"generate_media": true,
+		"generate_media": true, "delegate": true,
 	}
 	for name := range documented {
 		if !actual[name] && !conditional[name] {
@@ -1777,8 +1777,7 @@ func TestListToolsGenerateImageIsConditional(t *testing.T) {
 func TestCIRunStatusDoesNotPanicOnNilWakeAt(t *testing.T) {
 	store := application.NewAutoStore()
 	if err := store.Create(context.Background(), &domain.WorkflowRun{
-		ID:     "run_1",
-		Status: domain.StatusSuccess,
+		TaskState: domain.TaskState[domain.RunStatus]{ID: "run_1", Status: domain.StatusSuccess},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1804,8 +1803,7 @@ func TestCIWaitDoesNotPanicOnNilWakeAt(t *testing.T) {
 	store := application.NewAutoStore()
 	runs := application.RunMem{AutoStore: store}
 	if err := store.Create(context.Background(), &domain.WorkflowRun{
-		ID:     "run_1",
-		Status: domain.StatusSuccess,
+		TaskState: domain.TaskState[domain.RunStatus]{ID: "run_1", Status: domain.StatusSuccess},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1832,9 +1830,8 @@ func TestCIRunStatusFormatsWakeAt(t *testing.T) {
 	store := application.NewAutoStore()
 	wake := time.Date(2026, 8, 31, 2, 0, 0, 0, time.UTC)
 	if err := store.Create(context.Background(), &domain.WorkflowRun{
-		ID:     "run_wait",
-		Status: domain.StatusWaiting,
-		WakeAt: &wake,
+		TaskState: domain.TaskState[domain.RunStatus]{ID: "run_wait", Status: domain.StatusWaiting},
+		WakeAt:    &wake,
 	}); err != nil {
 		t.Fatal(err)
 	}

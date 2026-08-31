@@ -350,7 +350,7 @@ type FSArtifactStore struct {
 }
 
 func (s FSArtifactStore) Put(_ context.Context, req application.ArtifactPutRequest) (domain.Artifact, error) {
-	id := domain.NewID("art")
+	id := domain.NewID(domain.IDPrefixArt)
 	dir := filepath.Join(s.Root, req.RunID, req.JobID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return domain.Artifact{}, err

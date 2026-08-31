@@ -40,7 +40,6 @@ type Store struct {
 	conversations  map[string]*domain.Conversation
 	providers      []*domain.Provider
 	acpAgents      []*domain.AcpAgent
-	skills         []*domain.Skill
 	memories       []*domain.MemoryEntry
 	learningEdges  []*domain.LearningEdge
 	learnedParams  *domain.LearnedParamRegistry
@@ -119,9 +118,6 @@ func (s *Store) load() error {
 	}
 	s.migrateProviderKinds()
 	if err := s.loadJSON("config/acp-agents.json", &s.acpAgents); err != nil {
-		return err
-	}
-	if err := s.loadJSON("config/skills.json", &s.skills); err != nil {
 		return err
 	}
 	if err := s.loadJSON("config/settings.json", &s.settings); err != nil {
@@ -253,6 +249,94 @@ func atomicWrite(path string, b []byte) error {
 	}
 	return nil
 }
+
+// ---- generic ID-keyed collections ----
+//
+// The slice-backed CRUD families (providers, ACP agents) share one
+// shape: a JSON file holding a slice of ID-keyed entities with clone-on-read
+// snapshot isolation and atomic whole-file writes. The helpers below are the
+// single implementation; the per-entity methods are one-liners over them.
+// The JSONL families (memories, learning edges) share List/Delete but keep
+// their own append-only Save (no upsert semantics).
+
+// listSlice returns deep copies of every item.
+func listSlice[T any](s *Store, items []*T) []*T {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*T, len(items))
+	for i, it := range items {
+		out[i] = clone(it)
+	}
+	return out
+}
+
+// getSlice returns a deep copy of the item with the given ID, or ErrNotFound.
+func getSlice[T any](s *Store, items []*T, id string, idOf func(*T) string, kind string) (*T, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, it := range items {
+		if idOf(it) == id {
+			return clone(it), nil
+		}
+	}
+	return nil, fmt.Errorf("%w: %s %s", ErrNotFound, kind, id)
+}
+
+// saveSlice upserts v into items (replace by ID or append), persists the
+// whole slice to path, and returns the updated slice.
+func saveSlice[T any](s *Store, items []*T, v *T, idOf func(*T) string, path string) ([]*T, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored := clone(v)
+	for i, existing := range items {
+		if idOf(existing) == idOf(v) {
+			items[i] = stored
+			return items, s.writeJSON(path, items)
+		}
+	}
+	items = append(items, stored)
+	return items, s.writeJSON(path, items)
+}
+
+// removeSlice removes the item with the given ID, persists the remaining
+// slice via persist, and returns it. Errors use the kind label ("provider").
+func removeSlice[T any](s *Store, items []*T, id string, idOf func(*T) string, kind string, persist func([]*T) error) ([]*T, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, it := range items {
+		if idOf(it) == id {
+			next := append(items[:i], items[i+1:]...)
+			return next, persist(next)
+		}
+	}
+	return items, fmt.Errorf("%w: %s %s", ErrNotFound, kind, id)
+}
+
+// loadRegistry returns a deep copy of the single-registry pointer, or a
+// fresh value via newFn when nothing was loaded yet. Never returns nil.
+func loadRegistry[T any](s *Store, ptr **T, newFn func() *T) *T {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if *ptr == nil {
+		return newFn()
+	}
+	return clone(*ptr)
+}
+
+// saveRegistry persists a deep copy of the registry atomically and swaps
+// the in-memory pointer.
+func saveRegistry[T any](s *Store, ptr **T, v *T, path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored := clone(v)
+	*ptr = stored
+	return s.writeJSON(path, stored)
+}
+
+func providerID(p *domain.Provider) string  { return p.ID }
+func acpAgentID(a *domain.AcpAgent) string  { return a.ID }
+func memoryID(e *domain.MemoryEntry) string { return e.ID }
+func edgeID(e *domain.LearningEdge) string  { return e.ID }
 
 // ---- conversations ----
 
@@ -429,162 +513,47 @@ func (s *Store) migrateProviderKinds() {
 
 // ---- providers ----
 
-func (s *Store) ListProviders() []*domain.Provider {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]*domain.Provider, len(s.providers))
-	for i, p := range s.providers {
-		out[i] = clone(p)
-	}
-	return out
-}
+func (s *Store) ListProviders() []*domain.Provider { return listSlice(s, s.providers) }
 
 func (s *Store) GetProvider(id string) (*domain.Provider, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, p := range s.providers {
-		if p.ID == id {
-			return clone(p), nil
-		}
-	}
-	return nil, fmt.Errorf("%w: provider %s", ErrNotFound, id)
+	return getSlice(s, s.providers, id, providerID, "provider")
 }
 
-func (s *Store) SaveProvider(p *domain.Provider) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	stored := clone(p)
-	for i, existing := range s.providers {
-		if existing.ID == p.ID {
-			s.providers[i] = stored
-			return s.writeJSON("config/providers.json", s.providers)
-		}
-	}
-	s.providers = append(s.providers, stored)
-	return s.writeJSON("config/providers.json", s.providers)
+func (s *Store) SaveProvider(p *domain.Provider) (err error) {
+	s.providers, err = saveSlice(s, s.providers, p, providerID, "config/providers.json")
+	return err
 }
 
-func (s *Store) DeleteProvider(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, p := range s.providers {
-		if p.ID == id {
-			s.providers = append(s.providers[:i], s.providers[i+1:]...)
-			return s.writeJSON("config/providers.json", s.providers)
-		}
-	}
-	return fmt.Errorf("%w: provider %s", ErrNotFound, id)
+func (s *Store) DeleteProvider(id string) (err error) {
+	s.providers, err = removeSlice(s, s.providers, id, providerID, "provider", func(items []*domain.Provider) error {
+		return s.writeJSON("config/providers.json", items)
+	})
+	return err
 }
 
 // ---- ACP agents ----
 
-func (s *Store) ListAcpAgents() []*domain.AcpAgent {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]*domain.AcpAgent, len(s.acpAgents))
-	for i, a := range s.acpAgents {
-		out[i] = clone(a)
-	}
-	return out
-}
+func (s *Store) ListAcpAgents() []*domain.AcpAgent { return listSlice(s, s.acpAgents) }
 
 func (s *Store) GetAcpAgent(id string) (*domain.AcpAgent, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, a := range s.acpAgents {
-		if a.ID == id {
-			return clone(a), nil
-		}
-	}
-	return nil, fmt.Errorf("%w: acp agent %s", ErrNotFound, id)
+	return getSlice(s, s.acpAgents, id, acpAgentID, "acp agent")
 }
 
-func (s *Store) SaveAcpAgent(a *domain.AcpAgent) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	stored := clone(a)
-	for i, existing := range s.acpAgents {
-		if existing.ID == a.ID {
-			s.acpAgents[i] = stored
-			return s.writeJSON("config/acp-agents.json", s.acpAgents)
-		}
-	}
-	s.acpAgents = append(s.acpAgents, stored)
-	return s.writeJSON("config/acp-agents.json", s.acpAgents)
+func (s *Store) SaveAcpAgent(a *domain.AcpAgent) (err error) {
+	s.acpAgents, err = saveSlice(s, s.acpAgents, a, acpAgentID, "config/acp-agents.json")
+	return err
 }
 
-func (s *Store) DeleteAcpAgent(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, a := range s.acpAgents {
-		if a.ID == id {
-			s.acpAgents = append(s.acpAgents[:i], s.acpAgents[i+1:]...)
-			return s.writeJSON("config/acp-agents.json", s.acpAgents)
-		}
-	}
-	return fmt.Errorf("%w: acp agent %s", ErrNotFound, id)
-}
-
-// ---- skills ----
-
-func (s *Store) ListSkills() []*domain.Skill {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]*domain.Skill, len(s.skills))
-	for i, sk := range s.skills {
-		out[i] = clone(sk)
-	}
-	return out
-}
-
-func (s *Store) GetSkill(id string) (*domain.Skill, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, sk := range s.skills {
-		if sk.ID == id {
-			return clone(sk), nil
-		}
-	}
-	return nil, fmt.Errorf("%w: skill %s", ErrNotFound, id)
-}
-
-func (s *Store) SaveSkill(sk *domain.Skill) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	stored := clone(sk)
-	for i, existing := range s.skills {
-		if existing.ID == sk.ID {
-			s.skills[i] = stored
-			return s.writeJSON("config/skills.json", s.skills)
-		}
-	}
-	s.skills = append(s.skills, stored)
-	return s.writeJSON("config/skills.json", s.skills)
-}
-
-func (s *Store) DeleteSkill(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, sk := range s.skills {
-		if sk.ID == id {
-			s.skills = append(s.skills[:i], s.skills[i+1:]...)
-			return s.writeJSON("config/skills.json", s.skills)
-		}
-	}
-	return fmt.Errorf("%w: skill %s", ErrNotFound, id)
+func (s *Store) DeleteAcpAgent(id string) (err error) {
+	s.acpAgents, err = removeSlice(s, s.acpAgents, id, acpAgentID, "acp agent", func(items []*domain.AcpAgent) error {
+		return s.writeJSON("config/acp-agents.json", items)
+	})
+	return err
 }
 
 // ---- memory ----
 
-func (s *Store) ListMemories() []*domain.MemoryEntry {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]*domain.MemoryEntry, len(s.memories))
-	for i, e := range s.memories {
-		out[i] = clone(e)
-	}
-	return out
-}
+func (s *Store) ListMemories() []*domain.MemoryEntry { return listSlice(s, s.memories) }
 
 func (s *Store) SaveMemory(e *domain.MemoryEntry) error {
 	if e.Target == "" {
@@ -602,16 +571,11 @@ func (s *Store) SaveMemory(e *domain.MemoryEntry) error {
 	return s.appendJSONL("memory/memory.jsonl", stored)
 }
 
-func (s *Store) DeleteMemory(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, e := range s.memories {
-		if e.ID == id {
-			s.memories = append(s.memories[:i], s.memories[i+1:]...)
-			return s.writeJSONL("memory/memory.jsonl", s.memories)
-		}
-	}
-	return fmt.Errorf("%w: memory %s", ErrNotFound, id)
+func (s *Store) DeleteMemory(id string) (err error) {
+	s.memories, err = removeSlice(s, s.memories, id, memoryID, "memory", func(items []*domain.MemoryEntry) error {
+		return s.writeJSONL("memory/memory.jsonl", items)
+	})
+	return err
 }
 
 // ReplaceMemory finds the single entry in target whose content contains
@@ -795,15 +759,7 @@ func (s *Store) ApplySettings(settings domain.Settings) {
 
 // ---- learning edges ----
 
-func (s *Store) ListLearningEdges() []*domain.LearningEdge {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]*domain.LearningEdge, len(s.learningEdges))
-	for i, e := range s.learningEdges {
-		out[i] = clone(e)
-	}
-	return out
-}
+func (s *Store) ListLearningEdges() []*domain.LearningEdge { return listSlice(s, s.learningEdges) }
 
 func (s *Store) SaveLearningEdge(e *domain.LearningEdge) error {
 	s.mu.Lock()
@@ -813,16 +769,11 @@ func (s *Store) SaveLearningEdge(e *domain.LearningEdge) error {
 	return s.appendJSONL("learning/edges.jsonl", stored)
 }
 
-func (s *Store) DeleteLearningEdge(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, e := range s.learningEdges {
-		if e.ID == id {
-			s.learningEdges = append(s.learningEdges[:i], s.learningEdges[i+1:]...)
-			return s.writeJSONL("learning/edges.jsonl", s.learningEdges)
-		}
-	}
-	return fmt.Errorf("%w: learning edge %s", ErrNotFound, id)
+func (s *Store) DeleteLearningEdge(id string) (err error) {
+	s.learningEdges, err = removeSlice(s, s.learningEdges, id, edgeID, "learning edge", func(items []*domain.LearningEdge) error {
+		return s.writeJSONL("learning/edges.jsonl", items)
+	})
+	return err
 }
 
 // ---- learned params (dynamic 400-learning) ----
@@ -832,47 +783,23 @@ func (s *Store) DeleteLearningEdge(id string) error {
 // the returned pointer and call SaveLearnedParams to persist. Returns an
 // empty (non-nil) registry when no learning file exists yet.
 func (s *Store) LoadLearnedParams() *domain.LearnedParamRegistry {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.learnedParams == nil {
-		return domain.NewLearnedParamRegistry()
-	}
-	// Return a deep copy so callers can mutate without holding the lock.
-	return clone(s.learnedParams)
+	return loadRegistry(s, &s.learnedParams, domain.NewLearnedParamRegistry)
 }
 
 // SaveLearnedParams persists the registry atomically to
 // learning/provider_params.json.
 func (s *Store) SaveLearnedParams(r *domain.LearnedParamRegistry) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	stored := clone(r)
-	s.learnedParams = stored
-	return s.writeJSON("learning/provider_params.json", stored)
+	return saveRegistry(s, &s.learnedParams, r, "learning/provider_params.json")
 }
 
 // ---- model overrides (manual catalog corrections) ----
 
-// LoadModelOverrides returns the current model-override registry. The
-// registry is loaded once at startup and kept in memory; callers mutate
-// the returned pointer and call SaveModelOverrides to persist. Returns an
-// empty (non-nil) registry when no override file exists yet.
 func (s *Store) LoadModelOverrides() *domain.ModelOverrideRegistry {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.modelOverrides == nil {
-		return domain.NewModelOverrideRegistry()
-	}
-	// Return a deep copy so callers can mutate without holding the lock.
-	return clone(s.modelOverrides)
+	return loadRegistry(s, &s.modelOverrides, domain.NewModelOverrideRegistry)
 }
 
 // SaveModelOverrides persists the registry atomically to
 // learning/model_overrides.json.
 func (s *Store) SaveModelOverrides(r *domain.ModelOverrideRegistry) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	stored := clone(r)
-	s.modelOverrides = stored
-	return s.writeJSON("learning/model_overrides.json", stored)
+	return saveRegistry(s, &s.modelOverrides, r, "learning/model_overrides.json")
 }

@@ -393,7 +393,7 @@ func (a *App) handlePluginSave(req contracts.PluginSaveRequest) (any, *contracts
 		p = existing
 	} else {
 		p = &domain.Plugin{Manifest: domain.PluginManifest{
-			ID:      domain.NewID("plugin"),
+			ID:      domain.NewID(domain.IDPrefixPlugin),
 			Version: "0.1.0",
 			Icon:    "🧩",
 		}}

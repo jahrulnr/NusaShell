@@ -298,7 +298,7 @@ func (s *ExecutionScheduler) parkWait(ctx context.Context, run *domain.WorkflowR
 	run.ParkWait(*step.WaitUntil)
 	if s.Waits != nil {
 		_ = s.Waits.Put(ctx, &domain.WaitRecord{
-			ID: domain.NewID("wait"), WorkflowRunID: run.ID, JobID: jr.JobID, StepID: sr.StepID,
+			ID: domain.NewID(domain.IDPrefixWait), WorkflowRunID: run.ID, JobID: jr.JobID, StepID: sr.StepID,
 			WakeAt: step.WaitUntil, Status: domain.SchedulePending,
 		})
 	}
@@ -438,7 +438,7 @@ func (s *ExecutionScheduler) RecoverStale(ctx context.Context) error {
 			j := &run.Jobs[i]
 			if j.Status == domain.StatusRunning && j.HeartbeatAt != nil && now.Sub(*j.HeartbeatAt) > time.Minute {
 				j.Status = domain.StatusFailed
-				j.FailureReason = "stale lease after process restart"
+				j.Error = "stale lease after process restart"
 				changed = true
 			}
 		}
@@ -468,10 +468,12 @@ func (s *ExecutionScheduler) emit(typ string, v any) {
 
 func NewWorkflowRun(def domain.WorkflowDefinition, requestedBy string) *domain.WorkflowRun {
 	run := &domain.WorkflowRun{
-		ID:          domain.NewID("run"),
+		TaskState: domain.TaskState[domain.RunStatus]{
+			ID:     domain.NewID(domain.IDPrefixRun),
+			Status: domain.StatusQueued,
+		},
 		WorkflowID:  def.ID,
 		Name:        def.Name,
-		Status:      domain.StatusQueued,
 		Workspace:   def.Source.Workspace,
 		Definition:  def,
 		RequestedBy: requestedBy,
@@ -481,9 +483,17 @@ func NewWorkflowRun(def domain.WorkflowDefinition, requestedBy string) *domain.W
 		run.WorkflowID = "pipeline"
 	}
 	for _, j := range def.Jobs {
-		jr := domain.JobRun{ID: domain.NewID("job"), JobID: j.ID, Name: j.Name, Status: domain.StatusQueued}
+		jr := domain.JobRun{
+			TaskState: domain.TaskState[domain.RunStatus]{ID: domain.NewID(domain.IDPrefixJob), Status: domain.StatusQueued},
+			JobID:     j.ID,
+			Name:      j.Name,
+		}
 		for _, st := range j.Steps {
-			jr.Steps = append(jr.Steps, domain.StepRun{ID: domain.NewID("step"), StepID: st.ID, Name: st.Name, Status: domain.StatusQueued})
+			jr.Steps = append(jr.Steps, domain.StepRun{
+				TaskState: domain.TaskState[domain.RunStatus]{ID: domain.NewID(domain.IDPrefixStep), Status: domain.StatusQueued},
+				StepID:    st.ID,
+				Name:      st.Name,
+			})
 		}
 		run.Jobs = append(run.Jobs, jr)
 	}

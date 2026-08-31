@@ -62,6 +62,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `subagent_steer` | queue an extra instruction on a live ACP run |
 | `subagent_stop` | cancel a live ACP run (pending permissions fail closed) |
 | `subagent_wait` | wait for an async ACP run to finish |
+| `delegate` | spawn one internal NusaShell background agent: the same engine, headless, in a hidden pipeline room, with the standard toolbox (no `subagent`/`delegate`, no permission prompts). It does not receive this conversation's history — pass a compact brief with absolute paths. Always async: returns a run id immediately; the tool call stays `running` until the delegate finishes, then a synthetic `delegate_result` tool call is injected at the next steer-style round boundary (or a new turn if idle). Never listed for the delegate agent itself (no recursion) |
 
 ## Coordinate discipline (grep ↔ file_read ↔ file_patch)
 
@@ -144,7 +145,9 @@ The provider receives the current `Toolbox.ListTools` roster. `web_answer` is
 listed only when configured, `generate_image` is listed only when an image
 generation model is set in Settings, while `subagent`, `subagent_steer`,
 `subagent_stop`, and `subagent_wait` are listed only when an ACP agent is
-enabled.
+enabled. `delegate` is listed whenever the build supports internal
+delegation, and is filtered out of the delegate agent's own roster (no
+recursion).
 
 ### Dispatcher families
 

@@ -1,8 +1,6 @@
 package jsonstore
 
 import (
-	"fmt"
-
 	"nusashell/domain"
 )
 
@@ -26,15 +24,6 @@ func (a *AcpAgents) Get(id string) (*domain.AcpAgent, error) {
 }
 func (a *AcpAgents) Save(v *domain.AcpAgent) error { return a.S.SaveAcpAgent(v) }
 func (a *AcpAgents) Delete(id string) error        { return a.S.DeleteAcpAgent(id) }
-
-type Skills struct{ S *Store }
-
-func (k *Skills) List() []*domain.Skill { return k.S.ListSkills() }
-func (k *Skills) Get(id, ownedBy string) (*domain.Skill, error) {
-	return k.S.GetSkill(id)
-}
-func (k *Skills) Save(v *domain.Skill) error      { return k.S.SaveSkill(v) }
-func (k *Skills) Delete(id, ownedBy string) error { return k.S.DeleteSkill(id) }
 
 type Memory struct{ S *Store }
 
@@ -86,26 +75,4 @@ type Settings struct{ S *Store }
 func (st *Settings) Get() domain.Settings { return st.S.GetSettings() }
 func (st *Settings) Set(v domain.Settings) error {
 	return st.S.SetSettings(v)
-}
-
-// SkillsAdapter adds file-level skill reads for stores without a real
-// skills directory on disk (legacy jsonstore path). Reads are unsupported —
-// they return a clear error so the toolbox falls back to Content.
-func (k *Skills) ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error) {
-	return nil, fmt.Errorf("skill file reads are not supported by this store")
-}
-func (k *Skills) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
-	return nil, fmt.Errorf("skill file listing is not supported by this store")
-}
-func (k *Skills) WriteFile(id, ownedBy, path, content string) error {
-	return fmt.Errorf("skill file writes are not supported by this store")
-}
-func (k *Skills) Install(zipData []byte) (string, error) {
-	return "", fmt.Errorf("skill install is not supported by this store")
-}
-func (k *Skills) MountPluginSkills(pluginID, pluginSkillsDir string) error {
-	return nil // no-op for legacy stores
-}
-func (k *Skills) UnmountPluginSkills(pluginID string) error {
-	return nil // no-op for legacy stores
 }

@@ -54,9 +54,6 @@ func TestCacheLearnFrom400Inject(t *testing.T) {
 	if !cache.HasInjectFor("openrouter", "stealth/ox-alpha") {
 		t.Error("HasInjectFor returned false after learning inject")
 	}
-	if !HasReasoningReplay(cache, "openrouter", "stealth/ox-alpha") {
-		t.Error("HasReasoningReplay returned false after learning reasoning_content inject")
-	}
 }
 
 func TestCacheLearnFrom400CapContext(t *testing.T) {
@@ -222,27 +219,5 @@ func TestCacheSanitizeOnLoad(t *testing.T) {
 	_ = New(store)
 	if store.saves != 1 {
 		t.Errorf("second construction should not re-save, saves = %d", store.saves)
-	}
-}
-
-func TestApplyStrippedParams(t *testing.T) {
-	store := &fakeStore{}
-	cache := New(store)
-	cache.LearnFrom400("openrouter", "glm-5.2", "Unsupported parameter: logprobs")
-
-	body := map[string]any{
-		"model":    "glm-5.2",
-		"logprobs": true,
-		"stream":   true,
-	}
-	stripped := ApplyStrippedParams(body, "openrouter", "glm-5.2", cache)
-	if len(stripped) != 1 || stripped[0] != "logprobs" {
-		t.Fatalf("stripped = %v, want [logprobs]", stripped)
-	}
-	if _, ok := body["logprobs"]; ok {
-		t.Error("logprobs should have been deleted from body")
-	}
-	if _, ok := body["stream"]; !ok {
-		t.Error("stream should still be present")
 	}
 }

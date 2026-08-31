@@ -4,7 +4,7 @@
  * and primitives consumed by two or more views (.view-header, .mini-btn,
  * .action-btn, .tab, .select, .toggle, .empty-state). Single-view rules do
  * NOT belong here; put them in that view's stylesheet and guard yourself
- * with frontend/css-hygiene.test.mjs.
+ * with frontend/tests/css-hygiene.test.mjs.
  */
 :root {
   --ink: #070c0e;

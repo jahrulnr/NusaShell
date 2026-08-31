@@ -10,7 +10,7 @@ import (
 
 func TestModelCapabilitiesUnknownModelDefaultsVisionOnly(t *testing.T) {
 	provider := &domain.Provider{ID: "p1", Models: nil}
-	caps := modelCapabilities(provider, "unknown-model")
+	caps := modelCapabilitiesWithLearned(provider, "unknown-model", nil, nil)
 	if !caps.Vision {
 		t.Errorf("unknown model should default Vision=true, got %+v", caps)
 	}
@@ -26,7 +26,7 @@ func TestModelCapabilitiesUnknownModelDefaultsVisionOnly(t *testing.T) {
 }
 
 func TestModelCapabilitiesNilProviderDefaultsVisionOnly(t *testing.T) {
-	caps := modelCapabilities(nil, "any")
+	caps := modelCapabilitiesWithLearned(nil, "any", nil, nil)
 	if !caps.Vision {
 		t.Errorf("nil provider should default Vision=true, got %+v", caps)
 	}
@@ -63,7 +63,7 @@ func TestModelCapabilitiesFromMetadata(t *testing.T) {
 		{"llama-3", false, false, false, false},
 	}
 	for _, tt := range tests {
-		caps := modelCapabilities(provider, tt.model)
+		caps := modelCapabilitiesWithLearned(provider, tt.model, nil, nil)
 		if caps.Vision != tt.wantVision || caps.Audio != tt.wantAudio || caps.Video != tt.wantVideo || caps.Document != tt.wantDocument {
 			t.Errorf("model %s: got %+v, want vision=%v audio=%v video=%v document=%v",
 				tt.model, caps, tt.wantVision, tt.wantAudio, tt.wantVideo, tt.wantDocument)
@@ -262,12 +262,12 @@ func TestModelCapabilitiesReasoningReplayFromCatalog(t *testing.T) {
 		},
 	}
 
-	caps := modelCapabilities(provider, "glm-5.2")
+	caps := modelCapabilitiesWithLearned(provider, "glm-5.2", nil, nil)
 	if !caps.ReasoningReplay {
 		t.Errorf("glm-5.2 with interleaved_field=reasoning_content: ReasoningReplay = false, want true")
 	}
 
-	caps = modelCapabilities(provider, "gpt-5.5")
+	caps = modelCapabilitiesWithLearned(provider, "gpt-5.5", nil, nil)
 	if caps.ReasoningReplay {
 		t.Errorf("gpt-5.5 with no interleaved_field: ReasoningReplay = true, want false")
 	}
@@ -284,7 +284,7 @@ func TestModelCapabilitiesReasoningReplayPatternFallback(t *testing.T) {
 			{ID: "stealth/ox-alpha"}, // no InterleavedField (OpenRouter hides it)
 		},
 	}
-	caps := modelCapabilities(provider, "stealth/ox-alpha")
+	caps := modelCapabilitiesWithLearned(provider, "stealth/ox-alpha", nil, nil)
 	if !caps.ReasoningReplay {
 		t.Errorf("stealth/ox-alpha should match pattern fallback: ReasoningReplay = false, want true")
 	}
@@ -303,11 +303,11 @@ func TestModelCapabilitiesReasoningFlagFromCatalog(t *testing.T) {
 			{ID: "openai/gpt-4.1", Reasoning: false},
 		},
 	}
-	caps := modelCapabilities(provider, "deepseek/deepseek-r1")
+	caps := modelCapabilitiesWithLearned(provider, "deepseek/deepseek-r1", nil, nil)
 	if !caps.Reasoning {
 		t.Errorf("deepseek-r1 with Reasoning=true: caps.Reasoning = false, want true")
 	}
-	caps = modelCapabilities(provider, "openai/gpt-4.1")
+	caps = modelCapabilitiesWithLearned(provider, "openai/gpt-4.1", nil, nil)
 	if caps.Reasoning {
 		t.Errorf("gpt-4.1 with Reasoning=false: caps.Reasoning = true, want false")
 	}

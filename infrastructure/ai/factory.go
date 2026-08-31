@@ -81,8 +81,15 @@ func NewEmbedderFactory() application.EmbedderFactory {
 		if model == "" {
 			return nil, nil
 		}
+		// Respect the model's documented input context when the catalog
+		// knows it (e.g. text-embedding-3-small = 8191); 0 falls back to
+		// the Embedder's conservative default for small/self-hosted models.
+		maxTokens := 0
+		if m := p.FindModel(model); m != nil && m.Context > 0 {
+			maxTokens = m.Context
+		}
 		base := embeddingBaseURL(p.BaseURL)
-		return embeddings.NewEmbedder(base, apiKey, model), nil
+		return embeddings.NewEmbedder(base, apiKey, model, maxTokens), nil
 	}
 }
 

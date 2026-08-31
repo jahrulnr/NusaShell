@@ -442,59 +442,6 @@ func TestReviewLoopSkipsPrimaryInjectionWithoutStore(t *testing.T) {
 	}
 }
 
-func TestBuildTranscriptIncludesToolCalls(t *testing.T) {
-	app := &App{
-		Toolbox: &reviewStubToolbox{},
-		Logs:    &fakeLogStore{},
-	}
-	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
-	conv := &domain.Conversation{
-		ID: "conv_tool",
-		Messages: []domain.Message{
-			{Role: domain.RoleUser, Content: "search the codebase for auth patterns"},
-			{Role: domain.RoleAssistant, Content: "Let me search for auth patterns.", ToolCalls: []domain.ToolCall{
-				{Name: "grep", Args: `{"pattern":"auth","path":"src/"}`, Output: "src/auth.go: 5 matches found"},
-				{Name: "read_file", Args: `{"path":"src/auth.go"}`, Output: "package main\n\nfunc authenticate() {...}"},
-			}},
-			{Role: domain.RoleUser, Content: "great, now save what you found"},
-		},
-	}
-	transcript := agent.buildTranscript(conv)
-	if !strings.Contains(transcript, "→ tool: grep(") {
-		t.Error("transcript should include tool call 'grep' with args")
-	}
-	if !strings.Contains(transcript, "result: src/auth.go: 5 matches found") {
-		t.Error("transcript should include tool output for grep")
-	}
-	if !strings.Contains(transcript, "→ tool: read_file(") {
-		t.Error("transcript should include tool call 'read_file' with args")
-	}
-	if !strings.Contains(transcript, "result: package main") {
-		t.Error("transcript should include tool output for read_file")
-	}
-}
-
-func TestBuildTranscriptTruncatesToolOutput(t *testing.T) {
-	app := &App{
-		Toolbox: &reviewStubToolbox{},
-		Logs:    &fakeLogStore{},
-	}
-	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
-	longOutput := strings.Repeat("x", maxToolOutputChars+100)
-	conv := &domain.Conversation{
-		ID: "conv_trunc",
-		Messages: []domain.Message{
-			{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{
-				{Name: "read_file", Args: "{}", Output: longOutput},
-			}},
-		},
-	}
-	transcript := agent.buildTranscript(conv)
-	if !strings.Contains(transcript, "…") {
-		t.Error("transcript should truncate long tool output with ellipsis")
-	}
-}
-
 func TestApplyReviewModelOverride(t *testing.T) {
 	newApp := func(reviewModel string) *App {
 		return &App{
@@ -637,67 +584,6 @@ func (s *chunkConversationStore) ArchiveChunk(id string, messages []domain.Messa
 }
 func (s *chunkConversationStore) GetChunk(id string, index int) ([]domain.Message, error) {
 	return s.chunk, nil
-}
-
-func TestBuildTranscriptTokenCapDropsOldest(t *testing.T) {
-	app := &App{
-		Toolbox: &reviewStubToolbox{},
-		Logs:    &fakeLogStore{},
-	}
-	settings := DefaultReviewSettings()
-	settings.MaxTranscriptTokens = 10 // 40 chars cap
-	agent := NewBackgroundReviewAgent(app, settings)
-	long := strings.Repeat("y", 100)
-	conv := &domain.Conversation{
-		ID: "conv_cap",
-		Messages: []domain.Message{
-			{Role: domain.RoleUser, Content: "OLDEST-" + long},
-			{Role: domain.RoleAssistant, Content: "NEWEST-" + long},
-		},
-	}
-	transcript := agent.buildTranscript(conv)
-	if strings.Contains(transcript, "OLDEST") {
-		t.Error("transcript should drop the oldest line when over the token cap")
-	}
-	if !strings.Contains(transcript, "NEWEST") {
-		t.Error("transcript should keep the most recent line")
-	}
-}
-
-func TestBuildTranscriptUsesArchivedChunkWhenCompacted(t *testing.T) {
-	// Chunk messages are older (earlier timestamps) than live messages.
-	// transcriptMessages must merge by CreatedAt so the conversation flow
-	// stays chronological — without sorting, the chunk (archived assistant
-	// responses) would appear before the live user messages that triggered
-	// them, producing a temporally wrong transcript.
-	chunkTime := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
-	liveTime := time.Date(2026, 8, 25, 13, 0, 0, 0, time.UTC)
-	app := &App{
-		Toolbox: &reviewStubToolbox{},
-		Logs:    &fakeLogStore{},
-		Conversations: &chunkConversationStore{chunk: []domain.Message{
-			{Role: domain.RoleAssistant, Content: "old work", CreatedAt: chunkTime, ToolCalls: []domain.ToolCall{
-				{Name: "grep", Args: `{"pattern":"auth"}`, Output: "src/auth.go: 5 matches"},
-			}},
-		}},
-	}
-	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
-	// Post-compaction live messages have tool calls stripped (StripForRetention).
-	conv := &domain.Conversation{
-		ID:         "conv_compacted",
-		ChunkCount: 1,
-		Messages: []domain.Message{
-			{Role: domain.RoleUser, Content: "recent question", CreatedAt: liveTime},
-			{Role: domain.RoleAssistant, Content: "recent answer", CreatedAt: liveTime.Add(30 * time.Second)},
-		},
-	}
-	transcript := agent.buildTranscript(conv)
-	if !strings.Contains(transcript, "→ tool: grep(") {
-		t.Error("transcript should include tool calls from the archived chunk")
-	}
-	if !strings.Contains(transcript, "recent question") {
-		t.Error("transcript should still include live messages")
-	}
 }
 
 // TestTranscriptMessagesChronologicalOrder verifies that chunk and live
@@ -845,19 +731,19 @@ func TestReviewFailureCooldownSuppressesAndExpires(t *testing.T) {
 	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
 	agent.now = func() time.Time { return now }
 
-	if !agent.tryAcquireReview("conv_1") {
+	if reserved, _, _ := agent.acquireReview("conv_1"); !reserved {
 		t.Fatal("first review should acquire the conversation")
 	}
-	if agent.tryAcquireReview("conv_1") {
+	if reserved, _, _ := agent.acquireReview("conv_1"); reserved {
 		t.Fatal("concurrent duplicate should be suppressed while the first review is in flight")
 	}
 	agent.releaseReview("conv_1", true)
-	if agent.tryAcquireReview("conv_1") {
+	if reserved, _, _ := agent.acquireReview("conv_1"); reserved {
 		t.Fatal("failed review should be suppressed during retry cooldown")
 	}
 
 	now = now.Add(time.Hour)
-	if !agent.tryAcquireReview("conv_1") {
+	if reserved, _, _ := agent.acquireReview("conv_1"); !reserved {
 		t.Fatal("review should be allowed after retry cooldown expires")
 	}
 	agent.releaseReview("conv_1", false)
@@ -900,11 +786,11 @@ func TestReviewSuccessAlsoEntersCooldown(t *testing.T) {
 	settings := DefaultReviewSettings()
 	settings.ReviewCooldown = time.Hour
 	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), settings)
-	if !agent.tryAcquireReview("conv_success") {
+	if reserved, _, _ := agent.acquireReview("conv_success"); !reserved {
 		t.Fatal("first review should acquire")
 	}
 	agent.releaseReview("conv_success", false)
-	if agent.tryAcquireReview("conv_success") {
+	if reserved, _, _ := agent.acquireReview("conv_success"); reserved {
 		t.Fatal("successful review should be protected by cooldown (prevents redundant re-review)")
 	}
 }
@@ -913,11 +799,11 @@ func TestReviewFailureStartsCooldown(t *testing.T) {
 	settings := DefaultReviewSettings()
 	settings.ReviewCooldown = time.Hour
 	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), settings)
-	if !agent.tryAcquireReview("conv_failure") {
+	if reserved, _, _ := agent.acquireReview("conv_failure"); !reserved {
 		t.Fatal("first review should acquire")
 	}
 	agent.releaseReview("conv_failure", true)
-	if agent.tryAcquireReview("conv_failure") {
+	if reserved, _, _ := agent.acquireReview("conv_failure"); reserved {
 		t.Fatal("failed review should be protected by retry cooldown")
 	}
 }
@@ -926,10 +812,10 @@ func TestReviewCooldownAllowsDifferentConversations(t *testing.T) {
 	settings := DefaultReviewSettings()
 	settings.ReviewCooldown = time.Hour
 	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), settings)
-	if !agent.tryAcquireReview("conv_1") {
+	if reserved, _, _ := agent.acquireReview("conv_1"); !reserved {
 		t.Fatal("first conversation should acquire")
 	}
-	if !agent.tryAcquireReview("conv_2") {
+	if reserved, _, _ := agent.acquireReview("conv_2"); !reserved {
 		t.Fatal("different conversation should not be blocked")
 	}
 	agent.releaseReview("conv_1")
