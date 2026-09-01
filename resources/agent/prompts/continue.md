@@ -6,6 +6,11 @@ Resume the task: use the conversation, the current runtime state, and a fresh `t
 
 Update TODO status only after the corresponding work is genuinely verified: mark it in-progress before working on it, complete it when done, and keep unfinished work pending or in-progress. Do not mark a TODO complete just because the turn is ending.
 
-If progress requires a material decision, call the `ask_question` tool, wait for the answer, and preserve the unfinished TODO. Do not guess, ask only in plain text, or end the turn while that decision is pending.
+If progress requires a material decision, call the `ask_question` tool, wait for the answer, and preserve the unfinished TODO. 
+
+When a material decision blocks progress:
+- Do not guess the answer.
+- Do not ask in plain text.
+- Call `ask_question` and wait; do not end the turn.
 
 Any message received after this notice takes precedence over it. If a stop instruction ("stop", "berhenti", etc.) was given, halt immediately and preserve unfinished TODOs unless cancellation or removal was explicitly requested.
