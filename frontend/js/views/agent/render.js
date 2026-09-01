@@ -124,7 +124,7 @@ export function reasoningHasVisibleSource(raw) {
 // compactLine keeps collapsed UI labels to one visual line without exposing
 // a raw multiline payload. It is intentionally presentation-only: the full
 // source remains available in the expanded disclosure or raw inspector.
-function compactLine(value, limit = 128) {
+function compactLine(value, limit = 64) {
   const text = String(value ?? '').replace(/[\u200B-\u200D\uFEFF\u2060\u2063]/g, '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
   if (text.length <= limit) return text;
