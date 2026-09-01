@@ -82,6 +82,12 @@ type App struct {
 	ttsInstallMu     sync.Mutex
 	ttsInstallActive bool
 
+	// endpointsCache caches per-model upstream route lists (OpenRouter),
+	// persisted under DataDir so restarts keep the picker instant.
+	// Lazily initialized on first use.
+	endpointsCacheOnce sync.Once
+	endpointsCacheVal  *endpointsCache
+
 	// sttInstallMu guards the single in-flight offline STT install plus
 	// its cancel handle (settings.stt_install_cancel).
 	sttInstallMu     sync.Mutex

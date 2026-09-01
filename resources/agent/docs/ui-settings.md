@@ -518,11 +518,21 @@ Configure a web-grounded answer provider for the web_answer tool. This is separa
 
 ## Appearance
 
-Sidebar layout is stored in this browser. Sound notifications save with the NusaShell instance and play when an agent turn completes or fails.
+Choose a bundled interface font for this browser; the font applies immediately and is stored locally. Symbol and emoji coverage uses local fallbacks. Sidebar layout is also stored in this browser. Sound notifications save with the NusaShell instance and play when an agent turn completes or fails.
 
 - **Appearance title** (`#settings-appearance-title`):
   - Section: Settings
   - Type: text
+
+- **Interface font** (`#settings-font-family`):
+  - Section: Settings
+  - Type: select
+  - Notes: Browser-only preference. Selects one of the bundled UI families; Noto Sans Symbols 2 and Noto Color Emoji remain fallback coverage faces.
+
+- **Font preview** (`#settings-font-preview`):
+  - Section: Settings
+  - Type: text
+  - Notes: Shows letters, numbers, symbols, and emoji using the active interface font stack.
 
 - **Use icon-only sidebar** (`#settings-sidebar-compact`):
   - Section: Settings

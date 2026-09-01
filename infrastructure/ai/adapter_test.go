@@ -333,3 +333,88 @@ func TestListModelsRoutesAnthropicAndOpenAI(t *testing.T) {
 		t.Fatalf("openai models = %+v", models)
 	}
 }
+
+func TestListModelsParsesCanonicalSlug(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek/deepseek-chat","canonical_slug":"deepseek/deepseek-chat-v3","context_length":128000}]}`))
+	}))
+	defer srv.Close()
+
+	ad := &Adapter{ProviderKind: domain.ProviderChat, BaseURL: srv.URL, Client: srv.Client()}
+	models, err := ad.ListModels(context.Background(), "k")
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("models = %+v", models)
+	}
+	if models[0].CanonicalSlug != "deepseek/deepseek-chat-v3" {
+		t.Fatalf("canonical_slug = %q, want deepseek/deepseek-chat-v3", models[0].CanonicalSlug)
+	}
+	// Missing canonical_slug falls back to the model ID.
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"plain-model"}]}`))
+	}))
+	defer srv2.Close()
+	ad2 := &Adapter{ProviderKind: domain.ProviderChat, BaseURL: srv2.URL, Client: srv2.Client()}
+	models, err = ad2.ListModels(context.Background(), "k")
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(models) != 1 || models[0].CanonicalSlug != "plain-model" {
+		t.Fatalf("fallback canonical_slug = %+v", models)
+	}
+}
+
+func TestAdapterListModelEndpoints(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"endpoints":[
+			{"provider_name":"StreamLake","tag":"streamlake","quantization":"unknown","status":0,"latency_last_30m":1.25,"throughput_last_30m":50},
+			{"provider_name":"DeepInfra","tag":"deepinfra/fp4","quantization":"fp4","status":-2,"latency_last_30m":null,"throughput_last_30m":null}
+		]}}`))
+	}))
+	defer srv.Close()
+
+	ad := &Adapter{
+		ProviderKind: domain.ProviderChat,
+		Driver:       domain.ProviderDriverOpenRouter,
+		BaseURL:      srv.URL,
+		APIKey:       "k",
+		Client:       srv.Client(),
+		OpenRouter:   true,
+	}
+	routes, err := ad.ListModelEndpoints(context.Background(), "deepseek/deepseek-chat-v3")
+	if err != nil {
+		t.Fatalf("ListModelEndpoints: %v", err)
+	}
+	if gotPath != "/models/deepseek/deepseek-chat-v3/endpoints" {
+		t.Fatalf("request path = %q, want /models/deepseek/deepseek-chat-v3/endpoints", gotPath)
+	}
+	if len(routes) != 2 {
+		t.Fatalf("routes = %+v", routes)
+	}
+	if routes[0].Slug != "streamlake" || routes[0].Name != "StreamLake" || routes[0].Status != 0 {
+		t.Fatalf("route[0] = %+v", routes[0])
+	}
+	if routes[0].Latency == nil || *routes[0].Latency != 1.25 || routes[0].Throughput == nil || *routes[0].Throughput != 50 {
+		t.Fatalf("route[0] metrics = %+v", routes[0])
+	}
+	if routes[1].Slug != "deepinfra/fp4" || routes[1].Quantization != "fp4" || routes[1].Latency != nil {
+		t.Fatalf("route[1] = %+v", routes[1])
+	}
+
+	// Non-OpenRouter adapters report no routes without hitting the network.
+	direct := &Adapter{ProviderKind: domain.ProviderChat, BaseURL: srv.URL, Client: srv.Client()}
+	routes, err = direct.ListModelEndpoints(context.Background(), "x")
+	if err != nil {
+		t.Fatalf("direct ListModelEndpoints: %v", err)
+	}
+	if len(routes) != 0 {
+		t.Fatalf("direct routes = %+v, want empty", routes)
+	}
+}

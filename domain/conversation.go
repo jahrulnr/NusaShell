@@ -113,17 +113,23 @@ type Message struct {
 }
 
 type Conversation struct {
-	ID         string
-	Title      string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	Model      string
-	Effort     string // reasoning effort: "auto" (omit) or a level from the model's SupportedEfforts
-	Status     string // idle | running
-	Summary    string // compaction summary, "" when never compacted
-	Workspace  string // optional absolute working directory selected for this conversation
-	Messages   []Message
-	ChunkCount int // number of archived pre-compaction chunks available for scroll-back
+	ID        string
+	Title     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Model     string
+	Effort    string // reasoning effort: "auto" (omit) or a level from the model's SupportedEfforts
+	// ProviderRoute pins the upstream provider for the selected model on
+	// aggregator gateways (OpenRouter). Empty means auto/load-balanced.
+	// This is a gateway-internal route, distinct from the NusaShell
+	// provider (which is the gateway itself), so it lives in its own
+	// field instead of being encoded into the model string.
+	ProviderRoute string
+	Status        string // idle | running
+	Summary       string // compaction summary, "" when never compacted
+	Workspace     string // optional absolute working directory selected for this conversation
+	Messages      []Message
+	ChunkCount    int // number of archived pre-compaction chunks available for scroll-back
 	// CompactionBlob holds an opaque server-side compaction payload
 	// (OpenAI /responses/compact encrypted_content) that only the
 	// originating provider can read. When non-empty, the OpenAI Responses

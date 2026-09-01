@@ -36,6 +36,7 @@ const (
 	MethodProvidersTest   = "ai.providers.test"
 	MethodProvidersImport = "ai.providers.import-models"
 	MethodModelsList      = "ai.models.list"
+	MethodModelsEndpoints = "ai.models.endpoints"
 
 	MethodSkillsList     = "skills.list"
 	MethodSkillsRead     = "skills.read"
@@ -181,6 +182,7 @@ type ConversationDTO struct {
 	MessageCount    int    `json:"message_count"`
 	Model           string `json:"model,omitempty"`
 	Effort          string `json:"effort,omitempty"`
+	ProviderRoute   string `json:"provider_route,omitempty"`
 	Status          string `json:"status,omitempty"`
 	Workspace       string `json:"workspace,omitempty"`
 	ChunkCount      int    `json:"chunk_count,omitempty"`
@@ -313,6 +315,7 @@ type TurnStartRequest struct {
 	Text           string          `json:"text"`
 	Model          string          `json:"model"`
 	Effort         string          `json:"effort,omitempty"`
+	ProviderRoute  string          `json:"provider_route,omitempty"`
 	Attachments    []AttachmentDTO `json:"attachments,omitempty"`
 }
 
@@ -325,6 +328,7 @@ type TurnRetryRequest struct {
 	ConversationID string `json:"conversation_id"`
 	Model          string `json:"model"`
 	Effort         string `json:"effort,omitempty"`
+	ProviderRoute  string `json:"provider_route,omitempty"`
 }
 
 type TurnStartResult struct {
@@ -683,6 +687,11 @@ type ModelDTO struct {
 	TTS              bool     `json:"tts,omitempty"`
 	VideoGen         bool     `json:"video_gen,omitempty"`
 	KnowledgeCutoff  string   `json:"knowledge_cutoff,omitempty"`
+	// RouteSupport is true when the provider gateway has the concept of
+	// upstream routing (OpenRouter host/driver), meaning the route picker
+	// is interactive. False for direct providers — the picker still shows
+	// but is non-interactive with a home icon.
+	RouteSupport bool `json:"route_support,omitempty"`
 }
 
 type ProviderDTO struct {
@@ -732,6 +741,28 @@ type ImportModelsResult struct {
 
 type ModelsListResult struct {
 	Models []ModelDTO `json:"models"`
+}
+
+// ModelEndpointsRequest asks for the upstream providers (routes) that can
+// serve a specific model on a specific provider gateway.
+type ModelEndpointsRequest struct {
+	ProviderID string `json:"provider_id"`
+	ModelID    string `json:"model_id"`
+}
+
+type ModelEndpointDTO struct {
+	Slug         string   `json:"slug"`                   // routing slug for provider.order
+	Name         string   `json:"name"`                   // human-readable upstream name
+	Quantization string   `json:"quantization,omitempty"` // fp4/fp8/int4/...
+	Status       int      `json:"status"`                 // upstream status code (gateway-specific)
+	Latency      *float64 `json:"latency,omitempty"`      // seconds, rolling 30m
+	Throughput   *float64 `json:"throughput,omitempty"`   // tokens/sec, rolling 30m
+}
+
+type ModelEndpointsResult struct {
+	Routes    []ModelEndpointDTO `json:"routes"`
+	Cached    bool               `json:"cached"`
+	FetchedAt string             `json:"fetched_at,omitempty"`
 }
 
 // ---- skills ----

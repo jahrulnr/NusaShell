@@ -3,11 +3,16 @@ package ai
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"nusashell/domain"
 	aiutil "nusashell/infrastructure/ai/internal"
 )
+
+// openRouterDefaultBaseURL is the fallback host for OpenRouter gateways
+// when a provider record carries no explicit BaseURL.
+const openRouterDefaultBaseURL = "https://openrouter.ai/api/v1"
 
 // listOpenAIModels fetches the OpenAI-compatible /models catalog
 // (id, context window, pricing, reasoning efforts) used by chat,
@@ -18,6 +23,7 @@ func listOpenAIModels(ctx context.Context, baseURL string, headers map[string]st
 	var out struct {
 		Data []struct {
 			ID            string `json:"id"`
+			CanonicalSlug string `json:"canonical_slug"`
 			ContextLength int    `json:"context_length"`
 			MaxTokens     int    `json:"max_tokens"`
 			Description   string `json:"description"`
@@ -39,8 +45,13 @@ func listOpenAIModels(ctx context.Context, baseURL string, headers map[string]st
 		if m.ID == "" {
 			continue
 		}
+		canonical := m.CanonicalSlug
+		if canonical == "" {
+			canonical = m.ID
+		}
 		model := domain.Model{
 			ID:               m.ID,
+			CanonicalSlug:    canonical,
 			Context:          m.ContextLength,
 			MaxOutput:        m.MaxTokens,
 			Description:      m.Description,
@@ -53,6 +64,61 @@ func listOpenAIModels(ctx context.Context, baseURL string, headers map[string]st
 		models = append(models, model)
 	}
 	return models, nil
+}
+
+// listOpenRouterEndpoints fetches the upstream providers that can serve a
+// model: GET /models/{author}/{slug}/endpoints. One HTTP request per model;
+// there is no bulk endpoint, so callers cache aggressively. Returns an
+// empty slice (not an error) when the gateway returns no endpoints.
+func listOpenRouterEndpoints(ctx context.Context, baseURL string, headers map[string]string, client *http.Client, canonicalSlug string) ([]domain.ModelRoute, error) {
+	base := strings.TrimRight(baseURL, "/")
+	segments := strings.Split(canonicalSlug, "/")
+	for i, s := range segments {
+		segments[i] = url.PathEscape(s)
+	}
+	url := base + "/models/" + strings.Join(segments, "/") + "/endpoints"
+	var out struct {
+		Data struct {
+			Endpoints []struct {
+				ProviderName string   `json:"provider_name"`
+				Tag          string   `json:"tag"`
+				Quantization string   `json:"quantization"`
+				Status       int      `json:"status"`
+				Latency      *float64 `json:"latency_last_30m"`
+				Throughput   *float64 `json:"throughput_last_30m"`
+			} `json:"endpoints"`
+		} `json:"data"`
+	}
+	if err := aiutil.DoJSON(ctx, client, http.MethodGet, url, headers, nil, &out); err != nil {
+		return nil, err
+	}
+	routes := make([]domain.ModelRoute, 0, len(out.Data.Endpoints))
+	for _, e := range out.Data.Endpoints {
+		slug := strings.TrimSpace(e.Tag)
+		if slug == "" {
+			slug = routeSlugFallback(e.ProviderName)
+		}
+		if slug == "" {
+			continue
+		}
+		routes = append(routes, domain.ModelRoute{
+			Slug:         slug,
+			Name:         e.ProviderName,
+			Quantization: e.Quantization,
+			Status:       e.Status,
+			Latency:      e.Latency,
+			Throughput:   e.Throughput,
+		})
+	}
+	return routes, nil
+}
+
+// routeSlugFallback derives a routing slug from a provider display name
+// when the gateway omits the tag field (rare). Lowercased, spaces → dashes.
+func routeSlugFallback(name string) string {
+	s := strings.ToLower(strings.TrimSpace(name))
+	s = strings.ReplaceAll(s, " ", "-")
+	return s
 }
 
 // listAnthropicModels fetches the Anthropic model catalog

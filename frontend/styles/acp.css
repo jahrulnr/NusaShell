@@ -70,14 +70,14 @@
 .acp-dock { flex: none; border-bottom: 1px solid var(--border-soft); background: var(--bg); }
 .acp-dock[hidden] { display: none; }
 .acp-dock-head { display: flex; align-items: center; gap: 8px; min-height: 36px; padding-right: 8px; }
-.acp-dock-title { font: 12.5px/1.2 "IBM Plex Sans", system-ui, sans-serif; }
+.acp-dock-title { font: 12.5px/1.2 var(--font-body); }
 .acp-dock-meta {
   margin-left: auto;
   padding: 3px 8px;
   border-radius: 999px;
   background: var(--panel-alt);
   color: var(--text-dim);
-  font: 11px/1.2 "JetBrains Mono", monospace;
+  font: 11px/1.2 var(--font-mono);
 }
 .acp-dock-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 10px 10px; }
 .acp-dock-chip {
@@ -91,7 +91,7 @@
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
-  font: 11.5px "IBM Plex Sans", system-ui, sans-serif;
+  font: 11.5px var(--font-body);
 }
 .acp-dock-chip:hover { border-color: var(--accent-border); }
 .acp-dock-chip-pulse {

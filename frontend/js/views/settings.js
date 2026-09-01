@@ -2,6 +2,7 @@
 
 import { autoReconnectEnabled, on, rpc, setAutoReconnect } from '../rpc.js';
 import { toast, createSelect, el } from '../ui.js';
+import { FONT_OPTIONS, readFontPreference, setFontPreference } from '../font-preferences.js';
 
 let bound = false;
 const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', imageProviderId: '', imageModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', videoGenProviderId: '', videoGenModelId: '', ttsProviderId: '', ttsModelId: '', webAnswerProvider: '', webAnswerModel: '', webSearchStrategy: '', compactionModel: '', reviewModel: '' };
@@ -20,6 +21,8 @@ let webSearchStrategySelect;
 let contractModeSelect;
 let sttModelSelect;
 let sttLanguageSelect;
+let fontSelect;
+let syncingFontPreference = false;
 
 export async function initSettings() {
   if (!bound) {
@@ -28,6 +31,15 @@ export async function initSettings() {
     document.getElementById('settings-sidebar-compact').addEventListener('change', saveSidebarPreference);
     document.getElementById('settings-auto-reconnect').addEventListener('change', saveReconnectPreference);
     document.getElementById('settings-check-connection-btn').addEventListener('click', checkConnection);
+    fontSelect = createSelect(document.getElementById('settings-font-family'), {
+      data: FONT_OPTIONS.map((option) => ({
+        text: `${option.label} — ${option.description}`,
+        value: option.id,
+      })),
+      search: false,
+      onChange: handleFontPreferenceChange,
+    });
+    syncFontPreference();
     preferredSelect = createSelect(document.getElementById('settings-preferred-model'), {
       placeholder: 'Automatic — choose in each conversation',
       search: true,
@@ -149,6 +161,7 @@ function bindDiskSync() {
 }
 
 export async function refresh() {
+  syncFontPreference();
   const [settingsResult, infoResult, modelsResult, sttStatusResult, ttsStatusResult] = await Promise.allSettled([
     rpc('settings.get'),
     rpc('app.info', {}, { timeoutMs: 4000 }),
@@ -246,6 +259,26 @@ export async function refresh() {
   } else {
     setConnectionStatus('Could not reach the local backend.', true);
   }
+}
+
+function syncFontPreference() {
+  const id = readFontPreference();
+  if (fontSelect) {
+    syncingFontPreference = true;
+    fontSelect.setSelected([id]);
+    syncingFontPreference = false;
+  }
+  const preview = document.getElementById('settings-font-preview');
+  if (preview) preview.dataset.font = id;
+}
+
+function handleFontPreferenceChange(value) {
+  if (syncingFontPreference || !value) return;
+  const id = setFontPreference(value);
+  const option = FONT_OPTIONS.find((candidate) => candidate.id === id);
+  const preview = document.getElementById('settings-font-preview');
+  if (preview) preview.dataset.font = id;
+  setStatus(`${option?.label ?? 'Interface font'} applied on this device.`);
 }
 
 function renderModelOptions(models) {

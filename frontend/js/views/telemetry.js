@@ -3,10 +3,12 @@
 
 import { rpc } from '../rpc.js';
 import { createSelect } from '../ui.js';
+import { resolvedFontFamily } from '../font-preferences.js';
 
 let charts = {};
 let currentRange = 180; // 3h default
 let chartReady = false;
+let fontChangeBound = false;
 
 const PALETTE = ['#a3e635', '#22d3ee', '#a78bfa', '#fb923c', '#facc15', '#60a5fa', '#f472b6', '#94a3b8', '#ef4444'];
 
@@ -16,7 +18,7 @@ function getChart() {
   if (!chartReady) {
     C.defaults.color = '#94a3b8';
     C.defaults.borderColor = 'rgba(148,163,184,0.1)';
-    C.defaults.font.family = 'system-ui, sans-serif';
+    C.defaults.font.family = resolvedFontFamily() || "'IBM Plex Sans', 'Noto Color Emoji', 'Noto Sans Symbols 2', sans-serif";
     chartReady = true;
   }
   return C;
@@ -50,6 +52,15 @@ export async function initTelemetry() {
     });
   }
   if (refreshBtn) refreshBtn.addEventListener('click', () => refresh());
+  if (!fontChangeBound) {
+    fontChangeBound = true;
+    window.addEventListener('nusashell:font-change', () => {
+      chartReady = false;
+      const Chart = getChart();
+      for (const chart of Object.values(charts)) chart.update();
+      if (!Chart) charts = {};
+    });
+  }
 }
 
 export async function refresh() {

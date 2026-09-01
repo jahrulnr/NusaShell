@@ -66,9 +66,11 @@
   --radius-lg: 10px;
   --radius-md: 7px;
   --radius-sm: 5px;
-  --font-display: 'Space Grotesk', 'Segoe UI', sans-serif;
-  --font-body: 'IBM Plex Sans', 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', 'Cascadia Code', monospace;
+  --font-symbols: 'Noto Sans Symbols 2';
+  --font-emoji: 'Noto Color Emoji';
+  --font-display: 'Space Grotesk', var(--font-emoji), var(--font-symbols), sans-serif;
+  --font-body: 'IBM Plex Sans', var(--font-emoji), var(--font-symbols), sans-serif;
+  --font-mono: 'IBM Plex Mono', var(--font-emoji), var(--font-symbols), monospace;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -76,6 +78,23 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
+}
+
+/* The selected body/display family stays local; the symbol and emoji fallbacks
+ * remain in every option so model-authored glyphs survive the family swap. */
+:root[data-font="inter"] {
+  --font-display: 'Inter', var(--font-emoji), var(--font-symbols), sans-serif;
+  --font-body: 'Inter', var(--font-emoji), var(--font-symbols), sans-serif;
+}
+
+:root[data-font="atkinson"] {
+  --font-display: 'Atkinson Hyperlegible Next', var(--font-emoji), var(--font-symbols), sans-serif;
+  --font-body: 'Atkinson Hyperlegible Next', var(--font-emoji), var(--font-symbols), sans-serif;
+}
+
+:root[data-font="source-sans"] {
+  --font-display: 'Source Sans 3', var(--font-emoji), var(--font-symbols), sans-serif;
+  --font-body: 'Source Sans 3', var(--font-emoji), var(--font-symbols), sans-serif;
 }
 
 * { box-sizing: border-box; }

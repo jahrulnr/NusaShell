@@ -292,6 +292,16 @@ The message input with attachments, model picker, workspace selector, provider s
   - Type: dialog
   - Notes: Lists models grouped by provider with effort chips.
 
+- **Provider route trigger** (`#route-trigger`):
+  - Section: Agent
+  - Type: button
+  - Action: Toggles the upstream provider route menu (router icon = multi-provider, home icon = single upstream).
+
+- **Provider route menu** (`#route-menu`):
+  - Section: Agent
+  - Type: dialog
+  - Notes: Lists upstream providers for the selected model with quantization/latency badges; Auto entry restores gateway load balancing.
+
 - **Workspace selector** (`#agent-workspace-btn`):
   - Section: Agent
   - Type: button

@@ -4,6 +4,7 @@
 import { rpc, on, off } from '../rpc.js';
 import { el, debounce, createSelect, toast, fmtTime } from '../ui.js';
 import { renderMarkdown } from '../markdown.js';
+import { resolvedFontFamily } from '../font-preferences.js';
 // Reuse the Agent view's thinking/tool components so the review activity
 // reads exactly like a live agent conversation (minus the user side).
 import { reasoningDisclosure, renderToolCallCard, setToolTerminalOutput, setToolTerminalPresentation, setToolTerminalStatus, toolTerminalMeta } from './agent/render.js';
@@ -1000,18 +1001,19 @@ function initGraph() {
   if (!probe.getContext || !probe.getContext('2d')) return;
   state.nodes = new DataSet([]);
   state.edges = new DataSet([]);
+  const graphFont = () => resolvedFontFamily() || "'IBM Plex Sans', 'Noto Color Emoji', 'Noto Sans Symbols 2', sans-serif";
   const options = {
     nodes: {
       shape: 'dot',
       size: 16,
-      font: { size: 12, color: '#c9d1d9', face: 'Inter, system-ui, sans-serif' },
+      font: { size: 12, color: '#c9d1d9', face: graphFont() },
       borderWidth: 2,
     },
     edges: {
       width: 0.6,
       color: { color: '#30363d', highlight: '#6ee0c4', hover: '#8b949e' },
       smooth: { type: 'continuous', roundness: 0.5 },
-      font: { size: 10, color: '#8b949e', face: 'Inter, system-ui, sans-serif' },
+      font: { size: 10, color: '#8b949e', face: graphFont() },
     },
     groups: {
       skill: { color: { background: GRAPH_PALETTE.ocean, border: GRAPH_PALETTE.oceanBorder }, size: 20 },
@@ -1049,6 +1051,14 @@ function initGraph() {
     },
   };
   state.network = new Network(container, { nodes: state.nodes, edges: state.edges }, options);
+  window.addEventListener('nusashell:font-change', () => {
+    if (!state.network) return;
+    const face = graphFont();
+    state.network.setOptions({
+      nodes: { font: { face } },
+      edges: { font: { face } },
+    });
+  });
   bindGraphZoomSizing(state.network, state.nodes);
   // After a layout stabilizes, freeze the graph. Without this the physics
   // engine runs indefinitely (the "constant jitter / noise" bug when

@@ -21,6 +21,7 @@ func convDTO(c *domain.Conversation) contracts.ConversationDTO {
 		MessageCount:    len(c.Messages),
 		Model:           c.Model,
 		Effort:          c.Effort,
+		ProviderRoute:   c.ProviderRoute,
 		Status:          c.Status,
 		Workspace:       c.Workspace,
 		ChunkCount:      c.ChunkCount,

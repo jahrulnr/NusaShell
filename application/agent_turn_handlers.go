@@ -81,6 +81,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	a.addTurnMessages(c, userMsg, asstMsg)
 	c.Model = qualifiedModel
 	c.Effort = req.Effort
+	c.ProviderRoute = req.ProviderRoute
 	c.Status = "running"
 	if err := repo.Save(); err != nil {
 		return nil, rpcInternal(err)
@@ -164,6 +165,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	targetMsgID := next.ID
 	c.Model = qualifiedModel
 	c.Effort = req.Effort
+	c.ProviderRoute = req.ProviderRoute
 	c.Status = "running"
 	if err := repo.Save(); err != nil {
 		return nil, rpcInternal(err)

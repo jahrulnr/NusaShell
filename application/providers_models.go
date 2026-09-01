@@ -151,6 +151,7 @@ func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
 func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
 	models := p.Models
 	var out []contracts.ModelDTO
+	routeSupport := p.EffectiveDriver() == domain.ProviderDriverOpenRouter || domain.IsOpenRouterHost(p.Kind, p.BaseURL)
 	for _, m := range models {
 		out = append(out, contracts.ModelDTO{
 			ID:               m.ID,
@@ -175,6 +176,7 @@ func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
 			TTS:              m.Kind == domain.ModelKindTTS,
 			VideoGen:         m.Kind == domain.ModelKindVideo,
 			KnowledgeCutoff:  m.KnowledgeCutoff,
+			RouteSupport:     routeSupport,
 		})
 	}
 	return out

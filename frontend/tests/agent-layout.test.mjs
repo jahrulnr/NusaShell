@@ -11,6 +11,7 @@ const appShell = await readFile(new URL('../js/app.js', import.meta.url), 'utf8'
 const agentRender = await readFile(new URL('../js/views/agent/render.js', import.meta.url), 'utf8');
 const agentComposer = await readFile(new URL('../js/views/agent/composer.js', import.meta.url), 'utf8');
 const agentModelPicker = await readFile(new URL('../js/views/agent/model-picker.js', import.meta.url), 'utf8');
+const agentRoutePicker = await readFile(new URL('../js/views/agent/route-picker.js', import.meta.url), 'utf8');
 const subagentsView = await readFile(new URL('../js/views/agent/subagents.js', import.meta.url), 'utf8');
 const acpCSS = await readFile(new URL('../styles/acp.css', import.meta.url), 'utf8');
 
@@ -116,8 +117,22 @@ test('Agent delegates presentation, composer, and model picker responsibilities 
   assert.match(agentView, /from '\.\/agent\/render\.js'/);
   assert.match(agentView, /from '\.\/agent\/composer\.js'/);
   assert.match(agentView, /from '\.\/agent\/model-picker\.js'/);
+  assert.match(agentView, /from '\.\/agent\/route-picker\.js'/);
   assert.match(agentComposer, /export function bindComposer/);
   assert.match(agentModelPicker, /export function bindModelPicker/);
+  assert.match(agentRoutePicker, /export function bindRoutePicker/);
+  assert.match(agentRoutePicker, /ai\.models\.endpoints/);
+});
+
+test('Route picker trigger is wired in the composer footer with a router/home icon', () => {
+  assert.match(html, /id="route-trigger"/);
+  assert.match(html, /id="route-menu"/);
+  assert.match(html, /id="route-trigger-icon"/);
+  assert.match(agentRoutePicker, /router: '<svg/);
+  assert.match(agentRoutePicker, /home: '<svg/);
+  assert.match(agentRoutePicker, /spinner: '<svg/);
+  assert.match(agentCSS, /\.agent-route-trigger \{/);
+  assert.match(agentRoutePicker, /route_support/);
 });
 
 test('Subagent drawer reuses the conversation sidebar design', () => {

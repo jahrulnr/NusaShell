@@ -7,6 +7,7 @@ import { incrementalRender } from '../incremental-render.js';
 import { estimateContextTokens, formatContextUsage, effectiveContextWindow, previousWindowStart, conversationTail, isThreadAtBottom, updateScrollPin } from '../agent-ui.js';
 import { bindComposer, updateSendAvailability } from './agent/composer.js';
 import { bindModelPicker } from './agent/model-picker.js';
+import { bindRoutePicker } from './agent/route-picker.js';
 import { bindRoomInfo, updateRoomInfo } from './agent/room-info.js';
 import {
   attachmentChip,
@@ -96,6 +97,7 @@ const state = {
   settings: {},
   model: localStorage.getItem('nusashell.model') || '',
   effort: 'auto', // reasoning effort: "auto" (omit) or a level from the model's supported_efforts
+  providerRoute: localStorage.getItem('nusashell.provider_route') || '', // upstream provider pin on aggregators (OpenRouter); "" = auto
   runs: new Map(), // run_id -> {messageEl, toolStripEl, toolJobs, conversationId, runId}
   pendingEvents: new Map(), // run_id -> events that won the start race
   get running() { return runForConversation(this.activeId) !== null; },
@@ -542,6 +544,12 @@ export async function initAgent() {
     selectEffort,
     refreshModels,
   });
+  routePicker = bindRoutePicker({
+    getModels: () => models,
+    getSelectedModel: () => state.model,
+    getSelectedRoute: () => state.providerRoute,
+    selectRoute: selectProviderRoute,
+  });
   bindRoomInfo({ getConversation: () => state.conversation });
   bindStripToggles();
   bindSubagents({ getActiveConversationId: () => state.activeId });
@@ -876,6 +884,8 @@ async function openConversation(id) {
     const requestedModel = conversation.model || localStorage.getItem('nusashell.model') || '';
     state.model = models.length && requestedModel && !models.some((model) => `${model.provider_id}:${model.id}` === requestedModel) && !models.some((model) => model.id === requestedModel) ? '' : requestedModel;
     state.effort = conversation.effort || 'auto';
+    state.providerRoute = conversation.provider_route || localStorage.getItem('nusashell.provider_route') || '';
+    routePicker?.refresh();
   }
   renderConversationList();
   renderThread(windowedActiveMessages(), true);
@@ -1364,7 +1374,7 @@ async function retryTurn(failedNode, failedMessageId) {
   state.localTurnPending = true;
   try {
     try {
-      const res = await rpc('agent.turns.retry', { conversation_id: state.activeId, model, effort: state.effort && state.effort !== 'auto' ? state.effort : undefined });
+      const res = await rpc('agent.turns.retry', { conversation_id: state.activeId, model, effort: state.effort && state.effort !== 'auto' ? state.effort : undefined, provider_route: state.providerRoute || undefined });
       runId = res.run_id;
     } catch (err) {
       toast(err.message, 'error');
@@ -1536,6 +1546,7 @@ function saveRoomState(id) {
     attachments: state.attachments,
     model: state.model,
     effort: state.effort,
+    providerRoute: state.providerRoute,
   });
 }
 
@@ -1552,6 +1563,7 @@ function loadRoomState(id) {
     state.attachments = saved.attachments;
     state.model = saved.model;
     state.effort = saved.effort || 'auto';
+    state.providerRoute = saved.providerRoute || localStorage.getItem('nusashell.provider_route') || '';
     return true;
   }
   state.pinned = true;
@@ -1559,6 +1571,7 @@ function loadRoomState(id) {
   state.steerDraft = '';
   state.attachments = [];
   state.effort = 'auto';
+  state.providerRoute = localStorage.getItem('nusashell.provider_route') || '';
   // Model will be set by openConversation from conversation.model
   return false;
 }
@@ -2874,6 +2887,7 @@ async function refreshActiveConversation() {
 // ---------- models ----------
 
 let models = [];
+let routePicker = null;
 
 async function refreshModels() {
   try {
@@ -2886,7 +2900,13 @@ async function refreshModels() {
     state.model = '';
     localStorage.removeItem('nusashell.model');
   }
+  // A vanished model invalidates its route pin too.
+  if (state.providerRoute && (!state.model || (models.length && !models.some((model) => `${model.provider_id}:${model.id}` === state.model) && !models.some((model) => model.id === state.model)))) {
+    state.providerRoute = '';
+    localStorage.removeItem('nusashell.provider_route');
+  }
   updateModelTrigger();
+  routePicker?.refresh();
 }
 
 function updateModelTrigger() {
@@ -2914,6 +2934,21 @@ function selectModel(modelID) {
       state.effort = 'auto';
     }
   }
+  // A route slug is model-specific (each model may be served by a
+  // different set of upstreams), so switching models resets to auto.
+  if (state.providerRoute) {
+    state.providerRoute = '';
+    localStorage.removeItem('nusashell.provider_route');
+  }
+  updateModelTrigger();
+  routePicker?.refresh();
+}
+
+function selectProviderRoute(route) {
+  state.providerRoute = route || '';
+  if (route) localStorage.setItem('nusashell.provider_route', route);
+  else localStorage.removeItem('nusashell.provider_route');
+  routePicker?.refresh();
   updateModelTrigger();
 }
 

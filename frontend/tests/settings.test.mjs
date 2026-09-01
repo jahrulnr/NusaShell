@@ -53,3 +53,13 @@ test('STT language select is slim-enhanced like the model pickers', () => {
   assert.match(settingsView, /sttLanguageSelect\.getSelected/);
   assert.doesNotMatch(settingsView, /'settings-stt-language'\)\.value/);
 });
+
+test('Interface font picker is slim-enhanced and browser-local', () => {
+  assert.match(html, /id="settings-font-family"/);
+  assert.match(html, /id="settings-font-preview"/);
+  assert.match(settingsView, /createSelect\(document\.getElementById\('settings-font-family'\)/);
+  assert.match(settingsView, /readFontPreference/);
+  assert.match(settingsView, /setFontPreference/);
+  assert.match(settingsView, /handleFontPreferenceChange/);
+  assert.doesNotMatch(settingsView, /settings.set[sS]{0,500}font/i);
+});

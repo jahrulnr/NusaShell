@@ -39,6 +39,12 @@ func (a *App) dispatchAI(method string, payload json.RawMessage) (any, *contract
 		return a.handleProvidersImport(req)
 	case contracts.MethodModelsList:
 		return a.handleModelsList()
+	case contracts.MethodModelsEndpoints:
+		var req contracts.ModelEndpointsRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleModelEndpoints(req)
 	default:
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "unknown ai method: " + method}
 	}

@@ -224,6 +224,7 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 		PromptCache:       promptCache,
 		MaxTokens:         maxTokens,
 		Effort:            effort,
+		ProviderRoute:     conversation.ProviderRoute,
 		Temperature:       settings.Temperature,
 		TopP:              settings.TopP,
 		TopK:              settings.TopK,

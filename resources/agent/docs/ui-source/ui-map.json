@@ -200,6 +200,8 @@
             "model-trigger",
             "model-trigger-label",
             "model-menu",
+            "route-trigger",
+            "route-menu",
             "agent-workspace-btn",
             "agent-workspace-label",
             "agent-provider-status",
@@ -794,10 +796,12 @@
         {
           "heading": "Appearance",
           "paragraphs": [
-            "Sidebar layout is stored in this browser. Sound notifications save with the NusaShell instance and play when an agent turn completes or fails."
+            "Choose a bundled interface font for this browser; the font applies immediately and is stored locally. Symbol and emoji coverage uses local fallbacks. Sidebar layout is also stored in this browser. Sound notifications save with the NusaShell instance and play when an agent turn completes or fails."
           ],
           "controls": [
             "settings-appearance-title",
+            "settings-font-family",
+            "settings-font-preview",
             "settings-sidebar-compact",
             "settings-sound-notifications"
           ]
@@ -1700,6 +1704,18 @@
       "section": "Settings",
       "type": "text"
     },
+    "settings-font-family": {
+      "label": "Interface font",
+      "section": "Settings",
+      "type": "select",
+      "notes": "Browser-only preference. Selects one of the bundled UI families; Noto Sans Symbols 2 and Noto Color Emoji remain fallback coverage faces."
+    },
+    "settings-font-preview": {
+      "label": "Font preview",
+      "section": "Settings",
+      "type": "text",
+      "notes": "Shows letters, numbers, symbols, and emoji using the active interface font stack."
+    },
     "settings-sidebar-compact": {
       "label": "Use icon-only sidebar",
       "section": "Settings",
@@ -2555,6 +2571,18 @@
       "section": "Settings",
       "type": "password",
       "notes": "Stored in the credential store (web_search_tavily). Empty falls back to TAVILY_API_KEY; required to register the Tavily source."
+    },
+    "route-trigger": {
+      "label": "Provider route trigger",
+      "section": "Agent",
+      "type": "button",
+      "action": "Toggles the upstream provider route menu (router icon = multi-provider, home icon = single upstream)."
+    },
+    "route-menu": {
+      "label": "Provider route menu",
+      "section": "Agent",
+      "type": "dialog",
+      "notes": "Lists upstream providers for the selected model with quantization/latency badges; Auto entry restores gateway load balancing."
     }
   }
 }

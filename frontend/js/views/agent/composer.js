@@ -148,6 +148,7 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
         text,
         model: state.model,
         effort: state.effort && state.effort !== 'auto' ? state.effort : undefined,
+        provider_route: state.providerRoute || undefined,
         attachments,
       });
       input.value = '';

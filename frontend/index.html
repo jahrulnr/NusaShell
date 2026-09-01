@@ -288,6 +288,11 @@
                       </button>
                       <div class="agent-model-menu" id="model-menu" role="dialog" aria-label="Choose model" hidden></div>
                     </div>
+                    <button class="agent-route-trigger" id="route-trigger" type="button" title="Provider route: Auto" aria-haspopup="dialog" aria-controls="route-menu" aria-expanded="false" hidden>
+                      <span id="route-trigger-icon" class="agent-route-icon" aria-hidden="true"></span>
+                      <span id="route-trigger-label">Auto</span>
+                    </button>
+                    <div class="agent-model-menu agent-route-menu" id="route-menu" role="dialog" aria-label="Choose provider route" hidden></div>
                     <button class="agent-workspace-btn" id="agent-workspace-btn" type="button" aria-label="Choose workspace folder" title="Home (user home directory)">
                       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
                       <span id="agent-workspace-label">Home</span>
@@ -974,7 +979,20 @@
             <section class="settings-card" aria-labelledby="settings-appearance-title">
               <div class="settings-card-title">Appearance</div>
               <h2 id="settings-appearance-title" class="sr-only">Appearance</h2>
-              <p class="settings-card-copy">Sidebar layout stays in this browser. Sound notifications save with this NusaShell instance.</p>
+              <p class="settings-card-copy">Choose a bundled interface font for this browser. Symbols and emoji use local coverage fallbacks; sound notifications save with this NusaShell instance.</p>
+              <label class="settings-field settings-font-field" for="settings-font-family">Interface font
+                <select id="settings-font-family">
+                  <option value="plex">Nusa Plex — Space Grotesk headings + IBM Plex Sans body</option>
+                  <option value="inter">Inter — Neutral, compact interface text</option>
+                  <option value="atkinson">Atkinson Hyperlegible Next — Distinct glyphs for comfortable reading</option>
+                  <option value="source-sans">Source Sans 3 — Open, readable text with generous forms</option>
+                </select>
+                <small>Applies immediately and is saved only in this browser. Color emoji depends on browser font support; unsupported glyphs fall back to monochrome symbols.</small>
+              </label>
+              <div class="settings-font-preview" id="settings-font-preview" role="img" aria-label="Font preview with letters, numbers, symbols, and emoji">
+                <span class="settings-font-preview-label">Specimen</span>
+                <span class="settings-font-preview-sample" aria-hidden="true">Aa 123 · → ✓ ⚠ ✨ 🧭 🧠</span>
+              </div>
               <label class="settings-toggle" for="settings-sidebar-compact">
                 <span><strong>Use icon-only sidebar</strong><small>Keep more room for conversations on this device.</small></span>
                 <input id="settings-sidebar-compact" type="checkbox">

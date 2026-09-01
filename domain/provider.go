@@ -205,6 +205,7 @@ const (
 
 type Model struct {
 	ID               string
+	CanonicalSlug    string // gateway-canonical slug for per-model endpoints (OpenRouter); "" when unknown
 	DisplayName      string // human-readable name (e.g. "GPT-5.5"), from catalog
 	Context          int
 	MaxOutput        int     // max completion tokens, when known
@@ -231,6 +232,20 @@ type Model struct {
 	// turns or the upstream 400s with "reasoning_content must be passed
 	// back". Empty when the model does not use interleaved reasoning.
 	InterleavedField string
+}
+
+// ModelRoute describes one upstream endpoint that serves a model on an
+// aggregator gateway like OpenRouter. Slug is the exact routing slug used
+// in the provider.order request field (e.g. "deepinfra/fp4"); it may carry
+// a quantization or region suffix. Latency/Throughput are rolling 30m
+// metrics when the gateway reports them.
+type ModelRoute struct {
+	Slug         string   // routing slug for provider.order (e.g. "deepinfra/fp4")
+	Name         string   // human-readable upstream name (e.g. "DeepInfra")
+	Quantization string   // fp4/fp8/int4/int8/bf16/...; "" or "unknown" when not reported
+	Status       int      // upstream status code; semantics vary by gateway (0 = reported OK)
+	Latency      *float64 // seconds, rolling 30m; nil when unknown
+	Throughput   *float64 // tokens/sec, rolling 30m; nil when unknown
 }
 
 type Provider struct {

@@ -52,7 +52,7 @@ func TestRosterUniqueness(t *testing.T) {
 		MethodTurnsRetry, MethodTurnsSteer, MethodTurnsCancelSteer, MethodTurnsActive,
 		MethodToolContracts,
 		MethodProvidersList, MethodProvidersSave, MethodProvidersDelete, MethodProvidersTest,
-		MethodProvidersImport, MethodModelsList,
+		MethodProvidersImport, MethodModelsList, MethodModelsEndpoints,
 		MethodSkillsList, MethodSkillsRead, MethodSkillsSave, MethodSkillsDelete,
 		MethodPluginList, MethodPluginSave, MethodPluginDelete, MethodPluginTest,
 		MethodPluginStop, MethodPluginToolsList, MethodPluginUninstall,

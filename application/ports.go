@@ -297,6 +297,11 @@ type ChatRequest struct {
 	PromptCaching bool
 	MaxTokens     int
 	Effort        string // reasoning effort: "auto" (omit) or a level from the model's SupportedEfforts
+	// ProviderRoute pins the upstream provider for this model on
+	// aggregator gateways (OpenRouter). Empty means auto/load-balanced;
+	// when set, the adapter sends provider.order=[route] with
+	// allow_fallbacks=false (fail-closed, session cache stays warm).
+	ProviderRoute string
 	// Sampling parameters. nil = use provider default. Set from
 	// domain.Settings at turn start.
 	Temperature      *float64
@@ -419,6 +424,14 @@ type AIProvider interface {
 // ModelLister is implemented by providers that can enumerate models.
 type ModelLister interface {
 	ListModels(ctx context.Context, apiKey string) ([]domain.Model, error)
+}
+
+// ModelEndpointsLister is implemented by aggregator gateways (OpenRouter)
+// that can enumerate the upstream providers serving a model. Non-gateway
+// providers return an empty list and nil error so callers never branch on
+// gateway type.
+type ModelEndpointsLister interface {
+	ListModelEndpoints(ctx context.Context, canonicalSlug string) ([]domain.ModelRoute, error)
 }
 
 // EmbeddingModelLister is implemented by providers that can enumerate

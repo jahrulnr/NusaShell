@@ -74,6 +74,16 @@ func ToCoreRequest(req ChatRequest, kind domain.ProviderKind, openRouter bool) *
 	}
 	out.ToolChoice = req.ToolChoice
 	applyPromptCache(out, req, kind, openRouter)
+	// Provider pinning: only aggregator gateways (OpenRouter) understand
+	// the provider object; direct providers must never receive it. An
+	// empty route means auto/load-balanced — send nothing so OpenRouter
+	// uses its default strategy.
+	if openRouter && strings.TrimSpace(req.ProviderRoute) != "" && kind == domain.ProviderChat {
+		setProviderOption(out, "provider", map[string]any{
+			"order":           []string{strings.TrimSpace(req.ProviderRoute)},
+			"allow_fallbacks": false,
+		})
+	}
 	if req.CompactionBlob != "" && kind == domain.ProviderResponses {
 		setProviderOption(out, "compaction_items", req.CompactionBlob)
 	}

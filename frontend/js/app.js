@@ -17,6 +17,12 @@ import { toast, dismissOpenDialogs } from './ui.js';
 import { bindShellShortcuts } from './shell-shortcuts.js';
 import { initMobileNav } from './mobile-nav.js';
 import { initOfflineScreen } from './offline-screen.js';
+import { applyFontPreference, readFontPreference } from './font-preferences.js';
+
+// Apply the browser-only typography preference before the view modules render.
+// The bundled fallback faces keep model-authored symbols available for every
+// selectable UI family.
+applyFontPreference(readFontPreference());
 
 async function initProviders() {
   await Promise.all([initLlmProviders(), initAcpProviders()]);

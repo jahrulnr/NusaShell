@@ -11,6 +11,7 @@ package ai
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"nusashell/application"
 	"nusashell/domain"
@@ -110,4 +111,26 @@ func (a *Adapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model
 		}
 		return listOpenAIModels(ctx, a.BaseURL, headers, a.Client)
 	}
+}
+
+// ListModelEndpoints implements application.ModelEndpointsLister. Only
+// OpenRouter gateways have the concept of upstream providers; direct
+// providers (Anthropic, OpenAI, local chat) return an empty list so
+// callers never branch on gateway type.
+func (a *Adapter) ListModelEndpoints(ctx context.Context, canonicalSlug string) ([]domain.ModelRoute, error) {
+	if !a.OpenRouter && a.Driver != domain.ProviderDriverOpenRouter {
+		return nil, nil
+	}
+	headers := map[string]string{}
+	if a.APIKey != "" {
+		headers["Authorization"] = "Bearer " + a.APIKey
+	}
+	for k, v := range aiutil.OpenRouterAttributionHeaders() {
+		headers[k] = v
+	}
+	base := strings.TrimRight(a.BaseURL, "/")
+	if base == "" {
+		base = openRouterDefaultBaseURL
+	}
+	return listOpenRouterEndpoints(ctx, base, headers, a.Client, canonicalSlug)
 }

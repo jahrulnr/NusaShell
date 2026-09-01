@@ -342,3 +342,39 @@ Key behaviors:
 - **Token estimation:** `EstimateTokens` includes the `CompactionBlob`
   length so the context badge reflects the real request size after a
   server-side compaction.
+
+## Upstream provider routing (OpenRouter)
+
+Aggregator gateways (OpenRouter) may serve one model from several upstream
+providers, and by default load-balance across them per request. That causes
+silent provider switching between turns and prompt-cache misses. NusaShell
+lets the user pin one upstream per model (fail-closed) or leave routing to
+the gateway (Auto).
+
+- **Data source:** `GET /models/{canonical_slug}/endpoints` (one request
+  per model; there is no bulk endpoint). The canonical slug is captured
+  from `GET /models` at import time (`canonical_slug`, falling back to the
+  model ID). Response `tag` fields are the routing slugs used in
+  `provider.order`.
+- **RPC:** `ai.models.endpoints {provider_id, model_id}` returns
+  `{routes:[{slug,name,quantization,status,latency,throughput}], cached,
+  fetched_at}`. Routes are cached on disk under the data dir
+  (`endpoints_cache.json`, TTL 24h), keyed per provider+model because each
+  gateway serves models with its own upstream set.
+- **Direct providers** (Anthropic, OpenAI, local chat) have no route
+  concept: the handler returns an empty list without fetching, and the
+  frontend shows a non-interactive home icon next to the model picker.
+- **Pinning wire:** when a conversation has a non-empty `provider_route`
+  and the provider is a chat-kind OpenRouter gateway, the adapter sends
+  `provider: {order: [route], allow_fallbacks: false}` — a hard pin: if
+  the upstream is unavailable or blocked at the account level, the request
+  fails (404 "No endpoints found") instead of silently falling back to
+  another provider. Auto (empty route) sends no provider object, so
+  OpenRouter's load balancing applies.
+- **Persistence:** `provider_route` is stored on the conversation (like
+  `effort`) and sent in `agent.turns.start` / `agent.turns.retry`.
+  Switching models resets the route to Auto because slugs are
+  model-specific.
+- **Blocked upstreams:** account-level ignored providers still appear in
+  the route list (the endpoints API is unaware of account privacy
+  settings); pinning one yields a 404 the UI surfaces as a fetch hint.
