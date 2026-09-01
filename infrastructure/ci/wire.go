@@ -1,7 +1,6 @@
 package ci
 
 import (
-	"os"
 	"path/filepath"
 
 	"nusashell/application"
@@ -9,9 +8,7 @@ import (
 
 // BuildCI wires durable stores, the local executor, and both schedulers.
 func BuildCI(dataDir string, bus *application.Bus, plugins application.PluginStore, mcp application.MCPToolbox, caller application.MCPToolCaller) (*application.CI, *SQLite, error) {
-	dbPath := filepath.Join(dataDir, "ci", "workflows.db")
-	migrateAutomationDB(dataDir, dbPath)
-	store, err := OpenSQLite(dbPath)
+	store, err := OpenSQLite(filepath.Join(dataDir, "ci", "workflows.db"))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -56,22 +53,4 @@ func BuildCI(dataDir string, bus *application.Bus, plugins application.PluginSto
 		Clock:     application.SystemClock{},
 	}
 	return svc, store, nil
-}
-
-// migrateAutomationDB renames the legacy <dataDir>/ci/automation.db to
-// <dataDir>/ci/workflows.db when the new path does not exist yet. This is a
-// one-time migration so existing users keep their saved workflows after the
-// automation → CI namespace unification. If both files exist, the new path
-// wins (the old file is left in place for manual recovery). Errors are
-// silently ignored — a failed rename surfaces as OpenSQLite creating a fresh
-// empty database, which is the same behavior as a new install.
-func migrateAutomationDB(dataDir, newPath string) {
-	if _, err := os.Stat(newPath); err == nil || !os.IsNotExist(err) {
-		return
-	}
-	oldPath := filepath.Join(dataDir, "ci", "automation.db")
-	if _, err := os.Stat(oldPath); err != nil {
-		return
-	}
-	_ = os.Rename(oldPath, newPath)
 }

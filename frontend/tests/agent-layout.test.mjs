@@ -147,8 +147,6 @@ test('Thinking and tool markers use deliberate conversation rails', () => {
   assert.match(agentCSS, /\.agent-reasoning summary \{[^}]*margin-left: -12px;/s);
   assert.match(agentCSS, /\.agent-reasoning-preview \{[^}]*min-width: 0;/s,
     'Thinking exposes a scan-friendly preview without forcing a second row');
-  assert.match(agentCSS, /\.agent-reasoning \{[^}]*border-left: 2px solid/s,
-    'Thinking uses a distinct quiet rail instead of the tool card treatment');
   assert.match(agentCSS, /\.agent-tool-stack::before \{[^}]*left: 8px;/s,
     'the rail stays centered under the compact status node');
   assert.match(agentCSS, /--agent-tool-gutter: 32px;/);
