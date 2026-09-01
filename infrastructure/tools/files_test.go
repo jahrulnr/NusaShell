@@ -433,6 +433,92 @@ func TestFileReadSelfDescribingOffsets(t *testing.T) {
 	}
 }
 
+// Line mode lets the model read by 1-based line numbers (as grep reports
+// them) instead of computing byte offsets, which models routinely confuse
+// (audit conv: offset/line confusion lands reads hundreds of lines off).
+func TestFileReadLineRange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "lines.txt")
+	content := "one\ntwo\nthree\nfour\nfive\n"
+	if _, err := testTB.Execute(context.Background(), "file_write", fileJSON(map[string]any{"path": path, "content": content})); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Middle range, inclusive.
+	out, err := testTB.Execute(context.Background(), "file_read", fileJSON(map[string]any{"path": path, "start_line": 2, "end_line": 4}))
+	if err != nil {
+		t.Fatalf("read lines 2-4: %v", err)
+	}
+	for _, want := range []string{"start_line: 2", "end_line: 4", "total_lines: 5", "two\nthree\nfour"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("line range read missing %q: %s", want, out)
+		}
+	}
+	if strings.Contains(out, "one") || strings.Contains(out, "five") {
+		t.Errorf("line range read leaked outside range: %q", out)
+	}
+
+	// end_line beyond EOF clamps to the last line.
+	out, err = testTB.Execute(context.Background(), "file_read", fileJSON(map[string]any{"path": path, "start_line": 4, "end_line": 99}))
+	if err != nil {
+		t.Fatalf("read clamped range: %v", err)
+	}
+	for _, want := range []string{"start_line: 4", "end_line: 5", "four\nfive"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("clamped read missing %q: %s", want, out)
+		}
+	}
+
+	// start_line beyond EOF returns an empty page with the empty range echoed.
+	out, err = testTB.Execute(context.Background(), "file_read", fileJSON(map[string]any{"path": path, "start_line": 9}))
+	if err != nil {
+		t.Fatalf("read beyond EOF: %v", err)
+	}
+	if !strings.Contains(out, "start_line: 9") || !strings.Contains(out, "end_line: 8") {
+		t.Errorf("beyond-EOF read should echo the empty range: %q", out)
+	}
+
+	// end_line < start_line is an invalid request.
+	if _, err := testTB.Execute(context.Background(), "file_read", fileJSON(map[string]any{"path": path, "start_line": 4, "end_line": 2})); err == nil || !strings.Contains(err.Error(), "end_line") {
+		t.Fatalf("expected end_line < start_line error, got %v", err)
+	}
+
+	// max_bytes truncation continues in line space via next_start_line.
+	out, err = testTB.Execute(context.Background(), "file_read", fileJSON(map[string]any{"path": path, "start_line": 2, "max_bytes": 10}))
+	if err != nil {
+		t.Fatalf("truncated line read: %v", err)
+	}
+	if !strings.Contains(out, "truncated: true") || !strings.Contains(out, "next_start_line: 4") {
+		t.Errorf("truncated line read must report next_start_line: %q", out)
+	}
+
+	// Line mode ignores offset_bytes.
+	out, err = testTB.Execute(context.Background(), "file_read", fileJSON(map[string]any{"path": path, "start_line": 2, "end_line": 2, "offset_bytes": 99}))
+	if err != nil {
+		t.Fatalf("line mode with offset_bytes: %v", err)
+	}
+	if !strings.Contains(out, "two") || strings.Contains(out, "offset_bytes:") {
+		t.Errorf("line mode must ignore offset_bytes: %q", out)
+	}
+}
+
+func TestFileReadLineCountWithoutTrailingNewline(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "noeol.txt")
+	if _, err := testTB.Execute(context.Background(), "file_write", fileJSON(map[string]any{"path": path, "content": "one\ntwo\nthree"})); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	out, err := testTB.Execute(context.Background(), "file_read", fileJSON(map[string]any{"path": path, "start_line": 2, "end_line": 3}))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	for _, want := range []string{"total_lines: 3", "start_line: 2", "end_line: 3", "two\nthree"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no-trailing-newline read missing %q: %s", want, out)
+		}
+	}
+}
+
 func TestFileToolInfosRegistered(t *testing.T) {
 	tb := &Toolbox{}
 	names := map[string]bool{}

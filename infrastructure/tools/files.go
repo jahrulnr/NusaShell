@@ -33,7 +33,7 @@ const (
 
 func fileToolInfos() []application.ToolInfo {
 	return []application.ToolInfo{
-		{Name: "file_read", Description: "Read a text file from disk. Returns up to max_bytes (default 32768); continue with offset_bytes when truncated. Metadata reports the complete file's line ending, tab count, carriage-return count, and trailing-whitespace lines. Set show_whitespace=true for a copy-safe inspection view with invisible whitespace rendered visibly. Binary files are reported, not dumped.", InputSchema: obj("object", props("path", str("Absolute file path"), "offset_bytes", intSchema("Byte offset to start reading from (default 0)"), "max_bytes", intSchema("Maximum bytes returned (default 32768)"), "show_whitespace", obj("boolean", nil)), "path")},
+		{Name: "file_read", Description: "Read a text file from disk. Returns up to max_bytes (default 32768); continue with offset_bytes when truncated. Read by line numbers instead with start_line/end_line (1-based, inclusive; either one switches to line mode and offset_bytes is ignored) — the result echoes start_line/end_line and reports next_start_line when truncated. total_lines always reports the complete file's line count, so grep line numbers map directly. Metadata reports the complete file's line ending, tab count, carriage-return count, and trailing-whitespace lines. Set show_whitespace=true for a copy-safe inspection view with invisible whitespace rendered visibly. Binary files are reported, not dumped.", InputSchema: obj("object", props("path", str("Absolute file path"), "offset_bytes", intSchema("Byte offset to start reading from (default 0)"), "start_line", intSchema("1-based first line to read (line mode; offset_bytes ignored)"), "end_line", intSchema("1-based last line to read, inclusive (line mode; default last line)"), "max_bytes", intSchema("Maximum bytes returned (default 32768)"), "show_whitespace", obj("boolean", nil)), "path")},
 		{Name: "file_write", Description: "Create or overwrite a text file atomically (temp file in the same directory, then rename). Parent directories are created automatically. encoding=escaped decodes visible whitespace markers such as \\t, \\r, \\n, and \\\\ without normalizing line endings.", InputSchema: obj("object", props("path", str("Absolute file path"), "content", str("File content (UTF-8, max 10 MB)"), "encoding", strEnum("Content encoding: utf8 (default), escaped visible-whitespace text, or base64", "utf8", "escaped", "base64")), "path", "content")},
 		{Name: "file_patch", Description: "Replace an exact substring in a file. Fails unless old_string matches exactly once; disambiguate multiple matches with occurrence (1-based). After an exact miss, auto-heal defaults to one unique whitespace-equivalent match; set auto_heal=false for exact-only behavior. Use encoding=escaped when copying visible \\t/\\r/\\n markers from file_read(show_whitespace=true), so CRLF and tabs are matched exactly without normalization. Use expected_sha256 from file_read to fail closed when the file changed since it was read. Success returns the new sha256 and reports healed=true when whitespace recovery was used; ambiguous whitespace matches never write and report the current version, while no-match failures include whitespace statistics and a nearby excerpt with invisible characters rendered visibly. Use preview=true to see the result without writing.", InputSchema: obj("object", props("path", str("Absolute file path"), "old_string", str("Exact text to replace"), "new_string", str("Replacement text (may be empty to delete)"), "encoding", strEnum("String encoding: utf8 (default) or escaped visible-whitespace text", "utf8", "escaped"), "auto_heal", obj("boolean", nil), "occurrence", intSchema("1-based occurrence to replace when old_string appears multiple times"), "expected_sha256", str("Optional SHA-256 returned by file_read; fail if the file changed"), "preview", obj("boolean", nil)), "path", "old_string", "new_string")},
 		{Name: "file_list", Description: "List a directory's entries with type, size, and modified time.", InputSchema: obj("object", props("path", str("Absolute directory path")))},
@@ -107,14 +107,34 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 		}
 		fileHash := fileSHA256(data)
 		whitespace := inspectFileWhitespace(data)
-		offset := fileArgInt(args, "offset_bytes", 0)
-		if offset < 0 {
-			offset = 0
+		meta := map[string]any{"total_lines": fileLineCount(data), "sha256": fileHash}
+		addFileWhitespaceMeta(meta, whitespace)
+
+		startLine := fileArgInt(args, "start_line", 0)
+		endLine := fileArgInt(args, "end_line", 0)
+		lineMode := startLine > 0 || endLine > 0
+		offset := 0
+		firstLine, lastLine := 0, 0
+		if lineMode {
+			if startLine < 1 {
+				startLine = 1
+			}
+			if endLine > 0 && endLine < startLine {
+				return true, "", fmt.Errorf("end_line (%d) must be >= start_line (%d)", endLine, startLine)
+			}
+			data, firstLine, lastLine = fileLineSlice(data, startLine, endLine)
+			meta["start_line"] = firstLine
+			meta["end_line"] = lastLine
+		} else {
+			offset = fileArgInt(args, "offset_bytes", 0)
+			if offset < 0 {
+				offset = 0
+			}
+			if offset > len(data) {
+				offset = len(data)
+			}
+			data = data[offset:]
 		}
-		if offset > len(data) {
-			offset = len(data)
-		}
-		data = data[offset:]
 		maxBytes := fileArgInt(args, "max_bytes", fileReadDefaultMaxBytes)
 		if maxBytes <= 0 || maxBytes > fileContentMaxBytes {
 			maxBytes = fileReadDefaultMaxBytes
@@ -129,18 +149,21 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			head = head[:1024]
 		}
 		if bytes.IndexByte(head, 0) >= 0 {
-			meta := map[string]any{"binary": true, "size": len(data), "sha256": fileHash}
-			addFileWhitespaceMeta(meta, whitespace)
+			meta["binary"] = true
+			meta["size"] = len(data)
 			return true, yamlMD(meta, "[binary file — not rendered]"), nil
 		}
-		meta := map[string]any{"bytes": len(data), "sha256": fileHash}
-		addFileWhitespaceMeta(meta, whitespace)
+		meta["bytes"] = len(data)
 		if offset > 0 {
 			meta["offset_bytes"] = offset
 		}
 		if truncated {
 			meta["truncated"] = true
-			meta["next_offset_bytes"] = offset + len(data)
+			if lineMode {
+				meta["next_start_line"] = fileNextStartLine(data, firstLine)
+			} else {
+				meta["next_offset_bytes"] = offset + len(data)
+			}
 		}
 		body := string(data)
 		if fileArgBool(args, "show_whitespace") {
@@ -571,6 +594,62 @@ func patchLineNumbers(raw []byte, offsets []int) []int {
 		lines = append(lines, 1+bytes.Count(raw[:off], []byte{'\n'}))
 	}
 	return lines
+}
+
+// fileLineCount returns the number of lines in data. A trailing newline does
+// not add an empty line, so 1-based line numbers run 1..fileLineCount.
+func fileLineCount(data []byte) int {
+	if len(data) == 0 {
+		return 0
+	}
+	n := 1 + bytes.Count(data, []byte{'\n'})
+	if data[len(data)-1] == '\n' {
+		n--
+	}
+	return n
+}
+
+// fileLineSlice returns the byte range covering 1-based lines start..end
+// inclusive (end <= 0 means the last line), clamped to the file's extent,
+// plus the first and last line numbers actually covered. When start is past
+// the end of the file, the slice is empty and last = first - 1.
+func fileLineSlice(data []byte, start, end int) (slice []byte, first, last int) {
+	total := fileLineCount(data)
+	if start < 1 {
+		start = 1
+	}
+	if end <= 0 || end > total {
+		end = total
+	}
+	if start > end {
+		return nil, start, start - 1
+	}
+	from, to := 0, len(data)
+	nl := 0
+	for i, c := range data {
+		if c != '\n' {
+			continue
+		}
+		nl++
+		if nl == start-1 {
+			from = i + 1
+		}
+		if nl == end {
+			to = i + 1
+			break
+		}
+	}
+	return data[from:to], start, end
+}
+
+// fileNextStartLine returns the 1-based line number of the first byte after
+// a page that starts at firstLine, for continuing a truncated line-mode read.
+func fileNextStartLine(page []byte, firstLine int) int {
+	nl := bytes.Count(page, []byte{'\n'})
+	if len(page) > 0 && page[len(page)-1] != '\n' {
+		nl++
+	}
+	return firstLine + nl
 }
 
 func patchTextHasNonWhitespace(s string) bool {
