@@ -1,4 +1,8 @@
-/* NusaShell — night harbor tokens. Deep ink water, sea-glass accent.
+/* NusaShell — Kepulauan tokens. Night archipelago shell: warm volcanic
+ * charcoal neutrals (60% Shell), rice-field green accent (30%), and the
+ * Nusa accents ocean blue + earth brown (10%). Dark-first: every surface
+ * color flows through these tokens so a future light theme is a single
+ * override layer, not a per-view rewrite.
  *
  * Layer: shared — design tokens (:root custom properties), element resets,
  * and primitives consumed by two or more views (.view-header, .mini-btn,
@@ -7,37 +11,58 @@
  * with frontend/tests/css-hygiene.test.mjs.
  */
 :root {
-  --ink: #070c0e;
-  --harbor: #0b1114;
-  --bg: #0b1114;
-  --panel: #10181c;
-  --panel-alt: #152024;
-  --panel-raised: #1b272c;
-  --border: #3d5254;
-  --border-soft: #243336;
-  --border-strong: #5a7376;
-  --text: #e8efe8;
-  --text-dim: #b4c2bc;
-  --text-faint: #7e908c;
+  /* Shell — dark neutrals (60%) */
+  --ink: #08090a;
+  --harbor: #0c0e0d;
+  --bg: #0c0e0d;
+  --panel: #121512;
+  --panel-alt: #171b17;
+  --panel-raised: #1e241d;
+  --border-soft: #242a22;
+  --border: #3a4238;
+  --border-strong: #57614f;
+  --text: #e9e6dd;
+  --text-dim: #b3b1a5;
+  --text-faint: #7f8177;
   --text-muted: var(--text-dim);
-  --accent: #6ee0c4;
-  --accent-strong: #8af0d4;
-  --accent-ink: #0a1614;
-  --accent-soft: rgba(110, 224, 196, 0.12);
-  --accent-border: rgba(110, 224, 196, 0.42);
-  --accent-border-strong: rgba(110, 224, 196, 0.68);
-  --accent-glow: rgba(110, 224, 196, 0.42);
-  --accent-wash: rgba(110, 224, 196, 0.08);
-  --input-bg: #0c1417;
-  --green: #5fd4a8;
-  --red: #f07a6a;
+
+  /* Nusa green — rice-field / leaf accent (30%) */
+  --accent: #71bd6d;
+  --accent-strong: #8ed488;
+  --accent-ink: #0c170d;
+  --accent-soft: rgba(113, 189, 109, 0.12);
+  --accent-border: rgba(113, 189, 109, 0.42);
+  --accent-border-strong: rgba(113, 189, 109, 0.68);
+  --accent-glow: rgba(113, 189, 109, 0.42);
+  --accent-wash: rgba(113, 189, 109, 0.08);
+
+  /* Nusa ocean blue — info / links / subagent identity (10%) */
+  --blue-info: #66a9cf;
+  --blue-strong: #8cc4e2;
+  --blue-soft: rgba(102, 169, 207, 0.12);
+  --blue-border: rgba(102, 169, 207, 0.42);
+
+  /* Nusa earth brown — warmth / reasoning / memory (10%) */
+  --earth: #a98c6a;
+  --earth-strong: #c9a66b;
+  --earth-soft: rgba(169, 140, 106, 0.12);
+  --earth-border: rgba(169, 140, 106, 0.4);
+
+  --input-bg: #0d110e;
+  --green: #56cf91;
+  --green-bright: #6fd89b;
+  --red: #e8655f;
+  --red-bright: #ff9ca5;
+  --red-border: rgba(232, 101, 95, 0.4);
   --danger: var(--red);
   --purple: #c4b0ea;
-  --amber: #e8bd62;
-  --blue-info: #7eb8c8;
-  --scrollbar-track: #0b1114;
-  --scrollbar-thumb: #3d5254;
-  --scrollbar-thumb-hover: #5a7376;
+  --purple-bright: #c1a6ff;
+  --amber: #d8a24a;
+  --amber-bright: #f0bb6a;
+  --orange: #f0883e;
+  --scrollbar-track: #0c0e0d;
+  --scrollbar-thumb: #3a4238;
+  --scrollbar-thumb-hover: #57614f;
   --radius-lg: 10px;
   --radius-md: 7px;
   --radius-sm: 5px;
@@ -96,10 +121,7 @@ body {
    * chrome. dvh tracks the visible area; the vh line above is the fallback
    * for engines without dynamic viewport units. */
   height: 100dvh;
-  background:
-    radial-gradient(ellipse at 18% -10%, rgba(110, 224, 196, .08), transparent 42%),
-    radial-gradient(ellipse at 92% 110%, rgba(110, 224, 196, .04), transparent 36%),
-    var(--bg);
+  background: var(--bg);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -197,8 +219,8 @@ body {
 }
 .mini-btn:hover { background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px var(--accent-soft); }
 .mini-btn:disabled { cursor: not-allowed; opacity: .45; }
-.mini-btn.danger { border-color: rgba(240, 122, 106, .55); background: rgba(240, 122, 106, .14); color: #ff9a90; }
-.mini-btn.danger:hover { background: rgba(240, 122, 106, .28); color: #fff; box-shadow: 0 0 0 3px rgba(240, 122, 106, .12); }
+.mini-btn.danger { border-color: var(--red-border); background: var(--red-border); color: var(--red-bright); }
+.mini-btn.danger:hover { background: rgba(232, 101, 95, .28); color: #fff; box-shadow: 0 0 0 3px rgba(232, 101, 95, .12); }
 .mini-btn.ghost { border-color: var(--border); background: transparent; color: var(--text-dim); }
 .mini-btn.ghost:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 

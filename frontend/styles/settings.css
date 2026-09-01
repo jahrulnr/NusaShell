@@ -67,9 +67,7 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
   padding: var(--space-5);
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, .018), transparent 32%),
-    var(--panel);
+  background: var(--panel);
   box-shadow: inset 0 1px rgba(255, 255, 255, .025);
 }
 .settings-card-title { color: var(--text-dim); font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: .09em; }
@@ -193,8 +191,8 @@
   background: var(--border-soft);
 }
 
-.stt-req-item.ok .stt-req-dot { background: var(--green, #3fb950); }
-.stt-req-item.missing .stt-req-dot { background: var(--red, #f85149); }
+.stt-req-item.ok .stt-req-dot { background: var(--green, var(--green)); }
+.stt-req-item.missing .stt-req-dot { background: var(--red, var(--red)); }
 
 .stt-req-detail {
   font-size: 0.72rem;
@@ -274,9 +272,9 @@
  * next to the model label. */
 .settings-model-badges { display: inline-flex; gap: 3px; flex-wrap: wrap; margin-left: 4px; vertical-align: middle; }
 .settings-model-badge { font: 9px var(--font-mono); padding: 1px 5px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.03em; }
-.settings-badge-i2i { background: #123226; color: #56cf91; }
-.settings-badge-audio { background: #2a1f38; color: #b98cff; }
-.settings-badge-video { background: #382a14; color: #e8b853; }
+.settings-badge-i2i { background: rgba(86, 207, 145, .14); color: var(--green); }
+.settings-badge-audio { background: rgba(196, 176, 234, .14); color: var(--purple-bright); }
+.settings-badge-video { background: rgba(216, 162, 74, .14); color: var(--amber-bright); }
 
 /* ============ Settings responsive ============ */
 @media (max-width: 760px) {

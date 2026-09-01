@@ -15,7 +15,7 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   box-shadow:
-    0 0 0 1px #050605,
+    0 0 0 1px var(--ink),
     0 16px 48px rgba(0, 0, 0, .44),
     inset 0 1px rgba(255, 255, 255, .035);
 }
@@ -33,9 +33,7 @@
  * stay in global.css; this is the visual shell dressing. */
 body {
   padding: 4px;
-  background:
-    linear-gradient(135deg, rgba(110, 224, 196, .045), transparent 22%),
-    var(--ink);
+  background: var(--ink);
 }
 
 /* ============ Mobile shell bar ============ */
@@ -84,7 +82,7 @@ body {
   height: 8px;
   border-radius: 50%;
   background: var(--text-faint);
-  box-shadow: 0 0 0 3px rgba(133, 139, 132, .08);
+  box-shadow: 0 0 0 3px rgba(127, 129, 119, .08);
   transition: background .2s;
 }
 .connection-orb.online { background: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
@@ -100,9 +98,7 @@ body {
   min-height: 0;
   gap: 6px;
   padding: 6px;
-  background:
-    linear-gradient(90deg, rgba(110, 224, 196, .03) 1px, transparent 1px) 0 0 / 6px 6px,
-    var(--ink);
+  background: var(--ink);
 }
 
 /* ============ Sidebar ============ */
@@ -110,9 +106,7 @@ body {
   position: relative;
   width: 230px;
   min-width: 230px;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, .025), transparent 28%),
-    var(--panel);
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: var(--space-4) var(--space-3) var(--space-3);
@@ -191,10 +185,10 @@ body {
   height: 5px;
   top: 7px;
   left: 7px;
-  border: 1px solid #737a72;
+  border: 1px solid var(--border-strong);
   border-radius: 50%;
-  background: #242724;
-  box-shadow: inset 0 0 0 1px #111311;
+  background: var(--panel-raised);
+  box-shadow: inset 0 0 0 1px var(--ink);
   pointer-events: none;
 }
 
@@ -229,9 +223,7 @@ body {
 .nav-item.active {
   position: relative;
   border-color: var(--accent-border);
-  background:
-    linear-gradient(90deg, var(--accent-wash), transparent 70%),
-    var(--panel-alt);
+  background: var(--panel-alt);
   color: var(--text);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .8);
 }
@@ -329,9 +321,7 @@ body {
   position: relative;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background:
-    radial-gradient(circle at 64% 10%, rgba(110, 224, 196, .04), transparent 32%),
-    linear-gradient(115deg, var(--panel-raised), var(--panel) 62%, var(--panel-alt));
+  background: var(--panel);
   box-shadow:
     inset 0 0 0 4px var(--harbor),
     inset 0 0 0 5px var(--border-soft);
@@ -507,9 +497,7 @@ body.mini-mode .agent-conversations { display: none; }
     align-items: center;
     padding-inline: 13px;
     border-bottom: 1px solid var(--border);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, .03), transparent 72%),
-      var(--panel);
+    background: var(--panel);
     box-shadow: inset 0 -3px var(--ink);
   }
   .titlebar-actions { margin-left: auto; }

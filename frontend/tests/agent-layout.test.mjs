@@ -357,9 +357,9 @@ test('Narrow agent layout can reopen the conversations pane', () => {
     'mobile transcript must clear the floating Rooms toggle');
 });
 
-test('Harbor palette is tokenized instead of acid-lime defaults', async () => {
+test('Kepulauan palette is tokenized instead of acid-lime defaults', async () => {
   const globalCSS = await readFile(new URL('../styles/global.css', import.meta.url), 'utf8');
-  assert.match(globalCSS, /--accent:\s*#6ee0c4/);
+  assert.match(globalCSS, /--accent:\s*#71bd6d/);
   assert.doesNotMatch(globalCSS, /#c5f45d/);
   assert.match(appShell, /bindShellShortcuts/);
 });

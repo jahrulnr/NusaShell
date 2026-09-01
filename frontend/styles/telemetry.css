@@ -72,7 +72,7 @@
   font-variant-numeric: tabular-nums;
 }
 .telemetry-metric-change.up { color: var(--accent); }
-.telemetry-metric-change.down { color: #ef4444; }
+.telemetry-metric-change.down { color: var(--red); }
 .telemetry-metric-sub {
   font-size: 10px;
   color: var(--text-faint);

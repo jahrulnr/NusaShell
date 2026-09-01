@@ -15,7 +15,7 @@
   --agent-tool-accent: var(--accent);
   --agent-tool-accent-soft: var(--accent-soft);
   --agent-tool-accent-border: var(--accent-border);
-  --agent-tool-result-bg: rgba(16, 25, 29, .78);
+  --agent-tool-result-bg: rgba(18, 21, 18, .78);
   min-width: 0;
 }
 .agent-tool-card[data-tool] .agent-tool-request {
@@ -47,13 +47,13 @@ details.agent-tool-event[data-tool] {
 }
 details.agent-tool-event[data-tool][open] {
   border-color: var(--border-soft);
-  background: rgba(16, 25, 29, .46);
+  background: rgba(18, 21, 18, .46);
 }
 details.agent-tool-event[data-tool].is-running {
   border-color: var(--agent-tool-accent-border);
 }
 details.agent-tool-event[data-tool].is-error {
-  border-color: rgba(245, 91, 104, .38);
+  border-color: rgba(232, 101, 95, .38);
 }
 .agent-tool-event-title {
   flex: 0 1 auto;
@@ -65,7 +65,7 @@ details.agent-tool-event[data-tool].is-error {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.agent-tool-event.is-error .agent-tool-event-title { color: #ff9ca5; }
+.agent-tool-event.is-error .agent-tool-event-title { color: var(--red-bright); }
 .agent-tool-event-head-summary {
   min-width: 0;
   flex: 1 1 10rem;
@@ -77,11 +77,11 @@ details.agent-tool-event[data-tool].is-error {
   white-space: nowrap;
 }
 .agent-tool-event.is-running .agent-tool-event-head-summary { color: var(--blue-info); }
-.agent-tool-event.is-error .agent-tool-event-head-summary { color: #ff9ca5; }
+.agent-tool-event.is-error .agent-tool-event-head-summary { color: var(--red-bright); }
 .agent-tool-event-badge {
   flex: none;
   padding: 2px 4px;
-  border: 1px solid rgba(91, 141, 184, .3);
+  border: 1px solid rgba(102, 169, 207, .3);
   border-radius: 4px;
   color: var(--blue-info);
   font: 8px/1 var(--font-mono);
@@ -143,7 +143,7 @@ details.agent-tool-event[data-tool].is-error {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.agent-tool-event.is-error .agent-tool-event-summary-text { color: #ff9ca5; }
+.agent-tool-event.is-error .agent-tool-event-summary-text { color: var(--red-bright); }
 .agent-tool-event-wait {
   padding: 3px 9px 8px;
   color: var(--blue-info);
@@ -157,7 +157,7 @@ details.agent-tool-event[data-tool].is-error {
   margin: 0;
   border: 1px solid var(--border-soft);
   border-radius: 6px;
-  background: rgba(8, 18, 25, .42);
+  background: rgba(12, 14, 13, .42);
 }
 .agent-tool-event .agent-tool-raw summary {
   min-width: 0;
@@ -219,13 +219,13 @@ details.agent-tool-event[data-tool].is-error {
   padding: 6px 9px 8px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
-  background: rgba(7, 13, 17, .64);
-  color: #d5dde8;
+  background: rgba(8, 9, 10, .64);
+  color: var(--text);
   font: 9.5px/1.45 var(--font-mono);
   white-space: pre-wrap;
   word-break: break-word;
 }
-.agent-tool-terminal-output.is-error { color: #d68d94; }
+.agent-tool-terminal-output.is-error { color: var(--red-bright); }
 .agent-tool-terminal-result-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
@@ -245,7 +245,7 @@ details.agent-tool-event[data-tool].is-error {
   padding: 5px 7px;
   border: 1px solid var(--border-soft);
   border-radius: 5px;
-  background: rgba(8, 18, 25, .72);
+  background: rgba(12, 14, 13, .72);
   color: var(--text-dim);
   font: 9.5px/1.3 var(--font-mono);
 }
@@ -292,7 +292,7 @@ details.agent-tool-event[data-tool].is-error {
   padding: 3px 5px;
   border: 1px solid var(--border-soft);
   border-radius: 4px;
-  background: rgba(8, 18, 25, .62);
+  background: rgba(12, 14, 13, .62);
   color: var(--text-faint);
   font: 8.5px/1.25 var(--font-mono);
 }
@@ -324,7 +324,7 @@ details.agent-tool-event[data-tool].is-error {
   overflow: hidden;
   border: 1px solid var(--border-soft);
   border-radius: 6px;
-  background: rgba(7, 13, 17, .5);
+  background: rgba(8, 9, 10, .5);
 }
 .agent-tool-attachment-item img,
 .agent-tool-attachment-item video {
@@ -332,7 +332,7 @@ details.agent-tool-event[data-tool].is-error {
   width: 100%;
   max-height: 220px;
   object-fit: contain;
-  background: #05090c;
+  background: var(--ink);
 }
 .agent-tool-attachment-item audio {
   display: block;
@@ -375,15 +375,15 @@ details.agent-tool-event[data-tool].is-error {
   gap: 4px;
   margin-left: 3px;
   padding: 2px 6px;
-  border: 1px solid rgba(245, 91, 104, .45);
+  border: 1px solid rgba(232, 101, 95, .45);
   border-radius: 5px;
-  background: rgba(245, 91, 104, .08);
-  color: #ff9ca5;
+  background: rgba(232, 101, 95, .08);
+  color: var(--red-bright);
   cursor: pointer;
   font: 9px/1.2 var(--font-mono);
 }
 .agent-tool-stop:hover,
-.agent-tool-stop:focus-visible { background: rgba(255, 90, 106, .18); outline: none; }
+.agent-tool-stop:focus-visible { background: rgba(232, 101, 95, .18); outline: none; }
 .agent-tool-stop:disabled { cursor: not-allowed; opacity: .45; }
 .agent-tool-event:not(.is-running) .agent-tool-stop { display: none; }
 
@@ -400,116 +400,116 @@ details.agent-tool-event[data-tool].is-error {
 /* ---- one accent owner per roster tool ---- */
 .agent-tool-card[data-tool="file_read"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="file_write"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="file_patch"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="file_list"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="file_mkdir"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="file_delete"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="file_move"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="file_copy"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="file_info"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="read_media"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="generate_media"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="generate_image"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="generate_speech"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="generate_video"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="grep"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
 
 .agent-tool-card[data-tool="find_file"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
 
 .agent-tool-card[data-tool="web_search"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
 
 .agent-tool-card[data-tool="web_fetch"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
 
 .agent-tool-card[data-tool="web_answer"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
 
 .agent-tool-card[data-tool="docs"] {
@@ -562,212 +562,212 @@ details.agent-tool-event[data-tool].is-error {
 
 .agent-tool-card[data-tool="todo"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="ci_cancel"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="ci_logs"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="ci_run"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="ci_run_status"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="ci_steer"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="ci_wait"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="automation_create"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="automation_disable"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="automation_enable"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="automation_list"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="automation_read"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="automation_status"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="automation_validate"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="schedule_every"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="schedule_once"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="sleep"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="wait_until"] {
   --agent-tool-accent: var(--amber);
-  --agent-tool-accent-soft: rgba(232, 189, 98, .11);
-  --agent-tool-accent-border: rgba(232, 189, 98, .42);
+  --agent-tool-accent-soft: rgba(216, 162, 74, .11);
+  --agent-tool-accent-border: rgba(216, 162, 74, .42);
 }
 
 .agent-tool-card[data-tool="mcp_call"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
 
 .agent-tool-card[data-tool="mcp_disable"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
 
 .agent-tool-card[data-tool="mcp_enable"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
 
 .agent-tool-card[data-tool="mcp_install"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
 
 .agent-tool-card[data-tool="mcp_list"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
 
 .agent-tool-card[data-tool="mcp_register"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
 
 .agent-tool-card[data-tool="mcp_search"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
 
 .agent-tool-card[data-tool="mcp_server_add"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
 
 .agent-tool-card[data-tool="mcp_unregister"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
 
 .agent-tool-card[data-tool="ask_question"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="delegate"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="exec"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="subagent"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="subagent_steer"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="subagent_stop"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 .agent-tool-card[data-tool="subagent_wait"] {
   --agent-tool-accent: var(--accent);
-  --agent-tool-accent-soft: rgba(110, 224, 196, .10);
-  --agent-tool-accent-border: rgba(110, 224, 196, .42);
+  --agent-tool-accent-soft: rgba(113, 189, 109, .10);
+  --agent-tool-accent-border: rgba(113, 189, 109, .42);
 }
 
 /* Dynamic MCP tools are backend-defined, so their contract identity uses a
  * stable prefix while keeping the same request/result hooks. */
 .agent-tool-card[data-tool^="mcp__"] {
   --agent-tool-accent: var(--blue-info);
-  --agent-tool-accent-soft: rgba(126, 184, 200, .11);
-  --agent-tool-accent-border: rgba(126, 184, 200, .42);
+  --agent-tool-accent-soft: rgba(102, 169, 207, .11);
+  --agent-tool-accent-border: rgba(102, 169, 207, .42);
 }
