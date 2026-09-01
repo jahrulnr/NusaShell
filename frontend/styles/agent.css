@@ -656,11 +656,9 @@
   min-width: 0;
   max-width: 100%;
   width: 100%;
-  border-left: 2px solid rgba(196, 176, 234, .42);
   border-radius: 0 8px 8px 0;
-  background: rgba(196, 176, 234, .035);
   color: var(--text-dim);
-  margin: 8px 0 12px;
+  margin: 8px 0 0px;
 }
 .agent-reasoning summary {
   display: flex;
@@ -693,7 +691,7 @@
   overflow-x: auto;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
-  margin: 2px 0 11px 12px;
+  margin: 0px 0px 0px 12px;
   padding-inline-end: 8px;
   color: var(--text-dim);
   font: 11px/1.65 var(--font-mono);
