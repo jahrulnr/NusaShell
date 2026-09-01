@@ -40,7 +40,7 @@ func (s *streamedListingToolbox) ExecuteStreamed(_ context.Context, name string,
 }
 
 func TestFilterACPToolsHidesSubagentSurface(t *testing.T) {
-	inner := &listingToolbox{names: []string{"ci_run", "subagent", "subagent_steer", "subagent_stop", "subagent_wait", "docs"}}
+	inner := &listingToolbox{names: []string{"automation", "subagent", "subagent_steer", "subagent_stop", "subagent_wait", "docs"}}
 	filtered := FilterACPTools(inner)
 	got := map[string]bool{}
 	for _, ti := range filtered.ListTools() {
@@ -49,7 +49,7 @@ func TestFilterACPToolsHidesSubagentSurface(t *testing.T) {
 			t.Fatalf("pipeline toolbox listed ACP tool %q", ti.Name)
 		}
 	}
-	if !got["ci_run"] || !got["docs"] {
+	if !got["automation"] || !got["docs"] {
 		t.Fatalf("non-ACP tools must remain visible, got %v", got)
 	}
 	if got["subagent"] {
@@ -58,7 +58,7 @@ func TestFilterACPToolsHidesSubagentSurface(t *testing.T) {
 }
 
 func TestFilterACPToolsRejectsExecute(t *testing.T) {
-	inner := &listingToolbox{names: []string{"subagent", "ci_run"}}
+	inner := &listingToolbox{names: []string{"subagent", "automation"}}
 	filtered := FilterACPTools(inner)
 	if _, err := filtered.Execute(context.Background(), "subagent", []byte(`{"prompt":"x"}`)); err == nil || !strings.Contains(err.Error(), "not available to pipeline agent") {
 		t.Fatalf("expected pipeline deny, got %v", err)
@@ -66,11 +66,11 @@ func TestFilterACPToolsRejectsExecute(t *testing.T) {
 	if len(inner.calls) != 0 {
 		t.Fatalf("inner must not execute hidden tools, calls=%v", inner.calls)
 	}
-	out, err := filtered.Execute(context.Background(), "ci_run", []byte(`{}`))
+	out, err := filtered.Execute(context.Background(), "automation", []byte(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != "ok:ci_run" {
+	if out != "ok:automation" {
 		t.Fatalf("got %q", out)
 	}
 }
@@ -108,7 +108,7 @@ func TestFilteredToolboxExecuteStreamedFallback(t *testing.T) {
 }
 
 func TestPipelineAgentRunnerDoesNotLeakACP(t *testing.T) {
-	inner := &listingToolbox{names: []string{"subagent", "automation_list"}}
+	inner := &listingToolbox{names: []string{"subagent", "automation"}}
 	runner := NewPipelineAgentRunner(inner, nil)
 	_, _, err := runner.RunAgentStep(context.Background(), "do work", "", domain.TrustSafe, nil)
 	if err == nil || !strings.Contains(err.Error(), "agent steps are not configured") {
@@ -122,7 +122,7 @@ func TestPipelineAgentRunnerDoesNotLeakACP(t *testing.T) {
 }
 
 func TestInteractiveToolboxKeepsACPTools(t *testing.T) {
-	inner := &listingToolbox{names: []string{"subagent", "ci_run"}}
+	inner := &listingToolbox{names: []string{"subagent", "automation"}}
 	names := map[string]bool{}
 	for _, ti := range inner.ListTools() {
 		names[ti.Name] = true

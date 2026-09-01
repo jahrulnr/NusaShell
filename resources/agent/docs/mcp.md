@@ -36,7 +36,7 @@ back to stdio.
 
 It is stored as `plugins/<id>/manifest.json` exactly like a catalog
 installed plugin. Plugins with `mcp.autostart` (the Plugins drawer toggle)
-are connected when the Go process starts, so CI workflows and the agent
+are connected when the Go process starts, so automation workflows and the agent
 toolbox can use those tools immediately. Other plugins stay lazy: the first
 tool listing or **Start** (`plugin.test`) opens the connection. **Stop**
 (`plugin.stop`) drops the cached connection and **Restart** stops then starts.
@@ -44,31 +44,24 @@ tool listing or **Start** (`plugin.test`) opens the connection. **Stop**
 ## Tool exposure
 
 MCP plugin tools are not advertised in the tool list sent to the provider.
-You will not see them in `tools[]`. Use the universal `mcp_search` +
+You will not see them in `tools[]`. Use the universal `mcp_search` plus
 `mcp_call` pair to discover and execute — this works on every provider and
-keeps the tool list stable. Do NOT write tool calls as text in your reply
-and do NOT call `mcp__<server>__<tool>` names — they are not callable;
-`mcp_call` with a `ref` is the only execution path. `tool_list` returns
-`ref`s too, so every discovery flow ends in `mcp_call`. Tool schemas come
-from the server's own `tools/list` response. `mcp_search` accepts an
-optional `server` (plugin id); when omitted, it searches across ALL
-running MCP servers, so the agent can find a tool without knowing which
-server hosts it. `mcp_search` returns a `ref` plus the full tool
-definition (name, server, description, parameters) so the agent can call
-the tool directly via `mcp_call` without a follow-up `tool_schema`
-round-trip — this is the preferred discovery path. `tool_list` (list ALL
-tools of a server, no query) complements `mcp_search` (query-based,
-ranked) — use `mcp_search` to find a specific tool, `tool_list` to see
-everything a server offers.
+keeps the tool list stable. Do not write tool calls as text in your reply and
+do not call `mcp__<server>__<tool>` names — they are not callable;
+`mcp_call` with a `ref` is the only execution path. `mcp_search` accepts an
+optional `server` (plugin id); when omitted, it searches across all running
+MCP servers. Both `mcp_search` and `tool_list` return compact refs and omit
+input schemas. Use `tool_schema` for the exact argument shape when needed,
+then call the returned ref with `mcp_call`.
 
 ### Server→client notifications
 
 Plugins may push MCP notifications (e.g. `notifications/message`) to the host
 to signal "something happened" without being polled. The host bridges them
-into CI events (`infrastructure/mcpclient/notify.go`); see
+into automation events (`infrastructure/mcpclient/notify.go`); see
 Automation → Plugin push events for the `when:` trigger contract. As an
 agent you do not act on notifications directly — they are consumed by the
-CI engine, which starts the matching workflow.
+automation engine, which starts the matching workflow.
 
 ### Idle plugin enable workflow
 
@@ -79,15 +72,14 @@ Good example:
 
     mcp_list()                                       # → {"name":"Files","id":"nusashell.files","running":false,"tools":0}
     mcp_enable(id="nusashell.files")                 # → {"status":"enabled","tools":3} (status + count only)
-    mcp_search(query="read file")                    # → {"ref":"nusashell.files:read","name":"read","server":"nusashell.files","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}} (JSONL)
+    mcp_search(query="read file")                    # → {"ref":"nusashell.files:read","name":"read","server":"nusashell.files","description":"Read a text file..."} (JSONL)
+    tool_schema(server="nusashell.files", tool="read")  # full input schema
     mcp_call(ref="nusashell.files:read", arguments_json="{\"path\": \"/home/user/a.txt\"}")  # executes the tool
 
 `mcp_enable` returns only status + tool count — it does NOT dump tool
-definitions. After `mcp_enable`, call `mcp_search` to discover the tools
-(returns `ref` + full definitions with parameters), then `mcp_call` to
-execute. Use `tool_schema` only when you need the exact argument shape (field names,
-types, required fields) for a single tool and don't already have it from
-`mcp_search`.
+definitions. After `mcp_enable`, call `mcp_search` or `tool_list` to discover
+the tools, call `tool_schema` when an argument shape is unclear, then
+`mcp_call` to execute.
 If the plugin is already connected, `mcp_enable` returns
 `status: already_enabled` without reconnecting — do NOT call
 `mcp_enable` again for the same plugin; use `mcp_search` or call the

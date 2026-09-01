@@ -1096,11 +1096,7 @@ func TestListToolsIncludesAutomation(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
 	names := advertisedNames(tb)
 	for _, want := range []string{
-		"ci_run",
-		"ci_run_status", "ci_logs", "ci_cancel",
-		"ci_list", "ci_read", "ci_validate", "ci_create",
-		"ci_enable", "ci_disable", "ci_status",
-		"ci_schedule_once", "ci_schedule_every", "wait_until",
+		"automation", "automation_schedule", "wait_until",
 	} {
 		if !names[want] {
 			t.Fatalf("ListTools missing %q", want)
@@ -1127,7 +1123,7 @@ func TestListToolsIncludesDispatcherRoots(t *testing.T) {
 	for _, ti := range tb.ListTools() {
 		names[ti.Name] = true
 	}
-	for _, want := range []string{"skill", "memory", "docs", "memory_project"} {
+	for _, want := range []string{"skill", "memory", "docs", "memory_project", "automation", "automation_schedule"} {
 		if !names[want] {
 			t.Fatalf("ListTools missing dispatcher root %q", want)
 		}
@@ -1577,15 +1573,15 @@ func TestDocsReadAcceptsCanonicalIDAndMarkdownFilename(t *testing.T) {
 		t.Fatal(err)
 	}
 	tb := &Toolbox{Docs: source}
-	for _, id := range []string{"ci", "ci.md"} {
+	for _, id := range []string{"automation", "automation.md"} {
 		out, err := tb.Execute(context.Background(), "docs", []byte(fmt.Sprintf(`{"op":"read","id":%q}`, id)))
 		if err != nil {
 			t.Fatalf("docs read id %q: %v", id, err)
 		}
-		if !strings.Contains(out, "CI and pipelines") {
+		if !strings.Contains(out, "Automation and pipelines") {
 			t.Fatalf("docs read id %q returned unexpected content: %s", id, out)
 		}
-		if !strings.Contains(out, "title: CI") {
+		if !strings.Contains(out, "title: Automation") {
 			t.Fatalf("docs read id %q did not return canonical metadata: %s", id, out)
 		}
 	}
@@ -1746,16 +1742,41 @@ func TestSleepToolRespectsContextCancellation(t *testing.T) {
 	}
 }
 
-func TestListToolsIncludesSleepAndWaitAndCiWait(t *testing.T) {
+func TestListToolsIncludesSleepAndWaitAndAutomation(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
 	names := map[string]bool{}
 	for _, ti := range tb.ListTools() {
 		names[ti.Name] = true
 	}
-	for _, want := range []string{"sleep", "ci_wait", "ci_run"} {
+	for _, want := range []string{"sleep", "automation"} {
 		if !names[want] {
 			t.Fatalf("ListTools missing %q", want)
 		}
+	}
+}
+
+func TestAutomationDeleteRemovesWorkflow(t *testing.T) {
+	store := application.NewAutomationStore()
+	workflow := &domain.WorkflowDefinition{
+		ID:   "wf_delete",
+		Name: "Delete me",
+	}
+	if err := store.Put(context.Background(), workflow); err != nil {
+		t.Fatal(err)
+	}
+	tb := &Toolbox{Automation: &application.Automation{
+		Workflows: application.WorkflowMem{AutomationStore: store},
+	}}
+
+	out, err := tb.Execute(context.Background(), "automation", []byte(`{"op":"delete","workflow_id":"wf_delete"}`))
+	if err != nil {
+		t.Fatalf("automation delete: %v", err)
+	}
+	if !strings.Contains(out, "status: deleted") || !strings.Contains(out, "workflow_id: wf_delete") {
+		t.Fatalf("unexpected delete output: %s", out)
+	}
+	if _, err := store.Get(context.Background(), "wf_delete"); err == nil {
+		t.Fatal("deleted workflow must no longer be in the store")
 	}
 }
 
@@ -1788,17 +1809,17 @@ func TestListToolsGenerateImageIsConditional(t *testing.T) {
 	}
 }
 
-func TestCIRunStatusDoesNotPanicOnNilWakeAt(t *testing.T) {
-	store := application.NewCIStore()
+func TestAutomationStatusDoesNotPanicOnNilWakeAt(t *testing.T) {
+	store := application.NewAutomationStore()
 	if err := store.Create(context.Background(), &domain.WorkflowRun{
 		TaskState: domain.TaskState[domain.RunStatus]{ID: "run_1", Status: domain.StatusSuccess},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	tb := &Toolbox{CI: &application.CI{
-		Runs: application.RunMem{CIStore: store},
+	tb := &Toolbox{Automation: &application.Automation{
+		Runs: application.RunMem{AutomationStore: store},
 	}}
-	out, err := tb.Execute(context.Background(), "ci_run_status", []byte(`{"run_id":"run_1"}`))
+	out, err := tb.Execute(context.Background(), "automation", []byte(`{"op":"status","run_id":"run_1"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1813,19 +1834,19 @@ func TestCIRunStatusDoesNotPanicOnNilWakeAt(t *testing.T) {
 	}
 }
 
-func TestCIWaitDoesNotPanicOnNilWakeAt(t *testing.T) {
-	store := application.NewCIStore()
-	runs := application.RunMem{CIStore: store}
+func TestAutomationWaitDoesNotPanicOnNilWakeAt(t *testing.T) {
+	store := application.NewAutomationStore()
+	runs := application.RunMem{AutomationStore: store}
 	if err := store.Create(context.Background(), &domain.WorkflowRun{
 		TaskState: domain.TaskState[domain.RunStatus]{ID: "run_1", Status: domain.StatusSuccess},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	tb := &Toolbox{CI: &application.CI{
+	tb := &Toolbox{Automation: &application.Automation{
 		Runs: runs,
 		Exec: &application.ExecutionScheduler{Runs: runs},
 	}}
-	out, err := tb.Execute(context.Background(), "ci_wait", []byte(`{"run_id":"run_1","timeout_ms":1}`))
+	out, err := tb.Execute(context.Background(), "automation", []byte(`{"op":"wait","run_id":"run_1","timeout_ms":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1840,8 +1861,8 @@ func TestCIWaitDoesNotPanicOnNilWakeAt(t *testing.T) {
 	}
 }
 
-func TestCIRunStatusFormatsWakeAt(t *testing.T) {
-	store := application.NewCIStore()
+func TestAutomationStatusFormatsWakeAt(t *testing.T) {
+	store := application.NewAutomationStore()
 	wake := time.Date(2026, 8, 31, 2, 0, 0, 0, time.UTC)
 	if err := store.Create(context.Background(), &domain.WorkflowRun{
 		TaskState: domain.TaskState[domain.RunStatus]{ID: "run_wait", Status: domain.StatusWaiting},
@@ -1849,10 +1870,10 @@ func TestCIRunStatusFormatsWakeAt(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	tb := &Toolbox{CI: &application.CI{
-		Runs: application.RunMem{CIStore: store},
+	tb := &Toolbox{Automation: &application.Automation{
+		Runs: application.RunMem{AutomationStore: store},
 	}}
-	out, err := tb.Execute(context.Background(), "ci_run_status", []byte(`{"run_id":"run_wait"}`))
+	out, err := tb.Execute(context.Background(), "automation", []byte(`{"op":"status","run_id":"run_wait"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

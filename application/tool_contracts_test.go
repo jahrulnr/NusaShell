@@ -50,6 +50,20 @@ func TestToolContractsFollowExecutionRoster(t *testing.T) {
 	if len(dispatcher.Presentation.Variants) != 3 {
 		t.Fatalf("memory variants = %+v", dispatcher.Presentation.Variants)
 	}
+	automation, ok := findToolContract(got.Tools, "automation")
+	if !ok {
+		t.Fatal("automation dispatcher missing from catalog")
+	}
+	if len(automation.Presentation.Variants) != 3 || len(automation.Presentation.Formats) != 3 {
+		t.Fatalf("automation presentation = %+v", automation.Presentation)
+	}
+	schedule, ok := findToolContract(got.Tools, "automation_schedule")
+	if !ok {
+		t.Fatal("automation_schedule dispatcher missing from catalog")
+	}
+	if len(schedule.Presentation.Variants) != 1 || schedule.Presentation.Variants[0] != "status" {
+		t.Fatalf("automation_schedule presentation = %+v", schedule.Presentation)
+	}
 
 	media := buildToolContract(ToolDef{Name: "generate_image"})
 	if media.InputSchema == nil {

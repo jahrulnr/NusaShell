@@ -150,7 +150,7 @@ type Conversation struct {
 	// content. Zero means "never reviewed" (review from the start).
 	LastReviewedMsgCount int `json:"last_reviewed_msg_count,omitempty"`
 	// Origin marks conversations that are not Agent rooms. Pipeline agent
-	// steps persist a conversation so the turn loop and ci_steer can work;
+	// steps persist a conversation so the turn loop and automation(op="steer") can work;
 	// those must not appear in agent.conversations.list.
 	Origin string `json:"Origin,omitempty"`
 	// PendingWorkspaceAnnouncement is set when the user picks a new

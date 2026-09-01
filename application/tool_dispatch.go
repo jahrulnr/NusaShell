@@ -7,7 +7,7 @@ import (
 )
 
 // Dispatcher families expose ONE advertised tool per family (skill, memory,
-// docs, memory_project) selected by a required `op` argument. Root+op is the
+// docs, memory_project, automation, automation_schedule) selected by a required `op` argument. Root+op is the
 // SINGLE naming layer everywhere: provider roster, execution routing,
 // persisted history, hydration, and tests. There are no per-verb aliases —
 // a call named like an old verb is simply an unknown tool.
@@ -24,6 +24,45 @@ type dispatchFamily struct {
 }
 
 var dispatchFamilies = []dispatchFamily{
+	{
+		root:    "automation",
+		members: []string{"run", "wait", "status", "logs", "cancel", "steer", "list", "read", "validate", "create", "enable", "disable", "delete"},
+		def: ToolInfo{
+			Name:        "automation",
+			Description: "Manage durable automations; \"op\" selects: run {workflow_id,async?}; wait {run_id,timeout_ms?}; status {run_id}; logs {job_id,after?,limit?}; cancel {run_id}; steer {run_id,text}; list {}; read {workflow_id}; validate {yaml}; create {yaml,name?,enabled?}; enable {workflow_id}; disable {workflow_id}; delete {workflow_id} (destructive; run history is retained).",
+			InputSchema: objSchema(
+				pEnum("op", "Operation", "run", "wait", "status", "logs", "cancel", "steer", "list", "read", "validate", "create", "enable", "disable", "delete"),
+				pStr("workflow_id", "Workflow id (run/read/enable/disable/delete)"),
+				pStr("run_id", "Run id (wait/status/cancel/steer)"),
+				pStr("job_id", "Job run id (logs)"),
+				pStr("yaml", "Workflow YAML (validate/create)"),
+				pStr("name", "Optional workflow name (create)"),
+				pStr("text", "Steering instruction (steer)"),
+				pBool("async", "Return after queueing instead of waiting for completion (run)"),
+				pInt("timeout_ms", "Maximum wait in milliseconds (wait; default 300000, max 3600000)"),
+				pInt("after", "Log sequence cursor (logs)"),
+				pInt("limit", "Maximum log chunks (logs; default 200)"),
+				pBool("enabled", "Enable immediately after creation (create; default true)"),
+			),
+		},
+	},
+	{
+		root:    "automation_schedule",
+		members: []string{"once", "every"},
+		def: ToolInfo{
+			Name:        "automation_schedule",
+			Description: "Create durable automation schedules; \"op\" selects: once {at,yaml,name?}; every {cron? or interval?,timezone?,yaml,name?}. NusaShell owns the timer.",
+			InputSchema: objSchema(
+				pEnum("op", "Operation", "once", "every"),
+				pStr("at", "RFC3339 fire time (once)"),
+				pStr("cron", "Five-field calendar expression (every)"),
+				pStr("interval", "Elapsed duration such as 1h (every)"),
+				pStr("timezone", "IANA timezone (every)"),
+				pStr("yaml", "Workflow YAML or jobs YAML"),
+				pStr("name", "Optional workflow name"),
+			),
+		},
+	},
 	{
 		root:    "skill",
 		members: []string{"list", "search", "save"},
@@ -146,9 +185,10 @@ func objSchema(op schemaProp, optional ...schemaProp) map[string]any {
 		properties[p.name] = p.schema
 	}
 	return map[string]any{
-		"type":       "object",
-		"properties": properties,
-		"required":   []string{"op"},
+		"type":                 "object",
+		"properties":           properties,
+		"required":             []string{"op"},
+		"additionalProperties": false,
 	}
 }
 

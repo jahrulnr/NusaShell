@@ -21,7 +21,7 @@ import (
 	"nusashell/infrastructure/ai"
 	"nusashell/infrastructure/ai/modelcatalog"
 	"nusashell/infrastructure/attachmentfs"
-	"nusashell/infrastructure/ci"
+	"nusashell/infrastructure/automation"
 	"nusashell/infrastructure/config"
 	"nusashell/infrastructure/docs"
 	"nusashell/infrastructure/journal"
@@ -292,14 +292,14 @@ func run() error {
 	tb.Delegate = app
 	tb.Steerer = app
 	tb.SkillSearcher = app
-	var autoSvc *application.CI
-	if svc, autoDB, err := ci.BuildCI(dataDir, bus, pluginStore, mcpManager, mcpManager); err != nil {
+	var autoSvc *application.Automation
+	if svc, autoDB, err := automation.BuildAutomation(dataDir, bus, pluginStore, mcpManager, mcpManager); err != nil {
 		slog.Warn("automation store init failed", "error", err)
 	} else {
 		autoSvc = svc
-		app.CI = svc
+		app.Automation = svc
 		defer autoDB.Close()
-		tb.CI = svc
+		tb.Automation = svc
 		svc.Exec.Agent = application.NewPipelineAgentRunner(tb, app)
 		if loaded, err := svc.DiscoverPipelines(context.Background()); err != nil {
 			slog.Warn("pipeline discovery failed", "error", err)

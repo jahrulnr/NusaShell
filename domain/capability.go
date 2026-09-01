@@ -90,7 +90,7 @@ func MapAvailability(status CapabilityStatus, autoStart bool) WorkflowAvailabili
 }
 
 // AllowsAutoStart reports whether a stopped provider may be started to
-// satisfy this CI workflow. disabled_by_user always wins.
+// satisfy this Automation workflow. disabled_by_user always wins.
 func AllowsAutoStart(provider CapabilityStatus, policy AutoStartPolicy, serverAutoStart bool) bool {
 	if provider == CapDisabled || provider == CapMissing || provider == CapError {
 		return false

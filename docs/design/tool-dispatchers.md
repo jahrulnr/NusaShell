@@ -1,10 +1,10 @@
 # Tool dispatcher families
 
 One advertised tool per family instead of one tool per verb. `skill`,
-`memory`, `docs`, and `memory_project` are dispatched by a required `op` field
-(`memory` + `op=save`), replacing per-verb schemas with one family each. New
-verbs cost an enum value, not a new schema — prompt growth per feature is
-sub-linear.
+`memory`, `docs`, `memory_project`, `automation`, and `automation_schedule` are
+dispatched by a required `op` field (`memory` + `op=save`), replacing per-verb
+schemas with one family each. New verbs cost an enum value, not a new schema —
+prompt growth per feature is sub-linear.
 
 ## Single naming layer
 
@@ -32,14 +32,16 @@ Root+op is the ONLY form of these tools anywhere in the system:
 ## Rules
 
 - Families must be CRUD/search-shaped with simple params. Hot-path tools
-  (`exec`, `file_*`, `grep`, `find_file`, `show`, `web_*`, `mcp_call`),
-  process-control verbs (`ci_run/wait/cancel/steer`), and privileged gates
-  (`mcp_register/install/server_add`) stay as typed tools.
+  (`exec`, `file_*`, `grep`, `find_file`, `show`, `web_*`, `mcp_call`) and
+  privileged gates (`mcp_register/install/server_add`) stay as typed tools.
+- The `automation` family owns workflow lifecycle and process control. The
+  separate `automation_schedule` family owns once/every schedule creation so
+  schedule-specific fields remain discoverable without a mega-dispatcher.
 - Adding a verb: add the op to the family spec + its Execute case + tests.
-- `ci_pipeline` is the one family whose handlers live outside
-  `executeFamily`: it resolves the op there, then calls `executePipelineOp`
-  with the bare op string, so direct calls with resolved keys
-  (`ci_pipeline_list`) remain unknown tools.
+- `automation` and `automation_schedule` resolve their operations in
+  `executeFamily`, then call the automation application facade. Direct calls
+  with resolved keys (`automation_run`, `automation_schedule_once`) remain
+  unknown tools.
 - Invariant: every advertised family root+op must route through
   `Toolbox.Execute`. `TestAllAdvertisedFamilyOpsRoute` executes each one and
   fails when an op cannot reach its handler (routing-level assertion —

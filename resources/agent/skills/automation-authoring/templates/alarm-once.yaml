@@ -1,0 +1,20 @@
+version: 1
+name: alarm-once
+enabled: false
+trust: trusted
+
+triggers:
+  - once:
+      # Replace this example with a future RFC3339 time in your timezone.
+      at: "2026-12-31T07:00:00+07:00"
+      timezone: Asia/Jakarta
+
+jobs:
+  alarm:
+    name: Ring a local alarm
+    steps:
+      - name: Ring terminal bell
+        shell: sh
+        run: |
+          printf '\a'
+          printf '%s\n' 'ALARM: replace this text with your reminder'

@@ -140,7 +140,7 @@ type App struct {
 	// debugging and observability. Best-effort — nil = no-op.
 	Trajectory *TrajectoryRecorder
 
-	CI *CI
+	Automation *Automation
 
 	runsMu              sync.Mutex
 	runs                map[string]*TurnRun
@@ -253,8 +253,8 @@ type Deps struct {
 	AcpRunStorage               domain.AcpRunStorage
 	// Logger is an optional structured logger for crash recovery from
 	// fire-and-forget goroutines. Nil = slog.Default().
-	Logger *slog.Logger
-	CI     *CI
+	Logger     *slog.Logger
+	Automation *Automation
 }
 
 // App is the application core. It wires together all the stores and
@@ -316,7 +316,7 @@ func NewApp(deps Deps) *App {
 		imageGenSem:                 make(chan struct{}, maxConcurrentImageGens),
 		startedAt:                   clock.NewTime().Time(),
 		Logger:                      deps.Logger,
-		CI:                          deps.CI,
+		Automation:                  deps.Automation,
 		runs:                        map[string]*TurnRun{},
 		turnsSinceReview:            map[string]int{},
 		toolCallsSinceReview:        map[string]int{},
@@ -435,8 +435,8 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 		return a.dispatchLogs(method, payload)
 	case strings.HasPrefix(method, "telemetry."):
 		return a.dispatchTelemetry(method, payload)
-	case strings.HasPrefix(method, "ci."):
-		return a.handleCI(ctx, method, payload)
+	case strings.HasPrefix(method, "automation."):
+		return a.handleAutomation(ctx, method, payload)
 	}
 	switch method {
 	case contracts.MethodAppInfo:
@@ -457,7 +457,7 @@ func (a *App) handleAppInfo() (any, *contracts.RPCError) {
 			MCP:           true,
 			Compaction:    settings.CompactionEnabled,
 			PromptCaching: settings.PromptCaching,
-			CI:            a.CI != nil,
+			Automation:    a.Automation != nil,
 			Providers:     []string{"messages", "responses", "chat"},
 		},
 	}, nil

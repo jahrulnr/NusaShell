@@ -12,13 +12,13 @@ import (
 // and intent/evidence routing as one merged document.
 var systemPrompt = resources.Prompt("system")
 
-// continuousIntegrationPrompt is the system prompt for headless CI pipeline
+// automationPrompt is the system prompt for headless Automation workflow
 // agent steps. It is loaded once from
-// resources/agent/prompts/continuous-integration.md at init time. Unlike the
+// resources/agent/prompts/automation-agent.md at init time. Unlike the
 // interactive system prompt, it frames the agent as a focused step executor
 // with no user watching the stream, no ACP subagent tools, and concise
 // output captured as the step result.
-var continuousIntegrationPrompt = resources.Prompt("continuous-integration")
+var automationPrompt = resources.Prompt("automation-agent")
 
 // continuePrompt is the auto-continue guidance delivered as the output of
 // the synthetic `announcement` tool call injected at the start of each
@@ -58,13 +58,13 @@ func buildSystemPrompt(c *domain.Conversation, userPrompt string) string {
 }
 
 // buildSystemPromptForRun composes the system prompt for a specific turn run.
-// Headless CI pipeline steps (run.Headless && run.ToolKind == AgentCI)
-// use the continuous-integration prompt instead of the interactive system
+// Headless Automation pipeline steps (run.Headless && run.ToolKind == AgentAutomation)
+// use the automation prompt instead of the interactive system
 // prompt; the interactive path is unchanged when run is nil (e.g. tests).
 func buildSystemPromptForRun(run *TurnRun, c *domain.Conversation, userPrompt string) string {
 	base := systemPrompt
-	if run != nil && run.Headless && run.ToolKind == AgentCI {
-		base = continuousIntegrationPrompt
+	if run != nil && run.Headless && run.ToolKind == AgentAutomation {
+		base = automationPrompt
 	}
 	var sb strings.Builder
 	sb.WriteString(base)

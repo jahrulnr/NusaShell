@@ -55,6 +55,27 @@ func TestStore_SaveNewSkillDerivesIDFromName(t *testing.T) {
 	}
 }
 
+func TestSeedBuiltinSkillsIncludesAutomationAuthoringTemplates(t *testing.T) {
+	root := t.TempDir()
+	if err := SeedBuiltinSkills(root); err != nil {
+		t.Fatalf("SeedBuiltinSkills: %v", err)
+	}
+	for _, rel := range []string{
+		"SKILL.md",
+		"templates/telegram-auto-reply.yaml",
+		"templates/alarm-once.yaml",
+		"templates/reminder-every.yaml",
+		"references/yaml-contract.md",
+		"references/event-variables.md",
+		"references/tool-discovery.md",
+	} {
+		path := filepath.Join(root, "automation-authoring", filepath.FromSlash(rel))
+		if data, err := os.ReadFile(path); err != nil || len(data) == 0 {
+			t.Fatalf("seeded file %s: err=%v bytes=%d", rel, err, len(data))
+		}
+	}
+}
+
 func TestStore_WriteFile_supportFile(t *testing.T) {
 	s := newTestStore(t)
 	err := s.WriteFile("test-skill", "", "references/errors.md", "# Error recipes\n")

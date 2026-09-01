@@ -15,7 +15,7 @@ transport/       HTTP /rpc/{method...}, WebSocket /ws, static assets
 application/     use cases, agent runner, ports, event bus (Bus)
 domain/          pure entities and policies (no I/O imports)
 contracts/       wire types, method roster, golden JSON fixtures
-infrastructure/  jsonstore, sqlitestore, ai adapters, mcpclient, tools, docs, ci
+infrastructure/  jsonstore, sqlitestore, ai adapters, mcpclient, tools, docs, automation
 cmd/nusashell/   composition root (env config, wiring, lifecycle)
 testdata/        fake stdio MCP server used by handler-level tests
 pkg/time/        stdlib-only machine-local timestamp wrapper
@@ -37,10 +37,11 @@ normalized through the same wrapper when rendered or persisted. A trigger
 without an explicit timezone also follows the machine timezone; a configured
 trigger's explicit `timezone` remains authoritative for scheduling.
 
-Automation (CI runner + trigger engine) is wired in `cmd/nusashell`: SQLite
-`automation.db`, local executor, and a 15s `FireDue` loop. Domain types are
-pure; YAML parsing and process execution stay in `infrastructure/ci`. RPC
-methods are `ci.*` and `automation.*`. The frontend Automation view is an
+Automation (runner + trigger engine) is wired in `cmd/nusashell`: SQLite
+`automation/workflows.db`, local executor, and a 15s `FireDue` loop. Domain
+types are pure; YAML parsing and process execution stay in
+`infrastructure/automation`. RPC methods are `automation.*`. The frontend
+Automation view is an
 embedded ES module with no build step.
 
 ## Transports
@@ -98,7 +99,7 @@ dispatchers, each owning its routing table in a separate file:
 | `settings.*` | `dispatchSettings` | `application/settings_dispatch.go` |
 | `logs.*` | `dispatchLogs` | `application/logs_dispatch.go` |
 | `telemetry.*` | `dispatchTelemetry` | `application/telemetry.go` |
-| `ci.*`, `automation.*` | `handleCI` | `application/ci_handlers.go` |
+| `automation.*` | `handleAutomation` | `application/automation_handlers.go` |
 | `app.info` | inline | `application/app.go` |
 
 Adding a new method means: add the constant to `contracts/`, add a case to

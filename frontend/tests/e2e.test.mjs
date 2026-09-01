@@ -50,7 +50,7 @@ async function waitFor(check, label, timeoutMs = 10000) {
 }
 
 // startTurn wraps agent.turns.start with a retry on "conversation is busy".
-// On slow CI runners, there is a harmless race between finishTurn setting
+// On slow browser runners, there is a harmless race between finishTurn setting
 // status=idle (visible via RPC) and the deferred cleanup deleting the run
 // from the active runs map. Without a retry, the next turns.start hits
 // "conversation is busy" even though the previous turn is done.

@@ -1,0 +1,19 @@
+version: 1
+name: reminder-every
+enabled: false
+trust: trusted
+
+triggers:
+  - every:
+      # Weekdays at 09:00 in Jakarta; use interval: 24h for elapsed time.
+      cron: "0 9 * * 1-5"
+      timezone: Asia/Jakarta
+
+jobs:
+  reminder:
+    name: Write a recurring reminder
+    steps:
+      - name: Record reminder
+        shell: sh
+        run: |
+          printf '%s\n' "REMINDER: review today's priorities"

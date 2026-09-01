@@ -44,7 +44,7 @@ type Toolbox struct {
 	Settings        application.SettingsStore
 	Credentials     application.CredentialStore
 	AskQuestions    *application.AskQuestionService
-	CI              *application.CI
+	Automation      *application.Automation
 	// SpeechOfflineAvailable flips the generate_speech tool on when the local
 	// piper engine is wired (set by the composition root at startup).
 	SpeechOfflineAvailable bool
@@ -193,23 +193,8 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 	tools := []application.ToolInfo{
 		{Name: "todo", Description: "Manage the conversation task checklist. Two modes: `replace` (default, full-replace — empty items clears the list) and `patch` (merge by ID — update status/content of existing items, add new items, keep untouched items unchanged). Use `patch` to update a single item's status without re-emitting the full list (saves tokens). In patch mode, `content` may be empty (meaning \"don't change content, only update status\"). The user can delete items from the UI — treat deleted items as gone and do not re-add them. The optional `brief` argument is a living markdown plan — required sections `## Objective` (user intent) and `## Done when` (acceptance criteria), plus optional `## Findings` and `## Approach` that grow as the task progresses — that survives compaction and is re-injected via hydration (the current checkpoint is reused until compaction, not re-injected each turn); update it as findings emerge and never drift from the Objective. The brief is mirrored to a plan file — the result returns `plan_path` (absolute); `file_read` it to re-read the brief and hand it to subagents that need the plan. Set `clear_brief: true` to delete the brief and its plan file (items are untouched unless you also clear them); an empty `brief` alone never clears.", InputSchema: obj("object", props("items", arrObj("Todo items (max 50). In replace mode: full list. In patch mode: only items to update/add.", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars). Required in replace mode; optional in patch mode (empty = keep existing)."), "status", strEnum("Item status; prefer exactly one in_progress at a time", "pending", "in_progress", "completed")), "id", "content", "status"), "mode", strEnum("Update mode: replace (default, full-replace) or patch (merge by ID)", "replace", "patch"), "brief", str("Living planning document. Required sections: `## Objective` (user intent in their words), `## Done when` (acceptance criteria); optional, grows over time: `## Findings` (paths, line numbers), `## Approach` (key steps). Max ~10000 tokens."), "clear_brief", obj("boolean", nil)), "items")},
 		{Name: "ask_question", Description: "Pause and ask the user a structured clarifying question before continuing. Use only for genuine decisions the user must make — not things you can figure out yourself. A plain-text reply does not pause auto-continue; only this tool does. Set multi_select=true when more than one option could fit (preferences, scope, priorities); the user can also add free text (when allow_free_text=true) or answer purely with text. The turn blocks until the user answers or cancels.", InputSchema: obj("object", props("question", str("The question to show the user"), "options", arrObj("Selectable choices (1-8). Mark one default when possible.", props("id", str("Stable option id"), "label", str("Short option label"), "description", str("Optional one-line explanation"), "default", obj("boolean", nil), "icon", str("Optional emoji or short icon glyph"), "image", str("Optional image URL or compact data URI")), "id", "label"), "allow_free_text", obj("boolean", nil), "multi_select", obj("boolean", nil)), "question", "options")},
-		{Name: "ci_run", Description: "Start a saved CI workflow by workflow_id. Set async=true to return immediately with a run_id while the pipeline runs in the background; then use ci_wait or ci_run_status to check on it. Without async, the call blocks until the pipeline finishes.", InputSchema: obj("object", props("workflow_id", str("CI workflow id from ci_list"), "async", obj("boolean", nil)), "workflow_id")},
-		{Name: "ci_wait", Description: "Block until a pipeline run reaches a terminal state (done, failed, cancelled, blocked) or the timeout expires. Use after ci_run with async=true. Returns the final run status and summary.", InputSchema: obj("object", props("run_id", str("Run id"), "timeout_ms", intSchema("Max wait in milliseconds (default 300000 = 5 min, max 3600000 = 1 h)")), "run_id")},
-		{Name: "ci_run_status", Description: "Return run status, DAG summary, and failed jobs. Use this after ci_run; do not fetch full logs unless a job failed.", InputSchema: obj("object", props("run_id", str("Run id")), "run_id")},
-		{Name: "ci_logs", Description: "Retrieve job logs (tail 200 by default). Prefer failed jobs.", InputSchema: obj("object", props("job_id", str("Job run id"), "run_id", str("Run id"), "limit", intSchema("Max chunks")), "job_id")},
-		{Name: "ci_cancel", Description: "Cancel a running pipeline/automation run.", InputSchema: obj("object", props("run_id", str("Run id")), "run_id")},
-		{Name: "ci_steer", Description: "Send additional instructions to a running agent step without canceling.", InputSchema: obj("object", props("run_id", str("Run id"), "text", str("Steer instructions")), "run_id", "text")},
-		{Name: "ci_list", Description: "List saved CI workflows with availability (runnable/blocked/disabled/invalid). Invalid YAML stays listed and cannot be enabled or run until it is fixed.", InputSchema: obj("object", nil)},
-		{Name: "ci_read", Description: "Read one CI workflow definition and capability bindings.", InputSchema: obj("object", props("id", str("CI workflow id")), "id")},
-		{Name: "ci_validate", Description: "Validate a workflow YAML. Distinguishes INVALID vs BLOCKED (provider disabled/missing).", InputSchema: obj("object", props("yaml", str("Workflow YAML")), "yaml")},
-		{Name: "ci_create", Description: "Create a CI workflow from YAML (once/every/when triggers). NusaShell owns durable scheduling — do not keep timers yourself.", InputSchema: obj("object", props("yaml", str("Workflow YAML"), "enabled", obj("boolean", nil)), "yaml")},
-		{Name: "ci_enable", Description: "Enable a CI workflow and restore event subscriptions/schedules. Rejects invalid YAML (listed as availability=invalid) until the definition is fixed.", InputSchema: obj("object", props("id", str("CI workflow id")), "id")},
-		{Name: "ci_disable", Description: "Disable a CI workflow without deleting it.", InputSchema: obj("object", props("id", str("CI workflow id")), "id")},
-		{Name: "ci_status", Description: "Inspect a run, including waiting/blocked states.", InputSchema: obj("object", props("run_id", str("Run id")), "run_id")},
-		{Name: "ci_schedule_once", Description: "Create a one-shot scheduled CI workflow at an RFC3339 timestamp.", InputSchema: obj("object", props("at", str("RFC3339 time"), "yaml", str("Jobs YAML or a full workflow"), "name", str("Workflow name")), "at")},
-		{Name: "ci_schedule_every", Description: "Create a recurring CI workflow. cron uses calendar semantics; interval uses elapsed time. They are not equivalent.", InputSchema: obj("object", props("cron", str("5-field cron"), "interval", str("Go duration such as 1h"), "timezone", str("IANA timezone"), "yaml", str("Jobs YAML"), "name", str("Name")))},
 		{Name: "wait_until", Description: "Explain or create a durable wait_until step. Waiting never keeps a runner occupied.", InputSchema: obj("object", props("at", str("RFC3339 time")), "at")},
-		{Name: "sleep", Description: "Pause for the given number of seconds (max 300). Use for retry backoff or to wait between polls of an async ci_run. Does not consume a provider round — the turn resumes after the pause.", InputSchema: obj("object", props("seconds", intSchema("Seconds to sleep (1-300)")), "seconds")},
+		{Name: "sleep", Description: "Pause for the given number of seconds (max 300). Use for retry backoff or to wait between polls of an async automation(op=run). Does not consume a provider round — the turn resumes after the pause.", InputSchema: obj("object", props("seconds", intSchema("Seconds to sleep (1-300)")), "seconds")},
 		{Name: "mcp_list", Description: "List configured MCP servers with their enabled status and runtime state (running/stopped).", InputSchema: obj("object", nil)},
 		{Name: "tool_list", Description: "List tools from a running MCP server. Accepts the plugin id (e.g. \"nusashell.terminal\"). When omitted, lists tools across all running MCP servers. Returns compact entries (ref, name, server, description) without parameter schemas — load the exact schema with tool_schema before first use of an unfamiliar tool.", InputSchema: obj("object", props("server", str("Plugin id; when omitted, lists all running servers")))},
 		{Name: "tool_schema", Description: "Load one MCP tool's input schema by plugin id and tool name. The tool name is the bare tool name (e.g. \"exec\"). Returns the schema as readable JSON — the only place schemas are served; mcp_search and tool_list stay schema-free so large catalogs remain token-cheap.", InputSchema: obj("object", props("server", str("Plugin id (e.g. nusashell.terminal)"), "tool", str("Bare tool name within the server (e.g. \"exec\")")), "server", "tool")},
@@ -292,7 +277,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 	tools = append(tools, execToolInfos()...)
 	// Dispatcher roots are part of the Toolbox roster as well as the
 	// execution surface. ToolFactory applies workspace/agent policy and
-	// removes any duplicate compatibility entries when assembling a turn.
+	// deduplicates roots when assembling a turn.
 	tools = append(tools, application.DispatcherToolInfos()...)
 	return tools
 }
@@ -339,14 +324,30 @@ func (t *Toolbox) videoGenerationConfigured() bool {
 	return mediaGenerationConfigured(s.VideoGenProviderID, s.VideoGenModelID)
 }
 
-// executeFamily routes an ADVERTISED dispatcher-root call (skill, memory,
-// docs, memory_project) to its op handler. This is the ONLY door to the family
+// executeFamily routes an advertised dispatcher-root call to its op handler.
+// This is the only door to the family
 // handlers: the root+"_"+op strings below are private routing keys and are
 // not reachable as tool names, so retired per-op calls fail loud upstream.
 func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byte) (string, error) {
 	op, err := application.DispatchOp(name, argsJSON)
 	if err != nil {
 		return "", err
+	}
+	if name == "automation" || name == "automation_schedule" {
+		privateName := name + "_" + op
+		if name == "automation" {
+			privateName = "automation_" + op
+			if op == "status" {
+				privateName = "automation_run_status"
+			}
+		} else {
+			privateName = "automation_schedule_" + op
+		}
+		out, handled, err := t.executeAutomation(ctx, privateName, argsJSON)
+		if !handled {
+			return "", fmt.Errorf("unknown %s op %q", name, op)
+		}
+		return out, err
 	}
 	name = name + "_" + op // private routing key; never escapes this method
 	switch {
@@ -682,9 +683,6 @@ func (t *Toolbox) ExecuteStreamed(ctx context.Context, name string, argsJSON []b
 	return t.Execute(ctx, name, argsJSON)
 }
 
-// executePipelineOp runs one validated ci_pipeline op (list|read|validate).
-// It lives outside executeCI so the automation switch never answers
-// to a resolved per-op name.
 func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {
 	// Native built-ins first: file CRUD and the exec island.
 	if name == "exec" {
@@ -699,7 +697,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		return out, err
 	}
 	// Dispatcher families (advertised roots: skill, memory, docs,
-	// memory_project) are routed exclusively through executeFamily: resolving
+	// memory_project, automation, automation_schedule) are routed exclusively through executeFamily: resolving
 	// the required `op` and reaching a family handler is impossible without
 	// going through it. Retired per-op names fall through to the plain
 	// switch below and end up as the honest "unknown tool" error.
@@ -707,6 +705,8 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		return t.executeFamily(ctx, name, argsJSON)
 	}
 	switch {
+	case name == "wait_until":
+		return t.executeWaitUntil(argsJSON)
 	case name == "todo":
 		return t.execTodo(ctx, argsJSON)
 
@@ -1324,16 +1324,31 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		return yamlBlock(map[string]any{"status": "slept"}), nil
 	}
 
-	if out, handled, err := t.executeCI(ctx, name, argsJSON); handled {
-		return out, err
-	}
-
 	// MCP plugin tools are NOT callable by name. There is exactly one
 	// execution contract: mcp_call with a ref (<server>:<tool>) obtained from
 	// mcp_search / tool_list. The legacy mcp__<server>__<tool>
 	// dispatch was removed — those names are never advertised in tools[] and
 	// gave the model a second, ambiguous way to reach the same tool.
 	return "", fmt.Errorf("unknown tool: %s", name)
+}
+
+func (t *Toolbox) executeWaitUntil(argsJSON []byte) (string, error) {
+	var args struct {
+		At string `json:"at"`
+	}
+	if err := json.Unmarshal(argsJSON, &args); err != nil {
+		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	if strings.TrimSpace(args.At) == "" {
+		return "", fmt.Errorf("at is required")
+	}
+	if _, err := time.Parse(time.RFC3339, args.At); err != nil {
+		return "", fmt.Errorf("at must be RFC3339")
+	}
+	return yamlBlock(map[string]string{
+		"hint": "Use a workflow step wait_until: <RFC3339>. The run enters waiting and resumes after restart.",
+		"at":   args.At,
+	}), nil
 }
 
 // searchSkillsRanked runs the ranked skill search (BM25 + graph + recency,
@@ -1724,8 +1739,8 @@ func strEnum(desc string, values ...string) map[string]any {
 // callable. The single MCP execution contract is mcp_call with a ref
 // (<server>:<tool>) from mcp_search / tool_list.
 
-// automationRunYAML is the agent-facing run snapshot for ci_wait /
-// ci_run_status. WakeAt is formatted as RFC3339 (or omitted) so it is
+// automationRunYAML is the agent-facing run snapshot for automation_wait /
+// automation_run_status. WakeAt is formatted as RFC3339 (or omitted) so it is
 // not stuffed into map[string]any as *time.Time — yaml.v3 panics on that.
 func automationRunYAML(run *domain.WorkflowRun, extra map[string]any) map[string]any {
 	out := map[string]any{
@@ -1743,21 +1758,26 @@ func automationRunYAML(run *domain.WorkflowRun, extra map[string]any) map[string
 	return out
 }
 
-func (t *Toolbox) executeCI(ctx context.Context, name string, argsJSON []byte) (string, bool, error) {
-	if t.CI == nil {
+func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON []byte) (string, bool, error) {
+	if t.Automation == nil {
 		switch name {
-		case "ci_run", "ci_wait", "ci_run_status",
-			"ci_logs", "ci_cancel", "ci_steer", "ci_list", "ci_read", "ci_validate",
-			"ci_create", "ci_enable", "ci_disable", "ci_status",
-			"ci_schedule_once", "ci_schedule_every", "wait_until":
+		case "automation_run", "automation_wait", "automation_run_status",
+			"automation_logs", "automation_cancel", "automation_steer", "automation_list", "automation_read", "automation_validate",
+			"automation_create", "automation_enable", "automation_disable", "automation_delete",
+			"automation_schedule_once", "automation_schedule_every":
 			return "", true, fmt.Errorf("automation is not configured")
 		default:
 			return "", false, nil
 		}
 	}
-	a := t.CI
+	a := t.Automation
 	var args map[string]any
-	_ = json.Unmarshal(argsJSON, &args)
+	if err := json.Unmarshal(argsJSON, &args); err != nil || args == nil {
+		if err == nil {
+			err = fmt.Errorf("arguments must be a JSON object")
+		}
+		return "", true, fmt.Errorf("invalid automation arguments: %w", err)
+	}
 	str := func(k string) string {
 		v, _ := args[k].(string)
 		return v
@@ -1769,15 +1789,18 @@ func (t *Toolbox) executeCI(ctx context.Context, name string, argsJSON []byte) (
 		return yamlBlock(v), true, nil
 	}
 	switch name {
-	case "ci_validate":
+	case "automation_validate":
+		if strings.TrimSpace(str("yaml")) == "" {
+			return "", true, fmt.Errorf("yaml is required")
+		}
 		raw := []byte(str("yaml"))
 		r, _ := a.ValidateYAML(raw)
 		return encode(r, nil)
-	case "ci_run":
+	case "automation_run":
 		async, _ := args["async"].(bool)
 		id := str("workflow_id")
 		if id == "" {
-			return "", true, fmt.Errorf("workflow_id is required (use automation_list to see available automations)")
+			return "", true, fmt.Errorf("workflow_id is required (use automation op=list to see available workflows)")
 		}
 		var run *domain.WorkflowRun
 		var err error
@@ -1787,7 +1810,10 @@ func (t *Toolbox) executeCI(ctx context.Context, name string, argsJSON []byte) (
 			run, err = a.RunWorkflow(ctx, id, "agent")
 		}
 		return encode(run, err)
-	case "ci_wait":
+	case "automation_wait":
+		if strings.TrimSpace(str("run_id")) == "" {
+			return "", true, fmt.Errorf("run_id is required")
+		}
 		timeoutMs, _ := args["timeout_ms"].(float64)
 		timeout := 5 * time.Minute
 		if timeoutMs > 0 {
@@ -1803,20 +1829,44 @@ func (t *Toolbox) executeCI(ctx context.Context, name string, argsJSON []byte) (
 		return encode(automationRunYAML(run, map[string]any{
 			"timed_out": !run.Status.IsTerminal(),
 		}), nil)
-	case "ci_run_status", "ci_status":
+	case "automation_run_status":
+		if strings.TrimSpace(str("run_id")) == "" {
+			return "", true, fmt.Errorf("run_id is required")
+		}
 		run, err := a.Runs.Get(ctx, str("run_id"))
 		if err != nil {
 			return "", true, err
 		}
 		return encode(automationRunYAML(run, nil), nil)
-	case "ci_logs":
-		chunks, err := a.Logs.Read(ctx, str("job_id"), 0, 200)
+	case "automation_logs":
+		jobID := strings.TrimSpace(str("job_id"))
+		if jobID == "" {
+			return "", true, fmt.Errorf("job_id is required")
+		}
+		after, _ := args["after"].(float64)
+		limit, _ := args["limit"].(float64)
+		if limit <= 0 {
+			limit = 200
+		}
+		if limit > 2000 {
+			limit = 2000
+		}
+		chunks, err := a.Logs.Read(ctx, jobID, uint64(after), int(limit))
 		return encode(chunks, err)
-	case "ci_cancel":
+	case "automation_cancel":
+		if strings.TrimSpace(str("run_id")) == "" {
+			return "", true, fmt.Errorf("run_id is required")
+		}
 		return encode(map[string]bool{"ok": true}, a.Exec.Cancel(ctx, str("run_id")))
-	case "ci_steer":
+	case "automation_steer":
 		runID := str("run_id")
 		text := str("text")
+		if strings.TrimSpace(runID) == "" {
+			return "", true, fmt.Errorf("run_id is required")
+		}
+		if strings.TrimSpace(text) == "" {
+			return "", true, fmt.Errorf("text is required")
+		}
 		run, err := a.Runs.Get(ctx, runID)
 		if err != nil {
 			return "", true, fmt.Errorf("run not found: %w", err)
@@ -1839,7 +1889,7 @@ func (t *Toolbox) executeCI(ctx context.Context, name string, argsJSON []byte) (
 			return "", true, err
 		}
 		return encode(map[string]any{"steered": true, "conversation_id": convID}, nil)
-	case "ci_list":
+	case "automation_list":
 		list, err := a.Workflows.List(ctx)
 		if err != nil {
 			return "", true, err
@@ -1854,8 +1904,12 @@ func (t *Toolbox) executeCI(ctx context.Context, name string, argsJSON []byte) (
 			out = append(out, row{ID: w.ID, Name: w.Name, Enabled: w.Enabled, Availability: avail, Reason: reason})
 		}
 		return encode(out, nil)
-	case "ci_read":
-		w, err := a.Workflows.Get(ctx, str("id"))
+	case "automation_read":
+		workflowID := strings.TrimSpace(str("workflow_id"))
+		if workflowID == "" {
+			return "", true, fmt.Errorf("workflow_id is required")
+		}
+		w, err := a.Workflows.Get(ctx, workflowID)
 		if err != nil {
 			return "", true, err
 		}
@@ -1866,7 +1920,10 @@ func (t *Toolbox) executeCI(ctx context.Context, name string, argsJSON []byte) (
 			caps = append(caps, b)
 		}
 		return encode(map[string]any{"workflow": w, "availability": avail, "reason": reason, "capabilities": caps}, nil)
-	case "ci_create":
+	case "automation_create":
+		if strings.TrimSpace(str("yaml")) == "" {
+			return "", true, fmt.Errorf("yaml is required")
+		}
 		w, err := a.ParseDefinition(str("yaml"))
 		if err != nil {
 			return "", true, err
@@ -1875,28 +1932,48 @@ func (t *Toolbox) executeCI(ctx context.Context, name string, argsJSON []byte) (
 			w.Name = n
 		}
 		w.Enabled = true
+		if enabled, ok := args["enabled"].(bool); ok {
+			w.Enabled = enabled
+		}
 		saved, r, err := a.SaveWorkflow(ctx, w)
 		return encode(map[string]any{"workflow": saved, "validation": r}, err)
-	case "ci_enable", "ci_disable":
-		w, err := a.Workflows.Get(ctx, str("id"))
+	case "automation_enable", "automation_disable":
+		workflowID := strings.TrimSpace(str("workflow_id"))
+		if workflowID == "" {
+			return "", true, fmt.Errorf("workflow_id is required")
+		}
+		w, err := a.Workflows.Get(ctx, workflowID)
 		if err != nil {
 			return "", true, err
 		}
-		if name == "ci_enable" {
+		if name == "automation_enable" {
 			err = a.Sched.EnableWorkflow(ctx, w)
 		} else {
 			w.Enabled = false
 			err = a.Workflows.Put(ctx, w)
 		}
 		return encode(map[string]any{"id": w.ID, "enabled": w.Enabled}, err)
-	case "ci_schedule_once":
+	case "automation_delete":
+		workflowID := strings.TrimSpace(str("workflow_id"))
+		if workflowID == "" {
+			return "", true, fmt.Errorf("workflow_id is required")
+		}
+		if a.Workflows == nil {
+			return "", true, fmt.Errorf("workflow store not configured")
+		}
+		err := a.Workflows.Delete(ctx, workflowID)
+		return encode(map[string]any{"status": "deleted", "workflow_id": workflowID}, err)
+	case "automation_schedule_once":
+		if strings.TrimSpace(str("yaml")) == "" {
+			return "", true, fmt.Errorf("yaml is required")
+		}
 		at, err := time.Parse(time.RFC3339, str("at"))
 		if err != nil {
 			return "", true, fmt.Errorf("at must be RFC3339")
 		}
 		w, err := a.ParseDefinition(str("yaml"))
 		if err != nil {
-			w = &domain.WorkflowDefinition{Name: str("name"), Jobs: []domain.Job{{ID: "run", Steps: []domain.Step{{Run: "true"}}}}}
+			return "", true, fmt.Errorf("invalid workflow: %w", err)
 		}
 		if w.Name == "" {
 			w.Name = str("name")
@@ -1908,20 +1985,28 @@ func (t *Toolbox) executeCI(ctx context.Context, name string, argsJSON []byte) (
 		w.Triggers = []domain.Trigger{{ID: "t1", Kind: domain.TriggerOnce, Family: domain.FamilyOnce, At: &at}}
 		saved, r, err := a.SaveWorkflow(ctx, w)
 		return encode(map[string]any{"workflow": saved, "validation": r}, err)
-	case "ci_schedule_every":
+	case "automation_schedule_every":
+		if strings.TrimSpace(str("yaml")) == "" {
+			return "", true, fmt.Errorf("yaml is required")
+		}
 		w, err := a.ParseDefinition(str("yaml"))
 		if err != nil {
-			w = &domain.WorkflowDefinition{Name: str("name"), Jobs: []domain.Job{{ID: "run", Steps: []domain.Step{{Run: "true"}}}}}
+			return "", true, fmt.Errorf("invalid workflow: %w", err)
 		}
 		if w.Name == "" {
 			w.Name = str("name")
 		}
+		cron := strings.TrimSpace(str("cron"))
+		interval := strings.TrimSpace(str("interval"))
+		if cron != "" && interval != "" {
+			return "", true, fmt.Errorf("cron and interval are mutually exclusive")
+		}
 		tr := domain.Trigger{ID: "t1", Family: domain.FamilyEvery, Timezone: str("timezone")}
-		if str("cron") != "" {
+		if cron != "" {
 			tr.Kind = domain.TriggerCron
-			tr.Cron = str("cron")
+			tr.Cron = cron
 		} else {
-			d, err := time.ParseDuration(str("interval"))
+			d, err := time.ParseDuration(interval)
 			if err != nil {
 				return "", true, fmt.Errorf("interval or cron is required")
 			}
@@ -1932,11 +2017,6 @@ func (t *Toolbox) executeCI(ctx context.Context, name string, argsJSON []byte) (
 		w.Enabled = true
 		saved, r, err := a.SaveWorkflow(ctx, w)
 		return encode(map[string]any{"workflow": saved, "validation": r}, err)
-	case "wait_until":
-		return encode(map[string]string{
-			"hint": "Use a workflow step wait_until: <RFC3339>. The run enters waiting and resumes after restart.",
-			"at":   str("at"),
-		}, nil)
 	default:
 		return "", false, nil
 	}

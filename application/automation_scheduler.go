@@ -11,9 +11,9 @@ import (
 	clock "nusashell/pkg/time"
 )
 
-// CIScheduler wakes time-based triggers, consumes events, and
+// AutomationScheduler wakes time-based triggers, consumes events, and
 // creates workflow runs. It does not execute jobs.
-type CIScheduler struct {
+type AutomationScheduler struct {
 	Workflows WorkflowStore
 	Schedules ScheduleStore
 	Events    EventStore
@@ -26,7 +26,7 @@ type CIScheduler struct {
 	Bus       *Bus
 }
 
-func (s *CIScheduler) now() time.Time {
+func (s *AutomationScheduler) now() time.Time {
 	if s.Clock == nil {
 		return clock.NewTime().Time()
 	}
@@ -34,7 +34,7 @@ func (s *CIScheduler) now() time.Time {
 }
 
 // EnableWorkflow persists schedules/subscriptions for an enabled workflow.
-func (s *CIScheduler) EnableWorkflow(ctx context.Context, w *domain.WorkflowDefinition) error {
+func (s *AutomationScheduler) EnableWorkflow(ctx context.Context, w *domain.WorkflowDefinition) error {
 	if reason := s.invalidReason(ctx, w); reason != "" {
 		return fmt.Errorf("invalid workflow: %s", reason)
 	}
@@ -83,7 +83,7 @@ func (s *CIScheduler) EnableWorkflow(ctx context.Context, w *domain.WorkflowDefi
 	return nil
 }
 
-func (s *CIScheduler) invalidReason(ctx context.Context, w *domain.WorkflowDefinition) string {
+func (s *AutomationScheduler) invalidReason(ctx context.Context, w *domain.WorkflowDefinition) string {
 	if w == nil {
 		return "workflow is empty"
 	}
@@ -97,10 +97,10 @@ func (s *CIScheduler) invalidReason(ctx context.Context, w *domain.WorkflowDefin
 	return firstValidationMessage(r)
 }
 
-func (s *CIScheduler) blockWorkflow(ctx context.Context, w *domain.WorkflowDefinition, b domain.CapabilityBinding) error {
+func (s *AutomationScheduler) blockWorkflow(ctx context.Context, w *domain.WorkflowDefinition, b domain.CapabilityBinding) error {
 	_ = s.Workflows.Put(ctx, w)
 	if s.Bus != nil {
-		s.Bus.Emit(contracts.EventCIRunBlocked, map[string]any{
+		s.Bus.Emit(contracts.EventAutomationRunBlocked, map[string]any{
 			"workflow_id": w.ID, "capability": b.Capability, "provider": b.ProviderID, "status": b.Status, "reason": b.Reason,
 		})
 	}
@@ -108,7 +108,7 @@ func (s *CIScheduler) blockWorkflow(ctx context.Context, w *domain.WorkflowDefin
 }
 
 // FireDue claims due schedules and starts runs.
-func (s *CIScheduler) FireDue(ctx context.Context) error {
+func (s *AutomationScheduler) FireDue(ctx context.Context) error {
 	if s.Schedules == nil {
 		return nil
 	}
@@ -155,7 +155,7 @@ func (s *CIScheduler) FireDue(ctx context.Context) error {
 	return s.resumeWaits(ctx)
 }
 
-func (s *CIScheduler) resumeWaits(ctx context.Context) error {
+func (s *AutomationScheduler) resumeWaits(ctx context.Context) error {
 	if s.Waits == nil || s.Exec == nil {
 		return nil
 	}
@@ -174,7 +174,7 @@ func (s *CIScheduler) resumeWaits(ctx context.Context) error {
 }
 
 // IngestEvent matches when-triggers and creates at-most-one run per delivery key.
-func (s *CIScheduler) IngestEvent(ctx context.Context, ev domain.Event) error {
+func (s *AutomationScheduler) IngestEvent(ctx context.Context, ev domain.Event) error {
 	if ev.ID == "" {
 		ev.ID = domain.NewID(domain.IDPrefixEvt)
 	}
@@ -185,7 +185,7 @@ func (s *CIScheduler) IngestEvent(ctx context.Context, ev domain.Event) error {
 		_ = s.Events.PutEvent(ctx, &ev)
 	}
 	if s.Bus != nil {
-		s.Bus.Emit(contracts.EventCIEvent, ev)
+		s.Bus.Emit(contracts.EventAutomationEvent, ev)
 	}
 	if s.Workflows == nil {
 		return nil
@@ -253,7 +253,7 @@ func (s *CIScheduler) IngestEvent(ctx context.Context, ev domain.Event) error {
 	return nil
 }
 
-func (s *CIScheduler) startFromTrigger(ctx context.Context, w *domain.WorkflowDefinition, triggerID, eventID string, ev *domain.Event) error {
+func (s *AutomationScheduler) startFromTrigger(ctx context.Context, w *domain.WorkflowDefinition, triggerID, eventID string, ev *domain.Event) error {
 	if s.Caps != nil {
 		for _, j := range w.Jobs {
 			for _, step := range j.Steps {
@@ -318,7 +318,7 @@ func (s *CIScheduler) startFromTrigger(ctx context.Context, w *domain.WorkflowDe
 	return err
 }
 
-func (s *CIScheduler) Validate(ctx context.Context, w *domain.WorkflowDefinition) domain.ValidationResult {
+func (s *AutomationScheduler) Validate(ctx context.Context, w *domain.WorkflowDefinition) domain.ValidationResult {
 	r := domain.ValidateSyntax(w)
 	if r.Verdict() == "INVALID" {
 		return r

@@ -21,7 +21,7 @@
 <link rel="stylesheet" href="styles/acp.css">
 <link rel="stylesheet" href="styles/settings.css">
 <link rel="stylesheet" href="styles/learning.css">
-<link rel="stylesheet" href="styles/ci.css">
+<link rel="stylesheet" href="styles/automation.css">
 <link rel="stylesheet" href="styles/logs.css">
 <link rel="stylesheet" href="styles/telemetry.css">
 <link rel="stylesheet" href="styles/modals.css">
@@ -79,9 +79,9 @@
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M12 3L21 8L12 13L3 8L12 3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M7 11V16C7 16 9 18 12 18C15 18 17 16 17 16V11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 8V13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           <span class="nav-label">Learning</span>
         </button>
-        <button class="nav-item" type="button" data-view="ci" data-nav title="CI">
+        <button class="nav-item" type="button" data-view="automation" data-nav title="Automation">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M12 5V3M12 21v-2M5 12H3M21 12h-2M7.05 7.05 5.64 5.64M18.36 18.36l-1.41-1.41M7.05 16.95l-1.41 1.41M18.36 5.64l-1.41 1.41" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          <span class="nav-label">CI</span>
+          <span class="nav-label">Automation</span>
         </button>
         <button class="nav-item" type="button" data-view="plugins" data-nav title="Plugins">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>
@@ -215,7 +215,7 @@
                   <button class="agent-starter" type="button" data-starter-prompt="Help me research a topic. I'll ask the question, and you gather sources before answering.">Research a topic</button>
                   <button class="agent-starter" type="button" data-starter-prompt="Help me draft or improve some writing. I'll paste the text or describe what I need next.">Write &amp; edit</button>
                   <button class="agent-starter" type="button" data-starter-prompt="Look around my workspace and help me organize, summarize, or clean up the files there.">Tidy my files</button>
-                  <button class="agent-starter" type="button" data-starter-prompt="I'll describe a task I repeat often — help me script it or schedule it as a CI workflow.">Automate a task</button>
+                  <button class="agent-starter" type="button" data-starter-prompt="I'll describe a task I repeat often — help me script it or schedule it as an Automation workflow.">Automate a task</button>
                 </div>
                 <p class="agent-empty-hint">Ctrl+K search rooms · Ctrl+N new · Ctrl+Enter send</p>
               </div>
@@ -497,53 +497,53 @@
         </div>
       </section>
 
-      <!-- ===== CI ===== -->
-      <section class="view ci-view" data-view="ci">
-        <div class="view-header ci-header">
+      <!-- ===== Automation ===== -->
+      <section class="view automation-view" data-view="automation">
+        <div class="view-header automation-header">
           <div>
-            <div class="view-kicker"><span class="view-kicker-dot"></span>CI</div>
+            <div class="view-kicker"><span class="view-kicker-dot"></span>Automation</div>
             <h1>Pipelines &amp; schedules</h1>
-            <p>Run durable once/every/when CI workflows and inspect waiting or blocked runs.</p>
+            <p>Run durable once/every/when Automation workflows and inspect waiting or blocked runs.</p>
           </div>
-          <div class="ci-header-stats">
-            <span class="ci-stat" id="ci-stat-runnable">0 runnable</span>
-            <span class="ci-stat" id="ci-stat-blocked">0 blocked</span>
-            <span class="ci-stat" id="ci-stat-waiting">0 waiting</span>
+          <div class="automation-header-stats">
+            <span class="automation-stat" id="automation-stat-runnable">0 runnable</span>
+            <span class="automation-stat" id="automation-stat-blocked">0 blocked</span>
+            <span class="automation-stat" id="automation-stat-waiting">0 waiting</span>
           </div>
         </div>
-        <div class="view-body ci-body">
-          <div class="ci-toolbar">
-            <div class="tabs" id="ci-tabs" role="tablist" aria-label="CI sections">
-              <button class="tab active" type="button" id="ci-tab-workflows" data-auto-tab="workflows" role="tab" aria-selected="true">Workflows</button>
-              <button class="tab" type="button" id="ci-tab-runs" data-auto-tab="runs" role="tab" aria-selected="false">Runs</button>
-              <button class="tab" type="button" id="ci-tab-schedules" data-auto-tab="schedules" role="tab" aria-selected="false">Schedules</button>
-              <button class="tab" type="button" id="ci-tab-events" data-auto-tab="events" role="tab" aria-selected="false">Events</button>
+        <div class="view-body automation-body">
+          <div class="automation-toolbar">
+            <div class="tabs" id="automation-tabs" role="tablist" aria-label="Automation sections">
+              <button class="tab active" type="button" id="automation-tab-workflows" data-auto-tab="workflows" role="tab" aria-selected="true">Workflows</button>
+              <button class="tab" type="button" id="automation-tab-runs" data-auto-tab="runs" role="tab" aria-selected="false">Runs</button>
+              <button class="tab" type="button" id="automation-tab-schedules" data-auto-tab="schedules" role="tab" aria-selected="false">Schedules</button>
+              <button class="tab" type="button" id="automation-tab-events" data-auto-tab="events" role="tab" aria-selected="false">Events</button>
             </div>
-            <div class="ci-toolbar-actions">
-              <button class="mini-btn" id="ci-new-btn" type="button">New workflow</button>
+            <div class="automation-toolbar-actions">
+              <button class="mini-btn" id="automation-new-btn" type="button">New workflow</button>
             </div>
           </div>
-          <div class="ci-blocked" id="ci-blocked-banner" hidden>
-            <span id="ci-blocked-text">A capability provider is disabled.</span>
-            <button class="mini-btn" id="ci-enable-provider-btn" type="button">Enable provider</button>
+          <div class="automation-blocked" id="automation-blocked-banner" hidden>
+            <span id="automation-blocked-text">A capability provider is disabled.</span>
+            <button class="mini-btn" id="automation-enable-provider-btn" type="button">Enable provider</button>
           </div>
-          <div class="ci-workspace">
-            <div class="ci-list-pane">
-              <div class="ci-pane-head">
-                <h2 id="ci-list-title">Workflows</h2>
-                <span id="ci-list-count">0</span>
+          <div class="automation-workspace">
+            <div class="automation-list-pane">
+              <div class="automation-pane-head">
+                <h2 id="automation-list-title">Workflows</h2>
+                <span id="automation-list-count">0</span>
               </div>
-              <div class="ci-list" id="ci-list"></div>
+              <div class="automation-list" id="automation-list"></div>
             </div>
-            <div class="ci-detail-pane">
-              <div class="ci-pane-head">
-                <h2 id="ci-detail-title">Detail</h2>
-                <div class="ci-detail-actions" id="ci-detail-actions"></div>
+            <div class="automation-detail-pane">
+              <div class="automation-pane-head">
+                <h2 id="automation-detail-title">Detail</h2>
+                <div class="automation-detail-actions" id="automation-detail-actions"></div>
               </div>
-              <div class="ci-detail" id="ci-detail">
-                <div class="ci-empty">
+              <div class="automation-detail" id="automation-detail">
+                <div class="automation-empty">
                   <strong>No selection</strong>
-                  <span>Pick a workflow or run, or create a once/every/when CI workflow.</span>
+                  <span>Pick a workflow or run, or create a once/every/when Automation workflow.</span>
                 </div>
               </div>
             </div>

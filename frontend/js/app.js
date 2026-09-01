@@ -11,7 +11,7 @@ import { initAcpProviders, refreshAcpProviders } from './views/providers-acp.js'
 import { initLogs, refresh as refreshLogs } from './views/logs.js';
 import { initSettings, refresh as refreshSettings } from './views/settings.js';
 import { initLearning, refresh as refreshLearning } from './views/learning.js';
-import { initCI, refresh as refreshCI } from './views/ci.js';
+import { initAutomation, refresh as refreshAutomation } from './views/automation.js';
 import { initTelemetry, refresh as refreshTelemetry } from './views/telemetry.js';
 import { toast, dismissOpenDialogs } from './ui.js';
 import { bindShellShortcuts } from './shell-shortcuts.js';
@@ -34,7 +34,7 @@ const viewRefresh = {
   logs: refreshLogs,
   settings: refreshSettings,
   learning: refreshLearning,
-  automation: refreshCI,
+  automation: refreshAutomation,
   telemetry: refreshTelemetry,
 };
 
@@ -205,7 +205,7 @@ async function boot() {
     initLogs(),
     initSettings(),
     initLearning(),
-    initCI(),
+    initAutomation(),
     initTelemetry(),
   ]);
   // never swallow init failures silently: a dead view is a bug, not a state

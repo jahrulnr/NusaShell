@@ -117,15 +117,13 @@ test('built-in tool cards use the contract boundary for shared dressing and per-
   assert.match(tools, /\.agent-tool-card\[data-tool="exec"\] \{/, 'exec has an isolated contract accent');
   assert.match(tools, /\.agent-tool-card\[data-tool="todo"\] \{/, 'todo has an isolated contract accent');
   const builtinRoster = [
-    'ask_question', 'ci_create', 'ci_disable', 'ci_enable',
-    'ci_list', 'ci_read', 'ci_status', 'ci_validate',
-    'ci_cancel', 'ci_logs', 'ci_run', 'ci_run_status', 'ci_steer', 'ci_wait',
+    'ask_question', 'automation', 'automation_schedule',
     'contract_read', 'delegate', 'docs', 'exec', 'file_copy', 'file_delete',
     'file_info', 'file_list', 'file_mkdir', 'file_move', 'file_patch', 'file_read',
     'file_write', 'find_file', 'generate_media', 'grep', 'mcp_call', 'mcp_disable',
     'mcp_enable', 'mcp_install', 'mcp_list', 'mcp_register', 'mcp_search',
     'mcp_server_add', 'mcp_unregister', 'memory', 'memory_project', 'read_media',
-    'schedule_every', 'schedule_once', 'show', 'skill', 'sleep', 'subagent',
+    'show', 'skill', 'sleep', 'subagent',
     'subagent_steer', 'subagent_stop', 'subagent_wait', 'todo', 'tool_list',
     'tool_schema', 'wait_until', 'web_answer', 'web_fetch', 'web_search',
   ];

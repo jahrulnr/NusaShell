@@ -67,9 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path also persists once instead of twice.
 
 - **Built-in tools deduplicated into dispatcher families.** `skill`,
-  `memory`, `docs`, and `ci_pipeline` are now one advertised tool per family
-  with a required `op` field (e.g. `memory` + `op=save`), replacing 15
-  provider-facing schemas with 4 and cutting prompt cost on every request.
+  `memory`, `docs`, `memory_project`, `automation`, and
+  `automation_schedule` are each one advertised tool per family with a
+  required `op` field (e.g. `memory` + `op=save`), cutting provider-facing
+  schema count and prompt cost on every request.
   Single naming layer everywhere: a call is stored exactly as emitted
   (`{name:"memory", args:{op:"save",…}}`), and history, learning
   classification, hydration, review agents, and UI rendering all use the
@@ -78,8 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fails loud; pre-migration conversations keep their stored strings, but
   replaying those specific calls errors loudly by design. Unknown or missing
   `op` fails loud with the valid list. Hot-path (`exec`, `file_*`, `web_*`,
-  `mcp_call`), process-control (`ci_run/wait/cancel/steer`,
-  automation/schedule), invariant-enforcing writers
+  `mcp_call`), process-control (`automation(op=...)` and
+  `automation_schedule(op=once|every)`), invariant-enforcing writers
   (`artifact_create/update` — frontend card contract), and privileged MCP
   gates stay typed by design.
   See `docs/design/tool-dispatchers.md`.
@@ -152,6 +153,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `agent-render.test.mjs`, `learning.test.mjs`), the RPC golden DTO, and the
   `scan-ui-docs` comment now use the single-layer root+op form
   (`name:"memory", args:{op:"search"}`) matching what production persists.
+
+- **Automation naming is now consistent across the stack.** The former
+  `ci_*`/`ci.*` surface is now `automation(op=...)` plus
+  `automation_schedule(op=once|every)`, with matching Go packages, RPC/event
+  names, UI assets, documentation, and storage under `data/automation/`.
+  This is a deliberate breaking change: old tool names are not aliases and
+  existing `data/ci/` files are left untouched rather than migrated
+  implicitly.
 
 ### Removed
 

@@ -85,9 +85,9 @@ func TestRetiredPerOpNamesAreUnknownTools(t *testing.T) {
 }
 
 // Every advertised family root+op must reach a real handler through
-// Toolbox.Execute. Regression guard for ci_pipeline ops that were
+// Toolbox.Execute. Regression guard for automation pipeline ops that were
 // advertised but unreachable: executeFamily had no case for them, so every
-// call died with `unknown ci_pipeline_list op "list"` while the roster kept
+// call died with `unknown automation pipeline_list op "list"` while the roster kept
 // offering the tool (found by live probe 2026-08-23).
 //
 // The assertion is routing-only: any error is acceptable as long as it is
@@ -127,6 +127,12 @@ func TestAllAdvertisedFamilyOpsRoute(t *testing.T) {
 		{"memory_project", `{"op":"skip","reason":"nothing durable"}`},
 		{"memory_project", `{"op":"archive","id":"BUG-x"}`},
 		{"memory_project", `{"op":"lint"}`},
+		{"automation", `{"op":"run","workflow_id":"w"}`},
+		{"automation", `{"op":"status","run_id":"r"}`},
+		{"automation", `{"op":"list"}`},
+		{"automation", `{"op":"delete","workflow_id":"w"}`},
+		{"automation_schedule", `{"op":"once","at":"2026-09-02T09:00:00Z","yaml":"name: x"}`},
+		{"automation_schedule", `{"op":"every","interval":"1h","yaml":"name: x"}`},
 	}
 	for _, tc := range cases {
 		if _, err := tb.Execute(context.Background(), tc.name, []byte(tc.args)); err != nil && strings.Contains(err.Error(), "unknown") {
@@ -135,7 +141,7 @@ func TestAllAdvertisedFamilyOpsRoute(t *testing.T) {
 	}
 
 	// Retired per-op names stay unknown at the boundary — no alias door.
-	for _, name := range []string{"ci_pipeline_list", "ci_pipeline_read", "memory_replace", "skill_save", "docs_read"} {
+	for _, name := range []string{"ci_pipeline_list", "ci_pipeline_read", "ci_run", "ci_list", "automation_run", "automation_schedule_once", "memory_replace", "skill_save", "docs_read"} {
 		if _, err := tb.Execute(context.Background(), name, []byte(`{}`)); err == nil || !strings.Contains(err.Error(), "unknown tool") {
 			t.Fatalf("retired name %q must fail as unknown tool, got: %v", name, err)
 		}

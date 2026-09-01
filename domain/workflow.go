@@ -3,7 +3,7 @@ package domain
 import "time"
 
 // WorkflowDefinition is the canonical automation/pipeline document.
-// PipelineDefinition is a compatibility alias used by CI-oriented APIs.
+// PipelineDefinition is a compatibility alias used by Automation-oriented APIs.
 type WorkflowDefinition struct {
 	ID          string
 	Name        string
@@ -22,7 +22,7 @@ type WorkflowDefinition struct {
 	UpdatedAt   time.Time
 }
 
-// PipelineDefinition is the CI-facing name for a workflow.
+// PipelineDefinition is the Automation-facing name for a workflow.
 type PipelineDefinition = WorkflowDefinition
 
 // WorkflowSource records where a definition came from.
@@ -186,7 +186,7 @@ func (w *WorkflowDefinition) ReferencedCapabilities() []string {
 		out = append(out, name)
 	}
 	// Only `uses:` steps reference capabilities. Trigger events are event
-	// types (e.g. "telegram.message", "ci.run.completed"), not capabilities
+	// types (e.g. "telegram.message", "automation.run.completed"), not capabilities
 	// a plugin provides — including them here makes validation fail with
 	// unknown_capability for valid when-triggers.
 	for _, j := range w.Jobs {

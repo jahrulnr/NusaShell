@@ -59,8 +59,10 @@ func buildToolContract(def ToolDef) contracts.ToolContractDTO {
 
 func toolContractVariants(name string) []string {
 	switch name {
-	case "skill", "memory", "docs", "memory_project":
+	case "skill", "memory", "docs", "memory_project", "automation":
 		return []string{"collection", "document", "status"}
+	case "automation_schedule":
+		return []string{"status"}
 	default:
 		return []string{toolpresentation.ToolPresentationVariant(name, "")}
 	}
@@ -68,8 +70,10 @@ func toolContractVariants(name string) []string {
 
 func toolContractFormats(name string) []string {
 	switch name {
-	case "skill", "memory", "docs", "memory_project":
+	case "skill", "memory", "docs", "memory_project", "automation":
 		return []string{"list", "document", "status"}
+	case "automation_schedule":
+		return []string{"status"}
 	default:
 		return []string{toolpresentation.ToolPresentationFormat(name, "")}
 	}

@@ -9,11 +9,11 @@ func TestReadAcceptsMdSuffixAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	canonical, err := s.Read("ci")
+	canonical, err := s.Read("automation")
 	if err != nil {
 		t.Fatalf("canonical read failed: %v", err)
 	}
-	aliased, err := s.Read("ci.md")
+	aliased, err := s.Read("automation.md")
 	if err != nil {
 		t.Fatalf("aliased read failed: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestReadTrimsWhitespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Read("  ci  "); err != nil {
+	if _, err := s.Read("  automation  "); err != nil {
 		t.Fatalf("whitespace-trimmed read failed: %v", err)
 	}
 }

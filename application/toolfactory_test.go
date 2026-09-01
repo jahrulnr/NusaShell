@@ -24,7 +24,7 @@ func factoryStubTools() []ToolInfo {
 		{Name: "skill"},
 		{Name: "subagent"},
 		{Name: "delegate"},
-		{Name: "ci_run"},
+		{Name: "automation"},
 	}
 }
 
@@ -51,7 +51,7 @@ func TestToolFactoryConversationAgent(t *testing.T) {
 		Dispatchers: FilterDispatcherToolInfos,
 	}
 	defs := f.Get(AgentConversation, "/ws")
-	for _, want := range []string{"file_read", "exec", "subagent", "ci_run", "memory", "skill", "docs", "memory_project"} {
+	for _, want := range []string{"file_read", "exec", "subagent", "automation", "memory", "skill", "docs", "memory_project"} {
 		if !hasTool(defs, want) {
 			t.Fatalf("conversation agent missing %q in %v", want, namesOf(defs))
 		}
@@ -94,12 +94,12 @@ func TestToolFactoryAutomationAgentOmitsACPTools(t *testing.T) {
 		Toolbox:     func() []ToolInfo { return factoryStubTools() },
 		Dispatchers: FilterDispatcherToolInfos,
 	}
-	defs := f.Get(AgentCI, "/ws")
+	defs := f.Get(AgentAutomation, "/ws")
 	if hasTool(defs, "subagent") {
 		t.Fatalf("automation agent must not see subagent, got %v", namesOf(defs))
 	}
-	if !hasTool(defs, "ci_run") || !hasTool(defs, "exec") {
-		t.Fatalf("automation agent must keep ci/exec tools, got %v", namesOf(defs))
+	if !hasTool(defs, "automation") || !hasTool(defs, "exec") {
+		t.Fatalf("automation agent must keep automation/exec tools, got %v", namesOf(defs))
 	}
 }
 
@@ -119,7 +119,7 @@ func TestToolFactoryReviewAgentWhitelistedWithLocalTools(t *testing.T) {
 			t.Fatalf("review agent missing whitelisted %q in %v", want, namesOf(defs))
 		}
 	}
-	for _, banned := range []string{"exec", "file_write", "subagent", "ci_run", "memory_project", "docs"} {
+	for _, banned := range []string{"exec", "file_write", "subagent", "automation", "memory_project", "docs"} {
 		if hasTool(defs, banned) {
 			t.Fatalf("review agent must not see %q, got %v", banned, namesOf(defs))
 		}
@@ -148,7 +148,7 @@ func TestToolFactoryDelegateAgentOmitsACPToolsAndDelegate(t *testing.T) {
 	if hasTool(defs, "subagent") {
 		t.Fatalf("delegate agent must not see ACP tools, got %v", namesOf(defs))
 	}
-	for _, want := range []string{"exec", "file_read", "ci_run", "memory"} {
+	for _, want := range []string{"exec", "file_read", "automation", "memory"} {
 		if !hasTool(defs, want) {
 			t.Fatalf("delegate agent missing %q in %v", want, namesOf(defs))
 		}

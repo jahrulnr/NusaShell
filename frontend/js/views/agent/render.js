@@ -35,7 +35,7 @@ export const STARTER_PROMPTS = [
   },
   {
     label: 'Automate a task',
-    prompt: 'I\'ll describe a task I repeat often — help me script it or schedule it as a CI workflow.',
+    prompt: 'I\'ll describe a task I repeat often — help me script it or schedule it as an automation workflow.',
   },
 ];
 
@@ -1499,7 +1499,7 @@ export function renderToolJob(toolCall) {
 // with the primary argument as a single legible path line. The result is
 // visible without any extra toggle — one folded "show request and raw
 // output" details stays at the bottom for debugging, mirroring production
-// tools (IDE call inspectors, CI logs) that never surface raw payloads by
+// tools (IDE call inspectors, automation logs) that never surface raw payloads by
 // default. exec and MCP calls use the same event with a terminal output
 // panel (live-streamed for exec, raw passthrough for MCP).
 

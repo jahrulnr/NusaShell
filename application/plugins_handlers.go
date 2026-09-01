@@ -318,9 +318,9 @@ func (a *App) handlePluginDelete(req contracts.PluginIDRequest) (any, *contracts
 	if err := a.Plugins.Delete(req.ID); err != nil {
 		return nil, rpcInternal(err)
 	}
-	if a.CI != nil && a.CI.Caps != nil {
-		deps, _ := a.CI.Caps.Dependents(context.Background(), req.ID)
-		_ = a.CI.Caps.SetDisabled(context.Background(), req.ID, true)
+	if a.Automation != nil && a.Automation.Caps != nil {
+		deps, _ := a.Automation.Caps.Dependents(context.Background(), req.ID)
+		_ = a.Automation.Caps.SetDisabled(context.Background(), req.ID, true)
 		if len(deps) > 0 {
 			a.log("info", "plugin", "plugin %s had %d dependent automation(s); they are now blocked", req.ID, len(deps))
 		}

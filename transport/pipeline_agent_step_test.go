@@ -155,7 +155,7 @@ func TestPipelineAgentStepRendersEventPlaceholders(t *testing.T) {
 		},
 	}
 	// Apply the same rendering the production scheduler would do, so this
-	// test exercises the contract used by ci_scheduler.go.
+	// test exercises the contract used by automation scheduler.go.
 	rendered := domain.RenderAgentPrompt("balas chat ${event.chat_id}: ${event.text}", ev)
 	if !strings.Contains(rendered, "balas chat 9999: halo bos") {
 		t.Fatalf("RenderAgentPrompt: got %q, want substring %q", rendered, "balas chat 9999: halo bos")

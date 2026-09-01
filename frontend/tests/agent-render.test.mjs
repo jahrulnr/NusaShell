@@ -402,9 +402,9 @@ test('built-in tool events isolate dressing classes so file_read does not share 
     assert.ok(read.querySelector('.agent-tool-file-read-result'));
     assert.ok(grep.querySelector('.agent-tool-grep-result'));
 
-    const predictable = renderToolJob({ name: 'ci_list', args: {}, status: 'ok', output: 'No CI workflows.' });
-    assert.ok(predictable.querySelector('.agent-tool-ci-list-request'));
-    assert.ok(predictable.querySelector('.agent-tool-ci-list-result'));
+    const predictable = renderToolJob({ name: 'automation', args: { op: 'list' }, status: 'ok', output: 'No automations.' });
+    assert.ok(predictable.querySelector('.agent-tool-automation-request'));
+    assert.ok(predictable.querySelector('.agent-tool-automation-result'));
 
     const ask = renderToolCallCard({
       name: 'ask_question',

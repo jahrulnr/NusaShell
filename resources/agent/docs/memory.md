@@ -195,7 +195,7 @@ after a successful review that had no coalesced activity.
 
 Good examples:
 
-    memory(op="replace", target="primary", old_text="old CI config notes", content="CI uses GitHub Actions + GitLab Runner")
+    memory(op="replace", target="primary", old_text="old automation notes", content="Automation uses a local runner")
     memory(op="replace", target="primary", content="Full rewrite of the primary document body…")
 
 ## What not to save

@@ -4,7 +4,7 @@ import { test } from 'node:test';
 
 const skillsCSS = await readFile(new URL('../styles/skills.css', import.meta.url), 'utf8');
 const telemetryCSS = await readFile(new URL('../styles/telemetry.css', import.meta.url), 'utf8');
-const ciCSS = await readFile(new URL('../styles/ci.css', import.meta.url), 'utf8');
+const automationCSS = await readFile(new URL('../styles/automation.css', import.meta.url), 'utf8');
 const drawerCSS = await readFile(new URL('../styles/drawer.css', import.meta.url), 'utf8');
 const providersCSS = await readFile(new URL('../styles/providers.css', import.meta.url), 'utf8');
 const settingsCSS = await readFile(new URL('../styles/settings.css', import.meta.url), 'utf8');
@@ -27,7 +27,7 @@ test('Telemetry mobile cards and canvases can shrink to the single-column grid',
 });
 
 test('Automation mobile header and tab controls stay inside the viewport', () => {
-  const mobileRules = ciCSS.slice(ciCSS.indexOf('@media (max-width: 680px)'));
+  const mobileRules = automationCSS.slice(automationCSS.indexOf('@media (max-width: 680px)'));
   assert.match(mobileRules, /flex-direction:\s*column/);
   assert.match(mobileRules, /flex-wrap:\s*wrap/);
   assert.match(mobileRules, /max-width:\s*100%/);

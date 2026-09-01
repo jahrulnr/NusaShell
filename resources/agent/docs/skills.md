@@ -77,7 +77,7 @@ Good example:
 
     skill(op="search", query="release checklist")
     # → {"name":"release-checklist","owned_by":"user", ...}
-    file_read(file_path="/home/user/.config/nusashell/skills/release-checklist/SKILL.md")
+    file_read(path="/home/user/.config/nusashell/skills/release-checklist/SKILL.md")
 
 Bad examples:
 
@@ -100,3 +100,18 @@ Bad examples:
     skill(op="save", name="bug-2026-08-19", description="fix", content="the debug session…")
 
     skill(op="save", name="my-api-key-notes", description="credentials", content="sk-…")  # secrets
+
+## Builtin automation-authoring skill
+
+`automation-authoring` is the builtin cookbook for YAML workflows. Use it for
+pipeline, Telegram trigger, alarm, reminder, and schedule requests. Its
+support files are seeded with the skill and can be read progressively:
+
+    skill(op="search", query="automation authoring")
+    file_list(path="<datadir>/skills/automation-authoring/templates")
+    file_read(path="<datadir>/skills/automation-authoring/templates/alarm-once.yaml")
+
+The `templates/` folder contains concrete starting points; `references/`
+contains the YAML contract, supported event variables, and MCP discovery
+flow. Adapt a template, call `automation(op="validate")`, then save it with
+`automation(op="create", enabled=false)` until the user confirms activation.

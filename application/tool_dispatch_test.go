@@ -19,6 +19,10 @@ func TestDispatchOpRoutesOps(t *testing.T) {
 		{"docs", `{"op":"search","query":"mcp"}`, "search"},
 		{"memory_project", `{"op":"query","kind":"index"}`, "query"},
 		{"memory_project", `{"op":"skip","reason":"nothing durable"}`, "skip"},
+		{"automation", `{"op":"run","workflow_id":"nightly"}`, "run"},
+		{"automation", `{"op":"STATUS","run_id":"run_1"}`, "status"},
+		{"automation", `{"op":"delete","workflow_id":"nightly"}`, "delete"},
+		{"automation_schedule", `{"op":"every","cron":"0 9 * * 1-5"}`, "every"},
 	}
 	for _, tc := range cases {
 		got, err := DispatchOp(tc.root, []byte(tc.args))
@@ -47,7 +51,7 @@ func TestDispatchOpRejectsBadOp(t *testing.T) {
 }
 
 func TestIsDispatchRoot(t *testing.T) {
-	for _, root := range []string{"skill", "memory", "docs", "memory_project"} {
+	for _, root := range []string{"skill", "memory", "docs", "memory_project", "automation", "automation_schedule"} {
 		if !IsDispatchRoot(root) {
 			t.Fatalf("%q should be a dispatch root", root)
 		}
@@ -61,8 +65,8 @@ func TestIsDispatchRoot(t *testing.T) {
 
 func TestDispatcherToolInfosSchemaRequiresOp(t *testing.T) {
 	got := DispatcherToolInfos()
-	if len(got) != 4 {
-		t.Fatalf("family defs = %d, want 4", len(got))
+	if len(got) != 6 {
+		t.Fatalf("family defs = %d, want 6", len(got))
 	}
 	for _, def := range got {
 		req, ok := def.InputSchema["required"].([]string)
@@ -125,7 +129,50 @@ func TestFilterDispatcherToolInfosHidesProjectMemoryWithoutWorkspace(t *testing.
 	if !found {
 		t.Fatal("memory_project must be advertised when a workspace is set")
 	}
-	if len(shown) != 4 {
-		t.Fatalf("with workspace, family defs = %d, want 4", len(shown))
+	if len(shown) != 6 {
+		t.Fatalf("with workspace, family defs = %d, want 6", len(shown))
 	}
+}
+
+func TestAutomationDispatcherOpsAreExplicit(t *testing.T) {
+	want := []string{"run", "wait", "status", "logs", "cancel", "steer", "list", "read", "validate", "create", "enable", "disable", "delete"}
+	for _, op := range want {
+		if _, err := DispatchOp("automation", []byte(`{"op":"`+op+`"}`)); err != nil {
+			t.Fatalf("automation op %q rejected: %v", op, err)
+		}
+	}
+	for _, op := range []string{"once", "every"} {
+		if _, err := DispatchOp("automation_schedule", []byte(`{"op":"`+op+`"}`)); err != nil {
+			t.Fatalf("automation_schedule op %q rejected: %v", op, err)
+		}
+	}
+	if _, err := DispatchOp("automation", []byte(`{"op":"once"}`)); err == nil {
+		t.Fatal("schedule operation must not leak into automation dispatcher")
+	}
+
+	var automation ToolInfo
+	for _, info := range DispatcherToolInfos() {
+		if info.Name == "automation" {
+			automation = info
+			break
+		}
+	}
+	properties, ok := automation.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("automation schema must expose properties")
+	}
+	opSchema, ok := properties["op"].(map[string]any)
+	if !ok {
+		t.Fatal("automation schema must expose the op property")
+	}
+	values, ok := opSchema["enum"].([]any)
+	if !ok {
+		t.Fatal("automation op schema must expose an enum")
+	}
+	for _, value := range values {
+		if value == "delete" {
+			return
+		}
+	}
+	t.Fatal("automation op schema must advertise delete")
 }

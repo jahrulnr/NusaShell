@@ -1,11 +1,11 @@
 # NusaShell Automation Engine — Scheduling, Events, and Dynamic Workflows
 
-Status: Implemented as an extension of the CI runner
+Status: Implemented as the trigger layer above the Automation Runner
 Target: NusaShell / `jahrulnr/NusaShell`
 
 ## 1. Split of responsibilities
 
-The CI runner answers “how do we execute jobs after a trigger?” The Automation Engine answers “what starts a workflow, when, and under which conditions?”
+The Automation Runner answers “how do we execute jobs after a trigger?” The Automation Engine answers “what starts a workflow, when, and under which conditions?”
 
 ```text
 once / every / when / manual
@@ -34,8 +34,8 @@ A `wait_until` step stores a wait record and sets run status `waiting`. The exec
 
 ## 4. Persistence
 
-All automation state is in `{dataDir}/automation.db` (SQLite). Definitions are not stored in conversation JSON.
+All automation state is in `{dataDir}/automation/workflows.db` (SQLite). Definitions are not stored in conversation JSON.
 
 ## 5. Agent tools
 
-`automation_*`, `schedule_once`, `schedule_every`, `wait_until`, plus the `ci_*` execution tools. Creating a schedule through a tool persists it; the process ticker (`FireDue` every 15s) is the only clock.
+`automation` (`op=run|wait|status|logs|cancel|steer|list|read|validate|create|enable|disable|delete`), `automation_schedule` (`op=once|every`), and `wait_until`. Creating a schedule through a dispatcher persists it; the process ticker (`FireDue` every 15s) is the only clock.
