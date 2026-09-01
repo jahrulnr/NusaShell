@@ -223,7 +223,7 @@ func (a *App) describeAudiosWithFallback(ctx context.Context, settings domain.Se
 	if settings.AudioProviderID == "" || settings.AudioModelID == "" {
 		return attachments
 	}
-	audioIdxs := undescribedMediaIndexes(attachments, "audio", mediaDescPrefixAudio)
+	audioIdxs := domain.UndescribedMediaIndexes(attachments, "audio", mediaDescPrefixAudio)
 	if len(audioIdxs) == 0 {
 		return attachments
 	}
@@ -278,7 +278,7 @@ func (a *App) enrichWithAudioDescriptions(ctx context.Context, conversation *dom
 		return conversation
 	}
 	userMsg := &conversation.Messages[userMsgIdx]
-	pending := undescribedMediaIndexes(userMsg.Attachments, "audio", mediaDescPrefixAudio)
+	pending := domain.UndescribedMediaIndexes(userMsg.Attachments, "audio", mediaDescPrefixAudio)
 	if len(pending) == 0 {
 		return conversation
 	}
@@ -316,9 +316,3 @@ const (
 	mediaDescPrefixAudio  = domain.MediaDescPrefixAudio
 	mediaDescPrefixVideo  = domain.MediaDescPrefixVideo
 )
-
-// undescribedMediaIndexes returns attachments of mediaType that do not yet
-// have a matching prefix+name text description (e.g. vision:cat.png).
-func undescribedMediaIndexes(atts []domain.Attachment, mediaType, prefix string) []int {
-	return domain.UndescribedMediaIndexes(atts, mediaType, prefix)
-}

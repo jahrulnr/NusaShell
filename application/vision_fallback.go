@@ -31,7 +31,7 @@ func (a *App) describeImagesWithFallback(ctx context.Context, settings domain.Se
 	if settings.VisionProviderID == "" || settings.VisionModelID == "" {
 		return attachments
 	}
-	imageIdxs := undescribedMediaIndexes(attachments, "image", mediaDescPrefixVision)
+	imageIdxs := domain.UndescribedMediaIndexes(attachments, "image", mediaDescPrefixVision)
 	if len(imageIdxs) == 0 {
 		return attachments
 	}
@@ -105,7 +105,7 @@ func (a *App) enrichWithVisionDescriptions(ctx context.Context, conversation *do
 		return conversation
 	}
 	userMsg := &conversation.Messages[userMsgIdx]
-	pending := undescribedMediaIndexes(userMsg.Attachments, "image", mediaDescPrefixVision)
+	pending := domain.UndescribedMediaIndexes(userMsg.Attachments, "image", mediaDescPrefixVision)
 	if len(pending) == 0 {
 		return conversation
 	}

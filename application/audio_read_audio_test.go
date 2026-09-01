@@ -154,14 +154,14 @@ func TestUndescribedMediaIndexes(t *testing.T) {
 		{Type: "image", Name: "b.png"},
 		{Type: "audio", Name: "c.mp3"},
 	}
-	got := undescribedMediaIndexes(atts, "image", mediaDescPrefixVision)
+	got := domain.UndescribedMediaIndexes(atts, "image", mediaDescPrefixVision)
 	if len(got) != 1 || got[0] != 2 {
 		t.Fatalf("undescribed images = %v, want [2]", got)
 	}
-	if n := undescribedMediaIndexes(atts, "audio", mediaDescPrefixAudio); len(n) != 1 || n[0] != 3 {
+	if n := domain.UndescribedMediaIndexes(atts, "audio", mediaDescPrefixAudio); len(n) != 1 || n[0] != 3 {
 		t.Fatalf("undescribed audio = %v, want [3]", n)
 	}
-	if n := undescribedMediaIndexes(nil, "image", mediaDescPrefixVision); len(n) != 0 {
+	if n := domain.UndescribedMediaIndexes(nil, "image", mediaDescPrefixVision); len(n) != 0 {
 		t.Fatalf("empty attachments = %v, want []", n)
 	}
 }

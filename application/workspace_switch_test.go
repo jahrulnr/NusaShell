@@ -187,7 +187,7 @@ func TestAddTurnMessagesInjectsWorkspaceSwitchNotice(t *testing.T) {
 		t.Fatalf("user content = %q", saved.Messages[userIdx].Content)
 	}
 	notice := saved.Messages[userIdx+1]
-	if isHydrationMessage(notice) {
+	if domain.IsHydrationMessage(notice) {
 		t.Fatal("workspace-switch notice must be visible (not a hidden hydration checkpoint)")
 	}
 	if notice.Role != domain.RoleAssistant {

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"nusashell/domain"
 )
 
 func TestProviderRetryDelayHonorsRetryAfter(t *testing.T) {
@@ -199,8 +201,8 @@ func TestIsPermanentProviderFailure(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isPermanentProviderFailure(tt.status, tt.body); got != tt.want {
-				t.Fatalf("isPermanentProviderFailure(%d, %q) = %t, want %t", tt.status, tt.body, got, tt.want)
+			if got := domain.IsPermanentProviderFailure(tt.status, tt.body); got != tt.want {
+				t.Fatalf("domain.IsPermanentProviderFailure(%d, %q) = %t, want %t", tt.status, tt.body, got, tt.want)
 			}
 		})
 	}

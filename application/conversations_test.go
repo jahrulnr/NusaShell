@@ -381,7 +381,7 @@ func TestHandleConversationsPickWorkspaceEmptyRoomDoesNotInsertHydration(t *test
 	}
 	saved := convStore.convs["conv_1"]
 	for _, m := range saved.Messages {
-		if isHydrationMessage(m) {
+		if domain.IsHydrationMessage(m) {
 			t.Fatalf("empty room persisted hydration before any user: %+v", m)
 		}
 	}

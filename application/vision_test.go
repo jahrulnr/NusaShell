@@ -8,7 +8,7 @@ import (
 )
 
 func containsImageOmissionNote(content string) bool {
-	return containsOmissionNote(content, "image")
+	return domain.ContainsOmissionNote(content, "image")
 }
 
 func TestChatMessagesStripsImagesForNonVisionModel(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"nusashell/application/service/toolpresentation"
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/pkg/nonce"
@@ -115,7 +116,7 @@ func (a *App) completeDelegateRunLocked(conversationID, runID, toolCallID string
 		return err
 	}
 	conv := repo.Conversation()
-	toolArgs := toolCallArgsFromConversation(conv, toolCallID)
+	toolArgs := toolpresentation.ToolCallArgsFromConversation(conv, toolCallID)
 	brief := domain.DelegateBriefResult(runID, status == domain.ToolOK)
 	if toolCallID != "" {
 		conv = a.updateToolResult(conv, "", toolCallID, status, brief, nil)
@@ -139,9 +140,9 @@ func (a *App) completeDelegateRunLocked(conversationID, runID, toolCallID string
 			ToolCallID:     toolCallID,
 			Name:           domain.DelegateToolName,
 			Status:         string(status),
-			Args:           toolArgsRaw(toolArgs),
+			Args:           toolpresentation.ToolArgsRaw(toolArgs),
 			Output:         brief,
-			Presentation:   buildToolPresentation(domain.DelegateToolName, toolArgs, status, brief),
+			Presentation:   toolpresentation.BuildToolPresentation(domain.DelegateToolName, toolArgs, status, brief),
 		})
 	}
 	return nil

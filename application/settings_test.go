@@ -17,13 +17,13 @@ func TestResolveMaxOutputPrefersModelAdvertisedLimit(t *testing.T) {
 	}
 	settings := domain.Settings{MaxOutputTokens: 65536}
 
-	if got := resolveMaxOutput(provider, "gpt-4o", settings); got != 16384 {
+	if got := domain.ResolveMaxOutput(provider, "gpt-4o", settings); got != 16384 {
 		t.Fatalf("model with advertised limit: got %d, want 16384", got)
 	}
-	if got := resolveMaxOutput(provider, "no-limit-model", settings); got != 65536 {
+	if got := domain.ResolveMaxOutput(provider, "no-limit-model", settings); got != 65536 {
 		t.Fatalf("model without advertised limit: got %d, want 65536 (settings default)", got)
 	}
-	if got := resolveMaxOutput(provider, "unknown-model", settings); got != 65536 {
+	if got := domain.ResolveMaxOutput(provider, "unknown-model", settings); got != 65536 {
 		t.Fatalf("unknown model: got %d, want 65536 (settings default)", got)
 	}
 }
@@ -40,13 +40,13 @@ func TestResolveMaxOutputCapsAtSettings(t *testing.T) {
 	}
 	settings := domain.Settings{MaxOutputTokens: 65536}
 
-	if got := resolveMaxOutput(provider, "deepseek-v4-flash", settings); got != 65536 {
+	if got := domain.ResolveMaxOutput(provider, "deepseek-v4-flash", settings); got != 65536 {
 		t.Fatalf("model with 1M output should be capped at settings default: got %d, want 65536", got)
 	}
 
 	// When the user raises the cap, the model's limit is still respected if lower
 	settings.MaxOutputTokens = 2000000
-	if got := resolveMaxOutput(provider, "deepseek-v4-flash", settings); got != 1048576 {
+	if got := domain.ResolveMaxOutput(provider, "deepseek-v4-flash", settings); got != 1048576 {
 		t.Fatalf("model with 1M output and 2M cap: got %d, want 1048576", got)
 	}
 }

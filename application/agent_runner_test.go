@@ -64,13 +64,13 @@ func TestLastFailedAssistantIndex(t *testing.T) {
 }
 
 func TestShouldContinueFailedTurn(t *testing.T) {
-	if !shouldContinueFailedTurn(domain.Message{Content: "partial"}) {
+	if !domain.ShouldContinueFailedTurn(domain.Message{Content: "partial"}) {
 		t.Fatal("partial text without tools should continue")
 	}
-	if shouldContinueFailedTurn(domain.Message{Content: "partial", ToolCalls: []domain.ToolCall{{ID: "t1"}}}) {
+	if domain.ShouldContinueFailedTurn(domain.Message{Content: "partial", ToolCalls: []domain.ToolCall{{ID: "t1"}}}) {
 		t.Fatal("partial text with tool calls must restart from scratch")
 	}
-	if shouldContinueFailedTurn(domain.Message{}) {
+	if domain.ShouldContinueFailedTurn(domain.Message{}) {
 		t.Fatal("empty failed turn must restart from scratch")
 	}
 }
@@ -96,7 +96,7 @@ func TestHydrationCheckpointPersistsOnceUntilCompaction(t *testing.T) {
 		}
 		count := 0
 		for _, message := range saved.Messages {
-			if isHydrationMessage(message) {
+			if domain.IsHydrationMessage(message) {
 				count++
 			}
 		}
@@ -186,14 +186,14 @@ func TestChatMessagesKeepsReasoningOnlyAssistantTurns(t *testing.T) {
 func TestCompactionTriggerUsesThresholdCappedByWindow(t *testing.T) {
 	// Explicit threshold: capped at 80% of available budget (window - maxOutput).
 	settings := domain.Settings{CompactionThreshold: 40000}
-	if got := compactionTriggerTokens(1000, 0, settings); got != 800 {
+	if got := domain.CompactionTriggerTokens(1000, 0, settings); got != 800 {
 		t.Fatalf("small window: got %d, want 800 (80%% of 1000)", got)
 	}
-	if got := compactionTriggerTokens(200000, 0, settings); got != 40000 {
+	if got := domain.CompactionTriggerTokens(200000, 0, settings); got != 40000 {
 		t.Fatalf("large window: got %d, want threshold 40000", got)
 	}
 	settings.CompactionThreshold = 5000
-	if got := compactionTriggerTokens(200000, 0, settings); got != 5000 {
+	if got := domain.CompactionTriggerTokens(200000, 0, settings); got != 5000 {
 		t.Fatalf("custom threshold: got %d, want 5000", got)
 	}
 }
@@ -204,13 +204,13 @@ func TestCompactionTriggerAutoUsesWindowPercentage(t *testing.T) {
 	// token count. This is the default for new installations and after
 	// migration from the old 40k default.
 	settings := domain.Settings{CompactionThreshold: 0}
-	if got := compactionTriggerTokens(1048576, 0, settings); got != 838860 {
+	if got := domain.CompactionTriggerTokens(1048576, 0, settings); got != 838860 {
 		t.Fatalf("1M window auto: got %d, want 838860 (80%% of 1M)", got)
 	}
-	if got := compactionTriggerTokens(200000, 0, settings); got != 160000 {
+	if got := domain.CompactionTriggerTokens(200000, 0, settings); got != 160000 {
 		t.Fatalf("200k window auto: got %d, want 160000 (80%% of 200k)", got)
 	}
-	if got := compactionTriggerTokens(1000, 0, settings); got != 800 {
+	if got := domain.CompactionTriggerTokens(1000, 0, settings); got != 800 {
 		t.Fatalf("1k window auto: got %d, want 800", got)
 	}
 }
@@ -218,7 +218,7 @@ func TestCompactionTriggerAutoUsesWindowPercentage(t *testing.T) {
 func TestCompactionTriggerSubtractsMaxOutput(t *testing.T) {
 	// 256k window, 64k output → available = 196608 → trigger = 80% × 196608 = 157286
 	settings := domain.Settings{CompactionThreshold: 0}
-	if got := compactionTriggerTokens(262144, 65536, settings); got != 157286 {
+	if got := domain.CompactionTriggerTokens(262144, 65536, settings); got != 157286 {
 		t.Fatalf("with maxOutput: got %d, want 157286", got)
 	}
 }
@@ -1980,7 +1980,7 @@ func TestCompactionArchiveStripsHydration(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, m := range store.archived {
-		if isHydrationMessage(m) {
+		if domain.IsHydrationMessage(m) {
 			t.Fatal("archived chunk must not include hydration checkpoints")
 		}
 	}
@@ -1994,7 +1994,7 @@ func TestCompactionArchiveStripsHydration(t *testing.T) {
 	// archived chunks above must not carry any (checked before this).
 	checkpoints := 0
 	for _, m := range got.Messages {
-		if isHydrationMessage(m) {
+		if domain.IsHydrationMessage(m) {
 			checkpoints++
 		}
 	}

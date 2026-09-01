@@ -14,11 +14,6 @@ const MaxMemoryEntries = domain.MaxMemoryEntries
 // LifecycleConfig controls the decay and prune cycle for learning memory.
 type LifecycleConfig = domain.LifecycleConfig
 
-// DefaultLifecycleConfig returns sensible defaults for a personal shell.
-func DefaultLifecycleConfig() LifecycleConfig {
-	return domain.DefaultLifecycleConfig()
-}
-
 // LifecycleManager runs background decay and prune operations on the
 // memory store. Decay reduces a synthetic "strength" score for each entry
 // based on time since last access and access count. Prune removes entries
@@ -50,7 +45,7 @@ func (m *LifecycleManager) logf(level, format string, args ...any) {
 // NewLifecycleManager creates a manager with the given config.
 func NewLifecycleManager(memory MemoryStore, skills SkillStore, cfg LifecycleConfig) *LifecycleManager {
 	if cfg.DecayInterval == 0 {
-		cfg = DefaultLifecycleConfig()
+		cfg = domain.DefaultLifecycleConfig()
 	}
 	return &LifecycleManager{memory: memory, skills: skills, cfg: cfg}
 }

@@ -6,24 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"nusashell/application/service/toolpresentation"
 	"nusashell/contracts"
 	"nusashell/domain"
 	clock "nusashell/pkg/time"
 )
-
-// isHydrationMessage returns true when a message is a pure hydration
-// checkpoint — all tool calls have the "hydrate-" prefix and there is no
-// visible content or reasoning. These messages are hidden from the UI.
-func isHydrationMessage(m domain.Message) bool {
-	return domain.IsHydrationMessage(m)
-}
-
-// filterHydrationToolCalls strips hydration tool calls from a message that
-// has both real and hydration tool calls (mixed). Returns the message
-// unchanged if it has no hydration tool calls.
-func filterHydrationToolCalls(m domain.Message) domain.Message {
-	return domain.FilterHydrationToolCalls(m)
-}
 
 func convDTO(c *domain.Conversation) contracts.ConversationDTO {
 	return contracts.ConversationDTO{
@@ -48,10 +35,10 @@ func msgDTO(m domain.Message) contracts.MessageDTO {
 	// Filter hydration tool calls from the DTO sent to the UI.
 	// If ALL tool calls in a message are hydration calls and there is
 	// no content or reasoning, the entire message is hidden from the UI.
-	if isHydrationMessage(m) {
+	if domain.IsHydrationMessage(m) {
 		return contracts.MessageDTO{}
 	}
-	m = filterHydrationToolCalls(m)
+	m = domain.FilterHydrationToolCalls(m)
 	dto := contracts.MessageDTO{
 		ID:             m.ID,
 		Role:           string(m.Role),
@@ -103,9 +90,9 @@ func toolCallDTO(tc domain.ToolCall) contracts.ToolCallDTO {
 		Status:       string(tc.Status),
 		Output:       tc.Output,
 		Opaque:       tc.Opaque,
-		Presentation: toolPresentationDTO(tc),
+		Presentation: toolpresentation.ToolPresentationDTO(tc),
 	}
-	dto.OutputAttachments = toolAttachmentDTOs(tc.OutputAttachments)
+	dto.OutputAttachments = toolpresentation.ToolAttachmentDTOs(tc.OutputAttachments)
 	return dto
 }
 

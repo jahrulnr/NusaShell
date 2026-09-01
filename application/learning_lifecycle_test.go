@@ -8,7 +8,7 @@ import (
 )
 
 func TestComputeStrengthDecays(t *testing.T) {
-	cfg := DefaultLifecycleConfig()
+	cfg := domain.DefaultLifecycleConfig()
 	// Fresh entry (0 hours old) → full base strength.
 	fresh := &domain.MemoryEntry{Content: "test", Tags: []string{"fact"}, CreatedAt: time.Now()}
 	if s := domain.MemoryStrength(fresh, cfg); s < 0.79 || s > 0.81 {
@@ -27,7 +27,7 @@ func TestComputeStrengthDecays(t *testing.T) {
 }
 
 func TestComputeStrengthByTag(t *testing.T) {
-	cfg := DefaultLifecycleConfig()
+	cfg := domain.DefaultLifecycleConfig()
 	now := time.Now()
 	tests := []struct {
 		tags []string
@@ -54,7 +54,7 @@ func TestPruneOnceRemovesWeakEntries(t *testing.T) {
 		{ID: "old2", Content: "old pref", Tags: []string{"preference"}, CreatedAt: time.Now().Add(-700 * time.Hour)},
 		{ID: "new1", Content: "new fact", Tags: []string{"fact"}, CreatedAt: time.Now()},
 	}}
-	m := NewLifecycleManager(mem, &fakeSkillStore{}, DefaultLifecycleConfig())
+	m := NewLifecycleManager(mem, &fakeSkillStore{}, domain.DefaultLifecycleConfig())
 	m.PruneOnce()
 	remaining := mem.List()
 	if len(remaining) != 1 {
@@ -77,7 +77,7 @@ func TestPruneOnceRespectsCapacity(t *testing.T) {
 		}
 	}
 	mem := &fakeMemoryStore{entries: entries}
-	cfg := DefaultLifecycleConfig()
+	cfg := domain.DefaultLifecycleConfig()
 	cfg.MaxMemory = 5
 	m := NewLifecycleManager(mem, &fakeSkillStore{}, cfg)
 	m.PruneOnce()

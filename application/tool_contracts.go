@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"nusashell/application/service/toolpresentation"
 	"nusashell/contracts"
 )
 
@@ -42,9 +43,9 @@ func buildToolContract(def ToolDef) contracts.ToolContractDTO {
 	return contracts.ToolContractDTO{
 		Name:        def.Name,
 		Description: def.Description,
-		ID:          toolContractID(def.Name),
+		ID:          toolpresentation.ToolContractID(def.Name),
 		Version:     contracts.ToolContractVersion,
-		CSSClass:    toolContractCSSClass(def.Name),
+		CSSClass:    toolpresentation.ToolContractCSSClass(def.Name),
 		InputSchema: inputSchema,
 		Presentation: contracts.ToolContractPresentationDTO{
 			Variants:        variants,
@@ -61,7 +62,7 @@ func toolContractVariants(name string) []string {
 	case "skill", "memory", "docs", "memory_project":
 		return []string{"collection", "document", "status"}
 	default:
-		return []string{toolPresentationVariant(name, "")}
+		return []string{toolpresentation.ToolPresentationVariant(name, "")}
 	}
 }
 
@@ -70,7 +71,7 @@ func toolContractFormats(name string) []string {
 	case "skill", "memory", "docs", "memory_project":
 		return []string{"list", "document", "status"}
 	default:
-		return []string{toolPresentationFormat(name, "")}
+		return []string{toolpresentation.ToolPresentationFormat(name, "")}
 	}
 }
 

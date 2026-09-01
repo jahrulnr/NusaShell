@@ -1,4 +1,8 @@
-package application
+// Package toolpresentation builds the browser-facing view of tool calls
+// without changing the raw result that is persisted or passed back to a
+// provider. Extracted from the application root so the parsing/formatting
+// math lives in one testable leaf package.
+package toolpresentation
 
 import (
 	"bytes"
@@ -19,23 +23,23 @@ const (
 	toolPresentationTextLimit    = 12 << 10
 )
 
-// buildToolPresentation creates the browser-facing view without changing the
+// BuildToolPresentation creates the browser-facing view without changing the
 // raw result that is persisted or passed back to a provider. Built-in tools
 // already use YAML front matter and JSONL bodies, so the presentation can
 // expose those parts directly instead of making the browser parse an LLM
 // envelope on every render.
-func buildToolPresentation(name, args string, status domain.ToolCallStatus, rawOutput string, attachments ...[]domain.Attachment) *contracts.ToolPresentationDTO {
+func BuildToolPresentation(name, args string, status domain.ToolCallStatus, rawOutput string, attachments ...[]domain.Attachment) *contracts.ToolPresentationDTO {
 	presentation := &contracts.ToolPresentationDTO{
-		Variant:  toolPresentationVariant(name, args),
+		Variant:  ToolPresentationVariant(name, args),
 		Action:   toolPresentationAction(name, status, rawOutput),
 		Request:  formatToolPresentationRequest(name, args),
 		Contract: toolContractRef(name),
 		Result: contracts.ToolPresentationResultDTO{
-			Format: toolPresentationFormat(name, args),
+			Format: ToolPresentationFormat(name, args),
 		},
 	}
 	if len(attachments) > 0 {
-		presentation.Result.Attachments = toolAttachmentDTOs(attachments[0])
+		presentation.Result.Attachments = ToolAttachmentDTOs(attachments[0])
 	}
 
 	if presentation.Variant == "terminal" {
@@ -72,14 +76,14 @@ func buildToolPresentation(name, args string, status domain.ToolCallStatus, rawO
 	return presentation
 }
 
-// toolPresentationDTO is the shared adapter for persisted DTOs and live
+// ToolPresentationDTO is the shared adapter for persisted DTOs and live
 // events. Keeping it in application means the domain ToolCall remains free of
 // browser-specific fields and provider-facing ChatMessage stays unchanged.
-func toolPresentationDTO(tc domain.ToolCall) *contracts.ToolPresentationDTO {
-	return buildToolPresentation(tc.Name, tc.Args, tc.Status, tc.Output, tc.OutputAttachments)
+func ToolPresentationDTO(tc domain.ToolCall) *contracts.ToolPresentationDTO {
+	return BuildToolPresentation(tc.Name, tc.Args, tc.Status, tc.Output, tc.OutputAttachments)
 }
 
-func toolContractID(name string) string {
+func ToolContractID(name string) string {
 	if strings.TrimSpace(name) == "" {
 		name = "tool"
 	}
@@ -88,13 +92,13 @@ func toolContractID(name string) string {
 
 func toolContractRef(name string) *contracts.ToolContractRefDTO {
 	return &contracts.ToolContractRefDTO{
-		ID:       toolContractID(name),
+		ID:       ToolContractID(name),
 		Version:  contracts.ToolContractVersion,
-		CSSClass: toolContractCSSClass(name),
+		CSSClass: ToolContractCSSClass(name),
 	}
 }
 
-func toolContractCSSClass(name string) string {
+func ToolContractCSSClass(name string) string {
 	raw := strings.ToLower(strings.TrimSpace(name))
 	if strings.HasPrefix(raw, "mcp__") {
 		raw = "mcp"
@@ -120,10 +124,10 @@ func toolContractCSSClass(name string) string {
 	return "agent-tool-" + slug
 }
 
-// toolCallArgsFromConversation recovers the original request for a tool call
+// ToolCallArgsFromConversation recovers the original request for a tool call
 // when an asynchronous completion only has the call ID. ToolCalls and Steps
 // are durable mirrors, but older conversations may contain only one of them.
-func toolCallArgsFromConversation(c *domain.Conversation, callID string) string {
+func ToolCallArgsFromConversation(c *domain.Conversation, callID string) string {
 	if c == nil || strings.TrimSpace(callID) == "" {
 		return ""
 	}
@@ -153,10 +157,10 @@ func toolCallArgsFromConversation(c *domain.Conversation, callID string) string 
 	return ""
 }
 
-// toolArgsRaw keeps optional wire args valid JSON. Synthetic or legacy calls
+// ToolArgsRaw keeps optional wire args valid JSON. Synthetic or legacy calls
 // can legitimately have no args; emitting an invalid json.RawMessage would
 // replace the whole event payload with a marshal error.
-func toolArgsRaw(args string) json.RawMessage {
+func ToolArgsRaw(args string) json.RawMessage {
 	trimmed := strings.TrimSpace(args)
 	if trimmed == "" || !json.Valid([]byte(trimmed)) {
 		return nil
@@ -164,7 +168,7 @@ func toolArgsRaw(args string) json.RawMessage {
 	return json.RawMessage(trimmed)
 }
 
-func toolAttachmentDTOs(atts []domain.Attachment) []contracts.AttachmentDTO {
+func ToolAttachmentDTOs(atts []domain.Attachment) []contracts.AttachmentDTO {
 	if len(atts) == 0 {
 		return nil
 	}
@@ -177,7 +181,7 @@ func toolAttachmentDTOs(atts []domain.Attachment) []contracts.AttachmentDTO {
 	return out
 }
 
-func toolResultPresentationStatus(output string) domain.ToolCallStatus {
+func ToolResultPresentationStatus(output string) domain.ToolCallStatus {
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(output)), "error:") {
 		return domain.ToolFailed
 	}
@@ -412,7 +416,7 @@ func splitGrepPresentationLine(line string, allowTrailingNumber bool) (path stri
 	return "", 0, "", false, false
 }
 
-func toolPresentationVariant(name, args string) string {
+func ToolPresentationVariant(name, args string) string {
 	switch name {
 	case "exec", "mcp_call":
 		return "terminal"
@@ -445,8 +449,8 @@ func toolPresentationVariant(name, args string) string {
 	}
 }
 
-func toolPresentationFormat(name, args string) string {
-	switch toolPresentationVariant(name, args) {
+func ToolPresentationFormat(name, args string) string {
+	switch ToolPresentationVariant(name, args) {
 	case "terminal":
 		return "terminal"
 	case "file-list", "search-results", "collection":

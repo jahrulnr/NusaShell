@@ -138,12 +138,12 @@ func TestRelocateHydrationMovesCheckpointAfterFirstUser(t *testing.T) {
 		{ID: "u1", Role: domain.RoleUser, Content: "halo", Status: domain.StatusDone},
 		{ID: "a1", Role: domain.RoleAssistant, Content: "work", Status: domain.StatusDone},
 	}
-	got := relocateHydrationAfterFirstUser(msgs)
+	got := domain.RelocateHydrationAfterFirstUser(msgs)
 	if len(got) != 3 {
 		t.Fatalf("len = %d, want 3", len(got))
 	}
-	if got[0].ID != "u1" || !isHydrationMessage(got[1]) || got[2].ID != "a1" {
-		t.Fatalf("order = %s hyd=%v %s, want user, hydration, work", got[0].ID, isHydrationMessage(got[1]), got[2].ID)
+	if got[0].ID != "u1" || !domain.IsHydrationMessage(got[1]) || got[2].ID != "a1" {
+		t.Fatalf("order = %s hyd=%v %s, want user, hydration, work", got[0].ID, domain.IsHydrationMessage(got[1]), got[2].ID)
 	}
 	if got[1].ID != hyd.ID {
 		t.Fatalf("checkpoint was rebuilt (id %s → %s); repair must move the existing message", hyd.ID, got[1].ID)
@@ -158,8 +158,8 @@ func TestRelocateHydrationIsNoOpWhenAlreadyAfterUser(t *testing.T) {
 		hydrationCheckpointMessage(),
 		{ID: "a1", Role: domain.RoleAssistant, Content: "work", Status: domain.StatusDone},
 	}
-	got := relocateHydrationAfterFirstUser(msgs)
-	if len(got) != 3 || got[0].ID != "u1" || !isHydrationMessage(got[1]) || got[2].ID != "a1" {
+	got := domain.RelocateHydrationAfterFirstUser(msgs)
+	if len(got) != 3 || got[0].ID != "u1" || !domain.IsHydrationMessage(got[1]) || got[2].ID != "a1" {
 		t.Fatalf("correct order must stay put: %+v", got)
 	}
 }
@@ -297,9 +297,9 @@ func TestFreshTurnHydrationSitsBetweenUserAndAssistant(t *testing.T) {
 	if len(saved.Messages) < 3 {
 		t.Fatalf("len(Messages) = %d, want user + hydration + assistant", len(saved.Messages))
 	}
-	if saved.Messages[0].ID != "u1" || !isHydrationMessage(saved.Messages[1]) || saved.Messages[2].ID != "a1" {
+	if saved.Messages[0].ID != "u1" || !domain.IsHydrationMessage(saved.Messages[1]) || saved.Messages[2].ID != "a1" {
 		t.Fatalf("fresh transcript order = %s %v %s, want user, hydration, a1",
-			saved.Messages[0].ID, isHydrationMessage(saved.Messages[1]), saved.Messages[2].ID)
+			saved.Messages[0].ID, domain.IsHydrationMessage(saved.Messages[1]), saved.Messages[2].ID)
 	}
 	if saved.Messages[2].Content != "hello" {
 		t.Fatalf("assistant content = %q", saved.Messages[2].Content)
@@ -406,7 +406,7 @@ func TestPersistCompactedConversationInsertsHydrationAfterHandover(t *testing.T)
 	if conv.Messages[0].Role != domain.RoleUser {
 		t.Fatalf("Messages[0] role = %s, want user (handover)", conv.Messages[0].Role)
 	}
-	if !isHydrationMessage(conv.Messages[1]) {
+	if !domain.IsHydrationMessage(conv.Messages[1]) {
 		t.Fatalf("Messages[1] must be the hydration checkpoint, got %+v", conv.Messages[1])
 	}
 	// Exactly one checkpoint — no second one parked after the steer user.
@@ -414,7 +414,7 @@ func TestPersistCompactedConversationInsertsHydrationAfterHandover(t *testing.T)
 	hydIdx := -1
 	steerIdx := -1
 	for i, m := range conv.Messages {
-		if isHydrationMessage(m) {
+		if domain.IsHydrationMessage(m) {
 			count++
 			hydIdx = i
 		}
@@ -470,7 +470,7 @@ func TestFollowUpUserTurnDoesNotRelocateHydration(t *testing.T) {
 	hydIdx := -1
 	u2Idx := -1
 	for i, m := range conv.Messages {
-		if isHydrationMessage(m) {
+		if domain.IsHydrationMessage(m) {
 			count++
 			hydIdx = i
 		}
@@ -525,9 +525,9 @@ func TestFreshTurnRepairsHydrationLeadingTheUser(t *testing.T) {
 	if len(saved.Messages) < 3 {
 		t.Fatalf("len(Messages) = %d, want hydration + user + assistant", len(saved.Messages))
 	}
-	if !isHydrationMessage(saved.Messages[0]) || saved.Messages[1].ID != "u1" || saved.Messages[2].ID != "a1" {
+	if !domain.IsHydrationMessage(saved.Messages[0]) || saved.Messages[1].ID != "u1" || saved.Messages[2].ID != "a1" {
 		t.Fatalf("persisted order = hyd=%v %s %s, want leading hydration, u1, a1",
-			isHydrationMessage(saved.Messages[0]), saved.Messages[1].ID, saved.Messages[2].ID)
+			domain.IsHydrationMessage(saved.Messages[0]), saved.Messages[1].ID, saved.Messages[2].ID)
 	}
 	if saved.Messages[2].Content != "hello" {
 		t.Fatalf("assistant content = %q", saved.Messages[2].Content)

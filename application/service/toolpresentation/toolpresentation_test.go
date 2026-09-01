@@ -1,4 +1,4 @@
-package application
+package toolpresentation
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 )
 
 func TestBuildToolPresentationCarriesContractAndOutputAttachments(t *testing.T) {
-	got := buildToolPresentation("read_media", `{"file_path":"/tmp/a.png"}`, domain.ToolOK, "image loaded", []domain.Attachment{{
+	got := BuildToolPresentation("read_media", `{"file_path":"/tmp/a.png"}`, domain.ToolOK, "image loaded", []domain.Attachment{{
 		Type: "image", Name: "a.png", MediaType: "image/png", FilePath: "/tmp/a.png",
 	}})
 	if got.Contract == nil || got.Contract.ID != "tool.read_media.v1" || got.Contract.CSSClass != "agent-tool-read-media" {
@@ -20,7 +20,7 @@ func TestBuildToolPresentationCarriesContractAndOutputAttachments(t *testing.T) 
 
 func TestBuildToolPresentationExtractsCompactBuiltInResult(t *testing.T) {
 	raw := "---\ncount: 2\ntotal: 109K\n---\n-rw-r--r-- 4K Aug 30 15:36 file-a\n-rw-r--r-- 8K Aug 30 15:38 file with spaces-b"
-	got := buildToolPresentation("file_list", `{"path":"/workspace"}`, domain.ToolOK, raw)
+	got := BuildToolPresentation("file_list", `{"path":"/workspace"}`, domain.ToolOK, raw)
 	if got == nil {
 		t.Fatal("presentation is nil")
 	}
@@ -46,7 +46,7 @@ func TestBuildToolPresentationExtractsCompactBuiltInResult(t *testing.T) {
 
 func TestBuildToolPresentationTurnsBuiltInJSONLIntoItems(t *testing.T) {
 	raw := "---\ncount: 2\n---\n{\"id\":\"m1\",\"content\":\"one\"}\n{\"id\":\"m2\",\"content\":\"two\"}"
-	got := buildToolPresentation("memory", `{"op":"search","query":"one"}`, domain.ToolOK, raw)
+	got := BuildToolPresentation("memory", `{"op":"search","query":"one"}`, domain.ToolOK, raw)
 	if got.Variant != "collection" || got.Result.Format != "list" {
 		t.Fatalf("presentation = %+v", got)
 	}
@@ -60,7 +60,7 @@ func TestBuildToolPresentationTurnsBuiltInJSONLIntoItems(t *testing.T) {
 
 func TestBuildToolPresentationKeepsGenericToolOutputAsText(t *testing.T) {
 	raw := "---\nexit_code: 0\n---\nhello\nworld"
-	got := buildToolPresentation("exec", `{"command":"printf hello"}`, domain.ToolOK, raw)
+	got := BuildToolPresentation("exec", `{"command":"printf hello"}`, domain.ToolOK, raw)
 	if got.Variant != "terminal" || got.Result.Format != "terminal" {
 		t.Fatalf("presentation = %+v", got)
 	}
@@ -70,7 +70,7 @@ func TestBuildToolPresentationKeepsGenericToolOutputAsText(t *testing.T) {
 }
 
 func TestBuildToolPresentationShowsDirectMCPArgumentsInRequest(t *testing.T) {
-	got := buildToolPresentation("mcp_call", `{"ref":"files:read","arguments_json":{"path":"/tmp/a b.txt"}}`, domain.ToolOK, "result")
+	got := BuildToolPresentation("mcp_call", `{"ref":"files:read","arguments_json":{"path":"/tmp/a b.txt"}}`, domain.ToolOK, "result")
 	want := "mcp_call(files:read) {\n  \"path\": \"/tmp/a b.txt\"\n}"
 	if got.Request != want {
 		t.Fatalf("mcp request = %q, want %q", got.Request, want)
@@ -82,7 +82,7 @@ func TestBuildToolPresentationShowsDirectMCPArgumentsInRequest(t *testing.T) {
 
 func TestBuildToolPresentationParsesPredictableSearchRows(t *testing.T) {
 	raw := "---\nline_matches: 2\nvia: go\n---\napplication/main.go:12:match\napplication/main.go-11-context"
-	got := buildToolPresentation("grep", `{"pattern":"match","path":"application"}`, domain.ToolOK, raw)
+	got := BuildToolPresentation("grep", `{"pattern":"match","path":"application"}`, domain.ToolOK, raw)
 	if got.Variant != "search-results" || got.Result.Format != "list" {
 		t.Fatalf("presentation = %+v", got)
 	}
@@ -99,7 +99,7 @@ func TestBuildToolPresentationParsesPredictableSearchRows(t *testing.T) {
 
 func TestBuildToolPresentationParsesYAMLCollectionAndKeepsProviderRawPath(t *testing.T) {
 	raw := "---\ncount: 1\n---\n- id: wf_1\n  name: Nightly\n  enabled: true"
-	got := buildToolPresentation("automation_list", "{}", domain.ToolOK, raw)
+	got := BuildToolPresentation("automation_list", "{}", domain.ToolOK, raw)
 	if got.Variant != "collection" || got.Result.Format != "list" || len(got.Result.Items) != 1 {
 		t.Fatalf("automation presentation = %+v", got)
 	}
@@ -110,14 +110,14 @@ func TestBuildToolPresentationParsesYAMLCollectionAndKeepsProviderRawPath(t *tes
 		t.Errorf("collection body should move to items, got %q", got.Result.Text)
 	}
 
-	terminal := buildToolPresentation("mcp_call", `{"ref":"plugin:tool","arguments_json":"{\"path\":\"/tmp\"}"}`, domain.ToolOK, raw)
+	terminal := BuildToolPresentation("mcp_call", `{"ref":"plugin:tool","arguments_json":"{\"path\":\"/tmp\"}"}`, domain.ToolOK, raw)
 	if terminal.Variant != "terminal" || terminal.Result.Text != raw {
 		t.Fatalf("mcp call must stay raw terminal: %+v", terminal)
 	}
 }
 
 func TestToolResultPresentationStatusReadsStructuredFailure(t *testing.T) {
-	status := toolResultPresentationStatus("---\nstatus: failed\n---\nprovider rejected request")
+	status := ToolResultPresentationStatus("---\nstatus: failed\n---\nprovider rejected request")
 	if status != domain.ToolFailed {
 		t.Fatalf("status = %q, want fail", status)
 	}
@@ -125,7 +125,7 @@ func TestToolResultPresentationStatusReadsStructuredFailure(t *testing.T) {
 
 func TestBuildToolPresentationUsesFrontmatterFilesForFindFile(t *testing.T) {
 	raw := "---\ncount: 2\nfiles:\n  - /workspace/a.go\n  - /workspace/b.go\n---"
-	got := buildToolPresentation("find_file", `{"pattern":"**/*.go","path":"/workspace"}`, domain.ToolOK, raw)
+	got := BuildToolPresentation("find_file", `{"pattern":"**/*.go","path":"/workspace"}`, domain.ToolOK, raw)
 	if got.Result.Format != "list" || got.Result.Summary != "2 files" {
 		t.Fatalf("presentation = %+v", got)
 	}
@@ -138,7 +138,7 @@ func TestBuildToolPresentationUsesFrontmatterFilesForFindFile(t *testing.T) {
 }
 
 func TestBuildToolPresentationSummarizesStatusMetadata(t *testing.T) {
-	got := buildToolPresentation("file_write", `{"path":"/workspace/a.txt"}`, domain.ToolOK, "---\nbytes: 12\nwritten: true\nsha256: abcdef0123456789\n---")
+	got := BuildToolPresentation("file_write", `{"path":"/workspace/a.txt"}`, domain.ToolOK, "---\nbytes: 12\nwritten: true\nsha256: abcdef0123456789\n---")
 	if got.Variant != "status" || got.Result.Format != "status" || got.Result.Summary != "Written" {
 		t.Fatalf("status presentation = %+v", got)
 	}
@@ -148,17 +148,17 @@ func TestBuildToolPresentationSummarizesStatusMetadata(t *testing.T) {
 }
 
 func TestBuildToolPresentationUsesOperationSummaries(t *testing.T) {
-	read := buildToolPresentation("file_read", `{"path":"/workspace/a.go"}`, domain.ToolOK, "---\nbytes: 128\ntruncated: true\n---\npackage main")
+	read := BuildToolPresentation("file_read", `{"path":"/workspace/a.go"}`, domain.ToolOK, "---\nbytes: 128\ntruncated: true\n---\npackage main")
 	if read.Result.Summary != "Read 128 bytes · more available" {
 		t.Fatalf("file read summary = %q", read.Result.Summary)
 	}
 
-	grep := buildToolPresentation("grep", `{"pattern":"x","path":"."}`, domain.ToolOK, "---\nfiles: 2\ntotal_line_matches: 5\n---\na.go:2\nb.go:3")
+	grep := BuildToolPresentation("grep", `{"pattern":"x","path":"."}`, domain.ToolOK, "---\nfiles: 2\ntotal_line_matches: 5\n---\na.go:2\nb.go:3")
 	if grep.Result.Summary != "5 matches · 2 files" {
 		t.Fatalf("grep summary = %q", grep.Result.Summary)
 	}
 
-	validate := buildToolPresentation("automation_validate", `{}`, domain.ToolOK, "---\nsyntax: OK\ncapabilities: OK\nproviders: BLOCKED\n---")
+	validate := BuildToolPresentation("automation_validate", `{}`, domain.ToolOK, "---\nsyntax: OK\ncapabilities: OK\nproviders: BLOCKED\n---")
 	if validate.Result.Summary != "Blocked" {
 		t.Fatalf("validation summary = %q", validate.Result.Summary)
 	}

@@ -143,12 +143,12 @@ func isRetryableUpstream(err *UpstreamError) bool {
 		// Even temporary errors can be permanent provider failures (e.g.
 		// 503 with "insufficient balance" body). Check the message before
 		// declaring retryability.
-		if isPermanentProviderFailure(err.StatusCode, body) {
+		if domain.IsPermanentProviderFailure(err.StatusCode, body) {
 			return false
 		}
 		return true
 	}
-	if isPermanentProviderFailure(err.StatusCode, body) {
+	if domain.IsPermanentProviderFailure(err.StatusCode, body) {
 		return false
 	}
 	switch err.StatusCode {
@@ -172,14 +172,6 @@ func isRetryableUpstream(err *UpstreamError) bool {
 // failure rather than a transient server issue. Matched case-insensitively.
 // Mirrors the TS isPermanentProviderFailure phrase list.
 var permanentFailurePhrases = domain.PermanentFailurePhrases
-
-// isPermanentProviderFailure reports whether the HTTP status + body indicate
-// a billing/credit exhaustion that will not resolve on retry. A 503 with
-// "insufficient balance" is permanent; a 503 with "internal server error" is
-// not. Status 402 is always permanent.
-func isPermanentProviderFailure(status int, body string) bool {
-	return domain.IsPermanentProviderFailure(status, body)
-}
 
 // describeProviderError renders a provider error for the retry log so
 // operators can tell a 429 rate limit from a mid-stream EOF without digging

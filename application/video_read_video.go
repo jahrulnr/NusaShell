@@ -148,7 +148,7 @@ func (a *App) describeVideosWithFallback(ctx context.Context, settings domain.Se
 	if settings.VideoProviderID == "" || settings.VideoModelID == "" {
 		return attachments
 	}
-	videoIdxs := undescribedMediaIndexes(attachments, "video", mediaDescPrefixVideo)
+	videoIdxs := domain.UndescribedMediaIndexes(attachments, "video", mediaDescPrefixVideo)
 	if len(videoIdxs) == 0 {
 		return attachments
 	}
@@ -203,7 +203,7 @@ func (a *App) enrichWithVideoDescriptions(ctx context.Context, conversation *dom
 		return conversation
 	}
 	userMsg := &conversation.Messages[userMsgIdx]
-	pending := undescribedMediaIndexes(userMsg.Attachments, "video", mediaDescPrefixVideo)
+	pending := domain.UndescribedMediaIndexes(userMsg.Attachments, "video", mediaDescPrefixVideo)
 	if len(pending) == 0 {
 		return conversation
 	}

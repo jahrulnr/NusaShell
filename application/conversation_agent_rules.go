@@ -94,7 +94,7 @@ func (p *conversationRules) rules() AgentRules {
 			// grow the context.
 			if p.settings.CompactionEnabled && p.round > 1 && p.compactionAttempts < 3 {
 				cw := p.a.resolveContextWindow(p.provider, p.model, p.settings)
-				trigger := compactionTriggerTokens(cw, resolveMaxOutput(p.provider, p.model, p.settings), p.settings)
+				trigger := domain.CompactionTriggerTokens(cw, domain.ResolveMaxOutput(p.provider, p.model, p.settings), p.settings)
 				if est := p.conv.EstimateTokens(); est > trigger {
 					p.compactionAttempts++
 					p.a.log("info", "agent", "mid-turn compaction for %s round %d: est=%d trigger=%d window=%d",
@@ -168,7 +168,7 @@ func (p *conversationRules) rules() AgentRules {
 			}
 			if p.compactionAttempts < 3 && (isContextOverflowError(rawStreamErr) || isTPMOverflowError(rawStreamErr)) {
 				cw := p.a.resolveContextWindow(p.provider, p.model, p.settings)
-				trigger := compactionTriggerTokens(cw, resolveMaxOutput(p.provider, p.model, p.settings), p.settings)
+				trigger := domain.CompactionTriggerTokens(cw, domain.ResolveMaxOutput(p.provider, p.model, p.settings), p.settings)
 				preEmg := p.conv.EstimateTokens()
 				if !shouldEmergencyCompact(rawStreamErr, preEmg, trigger) {
 					p.a.log("warn", "agent", "overflow-like 400 for turn %s but est=%d <= trigger=%d; skipping emergency compaction", p.run.ID, preEmg, trigger)
