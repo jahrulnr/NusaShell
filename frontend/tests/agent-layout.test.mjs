@@ -4,6 +4,7 @@ import { test } from 'node:test';
 
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const agentCSS = await readFile(new URL('../styles/agent.css', import.meta.url), 'utf8');
+const agentToolsCSS = await readFile(new URL('../styles/agent-tools.css', import.meta.url), 'utf8');
 const globalCSS = await readFile(new URL('../styles/global.css', import.meta.url), 'utf8');
 const agentView = await readFile(new URL('../js/views/agent.js', import.meta.url), 'utf8');
 const appShell = await readFile(new URL('../js/app.js', import.meta.url), 'utf8');
@@ -35,16 +36,17 @@ test('Agent uses the Electron workspace shell without unsupported Todo UI', () =
   assert.match(agentCSS, /@media \(max-width: 900px\)[\s\S]*?\.agent-conversations \{[\s\S]*?display: none;/, '900px hides the room list');
 });
 
-test('Agent tool transcripts start collapsed, cap output at ten lines, and lazy-render reasoning', () => {
-  // Tool events are collapsible <details> (open by default, collapse via the
-  // head row), and both the event output and the exec/MCP terminal panel cap
-  // long output with their own scroll.
+test('Agent tool transcripts start collapsed, cap output, and lazy-render reasoning', () => {
+  // Settled tool events are compact <details> rows; only running work opens
+  // automatically. Both the event output and exec/MCP terminal panel cap long
+  // output with their own scroll.
   assert.match(agentRender, /class: `agent-tool-event agent-tool-\$\{slug\}`/);
   assert.match(agentRender, /el\('details', \{ class: `agent-tool-event/);
+  assert.match(agentRender, /card\.open = status === 'running';/);
   assert.match(agentRender, /function materializeReasoning/);
   assert.doesNotMatch(agentRender, /content\.innerHTML = renderMarkdown\(reasoning\)/);
   assert.doesNotMatch(agentView, /content\.innerHTML = renderMarkdown\(run\.rawReasoning\)/);
-  assert.match(agentCSS, /\.agent-tool-event-output \{[^}]*max-height: calc\(10 \* 1\.55em\);[^}]*overflow-y: auto;/s);
+  assert.match(agentToolsCSS, /\.agent-tool-event-output \{[^}]*max-height: calc\(8 \* 1\.45em\);[^}]*overflow-y: auto;/s);
 });
 
 test('Archived chunks load only on explicit Load older or scroll-to-top, never after turn.done or live compaction', () => {
@@ -143,10 +145,18 @@ test('ACP transcripts use the agent conversation structure and historical run lo
 
 test('Thinking and tool markers use deliberate conversation rails', () => {
   assert.match(agentCSS, /\.agent-reasoning summary \{[^}]*margin-left: -12px;/s);
-  assert.match(agentCSS, /\.agent-tool-stack::before \{[^}]*left: 0;/s);
+  assert.match(agentCSS, /\.agent-reasoning-preview \{[^}]*min-width: 0;/s,
+    'Thinking exposes a scan-friendly preview without forcing a second row');
+  assert.match(agentCSS, /\.agent-reasoning \{[^}]*border-left: 2px solid/s,
+    'Thinking uses a distinct quiet rail instead of the tool card treatment');
+  assert.match(agentCSS, /\.agent-tool-stack::before \{[^}]*left: 8px;/s,
+    'the rail stays centered under the compact status node');
   assert.match(agentCSS, /--agent-tool-gutter: 32px;/);
   assert.match(agentCSS, /--agent-tool-node-radius: 14px;/);
-  assert.match(agentCSS, /\.agent-tool-terminal summary \{[^}]*margin-left: calc\(-1 \* \(var\(--agent-tool-gutter\) \+ var\(--agent-tool-node-radius\)\)\);/s);
+  assert.match(agentCSS, /\.agent-tool-stack > \.agent-tool-event \{[^}]*margin-left: calc\(-1 \* var\(--agent-tool-gutter\)\);/s);
+  assert.match(agentCSS, /\.agent-tool-stack > \.agent-tool-event \{[^}]*width: calc\(100% \+ var\(--agent-tool-gutter\)\);/s,
+    'event rows reclaim the rail gutter for useful command/result width');
+  assert.match(agentCSS, /\.agent-tool-event-head \{[^}]*display: flex;/s);
 });
 
 test('Expanded Thinking is capped to twenty lines and scrolls internally', () => {
@@ -229,16 +239,25 @@ test('ACP wait/result bookkeeping never mounts a duplicate live tool row', () =>
 });
 
 test('Narrow windows ellipsize tool meta instead of overflowing the thread', () => {
-  assert.match(agentCSS, /\.agent-tool-terminal summary \{[^}]*display: flex;/s);
-  assert.match(agentCSS, /\.agent-tool-terminal-meta \{[^}]*flex: 1 1 0;/s);
+  assert.match(agentCSS, /\.agent-tool-event-head \{[^}]*display: flex;/s);
+  assert.match(agentToolsCSS, /\.agent-tool-event-head-summary \{[^}]*min-width: 0;/s);
   assert.match(agentCSS, /\.agent-tool-stack \{[^}]*min-width: 0;/s);
-  assert.match(agentCSS, /\.agent-tool-terminal \{[^}]*max-width: 100%;/s);
+  assert.match(agentCSS, /\.agent-tool-event \{[^}]*max-width: 100%;/s);
   assert.match(agentCSS, /\.agent-reasoning summary \{[^}]*display: flex;/s);
   assert.match(agentCSS, /\.agent-bubble \{[^}]*min-width: 0;/s);
   assert.match(agentCSS, /\.agent-bubble-text \{[^}]*overflow-wrap: anywhere;/s);
   assert.match(agentCSS, /\.agent-conversation \{[^}]*min-width: 0;/s);
   assert.match(agentCSS, /\.agent-thread \{[^}]*min-width: 0;/s);
   assert.doesNotMatch(agentCSS, /grid-template-columns: 24px minmax\(0, 1fr\) auto auto auto auto/);
+});
+
+test('Readable chat flow gets room while technical traces stay compact', () => {
+  assert.match(agentCSS, /\.agent-tool-stack \{[^}]*width: 100%;/s,
+    'tool timeline uses the available chat width instead of a fixed narrow cap');
+  assert.match(agentCSS, /\.agent-message\.assistant \.agent-bubble-text \{[^}]*line-height: 1\.65;/s,
+    'assistant commentary keeps a readable line-height');
+  assert.match(agentCSS, /\.agent-turn-meta \{[^}]*border-top: 1px solid/s,
+    'turn metadata is presented as a calm separator strip');
 });
 
 test('Live tool deltas stay queued until the card exists and thinking pulse is phase-gated', () => {

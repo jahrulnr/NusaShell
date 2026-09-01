@@ -2,7 +2,7 @@
 //
 // Below the 680px shell breakpoint the sidebar leaves normal flow and
 // becomes an off-canvas drawer. These tests pin the controller contract:
-// the title-bar hamburger toggles .body.is-nav-open, and the drawer closes
+// the mobile shell bar hamburger toggles .body.is-nav-open, and the drawer closes
 // via backdrop click, Escape, or selecting a nav item.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -148,7 +148,7 @@ test('mobile drawer gives the collapsed shell sidebar enough width for labels', 
   const mobileRules = layoutCSS.slice(layoutCSS.indexOf('@media (max-width: 680px)'));
   assert.match(
     mobileRules,
-    /\.window \.sidebar \.nav-item,\s*\.window \.sidebar \.sidebar-mode-toggle\s*\{[\s\S]*?justify-content:\s*flex-start;[\s\S]*?width:\s*100%;[\s\S]*?padding-inline:\s*var\(--space-4\);/
+    /\.window \.sidebar \.nav-item,\s*\.window \.sidebar \.sidebar-action,\s*\.window \.sidebar \.sidebar-mode-toggle\s*\{[\s\S]*?justify-content:\s*flex-start;[\s\S]*?width:\s*100%;[\s\S]*?padding-inline:\s*var\(--space-4\);/
   );
 });
 

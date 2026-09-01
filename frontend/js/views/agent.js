@@ -60,8 +60,8 @@ import { loadToolContracts, normalizeToolCall } from './agent/tool-contracts.js'
 // placeToolCard appends a tool card to the right container: standalone cards
 // (ask_question, show, generate_*, artifact, subagent — anything with
 // dataset.standalone="true") go directly into the bubble so they render
-// without the .agent-tool-stack border-left lane; tool terminals go into
-// the strip so the border-left visual cue groups them.
+// without the .agent-tool-stack border-left lane; timeline events go into
+// the strip so the rail groups them.
 function placeToolCard(bubble, strip, card) {
   if (card.dataset.standalone === 'true') {
     (strip?.parentElement || bubble).append(card);
@@ -349,7 +349,7 @@ function startToolElapsed(job) {
   job._startedAt = startTime;
   const elapsedEl = job.querySelector('.agent-tool-elapsed') || el('span', { class: 'agent-tool-elapsed', text: '0s' });
   if (!elapsedEl.parentElement) {
-    const head = job.querySelector('.agent-tool-job-card-head') || job.querySelector('summary') || job;
+    const head = job.querySelector('.agent-tool-event-head') || job.querySelector('summary') || job;
     head.append(elapsedEl);
   }
   job._elapsedTimer = setInterval(() => {
@@ -375,8 +375,9 @@ function ensureLiveToolJob(run, toolCallId, name, args, presentation) {
     if (args != null) {
       existing._toolArgs = args;
       existing._toolName = name || existing._toolName;
-      const meta = existing.querySelector('.agent-tool-terminal-meta');
-      if (meta) meta.textContent = toolTerminalMeta({ name: existing._toolName || name, args, status: 'running' });
+      // Reuse the renderer's collapsed-state summary so command/path labels
+      // stay consistent between the initial card and live SSE updates.
+      setToolTerminalStatus(existing, 'running');
     }
     if (presentation) setToolTerminalPresentation(existing, presentation);
     startToolElapsed(existing);
@@ -2452,12 +2453,9 @@ function bindEvents() {
     } else if (job.classList.contains('agent-tool-event')) {
       setToolTerminalOutput(job, output, next.status, toolTerminalMeta(next));
     }
-    // Only the terminal card auto-collapses on completion; the event card
-    // keeps its result summary visible (the whole event still collapses via
-    // its head row).
-    if (job.classList.contains('agent-tool-terminal')) job.open = false;
-    const meta = job.querySelector('.agent-tool-terminal-meta');
-    if (meta) meta.textContent = toolTerminalMeta(next);
+    // Settled events collapse to a compact summary row. The user can reopen
+    // the request/result/raw inspector from the same head row.
+    if (job.classList.contains('agent-tool-event')) job.open = false;
     // Room diagnostics stay current after the tool settles.
     updateRoomInfo(state.conversation, state.messages);
     const outputEl = job.querySelector('.agent-tool-terminal-output');

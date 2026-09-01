@@ -2,7 +2,7 @@
 //
 // Below the 680px shell breakpoint the sidebar leaves normal flow and
 // becomes an off-canvas drawer (see layout.css). This module owns that
-// state: one class on .body, mirrored onto the hamburger's aria-expanded.
+// state: one class on .body, mirrored onto the mobile bar hamburger's aria-expanded.
 // The drawer closes on backdrop click, Escape, or selecting a nav item —
 // mirroring how views/agent.js closes its conversations panel.
 

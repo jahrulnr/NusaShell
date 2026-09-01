@@ -28,7 +28,18 @@ The Learning knowledge graph rebuilds `related` links from content similarity
 and specific fragment metadata (project, task, and non-ubiquitous tags). It
 also records `used_with` links when successful agent or background-review
 tools observe multiple memory/skill nodes in the same turn. Edges whose
-endpoints were deleted are removed on the next graph rebuild.
+endpoints were deleted are removed on the next graph rebuild. Node size is
+scaled from the number of unique neighbouring nodes, so the most-connected
+memory or skill nodes appear as the largest hubs; hover text includes the
+relation count. When the graph is zoomed out, the renderer preserves most of
+the relation-driven size contrast so nearby degree values do not collapse to
+the same rasterized radius. Dense edge lines stay thin, and a completed full
+layout places highly connected hubs toward the center while low-degree and
+isolated nodes move toward a compact perimeter ring without detaching them
+from the main cluster. Its restrained archipelago palette maps skills to
+ocean blue, fragments to earth brown, primary memory to leaf green, and graph
+edges to deeper ocean, mangrove, or sand tones. Position-preserving background
+refreshes do not re-run this radial pass.
 
 ## Primary document format
 

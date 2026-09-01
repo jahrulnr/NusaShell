@@ -2,7 +2,7 @@
 
 Control how this local NusaShell instance runs agent turns, manages context, stores memory, picks models, and presents the workspace. Cards are grouped by boundary: Agent, Context, Memory & search, Media understanding, Media generation, Web, and Workspace. Browser-only preferences stay in local storage; the rest save with the instance.
 
-**How to open:** Click the settings icon in the title bar, or press the Settings shortcut.
+**How to open:** Click Settings in the sidebar, or press the Settings shortcut.
 
 ## Header
 

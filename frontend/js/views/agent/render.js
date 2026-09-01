@@ -121,6 +121,37 @@ export function reasoningHasVisibleSource(raw) {
   return raw.replace(/[\u200B-\u200D\uFEFF\u2060\u2063]/g, '').trim().length > 0;
 }
 
+// compactLine keeps collapsed UI labels to one visual line without exposing
+// a raw multiline payload. It is intentionally presentation-only: the full
+// source remains available in the expanded disclosure or raw inspector.
+function compactLine(value, limit = 128) {
+  const text = String(value ?? '').replace(/[\u200B-\u200D\uFEFF\u2060\u2063]/g, '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  if (text.length <= limit) return text;
+  return `${text.slice(0, Math.max(1, limit - 1)).trimEnd()}…`;
+}
+
+// reasoningPreview gives the collapsed Thinking row enough context to scan
+// without parsing/rendering Markdown. Fenced code is omitted because it is
+// rarely useful as a preview and can make the header look like a tool output.
+function reasoningPreview(raw) {
+  const text = String(raw || '')
+    .replace(/[\u200B-\u200D\uFEFF\u2060\u2063]/g, '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+    .replace(/^\s*>\s?/gm, '')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/[\*_~`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    // This phrase is emitted as a context-resumption marker in several
+    // rounds. Drop it when the same line has useful reasoning after it.
+    .replace(/^continue from (?:the )?current context\.?\s*/i, '')
+    .trim();
+  return compactLine(text);
+}
+
 // reasoningHasVisibleContent returns true when a rendered reasoning block
 // actually contains something the user can see. It strips zero-width and
 // whitespace-only text, and counts visual elements (images, diagrams, tables,
@@ -169,11 +200,13 @@ export function reasoningDisclosure(reasoning, options = {}) {
   const openHint = typeof options.openHint === 'string' && options.openHint.trim()
     ? options.openHint : 'Hide reasoning';
   const mark = typeof options.mark === 'string' && options.mark ? options.mark : '⌁';
+  const preview = reasoningPreview(raw);
   const content = el('div', { class: 'agent-reasoning-content' });
   const details = el('details', { class: 'agent-reasoning' },
     el('summary', {},
       el('span', { class: 'agent-reasoning-mark', text: mark }),
       el('span', { class: 'agent-reasoning-title', text: title }),
+      el('span', { class: 'agent-reasoning-preview', text: preview, title: preview }),
       el('span', { class: 'agent-reasoning-hint', text: collapsedHint }),
       el('span', { class: 'agent-reasoning-chevron', text: '⌄' }),
     ),
@@ -189,10 +222,10 @@ export function reasoningDisclosure(reasoning, options = {}) {
   return details;
 }
 
-const disclosureSelector = 'details.agent-reasoning, details.agent-tool-terminal, details.agent-tool-event';
+const disclosureSelector = 'details.agent-reasoning, details.agent-tool-event';
 
 function disclosureStateKeys(details, root) {
-  const kind = details.classList.contains('agent-tool-terminal') || details.classList.contains('agent-tool-event')
+  const kind = details.classList.contains('agent-tool-event')
     ? 'tool'
     : 'thinking';
   const round = details.closest('.agent-round');
@@ -204,7 +237,7 @@ function disclosureStateKeys(details, root) {
     || '';
   const owner = round || message || root;
   const siblings = [...owner.querySelectorAll(kind === 'tool'
-    ? 'details.agent-tool-terminal, details.agent-tool-event'
+    ? 'details.agent-tool-event'
     : 'details.agent-reasoning')];
   const ordinal = Math.max(0, siblings.indexOf(details));
   const all = [...root.querySelectorAll(disclosureSelector)];
@@ -1443,21 +1476,25 @@ function openImageLightbox({ src, name, caption }) {
 
 export function renderToolJob(toolCall) {
   const name = toolCall.name || 'tool';
-  // Built-in tools render as compact execution-timeline events, open by
-  // default with the result visible. exec (live streaming) and MCP calls
+  // Built-in tools render as compact execution-timeline events. Running
+  // calls stay open for live feedback; settled calls start collapsed. exec
+  // (live streaming) and MCP calls
   // (raw passthrough) use the same timeline event but with a terminal
   // output panel instead of the folded raw pair.
   if (!isStreamingTool(name) && !name.startsWith('mcp__') && name !== 'mcp_call') {
     return renderToolEvent(toolCall);
   }
-  return renderToolEvent(toolCall, { terminalOutput: true, mcp: true });
+  return renderToolEvent(toolCall, {
+    terminalOutput: true,
+    mcp: name.startsWith('mcp__') || name === 'mcp_call',
+  });
 }
 
 // ---- built-in tool event card (execution timeline) ----
 //
 // Built-in tool calls render as compact timeline events instead of raw
-// request/output terminals. The whole event is a collapsible <details> that
-// is open by default: its head row carries a status node, the action title,
+// request/output terminals. The whole event is a collapsible <details>:
+// its head row carries a status node, the action title,
 // and elapsed time (never a duplicated tool-name label), and the body leads
 // with the primary argument as a single legible path line. The result is
 // visible without any extra toggle — one folded "show request and raw
@@ -1477,13 +1514,6 @@ function toolEventPrimary(name, args) {
     if (raw === undefined || raw === null) return '';
     const text = typeof raw === 'object' ? JSON.stringify(raw) : String(raw);
     return text.trim();
-  };
-  const first = (keys) => {
-    for (const key of keys) {
-      const value = value(key);
-      if (value) return value;
-    }
-    return '';
   };
   if (name === 'grep') {
     const pattern = value('pattern');
@@ -1579,6 +1609,15 @@ function toolEventSummary(toolCall) {
   return toolTerminalMeta(toolCall);
 }
 
+// toolEventHeadSummary is the collapsed-state label. A human usually needs
+// the command/path/query first; result summaries stay in the expanded body.
+// This keeps a long sequence of "Command completed" rows scannable without
+// changing the backend presentation contract.
+function toolEventHeadSummary(toolCall) {
+  const primary = compactLine(toolEventPrimary(toolCall?.name, toolCall?.args));
+  return primary || compactLine(toolEventSummary(toolCall));
+}
+
 function renderToolEvent(toolCall, { terminalOutput = false, mcp = false } = {}) {
   toolCall = normalizeToolCall(toolCall);
   const name = toolCall.name || 'tool';
@@ -1595,7 +1634,7 @@ function renderToolEvent(toolCall, { terminalOutput = false, mcp = false } = {})
   const contractClass = toolContractClass(name, presentation);
   const card = el('details', { class: `agent-tool-event agent-tool-${slug}` });
   card.classList.add('agent-tool-card', contractClass);
-  card.open = true;
+  card.open = status === 'running';
   card.dataset.tool = name;
   card.dataset.toolContract = contract.id;
   card.dataset.toolContractVersion = String(contract.version);
@@ -1616,6 +1655,7 @@ function renderToolEvent(toolCall, { terminalOutput = false, mcp = false } = {})
     el('span', { class: 'agent-tool-event-node', text: toolStatusGlyph(status), 'aria-hidden': 'true' }),
     el('span', { class: 'agent-tool-event-head-text' },
       el('span', { class: 'agent-tool-event-title', text: presentation?.action || toolTimelineTitle(name, status) }),
+      el('span', { class: 'agent-tool-event-head-summary', text: toolEventHeadSummary(toolCall) }),
       mcp ? el('span', { class: 'agent-tool-event-badge', text: 'MCP' }) : null,
       ...(streaming ? [el('button', { class: 'agent-tool-stop', type: 'button', title: 'Stop this tool', 'aria-label': 'Stop running tool', hidden: true }, '■ Stop')] : []),
       el('span', { class: 'agent-tool-elapsed', text: elapsed }),
@@ -1808,14 +1848,20 @@ export function setToolTerminalStatus(card, status) {
   card.classList.toggle('is-error', errored);
   card.dataset.status = normalized;
   const glyph = toolStatusGlyph(normalized);
-  const prompt = card.querySelector('.agent-tool-terminal-prompt');
-  if (prompt) prompt.textContent = glyph;
   const eventNode = card.querySelector('.agent-tool-event-node');
   if (eventNode) eventNode.textContent = glyph;
-  const action = card.querySelector('.agent-tool-terminal-action');
-  if (action && card._toolName) action.textContent = card._toolPresentation?.action || toolTimelineTitle(card._toolName, normalized);
   const eventTitle = card.querySelector('.agent-tool-event-title');
   if (eventTitle && card._toolName) eventTitle.textContent = card._toolPresentation?.action || toolTimelineTitle(card._toolName, normalized);
+  const headSummary = card.querySelector('.agent-tool-event-head-summary');
+  if (headSummary && card._toolName) {
+    headSummary.textContent = toolEventHeadSummary({
+      name: card._toolName,
+      args: card._toolArgs,
+      status: normalized,
+      output: card._toolOutput,
+      presentation: card._toolPresentation,
+    });
+  }
   // The per-call stop button lives on streaming tools only and disappears
   // once the tool settles.
   const stop = card.querySelector('.agent-tool-stop');
@@ -1850,12 +1896,20 @@ export function setToolTerminalPresentation(card, presentation) {
   card.dataset.toolClass = contract.css_class;
   if (merged.variant) card.dataset.presentationVariant = String(merged.variant);
   if (merged.result?.format) card.dataset.resultFormat = String(merged.result.format);
-  const action = card.querySelector('.agent-tool-terminal-action');
-  if (action && merged.action) action.textContent = String(merged.action);
   const eventTitle = card.querySelector('.agent-tool-event-title');
   if (eventTitle && merged.action) eventTitle.textContent = String(merged.action);
-  const request = card.querySelector('.agent-tool-terminal-input');
-  if (request && merged.request !== undefined) request.textContent = String(merged.request || '');
+  const headSummary = card.querySelector('.agent-tool-event-head-summary');
+  if (headSummary) {
+    headSummary.textContent = toolEventHeadSummary({
+      name: card._toolName,
+      args: card._toolArgs,
+      status: card.dataset.status,
+      output: card._toolOutput,
+      presentation: merged,
+    });
+  }
+  const request = card.querySelector('.agent-tool-request');
+  if (request && merged.request) request.textContent = String(merged.request);
   const output = card.querySelector('.agent-tool-terminal-output');
   if (output) {
     // exec/MCP terminal panel: repaint the settled output in place.
@@ -1880,15 +1934,13 @@ export function setToolTerminalPresentation(card, presentation) {
   }
   const resultContent = renderToolEventResult({ name: card._toolName, status: card.dataset.status, output: card._toolOutput, presentation: merged });
   if (resultContent) resultBox.append(resultContent);
-  const rawPre = card.querySelector('.agent-tool-event-details pre');
+  const rawPre = card.querySelector('.agent-tool-raw > pre');
   if (rawPre) rawPre.textContent = toolEventRawText(card._toolName, merged, card._toolOutput);
 }
 
-// setToolTerminalOutput paints a settled tool result onto either card shape
-// without the caller knowing which one it is. Terminals get their output
-// panel + meta refreshed; event cards get their summary line, result body,
-// and folded raw panel repainted. Learning and ACP transcripts use this so
-// they never query card internals directly.
+// setToolTerminalOutput paints a settled result onto a contract-backed event.
+// Learning and ACP transcripts use this so they never query card internals
+// directly.
 export function setToolTerminalOutput(card, output, status, metaText = '') {
   if (!card) return;
   const text = String(output ?? '');
@@ -1916,21 +1968,12 @@ export function setToolTerminalOutput(card, output, status, metaText = '') {
       const resultContent = renderToolEventResult({ name: card._toolName, status, output: text, presentation: card._toolPresentation });
       if (resultContent) resultBox.append(resultContent);
     }
-    const rawPre = card.querySelector('.agent-tool-event-details pre');
+    const rawPre = card.querySelector('.agent-tool-raw > pre');
     if (rawPre) rawPre.textContent = toolEventRawText(card._toolName, card._toolPresentation, text);
     setToolTerminalStatus(card, status);
     return;
   }
-  const outputEl = card.querySelector('.agent-tool-terminal-output');
-  if (outputEl) {
-    outputEl.textContent = text.length > 12000 ? `${text.slice(0, 12000)}\n… (truncated)` : (text || 'ok');
-    outputEl.classList.toggle('is-error', status === 'fail');
-  }
-  const meta = card.querySelector('.agent-tool-terminal-meta');
-  if (meta && card._toolName) {
-    meta.textContent = metaText || toolTerminalMeta({ name: card._toolName, args: card._toolArgs, status });
-  }
-  setToolTerminalStatus(card, status);
+  setToolTerminalStatus(card, normalized);
 }
 
 function toolStatusGlyph(status) {
@@ -2050,14 +2093,23 @@ function compactToolMetaValue(key, value) {
 
 function renderToolPresentationList(items, className = 'agent-tool-terminal-output') {
   const list = el('div', { class: `${className} agent-tool-terminal-result-list`, role: 'list' });
-  for (const item of items.slice(0, 100)) {
-    if (!item || typeof item !== 'object') continue;
+  const validItems = items.filter((item) => item && typeof item === 'object');
+  const previewItems = validItems.slice(0, 6);
+  for (const item of previewItems) {
     const title = item.name || item.title || item.id || item.path || item.ref || 'Result';
     const detail = toolPresentationItemDetail(item);
     list.append(el('div', { class: 'agent-tool-terminal-result-item', role: 'listitem' },
       el('strong', { text: String(title) }),
       detail ? el('span', { text: String(detail).slice(0, 240) }) : null,
     ));
+  }
+  const remaining = validItems.length - previewItems.length;
+  if (remaining > 0) {
+    list.append(el('div', {
+      class: 'agent-tool-result-more',
+      role: 'listitem',
+      text: `+${remaining} more result${remaining === 1 ? '' : 's'}`,
+    }));
   }
   return list;
 }

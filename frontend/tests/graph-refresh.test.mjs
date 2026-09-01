@@ -9,15 +9,186 @@ import { test } from 'node:test';
 import {
   GRAPH_LAYOUT_ITERATIONS,
   GRAPH_NODE_GAP,
+  GRAPH_NODE_MAX_SIZE,
+  GRAPH_NODE_MIN_SIZE,
+  GRAPH_PALETTE,
   spaceGraphPositions,
   freezeGraphLayout,
   relayoutGraph,
   keepGraphPositions,
+  sizeGraphNodesByRelations,
+  graphNodeSizeAtScale,
+  bindGraphZoomSizing,
+  positionGraphByRelations,
+  graphEdgeWidth,
+  fitGraphToView,
 } from '../js/views/learning.js';
 
 function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
+
+test('GRAPH_PALETTE uses a restrained archipelago palette for every graph role', () => {
+  assert.deepEqual(GRAPH_PALETTE, {
+    ocean: '#6297b2',
+    oceanBorder: '#386e8a',
+    deepOcean: '#427994',
+    earth: '#a98c6a',
+    earthBorder: '#806342',
+    leaf: '#6fa57c',
+    leafBorder: '#447e52',
+    mangrove: '#569580',
+    sand: '#a59b73',
+  });
+  assert.equal(new Set([
+    GRAPH_PALETTE.ocean,
+    GRAPH_PALETTE.earth,
+    GRAPH_PALETTE.leaf,
+  ]).size, 3, 'node categories remain distinguishable');
+});
+
+test('graphEdgeWidth keeps dense graph lines thin while preserving weight order', () => {
+  assert.equal(graphEdgeWidth(0), 0.35);
+  assert.ok(graphEdgeWidth(0.5) < graphEdgeWidth(1));
+  assert.equal(graphEdgeWidth(1), 1.1);
+  assert.ok(graphEdgeWidth(1) < 1.5, 'even the strongest edge stays below the old minimum width');
+});
+
+test('positionGraphByRelations places hubs inward and isolates at the perimeter', () => {
+  const nodes = [
+    { id: 'hub', relationCount: 4 },
+    { id: 'branch', relationCount: 2 },
+    { id: 'isolated', relationCount: 0 },
+  ];
+  const out = positionGraphByRelations(nodes, {
+    hub: { x: 100, y: 0 },
+    branch: { x: 0, y: 100 },
+    isolated: { x: 20, y: 0 },
+  });
+  const center = { x: 40, y: 100 / 3 };
+
+  assert.ok(distance(out.hub, center) < distance(out.branch, center));
+  assert.ok(distance(out.branch, center) < distance(out.isolated, center));
+});
+
+test('positionGraphByRelations keeps the peripheral ring compact', () => {
+  const radius = 100;
+  const nodes = [
+    { id: 'hub', relationCount: 8 },
+    { id: 'branch', relationCount: 3 },
+    { id: 'isolated', relationCount: 0 },
+  ];
+  const out = positionGraphByRelations(nodes, {
+    hub: { x: radius, y: 0 },
+    branch: { x: -radius / 2, y: radius * Math.sqrt(3) / 2 },
+    isolated: { x: -radius / 2, y: -radius * Math.sqrt(3) / 2 },
+  });
+  const center = { x: 0, y: 0 };
+  const hubRadius = distance(out.hub, center);
+  const isolatedRadius = distance(out.isolated, center);
+
+  assert.ok(isolatedRadius <= radius, 'peripheral nodes stay inside the natural graph radius');
+  assert.ok(isolatedRadius / hubRadius < 1.8, 'centrality remains visible without splitting the graph apart');
+});
+
+test('positionGraphByRelations leaves a pinned refresh layout untouched', () => {
+  const positions = { hub: { x: 10, y: 20 }, leaf: { x: 30, y: 40 } };
+  const out = positionGraphByRelations([
+    { id: 'hub', relationCount: 5, fixed: { x: true, y: true } },
+    { id: 'leaf', relationCount: 0 },
+  ], positions);
+
+  assert.deepEqual(out, positions);
+});
+
+test('fitGraphToView reapplies relation sizing after programmatic fit', () => {
+  const records = [{ id: 'hub', relationSize: GRAPH_NODE_MAX_SIZE, size: GRAPH_NODE_MAX_SIZE }];
+  const network = {
+    fit: () => {},
+    getScale: () => 0.5,
+  };
+  const nodes = {
+    get: () => records.map((node) => ({ ...node })),
+    update: (updates) => updates.forEach((update) => Object.assign(records[0], update)),
+  };
+
+  fitGraphToView(network, nodes, 0);
+
+  assert.equal(records[0].size, 43);
+});
+
+test('sizeGraphNodesByRelations makes nodes with more unique relations larger', () => {
+  const nodes = [
+    { id: 'hub' },
+    { id: 'branch' },
+    { id: 'leaf' },
+    { id: 'single' },
+    { id: 'isolated' },
+  ];
+  const edges = [
+    { from: 'hub', to: 'branch' },
+    { from: 'hub', to: 'leaf' },
+    { from: 'hub', to: 'single' },
+    { from: 'branch', to: 'leaf' },
+    // Repeated edges describe another relation type, not another neighbour.
+    { from: 'hub', to: 'branch' },
+  ];
+
+  const sized = sizeGraphNodesByRelations(nodes, edges);
+  const byID = Object.fromEntries(sized.map((node) => [node.id, node]));
+
+  assert.equal(byID.hub.relationCount, 3);
+  assert.equal(byID.branch.relationCount, 2);
+  assert.equal(byID.leaf.relationCount, 2);
+  assert.equal(byID.single.relationCount, 1);
+  assert.equal(byID.isolated.relationCount, 0);
+  assert.ok(byID.hub.size > byID.branch.size);
+  assert.equal(byID.branch.size, byID.leaf.size);
+  assert.ok(byID.branch.size > byID.single.size);
+  assert.ok(byID.single.size > byID.isolated.size);
+  assert.equal(byID.hub.size, GRAPH_NODE_MAX_SIZE);
+  assert.equal(byID.isolated.size, GRAPH_NODE_MIN_SIZE);
+});
+
+test('graphNodeSizeAtScale preserves relation-size differences while zoomed out', () => {
+  const scale = 0.5;
+  const leaf = graphNodeSizeAtScale(GRAPH_NODE_MIN_SIZE, scale);
+  const branch = graphNodeSizeAtScale(16, scale);
+  const hub = graphNodeSizeAtScale(GRAPH_NODE_MAX_SIZE, scale);
+
+  assert.equal(leaf * scale, GRAPH_NODE_MIN_SIZE * scale);
+  assert.equal((branch - leaf) * scale, (16 - GRAPH_NODE_MIN_SIZE) * 0.75);
+  assert.equal((hub - leaf) * scale, (GRAPH_NODE_MAX_SIZE - GRAPH_NODE_MIN_SIZE) * 0.75);
+});
+
+test('graphNodeSizeAtScale leaves natural node sizes unchanged at normal and close zoom', () => {
+  assert.equal(graphNodeSizeAtScale(16, 1), 16);
+  assert.equal(graphNodeSizeAtScale(16, 2), 16);
+});
+
+test('bindGraphZoomSizing reapplies relation sizes whenever the viewport zooms', () => {
+  let zoomHandler;
+  const records = [
+    { id: 'leaf', relationSize: GRAPH_NODE_MIN_SIZE, size: GRAPH_NODE_MIN_SIZE },
+    { id: 'hub', relationSize: GRAPH_NODE_MAX_SIZE, size: GRAPH_NODE_MAX_SIZE },
+  ];
+  const network = {
+    on: (event, handler) => { if (event === 'zoom') zoomHandler = handler; },
+  };
+  const nodes = {
+    get: () => records.map((node) => ({ ...node })),
+    update: (updates) => updates.forEach((update) => Object.assign(
+      records.find((node) => node.id === update.id),
+      update,
+    )),
+  };
+
+  bindGraphZoomSizing(network, nodes);
+  zoomHandler({ scale: 0.5 });
+
+  assert.equal(records[0].size, GRAPH_NODE_MIN_SIZE);
+  assert.equal(records[1].size, 43);
+});
 
 test('spaceGraphPositions separates overlapping nodes by their radii plus a visible gap', () => {
   const input = { a: { x: 0, y: 0 }, b: { x: 0, y: 0 } };

@@ -52,7 +52,7 @@ export async function initLearning() {
   // repair a cramped layout instead of pinning the same bad coordinates.
   refreshBtn.addEventListener('click', () => loadGraph({ preservePositions: false }));
   fitBtn.addEventListener('click', () => {
-    if (state.network) state.network.fit({ animation: { duration: 300 } });
+    fitGraphToView(state.network, state.nodes, 300);
   });
   logRefreshBtn.addEventListener('click', () => loadLog());
 
@@ -719,9 +719,93 @@ function confirmDelete(id) {
 // simulation that never fires that event — the "nodes jitter while idle" bug.)
 export const GRAPH_LAYOUT_ITERATIONS = 80;
 export const GRAPH_NODE_GAP = 12;
+export const GRAPH_NODE_MIN_SIZE = 10;
+export const GRAPH_NODE_MAX_SIZE = 32;
+// A restrained archipelago palette. The three node colors share comparable
+// lightness and saturation, while their hues map to sea, soil, and foliage.
+export const GRAPH_PALETTE = Object.freeze({
+  ocean: '#6297b2',
+  oceanBorder: '#386e8a',
+  deepOcean: '#427994',
+  earth: '#a98c6a',
+  earthBorder: '#806342',
+  leaf: '#6fa57c',
+  leafBorder: '#447e52',
+  mangrove: '#569580',
+  sand: '#a59b73',
+});
+const GRAPH_NODE_MIN_ZOOM_SCALE = 0.25;
+const GRAPH_NODE_MIN_DETAIL_SCALE = 0.75;
 const GRAPH_PROJECTION_BUFFER = 2;
 export function relayoutGraph(network) {
   if (network) network.stabilize(GRAPH_LAYOUT_ITERATIONS);
+}
+
+// Scale every node against the most-connected node in the current graph.
+// Relations are unique neighbours rather than raw edges: the same two nodes
+// can have several edge types without pretending that they have more reach.
+export function sizeGraphNodesByRelations(nodes, edges) {
+  const nodeIDs = new Set((nodes || []).map((node) => node.id));
+  const neighbours = new Map([...nodeIDs].map((id) => [id, new Set()]));
+  for (const edge of edges || []) {
+    if (!nodeIDs.has(edge.from) || !nodeIDs.has(edge.to) || edge.from === edge.to) continue;
+    neighbours.get(edge.from).add(edge.to);
+    neighbours.get(edge.to).add(edge.from);
+  }
+  const maxRelations = Math.max(0, ...[...neighbours.values()].map((related) => related.size));
+  return (nodes || []).map((node) => {
+    const relationCount = neighbours.get(node.id)?.size || 0;
+    const ratio = maxRelations === 0 ? 0 : relationCount / maxRelations;
+    return {
+      ...node,
+      relationCount,
+      size: Math.round(GRAPH_NODE_MIN_SIZE + ratio * (GRAPH_NODE_MAX_SIZE - GRAPH_NODE_MIN_SIZE)),
+    };
+  });
+}
+
+// Canvas zoom multiplies small radius differences by the viewport scale. At
+// low scales that turns several distinct relation sizes into the same few
+// rasterized pixels. Keep the minimum node on the natural zoom curve, but
+// compensate the relation-driven part so its screen-space difference remains
+// visible. Close zoom (scale >= 1) keeps vis-network's natural sizing.
+export function graphNodeSizeAtScale(baseSize, scale) {
+  if (!Number.isFinite(baseSize) || baseSize <= GRAPH_NODE_MIN_SIZE) return GRAPH_NODE_MIN_SIZE;
+  if (!Number.isFinite(scale) || scale >= 1) return baseSize;
+  const effectiveScale = Math.max(scale, GRAPH_NODE_MIN_ZOOM_SCALE);
+  const detailScale = Math.max(effectiveScale, GRAPH_NODE_MIN_DETAIL_SCALE);
+  return GRAPH_NODE_MIN_SIZE + (baseSize - GRAPH_NODE_MIN_SIZE) * detailScale / effectiveScale;
+}
+
+export function bindGraphZoomSizing(network, nodes) {
+  if (!network || !nodes) return;
+  network.on('zoom', ({ scale }) => syncGraphNodeSizesForScale(nodes, scale));
+}
+
+function syncGraphNodeSizesForScale(nodes, scale) {
+  if (!nodes) return;
+  const updates = nodes.get()
+    .filter((node) => Number.isFinite(node.relationSize))
+    .map((node) => ({
+      id: node.id,
+      size: graphNodeSizeAtScale(node.relationSize, scale),
+    }));
+  if (updates.length > 0) nodes.update(updates);
+}
+
+// vis-network's animated fit does not emit its public zoom event. Reapply
+// the screen-space relation sizing explicitly once the camera settles.
+export function fitGraphToView(network, nodes, duration = 400) {
+  if (!network) return;
+  network.fit({ animation: duration > 0 ? { duration } : false });
+  const sync = () => syncGraphNodeSizesForScale(nodes, network.getScale());
+  if (duration > 0) setTimeout(sync, duration + 20);
+  else sync();
+}
+
+export function graphEdgeWidth(weight) {
+  const normalized = Number.isFinite(weight) ? Math.min(1, Math.max(0, weight)) : 0;
+  return Math.max(0.35, normalized * 1.1);
 }
 
 function graphNodeIsFixed(node) {
@@ -740,6 +824,52 @@ function pairDirection(firstID, secondID) {
   }
   const angle = ((hash >>> 0) / 0xffffffff) * Math.PI * 2;
   return { x: Math.cos(angle), y: Math.sin(angle) };
+}
+
+// Preserve the force layout's angular grouping, then remap distance from the
+// graph center by degree centrality. Hubs move inward; low-degree and isolated
+// nodes move toward the perimeter. Pinned refreshes deliberately skip this
+// pass so background updates never make the established graph jump.
+export function positionGraphByRelations(nodes, positions) {
+  const points = {};
+  for (const [id, point] of Object.entries(positions || {})) {
+    points[id] = { x: point.x, y: point.y };
+  }
+  const active = (nodes || []).filter((node) => points[node.id]);
+  if (active.length < 2 || active.some(graphNodeIsFixed)) return points;
+
+  const center = active.reduce((sum, node) => ({
+    x: sum.x + points[node.id].x / active.length,
+    y: sum.y + points[node.id].y / active.length,
+  }), { x: 0, y: 0 });
+  const maxRelations = Math.max(0, ...active.map((node) => node.relationCount || 0));
+  const maxRadius = Math.max(GRAPH_NODE_GAP * Math.sqrt(active.length), ...active.map((node) => (
+    Math.hypot(points[node.id].x - center.x, points[node.id].y - center.y)
+  )));
+
+  for (const node of active) {
+    const point = points[node.id];
+    let dx = point.x - center.x;
+    let dy = point.y - center.y;
+    let radius = Math.hypot(dx, dy);
+    if (radius < 0.001) {
+      const direction = pairDirection(node.id, 'graph-center');
+      dx = direction.x;
+      dy = direction.y;
+      radius = 1;
+    }
+    const centrality = maxRelations === 0
+      ? 0
+      : Math.sqrt(Math.max(0, node.relationCount || 0) / maxRelations);
+    // Keep centrality as a readable bias, not a set of detached rings. The
+    // outer target stays inside the force layout's natural radius, while a
+    // small amount of the original radius preserves its organic grouping.
+    const targetRadius = maxRadius * (0.58 + 0.32 * (1 - centrality));
+    const adjustedRadius = radius * 0.1 + targetRadius * 0.9;
+    point.x = center.x + dx / radius * adjustedRadius;
+    point.y = center.y + dy / radius * adjustedRadius;
+  }
+  return points;
 }
 
 // Resolve the residual overlaps that a bounded physics run can leave behind.
@@ -838,7 +968,8 @@ export function spaceGraphPositions(nodes, positions, gap = GRAPH_NODE_GAP) {
 export function freezeGraphLayout(network, nodes) {
   if (!network || !nodes) return;
   const records = nodes.get();
-  const positions = spaceGraphPositions(records, network.getPositions());
+  const radialPositions = positionGraphByRelations(records, network.getPositions());
+  const positions = spaceGraphPositions(records, radialPositions);
   network.setOptions({ physics: false });
   for (const [id, point] of Object.entries(positions)) {
     network.moveNode(id, point.x, point.y);
@@ -877,17 +1008,17 @@ function initGraph() {
       borderWidth: 2,
     },
     edges: {
-      width: 1.5,
-      color: { color: '#30363d', highlight: '#58a6ff', hover: '#8b949e' },
+      width: 0.6,
+      color: { color: '#30363d', highlight: '#6ee0c4', hover: '#8b949e' },
       smooth: { type: 'continuous', roundness: 0.5 },
       font: { size: 10, color: '#8b949e', face: 'Inter, system-ui, sans-serif' },
     },
     groups: {
-      skill: { color: { background: '#58a6ff', border: '#1f6feb' }, size: 20 },
-      memory: { color: { background: '#f0883e', border: '#db6d28' }, size: 14 },
+      skill: { color: { background: GRAPH_PALETTE.ocean, border: GRAPH_PALETTE.oceanBorder }, size: 20 },
+      memory: { color: { background: GRAPH_PALETTE.earth, border: GRAPH_PALETTE.earthBorder }, size: 14 },
       // Primary memory is one document (not per-fact), so it gets a
       // distinct shape + color instead of masquerading as a fragment.
-      'memory-primary': { color: { background: '#f85149', border: '#b62324' }, size: 16, shape: 'square' },
+      'memory-primary': { color: { background: GRAPH_PALETTE.leaf, border: GRAPH_PALETTE.leafBorder }, size: 16, shape: 'square' },
     },
     physics: {
       enabled: true,
@@ -918,6 +1049,7 @@ function initGraph() {
     },
   };
   state.network = new Network(container, { nodes: state.nodes, edges: state.edges }, options);
+  bindGraphZoomSizing(state.network, state.nodes);
   // After a layout stabilizes, freeze the graph. Without this the physics
   // engine runs indefinitely (the "constant jitter / noise" bug when
   // loadGraph is re-triggered by WebSocket events like memory.updated or
@@ -944,38 +1076,32 @@ async function loadGraph({ preservePositions = true } = {}) {
     // laid out by the bounded stabilize() below.
     const prevPositions = preservePositions && state.network ? state.network.getPositions() : {};
 
-    // Degree centrality: a node's size grows with how many edges touch
-    // it, so well-connected hubs (frequently-relevant memories, used
-    // skills) read as larger than isolated leaves — a neuron-style map
-    // instead of uniform dots.
-    const degree = new Map();
-    for (const e of edges || []) {
-      degree.set(e.from, (degree.get(e.from) || 0) + 1);
-      degree.set(e.to, (degree.get(e.to) || 0) + 1);
-    }
-    const nodeSize = (kind, deg) => {
-      if (kind === 'skill') return Math.round(14 + Math.sqrt(deg) * 4);
-      if (kind === 'memory-primary') return 16; // document node: fixed
-      return Math.round(10 + Math.sqrt(deg) * 3.5);
-    };
-
-    const newNodes = keepGraphPositions((nodes || []).map((n) => {
+    const newNodes = keepGraphPositions(sizeGraphNodesByRelations(nodes, edges).map((n) => {
       const group = n.kind === 'memory' && n.tier === 'primary' ? 'memory-primary' : n.kind;
+      const relationLabel = `${n.relationCount} relation${n.relationCount === 1 ? '' : 's'}`;
       return {
         id: n.id,
         label: n.name || n.id,
         group,
-        size: nodeSize(group, degree.get(n.id) || 0),
-        title: group === 'memory-primary' ? `Primary memory: ${n.name || n.id}` : (n.name || n.id),
+        size: n.size,
+        relationSize: n.size,
+        relationCount: n.relationCount,
+        title: group === 'memory-primary'
+          ? `Primary memory: ${n.name || n.id} • ${relationLabel}`
+          : `${n.name || n.id} • ${relationLabel}`,
       };
     }), prevPositions);
 
-    const edgeColors = { related: '#1f6feb', used_with: '#6ee0c4', derived_from: '#c1a6ff' };
+    const edgeColors = {
+      related: GRAPH_PALETTE.deepOcean,
+      used_with: GRAPH_PALETTE.mangrove,
+      derived_from: GRAPH_PALETTE.sand,
+    };
     const newEdges = (edges || []).map((e, i) => ({
       id: `edge_${i}`,
       from: e.from,
       to: e.to,
-      width: Math.max(1.5, e.weight * 4),
+      width: graphEdgeWidth(e.weight),
       color: { color: edgeColors[e.type] || '#4b504b', highlight: '#6ee0c4', hover: '#8af0d4' },
       title: `${e.type} (${(e.weight * 100).toFixed(0)}%)`,
     }));
@@ -998,7 +1124,7 @@ async function loadGraph({ preservePositions = true } = {}) {
       relayoutGraph(state.network);
       requestAnimationFrame(() => {
         setTimeout(() => {
-          state.network.fit({ animation: { duration: 400 } });
+          fitGraphToView(state.network, state.nodes, 400);
         }, 50);
       });
     }

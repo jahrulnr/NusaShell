@@ -27,7 +27,7 @@ test('global.css is a primitives layer: no single-view component rules', () => {
 });
 
 test('shell chrome stylesheets do not host other views\u2019 rules', () => {
-  // layout.css owns the app frame (titlebar, sidebar, content); it must not
+  // layout.css owns the app frame (mobile bar, sidebar, content); it must not
   // accumulate per-view sections like the Settings workspace once did.
   const layout = read('layout.css');
   assert.ok(!layout.includes('.settings-'), '.settings-* rules belong in settings.css, not layout.css');
@@ -90,23 +90,52 @@ test('shell chrome and mobile-nav drawer breakpoints live in layout.css', () => 
   assert.match(css, /\.mobile-nav-toggle \{ display: none; \}/, 'mobile-nav toggle base rule belongs in layout.css');
 });
 
+test('desktop shell chrome lives in the sidebar while mobile keeps a navigation bar', () => {
+  const css = read('layout.css');
+  assert.match(css, /\.titlebar \{\s*display: none;/,
+    'desktop should reclaim the empty titlebar row');
+  assert.match(css, /@media \(max-width: 680px\)[\s\S]*?\.titlebar \{[\s\S]*?height: 58px;[\s\S]*?display: flex;/,
+    'mobile titlebar keeps a compact touch-friendly navigation bar');
+  assert.match(css, /\.sidebar-brand \{/, 'sidebar owns the shell identity');
+  assert.match(css, /\.sidebar-actions \{/, 'sidebar owns global utility controls');
+});
+
 test('Agent parity and responsive rules live in agent.css', () => {
   const css = read('agent.css');
-  assert.match(css, /\.agent-tool-terminal-output \{[\s\S]*?max-height: calc\(10 \* 1\.55em\)/, 'agent tool terminal cap belongs in agent.css');
   assert.match(css, /\.agent-subagent-card \{/, 'subagent card belongs in agent.css');
   assert.match(css, /@media \(max-width: 900px\)[\s\S]*?\.agent-conversations \{[\s\S]*?display: none;/, '900px agent conversations hide belongs in agent.css');
 });
 
-test('built-in tool path/result dressing is per-tool, not a shared timeline rule', () => {
-  const sharedPath = read('agent.css').match(/\.agent-tool-event-path \{[^}]+\}/);
-  assert.ok(sharedPath, 'shared path hook still exists for layout');
-  assert.doesNotMatch(sharedPath[0], /max-width:\s*300px/, 'tab max-width must not leak from the shared path class');
-  assert.doesNotMatch(sharedPath[0], /accent-ink/, 'tab background must not leak from the shared path class');
+test('built-in tool cards use the contract boundary for shared dressing and per-tool identity', () => {
+  const agent = read('agent.css');
   const tools = read('agent-tools.css');
-  assert.match(tools, /\.agent-tool-file-read-path \{/, 'file_read owns its path tab');
-  assert.match(tools, /\.agent-tool-grep-path \{/, 'grep owns its path tab');
-  assert.match(tools, /\.agent-tool-exec-path \{/, 'exec owns its path tab');
-  assert.match(tools, /\.agent-tool-todo-path \{/, 'transcript todo owns its path tab');
+  assert.match(tools, /details\.agent-tool-event\[data-tool\] \{/, 'tool event chrome is owned by the tool stylesheet');
+  assert.match(tools, /\.agent-tool-event \.agent-tool-request \{/, 'request styling uses the canonical request hook');
+  assert.match(tools, /\.agent-tool-event \.agent-tool-result \{/, 'result styling uses the canonical result hook');
+  assert.match(tools, /\.agent-tool-card\[data-tool="file_read"\] \{/, 'file_read has an isolated contract accent');
+  assert.match(tools, /\.agent-tool-card\[data-tool="grep"\] \{/, 'grep has an isolated contract accent');
+  assert.match(tools, /\.agent-tool-card\[data-tool="exec"\] \{/, 'exec has an isolated contract accent');
+  assert.match(tools, /\.agent-tool-card\[data-tool="todo"\] \{/, 'todo has an isolated contract accent');
+  const builtinRoster = [
+    'ask_question', 'automation_create', 'automation_disable', 'automation_enable',
+    'automation_list', 'automation_read', 'automation_status', 'automation_validate',
+    'ci_cancel', 'ci_logs', 'ci_run', 'ci_run_status', 'ci_steer', 'ci_wait',
+    'contract_read', 'delegate', 'docs', 'exec', 'file_copy', 'file_delete',
+    'file_info', 'file_list', 'file_mkdir', 'file_move', 'file_patch', 'file_read',
+    'file_write', 'find_file', 'generate_media', 'grep', 'mcp_call', 'mcp_disable',
+    'mcp_enable', 'mcp_install', 'mcp_list', 'mcp_register', 'mcp_search',
+    'mcp_server_add', 'mcp_unregister', 'memory', 'memory_project', 'read_media',
+    'schedule_every', 'schedule_once', 'show', 'skill', 'sleep', 'subagent',
+    'subagent_steer', 'subagent_stop', 'subagent_wait', 'todo', 'tool_list',
+    'tool_schema', 'wait_until', 'web_answer', 'web_fetch', 'web_search',
+  ];
+  for (const name of builtinRoster) {
+    assert.match(tools, new RegExp(`\\.agent-tool-card\\[data-tool="${name}"\\] \\{`),
+      `${name} has an explicit contract accent owner`);
+  }
+  assert.doesNotMatch(agent, /\.agent-tool-terminal \{/, 'obsolete terminal component styles must not compete with agent-tool-event');
+  assert.doesNotMatch(agent, /\.agent-tool-job-card \{/, 'obsolete job card styles must not compete with agent-tool-event');
+  assert.doesNotMatch(tools, /\.agent-tool-file-read-path \{/, 'old per-tool path tabs are removed in favor of the contract boundary');
   const html = readFileSync(join(root, '..', 'index.html'), 'utf8');
   assert.match(html, /styles\/agent-tools\.css/, 'agent-tools.css is loaded after agent.css');
 });

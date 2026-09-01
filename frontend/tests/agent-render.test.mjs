@@ -109,7 +109,10 @@ test('compaction summary renders above retained chronological turns, not after t
   assert.ok(handover, 'handover reuses the Thinking disclosure');
   assert.equal(handover.querySelector('.agent-reasoning-title').textContent, 'Compacted context');
   assert.equal(handover.open, false, 'handover starts collapsed');
-  assert.doesNotMatch(handover.textContent, /Goal: fix ordering/);
+  assert.match(handover.querySelector('.agent-reasoning-preview')?.textContent || '', /Goal: fix ordering/,
+    'collapsed handover exposes a scan-friendly summary');
+  assert.equal(handover.querySelector('.agent-reasoning-content')?.innerHTML, '',
+    'full handover Markdown remains lazy until opened');
   openDetails(handover);
   assert.match(handover.textContent, /Goal: fix ordering/);
   assert.equal(nodes[1].classList.contains('user'), true);
@@ -243,6 +246,11 @@ test('tool job summary includes elapsed span before chevron', () => {
     const job = renderToolJob({ id: 'c1', name: 'exec', args: { command: 'ls' }, status: 'running' });
     const summary = job.querySelector('summary');
     assert.ok(summary.querySelector('.agent-tool-elapsed'), 'elapsed span present');
+    assert.equal(summary.querySelector('.agent-tool-event-head-summary')?.textContent, 'ls',
+      'collapsed state exposes the command instead of a generic running label');
+    assert.equal(summary.querySelector('.agent-tool-event-badge'), null, 'exec is not mislabeled as MCP');
+    const mcp = renderToolJob({ id: 'c2', name: 'mcp_call', args: { ref: 'files:read' }, status: 'running' });
+    assert.equal(mcp.querySelector('.agent-tool-event-badge')?.textContent, 'MCP');
     const chevron = summary.querySelector('.agent-tool-event-chevron');
     assert.ok(chevron, 'chevron span present');
     // The chevron is the last direct child of the head row; elapsed lives in
@@ -277,8 +285,10 @@ test('tool terminals render as compact execution timeline events', () => {
       },
     });
     assert.equal(job.classList.contains('agent-tool-event'), true);
-    assert.equal(job.open, true, 'event results are visible by default');
+    assert.equal(job.open, false, 'settled event results start collapsed');
     assert.equal(job.querySelector('.agent-tool-event-title')?.textContent, 'Files listed');
+    assert.equal(job.querySelector('.agent-tool-event-head-summary')?.textContent, '/workspace/telegram-research',
+      'collapsed state exposes the primary path for scanning');
     assert.equal(job.querySelector('.agent-tool-event-node')?.textContent, '✓');
     assert.equal(job.querySelector('.agent-tool-event-path')?.textContent, '/workspace/telegram-research');
     assert.match(job.querySelector('.agent-tool-event-summary-text')?.textContent || '', /3 entries · 109K/);
@@ -297,6 +307,31 @@ test('tool terminals render as compact execution timeline events', () => {
     const failed = renderToolJob({ name: 'file_list', args: {}, status: 'fail', output: 'permission denied' });
     assert.equal(failed.querySelector('.agent-tool-event-title')?.textContent, 'File listing failed');
     assert.equal(failed.querySelector('.agent-tool-event-node')?.textContent, '!');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('large predictable tool lists stay compact and disclose the hidden count', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const items = Array.from({ length: 8 }, (_, index) => ({ name: `file-${index + 1}.txt`, size: `${index + 1}K` }));
+    const job = renderToolJob({
+      name: 'file_list',
+      args: { path: '/workspace' },
+      status: 'ok',
+      presentation: {
+        variant: 'file-list',
+        action: 'Files listed',
+        result: { format: 'list', summary: '8 entries', items },
+      },
+    });
+    assert.equal(job.querySelectorAll('.agent-tool-terminal-result-item').length, 6,
+      'the collapsed-friendly preview renders only six result rows');
+    assert.match(job.querySelector('.agent-tool-result-more')?.textContent || '', /\+2 more/,
+      'the result tells the user that more rows are available after expanding');
   } finally {
     globalThis.document = previousDocument;
   }
@@ -1012,7 +1047,7 @@ function openDetails(details) {
   details.dispatchEvent(new EventCtor('toggle'));
 }
 
-test('reasoning markdown stays out of the DOM until the disclosure is opened', () => {
+test('reasoning preview stays plain and compact until the disclosure is opened', () => {
   const dom = new JSDOM('<body></body>');
   const previousDocument = globalThis.document;
   globalThis.document = dom.window.document;
@@ -1020,11 +1055,26 @@ test('reasoning markdown stays out of the DOM until the disclosure is opened', (
     const details = reasoningDisclosure('I will inspect **the workspace**.');
     document.body.append(details);
     const content = details.querySelector('.agent-reasoning-content');
+    const preview = details.querySelector('.agent-reasoning-preview');
     assert.equal(details.hidden, false, 'non-empty reasoning is visible as a collapsed row');
+    assert.equal(preview?.textContent, 'I will inspect the workspace.', 'collapsed row exposes a readable one-line preview');
     assert.equal(content.innerHTML, '', 'collapsed reasoning is not markdown-parsed');
-    assert.doesNotMatch(details.textContent, /the workspace/, 'raw reasoning is not in the collapsed DOM');
+    assert.doesNotMatch(details.innerHTML, /<strong>/, 'collapsed preview is not parsed as Markdown');
     openDetails(details);
     assert.match(content.innerHTML, /<strong>the workspace<\/strong>/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('Thinking preview skips a boilerplate continuation prefix when useful text follows', () => {
+  const dom = new JSDOM('<body></body>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const details = reasoningDisclosure('Continue from the current context. Note the count-mode case before testing.');
+    assert.equal(details.querySelector('.agent-reasoning-preview')?.textContent,
+      'Note the count-mode case before testing.');
   } finally {
     globalThis.document = previousDocument;
   }

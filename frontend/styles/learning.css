@@ -296,11 +296,11 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
-.learning-legend-skill { background: #58a6ff; }
-.learning-legend-memory { background: #f0883e; }
-.learning-legend-primary { background: #f85149; }
-.learning-legend-related { background: #1f6feb33; border: 1px solid #1f6feb; }
-.learning-legend-used { background: var(--accent-soft); border: 1px solid var(--accent); }
+.learning-legend-skill { background: #6297b2; }
+.learning-legend-memory { background: #a98c6a; }
+.learning-legend-primary { background: #6fa57c; }
+.learning-legend-related { background: #42799433; border: 1px solid #427994; }
+.learning-legend-used { background: #56958033; border: 1px solid #569580; }
 
 /* Responsive: stack vertically on narrow screens */
 @media (max-width: 900px) {
@@ -732,14 +732,10 @@
   margin: 1rem;
 }
 
-/* Agent-style flow inside the activity panel: the tool cards reuse the
-   Agent view's .agent-tool-terminal component; only layout adjustments are
-   local. */
+/* Agent-style flow inside the activity panel: tool events reuse the Agent
+   view's contract-backed timeline; only layout adjustments are local. */
 .learning-log-activity details.agent-reasoning {
   margin: 10px 10px 0;
-}
-.learning-log-activity .agent-tool-terminal {
-  margin: 6px 10px 0;
 }
 .learning-log-activity .agent-tool-event {
   margin: 6px 10px 0;

@@ -2,33 +2,40 @@
   "views": {
     "navigation": {
       "title": "Navigation and Shell Chrome",
-      "purpose": "Global chrome surrounding every NusaShell view: title bar, sidebar, connection status, and storage indicator.",
+      "purpose": "Global chrome surrounding every NusaShell view: the vertical sidebar owns identity, connection status, utilities, navigation, and storage; a small mobile bar only exposes drawer navigation.",
       "howToOpen": "Always visible when the NusaShell window is open.",
       "chrome": true,
       "sections": [
         {
-          "heading": "Title bar",
+          "heading": "Sidebar identity and utilities",
           "paragraphs": [
-            "Identifies NusaShell with its brand mark and wordmark, followed by compact backend connection status, a mini-window shortcut, an install shortcut (visible only while the browser offers installation), and a settings shortcut."
+            "The vertical sidebar identifies NusaShell with its brand mark and wordmark, shows compact backend connection status, and keeps settings plus the install shortcut (visible only while the browser offers installation) with the navigation."
           ],
           "controls": [
             "conn-status",
             "conn-fill",
-            "mini-window-btn",
             "pwa-install-btn",
             "nav-settings-btn"
           ]
         },
         {
+          "heading": "Mobile navigation bar",
+          "paragraphs": [
+            "Desktop has no separate titlebar. Below 680px, a compact bar remains only as the reliable home for the drawer toggle while the sidebar itself is off-canvas."
+          ],
+          "controls": [
+            "mobile-nav-toggle"
+          ]
+        },
+        {
           "heading": "Sidebar",
           "paragraphs": [
-            "Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Automation, Plugins, Providers, and Logs. It can show icons with labels or icons only, and remembers that choice locally. Below 680px viewport width the sidebar becomes a bounded, vertically scrollable off-canvas drawer: the title-bar hamburger toggles it open, and it closes on backdrop click, Escape, or selecting a nav item. While closed, the drawer is hidden from keyboard and assistive-technology navigation; focus returns to the hamburger after dismissal.",
+            "Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Automation, Plugins, Providers, Logs, and Telemetry. It can show icons with labels or icons only, and remembers that choice locally. Below 680px viewport width the sidebar becomes a bounded, vertically scrollable off-canvas drawer: the mobile navigation bar hamburger toggles it open, and it closes on backdrop click, Escape, or selecting a nav item. While closed, the drawer is hidden from keyboard and assistive-technology navigation; focus returns to the hamburger after dismissal.",
             "Keyboard: Ctrl/Cmd+K or / focuses the search box on the current view. Escape dismisses dialogs, toasts stay on hover, and Ctrl/Cmd+N starts a new agent conversation when the Agent view is open."
           ],
           "controls": [
             "sidebar",
-            "sidebar-mode-toggle",
-            "mobile-nav-toggle"
+            "sidebar-mode-toggle"
           ]
         },
         {
@@ -430,7 +437,7 @@
         {
           "heading": "Knowledge graph",
           "paragraphs": [
-            "Force-directed graph (vis-network) of skills, memory entries, and their edges. Related edges are rebuilt from content similarity plus specific fragment metadata (project, task, and non-ubiquitous tags); stale edges to deleted nodes are removed. Used-with edges connect learning nodes observed together during one successful agent/review turn. After its bounded physics pass, the graph resolves residual collisions so node circles retain a visible gap before the layout freezes. Reload fetches the graph and performs a full relayout; Fit fits it to view. Legend distinguishes Skill, Memory, Related, and Used-with edges. The graph refreshes automatically when memory or skills change or a review finishes (via `memory.updated` / `skill.updated` / `learning.review.done` events, coalesced with a 300ms debounce); automatic refreshes keep existing node positions and lay out only additions, so the graph stays still while idle. On narrow screens results and graph stack into separate bounded panes with their own scrollable result list."
+            "Force-directed graph (vis-network) of skills, memory entries, and their edges. Related edges are rebuilt from content similarity plus specific fragment metadata (project, task, and non-ubiquitous tags); stale edges to deleted nodes are removed. Used-with edges connect learning nodes observed together during one successful agent/review turn. Dense edge lines stay thin. Node size scales with the number of unique neighbouring nodes, making the most-connected hubs largest; hover text includes the relation count. Zooming out preserves most of that size contrast so nearby relation counts remain visually distinct instead of collapsing to the same rasterized radius. After its bounded physics pass, a full layout keeps the force-directed angular grouping but places highly connected hubs toward the center and low-degree or isolated nodes toward a compact perimeter ring without detaching them from the main cluster, then resolves residual collisions before freezing. The restrained archipelago palette maps skills to ocean blue, fragments to earth brown, primary memory to leaf green, and edges to deeper ocean, mangrove, or sand tones. Reload fetches the graph and performs this full relayout; Fit fits it to view. Legend distinguishes Skill, Memory, Related, and Used-with edges. The graph refreshes automatically when memory or skills change or a review finishes (via `memory.updated` / `skill.updated` / `learning.review.done` events, coalesced with a 300ms debounce); automatic refreshes keep existing node positions and lay out only additions, so the graph stays still while idle. On narrow screens results and graph stack into separate bounded panes with their own scrollable result list."
           ],
           "controls": [
             "learning-graph",
@@ -539,7 +546,7 @@
     "settings": {
       "title": "Settings",
       "purpose": "Control how this local NusaShell instance runs agent turns, manages context, stores memory, picks models, and presents the workspace. Cards are grouped by boundary: Agent, Context, Memory & search, Media understanding, Media generation, Web, and Workspace. Browser-only preferences stay in local storage; the rest save with the instance.",
-      "howToOpen": "Click the settings icon in the title bar, or press the Settings shortcut.",
+      "howToOpen": "Click Settings in the sidebar, or press the Settings shortcut.",
       "sections": [
         {
           "heading": "Header",
@@ -909,19 +916,19 @@
   "controls": {
     "conn-status": {
       "label": "Connection status text",
-      "section": "Title bar",
+      "section": "Sidebar",
       "type": "text",
       "notes": "Reflects backend WebSocket/RPC reachability."
     },
     "conn-fill": {
       "label": "Connection orb",
-      "section": "Title bar",
+      "section": "Sidebar",
       "type": "indicator",
       "notes": "Color-coded connection state."
     },
     "nav-settings-btn": {
       "label": "Settings shortcut",
-      "section": "Title bar",
+      "section": "Sidebar",
       "type": "button",
       "action": "Opens the Settings view."
     },
@@ -936,6 +943,12 @@
       "section": "Sidebar",
       "type": "button",
       "action": "Toggles icon-only sidebar mode (persisted locally)."
+    },
+    "mobile-nav-toggle": {
+      "label": "Open navigation menu",
+      "section": "Mobile navigation bar",
+      "type": "button",
+      "action": "Opens or closes the off-canvas navigation drawer below 680px."
     },
     "search-input": {
       "label": "App search",
@@ -2168,13 +2181,13 @@
     },
     "mini-window-btn": {
       "label": "Mini window",
-      "section": "Navigation",
+      "section": "Agent",
       "type": "button",
-      "notes": "Opens the picture-in-picture mini window (Document PiP on Chromium, popup fallback elsewhere) showing the live agent thread."
+      "notes": "Opens the picture-in-picture mini window (Document PiP on Chromium, popup fallback elsewhere) showing the live agent thread. Appears beside Room info for an active conversation."
     },
     "pwa-install-btn": {
       "label": "Install NusaShell",
-      "section": "Navigation",
+      "section": "Sidebar",
       "type": "button",
       "notes": "Visible only while the browser offers installation (beforeinstallprompt); triggers the native install flow and hides after install/dismissal."
     },

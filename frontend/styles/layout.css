@@ -1,4 +1,4 @@
-/* App shell layout: titlebar, sidebar, content frame, and the shell
+/* App shell layout: mobile shell bar, sidebar, content frame, and the shell
  * breakpoints / mobile-nav drawer.
  *
  * Layer: shell — chrome that wraps every view. Hosts no per-view rules;
@@ -38,40 +38,30 @@ body {
     var(--ink);
 }
 
-/* ============ Title bar ============ */
+/* ============ Mobile shell bar ============ */
 .titlebar {
-  height: 68px;
-  min-height: 68px;
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 0 var(--space-5) 0 var(--space-6);
-  border-bottom: 1px solid var(--border);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, .03), transparent 72%),
-    var(--panel);
-  box-shadow: inset 0 -3px var(--ink);
+  display: none;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: 9px;
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 20px;
+  font-size: 17px;
   letter-spacing: -.025em;
   white-space: nowrap;
 }
 
 .brand-logo {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   place-items: center;
   filter: none;
 }
-.brand-logo img { display: block; width: 30px; height: 30px; }
+.brand-logo img { display: block; width: 26px; height: 26px; }
 
 .titlebar-actions {
   display: flex;
@@ -83,10 +73,10 @@ body {
 .connection-state {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  margin-left: var(--space-3);
+  gap: 5px;
+  margin-left: 5px;
   color: var(--accent);
-  font: 500 12px var(--font-mono);
+  font: 500 10px var(--font-mono);
   letter-spacing: -.02em;
 }
 .connection-orb {
@@ -132,6 +122,64 @@ body {
     inset 0 0 0 3px var(--harbor),
     inset 0 1px rgba(255, 255, 255, .035);
   transition: width .18s ease, min-width .18s ease, padding .18s ease;
+}
+
+.sidebar-brand {
+  min-width: 0;
+  margin: 0 2px 12px;
+  padding: 2px 3px 13px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.sidebar-brand .brand {
+  min-width: 0;
+  width: 100%;
+}
+.sidebar-brand .brand-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar-brand .connection-state {
+  margin-left: auto;
+  flex: none;
+}
+
+.sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+.sidebar-action {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font: 500 12px var(--font-mono);
+  text-align: left;
+}
+.sidebar-action svg { flex: none; }
+.sidebar-action:hover,
+.sidebar-action:focus-visible {
+  border-color: var(--border-soft);
+  background: rgba(255, 255, 255, .025);
+  color: var(--text);
+  outline: none;
+}
+
+.mobile-shell-label {
+  display: none;
+  color: var(--text);
+  font: 600 15px var(--font-display);
+  letter-spacing: -.02em;
 }
 
 /* Instrument-frame registration dots shared by sidebar + content. */
@@ -250,6 +298,21 @@ body {
 }
 .sidebar.is-compact { width: 72px; min-width: 72px; padding-inline: 9px; }
 .sidebar.is-compact .nav-label { display: none; }
+.sidebar.is-compact .sidebar-brand {
+  display: flex;
+  justify-content: center;
+  margin-inline: 0;
+  padding-inline: 0;
+}
+.sidebar.is-compact .sidebar-brand .brand { width: auto; }
+.sidebar.is-compact .sidebar-brand .brand-name,
+.sidebar.is-compact .sidebar-brand .connection-state { display: none; }
+.sidebar.is-compact .sidebar-actions { align-items: center; }
+.sidebar.is-compact .sidebar-action {
+  justify-content: center;
+  width: 50px;
+  padding-inline: 0;
+}
 .sidebar.is-compact .nav-item,
 .sidebar.is-compact .sidebar-mode-toggle {
   justify-content: center;
@@ -379,7 +442,7 @@ body.mini-mode .agent-conversations { display: none; }
 
 /* ============ Shell breakpoints ============ */
 /* Shell-wide media queries. Per-view breakpoints (the elements a view
- * owns) live in that view's stylesheet; only the sidebar/titlebar/window
+ * owns) live in that view's stylesheet; only the sidebar/mobile-bar/window
  * frame adjustments live here. */
 
 @media (max-width: 1100px) {
@@ -390,19 +453,21 @@ body.mini-mode .agent-conversations { display: none; }
   .brand { font-size: 17px; }
   .connection-state { font-size: 10px; }
   .sidebar { width: 68px; min-width: 68px; padding-inline: 8px; }
+  .sidebar-brand { margin-inline: 0; padding-inline: 0; }
+  .sidebar-brand .brand { justify-content: center; }
+  .sidebar-brand .brand-name,
+  .sidebar-brand .connection-state { display: none; }
+  .sidebar-actions { align-items: center; }
   .sidebar .nav-label,
   .sidebar .storage { display: none; }
   .sidebar .nav-item,
+  .sidebar .sidebar-action,
   .sidebar .sidebar-mode-toggle { justify-content: center; width: 50px; padding-inline: 0; }
 }
 
 @media (max-width: 760px) {
   body { padding: 0; }
   .window { border: 0; border-radius: 0; }
-  .titlebar { min-height: 58px; height: 58px; padding-inline: var(--space-3); }
-  .brand-logo,
-  .brand-logo img { width: 26px; height: 26px; }
-  .connection-state span:last-child { display: none; }
   .body { gap: 0; padding: 0; }
   .sidebar { display: none; }
   .content { border: 0; border-radius: 0; box-shadow: none; }
@@ -421,7 +486,7 @@ body.mini-mode .agent-conversations { display: none; }
 }
 
 /* ============ Mobile navigation drawer (<=680px) ============ */
-/* The hamburger lives in the title bar and stays hidden on wide screens
+/* The hamburger lives in the mobile shell bar and stays hidden on wide screens
  * where the sidebar is always visible. Below 680px the sidebar leaves
  * normal flow and slides in over the content when js/mobile-nav.js sets
  * .body.is-nav-open. Drawer rules are scoped under .window (higher
@@ -430,8 +495,24 @@ body.mini-mode .agent-conversations { display: none; }
 .mobile-nav-toggle { display: none; }
 
 @media (max-width: 680px) {
-  .mobile-nav-toggle { display: inline-flex; }
-  .titlebar { padding-inline: 13px; }
+  .mobile-nav-toggle {
+    display: inline-flex;
+    position: relative;
+    z-index: 80;
+  }
+  .titlebar {
+    min-height: 58px;
+    height: 58px;
+    display: flex;
+    align-items: center;
+    padding-inline: 13px;
+    border-bottom: 1px solid var(--border);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, .03), transparent 72%),
+      var(--panel);
+    box-shadow: inset 0 -3px var(--ink);
+  }
+  .titlebar-actions { margin-left: auto; }
   .content { overflow-y: auto; }
   .window .sidebar {
     display: flex;
@@ -456,7 +537,14 @@ body.mini-mode .agent-conversations { display: none; }
   .window .sidebar.is-compact { width: min(78vw, 264px); }
   .window .sidebar .nav-label { display: inline; }
   .window .sidebar .storage { display: block; }
+  .window .sidebar .brand-name { display: inline; }
+  .window .sidebar .connection-state { display: inline-flex; }
+  .window .sidebar.is-compact .sidebar-brand .brand { width: 100%; justify-content: flex-start; }
+  .window .sidebar.is-compact .sidebar-brand .brand-name { display: inline; }
+  .window .sidebar.is-compact .sidebar-brand .connection-state { display: inline-flex; }
+  .window .sidebar .sidebar-actions { align-items: stretch; }
   .window .sidebar .nav-item,
+  .window .sidebar .sidebar-action,
   .window .sidebar .sidebar-mode-toggle {
     justify-content: flex-start;
     width: 100%;
@@ -482,6 +570,6 @@ body.mini-mode .agent-conversations { display: none; }
 }
 
 @media (max-width: 480px) {
-  .brand { font-size: 13px; }
+  .mobile-shell-label { font-size: 13px; }
   .connection-state { margin-left: 2px; }
 }
