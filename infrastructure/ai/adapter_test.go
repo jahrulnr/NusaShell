@@ -375,7 +375,8 @@ func TestAdapterListModelEndpoints(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":{"endpoints":[
 			{"provider_name":"StreamLake","tag":"streamlake","quantization":"unknown","status":0,"latency_last_30m":1.25,"throughput_last_30m":50},
-			{"provider_name":"DeepInfra","tag":"deepinfra/fp4","quantization":"fp4","status":-2,"latency_last_30m":null,"throughput_last_30m":null}
+			{"provider_name":"DeepInfra","tag":"deepinfra/fp4","quantization":"fp4","status":-2,"latency_last_30m":{"p50":787,"p75":1292.25,"p90":2382.9,"p99":7492.53},"throughput_last_30m":{"p50":118,"p75":148,"p90":177,"p99":232}},
+			{"provider_name":"NoData","tag":"nodata","status":0,"latency_last_30m":null,"throughput_last_30m":null}
 		]}}`))
 	}))
 	defer srv.Close()
@@ -395,7 +396,7 @@ func TestAdapterListModelEndpoints(t *testing.T) {
 	if gotPath != "/models/deepseek/deepseek-chat-v3/endpoints" {
 		t.Fatalf("request path = %q, want /models/deepseek/deepseek-chat-v3/endpoints", gotPath)
 	}
-	if len(routes) != 2 {
+	if len(routes) != 3 {
 		t.Fatalf("routes = %+v", routes)
 	}
 	if routes[0].Slug != "streamlake" || routes[0].Name != "StreamLake" || routes[0].Status != 0 {
@@ -404,8 +405,15 @@ func TestAdapterListModelEndpoints(t *testing.T) {
 	if routes[0].Latency == nil || *routes[0].Latency != 1.25 || routes[0].Throughput == nil || *routes[0].Throughput != 50 {
 		t.Fatalf("route[0] metrics = %+v", routes[0])
 	}
-	if routes[1].Slug != "deepinfra/fp4" || routes[1].Quantization != "fp4" || routes[1].Latency != nil {
+	// Percentile object → representative p50 value (latency ms, throughput tok/s).
+	if routes[1].Slug != "deepinfra/fp4" || routes[1].Quantization != "fp4" {
 		t.Fatalf("route[1] = %+v", routes[1])
+	}
+	if routes[1].Latency == nil || *routes[1].Latency != 787 || routes[1].Throughput == nil || *routes[1].Throughput != 118 {
+		t.Fatalf("route[1] percentile metrics = %+v (latency=%v throughput=%v)", routes[1], routes[1].Latency, routes[1].Throughput)
+	}
+	if routes[2].Latency != nil || routes[2].Throughput != nil {
+		t.Fatalf("route[2] null metrics = %+v, want nil", routes[2])
 	}
 
 	// Non-OpenRouter adapters report no routes without hitting the network.

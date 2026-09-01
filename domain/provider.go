@@ -244,8 +244,8 @@ type ModelRoute struct {
 	Name         string   // human-readable upstream name (e.g. "DeepInfra")
 	Quantization string   // fp4/fp8/int4/int8/bf16/...; "" or "unknown" when not reported
 	Status       int      // upstream status code; semantics vary by gateway (0 = reported OK)
-	Latency      *float64 // seconds, rolling 30m; nil when unknown
-	Throughput   *float64 // tokens/sec, rolling 30m; nil when unknown
+	Latency      *float64 // milliseconds, rolling 30m p50; nil when unknown
+	Throughput   *float64 // tokens/sec, rolling 30m p50; nil when unknown
 }
 
 type Provider struct {

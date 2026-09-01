@@ -360,7 +360,10 @@ the gateway (Auto).
   `{routes:[{slug,name,quantization,status,latency,throughput}], cached,
   fetched_at}`. Routes are cached on disk under the data dir
   (`endpoints_cache.json`, TTL 24h), keyed per provider+model because each
-  gateway serves models with its own upstream set.
+  gateway serves models with its own upstream set. `latency` is the rolling
+  30m **p50 in milliseconds** and `throughput` the p50 tokens/sec (the
+  gateway serves these as percentile objects `{"p50":...}` when
+  authenticated, or plain numbers/null; the parser accepts both shapes).
 - **Direct providers** (Anthropic, OpenAI, local chat) have no route
   concept: the handler returns an empty list without fetching, and the
   frontend shows a non-interactive home icon next to the model picker.

@@ -27,9 +27,9 @@ function positionMenu(menu, trigger) {
     : rect.bottom + 6}px`;
 }
 
-function formatLatency(seconds) {
-  if (seconds == null) return null;
-  return `${Math.round(seconds * 1000)}ms`;
+function formatLatency(ms) {
+  if (ms == null) return null;
+  return `${Math.round(ms)}ms`;
 }
 
 function formatThroughput(tokensPerSec) {

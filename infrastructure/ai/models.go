@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
@@ -80,12 +81,12 @@ func listOpenRouterEndpoints(ctx context.Context, baseURL string, headers map[st
 	var out struct {
 		Data struct {
 			Endpoints []struct {
-				ProviderName string   `json:"provider_name"`
-				Tag          string   `json:"tag"`
-				Quantization string   `json:"quantization"`
-				Status       int      `json:"status"`
-				Latency      *float64 `json:"latency_last_30m"`
-				Throughput   *float64 `json:"throughput_last_30m"`
+				ProviderName string          `json:"provider_name"`
+				Tag          string          `json:"tag"`
+				Quantization string          `json:"quantization"`
+				Status       int             `json:"status"`
+				Latency      json.RawMessage `json:"latency_last_30m"`
+				Throughput   json.RawMessage `json:"throughput_last_30m"`
 			} `json:"endpoints"`
 		} `json:"data"`
 	}
@@ -106,11 +107,33 @@ func listOpenRouterEndpoints(ctx context.Context, baseURL string, headers map[st
 			Name:         e.ProviderName,
 			Quantization: e.Quantization,
 			Status:       e.Status,
-			Latency:      e.Latency,
-			Throughput:   e.Throughput,
+			Latency:      parseRouteMetric(e.Latency),
+			Throughput:   parseRouteMetric(e.Throughput),
 		})
 	}
 	return routes, nil
+}
+
+// parseRouteMetric decodes a rolling-metric field that OpenRouter serves
+// in two shapes: a bare number, or an object of percentiles like
+// {"p50": 787, "p75": 1292, "p90": 2382, "p99": 7492}. We take the p50
+// (median) as the representative value. null/absent → nil. Latency is
+// milliseconds, throughput tokens/sec.
+func parseRouteMetric(raw json.RawMessage) *float64 {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var num float64
+	if err := json.Unmarshal(raw, &num); err == nil {
+		return &num
+	}
+	var obj struct {
+		P50 float64 `json:"p50"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		return &obj.P50
+	}
+	return nil
 }
 
 // routeSlugFallback derives a routing slug from a provider display name
