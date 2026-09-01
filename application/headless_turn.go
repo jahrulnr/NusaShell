@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"nusashell/domain"
+	"nusashell/pkg/text"
 	clock "nusashell/pkg/time"
 )
 
@@ -28,7 +29,7 @@ func (a *App) runHeadlessTurnKind(ctx context.Context, prompt, model string, tru
 		return nil, "", err
 	}
 
-	repo := NewConversation(a.Conversations, "[pipeline] "+truncate(prompt, 60))
+	repo := NewConversation(a.Conversations, "[pipeline] "+text.Truncate(prompt, 60))
 	conv := repo.Conversation()
 	conv.Origin = domain.ConversationOriginPipeline
 	conv.Model = provider.ID + ":" + bareModel
@@ -138,11 +139,4 @@ func (a *App) resolveHeadlessModel(modelID string) (*domain.Provider, string, st
 		return p, m.ID, key, nil
 	}
 	return nil, "", "", fmt.Errorf("no enabled provider with a model is available for headless agent steps")
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }

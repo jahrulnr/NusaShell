@@ -8,6 +8,7 @@ import (
 
 	"nusashell/application/service/tooloutput"
 	"nusashell/domain"
+	"nusashell/pkg/text"
 	"nusashell/resources"
 )
 
@@ -368,26 +369,14 @@ func capCompactionToolCalls(calls []domain.ToolCall, capChars int) []domain.Tool
 	out := make([]domain.ToolCall, 0, len(calls))
 	for _, tc := range calls {
 		if len(tc.Args) > capChars {
-			tc.Args = truncateCompactionText(tc.Args, capChars)
+			tc.Args = text.TruncateRunes(tc.Args, capChars)
 		}
 		if len(tc.Output) > capChars {
-			tc.Output = truncateCompactionText(tc.Output, capChars)
+			tc.Output = text.TruncateRunes(tc.Output, capChars)
 		}
 		out = append(out, tc)
 	}
 	return out
-}
-
-// truncateCompactionText keeps the first n runes of s and appends an
-// omission marker with the number of characters dropped, so the summary
-// model can tell the payload was cut.
-func truncateCompactionText(s string, n int) string {
-	omitted := len(s) - n
-	head := []rune(s)
-	if len(head) > n {
-		head = head[:n]
-	}
-	return string(head) + fmt.Sprintf("\n\n[truncated: %d chars omitted]", omitted)
 }
 
 // compactionPassAvailable is the per-pass token budget for message content.

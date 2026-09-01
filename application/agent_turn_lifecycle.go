@@ -3,6 +3,7 @@ package application
 import (
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/pkg/text"
 )
 
 func (a *App) updateMessage(c *domain.Conversation, msgID string, fn func(*domain.Message)) {
@@ -109,7 +110,7 @@ func (a *App) interruptTurn(run *TurnRun, msgID string, round streamedTurnRound,
 	if repo, e := a.loadRepo(run.ConversationID); e == nil {
 		c := repo.Conversation()
 		a.updateMessage(c, msgID, func(m *domain.Message) {
-			if visibleText(m.Content) == "" && visibleText(m.Reasoning) == "" && len(m.Steps) == 0 {
+			if text.Visible(m.Content) == "" && text.Visible(m.Reasoning) == "" && len(m.Steps) == 0 {
 				applyStreamRound(m, model, round)
 			} else if model != "" {
 				m.Model = model

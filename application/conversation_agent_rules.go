@@ -5,6 +5,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/pkg/text"
 )
 
 // conversationRules is the AgentConversation rule set: the richest agent.
@@ -140,7 +141,7 @@ func (p *conversationRules) rules() AgentRules {
 			// drops the UpstreamError type the overflow/TPM classifiers need.
 			rawStreamErr := err
 			err = p.a.decorateRateLimitError(p.provider.ID, err)
-			if !p.continuedPartialStream && isRetryableProviderError(err) && len(p.lastRound.Response.ToolCalls) == 0 && (visibleText(p.lastRound.Content) != "" || visibleText(p.lastRound.Reasoning) != "") {
+			if !p.continuedPartialStream && isRetryableProviderError(err) && len(p.lastRound.Response.ToolCalls) == 0 && (text.Visible(p.lastRound.Content) != "" || text.Visible(p.lastRound.Reasoning) != "") {
 				// A partial stream must never carry an unconfirmed tool call
 				// into the next continuation request.
 				p.lastRound.Response.ToolCalls = nil

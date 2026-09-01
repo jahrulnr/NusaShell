@@ -14,9 +14,8 @@
 package jsonstore
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"nusashell/pkg/hash"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,7 +92,7 @@ func (c *EmbeddingCache) load() error {
 
 // Get returns the cached vector for (modelID, text), or nil if not cached.
 func (c *EmbeddingCache) Get(modelID, text string) ([]float32, bool) {
-	h := hashText(text)
+	h := hash.Text(normalizeText(text))
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if e, ok := c.entries[cacheKey(modelID, h)]; ok {
@@ -104,7 +103,7 @@ func (c *EmbeddingCache) Get(modelID, text string) ([]float32, bool) {
 
 // Put stores a vector for (modelID, text) and appends to the JSONL file.
 func (c *EmbeddingCache) Put(modelID, text string, vector []float32) error {
-	h := hashText(text)
+	h := hash.Text(normalizeText(text))
 	entry := &EmbeddingCacheEntry{
 		ModelID: modelID,
 		Hash:    h,
@@ -187,12 +186,10 @@ func (c *EmbeddingCache) Close() error {
 	return nil
 }
 
-// hashText returns the SHA-256 hex digest of the normalized text.
-// Normalization: trim + collapse whitespace + lowercase. This ensures
-// that "Hello  World" and "hello world" share the same cache entry.
-func hashText(text string) string {
+// normalizeText normalizes text for embedding cache keys: trim + collapse
+// whitespace + lowercase. This ensures that "Hello  World" and "hello world"
+// share the same cache entry.
+func normalizeText(text string) string {
 	normalized := strings.ToLower(strings.TrimSpace(text))
-	normalized = strings.Join(strings.Fields(normalized), " ")
-	h := sha256.Sum256([]byte(normalized))
-	return hex.EncodeToString(h[:])
+	return strings.Join(strings.Fields(normalized), " ")
 }

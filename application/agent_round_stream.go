@@ -9,6 +9,7 @@ import (
 	"nusashell/application/service/learnedparams"
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/pkg/text"
 )
 
 const defaultMaxParallelTools = domain.DefaultMaxParallelTools
@@ -65,7 +66,7 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, promptCache *PromptCachePolicy, caps ModelCapabilities, round int) (streamedTurnRound, error) {
 	for retry := 1; ; retry++ {
 		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, promptCache, caps, round)
-		if err == nil || retry >= maxProviderAttempts || visibleText(roundResult.Content) != "" || visibleText(roundResult.Reasoning) != "" {
+		if err == nil || retry >= maxProviderAttempts || text.Visible(roundResult.Content) != "" || text.Visible(roundResult.Reasoning) != "" {
 			return roundResult, err
 		}
 		adapted := a.learnFromStreamError(run, model, err, &caps)

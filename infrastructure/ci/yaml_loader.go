@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"nusashell/domain"
+	"nusashell/pkg/duration"
 
 	"gopkg.in/yaml.v3"
 )
@@ -40,7 +41,7 @@ func ParseYAML(raw []byte) (*domain.WorkflowDefinition, error) {
 		w.Defaults.Shell = doc.Defaults.Shell
 	}
 	if doc.Defaults.Timeout != "" {
-		d, err := parseDuration(doc.Defaults.Timeout)
+		d, err := duration.Parse(doc.Defaults.Timeout)
 		if err != nil {
 			return nil, fmt.Errorf("defaults.timeout: %w", err)
 		}
@@ -231,7 +232,7 @@ func parseTrigger(t yamlTrigger, i int) (domain.Trigger, error) {
 			return domain.Trigger{}, fmt.Errorf("triggers[%d].every: cron and interval are distinct; specify one", i)
 		}
 		if t.Every.Interval != "" {
-			d, err := parseDuration(t.Every.Interval)
+			d, err := duration.Parse(t.Every.Interval)
 			if err != nil {
 				return domain.Trigger{}, fmt.Errorf("triggers[%d].every.interval: %w", i, err)
 			}
@@ -252,7 +253,7 @@ func parseTrigger(t yamlTrigger, i int) (domain.Trigger, error) {
 		var d time.Duration
 		if debounce != "" {
 			var err error
-			d, err = parseDuration(debounce)
+			d, err = duration.Parse(debounce)
 			if err != nil {
 				return domain.Trigger{}, fmt.Errorf("triggers[%d].debounce: %w", i, err)
 			}
@@ -282,7 +283,7 @@ func parseJob(id string, j yamlJob) (domain.Job, error) {
 		job.Name = id
 	}
 	if j.Timeout != "" {
-		d, err := parseDuration(j.Timeout)
+		d, err := duration.Parse(j.Timeout)
 		if err != nil {
 			return job, fmt.Errorf("jobs.%s.timeout: %w", id, err)
 		}
@@ -296,7 +297,7 @@ func parseJob(id string, j yamlJob) (domain.Job, error) {
 	if len(j.Artifacts.Paths) > 0 {
 		job.Artifacts.Paths = j.Artifacts.Paths
 		if j.Artifacts.Retention != "" {
-			d, err := parseDuration(j.Artifacts.Retention)
+			d, err := duration.Parse(j.Artifacts.Retention)
 			if err != nil {
 				return job, fmt.Errorf("jobs.%s.artifacts.retention: %w", id, err)
 			}
@@ -337,29 +338,13 @@ func parseStep(s yamlStep) (domain.Step, error) {
 		step.Agent = &domain.AgentStep{Prompt: s.Agent.Prompt, OutputSchema: s.Agent.OutputSchema, Model: s.Agent.Model}
 	}
 	if s.Timeout != "" {
-		d, err := parseDuration(s.Timeout)
+		d, err := duration.Parse(s.Timeout)
 		if err != nil {
 			return step, err
 		}
 		step.Timeout = d
 	}
 	return step, nil
-}
-
-func parseDuration(s string) (time.Duration, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, nil
-	}
-	if strings.HasSuffix(s, "d") {
-		n := strings.TrimSuffix(s, "d")
-		hours, err := time.ParseDuration(n + "h")
-		if err != nil {
-			return 0, err
-		}
-		return hours * 24, nil
-	}
-	return time.ParseDuration(s)
 }
 
 func parseTime(s string) (time.Time, error) {

@@ -9,6 +9,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	"nusashell/pkg/hash"
 	clock "nusashell/pkg/time"
 )
 
@@ -121,7 +122,7 @@ func (j *Journal) snapPath(path string) fileSnap {
 		return fileSnap{exists: true, hash: entry.hash, size: size}
 	}
 
-	h, sz, err := hashFile(path)
+	h, sz, err := hash.File(path)
 	if err != nil {
 		return fileSnap{exists: true, size: info.Size()}
 	}

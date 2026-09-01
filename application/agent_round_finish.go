@@ -2,13 +2,11 @@ package application
 
 import (
 	"context"
-	"strconv"
-	"strings"
-	"unicode"
 
 	"nusashell/application/service/toolpresentation"
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/pkg/text"
 	clock "nusashell/pkg/time"
 )
 
@@ -62,7 +60,7 @@ func applyStreamRound(message *domain.Message, model string, round streamedTurnR
 		message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepReasoning, Content: round.Reasoning})
 		message.Reasoning = round.Reasoning
 	}
-	if content := persistableText(round.Content); content != "" {
+	if content := text.Persistable(round.Content); content != "" {
 		message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepText, Content: content})
 		message.Content = content
 	}
@@ -83,27 +81,6 @@ func (a *App) publishRoundToolStart(runID, messageID string, round int, toolCall
 	if a.RoundStreams != nil {
 		a.RoundStreams.PublishWithArgsAndPresentation(runID, messageID, round, contracts.RoundDeltaTool, toolCallID, name, "", toolpresentation.ToolArgsRaw(args), presentation)
 	}
-}
-
-// visibleText is the assistant text worth persisting or sending. Models such
-// as Qwen3.8 emit a blank paragraph ("\n\n") as the first/last content tokens
-// after thinking; storing that makes empty rounds look like real turns.
-func visibleText(s string) string {
-	return strings.TrimSpace(s)
-}
-
-// persistableText is the content stored for a streamed round. Whitespace-only
-// rounds are dropped entirely (visibleText's job), but real content keeps its
-// trailing space: a stream cut mid-sentence ends on a word boundary that the
-// continuation round needs so the two halves do not run together
-// ("here.And"). Leading whitespace (including blank paragraphs) carries no
-// meaning and is trimmed; on the trailing side only newlines are stripped.
-func persistableText(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return ""
-	}
-	left := strings.TrimLeftFunc(s, unicode.IsSpace)
-	return strings.TrimRight(left, "\r\n")
 }
 
 // toolExecResult is one tool's outcome from the concurrent execution phase,
@@ -309,9 +286,5 @@ func (a *App) flushLearningReview(conversationID string, reason string) {
 const maxToolErrorLen = 2000
 
 func truncateToolError(msg string) string {
-	if len(msg) <= maxToolErrorLen {
-		return msg
-	}
-	return msg[:maxToolErrorLen] + "...[truncated: original error was " +
-		strconv.Itoa(len(msg)) + " chars]"
+	return text.TruncateWithNote(msg, maxToolErrorLen)
 }

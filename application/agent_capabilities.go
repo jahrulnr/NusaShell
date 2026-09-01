@@ -9,6 +9,7 @@ import (
 	"nusashell/application/service/modeloverrides"
 	"nusashell/application/service/tooloutput"
 	"nusashell/domain"
+	"nusashell/pkg/text"
 )
 
 type ModelCapabilities struct {
@@ -174,7 +175,7 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 			}
 			out = append(out, ChatMessage{Role: "user", Content: content, Attachments: attachments})
 		case domain.RoleAssistant:
-			content := visibleText(m.Content)
+			content := text.Visible(m.Content)
 			if m.ID == pendingMsgID && content == "" && m.Reasoning == "" && len(m.ToolCalls) == 0 {
 				continue
 			}

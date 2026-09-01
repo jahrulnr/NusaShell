@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"nusashell/domain"
+	"nusashell/pkg/text"
 	"nusashell/resources"
 )
 
@@ -324,8 +325,8 @@ func (r *BackgroundReviewAgent) executeReviewTranscript(c *domain.Conversation, 
 			Content: content,
 		}
 		for _, tc := range m.ToolCalls {
-			args := truncate(strings.TrimSpace(tc.Args), maxToolArgsChars)
-			output := truncate(strings.TrimSpace(tc.Output), maxToolOutputChars)
+			args := text.Truncate(strings.TrimSpace(tc.Args), maxToolArgsChars)
+			output := text.Truncate(strings.TrimSpace(tc.Output), maxToolOutputChars)
 			msg.ToolCalls = append(msg.ToolCalls, transcriptToolCallJSON{
 				Name:   tc.Name,
 				Args:   args,

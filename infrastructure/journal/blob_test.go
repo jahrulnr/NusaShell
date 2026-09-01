@@ -4,13 +4,15 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"nusashell/pkg/hash"
 )
 
 func TestBlobStore_roundtrip(t *testing.T) {
 	dir := t.TempDir()
 	bs := newBlobStore(dir)
 	data := []byte("snapshot content")
-	hash := hashContent(data)
+	hash := hash.Content(data)
 	if err := bs.put(hash, data); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +29,7 @@ func TestBlobStore_dedup(t *testing.T) {
 	dir := t.TempDir()
 	bs := newBlobStore(dir)
 	data := []byte("same")
-	hash := hashContent(data)
+	hash := hash.Content(data)
 	if err := bs.put(hash, data); err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +47,7 @@ func TestBlobStore_dedup(t *testing.T) {
 func TestBlobStore_atomicWrite(t *testing.T) {
 	dir := t.TempDir()
 	bs := newBlobStore(dir)
-	hash := hashContent([]byte("atomic"))
+	hash := hash.Content([]byte("atomic"))
 	if err := bs.put(hash, []byte("atomic")); err != nil {
 		t.Fatal(err)
 	}
