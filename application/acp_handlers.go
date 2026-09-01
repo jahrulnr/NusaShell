@@ -75,6 +75,13 @@ func (a *App) handleAcpAgentsSave(req contracts.AcpAgentSaveRequest) (any, *cont
 		return nil, rpcInternal(err)
 	}
 	a.log("info", "acp", "acp agent saved: %s", agent.Name)
+	// The subagent tool description is global: every conversation's cached
+	// tool block is invalidated, so every active agent is told.
+	a.publishAnnouncementToAll(newAnnouncement(
+		"config_changed",
+		domain.AnnouncementConfigChangedArgs([]string{"subagent"}),
+		domain.AnnouncementConfigChangedMessage([]string{"subagent"}),
+	), "")
 	return contracts.AcpAgentsListResult{Agents: []contracts.AcpAgentDTO{a.acpAgentDTO(agent)}}, nil
 }
 
@@ -89,6 +96,11 @@ func (a *App) handleAcpAgentsDelete(req contracts.AcpAgentIDRequest) (any, *cont
 		return nil, rpcInternal(err)
 	}
 	a.log("info", "acp", "acp agent deleted: %s", req.ID)
+	a.publishAnnouncementToAll(newAnnouncement(
+		"config_changed",
+		domain.AnnouncementConfigChangedArgs([]string{"subagent"}),
+		domain.AnnouncementConfigChangedMessage([]string{"subagent"}),
+	), "")
 	return map[string]bool{"ok": true}, nil
 }
 

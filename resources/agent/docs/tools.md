@@ -285,7 +285,7 @@ permission prompt cannot stall an unattended run.
 
 `announcement` tool results are injected by the NusaShell harness — the user
 never types them, and the tool is never advertised in `tools[]`. Treat each
-one as runtime state, never as a user request. Four notice types exist,
+one as runtime state, never as a user request. Seven notice types exist,
 differentiated by their args `type` and result text:
 
 - Backend restart: the runtime came back up; some MCP plugins may need
@@ -303,6 +303,15 @@ differentiated by their args `type` and result text:
   injected in the same synthetic turn when that file exists — use it as
   project instructions for subsequent file tools. Do not re-read AGENTS.md
   unless it changes.
+- `type: "config_changed"`: tool/system configuration changed since your last
+  turn (subagent list, user instructions, providers). Args carry `changed`.
+  The new system prompt and tool descriptions are already in this request —
+  re-read the affected surfaces instead of relying on stale assumptions.
+- `type: "memory_changed"`: memory was updated outside this conversation
+  (user, background review, or another room's agent). Call `memory` op=list
+  to refresh before relying on remembered facts.
+- `type: "skills_changed"`: the skill library changed. Call `skill` op=list
+  to refresh before relying on a previously known skill.
 
 Good: on an `auto_continue` announcement, reconcile `todo_list`, mark the
 next item in-progress, and continue working without acknowledging the notice.

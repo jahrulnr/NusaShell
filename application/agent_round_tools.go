@@ -104,6 +104,37 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 			a.recordLearningTurnNodes(run, results[i].learningNodeIDs)
 		}
 	}
+	// Cross-conversation announcements: the memory/skill libraries are
+	// global, so a successful mutating call by this conversation's agent is
+	// external news to every OTHER active agent. The caller's own room is
+	// skipped — the model already knows it made the call (no
+	// self-announcement).
+	for i := range toolCalls {
+		r := results[i]
+		if r.status != domain.ToolOK {
+			continue
+		}
+		switch toolCalls[i].Name {
+		case "memory":
+			op := OpArg([]byte(toolCalls[i].Args))
+			if op == "save" || op == "replace" || op == "delete" {
+				a.publishAnnouncementToAll(newAnnouncement(
+					"memory_changed",
+					domain.AnnouncementMemoryChangedArgs("", op),
+					domain.AnnouncementMemoryChangedMessage(),
+				), run.ConversationID)
+			}
+		case "skill":
+			op := OpArg([]byte(toolCalls[i].Args))
+			if op == "save" || op == "delete" {
+				a.publishAnnouncementToAll(newAnnouncement(
+					"skills_changed",
+					domain.AnnouncementSkillsChangedArgs(op),
+					domain.AnnouncementSkillsChangedMessage(),
+				), run.ConversationID)
+			}
+		}
+	}
 	if err := run.Ctx.Err(); err != nil {
 		return err
 	}

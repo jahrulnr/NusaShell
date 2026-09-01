@@ -153,7 +153,10 @@ func (p *reviewAgentRules) rules() AgentRules {
 						p.mutations = append(p.mutations, ReviewMutation{Kind: "skills", Tool: tc.Name, Snippet: mutationSnippet(tc.Args, "name")})
 					}
 					// Emit learning mutation events so the Learning UI
-					// refreshes memory/skill panes during a review.
+					// refreshes memory/skill panes during a review, and fan
+					// out harness announcements so every active agent learns
+					// the library changed (the review's writes are external
+					// to all of them).
 					if p.agent.app.Bus != nil {
 						switch {
 						case tc.Name == "memory" && (op == "save" || op == "replace"):
@@ -167,6 +170,20 @@ func (p *reviewAgentRules) rules() AgentRules {
 								"tool":   tc.Name,
 							})
 						}
+					}
+					switch {
+					case tc.Name == "memory" && (op == "save" || op == "replace"):
+						p.agent.app.publishAnnouncementToAll(newAnnouncement(
+							"memory_changed",
+							domain.AnnouncementMemoryChangedArgs("primary", string(op)),
+							domain.AnnouncementMemoryChangedMessage(),
+						), "")
+					case tc.Name == "skill" && op == "save":
+						p.agent.app.publishAnnouncementToAll(newAnnouncement(
+							"skills_changed",
+							domain.AnnouncementSkillsChangedArgs("save"),
+							domain.AnnouncementSkillsChangedMessage(),
+						), "")
 					}
 					out = append(out, ToolOutcome{Status: domain.ToolOK, Output: output})
 				}

@@ -361,11 +361,6 @@ type PromptCachePolicy struct {
 	// visible agent namespace: "nusashell_cv_<digest>" for normal conversation
 	// turns and "nusashell_bg_<digest>" for headless/background review turns.
 	Key string
-	// StableSystemMessages is the number of leading system messages that
-	// are cache-stable. Anthropic marks only the last of these with
-	// cache_control instead of the entire system block, so volatile tail
-	// content (user prompt, memory, todos) doesn't break cache hits.
-	StableSystemMessages int
 }
 
 type ChatUsage struct {

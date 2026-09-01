@@ -39,6 +39,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   close; streaming keeps working because JS references are preserved), with
   a universal popup fallback (`?mini=1#agent`, shell chrome hidden).
   `.webmanifest` is now served as `application/manifest+json`.
+- **Announcement queue for prompt-cache-breaking changes.** A persisted
+  per-conversation queue delivers config, memory, and skills changes (ACP
+  subagent save/delete, settings user instructions, provider save/delete,
+  memory/skills RPC, background review writes, cross-conversation tool calls)
+  to agent conversations as `announcement` tool calls (`config_changed`,
+  `memory_changed`, `skills_changed`). Publish appends to the queue
+  (coalesced by type, latest wins); the turn worker drains it at turn start
+  and at tool-round boundaries, injecting a persisted assistant message with
+  a pre-filled tool result. A per-conversation lock serializes publishers
+  against the drain so entries are never lost or double-injected; the queue
+  survives restarts and idle periods. The model is told the change happened
+  and re-reads the affected surfaces from the request instead of wasting
+  tokens on stale assumptions; the system prompt and `tools.md` document the
+  new notice types.
 
 ### Changed
 

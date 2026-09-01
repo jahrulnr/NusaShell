@@ -125,6 +125,13 @@ type App struct {
 	journalRootsMu sync.Mutex
 	journalRoots   map[string]*sync.Mutex
 
+	// announcementLocksMu guards lazy creation of per-conversation mutexes
+	// serializing pending-announcement load-modify-save between publishers
+	// (RPC handlers, review agent) and the turn worker's round-boundary
+	// drain, so entries are never lost or double-injected.
+	announcementLocksMu sync.Mutex
+	announcementLocks   map[string]*sync.Mutex
+
 	// edgeBuilder pre-computes deterministic/semantic learning edges;
 	// used_with edges are recorded by successful turn tool usage.
 	// as a background job. Nil if not configured.
@@ -286,6 +293,7 @@ func NewApp(deps Deps) *App {
 		Journal:                     deps.Journal,
 		MCPToolbox:                  deps.MCPToolbox,
 		journalRoots:                map[string]*sync.Mutex{},
+		announcementLocks:           map[string]*sync.Mutex{},
 		Factory:                     deps.Factory,
 		ImageGeneratorFactory:       deps.ImageGeneratorFactory,
 		SpeechTranscriberFactory:    deps.SpeechTranscriberFactory,

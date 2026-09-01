@@ -124,6 +124,11 @@ func (a *App) handleSkillsInstall(req contracts.SkillInstallRequest) (any, *cont
 		name = skill.Name
 	}
 	a.log("info", "skills", "skill installed: %s", id)
+	a.publishAnnouncementToAll(newAnnouncement(
+		"skills_changed",
+		domain.AnnouncementSkillsChangedArgs("install"),
+		domain.AnnouncementSkillsChangedMessage(),
+	), "")
 	return contracts.SkillInstallResult{ID: id, Name: name}, nil
 }
 
@@ -141,6 +146,11 @@ func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.
 			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 		}
 		a.log("info", "skills", "skill file saved: %s/%s", name, path)
+		a.publishAnnouncementToAll(newAnnouncement(
+			"skills_changed",
+			domain.AnnouncementSkillsChangedArgs("save"),
+			domain.AnnouncementSkillsChangedMessage(),
+		), "")
 		return contracts.SkillReadResult{Skill: contracts.SkillFull{SkillDTO: contracts.SkillDTO{ID: name, Name: name}}}, nil
 	}
 	var s *domain.Skill
@@ -165,6 +175,11 @@ func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.
 		return nil, rpcInternal(err)
 	}
 	a.log("info", "skills", "skill saved: %s", s.Name)
+	a.publishAnnouncementToAll(newAnnouncement(
+		"skills_changed",
+		domain.AnnouncementSkillsChangedArgs("save"),
+		domain.AnnouncementSkillsChangedMessage(),
+	), "")
 	return contracts.SkillReadResult{Skill: contracts.SkillFull{SkillDTO: skillDTO(s), Content: s.Content}}, nil
 }
 
@@ -176,5 +191,10 @@ func (a *App) handleSkillsDelete(req contracts.SkillIDRequest) (any, *contracts.
 		return nil, rpcInternal(err)
 	}
 	a.log("info", "skills", "skill deleted: %s", req.ID)
+	a.publishAnnouncementToAll(newAnnouncement(
+		"skills_changed",
+		domain.AnnouncementSkillsChangedArgs("delete"),
+		domain.AnnouncementSkillsChangedMessage(),
+	), "")
 	return map[string]bool{"ok": true}, nil
 }

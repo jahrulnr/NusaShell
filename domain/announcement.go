@@ -82,6 +82,78 @@ func WorkspaceChangedAnnouncementMessage(from, to string) string {
 	return fmt.Sprintf("Workspace changed from %s to %s. File tools now run against the new workspace.", from, to)
 }
 
+// AnnouncementConfigChangedArgs builds the self-describing args payload for
+// a config-change announcement: the notice type plus the changed surfaces
+// (e.g. "subagent", "user_prompt", "provider"). The model reads the change
+// from the data itself; the new system prompt / tool descriptions already
+// travel in the same request, so the announcement stays implicit.
+func AnnouncementConfigChangedArgs(changed []string) string {
+	if changed == nil {
+		changed = []string{}
+	}
+	b, err := json.Marshal(struct {
+		Type    string   `json:"type"`
+		Changed []string `json:"changed"`
+	}{Type: "config_changed", Changed: changed})
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// AnnouncementConfigChangedMessage is the announcement tool result text for
+// a config change. It flags the change and points at the refresh path
+// without dumping content — the model re-reads the affected surfaces from
+// the request itself.
+func AnnouncementConfigChangedMessage(changed []string) string {
+	if len(changed) == 0 {
+		return "Tool/system configuration changed since your last turn. Re-read the affected tool descriptions and instructions."
+	}
+	return fmt.Sprintf("Tool/system configuration changed since your last turn: %s. Re-read the affected tool descriptions and instructions.", strings.Join(changed, ", "))
+}
+
+// AnnouncementMemoryChangedArgs builds the self-describing args payload for
+// a memory-change announcement: the notice type plus the affected tier
+// (primary|fragment) and mutation op (save|replace|delete).
+func AnnouncementMemoryChangedArgs(tier, op string) string {
+	b, err := json.Marshal(struct {
+		Type string `json:"type"`
+		Tier string `json:"tier,omitempty"`
+		Op   string `json:"op"`
+	}{Type: "memory_changed", Tier: tier, Op: op})
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// AnnouncementMemoryChangedMessage is the announcement tool result text for
+// a memory change. The model refreshes via the real `memory` tool instead of
+// waiting for the next hydration epoch.
+func AnnouncementMemoryChangedMessage() string {
+	return "Memory was updated outside this conversation. Call `memory` op=list to refresh."
+}
+
+// AnnouncementSkillsChangedArgs builds the self-describing args payload for
+// a skill-library change: the notice type plus the mutation op
+// (save|delete|install).
+func AnnouncementSkillsChangedArgs(op string) string {
+	b, err := json.Marshal(struct {
+		Type string `json:"type"`
+		Op   string `json:"op"`
+	}{Type: "skills_changed", Op: op})
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// AnnouncementSkillsChangedMessage is the announcement tool result text for
+// a skill-library change. The model refreshes via the real `skill` tool.
+func AnnouncementSkillsChangedMessage() string {
+	return "The skill library changed. Call `skill` op=list to refresh."
+}
+
 // IsAnnouncementCallID returns true when a tool call ID belongs to an
 // injected announcement (prefix "announce-").
 func IsAnnouncementCallID(id string) bool {

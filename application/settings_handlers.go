@@ -16,6 +16,7 @@ func (a *App) handleSettingsGet() (any, *contracts.RPCError) {
 
 func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contracts.RPCError) {
 	s := a.Settings.Get()
+	oldUserPrompt := s.UserPrompt
 	if req.CompactionEnabled != nil {
 		s.CompactionEnabled = *req.CompactionEnabled
 	}
@@ -271,6 +272,15 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	// Invalidate the learning searcher so the next search rebuilds it with
 	// the new embedding settings (if the embedding model selection changed).
 	a.InvalidateLearningSearcher()
+	// The user instructions are appended to the system prompt: a real change
+	// invalidates the cached system block for every conversation.
+	if req.UserPrompt != nil && s.UserPrompt != oldUserPrompt {
+		a.publishAnnouncementToAll(newAnnouncement(
+			"config_changed",
+			domain.AnnouncementConfigChangedArgs([]string{"user_prompt"}),
+			domain.AnnouncementConfigChangedMessage([]string{"user_prompt"}),
+		), "")
+	}
 	return contracts.SettingsGetResult{Settings: settingsDTO(s)}, nil
 }
 

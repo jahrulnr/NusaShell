@@ -92,6 +92,11 @@ func (a *App) handleMemorySave(req contracts.MemorySaveRequest) (any, *contracts
 		return nil, rpcInternal(err)
 	}
 	a.emitMemoryUpdated()
+	a.publishAnnouncementToAll(newAnnouncement(
+		"memory_changed",
+		domain.AnnouncementMemoryChangedArgs("fragment", "save"),
+		domain.AnnouncementMemoryChangedMessage(),
+	), "")
 	return contracts.MemoryListResult{Entries: []contracts.MemoryEntryDTO{fragmentDTO(frag)}}, nil
 }
 
@@ -140,5 +145,10 @@ func (a *App) handleMemoryDelete(req contracts.MemoryIDRequest) (any, *contracts
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
 	a.emitMemoryUpdated()
+	a.publishAnnouncementToAll(newAnnouncement(
+		"memory_changed",
+		domain.AnnouncementMemoryChangedArgs("fragment", "delete"),
+		domain.AnnouncementMemoryChangedMessage(),
+	), "")
 	return map[string]bool{"ok": true}, nil
 }

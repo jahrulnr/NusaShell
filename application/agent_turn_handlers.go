@@ -253,6 +253,12 @@ func (a *App) addTurnMessages(c *domain.Conversation, userMsg, asstMsg domain.Me
 	if announce {
 		c.AddMessage(a.restartAnnouncement())
 	}
+	// Pending harness announcements (config/memory/skills changes published
+	// while idle) are injected after the user message and cleared. An active
+	// turn's worker drains newer entries at round boundaries instead.
+	for _, pa := range c.DrainPendingAnnouncements() {
+		c.AddMessage(a.pendingAnnouncementMessage(pa))
+	}
 	c.AddMessage(asstMsg)
 }
 

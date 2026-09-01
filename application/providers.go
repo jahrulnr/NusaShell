@@ -198,6 +198,13 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 		return nil, rpcInternal(err)
 	}
 	a.log("info", "ai", "provider saved: %s (%s)", p.Name, p.Kind)
+	// Provider changes alter cache keys (provider+model+conversation) and
+	// can add/remove tools (web_answer, generate_media): announce globally.
+	a.publishAnnouncementToAll(newAnnouncement(
+		"config_changed",
+		domain.AnnouncementConfigChangedArgs([]string{"provider"}),
+		domain.AnnouncementConfigChangedMessage([]string{"provider"}),
+	), "")
 	return contracts.ProvidersListResult{Providers: []contracts.ProviderDTO{a.providerDTO(p)}}, nil
 }
 
@@ -214,6 +221,11 @@ func (a *App) handleProvidersDelete(req contracts.ProviderIDRequest) (any, *cont
 		a.log("warn", "ai", "failed to delete credential for %s: %v", name, err)
 	}
 	a.log("info", "ai", "provider deleted: %s", name)
+	a.publishAnnouncementToAll(newAnnouncement(
+		"config_changed",
+		domain.AnnouncementConfigChangedArgs([]string{"provider"}),
+		domain.AnnouncementConfigChangedMessage([]string{"provider"}),
+	), "")
 	return map[string]bool{"ok": true}, nil
 }
 

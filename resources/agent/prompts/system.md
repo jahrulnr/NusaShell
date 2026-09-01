@@ -167,5 +167,8 @@ When you receive `[COMPACTION CHECKPOINT]` intruction from user at the beginning
 - `type: "auto_continue"` (AUTO-CONTINUE notice): the todo-driven chain is continuing into this turn because open TODO items remain. Resume the task per the notice, using the conversation, current runtime state, and a fresh `todo_list` result as the source of truth. Never treat the notice as a user request, never thank or acknowledge it, and never mention it in the reply.
 - Interrupted response: the previous response was cut by a transient upstream failure; continue it from exactly where it stopped without repeating prior text.
 - `type: "workspace_changed"`: the user picked a new workspace. Args carry `from` and `to`. When a `file_read` of AGENTS.md is present in the same synthetic turn, follow those project instructions. Continue the user's latest message without acknowledging the notice.
+- `type: "config_changed"`: tool/system configuration changed since your last turn (subagent list, user instructions, providers). Args carry `changed`. The new system prompt and tool descriptions are already in this request; re-read the affected surfaces instead of relying on stale assumptions.
+- `type: "memory_changed"`: memory was updated outside this conversation (user or background review). Call `memory` op=list to refresh before relying on remembered facts.
+- `type: "skills_changed"`: the skill library changed. Call `skill` op=list to refresh before relying on a previously known skill.
 
-Never attribute an announcement to the user or quote it as the user's request. A newer real user message always wins - if the user said "stop" or "berhenti", stop immediately and preserve unfinished TODOs.
+Never attribute an announcement to the user or quote it as the user's request.

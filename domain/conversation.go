@@ -164,6 +164,47 @@ type Conversation struct {
 	// PendingWorkspaceAnnouncement is set. Empty when the room had no
 	// workspace yet.
 	WorkspaceSwitchFrom string `json:"workspace_switch_from,omitempty"`
+	// PendingAnnouncements queues harness announcements (config/memory/
+	// skills changes) published while the conversation had no active turn.
+	// addTurnMessages injects them after the next user message and clears
+	// the queue; an active turn's worker drains them at round boundaries
+	// and removes the matching entries by ID. Persisted so announcements
+	// survive restarts and arbitrarily long idle periods.
+	PendingAnnouncements []PendingAnnouncement `json:"pending_announcements,omitempty"`
+}
+
+// PendingAnnouncement is a harness announcement queued on a conversation
+// for delivery at the next safe boundary (turn start or tool-round drain).
+// The announcement tool call is rebuilt from Args/Message at injection time.
+type PendingAnnouncement struct {
+	ID        string    `json:"id"`
+	Type      string    `json:"type"`
+	Args      string    `json:"args"`
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// QueueAnnouncement appends a pending announcement, coalescing by type: an
+// unconsumed pending of the same type is replaced (last value wins), so a
+// burst of changes collapses into one announcement.
+func (c *Conversation) QueueAnnouncement(pa PendingAnnouncement) {
+	for i := range c.PendingAnnouncements {
+		if c.PendingAnnouncements[i].Type == pa.Type {
+			c.PendingAnnouncements[i] = pa
+			return
+		}
+	}
+	c.PendingAnnouncements = append(c.PendingAnnouncements, pa)
+}
+
+// DrainPendingAnnouncements returns the pending queue and clears it. Called
+// by addTurnMessages at turn start and by the worker's round-boundary drain;
+// the per-conversation announcement lock serializes both against concurrent
+// publishers, so clearing the whole queue never loses a concurrent append.
+func (c *Conversation) DrainPendingAnnouncements() []PendingAnnouncement {
+	out := c.PendingAnnouncements
+	c.PendingAnnouncements = nil
+	return out
 }
 
 // ConversationOriginPipeline is stored on conversations created by

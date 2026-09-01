@@ -231,9 +231,9 @@ func (p *conversationRules) rules() AgentRules {
 			return p.a.persistTurnRound(p.run.ConversationID, p.currentMsgID, p.model, rr)
 		},
 		// Round boundary: repeated-tool guard, then drain queued
-		// steer/subagent results. A tool round always continues with a
-		// fresh assistant message; a terminal round continues only when a
-		// drain injected something the model must see.
+		// steer/subagent results and harness announcements. A tool round
+		// always continues with a fresh assistant message; a terminal round
+		// continues only when a drain injected something the model must see.
 		AfterRound: func(st *RoundState, resp ChatResponse, outcomes []ToolOutcome) (bool, error) {
 			if len(resp.ToolCalls) > 0 && p.repeatedGuard.check(resp.ToolCalls, resp.Content) {
 				p.a.log("warn", "agent", "turn %s: detected repeated tool round (%dx identical set), forcing text-only round", p.run.ID, p.repeatedGuard.limit)
@@ -247,7 +247,11 @@ func (p *conversationRules) rules() AgentRules {
 			if subErr != nil {
 				return false, subErr
 			}
-			if len(resp.ToolCalls) == 0 && !appliedSteer && !appliedSub {
+			appliedAnn, annErr := p.a.drainAnnouncements(p.run)
+			if annErr != nil {
+				return false, annErr
+			}
+			if len(resp.ToolCalls) == 0 && !appliedSteer && !appliedSub && !appliedAnn {
 				return false, nil // terminal
 			}
 			conv, msgID, err := p.a.appendTurnAssistant(p.run.ConversationID)
