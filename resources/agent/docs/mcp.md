@@ -36,7 +36,7 @@ back to stdio.
 
 It is stored as `plugins/<id>/manifest.json` exactly like a catalog
 installed plugin. Plugins with `mcp.autostart` (the Plugins drawer toggle)
-are connected when the Go process starts, so automations and the agent
+are connected when the Go process starts, so CI workflows and the agent
 toolbox can use those tools immediately. Other plugins stay lazy: the first
 tool listing or **Start** (`plugin.test`) opens the connection. **Stop**
 (`plugin.stop`) drops the cached connection and **Restart** stops then starts.
@@ -65,10 +65,10 @@ everything a server offers.
 
 Plugins may push MCP notifications (e.g. `notifications/message`) to the host
 to signal "something happened" without being polled. The host bridges them
-into automation events (`infrastructure/mcpclient/notify.go`); see
+into CI events (`infrastructure/mcpclient/notify.go`); see
 Automation → Plugin push events for the `when:` trigger contract. As an
 agent you do not act on notifications directly — they are consumed by the
-automation engine, which starts the matching workflow.
+CI engine, which starts the matching workflow.
 
 ### Idle plugin enable workflow
 

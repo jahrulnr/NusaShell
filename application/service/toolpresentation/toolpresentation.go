@@ -428,9 +428,9 @@ func ToolPresentationVariant(name, args string) string {
 		return "search-results"
 	case "docs_read", "web_fetch", "web_answer", "contract_read":
 		return "document"
-	case "automation_read":
+	case "ci_read":
 		return "document"
-	case "automation_list", "ci_logs", "mcp_list", "tool_list", "tool_schema",
+	case "ci_list", "ci_logs", "mcp_list", "tool_list", "tool_schema",
 		"skill_list", "skill_search", "memory_search", "memory_list":
 		return "collection"
 	case "read_media", "generate_media", "generate_image", "generate_speech", "generate_video", "show":
@@ -475,66 +475,66 @@ func toolPresentationAction(name string, status domain.ToolCallStatus, rawOutput
 		}
 	}
 	labels := map[string][3]string{
-		"exec":                {"Running command", "Command completed", "Command failed"},
-		"file_list":           {"Listing files", "Files listed", "File listing failed"},
-		"file_read":           {"Reading file", "File read", "File read failed"},
-		"file_write":          {"Writing file", "File written", "File write failed"},
-		"file_patch":          {"Patching file", "File patched", "File patch failed"},
-		"file_mkdir":          {"Creating directory", "Directory created", "Directory creation failed"},
-		"file_delete":         {"Deleting path", "Path deleted", "Path deletion failed"},
-		"file_move":           {"Moving path", "Path moved", "Path move failed"},
-		"file_copy":           {"Copying path", "Path copied", "Path copy failed"},
-		"file_info":           {"Inspecting path", "Path inspected", "Path inspection failed"},
-		"grep":                {"Searching", "Search completed", "Search failed"},
-		"file_search":         {"Searching files", "Search completed", "Search failed"},
-		"find_file":           {"Finding files", "Files found", "File search failed"},
-		"memory":              {"Updating memory", "Memory updated", "Memory update failed"},
-		"skill":               {"Loading skill", "Skill loaded", "Skill load failed"},
-		"docs":                {"Reading docs", "Docs loaded", "Docs load failed"},
-		"mcp_call":            {"Calling MCP tool", "MCP call completed", "MCP call failed"},
-		"mcp_list":            {"Listing MCP servers", "MCP servers listed", "MCP list failed"},
-		"tool_list":           {"Listing MCP tools", "MCP tools listed", "Tool list failed"},
-		"tool_schema":         {"Reading tool schema", "Tool schema loaded", "Tool schema failed"},
-		"mcp_search":          {"Searching MCP tools", "MCP search completed", "MCP search failed"},
-		"contract_read":       {"Reading plugin contract", "Plugin contract loaded", "Contract read failed"},
-		"mcp_install":         {"Installing plugin", "Plugin installed", "Plugin install failed"},
-		"mcp_register":        {"Registering plugin", "Plugin registered", "Plugin registration failed"},
-		"mcp_server_add":      {"Adding MCP server", "MCP server added", "MCP server add failed"},
-		"mcp_enable":          {"Connecting plugin", "Plugin connected", "Plugin connection failed"},
-		"mcp_disable":         {"Disconnecting plugin", "Plugin disconnected", "Plugin disconnect failed"},
-		"mcp_unregister":      {"Removing plugin", "Plugin removed", "Plugin removal failed"},
-		"web_search":          {"Searching the web", "Web search completed", "Web search failed"},
-		"web_fetch":           {"Fetching page", "Page fetched", "Page fetch failed"},
-		"web_answer":          {"Preparing web answer", "Web answer ready", "Web answer failed"},
-		"generate_image":      {"Generating image", "Image generated", "Image generation failed"},
-		"generate_speech":     {"Generating speech", "Speech generated", "Speech generation failed"},
-		"generate_video":      {"Generating video", "Video generated", "Video generation failed"},
-		"generate_media":      {"Generating media", "Media generated", "Media generation failed"},
-		"read_media":          {"Reading media", "Media read", "Media read failed"},
-		"show":                {"Preparing preview", "Preview ready", "Preview failed"},
-		"todo":                {"Updating tasks", "Tasks updated", "Task update failed"},
-		"ask_question":        {"Waiting for answer", "Answer received", "Question failed"},
-		"subagent":            {"Starting subagent", "Subagent completed", "Subagent failed"},
-		"subagent_steer":      {"Steering subagent", "Subagent steered", "Subagent steer failed"},
-		"subagent_stop":       {"Stopping subagent", "Subagent stopped", "Subagent stop failed"},
-		"subagent_wait":       {"Waiting for subagent", "Subagent result ready", "Subagent wait failed"},
-		"automation_list":     {"Listing automations", "Automations listed", "Automation list failed"},
-		"automation_read":     {"Reading automation", "Automation loaded", "Automation read failed"},
-		"automation_validate": {"Validating automation", "Automation validated", "Automation validation failed"},
-		"automation_create":   {"Creating automation", "Automation created", "Automation creation failed"},
-		"automation_enable":   {"Enabling automation", "Automation enabled", "Automation enable failed"},
-		"automation_disable":  {"Disabling automation", "Automation disabled", "Automation disable failed"},
-		"automation_status":   {"Checking automation", "Automation status ready", "Automation status failed"},
-		"schedule_once":       {"Scheduling automation", "Automation scheduled", "Scheduling failed"},
-		"schedule_every":      {"Scheduling automation", "Automation scheduled", "Scheduling failed"},
-		"wait_until":          {"Preparing wait", "Wait prepared", "Wait preparation failed"},
-		"sleep":               {"Pausing", "Pause finished", "Pause failed"},
-		"ci_run":              {"Starting pipeline", "Pipeline started", "Pipeline failed"},
-		"ci_wait":             {"Waiting for pipeline", "Pipeline finished", "Pipeline wait failed"},
-		"ci_run_status":       {"Checking pipeline", "Pipeline status ready", "Pipeline status failed"},
-		"ci_logs":             {"Reading pipeline logs", "Pipeline logs ready", "Pipeline logs failed"},
-		"ci_cancel":           {"Cancelling pipeline", "Pipeline cancelled", "Pipeline cancel failed"},
-		"ci_steer":            {"Steering pipeline", "Pipeline steered", "Pipeline steer failed"},
+		"exec":              {"Running command", "Command completed", "Command failed"},
+		"file_list":         {"Listing files", "Files listed", "File listing failed"},
+		"file_read":         {"Reading file", "File read", "File read failed"},
+		"file_write":        {"Writing file", "File written", "File write failed"},
+		"file_patch":        {"Patching file", "File patched", "File patch failed"},
+		"file_mkdir":        {"Creating directory", "Directory created", "Directory creation failed"},
+		"file_delete":       {"Deleting path", "Path deleted", "Path deletion failed"},
+		"file_move":         {"Moving path", "Path moved", "Path move failed"},
+		"file_copy":         {"Copying path", "Path copied", "Path copy failed"},
+		"file_info":         {"Inspecting path", "Path inspected", "Path inspection failed"},
+		"grep":              {"Searching", "Search completed", "Search failed"},
+		"file_search":       {"Searching files", "Search completed", "Search failed"},
+		"find_file":         {"Finding files", "Files found", "File search failed"},
+		"memory":            {"Updating memory", "Memory updated", "Memory update failed"},
+		"skill":             {"Loading skill", "Skill loaded", "Skill load failed"},
+		"docs":              {"Reading docs", "Docs loaded", "Docs load failed"},
+		"mcp_call":          {"Calling MCP tool", "MCP call completed", "MCP call failed"},
+		"mcp_list":          {"Listing MCP servers", "MCP servers listed", "MCP list failed"},
+		"tool_list":         {"Listing MCP tools", "MCP tools listed", "Tool list failed"},
+		"tool_schema":       {"Reading tool schema", "Tool schema loaded", "Tool schema failed"},
+		"mcp_search":        {"Searching MCP tools", "MCP search completed", "MCP search failed"},
+		"contract_read":     {"Reading plugin contract", "Plugin contract loaded", "Contract read failed"},
+		"mcp_install":       {"Installing plugin", "Plugin installed", "Plugin install failed"},
+		"mcp_register":      {"Registering plugin", "Plugin registered", "Plugin registration failed"},
+		"mcp_server_add":    {"Adding MCP server", "MCP server added", "MCP server add failed"},
+		"mcp_enable":        {"Connecting plugin", "Plugin connected", "Plugin connection failed"},
+		"mcp_disable":       {"Disconnecting plugin", "Plugin disconnected", "Plugin disconnect failed"},
+		"mcp_unregister":    {"Removing plugin", "Plugin removed", "Plugin removal failed"},
+		"web_search":        {"Searching the web", "Web search completed", "Web search failed"},
+		"web_fetch":         {"Fetching page", "Page fetched", "Page fetch failed"},
+		"web_answer":        {"Preparing web answer", "Web answer ready", "Web answer failed"},
+		"generate_image":    {"Generating image", "Image generated", "Image generation failed"},
+		"generate_speech":   {"Generating speech", "Speech generated", "Speech generation failed"},
+		"generate_video":    {"Generating video", "Video generated", "Video generation failed"},
+		"generate_media":    {"Generating media", "Media generated", "Media generation failed"},
+		"read_media":        {"Reading media", "Media read", "Media read failed"},
+		"show":              {"Preparing preview", "Preview ready", "Preview failed"},
+		"todo":              {"Updating tasks", "Tasks updated", "Task update failed"},
+		"ask_question":      {"Waiting for answer", "Answer received", "Question failed"},
+		"subagent":          {"Starting subagent", "Subagent completed", "Subagent failed"},
+		"subagent_steer":    {"Steering subagent", "Subagent steered", "Subagent steer failed"},
+		"subagent_stop":     {"Stopping subagent", "Subagent stopped", "Subagent stop failed"},
+		"subagent_wait":     {"Waiting for subagent", "Subagent result ready", "Subagent wait failed"},
+		"ci_list":           {"Listing CI workflows", "CI workflows listed", "CI list failed"},
+		"ci_read":           {"Reading CI workflow", "CI workflow loaded", "CI read failed"},
+		"ci_validate":       {"Validating CI workflow", "CI workflow validated", "CI validation failed"},
+		"ci_create":         {"Creating CI workflow", "CI workflow created", "CI creation failed"},
+		"ci_enable":         {"Enabling CI workflow", "CI workflow enabled", "CI enable failed"},
+		"ci_disable":        {"Disabling CI workflow", "CI workflow disabled", "CI disable failed"},
+		"ci_status":         {"Checking CI status", "CI status ready", "CI status failed"},
+		"ci_schedule_once":  {"Scheduling CI workflow", "CI workflow scheduled", "Scheduling failed"},
+		"ci_schedule_every": {"Scheduling CI workflow", "CI workflow scheduled", "Scheduling failed"},
+		"wait_until":        {"Preparing wait", "Wait prepared", "Wait preparation failed"},
+		"sleep":             {"Pausing", "Pause finished", "Pause failed"},
+		"ci_run":            {"Starting pipeline", "Pipeline started", "Pipeline failed"},
+		"ci_wait":           {"Waiting for pipeline", "Pipeline finished", "Pipeline wait failed"},
+		"ci_run_status":     {"Checking pipeline", "Pipeline status ready", "Pipeline status failed"},
+		"ci_logs":           {"Reading pipeline logs", "Pipeline logs ready", "Pipeline logs failed"},
+		"ci_cancel":         {"Cancelling pipeline", "Pipeline cancelled", "Pipeline cancel failed"},
+		"ci_steer":          {"Steering pipeline", "Pipeline steered", "Pipeline steer failed"},
 	}
 	if known, ok := labels[name]; ok {
 		switch {
@@ -639,7 +639,7 @@ func toolPresentationSummary(name string, status domain.ToolCallStatus, meta map
 		return "Moved"
 	case "file_copy":
 		return "Copied"
-	case "automation_validate":
+	case "ci_validate":
 		if providers, ok := meta["providers"].(string); ok && strings.EqualFold(providers, "blocked") {
 			return "Blocked"
 		}
@@ -650,11 +650,11 @@ func toolPresentationSummary(name string, status domain.ToolCallStatus, meta map
 			return "Invalid"
 		}
 		return "Valid"
-	case "automation_enable":
+	case "ci_enable":
 		return "Enabled"
-	case "automation_disable":
+	case "ci_disable":
 		return "Disabled"
-	case "schedule_once", "schedule_every":
+	case "ci_schedule_once", "ci_schedule_every":
 		return "Scheduled"
 	case "web_answer":
 		return "Answer ready"
@@ -700,8 +700,8 @@ func toolPresentationCountNoun(name string) string {
 		return "matches"
 	case "web_search":
 		return "results"
-	case "automation_list":
-		return "automations"
+	case "ci_list":
+		return "ci workflows"
 	case "ci_logs":
 		return "log entries"
 	default:

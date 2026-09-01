@@ -117,8 +117,8 @@ test('built-in tool cards use the contract boundary for shared dressing and per-
   assert.match(tools, /\.agent-tool-card\[data-tool="exec"\] \{/, 'exec has an isolated contract accent');
   assert.match(tools, /\.agent-tool-card\[data-tool="todo"\] \{/, 'todo has an isolated contract accent');
   const builtinRoster = [
-    'ask_question', 'automation_create', 'automation_disable', 'automation_enable',
-    'automation_list', 'automation_read', 'automation_status', 'automation_validate',
+    'ask_question', 'ci_create', 'ci_disable', 'ci_enable',
+    'ci_list', 'ci_read', 'ci_status', 'ci_validate',
     'ci_cancel', 'ci_logs', 'ci_run', 'ci_run_status', 'ci_steer', 'ci_wait',
     'contract_read', 'delegate', 'docs', 'exec', 'file_copy', 'file_delete',
     'file_info', 'file_list', 'file_mkdir', 'file_move', 'file_patch', 'file_read',

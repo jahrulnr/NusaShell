@@ -46,7 +46,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `conversations/<conv_id>.acp/` | terminal ACP subagent transcripts (one JSON file per run, written by `subagent_wait` or the completion callback and linked to the parent conversation); legacy global `acp_runs.jsonl` migrates here automatically on first use | JSON |
 | `conversations/<conv_id>.journal/` | workspace change journal sidecar: `journal.jsonl` (live append-only event log), `journal.jsonl.gz` (archived gzip members, appended at each turn end), and `blobs/` (content-addressed pre-image objects). Records every file change the agent makes (declared, opaque exec, unobserved MCP) so the post-compaction hydration slot can show exactly what the session changed. Deleted together with the conversation. | JSONL + gzip + files |
 | `credentials.db` | API keys per provider | SQLite |
-| `ci/automation.db` | workflows, runs, schedules, events, waits, locks | SQLite |
+| `ci/workflows.db` | workflows, runs, schedules, events, waits, locks | SQLite |
 | `ci/pipelines/` | pipeline definition YAML files (one per workflow, auto-discovered on boot) | YAML |
 | `ci/runs/` | local executor scratch directories | files |
 | platform temp `/nusashell/` | runtime scratch only: oversized tool results (`grep`, `exec`, `web_fetch`, `web_search`, `docs`) spilled when in-band output exceeds ~32KiB, plus TTS/STT/plugin installer staging and whisper work dirs. Path is `filepath.Join(os.TempDir(), "nusashell")` — `%TEMP%\nusashell` on Windows. Callers go through `infrastructure/nusatemp` — never dump files at the temp root. A background sweeper deletes files and directories aged 24h+; OS reboot may empty the parent temp dir earlier. | files |

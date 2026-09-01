@@ -42,20 +42,20 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `web_search` | search the web across Brave, Serper, Tavily, Startpage, Wikipedia, and GitHub (pool configurable in Settings → Web Search); returns ranked results with title, URL, and snippet. Oversized JSONL is truncated in-band (~32KiB) with `overflow_path` |
 | `web_fetch` | fetch a URL and return readable text; supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes` (extract cap, default 2MB); in-band body caps at ~32KiB with `overflow_path` / `next_offset_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
-| `ci_run` | start a saved automation by `workflow_id`; set `async: true` to return immediately with a `run_id` while the pipeline runs in the background |
+| `ci_run` | start a saved CI workflow by `workflow_id`; set `async: true` to return immediately with a `run_id` while the pipeline runs in the background |
 | `ci_wait` | block until a run reaches a terminal state or the timeout expires; use after `ci_run` with `async: true` |
 | `ci_run_status` | DAG summary and status; use this after `ci_run` |
 | `ci_logs` | job log tail (prefer failed jobs) |
 | `ci_cancel` | cancel a run |
 | `ci_steer` | send additional instructions to a running pipeline agent step |
-| `automation_list` | saved automations with availability (`runnable` / `blocked` / `disabled` / `invalid`); `invalid` stays listed and cannot be enabled or run until the YAML is fixed |
-| `automation_read` | one automation plus capability bindings |
-| `automation_validate` | validate YAML |
-| `automation_create` | persist a once/every/when/manual workflow (NusaShell owns the schedule) |
-| `automation_enable` / `automation_disable` | lifecycle without deleting; `automation_enable` rejects `invalid` YAML |
-| `automation_status` | inspect waiting/blocked runs |
-| `schedule_once` | one-shot RFC3339 automation |
-| `schedule_every` | cron or interval automation (not equivalent) |
+| `ci_list` | saved CI workflows with availability (`runnable` / `blocked` / `disabled` / `invalid`); `invalid` stays listed and cannot be enabled or run until the YAML is fixed |
+| `ci_read` | one CI workflow plus capability bindings |
+| `ci_validate` | validate YAML |
+| `ci_create` | persist a once/every/when/manual workflow (NusaShell owns the schedule) |
+| `ci_enable` / `ci_disable` | lifecycle without deleting; `ci_enable` rejects `invalid` YAML |
+| `ci_status` | inspect waiting/blocked runs |
+| `ci_schedule_once` | one-shot RFC3339 CI workflow |
+| `ci_schedule_every` | cron or interval CI workflow (not equivalent) |
 | `wait_until` | durable wait; the runner is not occupied |
 | `sleep` | pause 1–300 seconds; use for retry backoff or between polls of an async `ci_run` |
 | `subagent` | spawn 1–6 ACP coding-agent sessions (only listed when at least one ACP agent is enabled in Providers; never listed for pipeline `agent:` steps) |

@@ -1,4 +1,4 @@
-// Automation workspace: workflows, runs, schedules, events.
+// CI workspace: workflows, runs, schedules, events.
 
 import { rpc, on } from '../rpc.js';
 import { el, toast, dialog, confirmDialog } from '../ui.js';
@@ -13,15 +13,15 @@ const state = {
   blockedProvider: '',
 };
 
-export async function initAutomation() {
-  document.getElementById('auto-tabs').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-auto-tab]');
+export async function initCI() {
+  document.getElementById('ci-tabs').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-ci-tab]');
     if (!btn) return;
     setTab(btn.dataset.autoTab);
     refresh().catch((err) => toast(err.message || String(err), 'error'));
   });
-  document.getElementById('auto-new-btn').addEventListener('click', () => createWizard());
-  document.getElementById('auto-enable-provider-btn').addEventListener('click', enableBlockedProvider);
+  document.getElementById('ci-new-btn').addEventListener('click', () => createWizard());
+  document.getElementById('ci-enable-provider-btn').addEventListener('click', enableBlockedProvider);
   on('ci.run.created', () => refresh().catch(() => {}));
   on('ci.run.completed', () => refresh().catch(() => {}));
   on('ci.run.failed', () => refresh().catch(() => {}));
@@ -33,17 +33,17 @@ export async function initAutomation() {
 export async function refresh() {
   try {
     const [{ workflows }, { runs }, { schedules }, { events }] = await Promise.all([
-      rpc('automation.list'),
+      rpc('ci.list'),
       rpc('ci.runs.list'),
-      rpc('automation.schedules'),
-      rpc('automation.events'),
+      rpc('ci.schedules'),
+      rpc('ci.events'),
     ]);
     state.workflows = workflows || [];
     state.runs = runs || [];
     state.schedules = schedules || [];
     state.events = events || [];
   } catch (err) {
-    toast(err.message || 'Automation RPC failed', 'error');
+    toast(err.message || 'CI RPC failed', 'error');
     return;
   }
   renderStats();
@@ -54,35 +54,35 @@ export async function refresh() {
 function setTab(tab) {
   state.tab = tab;
   state.selected = null;
-  document.querySelectorAll('[data-auto-tab]').forEach((btn) => {
+  document.querySelectorAll('[data-ci-tab]').forEach((btn) => {
     const on = btn.dataset.autoTab === tab;
     btn.classList.toggle('active', on);
     btn.setAttribute('aria-selected', String(on));
   });
   const titles = { workflows: 'Workflows', runs: 'Runs', schedules: 'Schedules', events: 'Events' };
-  document.getElementById('auto-list-title').textContent = titles[tab];
-  document.getElementById('auto-detail').innerHTML = '';
-  document.getElementById('auto-detail').append(
-    el('div', { class: 'automation-empty' },
+  document.getElementById('ci-list-title').textContent = titles[tab];
+  document.getElementById('ci-detail').innerHTML = '';
+  document.getElementById('ci-detail').append(
+    el('div', { class: 'ci-empty' },
       el('strong', { text: 'No selection' }),
       el('span', { text: 'Pick a row to inspect status, DAG, or wake time.' }),
     ),
   );
-  document.getElementById('auto-detail-actions').innerHTML = '';
+  document.getElementById('ci-detail-actions').innerHTML = '';
 }
 
 function renderStats() {
   const runnable = state.workflows.filter((w) => w.availability === 'runnable').length;
   const blocked = state.workflows.filter((w) => w.availability === 'blocked').length;
   const waiting = state.runs.filter((r) => r.status === 'waiting').length;
-  document.getElementById('auto-stat-runnable').textContent = `${runnable} runnable`;
-  document.getElementById('auto-stat-blocked').textContent = `${blocked} blocked`;
-  document.getElementById('auto-stat-waiting').textContent = `${waiting} waiting`;
+  document.getElementById('ci-stat-runnable').textContent = `${runnable} runnable`;
+  document.getElementById('ci-stat-blocked').textContent = `${blocked} blocked`;
+  document.getElementById('ci-stat-waiting').textContent = `${waiting} waiting`;
   const firstBlocked = state.workflows.find((w) => w.availability === 'blocked');
-  const banner = document.getElementById('auto-blocked-banner');
+  const banner = document.getElementById('ci-blocked-banner');
   if (firstBlocked) {
     banner.hidden = false;
-    document.getElementById('auto-blocked-text').textContent = firstBlocked.blocked_reason || `"${firstBlocked.name}" is blocked.`;
+    document.getElementById('ci-blocked-text').textContent = firstBlocked.blocked_reason || `"${firstBlocked.name}" is blocked.`;
     state.blockedProvider = (firstBlocked.blocked_reason || '').split(' ').pop();
   } else {
     banner.hidden = true;
@@ -91,7 +91,7 @@ function renderStats() {
 }
 
 function renderList() {
-  const list = document.getElementById('auto-list');
+  const list = document.getElementById('ci-list');
   list.innerHTML = '';
   let rows = [];
   if (state.tab === 'workflows') {
@@ -127,19 +127,19 @@ function renderList() {
       item: e,
     }));
   }
-  document.getElementById('auto-list-count').textContent = String(rows.length);
+  document.getElementById('ci-list-count').textContent = String(rows.length);
   if (!rows.length) {
-    list.append(el('div', { class: 'automation-empty' },
+    list.append(el('div', { class: 'ci-empty' },
       el('strong', { text: 'Nothing here yet' }),
-      el('span', { text: state.tab === 'workflows' ? 'Create an automation or discover pipeline files.' : 'Waiting for activity.' }),
+      el('span', { text: state.tab === 'workflows' ? 'Create a CI workflow or discover pipeline files.' : 'Waiting for activity.' }),
     ));
     return;
   }
   for (const row of rows) {
-    const btn = el('button', { class: 'auto-row', type: 'button' },
-      el('span', { class: 'auto-row-title', text: row.title }),
-      el('span', { class: `auto-pill ${row.pill}`, text: row.pill }),
-      el('span', { class: 'auto-row-meta', text: row.meta }),
+    const btn = el('button', { class: 'ci-row', type: 'button' },
+      el('span', { class: 'ci-row-title', text: row.title }),
+      el('span', { class: `ci-pill ${row.pill}`, text: row.pill }),
+      el('span', { class: 'ci-row-meta', text: row.meta }),
     );
     if (state.selected && state.selected.id === row.id) btn.classList.add('active');
     btn.addEventListener('click', () => selectItem(row.item));
@@ -161,28 +161,28 @@ function selectCurrent() {
 function selectItem(item) {
   state.selected = item;
   renderList();
-  const detail = document.getElementById('auto-detail');
-  const actions = document.getElementById('auto-detail-actions');
+  const detail = document.getElementById('ci-detail');
+  const actions = document.getElementById('ci-detail-actions');
   detail.innerHTML = '';
   actions.innerHTML = '';
-  document.getElementById('auto-detail-title').textContent = item.name || item.type || item.id;
+  document.getElementById('ci-detail-title').textContent = item.name || item.type || item.id;
   if (state.tab === 'workflows') renderWorkflowDetail(item, detail, actions);
   else if (state.tab === 'runs') renderRunDetail(item, detail, actions);
   else if (state.tab === 'schedules') {
     detail.append(el('p', { text: `Next fire ${item.next_run_at || '—'} (${item.kind}, ${item.status})` }));
   } else {
-    detail.append(el('pre', { class: 'auto-yaml', text: JSON.stringify(item, null, 2) }));
+    detail.append(el('pre', { class: 'ci-yaml', text: JSON.stringify(item, null, 2) }));
   }
 }
 
 function renderWorkflowDetail(w, detail, actions) {
   detail.append(
     el('p', { text: w.blocked_reason || `Availability: ${w.availability || 'runnable'}` }),
-    el('div', { class: 'auto-dag' }, ...(w.jobs || []).map((j) =>
-      el('div', { class: 'auto-job-card' },
+    el('div', { class: 'ci-dag' }, ...(w.jobs || []).map((j) =>
+      el('div', { class: 'ci-job-card' },
         el('h3', { text: j.name || j.id }),
-        el('div', { class: 'auto-step', text: (j.needs || []).length ? `needs ${j.needs.join(', ')}` : 'no needs' }),
-        ...(j.steps || []).map((s) => el('div', { class: 'auto-step', text: s.run || s.uses || s.name || s.id })),
+        el('div', { class: 'ci-step', text: (j.needs || []).length ? `needs ${j.needs.join(', ')}` : 'no needs' }),
+        ...(j.steps || []).map((s) => el('div', { class: 'ci-step', text: s.run || s.uses || s.name || s.id })),
       ),
     )),
   );
@@ -191,7 +191,7 @@ function renderWorkflowDetail(w, detail, actions) {
   runBtn.disabled = invalid;
   runBtn.addEventListener('click', async () => {
     try {
-      await rpc('automation.run', { id: w.id });
+      await rpc('ci.run', { id: w.id });
       toast(`Started ${w.name}`, 'success');
       setTab('runs');
       await refresh();
@@ -203,7 +203,7 @@ function renderWorkflowDetail(w, detail, actions) {
   if (invalid && !w.enabled) toggle.disabled = true;
   toggle.addEventListener('click', async () => {
     try {
-      await rpc(w.enabled ? 'automation.disable' : 'automation.enable', { id: w.id });
+      await rpc(w.enabled ? 'ci.disable' : 'ci.enable', { id: w.id });
       await refresh();
     } catch (err) {
       toast(err.message || String(err), 'error');
@@ -214,7 +214,7 @@ function renderWorkflowDetail(w, detail, actions) {
     const ok = await confirmDialog('Delete automation', `"${w.name}" will be removed.`, 'Delete');
     if (!ok) return;
     try {
-      await rpc('automation.delete', { id: w.id });
+      await rpc('ci.delete', { id: w.id });
       state.selected = null;
       await refresh();
     } catch (err) {
@@ -231,14 +231,14 @@ function renderRunDetail(run, detail, actions) {
   if (run.blocked_reason) {
     detail.append(el('p', { text: run.blocked_reason }));
   }
-  detail.append(el('div', { class: 'auto-dag' }, ...(run.jobs || []).map((j) =>
-    el('div', { class: 'auto-job-card' },
+  detail.append(el('div', { class: 'ci-dag' }, ...(run.jobs || []).map((j) =>
+    el('div', { class: 'ci-job-card' },
       el('h3', { text: j.name || j.id }),
-      el('span', { class: `auto-pill ${j.status}`, text: j.status }),
+      el('span', { class: `ci-pill ${j.status}`, text: j.status }),
       ...(j.steps || []).map((s) => {
-        const stepEl = el('div', { class: 'auto-step', text: `${s.name || s.id}: ${s.status}` });
+        const stepEl = el('div', { class: 'ci-step', text: `${s.name || s.id}: ${s.status}` });
         if (s.output) {
-          stepEl.append(el('pre', { class: 'auto-step-output', text: s.output }));
+          stepEl.append(el('pre', { class: 'ci-step-output', text: s.output }));
         }
         return stepEl;
       }),
@@ -275,14 +275,14 @@ function renderRunDetail(run, detail, actions) {
 }
 
 async function enableBlockedProvider() {
-  const caps = await rpc('automation.capabilities');
+  const caps = await rpc('ci.capabilities');
   const disabled = (caps.capabilities || []).find((c) => c.status === 'disabled');
   if (!disabled) {
     toast('No disabled provider found', 'info');
     return;
   }
   try {
-    await rpc('automation.provider.disable', { id: disabled.provider, enabled: true });
+    await rpc('ci.provider.disable', { id: disabled.provider, enabled: true });
     toast(`Enabled ${disabled.provider}`, 'success');
     await refresh();
   } catch (err) {
@@ -333,12 +333,12 @@ async function createWizard() {
   }
   const yaml = `name: ${name}\n${trigger}${result.fields.yaml || ''}`;
   try {
-    const validated = await rpc('automation.validate', { yaml });
+    const validated = await rpc('ci.validate', { yaml });
     if (validated.verdict === 'INVALID') {
       toast(validated.issues?.[0]?.message || 'Invalid workflow', 'error');
       return;
     }
-    await rpc('automation.save', { yaml, enabled: true });
+    await rpc('ci.save', { yaml, enabled: true });
     toast(`Saved ${name}`, 'success');
     await refresh();
   } catch (err) {

@@ -17,12 +17,12 @@ func TestSQLiteOnceTriggerSurvivesReopen(t *testing.T) {
 	clock := &application.FrozenClock{T: time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)}
 	bus := application.NewBus()
 
-	svc, store, err := BuildAutomation(dir, bus, nil, nil, nil)
+	svc, store, err := BuildCI(dir, bus, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	svc.Clock = clock
-	svc.Auto.Clock = clock
+	svc.Sched.Clock = clock
 	svc.Exec.Clock = clock
 	at := clock.T.Add(time.Hour)
 	w := &domain.WorkflowDefinition{
@@ -37,19 +37,19 @@ func TestSQLiteOnceTriggerSurvivesReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc2, store2, err := BuildAutomation(dir, bus, nil, nil, nil)
+	svc2, store2, err := BuildCI(dir, bus, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store2.Close()
 	svc2.Clock = clock
-	svc2.Auto.Clock = clock
+	svc2.Sched.Clock = clock
 	svc2.Exec.Clock = clock
-	if _, err := os.Stat(filepath.Join(dir, "ci", "automation.db")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "ci", "workflows.db")); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(2 * time.Hour)
-	if err := svc2.Auto.FireDue(ctx); err != nil {
+	if err := svc2.Sched.FireDue(ctx); err != nil {
 		t.Fatal(err)
 	}
 	runs, err := svc2.Runs.List(ctx, application.RunFilter{WorkflowID: "once-mail"})
@@ -60,7 +60,7 @@ func TestSQLiteOnceTriggerSurvivesReopen(t *testing.T) {
 		t.Fatalf("want 1 run after reopen, got %d", len(runs))
 	}
 	clock.Advance(time.Hour)
-	if err := svc2.Auto.FireDue(ctx); err != nil {
+	if err := svc2.Sched.FireDue(ctx); err != nil {
 		t.Fatal(err)
 	}
 	runs, _ = svc2.Runs.List(ctx, application.RunFilter{WorkflowID: "once-mail"})

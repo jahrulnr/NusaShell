@@ -99,7 +99,7 @@ func TestBuildToolPresentationParsesPredictableSearchRows(t *testing.T) {
 
 func TestBuildToolPresentationParsesYAMLCollectionAndKeepsProviderRawPath(t *testing.T) {
 	raw := "---\ncount: 1\n---\n- id: wf_1\n  name: Nightly\n  enabled: true"
-	got := BuildToolPresentation("automation_list", "{}", domain.ToolOK, raw)
+	got := BuildToolPresentation("ci_list", "{}", domain.ToolOK, raw)
 	if got.Variant != "collection" || got.Result.Format != "list" || len(got.Result.Items) != 1 {
 		t.Fatalf("automation presentation = %+v", got)
 	}
@@ -158,7 +158,7 @@ func TestBuildToolPresentationUsesOperationSummaries(t *testing.T) {
 		t.Fatalf("grep summary = %q", grep.Result.Summary)
 	}
 
-	validate := BuildToolPresentation("automation_validate", `{}`, domain.ToolOK, "---\nsyntax: OK\ncapabilities: OK\nproviders: BLOCKED\n---")
+	validate := BuildToolPresentation("ci_validate", `{}`, domain.ToolOK, "---\nsyntax: OK\ncapabilities: OK\nproviders: BLOCKED\n---")
 	if validate.Result.Summary != "Blocked" {
 		t.Fatalf("validation summary = %q", validate.Result.Summary)
 	}

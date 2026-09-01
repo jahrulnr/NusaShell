@@ -292,14 +292,14 @@ func run() error {
 	tb.Delegate = app
 	tb.Steerer = app
 	tb.SkillSearcher = app
-	var autoSvc *application.Automation
-	if svc, autoDB, err := ci.BuildAutomation(dataDir, bus, pluginStore, mcpManager, mcpManager); err != nil {
+	var autoSvc *application.CI
+	if svc, autoDB, err := ci.BuildCI(dataDir, bus, pluginStore, mcpManager, mcpManager); err != nil {
 		slog.Warn("automation store init failed", "error", err)
 	} else {
 		autoSvc = svc
-		app.Automation = svc
+		app.CI = svc
 		defer autoDB.Close()
-		tb.Automation = svc
+		tb.CI = svc
 		svc.Exec.Agent = application.NewPipelineAgentRunner(tb, app)
 		if loaded, err := svc.DiscoverPipelines(context.Background()); err != nil {
 			slog.Warn("pipeline discovery failed", "error", err)
@@ -322,7 +322,7 @@ func run() error {
 		}
 		ictx, cancelEv := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancelEv()
-		if err := autoSvc.Auto.IngestEvent(ictx, ev); err != nil {
+		if err := autoSvc.Sched.IngestEvent(ictx, ev); err != nil {
 			slog.Warn("mcp notification ingest failed", "server", serverID, "event", ev.Type, "error", err)
 		}
 	})
@@ -354,8 +354,8 @@ func run() error {
 		go func() {
 			// Heal runs orphaned by a previous process (crash/restart): their
 			// running jobs have no heartbeat and would stay "running" forever.
-			_ = autoSvc.Auto.Exec.RecoverStale(context.Background())
-			_ = autoSvc.Auto.FireDue(context.Background())
+			_ = autoSvc.Sched.Exec.RecoverStale(context.Background())
+			_ = autoSvc.Sched.FireDue(context.Background())
 			ticker := time.NewTicker(15 * time.Second)
 			defer ticker.Stop()
 			for {
@@ -363,7 +363,7 @@ func run() error {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					_ = autoSvc.Auto.FireDue(context.Background())
+					_ = autoSvc.Sched.FireDue(context.Background())
 				}
 			}
 		}()

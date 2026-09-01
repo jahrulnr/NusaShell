@@ -59,7 +59,7 @@ func messageToEvent(serverID string, p map[string]any) (domain.Event, bool) {
 		return domain.Event{}, false
 	}
 	if v, ok := p["from_me"].(bool); ok && v {
-		// Outbound (bot) messages never trigger automation.
+		// Outbound (bot) messages never trigger CI workflows.
 		return domain.Event{}, false
 	}
 

@@ -94,7 +94,7 @@ func TestToolFactoryAutomationAgentOmitsACPTools(t *testing.T) {
 		Toolbox:     func() []ToolInfo { return factoryStubTools() },
 		Dispatchers: FilterDispatcherToolInfos,
 	}
-	defs := f.Get(AgentAutomation, "/ws")
+	defs := f.Get(AgentCI, "/ws")
 	if hasTool(defs, "subagent") {
 		t.Fatalf("automation agent must not see subagent, got %v", namesOf(defs))
 	}

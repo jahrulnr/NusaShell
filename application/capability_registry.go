@@ -13,7 +13,7 @@ import (
 )
 
 // CapabilityRegistry resolves logical capability names to builtin or MCP
-// providers. The Automation Engine consumes this interface and does not
+// providers. The CI Engine consumes this interface and does not
 // care which implementation sits underneath.
 type CapabilityRegistry struct {
 	Plugins   PluginStore

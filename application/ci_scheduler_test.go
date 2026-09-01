@@ -42,42 +42,42 @@ func (f *fakeExec) RunStep(ctx context.Context, req RunStepRequest) (StepResult,
 	return StepResult{ExitCode: 0, Outputs: map[string]any{"status": "ok"}}, nil
 }
 
-func testAutomation(t *testing.T, exec JobExecutor) (*Automation, *AutoStore, *FrozenClock) {
+func testAutomation(t *testing.T, exec JobExecutor) (*CI, *CIStore, *FrozenClock) {
 	t.Helper()
-	mem := NewAutoStore()
+	mem := NewCIStore()
 	clock := &FrozenClock{T: time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)}
 	caps := NewCapabilityRegistry()
-	caps.Workflows = WorkflowMem{AutoStore: mem}
-	caps.State = ProviderStateMem{AutoStore: mem}
+	caps.Workflows = WorkflowMem{CIStore: mem}
+	caps.State = ProviderStateMem{CIStore: mem}
 	es := NewExecutionScheduler()
-	es.Runs = RunMem{AutoStore: mem}
-	es.Logs = LogMem{AutoStore: mem}
+	es.Runs = RunMem{CIStore: mem}
+	es.Logs = LogMem{CIStore: mem}
 	es.Exec = exec
 	es.Caps = caps
-	es.Waits = WaitMem{AutoStore: mem}
+	es.Waits = WaitMem{CIStore: mem}
 	es.Clock = clock
 	es.Bus = NewBus()
-	auto := &AutomationScheduler{
-		Workflows: WorkflowMem{AutoStore: mem},
-		Schedules: ScheduleMem{AutoStore: mem},
-		Events:    EventMem{AutoStore: mem},
-		Waits:     WaitMem{AutoStore: mem},
-		Locks:     LockMem{AutoStore: mem},
-		Debounce:  DebounceMem{AutoStore: mem},
+	auto := &CIScheduler{
+		Workflows: WorkflowMem{CIStore: mem},
+		Schedules: ScheduleMem{CIStore: mem},
+		Events:    EventMem{CIStore: mem},
+		Waits:     WaitMem{CIStore: mem},
+		Locks:     LockMem{CIStore: mem},
+		Debounce:  DebounceMem{CIStore: mem},
 		Caps:      caps,
 		Exec:      es,
 		Clock:     clock,
 		Bus:       es.Bus,
 	}
-	return &Automation{
-		Workflows: WorkflowMem{AutoStore: mem},
-		Runs:      RunMem{AutoStore: mem},
-		Schedules: ScheduleMem{AutoStore: mem},
-		Events:    EventMem{AutoStore: mem},
+	return &CI{
+		Workflows: WorkflowMem{CIStore: mem},
+		Runs:      RunMem{CIStore: mem},
+		Schedules: ScheduleMem{CIStore: mem},
+		Events:    EventMem{CIStore: mem},
 		Exec:      es,
-		Auto:      auto,
+		Sched:     auto,
 		Caps:      caps,
-		Logs:      LogMem{AutoStore: mem},
+		Logs:      LogMem{CIStore: mem},
 		Clock:     clock,
 	}, mem, clock
 }
@@ -160,7 +160,7 @@ func TestWaitUntilDoesNotOccupyExecutor(t *testing.T) {
 		t.Fatalf("executor ran while waiting: %v", fx.Calls)
 	}
 	clock.Advance(3 * time.Hour)
-	if err := svc.Auto.resumeWaits(context.Background()); err != nil {
+	if err := svc.Sched.resumeWaits(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = svc.Runs.Get(context.Background(), run.ID)
@@ -178,10 +178,10 @@ func TestOnceTriggerFires(t *testing.T) {
 		Triggers: []domain.Trigger{{ID: "t1", Kind: domain.TriggerOnce, At: &at, Timezone: "UTC"}},
 		Jobs:     []domain.Job{{ID: "j", Steps: []domain.Step{{ID: "s", Run: "echo"}}}},
 	}
-	if err := svc.Auto.EnableWorkflow(context.Background(), w); err != nil {
+	if err := svc.Sched.EnableWorkflow(context.Background(), w); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Auto.FireDue(context.Background()); err != nil {
+	if err := svc.Sched.FireDue(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	runs, _ := svc.Runs.List(context.Background(), RunFilter{WorkflowID: "once"})
@@ -189,7 +189,7 @@ func TestOnceTriggerFires(t *testing.T) {
 		t.Fatalf("should not fire early, got %d", len(runs))
 	}
 	clock.Advance(2 * time.Hour)
-	if err := svc.Auto.FireDue(context.Background()); err != nil {
+	if err := svc.Sched.FireDue(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	runs, _ = svc.Runs.List(context.Background(), RunFilter{WorkflowID: "once"})
@@ -208,10 +208,10 @@ func TestEventIdempotentDelivery(t *testing.T) {
 	}
 	_ = svc.Workflows.Put(context.Background(), w)
 	ev := domain.Event{ID: "e1", Type: "email.received", Subject: "Invoice", Attributes: map[string]any{"mailbox": "finance"}}
-	if err := svc.Auto.IngestEvent(context.Background(), ev); err != nil {
+	if err := svc.Sched.IngestEvent(context.Background(), ev); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Auto.IngestEvent(context.Background(), ev); err != nil {
+	if err := svc.Sched.IngestEvent(context.Background(), ev); err != nil {
 		t.Fatal(err)
 	}
 	runs, _ := svc.Runs.List(context.Background(), RunFilter{WorkflowID: "mail"})
@@ -228,7 +228,7 @@ func TestBlockedWhenCapabilityMissing(t *testing.T) {
 		Triggers: []domain.Trigger{{ID: "t1", Kind: domain.TriggerEvent, Event: "email.received"}},
 		Jobs:     []domain.Job{{ID: "j", Steps: []domain.Step{{ID: "s", Uses: "email.read"}}}},
 	}
-	r := svc.Auto.Validate(context.Background(), w)
+	r := svc.Sched.Validate(context.Background(), w)
 	if r.Verdict() != "INVALID" {
 		t.Fatalf("missing capability should be INVALID, got %s %+v", r.Verdict(), r.Issues)
 	}
@@ -250,9 +250,9 @@ func TestCapabilityBuiltinAvailable(t *testing.T) {
 }
 
 func TestDisabledProviderBlocksNotFails(t *testing.T) {
-	mem := NewAutoStore()
+	mem := NewCIStore()
 	reg := NewCapabilityRegistry()
-	reg.State = ProviderStateMem{AutoStore: mem}
+	reg.State = ProviderStateMem{CIStore: mem}
 	reg.Plugins = &capPluginStore{items: []*domain.Plugin{{
 		Manifest: domain.PluginManifest{ID: "mail-mcp", Name: "mail"},
 	}}}
@@ -313,7 +313,7 @@ func TestConcurrencySkip(t *testing.T) {
 	}
 	_ = svc.Workflows.Put(context.Background(), w)
 	svc.LocksAcquireForTest(w.Concurrency.Key, "run_existing")
-	if err := svc.Auto.IngestEvent(context.Background(), domain.Event{ID: "e2", Type: "tick"}); err != nil {
+	if err := svc.Sched.IngestEvent(context.Background(), domain.Event{ID: "e2", Type: "tick"}); err != nil {
 		t.Fatal(err)
 	}
 	runs, _ := svc.Runs.List(context.Background(), RunFilter{WorkflowID: "mon"})
@@ -322,8 +322,8 @@ func TestConcurrencySkip(t *testing.T) {
 	}
 }
 
-func (a *Automation) LocksAcquireForTest(key, runID string) {
-	_ = a.Auto.Locks.Acquire(context.Background(), key, runID)
+func (a *CI) LocksAcquireForTest(key, runID string) {
+	_ = a.Sched.Locks.Acquire(context.Background(), key, runID)
 }
 
 func TestStartRunAsyncReturnsImmediately(t *testing.T) {

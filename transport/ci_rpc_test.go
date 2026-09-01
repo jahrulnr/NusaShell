@@ -7,16 +7,16 @@ import (
 	"nusashell/infrastructure/ci"
 )
 
-func TestRPCAutomationListAndSave(t *testing.T) {
+func TestRPCCIListAndSave(t *testing.T) {
 	h := newHarness(t, nil)
-	svc, store, err := ci.BuildAutomation(h.app.DataDir, h.app.Bus, h.app.Plugins, nil, nil)
+	svc, store, err := ci.BuildCI(h.app.DataDir, h.app.Bus, h.app.Plugins, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	h.app.Automation = svc
+	h.app.CI = svc
 
-	listed := h.rpcOK(t, "automation.list", map[string]any{})
+	listed := h.rpcOK(t, "ci.list", map[string]any{})
 	var list struct {
 		Workflows []struct {
 			ID string `json:"id"`
@@ -29,7 +29,7 @@ func TestRPCAutomationListAndSave(t *testing.T) {
 		t.Fatalf("want empty list, got %+v", list.Workflows)
 	}
 
-	saved := h.rpcOK(t, "automation.save", map[string]any{
+	saved := h.rpcOK(t, "ci.save", map[string]any{
 		"yaml": "name: ping\ntriggers:\n  manual: true\njobs:\n  hi:\n    steps:\n      - run: true\n",
 	})
 	var dto struct {
@@ -48,13 +48,13 @@ func TestRPCAutomationListAndSave(t *testing.T) {
 	info := h.rpcOK(t, "app.info", map[string]any{})
 	var appInfo struct {
 		Features struct {
-			Automation bool `json:"automation"`
+			CI bool `json:"ci"`
 		} `json:"features"`
 	}
 	if err := json.Unmarshal(info.Result, &appInfo); err != nil {
 		t.Fatal(err)
 	}
-	if !appInfo.Features.Automation {
-		t.Fatal("app.info features.automation should be true when wired")
+	if !appInfo.Features.CI {
+		t.Fatal("app.info features.ci should be true when wired")
 	}
 }

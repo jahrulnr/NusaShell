@@ -167,7 +167,7 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 	// runtime state (delegation config, continuation instructions, async
 	// results) is appended here — those travel as tool hydration or tool
 	// descriptions so the system prefix keeps its prompt-cache hits.
-	system := buildSystemPrompt(conversation, settings.UserPrompt)
+	system := buildSystemPromptForRun(run, conversation, settings.UserPrompt)
 	// The hydration checkpoint is persisted once per history epoch (fresh
 	// room at turn start, and inside persistCompactedConversation after
 	// compaction) — never inside the turn loop. The first Stream reads the

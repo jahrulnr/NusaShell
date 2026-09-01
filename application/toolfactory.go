@@ -18,10 +18,10 @@ const (
 	// review_transcript and model_override tools plus the memory/skill/
 	// file_read whitelist from the shared toolbox.
 	AgentReview AgentKind = "review"
-	// AgentAutomation is the headless pipeline agent step: the full
+	// AgentCI is the headless pipeline agent step: the full
 	// toolbox minus ACP subagent tools (permission prompts must never
 	// stall a headless run).
-	AgentAutomation AgentKind = "automation"
+	AgentCI AgentKind = "automation"
 	// AgentCompaction is the context-compaction summarizer: exactly one
 	// local tool, summary(), forced via ToolChoice. It never touches the
 	// toolbox or dispatchers.
@@ -59,7 +59,7 @@ func (f *ToolFactory) Get(kind AgentKind, workspace string) []ToolDef {
 	switch kind {
 	case AgentReview:
 		return f.reviewTools()
-	case AgentAutomation:
+	case AgentCI:
 		return filterACPToolDefs(f.baseTools(workspace))
 	case AgentDelegate:
 		return filterDelegateToolDefs(filterACPToolDefs(f.baseTools(workspace)))
@@ -138,7 +138,7 @@ func (a *App) turnToolDefs(run *TurnRun) []ToolDef {
 	}
 	kind := AgentConversation
 	if run.Headless {
-		kind = AgentAutomation
+		kind = AgentCI
 	}
 	if run.ToolKind != "" {
 		kind = run.ToolKind

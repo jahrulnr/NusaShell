@@ -17,20 +17,20 @@ const (
 	MethodCICacheList     = "ci.cache.list"
 	MethodCICacheClear    = "ci.cache.clear"
 
-	MethodAutomationList         = "automation.list"
-	MethodAutomationGet          = "automation.get"
-	MethodAutomationSave         = "automation.save"
-	MethodAutomationDelete       = "automation.delete"
-	MethodAutomationEnable       = "automation.enable"
-	MethodAutomationDisable      = "automation.disable"
-	MethodAutomationRun          = "automation.run"
-	MethodAutomationValidate     = "automation.validate"
-	MethodAutomationEvents       = "automation.events"
-	MethodAutomationIngest       = "automation.ingest"
-	MethodAutomationDependents   = "automation.dependents"
-	MethodAutomationSchedules    = "automation.schedules"
-	MethodAutomationCapabilities = "automation.capabilities"
-	MethodAutomationSetDisabled  = "automation.provider.disable"
+	MethodCIList            = "ci.list"
+	MethodCIGet             = "ci.get"
+	MethodCISave            = "ci.save"
+	MethodCIDelete          = "ci.delete"
+	MethodCIEnable          = "ci.enable"
+	MethodCIDisable         = "ci.disable"
+	MethodCIRun             = "ci.run"
+	MethodCIValidate        = "ci.validate"
+	MethodCIEvents          = "ci.events"
+	MethodCIIngest          = "ci.ingest"
+	MethodCIDependents      = "ci.dependents"
+	MethodCISchedules       = "ci.schedules"
+	MethodCICapabilities    = "ci.capabilities"
+	MethodCIProviderDisable = "ci.provider.disable"
 
 	EventCIRunCreated    = "ci.run.created"
 	EventCIRunStarted    = "ci.run.started"
@@ -49,7 +49,7 @@ const (
 	EventCIStepOutput    = "ci.step.output"
 	EventCIStepCompleted = "ci.step.completed"
 	EventCIStepFailed    = "ci.step.failed"
-	EventAutomationEvent = "automation.event"
+	EventCIEvent         = "ci.event"
 )
 
 type TriggerDTO struct {
@@ -77,7 +77,7 @@ type JobDTO struct {
 	Steps []StepDTO `json:"steps,omitempty"`
 }
 
-type AutomationDTO struct {
+type CIWorkflowDTO struct {
 	ID            string       `json:"id"`
 	Name          string       `json:"name"`
 	Enabled       bool         `json:"enabled"`
@@ -183,18 +183,18 @@ type CILogsResult struct {
 	Chunks []json.RawMessage `json:"chunks"`
 }
 
-type AutomationSaveRequest struct {
+type CIWorkflowSaveRequest struct {
 	ID      string `json:"id,omitempty"`
 	YAML    string `json:"yaml,omitempty"`
 	Enabled *bool  `json:"enabled,omitempty"`
 	Name    string `json:"name,omitempty"`
 }
 
-type AutomationIDRequest struct {
+type CIWorkflowIDRequest struct {
 	ID string `json:"id"`
 }
 
-type AutomationIngestRequest struct {
+type CIIngestRequest struct {
 	ID         string         `json:"id,omitempty"`
 	Type       string         `json:"type"`
 	Source     string         `json:"source,omitempty"`
@@ -210,8 +210,8 @@ type CapabilityDTO struct {
 	Reason     string `json:"reason,omitempty"`
 }
 
-type AutomationListResult struct {
-	Workflows []AutomationDTO `json:"workflows"`
+type CIWorkflowListResult struct {
+	Workflows []CIWorkflowDTO `json:"workflows"`
 }
 
 type CIRunListResult struct {

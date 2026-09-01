@@ -35,7 +35,7 @@ export const STARTER_PROMPTS = [
   },
   {
     label: 'Automate a task',
-    prompt: 'I\'ll describe a task I repeat often — help me script it or schedule it as an automation.',
+    prompt: 'I\'ll describe a task I repeat often — help me script it or schedule it as a CI workflow.',
   },
 ];
 

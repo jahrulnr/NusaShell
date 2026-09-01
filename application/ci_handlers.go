@@ -12,12 +12,12 @@ import (
 )
 
 func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessage) (any, *contracts.RPCError) {
-	if a.Automation == nil {
+	if a.CI == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "automation is not configured"}
 	}
-	auto := a.Automation
+	auto := a.CI
 	switch method {
-	case contracts.MethodAutomationValidate:
+	case contracts.MethodCIValidate:
 		var req contracts.CIWorkspaceRequest
 		if err := contracts.DecodePayload(payload, &req); err != nil {
 			return nil, err
@@ -169,19 +169,19 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 			"id": "local", "name": "Local machine", "executor": "local", "status": "online",
 			"labels": []string{"local", "linux"},
 		}}}, nil
-	case contracts.MethodAutomationList:
+	case contracts.MethodCIList:
 		list, err := auto.Workflows.List(ctx)
 		if err != nil {
 			return nil, rpcInternal(err)
 		}
-		out := make([]contracts.AutomationDTO, 0, len(list))
+		out := make([]contracts.CIWorkflowDTO, 0, len(list))
 		for _, w := range list {
 			avail, reason := auto.AvailabilityOf(ctx, w)
 			out = append(out, workflowDTO(w, avail, reason))
 		}
-		return contracts.AutomationListResult{Workflows: out}, nil
-	case contracts.MethodAutomationGet:
-		var req contracts.AutomationIDRequest
+		return contracts.CIWorkflowListResult{Workflows: out}, nil
+	case contracts.MethodCIGet:
+		var req contracts.CIWorkflowIDRequest
 		if err := contracts.DecodePayload(payload, &req); err != nil {
 			return nil, err
 		}
@@ -191,8 +191,8 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 		}
 		avail, reason := auto.AvailabilityOf(ctx, w)
 		return workflowDTO(w, avail, reason), nil
-	case contracts.MethodAutomationSave:
-		var req contracts.AutomationSaveRequest
+	case contracts.MethodCISave:
+		var req contracts.CIWorkflowSaveRequest
 		if err := contracts.DecodePayload(payload, &req); err != nil {
 			return nil, err
 		}
@@ -220,8 +220,8 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 		}
 		avail, reason := auto.AvailabilityOf(ctx, saved)
 		return map[string]any{"workflow": workflowDTO(saved, avail, reason), "validation": validationDTO(r)}, nil
-	case contracts.MethodAutomationDelete:
-		var req contracts.AutomationIDRequest
+	case contracts.MethodCIDelete:
+		var req contracts.CIWorkflowIDRequest
 		if err := contracts.DecodePayload(payload, &req); err != nil {
 			return nil, err
 		}
@@ -229,8 +229,8 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcInternal(err)
 		}
 		return map[string]bool{"ok": true}, nil
-	case contracts.MethodAutomationEnable, contracts.MethodAutomationDisable:
-		var req contracts.AutomationIDRequest
+	case contracts.MethodCIEnable, contracts.MethodCIDisable:
+		var req contracts.CIWorkflowIDRequest
 		if err := contracts.DecodePayload(payload, &req); err != nil {
 			return nil, err
 		}
@@ -238,8 +238,8 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 		if err != nil {
 			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 		}
-		if method == contracts.MethodAutomationEnable {
-			if err := auto.Auto.EnableWorkflow(ctx, w); err != nil {
+		if method == contracts.MethodCIEnable {
+			if err := auto.Sched.EnableWorkflow(ctx, w); err != nil {
 				return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
 			}
 		} else {
@@ -248,8 +248,8 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 		}
 		avail, reason := auto.AvailabilityOf(ctx, w)
 		return workflowDTO(w, avail, reason), nil
-	case contracts.MethodAutomationRun:
-		var req contracts.AutomationIDRequest
+	case contracts.MethodCIRun:
+		var req contracts.CIWorkflowIDRequest
 		if err := contracts.DecodePayload(payload, &req); err != nil {
 			return nil, err
 		}
@@ -258,7 +258,7 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcWorkflowRunError(err)
 		}
 		return runDTO(run), nil
-	case contracts.MethodAutomationEvents:
+	case contracts.MethodCIEvents:
 		evs, err := auto.Events.ListEvents(ctx, 50)
 		if err != nil {
 			return nil, rpcInternal(err)
@@ -271,17 +271,17 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 			})
 		}
 		return map[string]any{"events": out}, nil
-	case contracts.MethodAutomationIngest:
-		var req contracts.AutomationIngestRequest
+	case contracts.MethodCIIngest:
+		var req contracts.CIIngestRequest
 		if err := contracts.DecodePayload(payload, &req); err != nil {
 			return nil, err
 		}
 		ev := domain.Event{ID: req.ID, Type: req.Type, Source: req.Source, Subject: req.Subject, Attributes: req.Attributes, Time: clock.NewTime().Time()}
-		if err := auto.Auto.IngestEvent(ctx, ev); err != nil {
+		if err := auto.Sched.IngestEvent(ctx, ev); err != nil {
 			return nil, rpcInternal(err)
 		}
 		return map[string]bool{"ok": true}, nil
-	case contracts.MethodAutomationSchedules:
+	case contracts.MethodCISchedules:
 		list, err := auto.Schedules.List(ctx)
 		if err != nil {
 			return nil, rpcInternal(err)
@@ -294,7 +294,7 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 			})
 		}
 		return map[string]any{"schedules": out}, nil
-	case contracts.MethodAutomationCapabilities:
+	case contracts.MethodCICapabilities:
 		list := auto.Caps.List(ctx)
 		out := make([]contracts.CapabilityDTO, 0, len(list))
 		for _, b := range list {
@@ -303,7 +303,7 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 			})
 		}
 		return map[string]any{"capabilities": out}, nil
-	case contracts.MethodAutomationDependents:
+	case contracts.MethodCIDependents:
 		var req contracts.PluginIDRequest
 		if err := contracts.DecodePayload(payload, &req); err != nil {
 			return nil, err
@@ -317,7 +317,7 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 			names = append(names, d.Name)
 		}
 		return map[string]any{"automations": names, "count": len(names)}, nil
-	case contracts.MethodAutomationSetDisabled:
+	case contracts.MethodCIProviderDisable:
 		var req contracts.PluginSetFlagRequest
 		if err := contracts.DecodePayload(payload, &req); err != nil {
 			return nil, err

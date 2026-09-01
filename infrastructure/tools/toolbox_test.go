@@ -1098,9 +1098,9 @@ func TestListToolsIncludesAutomation(t *testing.T) {
 	for _, want := range []string{
 		"ci_run",
 		"ci_run_status", "ci_logs", "ci_cancel",
-		"automation_list", "automation_read", "automation_validate", "automation_create",
-		"automation_enable", "automation_disable", "automation_status",
-		"schedule_once", "schedule_every", "wait_until",
+		"ci_list", "ci_read", "ci_validate", "ci_create",
+		"ci_enable", "ci_disable", "ci_status",
+		"ci_schedule_once", "ci_schedule_every", "wait_until",
 	} {
 		if !names[want] {
 			t.Fatalf("ListTools missing %q", want)
@@ -1577,15 +1577,15 @@ func TestDocsReadAcceptsCanonicalIDAndMarkdownFilename(t *testing.T) {
 		t.Fatal(err)
 	}
 	tb := &Toolbox{Docs: source}
-	for _, id := range []string{"automation", "automation.md"} {
+	for _, id := range []string{"ci", "ci.md"} {
 		out, err := tb.Execute(context.Background(), "docs", []byte(fmt.Sprintf(`{"op":"read","id":%q}`, id)))
 		if err != nil {
 			t.Fatalf("docs read id %q: %v", id, err)
 		}
-		if !strings.Contains(out, "Automation and pipelines") {
+		if !strings.Contains(out, "CI and pipelines") {
 			t.Fatalf("docs read id %q returned unexpected content: %s", id, out)
 		}
-		if !strings.Contains(out, "title: Automation") {
+		if !strings.Contains(out, "title: CI") {
 			t.Fatalf("docs read id %q did not return canonical metadata: %s", id, out)
 		}
 	}
@@ -1789,14 +1789,14 @@ func TestListToolsGenerateImageIsConditional(t *testing.T) {
 }
 
 func TestCIRunStatusDoesNotPanicOnNilWakeAt(t *testing.T) {
-	store := application.NewAutoStore()
+	store := application.NewCIStore()
 	if err := store.Create(context.Background(), &domain.WorkflowRun{
 		TaskState: domain.TaskState[domain.RunStatus]{ID: "run_1", Status: domain.StatusSuccess},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	tb := &Toolbox{Automation: &application.Automation{
-		Runs: application.RunMem{AutoStore: store},
+	tb := &Toolbox{CI: &application.CI{
+		Runs: application.RunMem{CIStore: store},
 	}}
 	out, err := tb.Execute(context.Background(), "ci_run_status", []byte(`{"run_id":"run_1"}`))
 	if err != nil {
@@ -1814,14 +1814,14 @@ func TestCIRunStatusDoesNotPanicOnNilWakeAt(t *testing.T) {
 }
 
 func TestCIWaitDoesNotPanicOnNilWakeAt(t *testing.T) {
-	store := application.NewAutoStore()
-	runs := application.RunMem{AutoStore: store}
+	store := application.NewCIStore()
+	runs := application.RunMem{CIStore: store}
 	if err := store.Create(context.Background(), &domain.WorkflowRun{
 		TaskState: domain.TaskState[domain.RunStatus]{ID: "run_1", Status: domain.StatusSuccess},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	tb := &Toolbox{Automation: &application.Automation{
+	tb := &Toolbox{CI: &application.CI{
 		Runs: runs,
 		Exec: &application.ExecutionScheduler{Runs: runs},
 	}}
@@ -1841,7 +1841,7 @@ func TestCIWaitDoesNotPanicOnNilWakeAt(t *testing.T) {
 }
 
 func TestCIRunStatusFormatsWakeAt(t *testing.T) {
-	store := application.NewAutoStore()
+	store := application.NewCIStore()
 	wake := time.Date(2026, 8, 31, 2, 0, 0, 0, time.UTC)
 	if err := store.Create(context.Background(), &domain.WorkflowRun{
 		TaskState: domain.TaskState[domain.RunStatus]{ID: "run_wait", Status: domain.StatusWaiting},
@@ -1849,8 +1849,8 @@ func TestCIRunStatusFormatsWakeAt(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	tb := &Toolbox{Automation: &application.Automation{
-		Runs: application.RunMem{AutoStore: store},
+	tb := &Toolbox{CI: &application.CI{
+		Runs: application.RunMem{CIStore: store},
 	}}
 	out, err := tb.Execute(context.Background(), "ci_run_status", []byte(`{"run_id":"run_wait"}`))
 	if err != nil {

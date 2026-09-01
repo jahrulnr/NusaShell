@@ -1,6 +1,6 @@
-# Automation and pipelines
+# CI and pipelines
 
-NusaShell embeds a local CI runner and an automation engine in the same Go process. Humans use the **Automation** sidebar view. The agent uses structured tools. Do not invent shell `sleep` loops or scrape the UI for job IDs.
+NusaShell embeds a local CI runner and workflow engine in the same Go process. Humans use the **CI** sidebar view. The agent uses structured tools. Do not invent shell `sleep` loops or scrape the UI for job IDs.
 
 ## Repository verification before push
 
@@ -29,20 +29,20 @@ Bad:
 
 ## Pipeline files
 
-Pipeline definitions live as YAML files under `<data-dir>/ci/pipelines/<name>.yaml`. NusaShell discovers them on boot, parses each into a workflow, and registers it in the automation registry (`ci/automation.db`). Triggers in pipeline files are activated immediately — there is no separate "register" step.
+Pipeline definitions live as YAML files under `<data-dir>/ci/pipelines/<name>.yaml`. NusaShell discovers them on boot, parses each into a workflow, and registers it in the automation registry (`ci/workflows.db`). Triggers in pipeline files are activated immediately — there is no separate "register" step.
 
 The file name (without `.yaml`) becomes the workflow ID. For example `deploy.yaml` → workflow ID `deploy`. Edit the file with any text editor; restart NusaShell to pick up changes.
 
-Pipeline files use the same YAML schema as `automation_create` — `name`, `triggers`, `jobs`, `env`, `defaults`, etc. Jobs form a DAG via `needs`. Independent jobs run in parallel on the local executor (this machine, host access).
+Pipeline files use the same YAML schema as `ci_create` — `name`, `triggers`, `jobs`, `env`, `defaults`, etc. Jobs form a DAG via `needs`. Independent jobs run in parallel on the local executor (this machine, host access).
 
 ## Saved automations
 
-`automation_create` / `automation.save` persist a workflow in `ci/automation.db` (not conversation JSON). They are the same concept as pipeline files, just created via the agent or UI instead of a file on disk. Triggers:
+`ci_create` / `ci.save` persist a workflow in `ci/workflows.db` (not conversation JSON). They are the same concept as pipeline files, just created via the agent or UI instead of a file on disk. Triggers:
 
 - **once** — RFC3339 timestamp. Fires at most once. Survives restart.
 - **every** — `cron` (5-field calendar) or `interval` (elapsed duration such as `1h`). They are not equivalent.
 - **when** — event type plus optional `where` filters. Duplicate `(event, trigger, workflow)` deliveries are ignored.
-- **manual** — UI, RPC, or `automation.run` only.
+- **manual** — UI, RPC, or `ci.run` only.
 
 Runtime timestamps in automation results use the host machine's local
 timezone and include the RFC3339 offset (for example, `+07:00` on an
@@ -67,7 +67,7 @@ spawns when nothing is new:
 
 Good example:
 
-    automation_create(yaml=
+    ci_create(yaml=
       version: 1
       name: Telegram auto-reply
       triggers:
@@ -84,7 +84,7 @@ Good example:
 
 Bad examples:
 
-    automation_create(yaml="…triggers: [every: {interval: 30s}]…")   # polls forever, spawns a turn even when idle
+    ci_create(yaml="…triggers: [every: {interval: 30s}]…")   # polls forever, spawns a turn even when idle
     # an event name that no plugin pushes, e.g. when: {event: email.received} with no email plugin — never fires
 
 The event is delivered exactly once per `(chat_id, message_id)` (`RecordDelivery`
@@ -97,13 +97,13 @@ ingestion finishes.
 
 Good example:
 
-    automation_list()                         # → [{id: "broken", availability: "invalid", reason: "yaml: ..."}, ...]
+    ci_list()                         # → [{id: "broken", availability: "invalid", reason: "yaml: ..."}, ...]
     # fix the YAML, then:
-    automation_enable(id="broken")
+    ci_enable(id="broken")
 
 Bad examples:
 
-    automation_enable(id="broken")            # rejected while availability is invalid
+    ci_enable(id="broken")            # rejected while availability is invalid
     ci_run(workflow_id="broken")              # invalid YAML cannot start a run
 
 ## Waiting
@@ -115,9 +115,9 @@ A step may set `wait_until: <RFC3339>`. The run status becomes `waiting` and the
 | Tool | Use |
 | --- | --- |
 | `ci_run` / `ci_run_status` / `ci_logs` / `ci_cancel` | Start and observe execution by `workflow_id` |
-| `automation_list` / `automation_read` / `automation_validate` / `automation_create` | Saved workflows and pipeline files |
-| `automation_enable` / `automation_disable` / `automation_status` | Lifecycle |
-| `schedule_once` / `schedule_every` | Create durable schedules (NusaShell owns the timer) |
+| `ci_list` / `ci_read` / `ci_validate` / `ci_create` | Saved workflows and pipeline files |
+| `ci_enable` / `ci_disable` / `ci_status` | Lifecycle |
+| `ci_schedule_once` / `ci_schedule_every` | Create durable schedules (NusaShell owns the timer) |
 | `wait_until` | How to park a run without occupying a runner |
 
 After `ci_run`, call `ci_run_status`. Fetch logs only for failed jobs.
@@ -129,7 +129,7 @@ immediately, continue other work, then `ci_wait` once for completion.
 
 Good example:
 
-    automation_list()                                    # → [{id: "deploy", ...}, ...]
+    ci_list()                                    # → [{id: "deploy", ...}, ...]
     ci_run(workflow_id="deploy", async=true)             # → {run_id: "run_42", status: "queued"}
     # … do other work …
     ci_wait(run_id="run_42", timeout_ms=300000)          # blocks until terminal or timeout

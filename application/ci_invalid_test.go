@@ -43,7 +43,7 @@ func TestAvailabilityOfParseErrorIsInvalid(t *testing.T) {
 func TestEnableWorkflowRejectsInvalidSyntax(t *testing.T) {
 	svc, _, _ := testAutomation(t, &fakeExec{})
 	w := &domain.WorkflowDefinition{ID: "broken", Name: "broken"}
-	if err := svc.Auto.EnableWorkflow(context.Background(), w); err == nil {
+	if err := svc.Sched.EnableWorkflow(context.Background(), w); err == nil {
 		t.Fatal("expected enable to reject invalid yaml")
 	}
 	got, err := svc.Workflows.Get(context.Background(), "broken")

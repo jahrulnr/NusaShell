@@ -11,8 +11,8 @@ import (
 	"nusashell/domain"
 )
 
-// AutoStore is an in-process implementation of the automation ports.
-type AutoStore struct {
+// CIStore is an in-process implementation of the automation ports.
+type CIStore struct {
 	mu         sync.Mutex
 	Workflows  map[string]*domain.WorkflowDefinition
 	Runs       map[string]*domain.WorkflowRun
@@ -27,8 +27,8 @@ type AutoStore struct {
 	seq        map[string]uint64
 }
 
-func NewAutoStore() *AutoStore {
-	return &AutoStore{
+func NewCIStore() *CIStore {
+	return &CIStore{
 		Workflows:  map[string]*domain.WorkflowDefinition{},
 		Runs:       map[string]*domain.WorkflowRun{},
 		Schedules:  map[string]*domain.ScheduleRecord{},
@@ -41,7 +41,7 @@ func NewAutoStore() *AutoStore {
 	}
 }
 
-func (s *AutoStore) Put(_ context.Context, w *domain.WorkflowDefinition) error {
+func (s *CIStore) Put(_ context.Context, w *domain.WorkflowDefinition) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cp := *w
@@ -49,7 +49,7 @@ func (s *AutoStore) Put(_ context.Context, w *domain.WorkflowDefinition) error {
 	return nil
 }
 
-func (s *AutoStore) Get(_ context.Context, id string) (*domain.WorkflowDefinition, error) {
+func (s *CIStore) Get(_ context.Context, id string) (*domain.WorkflowDefinition, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	w, ok := s.Workflows[id]
@@ -60,7 +60,7 @@ func (s *AutoStore) Get(_ context.Context, id string) (*domain.WorkflowDefinitio
 	return &cp, nil
 }
 
-func (s *AutoStore) List(_ context.Context) ([]*domain.WorkflowDefinition, error) {
+func (s *CIStore) List(_ context.Context) ([]*domain.WorkflowDefinition, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []*domain.WorkflowDefinition
@@ -72,14 +72,14 @@ func (s *AutoStore) List(_ context.Context) ([]*domain.WorkflowDefinition, error
 	return out, nil
 }
 
-func (s *AutoStore) Delete(_ context.Context, id string) error {
+func (s *CIStore) Delete(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.Workflows, id)
 	return nil
 }
 
-func (s *AutoStore) Create(_ context.Context, run *domain.WorkflowRun) error {
+func (s *CIStore) Create(_ context.Context, run *domain.WorkflowRun) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cp := cloneRun(run)
@@ -87,7 +87,7 @@ func (s *AutoStore) Create(_ context.Context, run *domain.WorkflowRun) error {
 	return nil
 }
 
-func (s *AutoStore) GetRun(_ context.Context, id string) (*domain.WorkflowRun, error) {
+func (s *CIStore) GetRun(_ context.Context, id string) (*domain.WorkflowRun, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.Runs[id]
@@ -97,7 +97,7 @@ func (s *AutoStore) GetRun(_ context.Context, id string) (*domain.WorkflowRun, e
 	return cloneRun(r), nil
 }
 
-func (s *AutoStore) ListRuns(_ context.Context, filter RunFilter) ([]*domain.WorkflowRun, error) {
+func (s *CIStore) ListRuns(_ context.Context, filter RunFilter) ([]*domain.WorkflowRun, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []*domain.WorkflowRun
@@ -120,14 +120,14 @@ func (s *AutoStore) ListRuns(_ context.Context, filter RunFilter) ([]*domain.Wor
 	return out, nil
 }
 
-func (s *AutoStore) Update(_ context.Context, run *domain.WorkflowRun) error {
+func (s *CIStore) Update(_ context.Context, run *domain.WorkflowRun) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Runs[run.ID] = cloneRun(run)
 	return nil
 }
 
-func (s *AutoStore) PutSchedule(_ context.Context, rec *domain.ScheduleRecord) error {
+func (s *CIStore) PutSchedule(_ context.Context, rec *domain.ScheduleRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cp := *rec
@@ -135,7 +135,7 @@ func (s *AutoStore) PutSchedule(_ context.Context, rec *domain.ScheduleRecord) e
 	return nil
 }
 
-func (s *AutoStore) DueSchedules(_ context.Context, now time.Time, limit int) ([]*domain.ScheduleRecord, error) {
+func (s *CIStore) DueSchedules(_ context.Context, now time.Time, limit int) ([]*domain.ScheduleRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []*domain.ScheduleRecord
@@ -152,7 +152,7 @@ func (s *AutoStore) DueSchedules(_ context.Context, now time.Time, limit int) ([
 	return out, nil
 }
 
-func (s *AutoStore) ClaimSchedule(_ context.Context, id string, now time.Time) (*domain.ScheduleRecord, error) {
+func (s *CIStore) ClaimSchedule(_ context.Context, id string, now time.Time) (*domain.ScheduleRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, ok := s.Schedules[id]
@@ -166,7 +166,7 @@ func (s *AutoStore) ClaimSchedule(_ context.Context, id string, now time.Time) (
 	return &cp, nil
 }
 
-func (s *AutoStore) ListSchedules(_ context.Context) ([]*domain.ScheduleRecord, error) {
+func (s *CIStore) ListSchedules(_ context.Context) ([]*domain.ScheduleRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []*domain.ScheduleRecord
@@ -177,7 +177,7 @@ func (s *AutoStore) ListSchedules(_ context.Context) ([]*domain.ScheduleRecord, 
 	return out, nil
 }
 
-func (s *AutoStore) PutEvent(_ context.Context, ev *domain.Event) error {
+func (s *CIStore) PutEvent(_ context.Context, ev *domain.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cp := *ev
@@ -185,7 +185,7 @@ func (s *AutoStore) PutEvent(_ context.Context, ev *domain.Event) error {
 	return nil
 }
 
-func (s *AutoStore) RecordDelivery(_ context.Context, eventID, triggerID, workflowID, runID string, _ time.Time) (bool, error) {
+func (s *CIStore) RecordDelivery(_ context.Context, eventID, triggerID, workflowID, runID string, _ time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := domain.DeliveryKey(eventID, triggerID, workflowID)
@@ -196,7 +196,7 @@ func (s *AutoStore) RecordDelivery(_ context.Context, eventID, triggerID, workfl
 	return true, nil
 }
 
-func (s *AutoStore) ListEvents(_ context.Context, limit int) ([]*domain.Event, error) {
+func (s *CIStore) ListEvents(_ context.Context, limit int) ([]*domain.Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := append([]*domain.Event{}, s.Events...)
@@ -206,7 +206,7 @@ func (s *AutoStore) ListEvents(_ context.Context, limit int) ([]*domain.Event, e
 	return out, nil
 }
 
-func (s *AutoStore) PutWait(_ context.Context, rec *domain.WaitRecord) error {
+func (s *CIStore) PutWait(_ context.Context, rec *domain.WaitRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cp := *rec
@@ -214,7 +214,7 @@ func (s *AutoStore) PutWait(_ context.Context, rec *domain.WaitRecord) error {
 	return nil
 }
 
-func (s *AutoStore) DueWaits(_ context.Context, now time.Time, limit int) ([]*domain.WaitRecord, error) {
+func (s *CIStore) DueWaits(_ context.Context, now time.Time, limit int) ([]*domain.WaitRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []*domain.WaitRecord
@@ -233,7 +233,7 @@ func (s *AutoStore) DueWaits(_ context.Context, now time.Time, limit int) ([]*do
 	return out, nil
 }
 
-func (s *AutoStore) ClaimWait(_ context.Context, id string) (*domain.WaitRecord, error) {
+func (s *CIStore) ClaimWait(_ context.Context, id string) (*domain.WaitRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, ok := s.Waits[id]
@@ -245,7 +245,7 @@ func (s *AutoStore) ClaimWait(_ context.Context, id string) (*domain.WaitRecord,
 	return &cp, nil
 }
 
-func (s *AutoStore) WaitingForEvent(_ context.Context, eventType string) ([]*domain.WaitRecord, error) {
+func (s *CIStore) WaitingForEvent(_ context.Context, eventType string) ([]*domain.WaitRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []*domain.WaitRecord
@@ -258,7 +258,7 @@ func (s *AutoStore) WaitingForEvent(_ context.Context, eventType string) ([]*dom
 	return out, nil
 }
 
-func (s *AutoStore) Append(_ context.Context, chunk domain.LogChunk) error {
+func (s *CIStore) Append(_ context.Context, chunk domain.LogChunk) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.seq[chunk.JobID]++
@@ -267,7 +267,7 @@ func (s *AutoStore) Append(_ context.Context, chunk domain.LogChunk) error {
 	return nil
 }
 
-func (s *AutoStore) Read(_ context.Context, jobID string, after uint64, limit int) ([]domain.LogChunk, error) {
+func (s *CIStore) Read(_ context.Context, jobID string, after uint64, limit int) ([]domain.LogChunk, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []domain.LogChunk
@@ -282,21 +282,21 @@ func (s *AutoStore) Read(_ context.Context, jobID string, after uint64, limit in
 	return out, nil
 }
 
-func (s *AutoStore) Active(_ context.Context, key string) (string, bool, error) {
+func (s *CIStore) Active(_ context.Context, key string) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id, ok := s.Locks[key]
 	return id, ok, nil
 }
 
-func (s *AutoStore) Acquire(_ context.Context, key, runID string) error {
+func (s *CIStore) Acquire(_ context.Context, key, runID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Locks[key] = runID
 	return nil
 }
 
-func (s *AutoStore) Release(_ context.Context, key, runID string) error {
+func (s *CIStore) Release(_ context.Context, key, runID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.Locks[key] == runID {
@@ -305,28 +305,28 @@ func (s *AutoStore) Release(_ context.Context, key, runID string) error {
 	return nil
 }
 
-func (s *AutoStore) Last(_ context.Context, workflowID, triggerID string) (time.Time, bool, error) {
+func (s *CIStore) Last(_ context.Context, workflowID, triggerID string) (time.Time, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t, ok := s.Debounce[workflowID+"/"+triggerID]
 	return t, ok, nil
 }
 
-func (s *AutoStore) Touch(_ context.Context, workflowID, triggerID string, at time.Time) error {
+func (s *CIStore) Touch(_ context.Context, workflowID, triggerID string, at time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Debounce[workflowID+"/"+triggerID] = at
 	return nil
 }
 
-func (s *AutoStore) GetDisabled(_ context.Context, providerID string) (bool, bool, error) {
+func (s *CIStore) GetDisabled(_ context.Context, providerID string) (bool, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	d, ok := s.Disabled[providerID]
 	return d, ok, nil
 }
 
-func (s *AutoStore) SetDisabled(_ context.Context, providerID string, disabled bool) error {
+func (s *CIStore) SetDisabled(_ context.Context, providerID string, disabled bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Disabled[providerID] = disabled
@@ -340,18 +340,18 @@ func cloneRun(r *domain.WorkflowRun) *domain.WorkflowRun {
 	return &out
 }
 
-// Adapters expose AutoStore as the application ports whose method
+// Adapters expose CIStore as the application ports whose method
 // names collide (Get/List/Put/Due/Claim).
 
-type WorkflowMem struct{ *AutoStore }
-type RunMem struct{ *AutoStore }
-type ScheduleMem struct{ *AutoStore }
-type EventMem struct{ *AutoStore }
-type WaitMem struct{ *AutoStore }
-type LogMem struct{ *AutoStore }
-type LockMem struct{ *AutoStore }
-type DebounceMem struct{ *AutoStore }
-type ProviderStateMem struct{ *AutoStore }
+type WorkflowMem struct{ *CIStore }
+type RunMem struct{ *CIStore }
+type ScheduleMem struct{ *CIStore }
+type EventMem struct{ *CIStore }
+type WaitMem struct{ *CIStore }
+type LogMem struct{ *CIStore }
+type LockMem struct{ *CIStore }
+type DebounceMem struct{ *CIStore }
+type ProviderStateMem struct{ *CIStore }
 
 func (a RunMem) Get(ctx context.Context, id string) (*domain.WorkflowRun, error) {
 	return a.GetRun(ctx, id)

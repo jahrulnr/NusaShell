@@ -11,7 +11,7 @@ import (
 
 // PipelinesDir is the subdirectory under the data dir that holds one
 // YAML file per pipeline definition. Files are the source of truth for
-// file-sourced workflows; the automation registry (automation.db) is
+// file-sourced workflows; the CI workflow registry (workflows.db) is
 // the scheduler index that mirrors them.
 const PipelinesDir = "ci/pipelines"
 
