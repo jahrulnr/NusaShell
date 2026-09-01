@@ -62,6 +62,33 @@ func TestToolFactoryConversationAgent(t *testing.T) {
 	}
 }
 
+func TestToolFactoryDoesNotDuplicateDispatcherRoots(t *testing.T) {
+	f := &ToolFactory{
+		Toolbox: func() []ToolInfo {
+			return []ToolInfo{
+				{Name: "skill"},
+				{Name: "memory"},
+				{Name: "docs"},
+				{Name: "memory_project"},
+			}
+		},
+		Dispatchers: FilterDispatcherToolInfos,
+	}
+	defs := f.Get(AgentConversation, "/ws")
+	counts := map[string]int{}
+	for _, def := range defs {
+		counts[def.Name]++
+	}
+	for _, name := range []string{"skill", "memory", "docs", "memory_project"} {
+		if counts[name] != 1 {
+			t.Fatalf("dispatcher root %q appears %d times in %v", name, counts[name], namesOf(defs))
+		}
+	}
+	if hasTool(f.Get(AgentConversation, ""), "memory_project") {
+		t.Fatal("memory_project must stay hidden without a workspace")
+	}
+}
+
 func TestToolFactoryAutomationAgentOmitsACPTools(t *testing.T) {
 	f := &ToolFactory{
 		Toolbox:     func() []ToolInfo { return factoryStubTools() },

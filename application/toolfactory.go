@@ -1,5 +1,7 @@
 package application
 
+import "strings"
+
 // AgentKind identifies the agent personalities that see different tool
 // sets. The toolbox holds every tool definition; ToolFactory is the single
 // policy table for which agent sees which tools, replacing the scattered
@@ -79,11 +81,26 @@ func filterDelegateToolDefs(defs []ToolDef) []ToolDef {
 	return out
 }
 
-// baseTools assembles the shared toolbox + dispatcher list as ToolDefs.
+// baseTools assembles the shared toolbox + optional compatibility dispatcher
+// list as ToolDefs. The real Toolbox already owns the dispatcher roots; the
+// second source remains supported for partial/custom toolboxes. Names are
+// deduplicated so a root is never sent to a provider twice.
 func (f *ToolFactory) baseTools(workspace string) []ToolDef {
-	tools := append(f.Toolbox(), f.Dispatchers(workspace)...)
+	tools := f.Toolbox()
+	if f.Dispatchers != nil {
+		tools = append(tools, f.Dispatchers(workspace)...)
+	}
+	workspaceSet := strings.TrimSpace(workspace) != ""
+	seen := make(map[string]bool, len(tools))
 	out := make([]ToolDef, 0, len(tools))
 	for _, t := range tools {
+		if t.Name == "memory_project" && !workspaceSet {
+			continue
+		}
+		if seen[t.Name] {
+			continue
+		}
+		seen[t.Name] = true
 		out = append(out, ToolDef(t))
 	}
 	return out

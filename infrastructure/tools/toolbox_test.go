@@ -1082,11 +1082,11 @@ func TestMcpUnregister(t *testing.T) {
 	}
 }
 
-// advertisedNames mirrors the provider-facing roster: non-family built-ins
-// plus the dispatcher family roots (see tool_dispatch.go).
+// advertisedNames returns the actual Toolbox roster. Dispatcher roots are
+// registered by Toolbox.ListTools rather than appended by the test.
 func advertisedNames(tb *Toolbox) map[string]bool {
 	names := map[string]bool{}
-	for _, ti := range append(tb.ListTools(), application.DispatcherToolInfos()...) {
+	for _, ti := range tb.ListTools() {
 		names[ti.Name] = true
 	}
 	return names
@@ -1117,6 +1117,19 @@ func TestListToolsIncludesMcpManagement(t *testing.T) {
 	for _, want := range []string{"mcp_register", "mcp_enable", "mcp_disable", "mcp_unregister"} {
 		if !names[want] {
 			t.Fatalf("ListTools missing %q", want)
+		}
+	}
+}
+
+func TestListToolsIncludesDispatcherRoots(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	names := map[string]bool{}
+	for _, ti := range tb.ListTools() {
+		names[ti.Name] = true
+	}
+	for _, want := range []string{"skill", "memory", "docs", "memory_project"} {
+		if !names[want] {
+			t.Fatalf("ListTools missing dispatcher root %q", want)
 		}
 	}
 }
@@ -1599,7 +1612,7 @@ func TestAgentToolsDocMatchesBuiltInRoster(t *testing.T) {
 	// the dispatcher family roots (docs/design/tool-dispatchers.md). There
 	// are no per-verb names anywhere on the roster.
 	actual := map[string]bool{}
-	for _, tool := range append(tb.ListTools(), application.DispatcherToolInfos()...) {
+	for _, tool := range tb.ListTools() {
 		actual[tool.Name] = true
 		if !documented[tool.Name] {
 			t.Errorf("agent tools documentation missing %q", tool.Name)

@@ -290,6 +290,10 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 	// Native file CRUD + exec built-ins.
 	tools = append(tools, fileToolInfos()...)
 	tools = append(tools, execToolInfos()...)
+	// Dispatcher roots are part of the Toolbox roster as well as the
+	// execution surface. ToolFactory applies workspace/agent policy and
+	// removes any duplicate compatibility entries when assembling a turn.
+	tools = append(tools, application.DispatcherToolInfos()...)
 	return tools
 }
 
