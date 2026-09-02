@@ -72,6 +72,18 @@ message during an active tool cycle, so the normal sequence stays:
 user → assistant(tool_calls) → tool(result) → assistant
 ```
 
+When a Chat-compatible tool returns media, the media is reinjected as a
+user-content message because Chat tool messages carry text only. All tool
+results for one assistant batch stay contiguous before that reinjection:
+
+```text
+good: assistant(tool_calls: read_media, memory) → tool(read_media) → tool(memory) → user(image)
+bad:  assistant(tool_calls: read_media, memory) → tool(read_media) → user(image) → tool(memory)
+```
+
+The second shape is rejected by providers such as DeepSeek because every
+tool_call_id must be answered before another role appears.
+
 Do not classify this 400 as a transient outage: resending the same assistant-
 ended request cannot succeed. A 429 without a usable `Retry-After` is likewise
 hard-failed; a retry is only automatic when the shared domain policy says the

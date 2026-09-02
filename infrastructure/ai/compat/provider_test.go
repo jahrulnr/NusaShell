@@ -902,6 +902,63 @@ func TestToolResultImageReinjectsAsUserMessage(t *testing.T) {
 	}
 }
 
+func TestToolResultsStayContiguousBeforeMediaReinjection(t *testing.T) {
+	var capturedBody map[string]any
+	provider, err := New(Config{
+		APIKey:  "test-key",
+		BaseURL: "https://compat.example/v1",
+		HTTPClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if err := json.NewDecoder(req.Body).Decode(&capturedBody); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			return jsonResponse(http.StatusOK, `{"choices":[{"message":{"content":"ok"}}]}`), nil
+		}),
+	}, Spec{
+		Name: "testcompat",
+		Auth: AuthSpec{APIKeyRequired: true},
+		Request: RequestSpec{
+			SupportsJSONSchema: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := provider.Chat(context.Background(), &core.Request{
+		Model: "deepseek-v4-flash-vision-exp",
+		Messages: []core.Message{
+			core.UserText("inspect the screenshot and summarize it"),
+			core.Assistant(
+				core.ToolUseBlock{ID: "call_image", Name: "read_media", Arguments: core.MustJSONRaw(map[string]any{})},
+				core.ToolUseBlock{ID: "call_summary", Name: "memory", Arguments: core.MustJSONRaw(map[string]any{})},
+			),
+			core.ToolResult("call_image", core.Text("/tmp/screenshot.png"), core.ImageURL("https://example.test/screenshot.png")),
+			core.ToolResultText("call_summary", "summary"),
+		},
+	}); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	msgs := capturedBody["messages"].([]any)
+	if len(msgs) != 5 {
+		t.Fatalf("got %d messages, want user + assistant + 2 tools + media user: %+v", len(msgs), msgs)
+	}
+	if role := msgs[2].(map[string]any)["role"]; role != "tool" {
+		t.Fatalf("msgs[2] role = %v, want tool", role)
+	}
+	if id := msgs[2].(map[string]any)["tool_call_id"]; id != "call_image" {
+		t.Fatalf("msgs[2] tool_call_id = %v, want call_image", id)
+	}
+	if role := msgs[3].(map[string]any)["role"]; role != "tool" {
+		t.Fatalf("msgs[3] role = %v, want tool before media reinjection", role)
+	}
+	if id := msgs[3].(map[string]any)["tool_call_id"]; id != "call_summary" {
+		t.Fatalf("msgs[3] tool_call_id = %v, want call_summary", id)
+	}
+	if role := msgs[4].(map[string]any)["role"]; role != "user" {
+		t.Fatalf("msgs[4] role = %v, want user media reinjection", role)
+	}
+}
+
 func TestToolResultTextOnlyNoReinject(t *testing.T) {
 	var capturedBody map[string]any
 	provider, err := New(Config{

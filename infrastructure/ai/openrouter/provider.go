@@ -317,9 +317,22 @@ func cacheControl(retention, model string) (map[string]any, error) {
 
 func mapMessages(messages []core.Message) (any, error) {
 	out := make([]map[string]any, 0, len(messages))
+	var deferredMedia []map[string]any
+	flushDeferredMedia := func() {
+		if len(deferredMedia) == 0 {
+			return
+		}
+		out = append(out, map[string]any{"role": "user", "content": deferredMedia})
+		deferredMedia = nil
+	}
 	for i, msg := range messages {
 		switch msg.Role {
 		case core.RoleSystem, core.RoleUser, core.RoleAssistant:
+			// Media is reinjected as a user message, but it must wait until
+			// every tool result for the preceding assistant tool_calls message
+			// is emitted. Otherwise providers such as DeepSeek see a user
+			// message between tool results and reject the request as incomplete.
+			flushDeferredMedia()
 			content, toolCalls, reasoning, err := mapBlocks(msg.Blocks)
 			if err != nil {
 				return nil, fmt.Errorf("messages[%d]: %w", i, err)
@@ -351,13 +364,14 @@ func mapMessages(messages []core.Message) (any, error) {
 				// follow-up user message so the vision-capable model still
 				// sees the media in the next round.
 				if len(media) > 0 {
-					out = append(out, map[string]any{"role": "user", "content": media})
+					deferredMedia = append(deferredMedia, media...)
 				}
 			}
 		default:
 			return nil, fmt.Errorf("messages[%d]: unsupported role %q", i, msg.Role)
 		}
 	}
+	flushDeferredMedia()
 	return out, nil
 }
 
