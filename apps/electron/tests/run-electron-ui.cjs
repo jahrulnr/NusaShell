@@ -3,6 +3,7 @@
 const { spawn, spawnSync } = require('node:child_process');
 const { existsSync } = require('node:fs');
 const path = require('node:path');
+const { electronDevArgs } = require('../src/runtime.cjs');
 
 const testFile = path.join(__dirname, 'electron-ui.test.mjs');
 const testArgs = ['--test', testFile];
@@ -15,7 +16,7 @@ const environment = {
 // until its CLI is first invoked. Materialize the pinned runtime before the
 // Playwright test tries to launch it.
 const electronCLI = path.join(__dirname, '..', 'node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron');
-const electronBootstrap = spawnSync(electronCLI, ['--version'], {
+const electronBootstrap = spawnSync(electronCLI, [...electronDevArgs(), '--version'], {
   env: environment,
   stdio: 'inherit',
   windowsHide: true,

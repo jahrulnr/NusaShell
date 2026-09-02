@@ -1,6 +1,7 @@
 package application
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -27,16 +28,19 @@ func TestToolFactoryImproverFullToolsNoACProNoDelegate(t *testing.T) {
 }
 
 func TestImproverPromptInjectsPathAndWorkspace(t *testing.T) {
-	conv := &domain.Conversation{ID: "c1", Workspace: "/work/ns"}
-	app := &App{DataDir: "/data"}
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	conv := &domain.Conversation{ID: "c1", Workspace: workspace}
+	app := &App{DataDir: dataDir}
 	p := app.improverPrompt(conv)
 	if p == "" {
 		t.Fatal("improve prompt resource must load")
 	}
-	if !strings.Contains(p, "/data/conversations/c1.json") {
+	expectedConversationPath := filepath.Join(dataDir, "conversations", "c1.json")
+	if !strings.Contains(p, expectedConversationPath) {
 		t.Errorf("prompt missing conversation path, got:\n%s", p)
 	}
-	if !strings.Contains(p, "/work/ns") {
+	if !strings.Contains(p, workspace) {
 		t.Errorf("prompt missing workspace, got:\n%s", p)
 	}
 	if strings.Contains(p, "{{conversation_path}}") || strings.Contains(p, "{{workspace}}") {
@@ -45,7 +49,9 @@ func TestImproverPromptInjectsPathAndWorkspace(t *testing.T) {
 }
 
 func TestConversationJSONPathLayout(t *testing.T) {
-	if got := conversationJSONPath("/data", "conv_123"); got != "/data/conversations/conv_123.json" {
+	dataDir := t.TempDir()
+	expected := filepath.Join(dataDir, "conversations", "conv_123.json")
+	if got := conversationJSONPath(dataDir, "conv_123"); got != expected {
 		t.Errorf("path = %q", got)
 	}
 	if got := conversationJSONPath("", "conv_123"); got != "" {
