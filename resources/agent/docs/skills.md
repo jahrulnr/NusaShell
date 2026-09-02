@@ -38,7 +38,9 @@ The `skill` dispatcher tool handles catalog and authoring; `op` selects:
 - `list {limit?}` — enumerate skills. Returns `owned_by` and `shadowed` flags
   per entry; use `owned_by` to resolve the skill directory (see Reading skill
   files below).
-- `search {query,limit?}` — name/description substring match.
+- `search {query,limit?}` — discovery-only name/description search. Results
+  include metadata (`id`, `name`, `description`, `owned_by`) but never the
+  SKILL.md body.
 - `save {name,content,description?,id?,path?}` — create or update a
   user-owned skill, or write a support file when `path` is set (the skill
   must already exist).
@@ -67,10 +69,11 @@ Each skill directory contains `SKILL.md` plus optional support files
 Workflow:
 
 1. `skill(op="list")` (or `op="search"`) — find the skill and read its
-   `owned_by` flag.
+   `owned_by` flag. Search is only discovery; it does not load instructions.
 2. Construct the directory from the table above using `owned_by` and the
    skill `name`.
-3. `file_read` the `SKILL.md` (or a support file via its relative path).
+3. `file_read` the absolute `SKILL.md` before applying the skill's
+   instructions (or read a support file via its relative path when needed).
    Use `file_list` first when you do not know which support files exist.
 
 Good example:

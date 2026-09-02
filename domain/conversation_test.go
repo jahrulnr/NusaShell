@@ -238,6 +238,103 @@ func TestCompactDropsPrefixInsteadOfPullingAllUsers(t *testing.T) {
 	}
 }
 
+func TestCompactPreservesInFlightToolMessageVerbatim(t *testing.T) {
+	// An assistant message whose tool round has not reached a terminal status
+	// (persisted before execution — status is empty) must survive compaction
+	// with its ToolCalls and Steps intact, so the pending outputs can be
+	// patched into the live tail afterwards. Completed rounds still get
+	// stripped (their outputs are already summarized/archived).
+	msgs := []Message{
+		{ID: "u-old", Role: RoleUser, Content: strings.Repeat("old-user-", 200)},
+		{ID: "a-done", Role: RoleAssistant, Content: "done turn",
+			ToolCalls: []ToolCall{{ID: "c-done", Name: "read", Output: "old output", Status: ToolOK}}},
+		{ID: "u-new", Role: RoleUser, Content: "latest question"},
+		{ID: "a-inflight", Role: RoleAssistant, Content: "reading now",
+			ToolCalls: []ToolCall{{ID: "c-live", Name: "read", Args: `{"path":"/x"}`}}, // status "" = pre-execution
+			Steps:     []MessageStep{{Type: StepToolCalls, ToolCalls: []ToolCall{{ID: "c-live", Name: "read", Args: `{"path":"/x"}`}}}},
+		},
+	}
+	c := &Conversation{Messages: msgs}
+	c.Compact("summary", testHandover("summary"), 100) // tiny keep: only the latest turn fits
+
+	var kept *Message
+	for i := range c.Messages {
+		if c.Messages[i].ID == "a-inflight" {
+			kept = &c.Messages[i]
+		}
+	}
+	if kept == nil {
+		t.Fatal("in-flight message was dropped by compaction")
+	}
+	if len(kept.ToolCalls) != 1 || kept.ToolCalls[0].ID != "c-live" {
+		t.Fatalf("in-flight ToolCalls not preserved verbatim: %+v", kept.ToolCalls)
+	}
+	if len(kept.Steps) != 1 || len(kept.Steps[0].ToolCalls) != 1 {
+		t.Fatalf("in-flight Steps not preserved verbatim: %+v", kept.Steps)
+	}
+
+	// A completed round in the retained suffix is still stripped: its output
+	// is already captured and must not burn the keep budget twice.
+	for i := range c.Messages {
+		if c.Messages[i].ID != "a-done" {
+			continue
+		}
+		if len(c.Messages[i].ToolCalls) != 0 {
+			t.Fatalf("completed round not stripped: %+v", c.Messages[i].ToolCalls)
+		}
+		return
+	}
+	t.Fatal("completed round disappeared entirely (expected retained but stripped)")
+}
+
+// TestCompactPreservesBackgroundAgentMessagesVerbatim covers the async agent
+// handoff: spawn calls (subagent, delegate) and their synthetic results
+// (subagent_result, delegate_result) carry cross-turn continuity — the model
+// must keep knowing which background agents were spawned and returned — so
+// they survive compaction verbatim even with a completed (terminal) status,
+// which StripForRetention would otherwise drop from the context.
+func TestCompactPreservesBackgroundAgentMessagesVerbatim(t *testing.T) {
+	msgs := []Message{
+		{ID: "u-old", Role: RoleUser, Content: strings.Repeat("old-user-", 200)},
+		{ID: "a-spawn", Role: RoleAssistant,
+			ToolCalls: []ToolCall{{ID: "c-spawn", Name: SubagentToolName, Args: `{"prompt":"brief"}`, Status: ToolOK}}},
+		{ID: "a-delegate", Role: RoleAssistant,
+			ToolCalls: []ToolCall{{ID: "c-del", Name: DelegateToolName, Args: `{"prompt":"brief"}`, Status: ToolOK}}},
+		{ID: "u-new", Role: RoleUser, Content: "latest question"},
+		{ID: "a-result", Role: RoleAssistant,
+			ToolCalls: []ToolCall{{ID: "sr-1", Name: SubagentResultToolName, Args: `{"id":"run-x"}`, Output: "full result body", Status: ToolOK}}},
+		{ID: "a-plain", Role: RoleAssistant, Content: "plain done turn",
+			ToolCalls: []ToolCall{{ID: "c-plain", Name: "read", Output: "old output", Status: ToolOK}}},
+	}
+	c := &Conversation{Messages: msgs}
+	c.Compact("summary", testHandover("summary"), 100) // tiny keep: only the latest turns fit
+
+	var spawn, delegate, result *Message
+	for i := range c.Messages {
+		switch c.Messages[i].ID {
+		case "a-spawn":
+			spawn = &c.Messages[i]
+		case "a-delegate":
+			delegate = &c.Messages[i]
+		case "a-result":
+			result = &c.Messages[i]
+		case "a-plain":
+			if len(c.Messages[i].ToolCalls) != 0 {
+				t.Fatalf("plain completed round not stripped: %+v", c.Messages[i].ToolCalls)
+			}
+		}
+	}
+	if spawn == nil || len(spawn.ToolCalls) != 1 || spawn.ToolCalls[0].ID != "c-spawn" {
+		t.Fatalf("subagent spawn not preserved verbatim: %+v", spawn)
+	}
+	if delegate == nil || len(delegate.ToolCalls) != 1 || delegate.ToolCalls[0].ID != "c-del" {
+		t.Fatalf("delegate spawn not preserved verbatim: %+v", delegate)
+	}
+	if result == nil || len(result.ToolCalls) != 1 || result.ToolCalls[0].Output != "full result body" {
+		t.Fatalf("subagent_result not preserved verbatim: %+v", result)
+	}
+}
+
 func containsID(ids []string, id string) bool {
 	return indexOfID(ids, id) >= 0
 }

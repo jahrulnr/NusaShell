@@ -1,4 +1,4 @@
-# ACP subagents
+# Subagents and internal delegates
 
 ACP coding agents are spawn-only and always async. The user never chats
 with them in the composer. When the parent agent calls `subagent`, the
@@ -7,6 +7,45 @@ tool returns immediately with YAML frontmatter listing the spawned runs
 and the tool call is marked `running` in the conversation. The parent
 agent is free to continue other work — it does not block on the
 subagent.
+
+## Internal delegate
+
+The internal delegate tool is a local NusaShell background agent. It uses the
+same AgentEngine and standard toolbox in a hidden pipeline conversation, but
+it is not an ACP subprocess and it cannot spawn another delegate or ACP
+subagent. It receives only the self-contained prompt and workspace supplied
+by the parent.
+
+The delegate model is configured in Settings → Agent → Internal delegate
+model. An empty setting inherits the active model of the parent conversation;
+an explicit value uses the provider:model selection from Settings. The
+delegate has its own system prompt in
+resources/agent/prompts/delegate-agent.md because its role is to execute to
+completion, not to behave like the interactive parent or an Automation step.
+
+Delegate runs intentionally use the same ACP-shaped run events and DTOs as
+ACP runs. Therefore the Agent dock, run card, drawer, popup, transcript
+hydration, recent-run behavior, and scroll-follow behavior are identical for
+both families. The backend only differs in how the run is executed.
+
+The delegate result must be the terminal assistant message from the hidden
+conversation, after all tool rounds have completed. An intermediate
+acknowledgement such as “I will inspect the file” is transcript content only;
+it must never become the delegate_result output returned to the parent.
+
+Good example:
+
+    delegate(prompt="Inspect /workspace/app.go, make the requested fix, run the
+    focused tests, and report the changed files plus the test result.",
+             workspace="/workspace")
+
+Bad example:
+
+    delegate(prompt="Please look at this and tell me what you think.")
+
+The bad brief does not define a concrete completion condition, so the
+delegate may spend its run acknowledging or planning without producing useful
+evidence for the parent.
 
 ## Delegation brief
 
@@ -40,7 +79,7 @@ Bad example — delegating work the parent can do in one tool call:
     subagent(prompt="list the files in /home/user/proj/src")
 
 A dock appears above the composer: chips for every live run (and recent
-finishes in this room), in spawn order — live delta updates never
+finishes in this room), newest first — live delta updates never
 reshuffle chips under the cursor. Click a chip for the right-hand drawer
 (all parallel spawns), or peek one run in a popup. Both surfaces stream
 the transcript live, patched in place like the conversation thread
@@ -91,6 +130,14 @@ Runtime state (delegation config, continuation instructions, subagent
 results) is never appended to the system prompt — it travels as tool
 descriptions or tool hydration so the system prefix keeps its
 prompt-cache hits.
+
+Background/async runs are hydration-aware: the `runtime_context` hydration
+slot lists every active subagent/delegate run (ID + spawning tool + worker
+detail), so after a compaction the continuation agent still knows which
+background agents were spawned and are pending — and can correlate each
+`subagent_result`/`delegate_result` by run ID. Spawn calls and synthetic
+result calls are also preserved verbatim through compaction (never stripped)
+so the handoff never loses the background-agent picture.
 
 While any subagent is running, the parent agent's auto-continue chain
 pauses with reason `awaiting-background-jobs` instead of ending the

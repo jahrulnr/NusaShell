@@ -1,6 +1,7 @@
 package application
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -36,12 +37,26 @@ func TestEndpointsCacheRoundTripAndPersist(t *testing.T) {
 	}
 }
 
+func TestEndpointsCacheRejectsLegacyEntriesWithoutPricingSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.json")
+	legacy := `{"p1|m1":{"routes":[{"Slug":"nebius/fp8","Name":"Nebius"}],"fetched_at":4102444800}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := newEndpointsCache(path)
+	if _, ok := c.get("p1", "m1"); ok {
+		t.Fatal("legacy route cache must miss so pricing is fetched")
+	}
+}
+
 func TestEndpointsCacheExpiry(t *testing.T) {
 	c := newEndpointsCache("")
 	c.set("p1", "m1", []domain.ModelRoute{{Slug: "a"}})
 
 	c.mu.Lock()
 	c.items[c.key("p1", "m1")] = endpointsCacheEntry{
+		Version:   endpointCacheSchemaVersion,
 		Routes:    []domain.ModelRoute{{Slug: "stale"}},
 		FetchedAt: time.Now().Add(-(endpointCacheTTL + time.Hour)).Unix(),
 	}

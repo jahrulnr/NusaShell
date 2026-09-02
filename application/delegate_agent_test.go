@@ -10,6 +10,142 @@ import (
 	"nusashell/domain"
 )
 
+type delegateSettingsStore struct {
+	settings domain.Settings
+}
+
+func (s *delegateSettingsStore) Get() domain.Settings { return s.settings }
+
+func (s *delegateSettingsStore) Set(settings domain.Settings) error {
+	s.settings = settings
+	return nil
+}
+
+func TestResolveDelegateModelUsesTheConfiguredModel(t *testing.T) {
+	app := &App{
+		Settings: &delegateSettingsStore{settings: domain.Settings{DelegateModel: "cheap:model"}},
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{
+			"c1": {ID: "c1", Model: "parent:model"},
+		}},
+	}
+
+	got, err := app.resolveDelegateModel("c1")
+	if err != nil {
+		t.Fatalf("resolveDelegateModel: %v", err)
+	}
+	if got != "cheap:model" {
+		t.Fatalf("delegate model = %q, want configured model", got)
+	}
+}
+
+func TestResolveDelegateModelDefaultsToTheParentModel(t *testing.T) {
+	app := &App{
+		Settings: &delegateSettingsStore{},
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{
+			"c1": {ID: "c1", Model: "parent:model"},
+		}},
+	}
+
+	got, err := app.resolveDelegateModel("c1")
+	if err != nil {
+		t.Fatalf("resolveDelegateModel: %v", err)
+	}
+	if got != "parent:model" {
+		t.Fatalf("delegate model = %q, want parent model", got)
+	}
+}
+
+func TestDelegateModelSettingRoundTripsThroughSettingsRPC(t *testing.T) {
+	settings := &delegateSettingsStore{settings: domain.DefaultSettings()}
+	app := NewApp(Deps{Settings: settings})
+	configured := "  cheap:model  "
+
+	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{DelegateModel: &configured}); rpcErr != nil {
+		t.Fatalf("settings.set delegate model: %v", rpcErr)
+	}
+	if got := settings.Get().DelegateModel; got != "cheap:model" {
+		t.Fatalf("stored delegate model = %q, want trimmed value", got)
+	}
+	result, rpcErr := app.handleSettingsGet()
+	if rpcErr != nil {
+		t.Fatalf("settings.get: %v", rpcErr)
+	}
+	if got := result.(contracts.SettingsGetResult).Settings.DelegateModel; got != "cheap:model" {
+		t.Fatalf("settings DTO delegate model = %q, want configured value", got)
+	}
+
+	empty := ""
+	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{DelegateModel: &empty}); rpcErr != nil {
+		t.Fatalf("clear delegate model: %v", rpcErr)
+	}
+	if got := settings.Get().DelegateModel; got != "" {
+		t.Fatalf("cleared delegate model = %q, want empty inherit setting", got)
+	}
+}
+
+func TestDelegateRunSurfaceUsesTheCompleteHeadlessTranscript(t *testing.T) {
+	now := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
+	hidden := &domain.Conversation{
+		ID: "conv_delegate",
+		Messages: []domain.Message{
+			{
+				ID: "msg_round_1", Role: domain.RoleAssistant, CreatedAt: now, Status: domain.StatusDone,
+				Steps: []domain.MessageStep{
+					{Type: domain.StepText, Content: "I will inspect the file first."},
+					{Type: domain.StepToolCalls, ToolCalls: []domain.ToolCall{{
+						ID: "call_read", Name: "file_read", Status: domain.ToolOK, Output: "file contents",
+					}}},
+				},
+			},
+			{
+				ID: "msg_round_2", Role: domain.RoleAssistant, CreatedAt: now.Add(time.Second), Status: domain.StatusDone,
+				Steps: []domain.MessageStep{{Type: domain.StepText, Content: "The requested change is complete."}},
+			},
+		},
+	}
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"conv_delegate": hidden}},
+		Bus:           NewBus(),
+	}
+	_, running := app.registerDelegateRun("run_delegate", "call_parent", "conv_parent", "/workspace", "Inspect and fix the file", "cheap:model")
+	if running.Status != domain.AcpRunRunning {
+		t.Fatalf("registered delegate status = %q, want running", running.Status)
+	}
+
+	finished := app.finishDelegateRun("run_delegate", "conv_delegate", "The requested change is complete.", nil)
+	if finished == nil || finished.Status != domain.AcpRunCompleted {
+		t.Fatalf("finished delegate = %+v, want completed run", finished)
+	}
+	if len(finished.Transcript) != 3 {
+		t.Fatalf("transcript chunks = %+v, want acknowledgement, tool, and final output", finished.Transcript)
+	}
+	if finished.Transcript[0].Text != "I will inspect the file first." {
+		t.Fatalf("first transcript chunk = %+v, want the preliminary acknowledgement", finished.Transcript[0])
+	}
+	if finished.Transcript[1].Kind != "tool" || finished.Transcript[1].Text != "file contents" {
+		t.Fatalf("tool transcript chunk = %+v", finished.Transcript[1])
+	}
+	if finished.Transcript[2].Text != "The requested change is complete." {
+		t.Fatalf("delegate result lost final assistant output: %+v", finished.Transcript)
+	}
+
+	listed, rpcErr := app.handleAcpRunsList(contracts.AcpRunsListRequest{ConversationID: "conv_parent"})
+	if rpcErr != nil {
+		t.Fatalf("delegate run list: %v", rpcErr)
+	}
+	runs := listed.(contracts.AcpRunsListResult).Runs
+	if len(runs) != 1 || runs[0].ID != "run_delegate" || len(runs[0].Transcript) != 3 {
+		t.Fatalf("delegate run must be visible through ACP-shaped list: %+v", runs)
+	}
+	got, rpcErr := app.handleAcpRunsGet(contracts.AcpRunIDRequest{ID: "run_delegate"})
+	if rpcErr != nil {
+		t.Fatalf("delegate run get: %v", rpcErr)
+	}
+	if got.(contracts.AcpRunDTO).CurrentModelID != "model" {
+		t.Fatalf("delegate UI model = %q, want bare model id", got.(contracts.AcpRunDTO).CurrentModelID)
+	}
+}
+
 // TestDeliverRunDoneQueuesWhileParentTurnActive pins the shared
 // background-run delivery path: a live parent turn queues the completion
 // for the next tool-round boundary; an idle parent gets the injection
@@ -29,7 +165,7 @@ func TestDeliverRunDoneQueuesWhileParentTurnActive(t *testing.T) {
 	app := &App{Conversations: store, Bus: NewBus(), runs: map[string]*TurnRun{}}
 	parent := &TurnRun{ID: "turn1", ConversationID: "c1"}
 	app.runs[parent.ID] = parent
-	app.trackPendingRun("c1", "run_del")
+	app.trackPendingRun("c1", "run_del", "delegate")
 
 	turnLock := app.conversationTurnLock("c1")
 	turnLock.Lock()

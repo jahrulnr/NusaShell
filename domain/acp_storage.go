@@ -2,9 +2,9 @@ package domain
 
 import "time"
 
-// AcpRunRecord is the persistent JSON representation of a terminal ACP
-// subagent run. Completion callbacks and subagent_wait may both write the
-// same final snapshot before surfacing its output_path.
+// AcpRunRecord is the persistent JSON representation of a terminal
+// background-agent run. ACP completion callbacks, internal delegates, and
+// subagent_wait may write the same final snapshot before surfacing its path.
 //
 // Unlike the in-memory AcpRun, the record is self-contained: it carries
 // the full transcript, agent identity, and parent linkage so it can be
@@ -27,7 +27,7 @@ type AcpRunRecord struct {
 	EndedAt          time.Time            `json:"ended_at"`
 }
 
-// AcpRunStorage persists terminal ACP run records as one document per run,
+// AcpRunStorage persists terminal background-agent run records as one document per run,
 // linked to the parent conversation. Saving the same run replaces its earlier
 // snapshot. The application layer reads records back to restore state after a
 // restart or to serve the UI's transcript drawer for historical runs.
@@ -41,6 +41,11 @@ type AcpRunStorage interface {
 	// agent can read the persisted transcript directly.
 	Path(conversationID, runID string) string
 }
+
+// SubagentToolName is the provider-facing name of the async ACP subagent
+// tool. The spawn call is persisted with role assistant; its result arrives
+// later as a synthetic subagent_result tool call.
+const SubagentToolName = "subagent"
 
 // SubagentResultToolName is the synthetic tool name injected into the
 // parent agent's message history when a subagent completes. The tool

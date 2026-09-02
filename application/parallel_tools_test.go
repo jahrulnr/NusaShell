@@ -104,7 +104,7 @@ func TestExecuteTurnToolsRespectsMaxParallelTools(t *testing.T) {
 		{ID: "t1", Name: "a"}, {ID: "t2", Name: "b"},
 		{ID: "t3", Name: "c"}, {ID: "t4", Name: "d"},
 	}
-	app, _, run := newBarrierApp(t, toolCalls, box)
+	app, conv, run := newBarrierApp(t, toolCalls, box)
 	settings := domain.Settings{MaxParallelTools: cap}
 
 	done := make(chan error, 1)
@@ -127,6 +127,11 @@ func TestExecuteTurnToolsRespectsMaxParallelTools(t *testing.T) {
 	}
 	if box.maxActive < cap {
 		t.Fatalf("max concurrent tools = %d, want exactly %d (cap should allow this many)", box.maxActive, cap)
+	}
+	for i, toolCall := range conv.Messages[0].ToolCalls {
+		if toolCall.Status != domain.ToolOK {
+			t.Fatalf("tool %d (%s) status = %q, want ok; calls above the cap must be queued, not dropped", i, toolCall.Name, toolCall.Status)
+		}
 	}
 }
 

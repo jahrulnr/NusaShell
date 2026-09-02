@@ -34,6 +34,7 @@ type Toolbox struct {
 	SkillSearcher   application.SkillSearcher // optional; nil = substring fallback
 	Memory          application.MemoryStore   // legacy — used by lifecycle/learning subsystems
 	Primary         application.PrimaryStore
+	Agent           application.AgentStore
 	Fragments       application.FragmentStore
 	ProjectMemory   application.ProjectMemoryStore
 	Docs            application.DocsSource
@@ -191,7 +192,7 @@ func containsString(s []string, v string) bool {
 
 func (t *Toolbox) ListTools() []application.ToolInfo {
 	tools := []application.ToolInfo{
-		{Name: "todo", Description: "Manage the conversation task checklist. Two modes: `replace` (default, full-replace — empty items clears the list) and `patch` (merge by ID — update status/content of existing items, add new items, keep untouched items unchanged). Use `patch` to update a single item's status without re-emitting the full list (saves tokens). In patch mode, `content` may be empty (meaning \"don't change content, only update status\"). The user can delete items from the UI — treat deleted items as gone and do not re-add them. The optional `brief` argument is a living markdown plan — required sections `## Objective` (user intent) and `## Done when` (acceptance criteria), plus optional `## Findings` and `## Approach` that grow as the task progresses — that survives compaction and is re-injected via hydration (the current checkpoint is reused until compaction, not re-injected each turn); update it as findings emerge and never drift from the Objective. The brief is mirrored to a plan file — the result returns `plan_path` (absolute); `file_read` it to re-read the brief and hand it to subagents that need the plan. Set `clear_brief: true` to delete the brief and its plan file (items are untouched unless you also clear them); an empty `brief` alone never clears.", InputSchema: obj("object", props("items", arrObj("Todo items (max 50). In replace mode: full list. In patch mode: only items to update/add.", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars). Required in replace mode; optional in patch mode (empty = keep existing)."), "status", strEnum("Item status; prefer exactly one in_progress at a time", "pending", "in_progress", "completed")), "id", "content", "status"), "mode", strEnum("Update mode: replace (default, full-replace) or patch (merge by ID)", "replace", "patch"), "brief", str("Living planning document. Required sections: `## Objective` (user intent in their words), `## Done when` (acceptance criteria); optional, grows over time: `## Findings` (paths, line numbers), `## Approach` (key steps). Max ~10000 tokens."), "clear_brief", obj("boolean", nil)), "items")},
+		{Name: "todo", Description: "Manage the conversation task checklist. Two modes: `replace` (default, full-replace — empty items clears the list) and `patch` (merge by ID — update status/content of existing items, add new items, keep untouched items unchanged). In replace mode, `content` may be omitted for an existing ID (the stored description is preserved), while a new ID requires non-empty content. Use `patch` to update a single item's status without re-emitting the full list (saves tokens). In patch mode, `content` may be empty (meaning \"don't change content, only update status\"). The user can delete items from the UI — treat deleted items as gone and do not re-add them. The optional `brief` argument is a living markdown plan — required sections `## Objective` (user intent) and `## Done when` (acceptance criteria), plus optional `## Findings` and `## Approach` that grow as the task progresses — that survives compaction and is re-injected via hydration (the current checkpoint is reused until compaction, not re-injected each turn); update it as findings emerge and never drift from the Objective. The brief is mirrored to a plan file — the result returns `plan_path` (absolute); `file_read` it to re-read the brief and hand it to subagents that need the plan. Set `clear_brief: true` to delete the brief and its plan file (items are untouched unless you also clear them); an empty `brief` alone never clears.", InputSchema: obj("object", props("items", arrObj("Todo items (max 50). In replace mode: full list. In patch mode: only items to update/add.", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars). In replace mode optional for an existing ID (preserved from storage); required for a new ID. In patch mode optional for an existing ID (empty = keep existing)."), "status", strEnum("Item status; prefer exactly one in_progress at a time", "pending", "in_progress", "completed")), "id", "status"), "mode", strEnum("Update mode: replace (default, full-replace) or patch (merge by ID)", "replace", "patch"), "brief", str("Living planning document. Required sections: `## Objective` (user intent in their words), `## Done when` (acceptance criteria); optional, grows over time: `## Findings` (paths, line numbers), `## Approach` (key steps). Max ~10000 tokens."), "clear_brief", obj("boolean", nil)), "items")},
 		{Name: "ask_question", Description: "Pause and ask the user a structured clarifying question before continuing. Use only for genuine decisions the user must make — not things you can figure out yourself. A plain-text reply does not pause auto-continue; only this tool does. Set multi_select=true when more than one option could fit (preferences, scope, priorities); the user can also add free text (when allow_free_text=true) or answer purely with text. The turn blocks until the user answers or cancels.", InputSchema: obj("object", props("question", str("The question to show the user"), "options", arrObj("Selectable choices (1-8). Mark one default when possible.", props("id", str("Stable option id"), "label", str("Short option label"), "description", str("Optional one-line explanation"), "default", obj("boolean", nil), "icon", str("Optional emoji or short icon glyph"), "image", str("Optional image URL or compact data URI")), "id", "label"), "allow_free_text", obj("boolean", nil), "multi_select", obj("boolean", nil)), "question", "options")},
 		{Name: "wait_until", Description: "Explain or create a durable wait_until step. Waiting never keeps a runner occupied.", InputSchema: obj("object", props("at", str("RFC3339 time")), "at")},
 		{Name: "sleep", Description: "Pause for the given number of seconds (max 300). Use for retry backoff or to wait between polls of an async automation(op=run). Does not consume a provider round — the turn resumes after the pause.", InputSchema: obj("object", props("seconds", intSchema("Seconds to sleep (1-300)")), "seconds")},
@@ -394,7 +395,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			if !strings.Contains(strings.ToLower(s.Name+" "+s.Description), q) {
 				continue
 			}
-			items = append(items, map[string]any{"id": s.ID, "name": s.Name, "description": s.Description})
+			items = append(items, map[string]any{"id": s.ID, "name": s.Name, "description": s.Description, "owned_by": s.EffectiveOwnedBy()})
 			if len(items) >= limit {
 				break
 			}
@@ -513,21 +514,36 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			return "", fmt.Errorf("content is required")
 		}
 		switch args.Target {
-		case "primary":
+		case "primary", "user":
 			if t.Primary == nil {
-				return "", fmt.Errorf("primary store not configured")
+				return "", fmt.Errorf("user tier store not configured")
 			}
 			if strings.TrimSpace(args.OldText) == "" {
-				// No old_text: rewrite the entire primary document body.
+				// No old_text: rewrite the entire user document body.
 				if err := t.Primary.Update([]domain.PrimaryEntry{{Content: args.Content, Source: "agent"}}); err != nil {
 					return "", err
 				}
-				return yamlBlock(map[string]any{"status": "rewritten", "target": "primary"}), nil
+				return yamlBlock(map[string]any{"status": "rewritten", "target": "user"}), nil
 			}
 			if err := t.Primary.Replace(args.OldText, args.Content); err != nil {
 				return "", err
 			}
-			return yamlBlock(map[string]any{"status": "replaced", "target": "primary"}), nil
+			return yamlBlock(map[string]any{"status": "replaced", "target": "user"}), nil
+		case "agent":
+			if t.Agent == nil {
+				return "", fmt.Errorf("agent tier store not configured")
+			}
+			if strings.TrimSpace(args.OldText) == "" {
+				// No old_text: rewrite the entire agent document body.
+				if err := t.Agent.Update([]domain.PrimaryEntry{{Content: args.Content, Source: "agent"}}); err != nil {
+					return "", err
+				}
+				return yamlBlock(map[string]any{"status": "rewritten", "target": "agent"}), nil
+			}
+			if err := t.Agent.Replace(args.OldText, args.Content); err != nil {
+				return "", err
+			}
+			return yamlBlock(map[string]any{"status": "replaced", "target": "agent"}), nil
 		case "fragment":
 			if t.Fragments == nil {
 				return "", fmt.Errorf("fragment store not configured")
@@ -545,7 +561,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			}
 			return yamlBlock(map[string]any{"status": "updated", "target": "fragment"}), nil
 		default:
-			return "", fmt.Errorf("target must be \"primary\" or \"fragment\"")
+			return "", fmt.Errorf("target must be \"user\", \"agent\", or \"fragment\"")
 		}
 
 	case name == "memory_search":
@@ -593,13 +609,20 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		if limit <= 0 {
 			limit = 50
 		}
-		if args.Target == "primary" {
-			// Primary is a single document, not a list. Reading it via
+		if args.Target == "primary" || args.Target == "user" {
+			// The user tier is a single document, not a list. Reading it via
 			// list was a design wart; file_read is the honest path.
 			if t.Primary == nil {
-				return "", fmt.Errorf("primary memory is a single document, not a list — and no primary store is configured")
+				return "", fmt.Errorf("user memory is a single document, not a list — and no user store is configured")
 			}
-			return "", fmt.Errorf("primary memory is a single document, not a list — read it with file_read(path=%q)", t.Primary.Path())
+			return "", fmt.Errorf("user memory is a single document, not a list — read it with file_read(path=%q)", t.Primary.Path())
+		}
+		if args.Target == "agent" {
+			// Same single-document rule for the agent tier.
+			if t.Agent == nil {
+				return "", fmt.Errorf("soul memory is a single document, not a list — and no agent store is configured")
+			}
+			return "", fmt.Errorf("soul memory is a single document, not a list — read it with file_read(path=%q)", t.Agent.Path())
 		}
 		// Default: list fragments
 		if t.Fragments == nil {
@@ -1375,7 +1398,7 @@ func (t *Toolbox) searchSkillsRanked(ctx context.Context, query string, limit in
 			continue
 		}
 		seen[sk.ID] = true
-		items = append(items, map[string]any{"id": sk.ID, "name": sk.Name, "description": sk.Description})
+		items = append(items, map[string]any{"id": sk.ID, "name": sk.Name, "description": sk.Description, "owned_by": sk.EffectiveOwnedBy()})
 		if len(items) >= limit {
 			break
 		}
@@ -1392,7 +1415,7 @@ func (t *Toolbox) searchSkillsRanked(ctx context.Context, query string, limit in
 			}
 			if strings.Contains(strings.ToLower(sk.Name+" "+sk.Description), q) {
 				seen[sk.ID] = true
-				items = append(items, map[string]any{"id": sk.ID, "name": sk.Name, "description": sk.Description})
+				items = append(items, map[string]any{"id": sk.ID, "name": sk.Name, "description": sk.Description, "owned_by": sk.EffectiveOwnedBy()})
 			}
 		}
 	}
@@ -1544,6 +1567,12 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 	patchMode := mode == "patch"
 	items := make([]domain.TodoItem, 0, len(rawItems))
 	seenIDs := make(map[string]bool, len(rawItems))
+	existingContentByID := make(map[string]string)
+	if !patchMode {
+		for _, existing := range t.Todos.Get(conversationID) {
+			existingContentByID[existing.ID] = existing.Content
+		}
+	}
 	for _, raw := range rawItems {
 		id := strings.TrimSpace(raw.ID)
 		content := strings.TrimSpace(raw.Content)
@@ -1555,12 +1584,19 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 			return "", fmt.Errorf("duplicate item id: %s", id)
 		}
 		seenIDs[id] = true
-		// In patch mode, content may be empty (meaning "don't change
-		// content, only update status"). In replace mode, content is
-		// required for every item.
+		// In replace mode, content may be omitted for an existing ID. Preserve
+		// the stored description so status-only updates do not spend tokens
+		// re-emitting the full checklist. A new item still needs content
+		// because there is nothing to preserve.
 		if !patchMode && content == "" {
-			return "", fmt.Errorf("each item requires non-empty content")
+			if existingContent, ok := existingContentByID[id]; ok {
+				content = existingContent
+			} else {
+				return "", fmt.Errorf("each item requires non-empty content")
+			}
 		}
+		// In patch mode, an empty content means "don't change content, only
+		// update status" for an existing ID.
 		if content != "" && len(content) > todoMaxContentChars {
 			return "", fmt.Errorf("item content exceeds %d chars", todoMaxContentChars)
 		}

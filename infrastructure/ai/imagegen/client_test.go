@@ -138,7 +138,7 @@ func TestOpenAIEditsUsesMultipart(t *testing.T) {
 	}
 }
 
-func TestGenerateSurfacesHTTPStatusAsUpstreamError(t *testing.T) {
+func TestGenerateSurfacesHTTPStatusError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"overloaded"}}`, http.StatusBadGateway)
 	}))
@@ -148,12 +148,10 @@ func TestGenerateSurfacesHTTPStatusAsUpstreamError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	var upstream *application.UpstreamError
 	if !strings.Contains(err.Error(), "502") {
-		// DoJSON wraps as UpstreamError
+		// DoJSON keeps the HTTP status in the returned error.
 		t.Logf("err = %v", err)
 	}
-	_ = upstream
 }
 
 func TestGenerateHonorsCancel(t *testing.T) {

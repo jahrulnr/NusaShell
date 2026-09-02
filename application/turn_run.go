@@ -30,6 +30,10 @@ type TurnRun struct {
 	// during a headless turn. Derived from the workflow TrustLevel via
 	// domain.TrustLevelToRiskTierCap. Empty means no cap (interactive turns).
 	RiskTierCap domain.RiskTier
+	// HeadlessUpdate is called at safe round boundaries for an observed
+	// headless run. Internal delegates use it to mirror their hidden
+	// conversation into the shared ACP-shaped transcript UI.
+	HeadlessUpdate func()
 	// Workspace is the absolute workspace root of the conversation, captured
 	// at turn start so tool execution can attribute mutations without
 	// re-reading the conversation.
@@ -38,6 +42,9 @@ type TurnRun struct {
 	messageMu   sync.RWMutex
 	steerMu     sync.Mutex
 	steerQueued *SteerEntry
+
+	toolCancelMu sync.Mutex
+	toolCancels  map[string]context.CancelFunc
 
 	runDoneMu sync.Mutex
 	runDone   []pendingRunDone
@@ -49,11 +56,49 @@ type TurnRun struct {
 	learningNodes   map[string]struct{}
 }
 
+// registerToolCancel exposes a per-tool cancellation handle to the RPC layer
+// while the tool is in flight. It intentionally does not touch r.Cancel:
+// stopping a tool must leave the enclosing agent turn alive.
+func (r *TurnRun) registerToolCancel(toolCallID string, cancel context.CancelFunc) {
+	if r == nil || toolCallID == "" || cancel == nil {
+		return
+	}
+	r.toolCancelMu.Lock()
+	if r.toolCancels == nil {
+		r.toolCancels = make(map[string]context.CancelFunc)
+	}
+	r.toolCancels[toolCallID] = cancel
+	r.toolCancelMu.Unlock()
+}
+
+func (r *TurnRun) unregisterToolCancel(toolCallID string) {
+	if r == nil || toolCallID == "" {
+		return
+	}
+	r.toolCancelMu.Lock()
+	delete(r.toolCancels, toolCallID)
+	r.toolCancelMu.Unlock()
+}
+
+func (r *TurnRun) cancelTool(toolCallID string) bool {
+	if r == nil || toolCallID == "" {
+		return false
+	}
+	r.toolCancelMu.Lock()
+	cancel, ok := r.toolCancels[toolCallID]
+	r.toolCancelMu.Unlock()
+	if !ok {
+		return false
+	}
+	cancel()
+	return true
+}
+
 // pendingRunDone is a finished background run waiting to be injected
 // into the parent turn at the next steer-style tool-round boundary.
 // Complete delivers the result into the parent conversation (patch the
 // original tool call + inject the synthetic result message); producers
-// are subagents today, delegates tomorrow.
+// include ACP subagents and internal delegates.
 type pendingRunDone struct {
 	RunID    string
 	Complete func(conversationID string) error

@@ -72,10 +72,11 @@ func fileToolInfos() []application.ToolInfo {
 			"minigames — write the file first with file_write, then show it). op=image reads " +
 			"an image file and displays it inline. op=audio reads an audio file (mp3, wav, ogg, " +
 			"m4a) and displays an inline player. op=video reads a video file (mp4, webm, " +
-			"mov, avi) and displays an inline player. Use file_write to create the file, " +
+			"mov, avi) and displays an inline player. op=pdf validates a PDF and displays it " +
+			"in the browser's native PDF viewer. Use file_write to create the file, " +
 			"file_patch to update it, file_read to inspect it — show only handles display.",
 			InputSchema: obj("object", props(
-				"op", strEnum("Display type: html (iframe), image (inline), audio (inline player), or video (inline player)", "html", "image", "audio", "video"),
+				"op", strEnum("Display type: html (iframe), image, audio, video, or pdf (native browser viewer)", "html", "image", "audio", "video", "pdf"),
 				"path", str("Absolute path to the file to display"),
 				"width", intSchema("Iframe width in pixels (html only, default 720)"),
 				"height", intSchema("Iframe height in pixels (html only, default 400)"),

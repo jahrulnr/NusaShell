@@ -4,11 +4,10 @@ import "time"
 
 // Background review agent policy constants.
 //
-// The review agent runs a bounded LLM turn after a conversation crosses
+// The review agent runs an automatic LLM turn after a conversation crosses
 // the learning-review threshold. These constants govern the cooldown,
-// tool-loop bound, transcript window, and per-field truncation caps so
-// the review stays cheap and predictable. The agent itself lives in the
-// application layer; the policy constants live here so the rules are
+// transcript window, and per-field truncation caps. The agent itself lives in
+// the application layer; the policy constants live here so the rules are
 // visible at the layer that owns the memory model.
 const (
 	// DefaultReviewCooldown is the minimum interval between reviews for
@@ -17,8 +16,6 @@ const (
 	// DefaultReviewMemoryEveryNTurns is the trigger threshold: a review
 	// is considered after every N turns.
 	DefaultReviewMemoryEveryNTurns = 10
-	// DefaultReviewMaxToolRounds bounds the review agent's tool loop.
-	DefaultReviewMaxToolRounds = 6
 	// DefaultReviewTranscriptTailMsgs is how many recent messages the
 	// review agent includes in its transcript window.
 	DefaultReviewTranscriptTailMsgs = 40

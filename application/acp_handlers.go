@@ -174,6 +174,13 @@ func (a *App) handleAcpRunsList(req contracts.AcpRunsListRequest) (any, *contrac
 			out = append(out, acpRunDTO(r))
 		}
 	}
+	for _, r := range a.delegateRunList(req.ConversationID) {
+		if seen[r.ID] {
+			continue
+		}
+		seen[r.ID] = true
+		out = append(out, acpRunDTO(r))
+	}
 	if a.AcpRunStorage != nil {
 		for _, rec := range a.AcpRunStorage.List(req.ConversationID) {
 			if seen[rec.ID] {
@@ -217,6 +224,9 @@ func (a *App) handleAcpRunsGet(req contracts.AcpRunIDRequest) (any, *contracts.R
 		if run, ok := a.Acp.Get(req.ID); ok {
 			return acpRunDTO(run), nil
 		}
+	}
+	if run, ok := a.delegateRunSnapshot(req.ID); ok {
+		return acpRunDTO(run), nil
 	}
 	// The runtime only owns live runs. Terminal runs survive in the per-room
 	// .acp store and must remain readable after a backend restart so a room's

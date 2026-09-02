@@ -29,3 +29,12 @@
 
 # Frontend E2E dependencies
 node_modules/
+
+# Electron wrapper dependencies and generated native artifacts
+/apps/electron/node_modules/
+/apps/electron/dist/
+/apps/electron/runtime/*
+!/apps/electron/runtime/.gitkeep
+
+# Local release payloads
+/release/

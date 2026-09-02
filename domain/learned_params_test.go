@@ -81,6 +81,14 @@ func TestClassify400ErrorNoUserQuery(t *testing.T) {
 	}
 }
 
+func TestClassify400ErrorAssistantPrefill(t *testing.T) {
+	body := `provider returned HTTP 400: {"error":{"message":"This model does not support assistant message prefill. The conversation must end with a user message."}}`
+	action, param := Classify400Error(body)
+	if action != LearnedActionNudgeUser || param != "user_message" {
+		t.Fatalf("Classify400Error(prefill) = (%q, %q), want (%q, %q)", action, param, LearnedActionNudgeUser, "user_message")
+	}
+}
+
 // TestClassify400ErrorTextOnly proves that "text-only" / "must be a text
 // part" errors from text-only models (e.g. Qwen3.8) are classified as
 // LearnedActionDisableModality with param "vision" — the most common

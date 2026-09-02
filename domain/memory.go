@@ -6,22 +6,41 @@ import (
 	"unicode"
 )
 
-// ---- Two-tier memory ----
+// ---- Memory tiers ----
 //
-// Primary memory is a small, always-injected working set (~1k tokens)
-// stored in a single primary.md file. Fragments are an unlimited,
-// on-demand archive stored as one markdown file per entry under
-// memory/fragments/. The background review agent promotes durable
-// facts from fragments into primary; foreground agents save new
-// observations as fragments and search fragments by content + metadata.
+// Memory has three tiers. user.md (legacy name primary.md) is a small,
+// always-injected working set (~1k tokens) holding the user's rules and
+// preferences. soul.md is an equally sized (~1k tokens) always-injected
+// document holding agent working knowledge — conventions, gotchas,
+// decisions, references — curated by background improvers. Fragments are
+// an unlimited, on-demand archive stored as one markdown file per entry
+// under memory/fragments/. The background agent promotes durable facts
+// into the documents; foreground agents save new observations as
+// fragments and search fragments by content + metadata.
 
-// PrimaryTokenCap is the soft token budget for primary memory. The
-// primary store enforces a character approximation (4 chars ≈ 1 token)
-// to keep the always-injected prefix small.
+// PrimaryTokenCap is the soft token budget for the user tier (user.md,
+// legacy primary.md). The store enforces a character approximation
+// (4 chars ≈ 1 token) to keep the always-injected prefix small.
 const PrimaryTokenCap = 1000
 
 // PrimaryCharCap is the character approximation of PrimaryTokenCap.
 const PrimaryCharCap = PrimaryTokenCap * 4
+
+// AgentTokenCap is the soft token budget for the agent tier (soul.md).
+// Combined with the user tier the always-injected memory prefix totals
+// ~2k tokens.
+const AgentTokenCap = 1000
+
+// AgentCharCap is the character approximation of AgentTokenCap.
+const AgentCharCap = AgentTokenCap * 4
+
+// Memory tier identifiers used in tool wire payloads and announcements.
+const (
+	MemoryTierPrimary  = "primary" // legacy alias for the user tier
+	MemoryTierUser     = "user"
+	MemoryTierAgent    = "agent"
+	MemoryTierFragment = "fragment"
+)
 
 // PrimaryEntry is one line in the primary primary.md file. Primary
 // entries are short, durable facts promoted from fragments by the

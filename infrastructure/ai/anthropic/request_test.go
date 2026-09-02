@@ -757,8 +757,26 @@ func TestStreamRejectsEOFBeforeMessageStop(t *testing.T) {
 		``,
 	}, "\n")), &core.Request{Model: "claude"}, nil)
 	_, err := core.Collect(stream)
-	if err == nil || !strings.Contains(err.Error(), "before message_stop") || !core.IsProviderError(err) {
+	if err == nil || !strings.Contains(err.Error(), "before message_stop") || !core.IsNetworkError(err) {
 		t.Fatalf("expected truncated stream error, got %v", err)
+	}
+}
+
+func TestStreamAcceptsCleanEOFWithStopReason(t *testing.T) {
+	stream := newStream(streamResponse(strings.Join([]string{
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"complete"}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
+		``,
+	}, "\n")), &core.Request{Model: "claude"}, nil)
+	resp, err := core.Collect(stream)
+	if err != nil {
+		t.Fatalf("clean EOF with stop_reason must not error, got %v", err)
+	}
+	if resp.Text() != "complete" || resp.FinishReason != core.FinishReasonStop {
+		t.Fatalf("text/finish = %q/%q, want complete/stop", resp.Text(), resp.FinishReason)
 	}
 }
 

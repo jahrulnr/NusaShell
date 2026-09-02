@@ -25,8 +25,9 @@ func reasoningDeltaVisible(accumulated string) bool {
 const userNudgeText = domain.UserNudgeText
 
 // hasUserMessage reports whether the messages slice contains at least one
-// message with Role "user". Used to decide whether to inject a nudge user
-// message for providers that require one.
+// message with Role "user". It is kept separate from
+// needsUserMessageAtEnd because a provider may require the final role to be
+// user even when an earlier user message exists.
 func hasUserMessage(messages []ChatMessage) bool {
 	for _, m := range messages {
 		if m.Role == "user" {
@@ -34,6 +35,21 @@ func hasUserMessage(messages []ChatMessage) bool {
 		}
 	}
 	return false
+}
+
+// needsUserMessageAtEnd reports whether a learned provider constraint needs a
+// synthetic user turn appended to the request. A tool result is already the
+// valid final turn of an active tool cycle, so it must not be followed by a
+// synthetic user message. Requests with no user at all preserve the older
+// nudge behavior.
+func needsUserMessageAtEnd(messages []ChatMessage) bool {
+	if !hasUserMessage(messages) {
+		return true
+	}
+	if len(messages) == 0 {
+		return true
+	}
+	return messages[len(messages)-1].Role == "assistant"
 }
 
 // serverCompactionContextManagement returns the context_management directive
@@ -189,6 +205,10 @@ func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage) *doma
 func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	ctx := DefaultRuntimeContext(c.Workspace)
 	ctx.DataDir = a.DataDir
+	// The runtime context slot also carries the active background/async tool
+	// runs so the model always knows which subagents/delegates were spawned
+	// and are still pending (fed into the compaction re-hydration too).
+	ctx.BackgroundRuns = a.pendingBackgroundRuns(c.ID)
 	source := HydrationSource{
 		RuntimeContext: ctx,
 		ConvID:         c.ID,
@@ -202,6 +222,9 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	}
 	if a.Primary != nil {
 		source.PrimaryPath = a.Primary.Path()
+	}
+	if a.Agent != nil {
+		source.AgentPath = a.Agent.Path()
 	}
 	if a.Todos != nil {
 		source.Todos = a.Todos
@@ -222,7 +245,7 @@ func (a *App) completeWithRetry(ctx context.Context, adapter ProviderContext, re
 			return response, err
 		}
 		a.log("warn", "ai", "retrying provider completion (%d/%d) after %s: %v", retry, maxProviderAttempts, delay.Round(time.Millisecond), err)
-		if err := a.retrySleeper(ctx, delay); err != nil {
+		if err := a.waitForRetry(ctx, delay); err != nil {
 			return ChatResponse{}, err
 		}
 	}

@@ -641,9 +641,9 @@ test('BH-SETTINGS-01: sampling parameters cannot be cleared to null once set', a
 //   - assistant message with tool_calls whose ids start with "hydrate-"
 //   - followed by tool messages with tool_call_id matching those ids.
 // The transcript is DYNAMIC: slots whose real tool reports nothing (no
-// plugins, no todos, empty primary memory) are omitted entirely. In this
-// harness (fresh data dir, seeded primary, embedded skills, no plugins)
-// the visible slots are runtime_context, memory, skill_list.
+// plugins, no todos, empty memory documents) are omitted entirely. In this
+// harness (fresh data dir, seeded user + soul documents, embedded skills, no
+// plugins) the visible slots are runtime_context, file_read, file_read, skill.
 function findHydration(messages) {
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
@@ -663,7 +663,7 @@ function findHydration(messages) {
 }
 
 // hydrationSlotNames returns the tool-call function names from a hydration
-// exchange, in order. Used to assert the full 6-slot transcript is present.
+// exchange, in order. Used to assert the dynamic transcript is present.
 function hydrationSlotNames(hydration) {
   return hydration.calls.map((c) => c.function?.name);
 }
@@ -740,11 +740,11 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
     const providerID = saveRes.providers[0].id;
     await rpcModule.rpc('ai.providers.import-models', { id: providerID });
 
-    // Seed one primary memory entry so the memory slot is non-empty.
-    // Hydration reads from memory/primary.md (primary memory), so we write
-    // directly to the file in the data dir.
+    // Seed both always-injected documents so hydration must persist two
+    // separate file_read call/result pairs.
     await mkdir(join(dataDir, 'memory'), { recursive: true });
-    await writeFile(join(dataDir, 'memory', 'primary.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [frag_test] User prefers concise answers.\n');
+    await writeFile(join(dataDir, 'memory', 'user.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [frag_test] User prefers concise answers.\n');
+    await writeFile(join(dataDir, 'memory', 'soul.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [soul_test] Soul keeps the tool transcript explicit.\n');
 
     // Create a new conversation.
     window.location.hash = '#agent';
@@ -780,22 +780,37 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
     assertUserBeforeHydration(lastStream.body.messages, 'HYDR-NEW-ROOM');
 
     // Dynamic transcript: this harness has no plugins and no todos, so the
-    // mcp_list / tool_list / todo_list slots are hidden. Seeded primary
-    // memory and the embedded skill library keep memory + skill alive.
+    // mcp_list / tool_list / todo_list slots are hidden. The seeded user
+    // document and embedded skill library keep file_read + skill alive.
     const slots = hydrationSlotNames(hydration);
     assert.deepEqual(
       slots,
-      ['runtime_context', 'memory', 'skill'],
+      ['runtime_context', 'file_read', 'file_read', 'skill'],
       `HYDR-NEW-ROOM: hydration slots must be the dynamic transcript in order, got ${JSON.stringify(slots)}`,
     );
 
-    // The memory slot must contain the seeded entry.
-    const memCall = hydration.calls.find((c) => c.function?.name === 'memory');
-    const memResult = hydration.results.find((r) => r.tool_call_id === memCall?.id);
-    assert.ok(memResult, 'HYDR-NEW-ROOM: memory tool result must exist');
+    // The user document must be represented by a direct file_read result.
+    const userCall = hydration.calls.find((c) => {
+      if (c.function?.name !== 'file_read') return false;
+      try { return JSON.parse(c.function.arguments || '{}').path === join(dataDir, 'memory', 'user.md'); } catch { return false; }
+    });
+    const userResult = hydration.results.find((r) => r.tool_call_id === userCall?.id);
+    assert.ok(userCall, 'HYDR-NEW-ROOM: user file_read call must exist');
+    assert.ok(userResult, 'HYDR-NEW-ROOM: user file_read tool result must exist');
     assert.ok(
-      memResult.content.includes('User prefers concise answers.'),
-      `HYDR-NEW-ROOM: memory slot must contain the seeded entry, got: ${memResult.content}`,
+      userResult.content.includes('User prefers concise answers.'),
+      `HYDR-NEW-ROOM: user file_read result must contain the seeded entry, got: ${userResult.content}`,
+    );
+    const soulCall = hydration.calls.find((c) => {
+      if (c.function?.name !== 'file_read') return false;
+      try { return JSON.parse(c.function.arguments || '{}').path === join(dataDir, 'memory', 'soul.md'); } catch { return false; }
+    });
+    const soulResult = hydration.results.find((r) => r.tool_call_id === soulCall?.id);
+    assert.ok(soulCall, 'HYDR-NEW-ROOM: soul file_read call must exist');
+    assert.ok(soulResult, 'HYDR-NEW-ROOM: soul file_read tool result must exist');
+    assert.ok(
+      soulResult.content.includes('Soul keeps the tool transcript explicit.'),
+      `HYDR-NEW-ROOM: soul file_read result must contain the seeded entry, got: ${soulResult.content}`,
     );
 
     // The hydration transcript is persisted to the conversation store for
@@ -868,11 +883,11 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     const providerID = saveRes.providers[0].id;
     await rpcModule.rpc('ai.providers.import-models', { id: providerID });
 
-    // Seed one primary memory entry so the memory slot is non-empty.
-    // Hydration reads from memory/primary.md (primary memory), so we write
-    // directly to the file in the data dir.
+    // Seed both always-injected documents so the post-compaction hydration
+    // proves that each one is re-read through its own file_read call.
     await mkdir(join(dataDir, 'memory'), { recursive: true });
-    await writeFile(join(dataDir, 'memory', 'primary.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [frag_test] User is testing compaction hydration.\n');
+    await writeFile(join(dataDir, 'memory', 'user.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [frag_test] User is testing compaction hydration.\n');
+    await writeFile(join(dataDir, 'memory', 'soul.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [soul_test] Soul survives compaction hydration.\n');
 
     // Disable compaction while seeding history.
     await rpcModule.rpc('settings.set', { compaction_enabled: false });
@@ -974,22 +989,38 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     assertUserBeforeHydration(lastStream.body.messages, 'HYDR-POST-COMPACTION');
 
     // Dynamic transcript (see HYDR-NEW-ROOM): mcp/tool/todo slots are
-    // hidden in this harness; memory + skill survive.
+    // hidden in this harness; user file_read + skill survive.
     const slots = hydrationSlotNames(hydration);
     assert.deepEqual(
       slots,
-      ['runtime_context', 'memory', 'skill'],
+      ['runtime_context', 'file_read', 'file_read', 'skill'],
       `HYDR-POST-COMPACTION: hydration slots must be the dynamic transcript in order, got ${JSON.stringify(slots)}`,
     );
 
-    // The memory slot must contain the seeded entry (proves the transcript
-    // was rebuilt fresh from live stores, not reused from before compaction).
-    const memCall = hydration.calls.find((c) => c.function?.name === 'memory');
-    const memResult = hydration.results.find((r) => r.tool_call_id === memCall?.id);
-    assert.ok(memResult, 'HYDR-POST-COMPACTION: memory tool result must exist');
+    // The user document must be represented by a fresh direct file_read
+    // result (proves the transcript was rebuilt from live stores, not reused
+    // from before compaction).
+    const userCall = hydration.calls.find((c) => {
+      if (c.function?.name !== 'file_read') return false;
+      try { return JSON.parse(c.function.arguments || '{}').path === join(dataDir, 'memory', 'user.md'); } catch { return false; }
+    });
+    const userResult = hydration.results.find((r) => r.tool_call_id === userCall?.id);
+    assert.ok(userCall, 'HYDR-POST-COMPACTION: user file_read call must exist');
+    assert.ok(userResult, 'HYDR-POST-COMPACTION: user file_read tool result must exist');
     assert.ok(
-      memResult.content.includes('User is testing compaction hydration.'),
-      `HYDR-POST-COMPACTION: memory slot must contain the seeded entry, got: ${memResult.content}`,
+      userResult.content.includes('User is testing compaction hydration.'),
+      `HYDR-POST-COMPACTION: user file_read result must contain the seeded entry, got: ${userResult.content}`,
+    );
+    const soulCall = hydration.calls.find((c) => {
+      if (c.function?.name !== 'file_read') return false;
+      try { return JSON.parse(c.function.arguments || '{}').path === join(dataDir, 'memory', 'soul.md'); } catch { return false; }
+    });
+    const soulResult = hydration.results.find((r) => r.tool_call_id === soulCall?.id);
+    assert.ok(soulCall, 'HYDR-POST-COMPACTION: soul file_read call must exist');
+    assert.ok(soulResult, 'HYDR-POST-COMPACTION: soul file_read tool result must exist');
+    assert.ok(
+      soulResult.content.includes('Soul survives compaction hydration.'),
+      `HYDR-POST-COMPACTION: soul file_read result must contain the seeded entry, got: ${soulResult.content}`,
     );
 
     // The hydration transcript is persisted to the conversation store for

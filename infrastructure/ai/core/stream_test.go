@@ -162,6 +162,9 @@ func TestCollectRequiresDoneOrError(t *testing.T) {
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("expected EOF when stream ends without Done or error, got %v", err)
 	}
+	if !IsNetworkError(err) {
+		t.Fatalf("missing Done event should be classified as a retryable network error, got %T: %v", err, err)
+	}
 }
 
 func TestCollectNormalizesInvalidToolArguments(t *testing.T) {
@@ -346,6 +349,39 @@ func TestHandleWithSplitsReasoningAndContent(t *testing.T) {
 	}
 	if resp.Text() != "answer" {
 		t.Fatalf("aggregated text = %q", resp.Text())
+	}
+}
+
+func TestHandleWithDispatchesToolConstructionEvents(t *testing.T) {
+	var starts []ToolUseStart
+	var deltas []ToolUseDelta
+	resp, err := HandleWith(&eventSliceStream{events: []Event{
+		ToolUseStart{ID: "call_1", Name: "file_read"},
+		ToolUseDelta{ID: "call_1", ArgumentsDelta: []byte(`{"path":`)},
+		ToolUseDelta{ID: "call_1", ArgumentsDelta: []byte(`"/tmp/note"}`)},
+		ToolUseDone{ID: "call_1"},
+		DoneEvent{FinishReason: FinishReasonToolCall, Provider: "test", Model: "m"},
+	}}, StreamHandler{
+		ToolStart: func(event ToolUseStart) error {
+			starts = append(starts, event)
+			return nil
+		},
+		ToolDelta: func(event ToolUseDelta) error {
+			deltas = append(deltas, event)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleWith: %v", err)
+	}
+	if len(starts) != 1 || starts[0].ID != "call_1" || starts[0].Name != "file_read" {
+		t.Fatalf("tool starts = %#v, want one file_read start", starts)
+	}
+	if len(deltas) != 2 || string(deltas[0].ArgumentsDelta) != `{"path":` || string(deltas[1].ArgumentsDelta) != `"/tmp/note"}` {
+		t.Fatalf("tool deltas = %#v, want both argument chunks", deltas)
+	}
+	if calls := resp.ToolCalls(); len(calls) != 1 || string(calls[0].Arguments) != `{"path":"/tmp/note"}` {
+		t.Fatalf("aggregated tool calls = %#v", calls)
 	}
 }
 

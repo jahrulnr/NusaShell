@@ -30,8 +30,13 @@ func (a *App) endpoints() *endpointsCache {
 // same model with a different set of upstreams.
 const endpointCacheTTL = 24 * time.Hour
 
+// endpointCacheSchemaVersion forces a refresh after the route shape changes
+// so old entries cannot hide newly available per-provider pricing.
+const endpointCacheSchemaVersion = 2
+
 // endpointsCacheEntry is one cached route list.
 type endpointsCacheEntry struct {
+	Version   int                 `json:"version"`
 	Routes    []domain.ModelRoute `json:"routes"`
 	FetchedAt int64               `json:"fetched_at"` // unix seconds
 }
@@ -71,6 +76,10 @@ func (c *endpointsCache) get(providerID, modelID string) ([]domain.ModelRoute, b
 	if !ok {
 		return nil, false
 	}
+	if e.Version != endpointCacheSchemaVersion {
+		delete(c.items, k)
+		return nil, false
+	}
 	if time.Since(time.Unix(e.FetchedAt, 0)) > endpointCacheTTL {
 		delete(c.items, k)
 		return nil, false
@@ -83,6 +92,7 @@ func (c *endpointsCache) get(providerID, modelID string) ([]domain.ModelRoute, b
 func (c *endpointsCache) set(providerID, modelID string, routes []domain.ModelRoute) {
 	c.mu.Lock()
 	c.items[c.key(providerID, modelID)] = endpointsCacheEntry{
+		Version:   endpointCacheSchemaVersion,
 		Routes:    routes,
 		FetchedAt: time.Now().Unix(),
 	}

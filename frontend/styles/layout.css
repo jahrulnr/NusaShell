@@ -57,7 +57,7 @@ body {
   width: 26px;
   height: 26px;
   place-items: center;
-  filter: none;
+  filter: drop-shadow(0 0 8px var(--accent-glow));
 }
 .brand-logo img { display: block; width: 26px; height: 26px; }
 

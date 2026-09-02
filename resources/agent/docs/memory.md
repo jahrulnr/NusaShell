@@ -1,21 +1,30 @@
 # Memory
 
-NusaShell has a two-tier memory system: a small, always-injected
-**primary** document and an unlimited, searchable **fragments**
-archive.
+NusaShell has a three-tier memory system: two small, always-injected
+documents — **user.md** (user rules and preferences; legacy name
+`primary.md`) and **soul.md** (agent working knowledge) — plus an
+unlimited, searchable **fragments** archive.
 
-## Two tiers
+## Tiers
 
 | Tier | Storage | Cap | Injected | Tools |
 |---|---|---|---|---|
-| **Primary** | `memory/primary.md` (single markdown document) | ~1k tokens | Every turn (via hydration) | `file_read(path="memory/primary.md")`, `memory(op="replace",target="primary")` |
-| **Fragments** | `memory/fragments/*.md` (one file per entry) | Unlimited | On-demand (search) | `memory(op="save")`, `memory(op="search")`, `memory(op="list",target="fragments")`, `memory(op="replace",target="fragment")`, `memory(op="delete")` |
+| **User** | `memory/user.md` (single markdown document; legacy path `memory/primary.md` — move it here by hand when upgrading) | ~1k tokens | Every turn (via hydration) | `file_read(path="memory/user.md")`, `memory(op="replace",target="user")` (legacy `target="primary"` aliases user) |
+| **Agent / Soul** | `memory/soul.md` (single markdown document; legacy path `memory/agent.md` — move it here by hand when upgrading) | ~1k tokens | Every turn (via hydration) | `file_read(path="memory/soul.md")`, `memory(op="replace",target="agent")` |
+| **Fragments** | `memory/fragments/*.md` (one file per entry) | Unlimited | On-demand (search + `task_memory` announcements) | `memory(op="save")`, `memory(op="search")`, `memory(op="list",target="fragments")`, `memory(op="replace",target="fragment")`, `memory(op="delete")` |
 
-Primary memory is a single markdown document — like a README the agent
-maintains about the user and working context. It is injected into every
-turn. Fragments are the cold archive — all new facts enter here first,
-and the background review agent edits the primary document to reflect
-the most durable facts.
+The Agent / Soul tier keeps the wire identifier `agent` for memory operations
+and RPCs; only its on-disk filename and Learning label are `soul.md` / Soul.
+
+Both documents are single markdown files — like READMEs: user.md about
+the user and working context, soul.md about agent working knowledge
+(conventions, gotchas, decisions, references) curated by the background
+improver. Hydration reads each non-empty document with its own real
+`file_read` call/result pair, so the persisted transcript records
+`memory/user.md` and `memory/soul.md` separately. A workspace `AGENTS.md`
+is repository guidance and is injected as a separate `file_read` call; it is
+not NusaShell memory. Together the memory documents inject ~2k tokens every
+turn. Fragments are the cold archive — all new facts enter here first.
 
 Generated timestamps use the host machine's local timezone and RFC3339 offset;
 the examples below use `Asia/Jakarta` (`+07:00`).
@@ -41,10 +50,10 @@ ocean blue, fragments to earth brown, primary memory to leaf green, and graph
 edges to deeper ocean, mangrove, or sand tones. Position-preserving background
 refreshes do not re-run this radial pass.
 
-## Primary document format
+## Document format (user.md / soul.md)
 
-`memory/primary.md` is a markdown file with YAML frontmatter followed by
-a free-form prose body:
+Both tier documents share one format: a markdown file with YAML frontmatter
+followed by a free-form prose body. Example (user.md):
 
 ```markdown
 ---
@@ -61,8 +70,16 @@ that works for both humans and AI agents.
 
 The entire body is one document — paragraphs are part of the same
 entry, not separate entries. The agent edits the body in place via
-`memory(op="replace", target="primary")` (substring match) or rewrites
-the whole body by omitting `old_text`.
+`memory(op="replace", target="user"|"agent")` (substring match) or
+rewrites the whole body by omitting `old_text`. Legacy
+`target="primary"` maps to the user tier.
+
+Users can edit the two always-injected documents from **Learning**: the user
+document is under **About You**, and `soul.md` is under **About Agent**. These
+editors use the explicit `memory.primary.update` and `memory.agent.update`
+RPCs, preserve tier-only semantics, and allow an intentional empty document.
+Each editor shows the 4000-character cap; fragment memory is not changed by
+either action.
 
 ## Fragment metadata
 
@@ -97,11 +114,13 @@ All memory operations go through the `memory` dispatcher tool; `op` selects:
   metadata filters (`query`, `category`, `project`, `task`, `tags`,
   `limit`). Returns ranked results with scores.
 - `list` — list the fragment archive (`target="fragments"`, the default)
-  with optional metadata filters. Primary is a single document, not a
-  list — read it with `file_read(path="memory/primary.md")` instead.
-- `replace` — update memory. For primary: `target="primary"` +
-  `old_text` (substring match) + `content` to edit part of the document,
-  or omit `old_text` to rewrite the entire body. For fragments:
+  with optional metadata filters. The tier documents are single files,
+  not lists — read them with `file_read(path="memory/user.md")` or
+  `file_read(path="memory/soul.md")` instead.
+- `replace` — update memory. For tier documents: `target="user"` or
+  `target="agent"` (legacy `"primary"` aliases user) + `old_text`
+  (substring match) + `content` to edit part of the document, or omit
+  `old_text` to rewrite the entire body. For fragments:
   `target="fragment"` + `id` + `content`.
 - `delete` — delete a fragment by `id`.
 
@@ -127,19 +146,30 @@ Good examples:
     memory(op="search", query="comment language")   # before saving, check for duplicates
     memory_project(op="query", topic="deploy")      # project facts live in memory_project
 
-## How the review agent edits primary
+## How the background improver manages memory
 
-The background review agent edits the primary document via
-`memory(op="replace", target="primary")` when it finds durable facts in fragments
+The background improver (`AgentImprover`) is a hidden agent with the full
+local toolbox plus `review_transcript`: it reads the conversation transcript
+JSON and the files the room touched directly, researches the web when
+needed, and writes durable knowledge through the normal `memory` tool —
+**soul.md** for agent working knowledge and **fragments** for task facts.
+It never writes `user.md`, never deletes memory, and honors a mutation cap
+per run. Successful memory writes fan out to every conversation via the
+announcement channel and to this room via `task_memory` announcements.
 that belong in the always-injected working set. Primary is capped at ~1k
 tokens, so the agent rewrites or trims stale text before adding new
 content.
 
-The review agent sees the current primary document as a pre-injected
-`file_read` tool result (reading `memory/primary.md` directly, frontmatter
+The review agent sees the current user document as a pre-injected
+`file_read` tool result (reading `memory/user.md` directly, frontmatter
 included) at the start of each review run, so it can avoid duplicates and
-spot stale text without needing to read the file itself first. Reviews are bounded to a small number of
-tool rounds and coalesce concurrent threshold/skill/compaction triggers, so a burst cannot launch duplicate reviews or replay the same transcript repeatedly. Activity that arrives while a review is running is retained for one follow-up review. Both successful and failed reviews enter the cooldown period to prevent redundant re-review of the same window. Exact duplicate fragment writes are idempotent.
+spot stale text without needing to read the file itself first. Reviews use the same provider retry policy as conversation turns, then hard-fail after the internal retry budget is exhausted or when the error is non-retryable. Their tool loop has no artificial round cap: it continues while the model returns tool calls and ends on a terminal response or error. Concurrent threshold/skill/compaction triggers are still coalesced, so a burst cannot launch duplicate reviews or replay the same transcript repeatedly. Activity that arrives while a review is running is retained for one follow-up review. Both successful and failed reviews enter the cooldown period to prevent redundant re-review of the same window. Exact duplicate fragment writes are idempotent.
+
+Tool failures are fed back into the review conversation so the agent can
+correct the call and continue. Provider transport failures are retried
+internally; a non-retryable error or exhausted retry budget hard-fails the
+background review. The Learning log shows only a concise failure status;
+verbose diagnostics remain in the backend log and trajectory.
 
 ## How the review agent gets the transcript
 

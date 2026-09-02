@@ -5,6 +5,7 @@ import { test } from 'node:test';
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const view = await readFile(new URL('../js/views/automation.js', import.meta.url), 'utf8');
 const css = await readFile(new URL('../styles/automation.css', import.meta.url), 'utf8');
+const globalCSS = await readFile(new URL('../styles/global.css', import.meta.url), 'utf8');
 
 test('Automation view is wired in the shell', () => {
   assert.match(html, /data-view="automation"/);
@@ -29,4 +30,10 @@ test('Automation view talks to Automation RPC', () => {
   assert.match(view, /availability === 'invalid'/);
   assert.match(view, /runBtn\.disabled = invalid/);
   assert.match(css, /\.automation-pill\.invalid/);
+});
+
+test('Automation and Learning share a bounded segmented tab control', () => {
+  assert.match(html, /class="tabs learning-tabs" role="tablist"/);
+  assert.match(globalCSS, /\.tabs\s*\{[\s\S]*?width:\s*fit-content;[\s\S]*?padding:\s*3px;[\s\S]*?border:\s*1px solid var\(--border-soft\);/);
+  assert.match(css, /\.automation-toolbar \.tabs\s*\{[\s\S]*?max-width:\s*100%;/);
 });

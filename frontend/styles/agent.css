@@ -392,7 +392,7 @@
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
-.agent-message.user .agent-bubble { background: var(--accent-glow); border-color: var(--accent-glow); color: var(--text); border-bottom-right-radius: 3px; font-weight: 500; white-space: normal; }
+.agent-message.user .agent-bubble { background: var(--accent-soft); border-color: var(--accent-border); color: var(--text); border-bottom-right-radius: 3px; font-weight: 500; white-space: normal; }
 .agent-message.assistant .agent-bubble { white-space: normal; }
 .agent-message.assistant .agent-bubble > :first-child { margin-top: 0; }
 .agent-message.assistant .agent-bubble > :last-child { margin-bottom: 0; }
@@ -409,7 +409,7 @@
 .agent-message.assistant .agent-bubble pre {
   box-sizing: border-box;
   max-width: 100%;
-  overflow-x: auto;
+  overflow: auto;
   padding: 10px;
   border: 1px solid var(--border-soft);
   background: var(--bg);
@@ -854,6 +854,62 @@
   .agent-thinking-dots span { animation: none; }
 }
 
+/* ---- Live activity: provider is constructing work before a valid card ---- */
+@keyframes agent-activity-sheen {
+  0% { background-position: 180% 0; }
+  100% { background-position: -80% 0; }
+}
+@keyframes agent-activity-cursor { 0%, 45% { opacity: .25; } 55%, 100% { opacity: 1; } }
+@keyframes agent-activity-pulse { 0%, 100% { opacity: .55; transform: scale(.92); } 50% { opacity: 1; transform: scale(1); } }
+
+.agent-activity-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 24px;
+  margin: 2px 0 0;
+  padding: 3px 2px 1px;
+  color: var(--text-faint);
+  font: 11px/1.35 var(--font-mono);
+}
+.agent-activity-status[hidden] { display: none; }
+.agent-activity-status-mark {
+  display: grid;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid var(--accent-border);
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  animation: agent-activity-pulse 1.6s ease-in-out infinite;
+}
+.agent-activity-status-text {
+  min-width: 0;
+  overflow: hidden;
+  background: linear-gradient(90deg, var(--text-faint) 0%, var(--accent) 38%, var(--blue-info) 52%, var(--text-faint) 80%);
+  background-size: 240% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: var(--accent);
+  -webkit-text-fill-color: transparent;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: agent-activity-sheen 2.4s linear infinite;
+}
+.agent-activity-status-cursor {
+  flex: none;
+  color: var(--accent);
+  animation: agent-activity-cursor 1s steps(1, end) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-activity-status-mark,
+  .agent-activity-status-text,
+  .agent-activity-status-cursor { animation: none; }
+}
+
 .agent-turn-meta {
   display: flex;
   flex-wrap: wrap;
@@ -899,36 +955,17 @@
 }
 
 .agent-tool-stack {
-  --agent-tool-gutter: 32px;
-  --agent-tool-node-radius: 14px;
-  position: relative;
   display: grid;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   max-width: 100%;
   width: 100%;
   margin: 8px 0 14px;
-  padding-left: var(--agent-tool-gutter);
+  padding-left: 0;
   color: var(--text-dim);
 }
-.agent-tool-stack::before {
-  position: absolute;
-  top: 12px;
-  bottom: 14px;
-  left: 8px;
-  width: 1px;
-  background: var(--border-soft);
-  content: "";
-}
 .agent-tool-stack > .agent-tool-event {
-  margin-left: calc(-1 * var(--agent-tool-gutter));
-  width: calc(100% + var(--agent-tool-gutter));
-}
-@media (max-width: 480px) {
-  .agent-tool-stack {
-    --agent-tool-gutter: 30px;
-    --agent-tool-node-radius: 13px;
-  }
+  width: 100%;
 }
 
 .agent-tool-event {
@@ -958,9 +995,9 @@
   list-style: none;
 }
 .agent-tool-event-head::-webkit-details-marker { display: none; }
-.agent-tool-event-head:hover { background: rgba(18, 21, 18, .72); }
+.agent-tool-event-head:hover { background: rgba(15, 29, 35, .72); }
 .agent-tool-event-head:focus-visible {
-  background: rgba(18, 21, 18, .72);
+  background: rgba(15, 29, 35, .72);
   outline: 1px solid var(--accent);
   outline-offset: 2px;
 }
@@ -990,7 +1027,7 @@
   animation: agent-tool-terminal-pulse 1.2s ease-in-out infinite;
 }
 .agent-tool-event.is-success .agent-tool-event-node {
-  border-color: rgba(85, 217, 150, .35);
+  border-color: var(--forest-border);
   color: var(--green-bright);
 }
 .agent-tool-event.is-error .agent-tool-event-node {
@@ -1331,6 +1368,7 @@
 .agent-route-spin { animation: agent-route-spin 1s linear infinite; }
 @keyframes agent-route-spin { to { transform: rotate(360deg); } }
 .agent-route-menu { width: 330px; max-width: min(360px, calc(100vw - 24px)); }
+.agent-route-cost { color: var(--earth); text-transform: none; }
 .agent-route-note { padding: 8px 10px; font-size: 11px; color: var(--text-dim); border-top: 1px solid var(--border); }
 @media (max-width: 480px) {
   .agent-route-trigger { max-width: 76px; }
@@ -1800,6 +1838,31 @@
   border-radius: 7px;
   background: var(--panel-raised);
   color: var(--blue-info);
+}
+
+.agent-ask-header .agent-tool-elapsed {
+  flex: none;
+  margin-left: auto;
+  padding: 4px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--panel-raised);
+  color: var(--text-faint);
+  font: 10px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.agent-ask-card.is-pending .agent-tool-elapsed {
+  border-color: var(--blue-border);
+  color: var(--blue-info);
+  animation: agent-tool-tick 2s ease-in-out infinite;
+}
+.agent-ask-card.is-error .agent-tool-elapsed {
+  border-color: var(--red-border);
+  color: var(--red-bright);
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-ask-card.is-pending .agent-tool-elapsed { animation: none; }
 }
 
 .agent-ask-hint {
@@ -2704,6 +2767,78 @@
   text-align: center;
 }
 
+/* ============ Native PDF preview ============ */
+.agent-genpdf-card {
+  position: relative;
+  margin: 10px 1rem;
+  padding: 10px 12px 12px;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.agent-genpdf-card.is-error { border-color: rgba(232, 101, 95, .45); }
+
+.agent-genpdf-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.agent-genpdf-kicker {
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: var(--accent);
+  font: 700 9px var(--font-mono);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.agent-genpdf-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font: 600 13px var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-genpdf-plate {
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.agent-genpdf-frame {
+  display: block;
+  width: 100%;
+  height: min(68vh, 720px);
+  min-height: 360px;
+  border: 0;
+  background: #fff;
+}
+
+.agent-genpdf-caption {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+.agent-genpdf-download {
+  color: var(--accent);
+  font: 600 11px var(--font-ui);
+  text-decoration: none;
+}
+.agent-genpdf-download:hover { text-decoration: underline; }
+
+@media (max-width: 600px) {
+  .agent-genpdf-card { margin-inline: .5rem; }
+  .agent-genpdf-frame { height: 70vh; min-height: 320px; }
+}
+
 .agent-video-bar {
   margin-bottom: 12px;
   justify-content: flex-end;
@@ -2932,6 +3067,8 @@ a.agent-local-link:hover { text-decoration-style: solid; }
 
 .agent-text-preview-content {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   overflow: auto;
   padding: 18px 22px;
 }
@@ -2974,8 +3111,98 @@ a.agent-local-link:hover { text-decoration-style: solid; }
 }
 
 .agent-text-preview-md {
+  min-width: 0;
+  max-width: 100%;
   font-size: 13px;
   line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.agent-text-preview-md > :first-child { margin-top: 0; }
+.agent-text-preview-md > :last-child { margin-bottom: 0; }
+.agent-text-preview-md h1,
+.agent-text-preview-md h2,
+.agent-text-preview-md h3,
+.agent-text-preview-md h4,
+.agent-text-preview-md h5,
+.agent-text-preview-md h6 {
+  margin: 1em 0 .45em;
+  line-height: 1.25;
+}
+.agent-text-preview-md h1 { font-size: 1.65em; }
+.agent-text-preview-md h2 { font-size: 1.35em; }
+.agent-text-preview-md h3 { font-size: 1.15em; }
+.agent-text-preview-md p { margin: .75em 0; }
+.agent-text-preview-md ul,
+.agent-text-preview-md ol { margin: .75em 0; padding-left: 1.5em; }
+.agent-text-preview-md li + li { margin-top: .25em; }
+.agent-text-preview-md a { color: var(--accent); }
+.agent-text-preview-md blockquote {
+  margin: .75em 0;
+  padding: 2px 12px;
+  border-left: 2px solid var(--accent-border);
+  color: var(--text-dim);
+}
+.agent-text-preview-md hr { border: 0; border-top: 1px solid var(--border-soft); }
+
+/* GFM tables stay readable at normal width and become a local horizontal
+   scroller when their intrinsic column width exceeds the preview frame. */
+.agent-text-preview-md .markdown-table-scroll {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+}
+.agent-text-preview-md .markdown-table-scroll table {
+  display: table;
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+.agent-text-preview-md th,
+.agent-text-preview-md td {
+  min-width: 7rem;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.agent-text-preview-md th {
+  background: var(--panel-alt);
+  font-weight: 600;
+}
+
+/* Fenced code gets its own bounded surface; Mermaid source keeps the more
+   specific .mermaid-block styling until the lazy renderer replaces it. */
+.agent-text-preview-md > pre {
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: .9em 0;
+  padding: 10px;
+  overflow-x: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: .5rem;
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+}
+.agent-text-preview-md > pre code {
+  padding: 0;
+  background: transparent;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+.agent-text-preview-md .mermaid-block {
+  max-width: 100%;
 }
 
 /* ── Local file text / markdown preview popup ── */

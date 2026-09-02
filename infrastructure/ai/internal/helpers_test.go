@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"nusashell/application"
 	"nusashell/domain"
 )
 
@@ -227,7 +226,7 @@ func TestHTTPHelpers(t *testing.T) {
 	}))
 	defer errorServer.Close()
 	_, err = OpenSSE(context.Background(), errorServer.Client(), errorServer.URL, nil, nil)
-	var upstream *application.UpstreamError
+	var upstream *domain.ProviderError
 	if !errors.As(err, &upstream) || upstream.StatusCode != http.StatusTooManyRequests || !strings.Contains(err.Error(), "busy") {
 		t.Fatalf("OpenSSE error = %v, want 429 upstream error containing busy", err)
 	}
@@ -257,9 +256,9 @@ func TestSSEAndURLHelpers(t *testing.T) {
 	if !errors.Is(incomplete, io.ErrUnexpectedEOF) {
 		t.Fatalf("IncompleteSSEError = %v, want UnexpectedEOF wrapper", incomplete)
 	}
-	var upstream *application.UpstreamError
+	var upstream *domain.ProviderError
 	if !errors.As(incomplete, &upstream) {
-		t.Fatalf("IncompleteSSEError = %T, want UpstreamError", incomplete)
+		t.Fatalf("IncompleteSSEError = %T, want domain.ProviderError", incomplete)
 	}
 	if got := RetryableSSEReadError(nil); got != nil {
 		t.Fatalf("RetryableSSEReadError(nil) = %v, want nil", got)

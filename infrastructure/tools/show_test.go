@@ -76,6 +76,65 @@ func TestShowHTMLMissingPath(t *testing.T) {
 	}
 }
 
+func TestShowPDFReturnsMetadata(t *testing.T) {
+	dir := t.TempDir()
+	pdfPath := filepath.Join(dir, "report.pdf")
+	writeFile(t, pdfPath, "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n")
+
+	ok, out, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+		"op":   "pdf",
+		"path": pdfPath,
+	}))
+	if !ok || err != nil {
+		t.Fatalf("show PDF failed: ok=%v err=%v", ok, err)
+	}
+	for _, want := range []string{
+		`"show"`,
+		`"type":"pdf"`,
+		`"media_type":"application/pdf"`,
+		`"path":"` + jsonPath(pdfPath) + `"`,
+		`"size_bytes"`,
+	} {
+		if !contains(out, want) {
+			t.Errorf("PDF output should contain %s, got: %s", want, out)
+		}
+	}
+	if contains(out, "%PDF-1.7") {
+		t.Errorf("PDF body must not be embedded in tool output, got: %s", out)
+	}
+}
+
+func TestShowPDFRejectsNonPDFFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "not-a-pdf.bin")
+	writeFile(t, path, "plain text")
+
+	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+		"op":   "pdf",
+		"path": path,
+	}))
+	if err == nil {
+		t.Fatal("show(op=pdf) should reject a file without PDF magic bytes")
+	}
+}
+
+func TestShowPDFSizeCap(t *testing.T) {
+	dir := t.TempDir()
+	pdfPath := filepath.Join(dir, "huge.pdf")
+	writeFile(t, pdfPath, "%PDF-1.7\n")
+	if err := os.Truncate(pdfPath, showMaxPDFBytes+1); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+		"op":   "pdf",
+		"path": pdfPath,
+	}))
+	if err == nil {
+		t.Fatal("oversized PDF should error before opening a browser preview")
+	}
+}
+
 func TestShowImageReturnsMetadata(t *testing.T) {
 	dir := t.TempDir()
 	// Minimal valid PNG (8-byte signature + IHDR)

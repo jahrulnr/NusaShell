@@ -336,6 +336,15 @@ func (pc ProviderContext) Stream(ctx context.Context, req ChatRequest, onDelta, 
 	return StreamViaCore(ctx, pc.Provider, req, pc.Kind, pc.OpenRouter, onDelta, onReasoning)
 }
 
+// StreamWithToolActivity is the chat-stream variant used by the interactive
+// agent. Tool construction callbacks fire while the provider is still
+// assembling arguments, before the completed tool call is validated or
+// executed. Other callers can keep using Stream when they only need answer
+// and reasoning deltas.
+func (pc ProviderContext) StreamWithToolActivity(ctx context.Context, req ChatRequest, onDelta, onReasoning func(string), onToolStart func(core.ToolUseStart), onToolDelta func(core.ToolUseDelta)) (ChatResponse, error) {
+	return StreamViaCoreWithToolActivity(ctx, pc.Provider, req, pc.Kind, pc.OpenRouter, onDelta, onReasoning, onToolStart, onToolDelta)
+}
+
 // NewProviderContext builds a ProviderContext from a domain.Provider and a
 // core.Provider (typically returned by ProviderFactory).
 func NewProviderContext(p *domain.Provider, provider core.Provider) ProviderContext {
@@ -360,32 +369,32 @@ func buildPromptCachePolicyForContext(settings domain.Settings, adapter Provider
 	return buildPromptCachePolicy(settings, provider, model, conversationID, prefix)
 }
 
-// MapCoreError translates litellm/core errors into application.UpstreamError
+// MapCoreError translates litellm/core errors into domain.ProviderError
 // so the application retry loop keeps classifying by Kind/Temporary/RetryAfter.
 func MapCoreError(err error, kind domain.ProviderKind) error {
 	if err == nil {
 		return nil
 	}
 	if core.IsStreamIdleError(err) {
-		return &UpstreamError{Kind: KindIdleTimeout, Temporary: true, Err: err}
+		return &domain.ProviderError{Kind: domain.KindIdleTimeout, Temporary: true, Err: err}
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return &UpstreamError{Kind: KindConnect, Temporary: false, Err: err}
+		return &domain.ProviderError{Kind: domain.KindConnect, Temporary: false, Err: err}
 	}
 	var le *core.LiteLLMError
 	if errors.As(err, &le) {
-		up := &UpstreamError{Err: err}
+		up := &domain.ProviderError{Err: err}
 		if le.StatusCode != 0 {
-			up.Kind = KindHTTPStatus
+			up.Kind = domain.KindHTTPStatus
 			up.StatusCode = le.StatusCode
 			up.Err = fmt.Errorf("provider returned HTTP %d: %w", le.StatusCode, le)
 			if le.RetryAfter > 0 {
 				up.RetryAfter = time.Duration(le.RetryAfter) * time.Second
 			}
 		} else if core.IsNetworkError(err) || core.IsTimeoutError(err) {
-			up.Kind = KindConnect
+			up.Kind = domain.KindConnect
 		} else {
-			up.Kind = KindSSETransport
+			up.Kind = domain.KindSSETransport
 		}
 		up.Temporary = le.Retryable
 		if le.StatusCode == 429 && le.RetryAfter == 0 {
@@ -411,6 +420,14 @@ func CompleteViaCore(ctx context.Context, provider core.Provider, req ChatReques
 // content/reasoning deltas via core.HandleWith, and returns the converted
 // response. Error mapping is applied.
 func StreamViaCore(ctx context.Context, provider core.Provider, req ChatRequest, kind domain.ProviderKind, openRouter bool, onDelta, onReasoning func(string)) (ChatResponse, error) {
+	return StreamViaCoreWithToolActivity(ctx, provider, req, kind, openRouter, onDelta, onReasoning, nil, nil)
+}
+
+// StreamViaCoreWithToolActivity is StreamViaCore with optional callbacks for
+// provider-side tool construction. The callbacks never receive raw argument
+// chunks from the application boundary; callers can use them as an activity
+// signal while core continues to aggregate and validate the final tool call.
+func StreamViaCoreWithToolActivity(ctx context.Context, provider core.Provider, req ChatRequest, kind domain.ProviderKind, openRouter bool, onDelta, onReasoning func(string), onToolStart func(core.ToolUseStart), onToolDelta func(core.ToolUseDelta)) (ChatResponse, error) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stream, err := provider.Stream(streamCtx, ToCoreRequest(req, kind, openRouter))
@@ -430,6 +447,18 @@ func StreamViaCore(ctx context.Context, provider core.Provider, req ChatRequest,
 		Reasoning: func(text string) error {
 			if text != "" && onReasoning != nil {
 				onReasoning(text)
+			}
+			return nil
+		},
+		ToolStart: func(event core.ToolUseStart) error {
+			if onToolStart != nil {
+				onToolStart(event)
+			}
+			return nil
+		},
+		ToolDelta: func(event core.ToolUseDelta) error {
+			if onToolDelta != nil {
+				onToolDelta(event)
 			}
 			return nil
 		},

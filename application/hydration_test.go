@@ -69,6 +69,79 @@ func hydrationResultByName(t *testing.T, result HydrationResult, name string) st
 	return ""
 }
 
+func hydrationResultByFilePath(t *testing.T, result HydrationResult, path string) string {
+	t.Helper()
+	for i, c := range result.Messages[0].ToolCalls {
+		if c.Name != "file_read" {
+			continue
+		}
+		var args struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(c.Args), &args); err != nil {
+			t.Fatalf("file_read args for %q are invalid JSON: %v", path, err)
+		}
+		if args.Path != path {
+			continue
+		}
+		r := result.Messages[i+1]
+		if r.ToolResult == nil {
+			t.Fatalf("file_read slot for %q has no tool result", path)
+		}
+		return r.ToolResult.Content
+	}
+	t.Fatalf("file_read slot for %q not found in hydration transcript", path)
+	return ""
+}
+
+func TestHydrationMemoryUsesFileReadForEachDocument(t *testing.T) {
+	userPath := "/data/memory/user.md"
+	soulPath := "/data/memory/soul.md"
+	userOutput := "---\nbytes: 22\n---\n\n---\nversion: 2\n---\n\nUser context."
+	soulOutput := "---\nbytes: 21\n---\n\n---\nversion: 2\n---\n\nSoul context."
+	exec := &stubHydrationExecutor{fn: func(name string, args []byte) (string, error) {
+		switch name {
+		case "file_read":
+			var fileArgs struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(args, &fileArgs); err != nil {
+				return "", err
+			}
+			switch fileArgs.Path {
+			case userPath:
+				return userOutput, nil
+			case soulPath:
+				return soulOutput, nil
+			default:
+				return "", fmt.Errorf("unexpected file path %q", fileArgs.Path)
+			}
+		case "skill", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		default:
+			return "", fmt.Errorf("unexpected tool %q", name)
+		}
+	}}
+
+	result := NewHydrationBuilder(HydrationSource{
+		Executor:    exec,
+		PrimaryPath: userPath,
+		AgentPath:   soulPath,
+	}).Build()
+
+	for _, call := range result.Messages[0].ToolCalls {
+		if call.Name == "memory" {
+			t.Fatalf("memory hydration summary must be replaced by direct file_read calls: %+v", call)
+		}
+	}
+	if got := hydrationResultByFilePath(t, result, userPath); got != userOutput {
+		t.Errorf("user file_read result = %q, want verbatim output %q", got, userOutput)
+	}
+	if got := hydrationResultByFilePath(t, result, soulPath); got != soulOutput {
+		t.Errorf("soul file_read result = %q, want verbatim output %q", got, soulOutput)
+	}
+}
+
 func TestHydrationBuildBasic(t *testing.T) {
 	b := NewHydrationBuilder(HydrationSource{
 		RuntimeContext: RuntimeContextSnapshot{
@@ -140,59 +213,74 @@ func TestHydrationRuntimeContext(t *testing.T) {
 }
 
 func TestHydrationMemory(t *testing.T) {
-	// The memory slot reads primary.md via file_read and enriches the body
-	// with usage stats. The file body carries its own YAML frontmatter
-	// (last_updated/version) which must be stripped from the slot content.
-	primaryPath := "/data/memory/primary.md"
-	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
+	// Each always-injected memory document is represented by its own real
+	// file_read call/result pair. The result is kept verbatim, including the
+	// metadata and document frontmatter returned by file_read.
+	userPath := "/data/memory/user.md"
+	soulPath := "/data/memory/soul.md"
+	userBody := "User prefers Indonesian. Repo uses Go + Clean Architecture."
+	soulBody := "Soul conventions: gate scripts must be stdlib-only."
+	front := "---\nbytes: 60\n---\n\n---\nlast_updated: \"2026-01-01T00:00:00Z\"\nversion: 2\n---\n\n"
+	userOutput := front + userBody
+	soulOutput := front + soulBody
+	exec := &stubHydrationExecutor{fn: func(name string, args []byte) (string, error) {
 		switch name {
 		case "file_read":
+			var a struct {
+				Path string `json:"path"`
+			}
+			_ = json.Unmarshal(args, &a)
 			// file_read yamlMD output: meta block + raw file body.
-			return "---\nbytes: 60\n---\n\n" +
-				"---\nlast_updated: \"2026-01-01T00:00:00Z\"\nversion: 2\n---\n\n" +
-				"User prefers Indonesian. Repo uses Go + Clean Architecture.", nil
+			switch a.Path {
+			case userPath:
+				return front + userBody, nil
+			case soulPath:
+				return front + soulBody, nil
+			}
+			return "", fmt.Errorf("unexpected path %q", a.Path)
 		case "skill", "mcp_list", "tool_list":
 			return emptyToolOutput, nil
 		}
 		return "", fmt.Errorf("unexpected tool %q", name)
 	}}
-	b := NewHydrationBuilder(HydrationSource{Executor: exec, PrimaryPath: primaryPath})
+	b := NewHydrationBuilder(HydrationSource{Executor: exec, PrimaryPath: userPath, AgentPath: soulPath})
 	result := b.Build()
-	if got := result.Messages[0].ToolCalls[1].Args; got != `{"path":"/data/memory/primary.md"}` {
-		t.Errorf("memory call args = %s, want file_read path", got)
+	for _, call := range result.Messages[0].ToolCalls {
+		if call.Name == "memory" {
+			t.Fatalf("memory hydration summary must not replace file_read calls: %+v", call)
+		}
 	}
-	// memory is the second slot (after runtime_context)
-	memContent := hydrationResultByName(t, result, "memory")
-	var mem struct {
-		Count   int `json:"count"`
-		Entries []struct {
-			Content string `json:"content"`
-		} `json:"entries"`
-		Usage struct {
-			Chars int `json:"chars"`
-			Limit int `json:"limit"`
-			Pct   int `json:"pct"`
-		} `json:"usage"`
+	if got := hydrationResultByFilePath(t, result, userPath); got != userOutput {
+		t.Errorf("user file_read result = %q, want verbatim output", got)
 	}
-	if err := json.Unmarshal([]byte(memContent), &mem); err != nil {
-		t.Fatalf("invalid memory JSON: %v", err)
+	if got := hydrationResultByFilePath(t, result, soulPath); got != soulOutput {
+		t.Errorf("soul file_read result = %q, want verbatim output", got)
 	}
-	if mem.Count != 1 {
-		t.Errorf("expected 1 primary entry, got %d", mem.Count)
+}
+
+func TestHydrationMemoryUserOnlyWithoutAgentPath(t *testing.T) {
+	// When no AgentPath is configured only the user document is emitted.
+	userPath := "/data/memory/user.md"
+	userBody := "User prefers Indonesian."
+	userOutput := "---\nbytes: 60\n---\n\n---\nlast_updated: \"2026-01-01T00:00:00Z\"\nversion: 2\n---\n\n" + userBody
+	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
+		switch name {
+		case "file_read":
+			return userOutput, nil
+		case "skill", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	b := NewHydrationBuilder(HydrationSource{Executor: exec, PrimaryPath: userPath})
+	result := b.Build()
+	if got := hydrationResultByFilePath(t, result, userPath); got != userOutput {
+		t.Errorf("user-only file_read result = %q, want %q", got, userOutput)
 	}
-	if len(mem.Entries) != 1 {
-		t.Fatalf("unexpected entries: %+v", mem.Entries)
-	}
-	wantBody := "User prefers Indonesian. Repo uses Go + Clean Architecture."
-	if mem.Entries[0].Content != wantBody {
-		t.Errorf("entry content = %q, want %q", mem.Entries[0].Content, wantBody)
-	}
-	// Usage should report the primary char budget.
-	if mem.Usage.Limit != domain.PrimaryCharCap {
-		t.Errorf("limit = %d, want %d", mem.Usage.Limit, domain.PrimaryCharCap)
-	}
-	if mem.Usage.Chars != len(wantBody) {
-		t.Errorf("chars = %d, want %d", mem.Usage.Chars, len(wantBody))
+	for _, call := range result.Messages[0].ToolCalls {
+		if call.Name == "memory" {
+			t.Fatalf("memory hydration summary must not be emitted: %+v", call)
+		}
 	}
 }
 
@@ -316,30 +404,34 @@ func TestHydrationAgentsMDHidden(t *testing.T) {
 }
 
 func TestHydrationMemoryHiddenWhenEmpty(t *testing.T) {
-	// No executor: the memory slot is hidden, not emitted as an empty stub.
+	// No executor: memory file_read slots are hidden, not emitted as empty stubs.
 	b := NewHydrationBuilder(HydrationSource{})
 	result := b.Build()
 	for _, c := range result.Messages[0].ToolCalls {
-		if c.Name == "memory" {
-			t.Fatal("memory slot must be hidden when the real tool is unavailable")
+		if c.Name == "file_read" {
+			t.Fatal("memory file_read slots must be hidden when the real tool is unavailable")
 		}
 	}
-	// Executor + PrimaryPath present but the primary.md body is empty:
-	// also hidden.
+	// Executor + both memory paths present but their document bodies are empty:
+	// both file_read slots are hidden independently.
 	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
 		switch name {
 		case "file_read":
-			// file_read of an empty primary.md: meta block + frontmatter only.
+			// file_read of an empty memory document: meta block + frontmatter only.
 			return "---\nbytes: 0\n---\n\n---\nversion: 2\n---\n", nil
 		case "skill", "mcp_list", "tool_list":
 			return emptyToolOutput, nil
 		}
 		return "", fmt.Errorf("unexpected tool %q", name)
 	}}
-	result = NewHydrationBuilder(HydrationSource{Executor: exec, PrimaryPath: "/data/memory/primary.md"}).Build()
+	result = NewHydrationBuilder(HydrationSource{
+		Executor:    exec,
+		PrimaryPath: "/data/memory/user.md",
+		AgentPath:   "/data/memory/soul.md",
+	}).Build()
 	for _, c := range result.Messages[0].ToolCalls {
-		if c.Name == "memory" {
-			t.Fatal("memory slot must be hidden when primary memory is empty")
+		if c.Name == "file_read" {
+			t.Fatal("memory file_read slots must be hidden when the document is empty")
 		}
 	}
 }

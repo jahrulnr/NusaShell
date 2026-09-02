@@ -353,7 +353,7 @@ type flakyImageGen struct {
 func (f *flakyImageGen) Generate(_ context.Context, _ ImageGenRequest) (*ImageGenResult, error) {
 	f.hits++
 	if f.hits == 1 {
-		return nil, &UpstreamError{Kind: KindHTTPStatus, StatusCode: 503, Temporary: true, Err: fmt.Errorf("overloaded")}
+		return nil, &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 503, Temporary: true, Err: fmt.Errorf("overloaded")}
 	}
 	return &ImageGenResult{
 		Images:   []GeneratedImage{{Bytes: f.png, MediaType: "image/png"}},
@@ -428,7 +428,7 @@ func TestPersistGeneratedImagesRejectsOversize(t *testing.T) {
 }
 
 func TestFormatImageGenFailureRateLimit(t *testing.T) {
-	err := &UpstreamError{StatusCode: 429, RetryAfter: 2 * time.Minute, Err: fmt.Errorf("429")}
+	err := &domain.ProviderError{StatusCode: 429, RetryAfter: 2 * time.Minute, Err: fmt.Errorf("429")}
 	msg := formatImageGenFailure(err)
 	if !strings.Contains(msg, "rate-limited") || !strings.Contains(msg, "2m0s") {
 		t.Fatalf("msg = %q", msg)

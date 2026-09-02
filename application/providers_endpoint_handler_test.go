@@ -51,7 +51,8 @@ func newEndpointsTestApp(t *testing.T, factory ProviderFactory, creds Credential
 }
 
 func TestHandleModelEndpoints(t *testing.T) {
-	routeProvider := &fakeRouteProvider{routes: []domain.ModelRoute{{Slug: "nebius/fp8", Name: "Nebius"}}}
+	inputCost, outputCost := 1.5, 2.5
+	routeProvider := &fakeRouteProvider{routes: []domain.ModelRoute{{Slug: "nebius/fp8", Name: "Nebius", InputCost: &inputCost, OutputCost: &outputCost}}}
 	providers := map[string]*domain.Provider{
 		"p1": {
 			ID: "p1", Name: "OpenRouter", Enabled: true,
@@ -79,6 +80,9 @@ func TestHandleModelEndpoints(t *testing.T) {
 	first := res.(contracts.ModelEndpointsResult)
 	if first.Cached || len(first.Routes) != 1 || first.Routes[0].Slug != "nebius/fp8" {
 		t.Fatalf("first result = %+v", first)
+	}
+	if first.Routes[0].InputCost == nil || *first.Routes[0].InputCost != inputCost || first.Routes[0].OutputCost == nil || *first.Routes[0].OutputCost != outputCost {
+		t.Fatalf("first route pricing = %+v", first.Routes[0])
 	}
 	if routeProvider.calls != 1 || routeProvider.slug != "meta-llama/llama-3.3-70b-instruct" {
 		t.Fatalf("lister calls = %d slug=%q", routeProvider.calls, routeProvider.slug)

@@ -4,7 +4,9 @@ import (
 	"context"
 	"io"
 	"testing"
+	"time"
 
+	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/core"
 )
@@ -47,6 +49,66 @@ func (s *singleShotStream) Next() (core.Event, error) {
 }
 
 func (s *singleShotStream) Close() error { return nil }
+
+type toolConstructionActivityProvider struct{}
+
+func (p *toolConstructionActivityProvider) Name() string { return "tool-activity" }
+
+func (p *toolConstructionActivityProvider) Chat(context.Context, *core.Request) (*core.Response, error) {
+	return nil, nil
+}
+
+func (p *toolConstructionActivityProvider) Stream(context.Context, *core.Request) (core.Stream, error) {
+	index := 0
+	return &stubStream{events: []core.Event{
+		core.ToolUseStart{ID: "call_1", Name: "file_read", Index: &index},
+		core.ToolUseDelta{ID: "call_1", Index: &index, ArgumentsDelta: []byte(`{"path":`)},
+		core.ToolUseDelta{ID: "call_1", Index: &index, ArgumentsDelta: []byte(`"/tmp/note"}`)},
+		core.ToolUseDone{ID: "call_1", Index: &index},
+		core.DoneEvent{FinishReason: core.FinishReasonToolCall, Provider: "tool-activity", Model: "test-model"},
+	}}, nil
+}
+
+func TestStreamTurnRoundPublishesToolConstructionActivity(t *testing.T) {
+	reg := NewRoundStreamRegistry()
+	conv := &domain.Conversation{
+		ID: "c-activity",
+		Messages: []domain.Message{
+			{ID: "u1", Role: domain.RoleUser, Content: "read the note"},
+			{ID: "a1", Role: domain.RoleAssistant},
+		},
+	}
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c-activity": conv}},
+		Toolbox:       &recordingToolbox{},
+		Bus:           NewBus(),
+		RoundStreams:  reg,
+	}
+	run := &TurnRun{ID: "r-activity", ConversationID: conv.ID, Ctx: context.Background()}
+	if _, err := app.streamTurnRoundOnce(run, stubProviderContext(&toolConstructionActivityProvider{}), conv, "a1", "test-model", "", nil, domain.Settings{}, false, 100, nil, ModelCapabilities{}, 1); err != nil {
+		t.Fatalf("streamTurnRoundOnce: %v", err)
+	}
+
+	sub, err := reg.Subscribe(context.Background(), run.ID, "a1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	select {
+	case frame := <-sub.Frames():
+		if frame.Kind != contracts.RoundDeltaActivity || frame.Activity != contracts.RoundActivityToolCall {
+			t.Fatalf("activity frame = %+v", frame)
+		}
+		if frame.ToolCallID != "call_1" || frame.Name != "file_read" {
+			t.Fatalf("activity metadata = %+v", frame)
+		}
+		if len(frame.Args) != 0 {
+			t.Fatalf("activity frame leaked partial args: %s", frame.Args)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for tool construction activity")
+	}
+}
 
 // TestStreamTurnRoundStripsEffortForNonReasoningModel proves Bug 2's guard:
 // when caps.Reasoning=false and effort is a real level (e.g. "high"), the

@@ -13,7 +13,7 @@ import (
 )
 
 func TestProviderRetryDelayHonorsRetryAfter(t *testing.T) {
-	delay, retryable := providerRetryDelay(&UpstreamError{
+	delay, retryable := providerRetryDelay(&domain.ProviderError{
 		StatusCode: 429,
 		RetryAfter: 3 * time.Second,
 		Err:        errors.New("rate limited"),
@@ -32,18 +32,18 @@ func TestIsRetryableProviderError(t *testing.T) {
 		err       error
 		retryable bool
 	}{
-		{name: "request timeout", err: &UpstreamError{StatusCode: 408}, retryable: true},
-		{name: "conflict", err: &UpstreamError{StatusCode: 409}, retryable: true},
-		{name: "too early", err: &UpstreamError{StatusCode: 425}, retryable: true},
-		{name: "rate limited with Retry-After", err: &UpstreamError{StatusCode: 429, RetryAfter: 3 * time.Second}, retryable: true},
-		{name: "rate limited without Retry-After", err: &UpstreamError{StatusCode: 429}, retryable: false},
-		{name: "server error", err: &UpstreamError{StatusCode: 503}, retryable: true},
-		{name: "temporary transport error", err: &UpstreamError{Temporary: true}, retryable: true},
-		{name: "invalid request", err: &UpstreamError{StatusCode: 400}, retryable: false},
-		{name: "unauthorized", err: &UpstreamError{StatusCode: 401}, retryable: false},
-		{name: "forbidden", err: &UpstreamError{StatusCode: 403}, retryable: false},
-		{name: "not found", err: &UpstreamError{StatusCode: 404}, retryable: false},
-		{name: "cancelled", err: &UpstreamError{Temporary: true, Err: context.Canceled}, retryable: false},
+		{name: "request timeout", err: &domain.ProviderError{StatusCode: 408}, retryable: true},
+		{name: "conflict", err: &domain.ProviderError{StatusCode: 409}, retryable: true},
+		{name: "too early", err: &domain.ProviderError{StatusCode: 425}, retryable: true},
+		{name: "rate limited with Retry-After", err: &domain.ProviderError{StatusCode: 429, RetryAfter: 3 * time.Second}, retryable: true},
+		{name: "rate limited without Retry-After", err: &domain.ProviderError{StatusCode: 429}, retryable: false},
+		{name: "server error", err: &domain.ProviderError{StatusCode: 503}, retryable: true},
+		{name: "temporary transport error", err: &domain.ProviderError{Temporary: true}, retryable: true},
+		{name: "invalid request", err: &domain.ProviderError{StatusCode: 400}, retryable: false},
+		{name: "unauthorized", err: &domain.ProviderError{StatusCode: 401}, retryable: false},
+		{name: "forbidden", err: &domain.ProviderError{StatusCode: 403}, retryable: false},
+		{name: "not found", err: &domain.ProviderError{StatusCode: 404}, retryable: false},
+		{name: "cancelled", err: &domain.ProviderError{Temporary: true, Err: context.Canceled}, retryable: false},
 	}
 
 	for _, tt := range tests {
@@ -60,7 +60,7 @@ func TestIsRetryableProviderError(t *testing.T) {
 // an 81-hour rate-limit reset) is NOT retried — the turn should fail fast so
 // the user sees the error instead of waiting hours inside a retry sleep.
 func TestProviderRetryDelayRejectsLongRetryAfter(t *testing.T) {
-	delay, retryable := providerRetryDelay(&UpstreamError{
+	delay, retryable := providerRetryDelay(&domain.ProviderError{
 		StatusCode: 429,
 		RetryAfter: 81 * time.Hour,
 		Err:        errors.New("rate limited (reset after 81h 38m 41s)"),
@@ -76,7 +76,7 @@ func TestProviderRetryDelayRejectsLongRetryAfter(t *testing.T) {
 // TestProviderRetryDelayAcceptsShortRetryAfter verifies that a 429 with a
 // Retry-After within the cutoff is still retried with the provider's delay.
 func TestProviderRetryDelayAcceptsShortRetryAfter(t *testing.T) {
-	delay, retryable := providerRetryDelay(&UpstreamError{
+	delay, retryable := providerRetryDelay(&domain.ProviderError{
 		StatusCode: 429,
 		RetryAfter: 30 * time.Second,
 		Err:        errors.New("rate limited"),
@@ -93,29 +93,29 @@ func TestProviderRetryDelayAcceptsShortRetryAfter(t *testing.T) {
 // exactly at the cutoff is retryable, just above is not.
 func TestProviderRetryDelayAtCutoffBoundary(t *testing.T) {
 	// Exactly at cutoff — retryable
-	_, retryable := providerRetryDelay(&UpstreamError{
+	_, retryable := providerRetryDelay(&domain.ProviderError{
 		StatusCode: 429,
-		RetryAfter: retryAfterCutoff,
+		RetryAfter: domain.RetryAfterCutoff,
 		Err:        errors.New("rate limited"),
 	}, 1)
 	if !retryable {
-		t.Fatalf("expected retryable=true at cutoff (%s)", retryAfterCutoff)
+		t.Fatalf("expected retryable=true at cutoff (%s)", domain.RetryAfterCutoff)
 	}
 
 	// Just above cutoff — not retryable
-	_, retryable = providerRetryDelay(&UpstreamError{
+	_, retryable = providerRetryDelay(&domain.ProviderError{
 		StatusCode: 429,
-		RetryAfter: retryAfterCutoff + 1*time.Second,
+		RetryAfter: domain.RetryAfterCutoff + 1*time.Second,
 		Err:        errors.New("rate limited"),
 	}, 1)
 	if retryable {
-		t.Fatalf("expected retryable=false just above cutoff (%s+1s)", retryAfterCutoff)
+		t.Fatalf("expected retryable=false just above cutoff (%s+1s)", domain.RetryAfterCutoff)
 	}
 }
 
 // TestDescribeProviderError verifies that the retry log helper surfaces
-// UpstreamError metadata (status code, Retry-After) alongside the underlying
-// message, and falls back to the plain error string for non-Upstream errors.
+// ProviderError metadata (status code, Retry-After) alongside the underlying
+// message, and falls back to the plain error string for non-Provider errors.
 // This is what lets operators tell a 429 rate limit from a mid-stream EOF in
 // the retry log line.
 func TestDescribeProviderError(t *testing.T) {
@@ -127,7 +127,7 @@ func TestDescribeProviderError(t *testing.T) {
 	})
 
 	t.Run("bare temporary EOF", func(t *testing.T) {
-		err := &UpstreamError{Kind: KindSSETransport, Temporary: true, Err: io.ErrUnexpectedEOF}
+		err := &domain.ProviderError{Kind: domain.KindSSETransport, Temporary: true, Err: io.ErrUnexpectedEOF}
 		got := describeProviderError(err)
 		if !strings.Contains(got, "unexpected EOF") {
 			t.Fatalf("describeProviderError must include underlying message, got %q", got)
@@ -141,8 +141,8 @@ func TestDescribeProviderError(t *testing.T) {
 	})
 
 	t.Run("rate limit with status and retry-after", func(t *testing.T) {
-		err := &UpstreamError{
-			Kind:       KindHTTPStatus,
+		err := &domain.ProviderError{
+			Kind:       domain.KindHTTPStatus,
 			StatusCode: 429,
 			RetryAfter: 30 * time.Second,
 			Err:        errors.New("rate limited"),
@@ -156,8 +156,8 @@ func TestDescribeProviderError(t *testing.T) {
 	})
 
 	t.Run("server error with status only", func(t *testing.T) {
-		err := &UpstreamError{
-			Kind:       KindHTTPStatus,
+		err := &domain.ProviderError{
+			Kind:       domain.KindHTTPStatus,
 			StatusCode: 503,
 			Err:        errors.New("upstream down"),
 		}
@@ -211,15 +211,15 @@ func TestIsPermanentProviderFailure(t *testing.T) {
 // TestIsRetryableProviderErrorRejectsPermanentFailure verifies that a 503 with
 // a billing body is NOT retryable, even though 503 is in the transient status
 // set. This is the integration point between isPermanentProviderFailure and
-// isRetryableUpstream.
+// domain.CanAutoRetry.
 func TestShouldEmergencyCompact(t *testing.T) {
-	overflow := &UpstreamError{
-		Kind:       KindHTTPStatus,
+	overflow := &domain.ProviderError{
+		Kind:       domain.KindHTTPStatus,
 		StatusCode: 400,
 		Err:        errors.New(`provider returned HTTP 400: Requested token count exceeds the model's maximum context length of 262144 tokens. You requested a total of 267042 tokens.`),
 	}
-	notOverflow := &UpstreamError{
-		Kind:       KindHTTPStatus,
+	notOverflow := &domain.ProviderError{
+		Kind:       domain.KindHTTPStatus,
 		StatusCode: 400,
 		Err:        errors.New("provider returned HTTP 400: unsupported parameter"),
 	}
@@ -237,8 +237,8 @@ func TestShouldEmergencyCompact(t *testing.T) {
 }
 
 func TestContextLimitFromError(t *testing.T) {
-	overflow := &UpstreamError{
-		Kind:       KindHTTPStatus,
+	overflow := &domain.ProviderError{
+		Kind:       domain.KindHTTPStatus,
 		StatusCode: 400,
 		Err:        errors.New(`provider returned HTTP 400: Requested token count exceeds the model's maximum context length of 262144 tokens.`),
 	}
@@ -246,13 +246,13 @@ func TestContextLimitFromError(t *testing.T) {
 		t.Fatalf("contextLimitFromError = (%d, %t), want (262144, true)", got, ok)
 	}
 	if _, ok := contextLimitFromError(errors.New("plain error")); ok {
-		t.Fatal("contextLimitFromError should not match non-UpstreamError")
+		t.Fatal("contextLimitFromError should not match non-ProviderError")
 	}
 }
 
 func TestIsRetryableProviderErrorRejectsPermanentFailure(t *testing.T) {
-	err := &UpstreamError{
-		Kind:       KindHTTPStatus,
+	err := &domain.ProviderError{
+		Kind:       domain.KindHTTPStatus,
 		StatusCode: 503,
 		Err:        errors.New("provider returned HTTP 503: insufficient balance"),
 	}
@@ -288,7 +288,7 @@ func TestParseTPMLimitRequested(t *testing.T) {
 // never help) from a transient one (the request fits the budget but other
 // traffic consumed it — waiting for the next window helps).
 func TestIsTPMOverflowError(t *testing.T) {
-	structural := &UpstreamError{Kind: KindSSETransport, Temporary: true, Err: errors.New(tpmOverflowBody)}
+	structural := &domain.ProviderError{Kind: domain.KindSSETransport, Temporary: true, Err: errors.New(tpmOverflowBody)}
 	if !isTPMOverflowError(structural) {
 		t.Fatal("requested > limit must be structural TPM overflow")
 	}
@@ -296,7 +296,7 @@ func TestIsTPMOverflowError(t *testing.T) {
 	if !isTPMOverflowError(fmt.Errorf("stream round failed: %w", structural)) {
 		t.Fatal("wrapped structural TPM must still be detected")
 	}
-	transient := &UpstreamError{Kind: KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
+	transient := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
 		Err: errors.New("Request too large for gpt-5.6-luna on tokens per min (TPM): Limit 200000, Requested 150000. The input or output tokens must be reduced in order to run successfully.")}
 	if isTPMOverflowError(transient) {
 		t.Fatal("requested <= limit is transient, not structural")
@@ -314,13 +314,13 @@ func TestIsTPMOverflowError(t *testing.T) {
 // Retry-After that would normally qualify. Retrying resends the same
 // oversized request, which fails again in every window.
 func TestProviderRetryDelayRejectsStructuralTPM(t *testing.T) {
-	err := &UpstreamError{Kind: KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second, Err: errors.New(tpmOverflowBody)}
+	err := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second, Err: errors.New(tpmOverflowBody)}
 	delay, retryable := providerRetryDelay(err, 1)
 	if retryable {
 		t.Fatalf("structural TPM must not be retryable, got delay=%s", delay)
 	}
 	// The transient variant with the same status stays retryable.
-	transient := &UpstreamError{Kind: KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
+	transient := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
 		Err: errors.New("Request too large on tokens per min (TPM): Limit 200000, Requested 150000.")}
 	if _, retryable := providerRetryDelay(transient, 1); !retryable {
 		t.Fatal("transient TPM with Retry-After must stay retryable")
@@ -333,11 +333,11 @@ func TestProviderRetryDelayRejectsStructuralTPM(t *testing.T) {
 // (image-heavy transcripts are routinely undercounted by the chars/4
 // estimate).
 func TestShouldEmergencyCompactTPM(t *testing.T) {
-	err := &UpstreamError{Kind: KindSSETransport, Temporary: true, Err: errors.New(tpmOverflowBody)}
+	err := &domain.ProviderError{Kind: domain.KindSSETransport, Temporary: true, Err: errors.New(tpmOverflowBody)}
 	if !shouldEmergencyCompact(err, 50_000, 150_000) {
 		t.Fatal("structural TPM must force emergency compaction despite low estimate")
 	}
-	transient := &UpstreamError{Kind: KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
+	transient := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
 		Err: errors.New("Request too large on tokens per min (TPM): Limit 200000, Requested 150000.")}
 	if shouldEmergencyCompact(transient, 50_000, 150_000) {
 		t.Fatal("transient TPM must not force compaction")

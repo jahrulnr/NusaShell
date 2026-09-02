@@ -119,19 +119,27 @@ type MemoryStore interface {
 	Replace(target, oldText, content string) error
 }
 
-// PrimaryStore is the always-injected primary memory document backed by a
-// single primary.md file. The document body is free-form prose that the
-// agent edits in place via Replace (substring match) or Update (rewrite
-// the entire body). There is no per-entry create/delete — the agent
-// maintains the document like a README.
-type PrimaryStore interface {
+// MemoryDocStore is the shared contract for a single-file memory
+// document (user.md and soul.md): free-form prose maintained in place
+// via Replace (substring match) or Update (rewrite the entire body).
+// There is no per-entry create/delete — the agent maintains the document
+// like a README. The user tier used to be called "primary".
+type MemoryDocStore interface {
 	Load() *domain.PrimaryMemory
 	Update(entries []domain.PrimaryEntry) error
 	Replace(oldText, content string) error // substring match update
-	// Path returns the absolute filesystem path of the primary.md file.
+	// Path returns the absolute filesystem path of the document file.
 	// Used by the review agent to pre-inject the file via file_read.
 	Path() string
 }
+
+// PrimaryStore is the always-injected user-tier memory document (user.md,
+// legacy primary.md).
+type PrimaryStore = MemoryDocStore
+
+// AgentStore is the always-injected agent-tier memory document (soul.md)
+// holding agent working knowledge curated by background improvers.
+type AgentStore = MemoryDocStore
 
 // FragmentStore is the unlimited, searchable memory archive backed by
 // one markdown file per entry under memory/fragments/. Foreground

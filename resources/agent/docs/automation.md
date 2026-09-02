@@ -128,6 +128,14 @@ Independent jobs can run in parallel. Use `concurrency.policy` (`allow`,
 `retry` only for transient runner errors or timeouts, and make external write
 actions idempotent before retrying them.
 
+An `agent` step uses the same provider retry policy as an interactive
+conversation, including transient connection resets, truncated streams, idle
+timeouts, and eligible 5xx responses. Those retries are internal and do not
+create a Learning Log retry button. Non-retryable errors (for example an
+invalid request or a 429 without a usable `Retry-After`) fail the step; the
+job-level `retry` setting is a separate workflow policy and does not replay an
+agent step automatically.
+
 ## Event-driven workflows
 
 Plugins can push notifications to the host. The host stores the event and

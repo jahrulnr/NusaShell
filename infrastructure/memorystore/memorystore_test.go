@@ -12,6 +12,54 @@ import (
 	"nusashell/domain"
 )
 
+func TestAgentAutoCreates(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, SoulFile)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("soul.md should not exist yet")
+	}
+	a, err := NewAgent(dir)
+	if err != nil {
+		t.Fatalf("NewAgent: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("soul.md not auto-created: %v", err)
+	}
+	mem := a.Load()
+	if len(mem.Entries) != 1 || mem.Entries[0].Content != "" {
+		t.Errorf("new agent document should be empty, got %+v", mem)
+	}
+	if !strings.HasPrefix(a.Path(), path) {
+		t.Errorf("Path = %q, want under %q", a.Path(), path)
+	}
+}
+
+func TestAgentUpdateEnforcesCap(t *testing.T) {
+	dir := t.TempDir()
+	a, _ := NewAgent(dir)
+	big := strings.Repeat("x", domain.AgentCharCap+1)
+	if err := a.Update([]domain.PrimaryEntry{{Content: big}}); err == nil {
+		t.Error("agent Update should reject content over the agent cap")
+	}
+}
+
+func TestAgentReplaceAndPersist(t *testing.T) {
+	dir := t.TempDir()
+	a, _ := NewAgent(dir)
+	_ = a.Update([]domain.PrimaryEntry{{Content: "convention: gates must be stdlib-only", Source: "agent"}})
+	if err := a.Replace("stdlib-only", "stdlib-only or venv"); err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+	a2, err := NewAgent(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded := a2.Load()
+	if len(loaded.Entries) != 1 || !strings.Contains(loaded.Entries[0].Content, "venv") {
+		t.Errorf("agent doc after replace+reload = %+v", loaded)
+	}
+}
+
 func TestPrimaryAutoCreates(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, PrimaryFile)

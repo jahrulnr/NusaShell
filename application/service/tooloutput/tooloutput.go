@@ -92,7 +92,7 @@ func summarizeShowOutput(rawOutput string) (string, bool) {
 		return fmt.Sprintf("Displayed HTML artifact %q in the UI (%dx%d iframe).", title, artifact.Artifact.Width, artifact.Artifact.Height), true
 	}
 
-	// show(op=image|audio|video) returns { "show": { type, path, name,
+	// show(op=image|audio|video|pdf) returns { "show": { type, path, name,
 	// media_type, size_bytes } }. The src field is no longer embedded by
 	// the backend (it bloats the conversation JSON); the frontend loads
 	// the file via /local-file?path=. The summarizer only needs type and
@@ -118,6 +118,8 @@ func summarizeShowOutput(rawOutput string) (string, bool) {
 			return fmt.Sprintf("Displayed audio %s in the UI (path: %s).", quotePath(name), quotePath(path)), true
 		case "video":
 			return fmt.Sprintf("Displayed video %s in the UI (path: %s).", quotePath(name), quotePath(path)), true
+		case "pdf":
+			return fmt.Sprintf("Displayed PDF %s in the UI (path: %s).", quotePath(name), quotePath(path)), true
 		}
 	}
 	return rawOutput, false

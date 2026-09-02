@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -63,7 +65,10 @@ type reviewStubAdapter struct {
 	terminalContent string
 	calls           int
 	failOnCall      int
+	failFromCall    int
+	failAlways      bool
 	failErr         error
+	toolRounds      int
 	requests        []*core.Request
 }
 
@@ -72,7 +77,7 @@ func (a *reviewStubAdapter) Name() string { return "review-stub" }
 func (a *reviewStubAdapter) Chat(ctx context.Context, req *core.Request) (*core.Response, error) {
 	a.calls++
 	a.requests = append(a.requests, req)
-	if a.failOnCall > 0 && a.calls == a.failOnCall {
+	if a.failAlways || (a.failOnCall > 0 && a.calls == a.failOnCall) || (a.failFromCall > 0 && a.calls >= a.failFromCall) {
 		err := a.failErr
 		if err == nil {
 			err = errors.New("complete failed")
@@ -119,6 +124,17 @@ func (a *reviewStubAdapter) Stream(ctx context.Context, req *core.Request) (core
 
 func (a *reviewStubAdapter) coreResponse() *core.Response {
 	resp := &core.Response{}
+	if a.toolRounds > 0 && a.calls <= a.toolRounds {
+		for _, tc := range a.toolCalls {
+			resp.Blocks = append(resp.Blocks, core.ToolUseBlock{
+				ID:        tc.ID,
+				Name:      tc.Name,
+				Arguments: jsonRaw(tc.Args),
+			})
+		}
+		resp.FinishReason = core.FinishReasonToolCall
+		return resp
+	}
 	if a.terminalContent != "" {
 		resp.Blocks = append(resp.Blocks, core.TextBlock{Text: a.terminalContent})
 		resp.FinishReason = core.FinishReasonStop
@@ -157,6 +173,28 @@ func (s *stubStream) Next() (core.Event, error) {
 }
 
 func (s *stubStream) Close() error { return nil }
+
+type eventsThenErrorStream struct {
+	events   []core.Event
+	err      error
+	idx      int
+	failOnce bool
+}
+
+func (s *eventsThenErrorStream) Next() (core.Event, error) {
+	if s.idx < len(s.events) {
+		event := s.events[s.idx]
+		s.idx++
+		return event, nil
+	}
+	if !s.failOnce {
+		s.failOnce = true
+		return nil, s.err
+	}
+	return nil, io.EOF
+}
+
+func (s *eventsThenErrorStream) Close() error { return nil }
 
 // stubProviderContext wraps a core.Provider in a ProviderContext for tests.
 func stubProviderContext(p core.Provider) ProviderContext {
@@ -839,8 +877,8 @@ func TestReviewLoopCompleteErrorIsReturned(t *testing.T) {
 			Name: "memory",
 			Args: `{"op":"save","content":"user prefers Indonesian"}`,
 		}},
-		failOnCall: 2,
-		failErr:    errors.New("provider 500"),
+		failFromCall: 2,
+		failErr:      errors.New("provider 500"),
 	}
 	mutations, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 	if err == nil || !strings.Contains(err.Error(), "provider 500") {
@@ -848,6 +886,83 @@ func TestReviewLoopCompleteErrorIsReturned(t *testing.T) {
 	}
 	if len(mutations) != 1 {
 		t.Fatalf("partial mutations = %+v, want the successful first-round save", mutations)
+	}
+}
+
+func TestReviewLoopRetriesRetryableProviderErrorInternally(t *testing.T) {
+	app := newReviewApp(&reviewStubToolbox{})
+	app.retrySleeper = func(context.Context, time.Duration) error { return nil }
+	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	conv := &domain.Conversation{
+		ID:       "conv_retry",
+		Messages: []domain.Message{{Role: domain.RoleUser, Content: "remember this durable fact"}},
+	}
+	adapter := &reviewStubAdapter{
+		terminalContent: "Nothing to save.",
+		failOnCall:      1,
+		failErr: &domain.ProviderError{
+			Kind:       domain.KindHTTPStatus,
+			StatusCode: 503,
+			Err:        errors.New("provider temporarily unavailable"),
+		},
+	}
+
+	if _, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv); err != nil {
+		t.Fatalf("runReviewLoop: %v", err)
+	}
+	if adapter.calls != 2 {
+		t.Fatalf("provider calls = %d, want 2 (one internal retry)", adapter.calls)
+	}
+}
+
+func TestReviewLoopHardFailsNonRetryableProviderError(t *testing.T) {
+	app := newReviewApp(&reviewStubToolbox{})
+	app.retrySleeper = func(context.Context, time.Duration) error { return nil }
+	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	conv := &domain.Conversation{
+		ID:       "conv_hard_fail",
+		Messages: []domain.Message{{Role: domain.RoleUser, Content: "remember this durable fact"}},
+	}
+	adapter := &reviewStubAdapter{
+		failAlways: true,
+		failErr: &domain.ProviderError{
+			Kind:       domain.KindHTTPStatus,
+			StatusCode: 429,
+			Err:        errors.New("rate limit window is unknown"),
+		},
+	}
+
+	_, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
+	if err == nil || !strings.Contains(err.Error(), "rate limit window is unknown") {
+		t.Fatalf("err = %v, want non-retryable provider error", err)
+	}
+	if adapter.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1 for a 429 without Retry-After", adapter.calls)
+	}
+}
+
+func TestReviewLoopContinuesPastFormerRoundLimit(t *testing.T) {
+	app := newReviewApp(&reviewStubToolbox{})
+	app.retrySleeper = func(context.Context, time.Duration) error { return nil }
+	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	conv := &domain.Conversation{
+		ID:       "conv_unlimited_review",
+		Messages: []domain.Message{{Role: domain.RoleUser, Content: "remember this durable fact"}},
+	}
+	adapter := &reviewStubAdapter{
+		toolRounds: 7,
+		toolCalls: []domain.ToolCall{{
+			ID:   "memory_1",
+			Name: "memory",
+			Args: `{"op":"save","content":"durable fact"}`,
+		}},
+	}
+
+	if _, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv); err != nil {
+		t.Fatalf("runReviewLoop: %v", err)
+	}
+	if adapter.calls != 8 {
+		t.Fatalf("provider calls = %d, want 8 (seven tool rounds plus terminal round)", adapter.calls)
 	}
 }
 
@@ -1481,6 +1596,57 @@ func TestReviewLoopStreamErrorIsPropagated(t *testing.T) {
 	_, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
 	if err == nil || !strings.Contains(err.Error(), "idle timeout") {
 		t.Fatalf("err = %v, want propagation of the stream idle timeout", err)
+	}
+}
+
+type partialThenResetReviewAdapter struct {
+	calls int
+}
+
+func (a *partialThenResetReviewAdapter) Name() string { return "partial-then-reset-review" }
+
+func (a *partialThenResetReviewAdapter) Chat(context.Context, *core.Request) (*core.Response, error) {
+	return nil, errors.New("chat not used")
+}
+
+func (a *partialThenResetReviewAdapter) Stream(context.Context, *core.Request) (core.Stream, error) {
+	a.calls++
+	if a.calls == 1 {
+		return &eventsThenErrorStream{
+			events: []core.Event{
+				core.ContentDelta{Text: "partial review"},
+				core.ReasoningDelta{Text: "partial reasoning"},
+			},
+			err: &domain.ProviderError{
+				Kind: domain.KindSSETransport,
+				Err:  &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET},
+			},
+		}, nil
+	}
+	return &stubStream{events: []core.Event{
+		core.ContentDelta{Text: "Nothing to save."},
+		core.DoneEvent{FinishReason: core.FinishReasonStop, Provider: "partial-then-reset-review", Model: "test-model"},
+	}}, nil
+}
+
+func TestReviewLoopRetriesAfterPartialTransportError(t *testing.T) {
+	if resources.ReviewPrompt() == "" {
+		t.Fatal("review prompt must be non-empty")
+	}
+	app := newReviewApp(&reviewStubToolbox{})
+	app.retrySleeper = func(context.Context, time.Duration) error { return nil }
+	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	conv := &domain.Conversation{
+		ID:       "conv_partial_reset",
+		Messages: []domain.Message{{Role: domain.RoleUser, Content: "remember this fact"}},
+	}
+	adapter := &partialThenResetReviewAdapter{}
+
+	if _, _, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv); err != nil {
+		t.Fatalf("runReviewLoop after partial transport reset: %v", err)
+	}
+	if adapter.calls != 2 {
+		t.Fatalf("provider calls = %d, want 2 (partial reset + internal retry)", adapter.calls)
 	}
 }
 

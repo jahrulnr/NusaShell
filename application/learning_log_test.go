@@ -173,8 +173,8 @@ func TestHandleLearningLogParsesReviewStatusAndError(t *testing.T) {
 	if top.Status != "error" {
 		t.Errorf("top status = %q, want error", top.Status)
 	}
-	if top.Error != "no model configured" {
-		t.Errorf("top error = %q, want 'no model configured'", top.Error)
+	if top.Error != "Background review failed during automatic processing." {
+		t.Errorf("top error = %q, want generic background failure", top.Error)
 	}
 	if _, ok := top.Detail["status"]; ok {
 		t.Error("status should not appear in raw detail")
@@ -188,6 +188,39 @@ func TestHandleLearningLogParsesReviewStatusAndError(t *testing.T) {
 	}
 	if bottom.Error != "" {
 		t.Errorf("bottom error = %q, want empty", bottom.Error)
+	}
+}
+
+func TestFlushLearningReviewDoesNotPushVerboseErrorEvent(t *testing.T) {
+	app := &App{
+		Bus:                  NewBus(),
+		Conversations:        &fakeConversationStore{},
+		turnsSinceReview:     map[string]int{},
+		toolCallsSinceReview: map[string]int{},
+	}
+	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	_, events, unsubscribe := app.Bus.Subscribe()
+	defer unsubscribe()
+
+	app.flushLearningReview("conv_error_event", "threshold")
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-events:
+			if ev.Type != contracts.EventLearningReviewError {
+				continue
+			}
+			var payload contracts.LearningReviewEvent
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+				t.Fatalf("decode learning review error event: %v", err)
+			}
+			if payload.Error != "" {
+				t.Fatalf("learning review error event exposed provider details: %q", payload.Error)
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for learning review error event")
+		}
 	}
 }
 

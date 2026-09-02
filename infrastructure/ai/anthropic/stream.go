@@ -122,7 +122,14 @@ func (s *stream) Next() (core.Event, error) {
 		return nil, core.NewNetworkError("anthropic", "stream read error", err)
 	}
 	s.done = true
-	return nil, core.NewProviderError("anthropic", core.ErrorTypeProvider, "anthropic: stream ended before message_stop")
+	// message_stop is a transport terminator. A message_delta carrying a
+	// stop_reason is already the semantic completion signal, and some
+	// compatible gateways close immediately after it without sending
+	// message_stop. Preserve the accumulated response in that case.
+	if s.finish != "" {
+		return core.DoneEvent{FinishReason: s.finish, Provider: "anthropic", Model: s.model}, nil
+	}
+	return nil, core.NewNetworkError("anthropic", "anthropic: stream ended before message_stop without stop_reason", io.ErrUnexpectedEOF)
 }
 
 func (s *stream) Close() error {

@@ -318,7 +318,11 @@ func (a *App) handleLearningLog(req contracts.LearningLogRequest) (any, *contrac
 			entry.Status = status
 		}
 		if errMsg, ok := e.Detail["error"].(string); ok {
-			entry.Error = errMsg
+			if e.Type == "review" && entry.Status == "error" {
+				entry.Error = "Background review failed during automatic processing."
+			} else {
+				entry.Error = errMsg
+			}
 		}
 		if raw, ok := e.Detail["mutations"]; ok {
 			if list, ok := raw.([]interface{}); ok {

@@ -39,7 +39,7 @@ func TestDrainAnnouncementsInjectsPendingAtRoundBoundary(t *testing.T) {
 	}
 }
 
-func TestDrainAnnouncementsInjectsAllPendingTypes(t *testing.T) {
+func TestDrainAnnouncementsMergesAllPendingTypesIntoOne(t *testing.T) {
 	conv := &domain.Conversation{ID: "c1"}
 	conv.QueueAnnouncement(domain.PendingAnnouncement{
 		ID: "announce-1", Type: "config_changed", Args: `{"type":"config_changed"}`, Message: "config changed", CreatedAt: time.Now(),
@@ -61,16 +61,54 @@ func TestDrainAnnouncementsInjectsAllPendingTypes(t *testing.T) {
 	if !applied {
 		t.Fatal("expected announcements to be injected")
 	}
-	if len(conv.Messages) != 3 {
-		t.Fatalf("messages = %d, want 3 announcement messages", len(conv.Messages))
+	// All pending notices merge into ONE synthetic announcement tool call.
+	if len(conv.Messages) != 1 {
+		t.Fatalf("messages = %d, want 1 merged announcement message", len(conv.Messages))
 	}
-	for i, m := range conv.Messages {
-		if len(m.ToolCalls) != 1 || m.ToolCalls[0].Name != domain.AnnouncementToolName {
-			t.Fatalf("messages[%d] = %+v, want announcement tool call", i, m)
+	tc := conv.Messages[0].ToolCalls
+	if len(tc) != 1 || tc[0].Name != domain.AnnouncementToolName {
+		t.Fatalf("injected message = %+v, want a single announcement tool call", conv.Messages[0])
+	}
+	wantOutput := "config changed\n---\nmemory changed\n---\nskills changed"
+	if tc[0].Output != wantOutput {
+		t.Fatalf("output = %q, want merged notices:\n%s", tc[0].Output, wantOutput)
+	}
+	for _, want := range []string{`"items"`, `"config_changed"`, `"memory_changed"`, `"skills_changed"`} {
+		if !strings.Contains(tc[0].Args, want) {
+			t.Fatalf("args must carry %s so every notice stays self-describing, got %s", want, tc[0].Args)
 		}
 	}
 	if len(conv.PendingAnnouncements) != 0 {
 		t.Fatalf("pending queue not cleared: %+v", conv.PendingAnnouncements)
+	}
+}
+
+func TestPublishAnnouncementCapDropsOldest(t *testing.T) {
+	conv := &domain.Conversation{ID: "c1"}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
+
+	for i := 0; i < maxPendingAnnouncements+1; i++ {
+		app.publishAnnouncement("c1", newAnnouncement(
+			"config_changed",
+			`{"type":"config_changed"}`,
+			"config changed "+strings.Repeat("x", i+1),
+		))
+	}
+
+	got, err := store.Get("c1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.PendingAnnouncements) != maxPendingAnnouncements {
+		t.Fatalf("pending queue = %d entries, want capped at %d", len(got.PendingAnnouncements), maxPendingAnnouncements)
+	}
+	// The very first published notice was dropped, the newest survives.
+	if got.PendingAnnouncements[0].Message == "config changed x" {
+		t.Fatalf("oldest entry must be dropped, got %q first", got.PendingAnnouncements[0].Message)
+	}
+	if last := got.PendingAnnouncements[len(got.PendingAnnouncements)-1].Message; last != "config changed "+strings.Repeat("x", maxPendingAnnouncements+1) {
+		t.Fatalf("last entry = %q, want the newest notice kept", last)
 	}
 }
 
@@ -108,24 +146,30 @@ func TestPublishAnnouncementPersistsPending(t *testing.T) {
 	}
 }
 
-func TestPublishAnnouncementCoalescesByType(t *testing.T) {
+func TestPublishAnnouncementDedupsIdenticalAppendsDistinct(t *testing.T) {
 	conv := &domain.Conversation{ID: "c1"}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
 
+	// Distinct content: both arrive (append, never last-write-win).
 	app.publishAnnouncement("c1", newAnnouncement("config_changed", `{"type":"config_changed","changed":["subagent"]}`, "config changed 1"))
 	app.publishAnnouncement("c1", newAnnouncement("config_changed", `{"type":"config_changed","changed":["provider"]}`, "config changed 2"))
+	// Exact duplicate of the first: skipped so bursts never double-book.
+	app.publishAnnouncement("c1", newAnnouncement("config_changed", `{"type":"config_changed","changed":["subagent"]}`, "config changed 1"))
 
 	// Save persists a clone, so re-fetch from the store.
 	got, err := store.Get("c1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if len(got.PendingAnnouncements) != 1 {
-		t.Fatalf("pending queue = %+v, want 1 coalesced entry", got.PendingAnnouncements)
+	if len(got.PendingAnnouncements) != 2 {
+		t.Fatalf("pending queue = %+v, want 2 entries (deduped identical, appended distinct)", got.PendingAnnouncements)
 	}
-	if got.PendingAnnouncements[0].Message != "config changed 2" {
-		t.Fatalf("coalesced entry = %q, want latest wins", got.PendingAnnouncements[0].Message)
+	if got.PendingAnnouncements[0].Message != "config changed 1" {
+		t.Fatalf("entries[0] = %q, want first published order preserved", got.PendingAnnouncements[0].Message)
+	}
+	if got.PendingAnnouncements[1].Message != "config changed 2" {
+		t.Fatalf("entries[1] = %q, want second distinct entry appended", got.PendingAnnouncements[1].Message)
 	}
 }
 
@@ -153,7 +197,8 @@ func TestPublishDrainConcurrentNoLostOrDoubleInjection(t *testing.T) {
 	// The per-conversation announcement lock serializes load-modify-save
 	// between publishers and the worker drain: every published announcement
 	// is injected exactly once, and the queue is never left behind or
-	// double-injected.
+	// double-injected. All publishes here are byte-identical, so the
+	// exact-duplicate dedup collapses them into a single pending entry.
 	conv := &domain.Conversation{ID: "c1"}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
@@ -234,16 +279,21 @@ func TestAddTurnMessagesDrainsPendingAnnouncements(t *testing.T) {
 	}
 }
 
-func TestQueueAnnouncementCoalescesByType(t *testing.T) {
+func TestQueueAnnouncementDedupsIdenticalAppendsDistinct(t *testing.T) {
 	c := &domain.Conversation{}
+	// a1 and a2 carry identical content (only IDs differ): deduped.
 	c.QueueAnnouncement(domain.PendingAnnouncement{ID: "a1", Type: "config_changed"})
 	c.QueueAnnouncement(domain.PendingAnnouncement{ID: "a2", Type: "config_changed"})
+	// Different type: appended.
 	c.QueueAnnouncement(domain.PendingAnnouncement{ID: "a3", Type: "memory_changed"})
 	if len(c.PendingAnnouncements) != 2 {
-		t.Fatalf("pending = %+v, want 2 coalesced entries", c.PendingAnnouncements)
+		t.Fatalf("pending = %+v, want 2 entries (deduped identical, appended distinct)", c.PendingAnnouncements)
 	}
-	if c.PendingAnnouncements[0].ID != "a2" {
-		t.Fatalf("config entry = %q, want a2 (latest wins)", c.PendingAnnouncements[0].ID)
+	if c.PendingAnnouncements[0].ID != "a1" {
+		t.Fatalf("config entry = %q, want a1 (first arrival kept)", c.PendingAnnouncements[0].ID)
+	}
+	if c.PendingAnnouncements[1].ID != "a3" {
+		t.Fatalf("memory entry = %q, want a3 appended", c.PendingAnnouncements[1].ID)
 	}
 }
 

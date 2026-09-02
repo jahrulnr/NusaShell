@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	aiutil "nusashell/infrastructure/ai/internal"
 )
 
 // EmbeddingMaxTokens is the default token cap applied to embedding inputs.
@@ -110,6 +112,12 @@ func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32,
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+e.APIKey)
+		req.Header.Set("User-Agent", aiutil.NusaShellUserAgent)
+		if aiutil.IsOpenRouterURL(e.BaseURL) {
+			for name, value := range aiutil.OpenRouterAttributionHeaders() {
+				req.Header.Set(name, value)
+			}
+		}
 
 		resp, err := e.Client.Do(req)
 		if err != nil {

@@ -1,7 +1,7 @@
 package transport
 
 // handleStream serves the per-round SSE stream that carries live agent
-// deltas (text, reasoning, tool output) for one round.
+// deltas (text, reasoning, tool output, and provider activity) for one round.
 //
 // Query parameters:
 //   - run_id:      the TurnRun id (agent.turn.started / agent.turns.active)
@@ -13,8 +13,10 @@ package transport
 //
 // Frames (event: name, data: JSON):
 //   - round.delta: contracts.RoundDeltaFrame {seq, kind, tool_call_id, name,
-//     args?, text, presentation?}; tool start frames carry args and the
-//     versioned presentation contract, later chunks carry text only.
+//     args?, text, activity?, presentation?}; tool start frames carry args and
+//     the versioned presentation contract, later chunks carry text only.
+//     Activity frames announce provider-side work such as tool-call
+//     construction before a valid tool card exists; they carry no arguments.
 //   - round.done:  contracts.RoundDoneFrame {state, run_id, message_id,
 //     round, usage, next, error} — terminal. next is non-nil when the agent
 //     continues with another round (tool loop or auto-continue).

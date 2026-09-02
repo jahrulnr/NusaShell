@@ -24,12 +24,16 @@ type App struct {
 	Version string
 	DataDir string
 
-	Conversations   ConversationStore
-	Providers       ProviderStore
-	Credentials     CredentialStore
-	Skills          SkillStore
-	Memory          MemoryStore
-	Primary         PrimaryStore
+	Conversations ConversationStore
+	Providers     ProviderStore
+	Credentials   CredentialStore
+	Skills        SkillStore
+	Memory        MemoryStore
+	Primary       PrimaryStore
+	// Agent is the agent-tier memory document (soul.md) holding agent
+	// working knowledge curated by background improvers. Same document
+	// contract as the user tier (Primary).
+	Agent           AgentStore
 	Fragments       FragmentStore
 	ProjectMemory   ProjectMemoryStore
 	LearningEdges   LearningEdgeStore
@@ -154,10 +158,17 @@ type App struct {
 	conversationTurnsMu sync.Mutex
 	conversationTurns   map[string]*sync.Mutex
 
+	// delegateRuns mirrors internal delegate runs onto the ACP run surface.
+	// The delegate engine is local, but the UI contract is intentionally the
+	// same as ACP so both run families share the dock, drawer, transcript
+	// hydration, and lifecycle events.
+	delegateRunsMu sync.RWMutex
+	delegateRuns   map[string]*domain.AcpRun
+
 	// pendingRuns tracks active (not-yet-completed) background run IDs
 	// per conversation — the shared push-completion registry. Today the
-	// only producer is ACP subagents; future async tools (delegated
-	// agents, long-running jobs) queue their completion here too. Used to
+	// producers are ACP subagents and internal delegates; future async tools
+	// may queue their completion here too. Used to
 	// implement HasBackgroundJobs: while any run is pending, the parent
 	// agent's auto-continue chain pauses with reason
 	// "awaiting-background-jobs" instead of ending the turn. When a run
@@ -165,7 +176,7 @@ type App struct {
 	// boundary (or a new turn if the parent is idle) and then removed
 	// from this map.
 	pendingRunsMu sync.Mutex
-	pendingRuns   map[string]map[string]bool // conversationID → set of runIDs
+	pendingRuns   map[string]map[string]string // conversationID → set of runIDs → spawning tool
 
 	// rlMu guards per-provider rate-limit windows (see rate_limit.go).
 	// MarkProviderRateLimited records when a 429 window clears so client
@@ -220,6 +231,7 @@ type Deps struct {
 	Skills                      SkillStore
 	Memory                      MemoryStore
 	Primary                     PrimaryStore
+	Agent                       AgentStore
 	Fragments                   FragmentStore
 	ProjectMemory               ProjectMemoryStore
 	LearningEdges               LearningEdgeStore
@@ -280,6 +292,7 @@ func NewApp(deps Deps) *App {
 		Credentials:                 deps.Credentials,
 		Skills:                      deps.Skills,
 		Memory:                      deps.Memory,
+		Agent:                       deps.Agent,
 		Primary:                     deps.Primary,
 		Fragments:                   deps.Fragments,
 		ProjectMemory:               deps.ProjectMemory,
@@ -324,9 +337,10 @@ func NewApp(deps Deps) *App {
 		Logger:                      deps.Logger,
 		Automation:                  deps.Automation,
 		runs:                        map[string]*TurnRun{},
+		delegateRuns:                map[string]*domain.AcpRun{},
 		turnsSinceReview:            map[string]int{},
 		toolCallsSinceReview:        map[string]int{},
-		pendingRuns:                 map[string]map[string]bool{},
+		pendingRuns:                 map[string]map[string]string{},
 		learnedParams:               learnedparams.New(deps.LearnedParams),
 		modelOverrides:              modeloverrides.New(deps.ModelOverrides),
 	}

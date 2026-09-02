@@ -27,17 +27,17 @@ func (f *fakeLearnedParamStore) Save(r *domain.LearnedParamRegistry) error {
 }
 
 func TestIsLearnable400(t *testing.T) {
-	if !isLearnable400(&UpstreamError{StatusCode: 400, Err: errors.New("bad request")}) {
+	if !isLearnable400(&domain.ProviderError{StatusCode: 400, Err: errors.New("bad request")}) {
 		t.Error("400 should be learnable")
 	}
-	if isLearnable400(&UpstreamError{StatusCode: 429, Err: errors.New("rate limit")}) {
+	if isLearnable400(&domain.ProviderError{StatusCode: 429, Err: errors.New("rate limit")}) {
 		t.Error("429 should not be learnable")
 	}
-	if isLearnable400(&UpstreamError{StatusCode: 500, Err: errors.New("server error")}) {
+	if isLearnable400(&domain.ProviderError{StatusCode: 500, Err: errors.New("server error")}) {
 		t.Error("500 should not be learnable")
 	}
 	if isLearnable400(errors.New("plain error")) {
-		t.Error("non-UpstreamError should not be learnable")
+		t.Error("non-ProviderError should not be learnable")
 	}
 }
 
@@ -48,7 +48,7 @@ func TestExtractErrBody(t *testing.T) {
 	if got := extractErrBody(errors.New("plain")); got != "plain" {
 		t.Errorf("extractErrBody(plain) = %q, want plain", got)
 	}
-	if got := extractErrBody(&UpstreamError{StatusCode: 400, Err: errors.New("unsupported")}); got != "unsupported" {
+	if got := extractErrBody(&domain.ProviderError{StatusCode: 400, Err: errors.New("unsupported")}); got != "unsupported" {
 		t.Errorf("extractErrBody(upstream) = %q, want unsupported", got)
 	}
 }

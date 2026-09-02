@@ -113,6 +113,13 @@ Note: **PDF support is separate from vision** — many vision models
 `Document` capability flag (Anthropic Claude, OpenAI GPT-4o+, Google
 xAI Grok) receive PDF attachments natively.
 
+For a user-facing preview without sending the document to the model, use
+`show(op="pdf", path="/absolute/path/report.pdf")`. The frontend opens the
+validated file in the browser's native PDF viewer and keeps the tool result
+metadata-only. DOCX, PPTX, XLSX, ODT, and similar office files do not have a
+reliable vanilla-JavaScript preview path in the current build; treat office
+preview as a future capability rather than inventing a `show` operation.
+
 ### Wire format for media attachments
 
 Each provider adapter serializes media attachments using the content type
@@ -258,6 +265,7 @@ The absolute path is injected into the user message as a text placeholder:
 
 The agent can then use file tools (`list_dir`, `read_file`, `grep`, etc.)
 to explore the directory. Folder attachments are only available in desktop
-shells (Electron) where the browser exposes `File.path`; in pure web mode
-the browser does not expose filesystem paths and the drop is rejected with
-a clear error.
+shells (Electron): the preload bridge calls Electron's native
+`webUtils.getPathForFile` API and passes the result to the same web composer.
+In pure web mode the browser does not expose filesystem paths and the drop is
+rejected with a clear error.

@@ -29,16 +29,16 @@ type stream struct {
 	toolPending   map[toolKey]*pendingTool
 }
 
-// pendingTool buffers a tool call whose opening chunk did not carry a name.
-// Several OpenAI-compatible gateways (vLLM/sglang deployments, relay services)
-// send the first delta with only an id and deliver function.name in a later
-// chunk. Emitting ToolUseStart with an empty name at that point loses the name
-// forever — ToolUseDelta has no channel to backfill it — and the consumer ends
-// up dispatching `tool "" not found`. Buffer until the name arrives (or
-// finish_reason forces a close), then flush Start + accumulated arguments.
+// pendingTool tracks a tool call whose opening chunk did not carry a name.
+// Several OpenAI-compatible gateways (vLLM/sglang deployments, relay
+// services) send the first delta with only an id and deliver function.name in
+// a later chunk. Do not emit ToolUseStart with an empty name: downstream
+// dispatch would see `tool "" not found`. Argument deltas can still be emitted
+// immediately for stream observers (the interactive UI uses them as an
+// activity signal); the Start event waits until the name arrives.
 type pendingTool struct {
 	name string
-	args strings.Builder
+	args strings.Builder // arguments received after the name is known
 }
 
 func newStream(resp *http.Response, req *core.Request, spec Spec) *stream {
@@ -123,7 +123,7 @@ func (s *stream) Next() (core.Event, error) {
 	if s.finish != "" {
 		return core.DoneEvent{FinishReason: s.finish, Provider: s.spec.providerName(), Model: s.model}, nil
 	}
-	return nil, core.NewProviderError(s.spec.providerName(), core.ErrorTypeProvider, fmt.Sprintf("%s: stream ended before %s without finish_reason", s.spec.providerName(), s.spec.doneSentinel()))
+	return nil, core.NewNetworkError(s.spec.providerName(), fmt.Sprintf("%s: stream ended before %s without finish_reason", s.spec.providerName(), s.spec.doneSentinel()), io.ErrUnexpectedEOF)
 }
 
 func (s *stream) Close() error {
@@ -407,6 +407,19 @@ func (s *stream) toolEvents(raw any, choiceIndex int) ([]core.Event, error) {
 	if p == nil {
 		p = &pendingTool{}
 		s.toolPending[key] = p
+	}
+	if p.name == "" && name == "" {
+		// Preserve the stream's useful early signal without manufacturing an
+		// invalid tool start. The EventCollector can safely aggregate a delta
+		// before the later Start because both events identify the same call by
+		// id/index. Do not retain these bytes in p.args: flushPending must not
+		// replay them when the name eventually arrives.
+		if args == "" {
+			return events, nil
+		}
+		return []core.Event{core.ToolUseDelta{
+			ID: id, Index: core.IntPtr(index), OutputIndex: core.IntPtr(choiceIndex), ArgumentsDelta: []byte(args),
+		}}, nil
 	}
 	if p.name == "" {
 		p.name = name

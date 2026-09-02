@@ -102,7 +102,7 @@ func (p *conversationRules) rules() AgentRules {
 						p.run.ID, p.round, est, trigger, cw)
 					compAdapter, compModel, compWindow := p.a.resolveCompactionAdapter(p.run.Ctx, p.adapter, p.model, cw, p.settings)
 					p.a.emitCompactionStarted(p.run, p.conv.ID)
-					summary, compErr := p.a.compactConversation(p.run.Ctx, compAdapter, p.conv, compModel, compWindow, p.settings)
+					summary, compErr := p.a.compactConversation(p.run.Ctx, compAdapter, p.conv, compModel, compWindow, p.settings, domain.CompactionTriggerProactive)
 					if compErr == nil {
 						p.a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Summary: summary})
 						refreshed, getErr := p.a.Conversations.Get(p.run.ConversationID)
@@ -138,7 +138,7 @@ func (p *conversationRules) rules() AgentRules {
 				return false
 			}
 			// Capture the raw error before decoration: decorateRateLimitError
-			// drops the UpstreamError type the overflow/TPM classifiers need.
+			// drops the domain.ProviderError type the overflow/TPM classifiers need.
 			rawStreamErr := err
 			err = p.a.decorateRateLimitError(p.provider.ID, err)
 			if !p.continuedPartialStream && isRetryableProviderError(err) && len(p.lastRound.Response.ToolCalls) == 0 && (text.Visible(p.lastRound.Content) != "" || text.Visible(p.lastRound.Reasoning) != "") {
@@ -181,7 +181,7 @@ func (p *conversationRules) rules() AgentRules {
 				p.a.log("warn", "agent", "request too large for turn %s (est=%d trigger=%d), forcing emergency compaction", p.run.ID, preEmg, trigger)
 				compAdapter, compModel, compWindow := p.a.resolveCompactionAdapter(p.run.Ctx, p.adapter, p.model, cw, p.settings)
 				p.a.emitCompactionStarted(p.run, p.conv.ID)
-				summary, compErr := p.a.compactConversation(p.run.Ctx, compAdapter, p.conv, compModel, compWindow, p.settings)
+				summary, compErr := p.a.compactConversation(p.run.Ctx, compAdapter, p.conv, compModel, compWindow, p.settings, domain.CompactionTriggerEmergency)
 				if compErr == nil {
 					p.a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Summary: summary})
 					refreshed, getErr := p.a.Conversations.Get(p.run.ConversationID)
@@ -211,6 +211,22 @@ func (p *conversationRules) rules() AgentRules {
 			if err := p.a.persistTurnRound(p.run.ConversationID, p.currentMsgID, p.model, rr); err != nil {
 				return nil, err
 			}
+			// Refresh the in-memory conversation so the mid-tool compaction
+			// estimate includes the round that was just persisted (persist
+			// writes to the store; p.conv would otherwise stay stale).
+			if refreshed, getErr := p.a.Conversations.Get(p.run.ConversationID); getErr != nil {
+				p.a.log("warn", "agent", "refresh after persist failed for %s: %v", p.run.ID, getErr)
+			} else {
+				p.conv = refreshed
+			}
+			// Mid-tool compaction: if the estimated context (requested calls
+			// included, tool outputs not yet) already crosses the trigger,
+			// compact the prefix now so the summarizer never sees the tool
+			// result explosion. The in-flight round is preserved verbatim and
+			// its outputs are patched into the live tail below. Failures are
+			// logged and the tool round still proceeds — the proactive and
+			// emergency hooks remain as safety nets.
+			p.tryMidToolCompaction()
 			if err := p.a.executeTurnTools(p.run, p.currentMsgID, calls, p.caps, p.settings, p.round); err != nil {
 				if p.run.Ctx.Err() != nil {
 					p.a.interruptTurn(p.run, p.currentMsgID, rr, p.totalUsage, p.lastUsage.ContextTokens(), p.model)
@@ -252,6 +268,9 @@ func (p *conversationRules) rules() AgentRules {
 				return false, annErr
 			}
 			if len(resp.ToolCalls) == 0 && !appliedSteer && !appliedSub && !appliedAnn {
+				if p.run.HeadlessUpdate != nil {
+					p.run.HeadlessUpdate()
+				}
 				return false, nil // terminal
 			}
 			conv, msgID, err := p.a.appendTurnAssistant(p.run.ConversationID)
@@ -260,6 +279,9 @@ func (p *conversationRules) rules() AgentRules {
 			}
 			p.conv, p.currentMsgID = conv, msgID
 			p.run.setMessageID(p.currentMsgID)
+			if p.run.HeadlessUpdate != nil {
+				p.run.HeadlessUpdate()
+			}
 			return true, nil
 		},
 	}
@@ -276,6 +298,45 @@ func (p *conversationRules) toolsForRound() []ToolDef {
 
 // totalUsageTokens is the sum of per-round usage (↑/↓ display tags).
 func (p *conversationRules) totalUsageTokens() ChatUsage { return p.totalUsage }
+
+// tryMidToolCompaction runs compaction at the tool-request boundary: the
+// model has requested a tool round, the round was persisted, and the
+// estimated context (including the requested calls but before any tool
+// output) is already past the trigger. Compacting here — instead of waiting
+// for the next BeforeRound — means the summarizer never sees the tool-result
+// explosion, and the in-flight assistant message is preserved verbatim (see
+// domain.IsInFlightToolMessage) so the round's outputs are patched into the
+// live tail afterwards. Failures never block the tool round: the proactive
+// and emergency hooks remain as safety nets.
+func (p *conversationRules) tryMidToolCompaction() bool {
+	if !p.settings.CompactionEnabled || p.round <= 1 || p.compactionAttempts >= 3 {
+		return false
+	}
+	cw := p.a.resolveContextWindow(p.provider, p.model, p.settings)
+	trigger := domain.CompactionTriggerTokens(cw, domain.ResolveMaxOutput(p.provider, p.model, p.settings), p.settings)
+	est := p.conv.EstimateTokens()
+	if est <= trigger {
+		return false
+	}
+	p.compactionAttempts++
+	p.a.log("info", "agent", "mid-tool compaction for %s round %d: est=%d trigger=%d window=%d",
+		p.run.ID, p.round, est, trigger, cw)
+	compAdapter, compModel, compWindow := p.a.resolveCompactionAdapter(p.run.Ctx, p.adapter, p.model, cw, p.settings)
+	p.a.emitCompactionStarted(p.run, p.conv.ID)
+	summary, compErr := p.a.compactConversation(p.run.Ctx, compAdapter, p.conv, compModel, compWindow, p.settings, domain.CompactionTriggerMidTool)
+	if compErr != nil {
+		p.a.log("warn", "agent", "mid-tool compaction failed for %s round %d: %v", p.run.ID, p.round, compErr)
+		p.a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Error: compErr.Error()})
+		return false
+	}
+	p.a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Summary: summary})
+	if refreshed, getErr := p.a.Conversations.Get(p.run.ConversationID); getErr == nil {
+		p.conv = refreshed
+	}
+	p.a.log("info", "agent", "mid-tool compaction done for %s round %d: before=%d after=%d (msgs=%d)",
+		p.run.ID, p.round, est, p.conv.EstimateTokens(), len(p.conv.Messages))
+	return true
+}
 
 // contextTokens is the last round's authoritative context fill.
 func (p *conversationRules) contextTokens() int { return p.lastUsage.ContextTokens() }

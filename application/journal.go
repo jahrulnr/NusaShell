@@ -37,6 +37,12 @@ type ChangeJournal interface {
 	// not render file contents or diffs; the journal sidecar remains the
 	// authoritative restore source.
 	SessionState(ctx context.Context, conversationID, workspaceRoot string) (*WorkspaceState, error)
+
+	// RecordCompaction appends a durable compaction audit event to the
+	// conversation journal (see domain.CompactionEvent): trigger, model,
+	// retention budget, and the resulting handoff summary. It is best-effort —
+	// a failure is logged, never surfaced to the turn.
+	RecordCompaction(conversationID string, ev domain.CompactionEvent) error
 }
 
 // MutationRequest describes one mutating tool invocation for the journal.
@@ -81,6 +87,12 @@ type WorkspaceState struct {
 	// directory (the authoritative restore source). Empty when the sidecar
 	// path cannot be resolved.
 	JournalPath string
+
+	// Hint is a short agent-facing pointer appended by the hydration builder
+	// (not by the journal itself) telling the model how to read the full
+	// git-like change behavior: the sidecar layout, pre-image restore, and
+	// archive semantics live in the docs corpus (docs_read id=data-locations).
+	Hint string `json:"hint,omitempty"`
 }
 
 // ClassifyMutation maps a tool call to its mutation class and extracts the

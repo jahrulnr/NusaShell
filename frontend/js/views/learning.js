@@ -23,7 +23,44 @@ const state = {
   reviewEventHandlers: null, // cleanup funcs for event listeners
   learningEventHandlers: null, // cleanup funcs for memory/skill update listeners
   graphRefreshTimer: null, // debounce timer coalescing background graph refreshes
+  primaryMemory: null,
+  primaryLoaded: false,
+  agentMemory: null,
+  agentLoaded: false,
 };
+
+const MEMORY_EDITORS = Object.freeze({
+  primary: Object.freeze({
+    textareaId: 'learning-primary-memory',
+    reloadId: 'learning-primary-reload',
+    saveId: 'learning-primary-save',
+    statusId: 'learning-primary-status',
+    countId: 'learning-primary-count',
+    tier: 'primary',
+    memoryKey: 'primaryMemory',
+    loadedKey: 'primaryLoaded',
+    updateMethod: 'memory.primary.update',
+    label: 'Primary memory',
+    capMessage: 'Primary memory cannot exceed 4000 characters.',
+    loadError: 'Primary memory could not be loaded.',
+    savedMessage: 'Primary memory saved.',
+  }),
+  agent: Object.freeze({
+    textareaId: 'learning-agent-memory',
+    reloadId: 'learning-agent-reload',
+    saveId: 'learning-agent-save',
+    statusId: 'learning-agent-status',
+    countId: 'learning-agent-count',
+    tier: 'agent',
+    memoryKey: 'agentMemory',
+    loadedKey: 'agentLoaded',
+    updateMethod: 'memory.agent.update',
+    label: 'Soul memory',
+    capMessage: 'Soul memory cannot exceed 4000 characters.',
+    loadError: 'Soul memory could not be loaded.',
+    savedMessage: 'Soul memory saved.',
+  }),
+});
 
 export async function initLearning() {
   const input = document.getElementById('learning-search-input');
@@ -56,6 +93,8 @@ export async function initLearning() {
     fitGraphToView(state.network, state.nodes, 300);
   });
   logRefreshBtn.addEventListener('click', () => loadLog());
+  initMemoryDocumentEditor(MEMORY_EDITORS.primary);
+  initMemoryDocumentEditor(MEMORY_EDITORS.agent);
 
   initTabs();
   initSplitter();
@@ -71,11 +110,12 @@ export async function initLearning() {
   await Promise.all([doSearch(), loadGraph({ preservePositions: false })]);
 }
 
-// Tab switching between "Memory & Graph" and "Learning log". The log is
-// fetched lazily on first open so switching back and forth does not spam
-// the trajectory file read.
+// Tab switching between the memory document editors, memory graph, and Learning log.
+// The log is fetched lazily on first open so switching back and forth does
+// not spam the trajectory file read.
 function initTabs() {
   const tabs = document.querySelectorAll('[data-learning-tab]');
+  const panels = document.querySelectorAll('[data-learning-panel]');
   for (const tab of tabs) {
     tab.addEventListener('click', () => {
       const target = tab.dataset.learningTab;
@@ -84,8 +124,11 @@ function initTabs() {
         t.classList.toggle('active', active);
         t.setAttribute('aria-selected', String(active));
       });
-      document.getElementById('learning-panel-memory').hidden = target !== 'memory';
-      document.getElementById('learning-panel-log').hidden = target !== 'log';
+      panels.forEach((panel) => {
+        panel.hidden = panel.dataset.learningPanel !== target;
+      });
+      if (target === 'about' && !state.primaryLoaded) void loadStats();
+      if (target === 'agent' && !state.agentLoaded) void loadStats();
       if (target === 'log') {
         loadLog();
         // The graph canvas was possibly hidden while the other panel was
@@ -167,6 +210,81 @@ function initLearningUpdateListeners() {
     () => off('skill.updated', onSkillUpdated),
     () => { if (graphRefreshTimer) clearTimeout(graphRefreshTimer); },
   ];
+}
+
+function initMemoryDocumentEditor(config) {
+  const textarea = document.getElementById(config.textareaId);
+  const reloadBtn = document.getElementById(config.reloadId);
+  const saveBtn = document.getElementById(config.saveId);
+  if (!textarea || !reloadBtn || !saveBtn) return;
+  textarea.addEventListener('input', () => {
+    textarea.dataset.dirty = String(textarea.value !== (textarea.dataset.savedContent || ''));
+    updateMemoryDocumentMeta(config, textarea);
+  });
+  // Reload is an explicit user action: it discards the current draft and
+  // reads the persisted document value again. No native confirm dialog is
+  // used because the shell keeps destructive confirmation in its own UI.
+  reloadBtn.addEventListener('click', () => { void loadMemoryDocument(config); });
+  saveBtn.addEventListener('click', () => { void saveMemoryDocument(config); });
+  updateMemoryDocumentMeta(config, textarea);
+}
+
+function updateMemoryDocumentMeta(config, textarea) {
+  const count = document.getElementById(config.countId);
+  if (count) count.textContent = `${textarea.value.length} / 4000 characters`;
+  const save = document.getElementById(config.saveId);
+  if (save) save.disabled = textarea.dataset.dirty !== 'true';
+}
+
+function setMemoryDocumentEditor(config, entry, { preserveDirty = true } = {}) {
+  const textarea = document.getElementById(config.textareaId);
+  if (!textarea) return;
+  if (preserveDirty && textarea.dataset.dirty === 'true') return;
+  const content = String(entry?.content || '');
+  textarea.value = content;
+  textarea.dataset.savedContent = content;
+  textarea.dataset.dirty = 'false';
+  state[config.memoryKey] = entry || null;
+  state[config.loadedKey] = true;
+  const status = document.getElementById(config.statusId);
+  if (status) status.textContent = entry?.content ? 'Saved locally' : 'Empty';
+  updateMemoryDocumentMeta(config, textarea);
+}
+
+async function loadMemoryDocument(config) {
+  const status = document.getElementById(config.statusId);
+  if (status) status.textContent = 'Loading…';
+  try {
+    const { entries } = await rpc('memory.list');
+    const entry = (entries || []).find((item) => item.tier === config.tier) || null;
+    setMemoryDocumentEditor(config, entry, { preserveDirty: false });
+  } catch (e) {
+    state[config.loadedKey] = false;
+    if (status) status.textContent = 'Unavailable';
+    toast(e.message || config.loadError, 'error');
+  }
+}
+
+async function saveMemoryDocument(config) {
+  const textarea = document.getElementById(config.textareaId);
+  const saveBtn = document.getElementById(config.saveId);
+  const status = document.getElementById(config.statusId);
+  if (!textarea || !saveBtn) return;
+  if (textarea.value.length > 4000) {
+    toast(config.capMessage, 'error');
+    return;
+  }
+  saveBtn.disabled = true;
+  if (status) status.textContent = 'Saving…';
+  try {
+    const result = await rpc(config.updateMethod, { content: textarea.value });
+    setMemoryDocumentEditor(config, result.entry || { tier: config.tier, content: textarea.value }, { preserveDirty: false });
+    toast(config.savedMessage, 'success');
+  } catch (e) {
+    if (status) status.textContent = 'Unsaved changes';
+    updateMemoryDocumentMeta(config, textarea);
+    toast(e.message || `${config.label} could not be saved.`, 'error');
+  }
 }
 
 function showRunningIndicator() {
@@ -309,7 +427,6 @@ export function renderLogEntry(entry) {
     headChildren.push(el('span', {
       class: `learning-log-status learning-log-status-${entry.status}`,
       text: entry.status,
-      title: entry.status === 'error' && entry.error ? entry.error : '',
     }));
   }
   headChildren.push(el('span', { class: 'learning-log-time', text: fmtTime(entry.ts) }));
@@ -317,10 +434,11 @@ export function renderLogEntry(entry) {
 
   const parts = [head];
 
-  // Error message: shown when the review failed so the user can see
-  // why without opening the transcript.
-  if (entry.status === 'error' && entry.error) {
-    parts.push(el('div', { class: 'learning-log-error', text: entry.error }));
+  // Review failures are automatic/background work. Keep the Learning log
+  // concise without leaking a provider's verbose error body; the raw
+  // diagnostic remains in the backend log/trajectory for diagnosis.
+  if (entry.status === 'error') {
+    parts.push(el('div', { class: 'learning-log-error', text: 'Background review failed during automatic processing.' }));
   }
   if (entry.status === 'skipped') {
     const reason = entry.detail?.reason || 'deferred';
@@ -576,8 +694,14 @@ async function loadStats() {
     state.memoryCount = entries.length;
     document.getElementById('learning-stat-memory').textContent =
       `${state.memoryCount} memor${state.memoryCount === 1 ? 'y' : 'ies'}`;
+    const primary = (entries || []).find((entry) => entry.tier === 'primary') || null;
+    const agent = (entries || []).find((entry) => entry.tier === 'agent') || null;
+    setMemoryDocumentEditor(MEMORY_EDITORS.primary, primary);
+    setMemoryDocumentEditor(MEMORY_EDITORS.agent, agent);
   } catch (e) {
     // memory.list might fail if store not initialized
+    state.primaryLoaded = false;
+    state.agentLoaded = false;
   }
   // Edge count: we don't have a direct RPC, infer from graph load
 }
@@ -725,15 +849,15 @@ export const GRAPH_NODE_MAX_SIZE = 32;
 // A restrained archipelago palette. The three node colors share comparable
 // lightness and saturation, while their hues map to sea, soil, and foliage.
 export const GRAPH_PALETTE = Object.freeze({
-  ocean: '#6297b2',
-  oceanBorder: '#386e8a',
-  deepOcean: '#427994',
-  earth: '#a98c6a',
-  earthBorder: '#806342',
-  leaf: '#6fa57c',
-  leafBorder: '#447e52',
-  mangrove: '#569580',
-  sand: '#a59b73',
+  ocean: '#79bdd2',
+  oceanBorder: '#27758d',
+  deepOcean: '#1d5a70',
+  earth: '#c38c5e',
+  earthBorder: '#895833',
+  leaf: '#68b982',
+  leafBorder: '#3f7656',
+  mangrove: '#3f8a71',
+  sand: '#d6b36c',
 });
 const GRAPH_NODE_MIN_ZOOM_SCALE = 0.25;
 const GRAPH_NODE_MIN_DETAIL_SCALE = 0.75;

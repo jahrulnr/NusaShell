@@ -1,6 +1,7 @@
 import { rpc } from '../../rpc.js';
 import { el, toast } from '../../ui.js';
 import { inspectAttachmentContent, toDataURL } from '../../agent-ui.js';
+import { resolveDroppedFilePath } from '../../desktop-file-path.js';
 import { agentForm, composerInput, composerStack, sendButton } from './domrefs.js';
 
 export function bindComposer({ state, createConversation, beginTurn, refreshConversations, renderAttachments, updateComposerStatus, showSteerQueued, clearSteerQueue, promoteSteerToTranscript, stopActiveRun }) {
@@ -45,7 +46,7 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
   // Shows a drag overlay while dragging and handles both files and folders.
   // Folders are detected via webkitGetAsEntry() and attached as path-only
   // references (type: "folder") — the agent can use file tools to explore
-  // the directory. File.path is only available in desktop shells (Electron);
+  // the directory. The Electron preload bridge resolves the native path;
   // in pure web mode folders fall back to a workspace-picker prompt.
   const dropZone = document.getElementById('agent-conversation');
   if (dropZone) {
@@ -254,8 +255,8 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
 
   // handleDrop processes a DataTransfer from a drop event. It distinguishes
   // folders from files using webkitGetAsEntry(). Folders are attached as
-  // path-only references (type: "folder") when File.path is available
-  // (desktop shell). Files are processed as normal byte attachments.
+  // path-only references (type: "folder") when the desktop path bridge is
+  // available. Files are processed as normal byte attachments.
   async function handleDrop(dataTransfer) {
     if (!dataTransfer) return;
     const items = dataTransfer.items;
@@ -301,15 +302,16 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
   }
 
   // addFolderAttachment converts a FileSystemDirectoryEntry into a folder
-  // attachment. In desktop shells (Electron), File.path exposes the absolute
-  // filesystem path. In pure web mode, File.path is undefined — we still
+  // attachment. In desktop shells (Electron), the preload bridge exposes the
+  // absolute filesystem path. In pure web mode, no path is available — we still
   // attach the folder name but without a path, and the backend will reject
   // it with a clear validation error.
   async function addFolderAttachment(entry) {
-    // Try to get the underlying File object — Electron exposes .path on it.
+    // Try to get the underlying File object. Electron resolves its native path
+    // through preload because modern Chromium no longer exposes File.path.
     const file = await new Promise((resolve) => entry.file(resolve, () => resolve(null)));
     const name = entry.name || file?.name || 'Folder';
-    const filePath = file?.path || '';
+    const filePath = resolveDroppedFilePath(file);
 
     if (!filePath) {
       toast(`Cannot attach folder "${name}" — the browser does not expose filesystem paths. Use the workspace picker instead.`, 'error', 6000);

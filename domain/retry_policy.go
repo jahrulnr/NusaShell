@@ -8,10 +8,9 @@ import (
 // Provider retry policy constants.
 //
 // These govern the bounded retry loop around provider stream/complete
-// requests. The loop itself lives in the application layer because it
-// operates on UpstreamError (an application contract); the policy
-// constants and the pure body-classification helpers live here so the
-// retry rules are visible at the layer that owns the conversation model.
+// requests. The loop itself lives in the application layer; the provider
+// error and retry decision live here so conversation, review, and automation
+// use one policy at the layer that owns the conversation model.
 const (
 	// MaxProviderAttempts is the maximum number of attempts for a single
 	// provider request before the error surfaces to the turn.

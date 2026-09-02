@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Separate Go and Electron release streams.** The installer always installs
+  the standalone `nusashell` core, then opt-in prompts can install the thin
+  `nusashell-desktop` Electron wrapper and `NusaShell-mcp` plugins. Go and
+  Electron artifacts have independent SHA-256 manifests, version files, and
+  GitHub tags; Electron packages never embed the Go backend.
 - **PWA-grade shell: installable, offline-capable, mini window.** The web
   app now ships a web app manifest (standalone display, any + maskable
   icons) and a service worker (`sw.js`, network-first with cache fallback;
@@ -170,6 +175,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SSE now cover the same behavior over WebSocket.
 
 ### Added
+
+- **Cross-platform Electron wrapper.** `apps/electron/` starts the matching
+  native Go backend on loopback and loads the existing frontend in a secure
+  BrowserWindow. Make targets cover development, wrapper tests, unpacked
+  packaging, and native installer artifacts; GitHub Actions packages on
+  Linux, Windows, and macOS runners.
 
 - **Image generation tool.** `generate_image` is a built-in client-side
   tool (advertised only when Settings → Image generation is set). The
@@ -335,6 +346,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{providerID}:account:*` credentials, not only the active key.
 - **Codex circuit usage snapshot.** `LimitReached` without a reset timestamp
   no longer closes an already-open circuit breaker.
+- **Linux Electron development startup.** `make electron-dev` now detects an
+  unavailable `chrome-sandbox` helper on user-owned filesystems and uses an
+  explicit development-only fallback instead of aborting before the app opens.
 
 ## [0.1.0] - 2026-08-13
 

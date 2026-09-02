@@ -40,6 +40,31 @@ func TestRoundStreamReplayCursor(t *testing.T) {
 	}
 }
 
+func TestRoundStreamPublishActivityCarriesNoToolArguments(t *testing.T) {
+	reg := NewRoundStreamRegistry()
+	reg.PublishActivity("r", "m", 1, "call_1", "file_read", contracts.RoundActivityToolCall)
+
+	sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	select {
+	case frame := <-sub.Frames():
+		if frame.Kind != contracts.RoundDeltaActivity || frame.Activity != contracts.RoundActivityToolCall {
+			t.Fatalf("activity frame = %+v", frame)
+		}
+		if frame.ToolCallID != "call_1" || frame.Name != "file_read" {
+			t.Fatalf("activity metadata = %+v", frame)
+		}
+		if len(frame.Args) != 0 || frame.Text != "" || frame.Presentation != nil {
+			t.Fatalf("activity frame leaked tool payload: %+v", frame)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for activity frame")
+	}
+}
+
 // TestRoundStreamSealDeliversDone verifies the terminal frame reaches
 // subscribers and the seal is idempotent.
 func TestRoundStreamSealDeliversDone(t *testing.T) {
@@ -66,6 +91,9 @@ func TestRoundStreamSealDeliversDone(t *testing.T) {
 	done := sub.DoneFrame()
 	if done.State != contracts.RoundStateDone || done.Next == nil || done.Next.MessageID != "m2" {
 		t.Fatalf("done frame = %+v", done)
+	}
+	if done.LastSeq != 1 {
+		t.Fatalf("done last_seq = %d, want 1", done.LastSeq)
 	}
 	// Drain the replayed delta then verify no more frames arrive.
 	select {
@@ -205,9 +233,9 @@ func TestRoundStreamPublishAfterSealDropped(t *testing.T) {
 // reconnecting with after=<lastSeq> — the replay buffer still holds the
 // missed frames as long as its head has not been trimmed.
 //
-// This pins the design: bigger subscriber headroom (was 512, now 4096)
-// buys more tolerance for brief browser-side stalls (other tab in focus,
-// GC pause, devtools open) without falling back to a snapshot refresh.
+// This pins the design: replay-sized subscriber headroom buys more tolerance
+// for brief browser-side stalls (other tab in focus, GC pause, devtools open)
+// without deadlocking a replay or falling back to a snapshot refresh.
 func TestRoundStreamSlowSubscriberBufferHeadroom(t *testing.T) {
 	reg := NewRoundStreamRegistry()
 	// Bootstrap the stream so the subscriber attaches to a known stream
@@ -329,5 +357,34 @@ func TestRoundStreamSlowSubscriberGapDetectable(t *testing.T) {
 	// contiguous — no gap visible to a fresh attacher.
 	if first.Seq < int64(head+1) {
 		t.Fatalf("first live frame seq = %d, want > %d", first.Seq, head)
+	}
+}
+
+func TestRoundStreamLargeReplayDoesNotBlockSubscription(t *testing.T) {
+	reg := NewRoundStreamRegistry()
+	for i := 0; i < roundStreamFrameCap; i++ {
+		reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "x")
+	}
+
+	result := make(chan *RoundStreamSub, 1)
+	go func() {
+		sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
+		if err == nil {
+			result <- sub
+		}
+	}()
+
+	select {
+	case sub := <-result:
+		defer sub.Close()
+		for i := 0; i < roundStreamFrameCap; i++ {
+			select {
+			case <-sub.Frames():
+			case <-time.After(time.Second):
+				t.Fatalf("large replay stalled after %d frames", i)
+			}
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("subscription blocked when replay exceeded the live subscriber queue")
 	}
 }

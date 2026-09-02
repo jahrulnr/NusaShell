@@ -1,6 +1,6 @@
 # Learning
 
-Search accumulated memory entries and skills via hybrid BM25 + embedding + graph search, explore how they connect in the knowledge graph, and review what autolearn saved.
+Edit the always-injected user.md and soul.md documents, search accumulated memory entries and skills via hybrid BM25 + embedding + graph search, explore how they connect in the knowledge graph, and review what autolearn saved.
 
 **How to open:** Click the Learning item in the left sidebar.
 
@@ -18,7 +18,17 @@ Live counts of memory entries and learning edges. The memory count refreshes in 
 
 ## Tabs
 
-Switches between Memory & Graph (search + graph) and Learning log (autolearn activity feed). The log loads lazily on first open.
+Opens About You first, where the always-injected user.md document can be edited and saved. About Agent provides the matching editor for the agent working-knowledge document. Learning uses the same compact segmented tab control as Automation, kept apart from the content panel so navigation does not appear attached to a card edge. Memory & Graph provides search + graph, and Learning log shows autolearn activity; the log loads lazily on first open.
+
+- **About You tab** (`#learning-tab-about`):
+  - Section: Learning
+  - Type: tab
+  - Notes: Shows the editable always-injected primary memory document.
+
+- **About Agent tab** (`#learning-tab-agent`):
+  - Section: Learning
+  - Type: tab
+  - Notes: Shows the editable always-injected soul.md document.
 
 - **Memory & Graph tab** (`#learning-tab-memory`):
   - Section: Learning
@@ -29,6 +39,62 @@ Switches between Memory & Graph (search + graph) and Learning log (autolearn act
   - Section: Learning
   - Type: tab
   - Notes: Shows the autolearn activity feed.
+
+## About You
+
+The editable primary memory document. Reload reads the persisted value again; Save changes replaces the complete primary memory document through memory.primary.update. The editor shows the 4000-character cap and allows an intentional empty document. The card expands across the available desktop canvas while keeping a compact inset and full-width editor on mobile.
+
+- **Primary memory status** (`#learning-primary-status`):
+  - Section: Learning
+  - Type: status
+  - Notes: Reports whether primary memory is loaded, empty, saved, or unavailable.
+
+- **Primary memory editor** (`#learning-primary-memory`):
+  - Section: Learning
+  - Type: textarea
+  - Action: Edits the complete primary memory document.
+
+- **Primary memory character count** (`#learning-primary-count`):
+  - Section: Learning
+  - Type: text
+
+- **Reload primary memory** (`#learning-primary-reload`):
+  - Section: Learning
+  - Type: button
+  - Action: Discards the current draft and reloads the persisted primary memory document.
+
+- **Save primary memory** (`#learning-primary-save`):
+  - Section: Learning
+  - Type: button
+  - Action: Replaces the persisted primary memory document.
+
+## Soul.md
+
+The editable agent-tier memory document. Reload reads the persisted value again; Save changes replaces the complete soul.md document through memory.agent.update. The editor shows the 4000-character cap and allows an intentional empty document. Changes remain separate from user.md and fragment memory.
+
+- **Soul memory status** (`#learning-agent-status`):
+  - Section: Learning
+  - Type: status
+  - Notes: Reports whether soul.md is loaded, empty, saved, or unavailable.
+
+- **Soul memory editor** (`#learning-agent-memory`):
+  - Section: Learning
+  - Type: textarea
+  - Action: Edits the complete soul.md document.
+
+- **Soul memory character count** (`#learning-agent-count`):
+  - Section: Learning
+  - Type: text
+
+- **Reload soul memory** (`#learning-agent-reload`):
+  - Section: Learning
+  - Type: button
+  - Action: Discards the current draft and reloads the persisted soul.md document.
+
+- **Save soul memory** (`#learning-agent-save`):
+  - Section: Learning
+  - Type: button
+  - Action: Replaces the persisted soul.md document.
 
 ## Search bar
 
@@ -87,7 +153,7 @@ Force-directed graph (vis-network) of skills, memory entries, and their edges. R
 
 ## Learning log
 
-Autolearn activity feed from the trajectory log (review runs, extraction, edge building, consolidation, decay, prune), newest first. Review entries show a status badge (done or error) with the error message when failed, a compact Source <title> line (raw conversation id hidden), the saved outcomes (kind + snippet) or an explicit Nothing to save. line, per-type extras, and a View review details button. Expanding it replays what the background review agent did exactly like an Agent-view conversation - Thinking disclosures per round, terminal-style tool cards with input/output panels, short narration notes, and the final verdict - but never the replayed user transcript. A running indicator appears at the top while a review is in-flight. Refresh reloads the feed.
+Autolearn activity feed from the trajectory log (review runs, extraction, edge building, consolidation, decay, prune), newest first. Review entries show a status badge (done or error); failures use a concise automatic-processing message rather than exposing a verbose provider body. Each entry has a compact Source <title> line (raw conversation id hidden), the saved outcomes (kind + snippet) or an explicit Nothing to save. line, per-type extras, and a View review details button. Expanding it replays what the background review agent did exactly like an Agent-view conversation - Thinking disclosures per round, terminal-style tool cards with input/output panels, short narration notes, and the final verdict - but never the replayed user transcript. A running indicator appears at the top while a review is in-flight. Refresh reloads the feed. There is no manual retry action for background reviews.
 
 - **Learning log count** (`#learning-log-count`):
   - Section: Learning
@@ -101,4 +167,4 @@ Autolearn activity feed from the trajectory log (review runs, extraction, edge b
 - **Learning log** (`#learning-log`):
   - Section: Learning
   - Type: list
-  - Notes: Trajectory events; review entries have done/error/skipped status badges. Skipped entries explain whether a trigger was coalesced because another review was running or deferred by retry cooldown. Completed review entries have a View review details button that expands the background review agent's activity digest inline.
+  - Notes: Trajectory events; review entries have done/error/skipped status badges. Failed entries show a concise automatic-processing message; raw provider diagnostics stay server-side. Skipped entries explain whether a trigger was coalesced because another review was running or deferred by retry cooldown. Review entries have a View review details button that expands the background review agent's activity digest inline; there is no manual retry button.

@@ -220,6 +220,42 @@ func TestStreamHoldsToolCallUntilLateName(t *testing.T) {
 	}
 }
 
+func TestStreamEmitsEarlyToolDeltaBeforeLateName(t *testing.T) {
+	stream := streamFromSSE(t, strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"arguments":"{\"q\":"}}]}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"lookup","arguments":"\"x\"}"}}]}}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		`data: [DONE]`,
+		``,
+	}, "\n"), Spec{Name: "compat"}, nil)
+	var sequence []string
+	var deltas []core.ToolUseDelta
+	resp, err := core.HandleWith(stream, core.StreamHandler{
+		ToolStart: func(core.ToolUseStart) error {
+			sequence = append(sequence, "start")
+			return nil
+		},
+		ToolDelta: func(event core.ToolUseDelta) error {
+			sequence = append(sequence, "delta")
+			deltas = append(deltas, event)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleWith returned error: %v", err)
+	}
+	if len(sequence) < 3 || sequence[0] != "delta" || sequence[1] != "start" || sequence[2] != "delta" {
+		t.Fatalf("tool event sequence = %v, want delta, start, delta", sequence)
+	}
+	if len(deltas) != 2 || string(deltas[0].ArgumentsDelta) != `{"q":` || string(deltas[1].ArgumentsDelta) != `"x"}` {
+		t.Fatalf("tool deltas = %#v, want two non-duplicated chunks", deltas)
+	}
+	calls := resp.ToolCalls()
+	if len(calls) != 1 || calls[0].Name != "lookup" || string(calls[0].Arguments) != `{"q":"x"}` {
+		t.Fatalf("aggregated tool call = %#v", calls)
+	}
+}
+
 // TestStreamIgnoresResentToolCallName guards against gateways that echo the
 // full function.name on every argument chunk: the first non-empty name wins and
 // later repeats must neither concatenate nor re-open the call.
@@ -394,7 +430,7 @@ func TestStreamCleanEOFWithoutFinishReasonErrors(t *testing.T) {
 	// end. Surface it so the retry loop can reconnect.
 	stream := streamFromSSE(t, `data: {"choices":[{"delta":{"content":"partial"}}]}`, Spec{Name: "strict"}, nil)
 	_, err := core.Collect(stream)
-	if err == nil || !strings.Contains(err.Error(), "without finish_reason") {
+	if err == nil || !strings.Contains(err.Error(), "without finish_reason") || !core.IsNetworkError(err) {
 		t.Fatalf("expected incomplete stream error, got %v", err)
 	}
 }

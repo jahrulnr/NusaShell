@@ -386,6 +386,13 @@ func (j *Journal) wrapUnobserved(req application.MutationRequest) {
 	}
 }
 
+// RecordCompaction implements application.ChangeJournal. Appends the audit
+// event to the conversation's journal sidecar; replayEvents ignores the
+// event type, so compaction records never leak into workspace state.
+func (j *Journal) RecordCompaction(conversationID string, ev domain.CompactionEvent) error {
+	return j.store.appendCompaction(conversationID, ev)
+}
+
 // SessionState implements application.ChangeJournal.
 func (j *Journal) SessionState(ctx context.Context, conversationID, workspaceRoot string) (*application.WorkspaceState, error) {
 	events, err := j.store.readAll(conversationID)

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, setToolTerminalPresentation, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, renderToolAttachments, parseShowAudioOutput, parseShowVideoOutput, STARTER_PROMPTS, reasoningDisclosure, renderCompactionStatus, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, setThinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming, captureDisclosureState, restoreDisclosureState } from '../js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, setToolTerminalStatus, setToolTerminalPresentation, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, renderToolAttachments, parseShowAudioOutput, parseShowVideoOutput, parseShowPDFOutput, STARTER_PROMPTS, reasoningDisclosure, renderCompactionStatus, renderAgentActivityStatus, setAgentActivityStatus, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, setThinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming, captureDisclosureState, restoreDisclosureState } from '../js/views/agent/render.js';
 import { normalizeToolCall, registerToolContracts, toolContractFor, toolContractClass } from '../js/views/agent/tool-contracts.js';
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
@@ -163,6 +163,27 @@ test('compaction status replaces generic loading dots instead of showing both', 
   }
 });
 
+test('agent activity status is accessible and can switch copy without exposing tool arguments', () => {
+  const dom = new JSDOM('<main id="thread"></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const status = renderAgentActivityStatus();
+    document.body.append(status);
+    setAgentActivityStatus(status, { text: 'Preparing tool call…', phase: 'tool-call', visible: true });
+
+    assert.equal(status.hidden, false);
+    assert.equal(status.getAttribute('role'), 'status');
+    assert.equal(status.getAttribute('aria-live'), 'polite');
+    assert.equal(status.querySelector('.agent-activity-status-text')?.textContent, 'Preparing tool call…');
+    assert.ok(status.querySelector('.agent-activity-status-cursor'), 'status has the animated cursor');
+    assert.equal(status.dataset.phase, 'tool-call');
+    assert.doesNotMatch(status.textContent, /path|secret|arguments/i);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
 test('renders one model and usage summary for all assistant rounds in a user turn', () => {
   const thread = renderTranscript([
     { role: 'user', content: 'Run the checks', created_at: '2026-08-13T18:00:00Z' },
@@ -236,6 +257,29 @@ test('subagent cards are the only transcript representation of ACP runs', () => 
     'wait/result bookkeeping must not duplicate the card as tool rows');
   assert.equal(renderToolCallCard({ name: 'subagent_wait', args: {}, status: 'ok', output: '' }), null);
   assert.equal(renderToolCallCard({ name: 'subagent_result', args: {}, status: 'ok', output: '' }), null);
+});
+
+test('internal delegate cards use the same run card and auxiliary filtering as ACP', () => {
+  const completion = 'Delegate run run_internal123 completed. Full result delivered in the delegate_result tool call.';
+  const thread = renderTranscript([
+    { role: 'user', content: 'Delegate the config audit', created_at: '2026-08-30T00:00:00Z' },
+    {
+      role: 'assistant', created_at: '2026-08-30T00:00:01Z',
+      steps: [{ type: 'tool_calls', tool_calls: [
+        { id: 'delegate-1', name: 'delegate', args: { prompt: 'Inspect the config' }, status: 'ok', output: completion },
+        { id: 'result-1', name: 'delegate_result', args: { id: 'run_internal123' }, status: 'ok', output: 'final delegate output' },
+      ] }],
+    },
+  ]);
+
+  const card = thread.querySelector('.agent-subagent-card');
+  assert.ok(card, 'delegate should use the shared clickable subagent card');
+  assert.equal(card.dataset.runId, 'run_internal123');
+  assert.match(card.querySelector('.agent-subagent-name')?.textContent || '', /NusaShell delegate/);
+  assert.equal(thread.querySelectorAll('.agent-subagent-card').length, 1);
+  assert.equal(thread.querySelectorAll('.agent-tool-terminal').length, 0,
+    'delegate_result bookkeeping must not become a second terminal card');
+  assert.equal(renderToolCallCard({ name: 'delegate_result', args: {}, status: 'ok', output: '' }), null);
 });
 
 test('tool job summary includes elapsed span before chevron', () => {
@@ -417,6 +461,24 @@ test('built-in tool events isolate dressing classes so file_read does not share 
     assert.ok(ask.classList.contains('agent-ask-card'));
     assert.ok(ask.classList.contains('agent-tool-ask-question'));
     assert.ok(ask.querySelector('.agent-tool-ask-question-result'), 'ask output has the contract result hook');
+    assert.ok(ask.querySelector('.agent-ask-header .agent-tool-elapsed'), 'ask timer belongs in the card header');
+
+    const wrappedQuestion = `ask_question(${JSON.stringify({
+      question: 'Target porting skills office: di mana hasil porting ditempatkan?',
+      options: [{ id: 'a', label: 'A' }],
+    })})`;
+    const normalizedAsk = renderToolCallCard({
+      name: 'ask_question',
+      id: 'ask-2',
+      args: { question: wrappedQuestion, options: [{ id: 'a', label: 'A' }] },
+      status: 'ok',
+      output: '{"answer":"A"}',
+      elapsed: 75,
+    });
+    assert.equal(normalizedAsk.querySelector('.agent-ask-question')?.textContent,
+      'Target porting skills office: di mana hasil porting ditempatkan?',
+      'malformed nested tool-call text is not shown as the question');
+    assert.equal(normalizedAsk.querySelector('.agent-ask-header .agent-tool-elapsed')?.textContent, '1m 15s');
   } finally {
     globalThis.document = previousDocument;
   }
@@ -718,6 +780,23 @@ test('exec tool terminal renders a stop button only while running', () => {
   }
 });
 
+test('settling a live tool keeps the user-selected disclosure state', () => {
+  const dom = new JSDOM('<main id="thread"></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const job = renderToolJob({ id: 'disclosure-1', name: 'file_read', args: { path: '/workspace/a.txt' }, status: 'running' });
+    job.open = true;
+    setToolTerminalStatus(job, 'ok');
+    assert.equal(job.open, true, 'an expanded running card stays expanded after completion');
+    job.open = false;
+    setToolTerminalStatus(job, 'fail');
+    assert.equal(job.open, false, 'a card the user collapsed stays collapsed after failure');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
 test('appendToolJobDelta accumulates streamed output and clears placeholder', () => {
   const dom = new JSDOM('<main id="thread"></main>', { url: 'http://localhost/' });
   const previousDocument = globalThis.document;
@@ -794,7 +873,7 @@ test('setReasoningStreaming and sealReasoningStreaming toggle is-streaming', () 
   }
 });
 
-test('bindToolStop calls agent.turns.stop with the run id until satisfied', async () => {
+test('bindToolStop calls agent.tools.stop for one tool call until satisfied', async () => {
   const dom = new JSDOM('<main id="thread"></main>', { url: 'http://localhost/' });
   const previousDocument = globalThis.document;
   globalThis.document = dom.window.document;
@@ -811,7 +890,7 @@ test('bindToolStop calls agent.turns.stop with the run id until satisfied', asyn
   };
   try {
     const job = renderToolJob({ id: 't1', name: 'exec', args: { command: 'sleep 5' }, status: 'running' });
-    bindToolStop(job, () => 'run-123');
+    bindToolStop(job, () => ({ run_id: 'run-123', tool_call_id: 't1' }));
     const stop = job.querySelector('.agent-tool-stop');
     assert.equal(stop.hidden, false);
     // First click: transport fails → button re-enabled.
@@ -824,9 +903,10 @@ test('bindToolStop calls agent.turns.stop with the run id until satisfied', asyn
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(stopped, 2);
     assert.equal(stop.isConnected, false, 'stop button removed after successful stop');
-    assert.ok(calls.every((c) => c.url.includes('agent/turns/stop')));
+    assert.ok(calls.every((c) => c.url.includes('agent/tools/stop')));
     const payload = JSON.parse(calls[1].body).payload;
     assert.equal(payload.run_id, 'run-123');
+    assert.equal(payload.tool_call_id, 't1');
   } finally {
     globalThis.fetch = originalFetch;
     globalThis.document = previousDocument;
@@ -999,6 +1079,67 @@ test('renderToolCallCard renders a video card for show(op=video)', () => {
       'video does NOT fall through to the generic tool terminal');
     // Download affordance matches the image/audio cards.
     assert.ok(card.querySelector('a[download]'), 'video card exposes a Download link');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+// show(op="pdf") returns metadata only. The browser's built-in PDF viewer
+// loads the path on demand through /local-file, so no PDF.js bundle is needed
+// for the vanilla frontend.
+test('parseShowPDFOutput matches show(op=pdf) results', () => {
+  const out = JSON.stringify({
+    show: {
+      type: 'pdf',
+      path: '/tmp/report.pdf',
+      name: 'report.pdf',
+      media_type: 'application/pdf',
+    },
+  });
+  assert.deepEqual(
+    parseShowPDFOutput({ name: 'show', output: out }),
+    { src: '/local-file?path=%2Ftmp%2Freport.pdf', path: '/tmp/report.pdf', name: 'report.pdf' },
+  );
+  assert.equal(parseShowPDFOutput({ name: 'file_read', output: out }), null);
+  assert.equal(parseShowPDFOutput({ name: 'show', output: JSON.stringify({ show: { type: 'image', path: '/tmp/x.png' } }) }), null);
+  assert.equal(parseShowPDFOutput({ name: 'show', output: 'not json' }), null);
+  assert.equal(parseShowPDFOutput({ name: 'show', output: '' }), null);
+});
+
+test('renderToolCallCard renders a native PDF preview for show(op=pdf)', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const card = renderToolCallCard({
+      id: 'tc-pdf',
+      name: 'show',
+      args: { op: 'pdf', path: '/tmp/report.pdf' },
+      status: 'ok',
+      output: JSON.stringify({
+        show: {
+          type: 'pdf',
+          path: '/tmp/report.pdf',
+          name: 'report.pdf',
+          media_type: 'application/pdf',
+        },
+      }),
+    });
+    assert.ok(card.classList.contains('agent-genpdf-card'));
+    assert.ok(card.classList.contains('agent-tool-show'));
+    assert.ok(card.querySelector('.agent-tool-show-request'));
+    assert.ok(card.querySelector('.agent-tool-show-result'));
+    const frame = card.querySelector('iframe');
+    assert.ok(frame, 'PDF card renders an iframe using the native viewer');
+    assert.equal(frame.getAttribute('src'), '/local-file?path=%2Ftmp%2Freport.pdf');
+    assert.equal(frame.getAttribute('loading'), 'lazy');
+    assert.equal(frame.getAttribute('title'), 'Preview report.pdf');
+    const download = card.querySelector('a[download]');
+    assert.ok(download, 'PDF card exposes a Download link');
+    assert.equal(download.getAttribute('href'), frame.getAttribute('src'));
+    assert.equal(download.getAttribute('download'), 'report.pdf');
+    assert.equal(card.querySelectorAll('.agent-tool-terminal').length, 0,
+      'PDF does NOT fall through to the generic tool terminal');
   } finally {
     globalThis.document = previousDocument;
   }

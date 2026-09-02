@@ -18,6 +18,7 @@ import { bindShellShortcuts } from './shell-shortcuts.js';
 import { initMobileNav } from './mobile-nav.js';
 import { initOfflineScreen } from './offline-screen.js';
 import { applyFontPreference, readFontPreference } from './font-preferences.js';
+import { isElectronRuntime } from './desktop-file-path.js';
 
 // Apply the browser-only typography preference before the view modules render.
 // The bundled fallback faces keep model-authored symbols available for every
@@ -151,22 +152,28 @@ async function boot() {
   window.addEventListener('hashchange', route);
   initMobileNav();
 
-  // Full-window offline overlay + mini window button. Must be wired before
-  // the first connection status events fire so a dead backend is covered
-  // from the very start.
+  // Full-window offline overlay + browser mini window button. Must be wired
+  // before the first connection status events fire so a dead backend is
+  // covered from the very start.
   initOfflineScreen();
-  document.getElementById('mini-window-btn')?.addEventListener('click', async () => {
-    try {
-      const pip = await import('./pip.js');
-      await pip.openMiniWindow();
-    } catch (err) {
-      // Document PiP can reject (user gesture required, second PiP window,
-      // unsupported engine edge cases). The popup fallback already ran when
-      // pipSupported() was false, so anything here is a genuine failure.
-      console.error('mini window failed:', err);
-      toast('Mini window not available in this browser.', 'error');
-    }
-  });
+  const miniWindowButton = document.getElementById('mini-window-btn');
+  if (isElectronRuntime()) {
+    // Electron's renderer does not support the browser mini-window flow yet.
+    if (miniWindowButton) miniWindowButton.hidden = true;
+  } else {
+    miniWindowButton?.addEventListener('click', async () => {
+      try {
+        const pip = await import('./pip.js');
+        await pip.openMiniWindow();
+      } catch (err) {
+        // Document PiP can reject (user gesture required, second PiP window,
+        // unsupported engine edge cases). The popup fallback already ran when
+        // pipSupported() was false, so anything here is a genuine failure.
+        console.error('mini window failed:', err);
+        toast('Mini window not available in this browser.', 'error');
+      }
+    });
+  }
 
   setConnection('connecting');
   // one transport per function: WS carries BE -> FE event triggers; the FE
@@ -186,11 +193,6 @@ async function boot() {
   on('learning.review.done', () => {
     toast('Autolearn finished.', 'success', 2500);
   });
-  on('learning.review.error', (payload) => {
-    const msg = payload?.error || 'Unknown error';
-    toast(`Autolearn failed: ${msg}`, 'error', 6000);
-  });
-
   try {
     const info = await rpc('app.info', {}, { timeoutMs: 4000 });
     document.title = `NusaShell ${info.version ?? ''}`.trim();

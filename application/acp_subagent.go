@@ -142,7 +142,7 @@ func (a *App) SpawnSubagents(ctx context.Context, argsJSON []byte) (string, erro
 		results[i] = domain.AcpSpawned{Run: run, Err: err}
 		if err == nil && run != nil {
 			a.emitAcpRun(contracts.EventAcpRunStarted, run)
-			a.trackPendingRun(run.ConversationID, run.ID)
+			a.trackPendingRun(run.ConversationID, run.ID, domain.SubagentToolName)
 		}
 	}
 	// Always async: the parent agent gets "starting" immediately and is

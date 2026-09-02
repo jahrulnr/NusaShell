@@ -22,7 +22,7 @@ func TestOnAcpRunDoneQueuesWhileParentTurnActive(t *testing.T) {
 	app := &App{Conversations: store, Bus: NewBus(), runs: map[string]*TurnRun{}}
 	parent := &TurnRun{ID: "turn1", ConversationID: "c1"}
 	app.runs[parent.ID] = parent
-	app.trackPendingRun("c1", "run_done")
+	app.trackPendingRun("c1", "run_done", "subagent")
 
 	acpRun := &domain.AcpRun{
 		TaskState:        domain.TaskState[domain.AcpRunStatus]{ID: "run_done", Status: domain.AcpRunCompleted},
@@ -88,7 +88,7 @@ func TestOnAcpRunDoneInjectsImmediatelyWhenParentIdle(t *testing.T) {
 	}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{Conversations: store, Bus: NewBus(), runs: map[string]*TurnRun{}}
-	app.trackPendingRun("c1", "run_done")
+	app.trackPendingRun("c1", "run_done", "subagent")
 	acpRun := &domain.AcpRun{
 		TaskState:        domain.TaskState[domain.AcpRunStatus]{ID: "run_done", Status: domain.AcpRunCompleted},
 		ConversationID:   "c1",

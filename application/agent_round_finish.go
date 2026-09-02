@@ -77,6 +77,12 @@ func (a *App) publishRoundDelta(runID, messageID string, round int, kind, toolCa
 	}
 }
 
+func (a *App) publishRoundActivity(runID, messageID string, round int, toolCallID, name, activity string) {
+	if a.RoundStreams != nil {
+		a.RoundStreams.PublishActivity(runID, messageID, round, toolCallID, name, activity)
+	}
+}
+
 func (a *App) publishRoundToolStart(runID, messageID string, round int, toolCallID, name, args string, presentation *contracts.ToolPresentationDTO) {
 	if a.RoundStreams != nil {
 		a.RoundStreams.PublishWithArgsAndPresentation(runID, messageID, round, contracts.RoundDeltaTool, toolCallID, name, "", toolpresentation.ToolArgsRaw(args), presentation)
@@ -161,6 +167,10 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage,
 	// Pipeline agent steps are unattended automation, not user rooms.
 	if !run.Headless {
 		a.incrementTurnCounter(conversation.ID)
+		// Task-memory announcements: surface fragments relevant to this
+		// conversation that are new or changed since they were last
+		// delivered, via the shared announcement channel.
+		a.maybeAnnounceTaskMemory(run.ConversationID, conversation)
 	}
 
 	return nil
@@ -262,7 +272,6 @@ func (a *App) flushLearningReview(conversationID string, reason string) {
 				a.Bus.Emit(contracts.EventLearningReviewError, contracts.LearningReviewEvent{
 					ConversationID: conversationID,
 					Status:         "error",
-					Error:          err.Error(),
 				})
 			}
 			return

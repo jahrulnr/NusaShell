@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"nusashell/domain"
 )
 
 func TestMarkProviderRateLimitedAndWait(t *testing.T) {
@@ -35,7 +37,7 @@ func TestMarkProviderRateLimitedDefaultsToOneMinute(t *testing.T) {
 
 func TestDecorateRateLimitError(t *testing.T) {
 	a := &App{}
-	up := &UpstreamError{Kind: KindHTTPStatus, StatusCode: 429, Err: errors.New("rate limit")}
+	up := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, Err: errors.New("rate limit")}
 	err := a.decorateRateLimitError("tok", up)
 	if err == nil {
 		t.Fatal("nil error")
@@ -51,7 +53,7 @@ func TestDecorateRateLimitError(t *testing.T) {
 func TestDecorateRateLimitErrorNon429Untouched(t *testing.T) {
 	a := &App{}
 	inner := errors.New("boom")
-	up := &UpstreamError{Kind: KindHTTPStatus, StatusCode: 500, Err: inner}
+	up := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 500, Err: inner}
 	err := a.decorateRateLimitError("tok", up)
 	if !errors.Is(err, inner) {
 		t.Fatalf("non-429 error must pass through, got %v", err)
@@ -67,7 +69,7 @@ func TestDecorateRateLimitErrorNon429Untouched(t *testing.T) {
 // TPM: the request itself is too large and waiting changes nothing.
 func TestDecorateRateLimitErrorTPMMessage(t *testing.T) {
 	a := &App{}
-	up := &UpstreamError{Kind: KindHTTPStatus, StatusCode: 429, Err: errors.New(tpmOverflowBody)}
+	up := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, Err: errors.New(tpmOverflowBody)}
 	err := a.decorateRateLimitError("tok", up)
 	if err == nil {
 		t.Fatal("nil error")

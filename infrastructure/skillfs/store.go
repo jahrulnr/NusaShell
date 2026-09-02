@@ -25,6 +25,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -117,20 +118,19 @@ func SeedBuiltinSkills(root string) error {
 		}
 
 		// Copy the entire skill directory from the embed.
-		srcDir := filepath.Join("agent/skills", skillID)
-		if err := fs.WalkDir(resources.BuiltinSkillsFS, srcDir, func(path string, d fs.DirEntry, err error) error {
+		// io/fs paths always use slash separators, including on Windows.
+		srcDir := pathpkg.Join("agent/skills", skillID)
+		if err := fs.WalkDir(resources.BuiltinSkillsFS, srcDir, func(embeddedPath string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			rel, err := filepath.Rel(srcDir, path)
-			if err != nil {
-				return err
-			}
-			destPath := filepath.Join(destDir, rel)
+			rel := strings.TrimPrefix(embeddedPath, srcDir)
+			rel = strings.TrimPrefix(rel, "/")
+			destPath := filepath.Join(destDir, filepath.FromSlash(rel))
 			if d.IsDir() {
 				return os.MkdirAll(destPath, 0o755)
 			}
-			data, err := resources.BuiltinSkillsFS.ReadFile(path)
+			data, err := resources.BuiltinSkillsFS.ReadFile(embeddedPath)
 			if err != nil {
 				return err
 			}

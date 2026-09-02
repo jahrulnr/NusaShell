@@ -24,6 +24,10 @@ func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust d
 // pipeline steps use AgentAutomation, internal delegates use AgentDelegate
 // (which also removes the delegate tool itself to prevent recursion).
 func (a *App) runHeadlessTurnKind(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind) (map[string]any, string, error) {
+	return a.runHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, kind, nil)
+}
+
+func (a *App) runHeadlessTurnKindObserved(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind, onUpdate func(conversationID string)) (map[string]any, string, error) {
 	provider, bareModel, apiKey, err := a.resolveHeadlessModel(model)
 	if err != nil {
 		return nil, "", err
@@ -65,32 +69,52 @@ func (a *App) runHeadlessTurnKind(ctx context.Context, prompt, model string, tru
 		RiskTierCap:    domain.TrustLevelToRiskTierCap(trust),
 		Workspace:      conv.Workspace,
 	}
+	if onUpdate != nil {
+		run.HeadlessUpdate = func() { onUpdate(convID) }
+	}
 	a.runsMu.Lock()
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
 
 	a.runTurn(run, provider, apiKey, bareModel, "", asstMsgID, false, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides))
 
+	finalMessageID := run.currentMessageID()
 	saved, err := a.Conversations.Get(convID)
 	if err != nil || saved == nil {
 		return nil, "", fmt.Errorf("headless turn: read conversation: %w", err)
 	}
-	var text string
-	var failed bool
-	for _, m := range saved.Messages {
-		if m.ID == asstMsgID {
-			text = m.Content
-			if m.Status == domain.StatusError {
-				failed = true
-			}
-			break
-		}
+	final, found := finalHeadlessAssistantMessage(saved.Messages, finalMessageID)
+	if !found {
+		return nil, "", fmt.Errorf("headless turn: final assistant message %s not found", finalMessageID)
 	}
-	if failed {
-		return nil, "", fmt.Errorf("headless turn failed: %s", text)
+	if final.Status == domain.StatusError {
+		return nil, "", fmt.Errorf("headless turn failed: %s", final.Content)
 	}
 	_ = schema // structured output validation is a future enhancement
-	return map[string]any{"output": text}, convID, nil
+	return map[string]any{"output": final.Content}, convID, nil
+}
+
+// finalHeadlessAssistantMessage returns the assistant message that ended the
+// headless run. A tool round may leave an intermediate assistant message with
+// an acknowledgement or partial text, followed by a fresh assistant message
+// containing the actual final answer. Prefer the run's current message ID so
+// an intentionally empty final round is not replaced by stale earlier text;
+// the reverse scan is a compatibility fallback for callers with no ID.
+func finalHeadlessAssistantMessage(messages []domain.Message, finalMessageID string) (domain.Message, bool) {
+	if finalMessageID != "" {
+		for _, message := range messages {
+			if message.ID == finalMessageID && message.Role == domain.RoleAssistant && !domain.IsHydrationMessage(message) {
+				return message, true
+			}
+		}
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		message := messages[i]
+		if message.Role == domain.RoleAssistant && !domain.IsHydrationMessage(message) {
+			return message, true
+		}
+	}
+	return domain.Message{}, false
 }
 
 // SteerHeadlessTurn queues a steer message on a running headless turn

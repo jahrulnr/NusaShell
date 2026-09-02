@@ -48,7 +48,7 @@ func TestRosterUniqueness(t *testing.T) {
 		MethodAppInfo,
 		MethodConversationsList, MethodConversationsCreate, MethodConversationsGet,
 		MethodConversationsRename, MethodConversationsDelete, MethodConversationsPickWorkspace,
-		MethodConversationsChunk, MethodTurnsStart, MethodTurnsStop,
+		MethodConversationsChunk, MethodTurnsStart, MethodTurnsStop, MethodToolStop,
 		MethodTurnsRetry, MethodTurnsSteer, MethodTurnsCancelSteer, MethodTurnsActive,
 		MethodToolContracts,
 		MethodProvidersList, MethodProvidersSave, MethodProvidersDelete, MethodProvidersTest,
@@ -57,6 +57,7 @@ func TestRosterUniqueness(t *testing.T) {
 		MethodPluginList, MethodPluginSave, MethodPluginDelete, MethodPluginTest,
 		MethodPluginStop, MethodPluginToolsList, MethodPluginUninstall,
 		MethodMemoryList, MethodMemorySave, MethodMemorySearch, MethodMemoryDelete,
+		MethodMemoryPrimaryUpdate, MethodMemoryAgentUpdate,
 		MethodTodosGet, MethodTodosDelete,
 		MethodDocsList, MethodDocsSearch, MethodDocsRead,
 		MethodLogsList, MethodLogsClear,
@@ -97,7 +98,7 @@ func TestRosterUniqueness(t *testing.T) {
 		EventAutomationEvent,
 		EventAcpRunStarted, EventAcpRunUpdated, EventAcpRunDone,
 		EventAcpPermissionRequested, EventAcpPermissionDecided, EventAcpSessionModeChanged,
-		EventLearningReviewStarted, EventLearningReviewDone,
+		EventLearningReviewStarted, EventLearningReviewDone, EventLearningReviewError,
 		EventSettingsApplied, EventSettingsRejected,
 	}
 	seenEv := map[string]bool{}
@@ -277,6 +278,18 @@ func TestEventFieldNames(t *testing.T) {
 	for _, k := range []string{"seq", "kind", "tool_call_id", "name", "args", "text", "presentation"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("missing field %q in RoundDeltaFrame JSON", k)
+		}
+	}
+
+	b, _ = json.Marshal(RoundDeltaFrame{
+		Seq: 2, Kind: RoundDeltaActivity, ToolCallID: "t", Name: "exec", Activity: RoundActivityToolCall,
+	})
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"seq", "kind", "tool_call_id", "name", "activity"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("missing field %q in activity RoundDeltaFrame JSON", k)
 		}
 	}
 }

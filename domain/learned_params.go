@@ -32,10 +32,11 @@ const (
 	// Future turns cap the context window to this value for the provider+model.
 	LearnedActionCapContext LearnedParamAction = "cap_context"
 	// LearnedActionNudgeUser: the upstream 400 rejected the request because
-	// the messages array contained no user message. Some providers/models
-	// require at least one user-role message. The retry loop injects a
-	// minimal user message (".") into the request when this is learned and
-	// the messages don't already contain a user role.
+	// the messages array did not end with a user message. Some
+	// providers/models require a user-role message as the final turn. The
+	// retry loop injects a minimal user message (".") when this is learned;
+	// an existing tool result remains the final turn because it is the active
+	// tool continuation.
 	LearnedActionNudgeUser LearnedParamAction = "nudge_user"
 )
 
@@ -135,10 +136,9 @@ func (r *LearnedParamRegistry) RecordCapContext(provider, model, param, reason s
 	return r.record(provider, model, param, LearnedActionCapContext, reason)
 }
 
-// RecordNudgeUser learns that provider+model requires at least one user
-// message in the request. The retry loop injects a minimal user message
-// (".") when this is learned and the messages don't already contain a
-// user role.
+// RecordNudgeUser learns that provider+model requires a user message at the
+// end of the request. The retry loop injects a minimal user message (".")
+// when this is learned and the request does not already end in a user turn.
 func (r *LearnedParamRegistry) RecordNudgeUser(provider, model, param, reason string) *LearnedParam {
 	return r.record(provider, model, param, LearnedActionNudgeUser, reason)
 }
@@ -221,9 +221,9 @@ func (r *LearnedParamRegistry) DisabledModalities(provider, model string) []stri
 }
 
 // NeedsUserNudge reports whether provider+model has learned that requests
-// must contain at least one user message. When true, the application layer
-// injects a minimal user message (".") into the request when the messages
-// don't already contain a user role.
+// must end with a user message. When true, the application layer injects a
+// minimal user message (".") into the request when the messages do not
+// already end in a user turn.
 func (r *LearnedParamRegistry) NeedsUserNudge(provider, model string) bool {
 	if r == nil || r.Entries == nil {
 		return false
@@ -424,6 +424,11 @@ func isParamStopword(param string) bool {
 //   - "bad_response_status_code: No user query found in messages."
 var noUserQueryRe = regexp.MustCompile(`(?i)no\s+user\s+(?:query|message)\s+found|messages?\s+must\s+contain\s+at\s+least\s+one\s+user\s+message`)
 
+// userMessageAtEndRe matches providers that reject assistant prefilling and
+// require the conversation to end with a user message. Claude 4.6-compatible
+// gateways use this wording when a retry replays a completed assistant turn.
+var userMessageAtEndRe = regexp.MustCompile(`(?i)assistant\s+message\s+prefill|conversation\s+must\s+end\s+with\s+(?:a\s+)?user\s+message`)
+
 // textOnlyModelRe matches "text-only" in error messages from text-only
 // models that reject non-text content (images, audio, video). Examples:
 //   - "Qwen3.8 open checkpoint is text-only; messages[131].content[1] must be a text part"
@@ -477,9 +482,9 @@ func ExtractContextLimit(body string) (int, string, bool) {
 //     disable the vision modality (most common trigger) and retry.
 //  4. "unsupported parameter" pattern — the model rejects a specific
 //     parameter; we strip it and retry.
-//  5. "no user query" pattern — the provider requires at least one user
-//     message but none was found; we inject a minimal user message on
-//     retry.
+//  5. assistant-prefill / "no user query" patterns — the provider requires
+//     a user message at the end (or at least one user message); we inject a
+//     minimal user message on retry.
 func Classify400Error(body string) (LearnedParamAction, string) {
 	b := strings.TrimSpace(body)
 	if b == "" {
@@ -500,7 +505,7 @@ func Classify400Error(body string) (LearnedParamAction, string) {
 	if m := unsupportedParamRe.FindStringSubmatch(b); len(m) > 1 {
 		return LearnedActionStrip, strings.ToLower(m[1])
 	}
-	if noUserQueryRe.MatchString(b) {
+	if userMessageAtEndRe.MatchString(b) || noUserQueryRe.MatchString(b) {
 		return LearnedActionNudgeUser, "user_message"
 	}
 	return "", ""

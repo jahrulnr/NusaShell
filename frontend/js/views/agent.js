@@ -40,12 +40,15 @@ import {
   bindOptimisticTurn,
   thinkingDots,
   setThinkingDots,
+  renderAgentActivityStatus,
+  setAgentActivityStatus,
   renderCompactionStatus,
   captureDisclosureState,
   restoreDisclosureState,
   parseShowImageOutput,
   parseShowAudioOutput,
   parseShowVideoOutput,
+  parseShowPDFOutput,
   decorateToolCard,
 } from './agent/render.js';
 import { bindSubagents, setSubagentConversation } from './agent/subagents.js';
@@ -61,7 +64,7 @@ import { loadToolContracts, normalizeToolCall } from './agent/tool-contracts.js'
 // placeToolCard appends a tool card to the right container: standalone cards
 // (ask_question, show, generate_*, artifact, subagent — anything with
 // dataset.standalone="true") go directly into the bubble so they render
-// without the .agent-tool-stack border-left lane; timeline events go into
+// without the .agent-tool-stack lane; tool events go into
 // the strip so the rail groups them.
 function placeToolCard(bubble, strip, card) {
   if (card.dataset.standalone === 'true') {
@@ -76,6 +79,12 @@ function placeToolCard(bubble, strip, card) {
 // is standalone but the old one was a terminal inside the strip, the new
 // card moves to the bubble (not stay in the strip with border-left).
 function swapToolCard(oldCard, newCard, bubble, strip) {
+  // Replacements (show/media/subagent) can happen while the user is reading
+  // the request or raw output. Preserve disclosure when both sides are
+  // <details>; completion must not silently change the reader's viewport.
+  const disclosure = oldCard?.tagName === 'DETAILS' && newCard?.tagName === 'DETAILS'
+    ? oldCard.open
+    : null;
   if (oldCard) {
     if (newCard.dataset.standalone === 'true' && oldCard.parentElement === strip) {
       oldCard.replaceWith(newCard);
@@ -83,6 +92,7 @@ function swapToolCard(oldCard, newCard, bubble, strip) {
     } else {
       oldCard.replaceWith(newCard);
     }
+    if (disclosure !== null) newCard.open = disclosure;
   } else {
     placeToolCard(bubble, strip, newCard);
   }
@@ -99,9 +109,17 @@ const state = {
   effort: 'auto', // reasoning effort: "auto" (omit) or a level from the model's supported_efforts
   providerRoute: localStorage.getItem('nusashell.provider_route') || '', // upstream provider pin on aggregators (OpenRouter); "" = auto
   runs: new Map(), // run_id -> {messageEl, toolStripEl, toolJobs, conversationId, runId}
+  completedLiveRuns: new Map(), // run_id -> { run, node } during terminal-event handoff
   pendingEvents: new Map(), // run_id -> events that won the start race
   get running() { return runForConversation(this.activeId) !== null; },
   pinned: true, // auto-scroll only when the user is at the bottom (per-room, saved/restored)
+  followDetached: false, // explicit user scroll-up keeps the live tail detached until bottom is reached
+  pendingScrollIntent: '', // gesture signal consumed by the next native scroll event
+  userScroll: '', // last user gesture direction; guards marker re-pins during momentum
+  touchY: null,
+  suppressScrollTracking: false,
+  scrollMutation: null,
+  initialScroll: null,
   steerId: null, // id of the queued steer shown in the strip (per-room, saved/restored)
   steerDraft: '', // text of pending steer (per-room, saved/restored)
   contextEstimate: 0, // backend context tokens for the active room (server SoT: live estimate during a turn, provider-measured after)
@@ -147,6 +165,110 @@ const state = {
 };
 
 const MAX_LIVE_TOOL_JOBS = 128;
+const ACTIVITY_ROTATE_MS = 5000;
+const SCROLL_TOLERANCE = 24;
+const FOLLOW_SETTLE_FRAMES = 3;
+const INITIAL_SCROLL_SETTLE_FRAMES = 8;
+
+const THREAD_SCROLL_EVENTS = Object.freeze({
+  up: 'agent.scroll.up',
+  down: 'agent.scroll.down',
+  autoFollowStart: 'agent.auto-follow.start',
+  touchDown: 'agent.touch.down',
+  touchUp: 'agent.touch.up',
+});
+
+let followFrame = null;
+let followThread = null;
+let followFrames = 0;
+let followSequence = 0;
+let initialScrollSequence = 0;
+let scrollBinding = null;
+
+const ACTIVITY_COPY = {
+  thinking: ['Thinking…', 'Planning next step…', 'Working in background…'],
+  'tool-call': ['Preparing tool call…', 'Working in background…', 'Planning next step…'],
+  tool: ['Working in background…', 'Processing tool output…', 'Planning next step…'],
+  writing: ['Writing response…', 'Checking the result…', 'Finishing response…'],
+};
+
+function activityPhase(run) {
+  if (run?.activityPhase === 'tool-call') return 'tool-call';
+  if (run?.activityPhase === 'tool') return 'tool';
+  if (String(run?.raw || '').trim()) return 'writing';
+  return 'thinking';
+}
+
+function activityCopies(run, phase) {
+  const copies = ACTIVITY_COPY[phase] || ACTIVITY_COPY.thinking;
+  if (phase !== 'tool-call' || !run?.activityToolName) return copies;
+  const name = String(run.activityToolName).replace(/_/g, ' ').trim();
+  if (!name) return copies;
+  return [`Preparing ${name}…`, ...copies.slice(1)];
+}
+
+function ensureAgentActivityStatus(run) {
+  const bubble = run?.bubble;
+  if (!bubble?.isConnected) return null;
+  let status = run.activityNode;
+  if (!status?.isConnected || status.parentElement !== bubble) {
+    run.activityNode?.remove?.();
+    status = renderAgentActivityStatus();
+    run.activityNode = status;
+  }
+  // New rounds and tool cards are appended after the previous status node.
+  // Keep one status row at the end of the live bubble without rebuilding it.
+  if (bubble.lastElementChild !== status) bubble.append(status);
+  return status;
+}
+
+function syncAgentActivity(run, rotate = false) {
+  if (!run) return;
+  const compacting = state.compactionStatus.has(run.conversationId);
+  const hasVisibleContent = Boolean(String(run.raw || '').trim() || String(run.rawReasoning || '').trim());
+  const hasToolCard = Boolean(run.toolJobs?.size);
+  const constructingTool = run.activityPhase === 'tool-call' || Boolean(run.pendingToolDeltas?.size);
+  const visible = !compacting
+    && !run.waitingForAsk
+    && run.bubble?.isConnected
+    && (constructingTool || (!hasVisibleContent && !hasToolCard));
+  if (!visible) {
+    if (run.activityTimer) clearInterval(run.activityTimer);
+    run.activityTimer = null;
+    if (run.activityNode) setAgentActivityStatus(run.activityNode, { visible: false });
+    return;
+  }
+  const status = ensureAgentActivityStatus(run);
+  if (!status) {
+    if (run.activityTimer) clearInterval(run.activityTimer);
+    run.activityTimer = null;
+    return;
+  }
+  const phase = activityPhase(run);
+  if (run.activityCopyPhase !== phase) {
+    run.activityCopyPhase = phase;
+    run.activityCopyIndex = 0;
+  } else if (rotate) {
+    run.activityCopyIndex = (run.activityCopyIndex + 1) % activityCopies(run, phase).length;
+  }
+  const copies = activityCopies(run, phase);
+  setAgentActivityStatus(status, {
+    text: copies[run.activityCopyIndex % copies.length],
+    phase,
+    visible: true,
+  });
+  if (!run.activityTimer) {
+    run.activityTimer = setInterval(() => syncAgentActivity(run, true), ACTIVITY_ROTATE_MS);
+  }
+}
+
+function stopAgentActivity(run) {
+  if (!run) return;
+  if (run.activityTimer) clearInterval(run.activityTimer);
+  run.activityTimer = null;
+  run.activityNode?.remove?.();
+  run.activityNode = null;
+}
 
 // appendLiveText appends a single delta to the given field on the run state.
 // Live round text is unbounded on purpose: the round ends at the next
@@ -172,10 +294,23 @@ function appendLiveText(target, field, text) {
 // so a dropped HTTP connection self-heals without any room buffer mirror.
 
 const STREAM_RETRY_DELAYS = [300, 1200, 4000];
+const STREAM_GAP_RECOVERY_LIMIT = 2;
+// WebSocket turn.done normally follows round.done immediately, but the two
+// transports are independent. Keep a final SSE round alive briefly so a
+// faster SSE delivery cannot delete the live run before the authoritative
+// turn event arrives. The bounded fallback also handles a lost WebSocket.
+const ROUND_DONE_FALLBACK_MS = 5000;
 
-// closeRoundStream aborts a live round stream, if any.
-function closeRoundStream(run) {
+// closeRoundStream aborts a live round stream, if any. Reconnects keep the
+// retry budget; an explicit provider retry/new round can request a reset.
+function closeRoundStream(run, { resetRetries = true } = {}) {
   if (!run) return;
+  run.streamToken = (run.streamToken || 0) + 1;
+  if (run.streamRecoveryTimer) {
+    clearTimeout(run.streamRecoveryTimer);
+    run.streamRecoveryTimer = null;
+  }
+  run.streamRecoveryPending = false;
   if (run.streamReader) {
     try { run.streamReader.cancel(); } catch { /* already closed */ }
     run.streamReader = null;
@@ -184,7 +319,7 @@ function closeRoundStream(run) {
     run.streamAbort.abort();
     run.streamAbort = null;
   }
-  run.streamRetries = 0;
+  if (resetRetries) run.streamRetries = 0;
 }
 
 // openRoundStream attaches the SSE stream for the run's current round
@@ -194,8 +329,9 @@ async function openRoundStream(run) {
   if (!run || !run.runId || !run.messageId) return;
   const attachedMessage = run.streamMessageId;
   if (attachedMessage === run.messageId && run.streamReader) return; // already live
-  closeRoundStream(run);
+  closeRoundStream(run, { resetRetries: false });
   run.streamMessageId = run.messageId;
+  const streamToken = run.streamToken;
   const params = new URLSearchParams({ run_id: run.runId, message_id: run.messageId });
   if (run.lastSeq > 0) params.set('after', String(run.lastSeq));
   run.streamAbort = new AbortController();
@@ -204,6 +340,7 @@ async function openRoundStream(run) {
       headers: { Accept: 'text/event-stream' },
       signal: run.streamAbort.signal,
     });
+    if (streamToken !== run.streamToken) return;
     if (!resp.ok) {
       handleStreamMiss(run);
       return;
@@ -212,55 +349,252 @@ async function openRoundStream(run) {
       handleStreamMiss(run);
       return;
     }
-    run.streamReader = resp.body.getReader();
+    const reader = resp.body.getReader();
+    if (streamToken !== run.streamToken) {
+      try { reader.cancel(); } catch { /* already closed */ }
+      return;
+    }
+    run.streamReader = reader;
     const decoder = new TextDecoder();
     let buffer = '';
     let event = '';
     let data = '';
+    let terminalSeen = false;
     const flushBlock = () => {
+      if (streamToken !== run.streamToken) return;
       if (event === 'round.delta' && data) {
         try {
           const frame = JSON.parse(data);
           applyRoundDeltaFrame(run, frame);
-        } catch { /* malformed frame; skip */ }
+        } catch {
+          // A malformed frame is indistinguishable from a dropped frame at
+          // this boundary. Re-open from the last contiguous sequence rather
+          // than silently losing the rest of the round.
+          recoverRoundStream(run);
+        }
       } else if (event === 'round.done' && data) {
         try {
           const done = JSON.parse(data);
+          terminalSeen = true;
           applyRoundDoneFrame(run, done);
-        } catch { /* malformed terminal frame; fall back to WS turn.done */ }
+        } catch {
+          // The WebSocket terminal event may still arrive, but first give the
+          // SSE stream a chance to replay a complete terminal frame.
+          recoverRoundStream(run);
+        }
       }
       event = '';
       data = '';
     };
     for (;;) {
-      const { done, value } = await run.streamReader.read();
+      const { done, value } = await reader.read();
       if (done) break; // server closed the stream; terminal frame already handled
+      if (streamToken !== run.streamToken) return;
       buffer += decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
       let idx;
       while ((idx = buffer.indexOf('\n\n')) >= 0) {
         const block = buffer.slice(0, idx);
         buffer = buffer.slice(idx + 2);
         for (const line of block.split('\n')) {
-          if (line.startsWith('event: ')) event = line.slice(7);
-          else if (line.startsWith('data: ')) data = line.slice(6);
+          if (line.startsWith('event:')) event = line.slice(6).trimStart();
+          else if (line.startsWith('data:')) data += `${data ? '\n' : ''}${line.slice(5).trimStart()}`;
         }
         flushBlock();
+        if (streamToken !== run.streamToken) return;
       }
     }
+    buffer += decoder.decode();
+    if (buffer.trim() || event || data) {
+      for (const line of buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trimStart();
+        else if (line.startsWith('data:')) data += `${data ? '\n' : ''}${line.slice(5).trimStart()}`;
+      }
+      flushBlock();
+    }
+    if (!terminalSeen && streamToken === run.streamToken
+      && runForConversation(run.conversationId) === run) {
+      retryRoundStream(run, 'stream ended before round.done');
+    }
   } catch (err) {
+    if (streamToken !== run.streamToken) return;
     if (err?.name === 'AbortError' || run.streamAbort?.signal?.aborted) return;
     // Network drop mid-round: retry with backoff, resuming from lastSeq.
-    const attempts = run.streamRetries || 0;
-    if (attempts < STREAM_RETRY_DELAYS.length && runForConversation(run.conversationId) === run) {
-      run.streamRetries = attempts + 1;
-      const delay = STREAM_RETRY_DELAYS[attempts];
-      setTimeout(() => { void openRoundStream(run); }, delay);
+    retryRoundStream(run, err?.message || 'stream read failed');
+  } finally {
+    if (streamToken === run.streamToken) {
+      run.streamReader = null;
+      run.streamAbort = null;
+    }
+  }
+}
+
+// retryRoundStream reconnects the same round without discarding the
+// contiguous cursor. A normal network EOF/read error replays from lastSeq;
+// sequence-gap recovery uses the same path after cancelling the old reader.
+function retryRoundStream(run, reason = '') {
+  if (!run || run.streamRecoveryPending || run.streamNeedsSnapshot) return;
+  const attempts = run.streamRetries || 0;
+  if (attempts >= STREAM_RETRY_DELAYS.length) {
+    run.streamNeedsSnapshot = true;
+    handleStreamMiss(run);
+    return;
+  }
+  run.streamRetries = attempts + 1;
+  const delay = STREAM_RETRY_DELAYS[attempts];
+  if (reason) run.streamLastError = reason;
+  setTimeout(() => {
+    if (runForConversation(run.conversationId) !== run || run.conversationId !== state.activeId) return;
+    void openRoundStream(run);
+  }, delay);
+}
+
+// recoverRoundStream re-opens the SSE stream from the last contiguous Seq.
+// RoundStream keeps a replay tail, so this repairs best-effort subscriber
+// drops without asking the backend to rebuild the whole conversation. If the
+// replay head has already fallen off, completion falls back to the snapshot.
+function recoverRoundStream(run) {
+  if (!run || run.conversationId !== state.activeId || run.streamRecoveryPending) return;
+  const attempts = run.streamGapAttempts || 0;
+  if (attempts >= STREAM_GAP_RECOVERY_LIMIT) {
+    run.streamNeedsSnapshot = true;
+    run.streamGap = null;
+    closeRoundStream(run);
+    run.streamMessageId = null;
+    return;
+  }
+  run.streamGapAttempts = attempts + 1;
+  closeRoundStream(run, { resetRetries: false });
+  run.streamMessageId = null;
+  run.streamRecoveryPending = true;
+  run.streamRecoveryTimer = setTimeout(() => {
+    run.streamRecoveryTimer = null;
+    run.streamRecoveryPending = false;
+    if (runForConversation(run.conversationId) !== run || run.conversationId !== state.activeId) return;
+    void openRoundStream(run);
+  }, 0);
+}
+
+function acceptRoundDeltaFrame(run, frame) {
+  const seq = Number(frame?.seq);
+  if (!Number.isSafeInteger(seq) || seq <= 0) return true;
+  const lastSeq = Number(run.lastSeq) || 0;
+  if (seq <= lastSeq) return false; // duplicate/late frame after a replay
+  if (seq !== lastSeq + 1) {
+    run.streamGap = { expected: lastSeq + 1, received: seq };
+    recoverRoundStream(run);
+    return false;
+  }
+  run.streamGap = null;
+  run.streamGapAttempts = 0;
+  run.streamRetries = 0;
+  return true;
+}
+
+function rememberCompletedLiveRun(run) {
+  if (!run?.runId || !run.msgNode?.isConnected) return;
+  const entry = { run, node: run.msgNode, conversationId: run.conversationId };
+  state.completedLiveRuns.set(run.runId, entry);
+  setTimeout(() => {
+    if (state.completedLiveRuns.get(run.runId) === entry) state.completedLiveRuns.delete(run.runId);
+  }, ROUND_DONE_FALLBACK_MS * 2);
+}
+
+function isLiveRunEntry(run) {
+  if (!run?.runId) return false;
+  return state.runs.get(run.runId) === run
+    || state.completedLiveRuns.get(run.runId)?.run === run;
+}
+
+function appendTurnDoneMetadata(run, payload) {
+  const node = run?.msgNode;
+  if (!node || !payload?.message_id) return;
+  node.querySelectorAll('.agent-turn-meta, .agent-message-meta').forEach((n) => n.remove());
+  const meta = el('div', { class: 'agent-turn-meta' });
+  if (payload.model) meta.append(el('span', { class: 'agent-turn-tag', text: payload.model }));
+  if (payload.usage) {
+    meta.append(el('span', {
+      class: 'agent-turn-tag',
+      text: `↑${formatTokens(payload.usage.input_tokens ?? 0)} ↓${formatTokens(payload.usage.output_tokens ?? 0)}`,
+    }));
+    if (payload.usage.cache_read) {
+      meta.append(el('span', { class: 'agent-turn-tag', text: `cache ${formatTokens(payload.usage.cache_read)}` }));
+    }
+  }
+  meta.append(el('span', { class: 'agent-message-meta', text: fmtTime(new Date().toISOString()) }));
+  node.append(meta);
+  // Render any Mermaid diagrams in the just-finished message (settle point).
+  void renderMermaidDiagrams(node); void highlightCode(node); attachZoomButtons(node);
+}
+
+function finalizeLiveTurn(run, payload, { streamConfirmed = false } = {}) {
+  if (!run || run.turnDoneFinalized) return false;
+  run.turnDoneFinalized = true;
+  if (run.turnCompletionTimer) {
+    clearTimeout(run.turnCompletionTimer);
+    run.turnCompletionTimer = null;
+  }
+  const error = payload?.error || run.roundDoneError || '';
+  flushLiveRender(run);
+  // Only preserve a live node after the ordered SSE stream delivered its
+  // terminal frame. If the bounded fallback fires first, the authoritative
+  // snapshot must repaint the missing tail instead of preserving a partial
+  // node from the WebSocket race.
+  const preservedLiveNode = !error
+    && streamConfirmed
+    && run.msgNode?.isConnected
+    && !run.streamNeedsSnapshot
+    && !run.renderDirty
+    ? run.msgNode
+    : null;
+  if (preservedLiveNode) rememberCompletedLiveRun(run);
+  appendTurnDoneMetadata(run, payload);
+  const willAutoContinue = Boolean(payload?.auto_continue?.should_continue);
+  endTurn(run.runId, willAutoContinue);
+  state.completedLiveRuns.delete(run.runId);
+  if (run.conversationId === state.activeId && !willAutoContinue) {
+    void refreshActiveConversation({ preserveLiveNode: preservedLiveNode });
+  }
+  return true;
+}
+
+function scheduleRoundDoneFallback(run) {
+  if (!run) return;
+  if (run.roundDoneTimer) clearTimeout(run.roundDoneTimer);
+  run.roundDoneTimer = setTimeout(() => {
+    run.roundDoneTimer = null;
+    if (!isLiveRunEntry(run)) return;
+    if (run.roundDone) {
+      finishRoundFromSSE(run);
       return;
     }
-    handleStreamMiss(run);
-  } finally {
-    run.streamReader = null;
-  }
+    // A terminal frame reported deltas that this subscriber never received.
+    // If replay could not repair the gap before the bounded wait, force the
+    // authoritative snapshot path rather than preserving a partial bubble.
+    const done = run.roundTerminalPending;
+    if (!done || done.next) return;
+    run.streamNeedsSnapshot = true;
+    run.roundDone = true;
+    run.roundDoneState = done.state || '';
+    run.roundDoneUsage = done.usage || null;
+    run.roundDoneError = done.error || '';
+    run.roundTerminalPending = null;
+    finishRoundFromSSE(run);
+  }, ROUND_DONE_FALLBACK_MS);
+}
+
+function finishRoundFromSSE(run) {
+  if (!run || !isLiveRunEntry(run) || !run.roundDone) return;
+  const payload = run.turnDonePayload || {
+    run_id: run.runId,
+    message_id: run.messageId,
+    conversation_id: run.conversationId,
+    usage: run.roundDoneUsage,
+    error: run.roundDoneError,
+  };
+  run.roundDone = false;
+  run.roundDoneTimer = null;
+  finalizeLiveTurn(run, payload, { streamConfirmed: true });
 }
 
 // handleStreamMiss is the fallback when a round stream cannot be attached:
@@ -269,6 +603,11 @@ async function openRoundStream(run) {
 function handleStreamMiss(run) {
   if (!run) return;
   if (run.streamAbort) { run.streamAbort.abort(); run.streamAbort = null; }
+  // Once the replay tail is exhausted, an intermediate snapshot can still
+  // contain only the running placeholder. Keep the live DOM intact and let
+  // the terminal path perform the authoritative refresh instead of wiping
+  // the response the user has already seen.
+  if (run.streamNeedsSnapshot) return;
   if (run.conversationId === state.activeId && runForConversation(run.conversationId) === run) {
     void refreshActiveConversation();
   }
@@ -277,27 +616,46 @@ function handleStreamMiss(run) {
 // applyRoundDeltaFrame routes one round.delta frame into the live run state.
 function applyRoundDeltaFrame(run, frame) {
   if (!run) return;
-  run.lastSeq = frame.seq;
+  if (!acceptRoundDeltaFrame(run, frame)) return;
+  const seq = Number(frame?.seq);
+  if (Number.isSafeInteger(seq) && seq > 0) run.lastSeq = seq;
   switch (frame.kind) {
     case 'text':
       appendLiveText(run, 'raw', frame.text);
+      run.renderDirty = true;
+      run.activityPhase = 'writing';
       run.thinkingLive = false;
+      if (run.conversationId === state.activeId) syncRunLoadingIndicator(run);
       if (run.conversationId === state.activeId) scheduleLiveRender(run);
       break;
     case 'reasoning':
       appendLiveText(run, 'rawReasoning', frame.text);
+      run.renderDirty = true;
+      run.activityPhase = 'thinking';
       run.thinkingLive = true;
+      if (run.conversationId === state.activeId) syncRunLoadingIndicator(run);
       if (run.conversationId === state.activeId) scheduleLiveRender(run);
+      break;
+    case 'activity':
+      if (frame.activity === 'tool_call') run.activityPhase = 'tool-call';
+      if (frame.name) run.activityToolName = frame.name;
+      if (run.conversationId === state.activeId) syncRunLoadingIndicator(run);
       break;
     case 'tool':
       if (!frame.tool_call_id) break;
+      run.activityPhase = 'tool';
+      if (frame.name) run.activityToolName = frame.name;
       run.thinkingLive = false;
       run.toolsStarted = true;
-      if (isSubagentAuxiliaryTool(frame.name)) break;
+      if (isSubagentAuxiliaryTool(frame.name)) {
+        if (run.conversationId === state.activeId) syncRunLoadingIndicator(run);
+        break;
+      }
       if (run.conversationId !== state.activeId) break;
       sealReasoningStreaming(run.reasoningEl);
       ensureLiveToolJob(run, frame.tool_call_id, frame.name, frame.args, frame.presentation);
       if (frame.text) queueToolDelta(run, frame.tool_call_id, frame.text);
+      syncRunLoadingIndicator(run);
       break;
   }
 }
@@ -308,9 +666,25 @@ function applyRoundDeltaFrame(run, frame) {
 // round bookkeeping.
 function applyRoundDoneFrame(run, done) {
   if (!run) return;
+  const isCurrentRun = state.runs.get(run.runId) === run;
+  const isLiveRun = isCurrentRun || state.completedLiveRuns.get(run.runId)?.run === run;
+  const reportedLastSeq = Number(done.last_seq);
+  const observedLastSeq = Number(run.lastSeq) || 0;
+  if (isLiveRun && Number.isSafeInteger(reportedLastSeq) && reportedLastSeq > observedLastSeq) {
+    // A subscriber can drain its queue and receive round.done without ever
+    // receiving the frames dropped while the queue was full. Keep the
+    // terminal metadata pending, then replay from the last contiguous Seq.
+    // The bounded fallback below prevents a permanently incomplete live node
+    // if the replay head has already fallen off the server buffer.
+    run.roundTerminalPending = done;
+    if (!done.next) scheduleRoundDoneFallback(run);
+    recoverRoundStream(run);
+    return;
+  }
+  run.roundTerminalPending = null;
   run.lastSeq = 0;
   run.streamMessageId = null;
-  if (run.msgNode && done.usage) {
+  if (isCurrentRun && run.msgNode && done.usage) {
     run.msgNode.querySelectorAll('.agent-turn-meta, .agent-message-meta').forEach((n) => n.remove());
     const meta = el('div', { class: 'agent-turn-meta' });
     const usage = done.usage || {};
@@ -322,9 +696,30 @@ function applyRoundDoneFrame(run, done) {
   }
   // The backend reuses run_id across auto-continue turns; keep the run entry
   // so the next agent.turn.started (same run) finds it and opens the next
-  // round stream. The WebSocket agent.turn.done still drives the final
-  // refresh + sounds when the chain ends (next == null).
-  endTurn(run.runId, Boolean(done.next));
+  // round stream. For a final round, do not release the run immediately:
+  // round.done and agent.turn.done use different transports and can arrive
+  // in either order. The WebSocket terminal normally wins; the bounded
+  // fallback below handles a lost WebSocket without leaving the UI running.
+  if (done.next) {
+    if (isLiveRun) endTurn(run.runId, true);
+  } else if (isLiveRun) {
+    run.roundDone = true;
+    run.roundDoneState = done.state || '';
+    run.roundDoneUsage = done.usage || null;
+    run.roundDoneError = done.error || '';
+    if (run.turnCompletionTimer) {
+      clearTimeout(run.turnCompletionTimer);
+      run.turnCompletionTimer = null;
+    }
+    if (run.roundDoneTimer) clearTimeout(run.roundDoneTimer);
+    if (run.turnDonePayload) {
+      // The WebSocket terminal arrived first. The SSE terminal is the proof
+      // that every queued delta before it has been consumed by the browser.
+      queueMicrotask(() => finalizeLiveTurn(run, run.turnDonePayload, { streamConfirmed: true }));
+    } else {
+      run.roundDoneTimer = setTimeout(() => finishRoundFromSSE(run), ROUND_DONE_FALLBACK_MS);
+    }
+  }
   void renderMermaidDiagrams(run.msgNode); void highlightCode(run.msgNode); attachZoomButtons(run.msgNode);
 }
 
@@ -391,7 +786,7 @@ function ensureLiveToolJob(run, toolCallId, name, args, presentation) {
   const job = isMediaGenerationTool(toolName)
     ? renderToolCallCard({ id: toolCallId, name: toolName, args: resolvedArgs, status: 'running', presentation })
     : renderToolJob({ id: toolCallId, name: toolName, args: resolvedArgs, status: 'running', presentation });
-  if (isStreamingTool(toolName)) bindToolStop(job, () => run.runId);
+  if (isStreamingTool(toolName)) bindToolStop(job, () => ({ run_id: run.runId, tool_call_id: toolCallId }));
   setLiveToolJob(run.toolJobs, toolCallId, job);
   placeToolCard(run.bubble, run.strip, job);
   startToolElapsed(job);
@@ -402,10 +797,33 @@ function ensureLiveToolJob(run, toolCallId, name, args, presentation) {
 
 function resetLiveRoundText(run) {
   if (!run) return;
+  if (run.roundDoneTimer) {
+    clearTimeout(run.roundDoneTimer);
+    run.roundDoneTimer = null;
+  }
+  if (run.turnCompletionTimer) {
+    clearTimeout(run.turnCompletionTimer);
+    run.turnCompletionTimer = null;
+  }
   run.raw = '';
   run.rawReasoning = '';
+  run.renderDirty = false;
+  run.lastSeq = 0;
+  run.streamGap = null;
+  run.streamGapAttempts = 0;
+  run.streamRetries = 0;
+  run.streamNeedsSnapshot = false;
   run.thinkingLive = false;
   run.toolsStarted = false;
+  run.activityPhase = 'thinking';
+  run.activityToolName = '';
+  run.roundDone = false;
+  run.roundDoneState = '';
+  run.roundDoneUsage = null;
+  run.roundDoneError = '';
+  run.roundTerminalPending = null;
+  run.turnDonePayload = null;
+  run.turnDoneFinalized = false;
 }
 
 // Active-message windowing sizes (messages, not turns). INITIAL_WINDOW keeps
@@ -442,6 +860,89 @@ let threadEndObserver = null;
 let threadEndObserverThread = null;
 let threadMutationObserver = null;
 let threadMutationObserverThread = null;
+
+function scheduleFrame(thread, callback) {
+  const view = thread?.ownerDocument?.defaultView;
+  const raf = view?.requestAnimationFrame || globalThis.requestAnimationFrame;
+  if (typeof raf === 'function') {
+    const id = raf.call(view || globalThis, callback);
+    return {
+      id,
+      cancel: () => {
+        const cancel = view?.cancelAnimationFrame || globalThis.cancelAnimationFrame;
+        if (typeof cancel === 'function') cancel.call(view || globalThis, id);
+      },
+    };
+  }
+  const id = setTimeout(callback, 0);
+  return { id, cancel: () => clearTimeout(id) };
+}
+
+function emitThreadScrollEvent(thread, type, detail = {}) {
+  const EventCtor = thread?.ownerDocument?.defaultView?.CustomEvent || globalThis.CustomEvent;
+  if (typeof EventCtor !== 'function' || typeof thread?.dispatchEvent !== 'function') return;
+  thread.dispatchEvent(new EventCtor(type, { detail }));
+}
+
+function cancelScheduledFollow() {
+  followSequence++;
+  followFrame?.cancel?.();
+  followFrame = null;
+  followThread = null;
+  followFrames = 0;
+}
+
+function cancelInitialScroll() {
+  const initial = state.initialScroll;
+  if (!initial) return;
+  initial.cancelled = true;
+  initial.frame?.cancel?.();
+  state.initialScroll = null;
+  initialScrollSequence++;
+  state.suppressTopLoad = false;
+  state.suppressScrollTracking = false;
+}
+
+function cancelScrollMutation() {
+  if (state.scrollMutation) state.scrollMutation.cancelled = true;
+  state.scrollMutation = null;
+  state.suppressScrollTracking = false;
+}
+
+function markUserScrollIntent(thread, direction, source = 'gesture') {
+  if (!thread || !direction) return;
+  state.pendingScrollIntent = direction;
+  state.userScroll = direction;
+  emitThreadScrollEvent(thread, direction === 'up' ? THREAD_SCROLL_EVENTS.up : THREAD_SCROLL_EVENTS.down, {
+    direction,
+    source,
+  });
+  if (direction !== 'up') return;
+
+  state.followDetached = true;
+  state.pinned = false;
+  cancelScheduledFollow();
+  if (state.initialScroll) cancelInitialScroll();
+  if (state.scrollMutation?.thread === thread) cancelScrollMutation();
+}
+
+function scrollDirectionFromGeometry(thread) {
+  const previous = state.pinGeom?.thread === thread ? state.pinGeom.scrollTop : null;
+  if (previous == null) return '';
+  if (thread.scrollTop < previous) return 'up';
+  if (thread.scrollTop > previous) return 'down';
+  return '';
+}
+
+function startAutoFollow(thread, source = 'marker') {
+  if (!thread || state.followDetached) return false;
+  const wasPinned = state.pinned;
+  state.pinned = true;
+  if (!wasPinned) {
+    emitThreadScrollEvent(thread, THREAD_SCROLL_EVENTS.autoFollowStart, { source });
+  }
+  return true;
+}
 
 function observerConstructor(thread, name) {
   return thread?.ownerDocument?.defaultView?.[name] || globalThis[name];
@@ -488,7 +989,9 @@ function ensureThreadEndMarker() {
         // viewport between follow-scrolls, and treating that as "the user
         // scrolled up" killed autoscroll mid-turn. Unpinning is decided
         // exclusively by updateScrollPin (direction-aware scroll events).
-        if (entry.isIntersecting || isThreadAtBottom(thread)) state.pinned = true;
+        if ((entry.isIntersecting || isThreadAtBottom(thread)) && !state.followDetached) {
+          startAutoFollow(thread, 'end-marker');
+        }
       }, { root: thread, threshold: 0.01 });
       threadEndObserverThread = thread;
       threadEndObserver.observe(marker);
@@ -710,6 +1213,12 @@ async function createConversation(title = '') {
     state.conversation = conversation;
     state.messages = [];
     state.pinned = true;
+    state.followDetached = false;
+    state.pendingScrollIntent = '';
+    state.userScroll = '';
+    cancelScheduledFollow();
+    cancelInitialScroll();
+    cancelScrollMutation();
     state.steerId = null;
     state.steerDraft = '';
     state.attachments = [];
@@ -888,7 +1397,10 @@ async function openConversation(id) {
     routePicker?.refresh();
   }
   renderConversationList();
-  renderThread(windowedActiveMessages(), true);
+  // A fresh browser load has no per-room scroll intent and should land on the
+  // latest messages. When a room was explicitly detached before switching
+  // away, preserve that intent instead of forcing the reader to the tail.
+  renderThread(windowedActiveMessages(), !hasSaved || state.pinned);
   // Repair legacy Untitled rooms as soon as their persisted first user
   // message is available, not only after the next completed turn.
   void maybeAutoTitleConversation(id, { conversation, messages });
@@ -966,7 +1478,10 @@ async function restorePendingAsks(conversationId, token) {
       placeToolCard(run.bubble, run.strip, card);
     }
     setLiveToolJob(run.toolJobs, a.tool_call_id, card);
+    startToolElapsed(card);
   }
+  run.waitingForAsk = true;
+  syncRunLoadingIndicator(run);
   scrollToBottom();
 }
 
@@ -998,6 +1513,7 @@ async function reattachActiveRunFromBackend() {
     toolArgs: new Map(),
     raw: '',
     rawReasoning: '',
+    renderDirty: false,
     round: 1,
     conversationId: conversationId, runId: active.run_id,
     messageId: active.message_id,
@@ -1151,7 +1667,11 @@ function reattachActiveRun() {
   syncRunLoadingIndicator(run);
   clearToolTimers(run);
   run.toolJobs = toolJobs;
-  scrollToBottom(true);
+  if (run.renderDirty || run.pendingToolDeltas?.size) scheduleLiveRender(run);
+  // Re-attaching a live run is part of opening/refreshing a room, not a new
+  // user action. Respect a saved detached reader; the initial room render has
+  // already handled the fresh-load bottom jump.
+  scrollToBottom();
   // Attach the per-round SSE stream for the current round: switch-back and
   // reload both replay the accumulated deltas from the server-side round
   // buffer, so the re-attached DOM shows the full live tail, not a blank
@@ -1171,13 +1691,28 @@ function renderThread(messages, force = true, disclosureState = null) {
     ensureThreadEndMarker();
     return;
   }
+  const preservedScrollTop = !force && !state.pinned ? thread.scrollTop : null;
+  const scrollMutation = !force
+    ? { thread, preservedScrollTop, cancelled: false }
+    : null;
+  if (scrollMutation) {
+    if (state.scrollMutation) state.scrollMutation.cancelled = true;
+    state.scrollMutation = scrollMutation;
+    // replaceChildren can transiently reset scrollTop to zero. Do not let
+    // that internal layout movement look like a reader scroll-up.
+    state.suppressScrollTracking = true;
+  }
   thread.replaceChildren(renderConversation(messages, retryTurn));
   restoreDisclosureState(thread, disclosureState);
   ensureThreadEndMarker();
   mountCompactionStatus(state.activeId, runForConversation(state.activeId));
   // Render any Mermaid diagrams in the freshly painted thread (settle point,
   // not per-delta).
-  void renderMermaidDiagrams(thread); void highlightCode(thread); attachZoomButtons(thread);
+  const settleEnhancements = Promise.allSettled([
+    renderMermaidDiagrams(thread),
+    highlightCode(thread),
+  ]);
+  attachZoomButtons(thread);
   // Show the "Load older" button when the window holds back older messages.
   updateOlderSentinel();
   // Defer the scroll until after layout: setting scrollTop synchronously
@@ -1187,9 +1722,38 @@ function renderThread(messages, force = true, disclosureState = null) {
     // Opening/first paint: force to the bottom robustly across layout frames.
     scrollThreadToBottomHard();
   } else {
-    // Background refresh: respect the pin so a user reading history is not yanked.
-    requestAnimationFrame(() => scrollToBottom(false));
+    // Background refresh: preserve the reader's current position, or follow
+    // the tail only if the reader was already pinned there.
+    const restore = () => {
+      if (state.scrollMutation !== scrollMutation) return;
+      if (scrollMutation.cancelled) {
+        state.scrollMutation = null;
+        state.suppressScrollTracking = false;
+        return;
+      }
+      if (state.pinned && !state.followDetached) {
+        scrollThreadToBottomNow(thread);
+        scheduleScrollToBottom();
+      } else if (scrollMutation.preservedScrollTop != null) {
+        thread.scrollTop = scrollMutation.preservedScrollTop;
+        state.pinGeom = { thread, scrollTop: thread.scrollTop };
+      }
+      // Release tracking after the layout-induced scroll event has had a
+      // chance to settle. Gesture handlers can cancel this transaction first.
+      scheduleFrame(thread, () => {
+        if (state.scrollMutation !== scrollMutation) return;
+        state.scrollMutation = null;
+        state.suppressScrollTracking = false;
+      });
+    };
+    scheduleFrame(thread, restore);
   }
+  // Lazy Mermaid/highlight work can change height after the first follow frame.
+  // A completed enhancement gets the same guarded, cancellable follow pass.
+  void settleEnhancements.finally(() => {
+    if (agentThread() !== thread) return;
+    if (force || state.pinned) scheduleScrollToBottom();
+  });
 }
 
 function renderAttachments() {
@@ -1352,11 +1916,14 @@ function beginTurn(runId, userText, attachments = []) {
     toolArgs: existing?.toolArgs || new Map(),
     raw: existing?.raw || '',
     rawReasoning: existing?.rawReasoning || '',
+    renderDirty: Boolean(existing?.renderDirty),
     round: existing?.round || 1,
     conversationId: state.activeId, runId,
     messageId: existing?.messageId,
   });
-  mountCompactionStatus(state.activeId, state.runs.get(runId));
+  const liveRun = state.runs.get(runId);
+  mountCompactionStatus(state.activeId, liveRun);
+  syncRunLoadingIndicator(liveRun);
   flushPendingEvents(runId);
   updateComposerStatus();
   scrollToBottom(true);
@@ -1425,6 +1992,7 @@ async function retryTurn(failedNode, failedMessageId) {
         toolArgs: existing?.toolArgs || new Map(),
         raw: existing?.raw || '',
         rawReasoning: existing?.rawReasoning || '',
+        renderDirty: Boolean(existing?.renderDirty),
         round: 1, conversationId: state.activeId, runId,
         messageId: existing?.messageId,
       });
@@ -1457,25 +2025,14 @@ function compactionRunMatches(run, runId) {
   return !run || !runId || run.runId === runId;
 }
 
-function runIsWaitingForProvider(run) {
-  const textBox = run?.textBox;
-  return Boolean(
-    textBox?.isConnected
-    && !String(run.raw || '').trim()
-    && !String(run.rawReasoning || '').trim()
-    && !run.toolsStarted
-    && !(run.toolJobs?.size)
-  );
-}
-
-// There are two possible live statuses: the generic three-dot wait state and
-// the descriptive compaction state. They are mutually exclusive. This helper
-// is called at every transition that can race (turn start, room reattach, and
-// compaction start/end), so out-of-order events cannot paint both rows.
+// The descriptive activity row and the compaction row are mutually exclusive.
+// This helper is called at every transition that can race (turn start, room
+// reattach, and compaction start/end), so out-of-order events cannot paint
+// stale loading UI.
 function syncRunLoadingIndicator(run) {
-  if (!run?.textBox) return;
-  const compacting = state.compactionStatus.has(run.conversationId);
-  setThinkingDots(run.textBox, !compacting && runIsWaitingForProvider(run));
+  if (!run) return;
+  if (run.textBox) setThinkingDots(run.textBox, false);
+  syncAgentActivity(run);
 }
 
 // mountCompactionStatus attaches the transient status to the live assistant
@@ -1558,6 +2115,9 @@ function loadRoomState(id) {
   state.steerId = null; // always reset; re-shown from saved state if pending
   if (saved) {
     state.pinned = saved.pinned;
+    state.followDetached = !saved.pinned;
+    state.pendingScrollIntent = '';
+    state.userScroll = '';
     state.steerId = saved.steerId ?? null;
     state.steerDraft = saved.steerDraft;
     state.attachments = saved.attachments;
@@ -1567,6 +2127,9 @@ function loadRoomState(id) {
     return true;
   }
   state.pinned = true;
+  state.followDetached = false;
+  state.pendingScrollIntent = '';
+  state.userScroll = '';
   state.steerId = null;
   state.steerDraft = '';
   state.attachments = [];
@@ -1654,6 +2217,7 @@ function queueToolDelta(run, toolCallId, text) {
     toolCallId,
     ((run.pendingToolDeltas.get(toolCallId) || '') + text).slice(-12000),
   );
+  run.renderDirty = true;
   scheduleLiveRender(run);
 }
 
@@ -1691,7 +2255,7 @@ function cancelLiveRender(run) {
 }
 
 function flushLiveRender(run) {
-  if (!run?.renderScheduled) return;
+  if (!run || (!run.renderScheduled && !run.renderDirty)) return;
   cancelLiveRender(run);
   renderLiveRun(run);
 }
@@ -1700,11 +2264,22 @@ function renderLiveRun(run) {
   if (run.conversationId !== state.activeId) return;
   const textBox = run.textBox;
   const reasoningEl = run.reasoningEl;
-  if (!textBox?.isConnected && !reasoningEl?.isConnected && !run.bubble?.isConnected) return;
+  const hasLiveDOM = run.bubble?.isConnected
+    && (textBox?.isConnected || reasoningEl?.isConnected)
+    && (!run.raw?.trim() || textBox?.isConnected)
+    && (!run.rawReasoning?.trim() || reasoningEl?.isConnected);
+  if (!hasLiveDOM) {
+    // A snapshot/compaction patch can detach the current section between the
+    // delta callback and RAF. Keep the accumulated raw text marked dirty so
+    // reattachActiveRun or the next completion flush paints it.
+    run.renderDirty = true;
+    return;
+  }
 
   const enhanced = [];
   const flushedToolDelta = flushPendingToolDeltas(run);
   if (flushedToolDelta) updateRoomInfo(state.conversation, state.messages);
+  syncAgentActivity(run);
 
   if (reasoningEl) {
     setReasoningSource(reasoningEl, run.rawReasoning, { render: false });
@@ -1735,6 +2310,12 @@ function renderLiveRun(run) {
   }
   scheduleLiveEnhancement(run, enhanced);
   scheduleLiveMermaid(run, enhanced);
+  // Keep the dirty bit set when a tool delta arrived before its card was
+  // mounted, or when one of the two live content boxes was detached during
+  // this frame. The next reattach/flush will retry the missing portion.
+  run.renderDirty = Boolean(run.pendingToolDeltas?.size)
+    || (Boolean(run.raw?.trim()) && !textBox?.isConnected)
+    || (Boolean(run.rawReasoning?.trim()) && !reasoningEl?.isConnected);
   scrollToBottom();
 }
 
@@ -1765,7 +2346,11 @@ function scheduleLiveMermaid(run, changedNodes = []) {
     // mermaid.parse + mermaid.render) and its own content-hash lock keeps
     // it idempotent per block. We never await here so a slow render on one
     // block cannot stall text rendering for the rest of the bubble.
-    void renderMermaidDiagrams(node);
+    void renderMermaidDiagrams(node).finally(() => {
+      // SVG replacement changes height after the delta frame. Follow only if
+      // the user has not detached from the live tail in the meantime.
+      if (run.conversationId === state.activeId) scheduleScrollToBottom();
+    });
   }
 }
 
@@ -1782,11 +2367,17 @@ function scheduleLiveEnhancement(run, changedNodes = []) {
   if (run.enhanceTimer) clearTimeout(run.enhanceTimer);
   run.enhanceTimer = setTimeout(() => {
     run.enhanceTimer = null;
+    const enhancementTasks = [];
     for (const node of targets) {
       if (!node.isConnected) continue;
-      void highlightCode(node);
+      enhancementTasks.push(highlightCode(node));
       attachZoomButtons(node);
     }
+    // Highlighting may alter line metrics after the live render frame. Give a
+    // pinned reader one guarded follow pass after that asynchronous layout.
+    void Promise.allSettled(enhancementTasks).finally(() => {
+      if (run.conversationId === state.activeId) scheduleScrollToBottom();
+    });
   }, 120);
 }
 
@@ -1806,6 +2397,15 @@ function endTurn(runId, keepRun = false) {
   const conv = state.conversations.find((c) => c.id === convId);
   if (conv) conv.status = 'idle';
   if (state.activeId === convId && state.conversation) state.conversation.status = 'idle';
+  if (run.roundDoneTimer) {
+    clearTimeout(run.roundDoneTimer);
+    run.roundDoneTimer = null;
+  }
+  if (run.turnCompletionTimer) {
+    clearTimeout(run.turnCompletionTimer);
+    run.turnCompletionTimer = null;
+  }
+  run.roundDone = false;
   flushLiveRender(run);
   if (run.enhanceTimer) {
     clearTimeout(run.enhanceTimer);
@@ -1826,6 +2426,7 @@ function endTurn(runId, keepRun = false) {
   run.toolsStarted = false;
   run.bubble?.querySelector('.agent-retry-banner')?.remove();
   clearToolTimers(run);
+  stopAgentActivity(run);
   if (!keepRun) {
     state.runs.delete(runId);
   }
@@ -1852,13 +2453,76 @@ function endTurn(runId, keepRun = false) {
 function bindScrollPin() {
   const thread = agentThread();
   if (!thread) return;
+  if (scrollBinding?.thread === thread) return;
+  scrollBinding?.dispose?.();
   ensureThreadEndMarker();
   bindThreadEndMarker(thread);
-  thread.addEventListener('scroll', () => {
-    // Direction-aware: only a real upward user scroll releases the pin.
-    // Content growth and programmatic follow-scrolls can never unpin, so
-    // autoscroll survives tool-card spam without fighting the user.
-    updateScrollPin(state, thread);
+  const onWheel = (event) => {
+    if (event.deltaY < 0) markUserScrollIntent(thread, 'up', 'wheel');
+    else if (event.deltaY > 0) markUserScrollIntent(thread, 'down', 'wheel');
+  };
+  const onTouchStart = (event) => {
+    state.touchY = event.touches?.[0]?.clientY ?? null;
+    emitThreadScrollEvent(thread, THREAD_SCROLL_EVENTS.touchDown, { source: 'touch' });
+  };
+  const onTouchMove = (event) => {
+    const y = event.touches?.[0]?.clientY;
+    if (!Number.isFinite(y) || !Number.isFinite(state.touchY)) return;
+    const delta = y - state.touchY;
+    if (Math.abs(delta) < 1) return;
+    // Finger up moves the content down; finger down moves the content up.
+    markUserScrollIntent(thread, delta < 0 ? 'down' : 'up', 'touch');
+    state.touchY = y;
+  };
+  const onTouchEnd = () => {
+    state.touchY = null;
+    emitThreadScrollEvent(thread, THREAD_SCROLL_EVENTS.touchUp, { source: 'touch' });
+  };
+  const onKeyDown = (event) => {
+    if (event.target?.closest?.('input, textarea, [contenteditable="true"]')) return;
+    const up = event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home'
+      || (event.key === ' ' && event.shiftKey);
+    const down = event.key === 'ArrowDown' || event.key === 'PageDown' || event.key === 'End'
+      || (event.key === ' ' && !event.shiftKey);
+    if (up) markUserScrollIntent(thread, 'up', 'keyboard');
+    else if (down) markUserScrollIntent(thread, 'down', 'keyboard');
+  };
+  const onScroll = () => {
+    if (agentThread() !== thread) return;
+    const geometryDirection = scrollDirectionFromGeometry(thread);
+    const intent = state.pendingScrollIntent;
+    state.pendingScrollIntent = '';
+    if (state.suppressScrollTracking) {
+      state.pinGeom = { thread, scrollTop: thread.scrollTop };
+      return;
+    }
+
+    // Wheel/touch/keyboard signals arrive before the native scroll event.
+    // Scrollbar drags and programmatic focus movement (for example steering a
+    // queued message into view) have no gesture signal, so geometry remains a
+    // conservative fallback. Internal DOM/layout movement is covered by the
+    // suppressScrollTracking transaction above.
+    const direction = intent || geometryDirection;
+    if (direction && !intent) {
+      emitThreadScrollEvent(thread, direction === 'up' ? THREAD_SCROLL_EVENTS.up : THREAD_SCROLL_EVENTS.down, {
+        direction,
+        source: 'scroll',
+      });
+    }
+    if (direction === 'up') {
+      state.userScroll = 'up';
+      state.followDetached = true;
+      state.pinned = false;
+      cancelScheduledFollow();
+      if (state.initialScroll) cancelInitialScroll();
+    }
+    const wasPinned = state.pinned;
+    updateScrollPin(state, thread, SCROLL_TOLERANCE, { direction });
+    if (direction !== 'up' && isThreadAtBottom(thread, SCROLL_TOLERANCE)) {
+      state.followDetached = false;
+      state.userScroll = '';
+    }
+    if (!wasPinned && state.pinned) startAutoFollow(thread, 'scroll-bottom');
     // Older *active* messages are revealed via the explicit "Load older"
     // button (a deliberate click keeps the scroll anchored — auto-loading
     // during a fast wheel scroll fights the browser's momentum and jumps the
@@ -1867,7 +2531,26 @@ function bindScrollPin() {
     if (!state.suppressTopLoad && thread.scrollTop <= 4 && !hasOlderActiveMessages()) {
       loadOlderChunk();
     }
-  }, { passive: true });
+  };
+  thread.addEventListener('scroll', onScroll, { passive: true });
+  thread.addEventListener('wheel', onWheel, { passive: true });
+  thread.addEventListener('touchstart', onTouchStart, { passive: true });
+  thread.addEventListener('touchmove', onTouchMove, { passive: true });
+  thread.addEventListener('touchend', onTouchEnd, { passive: true });
+  thread.addEventListener('touchcancel', onTouchEnd, { passive: true });
+  thread.addEventListener('keydown', onKeyDown);
+  scrollBinding = {
+    thread,
+    dispose: () => {
+      thread.removeEventListener('scroll', onScroll);
+      thread.removeEventListener('wheel', onWheel);
+      thread.removeEventListener('touchstart', onTouchStart);
+      thread.removeEventListener('touchmove', onTouchMove);
+      thread.removeEventListener('touchend', onTouchEnd);
+      thread.removeEventListener('touchcancel', onTouchEnd);
+      thread.removeEventListener('keydown', onKeyDown);
+    },
+  };
 }
 
 // hasOlderActiveMessages reports whether older active messages are held back by
@@ -1948,44 +2631,125 @@ function prependActiveBatch() {
 // for the live tail. Uses the direction-aware update so content growth in the
 // final frames cannot masquerade as the user scrolling up.
 function syncActiveThreadPin() {
-  return updateScrollPin(state, agentThread());
+  const direction = state.pendingScrollIntent || (state.followDetached && state.userScroll === 'up' ? 'up' : '');
+  state.pendingScrollIntent = '';
+  return updateScrollPin(state, agentThread(), SCROLL_TOLERANCE, { direction });
 }
 
-// scrollThreadToBottomHard forces the thread to the bottom robustly after an
-// initial render: layout (fonts/markdown) can settle across a couple of frames,
-// so a single scrollTop assignment may land short. It also suppresses the
-// scroll-to-top loader until it settles so the transient scrollTop≈0 during
-// layout is not treated as the user scrolling up.
-function scrollThreadToBottomHard() {
-  const thread = agentThread();
+function scrollThreadToBottomNow(thread, force = false) {
   if (!thread) return;
   ensureThreadEndMarker();
-  state.suppressTopLoad = true;
-  const jump = () => {
-    thread.scrollTop = thread.scrollHeight;
+  thread.scrollTop = thread.scrollHeight;
+  state.pinGeom = { thread, scrollTop: thread.scrollTop };
+  if (force) {
+    const wasPinned = state.pinned;
+    state.followDetached = false;
     state.pinned = true;
+    if (!wasPinned) {
+      emitThreadScrollEvent(thread, THREAD_SCROLL_EVENTS.autoFollowStart, { source: 'forced' });
+    }
+  }
+}
+
+// scrollThreadToBottomHard is reserved for an explicit room open/new turn.
+// Layout can settle after Markdown, fonts, or Mermaid finish, so retry across
+// several animation frames. A user scroll-up cancels this transaction instead
+// of being pulled back to the tail by a late frame.
+function scrollThreadToBottomHard() {
+  cancelScheduledFollow();
+  cancelInitialScroll();
+  cancelScrollMutation();
+  const transaction = {
+    id: ++initialScrollSequence,
+    thread: null,
+    frame: null,
+    frames: 0,
+    attempts: 0,
+    cancelled: false,
+  };
+  state.initialScroll = transaction;
+  ensureThreadEndMarker();
+  state.suppressTopLoad = true;
+  state.suppressScrollTracking = true;
+  state.followDetached = false;
+  state.pinned = true;
+  const finish = () => {
+    if (state.initialScroll !== transaction) return;
+    transaction.frame?.cancel?.();
+    state.initialScroll = null;
+    state.suppressScrollTracking = false;
+    state.suppressTopLoad = false;
+    const thread = agentThread();
+    if (thread) state.pinGeom = { thread, scrollTop: thread.scrollTop };
+  };
+  const jump = () => {
+    if (state.initialScroll !== transaction || transaction.cancelled) return;
+    const thread = agentThread();
+    if (!thread) {
+      transaction.attempts++;
+      if (transaction.attempts < INITIAL_SCROLL_SETTLE_FRAMES) {
+        transaction.frame = scheduleFrame(null, jump);
+      } else {
+        finish();
+      }
+      return;
+    }
+    transaction.thread = thread;
+    ensureThreadEndMarker();
+    scrollThreadToBottomNow(thread, true);
+    transaction.frames++;
+    if (transaction.frames < INITIAL_SCROLL_SETTLE_FRAMES) {
+      transaction.frame = scheduleFrame(thread, jump);
+    } else {
+      // Re-enable older-history loading only once we are actually at the bottom.
+      finish();
+    }
   };
   jump();
-  requestAnimationFrame(() => {
-    jump();
-    requestAnimationFrame(() => {
-      jump();
-      // Re-enable older-history loading only once we are actually at the bottom.
-      state.suppressTopLoad = false;
-    });
-  });
+}
+
+// Live deltas frequently arrive in bursts: one frame can contain a reasoning
+// update, several parallel tool updates, and a status mutation. Coalesce those
+// requests and keep the tail pinned for a few settling frames. The transaction
+// is cancelled synchronously by a user scroll-up.
+function scheduleScrollToBottom() {
+  const thread = agentThread();
+  if (!thread || !state.pinned || state.followDetached) return;
+  ensureThreadEndMarker();
+  followThread = thread;
+  followFrames = Math.max(followFrames, FOLLOW_SETTLE_FRAMES);
+  if (followFrame) return;
+  const sequence = followSequence;
+  const follow = () => {
+    followFrame = null;
+    if (
+      sequence !== followSequence
+      || followThread !== thread
+      || agentThread() !== thread
+      || !state.pinned
+      || state.followDetached
+    ) {
+      followFrames = 0;
+      followThread = null;
+      return;
+    }
+    scrollThreadToBottomNow(thread);
+    followFrames--;
+    if (followFrames > 0) {
+      followFrame = scheduleFrame(thread, follow);
+    } else {
+      followThread = null;
+    }
+  };
+  followFrame = scheduleFrame(thread, follow);
 }
 
 function scrollToBottom(force = false) {
-  const thread = agentThread();
-  if (!thread) return;
-  ensureThreadEndMarker();
-  if (!force && !state.pinned) return;
-  thread.scrollTop = thread.scrollHeight;
-  // A follow-scroll only ever moves down; the next scroll event re-evaluates
-  // the pin from real geometry. Only a forced jump (new turn, room open)
-  // re-pins unconditionally.
-  if (force) state.pinned = true;
+  if (force) {
+    scrollThreadToBottomHard();
+    return;
+  }
+  scheduleScrollToBottom();
 }
 
 // ---- chunk-based lazy load ----
@@ -2102,7 +2866,7 @@ function bindEvents() {
       }
       run = {
         msgNode: null, bubble: null, strip: null, textBox: null, reasoningEl: null,
-        toolJobs: new Map(), toolArgs: new Map(), raw: '', rawReasoning: '',
+        toolJobs: new Map(), toolArgs: new Map(), raw: '', rawReasoning: '', renderDirty: false,
         round: 1, conversationId: conversation_id, runId: run_id,
         messageId: message_id,
       };
@@ -2275,6 +3039,7 @@ function bindEvents() {
     run.bubble.prepend(banner);
     // Also clear thinking dots since we're now in retry state, not initial wait.
     run.textBox?.querySelector('.agent-thinking-dots')?.remove();
+    syncRunLoadingIndicator(run);
     scrollToBottom();
     // Re-open the (server-reset) round stream so the retry's deltas render.
     void openRoundStream(run);
@@ -2289,6 +3054,8 @@ function bindEvents() {
     if (name === 'ask_question') return;
     run.toolsStarted = true;
     run.thinkingLive = false;
+    run.activityPhase = 'tool';
+    run.activityToolName = name || '';
     // Non-active rooms get their tool cards via the round stream replay on
     // switch-back; only the active room renders live tool cards here.
     if (conversation_id !== state.activeId) return;
@@ -2306,9 +3073,13 @@ function bindEvents() {
         run.textBox = null;
       }
     }
-    if (isSubagentAuxiliaryTool(name)) return;
+    if (isSubagentAuxiliaryTool(name)) {
+      syncRunLoadingIndicator(run);
+      return;
+    }
     const job = ensureLiveToolJob(run, tool_call_id, name, args, presentation);
     if (job) flushPendingToolDeltas(run);
+    syncRunLoadingIndicator(run);
   });
   on('agent.tool.completed', (payload) => {
     const { tool_call_id, name, args, status, output, attachments, presentation, conversation_id } = payload;
@@ -2326,6 +3097,7 @@ function bindEvents() {
     if (name === 'ask_question') {
       const job = run.toolJobs.get(tool_call_id);
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
+      scrollToBottom();
       return;
     }
     // `subagent_wait` and the injected `subagent_result` are provider-side
@@ -2336,6 +3108,7 @@ function bindEvents() {
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
       job?.remove?.();
       run.toolJobs.delete(tool_call_id);
+      scrollToBottom();
       return;
     }
     // show (op=html): replace the tool terminal with an artifact card once
@@ -2354,21 +3127,24 @@ function bindEvents() {
         swapToolCard(job, card, run.bubble, run.strip);
         setLiveToolJob(run.toolJobs, tool_call_id, card);
       } else if (job) {
-        // show(op=image|audio|video): swap terminal for inline media card.
+        // show(op=image|audio|video|pdf): swap terminal for inline media card.
         // renderToolCallCard dispatches to the correct card via the show
         // parsers (parseShowImageOutput / parseShowAudioOutput /
-        // parseShowVideoOutput). Falls through to renderToolJob when the
+        // parseShowVideoOutput / parseShowPDFOutput). Falls through to
+        // renderToolJob when the
         // output doesn't match any show variant.
         const showImage = parseShowImageOutput(toolCall);
         const showAudio = parseShowAudioOutput(toolCall);
         const showVideo = parseShowVideoOutput(toolCall);
-        if (showImage || showAudio || showVideo) {
+        const showPDF = parseShowPDFOutput(toolCall);
+        if (showImage || showAudio || showVideo || showPDF) {
           const card = renderToolCallCard(toolCall);
           card._toolArgs = toolCall.args;
           swapToolCard(job, card, run.bubble, run.strip);
           setLiveToolJob(run.toolJobs, tool_call_id, card);
         }
       }
+      scrollToBottom();
       return;
     }
     // subagent: re-render the delegation card with the completion output.
@@ -2389,6 +3165,7 @@ function bindEvents() {
         placeToolCard(run.bubble, run.strip, card);
         setLiveToolJob(run.toolJobs, tool_call_id, card);
       }
+      scrollToBottom();
       return;
     }
     if (isMediaGenerationTool(name)) {
@@ -2416,6 +3193,7 @@ function bindEvents() {
         placeToolCard(run.bubble, run.strip, card);
       }
       setLiveToolJob(run.toolJobs, tool_call_id, card);
+      scrollToBottom();
       return;
     }
     // When the job is missing — typically because a page refresh re-attached
@@ -2427,7 +3205,7 @@ function bindEvents() {
     if (!job) {
       const toolCall = normalizeToolCall({ id: tool_call_id, name, args: args ?? run.toolArgs?.get?.(tool_call_id) ?? {}, output: output ?? '', status: status || 'ok', attachments, output_attachments: attachments, presentation });
       const card = isMediaGenerationTool(name) ? renderToolCallCard(toolCall) : renderToolJob(toolCall);
-      if (isStreamingTool(name)) bindToolStop(card, () => run.runId);
+      if (isStreamingTool(name)) bindToolStop(card, () => ({ run_id: run.runId, tool_call_id }));
       setLiveToolJob(run.toolJobs, tool_call_id, card);
       if (run.strip) {
         placeToolCard(run.bubble, run.strip, card);
@@ -2466,9 +3244,9 @@ function bindEvents() {
     } else if (job.classList.contains('agent-tool-event')) {
       setToolTerminalOutput(job, output, next.status, toolTerminalMeta(next));
     }
-    // Settled events collapse to a compact summary row. The user can reopen
-    // the request/result/raw inspector from the same head row.
-    if (job.classList.contains('agent-tool-event')) job.open = false;
+    // Keep the card's current disclosure. A user may be reading the request
+    // or raw output while the tool settles; collapsing here changes the card's
+    // height and makes the transcript jump under their eyes.
     // Room diagnostics stay current after the tool settles.
     updateRoomInfo(state.conversation, state.messages);
     const outputEl = job.querySelector('.agent-tool-terminal-output');
@@ -2478,30 +3256,21 @@ function bindEvents() {
         outputEl.textContent = toolTerminalOutput(next);
       }
     }
+    scrollToBottom();
   });
   on('agent.turn.done', (payload) => {
-    const { run_id, message_id, model, usage, context_tokens, error, conversation_id } = payload;
+    const { run_id, context_tokens, error, conversation_id } = payload;
     if (conversation_id === state.activeId) syncActiveThreadPin();
     // Adopt the authoritative provider-measured context fill for the badge
     // (source of truth), so idle reflects real usage instead of an estimate.
     if (conversation_id === state.activeId && Number(context_tokens) > 0) {
       state.contextEstimate = Number(context_tokens);
     }
-    const run = getRunOrQueue('agent.turn.done', payload);
-    if (run && message_id) {
-      // refresh the message node with final metadata
-      run.msgNode.querySelectorAll('.agent-turn-meta, .agent-message-meta').forEach((n) => n.remove());
-      const meta = el('div', { class: 'agent-turn-meta' });
-      if (model) meta.append(el('span', { class: 'agent-turn-tag', text: model }));
-      if (usage) {
-        meta.append(el('span', { class: 'agent-turn-tag', text: `↑${formatTokens(usage.input_tokens ?? 0)} ↓${formatTokens(usage.output_tokens ?? 0)}` }));
-        if (usage.cache_read) meta.append(el('span', { class: 'agent-turn-tag', text: `cache ${formatTokens(usage.cache_read)}` }));
-      }
-      meta.append(el('span', { class: 'agent-message-meta', text: fmtTime(new Date().toISOString()) }));
-      run.msgNode.append(meta);
-      // Render any Mermaid diagrams in the just-finished message (settle point).
-      void renderMermaidDiagrams(run.msgNode); void highlightCode(run.msgNode); attachZoomButtons(run.msgNode);
-    }
+    // A final round.done can win the transport race and use the bounded SSE
+    // fallback before this WebSocket event arrives. Reuse its live node so a
+    // late terminal event still follows the no-rerender path.
+    const completedEntry = state.completedLiveRuns.get(run_id);
+    const run = completedEntry?.run || getRunOrQueue('agent.turn.done', payload);
     // Auto-continue: the backend will reuse the same run_id for the next
     // turn in the chain. Keep the run entry so turn.started for the next
     // turn finds it and streaming continues. Skip refreshActiveConversation
@@ -2509,7 +3278,38 @@ function bindEvents() {
     // that the next turn's streaming handlers need. The thread is refreshed
     // when the chain ends (turn.done without should_continue).
     const willAutoContinue = Boolean(payload.auto_continue?.should_continue);
-    endTurn(run_id, willAutoContinue);
+    // The WebSocket event is emitted before the backend seals the round. If it
+    // wins the transport race, deleting the live run and refreshing now can
+    // beat the final SSE deltas; keep the node in a short handoff until the
+    // ordered round.done arrives. The fallback timer handles a lost SSE.
+    const awaitRoundTerminal = Boolean(
+      run
+      && !willAutoContinue
+      && !error
+      && !run.roundDone
+      && run.msgNode?.isConnected,
+    );
+    let preservedLiveNode = null;
+    if (awaitRoundTerminal) {
+      run.turnDonePayload = payload;
+      rememberCompletedLiveRun(run);
+      endTurn(run_id);
+      run.turnCompletionTimer = setTimeout(() => {
+        run.turnCompletionTimer = null;
+        finalizeLiveTurn(run, payload, { streamConfirmed: false });
+      }, ROUND_DONE_FALLBACK_MS);
+    } else {
+      flushLiveRender(run);
+      preservedLiveNode = !error
+        && run?.roundDone
+        && run?.msgNode?.isConnected
+        && !run.streamNeedsSnapshot
+        && !run.renderDirty
+        ? run.msgNode
+        : null;
+      appendTurnDoneMetadata(run, payload);
+      endTurn(run_id, willAutoContinue);
+    }
     const isAgentRoom = conversation_id === state.activeId
       || state.conversations.some((c) => c.id === conversation_id);
     if (isAgentRoom) {
@@ -2520,7 +3320,9 @@ function bindEvents() {
         playComplete(state.settings?.sound_notifications !== false);
       }
     }
-    if (conversation_id === state.activeId && !willAutoContinue) refreshActiveConversation();
+    if (conversation_id === state.activeId && !willAutoContinue && !awaitRoundTerminal) {
+      void refreshActiveConversation({ preserveLiveNode: preservedLiveNode });
+    }
     void maybeAutoTitleConversation(conversation_id).finally(() => {
       if (!isAgentRoom) return;
       void refreshConversations().catch(() => {
@@ -2603,7 +3405,10 @@ function bindEvents() {
       const thread = agentThread();
       if (thread && node) thread.append(node);
       ensureThreadEndMarker();
-      thread?.scrollTo?.({ top: thread.scrollHeight, behavior: 'smooth' });
+      // The announcement is another live-tail mutation. Follow only when the
+      // reader is still pinned; a completion/auto-continue notification must
+      // not yank someone who has deliberately scrolled up.
+      scrollToBottom();
     }
   });
   on('agent.ask.pending', (payload) => {
@@ -2624,6 +3429,9 @@ function bindEvents() {
     card.dataset.standalone = 'true';
     setLiveToolJob(run.toolJobs, tool_call_id, card);
     placeToolCard(run.bubble, run.strip, card);
+    startToolElapsed(card);
+    run.waitingForAsk = true;
+    syncRunLoadingIndicator(run);
     card.focus();
     scrollToBottom();
   });
@@ -2636,6 +3444,9 @@ function bindEvents() {
     if (!card || !card.classList?.contains('agent-ask-card')) return;
     sealAskCard(card, { ok: true, answer, via, optionIds: payload.option_ids || [], text: payload.text || '' });
     decorateToolCard(card, { name: 'ask_question', args: card._toolArgs, status: 'ok' });
+    run.waitingForAsk = false;
+    run.activityPhase = 'thinking';
+    syncRunLoadingIndicator(run);
   });
   on('agent.ask.cancelled', (payload) => {
     const { run_id, tool_call_id, reason } = payload;
@@ -2645,6 +3456,9 @@ function bindEvents() {
     if (!card || !card.classList?.contains('agent-ask-card')) return;
     cancelAskCard(card, reason);
     decorateToolCard(card, { name: 'ask_question', args: card._toolArgs, status: 'interrupted' });
+    run.waitingForAsk = false;
+    run.activityPhase = 'thinking';
+    syncRunLoadingIndicator(run);
   });
   on('agent.compacting', ({ conversation_id, run_id }) => {
     markCompacting(conversation_id, run_id);
@@ -2820,7 +3634,7 @@ async function applyLiveCompaction(conversationId, run, expectedRunId = '') {
       restoreDisclosureState(thread, disclosureState);
       void renderMermaidDiagrams(thread); void highlightCode(thread); attachZoomButtons(thread);
     } else {
-      renderThread(windowedActiveMessages(), state.pinned, disclosureState);
+      renderThread(windowedActiveMessages(), false, disclosureState);
       reattachActiveRun();
     }
     updateOlderSentinel();
@@ -2834,7 +3648,7 @@ async function applyLiveCompaction(conversationId, run, expectedRunId = '') {
   }
 }
 
-async function refreshActiveConversation() {
+async function refreshActiveConversation({ preserveLiveNode = null } = {}) {
   if (!state.activeId) return;
   const conversationId = state.activeId;
   const token = state.conversationLoadToken;
@@ -2857,8 +3671,19 @@ async function refreshActiveConversation() {
     state.loadingChunk = false;
     const thread = agentThread();
     const disclosureState = captureDisclosureState(thread);
+    // A completed live node already contains the exact delta stream. Refresh
+    // the authoritative state above, but leave that node in place: replacing
+    // the thread here causes a visible jump and can make a reader lose their
+    // position. The next room switch/reload still renders from state.messages.
+    if (preserveLiveNode?.isConnected && thread?.contains(preserveLiveNode)) {
+      ensureThreadEndMarker();
+      updateOlderSentinel();
+      updateRoomInfo(state.conversation, state.messages);
+      updateComposerStatus();
+      return;
+    }
     const liveNode = liveRun?.msgNode?.isConnected ? liveRun.msgNode : null;
-    if (liveRun && liveNode && thread && runForConversation(conversationId) === liveRun) {
+    if (liveRun && liveNode && thread && !liveRun.streamNeedsSnapshot && runForConversation(conversationId) === liveRun) {
       const renderedMessageIDs = new Set((liveNode.dataset.messageIds || '').split(/\s+/).filter(Boolean));
       const snapshot = windowedActiveMessages().filter((message) => !renderedMessageIDs.has(message.id));
       const fragment = renderConversation(snapshot, retryTurn);
@@ -2873,7 +3698,7 @@ async function refreshActiveConversation() {
       restoreDisclosureState(thread, disclosureState);
       void renderMermaidDiagrams(thread); void highlightCode(thread); attachZoomButtons(thread);
     } else {
-      renderThread(windowedActiveMessages(), state.pinned, disclosureState);
+      renderThread(windowedActiveMessages(), false, disclosureState);
       if (liveRun && runForConversation(conversationId) === liveRun) reattachActiveRun();
     }
     updateOlderSentinel();

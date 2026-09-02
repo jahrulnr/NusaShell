@@ -50,6 +50,24 @@ test('Agent tool transcripts start collapsed, cap output, and lazy-render reason
   assert.match(agentToolsCSS, /\.agent-tool-event-output \{[^}]*max-height: calc\(8 \* 1\.45em\);[^}]*overflow-y: auto;/s);
 });
 
+test('standalone tool timers use the card header instead of an unstyled footer node', () => {
+  assert.match(agentCSS, /\.agent-ask-header \.agent-tool-elapsed \{[^}]*margin-left: auto;[^}]*padding:/s);
+  assert.match(agentCSS, /\.agent-ask-card\.is-pending \.agent-tool-elapsed \{[^}]*animation: agent-tool-tick/s);
+  assert.match(agentView, /createAskCard\([\s\S]*?startToolElapsed\(card\);/,
+    'live ask cards start the shared elapsed timer after mounting');
+});
+
+test('slow provider/tool-call gaps show a cycling animated activity status', () => {
+  assert.match(agentCSS, /\.agent-activity-status-text \{[^}]*background: linear-gradient/s);
+  assert.match(agentCSS, /@keyframes agent-activity-sheen/);
+  assert.match(agentCSS, /\.agent-activity-status-cursor \{[^}]*animation:/s);
+  assert.match(agentCSS, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.agent-activity-status-text/);
+  assert.match(agentView, /const ACTIVITY_ROTATE_MS = 5000/);
+  assert.match(agentView, /function syncAgentActivity/);
+  assert.match(agentView, /Preparing tool call/);
+  assert.match(agentView, /case 'activity'/);
+});
+
 test('Archived chunks load only on explicit Load older or scroll-to-top, never after turn.done or live compaction', () => {
   // Proactive maybeLoadOlderChunk after refresh/compaction re-inflated the
   // just-archived long turn into the DOM and froze the thread.
@@ -158,17 +176,15 @@ test('ACP transcripts use the agent conversation structure and historical run lo
   assert.match(agentRender, /extractSubagentRunIDs/);
 });
 
-test('Thinking and tool markers use deliberate conversation rails', () => {
+test('Thinking and tool markers stay quiet without a continuous transcript rail', () => {
   assert.match(agentCSS, /\.agent-reasoning summary \{[^}]*margin-left: -12px;/s);
   assert.match(agentCSS, /\.agent-reasoning-preview \{[^}]*min-width: 0;/s,
     'Thinking exposes a scan-friendly preview without forcing a second row');
-  assert.match(agentCSS, /\.agent-tool-stack::before \{[^}]*left: 8px;/s,
-    'the rail stays centered under the compact status node');
-  assert.match(agentCSS, /--agent-tool-gutter: 32px;/);
-  assert.match(agentCSS, /--agent-tool-node-radius: 14px;/);
-  assert.match(agentCSS, /\.agent-tool-stack > \.agent-tool-event \{[^}]*margin-left: calc\(-1 \* var\(--agent-tool-gutter\)\);/s);
-  assert.match(agentCSS, /\.agent-tool-stack > \.agent-tool-event \{[^}]*width: calc\(100% \+ var\(--agent-tool-gutter\)\);/s,
-    'event rows reclaim the rail gutter for useful command/result width');
+  assert.doesNotMatch(agentCSS, /\.agent-tool-stack::before/,
+    'separate tool nodes should not become one long terminal-like line');
+  assert.match(agentCSS, /\.agent-tool-stack \{[^}]*padding-left: 0;/s);
+  assert.match(agentCSS, /\.agent-tool-stack > \.agent-tool-event \{[^}]*width: 100%;/s,
+    'each tool owns its full transcript width without a reclaimed gutter');
   assert.match(agentCSS, /\.agent-tool-event-head \{[^}]*display: flex;/s);
 });
 
@@ -206,16 +222,47 @@ test('Assistant tables keep their content width inside a horizontal scroller', (
   assert.match(tableRules, /\.markdown-table-scroll table\s*\{[\s\S]*min-width:\s*100%/);
 });
 
+test('Markdown file previews style tables and keep wide columns scrollable', () => {
+  const previewRules = agentCSS.slice(agentCSS.indexOf('.agent-text-preview-content {'));
+  assert.match(previewRules, /\.agent-text-preview-content\s*\{[^}]*min-width:\s*0;/s);
+  assert.match(previewRules, /\.agent-text-preview-md \.markdown-table-scroll\s*\{[\s\S]*overflow-x:\s*auto;/s);
+  assert.match(previewRules, /\.agent-text-preview-md \.markdown-table-scroll table\s*\{[\s\S]*width:\s*max-content;[\s\S]*min-width:\s*100%;/s);
+  assert.match(previewRules, /\.agent-text-preview-md th,\s*\.agent-text-preview-md td\s*\{[\s\S]*border:\s*1px solid var\(--border-soft\);/s);
+});
+
 test('Live Thinking follows only while the thread-end marker is visible', () => {
   assert.match(agentView, /agent-thread-end-marker/);
   assert.match(agentView, /new IntersectionObserver/);
   // The marker is a re-pin signal only: it must never unpin, because tool
   // spam pushes it out of the viewport between follow-scrolls. Unpinning is
   // decided by the direction-aware updateScrollPin on scroll events.
-  assert.match(agentView, /if \(entry\.isIntersecting \|\| isThreadAtBottom\(thread\)\) state\.pinned = true;/);
+  assert.match(agentView, /if \(\(entry\.isIntersecting \|\| isThreadAtBottom\(thread\)\) && !state\.followDetached\)/);
+  assert.match(agentView, /startAutoFollow\(thread, 'end-marker'\)/);
   assert.doesNotMatch(agentView, /state\.pinned = entry\.isIntersecting/);
-  assert.match(agentView, /updateScrollPin\(state, thread\)/);
-  assert.match(agentView, /if \(!force && !state\.pinned\) return/);
+  assert.match(agentView, /updateScrollPin\(state, thread, SCROLL_TOLERANCE/);
+  assert.match(agentView, /if \(!thread \|\| !state\.pinned \|\| state\.followDetached\) return/);
+});
+
+test('Agent follow treats gesture direction as authoritative and coalesces follow frames', () => {
+  assert.match(agentView, /agent\.scroll\.up/);
+  assert.match(agentView, /agent\.scroll\.down/);
+  assert.match(agentView, /agent\.touch\.up/);
+  assert.match(agentView, /agent\.touch\.down/);
+  assert.match(agentView, /addEventListener\('wheel'/);
+  assert.match(agentView, /addEventListener\('touchstart'/);
+  assert.match(agentView, /addEventListener\('touchmove'/);
+  assert.match(agentView, /addEventListener\('touchend'/);
+  assert.match(agentView, /cancelScheduledFollow\(\)/);
+  assert.match(agentView, /requestAnimationFrame/);
+  assert.match(agentView, /followFrames/);
+});
+
+test('Initial load retries after layout settles without forcing a reader back down', () => {
+  assert.match(agentView, /initialScroll/);
+  assert.match(agentView, /scrollThreadToBottomHard/);
+  assert.match(agentView, /state\.initialScroll/);
+  assert.match(agentView, /userScroll/);
+  assert.doesNotMatch(agentView, /thread\?\.scrollTo\(\{ top: thread\.scrollHeight, behavior: 'smooth' \}\)/);
 });
 
 test('Turn completion samples the real scroll position before playing its sound', () => {
@@ -225,7 +272,7 @@ test('Turn completion samples the real scroll position before playing its sound'
   );
   assert.match(doneHandler, /syncActiveThreadPin\(\);/);
   assert.match(doneHandler, /playComplete\(/);
-  assert.match(doneHandler, /refreshActiveConversation\(\)/);
+  assert.match(doneHandler, /refreshActiveConversation\(\{ preserveLiveNode:/);
 });
 
 test('Transcript refresh restores user-controlled Thinking and tool disclosure state', () => {
@@ -234,7 +281,13 @@ test('Transcript refresh restores user-controlled Thinking and tool disclosure s
   assert.match(agentRender, /export function restoreDisclosureState/);
   assert.match(refreshHandler, /const disclosureState = captureDisclosureState\(thread\);/);
   assert.match(refreshHandler, /restoreDisclosureState\(thread, disclosureState\);/);
-  assert.match(refreshHandler, /renderThread\(windowedActiveMessages\(\), state\.pinned, disclosureState\)/);
+  assert.match(refreshHandler, /renderThread\(windowedActiveMessages\(\), false, disclosureState\)/);
+});
+
+test('Completing a tool preserves its current disclosure instead of collapsing the card', () => {
+  assert.doesNotMatch(agentView, /if \(job\.classList\.contains\('agent-tool-event'\)\) job\.open = false;/);
+  assert.match(agentView, /oldCard\?\.tagName === 'DETAILS'/);
+  assert.match(agentView, /newCard\?\.tagName === 'DETAILS'/);
 });
 
 test('Live tool terminals carry their call ID into disclosure restoration', () => {
@@ -247,8 +300,8 @@ test('Live tool terminals carry their call ID into disclosure restoration', () =
 
 test('ACP wait/result bookkeeping never mounts a duplicate live tool row', () => {
   assert.match(agentRender, /isSubagentAuxiliaryTool\(toolCall\.name\)/);
-  assert.match(agentView, /isSubagentAuxiliaryTool\(name\)\) return;/);
-  assert.match(agentView, /isSubagentAuxiliaryTool\(frame\.name\)\) break;/);
+  assert.match(agentView, /if \(isSubagentAuxiliaryTool\(name\)\) \{[\s\S]*?return;/);
+  assert.match(agentView, /if \(isSubagentAuxiliaryTool\(frame\.name\)\) \{[\s\S]*?break;/);
 });
 
 test('Narrow windows ellipsize tool meta instead of overflowing the thread', () => {
@@ -284,6 +337,65 @@ test('Live tool deltas stay queued until the card exists and thinking pulse is p
   assert.match(agentView, /sealReasoningStreaming\(run\.bubble\)/);
 });
 
+test('Live delta rendering stays dirty while its DOM slot is temporarily detached', () => {
+  assert.match(agentView, /run\.renderDirty = true/);
+  assert.match(agentView, /function flushLiveRender\(run\) \{[\s\S]*!run\.renderScheduled && !run\.renderDirty/);
+  assert.match(agentView, /hasLiveDOM[\s\S]*run\.renderDirty = true[\s\S]*return;/);
+  assert.match(agentView, /reattachActiveRun\(\)[\s\S]*scheduleLiveRender\(run\)/);
+});
+
+test('Dropped or reordered SSE deltas trigger replay from the last contiguous cursor', () => {
+  assert.match(agentView, /function recoverRoundStream\(run\)/);
+  assert.match(agentView, /frame\?\.seq/);
+  assert.match(agentView, /lastSeq \+ 1/);
+  assert.match(agentView, /done\.last_seq/);
+  assert.match(agentView, /roundTerminalPending/);
+  assert.match(agentView, /after=<lastSeq>/);
+  assert.match(agentView, /streamGap/);
+  assert.match(agentView, /STREAM_GAP_RECOVERY_LIMIT = 2/);
+});
+
+test('SSE network retry budget survives each reconnect attempt', () => {
+  assert.match(agentView, /function retryRoundStream\(run/);
+  assert.match(agentView, /attempts >= STREAM_RETRY_DELAYS\.length/);
+  assert.match(agentView, /closeRoundStream\(run, \{ resetRetries: false \}\)/);
+});
+
+test('Turn completion preserves a connected live node instead of rerendering the transcript', () => {
+  const doneHandler = agentView.slice(
+    agentView.indexOf("on('agent.turn.done'"),
+    agentView.indexOf("on('agent.turn.error'"),
+  );
+  const refreshHandler = agentView.slice(agentView.indexOf('async function refreshActiveConversation'));
+  assert.match(doneHandler, /preservedLiveNode/);
+  assert.match(doneHandler, /refreshActiveConversation\(\{ preserveLiveNode: preservedLiveNode \}\)/);
+  assert.match(refreshHandler, /preserveLiveNode/);
+  assert.match(refreshHandler, /preserveLiveNode\?\.isConnected/);
+});
+
+test('SSE round.done does not release the run before the WebSocket terminal event', () => {
+  const doneFrameHandler = agentView.slice(
+    agentView.indexOf('function applyRoundDoneFrame'),
+    agentView.indexOf('function setLiveToolJob'),
+  );
+  assert.match(doneFrameHandler, /ROUND_DONE_FALLBACK_MS/);
+  assert.match(doneFrameHandler, /run\.roundDone = true/);
+  assert.match(doneFrameHandler, /if \(done\.next\)/);
+  assert.match(agentView, /roundDoneTimer/);
+});
+
+test('WebSocket completion waits for the ordered SSE tail before preserving a live node', () => {
+  const doneHandler = agentView.slice(
+    agentView.indexOf("on('agent.turn.done'"),
+    agentView.indexOf("on('agent.turn.error'"),
+  );
+  assert.match(doneHandler, /turnDonePayload/);
+  assert.match(doneHandler, /rememberCompletedLiveRun\(run\)/);
+  assert.match(doneHandler, /turnCompletionTimer/);
+  assert.match(doneHandler, /run\.roundDone/);
+  assert.match(agentView, /streamConfirmed/);
+});
+
 test('Agent live motion respects reduced-motion preferences', () => {
   assert.match(agentCSS, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(globalCSS, /animation-duration: \.001ms !important/);
@@ -317,7 +429,8 @@ test('Compaction lifecycle is room-scoped and reuses the Thinking disclosure for
   assert.match(agentRender, /collapsedHint: 'Show handover'/);
   assert.match(agentCSS, /\.agent-compaction-status[\s\S]*agent-compaction-dot/);
   assert.match(agentView, /function syncRunLoadingIndicator/);
-  assert.match(agentView, /setThinkingDots\(run\.textBox, !compacting/);
+  assert.match(agentView, /setThinkingDots\(run\.textBox, false\)/);
+  assert.match(agentView, /syncAgentActivity\(run\)/);
   assert.match(agentRender, /export function setThinkingDots/);
 });
 
@@ -370,9 +483,13 @@ test('Narrow agent layout can reopen the conversations pane', () => {
     'mobile transcript must clear the floating Rooms toggle');
 });
 
-test('Kepulauan palette is tokenized instead of acid-lime defaults', async () => {
-  const globalCSS = await readFile(new URL('../styles/global.css', import.meta.url), 'utf8');
-  assert.match(globalCSS, /--accent:\s*#71bd6d/);
+test('Nusa palette makes reef the interface accent and reserves forest for success', () => {
+  assert.match(globalCSS, /--accent:\s*#45c6df/);
+  assert.match(globalCSS, /--forest:\s*#68b982/);
+  assert.match(globalCSS, /--earth:\s*#c38c5e/);
+  assert.doesNotMatch(globalCSS, /--accent:\s*#71bd6d/);
   assert.doesNotMatch(globalCSS, /#c5f45d/);
+  assert.match(agentToolsCSS, /--agent-tool-accent:\s*var\(--ocean\)/);
+  assert.match(agentToolsCSS, /--agent-tool-accent:\s*var\(--earth\)/);
   assert.match(appShell, /bindShellShortcuts/);
 });

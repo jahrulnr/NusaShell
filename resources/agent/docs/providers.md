@@ -52,6 +52,31 @@ OpenRouter regardless of host.
   `chat` hosts use the vanilla OpenAI Chat wire (see host detection above).
   Providers without an explicit driver retain host-detected routing.
 
+## Streaming completion and request-shape recovery
+
+OpenAI-compatible SSE providers do not all emit the `[DONE]` sentinel. A clean
+EOF after a final choice with `finish_reason` is treated as a completed
+response; the sentinel is a transport convention, not the completion signal.
+A clean EOF without a semantic finish reason remains an incomplete stream and
+is sent through the shared retry policy. Network cuts and idle timeouts follow
+the same policy.
+
+Some Claude 4.6-compatible gateways reject an assistant prefill when the last
+request message has role `assistant`, returning a 400 that says the
+conversation must end with a user message. NusaShell learns this constraint
+for that provider+model and retries with an ephemeral minimal user turn. The
+synthetic turn is never persisted. An existing `tool` result remains the last
+message during an active tool cycle, so the normal sequence stays:
+
+```text
+user → assistant(tool_calls) → tool(result) → assistant
+```
+
+Do not classify this 400 as a transient outage: resending the same assistant-
+ended request cannot succeed. A 429 without a usable `Retry-After` is likewise
+hard-failed; a retry is only automatic when the shared domain policy says the
+provider supplied a safe retry window.
+
 ## Prompt cache TTL
 
 Settings → **Prompt caching** turns provider-side prompt cache on for a
@@ -183,6 +208,11 @@ that and disables the modality for the provider+model. Future turns apply
 these learned overrides at model resolution time, so requests are built with
 the real capabilities instead of waiting for another 400.
 
+The same learned registry can record request-shape constraints, such as a
+gateway requiring a user message at the end of the request. These rules are
+scoped to provider+model and applied only on a retry after the matching 400;
+they do not change the persisted conversation transcript.
+
 Learned overrides are inferred from errors and can be wrong (a false
 positive). A second, **manual override** layer exists for corrections with
 direct evidence. The background review agent can record one via its local
@@ -194,7 +224,12 @@ restarts, and are applied at model resolution time **after** learned
 overrides — so a manual correction always wins over both the catalog and an
 auto-learned value. Precedence: catalog → learned → manual. Models tagged as
 embedding-capable appear in the
-Embedding model setting for skill and memory search. Models tagged as image
+Embedding model setting for skill and memory search. Embedding requests use
+the same OpenRouter app attribution as chat when the selected provider points
+at `*.openrouter.ai`: `HTTP-Referer`, `X-OpenRouter-Title`, and the app
+categories are sent on `POST /v1/embeddings`, so embedding usage is attributed
+to NusaShell instead of appearing as an unknown app. Those router-specific
+headers are not sent to other OpenAI-compatible hosts. Models tagged as image
 generators (`kind: image`, including `gpt-image-*` and `dall-e-*` even when
 `/models` omits a kind) appear in Settings → Image generation and back the
 `generate_image` tool. Image generation uses the
@@ -357,13 +392,18 @@ the gateway (Auto).
   model ID). Response `tag` fields are the routing slugs used in
   `provider.order`.
 - **RPC:** `ai.models.endpoints {provider_id, model_id}` returns
-  `{routes:[{slug,name,quantization,status,latency,throughput}], cached,
-  fetched_at}`. Routes are cached on disk under the data dir
-  (`endpoints_cache.json`, TTL 24h), keyed per provider+model because each
-  gateway serves models with its own upstream set. `latency` is the rolling
-  30m **p50 in milliseconds** and `throughput` the p50 tokens/sec (the
-  gateway serves these as percentile objects `{"p50":...}` when
-  authenticated, or plain numbers/null; the parser accepts both shapes).
+  `{routes:[{slug,name,quantization,status,latency,throughput,input_cost,
+  output_cost}], cached, fetched_at}`. `input_cost` and `output_cost` are
+  USD per 1M input/output tokens from the endpoint's
+  `pricing.prompt`/`pricing.completion`; omitted values mean the gateway did
+  not provide usable pricing, while zero is an explicit free price. Routes
+  are cached on disk under the data dir (`endpoints_cache.json`, TTL 24h),
+  keyed per provider+model because each gateway serves models with its own
+  upstream set. The cache schema version changes when route fields change so
+  stale entries are refetched. `latency` is the rolling 30m **p50 in
+  milliseconds** and `throughput` the p50 tokens/sec (the gateway serves
+  these as percentile objects `{"p50":...}` when authenticated, or plain
+  numbers/null; the parser accepts both shapes).
 - **Direct providers** (Anthropic, OpenAI, local chat) have no route
   concept: the handler returns an empty list without fetching, and the
   frontend shows a non-interactive home icon next to the model picker.

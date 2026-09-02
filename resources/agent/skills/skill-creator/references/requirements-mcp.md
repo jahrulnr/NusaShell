@@ -14,4 +14,4 @@ allow a suitable substitute when the skill only needs that capability role. The
 agent must check `mcp_list`, enable a selected plugin with `mcp_enable`, and use
 live `tool_list`/`tool_schema` before calling tools. Missing dependencies should
 be explained to the user; the current runtime uses a soft prompt gate rather
-than refusing `skill` with `op=read`.
+than refusing to load the skill with `file_read`.

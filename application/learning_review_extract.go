@@ -33,8 +33,9 @@ func mutationSnippet(argsJSON, field string) string {
 	return v
 }
 
-// runReviewLoop executes the bounded tool loop: send transcript → get tool
-// calls → execute whitelisted tools → feed results back → repeat. Returns
+// runReviewLoop executes the review loop: send transcript → get tool calls →
+// execute whitelisted tools → feed results back → repeat until the model is
+// terminal. Returns
 // the mutations and the full message history (the review agent's own
 // conversation with the LLM) so it can be persisted for the learning log.
 func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter ProviderContext, model string, conversation *domain.Conversation) ([]ReviewMutation, []ChatMessage, error) {
@@ -158,10 +159,11 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 		reviewSettings = r.app.Settings.Get()
 	}
 	promptCache := buildPromptCachePolicyForContext(reviewSettings, adapter, model, conversation.ID, promptCacheBackgroundPrefix)
-	// The bounded tool loop (stream → whitelisted/local tools → repeat)
+	// The review tool loop (stream → whitelisted/local tools → repeat)
 	// is the AgentEngine with the AgentReview rule set
 	// (review_agent_rules.go): virtual conversation, mutation tracking,
-	// and the "Nothing to save" early exit. MaxToolRounds bounds rounds.
+	// and the "Nothing to save" early exit. The engine runs without an
+	// artificial tool-round cap, like a conversation turn.
 	pr := &reviewAgentRules{
 		agent:       r,
 		adapter:     adapter,
@@ -182,7 +184,7 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 			r.app.recordLearningUsage(pr.learningIDs)
 		}
 	}()
-	st, loopErr := (&AgentEngine{}).Run(ctx, pr.rules(), r.settings.MaxToolRounds)
+	st, loopErr := (&AgentEngine{}).Run(ctx, pr.rules(), 0)
 	// The returned history is the full review conversation: the
 	// pre-injected opening (user prompt + synthetic tool results) plus
 	// everything the engine appended across rounds.

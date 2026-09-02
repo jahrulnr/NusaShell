@@ -50,7 +50,7 @@ test('learning.css keeps split components self-contained (no connected-card hack
 test('.tab is defined exactly once, in the shared layer', () => {
   let total = 0;
   for (const file of ['global.css', 'home.css', 'learning.css']) {
-    total += countOccurrences(read(file), '.tab {');
+    total += read(file).match(/^\.tab(?![\w-])\s*\{/gm)?.length ?? 0;
   }
   assert.equal(total, 1, `expected exactly one .tab definition, found ${total}`);
 });

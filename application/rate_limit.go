@@ -70,7 +70,7 @@ func (a *App) ProviderRateLimitWait(providerID string) time.Duration {
 
 // friendlyRateLimitError renders a 429 into a human-readable message that
 // tells the user how long to wait, instead of a raw provider JSON blob.
-func (a *App) friendlyRateLimitError(providerID string, upstream *UpstreamError, wait time.Duration) error {
+func (a *App) friendlyRateLimitError(providerID string, upstream *domain.ProviderError, wait time.Duration) error {
 	providerLabel := a.providerNameByID(providerID)
 	// A structural tokens-per-minute rejection (one request needs more tokens
 	// than the entire per-minute budget) is not a "wait and retry" situation —
@@ -101,7 +101,7 @@ func (a *App) decorateRateLimitError(providerID string, err error) error {
 	if err == nil {
 		return nil
 	}
-	var upstream *UpstreamError
+	var upstream *domain.ProviderError
 	if !errors.As(err, &upstream) || upstream.StatusCode != 429 {
 		return err
 	}

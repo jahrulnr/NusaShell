@@ -7,6 +7,8 @@ set -Eeuo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
+release_version="$(tr -d '\r\n' < VERSION)"
+go_ldflags="-X main.version=$release_version"
 
 null_device=/dev/null
 if [ "$(go env GOHOSTOS)" = "windows" ]; then
@@ -30,7 +32,7 @@ check_gofmt() {
 	unformatted="$(find . \
 		-path './.git' -prune -o \
 		-path './.experimental' -prune -o \
-		-type f -name '*.go' -print0 | xargs -0 -r gofmt -l)"
+		-type f -name '*.go' -exec gofmt -l {} +)"
 	if [ -n "$unformatted" ]; then
 		printf 'gofmt: the following files are not formatted:\n%s\n' "$unformatted" >&2
 		return 1
@@ -65,6 +67,17 @@ run_frontend_tests() {
 	run_step "frontend tests" node --test frontend/tests/*.test.mjs
 }
 
+run_release_contract_tests() {
+	if ! command -v node >/dev/null 2>&1; then
+		printf 'release contract tests require Node.js 24 or newer.\n' >&2
+		return 1
+	fi
+	run_step "release and Electron contract tests" \
+		node --test scripts/version.test.mjs scripts/release-changes.test.mjs \
+		scripts/release-index.test.mjs scripts/release-manifest.test.mjs \
+		scripts/release-notes.test.mjs scripts/install.test.mjs
+}
+
 compile_target() {
 	local target_os="$1"
 	local target_arch="$2"
@@ -72,7 +85,7 @@ compile_target() {
 	local packages package_count=0 package_name
 
 	run_step "cross build ($target)" \
-		env CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" go build ./...
+		env CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" go build -ldflags "$go_ldflags" ./...
 
 	printf '\n[verify-local] cross test compile (%s)\n' "$target"
 	packages="$(env CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" \
@@ -95,8 +108,9 @@ check_gofmt
 run_step "UI documentation drift" go run ./cmd/scan-ui-docs -check
 run_step "Go vet" go vet ./...
 run_native_tests
-run_step "native Go build" go build ./...
+run_step "native Go build" go build -ldflags "$go_ldflags" ./...
 run_frontend_tests
+run_release_contract_tests
 
 # These are the platforms used by the backend CI matrix. Cross-compilation
 # catches platform-specific build and _test.go errors, but not runtime behavior.

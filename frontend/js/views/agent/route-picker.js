@@ -6,7 +6,7 @@
 // The list is fetched on model selection (RPC ai.models.endpoints),
 // cached per (provider, model) in this session, and pinned routes are
 // stored by the caller in state + localStorage.
-import { el } from '../../ui.js';
+import { debounce, el } from '../../ui.js';
 import { rpc } from '../../rpc.js';
 
 const ICONS = {
@@ -35,6 +35,28 @@ function formatLatency(ms) {
 function formatThroughput(tokensPerSec) {
   if (tokensPerSec == null) return null;
   return `${Math.round(tokensPerSec)} tok/s`;
+}
+
+function formatRoutePrice(value) {
+  if (value == null || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? String(numeric) : null;
+}
+
+function formatRoutePricing(inputCost, outputCost) {
+  const parts = [];
+  const input = formatRoutePrice(inputCost);
+  const output = formatRoutePrice(outputCost);
+  if (input != null) parts.push(`$${input}/M in`);
+  if (output != null) parts.push(`$${output}/M out`);
+  return parts.join(' · ');
+}
+
+function routeMatchesQuery(route, query) {
+  const needle = String(query ?? '').trim().toLowerCase();
+  if (!needle) return true;
+  return [route.name, route.slug, route.quantization]
+    .some((value) => String(value ?? '').toLowerCase().includes(needle));
 }
 
 export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute, selectRoute }) {
@@ -134,11 +156,24 @@ export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute,
       return;
     }
     const list = el('div', { class: 'agent-model-list' });
+    const search = el('input', {
+      type: 'search',
+      placeholder: 'Search providers…',
+      autocomplete: 'off',
+      'aria-label': 'Search providers',
+    });
+    const searchBar = el('div', { class: 'agent-model-search' }, search);
+    const noResults = el('div', {
+      class: 'agent-model-empty',
+      text: 'No providers match your search.',
+      hidden: true,
+    });
+    const providerRows = [];
     const autoRow = el('div', { class: `agent-model-row${!route ? ' is-selected' : ''}` },
       el('button', { class: 'agent-model-choice', type: 'button' },
         el('span', { class: 'agent-model-name' },
           el('span', { text: 'Auto' }),
-          el('span', { class: 'agent-model-id', text: 'load balance OpenRouter' }),
+          el('span', { class: 'agent-model-id', text: 'load balance · pricing varies' }),
         ),
       ),
     );
@@ -157,6 +192,8 @@ export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute,
       if (lat) badges.push(el('span', { class: 'agent-model-badge', text: lat, title: 'Latency 30m' }));
       const tp = formatThroughput(r.throughput);
       if (tp) badges.push(el('span', { class: 'agent-model-badge', text: tp, title: 'Throughput 30m' }));
+      const pricing = formatRoutePricing(r.input_cost, r.output_cost);
+      if (pricing) badges.push(el('span', { class: 'agent-model-badge agent-route-cost', text: pricing, title: 'USD per 1M tokens' }));
       const row = el('div', { class: `agent-model-row${route === r.slug ? ' is-selected' : ''}` },
         el('button', { class: 'agent-model-choice', type: 'button' },
           el('span', { class: 'agent-model-name' },
@@ -171,9 +208,19 @@ export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute,
         closeMenu();
         refresh();
       });
+      providerRows.push({ route: r, row });
       list.append(row);
     }
-    menu.append(list);
+    search.addEventListener('input', debounce(() => {
+      let visibleCount = 0;
+      for (const { route: providerRoute, row } of providerRows) {
+        const visible = routeMatchesQuery(providerRoute, search.value);
+        row.hidden = !visible;
+        if (visible) visibleCount++;
+      }
+      noResults.hidden = !search.value.trim() || visibleCount > 0;
+    }, 120));
+    menu.append(searchBar, list, noResults);
     if (state.error) {
       menu.append(el('div', { class: 'agent-route-note', text: `Fetch gagal — menampilkan cache lama. ${state.error}` }));
     }
@@ -187,6 +234,7 @@ export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute,
     menu.hidden = false;
     positionMenu(menu, trigger);
     trigger.setAttribute('aria-expanded', 'true');
+    menu.querySelector('input')?.focus();
   };
 
   trigger.addEventListener('click', () => {

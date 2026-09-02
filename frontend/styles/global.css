@@ -1,6 +1,6 @@
-/* NusaShell — Kepulauan tokens. Night archipelago shell: warm volcanic
- * charcoal neutrals (60% Shell), rice-field green accent (30%), and the
- * Nusa accents ocean blue + earth brown (10%). Dark-first: every surface
+/* NusaShell — Kepulauan tokens. A nocturnal archipelago shell: deep sea
+ * surfaces, reef for interaction, volcanic soil for authored work, and
+ * mangrove only for healthy/successful state. Dark-first: every surface
  * color flows through these tokens so a future light theme is a single
  * override layer, not a per-view rewrite.
  *
@@ -11,58 +11,72 @@
  * with frontend/tests/css-hygiene.test.mjs.
  */
 :root {
-  /* Shell — dark neutrals (60%) */
-  --ink: #08090a;
-  --harbor: #0c0e0d;
-  --bg: #0c0e0d;
-  --panel: #121512;
-  --panel-alt: #171b17;
-  --panel-raised: #1e241d;
-  --border-soft: #242a22;
-  --border: #3a4238;
-  --border-strong: #57614f;
+  /* Shell — deep sea surfaces */
+  --ink: #071014;
+  --harbor: #0b171d;
+  --bg: #0d1b21;
+  --panel: #122127;
+  --panel-alt: #172a30;
+  --panel-raised: #1d3339;
+  --border-soft: #263b42;
+  --border: #3b555d;
+  --border-strong: #58737a;
   --text: #e9e6dd;
-  --text-dim: #b3b1a5;
-  --text-faint: #7f8177;
+  --text-dim: #bdc1b8;
+  --text-faint: #87928e;
   --text-muted: var(--text-dim);
 
-  /* Nusa green — rice-field / leaf accent (30%) */
-  --accent: #71bd6d;
-  --accent-strong: #8ed488;
-  --accent-ink: #0c170d;
-  --accent-soft: rgba(113, 189, 109, 0.12);
-  --accent-border: rgba(113, 189, 109, 0.42);
-  --accent-border-strong: rgba(113, 189, 109, 0.68);
-  --accent-glow: rgba(113, 189, 109, 0.42);
-  --accent-wash: rgba(113, 189, 109, 0.08);
+  /* Reef — the shared interactive and brand color. */
+  --accent: #45c6df;
+  --accent-strong: #82d8eb;
+  --accent-ink: #07191e;
+  --accent-soft: rgba(69, 198, 223, .12);
+  --accent-border: rgba(69, 198, 223, .42);
+  --accent-border-strong: rgba(69, 198, 223, .66);
+  --accent-glow: rgba(69, 198, 223, .30);
+  --accent-wash: rgba(69, 198, 223, .08);
 
-  /* Nusa ocean blue — info / links / subagent identity (10%) */
-  --blue-info: #66a9cf;
-  --blue-strong: #8cc4e2;
-  --blue-soft: rgba(102, 169, 207, 0.12);
-  --blue-border: rgba(102, 169, 207, 0.42);
+  /* Ocean — inspection, links, and external connectivity. */
+  --ocean: #79bdd2;
+  --ocean-strong: #a3dbe8;
+  --ocean-soft: rgba(121, 189, 210, .12);
+  --ocean-border: rgba(121, 189, 210, .42);
+  --blue-info: var(--ocean);
+  --blue-strong: var(--ocean-strong);
+  --blue-soft: var(--ocean-soft);
+  --blue-border: var(--ocean-border);
 
-  /* Nusa earth brown — warmth / reasoning / memory (10%) */
-  --earth: #a98c6a;
-  --earth-strong: #c9a66b;
-  --earth-soft: rgba(169, 140, 106, 0.12);
-  --earth-border: rgba(169, 140, 106, 0.4);
+  /* Volcanic soil and sand — authored work, memory, and scheduled work. */
+  --earth: #c38c5e;
+  --earth-strong: #dfb37d;
+  --earth-soft: rgba(195, 140, 94, .12);
+  --earth-border: rgba(195, 140, 94, .42);
+  --sand: #d6b36c;
+  --sand-strong: #eccb89;
+  --sand-soft: rgba(214, 179, 108, .12);
+  --sand-border: rgba(214, 179, 108, .42);
 
-  --input-bg: #0d110e;
-  --green: #56cf91;
-  --green-bright: #6fd89b;
+  /* Mangrove is intentionally semantic, never the default interface hue. */
+  --forest: #68b982;
+  --forest-strong: #8ad19a;
+  --forest-soft: rgba(104, 185, 130, .12);
+  --forest-border: rgba(104, 185, 130, .42);
+
+  --input-bg: #0b171b;
+  --green: var(--forest);
+  --green-bright: var(--forest-strong);
   --red: #e8655f;
   --red-bright: #ff9ca5;
   --red-border: rgba(232, 101, 95, 0.4);
   --danger: var(--red);
-  --purple: #c4b0ea;
-  --purple-bright: #c1a6ff;
-  --amber: #d8a24a;
-  --amber-bright: #f0bb6a;
+  --purple: #b7a8d7;
+  --purple-bright: #d0c4e9;
+  --amber: var(--sand);
+  --amber-bright: var(--sand-strong);
   --orange: #f0883e;
-  --scrollbar-track: #0c0e0d;
-  --scrollbar-thumb: #3a4238;
-  --scrollbar-thumb-hover: #57614f;
+  --scrollbar-track: #0b171d;
+  --scrollbar-thumb: #3b555d;
+  --scrollbar-thumb-hover: #58737a;
   --radius-lg: 10px;
   --radius-md: 7px;
   --radius-sm: 5px;
@@ -174,7 +188,7 @@ body {
   padding: var(--space-2) var(--space-5);
   margin-bottom: 1rem;
   border-bottom: 1px solid var(--border);
-  background: rgba(17, 19, 17, .82);
+  background: rgba(13, 27, 33, .82);
 }
 .view-kicker {
   display: flex;
@@ -272,9 +286,19 @@ body {
 .wc:hover { border-color: var(--border); background: var(--panel-alt); color: var(--text); }
 
 /* ============ Shared tabs ============ */
-/* Segmented tab buttons used by multiple views (Home categories,
-   Learning sections). Hosted here — not inside one view's stylesheet —
-   so both consume the same definition without cross-file coupling. */
+/* Content-section tabs share a bounded segmented control. Home's category
+   filter opts out in home.css because it filters a grid rather than a panel. */
+.tabs {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  gap: 2px;
+  padding: 3px;
+  overflow-x: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: calc(var(--radius-md) + 1px);
+  background: var(--panel);
+}
 .tab {
   min-width: 0;
   min-height: 32px;

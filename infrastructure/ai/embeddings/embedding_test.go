@@ -3,11 +3,18 @@ package embeddings
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
 
 func TestNewEmbedderNormalizesBaseURLAndNamesModel(t *testing.T) {
 	e := NewEmbedder("https://example.test/v1///", "key", "text-embedding-3-small", 0)
@@ -69,6 +76,61 @@ func TestEmbedBatchPostsRequestAndCachesDimension(t *testing.T) {
 	}
 	if requests != 1 {
 		t.Fatalf("Dim() made an extra request after EmbedBatch: requests = %d, want 1", requests)
+	}
+}
+
+func TestEmbedBatchAddsOpenRouterAttributionHeaders(t *testing.T) {
+	var got http.Header
+	e := NewEmbedder("https://openrouter.ai/api/v1", "test-key", "liquid/lfm-2.5-embedding-350m:free", 0)
+	e.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r.Header.Clone()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"data":[{"embedding":[0.1]}]}`)),
+			Request:    r,
+		}, nil
+	})}
+
+	if _, err := e.Embed(context.Background(), "identify this app"); err != nil {
+		t.Fatalf("Embed failed: %v", err)
+	}
+	if got.Get("User-Agent") != "NusaShell" {
+		t.Fatalf("User-Agent = %q, want NusaShell", got.Get("User-Agent"))
+	}
+	if got.Get("HTTP-Referer") != "https://github.com/jahrulnr/NusaShell" {
+		t.Fatalf("HTTP-Referer = %q, want NusaShell repository URL", got.Get("HTTP-Referer"))
+	}
+	if got.Get("X-OpenRouter-Title") != "NusaShell" {
+		t.Fatalf("X-OpenRouter-Title = %q, want NusaShell", got.Get("X-OpenRouter-Title"))
+	}
+	if got.Get("X-OpenRouter-Categories") == "" {
+		t.Fatal("missing X-OpenRouter-Categories")
+	}
+}
+
+func TestEmbedBatchDoesNotSendOpenRouterAttributionToOtherHosts(t *testing.T) {
+	var got http.Header
+	e := NewEmbedder("https://api.example.test/v1", "test-key", "test-embed", 0)
+	e.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r.Header.Clone()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"data":[{"embedding":[0.1]}]}`)),
+			Request:    r,
+		}, nil
+	})}
+
+	if _, err := e.Embed(context.Background(), "do not impersonate a router"); err != nil {
+		t.Fatalf("Embed failed: %v", err)
+	}
+	for _, name := range []string{"HTTP-Referer", "X-OpenRouter-Title", "X-OpenRouter-Categories"} {
+		if value := got.Get(name); value != "" {
+			t.Errorf("%s = %q, want absent for non-OpenRouter host", name, value)
+		}
 	}
 }
 

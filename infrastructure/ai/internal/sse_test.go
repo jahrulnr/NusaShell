@@ -28,7 +28,7 @@ func TestParseRetryAfter(t *testing.T) {
 // cleanly but the protocol terminator ([DONE] / message_stop /
 // response.completed) never arrived" path. It must:
 //   - still wrap io.ErrUnexpectedEOF so errors.Is keeps working,
-//   - remain a temporary retryable UpstreamError,
+//   - remain a temporary retryable domain.ProviderError,
 //   - surface a message that names the failure mode (not bare "unexpected EOF")
 //     so operators can tell it apart from a mid-frame network cut.
 func TestReadSSEIdleTimeout(t *testing.T) {
@@ -83,7 +83,7 @@ func TestReadSSEIdleTimeoutCompletes(t *testing.T) {
 }
 
 // TestIdleTimeoutErrorKind verifies that ErrIdleTimeout is wrapped as
-// KindIdleTimeout by the adapter-level helper.
+// domain.KindIdleTimeout by the adapter-level helper.
 func TestIsOpenRouterURL(t *testing.T) {
 	tests := []struct {
 		url  string

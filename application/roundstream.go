@@ -38,19 +38,15 @@ const (
 	// a consumer whose cursor falls off the head sees a Seq jump and falls
 	// back to a snapshot refresh).
 	roundStreamFrameCap = 8192
-	// roundStreamSubBuf is the per-subscriber live queue. Publishers never
-	// block on it; overflow drops and is recovered by replay (the SSE
-	// client reconnects with after=<lastSeq> and the registry replays the
-	// buffered tail). The buffer is sized large enough that a normal reader
-	// (browser tab rendering a live turn) absorbs the full burst between
-	// the SSE poll loop and the next animation frame, even when the
-	// provider emits many small deltas per second and the user is briefly
-	// doing other work in the tab. The previous 512-frame headroom was
-	// undersized for sustained long output (a few hundred-token deltas at
-	// dozens per second would overflow the buffer between browser paints
-	// and the live frames would be lost; recovery via after= only works
-	// when the cursor is still inside the replay buffer headroom).
-	roundStreamSubBuf = 4096
+	// roundStreamSubBuf is the per-subscriber live queue. It matches the replay
+	// cap because subscribe preloads the replay while holding the stream lock;
+	// the queue must fit the complete replay or a reconnect can deadlock before
+	// the transport gets a chance to start draining it. Publishers never block
+	// on it; overflow drops and is recovered by replay (the SSE client
+	// reconnects with after=<lastSeq> and the registry replays the buffered
+	// tail). The previous 4096-frame headroom was enough for normal bursts but
+	// not for a full replay after a long browser pause.
+	roundStreamSubBuf = roundStreamFrameCap
 	// roundStreamSealedTTL keeps sealed streams available for late joiners
 	// (new tab, room switch) before pruning.
 	roundStreamSealedTTL = 90 * time.Second
@@ -105,20 +101,27 @@ func (s *RoundStream) publish(frame contracts.RoundDeltaFrame) bool {
 	frame.Seq = s.seq
 	s.deltas = append(s.deltas, frame)
 	if len(s.deltas) > roundStreamFrameCap {
-		s.deltas = append([]contracts.RoundDeltaFrame(nil), s.deltas[len(s.deltas)-roundStreamFrameCap:]...)
+		// Drop the oldest frame without copying the whole replay tail on every
+		// publish. A slow subscriber can make this hot path run thousands of
+		// times while the browser is paused; copying 8192 frames per delta can
+		// stall the publisher under the race detector and, more importantly,
+		// needlessly inflate normal live-round latency. The backing slice is
+		// periodically replaced by append when its remaining capacity is
+		// exhausted, so retained headroom stays bounded to roughly 2x the cap.
+		s.deltas = s.deltas[1:]
 	}
 	s.lastActive = clock.NewTime().Time()
-	subs := make([]*roundSubscriber, 0, len(s.subs))
 	for _, sub := range s.subs {
-		subs = append(subs, sub)
-	}
-	s.mu.Unlock()
-	for _, sub := range subs {
+		// Keep the non-blocking fan-out under the stream lock. Publishing
+		// concurrently (parallel tools can do this) must enqueue frames in
+		// the same order as their Seq assignment; sending after unlock let a
+		// later publish overtake an earlier one in a subscriber's channel.
 		select {
 		case sub.ch <- frame:
 		default: // slow reader: drop; replay after= covers it
 		}
 	}
+	s.mu.Unlock()
 	return true
 }
 
@@ -130,6 +133,7 @@ func (s *RoundStream) seal(done contracts.RoundDoneFrame) {
 		return
 	}
 	s.sealed = true
+	done.LastSeq = s.seq
 	s.doneFrame = done
 	subs := make([]*roundSubscriber, 0, len(s.subs))
 	for _, sub := range s.subs {
@@ -162,16 +166,20 @@ func (s *RoundStream) subscribe(after int64) *RoundStreamSub {
 			replay = append(replay, f)
 		}
 	}
-	if !sealed {
-		s.subs[sub.id] = sub
-	}
-	s.mu.Unlock()
+	// Enqueue the replay before registering the subscriber while the stream
+	// lock is held. This preserves Seq order if a publish races the attach:
+	// the first live frame cannot overtake the replay. The queue capacity is
+	// roundStreamFrameCap, so this bounded send cannot block under the lock.
 	for _, f := range replay {
 		sub.ch <- f
 	}
 	if sealed {
+		s.mu.Unlock()
 		close(sub.done)
+		return &RoundStreamSub{stream: s, sub: sub}
 	}
+	s.subs[sub.id] = sub
+	s.mu.Unlock()
 	return &RoundStreamSub{stream: s, sub: sub}
 }
 
@@ -290,6 +298,18 @@ func (r *RoundStreamRegistry) PublishWithPresentation(runID, messageID string, r
 func (r *RoundStreamRegistry) PublishWithArgsAndPresentation(runID, messageID string, round int, kind, toolCallID, name, text string, args []byte, presentation *contracts.ToolPresentationDTO) {
 	st := r.streamFor(runID, messageID, round)
 	st.publish(contracts.RoundDeltaFrame{Kind: kind, ToolCallID: toolCallID, Name: name, Args: args, Text: text, Presentation: presentation})
+	r.maybeGC()
+}
+
+// PublishActivity publishes a transient provider-side activity signal. It is
+// intentionally separate from tool-call execution: the provider can emit it
+// while it is still assembling/validating tool arguments, before a tool card
+// or agent.tool.started event exists.
+func (r *RoundStreamRegistry) PublishActivity(runID, messageID string, round int, toolCallID, name, activity string) {
+	st := r.streamFor(runID, messageID, round)
+	st.publish(contracts.RoundDeltaFrame{
+		Kind: contracts.RoundDeltaActivity, ToolCallID: toolCallID, Name: name, Activity: activity,
+	})
 	r.maybeGC()
 }
 

@@ -27,7 +27,8 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `skills/.provenance.json` | skill authorship log (createdBy, createdAt) | JSON |
 | `skills/.deleted-builtin.json` | builtin skills the user deleted (so they are not re-seeded) | JSON |
 | `plugins/<id>/` | plugins (manual MCP servers and installed plugins): `manifest.json` + optional `ui/` + optional `skills/` (mounted read-only as `plugin:<id>` skills) | JSON + files |
-| `memory/primary.md` | primary memory (always-injected working set, ~1k token cap; auto-created on first run) | Markdown |
+| `memory/user.md` | user-tier memory (always-injected user rules/preferences, ~1k token cap; legacy path `memory/primary.md` — move it to `memory/user.md` by hand when upgrading; auto-created on first run) | Markdown |
+| `memory/soul.md` | agent-tier memory (always-injected agent working knowledge, ~1k token cap; legacy path `memory/agent.md` — move it here by hand when upgrading; auto-created on first run) | Markdown |
 | `memory/fragments/*.md` | memory fragments (unlimited searchable archive; one markdown file per entry with YAML frontmatter) | Markdown + YAML |
 | `memory_project/{key}/` | per-workspace project memory (`index.md`, `guardrails.md`, … plus `archive/`). Default base; override with Settings → Project memory (`project_memory_base`, for example `~/.memory`) | Markdown |
 | `memory/legacy.jsonl` | legacy memory entries (pre-fragment system) | JSONL |
@@ -35,7 +36,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `learning/embeddings.jsonl` | embedding cache for memory/skill entries | JSONL |
 | `learning/trajectory.jsonl` | learning trajectory log (one event per line) | JSONL |
 | `learning/turns.json` | turn counters for review agent scheduling | JSON |
-| `learning/provider_params.json` | auto-learned provider/model params (context caps, disabled modalities from 400 errors) | JSON |
+| `learning/provider_params.json` | auto-learned provider/model params (context caps, disabled modalities, and request-shape constraints from 400 errors) | JSON |
 | `learning/model_overrides.json` | manual model-metadata overrides (review agent corrections; win over catalog + learned) | JSON |
 | `learning/reviews/` | background review agent transcripts (one JSON file per review run; viewable from the Learning log) | JSON |
 | `attachments/<conv_id>/` | user image/file attachments and generated images (`gen-<toolCallID>.<ext>`) | files |
@@ -43,8 +44,8 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `piper/<goos>-<goarch>/` | managed piper engine installed by the one-click Settings installer (binary, `espeak-ng-data/`, shared libs); `PIPER_BIN`/PATH binaries still take precedence at runtime | files |
 | `docs/` | optional user-supplied docs that extend the embedded corpus | markdown |
 | `logs.jsonl` | activity log (bounded ring) | JSONL |
-| `conversations/<conv_id>.acp/` | terminal ACP subagent transcripts (one JSON file per run, written by `subagent_wait` or the completion callback and linked to the parent conversation); legacy global `acp_runs.jsonl` migrates here automatically on first use | JSON |
-| `conversations/<conv_id>.journal/` | workspace change journal sidecar: `journal.jsonl` (live append-only event log), `journal.jsonl.gz` (archived gzip members, appended at each turn end), and `blobs/` (content-addressed pre-image objects). Records every file change the agent makes (declared, opaque exec, unobserved MCP) so the post-compaction hydration slot can show exactly what the session changed. Deleted together with the conversation. | JSONL + gzip + files |
+| `conversations/<conv_id>.acp/` | terminal ACP subagent and internal delegate run snapshots (one JSON file per run, linked to the parent conversation); legacy global `acp_runs.jsonl` migrates here automatically on first use | JSON |
+| `conversations/<conv_id>.journal/` | workspace change journal sidecar: `journal.jsonl` (live append-only event log), `journal.jsonl.gz` (archived gzip members, appended at each turn end), and `blobs/` (content-addressed pre-image objects). Records every file change the agent makes (declared, opaque exec, unobserved MCP) so the post-compaction hydration slot can show exactly what the session changed. The hydration `workspace_state` payload also carries a hint pointing the agent at this doc (`docs_read(id="data-locations")`) for the full change-history and restore semantics. Also records a `compaction` event per successful compaction — the durable audit trail (trigger, model, retention budget, summary) that survives turn-end archiving. Deleted together with the conversation. | JSONL + gzip + files |
 | `credentials.db` | API keys per provider | SQLite |
 | `automation/workflows.db` | workflows, runs, schedules, events, waits, locks | SQLite |
 | `automation/pipelines/` | pipeline definition YAML files (one per workflow, auto-discovered on boot) | YAML |

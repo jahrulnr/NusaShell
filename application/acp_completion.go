@@ -13,13 +13,13 @@ import (
 )
 
 func (a *App) emitAcpRun(event string, run *domain.AcpRun) {
-	if run == nil {
+	if run == nil || a.Bus == nil {
 		return
 	}
 	a.Bus.Emit(event, contracts.AcpRunEvent{Run: acpRunDTO(run)})
 }
 
-// onAcpRunDone handles subagent completion: persists the transcript,
+// onAcpRunDone handles ACP subagent completion: persists the transcript,
 // then delivers the result through the shared background-run path
 // (queued at the next tool-round boundary on a live parent turn, or
 // injected immediately plus a new turn when the parent is idle).

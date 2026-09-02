@@ -256,10 +256,11 @@ func (a *App) addTurnMessages(c *domain.Conversation, userMsg, asstMsg domain.Me
 		c.AddMessage(a.restartAnnouncement())
 	}
 	// Pending harness announcements (config/memory/skills changes published
-	// while idle) are injected after the user message and cleared. An active
+	// while idle) are injected after the user message and cleared in ONE
+	// merged notice — the same drain as the round-boundary path. An active
 	// turn's worker drains newer entries at round boundaries instead.
-	for _, pa := range c.DrainPendingAnnouncements() {
-		c.AddMessage(a.pendingAnnouncementMessage(pa))
+	if items := c.DrainPendingAnnouncements(); len(items) > 0 {
+		c.AddMessage(a.pendingAnnouncementsMessage(items))
 	}
 	c.AddMessage(asstMsg)
 }
@@ -376,7 +377,7 @@ func (a *App) handleTurnsStop(req contracts.TurnStopRequest) (any, *contracts.RP
 	a.runsMu.Lock()
 	run, ok := a.runs[req.RunID]
 	a.runsMu.Unlock()
-	if !ok {
+	if !ok || run == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "run not found or already finished"}
 	}
 	run.Cancel()
@@ -386,6 +387,27 @@ func (a *App) handleTurnsStop(req contracts.TurnStopRequest) (any, *contracts.RP
 		a.AskQuestions.RejectRun(run.ID, "Agent turn interrupted by the user")
 	}
 	a.log("info", "agent", "turn stopped: %s", run.ID)
+	return map[string]bool{"ok": true}, nil
+}
+
+// handleToolStop cancels one in-flight tool call without cancelling the
+// enclosing turn. The next model round receives the tool's interrupted result
+// and can decide how to continue. The normal agent.turns.stop endpoint keeps
+// its whole-turn cancellation semantics for the composer Stop button.
+func (a *App) handleToolStop(req contracts.ToolStopRequest) (any, *contracts.RPCError) {
+	if req.RunID == "" || req.ToolCallID == "" {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "run_id and tool_call_id are required"}
+	}
+	a.runsMu.Lock()
+	run, ok := a.runs[req.RunID]
+	a.runsMu.Unlock()
+	if !ok || run == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "run not found or already finished"}
+	}
+	if !run.cancelTool(req.ToolCallID) {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "tool call not found or already finished"}
+	}
+	a.log("info", "agent", "tool stopped: run=%s tool=%s", req.RunID, req.ToolCallID)
 	return map[string]bool{"ok": true}, nil
 }
 

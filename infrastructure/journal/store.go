@@ -25,6 +25,7 @@ import (
 const (
 	eventTypeChange     = "change"
 	eventTypeUnobserved = "unobserved"
+	eventTypeCompaction = "compaction"
 )
 
 type domainFileChange struct {
@@ -71,6 +72,10 @@ type journalEvent struct {
 	RunID   string            `json:"runId,omitempty"`
 	Tool    string            `json:"tool,omitempty"`
 	Change  *domainFileChange `json:"change,omitempty"`
+	// Compaction carries the audit record for eventTypeCompaction events.
+	// Reuses domain.CompactionEvent directly (no mirror): the domain type
+	// owns the wire shape for this payload.
+	Compaction *domain.CompactionEvent `json:"compaction,omitempty"`
 }
 
 type store struct {
@@ -146,6 +151,16 @@ func (s *store) append(conversationID string, ev journalEvent) error {
 		return werr
 	}
 	return cerr
+}
+
+// appendCompaction appends one durable compaction audit event. The record is
+// best-effort: callers log failures and never fail the turn on it.
+func (s *store) appendCompaction(conversationID string, ev domain.CompactionEvent) error {
+	return s.append(conversationID, journalEvent{
+		Type:       eventTypeCompaction,
+		TS:         clock.NewTime().Time(),
+		Compaction: &ev,
+	})
 }
 
 // readAll returns the full event history: archived gzip members first

@@ -3,12 +3,14 @@ package application
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"nusashell/application/service/learnedparams"
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/core"
 	"nusashell/pkg/text"
 )
 
@@ -44,7 +46,7 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 		conversation.ID, beforeTokens, compactionTrigger, contextWindow, maxOutput)
 	compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, pc, model, contextWindow, settings)
 	a.emitCompactionStarted(run, conversation.ID)
-	summary, err := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings)
+	summary, err := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings, domain.CompactionTriggerInitial)
 	if err != nil {
 		a.log("warn", "agent", "compaction failed for %s: %v", conversation.ID, err)
 		a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: run.ID, ConversationID: conversation.ID, Error: err.Error()})
@@ -81,7 +83,7 @@ func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversatio
 			delay = retryBaseDelay
 		}
 		a.prepareStreamRetry(run, messageID, retry, delay, err)
-		if err := a.retrySleeper(run.Ctx, delay); err != nil {
+		if err := a.waitForRetry(run.Ctx, delay); err != nil {
 			return roundResult, err
 		}
 	}
@@ -141,7 +143,7 @@ func (a *App) prepareStreamRetry(run *TurnRun, messageID string, retry int, dela
 		DelayMS:        delay.Milliseconds(),
 		Error:          err.Error(),
 	}
-	var upstream *UpstreamError
+	var upstream *domain.ProviderError
 	if errors.As(err, &upstream) {
 		retryEvt.Kind = string(upstream.Kind)
 		retryEvt.Status = upstream.StatusCode
@@ -189,13 +191,13 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 	if continuation {
 		messages = appendContinuationTool(messages)
 	}
-	// Some providers/models reject requests that contain no user message
-	// ("No user query found in messages"). When 400-learning has recorded
-	// this for the current provider+model and the messages don't already
-	// contain a user role, inject a minimal user message ("."). This is
-	// ephemeral — not persisted to the conversation store — so later turns
-	// keep the real transcript intact.
-	if a.learnedParams != nil && a.learnedParams.NeedsUserNudge(run.ProviderID, model) && !hasUserMessage(messages) {
+	// Some providers/models reject assistant prefilling and require the
+	// request to end in a user message. When 400-learning has recorded this
+	// for the current provider+model, repair an assistant-ended request with a
+	// minimal user message ("."). A tool result is left untouched because it
+	// is the active continuation turn. This is ephemeral — not persisted to
+	// the conversation store — so later turns keep the real transcript intact.
+	if a.learnedParams != nil && a.learnedParams.NeedsUserNudge(run.ProviderID, model) && needsUserMessageAtEnd(messages) {
 		messages = append(messages, ChatMessage{Role: "user", Content: userNudgeText})
 	}
 	// Publish a lightweight server-side context estimate (system + messages +
@@ -215,7 +217,30 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 			}
 		}
 	}
-	response, err := adapter.Stream(run.Ctx, ChatRequest{
+	announcedToolCalls := make(map[string]string)
+	announceToolActivity := func(id, name, itemID string, index, outputIndex *int) {
+		key := id
+		if key == "" && index != nil {
+			output := 0
+			if outputIndex != nil {
+				output = *outputIndex
+			}
+			key = fmt.Sprintf("index:%d:%d", *index, output)
+		}
+		if key == "" && itemID != "" {
+			key = "item:" + itemID
+		}
+		if key == "" {
+			return
+		}
+		previousName, seen := announcedToolCalls[key]
+		if seen && (name == "" || previousName != "") {
+			return
+		}
+		announcedToolCalls[key] = name
+		a.publishRoundActivity(run.ID, messageID, round, id, name, contracts.RoundActivityToolCall)
+	}
+	response, err := adapter.StreamWithToolActivity(run.Ctx, ChatRequest{
 		Model:             model,
 		System:            system,
 		Messages:          messages,
@@ -244,6 +269,10 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 			return
 		}
 		a.publishRoundDelta(run.ID, messageID, round, contracts.RoundDeltaReasoning, "", "", delta)
+	}, func(event core.ToolUseStart) {
+		announceToolActivity(event.ID, event.Name, event.ItemID, event.Index, event.OutputIndex)
+	}, func(event core.ToolUseDelta) {
+		announceToolActivity(event.ID, "", event.ItemID, event.Index, event.OutputIndex)
 	})
 	for _, warning := range response.Warnings {
 		a.log("warn", "ai", "provider warning: %s", warning)

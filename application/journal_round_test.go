@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -39,6 +40,8 @@ func (f *fakeChangeJournal) SessionState(ctx context.Context, conversationID, wo
 	}
 	return nil, nil
 }
+
+func (f *fakeChangeJournal) RecordCompaction(_ string, _ domain.CompactionEvent) error { return nil }
 
 func (f *fakeChangeJournal) lastWrap() (journalWrapRecord, bool) {
 	f.mu.Lock()
@@ -243,6 +246,9 @@ func TestHydrationWorkspaceStateSlot(t *testing.T) {
 			}
 			if len(state.Changes) != 1 || state.Changes[0].Path != "/tmp/ws/changed.go" {
 				t.Fatalf("state = %+v", state)
+			}
+			if !strings.Contains(state.Hint, `docs_read(id="data-locations")`) {
+				t.Fatalf("workspace_state hint missing docs pointer: %q", state.Hint)
 			}
 		}
 	}

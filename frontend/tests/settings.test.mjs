@@ -16,6 +16,7 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
     'settings-data-dir',
     'settings-sidebar-compact',
     'settings-image-model',
+    'settings-delegate-model',
   ]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
@@ -24,6 +25,8 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
   assert.match(settingsView, /max_tool_rounds/);
   assert.match(settingsView, /max_parallel_tools/);
   assert.match(settingsView, /plugin_contract_mode/);
+  assert.match(settingsView, /delegate_model/);
+  assert.match(settingsView, /delegateSelect\.getSelected/);
 });
 
 test('WebSocket reconnect is an explicit persisted preference', () => {

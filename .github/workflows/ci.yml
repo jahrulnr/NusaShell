@@ -19,6 +19,46 @@ env:
   NODE_VERSION: "24"
 
 jobs:
+  detect-changes:
+    name: Detect changed release streams
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go_changed: ${{ steps.detect.outputs.go_changed }}
+      electron_changed: ${{ steps.detect.outputs.electron_changed }}
+      has_release_changes: ${{ steps.detect.outputs.has_release_changes }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Detect changed streams
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=''
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            node scripts/release-changes.mjs --all >> "$GITHUB_OUTPUT"
+            exit 0
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin "${{ github.base_ref }}" --depth=1
+            files="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")"
+          else
+            before="${{ github.event.before }}"
+            after="${{ github.event.after }}"
+            if [ -n "$before" ] && [ "$before" != "0000000000000000000000000000000000000000" ]; then
+              files="$(git diff --name-only "$before..$after")"
+            else
+              files="$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)"
+            fi
+          fi
+
+          printf '%s\n' "$files" | node scripts/release-changes.mjs >> "$GITHUB_OUTPUT"
+
   test-frontend:
     name: Frontend tests
     runs-on: ubuntu-latest
@@ -37,7 +77,82 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
-      - run: node --test frontend/*.test.mjs
+      - run: node --test frontend/tests/*.test.mjs
+
+  test-electron:
+    name: Electron wrapper tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/electron/package-lock.json
+      - run: node scripts/version.mjs check
+      - run: npm ci --prefix apps/electron
+      - run: npm --prefix apps/electron test
+
+  test-installers:
+    name: Installer scripts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Run installer and release contract tests
+        run: node --test scripts/version.test.mjs scripts/release-changes.test.mjs scripts/release-index.test.mjs scripts/release-manifest.test.mjs scripts/release-notes.test.mjs scripts/install.test.mjs
+      - name: Check Bash installer syntax
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash -n scripts/install.sh scripts/install-local.sh
+      - name: Check PowerShell installer syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($path in @('scripts/install.ps1', 'scripts/install-local.ps1')) {
+            [void][scriptblock]::Create((Get-Content -LiteralPath $path -Raw))
+          }
+
+  test-electron-ui:
+    name: Electron renderer smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/electron/package-lock.json
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y xvfb
+      - name: Stage native Go backend for the wrapper smoke test
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          mkdir -p apps/electron/runtime
+          go build -buildvcs=false -ldflags "-X main.version=${version}" -o apps/electron/runtime/nusashell ./cmd/nusashell
+      - run: npm ci --prefix apps/electron
+      - run: npm --prefix apps/electron run test:ui
 
   test-backend:
     name: Backend tests (${{ matrix.os }})
@@ -58,7 +173,12 @@ jobs:
           cache: true
       - name: Verify Go formatting
         shell: bash
-        run: test -z "$(gofmt -l .)"
+        run: |
+          unformatted="$(find . \
+            -path './.git' -prune -o \
+            -path './.experimental' -prune -o \
+            -type f -name '*.go' -exec gofmt -l {} +)"
+          test -z "$unformatted"
       - name: Verify UI docs are fresh
         shell: bash
         run: go run ./cmd/scan-ui-docs -check
@@ -67,7 +187,7 @@ jobs:
 
   build:
     name: Build (${{ matrix.os }})
-    needs: [test-frontend, test-backend]
+    needs: [test-frontend, test-backend, test-electron, test-installers, test-electron-ui]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -89,4 +209,305 @@ jobs:
       - name: Regenerate catalog
         shell: bash
         run: go run ./cmd/gen-catalog
-      - run: go build ./...
+      - name: Build Go packages with release version
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          go build -buildvcs=false -ldflags "-X main.version=${version}" ./...
+
+  # Go core and Electron wrapper are independent release streams. The wrapper
+  # never receives a Go binary in its package, and only its own path changes
+  # trigger this matrix.
+  build-go-release:
+    name: Go release (${{ matrix.os }})
+    needs: [detect-changes, test-frontend, test-backend, test-electron, test-installers, test-electron-ui]
+    if: needs.detect-changes.outputs.go_changed == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+          - os: windows-latest
+            platform: win
+            arch: x64
+          - os: macos-15-intel
+            platform: darwin
+            arch: x64
+          - os: macos-14
+            platform: darwin
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Regenerate embedded documentation and catalog
+        shell: bash
+        run: |
+          go run ./cmd/scan-ui-docs
+          go run ./cmd/gen-catalog
+      - name: Verify Go release version metadata
+        shell: bash
+        run: node scripts/version.mjs read-go
+      - name: Build and package Go core
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < VERSION)"
+          mkdir -p release/go/stage
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            go build -buildvcs=false -ldflags "-X main.version=${version}" -o release/go/stage/nusashell.exe ./cmd/nusashell
+            powershell -NoProfile -Command "Compress-Archive -Path 'release/go/stage/nusashell.exe' -DestinationPath 'release/go/nusashell-${version}-win-x64.zip' -Force"
+          else
+            go build -buildvcs=false -ldflags "-X main.version=${version}" -o release/go/stage/nusashell ./cmd/nusashell
+            tar -C release/go/stage -czf "release/go/nusashell-${version}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz" nusashell
+          fi
+          for payload in release/go/*.tar.gz release/go/*.zip; do
+            [ -f "$payload" ] || continue
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$payload" > "$payload.sha256"
+            else
+              shasum -a 256 "$payload" > "$payload.sha256"
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nusashell-go-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release/go/**
+          if-no-files-found: error
+
+  build-electron:
+    name: Electron wrapper release (${{ matrix.os }})
+    needs: [detect-changes, test-frontend, test-backend, test-electron, test-installers, test-electron-ui]
+    if: needs.detect-changes.outputs.electron_changed == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+          - os: windows-latest
+            platform: win
+            arch: x64
+          - os: macos-15-intel
+            platform: mac
+            arch: x64
+          - os: macos-14
+            platform: mac
+            arch: arm64
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/electron/package-lock.json
+      - name: Verify release version metadata
+        shell: bash
+        run: node scripts/version.mjs check
+      - run: npm ci --prefix apps/electron
+      - name: Build Electron wrapper artifacts
+        shell: bash
+        run: npm --prefix apps/electron run dist -- --publish never
+      - name: Package Linux directory wrapper payload
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < apps/electron/VERSION)"
+          npm --prefix apps/electron run package:dir
+          mkdir -p release/electron
+          tar -C apps/electron/dist/linux-unpacked -czf "$GITHUB_WORKSPACE/release/electron/nusashell-electron-${version}-linux-x64.tar.gz" .
+          sha256sum "release/electron/nusashell-electron-${version}-linux-x64.tar.gz" > "release/electron/nusashell-electron-${version}-linux-x64.tar.gz.sha256"
+      - name: Collect native Electron artifacts
+        shell: bash
+        run: |
+          mkdir -p release/electron
+          find apps/electron/dist -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.dmg' -o -name '*.zip' -o -name '*.exe' \) -exec cp {} release/electron/ \;
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nusashell-electron-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release/electron/**
+          if-no-files-found: error
+
+  publish-go:
+    name: Publish Go GitHub release
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.detect-changes.outputs.go_changed == 'true'
+    needs: [detect-changes, build-go-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Read Go release version
+        id: release
+        shell: bash
+        run: |
+          version="$(node scripts/version.mjs read-go)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=go-v$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nusashell-go-*
+          path: release-artifacts/go
+          merge-multiple: true
+      - name: Check Go release tag does not already exist
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          if git show-ref --tags --verify --quiet "refs/tags/$TAG" || git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists. Bump VERSION before merging another Go release."
+            exit 1
+          fi
+      - name: Create Go release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.release.outputs.version }}"
+          node scripts/release-manifest.mjs "$version" release-artifacts/go release-artifacts/latest.json go
+          if ! node scripts/release-notes.mjs "$version" CHANGELOG.md > release-notes.md; then
+            printf 'NusaShell Go core %s\n\nBuilt from commit %s.\n' "$version" "$GITHUB_SHA" > release-notes.md
+          fi
+      - name: Create Go GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' artifacts < <(find release-artifacts/go -type f -print0)
+          artifacts+=(release-artifacts/latest.json)
+          gh release create "$TAG" "${artifacts[@]}" \
+            --target "${GITHUB_SHA}" \
+            --title "NusaShell Go ${TAG#go-}" \
+            --notes-file release-notes.md
+
+  publish-electron:
+    name: Publish Electron GitHub release
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.detect-changes.outputs.electron_changed == 'true'
+    needs: [detect-changes, build-electron]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Read Electron release version
+        id: release
+        shell: bash
+        run: |
+          version="$(node scripts/version.mjs read)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=electron-v$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nusashell-electron-*
+          path: release-artifacts/electron
+          merge-multiple: true
+      - name: Check Electron release tag does not already exist
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          if git show-ref --tags --verify --quiet "refs/tags/$TAG" || git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists. Bump apps/electron/VERSION before merging another Electron release."
+            exit 1
+          fi
+      - name: Create Electron release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.release.outputs.version }}"
+          node scripts/release-manifest.mjs "$version" release-artifacts/electron release-artifacts/electron-latest.json electron
+          if ! node scripts/release-notes.mjs "$version" CHANGELOG.md > release-notes.md; then
+            printf 'NusaShell Electron wrapper %s\n\nBuilt from commit %s.\n' "$version" "$GITHUB_SHA" > release-notes.md
+          fi
+      - name: Create Electron GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' artifacts < <(find release-artifacts/electron -type f -print0)
+          artifacts+=(release-artifacts/electron-latest.json)
+          gh release create "$TAG" "${artifacts[@]}" \
+            --target "${GITHUB_SHA}" \
+            --title "NusaShell Electron ${TAG#electron-}" \
+            --notes-file release-notes.md
+
+  publish-release-index:
+    name: Update release stream index
+    if: >-
+      always() && github.event_name == 'push' && github.ref == 'refs/heads/master' &&
+      needs.detect-changes.result == 'success' &&
+      needs.detect-changes.outputs.has_release_changes == 'true' &&
+      (needs.detect-changes.outputs.go_changed != 'true' || needs.publish-go.result == 'success') &&
+      (needs.detect-changes.outputs.electron_changed != 'true' || needs.publish-electron.result == 'success')
+    needs: [detect-changes, publish-go, publish-electron]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ github.token }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Update stream pointers
+        env:
+          GO_CHANGED: ${{ needs.detect-changes.outputs.go_changed }}
+          ELECTRON_CHANGED: ${{ needs.detect-changes.outputs.electron_changed }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git pull --rebase origin master
+          GO_CHANGED="$GO_CHANGED" ELECTRON_CHANGED="$ELECTRON_CHANGED" \
+            GO_VERSION="${{ needs.publish-go.outputs.version }}" \
+            ELECTRON_VERSION="${{ needs.publish-electron.outputs.version }}" \
+            node scripts/release-index.mjs update-from-env release-versions.json
+          if git diff --quiet -- release-versions.json; then
+            echo 'release-versions.json is already up to date.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add release-versions.json
+          git commit -m 'chore: update release stream index [skip ci]'
+          git push origin HEAD:master

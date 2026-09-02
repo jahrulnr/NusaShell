@@ -31,6 +31,14 @@ const (
 	// pipeline room, with ACP tools AND the delegate tool itself removed
 	// so delegated agents cannot recurse.
 	AgentDelegate AgentKind = "delegate"
+	// AgentImprover is the background improver: a headless run with the
+	// full local toolbox (file_*, grep, exec, web_search/web_fetch,
+	// memory/skill dispatchers) plus the review_transcript and
+	// model_override local tools. It studies real evidence instead of
+	// reading transcript segments and writes durable memory (soul.md +
+	// fragments). ACP tools and the delegate tool are removed so it can
+	// neither stall on permission prompts nor recurse.
+	AgentImprover AgentKind = "improver"
 )
 
 // ToolFactory builds the advertised tool list per agent kind. The factory
@@ -59,6 +67,8 @@ func (f *ToolFactory) Get(kind AgentKind, workspace string) []ToolDef {
 	switch kind {
 	case AgentReview:
 		return f.reviewTools()
+	case AgentImprover:
+		return f.improverTools()
 	case AgentAutomation:
 		return filterACPToolDefs(f.baseTools(workspace))
 	case AgentDelegate:
@@ -103,6 +113,15 @@ func (f *ToolFactory) baseTools(workspace string) []ToolDef {
 		seen[t.Name] = true
 		out = append(out, ToolDef(t))
 	}
+	return out
+}
+
+// improverTools is the AgentImprover policy: the two local tools first,
+// then the full base toolbox minus ACP subagent and delegate tools (no
+// recursion, no permission prompts that could stall a headless run).
+func (f *ToolFactory) improverTools() []ToolDef {
+	out := []ToolDef{reviewTranscriptToolDef, modelOverrideToolDef}
+	out = append(out, filterDelegateToolDefs(filterACPToolDefs(f.baseTools("")))...)
 	return out
 }
 

@@ -155,6 +155,11 @@ type Conversation struct {
 	// LastReviewedMsgCount onward, avoiding re-reading already reviewed
 	// content. Zero means "never reviewed" (review from the start).
 	LastReviewedMsgCount int `json:"last_reviewed_msg_count,omitempty"`
+	// LastAnnouncedFragments tracks fragment IDs whose task_memory
+	// announcement has already been delivered to this conversation, so a
+	// fragment is announced once across turns and restarts (dedup state
+	// for the announcement engine).
+	LastAnnouncedFragments []string `json:"last_announced_fragments,omitempty"`
 	// Origin marks conversations that are not Agent rooms. Pipeline agent
 	// steps persist a conversation so the turn loop and automation(op="steer") can work;
 	// those must not appear in agent.conversations.list.
@@ -174,8 +179,11 @@ type Conversation struct {
 	// skills changes) published while the conversation had no active turn.
 	// addTurnMessages injects them after the next user message and clears
 	// the queue; an active turn's worker drains them at round boundaries
-	// and removes the matching entries by ID. Persisted so announcements
-	// survive restarts and arbitrarily long idle periods.
+	// and removes the matching entries by ID. Identical notices are
+	// deduplicated on queue; distinct notices append (never replace), and
+	// the drain merges everything into one announcement tool call.
+	// Persisted so announcements survive restarts and arbitrarily long
+	// idle periods.
 	PendingAnnouncements []PendingAnnouncement `json:"pending_announcements,omitempty"`
 }
 
@@ -190,13 +198,16 @@ type PendingAnnouncement struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// QueueAnnouncement appends a pending announcement, coalescing by type: an
-// unconsumed pending of the same type is replaced (last value wins), so a
-// burst of changes collapses into one announcement.
+// QueueAnnouncement appends a pending announcement. An entry with
+// identical content (type, args, and message) is deduplicated — a burst
+// publishing the same notice N times queues it once — while distinct
+// notices are appended, never replacing earlier ones: merged delivery
+// preserves every pending fact instead of a last-write-wins rule that
+// would swallow earlier notices of the same type (e.g. a peer message).
 func (c *Conversation) QueueAnnouncement(pa PendingAnnouncement) {
 	for i := range c.PendingAnnouncements {
-		if c.PendingAnnouncements[i].Type == pa.Type {
-			c.PendingAnnouncements[i] = pa
+		existing := &c.PendingAnnouncements[i]
+		if existing.Type == pa.Type && existing.Args == pa.Args && existing.Message == pa.Message {
 			return
 		}
 	}
@@ -481,6 +492,78 @@ func (c *Conversation) CompactionSplitIndex(keepTokenBudget int) int {
 	return splitIdx
 }
 
+// IsInFlightToolMessage reports whether m is an assistant message with a tool
+// round that has not reached a terminal status (executed, failed, or
+// interrupted) — a call that is still running or about to run. The status is
+// empty until a tool round executes (`persistTurnRound` stores the calls
+// before `executeTurnTools` assigns ToolRunning / ToolOK / ToolFailed /
+// ToolInterrupted). Such messages must survive compaction verbatim so the
+// pending tool outputs can still be patched in and stay visible in the live
+// tail instead of being lost by StripForRetention.
+func IsInFlightToolMessage(m Message) bool {
+	if m.Role != RoleAssistant {
+		return false
+	}
+	for i := range m.ToolCalls {
+		if toolCallNotTerminal(m.ToolCalls[i]) {
+			return true
+		}
+	}
+	for i := range m.Steps {
+		for j := range m.Steps[i].ToolCalls {
+			if toolCallNotTerminal(m.Steps[i].ToolCalls[j]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// toolCallNotTerminal reports whether a tool call has not reached a terminal
+// status. ToolRunning and the zero value (pre-execution) count as in-flight;
+// ToolOK, ToolFailed, and ToolInterrupted are terminal.
+func toolCallNotTerminal(tc ToolCall) bool {
+	return tc.Status != ToolOK && tc.Status != ToolFailed && tc.Status != ToolInterrupted
+}
+
+// IsBackgroundAgentMessage reports whether m is an assistant message that
+// participates in a background/async agent handoff: a spawn call (subagent,
+// delegate) whose result arrives later, or a synthetic result call
+// (subagent_result, delegate_result) injected when a background run
+// finishes. These messages carry cross-turn continuity — the model must know
+// which background agents were spawned and what they returned — so they
+// survive compaction verbatim instead of being stripped. The tools are
+// identified by name on both ToolCalls and Steps.
+func IsBackgroundAgentMessage(m Message) bool {
+	if m.Role != RoleAssistant {
+		return false
+	}
+	for i := range m.ToolCalls {
+		if isBackgroundAgentTool(m.ToolCalls[i].Name) {
+			return true
+		}
+	}
+	for i := range m.Steps {
+		for j := range m.Steps[i].ToolCalls {
+			if isBackgroundAgentTool(m.Steps[i].ToolCalls[j].Name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isBackgroundAgentTool reports whether a tool name belongs to the
+// background-agent handoff family: the async spawn tools and their synthetic
+// result calls.
+func isBackgroundAgentTool(name string) bool {
+	switch name {
+	case SubagentToolName, SubagentResultToolName, DelegateToolName, DelegateResultToolName:
+		return true
+	}
+	return false
+}
+
 // compactionRetention clones the contiguous keep suffix (and drops a prior
 // compaction summary if it sits inside that suffix). Used by Compact and
 // ArchiveMessages so the two stay consistent.
@@ -496,6 +579,16 @@ func (c *Conversation) compactionRetention(keepTokenBudget int) (retained []Mess
 			continue
 		}
 		retainedIndices[i] = true
+		if IsInFlightToolMessage(m) || IsBackgroundAgentMessage(m) {
+			// Preserve the in-flight round and background-agent handoffs
+			// (spawn calls + synthetic results) verbatim: pending tool
+			// outputs are patched into the live tail after compaction, and
+			// the model keeps knowing which background agents were spawned
+			// and what they returned (see IsInFlightToolMessage and
+			// IsBackgroundAgentMessage).
+			retained = append(retained, m)
+			continue
+		}
 		retained = append(retained, StripForRetention(m))
 	}
 	return retained, retainedIndices

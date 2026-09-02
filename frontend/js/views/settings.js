@@ -5,13 +5,14 @@ import { toast, createSelect, el } from '../ui.js';
 import { FONT_OPTIONS, readFontPreference, setFontPreference } from '../font-preferences.js';
 
 let bound = false;
-const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', imageProviderId: '', imageModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', videoGenProviderId: '', videoGenModelId: '', ttsProviderId: '', ttsModelId: '', webAnswerProvider: '', webAnswerModel: '', webSearchStrategy: '', compactionModel: '', reviewModel: '' };
+const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', imageProviderId: '', imageModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', videoGenProviderId: '', videoGenModelId: '', ttsProviderId: '', ttsModelId: '', webAnswerProvider: '', webAnswerModel: '', webSearchStrategy: '', compactionModel: '', reviewModel: '', delegateModel: '' };
 let preferredSelect;
 let embeddingSelect;
 let visionSelect;
 let imageSelect;
 let compactionSelect;
 let reviewSelect;
+let delegateSelect;
 let audioSelect;
 let videoSelect;
 let videoGenSelect;
@@ -77,6 +78,10 @@ export async function initSettings() {
       search: true,
     });
     reviewSelect = createSelect(document.getElementById('settings-review-model'), {
+      placeholder: 'Default — use the conversation\'s active model',
+      search: true,
+    });
+    delegateSelect = createSelect(document.getElementById('settings-delegate-model'), {
       placeholder: 'Default — use the conversation\'s active model',
       search: true,
     });
@@ -209,6 +214,7 @@ export async function refresh() {
     state.webSearchStrategy = settings.web_search_strategy ?? '';
     state.compactionModel = settings.compaction_model ?? '';
     state.reviewModel = settings.review_model ?? '';
+    state.delegateModel = settings.delegate_model ?? '';
     sttLanguageSelect.setSelected([['id', 'en'].includes(settings.stt_offline_language) ? settings.stt_offline_language : '']);
     document.getElementById('settings-learning-threshold').value = settings.learning_review_threshold ?? 10;
     document.getElementById('settings-skill-nudge-interval').value = settings.skill_nudge_interval ?? 15;
@@ -238,6 +244,7 @@ export async function refresh() {
   renderTTSModelOptions(allModels);
   renderCompactionModelOptions(allModels);
   renderReviewModelOptions(allModels);
+  renderDelegateModelOptions(allModels);
 
   // Offline engine cards: paint the status line + populate the STT model
   // picker from the installer snapshot. The picker only lists installed
@@ -497,6 +504,23 @@ function renderReviewModelOptions(models) {
   ];
   reviewSelect.setData(data);
   if (state.reviewModel) reviewSelect.setSelected([state.reviewModel]);
+}
+
+function renderDelegateModelOptions(models) {
+  const chatModels = models.filter((m) => !m.kind || m.kind === 'chat');
+  const data = [
+    { text: 'Default — use the conversation\'s active model', value: '', placeholder: true },
+    ...chatModels.map((m) => {
+      const label = m.id;
+      const ctx = m.context ? ' ' + Math.round(m.context / 1000) + 'K' : '';
+      return {
+        text: m.provider_name ? label + ctx + ' · ' + m.provider_name : label + ctx,
+        value: m.provider_id + ':' + m.id,
+      };
+    }),
+  ];
+  delegateSelect.setData(data);
+  if (state.delegateModel) delegateSelect.setSelected([state.delegateModel]);
 }
 
 // splitProviderModel splits a "providerId:modelId" select value on the first
@@ -782,6 +806,7 @@ async function save() {
     const { providerId: ttsProviderId, modelId: ttsModelId } = splitProviderModel(ttsValue);
     const compactionValue = compactionSelect.getSelected()?.[0] ?? '';
     const reviewValue = reviewSelect.getSelected()?.[0] ?? '';
+    const delegateValue = delegateSelect.getSelected()?.[0] ?? '';
     const learningThreshold = Number(document.getElementById('settings-learning-threshold').value);
     if (!Number.isInteger(learningThreshold) || learningThreshold < 0 || learningThreshold > 1000) {
       setStatus('Learning review threshold must be between 0 and 1,000.', true);
@@ -819,6 +844,7 @@ async function save() {
       compaction_summary_min_chars: compactionSummaryMinChars || null,
       compaction_model: compactionValue || null,
       review_model: reviewValue || null,
+      delegate_model: delegateValue || null,
       max_output_tokens: maxOutputTokens,
       embedding_provider_id: embProviderId || null,
       embedding_model_id: embModelId || null,

@@ -253,9 +253,8 @@ func (a *App) applyQueuedSteer(run *TurnRun) (bool, error) {
 
 // applyQueuedRunResults drains finished background runs queued on this
 // turn and injects them as synthetic result messages, same boundary as
-// steer. Returns true when at least one result was injected. The only
-// producer today is ACP subagents (subagent_result); the queue itself is
-// the shared push-completion path for any async tool.
+// steer. Returns true when at least one result was injected. ACP subagents
+// and internal delegates use this shared push-completion path.
 func (a *App) applyQueuedRunResults(run *TurnRun) (bool, error) {
 	pending := run.drainRunDone()
 	if len(pending) == 0 {

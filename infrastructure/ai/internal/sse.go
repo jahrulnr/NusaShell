@@ -17,7 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"nusashell/application"
 	"nusashell/domain"
 	clock "nusashell/pkg/time"
 )
@@ -40,12 +39,12 @@ type Event struct {
 }
 
 // ErrIdleTimeout is returned by ReadSSE when the stream stalls for the
-// configured idle window with no data. It is wrapped as KindIdleTimeout by
+// configured idle window with no data. It is wrapped as domain.KindIdleTimeout by
 // the adapter.
 var ErrIdleTimeout = errors.New("SSE stream idle timeout: provider stalled with no data")
 
 // ErrResponseTooLarge is returned when the SSE stream exceeds
-// defaultMaxResponseBytes. It is wrapped as a non-retryable UpstreamError.
+// defaultMaxResponseBytes. It is wrapped as a non-retryable domain.ProviderError.
 var ErrResponseTooLarge = errors.New("SSE stream exceeded the configured size limit")
 
 // limitedReader wraps an io.Reader and returns ErrResponseTooLarge when the
@@ -276,7 +275,7 @@ func OpenSSE(ctx context.Context, client *http.Client, url string, headers map[s
 	req.Header.Set("Accept", "text/event-stream, application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, &application.UpstreamError{Kind: application.KindConnect, Temporary: true, Err: err}
+		return nil, &domain.ProviderError{Kind: domain.KindConnect, Temporary: true, Err: err}
 	}
 	if resp.StatusCode < 400 {
 		return resp, nil
@@ -284,8 +283,8 @@ func OpenSSE(ctx context.Context, client *http.Client, url string, headers map[s
 	defer resp.Body.Close()
 	rawBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	message := string(rawBody)
-	return nil, &application.UpstreamError{
-		Kind:       application.KindHTTPStatus,
+	return nil, &domain.ProviderError{
+		Kind:       domain.KindHTTPStatus,
 		StatusCode: resp.StatusCode,
 		RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), clock.NewTime().Time()),
 		Err:        fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(message)),
@@ -314,13 +313,13 @@ func DoJSON(ctx context.Context, client *http.Client, method, url string, header
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return &application.UpstreamError{Kind: application.KindConnect, Temporary: true, Err: err}
+		return &domain.ProviderError{Kind: domain.KindConnect, Temporary: true, Err: err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &application.UpstreamError{
-			Kind:       application.KindHTTPStatus,
+		return &domain.ProviderError{
+			Kind:       domain.KindHTTPStatus,
 			StatusCode: resp.StatusCode,
 			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), clock.NewTime().Time()),
 			Err:        fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(msg))),
@@ -396,15 +395,15 @@ func IncompleteSSEError() error {
 	// TCP cut, which surfaces as a real io.ErrUnexpectedEOF from the body
 	// reader and is wrapped by RetryableSSEReadError below. Naming the mode
 	// lets operators tell the two apart in the retry log.
-	return &application.UpstreamError{
-		Kind:      application.KindSSETransport,
+	return &domain.ProviderError{
+		Kind:      domain.KindSSETransport,
 		Temporary: true,
 		Err:       fmt.Errorf("incomplete SSE stream: terminator never received: %w", io.ErrUnexpectedEOF),
 	}
 }
 
 // RetryableSSEReadError wraps mid-frame read failures as retryable
-// UpstreamErrors.
+// domain.ProviderErrors.
 func RetryableSSEReadError(err error) error {
 	if err == nil {
 		return nil
@@ -415,8 +414,8 @@ func RetryableSSEReadError(err error) error {
 	if errors.Is(err, ErrResponseTooLarge) {
 		// Non-retryable: the response is genuinely too large, retrying
 		// will hit the same limit.
-		return &application.UpstreamError{
-			Kind:      application.KindSSETransport,
+		return &domain.ProviderError{
+			Kind:      domain.KindSSETransport,
 			Temporary: false,
 			Err:       ErrResponseTooLarge,
 		}
@@ -426,8 +425,8 @@ func RetryableSSEReadError(err error) error {
 		// Mid-frame read failure: the connection was cut while a frame was
 		// in flight. Wrap with a descriptive prefix so this path is
 		// distinguishable from IncompleteSSEError in logs.
-		return &application.UpstreamError{
-			Kind:      application.KindSSETransport,
+		return &domain.ProviderError{
+			Kind:      domain.KindSSETransport,
 			Temporary: true,
 			Err:       fmt.Errorf("SSE read interrupted mid-frame: %w", err),
 		}
@@ -435,12 +434,12 @@ func RetryableSSEReadError(err error) error {
 	return err
 }
 
-// idleTimeoutUpstreamError wraps ErrIdleTimeout as a retryable UpstreamError
+// idleTimeoutUpstreamError wraps ErrIdleTimeout as a retryable domain.ProviderError
 // with KindIdleTimeout, so the retry log and event can distinguish a stalled
 // stream from a mid-frame cut or a clean close without terminator.
 func idleTimeoutUpstreamError() error {
-	return &application.UpstreamError{
-		Kind:      application.KindIdleTimeout,
+	return &domain.ProviderError{
+		Kind:      domain.KindIdleTimeout,
 		Temporary: true,
 		Err:       ErrIdleTimeout,
 	}

@@ -44,9 +44,10 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// version is the single source of truth for the Go port until a VERSION file
-// is introduced at the release boundary.
-const version = "0.1.0"
+// version is replaced by release builds with -ldflags -X main.version=...;
+// VERSION is the repository source of truth for release builds. Keep the
+// current baseline as the direct-build fallback for existing local workflows.
+var version = "0.1.0"
 
 func main() {
 	// Explicit subcommands run and exit before the server starts. Keep this
@@ -208,12 +209,17 @@ func run() error {
 	if err != nil {
 		slog.Warn("attachment store init failed", "error", err)
 	}
-	// Two-tier memory: primary (primary.md, always-injected, ~1k token cap)
-	// and fragments (memory/fragments/*.md, unlimited, searchable). Both
+	// Memory tiers: user.md (always-injected user rules, ~1k token cap),
+	// soul.md (always-injected agent working knowledge, ~1k token cap),
+	// and fragments (memory/fragments/*.md, unlimited, searchable). All
 	// auto-create their files/directories on first use.
 	primaryStore, err := memorystore.NewPrimary(dataDir)
 	if err != nil {
-		slog.Warn("primary memory init failed", "error", err)
+		slog.Warn("user memory init failed", "error", err)
+	}
+	agentStore, err := memorystore.NewAgent(dataDir)
+	if err != nil {
+		slog.Warn("soul memory init failed", "error", err)
 	}
 	fragmentStore, err := memorystore.NewFragments(dataDir)
 	if err != nil {
@@ -227,6 +233,7 @@ func run() error {
 		Skills:                 skillStore,
 		Memory:                 &jsonstore.Memory{S: store},
 		Primary:                primaryStore,
+		Agent:                  agentStore,
 		Fragments:              fragmentStore,
 		ProjectMemory:          projectMemoryStore,
 		Docs:                   docSource,
@@ -250,6 +257,7 @@ func run() error {
 		Skills:                      skillStore,
 		Memory:                      &jsonstore.Memory{S: store},
 		Primary:                     primaryStore,
+		Agent:                       agentStore,
 		Fragments:                   fragmentStore,
 		ProjectMemory:               projectMemoryStore,
 		LearningEdges:               &jsonstore.LearningEdges{S: store},

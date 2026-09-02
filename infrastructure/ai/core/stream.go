@@ -207,7 +207,11 @@ func Handle(stream Stream, fn func(Event) error) (*Response, error) {
 		event, err := stream.Next()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return nil, fmt.Errorf("stream ended before Done event: %w", err)
+				// EOF before a semantic DoneEvent means the provider closed
+				// the stream before the response was complete. Preserve EOF
+				// for callers that inspect it, but classify the failure as a
+				// network interruption so the shared retry policy can reconnect.
+				return nil, NewNetworkError("", "stream ended before Done event", err)
 			}
 			return nil, err
 		}
@@ -248,15 +252,20 @@ func HandleText(stream Stream, fn func(string) error) (*Response, error) {
 
 // StreamHandler routes streamed deltas to per-category callbacks. Unset
 // callbacks are skipped; every event is still aggregated into the returned
-// Response. For full event fidelity (tool-call streaming, provider events), use
-// Handle or the raw Stream.
+// Response. Tool callbacks observe a tool call while it is being constructed,
+// before the completed arguments are available for validation or execution.
+// For full event fidelity (including provider events), use Handle or the raw
+// Stream.
 type StreamHandler struct {
 	Content   func(string) error
 	Reasoning func(string) error
+	ToolStart func(ToolUseStart) error
+	ToolDelta func(ToolUseDelta) error
 }
 
-// HandleWith consumes the stream, dispatching content and reasoning deltas to
-// the handler's callbacks, and returns the aggregated Response.
+// HandleWith consumes the stream, dispatching content, reasoning, and tool
+// construction events to the handler's callbacks, and returns the aggregated
+// Response.
 func HandleWith(stream Stream, handler StreamHandler) (*Response, error) {
 	return Handle(stream, func(event Event) error {
 		switch e := event.(type) {
@@ -267,6 +276,14 @@ func HandleWith(stream Stream, handler StreamHandler) (*Response, error) {
 		case ReasoningDelta:
 			if handler.Reasoning != nil && e.Text != "" {
 				return handler.Reasoning(e.Text)
+			}
+		case ToolUseStart:
+			if handler.ToolStart != nil {
+				return handler.ToolStart(e)
+			}
+		case ToolUseDelta:
+			if handler.ToolDelta != nil {
+				return handler.ToolDelta(e)
 			}
 		}
 		return nil

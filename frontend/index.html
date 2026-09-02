@@ -438,12 +438,62 @@
             <span class="learning-stat" id="learning-stat-edges">0 edges</span>
           </div>
         </div>
-        <div class="learning-tabs" role="tablist" aria-label="Learning sections">
-          <button class="tab active" type="button" id="learning-tab-memory" data-learning-tab="memory" role="tab" aria-selected="true">Memory &amp; Graph</button>
-          <button class="tab" type="button" id="learning-tab-log" data-learning-tab="log" role="tab" aria-selected="false">Learning log</button>
+        <div class="tabs learning-tabs" role="tablist" aria-label="Learning sections">
+          <button class="tab active" type="button" id="learning-tab-about" data-learning-tab="about" role="tab" aria-selected="true" aria-controls="learning-panel-about">About You</button>
+          <button class="tab" type="button" id="learning-tab-agent" data-learning-tab="agent" role="tab" aria-selected="false" aria-controls="learning-panel-agent">About Agent</button>
+          <button class="tab" type="button" id="learning-tab-memory" data-learning-tab="memory" role="tab" aria-selected="false" aria-controls="learning-panel-memory">Memory &amp; Graph</button>
+          <button class="tab" type="button" id="learning-tab-log" data-learning-tab="log" role="tab" aria-selected="false" aria-controls="learning-panel-log">Learning log</button>
         </div>
         <div class="view-body learning-body">
-          <div class="learning-panel" id="learning-panel-memory" data-learning-panel="memory">
+          <div class="learning-panel learning-about-panel" id="learning-panel-about" data-learning-panel="about" role="tabpanel" aria-labelledby="learning-tab-about">
+            <div class="learning-about-card">
+              <div class="learning-about-header">
+                <div>
+                  <div class="learning-about-kicker">Always in context</div>
+                  <h2>About You</h2>
+                  <p>Primary memory is the small, durable profile NusaShell keeps available while it works. Edit it when you want to correct or clarify what the agent should remember about you.</p>
+                </div>
+                <span class="learning-about-status" id="learning-primary-status" aria-live="polite">Loading…</span>
+              </div>
+              <label class="learning-about-label" for="learning-primary-memory">Primary memory</label>
+              <textarea id="learning-primary-memory" class="learning-primary-memory" rows="14" spellcheck="false" placeholder="Tell NusaShell what it should remember about you…"></textarea>
+              <div class="learning-about-footer">
+                <div class="learning-about-meta">
+                  <span id="learning-primary-count">0 / 4000 characters</span>
+                  <span>Stored locally and included in future agent context.</span>
+                </div>
+                <div class="learning-about-actions">
+                  <button class="mini-btn ghost" id="learning-primary-reload" type="button">Reload</button>
+                  <button class="mini-btn" id="learning-primary-save" type="button">Save changes</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="learning-panel learning-about-panel learning-agent-panel" id="learning-panel-agent" data-learning-panel="agent" role="tabpanel" aria-labelledby="learning-tab-agent" hidden>
+            <div class="learning-about-card learning-agent-card">
+              <div class="learning-about-header">
+                <div>
+                  <div class="learning-about-kicker">Always in context · soul.md</div>
+                  <h2>Soul memory</h2>
+                  <p>This is NusaShell's durable working brief: conventions, gotchas, decisions, and references that help it work consistently. Edit it when you want to correct or clarify how NusaShell should work.</p>
+                </div>
+                <span class="learning-about-status" id="learning-agent-status" aria-live="polite">Loading…</span>
+              </div>
+              <label class="learning-about-label" for="learning-agent-memory">Soul memory</label>
+              <textarea id="learning-agent-memory" class="learning-primary-memory learning-agent-memory" rows="14" spellcheck="false" placeholder="Tell NusaShell what it should remember about how it works…"></textarea>
+              <div class="learning-about-footer">
+                <div class="learning-about-meta">
+                  <span id="learning-agent-count">0 / 4000 characters</span>
+                  <span>Stored locally and included in future agent context.</span>
+                </div>
+                <div class="learning-about-actions">
+                  <button class="mini-btn ghost" id="learning-agent-reload" type="button">Reload</button>
+                  <button class="mini-btn" id="learning-agent-save" type="button">Save changes</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="learning-panel" id="learning-panel-memory" data-learning-panel="memory" role="tabpanel" aria-labelledby="learning-tab-memory" hidden>
             <div class="learning-search-bar">
               <label class="learning-search-query">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -487,7 +537,7 @@
               </div>
             </div>
           </div>
-          <div class="learning-panel" id="learning-panel-log" data-learning-panel="log" hidden>
+          <div class="learning-panel" id="learning-panel-log" data-learning-panel="log" role="tabpanel" aria-labelledby="learning-tab-log" hidden>
             <div class="learning-log-toolbar">
               <span class="log-count" id="learning-log-count">0 events</span>
               <button class="mini-btn ghost" id="learning-log-refresh" type="button">Refresh</button>
@@ -671,6 +721,12 @@
                 </select>
                 <small>Used by new conversations. Existing conversations keep their selected model.</small>
               </label>
+              <label class="settings-field" for="settings-delegate-model">Internal delegate model
+                <select id="settings-delegate-model">
+                  <option value="">Default — use the conversation's active model</option>
+                </select>
+                <small>Model used by the internal delegate tool. Leave default to inherit the current conversation model, or choose a cheaper model to control background cost.</small>
+              </label>
               <label class="settings-field" for="settings-max-tool-rounds">Maximum tool rounds per turn
                 <input id="settings-max-tool-rounds" type="number" min="1" max="10000" step="1" inputmode="numeric" value="8">
                 <small>Stops a turn that keeps requesting more tool work. The default is 8.</small>
@@ -681,7 +737,7 @@
               </label>
               <label class="settings-field" for="settings-max-parallel-tools">Max parallel tools per round
                 <input id="settings-max-parallel-tools" type="number" min="1" max="64" step="1" inputmode="numeric" value="6">
-                <small>How many tool calls from one assistant round run at once (default 6). Raising it cuts latency when the model emits many independent calls; lower it to reduce load.</small>
+                <small>How many tool calls from one assistant round run at once (default 6). Calls above the limit wait in a queue and are not dropped. Raising it cuts latency for independent calls; lower it to reduce load.</small>
               </label>
               <label class="settings-field" for="settings-auto-continues">Max auto-continues
                 <input id="settings-auto-continues" type="number" min="0" max="10000" step="1" inputmode="numeric" value="10">

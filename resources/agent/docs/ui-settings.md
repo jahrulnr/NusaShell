@@ -58,7 +58,7 @@ Settings cards are clustered under labeled groups so unrelated controls are not 
 
 ## Agent runtime
 
-Default model for new conversations, tool-round guards (max rounds, repeated-call limit, max parallel tools), max auto-continues after a successful turn with open todos, max output tokens, and optional sampling parameters. Existing conversations keep their selected model.
+Default model for new conversations, the model used by the internal delegate agent, tool-round guards (max rounds, repeated-call limit, max parallel tools), max auto-continues after a successful turn with open todos, max output tokens, and optional sampling parameters. Existing conversations keep their selected model. The delegate model defaults to the active conversation model.
 
 - **Agent runtime title** (`#settings-runtime-title`):
   - Section: Settings
@@ -68,6 +68,11 @@ Default model for new conversations, tool-round guards (max rounds, repeated-cal
   - Section: Settings
   - Type: select
   - Notes: Used by new conversations.
+
+- **Internal delegate model** (`#settings-delegate-model`):
+  - Section: Settings
+  - Type: select
+  - Notes: Model for the internal headless delegate agent; empty inherits the active conversation model.
 
 - **Maximum tool rounds** (`#settings-max-tool-rounds`):
   - Section: Settings
@@ -82,7 +87,7 @@ Default model for new conversations, tool-round guards (max rounds, repeated-cal
 - **Max parallel tools** (`#settings-max-parallel-tools`):
   - Section: Settings
   - Type: number
-  - Notes: 1–64, default 6. Bounds concurrent tool calls per assistant round.
+  - Notes: 1–64, default 6. Bounds concurrent tool calls per assistant round; calls above the limit wait in a queue and are not dropped.
 
 - **Max auto-continues** (`#settings-auto-continues`):
   - Section: Settings

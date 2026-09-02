@@ -135,11 +135,11 @@ func TestThinkingFromEffort(t *testing.T) {
 
 func TestMapErrorHTTP(t *testing.T) {
 	err := application.MapCoreError(core.NewHTTPError("openai", 429, `{"error":{"message":"rate limited"}}`), domain.ProviderChat)
-	var up *application.UpstreamError
+	var up *domain.ProviderError
 	if !errors.As(err, &up) {
-		t.Fatalf("error = %T, want *UpstreamError", err)
+		t.Fatalf("error = %T, want *domain.ProviderError", err)
 	}
-	if up.Kind != application.KindHTTPStatus || up.StatusCode != 429 {
+	if up.Kind != domain.KindHTTPStatus || up.StatusCode != 429 {
 		t.Fatalf("kind/status = %q/%d", up.Kind, up.StatusCode)
 	}
 	if up.Temporary {
@@ -152,9 +152,9 @@ func TestMapErrorHTTP(t *testing.T) {
 
 func TestMapErrorHTTPWithRetryAfter(t *testing.T) {
 	err := application.MapCoreError(&core.LiteLLMError{Type: core.ErrorTypeRateLimit, StatusCode: 429, RetryAfter: 60, Message: "slow down", Retryable: true}, domain.ProviderChat)
-	var up *application.UpstreamError
+	var up *domain.ProviderError
 	if !errors.As(err, &up) {
-		t.Fatalf("error = %T, want *UpstreamError", err)
+		t.Fatalf("error = %T, want *domain.ProviderError", err)
 	}
 	if !up.Temporary {
 		t.Fatal("429 with Retry-After must be Temporary")
@@ -166,11 +166,11 @@ func TestMapErrorHTTPWithRetryAfter(t *testing.T) {
 
 func TestMapErrorNetwork(t *testing.T) {
 	err := application.MapCoreError(core.NewNetworkError("openai", "boom", errors.New("dial tcp: refused")), domain.ProviderChat)
-	var up *application.UpstreamError
+	var up *domain.ProviderError
 	if !errors.As(err, &up) {
-		t.Fatalf("error = %T, want *UpstreamError", err)
+		t.Fatalf("error = %T, want *domain.ProviderError", err)
 	}
-	if up.Kind != application.KindConnect || !up.Temporary {
+	if up.Kind != domain.KindConnect || !up.Temporary {
 		t.Fatalf("kind/temporary = %q/%v", up.Kind, up.Temporary)
 	}
 }
@@ -374,9 +374,9 @@ func TestAdapterListModelEndpoints(t *testing.T) {
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":{"endpoints":[
-			{"provider_name":"StreamLake","tag":"streamlake","quantization":"unknown","status":0,"latency_last_30m":1.25,"throughput_last_30m":50},
+			{"provider_name":"StreamLake","tag":"streamlake","quantization":"unknown","status":0,"latency_last_30m":1.25,"throughput_last_30m":50,"pricing":{"prompt":"0.0000015","completion":"0.0000025"}},
 			{"provider_name":"DeepInfra","tag":"deepinfra/fp4","quantization":"fp4","status":-2,"latency_last_30m":{"p50":787,"p75":1292.25,"p90":2382.9,"p99":7492.53},"throughput_last_30m":{"p50":118,"p75":148,"p90":177,"p99":232}},
-			{"provider_name":"NoData","tag":"nodata","status":0,"latency_last_30m":null,"throughput_last_30m":null}
+			{"provider_name":"FreeRoute","tag":"free-route","quantization":"fp16","status":0,"latency_last_30m":null,"throughput_last_30m":null,"pricing":{"prompt":"0","completion":"0"}}
 		]}}`))
 	}))
 	defer srv.Close()
@@ -405,6 +405,9 @@ func TestAdapterListModelEndpoints(t *testing.T) {
 	if routes[0].Latency == nil || *routes[0].Latency != 1.25 || routes[0].Throughput == nil || *routes[0].Throughput != 50 {
 		t.Fatalf("route[0] metrics = %+v", routes[0])
 	}
+	if routes[0].InputCost == nil || *routes[0].InputCost != 1.5 || routes[0].OutputCost == nil || *routes[0].OutputCost != 2.5 {
+		t.Fatalf("route[0] pricing = %+v", routes[0])
+	}
 	// Percentile object → representative p50 value (latency ms, throughput tok/s).
 	if routes[1].Slug != "deepinfra/fp4" || routes[1].Quantization != "fp4" {
 		t.Fatalf("route[1] = %+v", routes[1])
@@ -412,8 +415,14 @@ func TestAdapterListModelEndpoints(t *testing.T) {
 	if routes[1].Latency == nil || *routes[1].Latency != 787 || routes[1].Throughput == nil || *routes[1].Throughput != 118 {
 		t.Fatalf("route[1] percentile metrics = %+v (latency=%v throughput=%v)", routes[1], routes[1].Latency, routes[1].Throughput)
 	}
+	if routes[1].InputCost != nil || routes[1].OutputCost != nil {
+		t.Fatalf("route[1] missing pricing = %+v, want nil costs", routes[1])
+	}
 	if routes[2].Latency != nil || routes[2].Throughput != nil {
 		t.Fatalf("route[2] null metrics = %+v, want nil", routes[2])
+	}
+	if routes[2].InputCost == nil || *routes[2].InputCost != 0 || routes[2].OutputCost == nil || *routes[2].OutputCost != 0 {
+		t.Fatalf("route[2] zero pricing = %+v, want explicit zero values", routes[2])
 	}
 
 	// Non-OpenRouter adapters report no routes without hitting the network.

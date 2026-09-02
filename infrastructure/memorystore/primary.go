@@ -1,8 +1,9 @@
-// Package memorystore implements the two-tier memory persistence
-// adapters: a single primary.md file for the always-injected primary
-// working set, and one markdown file per entry under memory/fragments/
-// for the unlimited searchable archive. Both adapters auto-create their
-// files and directories on first use.
+// Package memorystore implements the three-tier memory persistence
+// adapters: two single-file documents (memory/user.md for the user
+// tier, legacy name primary.md, and memory/soul.md for the agent tier),
+// plus one markdown file per entry under memory/fragments/ for the
+// unlimited searchable archive. All adapters auto-create their files and
+// directories on first use.
 package memorystore
 
 import (
@@ -20,29 +21,47 @@ import (
 	clock "nusashell/pkg/time"
 )
 
-// ---- Primary store (primary.md) ----
+// ---- Document stores (user.md / soul.md) ----
 
-// PrimaryFile is the on-disk path of the primary memory document.
-const PrimaryFile = "memory/primary.md"
+// PrimaryFile is the on-disk path of the user-tier memory document. It was
+// introduced as memory/primary.md; the file moved to user.md when the
+// always-injected memory split into user + agent tiers. The move is done
+// by hand (see data-locations.md) — no automatic migration runs.
+const PrimaryFile = "memory/user.md"
 
-// PrimaryVersion is the schema version of the primary.md frontmatter.
-// Bump when the file format changes in a backward-incompatible way.
-const PrimaryVersion = 2
+// SoulFile is the on-disk path of the agent-tier memory document. The
+// user-facing filename is soul.md so it cannot be confused with a repository
+// AGENTS.md instruction file.
+const SoulFile = "memory/soul.md"
 
-// primaryFrontmatter is the YAML metadata block at the top of primary.md.
+// AgentFile is retained as a source-compatible alias for the agent-tier
+// document. It resolves to soul.md; no memory/agent.md file is read or
+// created.
+const AgentFile = SoulFile
+
+// DocVersion is the schema version of the document frontmatter. Bump when
+// the file format changes in a backward-incompatible way.
+const DocVersion = 2
+
+// PrimaryVersion is kept as an alias for code and tests that reference the
+// legacy constant name.
+const PrimaryVersion = DocVersion
+
+// docFrontmatter is the YAML metadata block at the top of a document file.
 // It carries the last-updated timestamp and schema version so a human
 // (or migration tool) can tell when the file was last touched and what
 // format version it uses.
-type primaryFrontmatter struct {
+type docFrontmatter struct {
 	LastUpdated string `yaml:"last_updated"`
 	Version     int    `yaml:"version"`
 }
 
-// Primary is the PrimaryStore adapter backed by primary.md. The file is
-// a single markdown document with YAML frontmatter (last_updated +
-// version) followed by the body — a free-form prose document the agent
-// edits in place via memory op=replace. Think of it as a README the agent
-// maintains about the user and working context:
+// Document is a single markdown memory document with YAML frontmatter
+// (last_updated + version) followed by the body — a free-form prose
+// document the agent edits in place via memory op=replace. Think of it as
+// a README the agent maintains: user.md about the user and working
+// context, soul.md about agent working knowledge (conventions, gotchas,
+// decisions, references).
 //
 //	---
 //	last_updated: "2026-08-20T00:00:00Z"
@@ -55,73 +74,93 @@ type primaryFrontmatter struct {
 // The entire body is treated as one entry; paragraphs are part of the
 // same document, not separate entries. The ID is derived from a content
 // hash so it survives reload with a stable ID without being stored.
-type Primary struct {
+type Document struct {
 	mu     sync.RWMutex
-	path   string
+	path   string // absolute file path
+	cap    int    // character cap (token cap * 4)
+	kind   string // "user" | "agent" (used in errors)
 	entry  domain.PrimaryEntry
 	loaded bool
 }
 
-// NewPrimary opens (or auto-creates) the primary.md file at dataDir and
-// loads its body into memory. The file is created empty with YAML
-// frontmatter if it does not exist.
-func NewPrimary(dataDir string) (*Primary, error) {
-	p := &Primary{path: filepath.Join(dataDir, PrimaryFile)}
-	if err := p.load(true); err != nil {
+// Primary is a compatibility alias for Document (the user tier store).
+type Primary = Document
+
+// newDocument opens (or auto-creates) a doc store at path with the given
+// token cap and loads its body into memory. The file is created empty with
+// YAML frontmatter if it does not exist.
+func newDocument(path, kind string, tokenCap int) (*Document, error) {
+	d := &Document{path: path, cap: tokenCap * 4, kind: kind}
+	if err := d.load(true); err != nil {
 		return nil, err
 	}
-	return p, nil
+	return d, nil
+}
+
+// NewPrimary opens (or auto-creates) the user-tier memory document
+// (memory/user.md) at dataDir and loads its body into memory. A pre-split
+// memory/primary.md is NOT migrated automatically; move it to
+// memory/user.md by hand when upgrading (see data-locations.md).
+func NewPrimary(dataDir string) (*Document, error) {
+	return newDocument(filepath.Join(dataDir, PrimaryFile), domain.MemoryTierUser, domain.PrimaryTokenCap)
+}
+
+// NewAgent opens (or auto-creates) the agent-tier memory document
+// (memory/soul.md) at dataDir and loads its body into memory.
+func NewAgent(dataDir string) (*Document, error) {
+	return newDocument(filepath.Join(dataDir, SoulFile), domain.MemoryTierAgent, domain.AgentTokenCap)
 }
 
 // load reads the file from disk, creating it empty if create is true
 // and the file is missing. Safe to call repeatedly; subsequent calls
 // re-read the file so updates from other processes are picked up.
-func (p *Primary) load(create bool) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	raw, err := os.ReadFile(p.path)
+func (d *Document) load(create bool) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	raw, err := os.ReadFile(d.path)
 	if err != nil {
 		if !create || !os.IsNotExist(err) {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(p.path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(d.path), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(p.path, []byte(emptyPrimaryFile()), 0o644); err != nil {
+		if err := os.WriteFile(d.path, []byte(emptyDocFile()), 0o644); err != nil {
 			return err
 		}
-		p.entry = domain.PrimaryEntry{}
-		p.loaded = true
+		d.entry = domain.PrimaryEntry{}
+		d.loaded = true
 		return nil
 	}
-	entry, err := parsePrimary(string(raw))
+	entry, err := parseDoc(string(raw))
 	if err != nil {
 		return err
 	}
-	p.entry = entry
-	p.loaded = true
+	d.entry = entry
+	d.loaded = true
 	return nil
 }
 
-// Load returns the current primary memory document. It re-reads the
-// file from disk so callers always see the latest state.
-func (p *Primary) Load() *domain.PrimaryMemory {
-	_ = p.load(false)
-	p.mu.RLock()
-	defer p.mu.RUnlock()
+// Load returns the current memory document. It re-reads the file from
+// disk so callers always see the latest state.
+func (d *Document) Load() *domain.PrimaryMemory {
+	_ = d.load(false)
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	return &domain.PrimaryMemory{
-		Entries:   []domain.PrimaryEntry{p.entry},
-		UpdatedAt: p.entry.UpdatedAt,
+		Entries:   []domain.PrimaryEntry{d.entry},
+		UpdatedAt: d.entry.UpdatedAt,
 	}
 }
 
-// Path returns the absolute filesystem path of the primary.md file.
-func (p *Primary) Path() string { return p.path }
+// Path returns the absolute filesystem path of the document file.
+func (d *Document) Path() string { return d.path }
 
-// Update replaces the entire primary document body and rewrites the file.
-// Used by memory op=replace target=primary when the agent rewrites the whole
-// document. Returns an error if the new content would exceed PrimaryCharCap.
-func (p *Primary) Update(entries []domain.PrimaryEntry) error {
+// Update replaces the entire document body and rewrites the file.
+// Used by memory op=replace target=user|agent when the agent rewrites the
+// whole document. Returns an error if the new content would exceed the
+// tier's token cap.
+func (d *Document) Update(entries []domain.PrimaryEntry) error {
 	var content string
 	for _, e := range entries {
 		if content != "" {
@@ -129,75 +168,75 @@ func (p *Primary) Update(entries []domain.PrimaryEntry) error {
 		}
 		content += e.Content
 	}
-	if len(content) > domain.PrimaryCharCap {
-		return fmt.Errorf("primary memory at %d/%d chars; primary is capped at ~%d tokens", len(content), domain.PrimaryCharCap, domain.PrimaryTokenCap)
+	if len(content) > d.cap {
+		return fmt.Errorf("%s memory at %d/%d chars; %s tier is capped at ~%d tokens", d.kind, len(content), d.cap, d.kind, d.cap/4)
 	}
-	p.mu.Lock()
-	p.entry = domain.PrimaryEntry{
-		ID:        primaryID(content),
+	d.mu.Lock()
+	d.entry = domain.PrimaryEntry{
+		ID:        docID(content),
 		Content:   content,
 		UpdatedAt: clock.NewTime().Time(),
 	}
-	err := p.writeFile()
-	p.mu.Unlock()
+	err := d.writeFile()
+	d.mu.Unlock()
 	return err
 }
 
 // Replace performs a substring-match update on the document body. The
 // first occurrence of oldText is replaced with content. Used by
-// foreground agents via memory op=replace target=primary.
-func (p *Primary) Replace(oldText, content string) error {
+// foreground agents via memory op=replace target=user|agent.
+func (d *Document) Replace(oldText, content string) error {
 	oldText = strings.TrimSpace(oldText)
 	content = strings.TrimSpace(content)
 	if oldText == "" || content == "" {
 		return fmt.Errorf("oldText and content are required")
 	}
-	_ = p.load(false)
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if !strings.Contains(p.entry.Content, oldText) {
-		return fmt.Errorf("no primary text matching %q", oldText)
+	_ = d.load(false)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !strings.Contains(d.entry.Content, oldText) {
+		return fmt.Errorf("no %s memory text matching %q", d.kind, oldText)
 	}
-	newBody := strings.Replace(p.entry.Content, oldText, content, 1)
-	if len(newBody) > domain.PrimaryCharCap {
-		return fmt.Errorf("primary memory at %d/%d chars; update would exceed the ~%d token cap", len(newBody), domain.PrimaryCharCap, domain.PrimaryTokenCap)
+	newBody := strings.Replace(d.entry.Content, oldText, content, 1)
+	if len(newBody) > d.cap {
+		return fmt.Errorf("%s memory at %d/%d chars; update would exceed the ~%d token cap", d.kind, len(newBody), d.cap, d.cap/4)
 	}
-	p.entry = domain.PrimaryEntry{
-		ID:        primaryID(newBody),
+	d.entry = domain.PrimaryEntry{
+		ID:        docID(newBody),
 		Content:   newBody,
 		UpdatedAt: clock.NewTime().Time(),
 	}
-	return p.writeFile()
+	return d.writeFile()
 }
 
 // writeFile serializes the current document to the markdown file with
 // YAML frontmatter (last_updated + version). The body is written as-is
 // so the file reads as clean writing when opened by hand. Caller must
-// hold p.mu.
-func (p *Primary) writeFile() error {
-	fm := primaryFrontmatter{
+// hold d.mu.
+func (d *Document) writeFile() error {
+	fm := docFrontmatter{
 		LastUpdated: clock.NewTime().RFC3339(),
-		Version:     PrimaryVersion,
+		Version:     DocVersion,
 	}
 	fmBytes, _ := yaml.Marshal(fm)
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.Write(fmBytes)
 	b.WriteString("---\n\n")
-	b.WriteString(p.entry.Content)
-	if p.entry.Content != "" && !strings.HasSuffix(p.entry.Content, "\n") {
+	b.WriteString(d.entry.Content)
+	if d.entry.Content != "" && !strings.HasSuffix(d.entry.Content, "\n") {
 		b.WriteString("\n")
 	}
-	return os.WriteFile(p.path, []byte(b.String()), 0o644)
+	return os.WriteFile(d.path, []byte(b.String()), 0o644)
 }
 
-// emptyPrimaryFile returns the content written when primary.md is
+// emptyDocFile returns the content written when a document file is
 // auto-created: YAML frontmatter with the current timestamp + version,
 // followed by an empty body.
-func emptyPrimaryFile() string {
-	fm := primaryFrontmatter{
+func emptyDocFile() string {
+	fm := docFrontmatter{
 		LastUpdated: clock.NewTime().RFC3339(),
-		Version:     PrimaryVersion,
+		Version:     DocVersion,
 	}
 	fmBytes, _ := yaml.Marshal(fm)
 	var b strings.Builder
@@ -207,10 +246,10 @@ func emptyPrimaryFile() string {
 	return b.String()
 }
 
-// parsePrimary splits the file into YAML frontmatter + body and returns
-// the entire body as a single entry. The ID is derived from a content
-// hash so it survives reload with a stable ID without being stored.
-func parsePrimary(raw string) (domain.PrimaryEntry, error) {
+// parseDoc splits the file into YAML frontmatter + body and returns the
+// entire body as a single entry. The ID is derived from a content hash so
+// it survives reload with a stable ID without being stored.
+func parseDoc(raw string) (domain.PrimaryEntry, error) {
 	raw = strings.TrimSpace(raw)
 	body := raw
 	// Strip YAML frontmatter if present.
@@ -229,15 +268,15 @@ func parsePrimary(raw string) (domain.PrimaryEntry, error) {
 		return domain.PrimaryEntry{}, nil
 	}
 	return domain.PrimaryEntry{
-		ID:        primaryID(body),
+		ID:        docID(body),
 		Content:   body,
 		UpdatedAt: clock.NewTime().Time(),
 	}, nil
 }
 
-// primaryID derives a deterministic ID from content so the entry survives
+// docID derives a deterministic ID from content so the entry survives
 // reload with a stable ID even though the file does not store it.
-func primaryID(content string) string {
+func docID(content string) string {
 	h := sha256.Sum256([]byte(content))
 	return "prim_" + hex.EncodeToString(h[:8])
 }

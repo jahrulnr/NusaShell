@@ -37,6 +37,43 @@ const (
 	CompactionMaxToolCallChars = 200_000
 )
 
+// CompactionTrigger identifies why a compaction was run. Persisted with the
+// journal compaction event so the audit trail distinguishes turn-start
+// compaction, mid-turn proactive compaction, and stream-overflow recovery.
+type CompactionTrigger string
+
+const (
+	// CompactionTriggerInitial runs at turn start when the estimated
+	// context already exceeds the trigger watermark.
+	CompactionTriggerInitial CompactionTrigger = "initial"
+	// CompactionTriggerProactive runs between rounds (pre-API) when tool
+	// results have grown the context past the watermark.
+	CompactionTriggerProactive CompactionTrigger = "proactive"
+	// CompactionTriggerEmergency recovers from a context/TPM overflow
+	// raised by the provider during the stream.
+	CompactionTriggerEmergency CompactionTrigger = "emergency"
+	// CompactionTriggerMidTool runs at the tool-request boundary: the model
+	// has requested a tool round, the round was persisted, and the estimated
+	// context (including the requested calls but before any tool output)
+	// already exceeds the trigger. Compact the prefix now — before the tool
+	// outputs exist — so the summarizer never sees the tool-result explosion.
+	// The in-flight assistant message is preserved verbatim (see
+	// IsInFlightToolMessage) so the round's outputs land in the live tail.
+	CompactionTriggerMidTool CompactionTrigger = "mid_tool"
+)
+
+// CompactionEvent is the durable audit record written to the conversation
+// journal after a compaction succeeds: when it ran, which model produced the
+// handoff, the retention budget used, and the resulting summary. The journal
+// keeps the full-fidelity history while this record makes the compaction
+// lifecycle itself auditable and resumable across restarts.
+type CompactionEvent struct {
+	Trigger    CompactionTrigger `json:"trigger"`
+	Model      string            `json:"model,omitempty"`
+	KeepBudget int               `json:"keepBudget,omitempty"`
+	Summary    string            `json:"summary,omitempty"`
+}
+
 // CompactionTriggerTokens is the estimated-token watermark that starts
 // compaction. When CompactionThreshold is 0 (auto, the default), compaction
 // triggers at 80% of the model's available input budget (contextWindow minus

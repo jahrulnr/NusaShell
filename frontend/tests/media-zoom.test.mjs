@@ -348,6 +348,31 @@ test('openTextPreviewPopup renders markdown for .md files', async () => {
   }
 });
 
+test('openTextPreviewPopup renders Mermaid diagrams in markdown previews', async () => {
+  const dom = makeDom();
+  const origFetch = globalThis.fetch;
+  dom.window.mermaid = {
+    initialize() {},
+    parse: async () => true,
+    render: async () => ({ svg: '<svg viewBox="0 0 100 50"><path d="M0 0"/></svg>' }),
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => '# Diagram\n\n```mermaid\nflowchart TD\n A-->B\n```',
+  });
+  try {
+    await openTextPreviewPopup('/path/to/diagram.md');
+    const overlay = document.querySelector('.agent-text-preview-overlay');
+    assert.ok(overlay?.querySelector('.mermaid-block'), 'Mermaid placeholder is present');
+    assert.ok(overlay?.querySelector('.mermaid-block svg'), 'Mermaid diagram is rendered');
+    overlay.remove();
+  } finally {
+    globalThis.fetch = origFetch;
+    cleanup();
+  }
+});
+
 test('openTextPreviewPopup handles fetch errors gracefully', async () => {
   makeDom();
   const origFetch = globalThis.fetch;

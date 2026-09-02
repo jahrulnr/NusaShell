@@ -145,6 +145,17 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 // tool-started and tool-completed events and never writes to the conversation
 // store, so it is safe to run concurrently for the tool calls of one round.
 func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCall, caps ModelCapabilities, settings domain.Settings, round int) toolExecResult {
+	baseCtx := run.Ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	toolCtx, cancelTool := context.WithCancel(baseCtx)
+	run.registerToolCancel(toolCall.ID, cancelTool)
+	defer func() {
+		run.unregisterToolCancel(toolCall.ID)
+		cancelTool()
+	}()
+
 	a.Bus.Emit(contracts.EventToolStarted, contracts.ToolStartedEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: toolpresentation.ToolArgsRaw(toolCall.Args),
 		Presentation: toolpresentation.BuildToolPresentation(toolCall.Name, toolCall.Args, domain.ToolRunning, ""),
@@ -154,7 +165,7 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 	// If the turn was already cancelled, do not start the tool — mark it
 	// interrupted (mirrors the pre-parallel behavior of skipping remaining
 	// tools after cancellation).
-	if run.Ctx.Err() != nil {
+	if baseCtx.Err() != nil || toolCtx.Err() != nil {
 		res := toolExecResult{status: domain.ToolInterrupted, output: "interrupted by user"}
 		a.emitToolCompleted(run, toolCall, res)
 		return res
@@ -187,7 +198,7 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 	case "generate_media", "generate_image", "generate_speech", "generate_video":
 		output, outputAttachments, err = a.executeGenerateMedia(run, toolCall, settings)
 	default:
-		toolCtx := WithConversationID(run.Ctx, run.ConversationID)
+		toolCtx = WithConversationID(toolCtx, run.ConversationID)
 		toolCtx = WithWorkspace(toolCtx, run.Workspace)
 		toolCtx = WithRunID(toolCtx, run.ID)
 		toolCtx = WithToolCallID(toolCtx, toolCall.ID)
@@ -231,26 +242,28 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 		}
 	}
 	status := domain.ToolOK
-	if err != nil {
+	interrupted := baseCtx.Err() != nil || toolCtx.Err() != nil
+	if interrupted {
+		status = domain.ToolInterrupted
 		// Interrupted streaming tools keep the partial output received so
-		// far (the executor returns it with the cancellation error), so the
-		// persisted tool call still shows the streamed lines after a reload.
-		if run.Ctx.Err() != nil && strings.Contains(err.Error(), "partial output") {
-			status = domain.ToolInterrupted
-			output = err.Error()
-		} else if run.Ctx.Err() != nil {
-			status = domain.ToolInterrupted
+		// far (the executor returns it with the cancellation error), while
+		// the explicit marker tells the next model round why the tool ended.
+		if err != nil && strings.Contains(err.Error(), "partial output") {
+			output = "interrupted by user\n" + err.Error()
+		} else if strings.TrimSpace(output) == "" {
 			output = "interrupted by user"
 		} else {
-			status = domain.ToolFailed
-			output = "error: " + truncateToolError(err.Error())
+			output = strings.TrimRight(output, "\n") + "\n\ninterrupted by user"
 		}
+	} else if err != nil {
+		status = domain.ToolFailed
+		output = "error: " + truncateToolError(err.Error())
 	}
 	// Async subagent: the tool returns immediately with "starting" status.
 	// Keep the tool call marked as running so the UI shows a spinner; the
 	// OnDone callback will update it to ok/fail with the summary when the
 	// subagent finishes.
-	if (toolCall.Name == "subagent" || toolCall.Name == domain.DelegateToolName) && err == nil {
+	if status == domain.ToolOK && (toolCall.Name == "subagent" || toolCall.Name == domain.DelegateToolName) && err == nil {
 		status = domain.ToolRunning
 	}
 	res := toolExecResult{status: status, output: output, atts: outputAttachments}

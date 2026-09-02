@@ -337,6 +337,11 @@ type Settings struct {
 	// reviews to a cheaper/faster model; reviews re-send the transcript
 	// tail, so the model choice directly affects background cost.
 	ReviewModel string `json:"review_model,omitempty"`
+	// DelegateModel selects the model used by the internal delegate agent.
+	// When empty, the delegate inherits the parent conversation's active model;
+	// if the parent has no model, normal headless model resolution applies.
+	// Format: "providerID:modelID".
+	DelegateModel string `json:"delegate_model,omitempty"`
 	// MaxAutoContinues is the outer multi-turn auto-continue budget.
 	// After a successful sealed turn, if the conversation todo list
 	// still has open items (pending or in_progress), the agent runner

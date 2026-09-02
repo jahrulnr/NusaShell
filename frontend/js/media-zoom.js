@@ -549,6 +549,7 @@ export async function openTextPreviewPopup(filePath) {
       const mdWrapper = el('div', { class: 'agent-bubble-text agent-text-preview-md' });
       mdWrapper.innerHTML = renderMarkdown(text);
       contentBox.append(mdWrapper);
+      await renderPreviewMermaid(mdWrapper);
       void highlightCode(contentBox);
     } else {
       const pre = el('pre', {}, el('code', { text }));
@@ -557,5 +558,19 @@ export async function openTextPreviewPopup(filePath) {
     }
   } catch (err) {
     contentBox.replaceChildren(el('div', { class: 'agent-text-preview-error', text: `Failed to load ${cleanPath}: ${err.message}` }));
+  }
+}
+
+// Markdown previews share the chat Markdown parser, including Mermaid
+// placeholders. Load the heavier renderer only when a preview actually has a
+// diagram; failures leave the escaped source visible instead of replacing the
+// whole document with an error state.
+async function renderPreviewMermaid(container) {
+  if (!container?.querySelector('.mermaid-block')) return;
+  try {
+    const { renderMermaidDiagrams } = await import('./mermaid-render.js');
+    await renderMermaidDiagrams(container);
+  } catch {
+    // Keep the Mermaid source placeholder as a useful fallback.
   }
 }

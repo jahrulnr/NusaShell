@@ -22,6 +22,11 @@ type RuntimeContextSnapshot struct {
 	RuntimeOS   string `json:"runtimeOs"`
 	Workspace   string `json:"workspace,omitempty"`
 	DataDir     string `json:"dataDir,omitempty"`
+	// BackgroundRuns lists the active background/async tool runs (subagent,
+	// delegate) for this conversation, so a fresh context knows which
+	// background agents were spawned and are still pending — even after
+	// compaction. Empty when nothing is pending.
+	BackgroundRuns []domain.BackgroundRunInfo `json:"backgroundRuns,omitempty"`
 }
 
 // HydrationSource assembles the read-only sources of truth the builder draws
@@ -30,16 +35,22 @@ type RuntimeContextSnapshot struct {
 type HydrationSource struct {
 	RuntimeContext RuntimeContextSnapshot
 	// Executor runs the REAL meta-tools — mcp_list, tool_list (per running
-	// server), skill op=list, file_read (primary.md) — so the checkpoint
-	// contains genuine tool output, the same tools the agent itself calls.
+	// server), skill op=list, and file_read for AGENTS.md and memory documents
+	// — so the checkpoint contains genuine tool output, the same tools the
+	// agent itself calls.
 	// The builder never mutates, clones, or mirrors a tool: it calls the
 	// real tool, processes the result, and attaches it to the conversation.
 	// When nil, the tool-backed slots fail soft (hidden).
 	Executor ToolExecutor
-	// PrimaryPath is the absolute filesystem path of memory/primary.md.
-	// When set, the memory slot reads the file via file_read. When empty,
-	// the memory slot is hidden.
+	// PrimaryPath is the absolute filesystem path of the user-tier memory
+	// document (memory/user.md, legacy name primary.md). When set, hydration
+	// emits a direct file_read call for the document. When empty, that call is
+	// hidden.
 	PrimaryPath string
+	// AgentPath is the absolute filesystem path of the agent-tier memory
+	// document (memory/soul.md). When set, hydration emits a separate direct
+	// file_read call for the document.
+	AgentPath string
 	// Todos is the per-conversation todo checklist. When nil, no todo_list
 	// slot is injected.
 	Todos  ConversationTodoPort
@@ -56,13 +67,12 @@ type HydrationSource struct {
 // (assistant toolCalls + matching tool results) representing a snapshot of
 // the shell runtime. Every tool-backed slot executes its REAL tool through
 // the Executor — the same implementation the agent calls — and attaches the
-// genuine output (processed only where the checkpoint adds value, e.g.
-// primary-memory usage stats). The transcript is DYNAMIC: slots with empty
-// content are omitted entirely, so the call count varies per epoch.
+// genuine output. The transcript is DYNAMIC: slots with empty content are
+// omitted entirely, so the call count varies per epoch.
 //
 // The transcript is placed AFTER a real user message (or compaction summary)
 // and BEFORE the model's own output, so the model sees fresh runtime facts
-// (date, workspace, memory, skills, MCP catalog, tool catalog) without those
+// (date, workspace, memory documents, skills, MCP catalog, tool catalog) without those
 // volatile values being baked into the stable system prompt prefix (which
 // would break prompt-cache hits).
 type HydrationBuilder struct {
@@ -91,18 +101,19 @@ type HydrationResult struct {
 func (b *HydrationBuilder) Build() HydrationResult {
 	nonce := nonce.Random()
 	var slots []hydrationSlot
-	for _, slot := range []hydrationSlot{
-		b.readRuntimeContext(),
-		b.readAgentsMD(),
-		b.readMemory(),
-		b.readProjectMemory(),
-		b.readSkills(),
-		b.readMcpList(),
-	} {
+	appendSlot := func(slot hydrationSlot) {
 		if slot.content != "" {
 			slots = append(slots, slot)
 		}
 	}
+	appendSlot(b.readRuntimeContext())
+	appendSlot(b.readAgentsMD())
+	for _, slot := range b.readMemory() {
+		appendSlot(slot)
+	}
+	appendSlot(b.readProjectMemory())
+	appendSlot(b.readSkills())
+	appendSlot(b.readMcpList())
 	slots = append(slots, b.readToolList()...)
 	if slot := b.readTodoList(); slot.content != "" {
 		slots = append(slots, slot)
@@ -190,40 +201,35 @@ func (b *HydrationBuilder) readAgentsMD() hydrationSlot {
 	return hydrationSlot{name: "file_read", args: args, content: out}
 }
 
-// readMemory reads the primary.md file via file_read and attaches its body
-// as a single entry, enriched with usage stats. An empty or missing primary
-// document hides the slot.
-func (b *HydrationBuilder) readMemory() hydrationSlot {
-	if b.source.Executor == nil || b.source.PrimaryPath == "" {
-		return hydrationSlot{name: "memory", content: ""}
+// readMemory reads each configured always-injected memory document through
+// the real file_read tool and returns one hydration slot per document. The
+// tool output stays verbatim so the persisted transcript records the same
+// call/result pair the agent would see if it read the file itself. Empty or
+// missing documents are omitted independently.
+func (b *HydrationBuilder) readMemory() []hydrationSlot {
+	if b.source.Executor == nil {
+		return nil
 	}
-	args := fmt.Sprintf(`{"path":%q}`, b.source.PrimaryPath)
-	out, err := b.source.Executor.Execute(context.Background(), "file_read", []byte(args))
-	if err != nil {
-		return hydrationSlot{name: "memory", content: ""}
+	var slots []hydrationSlot
+	for _, path := range []string{b.source.PrimaryPath, b.source.AgentPath} {
+		if path == "" {
+			continue
+		}
+		args := fmt.Sprintf(`{"path":%q}`, path)
+		out, err := b.source.Executor.Execute(context.Background(), "file_read", []byte(args))
+		if err != nil {
+			continue
+		}
+		// file_read returns yamlMD: a YAML frontmatter block (bytes meta)
+		// followed by the file body. The document file itself also starts
+		// with a YAML frontmatter block (last_updated/version). Strip both
+		// only for the empty-body check; keep the real output verbatim.
+		if strings.TrimSpace(stripYAMLFrontmatter(stripYAMLFrontmatter(out))) == "" {
+			continue
+		}
+		slots = append(slots, hydrationSlot{name: "file_read", args: args, content: out})
 	}
-	// file_read returns yamlMD: a YAML frontmatter block (bytes meta)
-	// followed by the file body. The primary.md file itself also starts with
-	// a YAML frontmatter block (last_updated/version). Strip both so the
-	// hydration slot carries only the prose body, matching the previous
-	// memory-list output.
-	body := stripYAMLFrontmatter(stripYAMLFrontmatter(out))
-	body = strings.TrimSpace(body)
-	if body == "" {
-		return hydrationSlot{name: "memory", content: ""}
-	}
-	chars := len(body)
-	limit := domain.PrimaryCharCap
-	pct := 0
-	if limit > 0 {
-		pct = chars * 100 / limit
-	}
-	content, _ := json.Marshal(map[string]any{
-		"entries": []map[string]any{{"content": body}},
-		"count":   1,
-		"usage":   map[string]any{"chars": chars, "limit": limit, "pct": pct},
-	})
-	return hydrationSlot{name: "memory", args: args, content: string(content)}
+	return slots
 }
 
 // readProjectMemory injects a compact IDX-project extract (PURPOSE, LOCKS,
@@ -394,8 +400,17 @@ func (b *HydrationBuilder) readTodoList() hydrationSlot {
 	return hydrationSlot{name: "todo_list", content: strings.Join(sections, "\n\n")}
 }
 
+// workspaceStateHint is the short agent-facing note appended to the
+// workspace_state hydration payload. Kept out of the system prompt so it
+// only appears when the slot is present (i.e. when the session actually
+// changed files): it tells the model how to get the full git-like change
+// and restore behavior from the docs corpus instead of guessing.
+const workspaceStateHint = `Workspace file changes are recorded git-style in the journal sidecar (JournalPath above; pre-images in blobs/, archived events in journal.jsonl.gz). For the full change-history and restore behavior, read the docs corpus: docs_read(id="data-locations")`
+
 // readWorkspaceState injects accumulated workspace file changes for the
 // conversation so post-compaction context retains what the agent modified.
+// The payload carries the change list and the journal sidecar path, plus a
+// hint pointing at the docs corpus for the full restore semantics.
 func (b *HydrationBuilder) readWorkspaceState() hydrationSlot {
 	if b.source.Journal == nil {
 		return hydrationSlot{name: "workspace_state", content: ""}
@@ -408,6 +423,7 @@ func (b *HydrationBuilder) readWorkspaceState() hydrationSlot {
 	if err != nil || state == nil || len(state.Changes) == 0 {
 		return hydrationSlot{name: "workspace_state", content: ""}
 	}
+	state.Hint = workspaceStateHint
 	content, err := json.Marshal(state)
 	if err != nil {
 		return hydrationSlot{name: "workspace_state", content: ""}

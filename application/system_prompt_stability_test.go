@@ -80,6 +80,23 @@ func TestAcpDelegationDescription(t *testing.T) {
 	}
 }
 
+func TestHeadlessAgentKindsUseDistinctSystemPrompts(t *testing.T) {
+	conv := &domain.Conversation{}
+	delegate := buildSystemPromptForRun(&TurnRun{Headless: true, ToolKind: AgentDelegate}, conv, "")
+	automation := buildSystemPromptForRun(&TurnRun{Headless: true, ToolKind: AgentAutomation}, conv, "")
+	interactive := buildSystemPrompt(conv, "")
+
+	if delegate == "" || !strings.Contains(delegate, "internal delegate agent") {
+		t.Fatalf("delegate prompt must identify its internal delegate role: %q", delegate)
+	}
+	if delegate == interactive || delegate == automation {
+		t.Fatal("delegate prompt must be distinct from interactive and automation prompts")
+	}
+	if automation == interactive {
+		t.Fatal("automation prompt must remain distinct from interactive prompt")
+	}
+}
+
 // TestSubagentResultMessageShape verifies the synthetic subagent_result
 // message mirrors the announcement pattern: pre-completed tool call with
 // the full result, persisted as an assistant message.

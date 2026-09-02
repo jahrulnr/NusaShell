@@ -79,7 +79,7 @@
     },
     "agent": {
       "title": "Agent",
-      "purpose": "The default view: multi-conversation chat against any configured provider model. Each conversation keeps its own history on disk and can use skills, memory, docs, plugin-provided MCP tools, and spawned ACP subagents.",
+      "purpose": "The default view: multi-conversation chat against any configured provider model. Each conversation keeps its own history on disk and can use skills, memory, docs, plugin-provided MCP tools, and spawned ACP subagents or internal delegates.",
       "howToOpen": "Open NusaShell, or click the Agent item in the left sidebar.",
       "sections": [
         {
@@ -102,7 +102,9 @@
           "heading": "Thread",
           "paragraphs": [
             "Renders the active conversation. An empty thread offers starter prompt chips that fill the composer.",
-            "Long conversations open showing only the most recent history, scrolled to the bottom. The complete trailing assistant run remains visible even when it contains dozens of tool or reasoning messages, so a finished answer is not hidden behind the history control. A 'Load older messages' button at the top reveals older in-memory messages, then archived pre-compaction chunks, one batch at a time. Chunks are never auto-loaded after a turn finishes or mid-turn compaction. User messages and isolated ACP prompt events preserve Markdown as friendly HTML: inline backticks become code pills and fenced code becomes a bounded, horizontally scrollable code card. Thinking and compaction handover markdown are parsed only when their expandable disclosures are opened. While the backend compacts, the active room receives a room-scoped WebSocket status and shows an animated 'Context automatically compacting' row; the generic Thinking loading dots are suppressed so only one loading status is visible, and the row is removed when compaction completes or fails. Live streaming auto-follows only while the view is pinned to the bottom."
+            "Long conversations open showing only the most recent history, scrolled to the bottom. The complete trailing assistant run remains visible even when it contains dozens of tool or reasoning messages, so a finished answer is not hidden behind the history control. A 'Load older messages' button at the top reveals older in-memory messages, then archived pre-compaction chunks, one batch at a time. Chunks are never auto-loaded after a turn finishes or mid-turn compaction. User messages and isolated ACP prompt events preserve Markdown as friendly HTML: inline backticks become code pills and fenced code becomes a bounded, horizontally scrollable code card. Thinking and compaction handover markdown are parsed only when their expandable disclosures are opened. While the backend compacts, the active room receives a room-scoped WebSocket status and shows an animated 'Context automatically compacting' row; the generic Thinking loading dots are suppressed so only one loading status is visible, and the row is removed when compaction completes or fails. When the provider is actively constructing a tool call before its arguments are valid, the room shows a transient animated activity row and cycles short status copy every five seconds; it contains no partial tool arguments and disappears when the tool card or answer is available. show(op=pdf) results render as a styled native PDF preview with a download link; DOCX/PPTX and other office previews are not enabled without a reliable renderer. Live streaming auto-follows only while the view is pinned to the bottom. Wheel, touch, keyboard, and scrollbar movement upward explicitly detaches follow; returning to the bottom re-enables it. Follow requests are frame-coalesced and retry across layout settling, while a refresh preserves a detached reader's position and does not force a scroll during live-to-complete transition.",
+            "Local Markdown file links open in a bounded text preview: GFM tables retain intrinsic width inside a horizontal scroller, and completed Mermaid fences render lazily when the bundled renderer is available.",
+            "Live completion refreshes authoritative state without replacing a connected live node. Delta rendering stays dirty across transient DOM detaches; SSE sequence gaps, duplicate frames, malformed frames, and premature EOFs are recovered from the last contiguous cursor, with a bounded snapshot fallback when replay is no longer available."
           ],
           "controls": [
             "agent-shell",
@@ -115,8 +117,8 @@
         {
           "heading": "Tool call strip",
           "paragraphs": [
-            "Shows in-flight MCP or built-in tool calls for the current turn. Built-in tools render as compact execution-timeline events, open by default: the head row (status node, action title, elapsed) collapses the card to a single line, and the body leads with the primary argument as a path line followed by the result without any nested toggle; the raw request and output stay folded inside a show-request-and-raw-output details. exec streams its command output live into a terminal output panel inside the same timeline event paths (with a per-call Stop button while running), and MCP calls render the same event with a MCP badge and the tool ref as the path line. ACP delegation is represented by one clickable subagent card per run; subagent_wait and synthetic subagent_result bookkeeping stay out of the transcript so they do not duplicate that card. Ask Question cards render their question, option descriptions, and submitted answer as Markdown while keeping the interaction controls native and accessible.",
-            "Streaming tools (exec) display their live output as it is produced and offer a per-call Stop button while running; the button cancels the underlying turn via agent.turns.stop (same as the composer Stop)."
+            "Shows in-flight MCP or built-in tool calls for the current turn. Built-in tools render as compact execution events, open by default: the head row (status node, action title, elapsed) collapses the card to a single line, and the body leads with the primary argument as a path line followed by the result without any nested toggle; the raw request and output stay folded inside a show-request-and-raw-output details. Tool markers are independent rather than joined by a continuous rail, so a long tool round stays visually calm. Ocean marks inspection and connectivity, volcanic soil marks local authored work, sand marks scheduled work, and reef marks direct agent collaboration; mangrove remains reserved for success state. A card keeps the disclosure state chosen by the user when it settles, so completion does not collapse an expanded result or remove a reader's vertical context. Every tool card keeps its elapsed indicator in the card chrome; standalone Ask Question cards place it in their header. Before a valid card exists, provider-side tool construction is represented by a transient animated activity row that cycles status copy every five seconds without exposing partial arguments. exec streams its command output live into a terminal output panel inside the same timeline event paths (with a per-call Stop button while running), and MCP calls render the same event with a MCP badge and the tool ref as the path line. ACP delegation and internal delegate runs are represented by one clickable subagent card per run and share the same dock, drawer, popup, and transcript hydration; subagent_wait, delegate_result, and synthetic subagent_result bookkeeping stay out of the transcript so they do not duplicate that card. Ask Question cards render their question, option descriptions, and submitted answer as Markdown while keeping the interaction controls native and accessible. Completed show(op=pdf) calls become a native PDF preview card instead of a terminal row.",
+            "Streaming tools (exec) display their live output as it is produced and offer a per-call Stop button while running; the button cancels only that tool call via agent.tools.stop, persists interrupted by user, and lets the enclosing agent turn continue. The composer Stop remains the separate whole-turn cancellation control."
           ],
           "controls": [
             "agent-composer-stack",
@@ -127,9 +129,9 @@
           ]
         },
         {
-          "heading": "ACP subagent dock",
+          "heading": "Background subagent dock",
           "paragraphs": [
-            "Appears above the composer when ACP subagents are live (or recently finished in this room). Each chip opens the right-hand drawer; the peek control opens a popup for one run."
+            "Appears above the composer when an ACP subagent or internal delegate is live (or recently finished in this room). Each chip opens the right-hand drawer; the peek control opens a popup for one run."
           ],
           "controls": [
             "acp-dock",
@@ -383,7 +385,7 @@
     },
     "learning": {
       "title": "Learning",
-      "purpose": "Search accumulated memory entries and skills via hybrid BM25 + embedding + graph search, explore how they connect in the knowledge graph, and review what autolearn saved.",
+      "purpose": "Edit the always-injected user.md and soul.md documents, search accumulated memory entries and skills via hybrid BM25 + embedding + graph search, explore how they connect in the knowledge graph, and review what autolearn saved.",
       "howToOpen": "Click the Learning item in the left sidebar.",
       "sections": [
         {
@@ -399,11 +401,39 @@
         {
           "heading": "Tabs",
           "paragraphs": [
-            "Switches between Memory & Graph (search + graph) and Learning log (autolearn activity feed). The log loads lazily on first open."
+            "Opens About You first, where the always-injected user.md document can be edited and saved. About Agent provides the matching editor for the agent working-knowledge document. Learning uses the same compact segmented tab control as Automation, kept apart from the content panel so navigation does not appear attached to a card edge. Memory & Graph provides search + graph, and Learning log shows autolearn activity; the log loads lazily on first open."
           ],
           "controls": [
+            "learning-tab-about",
+            "learning-tab-agent",
             "learning-tab-memory",
             "learning-tab-log"
+          ]
+        },
+        {
+          "heading": "About You",
+          "paragraphs": [
+            "The editable primary memory document. Reload reads the persisted value again; Save changes replaces the complete primary memory document through memory.primary.update. The editor shows the 4000-character cap and allows an intentional empty document. The card expands across the available desktop canvas while keeping a compact inset and full-width editor on mobile."
+          ],
+          "controls": [
+            "learning-primary-status",
+            "learning-primary-memory",
+            "learning-primary-count",
+            "learning-primary-reload",
+            "learning-primary-save"
+          ]
+        },
+        {
+          "heading": "Soul.md",
+          "paragraphs": [
+            "The editable agent-tier memory document. Reload reads the persisted value again; Save changes replaces the complete soul.md document through memory.agent.update. The editor shows the 4000-character cap and allows an intentional empty document. Changes remain separate from user.md and fragment memory."
+          ],
+          "controls": [
+            "learning-agent-status",
+            "learning-agent-memory",
+            "learning-agent-count",
+            "learning-agent-reload",
+            "learning-agent-save"
           ]
         },
         {
@@ -450,7 +480,7 @@
         {
           "heading": "Learning log",
           "paragraphs": [
-            "Autolearn activity feed from the trajectory log (review runs, extraction, edge building, consolidation, decay, prune), newest first. Review entries show a status badge (done or error) with the error message when failed, a compact Source <title> line (raw conversation id hidden), the saved outcomes (kind + snippet) or an explicit Nothing to save. line, per-type extras, and a View review details button. Expanding it replays what the background review agent did exactly like an Agent-view conversation - Thinking disclosures per round, terminal-style tool cards with input/output panels, short narration notes, and the final verdict - but never the replayed user transcript. A running indicator appears at the top while a review is in-flight. Refresh reloads the feed."
+            "Autolearn activity feed from the trajectory log (review runs, extraction, edge building, consolidation, decay, prune), newest first. Review entries show a status badge (done or error); failures use a concise automatic-processing message rather than exposing a verbose provider body. Each entry has a compact Source <title> line (raw conversation id hidden), the saved outcomes (kind + snippet) or an explicit Nothing to save. line, per-type extras, and a View review details button. Expanding it replays what the background review agent did exactly like an Agent-view conversation - Thinking disclosures per round, terminal-style tool cards with input/output panels, short narration notes, and the final verdict - but never the replayed user transcript. A running indicator appears at the top while a review is in-flight. Refresh reloads the feed. There is no manual retry action for background reviews."
           ],
           "controls": [
             "learning-log-count",
@@ -479,7 +509,7 @@
         {
           "heading": "Toolbar",
           "paragraphs": [
-            "Tabs switch between Workflows, Runs, Schedules, and Events. New workflow opens a once/every/when/manual wizard. Pipeline files from the data directory appear alongside saved automation workflows in the Workflows tab. On phones the tabs can scroll horizontally without widening the page."
+            "Tabs switch between Workflows, Runs, Schedules, and Events in the same compact segmented control used by Learning. New workflow opens a once/every/when/manual wizard. Pipeline files from the data directory appear alongside saved automation workflows in the Workflows tab. On phones the tabs can scroll horizontally without widening the page."
           ],
           "controls": [
             "automation-tabs",
@@ -578,11 +608,12 @@
         {
           "heading": "Agent runtime",
           "paragraphs": [
-            "Default model for new conversations, tool-round guards (max rounds, repeated-call limit, max parallel tools), max auto-continues after a successful turn with open todos, max output tokens, and optional sampling parameters. Existing conversations keep their selected model."
+            "Default model for new conversations, the model used by the internal delegate agent, tool-round guards (max rounds, repeated-call limit, max parallel tools), max auto-continues after a successful turn with open todos, max output tokens, and optional sampling parameters. Existing conversations keep their selected model. The delegate model defaults to the active conversation model."
           ],
           "controls": [
             "settings-runtime-title",
             "settings-preferred-model",
+            "settings-delegate-model",
             "settings-max-tool-rounds",
             "settings-repeated-tool-limit",
             "settings-max-parallel-tools",
@@ -1041,7 +1072,7 @@
       "label": "Thread log",
       "section": "Agent",
       "type": "log",
-      "notes": "Renders the active conversation messages. Long conversations are windowed: the last user bubble plus a short tail of a finished turn render on open (scrolled to bottom). A running turn keeps every persisted round of that turn mounted on reload. Older finished-turn rounds, earlier turns, and archived chunks load on demand via Load older or scroll-to-top. User and isolated ACP prompt events render Markdown as HTML; inline backticks use code pills and fenced code uses a bounded horizontal-scroll card. Thinking and compaction handover markdown are parsed when expanded; the expanded Thinking body shows up to 20 rendered lines and scrolls internally beyond that without clipping list numbers behind the scrollbar. Live Thinking deltas follow the thread only while the invisible end marker is visible at the bottom; scrolling up pauses auto-follow until the user returns to the bottom. Completion/error events resync the actual scroll geometry before sound and refresh so a reader stays on the message being read. Refreshes also preserve which Thinking and tool disclosures the user opened. Markdown tables keep their intrinsic width inside a horizontal scroll container on narrow bubbles. Tool cards load the versioned backend catalog from agent.tools.contracts, carry an isolated contract-owned class plus request/result hooks, and render predictable list, status, code, document, and media output formats; tool output attachments use the tool result renderer. During backend compaction, a room-scoped WebSocket event drives an animated inline status until the matching completed or failed event arrives; the generic Thinking dots are mutually exclusive with that status. An empty thread shows starter prompt chips."
+      "notes": "Renders the active conversation messages. Long conversations are windowed: the last user bubble plus a short tail of a finished turn render on open (scrolled to bottom). A running turn keeps every persisted round of that turn mounted on reload. Older finished-turn rounds, earlier turns, and archived chunks load on demand via Load older or scroll-to-top. User and isolated ACP prompt events render Markdown as HTML; inline backticks use code pills and fenced code uses a bounded horizontal-scroll card. Thinking and compaction handover markdown are parsed when expanded; the expanded Thinking body shows up to 20 rendered lines and scrolls internally beyond that without clipping list numbers behind the scrollbar. Live Thinking deltas follow the thread only while the invisible end marker is visible at the bottom; scrolling up pauses auto-follow until the user returns to the bottom. Completion/error events resync the actual scroll geometry before sound and refresh so a reader stays on the message being read. Refreshes also preserve which Thinking and tool disclosures the user opened. Markdown tables keep their intrinsic width inside a horizontal scroll container on narrow bubbles. Local Markdown file links open a bounded text preview with styled tables and lazy Mermaid rendering when the bundled renderer is available. Tool cards load the versioned backend catalog from agent.tools.contracts, carry an isolated contract-owned class plus request/result hooks, and render predictable list, status, code, document, and media output formats; tool output attachments use the tool result renderer. During backend compaction, a room-scoped WebSocket event drives an animated inline status until the matching completed or failed event arrives; the generic Thinking dots are mutually exclusive with that status. Before a valid tool card exists, provider-side tool construction shows a transient animated activity row with five-second copy rotation and no partial arguments. An empty thread shows starter prompt chips."
     },
     "agent-starter-prompts": {
       "label": "Starter prompts",
@@ -1466,6 +1497,18 @@
       "type": "tab",
       "notes": "Shows the search + knowledge graph panel."
     },
+    "learning-tab-about": {
+      "label": "About You tab",
+      "section": "Learning",
+      "type": "tab",
+      "notes": "Shows the editable always-injected primary memory document."
+    },
+    "learning-tab-agent": {
+      "label": "About Agent tab",
+      "section": "Learning",
+      "type": "tab",
+      "notes": "Shows the editable always-injected soul.md document."
+    },
     "learning-tab-log": {
       "label": "Learning log tab",
       "section": "Learning",
@@ -1483,11 +1526,69 @@
       "type": "button",
       "action": "Reloads the autolearn trajectory feed."
     },
+    "learning-primary-status": {
+      "label": "Primary memory status",
+      "section": "Learning",
+      "type": "status",
+      "notes": "Reports whether primary memory is loaded, empty, saved, or unavailable."
+    },
+    "learning-primary-memory": {
+      "label": "Primary memory editor",
+      "section": "Learning",
+      "type": "textarea",
+      "action": "Edits the complete primary memory document."
+    },
+    "learning-primary-count": {
+      "label": "Primary memory character count",
+      "section": "Learning",
+      "type": "text"
+    },
+    "learning-primary-reload": {
+      "label": "Reload primary memory",
+      "section": "Learning",
+      "type": "button",
+      "action": "Discards the current draft and reloads the persisted primary memory document."
+    },
+    "learning-primary-save": {
+      "label": "Save primary memory",
+      "section": "Learning",
+      "type": "button",
+      "action": "Replaces the persisted primary memory document."
+    },
+    "learning-agent-status": {
+      "label": "Soul memory status",
+      "section": "Learning",
+      "type": "status",
+      "notes": "Reports whether soul.md is loaded, empty, saved, or unavailable."
+    },
+    "learning-agent-memory": {
+      "label": "Soul memory editor",
+      "section": "Learning",
+      "type": "textarea",
+      "action": "Edits the complete soul.md document."
+    },
+    "learning-agent-count": {
+      "label": "Soul memory character count",
+      "section": "Learning",
+      "type": "text"
+    },
+    "learning-agent-reload": {
+      "label": "Reload soul memory",
+      "section": "Learning",
+      "type": "button",
+      "action": "Discards the current draft and reloads the persisted soul.md document."
+    },
+    "learning-agent-save": {
+      "label": "Save soul memory",
+      "section": "Learning",
+      "type": "button",
+      "action": "Replaces the persisted soul.md document."
+    },
     "learning-log": {
       "label": "Learning log",
       "section": "Learning",
       "type": "list",
-      "notes": "Trajectory events; review entries have done/error/skipped status badges. Skipped entries explain whether a trigger was coalesced because another review was running or deferred by retry cooldown. Completed review entries have a View review details button that expands the background review agent's activity digest inline."
+      "notes": "Trajectory events; review entries have done/error/skipped status badges. Failed entries show a concise automatic-processing message; raw provider diagnostics stay server-side. Skipped entries explain whether a trigger was coalesced because another review was running or deferred by retry cooldown. Review entries have a View review details button that expands the background review agent's activity digest inline; there is no manual retry button."
     },
     "log-level-filter": {
       "label": "Level filter",
@@ -1539,6 +1640,12 @@
       "type": "select",
       "notes": "Used by new conversations."
     },
+    "settings-delegate-model": {
+      "label": "Internal delegate model",
+      "section": "Settings",
+      "type": "select",
+      "notes": "Model for the internal headless delegate agent; empty inherits the active conversation model."
+    },
     "settings-max-tool-rounds": {
       "label": "Maximum tool rounds",
       "section": "Settings",
@@ -1549,7 +1656,7 @@
       "label": "Max parallel tools",
       "section": "Settings",
       "type": "number",
-      "notes": "1–64, default 6. Bounds concurrent tool calls per assistant round."
+      "notes": "1–64, default 6. Bounds concurrent tool calls per assistant round; calls above the limit wait in a queue and are not dropped."
     },
     "settings-embedding-title": {
       "label": "Embeddings title",
@@ -1911,29 +2018,29 @@
       "notes": "Edit label/args/env, probe, authenticate, refresh catalog, and map advertised modes to risk tiers. Command is read-only after save."
     },
     "acp-dock": {
-      "label": "ACP subagent dock",
+      "label": "Background subagent dock",
       "section": "Agent",
       "type": "container",
-      "notes": "Hidden until at least one live or recently finished ACP run exists."
+      "notes": "Hidden until at least one live or recently finished ACP or internal delegate run exists."
     },
     "acp-dock-toggle": {
-      "label": "ACP dock toggle",
+      "label": "Background dock toggle",
       "section": "Agent",
       "type": "button",
       "action": "Collapse/expand the subagent chip list."
     },
     "acp-dock-title": {
-      "label": "ACP dock title",
+      "label": "Background dock title",
       "section": "Agent",
       "type": "text"
     },
     "acp-dock-meta": {
-      "label": "ACP dock meta",
+      "label": "Background dock meta",
       "section": "Agent",
       "type": "text"
     },
     "acp-dock-open-drawer": {
-      "label": "Open ACP drawer",
+      "label": "Open background run drawer",
       "section": "Agent",
       "type": "button",
       "action": "Opens the right-hand multi-subagent drawer."
@@ -1944,62 +2051,62 @@
       "type": "list"
     },
     "acp-drawer-overlay": {
-      "label": "ACP drawer overlay",
+      "label": "Background run drawer overlay",
       "section": "Agent",
       "type": "overlay",
       "action": "Click to close the subagent drawer."
     },
     "acp-drawer": {
-      "label": "ACP subagent drawer",
+      "label": "Background subagent drawer",
       "section": "Agent",
       "type": "drawer",
       "notes": "Uses the Agent conversation-pane pattern with a run sidebar and a live transcript pane."
     },
     "acp-drawer-close": {
-      "label": "Close ACP drawer",
+      "label": "Close background run drawer",
       "section": "Agent",
       "type": "button",
       "action": "Closes the subagent drawer."
     },
     "acp-drawer-title": {
-      "label": "ACP drawer title",
+      "label": "Background drawer title",
       "section": "Agent",
       "type": "text"
     },
     "acp-drawer-subtitle": {
-      "label": "ACP drawer subtitle",
+      "label": "Background drawer subtitle",
       "section": "Agent",
       "type": "text"
     },
     "acp-drawer-body": {
-      "label": "ACP drawer body",
+      "label": "Background drawer body",
       "section": "Agent",
       "type": "container"
     },
     "acp-popup-overlay": {
-      "label": "ACP peek overlay",
+      "label": "Background run peek overlay",
       "section": "Agent",
       "type": "overlay",
       "action": "Click outside the dialog to close the peek popup."
     },
     "acp-popup": {
-      "label": "ACP peek popup",
+      "label": "Background run peek popup",
       "section": "Agent",
       "type": "dialog"
     },
     "acp-popup-close": {
-      "label": "Close ACP peek",
+      "label": "Close background run peek",
       "section": "Agent",
       "type": "button",
       "action": "Closes the peek popup."
     },
     "acp-popup-title": {
-      "label": "ACP peek title",
+      "label": "Background peek title",
       "section": "Agent",
       "type": "text"
     },
     "acp-popup-body": {
-      "label": "ACP peek body",
+      "label": "Background peek body",
       "section": "Agent",
       "type": "container"
     },
@@ -2199,7 +2306,7 @@
       "label": "Mini window",
       "section": "Agent",
       "type": "button",
-      "notes": "Opens the picture-in-picture mini window (Document PiP on Chromium, popup fallback elsewhere) showing the live agent thread. Appears beside Room info for an active conversation."
+      "notes": "Opens the picture-in-picture mini window (Document PiP on Chromium, popup fallback elsewhere) showing the live agent thread. Appears beside Room info for an active browser conversation; hidden in Electron until its mini-window flow is supported."
     },
     "pwa-install-btn": {
       "label": "Install NusaShell",
@@ -2211,7 +2318,7 @@
       "label": "Tool terminal stop",
       "section": "Agent",
       "type": "button",
-      "action": "Cancels the running turn for this tool call (agent.turns.stop). Shown only on streaming tools (exec) while the tool is running; the button hides once the tool settles.",
+      "action": "Cancels only this tool call (agent.tools.stop) and lets the enclosing turn continue. Shown only on streaming tools (exec) while the tool is running; the button hides once the tool settles.",
       "notes": "Appears inside the tool terminal card's summary row (class agent-tool-stop), next to the elapsed timer.",
       "selector": ".agent-tool-stop"
     },
@@ -2582,7 +2689,7 @@
       "label": "Provider route menu",
       "section": "Agent",
       "type": "dialog",
-      "notes": "Lists upstream providers for the selected model with quantization/latency badges; Auto entry restores gateway load balancing."
+      "notes": "Lists searchable upstream providers for the selected model with quantization, latency, throughput, and per-provider input/output pricing badges; Auto restores gateway load balancing and has no single fixed price."
     }
   }
 }

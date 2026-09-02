@@ -61,8 +61,44 @@ Open `http://127.0.0.1:9999`, configure a provider, then choose a folder from
 the composer’s workspace button. The selected folder is the workspace for the
 active conversation.
 
-To run NusaShell from anywhere as a `nusashell` command (the Go app owns the
-CLI name; it replaces any wrapper left by NusaShell-Desktop):
+### Release installer
+
+The release installer installs the Go core first and then asks whether the
+optional Electron desktop wrapper and `NusaShell-mcp` plugins should be
+installed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.sh | bash
+```
+
+Use `--install-electron`/`--no-electron` and
+`--install-mcp`/`--no-mcp` to choose explicitly. Set
+`NUSASHELL_NON_INTERACTIVE=1` for unattended installs; optional components
+default to not installed. See [`docs/INSTALL.md`](docs/INSTALL.md) for
+Windows, layouts, version pinning, and MCP details.
+
+### Electron desktop app
+
+The cross-platform Electron app is a thin wrapper around the same Go server
+and native frontend. It does not duplicate the web UI or its interactions, and
+its release package never embeds the Go binary:
+
+```bash
+make electron-dev       # build the local backend and launch Electron
+make electron-test      # run wrapper tests without a GUI
+make electron-ui-test   # launch Electron and test composer/workspace flows
+make electron-package   # create an unpacked app directory
+make electron-dist      # create a native installer for this OS
+make electron-install-local # install the unpacked app into the user profile
+make go-release         # package the standalone Go core for this Unix platform
+```
+
+See [`docs/electron.md`](docs/electron.md) for the runtime boundary,
+development overrides, packaging, and CI details. See
+[`docs/INSTALL.md`](docs/INSTALL.md) for release installers and versioning.
+
+To run the Go app from anywhere as a `nusashell` command (the desktop release
+uses the separate `nusashell-desktop` launcher):
 
 ```bash
 make install              # builds ./bin/nusashell and installs to ~/.local/bin
@@ -82,6 +118,15 @@ go vet ./...             # static analysis
 go build ./...           # compile every package
 make check               # fmt-check + race test + vet + build
 make verify-local        # full local gate + Windows/macOS compile checks
+make electron-test       # Electron wrapper unit tests
+make electron-ui-test    # real Electron renderer interaction smoke test
+make electron-dev        # run NusaShell in the Electron desktop shell
+make electron-installer-test # installer/version/manifest contract tests
+make go-release          # standalone Go core payload
+make go-release-manifest # standalone Go release manifest
+make go-version          # print the Go release version
+make electron-version    # print the Electron release version
+make release-index-check # validate independent release pointers
 ```
 
 The local gate also runs the frontend test suite. Install its development
@@ -136,6 +181,7 @@ assets changes.
 | `transport/` | HTTP RPC, WebSocket, and static asset serving |
 | `cmd/nusashell/` | Composition root, configuration, lifecycle, and entrypoint |
 | `frontend/` | Embedded native JavaScript, CSS, HTML, and frontend tests |
+| `apps/electron/` | Cross-platform Electron wrapper, preload, packaging, and wrapper tests |
 | `testdata/` | Stable fixtures, including a fake stdio MCP server |
 
 The routing matrix and static-serving policies live in

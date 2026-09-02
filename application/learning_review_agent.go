@@ -1,4 +1,4 @@
-// BackgroundReviewAgent runs a bounded LLM turn after a conversation crosses
+// BackgroundReviewAgent runs an automatic LLM turn after a conversation crosses
 // the learning-review threshold. It replays a transcript tail to the same
 // provider that completed the parent turn ("global LLM"), with a restricted
 // toolset (memory/skill dispatcher families, minus destructive verbs) and
@@ -12,8 +12,9 @@
 //   - Background review after N turns (fork agent, replay snapshot)
 //   - LLM-based extraction (no regex)
 //   - Restricted tool whitelist (memory + skill meta-tools + file_read)
-//   - Bounded tool rounds (maxToolRounds, default 6)
-//   - No streaming; parent conversation is not modified
+//   - The shared AgentEngine loop with no review-specific round cap; it ends
+//     when the model is terminal or an error is returned
+//   - Streams responses without exposing a foreground turn; parent conversation is not modified
 //   - Review transcript and mutation events are persisted for observability
 //   - Mutations tracked for the Learning log
 package application
@@ -33,7 +34,6 @@ import (
 type ReviewSettings struct {
 	Enabled             bool
 	MemoryEveryNTurns   int           // trigger threshold (from settings.LearningReviewThreshold)
-	MaxToolRounds       int           // bounded tool loop (default 6)
 	TranscriptTailMsgs  int           // how many recent messages to include (default 40)
 	MaxTranscriptChars  int           // per-message truncation (default 4000)
 	MaxTranscriptTokens int           // total transcript cap, ~chars/4 (default 30000)
@@ -47,7 +47,6 @@ func DefaultReviewSettings() ReviewSettings {
 	return ReviewSettings{
 		Enabled:             true,
 		MemoryEveryNTurns:   domain.DefaultReviewMemoryEveryNTurns,
-		MaxToolRounds:       domain.DefaultReviewMaxToolRounds,
 		TranscriptTailMsgs:  domain.DefaultReviewTranscriptTailMsgs,
 		MaxTranscriptChars:  domain.DefaultReviewMaxTranscriptChars,
 		MaxTranscriptTokens: domain.DefaultReviewMaxTranscriptTokens,
@@ -81,9 +80,6 @@ type BackgroundReviewAgent struct {
 
 // NewBackgroundReviewAgent creates a review agent bound to the App.
 func NewBackgroundReviewAgent(app *App, settings ReviewSettings) *BackgroundReviewAgent {
-	if settings.MaxToolRounds <= 0 {
-		settings.MaxToolRounds = 6
-	}
 	if settings.TranscriptTailMsgs <= 0 {
 		settings.TranscriptTailMsgs = domain.DefaultReviewTranscriptTailMsgs
 	}
@@ -164,8 +160,7 @@ var reviewTranscriptToolDef = ToolDef{
 // conversation's configured model (the "global LLM") and is fire-and-forget
 // — it never blocks or fails the parent turn. Returns an error describing
 // why the review aborted (missing conversation, no model, adapter failure,
-// LLM error) so the caller can emit a toast and record it in the
-// trajectory log.
+// or LLM error) so the background caller can record it in the trajectory log.
 func (r *BackgroundReviewAgent) RunReview(ctx context.Context, conversationID string) error {
 	if !r.reserveReview(conversationID) {
 		return nil
@@ -248,7 +243,7 @@ func (r *BackgroundReviewAgent) runReservedReview(ctx context.Context, conversat
 	// unresolvable, mirroring resolveCompactionAdapter.
 	adapter, bareModel = r.applyReviewModelOverride(context.Background(), adapter, bareModel)
 
-	r.app.log("info", "learning", "review started: conv=%s model=%s rounds=%d", conversationID, bareModel, r.settings.MaxToolRounds)
+	r.app.log("info", "learning", "review started: conv=%s model=%s", conversationID, bareModel)
 	if r.app.Trajectory != nil {
 		r.app.Trajectory.Record("review", map[string]interface{}{
 			"conversation": conversationID,
@@ -261,8 +256,8 @@ func (r *BackgroundReviewAgent) runReservedReview(ctx context.Context, conversat
 	// error. The only activity-based guard is the provider's per-chunk idle
 	// timeout (ReadSSE DefaultIdleTimeout) — it fires only when the stream
 	// sends nothing for the idle window (a hung provider), never for a slow
-	// but steadily streaming one. MaxToolRounds and ReviewCooldown bound the
-	// total work independently of wall-clock time.
+	// but steadily streaming one. ReviewCooldown controls trigger frequency;
+	// it is not an agent-loop limit.
 	mutations, messages, loopErr := r.runReviewLoop(ctx, adapter, bareModel, conversation)
 	reviewID := saveReviewTranscript(r.app.DataDir, conversationID, bareModel, messages)
 	// Update the incremental review marker regardless of success or

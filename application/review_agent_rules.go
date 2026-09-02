@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"nusashell/contracts"
 	"nusashell/domain"
@@ -14,9 +15,10 @@ import (
 // reviewAgentRules is the AgentReview rule set: a virtual conversation
 // (pre-injected transcript + primary memory as tool results), whitelisted
 // and local tools, mutation tracking for the learning log, and the
-// "Nothing to save" early exit. It deliberately has no retry, no
-// persistence, and no events beyond memory/skill updates. See
-// docs/decisions/003-agent-engine.md.
+// "Nothing to save" early exit. It uses the same provider retry policy and
+// AgentEngine lifecycle as a conversation, without a review-specific round
+// cap, while keeping review-specific persistence and mutation hooks out of
+// the shared conversation rule set.
 type reviewAgentRules struct {
 	agent       *BackgroundReviewAgent
 	adapter     ProviderContext
@@ -36,23 +38,45 @@ type reviewAgentRules struct {
 
 func (p *reviewAgentRules) rules() AgentRules {
 	return AgentRules{
-		// No retry: a review failure is surfaced to the caller, which
-		// records it in the trajectory log; the cooldown gate paces
-		// retries.
+		// Provider failures are retried internally with the same policy as a
+		// conversation. Once the policy says hard-fail, the error reaches the
+		// background caller and is recorded in the trajectory without a UI
+		// retry action.
 		Stream: func(ctx context.Context, req ChatRequest) (ChatResponse, error) {
-			var resp ChatResponse
-			resp, err := p.adapter.Stream(ctx, req, func(delta string) {
-				resp.Content += delta
-			}, func(delta string) {
-				resp.Reasoning += delta
-			})
-			if err != nil {
-				return resp, err
+			for attempt := 1; ; attempt++ {
+				var resp ChatResponse
+				resp, err := p.adapter.Stream(ctx, req, func(delta string) {
+					resp.Content += delta
+				}, func(delta string) {
+					resp.Reasoning += delta
+				})
+				if err == nil {
+					if strings.TrimSpace(resp.Content) == "" && strings.TrimSpace(resp.Reasoning) == "" && len(resp.ToolCalls) == 0 {
+						return resp, fmt.Errorf("empty response from review model")
+					}
+					return resp, nil
+				}
+				// A review has no user-visible partial answer to continue from.
+				// Replay the same request for every retryable provider error,
+				// including a stream that already emitted some deltas. This
+				// keeps background reviews from failing merely because a
+				// connection dropped after the model started responding.
+				if attempt >= maxProviderAttempts || !domain.CanAutoRetry(err) {
+					return resp, err
+				}
+				delay, retryable := providerRetryDelay(err, attempt)
+				if !retryable {
+					return resp, err
+				}
+				if p.agent != nil && p.agent.app != nil {
+					p.agent.app.log("warn", "learning", "retrying review provider (%d/%d) after %s: %s", attempt, maxProviderAttempts, delay.Round(time.Millisecond), describeProviderError(err))
+					if waitErr := p.agent.app.waitForRetry(ctx, delay); waitErr != nil {
+						return resp, waitErr
+					}
+				} else if waitErr := sleepForRetry(ctx, delay); waitErr != nil {
+					return resp, waitErr
+				}
 			}
-			if strings.TrimSpace(resp.Content) == "" && strings.TrimSpace(resp.Reasoning) == "" && len(resp.ToolCalls) == 0 {
-				return resp, fmt.Errorf("empty response from review model")
-			}
-			return resp, nil
 		},
 		BuildRequest: func(st *RoundState) ChatRequest {
 			messages := make([]ChatMessage, 0, len(p.base)+len(st.Messages))

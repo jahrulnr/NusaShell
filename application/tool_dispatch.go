@@ -68,7 +68,7 @@ var dispatchFamilies = []dispatchFamily{
 		members: []string{"list", "search", "save"},
 		def: ToolInfo{
 			Name:        "skill",
-			Description: "Skill library; \"op\" selects: list {limit?} returns owned_by+shadowed flags for path resolution; search {query,limit?} name/description substring match; save {name,content,description?,id?,path?} create/update SKILL.md, or write a support file when path is set (skill must exist). Skill files live on disk — read SKILL.md and support files with file_read, list a skill folder with file_list. See docs(op=\"read\", id=\"skills\") for the path layout.",
+			Description: "Skill library; \"op\" selects: list {limit?} returns owned_by+shadowed flags for path resolution; search {query,limit?} returns discovery metadata only (id/name/description/owned_by), never SKILL.md content — after selecting a skill, MUST read its absolute SKILL.md with file_read before applying it; save {name,content,description?,id?,path?} creates/updates SKILL.md, or writes a support file when path is set (skill must exist). Skill files live on disk; list a skill folder with file_list. See docs(op=\"read\", id=\"skills\") for the path layout.",
 			InputSchema: objSchema(
 				pEnum("op", "Operation", "list", "search", "save"),
 				pStr("query", "Search query (op=search)"),
@@ -86,16 +86,16 @@ var dispatchFamilies = []dispatchFamily{
 		members: []string{"save", "replace", "search", "list", "delete"},
 		def: ToolInfo{
 			Name:        "memory",
-			Description: "Long-term memory; \"op\" selects: save {content,category?,project?,task?,tags?} idempotent fragment dedup — durable knowledge only; replace {target:primary|fragment,content,old_text?,id?} edit primary document substring/whole body or one fragment; search {query,category?,project?,task?,tags?,limit?} BM25-ranked fragments; list {target?:fragments,category?,project?,limit?} list the fragment archive (primary is a single document — read it with file_read, not list); delete {id}",
+			Description: "Long-term memory; \"op\" selects: save {content,category?,project?,task?,tags?} idempotent fragment dedup — durable knowledge only; replace {target:user|agent|fragment,content,old_text?,id?} edit a tier document (user.md = user rules, soul.md = agent working knowledge, legacy target \"primary\" aliases user) via substring match or full rewrite, or edit one fragment; search {query,category?,project?,task?,tags?,limit?} BM25-ranked fragments plus substring matches in both tier documents; list {target?:fragments,category?,project?,limit?} list the fragment archive (tier documents are single files — read them with file_read of their path); delete {id}",
 			InputSchema: objSchema(
 				pEnum("op", "Operation", "save", "replace", "search", "list", "delete"),
 				pStr("content", "Fact/observation to save, replacement body, or new fragment content"),
-				pEnum("category", "Memory category (save/search/list)", "project", "user", "task", "general"),
+				pEnum("category", "Memory category (save/search)", "project", "user", "task", "general"),
 				pStr("project", "Optional project/workspace label"),
 				pStr("task", "Optional task label (save/search)"),
 				schemaProp{"tags", map[string]any{"type": "array", "description": "Optional tags; search requires ALL to match", "items": map[string]any{"type": "string"}}},
-				pEnum("target", "replace: primary|fragment · list: fragments (default)", "primary", "fragment", "fragments"),
-				pStr("old_text", "Primary substring to replace; omit to rewrite the entire body (op=replace target=primary)"),
+				pEnum("target", "replace: user|agent|fragment (primary = legacy alias for user) · list: fragments", "primary", "user", "agent", "fragment", "fragments"),
+				pStr("old_text", "Primary substring to replace; omit to rewrite the entire document body"),
 				pStr("id", "Fragment id (op=replace target=fragment / op=delete)"),
 				pStr("query", "Search query (op=search)"),
 				pInt("limit", "Max results (search default 20, list default 50)"),

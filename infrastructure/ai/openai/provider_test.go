@@ -769,8 +769,19 @@ func TestStreamEmitsTypedEvents(t *testing.T) {
 func TestStreamRejectsEOFBeforeDone(t *testing.T) {
 	stream := newStream(streamResponse(`data: {"choices":[{"delta":{"content":"partial"}}]}`), &core.Request{Model: "gpt-4.1"})
 	_, err := core.Collect(stream)
-	if err == nil || !strings.Contains(err.Error(), "before [DONE]") || !core.IsProviderError(err) {
+	if err == nil || !strings.Contains(err.Error(), "before [DONE]") || !core.IsNetworkError(err) {
 		t.Fatalf("expected truncated stream error, got %v", err)
+	}
+}
+
+func TestStreamAcceptsCleanEOFWithFinishReason(t *testing.T) {
+	stream := newStream(streamResponse(`data: {"choices":[{"delta":{"content":"complete"},"finish_reason":"stop"}]}`), &core.Request{Model: "gpt-4.1"})
+	resp, err := core.Collect(stream)
+	if err != nil {
+		t.Fatalf("clean EOF with finish_reason must not error, got %v", err)
+	}
+	if resp.Text() != "complete" || resp.FinishReason != core.FinishReasonStop {
+		t.Fatalf("text/finish = %q/%q, want complete/stop", resp.Text(), resp.FinishReason)
 	}
 }
 

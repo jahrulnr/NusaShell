@@ -1267,7 +1267,7 @@ func (s *responsesStream) Next() (core.Event, error) {
 		return nil, core.NewNetworkError("openai", "responses stream read error", err)
 	}
 	s.done = true
-	return nil, core.NewProviderError("openai", core.ErrorTypeProvider, "openai: responses stream ended before response.completed")
+	return nil, core.NewNetworkError("openai", "openai: responses stream ended before response.completed", io.ErrUnexpectedEOF)
 }
 
 func (s *responsesStream) Close() error {

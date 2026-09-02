@@ -166,7 +166,9 @@ const (
 	ModelTierUnclassified ModelTier = "unclassified"
 )
 
-// AcpRun is one spawned subagent session. It is in-memory only.
+// AcpRun is one spawned background-agent session. ACP subprocesses and
+// internal delegates share this lifecycle/transcript shape; the execution
+// backend is identified by AgentID. Live state is held in memory.
 type AcpRun struct {
 	TaskState[AcpRunStatus]
 	AgentID              string

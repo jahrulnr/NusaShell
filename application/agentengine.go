@@ -32,8 +32,8 @@ type ToolOutcome struct {
 type AgentRules struct {
 	// Stream performs one provider request per round. Rules choose the
 	// transport: conversation/review stream (delta callbacks), compaction
-	// completes. Provider retry (backoff) lives inside Stream — the
-	// engine never retries on its own (review deliberately has none).
+	// completes. Provider retry (backoff) lives inside Stream — the engine
+	// never retries on its own.
 	Stream func(ctx context.Context, req ChatRequest) (ChatResponse, error)
 
 	// BuildRequest assembles the next round's provider request.

@@ -70,6 +70,8 @@ func toEndpointsResult(routes []domain.ModelRoute, cached bool, fetchedAt time.T
 			Status:       r.Status,
 			Latency:      r.Latency,
 			Throughput:   r.Throughput,
+			InputCost:    r.InputCost,
+			OutputCost:   r.OutputCost,
 		})
 	}
 	return contracts.ModelEndpointsResult{

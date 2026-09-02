@@ -289,6 +289,32 @@ export function renderCompactionStatus() {
   );
 }
 
+// renderAgentActivityStatus creates the transient status shown while the
+// provider is still working but no user-facing text or valid tool card exists.
+// It deliberately contains only a short phase label: partial tool arguments
+// stay inside the provider stream until the completed call is validated.
+export function renderAgentActivityStatus() {
+  return el('div', {
+    class: 'agent-activity-status',
+    role: 'status',
+    'aria-live': 'polite',
+    'aria-atomic': 'true',
+    hidden: true,
+  },
+  el('span', { class: 'agent-activity-status-mark', text: '✦', 'aria-hidden': 'true' }),
+  el('span', { class: 'agent-activity-status-text', text: 'Thinking…' }),
+  el('span', { class: 'agent-activity-status-cursor', text: '▌', 'aria-hidden': 'true' }),
+  );
+}
+
+export function setAgentActivityStatus(node, { text = 'Thinking…', phase = '', visible } = {}) {
+  if (!node) return;
+  const textEl = node.querySelector('.agent-activity-status-text');
+  if (textEl) textEl.textContent = String(text || 'Thinking…');
+  if (phase) node.dataset.phase = String(phase);
+  if (visible !== undefined) node.hidden = !visible;
+}
+
 export function appendLiveError(bubble, message = 'Turn failed') {
   if (!bubble) return null;
   let errorEl = bubble.querySelector(':scope > .agent-live-error');
@@ -325,11 +351,10 @@ function ensureThinkingDots(textBox) {
   textBox.append(thinkingDots());
 }
 
-// setThinkingDots controls the one generic wait indicator for a live round.
-// Compaction has its own more descriptive status row, so callers can suppress
-// these dots while compaction is active and restore them when the provider is
-// ready to continue. Keeping the operation idempotent prevents event-order
-// races from creating duplicate loading indicators.
+// setThinkingDots controls the legacy generic wait indicator while a live
+// round is being mounted. The runtime replaces it with the descriptive
+// activity row as soon as the run is bound; keeping this operation idempotent
+// prevents event-order races from creating duplicate loading indicators.
 export function setThinkingDots(textBox, visible) {
   if (!textBox) return;
   textBox.querySelectorAll('.agent-thinking-dots').forEach((dots) => dots.remove());
@@ -583,17 +608,20 @@ function totalUsage(messages) {
 
 // renderToolCallCard dispatches to the right card type based on the tool
 // name. ask_question renders as a sealed ask card (matching Electron's
-// toolActivity); subagent renders as a delegation card (clickable → drawer);
+// toolActivity); subagent and delegate render as delegation cards (clickable
+// → the shared drawer); everything else renders as a tool terminal.
 // everything else renders as a tool terminal.
 //
 // Cards with their own border/frame (ask_question, subagent, generate_*,
 // show, artifact) are marked dataset.standalone="true" so the caller can
-// place them outside the .agent-tool-stack rail — the stack's rail is a
+// place them outside the .agent-tool-stack — the stack is a
 // visual cue for tool terminals (exec, grep, file_read) only, and
 // looks wrong around a media card or ask panel that already has its own
 // frame.
 export function isSubagentAuxiliaryTool(name) {
-  return name === 'subagent_wait' || name === 'subagent_result';
+  return name === 'subagent_wait'
+    || name === 'subagent_result'
+    || name === 'delegate_result';
 }
 
 export function isMediaGenerationTool(name) {
@@ -624,8 +652,8 @@ export function decorateToolCard(card, toolCall) {
       node.classList.add(`agent-tool-${part}`, `${ref.css_class}-${part}`);
     });
   };
-  markParts('.agent-tool-event-path, .agent-ask-question, .agent-subagent-prompt, .agent-genimage-head, .agent-genaudio-head, .agent-genvideo-head, .agent-genimage-prompt, .agent-genaudio-prompt, .agent-genvideo-prompt', 'request');
-  markParts('.agent-tool-event-result, .agent-tool-terminal-output, .agent-ask-answer, .agent-subagent-summary, .agent-genimage-plate, .agent-genaudio-plate, .agent-genvideo-plate, .artifact-card', 'result');
+  markParts('.agent-tool-event-path, .agent-ask-question, .agent-subagent-prompt, .agent-genimage-head, .agent-genaudio-head, .agent-genvideo-head, .agent-genpdf-head, .agent-genimage-prompt, .agent-genaudio-prompt, .agent-genvideo-prompt', 'request');
+  markParts('.agent-tool-event-result, .agent-tool-terminal-output, .agent-ask-answer, .agent-subagent-summary, .agent-genimage-plate, .agent-genaudio-plate, .agent-genvideo-plate, .agent-genpdf-plate, .artifact-card', 'result');
   return card;
 }
 
@@ -644,11 +672,12 @@ export function renderToolCallCard(toolCall) {
       sealed: true,
       output: toolCall.output || '',
       ok: toolCall.status !== 'fail',
+      elapsed: toolCall.elapsed,
     });
     card.dataset.standalone = 'true';
     return finish(card);
   }
-  if (toolCall.name === 'subagent') {
+  if (toolCall.name === 'subagent' || toolCall.name === 'delegate') {
     const card = renderSubagentCard(toolCall);
     card.dataset.standalone = 'true';
     return finish(card);
@@ -679,6 +708,12 @@ export function renderToolCallCard(toolCall) {
   const showVideo = parseShowVideoOutput(toolCall);
   if (showVideo) {
     const card = renderShowVideoCard(toolCall, showVideo);
+    card.dataset.standalone = 'true';
+    return finish(card);
+  }
+  const showPDF = parseShowPDFOutput(toolCall);
+  if (showPDF) {
+    const card = renderShowPDFCard(toolCall, showPDF);
     card.dataset.standalone = 'true';
     return finish(card);
   }
@@ -760,6 +795,29 @@ export function parseShowVideoOutput(toolCall) {
   try {
     const parsed = JSON.parse(toolCall.output);
     if (parsed && parsed.show && parsed.show.type === 'video' && parsed.show.path) {
+      const src = parsed.show.src || ('/local-file?path=' + encodeURIComponent(parsed.show.path));
+      return {
+        src,
+        path: parsed.show.path,
+        name: parsed.show.name || '',
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// parseShowPDFOutput extracts a show(op=pdf) result. PDFs are intentionally
+// metadata-only on the wire; the browser loads the absolute path through the
+// local-file endpoint. A native iframe keeps the frontend vanilla and avoids
+// shipping a PDF rendering library for a capability browsers already provide.
+export function parseShowPDFOutput(toolCall) {
+  if (toolCall.name !== 'show') return null;
+  if (!toolCall.output) return null;
+  try {
+    const parsed = JSON.parse(toolCall.output);
+    if (parsed && parsed.show && parsed.show.type === 'pdf' && parsed.show.path) {
       const src = parsed.show.src || ('/local-file?path=' + encodeURIComponent(parsed.show.path));
       return {
         src,
@@ -883,12 +941,47 @@ function renderShowVideoCard(toolCall, showVideo) {
   decorateToolCard(card, toolCall);
   return card;
 }
+
+// renderShowPDFCard uses the browser's native PDF viewer. The explicit
+// download link remains visible because some browser/webview environments do
+// not expose an embedded PDF plugin even though the file itself is valid.
+function renderShowPDFCard(toolCall, showPDF) {
+  const card = el('div', { class: 'agent-genpdf-card is-done', 'data-tool': 'show' });
+  const title = showPDF.name || (showPDF.path ? showPDF.path.split(/[\\/]/).pop() : 'PDF');
+  const head = el('div', { class: 'agent-genpdf-head' },
+    el('span', { class: 'agent-genpdf-kicker', text: 'pdf' }),
+    el('span', { class: 'agent-genpdf-title', text: title }),
+  );
+  card.append(head);
+  const plate = el('div', { class: 'agent-genpdf-plate' });
+  const frame = el('iframe', {
+    class: 'agent-genpdf-frame',
+    src: showPDF.src,
+    title: 'Preview ' + title,
+    loading: 'lazy',
+  });
+  plate.append(frame);
+  card.append(plate);
+  const caption = el('div', { class: 'agent-genpdf-caption' });
+  if (showPDF.path) {
+    caption.append(el('a', {
+      class: 'agent-genpdf-download',
+      href: showPDF.src,
+      download: title,
+      text: 'Download PDF',
+    }));
+  }
+  if (caption.children.length) card.append(caption);
+  decorateToolCard(card, toolCall);
+  return card;
+}
 // Async flow: saat spawn, output = YAML frontmatter
 // `runs: [{id, status, workspace}]` (status "starting"). Saat selesai,
 // output = YAML frontmatter (status, workspace, output_path) + markdown
 // body (summary). Card re-render via EventToolCompleted.
 export function renderSubagentCard(toolCall) {
   toolCall = normalizeToolCall(toolCall);
+  const isDelegate = toolCall.name === 'delegate';
   const args = parseToolArgs(toolCall.args);
   let runs = [];
   let meta = {};          // parsed YAML header
@@ -905,12 +998,14 @@ export function renderSubagentCard(toolCall) {
   }
   // The original `subagent` tool call is replaced with a short completion
   // sentence after the run finishes. That sentence still contains the stable
-  // acprun_* ID; recover it so a reloaded card can ask the backend for the
+  // run ID; recover it so a reloaded card can ask the backend for the
   // historical transcript instead of falling back to whichever run is cached.
-  const embeddedRunIDs = extractSubagentRunIDs(toolCall.output || '');
+  const embeddedRunIDs = isDelegate
+    ? extractBackgroundRunIDs(toolCall.output || '')
+    : extractSubagentRunIDs(toolCall.output || '');
   if (!runs.length && embeddedRunIDs.length) runs = embeddedRunIDs.map((id) => ({ id }));
 
-  const agentName = agentNameForId(args.agent_id) || 'Subagent';
+  const agentName = agentNameForId(args.agent_id) || (isDelegate ? 'NusaShell delegate' : 'Subagent');
   const promptPreview = (args.prompt || '').split('\n')[0].slice(0, 120);
   // Single-run spawn results are flat in the UI: merge the run's fields
   // up so status/workspace/error reflect the actual spawn outcome (a
@@ -931,7 +1026,7 @@ export function renderSubagentCard(toolCall) {
 
   const runIDs = [...new Set(runs.map((run) => run.id).filter(Boolean))];
   const card = el('div', { class: `agent-subagent-card is-${status}`, role: 'button', tabindex: '0', 'aria-label': `Open ${agentName} transcript` });
-  card.dataset.tool = 'subagent';
+  card.dataset.tool = toolCall.name;
   card._toolArgs = toolCall.args;
   if (runIDs.length === 1) card.dataset.runId = runIDs[0];
 
@@ -994,15 +1089,19 @@ export function renderSubagentCard(toolCall) {
   return card;
 }
 
-function extractSubagentRunIDs(raw) {
+function extractBackgroundRunIDs(raw) {
   const ids = [];
   const seen = new Set();
-  for (const match of String(raw).matchAll(/\bacprun_[A-Za-z0-9_-]+/g)) {
+  for (const match of String(raw).matchAll(/\b(?:acprun|run)_[A-Za-z0-9]+/g)) {
     if (seen.has(match[0])) continue;
     seen.add(match[0]);
     ids.push(match[0]);
   }
   return ids;
+}
+
+function extractSubagentRunIDs(raw) {
+  return extractBackgroundRunIDs(raw).filter((id) => id.startsWith('acprun_'));
 }
 
 // parseSubagentResult splits a YAML frontmatter + markdown body tool
@@ -1696,12 +1795,13 @@ export function isStreamingTool(name) {
 }
 
 // bindToolStop wires the per-call stop button (shown while the tool is
-// running) to cancel the underlying turn via agent.turns.stop. The run_id
-// is resolved lazily from the owning run entry so the button works even
-// when the card was rendered before the run was registered.
+// running) to agent.tools.stop. The callback is resolved lazily from the
+// owning run entry so the button works even when the card was rendered before
+// the run was registered. This deliberately targets one tool_call_id; the
+// composer Stop button still uses agent.turns.stop for whole-turn cancel.
 // Per-call stop button for streaming tools (exec): surfaced programmatically
 // inside the tool terminal card, so it has no static id in the HTML source.
-export function bindToolStop(card, getRunId) {
+export function bindToolStop(card, getStopRequest) {
   const btn = card?.querySelector('.agent-tool-stop');
   if (!btn) return;
   btn.hidden = false;
@@ -1711,8 +1811,16 @@ export function bindToolStop(card, getRunId) {
     if (btn.disabled) return;
     btn.disabled = true;
     btn.textContent = 'Stopping…';
-    const runId = typeof getRunId === 'function' ? getRunId() : getRunId;
-    rpc('agent.turns.stop', { run_id: runId }).then(() => {
+    const request = typeof getStopRequest === 'function' ? getStopRequest() : getStopRequest;
+    const payload = typeof request === 'string'
+      ? { run_id: request, tool_call_id: card.dataset.toolCallId }
+      : request;
+    if (!payload?.run_id || !payload?.tool_call_id) {
+      btn.disabled = false;
+      btn.textContent = '■ Stop';
+      return;
+    }
+    rpc('agent.tools.stop', payload).then(() => {
       setTimeout(() => btn.remove(), 600);
     }).catch(() => {
       btn.disabled = false;

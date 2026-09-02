@@ -99,6 +99,11 @@ func TestProviderToolContentStripsShowBase64(t *testing.T) {
 			output:  `{"show":{"type":"video","src":"data:video/mp4;base64,AAAA","path":"/tmp/clip.mp4","name":"clip.mp4"}}`,
 			wantSub: "/tmp/clip.mp4",
 		},
+		{
+			name:    "pdf",
+			output:  `{"show":{"type":"pdf","path":"/tmp/report.pdf","name":"report.pdf","media_type":"application/pdf"}}`,
+			wantSub: "/tmp/report.pdf",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -119,6 +124,19 @@ func TestProviderToolContentStripsShowBase64(t *testing.T) {
 				t.Errorf("provider content too long (%d chars), expected short summary: %s", len(out), out)
 			}
 		})
+	}
+}
+
+func TestProviderToolContentSummarizesShowPDF(t *testing.T) {
+	out := ProviderToolContent("show", `{"show":{"type":"pdf","path":"/tmp/report.pdf","name":"report.pdf","media_type":"application/pdf"}}`)
+	if !strings.Contains(out, "Displayed PDF") {
+		t.Fatalf("PDF result should be summarized for the provider, got: %s", out)
+	}
+	if !strings.Contains(out, "/tmp/report.pdf") {
+		t.Fatalf("PDF summary should retain the path, got: %s", out)
+	}
+	if strings.Contains(out, `"type":"pdf"`) {
+		t.Fatalf("PDF metadata should not be forwarded verbatim, got: %s", out)
 	}
 }
 

@@ -68,6 +68,12 @@ func (a *App) dispatchAgent(ctx context.Context, method string, payload json.Raw
 			return nil, rpcErr
 		}
 		return a.handleTurnsStop(req)
+	case contracts.MethodToolStop:
+		var req contracts.ToolStopRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleToolStop(req)
 	case contracts.MethodTurnsRetry:
 		var req contracts.TurnRetryRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {

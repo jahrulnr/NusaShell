@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -87,6 +88,10 @@ func listOpenRouterEndpoints(ctx context.Context, baseURL string, headers map[st
 				Status       int             `json:"status"`
 				Latency      json.RawMessage `json:"latency_last_30m"`
 				Throughput   json.RawMessage `json:"throughput_last_30m"`
+				Pricing      struct {
+					Prompt     string `json:"prompt"`
+					Completion string `json:"completion"`
+				} `json:"pricing"`
 			} `json:"endpoints"`
 		} `json:"data"`
 	}
@@ -109,9 +114,27 @@ func listOpenRouterEndpoints(ctx context.Context, baseURL string, headers map[st
 			Status:       e.Status,
 			Latency:      parseRouteMetric(e.Latency),
 			Throughput:   parseRouteMetric(e.Throughput),
+			InputCost:    parseRoutePrice(e.Pricing.Prompt),
+			OutputCost:   parseRoutePrice(e.Pricing.Completion),
 		})
 	}
 	return routes, nil
+}
+
+// parseRoutePrice converts an OpenRouter per-token price string to USD per
+// 1M tokens. Invalid, negative, and non-finite values are treated as unknown;
+// a valid zero remains a non-nil pointer so free routes are distinguishable
+// from routes where pricing was omitted.
+func parseRoutePrice(raw string) *float64 {
+	v, err := aiutil.ParseFloat(raw)
+	if err != nil || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+		return nil
+	}
+	v *= 1_000_000
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return nil
+	}
+	return &v
 }
 
 // parseRouteMetric decodes a rolling-metric field that OpenRouter serves

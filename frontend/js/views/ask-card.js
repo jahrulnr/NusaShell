@@ -46,10 +46,33 @@ function parseAskAnswer(output) {
   return { via: '', answer: String(output), optionIds: [], text: '' };
 }
 
+// Some OpenAI-compatible models occasionally put a second serialized
+// ask_question call inside the question field. Keep the validated outer
+// options, but show the nested human question instead of exposing the model's
+// wire syntax as the UI copy. Only unwrap a complete, valid object that has
+// the expected ask-question shape; ordinary questions remain untouched.
+function normalizeAskQuestionText(source) {
+  const raw = typeof source === 'string' ? source : '';
+  const match = raw.trim().match(/^ask_question\s*\(\s*([\s\S]*)\s*\)$/i);
+  if (!match) return raw;
+  try {
+    const nested = JSON.parse(match[1]);
+    const question = typeof nested?.question === 'string' ? nested.question.trim() : '';
+    if (question && Array.isArray(nested?.options)) return question;
+  } catch {}
+  return raw;
+}
+
+function formatAskElapsed(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  const seconds = Math.max(0, Math.floor(Number(value) || 0));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 // createAskCard builds the ask_question card DOM. When sealed=true, the card
 // is read-only and shows the answer. Otherwise it's interactive.
-export function createAskCard(callId, args, { sealed = false, output = '', ok = true, error = '', runId = '', onSubmit = null, onStop = null } = {}) {
-  const question = typeof args?.question === 'string' ? args.question : 'Choose a response';
+export function createAskCard(callId, args, { sealed = false, output = '', ok = true, error = '', runId = '', elapsed = '', onSubmit = null, onStop = null } = {}) {
+  const question = normalizeAskQuestionText(args?.question) || 'Choose a response';
   const options = Array.isArray(args?.options) ? args.options : [];
   const multiSelect = Boolean(args?.multi_select);
   const allowFreeText = args?.allow_free_text !== false;
@@ -65,6 +88,7 @@ export function createAskCard(callId, args, { sealed = false, output = '', ok = 
   header.append(
     el('span', { class: 'agent-ask-header-icon', text: '⚒' }),
     el('span', { class: 'agent-ask-header-title', text: 'Ask Question' }),
+    el('span', { class: 'agent-tool-elapsed', text: formatAskElapsed(elapsed) }),
   );
   card.append(header);
 

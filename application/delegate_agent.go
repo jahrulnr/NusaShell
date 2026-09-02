@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"nusashell/application/service/toolpresentation"
 	"nusashell/contracts"
@@ -44,8 +45,8 @@ func (a *App) SpawnDelegate(ctx context.Context, argsJSON []byte) (string, error
 		return "", fmt.Errorf("workspace must be an absolute path")
 	}
 
-	// The delegate runs on the parent conversation's model (same
-	// capabilities), falling back to the first enabled provider.
+	// The delegate runs on the configured delegate model, or inherits the
+	// parent conversation's model when that setting is empty.
 	modelID, err := a.resolveDelegateModel(parentConvID)
 	if err != nil {
 		return "", err
@@ -53,21 +54,30 @@ func (a *App) SpawnDelegate(ctx context.Context, argsJSON []byte) (string, error
 
 	runID := domain.NewID(domain.IDPrefixRun)
 	toolCallID := ToolCallIDFromContext(ctx)
+	starting, running := a.registerDelegateRun(runID, toolCallID, parentConvID, workspace, prompt, modelID)
+	a.emitAcpRun(contracts.EventAcpRunStarted, starting)
+	a.emitAcpRun(contracts.EventAcpRunUpdated, running)
 
 	// Track before spawning: the goroutine may finish before this call
 	// returns, and deliverRunDone must find the pending run to untrack
 	// and trigger the completion turn.
-	a.trackPendingRun(parentConvID, runID)
+	a.trackPendingRun(parentConvID, runID, domain.DelegateToolName)
 	a.goSafe("delegate", func() {
 		a.runDelegate(runID, toolCallID, parentConvID, workspace, prompt, modelID)
 	})
 	return fmt.Sprintf("Delegate run %s started; the result will be injected when it finishes.", runID), nil
 }
 
-// resolveDelegateModel picks the provider:model for a delegate run: the
-// parent conversation's model when available, otherwise the first enabled
-// provider with a model (mirrors headless resolution).
+// resolveDelegateModel picks the provider:model for a delegate run. An
+// explicit Settings → Internal delegate model wins; the empty setting means
+// inherit the parent conversation's model, otherwise normal headless
+// resolution chooses the first enabled provider with a model.
 func (a *App) resolveDelegateModel(parentConvID string) (string, error) {
+	if a.Settings != nil {
+		if configured := strings.TrimSpace(a.Settings.Get().DelegateModel); configured != "" {
+			return configured, nil
+		}
+	}
 	if parentConvID != "" && a.Conversations != nil {
 		if conv, err := a.Conversations.Get(parentConvID); err == nil && strings.TrimSpace(conv.Model) != "" {
 			return conv.Model, nil
@@ -84,7 +94,10 @@ func (a *App) resolveDelegateModel(parentConvID string) (string, error) {
 // outcome to the parent conversation. Runs detached from any request.
 func (a *App) runDelegate(runID, toolCallID, parentConvID, workspace, prompt, modelID string) {
 	ctx := context.Background()
-	output, runConvID, err := a.runHeadlessTurnKind(ctx, prompt, modelID, domain.TrustTrusted, nil, AgentDelegate)
+	output, runConvID, err := a.runHeadlessTurnKindObserved(ctx, prompt, modelID, domain.TrustTrusted, nil, AgentDelegate,
+		func(conversationID string) {
+			a.updateDelegateRunTranscript(runID, conversationID)
+		})
 	status := domain.ToolOK
 	text := ""
 	if err != nil {
@@ -96,12 +109,215 @@ func (a *App) runDelegate(runID, toolCallID, parentConvID, workspace, prompt, mo
 	if status == domain.ToolOK && strings.TrimSpace(text) == "" {
 		text = "Delegate run " + runID + " completed with no text output."
 	}
+	if run := a.finishDelegateRun(runID, runConvID, text, err); run != nil {
+		a.persistAcpRun(run)
+		a.emitAcpRun(contracts.EventAcpRunUpdated, run)
+		a.emitAcpRun(contracts.EventAcpRunDone, run)
+	}
 	a.deliverRunDone(parentConvID, pendingRunDone{
 		RunID: runID,
 		Complete: func(cid string) error {
 			return a.completeDelegateRunLocked(cid, runID, toolCallID, status, text, runConvID)
 		},
 	})
+}
+
+const (
+	internalDelegateAgentID   = "internal"
+	internalDelegateAgentName = "NusaShell delegate"
+)
+
+func (a *App) registerDelegateRun(runID, toolCallID, conversationID, workspace, prompt, modelID string) (*domain.AcpRun, *domain.AcpRun) {
+	now := clock.NewTime().Time()
+	_, currentModel, ok := domain.SplitQualifiedModel(strings.TrimSpace(modelID))
+	if !ok {
+		currentModel = strings.TrimSpace(modelID)
+	}
+	run := &domain.AcpRun{
+		TaskState: domain.TaskState[domain.AcpRunStatus]{
+			ID:        runID,
+			Status:    domain.AcpRunStarting,
+			StartedAt: now,
+		},
+		AgentID:          internalDelegateAgentID,
+		AgentName:        internalDelegateAgentName,
+		ConversationID:   conversationID,
+		ParentToolCallID: toolCallID,
+		Workspace:        workspace,
+		Prompt:           prompt,
+		CurrentModelID:   currentModel,
+		RiskTier:         domain.TrustLevelToRiskTierCap(domain.TrustTrusted),
+		UpdatedAt:        now,
+	}
+	a.delegateRunsMu.Lock()
+	if a.delegateRuns == nil {
+		a.delegateRuns = map[string]*domain.AcpRun{}
+	}
+	a.delegateRuns[runID] = run
+	starting := cloneDelegateRun(run)
+	run.BeginRunning(now)
+	running := cloneDelegateRun(run)
+	a.delegateRunsMu.Unlock()
+	return starting, running
+}
+
+// finishDelegateRun seals the public ACP-shaped snapshot after the hidden
+// headless conversation has completed. The hidden transcript is copied only
+// after runHeadlessTurnKind returns, so the UI receives the actual final
+// assistant round rather than the first acknowledgement.
+func (a *App) finishDelegateRun(runID, runConversationID, output string, runErr error) *domain.AcpRun {
+	a.delegateRunsMu.Lock()
+	defer a.delegateRunsMu.Unlock()
+	run := a.delegateRuns[runID]
+	if run == nil {
+		return nil
+	}
+	if runConversationID != "" && a.Conversations != nil {
+		if conversation, err := a.Conversations.Get(runConversationID); err == nil {
+			run.Transcript = delegateTranscriptFromConversation(conversation)
+		}
+	}
+	if len(run.Transcript) == 0 && strings.TrimSpace(output) != "" {
+		run.AppendTranscript(domain.AcpTranscriptChunk{
+			Kind: "text",
+			Text: output,
+			At:   clock.NewTime().Time(),
+		})
+	}
+	now := clock.NewTime().Time()
+	if runErr != nil {
+		run.AppendTranscript(domain.AcpTranscriptChunk{
+			Kind: "status",
+			Text: "Delegate failed: " + runErr.Error(),
+			At:   now,
+		})
+		run.Finish(domain.AcpRunFailed, runErr.Error(), "error", now)
+	} else {
+		run.Finish(domain.AcpRunCompleted, "", "completed", now)
+	}
+	return cloneDelegateRun(run)
+}
+
+func (a *App) updateDelegateRunTranscript(runID, conversationID string) {
+	if a.Conversations == nil || conversationID == "" {
+		return
+	}
+	conversation, err := a.Conversations.Get(conversationID)
+	if err != nil {
+		return
+	}
+	transcript := delegateTranscriptFromConversation(conversation)
+	a.delegateRunsMu.Lock()
+	run := a.delegateRuns[runID]
+	if run == nil || !run.Live() {
+		a.delegateRunsMu.Unlock()
+		return
+	}
+	run.Transcript = transcript
+	run.UpdatedAt = clock.NewTime().Time()
+	snapshot := cloneDelegateRun(run)
+	a.delegateRunsMu.Unlock()
+	a.emitAcpRun(contracts.EventAcpRunUpdated, snapshot)
+}
+
+func delegateTranscriptFromConversation(conversation *domain.Conversation) []domain.AcpTranscriptChunk {
+	if conversation == nil {
+		return nil
+	}
+	builder := &domain.AcpRun{}
+	appendText := func(kind, value string, at time.Time) {
+		if value == "" {
+			return
+		}
+		builder.AppendTranscript(domain.AcpTranscriptChunk{Kind: kind, Text: value, At: at})
+	}
+	appendTools := func(calls []domain.ToolCall, at time.Time) {
+		for _, call := range calls {
+			builder.AppendTranscript(domain.AcpTranscriptChunk{
+				Kind:       "tool",
+				Text:       call.Output,
+				ToolID:     call.ID,
+				ToolTitle:  call.Name,
+				ToolKind:   call.Name,
+				ToolStatus: delegateTranscriptToolStatus(call.Status),
+				At:         at,
+			})
+		}
+	}
+	for _, message := range conversation.Messages {
+		if message.Role != domain.RoleAssistant || domain.IsHydrationMessage(message) {
+			continue
+		}
+		if len(message.Steps) > 0 {
+			for _, step := range message.Steps {
+				switch step.Type {
+				case domain.StepReasoning:
+					appendText("thought", step.Content, message.CreatedAt)
+				case domain.StepText:
+					appendText("text", step.Content, message.CreatedAt)
+				case domain.StepToolCalls:
+					appendTools(step.ToolCalls, message.CreatedAt)
+				}
+			}
+			continue
+		}
+		appendText("thought", message.Reasoning, message.CreatedAt)
+		appendText("text", message.Content, message.CreatedAt)
+		appendTools(message.ToolCalls, message.CreatedAt)
+	}
+	return builder.Transcript
+}
+
+func delegateTranscriptToolStatus(status domain.ToolCallStatus) string {
+	switch status {
+	case domain.ToolRunning:
+		return "running"
+	case domain.ToolFailed:
+		return "failed"
+	case domain.ToolInterrupted:
+		return "cancelled"
+	case domain.ToolOK:
+		return "completed"
+	default:
+		return ""
+	}
+}
+
+func cloneDelegateRun(run *domain.AcpRun) *domain.AcpRun {
+	if run == nil {
+		return nil
+	}
+	cloned := *run
+	cloned.AvailableModes = append([]domain.AcpMode(nil), run.AvailableModes...)
+	cloned.Transcript = append([]domain.AcpTranscriptChunk(nil), run.Transcript...)
+	if run.PendingPermission != nil {
+		permission := *run.PendingPermission
+		permission.Paths = append([]string(nil), run.PendingPermission.Paths...)
+		permission.Options = append([]domain.AcpPermissionOption(nil), run.PendingPermission.Options...)
+		cloned.PendingPermission = &permission
+	}
+	return &cloned
+}
+
+func (a *App) delegateRunSnapshot(runID string) (*domain.AcpRun, bool) {
+	a.delegateRunsMu.RLock()
+	run, ok := a.delegateRuns[runID]
+	cloned := cloneDelegateRun(run)
+	a.delegateRunsMu.RUnlock()
+	return cloned, ok
+}
+
+func (a *App) delegateRunList(conversationID string) []*domain.AcpRun {
+	a.delegateRunsMu.RLock()
+	defer a.delegateRunsMu.RUnlock()
+	out := make([]*domain.AcpRun, 0, len(a.delegateRuns))
+	for _, run := range a.delegateRuns {
+		if conversationID != "" && run.ConversationID != conversationID {
+			continue
+		}
+		out = append(out, cloneDelegateRun(run))
+	}
+	return out
 }
 
 // completeDelegateRunLocked updates the original `delegate` tool call to

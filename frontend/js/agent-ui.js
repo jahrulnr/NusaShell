@@ -77,12 +77,20 @@ export function syncThreadPin(state, thread) {
 // - pinned + scrollTop moved up beyond the tolerance a follow-scroll can
 //   leave → released (user intent: read history).
 // - released + user returned near the bottom → re-pinned.
-export function updateScrollPin(state, thread, tolerance = 24) {
+export function updateScrollPin(state, thread, tolerance = 24, options = {}) {
   if (!thread) return state.pinned;
   const scrollTop = thread.scrollTop;
   const distance = thread.scrollHeight - scrollTop - thread.clientHeight;
+  const direction = typeof options === 'string' ? options : options.direction;
   const previous = state.pinGeom;
-  if (previous && previous.thread === thread && scrollTop < previous.scrollTop - tolerance) {
+  if (direction === 'up') {
+    // A gesture is stronger evidence than a single geometry sample. Touchpad
+    // and wheel events can move only a few pixels before the first scroll
+    // event, so waiting for the tolerance here makes follow feel sticky.
+    state.pinned = false;
+  } else if (direction === 'down' && distance <= tolerance) {
+    state.pinned = true;
+  } else if (previous && previous.thread === thread && scrollTop < previous.scrollTop - tolerance) {
     // Upward movement beyond what a follow-scroll could produce: the user is
     // scrolling up. Release the pin regardless of where the bottom now is.
     state.pinned = false;

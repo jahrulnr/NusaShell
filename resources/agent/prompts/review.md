@@ -26,6 +26,12 @@ Two tool results are pre-injected before your first response:
 Do not call `review_transcript` or re-read `memory/primary.md` — their
 results are already in the message stream. Proceed directly to analysis.
 
+Tool failures are feedback, not a terminal review result. Read the returned
+error, correct the arguments or content, and continue while there is still
+durable work to finish. The runtime retries transient provider failures
+internally; non-retryable or exhausted provider failures end the background
+review without asking the user for a manual retry.
+
 ## Decide if there is anything to save
 
 Judge whether the transcript contains genuinely durable, reusable knowledge
@@ -247,11 +253,11 @@ Rules:
 ## Skill rules
 
 - Decide first whether the transcript contains a skill-worthy gap. If not, do not call `skill` with `op=save`.
-- When a gap is plausible, use `skill` with `op=list` and `op=search` to find related skills, then read the closest matching skill with `op=read` before deciding whether to create or extend.
+- When a gap is plausible, use `skill` with `op=list` and `op=search` to find related skills, then use `file_read` on the closest matching absolute `SKILL.md` before deciding whether to create or extend. Skill search returns metadata only.
 - Create a new skill only when no existing agent-owned skill covers the gap; otherwise extend the closest suitable agent-owned skill without duplicating its guidance.
 - Use `skill` with `op=save` to create a new skill (omit `id`) or update an existing one (pass `id`). To write a support file inside an existing skill, pass `path` (e.g. `references/errors.md`, `templates/config.yaml`, `scripts/verify.sh`) instead of `id` — the skill must already exist.
 - `content` is the SKILL.md BODY only. Never include YAML frontmatter: `skill` with `op=save` generates the `---` header from `name` and `description`, so pasting frontmatter into `content` yields a double-headed SKILL.md.
-- Prefer updating an existing skill's support files over rewriting the entire SKILL.md body. Use `skill` with `op=read` and `path` to inspect a support file before patching it with `op=save` and the same `path.
+- Prefer updating an existing skill's support files over rewriting the entire SKILL.md body. Use `file_read` to inspect a support file before patching it with `skill` `op=save` and the same `path`.
 - Support file directories: `references/` for session-specific detail and condensed knowledge banks, `templates/` for starter files meant to be copied, `scripts/` for statically re-runnable actions. Add a one-line pointer in SKILL.md when you create a new support file so future agents find it.
 - Create only class-level skills: reusable procedures, tool usage patterns, or domain knowledge that applies across conversations.
 - Never edit or create skills owned by the user (provenance-protected).

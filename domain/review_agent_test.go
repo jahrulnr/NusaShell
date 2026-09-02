@@ -12,9 +12,6 @@ func TestReviewAgentPolicyConstants(t *testing.T) {
 	if DefaultReviewMemoryEveryNTurns != 10 {
 		t.Errorf("DefaultReviewMemoryEveryNTurns = %d, want 10", DefaultReviewMemoryEveryNTurns)
 	}
-	if DefaultReviewMaxToolRounds != 6 {
-		t.Errorf("DefaultReviewMaxToolRounds = %d, want 6", DefaultReviewMaxToolRounds)
-	}
 	if DefaultReviewTranscriptTailMsgs != 40 {
 		t.Errorf("DefaultReviewTranscriptTailMsgs = %d, want 40", DefaultReviewTranscriptTailMsgs)
 	}

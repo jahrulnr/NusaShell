@@ -30,15 +30,15 @@ function distance(a, b) {
 
 test('GRAPH_PALETTE uses a restrained archipelago palette for every graph role', () => {
   assert.deepEqual(GRAPH_PALETTE, {
-    ocean: '#6297b2',
-    oceanBorder: '#386e8a',
-    deepOcean: '#427994',
-    earth: '#a98c6a',
-    earthBorder: '#806342',
-    leaf: '#6fa57c',
-    leafBorder: '#447e52',
-    mangrove: '#569580',
-    sand: '#a59b73',
+    ocean: '#79bdd2',
+    oceanBorder: '#27758d',
+    deepOcean: '#1d5a70',
+    earth: '#c38c5e',
+    earthBorder: '#895833',
+    leaf: '#68b982',
+    leafBorder: '#3f7656',
+    mangrove: '#3f8a71',
+    sand: '#d6b36c',
   });
   assert.equal(new Set([
     GRAPH_PALETTE.ocean,

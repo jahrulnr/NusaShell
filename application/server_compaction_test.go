@@ -113,7 +113,7 @@ func TestCompactConversationSkipsForServerSideEligibleModel(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 
-	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "gpt-5.2", 4000, settings)
+	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "gpt-5.2", 4000, settings, domain.CompactionTriggerInitial)
 	if err != nil {
 		t.Fatalf("compactConversation: %v", err)
 	}

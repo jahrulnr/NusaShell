@@ -11,13 +11,14 @@ package tools
 //
 //	op=html: returns { artifact: { path, width, height, title } } so the
 //	  frontend renders it in a sandboxed iframe (fetched on demand).
-//	op=image/audio/video: returns { show: { type, path, name, media_type,
+//	op=image/audio/video/pdf: returns { show: { type, path, name, media_type,
 //	  size_bytes } } so the frontend renders inline media (fetched on
 //	  demand). Use read_media instead when the model needs pixel access.
 
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +39,10 @@ const (
 	// output and short audio references; longer audio still goes through
 	// `read_media` + inline attachment rendering, not the show tool.
 	showMaxAudioBytes = 20 << 20 // 20 MB
+	// Keep PDF previews bounded because the browser loads the file on demand
+	// into an embedded viewer. Larger documents should be opened externally or
+	// passed through a future document-rendering capability.
+	showMaxPDFBytes   = 100 << 20 // 100 MB
 	showDefaultWidth  = 720
 	showDefaultHeight = 400
 )
@@ -56,7 +61,7 @@ func executeShow(argsJSON []byte) (bool, string, error) {
 	}
 	op := strings.TrimSpace(args.Op)
 	if op == "" {
-		return true, "", fmt.Errorf("op is required (html or image)")
+		return true, "", fmt.Errorf("op is required (html, image, audio, video, or pdf)")
 	}
 	path := strings.TrimSpace(args.Path)
 	if path == "" {
@@ -75,8 +80,10 @@ func executeShow(argsJSON []byte) (bool, string, error) {
 		return showAudio(path)
 	case "video":
 		return showVideo(path)
+	case "pdf":
+		return showPDF(path)
 	default:
-		return true, "", fmt.Errorf("op must be html, image, audio, or video (got %q)", op)
+		return true, "", fmt.Errorf("op must be html, image, audio, video, or pdf (got %q)", op)
 	}
 }
 
@@ -114,6 +121,47 @@ func showHTML(args showArgs, path string) (bool, string, error) {
 			Width:  width,
 			Height: height,
 			Title:  title,
+		},
+	})
+	return true, string(b), nil
+}
+
+// showPDF validates the PDF signature and returns metadata for the frontend's
+// native browser PDF viewer. The body is deliberately not embedded in the
+// tool result; the frontend fetches the absolute path through /local-file when
+// it renders the iframe.
+func showPDF(path string) (bool, string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return true, "", fmt.Errorf("file not found: %w", err)
+	}
+	if info.IsDir() {
+		return true, "", fmt.Errorf("PDF path is a directory: %s", path)
+	}
+	if info.Size() > showMaxPDFBytes {
+		return true, "", fmt.Errorf("PDF file too large: %d bytes (max %d)", info.Size(), showMaxPDFBytes)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return true, "", err
+	}
+	defer f.Close()
+	header := make([]byte, 512)
+	n, err := f.Read(header)
+	if err != nil && err != io.EOF {
+		return true, "", err
+	}
+	mediaType, kind := domain.SniffMagic(header[:n])
+	if mediaType != "application/pdf" || kind != "document" {
+		return true, "", fmt.Errorf("unrecognized PDF format (magic bytes did not match application/pdf, got %q)", mediaType)
+	}
+	b, _ := json.Marshal(map[string]any{
+		"show": map[string]any{
+			"type":       "pdf",
+			"path":       path,
+			"name":       filepath.Base(path),
+			"media_type": mediaType,
+			"size_bytes": info.Size(),
 		},
 	})
 	return true, string(b), nil

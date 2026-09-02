@@ -144,7 +144,7 @@ func toolContractAttachmentTypes(name string) []string {
 	case "generate_video":
 		return []string{"video"}
 	case "show":
-		return []string{"image", "audio", "video"}
+		return []string{"image", "audio", "video", "file"}
 	default:
 		return nil
 	}

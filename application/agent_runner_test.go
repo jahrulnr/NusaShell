@@ -962,7 +962,7 @@ func (a *overflowThenOKAdapter) Stream(_ context.Context, req *core.Request) (co
 	if a.streams == 1 {
 		err := a.streamErr
 		if err == nil {
-			err = &UpstreamError{StatusCode: 400, Err: errors.New("maximum context length exceeded")}
+			err = &domain.ProviderError{StatusCode: 400, Err: errors.New("maximum context length exceeded")}
 		}
 		return nil, err
 	}
@@ -1387,7 +1387,7 @@ func TestCompactionUsesSummaryTool(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings)
+	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1442,7 +1442,7 @@ func TestCompactionRequestEndsWithUserHandoffAfterToolRound(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings); err != nil {
+	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()
@@ -1487,7 +1487,7 @@ func TestCompactionRequestClonesPrefixThenAppendsHandoff(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings); err != nil {
+	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()
@@ -1632,7 +1632,7 @@ func TestCompactionRetriesOnShortSummary(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings)
+	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
 	if err != nil {
 		t.Fatalf("expected success after retry, got error: %v", err)
 	}
@@ -1663,7 +1663,7 @@ func TestCompactionFailsAfterMaxRetries(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	_, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings)
+	_, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
 	if err == nil {
 		t.Fatal("expected error when all retries produce short summaries, got nil")
 	}
@@ -1697,7 +1697,7 @@ func TestCompactionBudgetDoublesOnRetry(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	_, _ = app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 200000, settings)
+	_, _ = app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 200000, settings, domain.CompactionTriggerInitial)
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
 	expectedBudget := 800
@@ -1729,7 +1729,7 @@ func TestCompactionBudgetClampedToContextWindow(t *testing.T) {
 	settings.CompactionSummaryMaxTokens = 800
 	// Small context window (2000) so the doubled budget hits the clamp.
 	// maxBudget = 2000 - 300 (systemReserve) = 1700
-	_, _ = app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 2000, settings)
+	_, _ = app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 2000, settings, domain.CompactionTriggerInitial)
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
 	maxBudget := 2000 - compactionSystemReserve
@@ -1768,7 +1768,7 @@ func TestCompactionStripsMediaAttachments(t *testing.T) {
 	}
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
-	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 20000, settings)
+	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 20000, settings, domain.CompactionTriggerInitial)
 	if err != nil {
 		t.Fatalf("compaction failed: %v", err)
 	}
@@ -1830,7 +1830,7 @@ func TestCompactionCapsOversizedToolOutput(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	// Small window keeps the per-call cap small so truncation is observable.
-	_, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 2000, settings)
+	_, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 2000, settings, domain.CompactionTriggerInitial)
 	if err != nil {
 		t.Fatalf("compaction failed: %v", err)
 	}
@@ -1879,7 +1879,7 @@ func TestCompactionSummaryMinCharsFromSettings(t *testing.T) {
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
 	settings.CompactionSummaryMinChars = 500
-	_, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings)
+	_, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
 	if err == nil {
 		t.Fatal("expected error when summary < settings min chars, got nil")
 	}
@@ -1907,7 +1907,7 @@ func TestMultiPassCompactionShrinksLaterChunks(t *testing.T) {
 	// summary reserve.
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings); err != nil {
+	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()
@@ -1976,7 +1976,7 @@ func TestCompactionArchiveStripsHydration(t *testing.T) {
 		Bus:           NewBus(),
 	}
 	adapter := &recordingCompleteAdapter{summaries: []string{validTestSummary}}
-	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, domain.DefaultSettings()); err != nil {
+	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial); err != nil {
 		t.Fatal(err)
 	}
 	for _, m := range store.archived {
@@ -2024,7 +2024,7 @@ func TestCompactionStripsToolOutputImageAttachments(t *testing.T) {
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	adapter := &recordingCompleteAdapter{summaries: []string{validTestSummary}}
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
-	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, domain.DefaultSettings()); err != nil {
+	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()

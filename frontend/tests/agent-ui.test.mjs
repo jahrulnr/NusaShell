@@ -89,6 +89,26 @@ test('updateScrollPin releases on a real upward scroll and re-pins at the bottom
   assert.equal(updateScrollPin(state, thread), true);
 });
 
+test('updateScrollPin honours explicit user scroll intent before geometry settles', () => {
+  const thread = { scrollHeight: 2400, scrollTop: 900, clientHeight: 500 };
+  const state = { pinned: true };
+  updateScrollPin(state, thread);
+
+  // A wheel/touch signal must release immediately, even when the browser has
+  // only moved a few pixels and the scroll event has not crossed the normal
+  // geometry tolerance yet.
+  thread.scrollTop = 895;
+  assert.equal(updateScrollPin(state, thread, 24, { direction: 'up' }), false);
+
+  // Content growth cannot re-pin a detached reader. Downward intent only
+  // restores follow once the viewport has actually reached the tail.
+  thread.scrollHeight = 2800;
+  thread.scrollTop = 895;
+  assert.equal(updateScrollPin(state, thread, 24, { direction: 'down' }), false);
+  thread.scrollTop = 2300;
+  assert.equal(updateScrollPin(state, thread, 24, { direction: 'down' }), true);
+});
+
 test('updateScrollPin ignores geometry from a different thread element', () => {
   const threadA = { scrollHeight: 1000, scrollTop: 900, clientHeight: 500 };
   const threadB = { scrollHeight: 1000, scrollTop: 100, clientHeight: 500 };

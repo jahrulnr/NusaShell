@@ -2,15 +2,17 @@ package application
 
 import (
 	"errors"
+
+	"nusashell/domain"
 )
 
 // extractErrBody returns the upstream error message string from an
-// UpstreamError, or the plain error string when not wrapped.
+// domain.ProviderError, or the plain error string when not wrapped.
 func extractErrBody(err error) string {
 	if err == nil {
 		return ""
 	}
-	var upstream *UpstreamError
+	var upstream *domain.ProviderError
 	if errors.As(err, &upstream) && upstream.Err != nil {
 		return upstream.Err.Error()
 	}
@@ -21,7 +23,7 @@ func extractErrBody(err error) string {
 // classifier should inspect. We only learn from 400s (not 429/5xx — those
 // are transient and handled by the retry loop).
 func isLearnable400(err error) bool {
-	var upstream *UpstreamError
+	var upstream *domain.ProviderError
 	if !errors.As(err, &upstream) {
 		return false
 	}

@@ -20,10 +20,22 @@ var systemPrompt = resources.Prompt("system")
 // output captured as the step result.
 var automationPrompt = resources.Prompt("automation-agent")
 
+// delegatePrompt is the system prompt for the internal delegate agent. It is
+// intentionally separate from both the interactive and automation prompts:
+// delegate output is consumed by a parent agent, and the delegate must finish
+// the assigned work before returning its terminal assistant message.
+var delegatePrompt = resources.Prompt("delegate-agent")
+
 // continuePrompt is the auto-continue guidance delivered as the output of
 // the synthetic `announcement` tool call injected at the start of each
 // auto-continue turn. Loaded from resources/agent/prompts/continue.md.
 var continuePrompt = resources.Prompt("continue")
+
+// improvePrompt is the background improver prompt: it teaches the
+// improver to study real conversation evidence (transcript JSON + the
+// files it touched) and write durable memory with guardrails. Loaded
+// from resources/agent/prompts/improve.md.
+var improvePrompt = resources.Prompt("improve")
 
 // compactionPrompt is the system prompt for the compaction summarization
 // call. Loaded from resources/agent/prompts/compaction.md. Tells the model
@@ -58,13 +70,18 @@ func buildSystemPrompt(c *domain.Conversation, userPrompt string) string {
 }
 
 // buildSystemPromptForRun composes the system prompt for a specific turn run.
-// Headless Automation pipeline steps (run.Headless && run.ToolKind == AgentAutomation)
-// use the automation prompt instead of the interactive system
-// prompt; the interactive path is unchanged when run is nil (e.g. tests).
+// Headless Automation pipeline steps and internal delegates use their own
+// prompts instead of the interactive system prompt. The interactive path is
+// unchanged when run is nil (e.g. tests).
 func buildSystemPromptForRun(run *TurnRun, c *domain.Conversation, userPrompt string) string {
 	base := systemPrompt
-	if run != nil && run.Headless && run.ToolKind == AgentAutomation {
-		base = automationPrompt
+	if run != nil && run.Headless {
+		switch run.ToolKind {
+		case AgentAutomation:
+			base = automationPrompt
+		case AgentDelegate:
+			base = delegatePrompt
+		}
 	}
 	var sb strings.Builder
 	sb.WriteString(base)

@@ -1288,7 +1288,7 @@ func TestResponsesStreamRejectsEOFBeforeCompleted(t *testing.T) {
 		``,
 	}, "\n")), "gpt-5.1")
 	_, err := core.Collect(stream)
-	if err == nil || !strings.Contains(err.Error(), "before response.completed") || !core.IsProviderError(err) {
+	if err == nil || !strings.Contains(err.Error(), "before response.completed") || !core.IsNetworkError(err) {
 		t.Fatalf("expected truncated responses stream error, got %v", err)
 	}
 }

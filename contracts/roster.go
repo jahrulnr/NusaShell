@@ -21,6 +21,7 @@ const (
 	MethodConversationsChunk         = "agent.conversations.chunk"
 	MethodTurnsStart                 = "agent.turns.start"
 	MethodTurnsStop                  = "agent.turns.stop"
+	MethodToolStop                   = "agent.tools.stop"
 	MethodTurnsRetry                 = "agent.turns.retry"
 	MethodTurnsSteer                 = "agent.turns.steer"
 	MethodTurnsCancelSteer           = "agent.turns.cancel-steer"
@@ -59,10 +60,12 @@ const (
 	MethodPluginSetAutoUpdate = "plugin.set_autoupdate"
 	MethodPluginSetAutoStart  = "plugin.set_autostart"
 
-	MethodMemoryList   = "memory.list"
-	MethodMemorySave   = "memory.save"
-	MethodMemorySearch = "memory.search"
-	MethodMemoryDelete = "memory.delete"
+	MethodMemoryList          = "memory.list"
+	MethodMemorySave          = "memory.save"
+	MethodMemorySearch        = "memory.search"
+	MethodMemoryDelete        = "memory.delete"
+	MethodMemoryPrimaryUpdate = "memory.primary.update"
+	MethodMemoryAgentUpdate   = "memory.agent.update"
 
 	MethodTodosGet    = "agent.todos.get"
 	MethodTodosDelete = "agent.todos.delete"
@@ -339,6 +342,14 @@ type TurnStopRequest struct {
 	RunID string `json:"run_id"`
 }
 
+// ToolStopRequest cancels one in-flight tool call without cancelling the
+// enclosing agent turn. The tool result is persisted as "interrupted by
+// user", after which the agent receives the result and can continue.
+type ToolStopRequest struct {
+	RunID      string `json:"run_id"`
+	ToolCallID string `json:"tool_call_id"`
+}
+
 type TurnSteerRequest struct {
 	ConversationID string          `json:"conversation_id"`
 	Text           string          `json:"text"`
@@ -393,19 +404,30 @@ const (
 	RoundDeltaText      = "text"
 	RoundDeltaReasoning = "reasoning"
 	RoundDeltaTool      = "tool"
+	// RoundDeltaActivity is a transient provider-activity signal. It is not a
+	// tool card and carries no partial tool arguments.
+	RoundDeltaActivity = "activity"
+)
+
+const (
+	// RoundActivityToolCall means the provider has started constructing a tool
+	// call, but the call is not yet valid or executing.
+	RoundActivityToolCall = "tool_call"
 )
 
 // RoundDeltaFrame is one incremental chunk of a live round. Tool start frames
 // carry Args and Presentation so a reconnecting browser can build a complete
 // card before streamed tool text arrives; subsequent tool chunks carry only
-// Text.
+// Text. Activity frames are transient status signals and carry no partial
+// tool arguments.
 type RoundDeltaFrame struct {
 	Seq          int64                `json:"seq"`
-	Kind         string               `json:"kind"` // "text" | "reasoning" | "tool"
+	Kind         string               `json:"kind"` // "text" | "reasoning" | "tool" | "activity"
 	ToolCallID   string               `json:"tool_call_id,omitempty"`
 	Name         string               `json:"name,omitempty"` // tool name for kind="tool"
 	Args         json.RawMessage      `json:"args,omitempty"` // tool args on the start frame
 	Text         string               `json:"text,omitempty"`
+	Activity     string               `json:"activity,omitempty"` // activity name for kind="activity"
 	Presentation *ToolPresentationDTO `json:"presentation,omitempty"`
 }
 
@@ -422,13 +444,17 @@ const (
 // frontend then opens the next stream for Next.MessageID when it receives
 // the following agent.turn.started.
 type RoundDoneFrame struct {
-	State     string    `json:"state"`
-	RunID     string    `json:"run_id"`
-	MessageID string    `json:"message_id"`
-	Round     int       `json:"round"`
-	Usage     *UsageDTO `json:"usage,omitempty"`
-	Next      *RoundRef `json:"next,omitempty"`
-	Error     string    `json:"error,omitempty"`
+	State     string `json:"state"`
+	RunID     string `json:"run_id"`
+	MessageID string `json:"message_id"`
+	Round     int    `json:"round"`
+	// LastSeq is the highest delta sequence published before the round was
+	// sealed. Consumers use it to detect a subscriber queue drop even when no
+	// later live frame arrives to expose the gap.
+	LastSeq int64     `json:"last_seq,omitempty"`
+	Usage   *UsageDTO `json:"usage,omitempty"`
+	Next    *RoundRef `json:"next,omitempty"`
+	Error   string    `json:"error,omitempty"`
 }
 
 // ContextEstimateEvent carries a lightweight server-side estimate of the
@@ -541,16 +567,18 @@ type CompactionFailedEvent struct {
 }
 
 // LearningReviewEvent is emitted when the background learning review
-// (autolearn) starts, completes, or errors so the UI can toast the
-// user. The review is fire-and-forget; Status is "started", "done", or
-// "error". When Status is "error", Error carries the failure reason.
+// (autolearn) starts, completes, or errors so the Learning view can refresh
+// its lifecycle state. The review is fire-and-forget; Status is "started",
+// "done", or "error". Error is retained for wire compatibility but is not
+// populated for background failures; verbose provider diagnostics stay in
+// the backend log/trajectory instead of being pushed to the frontend.
 // Cooldown skips are recorded in the learning trajectory rather than emitted
 // as lifecycle events, so the UI does not show a false start/done pair.
 type LearningReviewEvent struct {
 	ConversationID string `json:"conversation_id"`
 	Status         string `json:"status"`           // "started" | "done" | "error"
 	Reason         string `json:"reason,omitempty"` // "threshold" | "compaction"
-	Error          string `json:"error,omitempty"`  // failure message when status="error"
+	Error          string `json:"error,omitempty"`  // reserved for compatibility; not sent for background failures
 }
 
 type SteerEvent struct {
@@ -755,8 +783,10 @@ type ModelEndpointDTO struct {
 	Name         string   `json:"name"`                   // human-readable upstream name
 	Quantization string   `json:"quantization,omitempty"` // fp4/fp8/int4/...
 	Status       int      `json:"status"`                 // upstream status code (gateway-specific)
-	Latency      *float64 `json:"latency,omitempty"`      // seconds, rolling 30m
+	Latency      *float64 `json:"latency,omitempty"`      // milliseconds, rolling 30m p50
 	Throughput   *float64 `json:"throughput,omitempty"`   // tokens/sec, rolling 30m
+	InputCost    *float64 `json:"input_cost,omitempty"`   // USD per 1M input tokens
+	OutputCost   *float64 `json:"output_cost,omitempty"`  // USD per 1M output tokens
 }
 
 type ModelEndpointsResult struct {
@@ -1037,13 +1067,36 @@ type MemoryEntryDTO struct {
 	Category string `json:"category,omitempty"`
 	Project  string `json:"project,omitempty"`
 	Task     string `json:"task,omitempty"`
-	// Tier marks the memory source: "primary" (always-injected) or
-	// "fragment" (searchable archive). Empty for legacy entries.
+	// Tier marks the memory source: "primary" (user document, legacy label),
+	// "agent" (agent document), or "fragment" (searchable archive). Empty
+	// for legacy entries.
 	Tier string `json:"tier,omitempty"`
 }
 
 type MemoryListResult struct {
 	Entries []MemoryEntryDTO `json:"entries"`
+}
+
+// MemoryPrimaryUpdateRequest replaces the always-injected primary memory
+// document. Empty content is allowed so the user can intentionally clear it;
+// the primary store enforces its character cap.
+type MemoryPrimaryUpdateRequest struct {
+	Content string `json:"content"`
+}
+
+type MemoryPrimaryUpdateResult struct {
+	Entry MemoryEntryDTO `json:"entry"`
+}
+
+// MemoryAgentUpdateRequest replaces the always-injected soul memory
+// document. Empty content is allowed so the user can intentionally clear it;
+// the agent-tier store enforces its character cap.
+type MemoryAgentUpdateRequest struct {
+	Content string `json:"content"`
+}
+
+type MemoryAgentUpdateResult struct {
+	Entry MemoryEntryDTO `json:"entry"`
 }
 
 type MemorySaveRequest struct {
@@ -1175,6 +1228,7 @@ type SettingsDTO struct {
 	MaxOutputTokens            int      `json:"max_output_tokens"`
 	MaxParallelTools           int      `json:"max_parallel_tools,omitempty"`
 	ReviewModel                string   `json:"review_model,omitempty"`
+	DelegateModel              string   `json:"delegate_model,omitempty"`
 	EmbeddingProviderID        string   `json:"embedding_provider_id,omitempty"`
 	EmbeddingModelID           string   `json:"embedding_model_id,omitempty"`
 	VisionProviderID           string   `json:"vision_provider_id,omitempty"`
@@ -1225,6 +1279,7 @@ type SettingsSetRequest struct {
 	MaxOutputTokens            *int    `json:"max_output_tokens,omitempty"`
 	MaxParallelTools           *int    `json:"max_parallel_tools,omitempty"`
 	ReviewModel                *string `json:"review_model,omitempty"`
+	DelegateModel              *string `json:"delegate_model,omitempty"`
 	EmbeddingProviderID        *string `json:"embedding_provider_id,omitempty"`
 	EmbeddingModelID           *string `json:"embedding_model_id,omitempty"`
 	VisionProviderID           *string `json:"vision_provider_id,omitempty"`
@@ -1389,7 +1444,7 @@ type LearningLogEntryDTO struct {
 	ConversationTitle string                     `json:"conversation_title,omitempty"`
 	ReviewID          string                     `json:"review_id,omitempty"`
 	Status            string                     `json:"status,omitempty"` // done|error|skipped (review only; skipped reasons are in detail)
-	Error             string                     `json:"error,omitempty"`  // failure message (review, status=error)
+	Error             string                     `json:"error,omitempty"`  // generic review failure status; raw provider details stay server-side
 	Mutations         []LearningLogMutationDTO   `json:"mutations,omitempty"`
 	Detail            map[string]json.RawMessage `json:"detail,omitempty"`
 }

@@ -238,7 +238,8 @@ type Model struct {
 // aggregator gateway like OpenRouter. Slug is the exact routing slug used
 // in the provider.order request field (e.g. "deepinfra/fp4"); it may carry
 // a quantization or region suffix. Latency/Throughput are rolling 30m
-// metrics when the gateway reports them.
+// metrics when the gateway reports them. InputCost and OutputCost are USD
+// per 1M tokens; nil means the gateway did not provide a usable value.
 type ModelRoute struct {
 	Slug         string   // routing slug for provider.order (e.g. "deepinfra/fp4")
 	Name         string   // human-readable upstream name (e.g. "DeepInfra")
@@ -246,6 +247,8 @@ type ModelRoute struct {
 	Status       int      // upstream status code; semantics vary by gateway (0 = reported OK)
 	Latency      *float64 // milliseconds, rolling 30m p50; nil when unknown
 	Throughput   *float64 // tokens/sec, rolling 30m p50; nil when unknown
+	InputCost    *float64 // USD per 1M input tokens; nil when unknown
+	OutputCost   *float64 // USD per 1M output tokens; nil when unknown
 }
 
 type Provider struct {

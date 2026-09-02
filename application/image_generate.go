@@ -292,11 +292,7 @@ func (a *App) generateImage(run *TurnRun, provider *domain.Provider, apiKey stri
 			break
 		}
 		a.log("warn", "image", "retrying image generation (%d/%d) after %s: %v", retry, maxProviderAttempts, delay.Round(time.Millisecond), err)
-		sleeper := a.retrySleeper
-		if sleeper == nil {
-			sleeper = sleepForRetry
-		}
-		if serr := sleeper(run.Ctx, delay); serr != nil {
+		if serr := a.waitForRetry(run.Ctx, delay); serr != nil {
 			return nil, serr
 		}
 	}
@@ -310,7 +306,7 @@ func formatImageGenFailure(err error) string {
 	if errors.Is(err, context.Canceled) {
 		return "error: image generation interrupted"
 	}
-	var upstream *UpstreamError
+	var upstream *domain.ProviderError
 	if errors.As(err, &upstream) {
 		if upstream.StatusCode == 429 {
 			reset := ""

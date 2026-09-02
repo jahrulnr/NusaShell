@@ -80,7 +80,15 @@ func (s *stream) Next() (core.Event, error) {
 		return nil, core.NewNetworkError("openai", "stream read error", err)
 	}
 	s.done = true
-	return nil, core.NewProviderError("openai", core.ErrorTypeProvider, "openai: stream ended before [DONE]")
+	// [DONE] is an OpenAI SSE sentinel, not the semantic completion signal.
+	// Several compatible gateways close cleanly after emitting the final
+	// choice with finish_reason but omit the sentinel. Treat that as a normal
+	// completion; a clean close without finish_reason is still incomplete and
+	// remains retryable.
+	if s.finish != "" {
+		return core.DoneEvent{FinishReason: s.finish, Provider: "openai", Model: s.model}, nil
+	}
+	return nil, core.NewNetworkError("openai", "openai: stream ended before [DONE] without finish_reason", io.ErrUnexpectedEOF)
 }
 
 func (s *stream) Close() error {

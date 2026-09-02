@@ -276,7 +276,7 @@ func (c *Client) openaiEdits(ctx context.Context, req application.ImageGenReques
 	}
 	resp, err := c.HTTP.Do(httpReq)
 	if err != nil {
-		return nil, &application.UpstreamError{Kind: application.KindConnect, Temporary: true, Err: err}
+		return nil, &domain.ProviderError{Kind: domain.KindConnect, Temporary: true, Err: err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
@@ -285,8 +285,8 @@ func (c *Client) openaiEdits(ctx context.Context, req application.ImageGenReques
 		if seconds, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); err == nil && seconds > 0 {
 			retryAfter = time.Duration(seconds) * time.Second
 		}
-		return nil, &application.UpstreamError{
-			Kind:       application.KindHTTPStatus,
+		return nil, &domain.ProviderError{
+			Kind:       domain.KindHTTPStatus,
 			StatusCode: resp.StatusCode,
 			RetryAfter: retryAfter,
 			Err:        fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(msg))),

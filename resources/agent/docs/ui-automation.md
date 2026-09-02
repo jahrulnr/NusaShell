@@ -16,7 +16,7 @@ Counts of runnable, blocked, and waiting automation workflows so provider outage
 
 ## Toolbar
 
-Tabs switch between Workflows, Runs, Schedules, and Events. New workflow opens a once/every/when/manual wizard. Pipeline files from the data directory appear alongside saved automation workflows in the Workflows tab. On phones the tabs can scroll horizontally without widening the page.
+Tabs switch between Workflows, Runs, Schedules, and Events in the same compact segmented control used by Learning. New workflow opens a once/every/when/manual wizard. Pipeline files from the data directory appear alongside saved automation workflows in the Workflows tab. On phones the tabs can scroll horizontally without widening the page.
 
 - **`#automation-tabs`** (missing map entry)
 

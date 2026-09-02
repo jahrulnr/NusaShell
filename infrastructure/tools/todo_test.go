@@ -409,20 +409,98 @@ func TestExecTodoPatchPreservesBrief(t *testing.T) {
 	}
 }
 
-// Replace mode (default): empty content should still be rejected.
-func TestExecTodoReplaceModeRejectsEmptyContent(t *testing.T) {
-	todoPort := &stubTodoPort{}
+// Replace mode can update the status of existing items without re-emitting
+// their content. This is a full list replacement, but content omitted for a
+// known ID means "keep the existing description".
+func TestExecTodoReplaceModePreservesExistingContentOnStatusUpdate(t *testing.T) {
+	todoPort := &stubTodoPort{
+		items: map[string][]domain.TodoItem{"conv_1": {
+			{ID: "1", Content: "Research Hermes", Status: domain.TodoCompleted},
+			{ID: "2", Content: "Research OpenClaw", Status: domain.TodoCompleted},
+			{ID: "3", Content: "Compare the projects", Status: domain.TodoInProgress},
+			{ID: "4", Content: "Identify strengths", Status: domain.TodoPending},
+			{ID: "5", Content: "Present findings", Status: domain.TodoPending},
+		}},
+	}
 	toolbox := &Toolbox{Todos: todoPort}
 	ctx := application.WithConversationID(context.Background(), "conv_1")
 
 	args, _ := json.Marshal(map[string]any{
 		"items": []map[string]any{
-			{"id": "1", "content": "", "status": "pending"},
+			{"id": "1", "status": "completed"},
+			{"id": "2", "status": "completed"},
+			{"id": "3", "status": "completed"},
+			{"id": "4", "status": "completed"},
+			{"id": "5", "status": "completed"},
 		},
+		"mode": "replace",
 	})
-	_, err := toolbox.execTodo(ctx, args)
-	if err == nil {
-		t.Fatal("replace mode should reject empty content")
+	if _, err := toolbox.execTodo(ctx, args); err != nil {
+		t.Fatalf("status-only replace should preserve existing content: %v", err)
+	}
+	items := todoPort.Get("conv_1")
+	if len(items) != 5 {
+		t.Fatalf("expected 5 items, got %d", len(items))
+	}
+	for _, item := range items {
+		if item.Status != domain.TodoCompleted {
+			t.Errorf("item %s status = %s, want completed", item.ID, item.Status)
+		}
+		if item.Content == "" {
+			t.Errorf("item %s content was lost", item.ID)
+		}
+	}
+}
+
+// Replace mode still requires content when an ID does not exist yet; there is
+// nothing to preserve for a newly introduced item.
+func TestExecTodoReplaceModeRequiresContentForNewItem(t *testing.T) {
+	todoPort := &stubTodoPort{}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	args, _ := json.Marshal(map[string]any{
+		"items": []map[string]any{{"id": "new", "status": "pending"}},
+		"mode":  "replace",
+	})
+	if _, err := toolbox.execTodo(ctx, args); err == nil {
+		t.Fatal("replace mode should require content for a new item")
+	}
+}
+
+func TestTodoToolSchemaAllowsStatusOnlyUpdates(t *testing.T) {
+	toolbox := &Toolbox{}
+	var todo application.ToolInfo
+	for _, tool := range toolbox.ListTools() {
+		if tool.Name == "todo" {
+			todo = tool
+			break
+		}
+	}
+	if todo.Name == "" {
+		t.Fatal("todo tool is not advertised")
+	}
+	properties, ok := todo.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("todo schema properties missing: %#v", todo.InputSchema)
+	}
+	itemsSchema, ok := properties["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("todo items schema missing: %#v", properties)
+	}
+	itemSchema, ok := itemsSchema["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("todo item schema missing: %#v", itemsSchema)
+	}
+	required, ok := itemSchema["required"].([]string)
+	if !ok {
+		t.Fatalf("todo item required fields have unexpected type: %#v", itemSchema["required"])
+	}
+	if len(required) != 2 || required[0] != "id" || required[1] != "status" {
+		t.Fatalf("todo item required fields = %#v, want [id status]", required)
+	}
+	if !strings.Contains(todo.Description, "`content` may be omitted for an existing ID") {
+		t.Fatalf("todo description does not document status-only replace updates: %s", todo.Description)
 	}
 }
 
