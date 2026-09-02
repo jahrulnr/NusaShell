@@ -99,6 +99,10 @@ gate does not block an Electron release and vice versa. The tracked index is
 updated per successful publisher, allowing a pending stream to be retried
 later while preserving the stream that already released. Electron packaging
 never cross-embeds a backend from another operating system.
+If a detected stream already has its immutable tag, only that stream's publish
+steps are skipped and its pointer is left unchanged; the workflow remains
+successful so test-only or documentation-only follow-up work does not create a
+failed release.
 
 Linux/macOS release installation is in `scripts/install.sh`; Windows is in
 `scripts/install.ps1`. Checkout-only wrapper installation is in

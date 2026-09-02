@@ -99,6 +99,26 @@ go build ./...
 
 Do not weaken or delete tests merely to make a suite pass. Do not commit secrets, generated binaries, or production credentials. Keep changes small and focused; do not auto-commit or auto-push.
 
+## Versioning and release changes
+
+- Release versions use the `{major}.{minor}.{patch}` format without a `v`
+  prefix in version files. Use a patch bump for a backward-compatible fix, a
+  minor bump for backward-compatible functionality, and a major bump for a
+  breaking change.
+- The root `VERSION` is the Go core release version. Fixes that change the Go
+  core or embedded frontend must bump only `VERSION`; Electron-only fixes must
+  bump only `apps/electron/VERSION`. If both products change, bump both
+  version files independently and synchronize Electron metadata with
+  `make electron-version-sync`.
+- Documentation, unit-test-only, CI, and release-tooling changes do not need a
+  product version bump. If path-based detection still schedules a publisher,
+  an already-existing stream tag must be treated as a skipped release, not a
+  failed workflow; the release pointer must remain unchanged.
+- Before considering a product release complete, confirm its version source,
+  stream tag, release manifest, and `release-versions.json` pointer all refer
+  to the same `{major}.{minor}.{patch}` version. Never reuse an immutable
+  `go-v<VERSION>` or `electron-v<VERSION>` tag; bump the relevant stream first.
+
 ## Change documentation
 
 When a behavior or public wire contract changes, update the relevant package documentation and golden fixtures. Record intentional compatibility breaks and non-functional trade-offs explicitly.

@@ -75,7 +75,8 @@ run_release_contract_tests() {
 	run_step "release and Electron contract tests" \
 		node --test scripts/version.test.mjs scripts/release-changes.test.mjs \
 		scripts/release-index.test.mjs scripts/release-manifest.test.mjs \
-		scripts/release-notes.test.mjs scripts/install.test.mjs
+		scripts/release-notes.test.mjs scripts/release-workflow.test.mjs \
+		scripts/install.test.mjs
 }
 
 compile_target() {

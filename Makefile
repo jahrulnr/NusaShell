@@ -110,7 +110,7 @@ electron-test: electron-install
 
 ## electron-installer-test: validate installer syntax and release metadata.
 electron-installer-test:
-	node --test scripts/version.test.mjs scripts/release-changes.test.mjs scripts/release-index.test.mjs scripts/release-manifest.test.mjs scripts/release-notes.test.mjs scripts/install.test.mjs
+	node --test scripts/version.test.mjs scripts/release-changes.test.mjs scripts/release-index.test.mjs scripts/release-manifest.test.mjs scripts/release-notes.test.mjs scripts/release-workflow.test.mjs scripts/install.test.mjs
 
 ## electron-ui-test: launch the real Electron renderer and exercise web UI flows.
 electron-ui-test: electron-build-backend electron-install

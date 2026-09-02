@@ -150,8 +150,11 @@ is retried even when the follow-up commit only fixes CI or tests. The Go and
 Electron build/publish gates are independent: a failed Go gate does not block
 Electron, and a failed Electron gate does not block Go. Each successful
 publisher updates only its own pointer, preserving the stream that is still
-pending. Bump the corresponding VERSION file before merging a new release; CI
-fails if that stream's tag already exists.
+pending. CI checks the corresponding immutable tag before publishing. If the
+tag already exists, that stream's publisher is skipped without failing the
+workflow and its release pointer remains unchanged. Bump the corresponding
+VERSION file before the next product release; documentation, CI, and
+release-tooling-only changes do not require a product bump.
 
 The index is committed by GitHub Actions with `[skip ci]`. It is a small,
 tracked pointer document, not a copy of release binaries, and lets installers

@@ -115,7 +115,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Run installer and release contract tests
-        run: node --test scripts/version.test.mjs scripts/release-changes.test.mjs scripts/release-index.test.mjs scripts/release-manifest.test.mjs scripts/release-notes.test.mjs scripts/install.test.mjs
+        run: node --test scripts/version.test.mjs scripts/release-changes.test.mjs scripts/release-index.test.mjs scripts/release-manifest.test.mjs scripts/release-notes.test.mjs scripts/release-workflow.test.mjs scripts/install.test.mjs
       - name: Check Bash installer syntax
         if: runner.os != 'Windows'
         shell: bash
@@ -357,6 +357,7 @@ jobs:
     name: Publish Go GitHub release
     outputs:
       version: ${{ steps.release.outputs.version }}
+      published: ${{ steps.create_release.outcome == 'success' }}
     if: github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.detect-changes.outputs.go_changed == 'true'
     needs: [detect-changes, build-go-release]
     runs-on: ubuntu-latest
@@ -383,14 +384,18 @@ jobs:
           path: release-artifacts/go
           merge-multiple: true
       - name: Check Go release tag does not already exist
+        id: tag_check
         env:
           TAG: ${{ steps.release.outputs.tag }}
         run: |
           if git show-ref --tags --verify --quiet "refs/tags/$TAG" || git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "::error::Tag $TAG already exists. Bump VERSION before merging another Go release."
-            exit 1
+            echo "::notice::Tag $TAG already exists. Skipping Go release; bump VERSION before merging another Go release."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Create Go release manifest
+        if: steps.tag_check.outputs.should_publish == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -400,6 +405,8 @@ jobs:
             printf 'NusaShell Go core %s\n\nBuilt from commit %s.\n' "$version" "$GITHUB_SHA" > release-notes.md
           fi
       - name: Create Go GitHub release
+        id: create_release
+        if: steps.tag_check.outputs.should_publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
@@ -417,6 +424,7 @@ jobs:
     name: Publish Electron GitHub release
     outputs:
       version: ${{ steps.release.outputs.version }}
+      published: ${{ steps.create_release.outcome == 'success' }}
     if: github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.detect-changes.outputs.electron_changed == 'true'
     needs: [detect-changes, build-electron]
     runs-on: ubuntu-latest
@@ -443,14 +451,18 @@ jobs:
           path: release-artifacts/electron
           merge-multiple: true
       - name: Check Electron release tag does not already exist
+        id: tag_check
         env:
           TAG: ${{ steps.release.outputs.tag }}
         run: |
           if git show-ref --tags --verify --quiet "refs/tags/$TAG" || git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "::error::Tag $TAG already exists. Bump apps/electron/VERSION before merging another Electron release."
-            exit 1
+            echo "::notice::Tag $TAG already exists. Skipping Electron release; bump apps/electron/VERSION before merging another Electron release."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Create Electron release manifest
+        if: steps.tag_check.outputs.should_publish == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -460,6 +472,8 @@ jobs:
             printf 'NusaShell Electron wrapper %s\n\nBuilt from commit %s.\n' "$version" "$GITHUB_SHA" > release-notes.md
           fi
       - name: Create Electron GitHub release
+        id: create_release
+        if: steps.tag_check.outputs.should_publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
@@ -476,12 +490,12 @@ jobs:
   publish-release-index:
     name: Update release stream index
     # A partial release is valid: update the pointer for each publisher that
-    # succeeded and leave a failed/skipped stream pending for a later push.
+    # succeeded and leave an unpublished/skipped stream pending for a later push.
     if: >-
       always() && github.event_name == 'push' && github.ref == 'refs/heads/master' &&
       needs.detect-changes.result == 'success' &&
       needs.detect-changes.outputs.has_release_changes == 'true' &&
-      (needs.publish-go.result == 'success' || needs.publish-electron.result == 'success')
+      (needs.publish-go.outputs.published == 'true' || needs.publish-electron.outputs.published == 'true')
     needs: [detect-changes, publish-go, publish-electron]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -497,8 +511,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: Update stream pointers
         env:
-          GO_CHANGED: ${{ needs.publish-go.result == 'success' && needs.detect-changes.outputs.go_changed == 'true' }}
-          ELECTRON_CHANGED: ${{ needs.publish-electron.result == 'success' && needs.detect-changes.outputs.electron_changed == 'true' }}
+          GO_CHANGED: ${{ needs.publish-go.outputs.published == 'true' }}
+          ELECTRON_CHANGED: ${{ needs.publish-electron.outputs.published == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
