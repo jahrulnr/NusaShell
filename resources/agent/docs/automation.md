@@ -262,3 +262,29 @@ file so it is discovered again.
 For source changes, run `make verify-local`. It checks formatting, UI-doc
 drift, Go vet/tests/race/build, frontend tests, and portability compile
 targets. `make hooks` enables the same gate before a push.
+
+## Product release streams
+
+The repository CI has two independent product release streams. Go uses the
+root `VERSION` and publishes the `go-v<VERSION>` release; Electron uses
+`apps/electron/VERSION` and publishes the `electron-v<VERSION>` release. On a
+push to `master`, `detect-changes` marks a stream when its product paths
+changed or when its VERSION is ahead of that stream's pointer in
+`release-versions.json`. The latter is important when a follow-up commit fixes
+tests or CI without touching a product path.
+
+The Go release gate depends on frontend, backend, and installer tests. The
+Electron release gate depends on wrapper, renderer, and installer tests. Do
+not infer that one failed product test blocks the other product's release.
+The release-index job updates only publishers that actually succeeded and
+preserves the pointer for a failed or skipped stream.
+
+Good when diagnosing a release:
+
+    gh run view <run-id> --json status,conclusion,jobs
+    gh run view <run-id> --log-failed
+
+Bad:
+
+    gh run rerun <run-id> --failed  # reruns before identifying the failed stream
+    git show release-versions.json  # treats the pointer file as the artifact itself

@@ -57,7 +57,10 @@ jobs:
             fi
           fi
 
-          printf '%s\n' "$files" | node scripts/release-changes.mjs >> "$GITHUB_OUTPUT"
+          go_version="$(node scripts/version.mjs read-go)"
+          electron_version="$(node scripts/version.mjs read)"
+          GO_VERSION="$go_version" ELECTRON_VERSION="$electron_version" \
+            node scripts/release-changes.mjs --release-index release-versions.json <<< "$files" >> "$GITHUB_OUTPUT"
 
   test-frontend:
     name: Frontend tests
@@ -216,11 +219,12 @@ jobs:
           go build -buildvcs=false -ldflags "-X main.version=${version}" ./...
 
   # Go core and Electron wrapper are independent release streams. The wrapper
-  # never receives a Go binary in its package, and only its own path changes
-  # trigger this matrix.
+  # never receives a Go binary in its package. Product-specific test gates are
+  # intentionally kept out of the other stream's needs list, so a failing Go
+  # test cannot suppress an otherwise healthy Electron release (and vice versa).
   build-go-release:
     name: Go release (${{ matrix.os }})
-    needs: [detect-changes, test-frontend, test-backend, test-electron, test-installers, test-electron-ui]
+    needs: [detect-changes, test-frontend, test-backend, test-installers]
     if: needs.detect-changes.outputs.go_changed == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -290,7 +294,7 @@ jobs:
 
   build-electron:
     name: Electron wrapper release (${{ matrix.os }})
-    needs: [detect-changes, test-frontend, test-backend, test-electron, test-installers, test-electron-ui]
+    needs: [detect-changes, test-electron, test-electron-ui, test-installers]
     if: needs.detect-changes.outputs.electron_changed == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
@@ -471,12 +475,13 @@ jobs:
 
   publish-release-index:
     name: Update release stream index
+    # A partial release is valid: update the pointer for each publisher that
+    # succeeded and leave a failed/skipped stream pending for a later push.
     if: >-
       always() && github.event_name == 'push' && github.ref == 'refs/heads/master' &&
       needs.detect-changes.result == 'success' &&
       needs.detect-changes.outputs.has_release_changes == 'true' &&
-      (needs.detect-changes.outputs.go_changed != 'true' || needs.publish-go.result == 'success') &&
-      (needs.detect-changes.outputs.electron_changed != 'true' || needs.publish-electron.result == 'success')
+      (needs.publish-go.result == 'success' || needs.publish-electron.result == 'success')
     needs: [detect-changes, publish-go, publish-electron]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -492,8 +497,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: Update stream pointers
         env:
-          GO_CHANGED: ${{ needs.detect-changes.outputs.go_changed }}
-          ELECTRON_CHANGED: ${{ needs.detect-changes.outputs.electron_changed }}
+          GO_CHANGED: ${{ needs.publish-go.result == 'success' && needs.detect-changes.outputs.go_changed == 'true' }}
+          ELECTRON_CHANGED: ${{ needs.publish-electron.result == 'success' && needs.detect-changes.outputs.electron_changed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail

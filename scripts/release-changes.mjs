@@ -23,18 +23,33 @@ function hasPrefix(path, prefixes) {
   return prefixes.some((prefix) => path.startsWith(prefix));
 }
 
+function versionNeedsRelease(stream, currentVersions, releaseIndex) {
+  const current = String(currentVersions?.[stream] ?? '').trim();
+  const released = String(releaseIndex?.[stream]?.version ?? '').trim();
+  // A null pointer means the stream has never been published. It should not
+  // make every documentation-only push publish both products; an explicit
+  // VERSION change remains the signal for a stream's first release.
+  return current !== '' && released !== '' && current !== released;
+}
+
 /**
  * Map changed repository paths to the product release streams they affect.
  * The Electron package is only a wrapper, so frontend/backend changes belong
  * to the Go stream; the wrapper is rebuilt only when its own package changes.
+ * A non-null release pointer whose version differs from the checked-out
+ * VERSION also keeps that stream eligible for a retry.
  */
-export function detectReleaseStreams(files, { all = false } = {}) {
+export function detectReleaseStreams(files, {
+  all = false,
+  currentVersions = {},
+  releaseIndex = null,
+} = {}) {
   if (all) {
     return { goChanged: true, electronChanged: true, hasChanges: true };
   }
 
-  let goChanged = false;
-  let electronChanged = false;
+  let goChanged = versionNeedsRelease('go', currentVersions, releaseIndex);
+  let electronChanged = versionNeedsRelease('electron', currentVersions, releaseIndex);
   for (const rawFile of Array.isArray(files) ? files : []) {
     const file = normalizePath(rawFile);
     if (!file) continue;
@@ -57,11 +72,23 @@ export function detectReleaseStreams(files, { all = false } = {}) {
 
 const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : '';
 if (import.meta.url === invokedPath) {
-  const all = process.argv.includes('--all');
+  const args = process.argv.slice(2);
+  const all = args.includes('--all');
+  const releaseIndexFlag = args.indexOf('--release-index');
+  const releaseIndexPath = releaseIndexFlag >= 0 ? args[releaseIndexFlag + 1] : '';
   const files = all ? [] : readFileSync(0, 'utf8').split(/\r?\n/);
-  const result = detectReleaseStreams(files, { all });
+  const releaseIndex = releaseIndexPath
+    ? JSON.parse(readFileSync(releaseIndexPath, 'utf8'))
+    : null;
+  const result = detectReleaseStreams(files, {
+    all,
+    currentVersions: {
+      go: process.env.GO_VERSION,
+      electron: process.env.ELECTRON_VERSION,
+    },
+    releaseIndex,
+  });
   process.stdout.write(`go_changed=${result.goChanged}\n`);
   process.stdout.write(`electron_changed=${result.electronChanged}\n`);
   process.stdout.write(`has_release_changes=${result.hasChanges}\n`);
 }
-

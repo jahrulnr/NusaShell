@@ -91,11 +91,14 @@ different artifact names and manifests:
 - Electron wrapper: `electron-latest.json`, with
   `nusashell-electron-...`/`NusaShell-Electron-...` payloads.
 
-The workflow detects changed paths before packaging. A Go-only change does
-not rebuild Electron; an Electron-only change does not rebuild Go. The tracked
-`release-versions.json` file points installers at the current release tag for
-each stream, so the optional wrapper can be newer or older than the core.
-Electron packaging never cross-embeds a backend from another operating system.
+The workflow detects changed paths and also compares each VERSION value with
+the corresponding `release-versions.json` pointer before packaging. A Go-only
+change does not rebuild Electron; an Electron-only change does not rebuild Go.
+Product-specific test/build/publish gates are independent, so a failed Go
+gate does not block an Electron release and vice versa. The tracked index is
+updated per successful publisher, allowing a pending stream to be retried
+later while preserving the stream that already released. Electron packaging
+never cross-embeds a backend from another operating system.
 
 Linux/macOS release installation is in `scripts/install.sh`; Windows is in
 `scripts/install.ps1`. Checkout-only wrapper installation is in

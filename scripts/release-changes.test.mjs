@@ -55,3 +55,29 @@ test('workflow dispatch can explicitly release every stream', () => {
   });
 });
 
+test('detectReleaseStreams retries a stream whose version is ahead of its release pointer', () => {
+  const result = detectReleaseStreams(['README.md'], {
+    currentVersions: { go: '1.1.0', electron: '2.0.0' },
+    releaseIndex: {
+      go: { version: '1.0.0' },
+      electron: { version: '2.0.0' },
+    },
+  });
+
+  assert.deepEqual(result, {
+    goChanged: true,
+    electronChanged: false,
+    hasChanges: true,
+  });
+});
+
+test('detectReleaseStreams does not infer a release when a stream has no pointer yet', () => {
+  assert.deepEqual(detectReleaseStreams(['README.md'], {
+    currentVersions: { go: '0.1.0', electron: '0.1.0' },
+    releaseIndex: { go: null, electron: null },
+  }), {
+    goChanged: false,
+    electronChanged: false,
+    hasChanges: false,
+  });
+});

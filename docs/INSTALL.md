@@ -144,10 +144,14 @@ On a push to `master`, GitHub Actions first detects which product paths
 changed, following the release-on-changes pattern used by NusaShell-mcp.
 Go changes build and publish only the Go matrix; `apps/electron/**` changes
 build and publish only the Electron matrix; shared icon changes run both.
-The release jobs use `go-v<VERSION>` and `electron-v<VERSION>` independently
-and update `release-versions.json`, preserving the pointer for the stream that
-did not change. Bump the corresponding VERSION file before merging a new
-release; CI fails if that stream's tag already exists.
+The release jobs also compare each VERSION value with its corresponding
+`release-versions.json` pointer. A stream whose version is ahead of its pointer
+is retried even when the follow-up commit only fixes CI or tests. The Go and
+Electron build/publish gates are independent: a failed Go gate does not block
+Electron, and a failed Electron gate does not block Go. Each successful
+publisher updates only its own pointer, preserving the stream that is still
+pending. Bump the corresponding VERSION file before merging a new release; CI
+fails if that stream's tag already exists.
 
 The index is committed by GitHub Actions with `[skip ci]`. It is a small,
 tracked pointer document, not a copy of release binaries, and lets installers
