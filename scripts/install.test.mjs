@@ -160,6 +160,7 @@ esac
       NUSASHELL_RELEASE_INDEX: 'https://fixture.invalid/releases/release-versions.json',
       NUSASHELL_GO_INSTALL_ROOT: installRoot,
       NUSASHELL_VERSION: '',
+      NUSASHELL_NON_INTERACTIVE: '1',
     },
   });
 
