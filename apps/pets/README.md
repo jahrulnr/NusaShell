@@ -6,6 +6,17 @@ sehingga kanvas transparan di luar mascot tidak menjadi kotak hitam. WebP di
 sini adalah atlas sprite, bukan animated WebP container: setiap state/arah
 dipilih sebagai cell lalu dimainkan oleh renderer.
 
+## Install via release
+
+Pets dirilis sebagai stream terpisah (`pets-v<version>`, `pets-latest.json`,
+Linux x64/arm64). Installer `install.sh` menawarkannya interaktif di Linux
+(`--install-pets`, `NUSASHELL_INSTALL_PETS=1`, atau prompt `Install desktop
+pet (Linux only)?`), memasang `nusashell-pets` ke `~/.local/share/nusashell-pets`
+dan menyiapkan launcher `~/.local/bin/nusashell-pets` yang otomatis mengarah
+ke `--assets <current>/assets/pets`. Pet menerima payload release bersama
+folder `assets/` (atlas WebP + `config.json`), jadi ia tidak membutuhkan
+source checkout.
+
 ## Struktur
 
 ```text
