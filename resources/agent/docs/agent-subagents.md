@@ -118,8 +118,9 @@ When a subagent finishes (completed, failed, or cancelled):
    conversation, announcement-style. It is persisted as a normal
    assistant tool call so the model sees it in fresh context and in
    later turns (auto-continue) too. If the parent is still in a turn,
-   completion is queued and injected at the next tool-round boundary —
-   the same boundary as steer — then the parent continues. Auto-continue
+   completion is queued and injected at the next tool-round boundary,
+   before a queued user steer. The steer is appended last so the next
+   provider request ends with the user's newest instruction. Auto-continue
    stays paused (`awaiting-background-jobs`) until that injection lands.
 4. If the parent is idle, a new parent-agent turn is triggered so the
    parent processes the `subagent_result` without a user message. The
@@ -142,6 +143,33 @@ so the handoff never loses the background-agent picture.
 While any subagent is running, the parent agent's auto-continue chain
 pauses with reason `awaiting-background-jobs` instead of ending the
 turn. When all subagents complete, the chain resumes.
+
+## Steering priority and timing
+
+A steer from the main composer is a real user message, not background runtime
+state. It is queued while the current provider or tool round is in flight and
+applied at the next safe boundary. `subagent_wait` is intentionally blocking,
+so a steer can wait for that call to return; this delay does not mean the
+message was dropped.
+
+At a boundary, the parent applies finished background results and harness
+announcements first, then appends the queued steer, then starts one fresh
+assistant round. This ordering keeps the steer as the newest user instruction.
+After a steer is applied, re-evaluate the user's request before resuming the
+older plan. Do not call `subagent_wait` again merely because the previous plan
+was waiting if the steer changes the requested action.
+
+Good example, steer a child run when the user changes its direction:
+
+    subagent_steer(id="acp_run_123", text="Stop the framework comparison and inspect the existing desktop pet code instead.")
+
+Bad example, continue the stale parent plan after a user steer:
+
+    subagent_wait(id="acp_run_123", timeout_ms=120000)
+    subagent_wait(id="acp_run_456", timeout_ms=120000)
+
+The bad sequence ignores the newly requested direction. First process the
+latest user steer, then wait only if that revised plan still needs a result.
 
 ## Waiting for results
 
@@ -177,8 +205,17 @@ Bad example — polling in a sleep loop:
 `edit_confirmed` auto-allows edit/delete/move only when every path stays
 inside the bound workspace; slash-rooted paths (`/etc/passwd`, `\Windows\…`)
 are treated as absolute even on Windows and never join onto the workspace.
-Existing runs keep the workspace they bound at spawn; new spawns follow the
-current conversation workspace unless the tool overrides it.
+Local stdio workspaces and tool paths are checked after resolving symlink
+aliases, so a bind through `/home/...` and a target under `/media/...` can
+refer to the same physical workspace. A symlink that escapes the workspace
+is rejected. Existing runs keep the canonical workspace they bound at spawn;
+new spawns follow the current conversation workspace unless the tool
+overrides it.
+
+The configured preferred ACP mode is applied before the first prompt. If the
+ACP agent rejects that mode switch, spawning fails explicitly; the runtime
+does not silently continue with a different, potentially more restrictive
+mode.
 
 Stdio framing is newline-delimited JSON-RPC. Do not expect LSP
 `Content-Length` headers; the ACP spec rejects them as invalid JSON.

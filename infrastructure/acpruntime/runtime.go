@@ -123,9 +123,9 @@ func (rt *Runtime) RefreshCatalog(ctx context.Context, agent *domain.AcpAgent) (
 			return *agent, err
 		}
 		applyInitialize(agent, init)
-		cwd := agent.DefaultWorkspace
-		if cwd == "" {
-			cwd, _ = os.Getwd()
+		cwd, err := resolveAcpWorkspace(agent, "")
+		if err != nil {
+			return *agent, err
 		}
 		sess, err := newSessionWithLazyAuth(ctx, conn, agent, cwd)
 		if err != nil {
@@ -157,9 +157,9 @@ func newSessionWithLazyAuth(ctx context.Context, conn *acpclient.Conn, agent *do
 }
 
 func (rt *Runtime) withThrowaway(ctx context.Context, agent *domain.AcpAgent, fn func(*acpclient.Conn) (domain.AcpAgent, error)) (domain.AcpAgent, error) {
-	cwd := agent.DefaultWorkspace
-	if cwd == "" {
-		cwd, _ = os.Getwd()
+	cwd, err := resolveAcpWorkspace(agent, "")
+	if err != nil {
+		return *agent, err
 	}
 	conn, err := rt.dialAgent(ctx, agent, cwd, nil)
 	if err != nil {
@@ -306,12 +306,9 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 	if strings.TrimSpace(req.Prompt) == "" {
 		return nil, fmt.Errorf("prompt is required")
 	}
-	workspace := strings.TrimSpace(req.Workspace)
-	if workspace == "" {
-		workspace = strings.TrimSpace(req.Agent.DefaultWorkspace)
-	}
-	if workspace == "" {
-		workspace, _ = os.Getwd()
+	workspace, err := resolveAcpWorkspace(req.Agent, req.Workspace)
+	if err != nil {
+		return nil, err
 	}
 
 	rt.mu.Lock()
@@ -349,9 +346,11 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 	}
 	currentMode := sessionCurrentMode(sess)
 	if modeID != "" && hasModeSelector(sess) && modeID != currentMode {
-		if err := pc.conn.SetMode(ctx, sess.SessionID, modeID); err == nil {
-			currentMode = modeID
+		if err := pc.conn.SetMode(ctx, sess.SessionID, modeID); err != nil {
+			slog.Error("acp mode selection failed", "agent", req.Agent.ID, "session", sess.SessionID, "mode", modeID, "error", err)
+			return nil, fmt.Errorf("set ACP mode %q: %w", modeID, err)
 		}
+		currentMode = modeID
 	}
 	if currentMode != "" {
 		modeID = currentMode
@@ -631,14 +630,6 @@ func (pc *pooledConn) WriteTextFile(ctx context.Context, params acpclient.WriteT
 		return err
 	}
 	return os.WriteFile(path, []byte(params.Content), 0o644)
-}
-
-func containedPath(workspace, p string) (string, error) {
-	clean, ok := domain.ResolveWithinWorkspace(workspace, p)
-	if !ok {
-		return "", fmt.Errorf("path %q is outside the bound workspace", p)
-	}
-	return clean, nil
 }
 
 // drivePrompt sends one prompt to the ACP session. The initial delegation is

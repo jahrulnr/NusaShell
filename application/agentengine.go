@@ -48,8 +48,9 @@ type AgentRules struct {
 	// (compaction extracts summary() args instead).
 	Execute func(st *RoundState, resp ChatResponse, calls []domain.ToolCall) ([]ToolOutcome, error)
 
-	// BeforeRound runs before every stream: proactive compaction,
-	// steer/subagent drains, cross-round budget adjustments.
+	// BeforeRound runs before every stream: proactive compaction and
+	// cross-round budget adjustments. Conversation-specific steer and
+	// background-result drains run in AfterRound at the safe boundary.
 	BeforeRound func(st *RoundState) error
 
 	// OnStreamErr may recover a failed stream (emergency compaction,

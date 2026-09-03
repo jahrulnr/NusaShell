@@ -185,6 +185,10 @@ func handle(req request) {
 			}
 		}
 	case "session/set_mode":
+		if os.Getenv("FAKEACP_REJECT_MODE") == "1" {
+			fail(req.ID, "mode switch rejected")
+			return
+		}
 		var p struct {
 			SessionID string `json:"sessionId"`
 			ModeID    string `json:"modeId"`

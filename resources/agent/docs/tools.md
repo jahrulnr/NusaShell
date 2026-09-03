@@ -411,13 +411,20 @@ continue other work. When a subagent finishes, the original tool call
 transitions to `ok`/`fail` with a brief terminal status and a synthetic
 `subagent_result` tool call carrying the full result is injected at the
 next steer-style tool-round boundary (or a new parent turn if idle)
-so the parent processes the result without a user message. While any subagent is running, the
+so the parent processes the result without a user message. On a live parent
+turn, finished results and harness announcements are injected before a queued
+user steer; the steer is last so the next provider request ends with the
+newest user instruction. While any subagent is running, the
 parent's auto-continue chain pauses with reason
 `awaiting-background-jobs`. Completed run transcripts are persisted per
 conversation under `conversations/<conversation_id>.acp/`. Permissions are auto-allowed
 (orchestrator delegates authority). The user can peek the transcript
 from the Agent dock / drawer / popup. Unattended pipeline agents never
 see these tools.
+
+The configured preferred ACP mode is applied before the first prompt. If the
+ACP agent rejects that mode switch, spawning fails explicitly instead of
+silently continuing with another mode.
 
 `subagent_wait` blocks until a run reaches a terminal state (completed,
 failed, cancelled) or the timeout elapses. For a terminal result, it persists
@@ -428,6 +435,18 @@ may be used as the bounded fallback. A timeout can return a still-running status
 without `output_path`. Intermediate progress and other thought, tool, plan,
 status, and usage chunks stay in the terminal JSON; use `file_read` only when that detail
 is necessary. The Agent drawer receives live transcript events separately.
+
+If the user steers while `subagent_wait` is in flight, wait for the current
+tool call to reach its safe boundary, then handle the steer before continuing
+the old wait plan. A steer is not a request to append another wait blindly.
+
+Good:
+
+    subagent_steer(id="acp_run_123", text="Use the existing workspace and inspect the current implementation now.")
+
+Bad:
+
+    subagent_wait(id="acp_run_123", timeout_ms=120000)  # repeat this after a steer without re-evaluating the request
 
 `subagent_steer` and `subagent_stop` acknowledge the current run status.
 Their provider-facing results are bounded and omit intermediate transcript

@@ -108,6 +108,31 @@ func TestSpawnWaitCompletes(t *testing.T) {
 	}
 }
 
+func TestSpawnCanonicalizesWorkspaceAlias(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	realWorkspace := t.TempDir()
+	workspaceAlias := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(realWorkspace, workspaceAlias); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	run, err := rt.Spawn(ctx, application.AcpSpawnRequest{
+		Agent: testAgent(workspaceAlias), Prompt: "alias workspace", Workspace: workspaceAlias,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Workspace != realWorkspace {
+		t.Fatalf("workspace = %q, want canonical %q", run.Workspace, realWorkspace)
+	}
+	if _, err := rt.Wait(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSteerPersistsAsPromptTranscript(t *testing.T) {
 	rt := New()
 	defer rt.Close()
@@ -267,7 +292,7 @@ func TestPermissionAutoAllowedByOrchestrator(t *testing.T) {
 }
 
 func TestContainedPathRejectsSlashRooted(t *testing.T) {
-	ws := filepath.Join(string(filepath.Separator), "proj")
+	ws := t.TempDir()
 	_, err := containedPath(ws, filepath.Join(string(filepath.Separator), "etc", "passwd"))
 	if err == nil {
 		t.Fatal("slash-rooted path outside workspace must be rejected")
@@ -279,6 +304,73 @@ func TestContainedPathRejectsSlashRooted(t *testing.T) {
 	want := filepath.Join(ws, "main.go")
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestContainedPathResolvesWorkspaceAndTargetAliases(t *testing.T) {
+	realWorkspace := filepath.Join(t.TempDir(), "workspace")
+	if err := os.MkdirAll(filepath.Join(realWorkspace, ".experimental"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workspaceAlias := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(realWorkspace, workspaceAlias); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	got, err := containedPath(workspaceAlias, filepath.Join(realWorkspace, ".experimental", "probe.txt"))
+	if err != nil {
+		t.Fatalf("containedPath through aliases: %v", err)
+	}
+	want := filepath.Join(realWorkspace, ".experimental", "probe.txt")
+	if got != want {
+		t.Fatalf("canonical path = %q, want %q", got, want)
+	}
+}
+
+func TestContainedPathRejectsSymlinkEscape(t *testing.T) {
+	realWorkspace := filepath.Join(t.TempDir(), "workspace")
+	if err := os.MkdirAll(realWorkspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(realWorkspace, "escape")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if _, err := containedPath(realWorkspace, filepath.Join(realWorkspace, "escape", "secret.txt")); err == nil {
+		t.Fatal("symlink escape must be rejected")
+	}
+}
+
+func TestContainedPathRejectsDanglingSymlinkEscape(t *testing.T) {
+	realWorkspace := filepath.Join(t.TempDir(), "workspace")
+	if err := os.MkdirAll(realWorkspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(filepath.Join(outside, "not-created"), filepath.Join(realWorkspace, "escape")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if _, err := containedPath(realWorkspace, filepath.Join(realWorkspace, "escape", "secret.txt")); err == nil {
+		t.Fatal("dangling symlink escape must be rejected")
+	}
+}
+
+func TestSpawnFailsWhenPreferredModeCannotBeApplied(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	agent := testAgent(ws)
+	agent.Env = map[string]string{"FAKEACP_REJECT_MODE": "1"}
+	agent.PreferredModeID = "bypassPermissions"
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	if _, err := rt.Spawn(ctx, application.AcpSpawnRequest{
+		Agent: agent, Prompt: "mode must apply", Workspace: ws,
+	}); err == nil || !strings.Contains(err.Error(), "set ACP mode") {
+		t.Fatalf("spawn error = %v, want explicit mode-application failure", err)
 	}
 }
 

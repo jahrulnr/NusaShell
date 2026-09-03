@@ -252,18 +252,14 @@ func (p *conversationRules) rules() AgentRules {
 			rr := streamedTurnRound{Content: resp.Content, Reasoning: resp.Reasoning, Response: resp}
 			return p.a.persistTurnRound(p.run.ConversationID, p.currentMsgID, p.model, rr)
 		},
-		// Round boundary: repeated-tool guard, then drain queued
-		// steer/subagent results and harness announcements. A tool round
-		// always continues with a fresh assistant message; a terminal round
-		// continues only when a drain injected something the model must see.
+		// Round boundary: repeated-tool guard, then drain queued background
+		// results and harness announcements, and apply steering last. A tool
+		// round always continues with a fresh assistant message; a terminal
+		// round continues only when a drain injected something the model must see.
 		AfterRound: func(st *RoundState, resp ChatResponse, outcomes []ToolOutcome) (bool, error) {
 			if len(resp.ToolCalls) > 0 && p.repeatedGuard.check(resp.ToolCalls, resp.Content) {
 				p.a.log("warn", "agent", "turn %s: detected repeated tool round (%dx identical set), forcing text-only round", p.run.ID, p.repeatedGuard.limit)
 				p.toolRounds = p.settings.MaxToolRounds
-			}
-			appliedSteer, steerErr := p.a.applyQueuedSteer(p.run)
-			if steerErr != nil {
-				return false, steerErr
 			}
 			appliedSub, subErr := p.a.applyQueuedRunResults(p.run)
 			if subErr != nil {
@@ -272,6 +268,14 @@ func (p *conversationRules) rules() AgentRules {
 			appliedAnn, annErr := p.a.drainAnnouncements(p.run)
 			if annErr != nil {
 				return false, annErr
+			}
+			// Apply steering last so it is the final user instruction in the
+			// next provider request. Background completions and harness
+			// announcements are context; they must not become newer than an
+			// explicit instruction the user just sent.
+			appliedSteer, steerErr := p.a.applyQueuedSteer(p.run)
+			if steerErr != nil {
+				return false, steerErr
 			}
 			if len(resp.ToolCalls) == 0 && !appliedSteer && !appliedSub && !appliedAnn {
 				if p.run.HeadlessUpdate != nil {

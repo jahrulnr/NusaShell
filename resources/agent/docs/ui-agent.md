@@ -225,7 +225,7 @@ A compact strip showing the agent's todo list for the current conversation. Item
 
 ## Steer queue
 
-When a user sends a steer message mid-turn, it is queued here and applied at the next safe tool-round boundary. Once applied, the user bubble anchors the next assistant round: stale waiting dots from the completed round are removed and exactly one new waiting round appears after the user bubble.
+When a user sends a steer message mid-turn, it is queued here and applied at the next safe tool-round boundary. Finished background results and harness announcements are inserted before the steer, then the steer becomes the newest user instruction for the next provider request. Once applied, the user bubble anchors the next assistant round: stale waiting dots from the completed round are removed and exactly one new waiting round appears after the user bubble.
 
 - **Steer queue** (`#agent-steer-queue`):
   - Section: Agent
