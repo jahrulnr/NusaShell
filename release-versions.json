@@ -12,5 +12,10 @@
     "manifest": "electron-latest.json",
     "releasedAt": "2026-09-02T20:30:53.526Z"
   },
-  "pets": null
+  "pets": {
+    "version": "0.1.4",
+    "tag": "pets-v0.1.4",
+    "manifest": "pets-latest.json",
+    "releasedAt": "2026-09-03T17:33:16.384Z"
+  }
 }
