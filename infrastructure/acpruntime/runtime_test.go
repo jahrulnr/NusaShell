@@ -70,6 +70,20 @@ func testAgent(workspace string) *domain.AcpAgent {
 	}
 }
 
+// canonicalForTest resolves symlinks the same way canonicalPath does. Tests
+// compare run.Workspace against this resolved form instead of the raw path
+// returned by t.TempDir, so the assertions hold on platforms where the OS
+// adds a resolvable alias: macOS maps /var to /private/var, and Windows
+// resolves 8.3 short names (RUNNER~1) to their long form (runneradmin).
+func canonicalForTest(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("resolve %q: %v", path, err)
+	}
+	return resolved
+}
+
 func TestSpawnWaitCompletes(t *testing.T) {
 	rt := New()
 	defer rt.Close()
@@ -84,7 +98,7 @@ func TestSpawnWaitCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Workspace != ws {
+	if run.Workspace != canonicalForTest(t, ws) {
 		t.Fatalf("workspace = %q, want %q", run.Workspace, ws)
 	}
 	if run.CurrentModeID != "plan" {
@@ -125,7 +139,7 @@ func TestSpawnCanonicalizesWorkspaceAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Workspace != realWorkspace {
+	if run.Workspace != canonicalForTest(t, realWorkspace) {
 		t.Fatalf("workspace = %q, want canonical %q", run.Workspace, realWorkspace)
 	}
 	if _, err := rt.Wait(ctx, run.ID); err != nil {
@@ -235,7 +249,7 @@ func TestDynamicWorkspaceKeepsBoundRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if slow.Workspace != first || other.Workspace != second {
+	if slow.Workspace != canonicalForTest(t, first) || other.Workspace != canonicalForTest(t, second) {
 		t.Fatalf("workspaces = %q %q", slow.Workspace, other.Workspace)
 	}
 	if _, err := rt.Wait(ctx, slow.ID); err != nil {
@@ -301,7 +315,7 @@ func TestContainedPathRejectsSlashRooted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(ws, "main.go")
+	want := filepath.Join(canonicalForTest(t, ws), "main.go")
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
@@ -321,7 +335,7 @@ func TestContainedPathResolvesWorkspaceAndTargetAliases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("containedPath through aliases: %v", err)
 	}
-	want := filepath.Join(realWorkspace, ".experimental", "probe.txt")
+	want := filepath.Join(canonicalForTest(t, realWorkspace), ".experimental", "probe.txt")
 	if got != want {
 		t.Fatalf("canonical path = %q, want %q", got, want)
 	}
