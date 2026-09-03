@@ -60,12 +60,12 @@ const (
 	MethodPluginSetAutoUpdate = "plugin.set_autoupdate"
 	MethodPluginSetAutoStart  = "plugin.set_autostart"
 
-	MethodMemoryList          = "memory.list"
-	MethodMemorySave          = "memory.save"
-	MethodMemorySearch        = "memory.search"
-	MethodMemoryDelete        = "memory.delete"
-	MethodMemoryPrimaryUpdate = "memory.primary.update"
-	MethodMemoryAgentUpdate   = "memory.agent.update"
+	MethodMemoryList        = "memory.list"
+	MethodMemorySave        = "memory.save"
+	MethodMemorySearch      = "memory.search"
+	MethodMemoryDelete      = "memory.delete"
+	MethodMemoryUserUpdate  = "memory.user.update"
+	MethodMemoryAgentUpdate = "memory.agent.update"
 
 	MethodTodosGet    = "agent.todos.get"
 	MethodTodosDelete = "agent.todos.delete"
@@ -1067,9 +1067,8 @@ type MemoryEntryDTO struct {
 	Category string `json:"category,omitempty"`
 	Project  string `json:"project,omitempty"`
 	Task     string `json:"task,omitempty"`
-	// Tier marks the memory source: "primary" (user document, legacy label),
-	// "agent" (agent document), or "fragment" (searchable archive). Empty
-	// for legacy entries.
+	// Tier marks the memory source: "user" (user document), "agent" (agent
+	// document), or "fragment" (searchable archive).
 	Tier string `json:"tier,omitempty"`
 }
 
@@ -1077,14 +1076,14 @@ type MemoryListResult struct {
 	Entries []MemoryEntryDTO `json:"entries"`
 }
 
-// MemoryPrimaryUpdateRequest replaces the always-injected primary memory
-// document. Empty content is allowed so the user can intentionally clear it;
-// the primary store enforces its character cap.
-type MemoryPrimaryUpdateRequest struct {
+// MemoryUserUpdateRequest replaces the always-injected user memory document.
+// Empty content is allowed so the user can intentionally clear it; the user
+// store enforces its character cap.
+type MemoryUserUpdateRequest struct {
 	Content string `json:"content"`
 }
 
-type MemoryPrimaryUpdateResult struct {
+type MemoryUserUpdateResult struct {
 	Entry MemoryEntryDTO `json:"entry"`
 }
 
@@ -1402,7 +1401,7 @@ type LearningSearchRequest struct {
 type LearningSearchResultItem struct {
 	ID      string  `json:"id"`
 	Kind    string  `json:"kind"`           // "skill" | "memory"
-	Tier    string  `json:"tier,omitempty"` // "primary" | "fragment" (memory only)
+	Tier    string  `json:"tier,omitempty"` // "user" | "fragment" (memory only)
 	Name    string  `json:"name,omitempty"`
 	Content string  `json:"content,omitempty"`
 	Score   float32 `json:"score"`
@@ -1421,7 +1420,7 @@ type LearningGraphResult struct {
 type LearningGraphNode struct {
 	ID   string `json:"id"`
 	Kind string `json:"kind"`           // "skill" | "memory"
-	Tier string `json:"tier,omitempty"` // memory only: "primary" | "fragment"
+	Tier string `json:"tier,omitempty"` // memory only: "user" | "fragment"
 	Name string `json:"name,omitempty"`
 }
 

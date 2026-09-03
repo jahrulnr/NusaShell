@@ -2,7 +2,10 @@ Run one agentic post-conversation pass over this conversation and curate
 long-term memory and agent-owned skills, per your system instructions.
 
 ## Memory
-Gather evidence (transcript, files, `docs`, web when needed), then:
+Gather evidence (transcript, files, `docs`, web when needed). For NusaShell
+documentation, search or list only for discovery, then read the relevant page
+with `docs(op="read", id="...")` before relying on its facts. A zero-result
+search is a discovery miss, not evidence that the topic is absent. Then:
 - Update or trim `memory/user.md` (user rules, preferences, stable context) only on clear, durable, explicit statements or corrections from the user; not on one-off choices made during this session.
 - Update or trim `memory/soul.md` (agent working knowledge) when the conversation teaches conventions, gotchas, or reusable fixes.
 - Save new durable facts as fragments first, with category/tags; promote to `user.md`/`soul.md` only if the fact clearly belongs in the always-injected hot tier. Replace or delete fragments that are contradicted, stale, or obsolete.

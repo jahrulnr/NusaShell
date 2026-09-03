@@ -161,12 +161,50 @@ func TestDocsDispatcherOpsAreExplicit(t *testing.T) {
 	if !ok {
 		t.Fatal("docs op schema must expose an enum")
 	}
+	seen := make(map[string]bool, len(values))
 	for _, value := range values {
-		if value == "list" {
-			return
+		if op, ok := value.(string); ok {
+			seen[op] = true
 		}
 	}
-	t.Fatal("docs op schema must advertise list for vocabulary discovery")
+	for _, want := range []string{"list", "search", "read"} {
+		if !seen[want] {
+			t.Fatalf("docs op schema must advertise %q", want)
+		}
+	}
+	if !strings.Contains(docs.Description, "read {id}") {
+		t.Fatalf("docs description must advertise the read follow-up: %s", docs.Description)
+	}
+}
+
+func TestMemoryDispatcherUsesCanonicalUserTier(t *testing.T) {
+	var memory ToolInfo
+	for _, info := range DispatcherToolInfos() {
+		if info.Name == "memory" {
+			memory = info
+			break
+		}
+	}
+	if strings.Contains(strings.ToLower(memory.Description), "primary") {
+		t.Fatalf("memory description must use canonical user tier, got: %s", memory.Description)
+	}
+	properties, ok := memory.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("memory schema must expose properties")
+	}
+	target, ok := properties["target"].(map[string]any)
+	if !ok {
+		t.Fatal("memory schema must expose target")
+	}
+	values, ok := target["enum"].([]any)
+	if !ok {
+		t.Fatal("memory target schema must expose an enum")
+	}
+	for _, value := range values {
+		if value == "primary" {
+			t.Fatal("memory target schema must not advertise the removed primary alias")
+		}
+	}
 }
 
 func TestSkillDispatcherOpsAreExplicit(t *testing.T) {
@@ -181,6 +219,9 @@ func TestSkillDispatcherOpsAreExplicit(t *testing.T) {
 			skill = info
 			break
 		}
+	}
+	if !strings.Contains(skill.Description, "file_read") || !strings.Contains(skill.Description, "MUST") {
+		t.Fatalf("skill description must require file_read after discovery: %s", skill.Description)
 	}
 	properties, ok := skill.InputSchema["properties"].(map[string]any)
 	if !ok {

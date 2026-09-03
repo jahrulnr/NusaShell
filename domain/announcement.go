@@ -114,7 +114,7 @@ func AnnouncementConfigChangedMessage(changed []string) string {
 
 // AnnouncementMemoryChangedArgs builds the self-describing args payload for
 // a memory-change announcement: the notice type plus the affected tier
-// (primary|agent|fragment) and mutation op (save|replace|delete|update).
+// (user|agent|fragment) and mutation op (save|replace|delete|update).
 func AnnouncementMemoryChangedArgs(tier, op string) string {
 	b, err := json.Marshal(struct {
 		Type string `json:"type"`

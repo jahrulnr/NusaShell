@@ -27,9 +27,9 @@ func fragmentDTO(f *domain.MemoryFragment) contracts.MemoryEntryDTO {
 	return dto
 }
 
-// docDTO converts a PrimaryEntry from a memory document (user.md or
+// docDTO converts a DocumentEntry from a memory document (user.md or
 // soul.md) to a MemoryEntryDTO for the UI.
-func docDTO(e *domain.PrimaryEntry, tier string) contracts.MemoryEntryDTO {
+func docDTO(e *domain.DocumentEntry, tier string) contracts.MemoryEntryDTO {
 	dto := contracts.MemoryEntryDTO{
 		ID:        e.ID,
 		Content:   e.Content,
@@ -43,12 +43,6 @@ func docDTO(e *domain.PrimaryEntry, tier string) contracts.MemoryEntryDTO {
 	return dto
 }
 
-// primaryDTO converts a PrimaryEntry to a MemoryEntryDTO for the UI,
-// tagged with the legacy "primary" tier label (the user tier).
-func primaryDTO(e *domain.PrimaryEntry) contracts.MemoryEntryDTO {
-	return docDTO(e, domain.MemoryTierPrimary)
-}
-
 // emitMemoryUpdated publishes a memory.updated event so the Learning UI
 // can refresh its memory list, search results, and graph without polling.
 func (a *App) emitMemoryUpdated() {
@@ -59,11 +53,11 @@ func (a *App) emitMemoryUpdated() {
 
 func (a *App) handleMemoryList() (any, *contracts.RPCError) {
 	out := make([]contracts.MemoryEntryDTO, 0)
-	// Primary (user) memory entries (always-injected working set).
-	if a.Primary != nil {
-		mem := a.Primary.Load()
+	// User memory entries (always-injected working set).
+	if a.User != nil {
+		mem := a.User.Load()
 		for i := range mem.Entries {
-			out = append(out, primaryDTO(&mem.Entries[i]))
+			out = append(out, docDTO(&mem.Entries[i], domain.MemoryTierUser))
 		}
 	}
 	// Agent memory entries (always-injected agent working knowledge).
@@ -82,33 +76,33 @@ func (a *App) handleMemoryList() (any, *contracts.RPCError) {
 	return contracts.MemoryListResult{Entries: out}, nil
 }
 
-// handleMemoryPrimaryUpdate replaces the always-injected primary memory
-// document from the Learning/About You editor. Primary memory is one
+// handleMemoryUserUpdate replaces the always-injected user memory
+// document from the Learning/About You editor. User memory is one
 // free-form document, so this endpoint deliberately does not expose fragment
 // metadata or per-entry delete semantics.
-func (a *App) handleMemoryPrimaryUpdate(req contracts.MemoryPrimaryUpdateRequest) (any, *contracts.RPCError) {
-	if a.Primary == nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeInternal, Message: "primary memory store not configured"}
+func (a *App) handleMemoryUserUpdate(req contracts.MemoryUserUpdateRequest) (any, *contracts.RPCError) {
+	if a.User == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeInternal, Message: "user memory store not configured"}
 	}
 	content := strings.TrimSpace(req.Content)
-	if len(content) > domain.PrimaryCharCap {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "primary memory cannot exceed 4000 characters"}
+	if len(content) > domain.UserCharCap {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "user memory cannot exceed 4000 characters"}
 	}
-	if err := a.Primary.Update([]domain.PrimaryEntry{{Content: content, Source: "user"}}); err != nil {
+	if err := a.User.Update([]domain.DocumentEntry{{Content: content, Source: "user"}}); err != nil {
 		return nil, rpcInternal(err)
 	}
-	mem := a.Primary.Load()
-	var entry domain.PrimaryEntry
+	mem := a.User.Load()
+	var entry domain.DocumentEntry
 	if mem != nil && len(mem.Entries) > 0 {
 		entry = mem.Entries[0]
 	}
 	a.emitMemoryUpdated()
 	a.publishAnnouncementToAll(newAnnouncement(
 		"memory_changed",
-		domain.AnnouncementMemoryChangedArgs("primary", "update"),
+		domain.AnnouncementMemoryChangedArgs(domain.MemoryTierUser, "update"),
 		domain.AnnouncementMemoryChangedMessage(),
 	), "")
-	return contracts.MemoryPrimaryUpdateResult{Entry: primaryDTO(&entry)}, nil
+	return contracts.MemoryUserUpdateResult{Entry: docDTO(&entry, domain.MemoryTierUser)}, nil
 }
 
 // handleMemoryAgentUpdate replaces the always-injected agent memory
@@ -123,11 +117,11 @@ func (a *App) handleMemoryAgentUpdate(req contracts.MemoryAgentUpdateRequest) (a
 	if len(content) > domain.AgentCharCap {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "soul memory cannot exceed 4000 characters"}
 	}
-	if err := a.Agent.Update([]domain.PrimaryEntry{{Content: content, Source: "user"}}); err != nil {
+	if err := a.Agent.Update([]domain.DocumentEntry{{Content: content, Source: "user"}}); err != nil {
 		return nil, rpcInternal(err)
 	}
 	mem := a.Agent.Load()
-	var entry domain.PrimaryEntry
+	var entry domain.DocumentEntry
 	if mem != nil && len(mem.Entries) > 0 {
 		entry = mem.Entries[0]
 	}
@@ -195,12 +189,12 @@ func (a *App) handleMemorySearch(req contracts.MemorySearchRequest) (any, *contr
 	}
 	// Also include user-tier and agent-tier document entries that match
 	// the query (substring).
-	if a.Primary != nil {
-		mem := a.Primary.Load()
+	if a.User != nil {
+		mem := a.User.Load()
 		q := strings.ToLower(query)
 		for i := range mem.Entries {
 			if q == "" || strings.Contains(strings.ToLower(mem.Entries[i].Content), q) {
-				out = append(out, primaryDTO(&mem.Entries[i]))
+				out = append(out, docDTO(&mem.Entries[i], domain.MemoryTierUser))
 			}
 		}
 	}

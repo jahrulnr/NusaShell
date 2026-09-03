@@ -8,8 +8,8 @@ import (
 
 // ---- Memory tiers ----
 //
-// Memory has three tiers. user.md (legacy name primary.md) is a small,
-// always-injected working set (~1k tokens) holding the user's rules and
+// Memory has three tiers. user.md is a small, always-injected working set
+// (~1k tokens) holding the user's rules and
 // preferences. soul.md is an equally sized (~1k tokens) always-injected
 // document holding agent working knowledge — conventions, gotchas,
 // decisions, references — curated by the background learning agent. Fragments are
@@ -18,13 +18,13 @@ import (
 // into the documents; foreground agents save new observations as
 // fragments and search fragments by content + metadata.
 
-// PrimaryTokenCap is the soft token budget for the user tier (user.md,
-// legacy primary.md). The store enforces a character approximation
+// UserTokenCap is the soft token budget for the user tier (user.md). The
+// store enforces a character approximation
 // (4 chars ≈ 1 token) to keep the always-injected prefix small.
-const PrimaryTokenCap = 1000
+const UserTokenCap = 1000
 
-// PrimaryCharCap is the character approximation of PrimaryTokenCap.
-const PrimaryCharCap = PrimaryTokenCap * 4
+// UserCharCap is the character approximation of UserTokenCap.
+const UserCharCap = UserTokenCap * 4
 
 // AgentTokenCap is the soft token budget for the agent tier (soul.md).
 // Combined with the user tier the always-injected memory prefix totals
@@ -36,28 +36,27 @@ const AgentCharCap = AgentTokenCap * 4
 
 // Memory tier identifiers used in tool wire payloads and announcements.
 const (
-	MemoryTierPrimary  = "primary" // legacy alias for the user tier
 	MemoryTierUser     = "user"
 	MemoryTierAgent    = "agent"
 	MemoryTierFragment = "fragment"
 )
 
-// PrimaryEntry is one line in the primary primary.md file. Primary
-// entries are short, durable facts promoted from fragments by the
+// DocumentEntry is the in-memory representation of a memory document.
+// Entries are short, durable facts promoted from fragments by the
 // background learning agent. Foreground agents can read and update them
 // but cannot create new ones directly.
-type PrimaryEntry struct {
+type DocumentEntry struct {
 	ID        string    // stable id (fragment id the entry was promoted from, or generated)
 	Content   string    // one line of text
 	Source    string    // "agent" (promoted by review agent) | "user"
 	UpdatedAt time.Time // last update time
 }
 
-// PrimaryMemory is the full primary memory document. It is loaded once
+// MemoryDocument is the full memory document. It is loaded once
 // at startup and re-read on each update so the hydration prefix stays
 // in sync with the file on disk.
-type PrimaryMemory struct {
-	Entries   []PrimaryEntry
+type MemoryDocument struct {
+	Entries   []DocumentEntry
 	UpdatedAt time.Time
 }
 

@@ -62,12 +62,12 @@ func DefaultEdgeBuilderConfig() EdgeBuilderConfig {
 
 // EdgeBuilder pre-computes learning edges between memory fragments and
 // skills. Fragments are the graph's memory nodes (one node per fact);
-// primary memory is a single working-set document, not a graph node with
+// user memory is a single working-set document, not a graph node with
 // meaningful similarity edges, so it is intentionally excluded.
 type EdgeBuilder struct {
 	fragments FragmentStore
 	skills    SkillStore
-	primary   PrimaryStore
+	user      MemoryDocumentStore
 	graph     *LearningGraphService
 	embed     Embedder
 	cache     *jsonstore.EmbeddingCache
@@ -101,15 +101,15 @@ func NewEdgeBuilder(
 	}
 }
 
-// SetPrimaryStore supplies the primary-memory node catalog used while
+// SetUserStore supplies the user-memory node catalog used while
 // pruning stale edges. It is separate from the constructor so tests and
 // lightweight callers that only have fragments and skills remain valid.
-func (b *EdgeBuilder) SetPrimaryStore(primary PrimaryStore) {
+func (b *EdgeBuilder) SetUserStore(user MemoryDocumentStore) {
 	if b == nil {
 		return
 	}
 	b.buildMu.Lock()
-	b.primary = primary
+	b.user = user
 	b.buildMu.Unlock()
 }
 
@@ -387,8 +387,8 @@ func learningMetadataKey(value string) string {
 }
 
 // pruneDanglingEdges removes persisted edges whose endpoints no longer exist
-// in any current learning store. Primary IDs are included because promoted
-// entries may intentionally no longer have a fragment counterpart.
+// in any current learning store. User document IDs are included because
+// promoted entries may intentionally no longer have a fragment counterpart.
 func (b *EdgeBuilder) pruneDanglingEdges() {
 	known := make(map[string]struct{})
 	seen := make(map[string]struct{})
@@ -405,8 +405,8 @@ func (b *EdgeBuilder) pruneDanglingEdges() {
 			known[skill.ID] = struct{}{}
 		}
 	}
-	if b.primary != nil {
-		if memory := b.primary.Load(); memory != nil {
+	if b.user != nil {
+		if memory := b.user.Load(); memory != nil {
 			for _, entry := range memory.Entries {
 				if entry.ID != "" {
 					known[entry.ID] = struct{}{}

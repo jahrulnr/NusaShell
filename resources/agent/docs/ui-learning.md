@@ -23,7 +23,7 @@ Opens About You first, where the always-injected user.md document can be edited 
 - **About You tab** (`#learning-tab-about`):
   - Section: Learning
   - Type: tab
-  - Notes: Shows the editable always-injected primary memory document.
+  - Notes: Shows the editable always-injected user memory document.
 
 - **About Agent tab** (`#learning-tab-agent`):
   - Section: Learning
@@ -42,31 +42,31 @@ Opens About You first, where the always-injected user.md document can be edited 
 
 ## About You
 
-The editable primary memory document. Reload reads the persisted value again; Save changes replaces the complete primary memory document through memory.primary.update. The editor shows the 4000-character cap and allows an intentional empty document. The card expands across the available desktop canvas while keeping a compact inset and full-width editor on mobile.
+The editable user memory document. Reload reads the persisted value again; Save changes replaces the complete user memory document through memory.user.update. The editor shows the 4000-character cap and allows an intentional empty document. The card expands across the available desktop canvas while keeping a compact inset and full-width editor on mobile.
 
-- **Primary memory status** (`#learning-primary-status`):
+- **User memory status** (`#learning-user-status`):
   - Section: Learning
   - Type: status
-  - Notes: Reports whether primary memory is loaded, empty, saved, or unavailable.
+  - Notes: Reports whether user memory is loaded, empty, saved, or unavailable.
 
-- **Primary memory editor** (`#learning-primary-memory`):
+- **User memory editor** (`#learning-user-memory`):
   - Section: Learning
   - Type: textarea
-  - Action: Edits the complete primary memory document.
+  - Action: Edits the complete user memory document.
 
-- **Primary memory character count** (`#learning-primary-count`):
+- **User memory character count** (`#learning-user-count`):
   - Section: Learning
   - Type: text
 
-- **Reload primary memory** (`#learning-primary-reload`):
+- **Reload user memory** (`#learning-user-reload`):
   - Section: Learning
   - Type: button
-  - Action: Discards the current draft and reloads the persisted primary memory document.
+  - Action: Discards the current draft and reloads the persisted user memory document.
 
-- **Save primary memory** (`#learning-primary-save`):
+- **Save user memory** (`#learning-user-save`):
   - Section: Learning
   - Type: button
-  - Action: Replaces the persisted primary memory document.
+  - Action: Replaces the persisted user memory document.
 
 ## Soul.md
 
@@ -116,7 +116,7 @@ Hybrid search across memory and skills, with a kind filter (All, Skills, Memory)
 
 ## Results
 
-Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately. Memory entries show a tier badge (primary or fragment) next to the kind label so the two tiers are visually distinguishable. Memory entries have a delete button (×) that opens a confirm dialog and calls memory.delete. Long content is collapsed to 3 lines; click to expand. Results refresh automatically when memory or skills change (via `memory.updated` / `skill.updated` events, debounced 300ms).
+Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately. Memory entries show a tier badge (user or fragment) next to the kind label so the two tiers are visually distinguishable. Memory entries have a delete button (×) that opens a confirm dialog and calls memory.delete. Long content is collapsed to 3 lines; click to expand. Results refresh automatically when memory or skills change (via `memory.updated` / `skill.updated` events, debounced 300ms).
 
 - **Results** (`#learning-results`):
   - Section: Learning
@@ -134,7 +134,7 @@ Draggable splitter between the results pane and the graph pane. Drag to resize t
 
 ## Knowledge graph
 
-Force-directed graph (vis-network) of skills, memory entries, and their edges. Related edges are rebuilt from content similarity plus specific fragment metadata (project, task, and non-ubiquitous tags); stale edges to deleted nodes are removed. Used-with edges connect learning nodes observed together during one successful agent/review turn. Dense edge lines stay thin. Node size scales with the number of unique neighbouring nodes, making the most-connected hubs largest; hover text includes the relation count. Zooming out preserves most of that size contrast so nearby relation counts remain visually distinct instead of collapsing to the same rasterized radius. After its bounded physics pass, a full layout keeps the force-directed angular grouping but places highly connected hubs toward the center and low-degree or isolated nodes toward a compact perimeter ring without detaching them from the main cluster, then resolves residual collisions before freezing. The restrained archipelago palette maps skills to ocean blue, fragments to earth brown, primary memory to leaf green, and edges to deeper ocean, mangrove, or sand tones. Reload fetches the graph and performs this full relayout; Fit fits it to view. Legend distinguishes Skill, Memory, Related, and Used-with edges. The graph refreshes automatically when memory or skills change or a review finishes (via `memory.updated` / `skill.updated` / `learning.review.done` events, coalesced with a 300ms debounce); automatic refreshes keep existing node positions and lay out only additions, so the graph stays still while idle. On narrow screens results and graph stack into separate bounded panes with their own scrollable result list.
+Force-directed graph (vis-network) of skills, memory entries, and their edges. Related edges are rebuilt from content similarity plus specific fragment metadata (project, task, and non-ubiquitous tags); stale edges to deleted nodes are removed. Used-with edges connect learning nodes observed together during one successful agent/review turn. Dense edge lines stay thin. Node size scales with the number of unique neighbouring nodes, making the most-connected hubs largest; hover text includes the relation count. Zooming out preserves most of that size contrast so nearby relation counts remain visually distinct instead of collapsing to the same rasterized radius. After its bounded physics pass, a full layout keeps the force-directed angular grouping but places highly connected hubs toward the center and low-degree or isolated nodes toward a compact perimeter ring without detaching them from the main cluster, then resolves residual collisions before freezing. The restrained archipelago palette maps skills to ocean blue, fragments to earth brown, user memory to leaf green, and edges to deeper ocean, mangrove, or sand tones. Reload fetches the graph and performs this full relayout; Fit fits it to view. Legend distinguishes Skill, Memory, Related, and Used-with edges. The graph refreshes automatically when memory or skills change or a review finishes (via `memory.updated` / `skill.updated` / `learning.review.done` events, coalesced with a 300ms debounce); automatic refreshes keep existing node positions and lay out only additions, so the graph stays still while idle. On narrow screens results and graph stack into separate bounded panes with their own scrollable result list.
 
 - **Knowledge graph** (`#learning-graph`):
   - Section: Learning

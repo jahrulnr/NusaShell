@@ -114,7 +114,7 @@ func TestLearningNodeIDsFromToolOutput(t *testing.T) {
 		Skills: &fakeSkillStore{items: map[string]*domain.Skill{
 			"skill_frontend": {ID: "skill_frontend", Name: "frontend"},
 		}},
-		Primary: &fakePrimaryStore{entries: []domain.PrimaryEntry{{ID: "primary_1", Content: "primary"}}},
+		User: &fakeUserStore{entries: []domain.DocumentEntry{{ID: "user_1", Content: "user"}}},
 	}
 
 	memoryIDs := learningNodeIDsFromTool(app,

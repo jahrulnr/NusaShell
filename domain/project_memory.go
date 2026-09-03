@@ -9,12 +9,12 @@ import (
 )
 
 // Project memory is a per-workspace, skill-compatible store of anchored
-// markdown entries. It is independent of user memory (primary.md + fragments).
+// markdown entries. It is independent of user memory (user.md + fragments).
 // On-disk layout: {base}/{key}/{kind}.md with optional archive/{kind}.md.
 
 const (
 	ProjectMemoryDirName    = "memory_project"
-	ProjectIndexCharCap     = PrimaryCharCap
+	ProjectIndexCharCap     = UserCharCap
 	ProjectPatternThreshold = 3
 )
 
@@ -272,11 +272,11 @@ func IsCanonicalProjectKind(fileKind string) bool {
 func RejectProjectUserKind(kind string) string {
 	n := NormalizeProjectKindFile(kind)
 	if projectForbiddenFiles[n] || projectForbiddenKinds[n] || n == "user-profile" {
-		return "project memory rejects user-profile facts; use the memory tool (primary/fragments)"
+		return "project memory rejects user-profile facts; use the memory tool (user/fragments)"
 	}
 	entry := strings.ToUpper(strings.ReplaceAll(n, "-", "_"))
 	if entry == "USER_PROFILE" {
-		return "project memory rejects user-profile facts; use the memory tool (primary/fragments)"
+		return "project memory rejects user-profile facts; use the memory tool (user/fragments)"
 	}
 	return ""
 }

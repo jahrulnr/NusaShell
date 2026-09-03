@@ -102,7 +102,7 @@ the self-describing args pattern of `AutoContinueAnnouncementArgs`:
 | Type | Publishers | Args | Result text (implicit, model re-reads details) |
 |------|-----------|------|------------------------------------------------|
 | `config_changed` | `acp.agents.save/delete`, `settings.save` (UserPrompt), `ai.providers.save` | `{type, changed: ["subagent","user_prompt"]}` | "Tool/system configuration changed since your last turn: subagent list, user instructions. Re-read the affected tool descriptions and instructions." |
-| `memory_changed` | `memory.save`/`memory.delete` RPC, review agent, `memory` tool from other conversations | `{type, tier: "primary"\|"fragment", op: "save"\|"replace"\|"delete"}` | "Memory was updated outside this conversation. Call `memory` op=list to refresh." |
+| `memory_changed` | `memory.save`/`memory.delete` RPC, review agent, `memory` tool from other conversations | `{type, tier: "user"\|"fragment", op: "save"\|"replace"\|"delete"}` | "Memory was updated outside this conversation. Call `memory` op=list to refresh." |
 | `skills_changed` | `skills.save/install/delete` RPC, `skill` tool from other conversations | `{type, op}` | "The skill library changed. Call `skill` op=list to refresh." |
 
 Rules:

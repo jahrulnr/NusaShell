@@ -603,7 +603,7 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	primaryStore, err := memorystore.NewPrimary(dataDir)
+	userStore, err := memorystore.NewUser(dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +619,7 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	tb := &tools.Toolbox{
 		Skills:    skillStore,
 		Memory:    &jsonstore.Memory{S: store},
-		Primary:   primaryStore,
+		User:      userStore,
 		Fragments: fragmentStore,
 		Docs:      docSource,
 		Plugins:   pluginStore,
@@ -633,7 +633,7 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 		Credentials:   creds,
 		Skills:        skillStore,
 		Memory:        &jsonstore.Memory{S: store},
-		Primary:       primaryStore,
+		User:          userStore,
 		Fragments:     fragmentStore,
 		Logs:          &jsonstore.Logs{S: store},
 		Settings:      &jsonstore.Settings{S: store},

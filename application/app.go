@@ -29,11 +29,11 @@ type App struct {
 	Credentials   CredentialStore
 	Skills        SkillStore
 	Memory        MemoryStore
-	Primary       PrimaryStore
+	User          MemoryDocumentStore
 	// Agent is the agent-tier memory document (soul.md) holding agent
 	// working knowledge curated by the background learning agent. Same document
-	// contract as the user tier (Primary).
-	Agent           AgentStore
+	// contract as the user tier.
+	Agent           MemoryDocumentStore
 	Fragments       FragmentStore
 	ProjectMemory   ProjectMemoryStore
 	LearningEdges   LearningEdgeStore
@@ -230,8 +230,8 @@ type Deps struct {
 	Credentials                 CredentialStore
 	Skills                      SkillStore
 	Memory                      MemoryStore
-	Primary                     PrimaryStore
-	Agent                       AgentStore
+	User                        MemoryDocumentStore
+	Agent                       MemoryDocumentStore
 	Fragments                   FragmentStore
 	ProjectMemory               ProjectMemoryStore
 	LearningEdges               LearningEdgeStore
@@ -293,7 +293,7 @@ func NewApp(deps Deps) *App {
 		Skills:                      deps.Skills,
 		Memory:                      deps.Memory,
 		Agent:                       deps.Agent,
-		Primary:                     deps.Primary,
+		User:                        deps.User,
 		Fragments:                   deps.Fragments,
 		ProjectMemory:               deps.ProjectMemory,
 		LearningEdges:               deps.LearningEdges,
@@ -421,7 +421,7 @@ func NewApp(deps Deps) *App {
 			DefaultEdgeBuilderConfig(),
 			"", // model ID resolved lazily
 		)
-		app.edgeBuilder.SetPrimaryStore(deps.Primary)
+		app.edgeBuilder.SetUserStore(deps.User)
 	}
 	return app
 }

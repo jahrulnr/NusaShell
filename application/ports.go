@@ -119,27 +119,19 @@ type MemoryStore interface {
 	Replace(target, oldText, content string) error
 }
 
-// MemoryDocStore is the shared contract for a single-file memory
+// MemoryDocumentStore is the shared contract for a single-file memory
 // document (user.md and soul.md): free-form prose maintained in place
 // via Replace (substring match) or Update (rewrite the entire body).
 // There is no per-entry create/delete — the agent maintains the document
-// like a README. The user tier used to be called "primary".
-type MemoryDocStore interface {
-	Load() *domain.PrimaryMemory
-	Update(entries []domain.PrimaryEntry) error
+// like a README.
+type MemoryDocumentStore interface {
+	Load() *domain.MemoryDocument
+	Update(entries []domain.DocumentEntry) error
 	Replace(oldText, content string) error // substring match update
 	// Path returns the absolute filesystem path of the document file.
 	// Used by the review agent to pre-inject the file via file_read.
 	Path() string
 }
-
-// PrimaryStore is the always-injected user-tier memory document (user.md,
-// legacy primary.md).
-type PrimaryStore = MemoryDocStore
-
-// AgentStore is the always-injected agent-tier memory document (soul.md)
-// holding agent working knowledge curated by the background learning agent.
-type AgentStore = MemoryDocStore
 
 // FragmentStore is the unlimited, searchable memory archive backed by
 // one markdown file per entry under memory/fragments/. Foreground
@@ -161,7 +153,7 @@ type FragmentSaveIfAbsent interface {
 
 // ProjectMemoryStore is the per-workspace, skill-compatible project memory
 // adapter ({base}/{key}/{kind}.md). It is independent of user memory
-// (primary.md + fragments). Empty workspace is rejected by the tool layer.
+// (user.md + fragments). Empty workspace is rejected by the tool layer.
 type ProjectMemoryStore interface {
 	Query(workspace string, q domain.ProjectMemoryQuery) ([]domain.ProjectMemoryHit, error)
 	List(workspace string) ([]string, error)

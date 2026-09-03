@@ -124,9 +124,9 @@ func TestHydrationMemoryUsesFileReadForEachDocument(t *testing.T) {
 	}}
 
 	result := NewHydrationBuilder(HydrationSource{
-		Executor:    exec,
-		PrimaryPath: userPath,
-		AgentPath:   soulPath,
+		Executor:  exec,
+		UserPath:  userPath,
+		AgentPath: soulPath,
 	}).Build()
 
 	for _, call := range result.Messages[0].ToolCalls {
@@ -243,7 +243,7 @@ func TestHydrationMemory(t *testing.T) {
 		}
 		return "", fmt.Errorf("unexpected tool %q", name)
 	}}
-	b := NewHydrationBuilder(HydrationSource{Executor: exec, PrimaryPath: userPath, AgentPath: soulPath})
+	b := NewHydrationBuilder(HydrationSource{Executor: exec, UserPath: userPath, AgentPath: soulPath})
 	result := b.Build()
 	for _, call := range result.Messages[0].ToolCalls {
 		if call.Name == "memory" {
@@ -272,7 +272,7 @@ func TestHydrationMemoryUserOnlyWithoutAgentPath(t *testing.T) {
 		}
 		return "", fmt.Errorf("unexpected tool %q", name)
 	}}
-	b := NewHydrationBuilder(HydrationSource{Executor: exec, PrimaryPath: userPath})
+	b := NewHydrationBuilder(HydrationSource{Executor: exec, UserPath: userPath})
 	result := b.Build()
 	if got := hydrationResultByFilePath(t, result, userPath); got != userOutput {
 		t.Errorf("user-only file_read result = %q, want %q", got, userOutput)
@@ -425,9 +425,9 @@ func TestHydrationMemoryHiddenWhenEmpty(t *testing.T) {
 		return "", fmt.Errorf("unexpected tool %q", name)
 	}}
 	result = NewHydrationBuilder(HydrationSource{
-		Executor:    exec,
-		PrimaryPath: "/data/memory/user.md",
-		AgentPath:   "/data/memory/soul.md",
+		Executor:  exec,
+		UserPath:  "/data/memory/user.md",
+		AgentPath: "/data/memory/soul.md",
 	}).Build()
 	for _, c := range result.Messages[0].ToolCalls {
 		if c.Name == "file_read" {

@@ -45,9 +45,9 @@ func learningNodeIDsFromTool(app *App, toolCall domain.ToolCall, output string) 
 			if learningStringArg(args, "target") == "fragment" {
 				ids = appendLearningID(ids, learningStringArg(args, "id"))
 			}
-			if learningStringArg(args, "target") == "primary" && app != nil && app.Primary != nil {
-				if primary := app.Primary.Load(); primary != nil {
-					for _, entry := range primary.Entries {
+			if learningStringArg(args, "target") == domain.MemoryTierUser && app != nil && app.User != nil {
+				if user := app.User.Load(); user != nil {
+					for _, entry := range user.Entries {
 						ids = appendLearningID(ids, entry.ID)
 					}
 				}
@@ -262,9 +262,9 @@ func learningNodeIDsFromFilePath(app *App, path string) []string {
 	}
 	path = filepath.Clean(path)
 	ids := make([]string, 0, 2)
-	if app.Primary != nil && app.Primary.Path() != "" && filepath.Clean(app.Primary.Path()) == path {
-		if primary := app.Primary.Load(); primary != nil {
-			for _, entry := range primary.Entries {
+	if app.User != nil && app.User.Path() != "" && filepath.Clean(app.User.Path()) == path {
+		if user := app.User.Load(); user != nil {
+			for _, entry := range user.Entries {
 				ids = appendLearningID(ids, entry.ID)
 			}
 		}

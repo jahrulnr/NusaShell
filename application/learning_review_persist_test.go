@@ -64,7 +64,7 @@ func TestReviewLoopPersistsReasoningAndFinalSummary(t *testing.T) {
 		t.Fatalf("runReviewLoop: %v", err)
 	}
 
-	// Expected shape (newReviewApp sets no PrimaryStore, so only
+	// Expected shape (newReviewApp sets no user memory store, so only
 	// review_transcript is pre-injected — no file_read call):
 	//   0: user (prompt from prompts/user/review.md)
 	//   1: assistant (synthetic tool call: review_transcript)
@@ -110,7 +110,7 @@ func TestReviewLoopPersistsNothingToSaveConclusion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runReviewLoop: %v", err)
 	}
-	// Expected shape (newReviewApp sets no PrimaryStore, so only
+	// Expected shape (newReviewApp sets no user memory store, so only
 	// review_transcript is pre-injected — no file_read call):
 	//   0: user (prompt)
 	//   1: assistant (synthetic tool call: review_transcript)

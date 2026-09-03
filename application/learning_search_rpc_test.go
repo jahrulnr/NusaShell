@@ -100,7 +100,7 @@ func TestHandleLearningSearchEmptyQuery(t *testing.T) {
 	if len(result.Items) != 1 || result.Items[0].ID != "skill_1" {
 		t.Fatalf("empty query + kind=skills should list all skills, got %+v", result.Items)
 	}
-	// kind=memory: empty query lists all memory entries (fragments + primary).
+	// kind=memory: empty query lists all memory entries (fragments + user document).
 	resp, _ = app.handleLearningSearch(contracts.LearningSearchRequest{
 		Query: "",
 		Kind:  "memory",
@@ -120,21 +120,21 @@ func TestHandleLearningSearchEmptyQuery(t *testing.T) {
 	}
 }
 
-// TestHandleLearningSearchTierBadge verifies that primary and fragment
+// TestHandleLearningSearchTierBadge verifies that user and fragment
 // memory entries are tagged with the correct tier so the UI can show
 // a distinguishing badge.
 func TestHandleLearningSearchTierBadge(t *testing.T) {
 	fragments := &fakeFragmentStore{frags: []*domain.MemoryFragment{
 		{ID: "frag_1", Content: "A fragment entry", Category: domain.FragmentCategoryGeneral},
 	}}
-	primary := &stubPrimaryStoreReview{mem: &domain.PrimaryMemory{
-		Entries: []domain.PrimaryEntry{
-			{ID: "prim_1", Content: "A primary entry"},
+	user := &stubUserStoreReview{mem: &domain.MemoryDocument{
+		Entries: []domain.DocumentEntry{
+			{ID: "user_1", Content: "A user entry"},
 		},
 	}}
 	app := &App{
 		Fragments: fragments,
-		Primary:   primary,
+		User:      user,
 		Settings:  &fakeSettingsStore{settings: domain.Settings{}},
 	}
 	resp, _ := app.handleLearningSearch(contracts.LearningSearchRequest{
@@ -149,8 +149,8 @@ func TestHandleLearningSearchTierBadge(t *testing.T) {
 	if tiers["frag_1"] != "fragment" {
 		t.Errorf("frag_1 tier = %q, want \"fragment\"", tiers["frag_1"])
 	}
-	if tiers["prim_1"] != "primary" {
-		t.Errorf("prim_1 tier = %q, want \"primary\"", tiers["prim_1"])
+	if tiers["user_1"] != domain.MemoryTierUser {
+		t.Errorf("user_1 tier = %q, want %q", tiers["user_1"], domain.MemoryTierUser)
 	}
 }
 
@@ -259,31 +259,31 @@ func (f *fakeSettingsStore) Set(s domain.Settings) error {
 	return nil
 }
 
-// fakePrimaryStore is a minimal PrimaryStore for tests.
-type fakePrimaryStore struct {
-	entries []domain.PrimaryEntry
+// fakeUserStore is a minimal user-tier store for tests.
+type fakeUserStore struct {
+	entries []domain.DocumentEntry
 }
 
-func (f *fakePrimaryStore) Load() *domain.PrimaryMemory {
-	return &domain.PrimaryMemory{Entries: f.entries}
+func (f *fakeUserStore) Load() *domain.MemoryDocument {
+	return &domain.MemoryDocument{Entries: f.entries}
 }
-func (f *fakePrimaryStore) Update(entries []domain.PrimaryEntry) error {
+func (f *fakeUserStore) Update(entries []domain.DocumentEntry) error {
 	f.entries = entries
 	return nil
 }
-func (f *fakePrimaryStore) Replace(oldText, content string) error { return nil }
-func (f *fakePrimaryStore) Path() string                          { return "" }
+func (f *fakeUserStore) Replace(oldText, content string) error { return nil }
+func (f *fakeUserStore) Path() string                          { return "" }
 
-func TestHandleLearningGraphPrimaryNodeTierAndLabel(t *testing.T) {
-	primary := &fakePrimaryStore{entries: []domain.PrimaryEntry{
-		{ID: "prim_abc", Content: "You are a backend developer living in Jakarta.\nYou prefer Go and pragmatic solutions."},
+func TestHandleLearningGraphUserNodeTierAndLabel(t *testing.T) {
+	user := &fakeUserStore{entries: []domain.DocumentEntry{
+		{ID: "user_abc", Content: "You are a backend developer living in Jakarta.\nYou prefer Go and pragmatic solutions."},
 	}}
 	fragments := &fakeFragmentStore{frags: []*domain.MemoryFragment{
 		{ID: "frag_1", Content: "multi\nline fact", Category: domain.FragmentCategoryGeneral},
 	}}
 	app := &App{
 		Skills:    &fakeSkillStore{items: map[string]*domain.Skill{}},
-		Primary:   primary,
+		User:      user,
 		Fragments: fragments,
 		Settings:  &fakeSettingsStore{settings: domain.Settings{}},
 	}
@@ -293,18 +293,18 @@ func TestHandleLearningGraphPrimaryNodeTierAndLabel(t *testing.T) {
 	}
 	result := resp.(contracts.LearningGraphResult)
 	if len(result.Nodes) != 2 {
-		t.Fatalf("nodes = %d, want 2 (primary + fragment)", len(result.Nodes))
+		t.Fatalf("nodes = %d, want 2 (user + fragment)", len(result.Nodes))
 	}
 	byID := map[string]contracts.LearningGraphNode{}
 	for _, n := range result.Nodes {
 		byID[n.ID] = n
 	}
-	pn, ok := byID["prim_abc"]
-	if !ok || pn.Tier != "primary" {
-		t.Fatalf("primary node missing or wrong tier: %+v", result.Nodes)
+	pn, ok := byID["user_abc"]
+	if !ok || pn.Tier != domain.MemoryTierUser {
+		t.Fatalf("user node missing or wrong tier: %+v", result.Nodes)
 	}
 	if pn.Name != "You are a backend developer living in Jakarta." {
-		t.Fatalf("primary label should be the first line, got %q", pn.Name)
+		t.Fatalf("user label should be the first line, got %q", pn.Name)
 	}
 	fn, ok := byID["frag_1"]
 	if !ok || fn.Tier != "fragment" {

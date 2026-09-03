@@ -33,8 +33,8 @@ type Toolbox struct {
 	Skills          application.SkillStore
 	SkillSearcher   application.SkillSearcher // optional; nil = substring fallback
 	Memory          application.MemoryStore   // legacy — used by lifecycle/learning subsystems
-	Primary         application.PrimaryStore
-	Agent           application.AgentStore
+	User            application.MemoryDocumentStore
+	Agent           application.MemoryDocumentStore
 	Fragments       application.FragmentStore
 	ProjectMemory   application.ProjectMemoryStore
 	Docs            application.DocsSource
@@ -612,18 +612,18 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			return "", fmt.Errorf("content is required")
 		}
 		switch args.Target {
-		case "primary", "user":
-			if t.Primary == nil {
+		case "user":
+			if t.User == nil {
 				return "", fmt.Errorf("user tier store not configured")
 			}
 			if strings.TrimSpace(args.OldText) == "" {
 				// No old_text: rewrite the entire user document body.
-				if err := t.Primary.Update([]domain.PrimaryEntry{{Content: args.Content, Source: "agent"}}); err != nil {
+				if err := t.User.Update([]domain.DocumentEntry{{Content: args.Content, Source: "agent"}}); err != nil {
 					return "", err
 				}
 				return yamlBlock(map[string]any{"status": "rewritten", "target": "user"}), nil
 			}
-			if err := t.Primary.Replace(args.OldText, args.Content); err != nil {
+			if err := t.User.Replace(args.OldText, args.Content); err != nil {
 				return "", err
 			}
 			return yamlBlock(map[string]any{"status": "replaced", "target": "user"}), nil
@@ -633,7 +633,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			}
 			if strings.TrimSpace(args.OldText) == "" {
 				// No old_text: rewrite the entire agent document body.
-				if err := t.Agent.Update([]domain.PrimaryEntry{{Content: args.Content, Source: "agent"}}); err != nil {
+				if err := t.Agent.Update([]domain.DocumentEntry{{Content: args.Content, Source: "agent"}}); err != nil {
 					return "", err
 				}
 				return yamlBlock(map[string]any{"status": "rewritten", "target": "agent"}), nil
@@ -707,13 +707,13 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		if limit <= 0 {
 			limit = 50
 		}
-		if args.Target == "primary" || args.Target == "user" {
+		if args.Target == "user" {
 			// The user tier is a single document, not a list. Reading it via
 			// list was a design wart; file_read is the honest path.
-			if t.Primary == nil {
+			if t.User == nil {
 				return "", fmt.Errorf("user memory is a single document, not a list — and no user store is configured")
 			}
-			return "", fmt.Errorf("user memory is a single document, not a list — read it with file_read(path=%q)", t.Primary.Path())
+			return "", fmt.Errorf("user memory is a single document, not a list — read it with file_read(path=%q)", t.User.Path())
 		}
 		if args.Target == "agent" {
 			// Same single-document rule for the agent tier.
@@ -787,7 +787,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		hits := t.Docs.Search(args.Query, limit)
 		items := make([]any, 0, len(hits))
 		for _, h := range hits {
-			items = append(items, map[string]any{"id": h.ID, "title": h.Title, "path": h.Path})
+			items = append(items, map[string]any{"id": h.ID, "title": h.Title, "path": h.Path, "snippet": h.Snippet})
 		}
 		return capJSONL("docs", map[string]any{"count": len(hits)}, items), nil
 

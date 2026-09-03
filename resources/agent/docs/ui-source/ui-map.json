@@ -413,14 +413,14 @@
         {
           "heading": "About You",
           "paragraphs": [
-            "The editable primary memory document. Reload reads the persisted value again; Save changes replaces the complete primary memory document through memory.primary.update. The editor shows the 4000-character cap and allows an intentional empty document. The card expands across the available desktop canvas while keeping a compact inset and full-width editor on mobile."
+            "The editable user memory document. Reload reads the persisted value again; Save changes replaces the complete user memory document through memory.user.update. The editor shows the 4000-character cap and allows an intentional empty document. The card expands across the available desktop canvas while keeping a compact inset and full-width editor on mobile."
           ],
           "controls": [
-            "learning-primary-status",
-            "learning-primary-memory",
-            "learning-primary-count",
-            "learning-primary-reload",
-            "learning-primary-save"
+            "learning-user-status",
+            "learning-user-memory",
+            "learning-user-count",
+            "learning-user-reload",
+            "learning-user-save"
           ]
         },
         {
@@ -450,7 +450,7 @@
         {
           "heading": "Results",
           "paragraphs": [
-            "Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately. Memory entries show a tier badge (primary or fragment) next to the kind label so the two tiers are visually distinguishable. Memory entries have a delete button (×) that opens a confirm dialog and calls memory.delete. Long content is collapsed to 3 lines; click to expand. Results refresh automatically when memory or skills change (via `memory.updated` / `skill.updated` events, debounced 300ms)."
+            "Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately. Memory entries show a tier badge (user or fragment) next to the kind label so the two tiers are visually distinguishable. Memory entries have a delete button (×) that opens a confirm dialog and calls memory.delete. Long content is collapsed to 3 lines; click to expand. Results refresh automatically when memory or skills change (via `memory.updated` / `skill.updated` events, debounced 300ms)."
           ],
           "controls": [
             "learning-results",
@@ -469,7 +469,7 @@
         {
           "heading": "Knowledge graph",
           "paragraphs": [
-            "Force-directed graph (vis-network) of skills, memory entries, and their edges. Related edges are rebuilt from content similarity plus specific fragment metadata (project, task, and non-ubiquitous tags); stale edges to deleted nodes are removed. Used-with edges connect learning nodes observed together during one successful agent/review turn. Dense edge lines stay thin. Node size scales with the number of unique neighbouring nodes, making the most-connected hubs largest; hover text includes the relation count. Zooming out preserves most of that size contrast so nearby relation counts remain visually distinct instead of collapsing to the same rasterized radius. After its bounded physics pass, a full layout keeps the force-directed angular grouping but places highly connected hubs toward the center and low-degree or isolated nodes toward a compact perimeter ring without detaching them from the main cluster, then resolves residual collisions before freezing. The restrained archipelago palette maps skills to ocean blue, fragments to earth brown, primary memory to leaf green, and edges to deeper ocean, mangrove, or sand tones. Reload fetches the graph and performs this full relayout; Fit fits it to view. Legend distinguishes Skill, Memory, Related, and Used-with edges. The graph refreshes automatically when memory or skills change or a review finishes (via `memory.updated` / `skill.updated` / `learning.review.done` events, coalesced with a 300ms debounce); automatic refreshes keep existing node positions and lay out only additions, so the graph stays still while idle. On narrow screens results and graph stack into separate bounded panes with their own scrollable result list."
+            "Force-directed graph (vis-network) of skills, memory entries, and their edges. Related edges are rebuilt from content similarity plus specific fragment metadata (project, task, and non-ubiquitous tags); stale edges to deleted nodes are removed. Used-with edges connect learning nodes observed together during one successful agent/review turn. Dense edge lines stay thin. Node size scales with the number of unique neighbouring nodes, making the most-connected hubs largest; hover text includes the relation count. Zooming out preserves most of that size contrast so nearby relation counts remain visually distinct instead of collapsing to the same rasterized radius. After its bounded physics pass, a full layout keeps the force-directed angular grouping but places highly connected hubs toward the center and low-degree or isolated nodes toward a compact perimeter ring without detaching them from the main cluster, then resolves residual collisions before freezing. The restrained archipelago palette maps skills to ocean blue, fragments to earth brown, user memory to leaf green, and edges to deeper ocean, mangrove, or sand tones. Reload fetches the graph and performs this full relayout; Fit fits it to view. Legend distinguishes Skill, Memory, Related, and Used-with edges. The graph refreshes automatically when memory or skills change or a review finishes (via `memory.updated` / `skill.updated` / `learning.review.done` events, coalesced with a 300ms debounce); automatic refreshes keep existing node positions and lay out only additions, so the graph stays still while idle. On narrow screens results and graph stack into separate bounded panes with their own scrollable result list."
           ],
           "controls": [
             "learning-graph",
@@ -1502,7 +1502,7 @@
       "label": "About You tab",
       "section": "Learning",
       "type": "tab",
-      "notes": "Shows the editable always-injected primary memory document."
+      "notes": "Shows the editable always-injected user memory document."
     },
     "learning-tab-agent": {
       "label": "About Agent tab",
@@ -1527,34 +1527,34 @@
       "type": "button",
       "action": "Reloads the autolearn trajectory feed."
     },
-    "learning-primary-status": {
-      "label": "Primary memory status",
+    "learning-user-status": {
+      "label": "User memory status",
       "section": "Learning",
       "type": "status",
-      "notes": "Reports whether primary memory is loaded, empty, saved, or unavailable."
+      "notes": "Reports whether user memory is loaded, empty, saved, or unavailable."
     },
-    "learning-primary-memory": {
-      "label": "Primary memory editor",
+    "learning-user-memory": {
+      "label": "User memory editor",
       "section": "Learning",
       "type": "textarea",
-      "action": "Edits the complete primary memory document."
+      "action": "Edits the complete user memory document."
     },
-    "learning-primary-count": {
-      "label": "Primary memory character count",
+    "learning-user-count": {
+      "label": "User memory character count",
       "section": "Learning",
       "type": "text"
     },
-    "learning-primary-reload": {
-      "label": "Reload primary memory",
+    "learning-user-reload": {
+      "label": "Reload user memory",
       "section": "Learning",
       "type": "button",
-      "action": "Discards the current draft and reloads the persisted primary memory document."
+      "action": "Discards the current draft and reloads the persisted user memory document."
     },
-    "learning-primary-save": {
-      "label": "Save primary memory",
+    "learning-user-save": {
+      "label": "Save user memory",
       "section": "Learning",
       "type": "button",
-      "action": "Replaces the persisted primary memory document."
+      "action": "Replaces the persisted user memory document."
     },
     "learning-agent-status": {
       "label": "Soul memory status",

@@ -57,7 +57,7 @@ func TestRosterUniqueness(t *testing.T) {
 		MethodPluginList, MethodPluginSave, MethodPluginDelete, MethodPluginTest,
 		MethodPluginStop, MethodPluginToolsList, MethodPluginUninstall,
 		MethodMemoryList, MethodMemorySave, MethodMemorySearch, MethodMemoryDelete,
-		MethodMemoryPrimaryUpdate, MethodMemoryAgentUpdate,
+		MethodMemoryUserUpdate, MethodMemoryAgentUpdate,
 		MethodTodosGet, MethodTodosDelete,
 		MethodDocsList, MethodDocsSearch, MethodDocsRead,
 		MethodLogsList, MethodLogsClear,

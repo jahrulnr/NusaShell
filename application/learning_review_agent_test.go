@@ -38,7 +38,7 @@ func (s *reviewStubToolbox) Execute(_ context.Context, name string, argsJSON []b
 	if s.fail[name] {
 		return "", errors.New("boom: tool unavailable")
 	}
-	// file_read is used by the review loop to pre-inject primary.md; read
+	// file_read is used by the review loop to pre-inject user.md; read
 	// the real file so tests can assert on its content.
 	if name == "file_read" {
 		var args struct {
@@ -337,18 +337,18 @@ func TestReviewLoopRecordsMutationOnlyOnSuccess(t *testing.T) {
 	})
 }
 
-// stubPrimaryStoreReview is a minimal PrimaryStore for review-agent tests.
-type stubPrimaryStoreReview struct {
-	mem  *domain.PrimaryMemory
+// stubUserStoreReview is a minimal user memory store for review-agent tests.
+type stubUserStoreReview struct {
+	mem  *domain.MemoryDocument
 	path string
 }
 
-func (s *stubPrimaryStoreReview) Load() *domain.PrimaryMemory { return s.mem }
-func (s *stubPrimaryStoreReview) Update(entries []domain.PrimaryEntry) error {
+func (s *stubUserStoreReview) Load() *domain.MemoryDocument { return s.mem }
+func (s *stubUserStoreReview) Update(entries []domain.DocumentEntry) error {
 	return nil
 }
-func (s *stubPrimaryStoreReview) Replace(oldText, content string) error { return nil }
-func (s *stubPrimaryStoreReview) Path() string                          { return s.path }
+func (s *stubUserStoreReview) Replace(oldText, content string) error { return nil }
+func (s *stubUserStoreReview) Path() string                          { return s.path }
 
 func TestReviewLoopRecordsMemoryReplaceMutation(t *testing.T) {
 	if resources.ReviewPrompt() == "" {
@@ -381,18 +381,18 @@ func TestReviewLoopRecordsMemoryReplaceMutation(t *testing.T) {
 	}
 }
 
-// TestReviewLoopInjectsPrimaryViaFileRead pins the new injection contract:
-// when a PrimaryStore with a real file path is configured, the review loop
-// pre-injects a file_read tool call + result carrying the primary.md content
+// TestReviewLoopInjectsUserViaFileRead pins the new injection contract:
+// when a user memory store with a real file path is configured, the review loop
+// pre-injects a file_read tool call + result carrying the user.md content
 // (frontmatter included), so the agent sees the actual file as ground truth.
-func TestReviewLoopInjectsPrimaryViaFileRead(t *testing.T) {
+func TestReviewLoopInjectsUserViaFileRead(t *testing.T) {
 	if resources.ReviewPrompt() == "" {
 		t.Fatal("review prompt must be non-empty for the loop to run")
 	}
 	dir := t.TempDir()
-	primaryPath := filepath.Join(dir, "primary.md")
+	userPath := filepath.Join(dir, "user.md")
 	body := "---\nversion: 2\n---\n\nUser prefers Indonesian.\n"
-	if err := os.WriteFile(primaryPath, []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(userPath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -404,9 +404,9 @@ func TestReviewLoopInjectsPrimaryViaFileRead(t *testing.T) {
 	app := &App{
 		Toolbox: &reviewStubToolbox{},
 		Logs:    &fakeLogStore{},
-		Primary: &stubPrimaryStoreReview{
-			mem:  &domain.PrimaryMemory{Entries: []domain.PrimaryEntry{{Content: "User prefers Indonesian."}}},
-			path: primaryPath,
+		User: &stubUserStoreReview{
+			mem:  &domain.MemoryDocument{Entries: []domain.DocumentEntry{{Content: "User prefers Indonesian."}}},
+			path: userPath,
 		},
 	}
 	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
@@ -426,16 +426,16 @@ func TestReviewLoopInjectsPrimaryViaFileRead(t *testing.T) {
 		}
 		// Compare the decoded path field, not the raw JSON: on Windows the
 		// backslashes in tc.Args are escaped (C:\\Users\\...) and would not
-		// match the native primaryPath.
+		// match the native userPath.
 		var args struct {
 			Path string `json:"path"`
 		}
-		if err := json.Unmarshal([]byte(tc.Args), &args); err == nil && args.Path == primaryPath {
+		if err := json.Unmarshal([]byte(tc.Args), &args); err == nil && args.Path == userPath {
 			sawFileRead = true
 		}
 	}
 	if !sawFileRead {
-		t.Errorf("expected a file_read tool call for %q in %+v", primaryPath, messages[1].ToolCalls)
+		t.Errorf("expected a file_read tool call for %q in %+v", userPath, messages[1].ToolCalls)
 	}
 	// The file_read result must carry the real file content.
 	var fileReadContent string
@@ -445,13 +445,13 @@ func TestReviewLoopInjectsPrimaryViaFileRead(t *testing.T) {
 		}
 	}
 	if !strings.Contains(fileReadContent, "User prefers Indonesian.") {
-		t.Errorf("file_read result should contain primary body, got %q", fileReadContent)
+		t.Errorf("file_read result should contain user body, got %q", fileReadContent)
 	}
 }
 
-// TestReviewLoopSkipsPrimaryInjectionWithoutStore covers the no-Primary path:
+// TestReviewLoopSkipsUserInjectionWithoutStore covers the no-user-store path:
 // only review_transcript is injected, no file_read call appears.
-func TestReviewLoopSkipsPrimaryInjectionWithoutStore(t *testing.T) {
+func TestReviewLoopSkipsUserInjectionWithoutStore(t *testing.T) {
 	if resources.ReviewPrompt() == "" {
 		t.Fatal("review prompt must be non-empty for the loop to run")
 	}
@@ -463,7 +463,7 @@ func TestReviewLoopSkipsPrimaryInjectionWithoutStore(t *testing.T) {
 	app := &App{
 		Toolbox: &reviewStubToolbox{},
 		Logs:    &fakeLogStore{},
-		// Primary not set
+		// User store not set
 	}
 	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
 	_, messages, err := agent.runReviewLoop(context.Background(), stubProviderContext(adapter), "model", conv)
@@ -475,7 +475,7 @@ func TestReviewLoopSkipsPrimaryInjectionWithoutStore(t *testing.T) {
 	}
 	for _, tc := range messages[1].ToolCalls {
 		if tc.Name == "file_read" {
-			t.Errorf("no file_read call expected without a PrimaryStore, got %+v", tc)
+			t.Errorf("no file_read call expected without a user memory store, got %+v", tc)
 		}
 	}
 }
@@ -756,7 +756,7 @@ func TestReviewLoopEmptyResponseIsError(t *testing.T) {
 	}
 	// Pre-injected synthetic tool produces 3 messages before the first LLM
 	// call: user prompt, synthetic assistant tool call, and 1 tool result
-	// (newReviewApp sets no PrimaryStore, so no file_read injection).
+	// (newReviewApp sets no user memory store, so no file_read injection).
 	if len(messages) != 3 {
 		t.Fatalf("messages = %d, want 3 (user + synthetic assistant + 1 tool result)", len(messages))
 	}
@@ -1129,7 +1129,7 @@ func TestReviewLoopCompactionResetsStaleMarker(t *testing.T) {
 		t.Fatal("expected review to run after marker reset, got nil messages (stale marker not reset)")
 	}
 	// 4 messages: user prompt + synthetic assistant + 1 tool result + conclusion
-	// (no PrimaryStore set, so no file_read injection).
+	// (no user memory store set, so no file_read injection).
 	if len(messages) != 4 {
 		t.Errorf("messages = %d, want 4; got %+v", len(messages), messages)
 	}

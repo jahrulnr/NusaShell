@@ -1,16 +1,16 @@
 # Memory
 
 NusaShell has a three-tier memory system: two small, always-injected
-documents — **user.md** (user rules and preferences; legacy name
-`primary.md`) and **soul.md** (agent working knowledge) — plus an
+documents — **user.md** (user rules and preferences) and **soul.md**
+(agent working knowledge) — plus an
 unlimited, searchable **fragments** archive.
 
 ## Tiers
 
 | Tier | Storage | Cap | Injected | Tools |
 |---|---|---|---|---|
-| **User** | `memory/user.md` (single markdown document; legacy path `memory/primary.md` — move it here by hand when upgrading) | ~1k tokens | Every turn (via hydration) | `file_read(path="memory/user.md")`, `memory(op="replace",target="user")` (legacy `target="primary"` aliases user) |
-| **Agent / Soul** | `memory/soul.md` (single markdown document; legacy path `memory/agent.md` — move it here by hand when upgrading) | ~1k tokens | Every turn (via hydration) | `file_read(path="memory/soul.md")`, `memory(op="replace",target="agent")` |
+| **User** | `memory/user.md` (single markdown document) | ~1k tokens | Every turn (via hydration) | `file_read(path="memory/user.md")`, `memory(op="replace",target="user")` |
+| **Agent / Soul** | `memory/soul.md` (single markdown document) | ~1k tokens | Every turn (via hydration) | `file_read(path="memory/soul.md")`, `memory(op="replace",target="agent")` |
 | **Fragments** | `memory/fragments/*.md` (one file per entry) | Unlimited | On-demand (search + `task_memory` announcements) | `memory(op="save")`, `memory(op="search")`, `memory(op="list",target="fragments")`, `memory(op="replace",target="fragment")`, `memory(op="delete")` |
 
 The Agent / Soul tier keeps the wire identifier `agent` for memory operations
@@ -46,7 +46,7 @@ the same rasterized radius. Dense edge lines stay thin, and a completed full
 layout places highly connected hubs toward the center while low-degree and
 isolated nodes move toward a compact perimeter ring without detaching them
 from the main cluster. Its restrained archipelago palette maps skills to
-ocean blue, fragments to earth brown, primary memory to leaf green, and graph
+ocean blue, fragments to earth brown, user memory to leaf green, and graph
 edges to deeper ocean, mangrove, or sand tones. Position-preserving background
 refreshes do not re-run this radial pass.
 
@@ -71,12 +71,11 @@ that works for both humans and AI agents.
 The entire body is one document — paragraphs are part of the same
 entry, not separate entries. The agent edits the body in place via
 `memory(op="replace", target="user"|"agent")` (substring match) or
-rewrites the whole body by omitting `old_text`. Legacy
-`target="primary"` maps to the user tier.
+rewrites the whole body by omitting `old_text`.
 
 Users can edit the two always-injected documents from **Learning**: the user
 document is under **About You**, and `soul.md` is under **About Agent**. These
-editors use the explicit `memory.primary.update` and `memory.agent.update`
+editors use the explicit `memory.user.update` and `memory.agent.update`
 RPCs, preserve tier-only semantics, and allow an intentional empty document.
 Each editor shows the 4000-character cap; fragment memory is not changed by
 either action.
@@ -118,9 +117,9 @@ All memory operations go through the `memory` dispatcher tool; `op` selects:
   not lists — read them with `file_read(path="memory/user.md")` or
   `file_read(path="memory/soul.md")` instead.
 - `replace` — update memory. For tier documents: `target="user"` or
-  `target="agent"` (legacy `"primary"` aliases user) + `old_text`
-  (substring match) + `content` to edit part of the document, or omit
-  `old_text` to rewrite the entire body. For fragments:
+  `target="agent"` + `old_text` (substring match) + `content` to edit
+  part of the document, or omit `old_text` to rewrite the entire body.
+  For fragments:
   `target="fragment"` + `id` + `content`.
 - `delete` — delete a fragment by `id`.
 
@@ -256,8 +255,8 @@ after a successful review that had no coalesced activity.
 
 Good examples:
 
-    memory(op="replace", target="primary", old_text="old automation notes", content="Automation uses a local runner")
-    memory(op="replace", target="primary", content="Full rewrite of the primary document body…")
+    memory(op="replace", target="user", old_text="old automation notes", content="Automation uses a local runner")
+    memory(op="replace", target="user", content="Full rewrite of the user document body…")
 
 ## What not to save
 

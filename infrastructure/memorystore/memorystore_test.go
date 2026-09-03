@@ -38,7 +38,7 @@ func TestAgentUpdateEnforcesCap(t *testing.T) {
 	dir := t.TempDir()
 	a, _ := NewAgent(dir)
 	big := strings.Repeat("x", domain.AgentCharCap+1)
-	if err := a.Update([]domain.PrimaryEntry{{Content: big}}); err == nil {
+	if err := a.Update([]domain.DocumentEntry{{Content: big}}); err == nil {
 		t.Error("agent Update should reject content over the agent cap")
 	}
 }
@@ -46,7 +46,7 @@ func TestAgentUpdateEnforcesCap(t *testing.T) {
 func TestAgentReplaceAndPersist(t *testing.T) {
 	dir := t.TempDir()
 	a, _ := NewAgent(dir)
-	_ = a.Update([]domain.PrimaryEntry{{Content: "convention: gates must be stdlib-only", Source: "agent"}})
+	_ = a.Update([]domain.DocumentEntry{{Content: "convention: gates must be stdlib-only", Source: "agent"}})
 	if err := a.Replace("stdlib-only", "stdlib-only or venv"); err != nil {
 		t.Fatalf("Replace: %v", err)
 	}
@@ -58,35 +58,38 @@ func TestAgentReplaceAndPersist(t *testing.T) {
 	if len(loaded.Entries) != 1 || !strings.Contains(loaded.Entries[0].Content, "venv") {
 		t.Errorf("agent doc after replace+reload = %+v", loaded)
 	}
+	if !strings.HasPrefix(loaded.Entries[0].ID, "agent_") {
+		t.Errorf("agent document ID should be agent_ prefixed, got %q", loaded.Entries[0].ID)
+	}
 }
 
-func TestPrimaryAutoCreates(t *testing.T) {
+func TestUserAutoCreates(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, PrimaryFile)
+	path := filepath.Join(dir, UserFile)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatal("primary.md should not exist yet")
+		t.Fatal("user.md should not exist yet")
 	}
-	p, err := NewPrimary(dir)
+	p, err := NewUser(dir)
 	if err != nil {
-		t.Fatalf("NewPrimary: %v", err)
+		t.Fatalf("NewUser: %v", err)
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("primary.md not auto-created: %v", err)
+		t.Fatalf("user.md not auto-created: %v", err)
 	}
 	mem := p.Load()
 	if len(mem.Entries) != 1 || mem.Entries[0].Content != "" {
-		t.Errorf("new primary should be empty, got %+v", mem)
+		t.Errorf("new user document should be empty, got %+v", mem)
 	}
 }
 
-func TestPrimaryUpdateAndLoad(t *testing.T) {
+func TestUserUpdateAndLoad(t *testing.T) {
 	dir := t.TempDir()
-	p, err := NewPrimary(dir)
+	p, err := NewUser(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := "You are a backend developer living in Jakarta.\n\nYou prefer pragmatic solutions."
-	if err := p.Update([]domain.PrimaryEntry{{Content: body, Source: "agent"}}); err != nil {
+	if err := p.Update([]domain.DocumentEntry{{Content: body, Source: "agent"}}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	loaded := p.Load()
@@ -98,10 +101,10 @@ func TestPrimaryUpdateAndLoad(t *testing.T) {
 	}
 }
 
-func TestPrimaryUpdateMergesEntries(t *testing.T) {
+func TestUserUpdateMergesEntries(t *testing.T) {
 	dir := t.TempDir()
-	p, _ := NewPrimary(dir)
-	entries := []domain.PrimaryEntry{
+	p, _ := NewUser(dir)
+	entries := []domain.DocumentEntry{
 		{Content: "First paragraph.", Source: "agent"},
 		{Content: "Second paragraph.", Source: "agent"},
 	}
@@ -121,19 +124,19 @@ func TestPrimaryUpdateMergesEntries(t *testing.T) {
 	}
 }
 
-func TestPrimaryUpdateEnforcesCap(t *testing.T) {
+func TestUserUpdateEnforcesCap(t *testing.T) {
 	dir := t.TempDir()
-	p, _ := NewPrimary(dir)
-	big := strings.Repeat("x", domain.PrimaryCharCap+1)
-	if err := p.Update([]domain.PrimaryEntry{{Content: big}}); err == nil {
+	p, _ := NewUser(dir)
+	big := strings.Repeat("x", domain.UserCharCap+1)
+	if err := p.Update([]domain.DocumentEntry{{Content: big}}); err == nil {
 		t.Error("Update should reject content over the cap")
 	}
 }
 
-func TestPrimaryReplace(t *testing.T) {
+func TestUserReplace(t *testing.T) {
 	dir := t.TempDir()
-	p, _ := NewPrimary(dir)
-	_ = p.Update([]domain.PrimaryEntry{{Content: "user prefers English", Source: "agent"}})
+	p, _ := NewUser(dir)
+	_ = p.Update([]domain.DocumentEntry{{Content: "user prefers English", Source: "agent"}})
 	if err := p.Replace("English", "user prefers Indonesian"); err != nil {
 		t.Fatalf("Replace: %v", err)
 	}
@@ -143,21 +146,21 @@ func TestPrimaryReplace(t *testing.T) {
 	}
 }
 
-func TestPrimaryReplaceNoMatch(t *testing.T) {
+func TestUserReplaceNoMatch(t *testing.T) {
 	dir := t.TempDir()
-	p, _ := NewPrimary(dir)
-	_ = p.Update([]domain.PrimaryEntry{{Content: "hello"}})
+	p, _ := NewUser(dir)
+	_ = p.Update([]domain.DocumentEntry{{Content: "hello"}})
 	if err := p.Replace("nonexistent", "new"); err == nil {
 		t.Error("Replace should fail when no text matches")
 	}
 }
 
-func TestPrimaryPersistsAcrossInstances(t *testing.T) {
+func TestUserPersistsAcrossInstances(t *testing.T) {
 	dir := t.TempDir()
-	p1, _ := NewPrimary(dir)
-	_ = p1.Update([]domain.PrimaryEntry{{Content: "persisted document body"}})
+	p1, _ := NewUser(dir)
+	_ = p1.Update([]domain.DocumentEntry{{Content: "persisted document body"}})
 
-	p2, err := NewPrimary(dir)
+	p2, err := NewUser(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,19 +170,19 @@ func TestPrimaryPersistsAcrossInstances(t *testing.T) {
 	}
 }
 
-func TestPrimaryAutoCreateHasYAMLFrontmatter(t *testing.T) {
+func TestUserAutoCreateHasYAMLFrontmatter(t *testing.T) {
 	dir := t.TempDir()
-	p, err := NewPrimary(dir)
+	p, err := NewUser(dir)
 	if err != nil {
-		t.Fatalf("NewPrimary: %v", err)
+		t.Fatalf("NewUser: %v", err)
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, PrimaryFile))
+	raw, err := os.ReadFile(filepath.Join(dir, UserFile))
 	if err != nil {
-		t.Fatalf("read primary.md: %v", err)
+		t.Fatalf("read user.md: %v", err)
 	}
 	s := string(raw)
 	if !strings.HasPrefix(s, "---\n") {
-		t.Fatal("primary.md should start with YAML frontmatter delimiter '---'")
+		t.Fatal("user.md should start with YAML frontmatter delimiter '---'")
 	}
 	if !strings.Contains(s, "last_updated:") {
 		t.Error("frontmatter missing last_updated field")
@@ -187,23 +190,23 @@ func TestPrimaryAutoCreateHasYAMLFrontmatter(t *testing.T) {
 	if !strings.Contains(s, "version:") {
 		t.Error("frontmatter missing version field")
 	}
-	if !strings.Contains(s, fmt.Sprintf("version: %d", PrimaryVersion)) {
-		t.Errorf("frontmatter version should be %d", PrimaryVersion)
+	if !strings.Contains(s, fmt.Sprintf("version: %d", DocVersion)) {
+		t.Errorf("frontmatter version should be %d", DocVersion)
 	}
 	mem := p.Load()
 	if len(mem.Entries) != 1 || mem.Entries[0].Content != "" {
-		t.Errorf("auto-created primary should be empty, got %+v", mem)
+		t.Errorf("auto-created user document should be empty, got %+v", mem)
 	}
 }
 
-func TestPrimaryUpdateWritesFrontmatter(t *testing.T) {
+func TestUserUpdateWritesFrontmatter(t *testing.T) {
 	dir := t.TempDir()
-	p, _ := NewPrimary(dir)
-	_ = p.Update([]domain.PrimaryEntry{{Content: "test document body"}})
-	raw, _ := os.ReadFile(filepath.Join(dir, PrimaryFile))
+	p, _ := NewUser(dir)
+	_ = p.Update([]domain.DocumentEntry{{Content: "test document body"}})
+	raw, _ := os.ReadFile(filepath.Join(dir, UserFile))
 	s := string(raw)
 	if !strings.HasPrefix(s, "---\n") {
-		t.Fatal("updated primary.md should start with YAML frontmatter")
+		t.Fatal("updated user.md should start with YAML frontmatter")
 	}
 	if !strings.Contains(s, "last_updated:") {
 		t.Error("updated frontmatter missing last_updated")
@@ -219,11 +222,11 @@ func TestPrimaryUpdateWritesFrontmatter(t *testing.T) {
 	}
 }
 
-func TestPrimaryMultiParagraphDocument(t *testing.T) {
+func TestUserMultiParagraphDocument(t *testing.T) {
 	dir := t.TempDir()
-	p, _ := NewPrimary(dir)
+	p, _ := NewUser(dir)
 	body := "You are a backend developer.\n\nYou prefer Go and clean architecture.\n\nYou work on NusaShell."
-	if err := p.Update([]domain.PrimaryEntry{{Content: body, Source: "agent"}}); err != nil {
+	if err := p.Update([]domain.DocumentEntry{{Content: body, Source: "agent"}}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	loaded := p.Load()
@@ -233,8 +236,8 @@ func TestPrimaryMultiParagraphDocument(t *testing.T) {
 	if loaded.Entries[0].Content != body {
 		t.Errorf("body should be preserved as-is:\nwant: %q\ngot:  %q", body, loaded.Entries[0].Content)
 	}
-	if !strings.HasPrefix(loaded.Entries[0].ID, "prim_") {
-		t.Errorf("ID should be prim_ prefixed, got %q", loaded.Entries[0].ID)
+	if !strings.HasPrefix(loaded.Entries[0].ID, "user_") {
+		t.Errorf("ID should be user_ prefixed, got %q", loaded.Entries[0].ID)
 	}
 }
 
@@ -444,7 +447,7 @@ func TestParseFragmentRoundTrip(t *testing.T) {
 		Task:      "memory-tier",
 		Tags:      []string{"go", "arch"},
 		Source:    "agent",
-		Content:   "Two-tier memory with primary + fragments.",
+		Content:   "User memory with fragments.",
 		CreatedAt: mustParseTime("2026-08-19T12:00:00Z"),
 		UpdatedAt: mustParseTime("2026-08-19T12:30:00Z"),
 	}

@@ -40,9 +40,9 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 			}
 		}
 		if kind == "" || kind == "memory" {
-			// Primary memory entries.
-			if a.Primary != nil {
-				mem := a.Primary.Load()
+			// User memory entries.
+			if a.User != nil {
+				mem := a.User.Load()
 				for i := range mem.Entries {
 					content := mem.Entries[i].Content
 					name := content
@@ -52,7 +52,7 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 					items = append(items, contracts.LearningSearchResultItem{
 						ID:      mem.Entries[i].ID,
 						Kind:    "memory",
-						Tier:    "primary",
+						Tier:    domain.MemoryTierUser,
 						Name:    name,
 						Content: content,
 					})
@@ -126,9 +126,9 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 				})
 			}
 		}
-		// Also search primary memory via substring.
-		if a.Primary != nil {
-			mem := a.Primary.Load()
+		// Also search user memory via substring.
+		if a.User != nil {
+			mem := a.User.Load()
 			q := strings.ToLower(query)
 			for i := range mem.Entries {
 				if strings.Contains(strings.ToLower(mem.Entries[i].Content), q) {
@@ -139,7 +139,7 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 					items = append(items, contracts.LearningSearchResultItem{
 						ID:      mem.Entries[i].ID,
 						Kind:    "memory",
-						Tier:    "primary",
+						Tier:    domain.MemoryTierUser,
 						Name:    name,
 						Content: mem.Entries[i].Content,
 					})
@@ -189,18 +189,18 @@ func (a *App) handleLearningGraph() (any, *contracts.RPCError) {
 			Name: s.Name,
 		})
 	}
-	// Primary memory nodes. Primary is a single prose document (one entry
+	// User memory nodes. User memory is a single prose document (one entry
 	// per whole document), not per-fact entries — the node label is the
 	// first line so it reads as the document's subject, and the tier marks
-	// it as primary in the UI (distinct shape/color from fragments).
-	if a.Primary != nil {
-		mem := a.Primary.Load()
+	// it as user memory in the UI (distinct shape/color from fragments).
+	if a.User != nil {
+		mem := a.User.Load()
 		for i := range mem.Entries {
 			nodes = append(nodes, contracts.LearningGraphNode{
 				ID:   mem.Entries[i].ID,
 				Kind: "memory",
-				Tier: "primary",
-				Name: primaryNodeLabel(mem.Entries[i].Content),
+				Tier: domain.MemoryTierUser,
+				Name: userNodeLabel(mem.Entries[i].Content),
 			})
 		}
 	}
@@ -266,10 +266,10 @@ func memoryNodeLabel(content string) string {
 	return oneLine
 }
 
-// primaryNodeLabel labels the single primary-memory document node with
+// userNodeLabel labels the single user-memory document node with
 // its first line (the document's subject), capped at 60 chars. The full
 // document stays in the node tooltip via the frontend's title fallback.
-func primaryNodeLabel(content string) string {
+func userNodeLabel(content string) string {
 	first := content
 	if idx := strings.IndexByte(first, '\n'); idx >= 0 {
 		first = first[:idx]

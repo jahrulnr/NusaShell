@@ -149,6 +149,18 @@ func TestSkillSearch(t *testing.T) {
 	}
 }
 
+func TestMemoryReplaceRejectsRemovedPrimaryTier(t *testing.T) {
+	user, err := memorystore.NewUser(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewUser: %v", err)
+	}
+	tb := &Toolbox{User: user}
+	_, err = tb.Execute(context.Background(), "memory", []byte(`{"op":"replace","target":"primary","content":"stale alias"}`))
+	if err == nil || !strings.Contains(err.Error(), `target must be "user"`) {
+		t.Fatalf("removed primary target must fail with canonical target guidance, got: %v", err)
+	}
+}
+
 // stubSkillSearcher returns scripted ranked results for skill search tests.
 type stubSkillSearcher struct {
 	ids []string
@@ -1590,6 +1602,21 @@ func TestDocsReadAcceptsCanonicalIDAndMarkdownFilename(t *testing.T) {
 		if !strings.Contains(out, "title: Automation") {
 			t.Fatalf("docs read id %q did not return canonical metadata: %s", id, out)
 		}
+	}
+}
+
+func TestDocsSearchReturnsSelectionSnippet(t *testing.T) {
+	source, err := docsinfra.New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tb := &Toolbox{Docs: source}
+	out, err := tb.Execute(context.Background(), "docs", []byte(`{"op":"search","query":"provider credentials","limit":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"snippet"`) || !strings.Contains(strings.ToLower(out), "provider") {
+		t.Fatalf("docs search should return a selection snippet, got: %s", out)
 	}
 }
 

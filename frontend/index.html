@@ -451,20 +451,20 @@
                 <div>
                   <div class="learning-about-kicker">Always in context</div>
                   <h2>About You</h2>
-                  <p>Primary memory is the small, durable profile NusaShell keeps available while it works. Edit it when you want to correct or clarify what the agent should remember about you.</p>
+                  <p>User memory is the small, durable profile NusaShell keeps available while it works. Edit it when you want to correct or clarify what the agent should remember about you.</p>
                 </div>
-                <span class="learning-about-status" id="learning-primary-status" aria-live="polite">Loading…</span>
+                <span class="learning-about-status" id="learning-user-status" aria-live="polite">Loading…</span>
               </div>
-              <label class="learning-about-label" for="learning-primary-memory">Primary memory</label>
-              <textarea id="learning-primary-memory" class="learning-primary-memory" rows="14" spellcheck="false" placeholder="Tell NusaShell what it should remember about you…"></textarea>
+              <label class="learning-about-label" for="learning-user-memory">User memory</label>
+              <textarea id="learning-user-memory" class="learning-memory-editor" rows="14" spellcheck="false" placeholder="Tell NusaShell what it should remember about you…"></textarea>
               <div class="learning-about-footer">
                 <div class="learning-about-meta">
-                  <span id="learning-primary-count">0 / 4000 characters</span>
+                  <span id="learning-user-count">0 / 4000 characters</span>
                   <span>Stored locally and included in future agent context.</span>
                 </div>
                 <div class="learning-about-actions">
-                  <button class="mini-btn ghost" id="learning-primary-reload" type="button">Reload</button>
-                  <button class="mini-btn" id="learning-primary-save" type="button">Save changes</button>
+                  <button class="mini-btn ghost" id="learning-user-reload" type="button">Reload</button>
+                  <button class="mini-btn" id="learning-user-save" type="button">Save changes</button>
                 </div>
               </div>
             </div>
@@ -480,7 +480,7 @@
                 <span class="learning-about-status" id="learning-agent-status" aria-live="polite">Loading…</span>
               </div>
               <label class="learning-about-label" for="learning-agent-memory">Soul memory</label>
-              <textarea id="learning-agent-memory" class="learning-primary-memory learning-agent-memory" rows="14" spellcheck="false" placeholder="Tell NusaShell what it should remember about how it works…"></textarea>
+              <textarea id="learning-agent-memory" class="learning-memory-editor learning-agent-memory" rows="14" spellcheck="false" placeholder="Tell NusaShell what it should remember about how it works…"></textarea>
               <div class="learning-about-footer">
                 <div class="learning-about-meta">
                   <span id="learning-agent-count">0 / 4000 characters</span>
@@ -530,7 +530,7 @@
                 <div class="learning-graph-legend">
                   <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-skill"></span>Skill</span>
                   <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-memory"></span>Fragment</span>
-                  <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-primary"></span>Primary</span>
+                  <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-user"></span>User</span>
                   <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-related"></span>Related</span>
                   <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-used"></span>Used with</span>
                 </div>

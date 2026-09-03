@@ -213,7 +213,7 @@ func run() error {
 	// soul.md (always-injected agent working knowledge, ~1k token cap),
 	// and fragments (memory/fragments/*.md, unlimited, searchable). All
 	// auto-create their files/directories on first use.
-	primaryStore, err := memorystore.NewPrimary(dataDir)
+	userStore, err := memorystore.NewUser(dataDir)
 	if err != nil {
 		slog.Warn("user memory init failed", "error", err)
 	}
@@ -232,7 +232,7 @@ func run() error {
 	tb := &tools.Toolbox{
 		Skills:                 skillStore,
 		Memory:                 &jsonstore.Memory{S: store},
-		Primary:                primaryStore,
+		User:                   userStore,
 		Agent:                  agentStore,
 		Fragments:              fragmentStore,
 		ProjectMemory:          projectMemoryStore,
@@ -256,7 +256,7 @@ func run() error {
 		Credentials:                 credentials,
 		Skills:                      skillStore,
 		Memory:                      &jsonstore.Memory{S: store},
-		Primary:                     primaryStore,
+		User:                        userStore,
 		Agent:                       agentStore,
 		Fragments:                   fragmentStore,
 		ProjectMemory:               projectMemoryStore,

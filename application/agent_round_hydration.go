@@ -220,8 +220,8 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 		// tool output — the same tools the agent calls.
 		source.Executor = a.Toolbox
 	}
-	if a.Primary != nil {
-		source.PrimaryPath = a.Primary.Path()
+	if a.User != nil {
+		source.UserPath = a.User.Path()
 	}
 	if a.Agent != nil {
 		source.AgentPath = a.Agent.Path()

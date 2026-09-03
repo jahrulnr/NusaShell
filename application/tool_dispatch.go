@@ -87,7 +87,7 @@ var dispatchFamilies = []dispatchFamily{
 		members: []string{"save", "replace", "search", "list", "delete"},
 		def: ToolInfo{
 			Name:        "memory",
-			Description: "Long-term memory; \"op\" selects: save {content,category?,project?,task?,tags?} idempotent fragment dedup — durable knowledge only; replace {target:user|agent|fragment,content,old_text?,id?} edit a tier document (user.md = user rules, soul.md = agent working knowledge, legacy target \"primary\" aliases user) via substring match or full rewrite, or edit one fragment; search {query,category?,project?,task?,tags?,limit?} BM25-ranked fragments plus substring matches in both tier documents; list {target?:fragments,category?,project?,limit?} list the fragment archive (tier documents are single files — read them with file_read of their path); delete {id}",
+			Description: "Long-term memory; \"op\" selects: save {content,category?,project?,task?,tags?} idempotent fragment dedup — durable knowledge only; replace {target:user|agent|fragment,content,old_text?,id?} edit a tier document (user.md = user rules, soul.md = agent working knowledge) via substring match or full rewrite, or edit one fragment; search {query,category?,project?,task?,tags?,limit?} BM25-ranked fragments plus substring matches in both tier documents; list {target?:fragments,category?,project?,limit?} list the fragment archive (tier documents are single files — read them with file_read of their path); delete {id}",
 			InputSchema: objSchema(
 				pEnum("op", "Operation", "save", "replace", "search", "list", "delete"),
 				pStr("content", "Fact/observation to save, replacement body, or new fragment content"),
@@ -95,8 +95,8 @@ var dispatchFamilies = []dispatchFamily{
 				pStr("project", "Optional project/workspace label"),
 				pStr("task", "Optional task label (save/search)"),
 				schemaProp{"tags", map[string]any{"type": "array", "description": "Optional tags; search requires ALL to match", "items": map[string]any{"type": "string"}}},
-				pEnum("target", "replace: user|agent|fragment (primary = legacy alias for user) · list: fragments", "primary", "user", "agent", "fragment", "fragments"),
-				pStr("old_text", "Primary substring to replace; omit to rewrite the entire document body"),
+				pEnum("target", "replace: user|agent|fragment · list: fragments", "user", "agent", "fragment", "fragments"),
+				pStr("old_text", "User/agent document substring to replace; omit to rewrite the entire document body"),
 				pStr("id", "Fragment id (op=replace target=fragment / op=delete)"),
 				pStr("query", "Search query (op=search)"),
 				pInt("limit", "Max results (search default 20, list default 50)"),
@@ -108,7 +108,7 @@ var dispatchFamilies = []dispatchFamily{
 		members: []string{"list", "search", "read"},
 		def: ToolInfo{
 			Name:        "docs",
-			Description: "NusaShell documentation corpus; \"op\" selects: list {limit?} page ids/titles for vocabulary discovery; search {query,limit?} BM25-ranked page ids (multi-word terms need not be contiguous); read {id} full page. When terminology is uncertain or search returns no results, use list, then read relevant pages before answering. Long pages are truncated in-band (~32KiB) with overflow_path in the platform temp dir — continue with file_read using next_offset_bytes.",
+			Description: "NusaShell documentation corpus; \"op\" selects: list {limit?} page ids/titles for vocabulary discovery; search {query,limit?} BM25-ranked page ids/titles/snippets (multi-word terms need not be contiguous); read {id} full authoritative page. When terminology is uncertain or search returns no results, use list, then MUST read relevant pages before answering. After any search hit, MUST read the relevant page before relying on its facts. Long pages are truncated in-band (~32KiB) with overflow_path in the platform temp dir — continue with file_read using next_offset_bytes.",
 			InputSchema: objSchema(
 				pEnum("op", "Operation", "list", "search", "read"),
 				pStr("query", "Search query (op=search)"),
@@ -122,7 +122,7 @@ var dispatchFamilies = []dispatchFamily{
 		members: []string{"query", "list", "read", "admit", "skip", "archive", "lint"},
 		def: ToolInfo{
 			Name:        "memory_project",
-			Description: "Per-workspace project memory (skill-compatible anchored markdown); advertised only when a workspace is set. \"op\" selects: query {topic?|kind?|related?|id?, archive?, full?, limit?} AND selectors, at least one required; list files in read priority; read {kind} or {id}; admit {kind,content,id?} upsert then lint (debug also pattern-tracks); skip {reason} records a negative admission with no disk write; archive {id} moves a live entry to archive/; lint reports problems. Never store user prefs here — use memory (primary/fragments). See docs(op=\"read\", id=\"memory-project\").",
+			Description: "Per-workspace project memory (skill-compatible anchored markdown); advertised only when a workspace is set. \"op\" selects: query {topic?|kind?|related?|id?, archive?, full?, limit?} AND selectors, at least one required; list files in read priority; read {kind} or {id}; admit {kind,content,id?} upsert then lint (debug also pattern-tracks); skip {reason} records a negative admission with no disk write; archive {id} moves a live entry to archive/; lint reports problems. Never store user prefs here — use memory (user/fragments). See docs(op=\"read\", id=\"memory-project\").",
 			InputSchema: objSchema(
 				pEnum("op", "Operation", "query", "list", "read", "admit", "skip", "archive", "lint"),
 				pStr("topic", "Topic selector (op=query)"),

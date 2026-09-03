@@ -220,7 +220,7 @@
   border-radius: 8px;
   margin-left: -4px;
 }
-.learning-tier-primary {
+.learning-tier-user {
   color: var(--red);
   background: rgba(248, 81, 73, 0.12);
   border: 1px solid rgba(248, 81, 73, 0.3);
@@ -298,7 +298,7 @@
 }
 .learning-legend-skill { background: #79bdd2; }
 .learning-legend-memory { background: #c38c5e; }
-.learning-legend-primary { background: #68b982; }
+.learning-legend-user { background: #68b982; }
 .learning-legend-related { background: #1d5a7033; border: 1px solid #1d5a70; }
 .learning-legend-used { background: #3f8a7133; border: 1px solid #3f8a71; }
 
@@ -437,7 +437,7 @@
   display: none;
 }
 
-/* ============ About You / primary memory ============ */
+/* ============ About You / user memory ============ */
 
 .learning-about-panel {
   overflow-y: auto;
@@ -498,7 +498,7 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.learning-primary-memory {
+.learning-memory-editor {
   display: block;
   width: 100%;
   min-height: clamp(300px, 42vh, 520px);
@@ -512,11 +512,11 @@
   font: 14px/1.6 var(--font-mono, ui-monospace, monospace);
   outline: none;
 }
-.learning-primary-memory:focus {
+.learning-memory-editor:focus {
   border-color: var(--accent-border);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
-.learning-primary-memory::placeholder {
+.learning-memory-editor::placeholder {
   color: var(--text-faint);
 }
 .learning-about-footer {

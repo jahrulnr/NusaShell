@@ -128,13 +128,13 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 			Path() string
 		}
 	}{}
-	if r.app.Primary != nil {
+	if r.app.User != nil {
 		memoryDocs = append(memoryDocs, struct {
 			idPrefix string
 			store    interface {
 				Path() string
 			}
-		}{"synthetic_file_read_user", r.app.Primary})
+		}{"synthetic_file_read_user", r.app.User})
 	}
 	if r.app.Agent != nil {
 		memoryDocs = append(memoryDocs, struct {

@@ -1,6 +1,6 @@
 // Package memorystore implements the three-tier memory persistence
 // adapters: two single-file documents (memory/user.md for the user
-// tier, legacy name primary.md, and memory/soul.md for the agent tier),
+// tier and memory/soul.md for the agent tier),
 // plus one markdown file per entry under memory/fragments/ for the
 // unlimited searchable archive. All adapters auto-create their files and
 // directories on first use.
@@ -23,29 +23,17 @@ import (
 
 // ---- Document stores (user.md / soul.md) ----
 
-// PrimaryFile is the on-disk path of the user-tier memory document. It was
-// introduced as memory/primary.md; the file moved to user.md when the
-// always-injected memory split into user + agent tiers. The move is done
-// by hand (see data-locations.md) — no automatic migration runs.
-const PrimaryFile = "memory/user.md"
+// UserFile is the on-disk path of the user-tier memory document.
+const UserFile = "memory/user.md"
 
 // SoulFile is the on-disk path of the agent-tier memory document. The
 // user-facing filename is soul.md so it cannot be confused with a repository
 // AGENTS.md instruction file.
 const SoulFile = "memory/soul.md"
 
-// AgentFile is retained as a source-compatible alias for the agent-tier
-// document. It resolves to soul.md; no memory/agent.md file is read or
-// created.
-const AgentFile = SoulFile
-
 // DocVersion is the schema version of the document frontmatter. Bump when
 // the file format changes in a backward-incompatible way.
 const DocVersion = 2
-
-// PrimaryVersion is kept as an alias for code and tests that reference the
-// legacy constant name.
-const PrimaryVersion = DocVersion
 
 // docFrontmatter is the YAML metadata block at the top of a document file.
 // It carries the last-updated timestamp and schema version so a human
@@ -79,12 +67,9 @@ type Document struct {
 	path   string // absolute file path
 	cap    int    // character cap (token cap * 4)
 	kind   string // "user" | "agent" (used in errors)
-	entry  domain.PrimaryEntry
+	entry  domain.DocumentEntry
 	loaded bool
 }
-
-// Primary is a compatibility alias for Document (the user tier store).
-type Primary = Document
 
 // newDocument opens (or auto-creates) a doc store at path with the given
 // token cap and loads its body into memory. The file is created empty with
@@ -97,12 +82,10 @@ func newDocument(path, kind string, tokenCap int) (*Document, error) {
 	return d, nil
 }
 
-// NewPrimary opens (or auto-creates) the user-tier memory document
-// (memory/user.md) at dataDir and loads its body into memory. A pre-split
-// memory/primary.md is NOT migrated automatically; move it to
-// memory/user.md by hand when upgrading (see data-locations.md).
-func NewPrimary(dataDir string) (*Document, error) {
-	return newDocument(filepath.Join(dataDir, PrimaryFile), domain.MemoryTierUser, domain.PrimaryTokenCap)
+// NewUser opens (or auto-creates) the user-tier memory document
+// (memory/user.md) at dataDir and loads its body into memory.
+func NewUser(dataDir string) (*Document, error) {
+	return newDocument(filepath.Join(dataDir, UserFile), domain.MemoryTierUser, domain.UserTokenCap)
 }
 
 // NewAgent opens (or auto-creates) the agent-tier memory document
@@ -128,11 +111,11 @@ func (d *Document) load(create bool) error {
 		if err := os.WriteFile(d.path, []byte(emptyDocFile()), 0o644); err != nil {
 			return err
 		}
-		d.entry = domain.PrimaryEntry{}
+		d.entry = domain.DocumentEntry{}
 		d.loaded = true
 		return nil
 	}
-	entry, err := parseDoc(string(raw))
+	entry, err := parseDoc(string(raw), d.kind)
 	if err != nil {
 		return err
 	}
@@ -143,12 +126,12 @@ func (d *Document) load(create bool) error {
 
 // Load returns the current memory document. It re-reads the file from
 // disk so callers always see the latest state.
-func (d *Document) Load() *domain.PrimaryMemory {
+func (d *Document) Load() *domain.MemoryDocument {
 	_ = d.load(false)
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return &domain.PrimaryMemory{
-		Entries:   []domain.PrimaryEntry{d.entry},
+	return &domain.MemoryDocument{
+		Entries:   []domain.DocumentEntry{d.entry},
 		UpdatedAt: d.entry.UpdatedAt,
 	}
 }
@@ -160,7 +143,7 @@ func (d *Document) Path() string { return d.path }
 // Used by memory op=replace target=user|agent when the agent rewrites the
 // whole document. Returns an error if the new content would exceed the
 // tier's token cap.
-func (d *Document) Update(entries []domain.PrimaryEntry) error {
+func (d *Document) Update(entries []domain.DocumentEntry) error {
 	var content string
 	for _, e := range entries {
 		if content != "" {
@@ -172,8 +155,8 @@ func (d *Document) Update(entries []domain.PrimaryEntry) error {
 		return fmt.Errorf("%s memory at %d/%d chars; %s tier is capped at ~%d tokens", d.kind, len(content), d.cap, d.kind, d.cap/4)
 	}
 	d.mu.Lock()
-	d.entry = domain.PrimaryEntry{
-		ID:        docID(content),
+	d.entry = domain.DocumentEntry{
+		ID:        docID(d.kind, content),
 		Content:   content,
 		UpdatedAt: clock.NewTime().Time(),
 	}
@@ -201,8 +184,8 @@ func (d *Document) Replace(oldText, content string) error {
 	if len(newBody) > d.cap {
 		return fmt.Errorf("%s memory at %d/%d chars; update would exceed the ~%d token cap", d.kind, len(newBody), d.cap, d.cap/4)
 	}
-	d.entry = domain.PrimaryEntry{
-		ID:        docID(newBody),
+	d.entry = domain.DocumentEntry{
+		ID:        docID(d.kind, newBody),
 		Content:   newBody,
 		UpdatedAt: clock.NewTime().Time(),
 	}
@@ -249,7 +232,7 @@ func emptyDocFile() string {
 // parseDoc splits the file into YAML frontmatter + body and returns the
 // entire body as a single entry. The ID is derived from a content hash so
 // it survives reload with a stable ID without being stored.
-func parseDoc(raw string) (domain.PrimaryEntry, error) {
+func parseDoc(raw, kind string) (domain.DocumentEntry, error) {
 	raw = strings.TrimSpace(raw)
 	body := raw
 	// Strip YAML frontmatter if present.
@@ -265,10 +248,10 @@ func parseDoc(raw string) (domain.PrimaryEntry, error) {
 		}
 	}
 	if body == "" {
-		return domain.PrimaryEntry{}, nil
+		return domain.DocumentEntry{}, nil
 	}
-	return domain.PrimaryEntry{
-		ID:        docID(body),
+	return domain.DocumentEntry{
+		ID:        docID(kind, body),
 		Content:   body,
 		UpdatedAt: clock.NewTime().Time(),
 	}, nil
@@ -276,7 +259,7 @@ func parseDoc(raw string) (domain.PrimaryEntry, error) {
 
 // docID derives a deterministic ID from content so the entry survives
 // reload with a stable ID even though the file does not store it.
-func docID(content string) string {
+func docID(kind, content string) string {
 	h := sha256.Sum256([]byte(content))
-	return "prim_" + hex.EncodeToString(h[:8])
+	return kind + "_" + hex.EncodeToString(h[:8])
 }

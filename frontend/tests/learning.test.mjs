@@ -21,14 +21,14 @@ function withDocument(fn) {
   }
 }
 
-test('About You is the first learning tab and exposes an editable primary memory', () => {
+test('About You is the first learning tab and exposes editable user memory', () => {
   const doc = new JSDOM(learningHTML).window.document;
   const tabs = [...doc.querySelectorAll('.learning-tabs [data-learning-tab]')];
   assert.equal(tabs[0]?.dataset.learningTab, 'about');
   assert.equal(tabs[0]?.textContent, 'About You');
   assert.equal(tabs[0]?.getAttribute('aria-selected'), 'true');
   assert.ok(doc.querySelector('#learning-panel-about'));
-  assert.ok(doc.querySelector('#learning-primary-memory'));
+  assert.ok(doc.querySelector('#learning-user-memory'));
   assert.equal(doc.querySelector('#learning-panel-about')?.hidden, false);
 });
 
@@ -45,9 +45,9 @@ test('About Agent is an editable learning tab with its own document panel', () =
   assert.ok(doc.querySelector('#learning-agent-save'));
 });
 
-test('primary memory editor uses the dedicated update RPC', () => {
-  assert.match(learningView, /memory\.primary\.update/);
-  assert.match(learningView, /learning-primary-memory/);
+test('user memory editor uses the dedicated update RPC', () => {
+  assert.match(learningView, /memory\.user\.update/);
+  assert.match(learningView, /learning-user-memory/);
 });
 
 test('soul memory editor uses the dedicated update RPC', () => {
@@ -58,7 +58,7 @@ test('soul memory editor uses the dedicated update RPC', () => {
 test('About You uses the available desktop width while retaining a comfortable mobile inset', () => {
   assert.match(learningCSS, /\.learning-about-card\s*\{[\s\S]*?width:\s*min\(1180px,\s*calc\(100%\s*-\s*32px\)\);/);
   assert.match(learningCSS, /\.learning-about-card\s*\{[\s\S]*?box-sizing:\s*border-box;/);
-  assert.match(learningCSS, /\.learning-primary-memory\s*\{[\s\S]*?min-height:\s*clamp\(300px,\s*42vh,\s*520px\);/);
+  assert.match(learningCSS, /\.learning-memory-editor\s*\{[\s\S]*?min-height:\s*clamp\(300px,\s*42vh,\s*520px\);/);
 });
 
 test('Learning tabs are a self-contained control with breathing room before its panel', () => {

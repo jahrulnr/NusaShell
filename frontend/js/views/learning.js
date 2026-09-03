@@ -23,27 +23,27 @@ const state = {
   reviewEventHandlers: null, // cleanup funcs for event listeners
   learningEventHandlers: null, // cleanup funcs for memory/skill update listeners
   graphRefreshTimer: null, // debounce timer coalescing background graph refreshes
-  primaryMemory: null,
-  primaryLoaded: false,
+  userMemory: null,
+  userLoaded: false,
   agentMemory: null,
   agentLoaded: false,
 };
 
 const MEMORY_EDITORS = Object.freeze({
-  primary: Object.freeze({
-    textareaId: 'learning-primary-memory',
-    reloadId: 'learning-primary-reload',
-    saveId: 'learning-primary-save',
-    statusId: 'learning-primary-status',
-    countId: 'learning-primary-count',
-    tier: 'primary',
-    memoryKey: 'primaryMemory',
-    loadedKey: 'primaryLoaded',
-    updateMethod: 'memory.primary.update',
-    label: 'Primary memory',
-    capMessage: 'Primary memory cannot exceed 4000 characters.',
-    loadError: 'Primary memory could not be loaded.',
-    savedMessage: 'Primary memory saved.',
+  user: Object.freeze({
+    textareaId: 'learning-user-memory',
+    reloadId: 'learning-user-reload',
+    saveId: 'learning-user-save',
+    statusId: 'learning-user-status',
+    countId: 'learning-user-count',
+    tier: 'user',
+    memoryKey: 'userMemory',
+    loadedKey: 'userLoaded',
+    updateMethod: 'memory.user.update',
+    label: 'User memory',
+    capMessage: 'User memory cannot exceed 4000 characters.',
+    loadError: 'User memory could not be loaded.',
+    savedMessage: 'User memory saved.',
   }),
   agent: Object.freeze({
     textareaId: 'learning-agent-memory',
@@ -93,7 +93,7 @@ export async function initLearning() {
     fitGraphToView(state.network, state.nodes, 300);
   });
   logRefreshBtn.addEventListener('click', () => loadLog());
-  initMemoryDocumentEditor(MEMORY_EDITORS.primary);
+  initMemoryDocumentEditor(MEMORY_EDITORS.user);
   initMemoryDocumentEditor(MEMORY_EDITORS.agent);
 
   initTabs();
@@ -127,7 +127,7 @@ function initTabs() {
       panels.forEach((panel) => {
         panel.hidden = panel.dataset.learningPanel !== target;
       });
-      if (target === 'about' && !state.primaryLoaded) void loadStats();
+      if (target === 'about' && !state.userLoaded) void loadStats();
       if (target === 'agent' && !state.agentLoaded) void loadStats();
       if (target === 'log') {
         loadLog();
@@ -694,13 +694,13 @@ async function loadStats() {
     state.memoryCount = entries.length;
     document.getElementById('learning-stat-memory').textContent =
       `${state.memoryCount} memor${state.memoryCount === 1 ? 'y' : 'ies'}`;
-    const primary = (entries || []).find((entry) => entry.tier === 'primary') || null;
+    const user = (entries || []).find((entry) => entry.tier === 'user') || null;
     const agent = (entries || []).find((entry) => entry.tier === 'agent') || null;
-    setMemoryDocumentEditor(MEMORY_EDITORS.primary, primary);
+    setMemoryDocumentEditor(MEMORY_EDITORS.user, user);
     setMemoryDocumentEditor(MEMORY_EDITORS.agent, agent);
   } catch (e) {
     // memory.list might fail if store not initialized
-    state.primaryLoaded = false;
+    state.userLoaded = false;
     state.agentLoaded = false;
   }
   // Edge count: we don't have a direct RPC, infer from graph load
@@ -775,7 +775,7 @@ function renderResults() {
       el('div', { class: 'learning-result-header' }, [
         el('span', { class: `learning-result-kind learning-kind-${item.kind}`, text: item.kind }),
         item.kind === 'memory' && item.tier
-          ? el('span', { class: `learning-result-tier learning-tier-${item.tier}`, text: item.tier, title: item.tier === 'primary' ? 'Primary memory' : 'Fragment' })
+          ? el('span', { class: `learning-result-tier learning-tier-${item.tier}`, text: item.tier, title: item.tier === 'user' ? 'User memory' : 'Fragment' })
           : null,
         headerRight,
       ]),
@@ -1142,9 +1142,9 @@ function initGraph() {
     groups: {
       skill: { color: { background: GRAPH_PALETTE.ocean, border: GRAPH_PALETTE.oceanBorder }, size: 20 },
       memory: { color: { background: GRAPH_PALETTE.earth, border: GRAPH_PALETTE.earthBorder }, size: 14 },
-      // Primary memory is one document (not per-fact), so it gets a
+      // User memory is one document (not per-fact), so it gets a
       // distinct shape + color instead of masquerading as a fragment.
-      'memory-primary': { color: { background: GRAPH_PALETTE.leaf, border: GRAPH_PALETTE.leafBorder }, size: 16, shape: 'square' },
+      'memory-user': { color: { background: GRAPH_PALETTE.leaf, border: GRAPH_PALETTE.leafBorder }, size: 16, shape: 'square' },
     },
     physics: {
       enabled: true,
@@ -1211,7 +1211,7 @@ async function loadGraph({ preservePositions = true } = {}) {
     const prevPositions = preservePositions && state.network ? state.network.getPositions() : {};
 
     const newNodes = keepGraphPositions(sizeGraphNodesByRelations(nodes, edges).map((n) => {
-      const group = n.kind === 'memory' && n.tier === 'primary' ? 'memory-primary' : n.kind;
+      const group = n.kind === 'memory' && n.tier === 'user' ? 'memory-user' : n.kind;
       const relationLabel = `${n.relationCount} relation${n.relationCount === 1 ? '' : 's'}`;
       return {
         id: n.id,
@@ -1220,8 +1220,8 @@ async function loadGraph({ preservePositions = true } = {}) {
         size: n.size,
         relationSize: n.size,
         relationCount: n.relationCount,
-        title: group === 'memory-primary'
-          ? `Primary memory: ${n.name || n.id} • ${relationLabel}`
+        title: group === 'memory-user'
+          ? `User memory: ${n.name || n.id} • ${relationLabel}`
           : `${n.name || n.id} • ${relationLabel}`,
       };
     }), prevPositions);
@@ -1247,7 +1247,7 @@ async function loadGraph({ preservePositions = true } = {}) {
     state.edgeCount = newEdges.length;
     document.getElementById('learning-stat-edges').textContent =
       `${state.edgeCount} edge${state.edgeCount === 1 ? '' : 's'}`;
-    const memCount = newNodes.filter((n) => n.group === 'memory' || n.group === 'memory-primary').length;
+    const memCount = newNodes.filter((n) => n.group === 'memory' || n.group === 'memory-user').length;
     document.getElementById('learning-stat-memory').textContent =
       `${memCount} memor${memCount === 1 ? 'y' : 'ies'}`;
     // Bounded re-layout for the new/changed nodes, then the

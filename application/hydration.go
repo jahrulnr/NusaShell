@@ -42,11 +42,10 @@ type HydrationSource struct {
 	// real tool, processes the result, and attaches it to the conversation.
 	// When nil, the tool-backed slots fail soft (hidden).
 	Executor ToolExecutor
-	// PrimaryPath is the absolute filesystem path of the user-tier memory
-	// document (memory/user.md, legacy name primary.md). When set, hydration
-	// emits a direct file_read call for the document. When empty, that call is
-	// hidden.
-	PrimaryPath string
+	// UserPath is the absolute filesystem path of the user-tier memory
+	// document (memory/user.md). When set, hydration emits a direct file_read
+	// call for the document. When empty, that call is hidden.
+	UserPath string
 	// AgentPath is the absolute filesystem path of the agent-tier memory
 	// document (memory/soul.md). When set, hydration emits a separate direct
 	// file_read call for the document.
@@ -211,7 +210,7 @@ func (b *HydrationBuilder) readMemory() []hydrationSlot {
 		return nil
 	}
 	var slots []hydrationSlot
-	for _, path := range []string{b.source.PrimaryPath, b.source.AgentPath} {
+	for _, path := range []string{b.source.UserPath, b.source.AgentPath} {
 		if path == "" {
 			continue
 		}

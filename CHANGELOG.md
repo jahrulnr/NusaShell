@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`file_patch` no longer takes `expected_sha256`.** The fail-closed
+  precondition (refuse to patch when the file hash differs from the one a
+  previous `file_read` returned) is gone: a too-disciplined model that
+  passes the hash after every read could never work on files another agent
+  was also editing — any concurrent write produced `FILE_CHANGED_SINCE_READ`
+  and blocked the patch. The parameter is removed from the tool schema and
+  the guard is deleted; a legacy call that still passes it (older agents,
+  cached tool schemas) is ignored, not rejected. `file_read`/`file_patch`
+  still report the content `sha256` in their metadata for diagnostics —
+  only the *precondition* is removed.
+
+### Added
+
+- **TPM context-cap learning from OpenAI rate-limit errors.** When an
+  official OpenAI account rejects a request for tokens per minute, NusaShell
+  now parses the provider's own accounting (`Limit`, `Used`, `Requested` —
+  including the modern bodies that carry `Used`, which previously matched
+  nothing) and classifies the rejection into three shapes: transient
+  congestion (retry with backoff), structural overflow (one request > the
+  whole budget), and dominant request (> half the budget). Structural and
+  dominant rejections skip futile retries and go straight to emergency
+  compaction; a dominant rejection additionally derives a context-window cap
+  (half the per-minute budget minus the completion budget) and learns it per
+  provider+model in the learned-param registry, so every conversation on
+  that model compacts earlier and stays inside the per-minute budget. The
+  429 surface now quotes limit/used/requested numbers. Headless and ACP
+  completion turns also carry the provider ID on their run, so learning keys
+  correctly for them too.
+
+- **Slow Down: per-round agent pacing delay (`slow_down`).** Settings → Agent runtime gains a "Slow Down per round (seconds)" control (default 0 = off, range 0–60). When set, the agent waits that many seconds before **every round of every conversation** — including auto-continue chains and headless pipeline steps — so the AI's visible pace (and its prompt-cache lifetime during unattended runs) is bounded by the user instead of the provider. The round loop re-reads the live setting on a short tick, so saving a new value from the Settings UI applies instantly to running conversations: an in-flight delay shrinks or cancels outright, no stop, idle turn, or restart needed. Cancellation (user stop, conversation switch, shutdown) also aborts the wait immediately.
+
 ### Fixed
 
 - **Thinking pulse no longer sticks on finished rounds.** `is-streaming` is gated on the current round still being in the thinking phase (live reasoning, no text, no tools). Starting a tool, emitting text, or opening the next round seals prior Thinking disclosures.
