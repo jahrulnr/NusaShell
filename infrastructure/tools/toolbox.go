@@ -41,6 +41,7 @@ type Toolbox struct {
 	Plugins         application.PluginStore
 	PluginInstaller application.PluginInstaller
 	Todos           application.ConversationTodoPort
+	Conversations   application.ConversationMessenger
 	Searcher        *searchwire.Searcher // startup searcher for web_fetch + web_search fallback when settings are unavailable
 	Settings        application.SettingsStore
 	Credentials     application.CredentialStore
@@ -352,6 +353,83 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 	}
 	name = name + "_" + op // private routing key; never escapes this method
 	switch {
+	case name == "conversation_list":
+		if t.Conversations == nil {
+			return "", fmt.Errorf("conversation service not available")
+		}
+		var args struct {
+			Limit  int `json:"limit"`
+			Offset int `json:"offset"`
+		}
+		_ = json.Unmarshal(argsJSON, &args)
+		limit := args.Limit
+		if limit <= 0 {
+			limit = 20
+		}
+		currID := application.ConversationIDFromContext(ctx)
+		count, items, err := t.Conversations.List(currID, limit, args.Offset)
+		if err != nil {
+			return "", err
+		}
+		rawItems := make([]any, len(items))
+		for i, item := range items {
+			rawItems[i] = item
+		}
+		return yamlJSONL(map[string]any{"count": count, "offset": args.Offset, "limit": limit}, rawItems), nil
+
+	case name == "conversation_search":
+		if t.Conversations == nil {
+			return "", fmt.Errorf("conversation service not available")
+		}
+		var args struct {
+			Query  string `json:"query"`
+			Limit  int    `json:"limit"`
+			Offset int    `json:"offset"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.Query) == "" {
+			return "", fmt.Errorf("query is required")
+		}
+		limit := args.Limit
+		if limit <= 0 {
+			limit = 20
+		}
+		currID := application.ConversationIDFromContext(ctx)
+		count, items, err := t.Conversations.Search(currID, args.Query, limit, args.Offset)
+		if err != nil {
+			return "", err
+		}
+		rawItems := make([]any, len(items))
+		for i, item := range items {
+			rawItems[i] = item
+		}
+		return yamlJSONL(map[string]any{"count": count, "offset": args.Offset, "limit": limit, "query": args.Query}, rawItems), nil
+
+	case name == "conversation_send":
+		if t.Conversations == nil {
+			return "", fmt.Errorf("conversation service not available")
+		}
+		var args struct {
+			ID      string `json:"id"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.ID) == "" {
+			return "", fmt.Errorf("target conversation id is required")
+		}
+		if strings.TrimSpace(args.Content) == "" {
+			return "", fmt.Errorf("message content is required")
+		}
+		currID := application.ConversationIDFromContext(ctx)
+		if err := t.Conversations.Send(currID, args.ID, args.Content); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Message delivered to conversation `%s`", args.ID), nil
+
 	case name == "skill_list":
 		var args struct {
 			Limit int `json:"limit"`
@@ -451,6 +529,26 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			return "", err
 		}
 		return yamlBlock(map[string]any{"status": "saved", "id": s.ID}), nil
+
+	case name == "skill_delete":
+		var args struct {
+			ID      string `json:"id"`
+			OwnedBy string `json:"owned_by"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		id := strings.TrimSpace(args.ID)
+		if id == "" {
+			return "", fmt.Errorf("skill id is required")
+		}
+		if _, err := t.Skills.Get(id, args.OwnedBy); err != nil {
+			return "", err
+		}
+		if err := t.Skills.Delete(id, args.OwnedBy); err != nil {
+			return "", err
+		}
+		return yamlBlock(map[string]any{"status": "deleted", "id": id}), nil
 
 	case name == "memory_save":
 		var args struct {
@@ -654,6 +752,26 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		}
 		return yamlBlock(map[string]any{"status": "deleted"}), nil
 
+	case name == "docs_list":
+		var args struct {
+			Limit int `json:"limit"`
+		}
+		_ = json.Unmarshal(argsJSON, &args)
+		limit := args.Limit
+		if limit <= 0 {
+			limit = 50
+		}
+		metas := t.Docs.List()
+		total := len(metas)
+		if limit < len(metas) {
+			metas = metas[:limit]
+		}
+		items := make([]any, 0, len(metas))
+		for _, m := range metas {
+			items = append(items, map[string]any{"id": m.ID, "title": m.Title, "path": m.Path})
+		}
+		return capJSONL("docs", map[string]any{"count": len(metas), "total": total, "limit": limit}, items), nil
+
 	case name == "docs_search":
 		var args struct {
 			Query string `json:"query"`
@@ -682,7 +800,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		}
 		doc, err := t.Docs.Read(args.ID)
 		if err != nil {
-			return "", fmt.Errorf("document %q not found; use docs with op=search first", args.ID)
+			return "", fmt.Errorf("document %q not found; use docs with op=list or op=search first", args.ID)
 		}
 		return capToolOutput("docs", map[string]any{"title": doc.Title, "path": doc.Path}, doc.Content), nil
 

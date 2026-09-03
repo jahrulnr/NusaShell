@@ -1,5 +1,5 @@
 // Package docs provides the product documentation corpus the agent can read
-// through the docs tool (op=search / op=read). The corpus is embedded at
+// through the docs tool (op=list / op=search / op=read). The corpus is embedded at
 // build time via the resources package; a user-supplied directory may
 // extend it.
 package docs
@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"nusashell/application"
 	"nusashell/infrastructure/jsonstore"
@@ -85,6 +86,31 @@ func titleOf(b []byte) string {
 	return "Untitled"
 }
 
+// searchMatch returns the best snippet anchor for query in content. Exact
+// phrases win; otherwise the earliest query term is used so multi-word
+// searches still produce useful context when the terms are separated.
+func searchMatch(content, query string) (index, length int) {
+	if query == "" {
+		return 0, 0
+	}
+	lower := strings.ToLower(content)
+	if idx := strings.Index(lower, query); idx >= 0 {
+		return idx, len(query)
+	}
+	terms := strings.FieldsFunc(query, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+	best := -1
+	bestLength := 0
+	for _, term := range terms {
+		if idx := strings.Index(lower, term); idx >= 0 && (best < 0 || idx < best) {
+			best = idx
+			bestLength = len(term)
+		}
+	}
+	return best, bestLength
+}
+
 func (s *Source) List() []application.DocMeta {
 	out := make([]application.DocMeta, 0, len(s.docs))
 	for _, d := range s.docs {
@@ -95,30 +121,40 @@ func (s *Source) List() []application.DocMeta {
 
 func (s *Source) Search(query string, limit int) []application.DocHit {
 	q := strings.ToLower(strings.TrimSpace(query))
-	// Recall: substring over full content (unchanged).
+	// Build the candidate set from the entire corpus. BM25 provides lexical
+	// recall for multi-word queries whose terms are not adjacent; exact phrase
+	// matching is reserved for the snippet anchor below.
 	type candidate struct {
-		doc docEntry
-		idx int
+		doc      docEntry
+		idx      int
+		matchLen int
 	}
-	var cands []candidate
+	cands := make([]candidate, 0, len(s.docs))
 	for _, d := range s.docs {
-		lower := strings.ToLower(d.content)
-		idx := strings.Index(lower, q)
-		if q == "" || idx >= 0 {
-			cands = append(cands, candidate{doc: d, idx: idx})
-		}
+		idx, matchLen := searchMatch(d.content, q)
+		cands = append(cands, candidate{doc: d, idx: idx, matchLen: matchLen})
 	}
-	// Ranking: BM25 over candidate contents so multi-term queries surface
-	// the most relevant page first instead of embedded-corpus order.
-	if len(cands) > 1 && q != "" {
+
+	// Ranking: BM25 over the complete corpus. Only documents containing at
+	// least one query term are returned; the score determines their order.
+	rank := make(map[string]int, len(cands))
+	if len(cands) > 0 && q != "" {
 		docs := make([]jsonstore.BM25Doc, len(cands))
 		for i, c := range cands {
 			docs[i] = jsonstore.BM25Doc{ID: c.doc.id, Text: c.doc.content}
 		}
 		results := jsonstore.NewBM25(docs).Search(q, len(cands))
-		rank := make(map[string]int, len(results))
 		for i, r := range results {
 			rank[r.ID] = i
+		}
+		// Preserve exact punctuation-only searches, for which BM25 has no
+		// tokens to index, without making them part of normal ranking.
+		if len(results) == 0 {
+			for _, c := range cands {
+				if c.idx >= 0 {
+					rank[c.doc.id] = len(rank)
+				}
+			}
 		}
 		sort.SliceStable(cands, func(i, j int) bool {
 			ri, oki := rank[cands[i].doc.id]
@@ -134,6 +170,11 @@ func (s *Source) Search(query string, limit int) []application.DocHit {
 	}
 	hits := make([]application.DocHit, 0, len(cands))
 	for _, c := range cands {
+		if q != "" {
+			if _, ok := rank[c.doc.id]; !ok {
+				continue
+			}
+		}
 		d := c.doc
 		snippet := ""
 		if c.idx >= 0 {
@@ -141,7 +182,7 @@ func (s *Source) Search(query string, limit int) []application.DocHit {
 			if start < 0 {
 				start = 0
 			}
-			end := c.idx + len(q) + 120
+			end := c.idx + c.matchLen + 120
 			if end > len(d.content) {
 				end = len(d.content)
 			}

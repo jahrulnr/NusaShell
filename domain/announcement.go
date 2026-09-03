@@ -154,6 +154,25 @@ func AnnouncementSkillsChangedMessage() string {
 	return "The skill library changed. Call `skill` op=list to refresh."
 }
 
+// AnnouncementPeerMessageArgs builds the self-describing args payload for a
+// peer message from another conversation room.
+func AnnouncementPeerMessageArgs(fromConvID string) string {
+	b, err := json.Marshal(struct {
+		Type string `json:"type"`
+		From string `json:"from"`
+	}{Type: "peer_message", From: fromConvID})
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// AnnouncementPeerMessageMessage builds the user-visible announcement result text
+// for receiving a message from another conversation room.
+func AnnouncementPeerMessageMessage(fromConvID, content string) string {
+	return fmt.Sprintf("You received message from conversation `%s`, use `conversation(op=\"send\", id=\"%s\", content=\"...\")` to reply:\n> %s", fromConvID, fromConvID, strings.ReplaceAll(content, "\n", "\n> "))
+}
+
 // IsAnnouncementCallID returns true when a tool call ID belongs to an
 // injected announcement (prefix "announce-").
 func IsAnnouncementCallID(id string) bool {

@@ -31,7 +31,7 @@ type App struct {
 	Memory        MemoryStore
 	Primary       PrimaryStore
 	// Agent is the agent-tier memory document (soul.md) holding agent
-	// working knowledge curated by background improvers. Same document
+	// working knowledge curated by the background learning agent. Same document
 	// contract as the user tier (Primary).
 	Agent           AgentStore
 	Fragments       FragmentStore
@@ -344,9 +344,10 @@ func NewApp(deps Deps) *App {
 		learnedParams:               learnedparams.New(deps.LearnedParams),
 		modelOverrides:              modeloverrides.New(deps.ModelOverrides),
 	}
-	// Wire the background LLM review agent. Uses the conversation's
-	// configured model ("global LLM") with a restricted toolset and the
-	// review prompt (single pass for both memory and skills).
+	// Wire the unified background learning agent. Uses the conversation's
+	// configured model ("global LLM") with a curation toolset and the
+	// unified post-conversation prompt (single agentic pass for memory
+	// and skills).
 	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
 	// Wire the ask_question service callback so pending asks emit an
 	// EventAskPending over the bus. The UI renders a question card from

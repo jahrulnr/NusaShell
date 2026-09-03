@@ -14,10 +14,6 @@ const (
 	// plus dispatcher families, with memory_project gated on the
 	// conversation workspace.
 	AgentConversation AgentKind = "conversation"
-	// AgentReview is the background learning review agent: the local
-	// review_transcript and model_override tools plus the memory/skill/
-	// file_read whitelist from the shared toolbox.
-	AgentReview AgentKind = "review"
 	// AgentAutomation is the headless pipeline agent step: the full
 	// toolbox minus ACP subagent tools (permission prompts must never
 	// stall a headless run).
@@ -31,14 +27,11 @@ const (
 	// pipeline room, with ACP tools AND the delegate tool itself removed
 	// so delegated agents cannot recurse.
 	AgentDelegate AgentKind = "delegate"
-	// AgentImprover is the background improver: a headless run with the
-	// full local toolbox (file_*, grep, exec, web_search/web_fetch,
-	// memory/skill dispatchers) plus the review_transcript and
-	// model_override local tools. It studies real evidence instead of
-	// reading transcript segments and writes durable memory (soul.md +
-	// fragments). ACP tools and the delegate tool are removed so it can
-	// neither stall on permission prompts nor recurse.
-	AgentImprover AgentKind = "improver"
+	// AgentReview is the unified background learning agent. It receives the
+	// completed conversation evidence and can inspect, research, and curate
+	// durable memory and agent-owned skills. The name is retained for the
+	// learning.review wire surface and persisted history compatibility.
+	AgentReview AgentKind = "review"
 )
 
 // ToolFactory builds the advertised tool list per agent kind. The factory
@@ -66,9 +59,7 @@ func (f *ToolFactory) Get(kind AgentKind, workspace string) []ToolDef {
 	}
 	switch kind {
 	case AgentReview:
-		return f.reviewTools()
-	case AgentImprover:
-		return f.improverTools()
+		return f.reviewTools(workspace)
 	case AgentAutomation:
 		return filterACPToolDefs(f.baseTools(workspace))
 	case AgentDelegate:
@@ -116,21 +107,13 @@ func (f *ToolFactory) baseTools(workspace string) []ToolDef {
 	return out
 }
 
-// improverTools is the AgentImprover policy: the two local tools first,
-// then the full base toolbox minus ACP subagent and delegate tools (no
-// recursion, no permission prompts that could stall a headless run).
-func (f *ToolFactory) improverTools() []ToolDef {
+// reviewTools is the unified AgentReview policy: the local transcript and
+// model tools plus read-only evidence/research tools and the memory/skill
+// dispatcher roots. The runtime gate decides which operations may mutate.
+func (f *ToolFactory) reviewTools(workspace string) []ToolDef {
 	out := []ToolDef{reviewTranscriptToolDef, modelOverrideToolDef}
-	out = append(out, filterDelegateToolDefs(filterACPToolDefs(f.baseTools("")))...)
-	return out
-}
-
-// reviewTools is the AgentReview policy: the two local tools first, then
-// the whitelisted toolbox entries.
-func (f *ToolFactory) reviewTools() []ToolDef {
-	out := []ToolDef{reviewTranscriptToolDef, modelOverrideToolDef}
-	for _, t := range f.baseTools("") {
-		if reviewToolWhitelist()[t.Name] && t.Name != reviewTranscriptToolName {
+	for _, t := range f.baseTools(workspace) {
+		if backgroundLearningToolWhitelist()[t.Name] && t.Name != reviewTranscriptToolName {
 			out = append(out, t)
 		}
 	}

@@ -72,6 +72,18 @@ func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversatio
 			return roundResult, err
 		}
 		adapted := a.learnFromStreamError(run, model, err, &caps)
+		// A tokens-per-minute rejection where this request alone needs
+		// more than half the per-minute budget cannot be outwaited: the
+		// window drains far more slowly than the retry backoff, so each
+		// attempt just burns a provider slot. Learn a context cap from
+		// the limit (so every conversation on this provider+model
+		// compacts earlier) and hand off to the emergency-compaction
+		// hook — the round retries with a smaller request instead of
+		// exhausting all attempts on futile backoff.
+		if isTPMDominatedRequest(err) {
+			a.learnTPMContextCap(run, model, err, maxTokens)
+			return roundResult, err
+		}
 		delay, retryable := providerRetryDelay(err, retry)
 		if !retryable && !adapted {
 			return roundResult, err

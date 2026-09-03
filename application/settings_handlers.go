@@ -80,6 +80,12 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 		}
 		s.MaxParallelTools = *req.MaxParallelTools
 	}
+	if req.SlowDown != nil {
+		if *req.SlowDown < 0 || *req.SlowDown > 60 {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "slow_down must be between 0 and 60 seconds (0 = off)"}
+		}
+		s.SlowDown = *req.SlowDown
+	}
 	// Sampling parameters use json.RawMessage to distinguish three states:
 	// absent (don't change), null (clear to nil), value (set). A *float64
 	// with omitempty cannot tell null from absent, so once set the parameter
@@ -313,6 +319,7 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		MaxInputTokens:             s.MaxInputTokens,
 		MaxOutputTokens:            s.MaxOutputTokens,
 		MaxParallelTools:           s.MaxParallelTools,
+		SlowDown:                   s.SlowDown,
 		EmbeddingProviderID:        s.EmbeddingProviderID,
 		EmbeddingModelID:           s.EmbeddingModelID,
 		VisionProviderID:           s.VisionProviderID,

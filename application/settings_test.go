@@ -3,6 +3,7 @@ package application
 import (
 	"testing"
 
+	"nusashell/contracts"
 	"nusashell/domain"
 )
 
@@ -139,5 +140,35 @@ func TestNormalizeSettingsPreservesUserPrompt(t *testing.T) {
 	withoutPrompt := domain.NormalizeSettings(domain.Settings{MaxToolRounds: 8})
 	if withoutPrompt.UserPrompt != "" {
 		t.Fatalf("UserPrompt = %q, want empty", withoutPrompt.UserPrompt)
+	}
+}
+
+// TestHandleSettingsSetSlowDown: settings.set must persist a valid
+// slow_down, reject out-of-range values, and round-trip it through the DTO.
+func TestHandleSettingsSetSlowDown(t *testing.T) {
+	app := &App{Settings: &memSettingsStore{s: domain.DefaultSettings()}, Logs: &fakeLogStore{}}
+
+	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{SlowDown: intPtr(3)}); rpcErr != nil {
+		t.Fatalf("set slow_down=3: %v", rpcErr.Message)
+	}
+	if got := app.Settings.Get().SlowDown; got != 3 {
+		t.Fatalf("SlowDown after set = %d, want 3", got)
+	}
+	if dto := settingsDTO(app.Settings.Get()); dto.SlowDown != 3 {
+		t.Fatalf("settingsDTO.SlowDown = %d, want 3", dto.SlowDown)
+	}
+
+	for _, bad := range []int{-1, 61} {
+		if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{SlowDown: intPtr(bad)}); rpcErr == nil {
+			t.Fatalf("slow_down=%d must be rejected", bad)
+		}
+	}
+
+	// Clearing back to 0 (off) must work.
+	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{SlowDown: intPtr(0)}); rpcErr != nil {
+		t.Fatalf("set slow_down=0: %v", rpcErr.Message)
+	}
+	if got := app.Settings.Get().SlowDown; got != 0 {
+		t.Fatalf("SlowDown after clear = %d, want 0", got)
 	}
 }

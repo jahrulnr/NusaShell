@@ -67,7 +67,7 @@ type SkillStore interface {
 	// WriteFile writes content to a file inside a skill directory (default
 	// SKILL.md). Parent directories (references/, templates/, scripts/)
 	// are created as needed. The skill must already exist; plugin-owned
-	// skills are read-only. Used by the background review agent to add
+	// skills are read-only. Used by the background learning agent to add
 	// support files and patch existing ones for skill self-improvement.
 	WriteFile(id, ownedBy, path, content string) error
 	// Files lists the nested directory tree of a skill folder (path,
@@ -138,7 +138,7 @@ type MemoryDocStore interface {
 type PrimaryStore = MemoryDocStore
 
 // AgentStore is the always-injected agent-tier memory document (soul.md)
-// holding agent working knowledge curated by background improvers.
+// holding agent working knowledge curated by the background learning agent.
 type AgentStore = MemoryDocStore
 
 // FragmentStore is the unlimited, searchable memory archive backed by
@@ -204,6 +204,22 @@ type ModelOverrideStore interface {
 	// Save persists the registry atomically. Callers may pass the same
 	// pointer they got from Load after mutating it.
 	Save(r *domain.ModelOverrideRegistry) error
+}
+
+// ConversationMessenger enables inter-agent messaging between conversation rooms
+// via the `conversation` tool.
+type ConversationMessenger interface {
+	List(currentConvID string, limit, offset int) (count int, items []ConversationSummaryDTO, err error)
+	Search(currentConvID, query string, limit, offset int) (count int, items []ConversationSummaryDTO, err error)
+	Send(currentConvID, targetConvID, content string) error
+}
+
+type ConversationSummaryDTO struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Summary   string `json:"summary,omitempty"`
+	Status    string `json:"status,omitempty"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // ConversationTodoPort is the per-conversation todo checklist store. The
@@ -372,7 +388,7 @@ type PromptCachePolicy struct {
 	// Key is a stable routing key sent as prompt_cache_key where the selected
 	// wire supports it. NusaShell keeps it at 32 ASCII characters and uses a
 	// visible agent namespace: "nusashell_cv_<digest>" for normal conversation
-	// turns and "nusashell_bg_<digest>" for headless/background review turns.
+	// turns and "nusashell_bg_<digest>" for headless/background learning turns.
 	Key string
 }
 

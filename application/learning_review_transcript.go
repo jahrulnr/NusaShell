@@ -9,10 +9,10 @@ import (
 	clock "nusashell/pkg/time"
 )
 
-// ReviewTranscript is the persisted record of one background review run:
-// the review agent's own conversation with the LLM (user transcript →
+// ReviewTranscript is the persisted record of one background learning run:
+// the agent's own conversation with the LLM (user transcript →
 // assistant tool_calls → tool results → …). Stored as one JSON file per
-// review under <dataDir>/learning/reviews/<id>.json.
+// run under <dataDir>/learning/reviews/<id>.json.
 type ReviewTranscript struct {
 	ID             string        `json:"id"`
 	ConversationID string        `json:"conversation_id"`

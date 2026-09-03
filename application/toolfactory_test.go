@@ -18,8 +18,14 @@ func (s *factoryStubToolbox) Execute(ctx context.Context, name string, argsJSON 
 func factoryStubTools() []ToolInfo {
 	return []ToolInfo{
 		{Name: "file_read"},
+		{Name: "file_list"},
+		{Name: "grep"},
 		{Name: "file_write"},
+		{Name: "file_patch"},
+		{Name: "file_delete"},
 		{Name: "exec"},
+		{Name: "web_search"},
+		{Name: "web_fetch"},
 		{Name: "memory"},
 		{Name: "skill"},
 		{Name: "subagent"},
@@ -111,17 +117,17 @@ func TestToolFactoryReviewAgentWhitelistedWithLocalTools(t *testing.T) {
 	defs := f.Get(AgentReview, "")
 	// Local tools always present.
 	if !hasTool(defs, reviewTranscriptToolName) || !hasTool(defs, modelOverrideToolName) {
-		t.Fatalf("review agent missing local tools, got %v", namesOf(defs))
+		t.Fatalf("background learning agent missing local tools, got %v", namesOf(defs))
 	}
-	// Whitelist: memory, skill, file_read only.
-	for _, want := range []string{"memory", "skill", "file_read"} {
+	// Curation + evidence + research roster.
+	for _, want := range []string{"memory", "skill", "file_read", "file_list", "grep", "web_search", "web_fetch", "docs"} {
 		if !hasTool(defs, want) {
-			t.Fatalf("review agent missing whitelisted %q in %v", want, namesOf(defs))
+			t.Fatalf("background learning agent missing %q in %v", want, namesOf(defs))
 		}
 	}
-	for _, banned := range []string{"exec", "file_write", "subagent", "automation", "memory_project", "docs"} {
+	for _, banned := range []string{"exec", "file_write", "file_patch", "file_delete", "show", "subagent", "delegate", "automation", "memory_project"} {
 		if hasTool(defs, banned) {
-			t.Fatalf("review agent must not see %q, got %v", banned, namesOf(defs))
+			t.Fatalf("background learning agent must not see %q, got %v", banned, namesOf(defs))
 		}
 	}
 }

@@ -266,45 +266,35 @@ func TestIsRetryableProviderErrorRejectsPermanentFailure(t *testing.T) {
 // Completions). Sanitized org id.
 const tpmOverflowBody = "openai: stream error: Request too large for gpt-5.6-luna in organization org-test on tokens per min (TPM): Limit 200000, Requested 333331. The input or output tokens must be reduced in order to run successfully. Visit https://platform.openai.com/account/rate-limits to learn more."
 
-func TestParseTPMLimitRequested(t *testing.T) {
-	limit, requested, ok := parseTPMLimitRequested(tpmOverflowBody)
-	if !ok || limit != 200000 || requested != 333331 {
-		t.Fatalf("parseTPMLimitRequested = (%d, %d, %t), want (200000, 333331, true)", limit, requested, ok)
-	}
-	// Minute spelling variant.
-	if _, _, ok := parseTPMLimitRequested("on tokens per minute: Limit 30000, Requested 40000"); !ok {
-		t.Fatal("tokens per minute spelling must parse")
-	}
-	// Non-TPM bodies never match.
-	for _, body := range []string{"", "rate limit exceeded", "maximum context length of 262144 tokens"} {
-		if _, _, ok := parseTPMLimitRequested(body); ok {
-			t.Fatalf("parseTPMLimitRequested(%q) must not match", body)
-		}
-	}
-}
-
-// TestIsTPMOverflowError distinguishes a structural TPM rejection (one
-// request needs more tokens than the entire per-minute budget — waiting can
-// never help) from a transient one (the request fits the budget but other
-// traffic consumed it — waiting for the next window helps).
-func TestIsTPMOverflowError(t *testing.T) {
+// TestIsTPMOverflowSemantics: the modern parser distinguishes three TPM
+// rejection classes. Structural (requested > limit) and dominant (requested
+// > half of limit) both require shrinking the request — the compact-then-
+// retry path handles them via isTPMDominatedRequest, which covers structural
+// as a subset. Modest requests (<= half the budget) are genuine congestion:
+// waiting for the window to drain is the right fix.
+func TestIsTPMDominatedRequestApp(t *testing.T) {
 	structural := &domain.ProviderError{Kind: domain.KindSSETransport, Temporary: true, Err: errors.New(tpmOverflowBody)}
-	if !isTPMOverflowError(structural) {
-		t.Fatal("requested > limit must be structural TPM overflow")
+	if !isTPMDominatedRequest(structural) {
+		t.Fatal("requested > limit must be dominated (structural subset)")
 	}
 	// Wrapping layers must not hide the signal.
-	if !isTPMOverflowError(fmt.Errorf("stream round failed: %w", structural)) {
-		t.Fatal("wrapped structural TPM must still be detected")
+	if !isTPMDominatedRequest(fmt.Errorf("stream round failed: %w", structural)) {
+		t.Fatal("wrapped dominant TPM must still be detected")
 	}
-	transient := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
-		Err: errors.New("Request too large for gpt-5.6-luna on tokens per min (TPM): Limit 200000, Requested 150000. The input or output tokens must be reduced in order to run successfully.")}
-	if isTPMOverflowError(transient) {
-		t.Fatal("requested <= limit is transient, not structural")
+	dominant := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
+		Err: errors.New("Request too large for gpt-5.6-luna on tokens per min (TPM): Limit 500000, Used 271036, Requested 355391.")}
+	if !isTPMDominatedRequest(dominant) {
+		t.Fatal("requested > half the budget must be dominated")
 	}
-	if isTPMOverflowError(errors.New("boom")) {
+	modest := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
+		Err: errors.New("Request too large on tokens per min (TPM): Limit 500000, Used 271036, Requested 40000.")}
+	if isTPMDominatedRequest(modest) {
+		t.Fatal("requested <= half the budget is congestion, not dominated")
+	}
+	if isTPMDominatedRequest(errors.New("boom")) {
 		t.Fatal("unrelated error must not match")
 	}
-	if isTPMOverflowError(nil) {
+	if isTPMDominatedRequest(nil) {
 		t.Fatal("nil error must not match")
 	}
 }
@@ -327,19 +317,26 @@ func TestProviderRetryDelayRejectsStructuralTPM(t *testing.T) {
 	}
 }
 
-// TestShouldEmergencyCompactTPM verifies that a structural TPM rejection
-// triggers emergency compaction even when the local token estimate is far
-// below the compaction trigger — the provider's own numbers are the proof
-// (image-heavy transcripts are routinely undercounted by the chars/4
-// estimate).
+// TestShouldEmergencyCompactTPM verifies that TPM rejections where the
+// request dominates the per-minute budget trigger emergency compaction even
+// when the local token estimate is far below the compaction trigger — the
+// provider's own numbers are the proof (image-heavy transcripts are
+// routinely undercounted by the chars/4 estimate). Structural (requested >
+// limit) and dominant (requested > half of limit) both qualify; a modest
+// request is congestion and must not force compaction.
 func TestShouldEmergencyCompactTPM(t *testing.T) {
-	err := &domain.ProviderError{Kind: domain.KindSSETransport, Temporary: true, Err: errors.New(tpmOverflowBody)}
-	if !shouldEmergencyCompact(err, 50_000, 150_000) {
+	structural := &domain.ProviderError{Kind: domain.KindSSETransport, Temporary: true, Err: errors.New(tpmOverflowBody)}
+	if !shouldEmergencyCompact(structural, 50_000, 150_000) {
 		t.Fatal("structural TPM must force emergency compaction despite low estimate")
 	}
-	transient := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
-		Err: errors.New("Request too large on tokens per min (TPM): Limit 200000, Requested 150000.")}
-	if shouldEmergencyCompact(transient, 50_000, 150_000) {
-		t.Fatal("transient TPM must not force compaction")
+	dominant := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
+		Err: errors.New("Request too large on tokens per min (TPM): Limit 500000, Used 100000, Requested 300000.")}
+	if !shouldEmergencyCompact(dominant, 50_000, 150_000) {
+		t.Fatal("dominant TPM (request > half the budget) must force emergency compaction")
+	}
+	modest := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
+		Err: errors.New("Request too large on tokens per min (TPM): Limit 500000, Used 400000, Requested 40000.")}
+	if shouldEmergencyCompact(modest, 50_000, 150_000) {
+		t.Fatal("modest TPM (congestion) must not force compaction")
 	}
 }

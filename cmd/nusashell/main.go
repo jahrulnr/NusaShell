@@ -300,6 +300,7 @@ func run() error {
 	tb.Delegate = app
 	tb.Steerer = app
 	tb.SkillSearcher = app
+	tb.Conversations = app
 	var autoSvc *application.Automation
 	if svc, autoDB, err := automation.BuildAutomation(dataDir, bus, pluginStore, mcpManager, mcpManager); err != nil {
 		slog.Warn("automation store init failed", "error", err)

@@ -64,6 +64,7 @@ func (a *App) runHeadlessTurnKindObserved(ctx context.Context, prompt, model str
 		MessageID:      asstMsgID,
 		Ctx:            turnCtx,
 		Cancel:         cancel,
+		ProviderID:     provider.ID,
 		Headless:       true,
 		ToolKind:       kind,
 		RiskTierCap:    domain.TrustLevelToRiskTierCap(trust),

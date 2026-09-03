@@ -136,31 +136,6 @@ func contextLimitFromError(err error) (int, bool) {
 	return n, ok
 }
 
-// parseTPMLimitRequested extracts the per-minute token budget and the token
-// count the rejected request asked for from a TPM error body.
-func parseTPMLimitRequested(body string) (limit, requested int, ok bool) {
-	return domain.ParseTPMLimitRequested(body)
-}
-
-// isTPMOverflowError reports whether the provider rejected the request
-// because a single request needs more tokens than the entire
-// tokens-per-minute budget ("Limit 200000, Requested 333331"). This is
-// structural: the same request fails in every window, so waiting or backing
-// off can never help — the only recovery is shrinking the request via
-// emergency compaction. A TPM rejection where the request fits the budget is
-// transient (other traffic consumed the window) and stays retryable.
-func isTPMOverflowError(err error) bool {
-	var upstream *domain.ProviderError
-	if !errors.As(err, &upstream) {
-		return false
-	}
-	body := ""
-	if upstream.Err != nil {
-		body = upstream.Err.Error()
-	}
-	return domain.IsStructuralTPMFailure(body)
-}
-
 // shouldEmergencyCompact reports whether a provider error should trigger
 // destructive emergency compaction. The body must match an explicit overflow
 // phrase (not a generic field name like "input_tokens"). Normally the local
@@ -169,10 +144,13 @@ func isTPMOverflowError(err error) bool {
 // heuristic estimate is low — different tokenizers can count more tokens than
 // our chars/4 estimate.
 func shouldEmergencyCompact(err error, estimatedTokens, compactionTrigger int) bool {
-	// A structural TPM rejection proves the request is too large for the
-	// provider's per-minute budget regardless of the local estimate —
-	// image-heavy transcripts are routinely undercounted by chars/4.
-	if isTPMOverflowError(err) {
+	// A TPM rejection where the request dominates the per-minute budget
+	// (structural: needs more than the whole budget; or dominant: more
+	// than half of it) cannot be fixed by waiting — the only recovery is
+	// shrinking the request via emergency compaction. Dominant requests
+	// also cover every structural case (requested > limit implies
+	// requested > limit/2), so one predicate gates both.
+	if isTPMDominatedRequest(err) {
 		return true
 	}
 	if !isContextOverflowError(err) {

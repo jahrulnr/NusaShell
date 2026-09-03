@@ -44,6 +44,10 @@ The `skill` dispatcher tool handles catalog and authoring; `op` selects:
 - `save {name,content,description?,id?,path?}` — create or update a
   user-owned skill, or write a support file when `path` is set (the skill
   must already exist).
+- `delete {id,owned_by?}` — remove a skill. Plugin-owned skills cannot be
+  deleted directly (uninstall the plugin instead). The background learning
+  agent is instructed to only delete agent-owned skills; user-owned and
+  builtin skills are protected by this guidance.
 
 The Skills workspace is a read-only browser: it shows the catalog, the file
 tree of the selected skill, and a file viewer. Use `skill(op="save")` (or the

@@ -1165,7 +1165,7 @@ func TestReviewLoopCallsHydrationToolFirst(t *testing.T) {
 	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
 
 	// The reviewTools() list must include review_transcript.
-	tools := agent.reviewTools()
+	tools := agent.reviewTools("")
 	found := false
 	for _, td := range tools {
 		if td.Name == "review_transcript" {
@@ -1203,7 +1203,7 @@ func TestReviewLoopCallsHydrationToolFirst(t *testing.T) {
 	if strings.Contains(capturedInitialContent, "[user]") || strings.Contains(capturedInitialContent, "[assistant]") {
 		t.Fatalf("initial user message looks like a transcript dump: %q", capturedInitialContent[:min(100, len(capturedInitialContent))])
 	}
-	for _, td := range agent.reviewTools() {
+	for _, td := range agent.reviewTools("") {
 		if td.Name == reviewTranscriptToolName {
 			// The tool definition still describes the path/start/end params.
 			if !strings.Contains(td.Description, "path") {
@@ -1764,23 +1764,35 @@ func TestReviewMarkerSaveDoesNotOverwriteConcurrentTurnProgress(t *testing.T) {
 	}
 }
 
-func TestReviewAllowedOpRejectsMemoryProject(t *testing.T) {
-	if reviewAllowedOp("memory_project", []byte(`{"op":"query","kind":"index"}`)) {
-		t.Fatal("review agent must not be allowed to call memory_project")
+// Project memory is read-only for the unified background learning agent:
+// query/list/read inform curation, but nothing may be admitted, archived,
+// or modified.
+func TestReviewAllowedOpKeepsProjectMemoryReadOnly(t *testing.T) {
+	for _, args := range []string{
+		`{"op":"query","kind":"index"}`,
+		`{"op":"list"}`,
+		`{"op":"read","kind":"index"}`,
+	} {
+		if !reviewAllowedOp("memory_project", []byte(args)) {
+			t.Fatalf("read-only memory_project op must be allowed: %s", args)
+		}
 	}
-	if reviewAllowedOp("memory_project", []byte(`{"op":"admit","kind":"debug","content":"x"}`)) {
-		t.Fatal("review agent must not admit into project memory")
-	}
-	if reviewToolWhitelist()["memory_project"] {
-		t.Fatal("memory_project must stay off the review whitelist")
+	for _, args := range []string{
+		`{"op":"admit","kind":"debug","content":"x"}`,
+		`{"op":"archive","id":"D-old"}`,
+		`{"op":"lint"}`,
+	} {
+		if reviewAllowedOp("memory_project", []byte(args)) {
+			t.Fatalf("mutating memory_project op must be blocked: %s", args)
+		}
 	}
 }
 
-func TestReviewToolsOmitMemoryProject(t *testing.T) {
+func TestReviewToolsOmitProjectMemoryWithoutWorkspace(t *testing.T) {
 	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
-	for _, td := range agent.reviewTools() {
+	for _, td := range agent.reviewTools("") {
 		if td.Name == "memory_project" {
-			t.Fatal("reviewTools() must not list memory_project")
+			t.Fatal("reviewTools() must not list memory_project without a workspace")
 		}
 	}
 }

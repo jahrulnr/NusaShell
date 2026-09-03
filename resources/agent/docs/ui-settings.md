@@ -58,7 +58,7 @@ Settings cards are clustered under labeled groups so unrelated controls are not 
 
 ## Agent runtime
 
-Default model for new conversations, the model used by the internal delegate agent, tool-round guards (max rounds, repeated-call limit, max parallel tools), max auto-continues after a successful turn with open todos, max output tokens, and optional sampling parameters. Existing conversations keep their selected model. The delegate model defaults to the active conversation model.
+Default model for new conversations, the model used by the internal delegate agent, tool-round guards (max rounds, repeated-call limit, max parallel tools), max auto-continues after a successful turn with open todos, an optional per-round slow-down pacing delay, max output tokens, and optional sampling parameters. Existing conversations keep their selected model. The delegate model defaults to the active conversation model.
 
 - **Agent runtime title** (`#settings-runtime-title`):
   - Section: Settings
@@ -93,6 +93,11 @@ Default model for new conversations, the model used by the internal delegate age
   - Section: Settings
   - Type: number
   - Notes: Auto-starts the next turn while todos remain; default 10, 0 unlimited.
+
+- **Slow Down per round (seconds)** (`#settings-slow-down`):
+  - Section: Settings
+  - Type: number
+  - Notes: Artificial per-round delay before every agent round in every conversation; default 0 (off), range 0-60. Saved values apply instantly to running conversations - an in-flight delay shrinks or cancels without stopping the turn.
 
 - **Max output tokens** (`#settings-max-output-tokens`):
   - Section: Settings

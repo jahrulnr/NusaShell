@@ -52,6 +52,25 @@ func TestExecuteDispatcherSkillList(t *testing.T) {
 	}
 }
 
+func TestExecuteDispatcherDocsList(t *testing.T) {
+	docsSource, err := docsinfra.New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tb := testToolbox(nil, nil, &stubMCP{})
+	tb.Docs = docsSource
+
+	out, err := tb.Execute(context.Background(), "docs", []byte(`{"op":"list","limit":5}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"count: 5", "limit: 5", "automation"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("dispatcher docs list output missing %q: %s", want, out)
+		}
+	}
+}
+
 func TestExecuteDispatcherUnknownOpFailsLoud(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
 	_, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"bogus"}`))
@@ -113,11 +132,13 @@ func TestAllAdvertisedFamilyOpsRoute(t *testing.T) {
 		{"skill", `{"op":"list"}`},
 		{"skill", `{"op":"search","query":"git"}`},
 		{"skill", `{"op":"save","name":"probe","content":"c"}`},
+		{"skill", `{"op":"delete","id":"probe"}`},
 		{"memory", `{"op":"save","content":"User prefers Indonesian","category":"user"}`},
 		{"memory", `{"op":"replace","target":"fragment","id":"nope","content":"c"}`},
 		{"memory", `{"op":"search","query":"Indonesian"}`},
 		{"memory", `{"op":"list"}`},
 		{"memory", `{"op":"delete","id":"nope"}`},
+		{"docs", `{"op":"list"}`},
 		{"docs", `{"op":"search","query":"automation"}`},
 		{"docs", `{"op":"read","id":"automation"}`},
 		{"memory_project", `{"op":"list"}`},
@@ -133,6 +154,9 @@ func TestAllAdvertisedFamilyOpsRoute(t *testing.T) {
 		{"automation", `{"op":"delete","workflow_id":"w"}`},
 		{"automation_schedule", `{"op":"once","at":"2026-09-02T09:00:00Z","yaml":"name: x"}`},
 		{"automation_schedule", `{"op":"every","interval":"1h","yaml":"name: x"}`},
+		{"conversation", `{"op":"list"}`},
+		{"conversation", `{"op":"search","query":"backend"}`},
+		{"conversation", `{"op":"send","id":"conv_target","content":"hello"}`},
 	}
 	for _, tc := range cases {
 		if _, err := tb.Execute(context.Background(), tc.name, []byte(tc.args)); err != nil && strings.Contains(err.Error(), "unknown") {

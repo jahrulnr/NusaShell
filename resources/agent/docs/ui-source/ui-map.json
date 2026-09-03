@@ -608,7 +608,7 @@
         {
           "heading": "Agent runtime",
           "paragraphs": [
-            "Default model for new conversations, the model used by the internal delegate agent, tool-round guards (max rounds, repeated-call limit, max parallel tools), max auto-continues after a successful turn with open todos, max output tokens, and optional sampling parameters. Existing conversations keep their selected model. The delegate model defaults to the active conversation model."
+            "Default model for new conversations, the model used by the internal delegate agent, tool-round guards (max rounds, repeated-call limit, max parallel tools), max auto-continues after a successful turn with open todos, an optional per-round slow-down pacing delay, max output tokens, and optional sampling parameters. Existing conversations keep their selected model. The delegate model defaults to the active conversation model."
           ],
           "controls": [
             "settings-runtime-title",
@@ -618,6 +618,7 @@
             "settings-repeated-tool-limit",
             "settings-max-parallel-tools",
             "settings-auto-continues",
+            "settings-slow-down",
             "settings-max-output-tokens",
             "settings-temperature",
             "settings-top-p",
@@ -1072,7 +1073,7 @@
       "label": "Thread log",
       "section": "Agent",
       "type": "log",
-      "notes": "Renders the active conversation messages. Long conversations are windowed: the last user bubble plus a short tail of a finished turn render on open (scrolled to bottom). A running turn keeps every persisted round of that turn mounted on reload. Older finished-turn rounds, earlier turns, and archived chunks load on demand via Load older or scroll-to-top. User and isolated ACP prompt events render Markdown as HTML; inline backticks use code pills and fenced code uses a bounded horizontal-scroll card. Thinking and compaction handover markdown are parsed when expanded; the expanded Thinking body shows up to 20 rendered lines and scrolls internally beyond that without clipping list numbers behind the scrollbar. Live Thinking deltas follow the thread only while the invisible end marker is visible at the bottom; scrolling up pauses auto-follow until the user returns to the bottom. Completion/error events resync the actual scroll geometry before sound and refresh so a reader stays on the message being read. Refreshes also preserve which Thinking and tool disclosures the user opened. Markdown tables keep their intrinsic width inside a horizontal scroll container on narrow bubbles. Local Markdown file links open a bounded text preview with styled tables and lazy Mermaid rendering when the bundled renderer is available. Tool cards load the versioned backend catalog from agent.tools.contracts, carry an isolated contract-owned class plus request/result hooks, and render predictable list, status, code, document, and media output formats; tool output attachments use the tool result renderer. During backend compaction, a room-scoped WebSocket event drives an animated inline status until the matching completed or failed event arrives; the generic Thinking dots are mutually exclusive with that status. Before a valid tool card exists, provider-side tool construction shows a transient animated activity row with five-second copy rotation and no partial arguments. An empty thread shows starter prompt chips."
+      "notes": "Renders the active conversation messages. Long conversations are windowed: the last user bubble plus a short tail of a finished turn render on open (scrolled to bottom). A running turn keeps every persisted round of that turn mounted on reload. Older finished-turn rounds, earlier turns, and archived chunks load on demand via Load older or scroll-to-top. User and isolated ACP prompt events render Markdown as HTML; inline backticks use code pills and fenced code uses a bounded horizontal-scroll card. Thinking and compaction handover markdown are parsed when expanded; the expanded Thinking body shows up to 20 rendered lines and scrolls internally beyond that without clipping list numbers behind the scrollbar. Live Thinking deltas follow the thread only while the invisible end marker is visible at the bottom; scrolling up pauses auto-follow until the user returns to the bottom. Completion/error events resync the actual scroll geometry before sound and refresh so a reader stays on the message being read. Refreshes also preserve which Thinking and tool disclosures the user opened. Markdown table cells are capped at 400px and wrap long content; multi-column tables remain inside a local horizontal scroller so the scrollbar stays available. Local Markdown file links open a bounded text preview with styled tables and lazy Mermaid rendering when the bundled renderer is available. Tool cards load the versioned backend catalog from agent.tools.contracts, carry an isolated contract-owned class plus request/result hooks, and render predictable list, status, code, document, and media output formats; tool output attachments use the tool result renderer. During backend compaction, a room-scoped WebSocket event drives an animated inline status until the matching completed or failed event arrives; the generic Thinking dots are mutually exclusive with that status. Before a valid tool card exists, provider-side tool construction shows a transient animated activity row with five-second copy rotation and no partial arguments. An empty thread shows starter prompt chips."
     },
     "agent-starter-prompts": {
       "label": "Starter prompts",
@@ -2395,6 +2396,12 @@
       "section": "Settings",
       "type": "number",
       "notes": "Auto-starts the next turn while todos remain; default 10, 0 unlimited."
+    },
+    "settings-slow-down": {
+      "label": "Slow Down per round (seconds)",
+      "section": "Settings",
+      "type": "number",
+      "notes": "Artificial per-round delay before every agent round in every conversation; default 0 (off), range 0-60. Saved values apply instantly to running conversations - an in-flight delay shrinks or cancels without stopping the turn."
     },
     "settings-user-prompt": {
       "label": "User prompt",

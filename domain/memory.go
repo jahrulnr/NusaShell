@@ -12,7 +12,7 @@ import (
 // always-injected working set (~1k tokens) holding the user's rules and
 // preferences. soul.md is an equally sized (~1k tokens) always-injected
 // document holding agent working knowledge — conventions, gotchas,
-// decisions, references — curated by background improvers. Fragments are
+// decisions, references — curated by the background learning agent. Fragments are
 // an unlimited, on-demand archive stored as one markdown file per entry
 // under memory/fragments/. The background agent promotes durable facts
 // into the documents; foreground agents save new observations as
@@ -44,7 +44,7 @@ const (
 
 // PrimaryEntry is one line in the primary primary.md file. Primary
 // entries are short, durable facts promoted from fragments by the
-// background review agent. Foreground agents can read and update them
+// background learning agent. Foreground agents can read and update them
 // but cannot create new ones directly.
 type PrimaryEntry struct {
 	ID        string    // stable id (fragment id the entry was promoted from, or generated)

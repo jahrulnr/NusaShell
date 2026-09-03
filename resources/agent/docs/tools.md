@@ -9,7 +9,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `exec` | run a shell command as a child process; combined stdout/stderr streamed live to the tool terminal as it is produced (head/tail elision for huge output) plus an optional per-call Stop button while running; default shell is POSIX `sh` on Unix/macOS, on Windows `auto` resolves Git Bash first (POSIX syntax works best) then PowerShell — `cmd` only via explicit `shell="cmd"`, plus optional kinds `bash`/`powershell`/`pwsh`/`wsl` (wsl maps cwd under /mnt); no absolute wall-clock limit — running commands keep producing, but silence longer than `idle_timeout_ms` (default 180000) fails the run; optional explicit `timeout_ms`; optional absolute `cwd`; the whole child tree dies on cancel/timeout (Stop button or composer Stop); on Windows select shells via `shell=` instead of invoking cmd.exe/powershell.exe inside a bash command line (MSYS path conversion mangles drive-letter paths like `Z:/x`). When the full log exceeds ~32KiB, YAML includes `overflow_path` (absolute file under the platform temp dir `nusashell/`) with the complete stdout/stderr — `file_read` it from offset 0 |
 | `file_read` | read a text file by absolute path (up to `max_bytes`, default 32768; byte mode: continue with `offset_bytes` when truncated — the result echoes `offset_bytes`/`next_offset_bytes`, always byte counts, never line numbers; line mode: pass `start_line`/`end_line` (1-based, inclusive; either one switches to line mode and `offset_bytes` is ignored) to read by line numbers as grep reports them — the result echoes `start_line`/`end_line` and continues with `next_start_line` when truncated; `total_lines` always reports the complete file's line count so grep line numbers map directly; `sha256` is the version of the complete file, including bytes outside the returned page; metadata also reports `line_ending`, `tabs`, `carriage_returns`, and `trailing_whitespace_lines`; use `show_whitespace=true` to render invisible whitespace as visible markers; binary files are reported, not dumped) |
 | `file_write` | create or overwrite a text file atomically (temp file + rename); parent directories created automatically; `encoding` is utf8, escaped visible-whitespace text, or base64; escaped text understands `\t`, `\r`, `\n`, and `\\` and preserves the resulting bytes; transient Windows file-lock errors during the rename are retried briefly; the result includes the written file's `sha256` and whitespace metadata |
-| `file_patch` | exact substring replace; after an exact miss, safely auto-heals one unique whitespace-equivalent match by default and reports `healed: true`; set `auto_heal=false` for exact-only behavior; repeated exact matches still require 1-based `occurrence`, while ambiguous whitespace matches never write and report the current version plus candidate line numbers (`candidate_lines=[...]`); use `encoding=escaped` when copying markers from `file_read(show_whitespace=true)`; pass `expected_sha256` from `file_read` to fail closed if the file changed; success returns the new `sha256` and whitespace metadata; a no-match context failure returns the current version, whitespace statistics, and a nearby excerpt with invisible characters rendered visibly; `preview=true` returns the result without writing |
+| `file_patch` | exact substring replace; after an exact miss, safely auto-heals one unique whitespace-equivalent match by default and reports `healed: true`; set `auto_heal=false` for exact-only behavior; repeated exact matches still require 1-based `occurrence`, while ambiguous whitespace matches never write and report the current version plus candidate line numbers (`candidate_lines=[...]`); use `encoding=escaped` when copying markers from `file_read(show_whitespace=true)`; success returns the new `sha256` and whitespace metadata; a no-match context failure returns the current version, whitespace statistics, and a nearby excerpt with invisible characters rendered visibly; `preview=true` returns the result without writing |
 | `file_list` | list directory entries with name, type, size, modified time |
 | `file_mkdir` | create a directory including any missing parents |
 | `file_delete` | delete a file or directory (non-empty directories require `recursive=true`); irreversible |
@@ -19,10 +19,10 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `grep` | search file contents with regex (RE2 syntax); filters by `glob_pattern`, returns matching lines with optional `context_lines`; `output_mode`: content (default), files_with_matches, count; case-insensitive via `case_insensitive=true`; set `show_whitespace=true` in content mode to render tabs and carriage returns visibly; content rows are `path:LINE:text` where LINE is a 1-based line number (context rows use `path-LINE-text`), and the header tallies them as `line_matches` (when `max_results` caps the result, the header also reports `total_line_matches` from the search totals; count mode: `file:N` = match count, `total_line_matches`); skips `.git`, `node_modules`, `vendor`, and `*.min.js`/`*.min.css`/`*.map`; each content line is clipped at 200 bytes; in-band body caps at ~32KiB with `overflow_path` / `next_offset_bytes` so `file_read` can page the rest from the platform temp dir; prefer this over exec+shell grep — structured output, no process spawn, works without rg installed |
 | `find_file` | find files by glob pattern with `**` recursive matching (e.g. `**/*.go`) and brace expansion (e.g. `*.{go,ts}`); skips .git/node_modules/vendor; returns matching paths sorted alphabetically |
 | `show` | render a file from disk in the UI. `op=html` reads an HTML file and displays it in a sandboxed iframe (write the file first with `file_write`, then `show` it — use `file_patch` for edits, `file_read` to inspect). `op=image` reads an image file and displays it inline. `op=audio` reads an audio file (mp3, wav, ogg, m4a) and displays an inline player. `op=video` reads a video file (mp4, webm, mov, avi) and displays an inline player. `op=pdf` validates a PDF by its `%PDF-` magic bytes and displays it in the browser's native PDF viewer. `width`/`height` control the iframe viewport (html only, default 720x400). The tool result to the model is metadata only (path, name, media_type, size_bytes for media/PDF; path, width, height, title for html) — no file content or base64 payload is ever embedded in the tool output, so it does not bloat the conversation JSON or enter the provider request. The frontend loads the file via `/local-file?path=` on demand. Use `read_media` instead when the model needs to see image/audio/video/PDF content. Replaces the former `artifact_*` tools — file_* handles CRUD, `show` only handles display |
-| `skill` | skill library dispatcher; `op` selects: `list`, `search`, `save`. `search` is discovery metadata only (`id`, `name`, `description`, `owned_by`); it never loads `SKILL.md`. After selecting a skill, read its absolute `SKILL.md` with `file_read` before applying it. Support files also use `file_read`; list a skill folder with `file_list` (see `docs(op="read", id="skills")` for the path layout) |
+| `skill` | skill library dispatcher; `op` selects: `list`, `search`, `save`, `delete`. `search` is discovery metadata only (`id`, `name`, `description`, `owned_by`); it never loads `SKILL.md`. After selecting a skill, read its absolute `SKILL.md` with `file_read` before applying it. Support files also use `file_read`; list a skill folder with `file_list`; `delete {id,owned_by?}` removes a user/agent-owned skill (plugin-owned skills cannot be deleted directly) (see `docs(op="read", id="skills")` for the path layout) |
 | `memory` | long-term memory dispatcher; `op` selects: `save` (idempotent dedup), `replace` (primary substring/body rewrite or fragment update), `search` (BM25 ranked fragments), `list`, `delete` |
 | `memory_project` | per-workspace project memory dispatcher (listed only with a workspace); `op` selects: `query` (AND selectors), `list`, `read`, `admit` (upsert + lint), `skip` (negative admission, no write), `archive`, `lint`. User prefs stay in `memory`. See `docs(op="read", id="memory-project")` |
-| `docs` | product documentation dispatcher; `op` selects: `search {query}` (ranked page ids) and `read {id}`. Long `read` pages are truncated in-band (~32KiB) with `overflow_path` — continue via `file_read` |
+| `docs` | product documentation dispatcher; `op` selects: `list {limit?}` (page ids/titles for vocabulary discovery), `search {query,limit?}` (BM25-ranked page ids; multi-word terms need not be contiguous), and `read {id}` (full page). Use `list` when terminology is uncertain or search returns zero; read relevant pages before relying on facts. Long `read` pages are truncated in-band (~32KiB) with `overflow_path` — continue via `file_read` |
 | `todo` | manage the conversation task checklist. Two modes: `replace` (default) full-replaces the list (an empty items array clears it); `patch` merges by ID — updates status/content of existing items, appends new ones, keeps untouched items unchanged. In `replace`, `content` may be omitted for an existing ID and its stored description is preserved; a new ID still requires non-empty `content`. In `patch`, `content` is optional for existing items and an empty value means keep the stored description. Use `patch` to update a single item without re-emitting the full list. Item IDs are shown in the hydrated checklist so statuses can be patched after compaction. Max 50 items, 500 chars each; prefer exactly one `in_progress` at a time. The optional `brief` argument is a living planning document (max ~10k tokens) with required markdown sections `## Objective` and `## Done when`, plus optional `## Findings` and `## Approach` that grow as the task progresses. It stays available through conversation history and is re-injected with the fresh hydration checkpoint immediately after the compacted handover user (the epoch anchor), before retained assistant rounds. The brief is mirrored to a plan file on disk; the result returns `plan_path` (absolute) — `file_read` it to re-read the latest brief, and hand it to ACP subagents. Set `clear_brief: true` to delete the brief and its plan file (items untouched); an empty `brief` string alone never clears. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
 | `ask_question` | block for a structured user decision; use only when progress genuinely requires a choice or approval. This is the only way to pause the todo-driven auto-continue chain for a user answer — a plain-text question in the reply does not pause it. Set `multi_select=true` whenever more than one option could fit (preferences, scope, priorities) so the user can pick several; the user can also add free text as a note/suggestion alongside the chosen options (when `allow_free_text=true`) |
 | `mcp_list` | list all plugins (MCP servers) with runtime state: every plugin appears, running or idle |
@@ -42,6 +42,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `web_search` | search the web across Brave, Serper, Tavily, Startpage, Wikipedia, and GitHub (pool configurable in Settings → Web Search); returns ranked results with title, URL, and snippet. Oversized JSONL is truncated in-band (~32KiB) with `overflow_path` |
 | `web_fetch` | fetch a URL and return readable text; supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes` (extract cap, default 2MB); in-band body caps at ~32KiB with `overflow_path` / `next_offset_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
+| `conversation` | inter-agent room communication dispatcher; `op` selects: `list` (list visible rooms, newest first), `search` (search by title or summary), `send` (send message to another room) |
 | `automation` | durable automation dispatcher; pass `op` to run, wait, status, logs, cancel, steer, list, read, validate, create, enable, disable, or delete a workflow |
 | `automation_schedule` | durable schedule dispatcher; pass `op="once"` for an RFC3339 one-shot or `op="every"` for a cron/interval schedule |
 | `wait_until` | durable wait; the runner is not occupied |
@@ -51,6 +52,16 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `subagent_stop` | cancel a live ACP run (pending permissions fail closed) |
 | `subagent_wait` | wait for an async ACP run to finish |
 | `delegate` | spawn one internal NusaShell background agent: the same engine, headless, in a hidden pipeline room, with the standard toolbox (no `subagent`/`delegate`, no permission prompts). It does not receive this conversation's history — pass a compact brief with absolute paths. The model comes from Settings → Agent → Internal delegate model; empty inherits the parent conversation's active model. Always async: returns a run id immediately; the tool call stays `running` until the delegate finishes, then a synthetic `delegate_result` call carries only the terminal assistant output after all tool rounds. The same ACP-shaped dock/drawer/transcript UI is used for this run. Never listed for the delegate agent itself (no recursion) |
+
+### Documentation discovery and search
+
+Use `docs(op="search", query="...")` when you already know likely product
+vocabulary. It uses BM25 over the documentation corpus, and multi-word terms
+do not need to appear as one contiguous phrase. Use
+`docs(op="list", limit=...)` when terminology is uncertain, when search
+returns zero, or when discovering page ids. List and search are discovery
+signals, not factual evidence; call `docs(op="read", id="...")` for the
+relevant page before relying on NusaShell behavior.
 
 ### `show` display capabilities
 
@@ -166,7 +177,7 @@ recursion).
 
 ### Dispatcher families
 
-`skill`, `memory`, `docs`, and `memory_project` are **dispatcher tools**: one
+`skill`, `memory`, `docs`, `memory_project`, and `conversation` are **dispatcher tools**: one
 advertised tool per family whose required `op` field selects the action.
 Root+op is the SINGLE naming layer — the roster, execution routing, persisted
 history, hydration checkpoints, and internal callers all use exactly this
@@ -179,18 +190,23 @@ Ops per family:
   resolution); `search {query,limit?}` (discovery metadata only, never the
   SKILL.md body); `save {name,content,description?,id?,path?}` — with `path`
   set, writes a support file (`references/…`, `scripts/…`) inside an existing
-  skill. After discovery, read the selected absolute `SKILL.md` with
-  `file_read` before applying it; support files are also read with `file_read`
-  and listed with `file_list` (see `docs(op="read", id="skills")`).
+  skill; `delete {id,owned_by?}` — removes a user/agent-owned skill
+  (plugin-owned skills cannot be deleted directly). After discovery, read the
+  selected absolute `SKILL.md` with `file_read` before applying it; support
+  files are also read with `file_read` and listed with `file_list` (see
+  `docs(op="read", id="skills")`).
 - `memory`: `save {content,category?,project?,task?,tags?}` is idempotent for
   exact normalized duplicates; `replace {target,content,old_text?,id?}` edits
   the primary document or one fragment; `search` is BM25-ranked with metadata
   filters; `list`; `delete {id}`.
-- `docs`: `search {query,limit?}`, then `read {id}`.
+- `docs`: `list {limit?}` for page ids/titles when vocabulary is unknown;
+  `search {query,limit?}` for known vocabulary (terms need not be a
+  contiguous phrase); then `read {id}` before relying on the page.
 - `memory_project` (only when a workspace is set): `query` (AND `topic` /
   `kind` / `related` / `id`; `archive` / `full` / `limit` optional), `list`,
   `read {kind|id}`, `admit {kind,content,id?}`, `skip {reason}`, `archive {id}`,
   `lint`. See `docs(op="read", id="memory-project")`.
+- `conversation`: `list {limit?,offset?}` (visible rooms sorted newest first), `search {query,limit?,offset?}` (search rooms by title or summary), `send {id,content}` (deliver message to another conversation room).
 
 ## Workflow routing
 
@@ -199,6 +215,9 @@ a TODO. Multi-step, asynchronous, or cross-turn work does.
 
 Good examples:
 
+    docs(op="list", limit=20)
+    docs(op="search", query="provider credentials")
+    docs(op="read", id="providers")
     docs(op="read", id="automation")
     skill(op="search", query="release checklist")
     file_read(path="/home/user/.config/nusashell/skills/release-checklist/SKILL.md")
@@ -208,6 +227,7 @@ Good examples:
 
 Bad examples:
 
+    docs(op="search", query="...") → count: 0; answer from memory without list/read
     todo(items=[{"id":"1","content":"Define MCP","status":"in_progress"}])
     skill(op="list")
     web_fetch(url="<guessed URL>")
@@ -325,12 +345,15 @@ differentiated by their args `type` and result text:
   The new system prompt and tool descriptions are already in this request —
   re-read the affected surfaces instead of relying on stale assumptions.
 - `type: "memory_changed"`: memory was updated outside this conversation
-  (user, background review, or another room's agent). Call `memory` op=list
-  to refresh before relying on remembered facts.
+  (user, the background learning agent, or another room's agent). Call
+  `memory` op=list to refresh before relying on remembered facts.
 - `type: "skills_changed"`: the skill library changed. Call `skill` op=list
   to refresh before relying on a previously known skill.
+- `type: "peer_message"`: a message received from another conversation room via `conversation(op="send")`.
+  Args carry `from` (sender conversation ID). Result text carries the quoted message and reply instructions.
 - `type: "task_memory"`: fragments relevant to this conversation are new or
-  updated (written by another conversation or the background improver).
+  updated (written by another conversation or the background learning
+  agent).
   Args carry `hits` with snippet contents — the facts are in the result
   text. Use them for the current task; retrieve full entries with
   `memory(op="search")` when a snippet needs more context. A fragment is

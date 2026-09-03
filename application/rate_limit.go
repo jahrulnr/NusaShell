@@ -81,8 +81,12 @@ func (a *App) friendlyRateLimitError(providerID string, upstream *domain.Provide
 	if upstream != nil && upstream.Err != nil {
 		body = upstream.Err.Error()
 	}
-	if limit, requested, ok := parseTPMLimitRequested(body); ok && requested > limit {
-		return fmt.Errorf("%s rejected this request: it needs %d tokens but the tokens-per-minute limit is %d. The conversation will be compacted to fit, or reduce the input/output tokens.", providerLabel, requested, limit)
+	// A TPM rejection where this request needs more than half the
+	// per-minute budget is a compaction problem, not a wait problem —
+	// surface the provider's own numbers (including what is already used
+	// this minute) and point at the compaction that is about to run.
+	if limit, used, requested, ok := domain.ParseTPMError(body); ok && requested*2 > limit {
+		return fmt.Errorf("%s is rate-limited on tokens per minute: this request needs %d tokens (limit %d/min, %d already used). The conversation will be compacted to fit, or reduce the input/output tokens.", providerLabel, requested, limit, used)
 	}
 	if wait <= 0 {
 		wait = DefaultRateLimitWindow

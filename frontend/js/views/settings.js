@@ -220,6 +220,7 @@ export async function refresh() {
     document.getElementById('settings-skill-nudge-interval').value = settings.skill_nudge_interval ?? 15;
     document.getElementById('settings-project-memory-base').value = settings.project_memory_base ?? '';
     document.getElementById('settings-auto-continues').value = settings.max_auto_continues ?? 10;
+    document.getElementById('settings-slow-down').value = settings.slow_down ?? 0;
     // Web answer: set provider dropdown and model field. API key is write-only.
     webAnswerProviderSelect.setSelected([state.webAnswerProvider || '']);
     document.getElementById('settings-web-answer-model').value = state.webAnswerModel;
@@ -822,6 +823,11 @@ async function save() {
       setStatus('Max auto-continues must be between 0 and 10,000 (0 = unlimited).', true);
       return;
     }
+    const slowDown = Number(document.getElementById('settings-slow-down').value);
+    if (!Number.isInteger(slowDown) || slowDown < 0 || slowDown > 60) {
+      setStatus('Slow Down must be between 0 and 60 seconds (0 = off).', true);
+      return;
+    }
     const webAnswerProvider = webAnswerProviderSelect.getSelected()?.[0] ?? '';
     const webAnswerModel = document.getElementById('settings-web-answer-model')?.value?.trim() ?? '';
     const webAnswerAPIKey = document.getElementById('settings-web-answer-api-key')?.value?.trim() ?? '';
@@ -873,6 +879,7 @@ async function save() {
       skill_nudge_interval: skillNudgeInterval,
       project_memory_base: document.getElementById('settings-project-memory-base').value.trim() || null,
       max_auto_continues: maxAutoContinues,
+      slow_down: slowDown,
       temperature: optionalNumber('settings-temperature'),
       top_p: optionalNumber('settings-top-p'),
       top_k: optionalNumber('settings-top-k'),

@@ -743,6 +743,10 @@
                 <input id="settings-auto-continues" type="number" min="0" max="10000" step="1" inputmode="numeric" value="10">
                 <small>After a successful turn, if the todo list still has open items, the agent automatically starts the next turn (default 10). Set 0 for unlimited; the chain stops on error, question, or user stop.</small>
               </label>
+              <label class="settings-field" for="settings-slow-down">Slow Down per round (seconds)
+                <input id="settings-slow-down" type="number" min="0" max="60" step="1" inputmode="numeric" value="0">
+                <small>Artificially slow the agent: wait this many seconds before every round of every conversation (default 0 = off). Saved values apply instantly to running conversations — a delay in progress shrinks or cancels, no stop or idle turn needed.</small>
+              </label>
               <label class="settings-field" for="settings-max-output-tokens">Max output tokens (default completion limit)
                 <input id="settings-max-output-tokens" type="number" min="256" max="1000000" step="256" inputmode="numeric" value="65536">
                 <small>Default max completion tokens per turn (default 65,536). Models that advertise their own limit use that instead.</small>

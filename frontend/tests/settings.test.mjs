@@ -41,6 +41,15 @@ test('Skill nudge interval is exposed in settings UI', () => {
   assert.match(settingsView, /settings-skill-nudge-interval/);
 });
 
+test('Slow Down per-round delay is exposed in settings UI', () => {
+  assert.match(html, /id="settings-slow-down"/);
+  assert.match(settingsView, /slow_down/);
+  assert.match(settingsView, /settings-slow-down/);
+  // Range matches the backend validation (0 = off .. 60s cap).
+  assert.match(html, /id="settings-slow-down" type="number" min="0" max="60"/);
+  assert.match(settingsView, /slowDown < 0 \|\| slowDown > 60/);
+});
+
 test('Plugin usage contracts select is slim-enhanced like the model pickers', () => {
   assert.match(settingsView, /createSelect\(document\.getElementById\('settings-plugin-contract-mode'\)/);
   assert.match(settingsView, /contractModeSelect\.setSelected/);

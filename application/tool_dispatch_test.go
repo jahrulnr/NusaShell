@@ -13,9 +13,11 @@ func TestDispatchOpRoutesOps(t *testing.T) {
 	}{
 		{"skill", `{"op":"list","limit":5}`, "list"},
 		{"skill", `{"op":"save","name":"x","content":"y"}`, "save"},
+		{"skill", `{"op":"delete","id":"x"}`, "delete"},
 		{"memory", `{"op":"save","content":"x"}`, "save"},
 		{"memory", `{"op":"SAVE","content":"x"}`, "save"}, // op match is case-insensitive
 		{"memory", `{"op":" search ","query":"q"}`, "search"},
+		{"docs", `{"op":"list"}`, "list"},
 		{"docs", `{"op":"search","query":"mcp"}`, "search"},
 		{"memory_project", `{"op":"query","kind":"index"}`, "query"},
 		{"memory_project", `{"op":"skip","reason":"nothing durable"}`, "skip"},
@@ -51,7 +53,7 @@ func TestDispatchOpRejectsBadOp(t *testing.T) {
 }
 
 func TestIsDispatchRoot(t *testing.T) {
-	for _, root := range []string{"skill", "memory", "docs", "memory_project", "automation", "automation_schedule"} {
+	for _, root := range []string{"skill", "memory", "docs", "memory_project", "automation", "automation_schedule", "conversation"} {
 		if !IsDispatchRoot(root) {
 			t.Fatalf("%q should be a dispatch root", root)
 		}
@@ -65,8 +67,8 @@ func TestIsDispatchRoot(t *testing.T) {
 
 func TestDispatcherToolInfosSchemaRequiresOp(t *testing.T) {
 	got := DispatcherToolInfos()
-	if len(got) != 6 {
-		t.Fatalf("family defs = %d, want 6", len(got))
+	if len(got) != 7 {
+		t.Fatalf("family defs = %d, want 7", len(got))
 	}
 	for _, def := range got {
 		req, ok := def.InputSchema["required"].([]string)
@@ -129,9 +131,75 @@ func TestFilterDispatcherToolInfosHidesProjectMemoryWithoutWorkspace(t *testing.
 	if !found {
 		t.Fatal("memory_project must be advertised when a workspace is set")
 	}
-	if len(shown) != 6 {
-		t.Fatalf("with workspace, family defs = %d, want 6", len(shown))
+	if len(shown) != 7 {
+		t.Fatalf("with workspace, family defs = %d, want 7", len(shown))
 	}
+}
+
+func TestDocsDispatcherOpsAreExplicit(t *testing.T) {
+	for _, op := range []string{"list", "search", "read"} {
+		if _, err := DispatchOp("docs", []byte(`{"op":"`+op+`"}`)); err != nil {
+			t.Fatalf("docs op %q rejected: %v", op, err)
+		}
+	}
+	var docs ToolInfo
+	for _, info := range DispatcherToolInfos() {
+		if info.Name == "docs" {
+			docs = info
+			break
+		}
+	}
+	properties, ok := docs.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("docs schema must expose properties")
+	}
+	opSchema, ok := properties["op"].(map[string]any)
+	if !ok {
+		t.Fatal("docs schema must expose the op property")
+	}
+	values, ok := opSchema["enum"].([]any)
+	if !ok {
+		t.Fatal("docs op schema must expose an enum")
+	}
+	for _, value := range values {
+		if value == "list" {
+			return
+		}
+	}
+	t.Fatal("docs op schema must advertise list for vocabulary discovery")
+}
+
+func TestSkillDispatcherOpsAreExplicit(t *testing.T) {
+	for _, op := range []string{"list", "search", "save", "delete"} {
+		if _, err := DispatchOp("skill", []byte(`{"op":"`+op+`"}`)); err != nil {
+			t.Fatalf("skill op %q rejected: %v", op, err)
+		}
+	}
+	var skill ToolInfo
+	for _, info := range DispatcherToolInfos() {
+		if info.Name == "skill" {
+			skill = info
+			break
+		}
+	}
+	properties, ok := skill.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("skill schema must expose properties")
+	}
+	opSchema, ok := properties["op"].(map[string]any)
+	if !ok {
+		t.Fatal("skill schema must expose the op property")
+	}
+	values, ok := opSchema["enum"].([]any)
+	if !ok {
+		t.Fatal("skill op schema must expose an enum")
+	}
+	for _, value := range values {
+		if value == "delete" {
+			return
+		}
+	}
+	t.Fatal("skill op schema must advertise delete")
 }
 
 func TestAutomationDispatcherOpsAreExplicit(t *testing.T) {

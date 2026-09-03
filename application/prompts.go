@@ -31,12 +31,6 @@ var delegatePrompt = resources.Prompt("delegate-agent")
 // auto-continue turn. Loaded from resources/agent/prompts/continue.md.
 var continuePrompt = resources.Prompt("continue")
 
-// improvePrompt is the background improver prompt: it teaches the
-// improver to study real conversation evidence (transcript JSON + the
-// files it touched) and write durable memory with guardrails. Loaded
-// from resources/agent/prompts/improve.md.
-var improvePrompt = resources.Prompt("improve")
-
 // compactionPrompt is the system prompt for the compaction summarization
 // call. Loaded from resources/agent/prompts/compaction.md. Tells the model
 // to call the summary() tool with the handoff checkpoint text.

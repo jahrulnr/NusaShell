@@ -331,7 +331,7 @@ type Settings struct {
 	// calls across all turns. Set to 0 to disable tool-based review.
 	// Default: 15 tool calls.
 	SkillNudgeInterval int `json:"skill_nudge_interval,omitempty"`
-	// ReviewModel selects the model used by the background review agent.
+	// ReviewModel selects the model used by the background learning agent.
 	// When empty, the conversation's active model is used. Format:
 	// "providerID:modelID" (same as CompactionModel). Useful for routing
 	// reviews to a cheaper/faster model; reviews re-send the transcript
@@ -365,6 +365,15 @@ type Settings struct {
 	// strips tools for one round to break the loop. 0 = disabled.
 	// Default: 3.
 	RepeatedToolLimit int `json:"repeated_tool_limit,omitempty"`
+	// SlowDown is an artificial per-round delay in seconds applied before
+	// every round of every conversation agent run (interactive turns,
+	// auto-continue chains, and headless pipeline steps). Its purpose is
+	// pacing: a slower agent is easier to step away from, and an
+	// unattended run finishes closer to the prompt-cache TTL instead of
+	// blowing through it instantly. The live setting is re-read on every
+	// wait tick, so saving a new value applies immediately to running
+	// conversations. 0 = off (default), max 60.
+	SlowDown int `json:"slow_down,omitempty"`
 	// UserPrompt is custom instructions the user wants injected into every
 	// agent turn's system prompt. Placed after the cache-stable prefix
 	// (system.md + tools.md) but before per-conversation system messages,
@@ -459,6 +468,14 @@ func NormalizeSettings(settings Settings) Settings {
 	// unset (-1 from JSON omitempty on older files) needs the default.
 	if settings.RepeatedToolLimit < 0 {
 		settings.RepeatedToolLimit = DefaultSettings().RepeatedToolLimit
+	}
+	// SlowDown: 0 = off (default). Negative (stale -1 from JSON omitempty)
+	// resets to off; clamp to the 60s cap so a hand-edit typo cannot stall
+	// a turn for minutes.
+	if settings.SlowDown < 0 {
+		settings.SlowDown = 0
+	} else if settings.SlowDown > 60 {
+		settings.SlowDown = 60
 	}
 	// PluginContractMode: anti-stamping — empty means "follow the factory
 	// default" and must STAY empty so future default changes reach saved

@@ -58,9 +58,10 @@ func Prompt(name string) string {
 // UserPrompt returns the content of a named user-role prompt file from
 // resources/agent/prompts/user/. These are short, imperative user
 // messages injected as the opening user turn for background agents
-// (e.g. the review agent). The .md extension is appended when omitted.
-// User prompts are treated by the LLM as direct instructions, which
-// models obey more reliably than system-prompt guidelines.
+// (e.g. the unified background learning agent). The .md extension is
+// appended when omitted. User prompts are treated by the LLM as direct
+// instructions, which models obey more reliably than system-prompt
+// guidelines.
 func UserPrompt(name string) string {
 	if len(name) < 3 || name[len(name)-3:] != ".md" {
 		name += ".md"
@@ -73,8 +74,7 @@ func UserPrompt(name string) string {
 }
 
 const (
-	skillReviewRulesPlaceholder = "{{skill_review_rules}}"
-	compactedSummaries          = "{{compacted_summaries}}"
+	compactedSummaries = "{{compacted_summaries}}"
 )
 
 func AudioVisionSystemPrompt() string {
@@ -108,24 +108,23 @@ func TranscribeAudioPrompt() string {
 	return UserPrompt("transcribe-audio")
 }
 
-// ReviewPrompt loads the combined background review prompt
-// (review.md), substituting the {{skill_review_rules}} template
-// with skill-rules.md content. There is intentionally only one review
-// agent — it decides both memory and skill writes in a single pass to
-// avoid the redundancy bug where memory contains skill fragments and
-// vice versa.
+// ReviewPrompt loads the unified post-conversation learning prompt
+// (review.md). There is intentionally one background agent: it gathers
+// evidence, researches when needed, curates both memory tiers and
+// fragments, and manages agent-owned skills in a single agentic pass so
+// memory and skills never drift into each other's territory.
 func ReviewPrompt() string {
-	return Prompt("review")
+	return Prompt("learn")
 }
 
-// ReviewUserPrompt loads the user-role review prompt
+// ReviewUserPrompt loads the user-role prompt
 // (prompts/user/review.md). This is injected as the opening user message
-// for the background review agent. Models treat user messages as direct
-// instructions, which they obey more reliably than system-prompt
-// guidelines — so the review trigger is a short imperative user message,
+// for the unified background learning agent. Models treat user messages as
+// direct instructions, which they obey more reliably than system-prompt
+// guidelines — so the trigger is a short imperative user message,
 // not a long system-prompt directive.
 func ReviewUserPrompt() string {
-	return UserPrompt("review")
+	return UserPrompt("learn")
 }
 
 // Brief new agent after compaction to continue conversation

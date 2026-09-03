@@ -85,19 +85,15 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 		}
 	}
 
-	tools := r.reviewTools()
+	tools := r.reviewTools(conversation.Workspace)
 
 	// Build the opening message sequence:
 	//   user:    user/review.md (imperative instruction)
-	//   assistant: synthetic tool_call(review_transcript) [+ tool_call(file_read)]
-	//   tool:    review_transcript result (bounded segment)
-	//   tool:    file_read result (primary.md content, when available)
+	//   assistant: synthetic tool_call(review_transcript) + memory doc reads
+	//   tool:    transcript and current user/soul document results
 	//
-	// Pre-injecting the tool results means the agent starts with both the
-	// transcript segment and the current primary memory as factual ground
-	// truth (tool output authority > system prompt authority). The agent
-	// does not need to call these tools — their results are already in the
-	// message stream.
+	// Pre-injecting all memory documents gives the agent factual state before
+	// it decides whether a read, update, or cleanup is justified.
 	userPrompt := resources.ReviewUserPrompt()
 	if userPrompt == "" {
 		userPrompt = "Review this conversation and manage your memories."
@@ -120,17 +116,44 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 		},
 	}
 
-	// Primary memory: pre-inject as a real file_read call so the agent
-	// sees the actual primary.md file (including frontmatter) as ground
-	// truth. Uses the real Toolbox.Execute so the output format is
-	// identical to what the agent would get calling file_read itself.
-	if r.app.Primary != nil && r.app.Primary.Path() != "" {
-		primaryPath := r.app.Primary.Path()
-		fileReadArgs := fmt.Sprintf(`{"path":%q}`, primaryPath)
-		fileReadTCID := "synthetic_file_read_primary"
+	// Memory documents: pre-inject each available tier (user.md and
+	// soul.md) as a real file_read call so the agent sees the actual
+	// files (frontmatter included) as ground truth before deciding what
+	// to update or trim. Uses the real Toolbox.Execute so the output
+	// format is identical to what the agent would get calling file_read
+	// itself.
+	memoryDocs := []struct {
+		idPrefix string
+		store    interface {
+			Path() string
+		}
+	}{}
+	if r.app.Primary != nil {
+		memoryDocs = append(memoryDocs, struct {
+			idPrefix string
+			store    interface {
+				Path() string
+			}
+		}{"synthetic_file_read_user", r.app.Primary})
+	}
+	if r.app.Agent != nil {
+		memoryDocs = append(memoryDocs, struct {
+			idPrefix string
+			store    interface {
+				Path() string
+			}
+		}{"synthetic_file_read_soul", r.app.Agent})
+	}
+	for _, doc := range memoryDocs {
+		docPath := doc.store.Path()
+		if docPath == "" {
+			continue
+		}
+		fileReadArgs := fmt.Sprintf(`{"path":%q}`, docPath)
+		fileReadTCID := doc.idPrefix
 		output, err := r.app.Toolbox.Execute(ctx, "file_read", []byte(fileReadArgs))
 		if err != nil {
-			output = "(primary memory file unavailable: " + err.Error() + ")"
+			output = "(memory document unavailable: " + err.Error() + ")"
 		} else {
 			reviewLearningIDs = append(reviewLearningIDs, learningNodeIDsFromTool(r.app, domain.ToolCall{
 				Name: "file_read",
@@ -172,6 +195,7 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter Provi
 		start:       start,
 		end:         end,
 		convPath:    convPath,
+		workspace:   conversation.Workspace,
 		tools:       tools,
 		base:        messages,
 		settings:    reviewSettings,
@@ -208,16 +232,17 @@ func isNothingToSave(content string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(content)), "nothing to save")
 }
 
-// reviewTools returns the restricted tool definitions for the review agent.
-// The synthetic review_transcript tool is listed first so the LLM knows its
-// schema, but its result is pre-injected by runReviewLoop before the first
-// LLM call — the agent does not need to call it to get the initial data.
-// Whitelisted tools (memory, skill, file_read) come from the Toolbox.
-func (r *BackgroundReviewAgent) reviewTools() []ToolDef {
+// reviewTools returns the restricted tool definitions for the unified
+// background learning agent. The synthetic review_transcript tool is listed
+// first so the LLM knows its schema, but its result is pre-injected by
+// runReviewLoop before the first LLM call. Curation, inspection, research,
+// and read-only project-memory tools come from the Toolbox; memory_project
+// is only advertised when the conversation has a workspace.
+func (r *BackgroundReviewAgent) reviewTools(workspace string) []ToolDef {
 	if r.app == nil || r.app.Toolbox == nil {
 		return nil
 	}
-	return toolFactoryFor(r.app).Get(AgentReview, "")
+	return toolFactoryFor(r.app).Get(AgentReview, workspace)
 }
 
 // transcriptMessages returns the messages to review. Compaction retains real

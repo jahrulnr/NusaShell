@@ -1,17 +1,15 @@
-// BackgroundReviewAgent runs an automatic LLM turn after a conversation crosses
-// the learning-review threshold. It replays a transcript tail to the same
-// provider that completed the parent turn ("global LLM"), with a restricted
-// toolset (memory/skill dispatcher families, minus destructive verbs) and
-// the review.md system prompt.
+// BackgroundReviewAgent is the unified post-conversation learning agent.
+// It runs an agentic, tool-using pass over completed conversation evidence,
+// then curates durable memory and agent-owned skills.
 //
 // This replaces the earlier regex-based ExtractObservations path, which was
 // English-only and produced noisy one-off entries. The LLM understands any
 // language and can judge what is genuinely durable.
 //
 // Design follows the learning-sources-audit Phase 2:
-//   - Background review after N turns (fork agent, replay snapshot)
+//   - Background learning after N turns (fork agent, replay snapshot)
 //   - LLM-based extraction (no regex)
-//   - Restricted tool whitelist (memory + skill meta-tools + file_read)
+//   - Curation toolset: memory/skill dispatchers + evidence/research tools
 //   - The shared AgentEngine loop with no review-specific round cap; it ends
 //     when the model is terminal or an error is returned
 //   - Streams responses without exposing a foreground turn; parent conversation is not modified
@@ -30,7 +28,8 @@ import (
 	clock "nusashell/pkg/time"
 )
 
-// ReviewSettings controls the background review agent.
+// ReviewSettings controls the unified background learning agent (kept
+// wire-compatible with the learning.review surface).
 type ReviewSettings struct {
 	Enabled             bool
 	MemoryEveryNTurns   int           // trigger threshold (from settings.LearningReviewThreshold)
@@ -61,7 +60,9 @@ type ReviewMutation struct {
 	Snippet string // trimmed content/name saved or updated, for the learning log
 }
 
-// BackgroundReviewAgent spawns a restricted LLM review turn.
+// BackgroundReviewAgent is the unified post-conversation learning agent.
+// It runs an agentic, tool-using pass over completed conversation evidence,
+// then curates durable memory and agent-owned skills.
 type BackgroundReviewAgent struct {
 	app      *App
 	settings ReviewSettings
@@ -102,22 +103,57 @@ func NewBackgroundReviewAgent(app *App, settings ReviewSettings) *BackgroundRevi
 	}
 }
 
-// reviewToolWhitelist is the only set of tools the review agent may call:
-// the memory and skill dispatcher roots. Destructive ops (delete/files) are
-// rejected per-call by reviewAllowedOp.
-func reviewToolWhitelist() map[string]bool {
-	return map[string]bool{"memory": true, "skill": true, "file_read": true}
+// backgroundLearningToolWhitelist is the explicit capability boundary for
+// the unified post-conversation agent. It may inspect evidence, research,
+// and curate memory/skills, but it cannot execute commands, write arbitrary
+// files, run automations, or enter interactive/recursive agent flows.
+func backgroundLearningToolWhitelist() map[string]bool {
+	return map[string]bool{
+		"memory":         true,
+		"skill":          true,
+		"file_read":      true,
+		"file_list":      true,
+		"file_info":      true,
+		"find_file":      true,
+		"grep":           true,
+		"memory_project": true,
+		"web_search":     true,
+		"web_fetch":      true,
+		"web_answer":     true,
+		"docs":           true,
+	}
 }
 
-// reviewAllowedOp reports whether a review-agent call to a whitelisted root
-// carries a non-destructive op. The advertised schemas still list every op,
-// so the rejection message below stays self-describing.
+// reviewToolWhitelist is retained as a source-compatible name for tests and
+// callers inside the application package. New code should use the explicit
+// backgroundLearningToolWhitelist name.
+func reviewToolWhitelist() map[string]bool {
+	return backgroundLearningToolWhitelist()
+}
+
+// reviewAllowedOp reports whether a unified background-learning call is
+// allowed. Memory, skill, docs, and project-memory dispatcher operations
+// are restricted to their curation/read surfaces; inspection and research
+// tools have no dispatcher op.
 func reviewAllowedOp(name string, argsJSON []byte) bool {
-	if !reviewToolWhitelist()[name] {
+	if !backgroundLearningToolWhitelist()[name] {
 		return false
 	}
-	op := OpArg(argsJSON)
-	return op != "delete" && op != "files"
+	switch name {
+	case "memory":
+		op := OpArg(argsJSON)
+		return op == "save" || op == "replace" || op == "search" || op == "list" || op == "delete"
+	case "skill":
+		op := OpArg(argsJSON)
+		return op == "list" || op == "search" || op == "save" || op == "delete"
+	case "docs":
+		op := OpArg(argsJSON)
+		return op == "list" || op == "search" || op == "read"
+	case "memory_project":
+		op := OpArg(argsJSON)
+		return op == "query" || op == "list" || op == "read"
+	}
+	return true
 }
 
 // review_transcript is the hydration tool — it returns the conversation as
@@ -156,7 +192,8 @@ var reviewTranscriptToolDef = ToolDef{
 	},
 }
 
-// RunReview spawns a background review for a conversation. It uses the
+// RunReview spawns the unified background learning pass for a conversation.
+// It uses the
 // conversation's configured model (the "global LLM") and is fire-and-forget
 // — it never blocks or fails the parent turn. Returns an error describing
 // why the review aborted (missing conversation, no model, adapter failure,

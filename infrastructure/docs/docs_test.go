@@ -1,6 +1,7 @@
 package docs
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -49,6 +50,21 @@ func TestSearchRanksByRelevance(t *testing.T) {
 	hits = s.Search("alpha", 5)
 	if len(hits) != 2 || hits[0].ID != "a" || hits[1].ID != "b" {
 		t.Fatalf("alpha hits = %+v, want a then b", hits)
+	}
+}
+
+func TestSearchFindsNonContiguousQueryTerms(t *testing.T) {
+	s := &Source{docs: []docEntry{
+		{id: "settings", title: "Settings", path: "p", content: "Provider credentials are selected in the settings view."},
+		{id: "other", title: "Other", path: "p", content: "Troubleshooting an unrelated issue."},
+	}}
+
+	hits := s.Search("provider settings", 5)
+	if len(hits) != 1 || hits[0].ID != "settings" {
+		t.Fatalf("non-contiguous query hits = %+v, want settings", hits)
+	}
+	if !strings.Contains(strings.ToLower(hits[0].Snippet), "provider") {
+		t.Fatalf("non-contiguous query snippet = %q, want matching context", hits[0].Snippet)
 	}
 }
 

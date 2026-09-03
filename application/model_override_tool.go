@@ -10,8 +10,8 @@ import (
 	"nusashell/domain"
 )
 
-// model_override is a LOCAL tool available only to the background review
-// agent. It lets the agent correct a model's catalog metadata (vision,
+// model_override is a LOCAL tool available only to the unified background
+// learning agent. It lets the agent correct a model's catalog metadata (vision,
 // context window, etc.) for a specific provider+model pair. Corrections are
 // stored in the manual override registry and applied at resolve time AFTER
 // learned 400-adaptations, so they always win and survive catalog re-imports.

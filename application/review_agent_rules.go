@@ -12,13 +12,9 @@ import (
 	"nusashell/resources"
 )
 
-// reviewAgentRules is the AgentReview rule set: a virtual conversation
-// (pre-injected transcript + primary memory as tool results), whitelisted
-// and local tools, mutation tracking for the learning log, and the
-// "Nothing to save" early exit. It uses the same provider retry policy and
-// AgentEngine lifecycle as a conversation, without a review-specific round
-// cap, while keeping review-specific persistence and mutation hooks out of
-// the shared conversation rule set.
+// reviewAgentRules is the unified background-learning rule set: a virtual
+// conversation with pre-injected evidence, research tools, controlled
+// memory/skill mutations, mutation tracking, and a terminal summary.
 type reviewAgentRules struct {
 	agent       *BackgroundReviewAgent
 	adapter     ProviderContext
@@ -27,6 +23,7 @@ type reviewAgentRules struct {
 	start       int
 	end         int
 	convPath    string
+	workspace   string
 	tools       []ToolDef
 	base        []ChatMessage
 	settings    domain.Settings
@@ -56,10 +53,10 @@ func (p *reviewAgentRules) rules() AgentRules {
 					}
 					return resp, nil
 				}
-				// A review has no user-visible partial answer to continue from.
+				// A background run has no user-visible partial answer to continue from.
 				// Replay the same request for every retryable provider error,
 				// including a stream that already emitted some deltas. This
-				// keeps background reviews from failing merely because a
+				// keeps background learning runs from failing merely because a
 				// connection dropped after the model started responding.
 				if attempt >= maxProviderAttempts || !domain.CanAutoRetry(err) {
 					return resp, err
@@ -152,10 +149,14 @@ func (p *reviewAgentRules) rules() AgentRules {
 				case !reviewAllowedOp(tc.Name, []byte(tc.Args)):
 					out = append(out, ToolOutcome{
 						Status: domain.ToolFailed,
-						Output: fmt.Sprintf("error: tool %q (with this op) is not allowed in background review", tc.Name),
+						Output: fmt.Sprintf("error: tool %q (with this op) is not allowed in the background learning agent", tc.Name),
 					})
 				default:
-					output, execErr := p.agent.app.Toolbox.Execute(p.ctx, tc.Name, []byte(tc.Args))
+					toolCtx := p.ctx
+					if p.agent != nil && p.agent.app != nil {
+						toolCtx = WithWorkspace(WithConversationID(p.ctx, p.conv.ID), p.workspace)
+					}
+					output, execErr := p.agent.app.Toolbox.Execute(toolCtx, tc.Name, []byte(tc.Args))
 					if execErr != nil {
 						output = "error: " + execErr.Error()
 						// Only count a mutation when the tool actually
@@ -171,10 +172,18 @@ func (p *reviewAgentRules) rules() AgentRules {
 					// log (which tool saved what, trimmed).
 					op := OpArg([]byte(tc.Args))
 					switch {
-					case tc.Name == "memory" && (op == "save" || op == "replace"):
-						p.mutations = append(p.mutations, ReviewMutation{Kind: "memory", Tool: tc.Name, Snippet: mutationSnippet(tc.Args, "content")})
-					case tc.Name == "skill" && op == "save":
-						p.mutations = append(p.mutations, ReviewMutation{Kind: "skills", Tool: tc.Name, Snippet: mutationSnippet(tc.Args, "name")})
+					case tc.Name == "memory" && (op == "save" || op == "replace" || op == "delete"):
+						snippet := mutationSnippet(tc.Args, "content")
+						if op == "delete" {
+							snippet = mutationSnippet(tc.Args, "id")
+						}
+						p.mutations = append(p.mutations, ReviewMutation{Kind: "memory", Tool: tc.Name, Snippet: snippet})
+					case tc.Name == "skill" && (op == "save" || op == "delete"):
+						snippet := mutationSnippet(tc.Args, "name")
+						if op == "delete" {
+							snippet = mutationSnippet(tc.Args, "id")
+						}
+						p.mutations = append(p.mutations, ReviewMutation{Kind: "skills", Tool: tc.Name, Snippet: snippet})
 					}
 					// Emit learning mutation events so the Learning UI
 					// refreshes memory/skill panes during a review, and fan
@@ -183,29 +192,31 @@ func (p *reviewAgentRules) rules() AgentRules {
 					// to all of them).
 					if p.agent.app.Bus != nil {
 						switch {
-						case tc.Name == "memory" && (op == "save" || op == "replace"):
+						case tc.Name == "memory" && (op == "save" || op == "replace" || op == "delete"):
 							p.agent.app.Bus.Emit(contracts.EventMemoryUpdated, map[string]any{
 								"source": "review",
 								"tool":   tc.Name,
+								"op":     op,
 							})
-						case tc.Name == "skill" && op == "save":
+						case tc.Name == "skill" && (op == "save" || op == "delete"):
 							p.agent.app.Bus.Emit(contracts.EventSkillUpdated, map[string]any{
 								"source": "review",
 								"tool":   tc.Name,
+								"op":     op,
 							})
 						}
 					}
 					switch {
-					case tc.Name == "memory" && (op == "save" || op == "replace"):
+					case tc.Name == "memory" && (op == "save" || op == "replace" || op == "delete"):
 						p.agent.app.publishAnnouncementToAll(newAnnouncement(
 							"memory_changed",
-							domain.AnnouncementMemoryChangedArgs("primary", string(op)),
+							domain.AnnouncementMemoryChangedArgs("", op),
 							domain.AnnouncementMemoryChangedMessage(),
 						), "")
-					case tc.Name == "skill" && op == "save":
+					case tc.Name == "skill" && (op == "save" || op == "delete"):
 						p.agent.app.publishAnnouncementToAll(newAnnouncement(
 							"skills_changed",
-							domain.AnnouncementSkillsChangedArgs("save"),
+							domain.AnnouncementSkillsChangedArgs(op),
 							domain.AnnouncementSkillsChangedMessage(),
 						), "")
 					}

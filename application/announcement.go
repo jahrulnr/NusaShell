@@ -168,7 +168,7 @@ func (a *App) publishAnnouncement(convID string, ev Announcement) {
 
 // publishAnnouncementToAll fans an announcement out to every visible
 // conversation except skipConvID (the caller's own room — no
-// self-announcement). Used by the background review agent, whose memory and
+// self-announcement). Used by the background learning agent, whose memory and
 // skill writes are external to every active agent.
 func (a *App) publishAnnouncementToAll(ev Announcement, skipConvID string) {
 	if a.Conversations == nil {

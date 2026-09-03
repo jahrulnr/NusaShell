@@ -109,7 +109,7 @@ func TestFileReadAndPatchExposeContentVersion(t *testing.T) {
 		t.Fatalf("file_read must expose the content version: %q", readOut)
 	}
 
-	patchOut, err := testTB.Execute(context.Background(), "file_patch", fileJSON(map[string]any{"path": path, "old_string": "beta", "new_string": "BETA", "expected_sha256": beforeHash}))
+	patchOut, err := testTB.Execute(context.Background(), "file_patch", fileJSON(map[string]any{"path": path, "old_string": "beta", "new_string": "BETA"}))
 	if err != nil {
 		t.Fatalf("patch: %v", err)
 	}
@@ -150,23 +150,40 @@ func TestFilePatchFailureExplainsStaleContext(t *testing.T) {
 	}
 }
 
-func TestFilePatchRejectsStaleExpectedVersionWithoutWriting(t *testing.T) {
+// TestFilePatchIgnoresLegacyExpectedSha256: the expected_sha256
+// fail-closed guard was removed so disciplined models can work in parallel
+// with other agents (another agent editing the file mid-flight no longer
+// blocks this patch). The tool no longer advertises the parameter, and a
+// call that still passes it (older agents, cached tool schemas) must be
+// ignored, not rejected or failed.
+func TestFilePatchIgnoresLegacyExpectedSha256(t *testing.T) {
+	// The advertised schema must not carry the removed parameter.
+	payload, err := json.Marshal(fileToolInfos()[2].InputSchema)
+	if err != nil {
+		t.Fatalf("marshal schema: %v", err)
+	}
+	if strings.Contains(string(payload), "expected_sha256") {
+		t.Fatal("file_patch schema must not advertise expected_sha256")
+	}
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "versioned.txt")
 	if _, err := testTB.Execute(context.Background(), "file_write", fileJSON(map[string]any{"path": path, "content": "one\ntwo\n"})); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
-	_, err := testTB.Execute(context.Background(), "file_patch", fileJSON(map[string]any{
+	// A stale/wrong hash passed by an older client must be ignored: the
+	// patch applies normally instead of failing FILE_CHANGED_SINCE_READ.
+	_, err = testTB.Execute(context.Background(), "file_patch", fileJSON(map[string]any{
 		"path": path, "old_string": "two", "new_string": "TWO",
 		"expected_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
 	}))
-	if err == nil || !strings.Contains(err.Error(), "FILE_CHANGED_SINCE_READ") {
-		t.Fatalf("expected stale-version error, got %v", err)
+	if err != nil {
+		t.Fatalf("legacy expected_sha256 must be ignored, got: %v", err)
 	}
 	out, readErr := testTB.Execute(context.Background(), "file_read", []byte(`{"path":"`+jsonPath(path)+`"}`))
-	if readErr != nil || !strings.Contains(out, "two") || strings.Contains(out, "TWO") {
-		t.Fatalf("stale precondition must not write: err=%v out=%q", readErr, out)
+	if readErr != nil || !strings.Contains(out, "TWO") {
+		t.Fatalf("patch must have been applied despite stale param: err=%v out=%q", readErr, out)
 	}
 }
 

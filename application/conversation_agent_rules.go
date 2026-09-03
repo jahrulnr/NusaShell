@@ -89,6 +89,12 @@ func (p *conversationRules) rules() AgentRules {
 			return len(resp.ToolCalls) == 0
 		},
 		BeforeRound: func(st *RoundState) error {
+			// Slow Down: an artificial per-round pacing delay when
+			// settings.slow_down is set. Reads the live setting every
+			// tick, so saving 0 (or a lower value) from the Settings UI
+			// shortens or cancels the current wait on every running
+			// conversation immediately.
+			p.a.waitSlowDown(p.run.Ctx)
 			p.round++
 			// Pre-API proactive compaction check (see the pre-engine
 			// comment in runSingleTurn): between rounds, tool results
@@ -167,7 +173,7 @@ func (p *conversationRules) rules() AgentRules {
 				p.round--
 				return true
 			}
-			if p.compactionAttempts < 3 && (isContextOverflowError(rawStreamErr) || isTPMOverflowError(rawStreamErr)) {
+			if p.compactionAttempts < 3 && (isContextOverflowError(rawStreamErr) || isTPMDominatedRequest(rawStreamErr)) {
 				cw := p.a.resolveContextWindow(p.provider, p.model, p.settings)
 				trigger := domain.CompactionTriggerTokens(cw, domain.ResolveMaxOutput(p.provider, p.model, p.settings), p.settings)
 				preEmg := p.conv.EstimateTokens()

@@ -136,29 +136,54 @@ func isTransientTransportError(err error) bool {
 	return false
 }
 
+// ParseTPMError extracts the per-minute token budget, the tokens already
+// consumed in the current window, and the token count the rejected request
+// needs from a provider's tokens-per-minute rejection. OpenAI reports
+// "Used" since 2025; older bodies omit it (used = 0).
+func ParseTPMError(body string) (limit, used, requested int, ok bool) {
+	m := tpmLimitRe.FindStringSubmatch(body)
+	if len(m) < 4 {
+		return 0, 0, 0, false
+	}
+	limit, err1 := strconv.Atoi(m[1])
+	requested, err3 := strconv.Atoi(m[3])
+	var err2 error
+	if m[2] != "" {
+		used, err2 = strconv.Atoi(m[2])
+	}
+	if err1 != nil || err2 != nil || err3 != nil || limit <= 0 {
+		return 0, 0, 0, false
+	}
+	return limit, used, requested, true
+}
+
 // ParseTPMLimitRequested extracts the per-minute token budget and the token
 // count rejected by a provider's tokens-per-minute error.
 func ParseTPMLimitRequested(body string) (limit, requested int, ok bool) {
-	m := tpmLimitRe.FindStringSubmatch(body)
-	if len(m) < 3 {
-		return 0, 0, false
-	}
-	limit, err1 := strconv.Atoi(m[1])
-	requested, err2 := strconv.Atoi(m[2])
-	if err1 != nil || err2 != nil || limit <= 0 {
-		return 0, 0, false
-	}
-	return limit, requested, true
+	limit, _, requested, ok = ParseTPMError(body)
+	return limit, requested, ok
 }
 
 // IsStructuralTPMFailure distinguishes an oversized single request from a
 // transient request-count/window limit. Waiting cannot make a request whose
 // token count exceeds the whole per-minute budget succeed.
 func IsStructuralTPMFailure(body string) bool {
-	limit, requested, ok := ParseTPMLimitRequested(body)
+	limit, _, requested, ok := ParseTPMError(body)
 	return ok && requested > limit
 }
 
+// IsTPMDominatedRequest reports whether a TPM rejection was caused by the
+// request itself demanding more than half of the per-minute budget. Such a
+// request "fits" the raw limit but collides with any concurrent usage: the
+// window keeps draining and the retry keeps failing until it is idle, so
+// waiting alone is unreliable — the durable fix is shrinking the request via
+// compaction (and a learned context cap derived from the limit).
+func IsTPMDominatedRequest(body string) bool {
+	limit, _, requested, ok := ParseTPMError(body)
+	return ok && requested*2 > limit
+}
+
 // tpmLimitRe matches OpenAI's tokens-per-minute rejection body, delivered as
-// an HTTP 429 or as an in-stream SSE error event.
-var tpmLimitRe = regexp.MustCompile(`(?i)tokens per min(?:ute)?[^:]*:\s*Limit\s+(\d+),\s*Requested\s+(\d+)`)
+// an HTTP 429 or as an in-stream SSE error event. The "Used N," segment is
+// present in modern bodies and absent in older ones.
+var tpmLimitRe = regexp.MustCompile(`(?i)tokens per min(?:ute)?[^:]*:\s*Limit\s+(\d+)(?:,\s*Used\s+(\d+))?,\s*Requested\s+(\d+)`)

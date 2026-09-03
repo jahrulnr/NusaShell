@@ -35,10 +35,10 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `learning/edges.jsonl` | learning edges: content/embedding and fragment-metadata `related` links, plus `used_with` links for nodes observed together in one agent turn; stale endpoints are pruned during graph rebuild | JSONL |
 | `learning/embeddings.jsonl` | embedding cache for memory/skill entries | JSONL |
 | `learning/trajectory.jsonl` | learning trajectory log (one event per line) | JSONL |
-| `learning/turns.json` | turn counters for review agent scheduling | JSON |
+| `learning/turns.json` | turn counters for background learning scheduling | JSON |
 | `learning/provider_params.json` | auto-learned provider/model params (context caps, disabled modalities, and request-shape constraints from 400 errors) | JSON |
-| `learning/model_overrides.json` | manual model-metadata overrides (review agent corrections; win over catalog + learned) | JSON |
-| `learning/reviews/` | background review agent transcripts (one JSON file per review run; viewable from the Learning log) | JSON |
+| `learning/model_overrides.json` | manual model-metadata overrides (background learning agent corrections; win over catalog + learned) | JSON |
+| `learning/reviews/` | unified background learning agent transcripts (one JSON file per run; viewable from the Learning log) | JSON |
 | `attachments/<conv_id>/` | user image/file attachments and generated images (`gen-<toolCallID>.<ext>`) | files |
 | `models/tts/<voice>.onnx(.json)` | offline TTS voice models (piper). Installed by the one-click Settings installer or placed manually; `PIPER_VOICES_DIR` overrides this location | binary + JSON |
 | `piper/<goos>-<goarch>/` | managed piper engine installed by the one-click Settings installer (binary, `espeak-ng-data/`, shared libs); `PIPER_BIN`/PATH binaries still take precedence at runtime | files |

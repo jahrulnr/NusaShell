@@ -198,3 +198,93 @@ func TestProviderDrivers(t *testing.T) {
 		}
 	}
 }
+
+// Real OpenAI rejection bodies observed in the field. The "Used" figure
+// appeared in mid-2025 bodies; older ones omit it entirely. The parser must
+// handle both — before "Used" support, these modern bodies matched nothing,
+// so the TPM overflow safety net never fired and turns spun through 5 futile
+// retries before failing.
+const (
+	tpmBodyWithUsed = "Rate limit reached for gpt-5.6-luna in organization org-sFd4kjWg5yerL8fwlgAerbgo on tokens per min (TPM): Limit 500000, Used 271036, Requested 355391. Please try again in 15.171s. Visit https://platform.openai.com/account/rate-limits to learn more. kind=sse_transport"
+	tpmBodyLegacy   = "tokens per min (TPM): Limit 200000, Requested 333331"
+)
+
+func TestParseTPMErrorWithUsed(t *testing.T) {
+	limit, used, requested, ok := ParseTPMError(tpmBodyWithUsed)
+	if !ok {
+		t.Fatal("modern body with Used must parse")
+	}
+	if limit != 500000 || used != 271036 || requested != 355391 {
+		t.Fatalf("ParseTPMError = (%d, %d, %d), want (500000, 271036, 355391)", limit, used, requested)
+	}
+}
+
+func TestParseTPMErrorLegacyWithoutUsed(t *testing.T) {
+	limit, used, requested, ok := ParseTPMError(tpmBodyLegacy)
+	if !ok {
+		t.Fatal("legacy body without Used must parse")
+	}
+	if limit != 200000 || used != 0 || requested != 333331 {
+		t.Fatalf("ParseTPMError = (%d, %d, %d), want (200000, 0, 333331)", limit, used, requested)
+	}
+}
+
+func TestParseTPMErrorMinuteSpellingAndNegatives(t *testing.T) {
+	if _, _, _, ok := ParseTPMError("on tokens per minute: Limit 30000, Used 50, Requested 40000"); !ok {
+		t.Fatal("tokens per minute spelling must parse")
+	}
+	if _, _, _, ok := ParseTPMError("maximum context length of 262144 tokens"); ok {
+		t.Fatal("non-TPM body must not match")
+	}
+	if _, _, _, ok := ParseTPMError(""); ok {
+		t.Fatal("empty body must not match")
+	}
+}
+
+// TestParseTPMLimitRequestedWithUsed: the two-token compatibility view must
+// keep working on modern bodies (it drops the Used figure).
+func TestParseTPMLimitRequestedWithUsed(t *testing.T) {
+	limit, requested, ok := ParseTPMLimitRequested(tpmBodyWithUsed)
+	if !ok || limit != 500000 || requested != 355391 {
+		t.Fatalf("ParseTPMLimitRequested = (%d, %d, %t), want (500000, 355391, true)", limit, requested, ok)
+	}
+}
+
+func TestIsStructuralTPMFailureWithUsed(t *testing.T) {
+	// Modern body where the request alone exceeds the budget: structural.
+	if !IsStructuralTPMFailure(tpmBodyLegacy) {
+		t.Fatal("legacy requested > limit must be structural")
+	}
+	if !IsStructuralTPMFailure("tokens per min (TPM): Limit 500000, Used 10000, Requested 600000") {
+		t.Fatal("modern body with Used and requested > limit must be structural")
+	}
+	// The field-observed body is NOT structural: the request fits the
+	// budget, retries drain the window.
+	if IsStructuralTPMFailure(tpmBodyWithUsed) {
+		t.Fatal("requested < limit must not be structural")
+	}
+}
+
+// TestIsTPMDominatedRequest: a request consuming more than half the
+// per-minute budget keeps colliding with any concurrent traffic even when it
+// "fits" the raw limit — the durable fix is shrinking (compaction + learned
+// cap), not waiting. Exactly half the budget is NOT dominant (it fits an
+// idle window); just over half is.
+func TestIsTPMDominatedRequest(t *testing.T) {
+	cases := []struct {
+		body string
+		want bool
+	}{
+		{tpmBodyWithUsed, true}, // 355391 > 500000/2
+		{"tokens per min (TPM): Limit 500000, Used 0, Requested 250000", false},
+		{"tokens per min (TPM): Limit 500000, Used 0, Requested 250001", true},
+		{"tokens per min (TPM): Limit 200000, Requested 333331", true}, // structural ⊆ dominated
+		{"rate limit exceeded", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := IsTPMDominatedRequest(tc.body); got != tc.want {
+			t.Errorf("IsTPMDominatedRequest(%q) = %t, want %t", tc.body, got, tc.want)
+		}
+	}
+}

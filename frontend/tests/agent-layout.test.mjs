@@ -222,12 +222,35 @@ test('Assistant tables keep their content width inside a horizontal scroller', (
   assert.match(tableRules, /\.markdown-table-scroll table\s*\{[\s\S]*min-width:\s*100%/);
 });
 
+test('Markdown table cells wrap long content without removing horizontal scrolling', () => {
+  const assistantTableRules = agentCSS.slice(
+    agentCSS.indexOf('.agent-message.assistant .agent-bubble .markdown-table-scroll'),
+    agentCSS.indexOf('.agent-message.user .agent-bubble > :first-child'),
+  );
+  const assistantCellRules = agentCSS.slice(
+    agentCSS.indexOf('.agent-message.assistant .agent-bubble th,'),
+    agentCSS.indexOf('.agent-message.user .agent-bubble > :first-child'),
+  );
+  assert.match(assistantCellRules, /max-width:\s*400px;/,
+    'assistant table cells must not grow wider than the readable column limit');
+  assert.match(assistantCellRules, /overflow-wrap:\s*anywhere;/,
+    'long URLs and tokens must wrap inside bounded assistant table cells');
+  assert.match(assistantCellRules, /word-break:\s*break-word;/,
+    'table-cell wrapping must also cover long legacy tokens');
+  assert.match(assistantTableRules, /\.markdown-table-scroll\s*\{[\s\S]*overflow-x:\s*auto;/,
+    'the table wrapper must remain horizontally scrollable');
+  assert.match(assistantTableRules, /\.markdown-table-scroll table\s*\{[\s\S]*width:\s*max-content/,
+    'wide multi-column tables must retain their own scrollable content width');
+});
+
 test('Markdown file previews style tables and keep wide columns scrollable', () => {
   const previewRules = agentCSS.slice(agentCSS.indexOf('.agent-text-preview-content {'));
   assert.match(previewRules, /\.agent-text-preview-content\s*\{[^}]*min-width:\s*0;/s);
   assert.match(previewRules, /\.agent-text-preview-md \.markdown-table-scroll\s*\{[\s\S]*overflow-x:\s*auto;/s);
   assert.match(previewRules, /\.agent-text-preview-md \.markdown-table-scroll table\s*\{[\s\S]*width:\s*max-content;[\s\S]*min-width:\s*100%;/s);
   assert.match(previewRules, /\.agent-text-preview-md th,\s*\.agent-text-preview-md td\s*\{[\s\S]*border:\s*1px solid var\(--border-soft\);/s);
+  assert.match(previewRules, /\.agent-text-preview-md th,\s*\.agent-text-preview-md td\s*\{[\s\S]*max-width:\s*400px;/s,
+    'Markdown preview cells must use the same readable column limit');
 });
 
 test('Live Thinking follows only while the thread-end marker is visible', () => {

@@ -29,6 +29,28 @@ func TestNormalizeSettingsLeavesContractModeEmptyForFactoryDefault(t *testing.T)
 	}
 }
 
+// SlowDown: 0 = off (default). Negative values (stale -1 from JSON
+// omitempty on older files) reset to off; values above the 60s cap are
+// clamped so a typo cannot stall a turn for minutes.
+func TestNormalizeSettingsClampsSlowDown(t *testing.T) {
+	unset := NormalizeSettings(Settings{})
+	if unset.SlowDown != 0 {
+		t.Fatalf("SlowDown = %d, want 0 (off by default)", unset.SlowDown)
+	}
+	neg := NormalizeSettings(Settings{SlowDown: -1})
+	if neg.SlowDown != 0 {
+		t.Fatalf("SlowDown = %d, want 0 (negative resets to off)", neg.SlowDown)
+	}
+	ok := NormalizeSettings(Settings{SlowDown: 3})
+	if ok.SlowDown != 3 {
+		t.Fatalf("SlowDown = %d, want 3 (preserved)", ok.SlowDown)
+	}
+	over := NormalizeSettings(Settings{SlowDown: 3600})
+	if over.SlowDown != 60 {
+		t.Fatalf("SlowDown = %d, want 60 (clamped to cap)", over.SlowDown)
+	}
+}
+
 // Explicit user intent persists verbatim; unrecognized values reset to empty
 // (not to a concrete default) for the same reason.
 func TestNormalizeSettingsKeepsExplicitContractMode(t *testing.T) {

@@ -65,12 +65,12 @@ var dispatchFamilies = []dispatchFamily{
 	},
 	{
 		root:    "skill",
-		members: []string{"list", "search", "save"},
+		members: []string{"list", "search", "save", "delete"},
 		def: ToolInfo{
 			Name:        "skill",
-			Description: "Skill library; \"op\" selects: list {limit?} returns owned_by+shadowed flags for path resolution; search {query,limit?} returns discovery metadata only (id/name/description/owned_by), never SKILL.md content — after selecting a skill, MUST read its absolute SKILL.md with file_read before applying it; save {name,content,description?,id?,path?} creates/updates SKILL.md, or writes a support file when path is set (skill must exist). Skill files live on disk; list a skill folder with file_list. See docs(op=\"read\", id=\"skills\") for the path layout.",
+			Description: "Skill library; \"op\" selects: list {limit?} returns owned_by+shadowed flags for path resolution; search {query,limit?} returns discovery metadata only (id/name/description/owned_by), never SKILL.md content — after selecting a skill, MUST read its absolute SKILL.md with file_read before applying it; save {name,content,description?,id?,path?} creates/updates SKILL.md, or writes a support file when path is set (skill must exist); delete {id,owned_by?} removes a user/agent-owned skill (plugin-owned skills are read-only). Skill files live on disk; list a skill folder with file_list. See docs(op=\"read\", id=\"skills\") for the path layout.",
 			InputSchema: objSchema(
-				pEnum("op", "Operation", "list", "search", "save"),
+				pEnum("op", "Operation", "list", "search", "save", "delete"),
 				pStr("query", "Search query (op=search)"),
 				pInt("limit", "Max results (list default 100, search default 50)"),
 				pStr("name", "Skill name, lowercase-with-hyphens (op=save)"),
@@ -78,6 +78,7 @@ var dispatchFamilies = []dispatchFamily{
 				pStr("id", "Existing skill id to update; omit to create (op=save without path)"),
 				pStr("description", "Short description up to 1024 chars (op=save SKILL.md mode)"),
 				pStr("content", "Full file content (op=save)"),
+				pStr("owned_by", "Skill owner for delete (optional; user/agent/builtin/plugin:<id>)"),
 			),
 		},
 	},
@@ -104,14 +105,14 @@ var dispatchFamilies = []dispatchFamily{
 	},
 	{
 		root:    "docs",
-		members: []string{"search", "read"},
+		members: []string{"list", "search", "read"},
 		def: ToolInfo{
 			Name:        "docs",
-			Description: "NusaShell documentation corpus; \"op\" selects: search {query,limit?} ranked page ids; read {id} full page by id from search results. Long pages are truncated in-band (~32KiB) with overflow_path in the platform temp dir — continue with file_read using next_offset_bytes.",
+			Description: "NusaShell documentation corpus; \"op\" selects: list {limit?} page ids/titles for vocabulary discovery; search {query,limit?} BM25-ranked page ids (multi-word terms need not be contiguous); read {id} full page. When terminology is uncertain or search returns no results, use list, then read relevant pages before answering. Long pages are truncated in-band (~32KiB) with overflow_path in the platform temp dir — continue with file_read using next_offset_bytes.",
 			InputSchema: objSchema(
-				pEnum("op", "Operation", "search", "read"),
+				pEnum("op", "Operation", "list", "search", "read"),
 				pStr("query", "Search query (op=search)"),
-				pInt("limit", "Max results (op=search, default 10)"),
+				pInt("limit", "Max results (op=list/search; default 50 for list, 10 for search)"),
 				pStr("id", "Documentation page id (op=read)"),
 			),
 		},
@@ -133,6 +134,22 @@ var dispatchFamilies = []dispatchFamily{
 				pInt("limit", "Max query hits (0 = unlimited)"),
 				pStr("content", "Entry body to admit (BEGIN/END wrappers optional)"),
 				pStr("reason", "Why nothing was written (op=skip; required)"),
+			),
+		},
+	},
+	{
+		root:    "conversation",
+		members: []string{"list", "search", "send"},
+		def: ToolInfo{
+			Name:        "conversation",
+			Description: "Inter-agent room communication; \"op\" selects: list {limit?,offset?} list visible rooms (newest activity first); search {query,limit?,offset?} search rooms by title or summary; send {id,content} send a message to another conversation room.",
+			InputSchema: objSchema(
+				pEnum("op", "Operation", "list", "search", "send"),
+				pStr("id", "Target conversation room ID (send)"),
+				pStr("content", "Message text to send (send)"),
+				pStr("query", "Search query for title or summary (search)"),
+				pInt("limit", "Max results (list/search default 20)"),
+				pInt("offset", "Pagination offset (list/search default 0)"),
 			),
 		},
 	},

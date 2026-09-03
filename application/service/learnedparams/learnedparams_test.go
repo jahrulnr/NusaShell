@@ -221,3 +221,37 @@ func TestCacheSanitizeOnLoad(t *testing.T) {
 		t.Errorf("second construction should not re-save, saves = %d", store.saves)
 	}
 }
+
+// TestCacheLearnTPMContextCap: a TPM-derived cap is recorded, persisted, and
+// folded into the standard ContextCap view (smallest cap wins).
+func TestCacheLearnTPMContextCap(t *testing.T) {
+	store := &fakeStore{}
+	cache := New(store)
+
+	if !cache.LearnTPMContextCap("openai", "gpt-5.6-luna", 185000, "Limit 500000, Requested 355391") {
+		t.Fatal("first TPM cap must be learned")
+	}
+	if got := cache.ContextCap("openai", "gpt-5.6-luna"); got != 185000 {
+		t.Fatalf("ContextCap = %d, want 185000", got)
+	}
+	if store.saves != 1 {
+		t.Fatalf("expected 1 save, got %d", store.saves)
+	}
+
+	// A larger cap observed later must not erase the smaller one.
+	if cache.LearnTPMContextCap("openai", "gpt-5.6-luna", 250000, "Limit 500000, Requested 260000") {
+		t.Fatal("larger TPM cap must not replace the smaller one")
+	}
+	if got := cache.ContextCap("openai", "gpt-5.6-luna"); got != 185000 {
+		t.Fatalf("ContextCap after larger observation = %d, want 185000", got)
+	}
+
+	// Non-positive caps are rejected.
+	if cache.LearnTPMContextCap("openai", "gpt-5.6-luna", 0, "x") {
+		t.Fatal("zero cap must not be learned")
+	}
+	var nilCache *Cache
+	if nilCache.LearnTPMContextCap("p", "m", 100, "x") {
+		t.Fatal("nil cache must be a no-op")
+	}
+}

@@ -19,7 +19,7 @@ and RPCs; only its on-disk filename and Learning label are `soul.md` / Soul.
 Both documents are single markdown files — like READMEs: user.md about
 the user and working context, soul.md about agent working knowledge
 (conventions, gotchas, decisions, references) curated by the background
-improver. Hydration reads each non-empty document with its own real
+learning agent. Hydration reads each non-empty document with its own real
 `file_read` call/result pair, so the persisted transcript records
 `memory/user.md` and `memory/soul.md` separately. A workspace `AGENTS.md`
 is repository guidance and is injected as a separate `file_read` call; it is
@@ -137,7 +137,7 @@ saving, apply two tests:
 Save only when both answers favor memory — the fact is durable, not already
 captured elsewhere, and likely to be searched for. Run `memory(op="search")`
 first; if a matching fragment exists, replace it instead of adding
-a duplicate. A redundant fragment is noise the background review agent must
+a duplicate. A redundant fragment is noise the background learning agent must
 triage, and it pushes the real fact down in search results.
 
 Good examples:
@@ -146,62 +146,93 @@ Good examples:
     memory(op="search", query="comment language")   # before saving, check for duplicates
     memory_project(op="query", topic="deploy")      # project facts live in memory_project
 
-## How the background improver manages memory
+## How the unified background learning agent manages memory
 
-The background improver (`AgentImprover`) is a hidden agent with the full
-local toolbox plus `review_transcript`: it reads the conversation transcript
-JSON and the files the room touched directly, researches the web when
-needed, and writes durable knowledge through the normal `memory` tool —
-**soul.md** for agent working knowledge and **fragments** for task facts.
-It never writes `user.md`, never deletes memory, and honors a mutation cap
-per run. Successful memory writes fan out to every conversation via the
-announcement channel and to this room via `task_memory` announcements.
-that belong in the always-injected working set. Primary is capped at ~1k
-tokens, so the agent rewrites or trims stale text before adding new
-content.
+One background agent (`AgentReview`) runs after each completed conversation
+segment. It is an agentic pass, not a one-shot extractor: it starts with the
+conversation transcript plus the current `memory/user.md` and
+`memory/soul.md` documents (both pre-injected as real `file_read` tool
+results, frontmatter included), inspects the workspace with read-only file
+tools, researches the web when needed, and then curates memory through the
+normal `memory` tool.
 
-The review agent sees the current user document as a pre-injected
-`file_read` tool result (reading `memory/user.md` directly, frontmatter
-included) at the start of each review run, so it can avoid duplicates and
-spot stale text without needing to read the file itself first. Reviews use the same provider retry policy as conversation turns, then hard-fail after the internal retry budget is exhausted or when the error is non-retryable. Their tool loop has no artificial round cap: it continues while the model returns tool calls and ends on a terminal response or error. Concurrent threshold/skill/compaction triggers are still coalesced, so a burst cannot launch duplicate reviews or replay the same transcript repeatedly. Activity that arrives while a review is running is retained for one follow-up review. Both successful and failed reviews enter the cooldown period to prevent redundant re-review of the same window. Exact duplicate fragment writes are idempotent.
+What it manages:
 
-Tool failures are fed back into the review conversation so the agent can
-correct the call and continue. Provider transport failures are retried
-internally; a non-retryable error or exhausted retry budget hard-fails the
-background review. The Learning log shows only a concise failure status;
-verbose diagnostics remain in the backend log and trajectory.
+- **soul.md** (`target="agent"`) — agent working knowledge: conventions,
+  gotchas, decisions, references, recurring fixes. The agent adds, trims,
+  and consolidates entries, always staying under the ~1k token cap.
+- **user.md** (`target="user"`) — user rules, preferences, and stable
+  context. The agent updates it only on clear, durable changes or explicit
+  corrections from the conversation, and trims stale text.
+- **fragments** — new durable facts enter here with category/tags;
+  redundant entries are replaced, and fragments that are contradicted,
+  stale, or obsolete are deleted when there is clear evidence.
 
-## How the review agent gets the transcript
+The agent honors a mutation budget (at most 10 mutating memory/skill calls
+per run), never saves transient task state, work logs, or secrets, and
+treats interrupted tool runs as partial evidence. Memory writes fan out to
+every conversation via the announcement channel and to the current room via
+`task_memory` announcements.
 
-The review agent receives the conversation transcript as a pre-injected
+The tool loop has no artificial round cap: it continues while the model
+returns tool calls and ends on a terminal response or error. Concurrent
+threshold/skill/compaction triggers are coalesced, so a burst cannot launch
+duplicate runs or replay the same transcript repeatedly. Activity that
+arrives while a run is in progress is retained for one follow-up run. Both
+successful and failed runs enter the cooldown period.
+
+Tool failures are fed back into the run so the agent can correct the call
+and continue. Provider transport failures are retried internally; a
+non-retryable error or exhausted retry budget hard-fails the run. The
+Learning log shows only a concise failure status; verbose diagnostics
+remain in the backend log and trajectory.
+
+## How the agent gets the transcript
+
+The agent receives the conversation transcript as a pre-injected
 `review_transcript` synthetic tool result. The JSON contains proper role
 alternation (user/assistant), nested tool calls with their arguments and
 outputs, conversation metadata, and the absolute path to the full
 conversation JSON file (use `file_read` on that path if the bounded
-segment lacks context). This is NOT a flat text dump — the LLM sees the
+segment lacks context). This is NOT a flat text dump — the model sees the
 conversation semantically, the same way it would see a tool result from
 any other tool.
 
-The transcript is **incrementally bounded**: each review only processes
-messages since the last review (tracked via `last_reviewed_msg_count` on
+The transcript is **incrementally bounded**: each pass only processes
+messages since the last pass (tracked via `last_reviewed_msg_count` on
 the conversation). This prevents re-reading and re-reasoning over
-already reviewed content. The `review_transcript` tool and the primary
-`file_read` result are pre-injected before the first LLM call — the agent
-does not need to call them to get the initial data.
+already reviewed content. `review_transcript` and both memory document
+`file_read` results are pre-injected before the first LLM call — the
+agent does not need to call them to get the initial data.
 
-`review_transcript` is review-only: it is not registered in the global
-Toolbox and is executed locally by the review loop. The primary memory
+`review_transcript` is background-only: it is not registered in the global
+Toolbox and is executed locally by the learning loop. The memory document
 injection uses the real `file_read` tool (which IS in the global Toolbox
-and whitelisted for the review agent), so the agent can re-read the file
+and allowed for the background agent), so the agent can re-read the files
 itself if needed.
 
-`model_override` is also review-only and executed locally. It lets the
-review agent correct a model's catalog metadata (vision, context window,
-max output, etc.) for a specific provider+model pair when the transcript
-shows the catalog is wrong. Corrections are stored in
+`model_override` is also background-only and executed locally. It lets the
+agent correct a model's catalog metadata (vision, context window, max
+output, etc.) for a specific provider+model pair when the transcript shows
+the catalog is wrong. Corrections are stored in
 `learning/model_overrides.json`, survive catalog re-imports, and win over
 both catalog and auto-learned values at model resolution time. See
 `providers.md` for the precedence rules.
+
+## Background agent tools and boundaries
+
+The unified background agent advertises: the local `review_transcript` and
+`model_override` tools; the `memory` and `skill` dispatchers (create,
+update, delete included); read-only file inspection (`file_read`,
+`file_list`, `file_info`, `find_file`, `grep`); web research
+(`web_search`, `web_fetch`, `web_answer`); product docs; and read-only
+`memory_project` (`query`/`list`/`read`) when the conversation has a
+workspace.
+
+It deliberately has **no** `exec`, no arbitrary file writes/deletes, no
+automation or scheduling tools, and no subagent/delegate tools. Skill
+deletion is restricted to agent-owned skills; user-owned and builtin skills
+are protected by the store. Project memory is read-only for it.
 
 ## Review triggers
 

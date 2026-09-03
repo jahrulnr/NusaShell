@@ -2,13 +2,13 @@ package domain
 
 import "time"
 
-// Background review agent policy constants.
+// Background learning agent policy constants.
 //
-// The review agent runs an automatic LLM turn after a conversation crosses
-// the learning-review threshold. These constants govern the cooldown,
-// transcript window, and per-field truncation caps. The agent itself lives in
-// the application layer; the policy constants live here so the rules are
-// visible at the layer that owns the memory model.
+// The unified background learning agent runs an automatic LLM pass after a
+// conversation crosses the learning-review threshold. These constants govern
+// the cooldown, transcript window, and per-field truncation caps. The agent
+// itself lives in the application layer; the policy constants live here so
+// the rules are visible at the layer that owns the memory model.
 const (
 	// DefaultReviewCooldown is the minimum interval between reviews for
 	// one conversation.

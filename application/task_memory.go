@@ -96,7 +96,7 @@ func (a *App) maybeAnnounceTaskMemory(conversationID string, conversation *domai
 	if len(selected) == 0 {
 		return
 	}
-	msg := "Relevant task memory for this conversation is new or updated. Read the snippets above; they may come from another conversation or the background improver. Retrieve full entries with memory op=search."
+	msg := "Relevant task memory for this conversation is new or updated. Read the snippets above; they may come from another conversation or the background learning agent. Retrieve full entries with memory op=search."
 	a.publishAnnouncement(conversationID, newAnnouncement(taskMemoryAnnounceType, taskMemoryArgs(selected), msg))
 	// Record delivered IDs so future turns skip them, and persist that
 	// state. publishAnnouncement saves its own loaded copy (the queue

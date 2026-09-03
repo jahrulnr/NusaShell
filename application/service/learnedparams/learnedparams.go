@@ -6,6 +6,7 @@
 package learnedparams
 
 import (
+	"strconv"
 	"sync"
 
 	"nusashell/domain"
@@ -164,6 +165,28 @@ func (c *Cache) LearnFrom400(provider, model, errBody string) (domain.LearnedPar
 		_ = c.store.Save(c.registry)
 	}
 	return action, param
+}
+
+// LearnTPMContextCap records a context-window cap derived from a
+// tokens-per-minute rejection: the request consumed more than half the
+// per-minute budget, so every conversation on this provider+model should
+// compact against a smaller window instead of spinning through retries.
+// Keeps the smallest cap observed (same semantics as 400-learned caps).
+// Returns true when a new cap was recorded. Safe to call with a nil cache.
+func (c *Cache) LearnTPMContextCap(provider, model string, cap int, reason string) bool {
+	if c == nil || cap <= 0 {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if existing := c.registry.ContextCap(provider, model); existing > 0 && cap >= existing {
+		return false
+	}
+	c.registry.RecordCapContext(provider, model, strconv.Itoa(cap), reason)
+	if c.store != nil {
+		_ = c.store.Save(c.registry)
+	}
+	return true
 }
 
 // BumpHit records that a learned rule fired for provider+model+param.
