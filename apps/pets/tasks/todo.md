@@ -12,4 +12,6 @@
 - [x] Add hatch-pet deterministic extraction, registration, despill, and QA
       artifacts under the experiment run folder.
 - [x] Run default and SDL2-tagged verification plus local X11 smoke checks.
+- [x] Add the pets release stream: linux x64/arm64 CI payload (nusashell-pets
+      + assets) and the interactive Linux installer opt-in.
 - [ ] Decide whether a future release should add native Wayland support.

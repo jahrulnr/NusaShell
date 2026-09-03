@@ -411,11 +411,11 @@ jobs:
           set -euo pipefail
           cd apps/pets
           version="$(tr -d '\r\n' < VERSION)"
-          mkdir -p release/pets/stage
-          go build -buildvcs=false -tags sdl2 -o release/pets/stage/nusashell-pets ./cmd/pets
-          cp -R assets release/pets/stage/
-          tar -C release/pets/stage -czf "release/pets/nusashell-pets-${version}-linux-${{ matrix.arch }}.tar.gz" nusashell-pets assets
-          sha256sum "release/pets/nusashell-pets-${version}-linux-${{ matrix.arch }}.tar.gz" > "release/pets/nusashell-pets-${version}-linux-${{ matrix.arch }}.tar.gz.sha256"
+          mkdir -p "$GITHUB_WORKSPACE/release/pets/stage"
+          go build -buildvcs=false -tags sdl2 -o "$GITHUB_WORKSPACE/release/pets/stage/nusashell-pets" ./cmd/pets
+          cp -R assets "$GITHUB_WORKSPACE/release/pets/stage/"
+          tar -C "$GITHUB_WORKSPACE/release/pets/stage" -czf "$GITHUB_WORKSPACE/release/pets/nusashell-pets-${version}-linux-${{ matrix.arch }}.tar.gz" nusashell-pets assets
+          sha256sum "$GITHUB_WORKSPACE/release/pets/nusashell-pets-${version}-linux-${{ matrix.arch }}.tar.gz" > "$GITHUB_WORKSPACE/release/pets/nusashell-pets-${version}-linux-${{ matrix.arch }}.tar.gz.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: nusashell-pets-linux-${{ matrix.arch }}
