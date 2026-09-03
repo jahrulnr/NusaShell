@@ -265,19 +265,21 @@ targets. `make hooks` enables the same gate before a push.
 
 ## Product release streams
 
-The repository CI has two independent product release streams. Go uses the
+The repository CI has three independent product release streams. Go uses the
 root `VERSION` and publishes the `go-v<VERSION>` release; Electron uses
-`apps/electron/VERSION` and publishes the `electron-v<VERSION>` release. On a
-push to `master`, `detect-changes` marks a stream when its product paths
-changed or when its VERSION is ahead of that stream's pointer in
-`release-versions.json`. The latter is important when a follow-up commit fixes
-tests or CI without touching a product path.
+`apps/electron/VERSION` and publishes the `electron-v<VERSION>` release; the
+desktop pet uses `apps/pets/VERSION` and publishes the `pets-v<VERSION>`
+release (Linux-only matrix). On a push to `master`, `detect-changes` marks a
+stream when its product paths changed or when its VERSION is ahead of that
+stream's pointer in `release-versions.json`. The latter is important when a
+follow-up commit fixes tests or CI without touching a product path.
 
 The Go release gate depends on frontend, backend, and installer tests. The
-Electron release gate depends on wrapper, renderer, and installer tests. Do
-not infer that one failed product test blocks the other product's release.
-The release-index job updates only publishers that actually succeeded and
-preserves the pointer for a failed or skipped stream.
+Electron release gate depends on wrapper, renderer, and installer tests. The
+pets release gate depends on pets and installer tests. Do not infer that one
+failed product test blocks another product's release. The release-index job
+updates only publishers that actually succeeded and preserves the pointer
+for a failed or skipped stream.
 
 Good when diagnosing a release:
 

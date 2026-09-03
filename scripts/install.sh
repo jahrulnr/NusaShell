@@ -8,8 +8,9 @@ usage() {
   cat <<'EOF'
 Usage: install.sh [options]
 
-The Go core is always installed. Electron and NusaShell-mcp are opt-in:
-the installer asks about both when an interactive terminal is available.
+The Go core is always installed. Electron, the desktop pet (Linux only), and
+NusaShell-mcp are opt-in: the installer asks about each when an interactive
+terminal is available.
 
 Options:
   --version VERSION       Pin a release version (otherwise latest).
@@ -17,6 +18,9 @@ Options:
                            Pin the optional Electron version (otherwise latest Electron).
   --install-electron      Install the Electron desktop wrapper.
   --no-electron            Do not install Electron.
+  --pets-version VERSION   Pin the optional desktop pet version (Linux only, otherwise latest).
+  --install-pets          Install the desktop pet overlay (Linux only).
+  --no-pets               Do not install the desktop pet.
   --install-mcp           Install first-party NusaShell-mcp plugins.
   --no-mcp                Do not install NusaShell-mcp plugins.
   -h, --help              Show this help.
@@ -25,6 +29,8 @@ Environment:
   NUSASHELL_VERSION             Pin a release version (otherwise latest).
   NUSASHELL_ELECTRON_VERSION    Pin the optional Electron version (otherwise latest Electron).
   NUSASHELL_INSTALL_ELECTRON   1/yes or 0/no; overrides the prompt.
+  NUSASHELL_PETS_VERSION        Pin the optional desktop pet version (Linux only).
+  NUSASHELL_INSTALL_PETS       1/yes or 0/no; overrides the prompt (Linux only).
   NUSASHELL_INSTALL_MCP        1/yes or 0/no; overrides the prompt.
   NUSASHELL_NON_INTERACTIVE    1 skips optional components by default.
   NUSASHELL_REPOSITORY         GitHub repository (default: jahrulnr/NusaShell).
@@ -33,6 +39,7 @@ Environment:
   NUSASHELL_GO_INSTALL_ROOT    Override the Go core installation root.
   NUSASHELL_ELECTRON_INSTALL_ROOT
                                 Override the Linux Electron installation root.
+  NUSASHELL_PETS_INSTALL_ROOT  Override the Linux desktop pet installation root.
   NUSASHELL_MAC_INSTALL_DIR    Override the macOS application directory.
   NUSASHELL_MCP_REPOSITORY     MCP repository slug (default: jahrulnr/NusaShell-mcp).
   NUSASHELL_MCP_PLUGINS        Space/comma-separated plugin keys to install.
@@ -41,7 +48,9 @@ EOF
 
 requested_version="${NUSASHELL_VERSION:-}"
 requested_electron_version="${NUSASHELL_ELECTRON_VERSION:-}"
+requested_pets_version="${NUSASHELL_PETS_VERSION:-}"
 electron_override="${NUSASHELL_INSTALL_ELECTRON:-}"
+pets_override="${NUSASHELL_INSTALL_PETS:-}"
 mcp_override="${NUSASHELL_INSTALL_MCP:-}"
 while (($# > 0)); do
   case "$1" in
@@ -69,6 +78,23 @@ while (($# > 0)); do
       ;;
     --no-electron)
       electron_override=0
+      shift
+      ;;
+    --pets-version)
+      (($# >= 2)) || { echo '--pets-version requires a value' >&2; exit 2; }
+      requested_pets_version="$2"
+      shift 2
+      ;;
+    --pets-version=*)
+      requested_pets_version="${1#*=}"
+      shift
+      ;;
+    --install-pets)
+      pets_override=1
+      shift
+      ;;
+    --no-pets)
+      pets_override=0
       shift
       ;;
     --install-mcp)
@@ -137,6 +163,9 @@ fi
 if [[ -n "$requested_electron_version" && ! "$requested_electron_version" =~ $semver_re ]]; then
   fail "Invalid Electron release version: $requested_electron_version"
 fi
+if [[ -n "$requested_pets_version" && ! "$requested_pets_version" =~ $semver_re ]]; then
+  fail "Invalid pets release version: $requested_pets_version"
+fi
 
 validate_choice() {
   local value="$1" name="$2"
@@ -185,6 +214,19 @@ if prompt_yes_no "$mcp_override" 'Install MCP plugins from NusaShell-mcp?'; then
 else
   install_mcp=0
 fi
+# The desktop pet is Linux-only for now; macOS ignores pets options.
+if [[ "$os" == linux ]]; then
+  if prompt_yes_no "$pets_override" 'Install desktop pet (Linux only)?'; then
+    install_pets=1
+  else
+    install_pets=0
+  fi
+else
+  install_pets=0
+  if [[ -n "$pets_override" ]]; then
+    echo 'Desktop pet is Linux-only; ignoring pets options on macOS.' >&2
+  fi
+fi
 
 release_index=''
 release_version=''
@@ -206,8 +248,12 @@ release_index_value() {
 
 resolve_release_stream() {
   local stream="$1" requested="$2" expected_manifest
-  expected_manifest='latest.json'
-  [[ "$stream" == electron ]] && expected_manifest='electron-latest.json'
+  case "$stream" in
+    go) expected_manifest='latest.json' ;;
+    electron) expected_manifest='electron-latest.json' ;;
+    pets) expected_manifest='pets-latest.json' ;;
+    *) fail "Unknown release stream: $stream" ;;
+  esac
   if [[ -n "$requested" ]]; then
     release_version="$requested"
     release_tag="${stream}-v${requested}"
@@ -439,6 +485,46 @@ EOF
   echo "Installed NusaShell Electron wrapper $electron_version. Run: nusashell-desktop"
 }
 
+install_pets_linux() {
+  local manifest="$tmp_dir/pets-latest.json" pets_version file_name expected_sha payload root versions current previous target staging
+  resolve_release_stream pets "$requested_pets_version"
+  download "${release_base}/download/${release_tag}/${release_manifest}" "$manifest" || fail 'Pets was selected, but no pets release manifest is available.'
+  pets_version="$(manifest_value "$manifest" version)"
+  [[ "$pets_version" =~ $semver_re ]] || fail 'Pets release manifest contains an invalid version.'
+  [[ "$pets_version" == "$release_version" ]] || fail "Pets release manifest version $pets_version does not match release index $release_version."
+  file_name="$(manifest_value "$manifest" "${os}-${arch}" name)"
+  expected_sha="$(manifest_value "$manifest" "${os}-${arch}" sha256)"
+  [[ -n "$file_name" && -n "$expected_sha" ]] || fail "No pets release payload is published for ${os}-${arch}."
+  assert_safe_archive_name "$file_name"
+  payload="$tmp_dir/$file_name"
+  download "${release_base}/download/${release_tag}/${file_name}" "$payload" || fail 'Could not download the pets payload.'
+  verify_payload "$payload" "$expected_sha"
+
+  root="${NUSASHELL_PETS_INSTALL_ROOT:-$home_dir/.local/share/nusashell-pets}"
+  versions="$root/versions"
+  current="$root/current"
+  mkdir -p "$versions"
+  previous="$(read_previous_version "$current")"
+  target="$versions/$pets_version"
+  if [[ ! -x "$target/nusashell-pets" ]]; then
+    [[ ! -e "$target" ]] || rm -rf "$target"
+    staging="$versions/.staging-${pets_version}-$$"
+    rm -rf "$staging"
+    safe_extract_tar "$payload" "$staging"
+    [[ -x "$staging/nusashell-pets" ]] || fail 'The pets release did not contain the nusashell-pets executable at its root.'
+    [[ -f "$staging/assets/pets/config.json" ]] || fail 'The pets release did not contain its assets folder.'
+    mv "$staging" "$target"
+  fi
+  [[ -x "$target/nusashell-pets" ]] || fail 'The pets release did not contain the nusashell-pets executable.'
+  activate_unix_version "$root" "$target" "$pets_version"
+  prune_unix_versions "$versions" "$pets_version" "$previous"
+
+  mkdir -p "$home_dir/.local/bin"
+  printf '#!/usr/bin/env sh\nexec "%s/nusashell-pets" --assets "%s/assets/pets" "$@"\n' "$current" "$current" > "$home_dir/.local/bin/nusashell-pets"
+  chmod 0755 "$home_dir/.local/bin/nusashell-pets"
+  echo "Installed NusaShell desktop pet $pets_version. Run: nusashell-pets"
+}
+
 mcp_data_dir() {
   if [[ -n "${NUSASHELL_DATA_DIR:-}" ]]; then
     printf '%s\n' "$NUSASHELL_DATA_DIR"
@@ -522,6 +608,9 @@ install_mcp_unix() {
 install_core_unix
 if [[ "$install_electron" == 1 ]]; then
   install_electron_unix
+fi
+if [[ "$install_pets" == 1 ]]; then
+  install_pets_linux
 fi
 if [[ "$install_mcp" == 1 ]]; then
   install_mcp_unix

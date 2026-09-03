@@ -25,6 +25,10 @@ function artifactKey(name, version, product) {
     const mac = name.match(new RegExp(`^NusaShell-Electron-${escapedVersion}-(?:darwin|mac)-(x64|arm64)\\.zip$`));
     return mac ? `darwin-${mac[1]}` : null;
   }
+  if (product === 'pets') {
+    const linux = name.match(new RegExp(`^nusashell-pets-${escapedVersion}-linux-(x64|arm64)\\.tar\\.gz$`));
+    return linux ? `linux-${linux[1]}` : null;
+  }
   throw new Error(`Unsupported release product: ${product}`);
 }
 
@@ -63,7 +67,7 @@ const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : '';
 if (import.meta.url === invokedPath) {
   const [version, root = 'release-artifacts/go', output = join(root, 'latest.json'), product = 'go'] = process.argv.slice(2);
   if (!version) {
-    process.stderr.write('Usage: node scripts/release-manifest.mjs <version> [root] [output] [go|electron]\n');
+    process.stderr.write('Usage: node scripts/release-manifest.mjs <version> [root] [output] [go|electron|pets]\n');
     process.exitCode = 1;
   } else {
     try {

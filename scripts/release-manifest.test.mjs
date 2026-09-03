@@ -51,6 +51,20 @@ test('buildReleaseManifest keeps Electron payloads in a separate manifest', asyn
   assert.equal(manifest.files['linux-x64'].name, 'nusashell-electron-2.4.6-linux-x64.tar.gz');
 });
 
+test('buildReleaseManifest indexes Linux-only pets payloads', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'nusashell-pets-release-'));
+  temporaryDirectories.push(root);
+  await writeFile(join(root, 'nusashell-pets-0.1.3-linux-x64.tar.gz'), 'pets x64');
+  await writeFile(join(root, 'nusashell-pets-0.1.3-linux-arm64.tar.gz'), 'pets arm64');
+
+  const manifest = await buildReleaseManifest('0.1.3', root, 'pets');
+
+  assert.equal(manifest.product, 'pets');
+  assert.deepEqual(Object.keys(manifest.files).sort(), ['linux-arm64', 'linux-x64']);
+  assert.equal(manifest.files['linux-x64'].name, 'nusashell-pets-0.1.3-linux-x64.tar.gz');
+  assert.match(manifest.files['linux-arm64'].sha256, /^[a-f0-9]{64}$/);
+});
+
 test('buildReleaseManifest rejects a version with no recognized payload', async () => {
   const root = await mkdtemp(join(tmpdir(), 'nusashell-release-empty-'));
   temporaryDirectories.push(root);

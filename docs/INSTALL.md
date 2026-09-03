@@ -1,16 +1,20 @@
 # Install NusaShell
 
-NusaShell has two separate programs:
+NusaShell has three separate programs:
 
 - `nusashell` is the Go core and always gets installed.
 - `nusashell-desktop` is an optional Electron wrapper. It starts the already
   installed Go core on loopback and loads the same web application.
+- `nusashell-pets` is an optional desktop pet overlay (Linux only). It renders
+  the NusaShell mascot as an alpha-shaped, always-on-top SDL2 window and
+  follows agent activity over the local WebSocket.
 
 The release artifacts and manifests are separate as well. `latest.json` is
-for the Go core; `electron-latest.json` is for the Electron wrapper. Each
-stream has its own immutable GitHub tag (`go-v<version>` or
-`electron-v<version>`), so either one can be released without rebuilding the
-other. Electron never embeds or replaces the Go binary.
+for the Go core; `electron-latest.json` is for the Electron wrapper;
+`pets-latest.json` is for the desktop pet. Each stream has its own immutable
+GitHub tag (`go-v<version>`, `electron-v<version>`, or `pets-v<version>`), so
+either one can be released without rebuilding the other. Electron never
+embeds or replaces the Go binary.
 
 ## Release installer
 
@@ -23,19 +27,21 @@ curl -fsSL https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/i
 The installer always installs the Go core, then asks:
 
 1. whether to install the Electron desktop wrapper;
-2. whether to install first-party plugins from `NusaShell-mcp`.
+2. whether to install the desktop pet (Linux only);
+3. whether to install first-party plugins from `NusaShell-mcp`.
 
-The default answer is no for both optional components. Choices can be made
+The default answer is no for all optional components. Choices can be made
 without a prompt, which is useful for automation:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.sh \
-  | bash -s -- --install-electron --install-mcp
+  | bash -s -- --install-electron --install-pets --install-mcp
 ```
 
-Equivalent environment overrides are `NUSASHELL_INSTALL_ELECTRON=1|0` and
-`NUSASHELL_INSTALL_MCP=1|0`. Set `NUSASHELL_NON_INTERACTIVE=1` to skip both
-unless an explicit `1` override or install flag is supplied.
+Equivalent environment overrides are `NUSASHELL_INSTALL_ELECTRON=1|0`,
+`NUSASHELL_INSTALL_PETS=1|0`, and `NUSASHELL_INSTALL_MCP=1|0`. Set
+`NUSASHELL_NON_INTERACTIVE=1` to skip all of them unless an explicit `1`
+override or install flag is supplied.
 
 Windows PowerShell:
 
@@ -57,34 +63,36 @@ unsafe archive names/paths, resolve each stream through
 Pin a release for a reproducible install:
 
 ```bash
-NUSASHELL_VERSION=0.1.0 bash scripts/install.sh --no-electron --no-mcp
+NUSASHELL_VERSION=0.1.0 bash scripts/install.sh --no-electron --no-pets --no-mcp
 ```
 
-Pin the two streams independently when installing Electron:
+Pin the three streams independently:
 
 ```bash
-NUSASHELL_VERSION=1.2.3 NUSASHELL_ELECTRON_VERSION=2.0.0 \
-  bash scripts/install.sh --install-electron --no-mcp
+NUSASHELL_VERSION=1.2.3 NUSASHELL_ELECTRON_VERSION=2.0.0 NUSASHELL_PETS_VERSION=0.1.3 \
+  bash scripts/install.sh --install-electron --install-pets --no-mcp
 ```
 
 ```powershell
 & .\scripts\install.ps1 -Version 0.1.0 -NoElectron -NoMcp
 ```
 
-PowerShell uses `-ElectronVersion` for the optional wrapper. The equivalent
-environment variable is `NUSASHELL_ELECTRON_VERSION`. When Electron is
-selected without a pin, the installer gets the latest Electron stream even if
-the Go core has a different version.
+PowerShell uses `-ElectronVersion` for the optional wrapper; the desktop pet
+is Linux-only and is therefore never offered by the Windows installer. The
+equivalent environment variables are `NUSASHELL_ELECTRON_VERSION` and
+`NUSASHELL_PETS_VERSION`. When an optional component is selected without a
+pin, the installer gets that stream's latest release even if the Go core has
+a different version.
 
 ## Installation layout
 
 The program files and NusaShell data are deliberately separate.
 
-| Platform | Go core | Electron wrapper | MCP/application data |
-| --- | --- | --- | --- |
-| Linux | `~/.local/share/nusashell/versions/<version>/`, launcher `~/.local/bin/nusashell` | `~/.local/share/nusashell-electron/versions/<version>/`, launcher `~/.local/bin/nusashell-desktop` | `~/.config/nusashell/plugins/` |
-| macOS | `~/.local/share/nusashell/versions/<version>/`, launcher `~/.local/bin/nusashell` | `~/Applications/NusaShell Desktop.app` | `~/Library/Application Support/nusashell/plugins/` |
-| Windows | `%LOCALAPPDATA%\Programs\NusaShell\versions\`, launcher `nusashell.cmd` | `%LOCALAPPDATA%\Programs\NusaShell-Electron\versions\`, Start Menu/Desktop shortcuts | `%APPDATA%\nusashell\plugins\` |
+| Platform | Go core | Electron wrapper | Desktop pet | MCP/application data |
+| --- | --- | --- | --- | --- |
+| Linux | `~/.local/share/nusashell/versions/<version>/`, launcher `~/.local/bin/nusashell` | `~/.local/share/nusashell-electron/versions/<version>/`, launcher `~/.local/bin/nusashell-desktop` | `~/.local/share/nusashell-pets/versions/<version>/`, launcher `~/.local/bin/nusashell-pets` | `~/.config/nusashell/plugins/` |
+| macOS | `~/.local/share/nusashell/versions/<version>/`, launcher `~/.local/bin/nusashell` | `~/Applications/NusaShell Desktop.app` | not available | `~/Library/Application Support/nusashell/plugins/` |
+| Windows | `%LOCALAPPDATA%\Programs\NusaShell\versions\`, launcher `nusashell.cmd` | `%LOCALAPPDATA%\Programs\NusaShell-Electron\versions\`, Start Menu/Desktop shortcuts | not available | `%APPDATA%\nusashell\plugins\` |
 
 Linux and Windows keep a `current` symlink/junction and retain the active
 release plus one previous release. The old version is not removed while its
@@ -94,6 +102,23 @@ the versioned Go layout for the core.
 The installer never deletes conversations, credentials, provider settings,
 skills, memory, or plugins. Remove the program paths only for an uninstall;
 remove the data directory separately when a full wipe is intended.
+
+## Desktop pet (Linux)
+
+The desktop pet is an opt-in component like Electron, but Linux-only for now:
+the Unix installer offers it only on Linux and the Windows installer does not
+install it at all. The payload contains the `nusashell-pets` binary and its
+`assets/` folder (the hatch-pet v2 WebP atlas and `config.json`); the
+launcher always passes `--assets <current>/assets/pets`, so the pet finds its
+artwork regardless of the current working directory. Run it with:
+
+```bash
+nusashell-pets
+```
+
+The default runtime expects the NusaShell Go core on `ws://127.0.0.1:9999/ws`
+and an X11 (or XWayland) session. Native Wayland is rejected with a hint,
+because the always-on-top and shaped-input behavior needs X11 Shape.
 
 ## NusaShell-mcp
 
@@ -119,6 +144,7 @@ The streams have independent Semantic Version sources:
 
 - `VERSION` is the Go core version.
 - `apps/electron/VERSION` is the Electron wrapper version.
+- `apps/pets/VERSION` is the desktop pet version (Linux only).
 
 Read, synchronize, and check them with:
 
@@ -129,6 +155,8 @@ make electron-version-sync
 make electron-version-check
 make release-index-check
 ```
+
+(`apps/pets/VERSION` is read via `node scripts/version.mjs read-pets`.)
 
 Useful local packaging commands are:
 
@@ -143,18 +171,19 @@ make electron-release-manifest
 On a push to `master`, GitHub Actions first detects which product paths
 changed, following the release-on-changes pattern used by NusaShell-mcp.
 Go changes build and publish only the Go matrix; `apps/electron/**` changes
-build and publish only the Electron matrix; shared icon changes run both.
-The release jobs also compare each VERSION value with its corresponding
-`release-versions.json` pointer. A stream whose version is ahead of its pointer
-is retried even when the follow-up commit only fixes CI or tests. The Go and
-Electron build/publish gates are independent: a failed Go gate does not block
-Electron, and a failed Electron gate does not block Go. Each successful
-publisher updates only its own pointer, preserving the stream that is still
-pending. CI checks the corresponding immutable tag before publishing. If the
-tag already exists, that stream's publisher is skipped without failing the
-workflow and its release pointer remains unchanged. Bump the corresponding
-VERSION file before the next product release; documentation, CI, and
-release-tooling-only changes do not require a product bump.
+build and publish only the Electron matrix; `apps/pets/**` changes build and
+publish only the Linux pets matrix; shared icon changes run both Go and
+Electron. The release jobs also compare each VERSION value with its
+corresponding `release-versions.json` pointer. A stream whose version is
+ahead of its pointer is retried even when the follow-up commit only fixes CI
+or tests. The Go, Electron, and pets gates are independent: a failed gate for
+one stream does not block the others. Each successful publisher updates only
+its own pointer, preserving the stream that is still pending. CI checks the
+corresponding immutable tag before publishing. If the tag already exists,
+that stream's publisher is skipped without failing the workflow and its
+release pointer remains unchanged. Bump the corresponding VERSION file before
+the next product release; documentation, CI, and release-tooling-only changes
+do not require a product bump.
 
 The index is committed by GitHub Actions with `[skip ci]`. It is a small,
 tracked pointer document, not a copy of release binaries, and lets installers
@@ -186,8 +215,9 @@ to stderr. This is a launcher fallback, not a Go core setting.
 Close NusaShell first. Remove the relevant program paths:
 
 - Linux: `~/.local/share/nusashell`,
-  `~/.local/share/nusashell-electron`, `~/.local/bin/nusashell`,
-  `~/.local/bin/nusashell-desktop`, and the desktop entry.
+  `~/.local/share/nusashell-electron`, `~/.local/share/nusashell-pets`,
+  `~/.local/bin/nusashell`, `~/.local/bin/nusashell-desktop`,
+  `~/.local/bin/nusashell-pets`, and the desktop entry.
 - macOS: `~/.local/share/nusashell`, `~/.local/bin/nusashell`, and
   `~/Applications/NusaShell Desktop.app`.
 - Windows: `%LOCALAPPDATA%\Programs\NusaShell` and

@@ -59,7 +59,8 @@ jobs:
 
           go_version="$(node scripts/version.mjs read-go)"
           electron_version="$(node scripts/version.mjs read)"
-          GO_VERSION="$go_version" ELECTRON_VERSION="$electron_version" \
+          pets_version="$(node scripts/version.mjs read-pets)"
+          GO_VERSION="$go_version" ELECTRON_VERSION="$electron_version" PETS_VERSION="$pets_version" \
             node scripts/release-changes.mjs --release-index release-versions.json <<< "$files" >> "$GITHUB_OUTPUT"
 
   test-frontend:
@@ -98,6 +99,27 @@ jobs:
       - run: node scripts/version.mjs check
       - run: npm ci --prefix apps/electron
       - run: npm --prefix apps/electron test
+
+  test-pets:
+    name: Pets tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/pets/go.mod
+          check-latest: true
+          cache: true
+      - name: Verify Go formatting
+        shell: bash
+        run: |
+          unformatted="$(cd apps/pets && gofmt -l .)"
+          test -z "$unformatted"
+      - run: cd apps/pets && go vet ./...
+      - run: cd apps/pets && go test ./...
 
   test-installers:
     name: Installer scripts (${{ matrix.os }})
@@ -190,7 +212,7 @@ jobs:
 
   build:
     name: Build (${{ matrix.os }})
-    needs: [test-frontend, test-backend, test-electron, test-installers, test-electron-ui]
+    needs: [test-frontend, test-backend, test-electron, test-pets, test-installers, test-electron-ui]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -222,6 +244,7 @@ jobs:
   # never receives a Go binary in its package. Product-specific test gates are
   # intentionally kept out of the other stream's needs list, so a failing Go
   # test cannot suppress an otherwise healthy Electron release (and vice versa).
+  # The Linux-only pets stream (apps/pets) follows the same independent pattern.
   build-go-release:
     name: Go release (${{ matrix.os }})
     needs: [detect-changes, test-frontend, test-backend, test-installers]
@@ -351,6 +374,51 @@ jobs:
         with:
           name: nusashell-electron-${{ matrix.platform }}-${{ matrix.arch }}
           path: release/electron/**
+          if-no-files-found: error
+
+  build-pets-release:
+    name: Pets release (${{ matrix.os }})
+    needs: [detect-changes, test-pets, test-installers]
+    if: needs.detect-changes.outputs.pets_changed == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+          - os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/pets/go.mod
+          check-latest: true
+          cache: true
+          cache-dependency-path: apps/pets/go.sum
+      - name: Install SDL2 and X11 development headers
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libsdl2-dev libx11-dev libxext-dev pkg-config
+      - name: Build and package pets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd apps/pets
+          version="$(tr -d '\r\n' < VERSION)"
+          mkdir -p release/pets/stage
+          go build -buildvcs=false -tags sdl2 -o release/pets/stage/nusashell-pets ./cmd/pets
+          cp -R assets release/pets/stage/
+          tar -C release/pets/stage -czf "release/pets/nusashell-pets-${version}-linux-${{ matrix.arch }}.tar.gz" nusashell-pets assets
+          sha256sum "release/pets/nusashell-pets-${version}-linux-${{ matrix.arch }}.tar.gz" > "release/pets/nusashell-pets-${version}-linux-${{ matrix.arch }}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nusashell-pets-linux-${{ matrix.arch }}
+          path: release/pets/**
           if-no-files-found: error
 
   publish-go:
@@ -487,6 +555,73 @@ jobs:
             --title "NusaShell Electron ${TAG#electron-}" \
             --notes-file release-notes.md
 
+  publish-pets:
+    name: Publish pets GitHub release
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      published: ${{ steps.create_release.outcome == 'success' }}
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.detect-changes.outputs.pets_changed == 'true'
+    needs: [detect-changes, build-pets-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Read pets release version
+        id: release
+        shell: bash
+        run: |
+          version="$(node scripts/version.mjs read-pets)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=pets-v$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nusashell-pets-*
+          path: release-artifacts/pets
+          merge-multiple: true
+      - name: Check pets release tag does not already exist
+        id: tag_check
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          if git show-ref --tags --verify --quiet "refs/tags/$TAG" || git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::notice::Tag $TAG already exists. Skipping pets release; bump apps/pets/VERSION before merging another pets release."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Create pets release manifest
+        if: steps.tag_check.outputs.should_publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.release.outputs.version }}"
+          node scripts/release-manifest.mjs "$version" release-artifacts/pets release-artifacts/pets-latest.json pets
+          if ! node scripts/release-notes.mjs "$version" CHANGELOG.md > release-notes.md; then
+            printf 'NusaShell pets %s\n\nBuilt from commit %s.\n' "$version" "$GITHUB_SHA" > release-notes.md
+          fi
+      - name: Create pets GitHub release
+        id: create_release
+        if: steps.tag_check.outputs.should_publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' artifacts < <(find release-artifacts/pets -type f -print0)
+          artifacts+=(release-artifacts/pets-latest.json)
+          gh release create "$TAG" "${artifacts[@]}" \
+            --target "${GITHUB_SHA}" \
+            --title "NusaShell Pets ${TAG#pets-}" \
+            --notes-file release-notes.md
+
   publish-release-index:
     name: Update release stream index
     # A partial release is valid: update the pointer for each publisher that
@@ -495,8 +630,8 @@ jobs:
       always() && github.event_name == 'push' && github.ref == 'refs/heads/master' &&
       needs.detect-changes.result == 'success' &&
       needs.detect-changes.outputs.has_release_changes == 'true' &&
-      (needs.publish-go.outputs.published == 'true' || needs.publish-electron.outputs.published == 'true')
-    needs: [detect-changes, publish-go, publish-electron]
+      (needs.publish-go.outputs.published == 'true' || needs.publish-electron.outputs.published == 'true' || needs.publish-pets.outputs.published == 'true')
+    needs: [detect-changes, publish-go, publish-electron, publish-pets]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -513,13 +648,15 @@ jobs:
         env:
           GO_CHANGED: ${{ needs.publish-go.outputs.published == 'true' }}
           ELECTRON_CHANGED: ${{ needs.publish-electron.outputs.published == 'true' }}
+          PETS_CHANGED: ${{ needs.publish-pets.outputs.published == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
           git pull --rebase origin master
-          GO_CHANGED="$GO_CHANGED" ELECTRON_CHANGED="$ELECTRON_CHANGED" \
+          GO_CHANGED="$GO_CHANGED" ELECTRON_CHANGED="$ELECTRON_CHANGED" PETS_CHANGED="$PETS_CHANGED" \
             GO_VERSION="${{ needs.publish-go.outputs.version }}" \
             ELECTRON_VERSION="${{ needs.publish-electron.outputs.version }}" \
+            PETS_VERSION="${{ needs.publish-pets.outputs.version }}" \
             node scripts/release-index.mjs update-from-env release-versions.json
           if git diff --quiet -- release-versions.json; then
             echo 'release-versions.json is already up to date.'

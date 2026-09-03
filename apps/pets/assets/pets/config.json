@@ -1,0 +1,12 @@
+{
+  "name": "nusa-shell-pet",
+  "spritesheet": "spritesheet.webp",
+  "max_width": 192,
+  "max_height": 208,
+  "ws_url": "ws://127.0.0.1:9999/ws",
+  "electron_path": "",
+  "click_through": false,
+  "shape_alpha_cutoff": 8,
+  "bubble_enabled": true,
+  "bubble_font": ""
+}

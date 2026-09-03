@@ -51,6 +51,13 @@ test('installers preserve the release manifest, checksum, and version activation
   assert.match(releaseInstaller, /nusashell-desktop/);
   assert.match(releaseInstaller, /Install Electron/);
   assert.match(releaseInstaller, /Install MCP/);
+  assert.match(releaseInstaller, /pets-latest\.json/);
+  assert.match(releaseInstaller, /NUSASHELL_INSTALL_PETS/);
+  assert.match(releaseInstaller, /Install desktop pet \(Linux only\)/);
+  assert.match(releaseInstaller, /\.local\/share\/nusashell-pets/);
+  assert.match(releaseInstaller, /nusashell-pets/);
+  assert.doesNotMatch(windowsInstaller, /pets-latest\.json/);
+  assert.doesNotMatch(windowsInstaller, /NUSASHELL_INSTALL_PETS/);
   assert.match(windowsInstaller, /nusashell\.exe/);
   assert.match(windowsInstaller, /LOCALAPPDATA.*Programs.*NusaShell/s);
   assert.match(windowsInstaller, /New-Item -ItemType Junction/);
@@ -271,6 +278,93 @@ esac
   assert.equal(await fileExists(join(runningElectron, 'nusashell-desktop')), true);
   assert.match(await readFile(join(home, '.local', 'bin', 'nusashell'), 'utf8'), /go-program\/current\/nusashell/);
   assert.match(await readFile(join(home, '.local', 'bin', 'nusashell-desktop'), 'utf8'), /electron-program\/current\/nusashell-desktop/);
+});
+
+test('release Linux installer can opt into the desktop pet as a separate Linux-only payload', async () => {
+  if (process.platform !== 'linux') return;
+  const root = await mkdtemp(join(tmpdir(), 'nusashell-release-pets-'));
+  temporaryDirectories.push(root);
+  const home = join(root, 'home');
+  const fakeBin = join(root, 'bin');
+  const corePayload = join(root, 'core-payload');
+  const petsPayload = join(root, 'pets-payload');
+  const releaseRoot = join(root, 'release');
+  const goInstallRoot = join(root, 'go-program');
+  const petsInstallRoot = join(root, 'pets-program');
+  const coreName = 'nusashell-0.1.0-linux-x64.tar.gz';
+  const petsName = 'nusashell-pets-0.1.3-linux-x64.tar.gz';
+  await mkdir(home, { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  await mkdir(corePayload, { recursive: true });
+  await mkdir(join(petsPayload, 'assets', 'pets'), { recursive: true });
+  await mkdir(releaseRoot, { recursive: true });
+  await writeFile(join(corePayload, 'nusashell'), '#!/usr/bin/env sh\nexit 0\n');
+  await writeFile(join(petsPayload, 'nusashell-pets'), '#!/usr/bin/env sh\nexit 0\n');
+  await writeFile(join(petsPayload, 'assets', 'pets', 'config.json'), JSON.stringify({ name: 'nusa-shell-pet' }) + '\n');
+  await writeFile(join(petsPayload, 'assets', 'pets', 'spritesheet.webp'), 'atlas');
+  await chmod(join(corePayload, 'nusashell'), 0o755);
+  await chmod(join(petsPayload, 'nusashell-pets'), 0o755);
+  await execFileAsync('tar', ['-C', corePayload, '-czf', join(releaseRoot, coreName), 'nusashell']);
+  await execFileAsync('tar', ['-C', petsPayload, '-czf', join(releaseRoot, petsName), 'nusashell-pets', 'assets']);
+  const coreSha = createHash('sha256').update(await readFile(join(releaseRoot, coreName))).digest('hex');
+  const petsSha = createHash('sha256').update(await readFile(join(releaseRoot, petsName))).digest('hex');
+  await writeFile(join(releaseRoot, 'latest.json'), `${JSON.stringify({
+    product: 'go',
+    version: '0.1.0',
+    files: { 'linux-x64': { name: coreName, sha256: coreSha } },
+  }, null, 2)}\n`);
+  await writeFile(join(releaseRoot, 'pets-latest.json'), `${JSON.stringify({
+    product: 'pets',
+    version: '0.1.3',
+    files: { 'linux-x64': { name: petsName, sha256: petsSha } },
+  }, null, 2)}\n`);
+  await writeFile(join(releaseRoot, 'release-versions.json'), `${JSON.stringify({
+    schemaVersion: 1,
+    go: { version: '0.1.0', tag: 'go-v0.1.0', manifest: 'latest.json', releasedAt: '2026-01-01T00:00:00Z' },
+    electron: null,
+    pets: { version: '0.1.3', tag: 'pets-v0.1.3', manifest: 'pets-latest.json', releasedAt: '2026-03-01T00:00:00Z' },
+  }, null, 2)}\n`);
+  await writeFile(join(fakeBin, 'curl'), `#!/usr/bin/env sh
+set -eu
+url=''
+destination=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) destination="$2"; shift 2 ;;
+    https://*) url="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+case "$url" in
+  */release-versions.json) cp '${releaseRoot}/release-versions.json' "$destination" ;;
+  */pets-latest.json) cp '${releaseRoot}/pets-latest.json' "$destination" ;;
+  *pets-v0.1.3/nusashell-pets-0.1.3-linux-x64.tar.gz) cp '${releaseRoot}/${petsName}' "$destination" ;;
+  */latest.json) cp '${releaseRoot}/latest.json' "$destination" ;;
+  *) cp '${releaseRoot}/${coreName}' "$destination" ;;
+esac
+`);
+  await chmod(join(fakeBin, 'curl'), 0o755);
+
+  await execFileAsync('bash', [script('install.sh').pathname, '--no-electron', '--install-pets', '--no-mcp'], {
+    env: {
+      ...process.env,
+      HOME: home,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      NUSASHELL_RELEASE_BASE: 'https://fixture.invalid/releases',
+      NUSASHELL_RELEASE_INDEX: 'https://fixture.invalid/releases/release-versions.json',
+      NUSASHELL_GO_INSTALL_ROOT: goInstallRoot,
+      NUSASHELL_PETS_INSTALL_ROOT: petsInstallRoot,
+      NUSASHELL_NON_INTERACTIVE: '1',
+    },
+  });
+
+  assert.equal(await realpath(join(goInstallRoot, 'current')), join(goInstallRoot, 'versions', '0.1.0'));
+  assert.equal(await realpath(join(petsInstallRoot, 'current')), join(petsInstallRoot, 'versions', '0.1.3'));
+  assert.equal(await realpath(join(petsInstallRoot, 'current', 'nusashell-pets')), join(petsInstallRoot, 'versions', '0.1.3', 'nusashell-pets'));
+  assert.equal(await fileExists(join(petsInstallRoot, 'current', 'assets', 'pets', 'spritesheet.webp')), true);
+  const launcher = await readFile(join(home, '.local', 'bin', 'nusashell-pets'), 'utf8');
+  assert.match(launcher, /pets-program\/current\/nusashell-pets/);
+  assert.match(launcher, /--assets ".*pets-program\/current\/assets\/pets"/);
 });
 
 test('release Linux installer installs an opted-in NusaShell-mcp plugin into Go app data', async () => {

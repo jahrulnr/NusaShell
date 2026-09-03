@@ -90,6 +90,8 @@ if (import.meta.url === invokedPath) {
       process.stdout.write(`${await readVersion(resolve(repoRoot, 'apps/electron/VERSION'))}\n`);
     } else if (command === 'read-go') {
       process.stdout.write(`${await readVersion(resolve(repoRoot, 'VERSION'))}\n`);
+    } else if (command === 'read-pets') {
+      process.stdout.write(`${await readVersion(resolve(repoRoot, 'apps/pets/VERSION'))}\n`);
     } else if (command === 'sync') {
       const result = await syncElectronVersion(repoRoot);
       process.stdout.write(`${result.changed ? 'Synchronized' : 'Already synchronized'} Electron version ${result.version}\n`);
@@ -97,7 +99,7 @@ if (import.meta.url === invokedPath) {
       const result = await syncElectronVersion(repoRoot, { check: true });
       process.stdout.write(`Electron version ${result.version} is synchronized\n`);
     } else {
-      throw new Error('Usage: node scripts/version.mjs [read|read-go|sync|check]');
+      throw new Error('Usage: node scripts/version.mjs [read|read-go|read-pets|sync|check]');
     }
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);

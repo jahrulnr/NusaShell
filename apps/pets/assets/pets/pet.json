@@ -1,0 +1,7 @@
+{
+  "id": "nusa-shell-pet",
+  "displayName": "NusaShell Pet",
+  "description": "A small green-and-cream robot companion that reflects NusaShell agent activity.",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.webp"
+}

@@ -11,5 +11,6 @@
     "tag": "electron-v0.1.0",
     "manifest": "electron-latest.json",
     "releasedAt": "2026-09-02T20:30:53.526Z"
-  }
+  },
+  "pets": null
 }

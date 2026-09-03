@@ -8,6 +8,7 @@ export const RELEASE_INDEX_SCHEMA_VERSION = 1;
 const STREAMS = Object.freeze({
   go: 'latest.json',
   electron: 'electron-latest.json',
+  pets: 'pets-latest.json',
 });
 const SAFE_TAG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/;
 const SAFE_MANIFEST_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*\.json$/;
@@ -17,6 +18,7 @@ export function createReleaseIndex() {
     schemaVersion: RELEASE_INDEX_SCHEMA_VERSION,
     go: null,
     electron: null,
+    pets: null,
   };
 }
 
@@ -62,6 +64,7 @@ export function validateReleaseIndex(index) {
     schemaVersion: RELEASE_INDEX_SCHEMA_VERSION,
     go: validateEntry('go', index.go ?? null),
     electron: validateEntry('electron', index.electron ?? null),
+    pets: validateEntry('pets', index.pets ?? null),
   };
 }
 
@@ -99,6 +102,12 @@ export function releaseUpdatesFromEnvironment(environment = process.env) {
     updates.electron = {
       version: environment.ELECTRON_VERSION,
       tag: `electron-v${environment.ELECTRON_VERSION}`,
+    };
+  }
+  if (environment.PETS_CHANGED === 'true') {
+    updates.pets = {
+      version: environment.PETS_VERSION,
+      tag: `pets-v${environment.PETS_VERSION}`,
     };
   }
   return updates;

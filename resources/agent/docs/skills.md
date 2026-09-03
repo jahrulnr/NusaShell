@@ -122,3 +122,44 @@ The `templates/` folder contains concrete starting points; `references/`
 contains the YAML contract, supported event variables, and MCP discovery
 flow. Adapt a template, call `automation(op="validate")`, then save it with
 `automation(op="create", enabled=false)` until the user confirms activation.
+
+## Builtin hatch-pet skill
+
+`hatch-pet` is the pet/mascot authoring pipeline for NusaShell desktop pets.
+Use it when the user asks to hatch or create a pet, mascot, or custom
+animated character; make a pet from a brand name or reference image; repair
+or upgrade an existing pet atlas; or run the pet QA/packaging pipeline. It
+produces the Codex-compatible v2 atlas contract consumed by `apps/pets`:
+8 columns x 11 rows of `192x208` cells (1536x2288), the 9 standard animation
+rows plus 16 clockwise look directions, packaged with
+`spriteVersionNumber: 2`. `apps/pets/internal/char/atlas.go` maps NusaShell
+states (`idle`, `thinking`, `reasoning`, `done`, `error`, `waiting`) onto
+hatch-pet rows and loads the look rows for idle hover gaze.
+
+When validating an authored pet in `apps/pets`, keep the artwork distinct from
+the runtime activity bubble: the bubble is painted by Go, not baked into the
+atlas. Its antialiased dark panel uses subtle surface lighting and light text:
+a 14px bold header and 12px regular detail, left-aligned without a status dot.
+It shows two lines (activity + detail), holds each update for at least
+4 seconds, and coalesces fast events to the newest one. Thinking copy rotates
+every 5 seconds; it is local status wording, not streamed model reasoning.
+`Executing…` shows the tool name as `name(...)`, without arguments. Idle hides
+the bubble after the current dwell. To verify bubble composition, a good call
+is `exec(command="cd apps/pets && go test -tags sdl2 ./internal/renderer -run TestBubble")`
+from the repository workspace. Bad: regenerate `spritesheet.webp` to change
+status text, or infer a model's reasoning from the bubble wording.
+
+Read the seeded package progressively:
+
+    skill(op="search", query="hatch pet")
+    file_list(path="<datadir>/skills/hatch-pet/scripts")
+    file_read(path="<datadir>/skills/hatch-pet/SKILL.md")
+
+The `scripts/` folder contains the deterministic Pillow pipeline (run checks,
+frame extraction, atlas composition, validation, despill, QA sheets; invoke
+through `exec` with `python3` after confirming Pillow is installed). The
+`references/` folder holds the v2 contract, look-direction acceptance policy,
+QA rubric, the full command sequence, and the isolated review worker prompts.
+Visual generation uses `generate_media`; independent blind and final visual
+QA use `subagent`/`delegate` workers. Packages stage to
+`<datadir>/pets/<pet-id>/` with `pet.json` + `spritesheet.webp`.

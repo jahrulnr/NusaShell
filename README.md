@@ -35,6 +35,10 @@ streaming tool timeline, and expandable reasoning and tool output.
 - **Local-first delivery** — Go serves the frontend assets embedded with
   `embed.FS`. Production use needs no Node runtime, `node_modules`, or frontend
   build step.
+- **Desktop pet (Linux)** — an optional SDL2 overlay (`nusashell-pets`) that
+  renders the alpha-shaped NusaShell mascot always-on-top and reacts to agent
+  activity over WebSocket. Built under `apps/pets` and installed as an
+  opt-in release component, currently Linux-only.
 
 ## Quick start
 
@@ -64,18 +68,27 @@ active conversation.
 ### Release installer
 
 The release installer installs the Go core first and then asks whether the
-optional Electron desktop wrapper and `NusaShell-mcp` plugins should be
-installed:
+optional Electron desktop wrapper, the desktop pet (Linux only), and
+`NusaShell-mcp` plugins should be installed:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.sh | bash
 ```
 
-Use `--install-electron`/`--no-electron` and
-`--install-mcp`/`--no-mcp` to choose explicitly. Set
+Use `--install-electron`/`--no-electron`,
+`--install-pets`/`--no-pets`, and
+`--install-mcp`/`--no-mcp` to choose explicitly. The desktop pet is currently
+Linux-only; the installer on macOS ignores pets options. Set
 `NUSASHELL_NON_INTERACTIVE=1` for unattended installs; optional components
 default to not installed. See [`docs/INSTALL.md`](docs/INSTALL.md) for
 Windows, layouts, version pinning, and MCP details.
+
+Windows uses the equivalent PowerShell installer (pets is not offered there
+yet):
+
+```powershell
+irm https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.ps1 | iex
+```
 
 ### Electron desktop app
 

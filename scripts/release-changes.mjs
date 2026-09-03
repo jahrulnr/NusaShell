@@ -13,6 +13,7 @@ const GO_PREFIXES = Object.freeze([
 ]);
 
 const ELECTRON_PREFIXES = Object.freeze(['apps/electron/']);
+const PETS_PREFIXES = Object.freeze(['apps/pets/']);
 const SHARED_ELECTRON_PREFIXES = Object.freeze(['frontend/icons/']);
 
 function normalizePath(file) {
@@ -45,11 +46,12 @@ export function detectReleaseStreams(files, {
   releaseIndex = null,
 } = {}) {
   if (all) {
-    return { goChanged: true, electronChanged: true, hasChanges: true };
+    return { goChanged: true, electronChanged: true, petsChanged: true, hasChanges: true };
   }
 
   let goChanged = versionNeedsRelease('go', currentVersions, releaseIndex);
   let electronChanged = versionNeedsRelease('electron', currentVersions, releaseIndex);
+  let petsChanged = versionNeedsRelease('pets', currentVersions, releaseIndex);
   for (const rawFile of Array.isArray(files) ? files : []) {
     const file = normalizePath(rawFile);
     if (!file) continue;
@@ -65,9 +67,12 @@ export function detectReleaseStreams(files, {
     if (hasPrefix(file, ELECTRON_PREFIXES) || hasPrefix(file, SHARED_ELECTRON_PREFIXES)) {
       electronChanged = true;
     }
+    if (hasPrefix(file, PETS_PREFIXES)) {
+      petsChanged = true;
+    }
   }
 
-  return { goChanged, electronChanged, hasChanges: goChanged || electronChanged };
+  return { goChanged, electronChanged, petsChanged, hasChanges: goChanged || electronChanged || petsChanged };
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : '';
@@ -85,10 +90,12 @@ if (import.meta.url === invokedPath) {
     currentVersions: {
       go: process.env.GO_VERSION,
       electron: process.env.ELECTRON_VERSION,
+      pets: process.env.PETS_VERSION,
     },
     releaseIndex,
   });
   process.stdout.write(`go_changed=${result.goChanged}\n`);
   process.stdout.write(`electron_changed=${result.electronChanged}\n`);
+  process.stdout.write(`pets_changed=${result.petsChanged}\n`);
   process.stdout.write(`has_release_changes=${result.hasChanges}\n`);
 }

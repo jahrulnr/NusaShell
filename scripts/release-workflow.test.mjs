@@ -15,7 +15,8 @@ function jobSection(jobName, nextJobName) {
 test('publisher jobs skip an already published tag without failing', () => {
   for (const [stream, nextJob, versionMessage] of [
     ['Go', 'publish-electron', 'bump VERSION before merging another Go release.'],
-    ['Electron', 'publish-release-index', 'bump apps/electron/VERSION before merging another Electron release.'],
+    ['Electron', 'publish-pets', 'bump apps/electron/VERSION before merging another Electron release.'],
+    ['pets', 'publish-release-index', 'bump apps/pets/VERSION before merging another pets release.'],
   ]) {
     const section = jobSection(`publish-${stream.toLowerCase()}`, nextJob);
     assert.match(section, /published: \$\{\{ steps\.create_release\.outcome == 'success' \}\}/);
@@ -36,6 +37,9 @@ test('release index only advances for publishers that created a release', () => 
   const section = jobSection('publish-release-index', '');
   assert.match(section, /needs\.publish-go\.outputs\.published == 'true'/);
   assert.match(section, /needs\.publish-electron\.outputs\.published == 'true'/);
+  assert.match(section, /needs\.publish-pets\.outputs\.published == 'true'/);
   assert.match(section, /GO_CHANGED: \$\{\{ needs\.publish-go\.outputs\.published == 'true' \}\}/);
   assert.match(section, /ELECTRON_CHANGED: \$\{\{ needs\.publish-electron\.outputs\.published == 'true' \}\}/);
+  assert.match(section, /PETS_CHANGED: \$\{\{ needs\.publish-pets\.outputs\.published == 'true' \}\}/);
+  assert.match(section, /PETS_VERSION="\$\{\{ needs\.publish-pets\.outputs\.version \}\}"/);
 });
