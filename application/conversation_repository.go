@@ -167,7 +167,7 @@ func (r *ConversationRepository) Add(role domain.MessageRole, args ...any) error
 }
 
 // ResetTranscript starts a new epoch on this conversation identity (same ID
-// so journal, todos, attachments, chunks, and the open room stay attached).
+// so todos, attachments, chunks, and the open room stay attached).
 // Callers Add the handover, hydration, and retained suffix, then Save.
 func (r *ConversationRepository) ResetTranscript() {
 	if r == nil || r.inner == nil {

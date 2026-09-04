@@ -87,7 +87,7 @@ func TestRosterUniqueness(t *testing.T) {
 	}
 
 	events := []string{
-		EventTurnStarted, EventToolStarted, EventToolCompleted,
+		EventTurnStarted, EventToolStarted, EventToolCompleted, EventTurnDiff,
 		EventTurnDone, EventTurnError, EventCompacting, EventCompacted, EventCompactionFailed, EventSteerQueued, EventSteerApplied,
 		EventSteerCancelled, EventProviderRetry, EventLogAppend, EventTodoUpdated,
 		EventAutomationRunCreated, EventAutomationRunStarted, EventAutomationRunCompleted, EventAutomationRunFailed,
@@ -132,6 +132,9 @@ func TestGoldenEnvelopes(t *testing.T) {
 	assertGolden(t, "event.json", Event{
 		Type:    EventTurnStarted,
 		Payload: json.RawMessage(`{"run_id":"run_1","conversation_id":"conv_1","message_id":"msg_1","round":1}`),
+	})
+	assertGolden(t, "turn-diff-event.json", TurnDiffEvent{
+		RunID: "run_1", ConversationID: "conv_1", UnifiedDiff: "diff --git a/a.txt b/a.txt\n",
 	})
 }
 
@@ -245,6 +248,16 @@ func TestEventFieldNames(t *testing.T) {
 	for _, k := range want {
 		if _, ok := m[k]; !ok {
 			t.Errorf("missing field %q in TurnDoneEvent JSON", k)
+		}
+	}
+
+	b, _ = json.Marshal(TurnDiffEvent{RunID: "r", ConversationID: "c", UnifiedDiff: ""})
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"run_id", "conversation_id", "unified_diff"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("missing field %q in TurnDiffEvent JSON", k)
 		}
 	}
 

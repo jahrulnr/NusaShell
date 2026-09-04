@@ -112,6 +112,7 @@ const (
 	EventContextEstimate  = "agent.context.estimate"
 	EventToolStarted      = "agent.tool.started"
 	EventToolCompleted    = "agent.tool.completed"
+	EventTurnDiff         = "agent.turn.diff"
 	EventTurnDone         = "agent.turn.done"
 	EventTurnError        = "agent.turn.error"
 	EventCompacting       = "agent.compacting"
@@ -510,6 +511,15 @@ type TurnDoneEvent struct {
 	ContextTokens int              `json:"context_tokens,omitempty"`
 	Error         string           `json:"error,omitempty"`
 	AutoContinue  *AutoContinueDTO `json:"auto_continue,omitempty"`
+}
+
+// TurnDiffEvent is the live net git unified diff of committed file_*
+// mutations in the current turn. unified_diff is empty when the tracker
+// invalidates (binary/directory/unreadable pre-image) so consumers can clear.
+type TurnDiffEvent struct {
+	RunID          string `json:"run_id"`
+	ConversationID string `json:"conversation_id"`
+	UnifiedDiff    string `json:"unified_diff"`
 }
 
 // AutoContinueDTO mirrors domain.AutoContinueDecision for the wire. When

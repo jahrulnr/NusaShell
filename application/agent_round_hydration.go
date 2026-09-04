@@ -234,7 +234,6 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	source := HydrationSource{
 		RuntimeContext: ctx,
 		ConvID:         c.ID,
-		Journal:        a.Journal,
 	}
 	if a.Toolbox != nil {
 		// The real toolbox executes the meta-tools (mcp_list, tool_list per

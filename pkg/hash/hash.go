@@ -1,5 +1,5 @@
 // Package hash provides content-addressed SHA-256 digests used by
-// caching, journaling, and embedding layers.
+// caching and embedding layers.
 //
 // This is a shared leaf package at the module root (under pkg/) so both
 // application/ and infrastructure/ can import it without violating Go's

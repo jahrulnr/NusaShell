@@ -133,6 +133,7 @@ func (a *App) interruptTurn(run *TurnRun, msgID string, round streamedTurnRound,
 		Usage:         &contracts.UsageDTO{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens},
 		ContextTokens: contextTokens,
 	})
+	a.emitFinalTurnDiff(run)
 }
 
 func (a *App) discardQueuedSteer(run *TurnRun) {

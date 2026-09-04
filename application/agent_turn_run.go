@@ -6,6 +6,7 @@ import (
 )
 
 func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities) {
+	run.initTurnDiff()
 	turnLock := a.conversationTurnLock(run.ConversationID)
 	turnLock.Lock()
 
@@ -46,9 +47,6 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		// Without this the conversation is permanently stuck and the user
 		// gets a 409 "conversation is busy" on every new message.
 		a.recoverOrphanedTurn(run)
-		// Compress the conversation's live journal now that the turn is
-		// done, keeping journal.jsonl bounded across long sessions.
-		a.archiveJournal(run.ConversationID)
 	}()
 	a.runTurnChain(run, provider, apiKey, model, effort, asstMsgID, initialContinuation, caps, 0)
 }

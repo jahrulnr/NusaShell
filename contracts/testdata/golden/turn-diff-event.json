@@ -1,0 +1,5 @@
+{
+  "run_id": "run_1",
+  "conversation_id": "conv_1",
+  "unified_diff": "diff --git a/a.txt b/a.txt\n"
+}

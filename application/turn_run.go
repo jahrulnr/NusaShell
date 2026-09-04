@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"nusashell/domain"
+	"nusashell/domain/turndiff"
 	clock "nusashell/pkg/time"
 )
 
@@ -38,6 +39,12 @@ type TurnRun struct {
 	// at turn start so tool execution can attribute mutations without
 	// re-reading the conversation.
 	Workspace string
+
+	turnDiffMu sync.Mutex
+	// TurnDiff accumulates the net git unified diff of committed file_*
+	// mutations for this turn. Ephemeral: never persisted. Nil until the
+	// turn loop allocates it.
+	TurnDiff *turndiff.Tracker
 
 	messageMu   sync.RWMutex
 	steerMu     sync.Mutex

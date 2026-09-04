@@ -334,27 +334,7 @@ func (a *App) compactConversation(ctx context.Context, adapter ProviderContext, 
 	if err := a.persistCompactedConversation(c, runningSummary, effectiveKeepBudget); err != nil {
 		return "", err
 	}
-	a.recordCompaction(c.ID, trigger, model, effectiveKeepBudget, runningSummary)
 	return runningSummary, nil
-}
-
-// recordCompaction appends the durable compaction audit event to the
-// conversation journal. Journaling is best-effort: a failure is logged and
-// never fails the turn. The record is written only after the compacted
-// conversation itself was persisted, so the journal never claims a summary
-// that did not land.
-func (a *App) recordCompaction(conversationID string, trigger domain.CompactionTrigger, model string, keepBudget int, summary string) {
-	if a.Journal == nil {
-		return
-	}
-	if err := a.Journal.RecordCompaction(conversationID, domain.CompactionEvent{
-		Trigger:    trigger,
-		Model:      model,
-		KeepBudget: keepBudget,
-		Summary:    summary,
-	}); err != nil {
-		a.log("warn", "agent", "failed to record compaction event for %s: %v", conversationID, err)
-	}
 }
 
 // compactionAttachmentNote renders a short text note for message attachments

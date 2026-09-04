@@ -116,6 +116,7 @@ func isCriticalBusEvent(typ string) bool {
 	switch typ {
 	case contracts.EventTurnStarted,
 		contracts.EventTurnDone,
+		contracts.EventTurnDiff,
 		contracts.EventTurnError,
 		contracts.EventToolCompleted,
 		contracts.EventSteerQueued,

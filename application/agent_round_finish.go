@@ -156,6 +156,7 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage,
 		ContextTokens: contextTokens,
 		AutoContinue:  autoContinue,
 	})
+	a.emitFinalTurnDiff(run)
 	a.log("info", "agent", "turn finished: %s (in %d / out %d)", run.ID, usage.InputTokens, usage.OutputTokens)
 
 	// Threshold-based learning review: accumulate turns since the last

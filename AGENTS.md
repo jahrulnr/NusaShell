@@ -75,7 +75,7 @@ infrastructure adapter or the AI composition root:
   outer adapters/composition helpers, not ported wire implementations. They
   may import application ports and domain entities when constructing or
   adapting those ports. Likewise, infrastructure adapters such as
-  `acpruntime`, `tools`, and `journal` may import application interfaces and
+  `acpruntime` and `tools` may import application interfaces and
   domain entities; this is the intended adapter → inner-layer direction, not
   a dependency-rule exception. They must not import concrete application
   services or make domain depend on infrastructure.

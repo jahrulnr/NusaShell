@@ -831,7 +831,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		return out, err
 	}
 	if strings.HasPrefix(name, "file_") || name == "grep" || name == "find_file" || name == "show" {
-		ok, out, err := executeFileTool(name, argsJSON)
+		ok, out, err := executeFileToolCtx(ctx, name, argsJSON)
 		if !ok {
 			return "", fmt.Errorf("unknown tool %q", name)
 		}

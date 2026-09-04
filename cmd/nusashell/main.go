@@ -24,7 +24,6 @@ import (
 	"nusashell/infrastructure/automation"
 	"nusashell/infrastructure/config"
 	"nusashell/infrastructure/docs"
-	"nusashell/infrastructure/journal"
 	"nusashell/infrastructure/jsonstore"
 	"nusashell/infrastructure/mcpclient"
 	"nusashell/infrastructure/memorystore"
@@ -135,6 +134,9 @@ func run() error {
 		return err
 	}
 	_ = os.Chmod(dataDir, 0o700)
+	if n := application.RemoveOrphanJournalSidecars(dataDir); n > 0 {
+		logger.Info("removed leftover journal sidecars", "count", n)
+	}
 
 	store, err := jsonstore.New(dataDir)
 	if err != nil {
@@ -273,7 +275,6 @@ func run() error {
 		Bus:                         bus,
 		AskQuestions:                askService,
 		Toolbox:                     tb,
-		Journal:                     journal.New(dataDir),
 		MCPToolbox:                  mcpManager,
 		Factory:                     ai.NewFactory(credentials),
 		ImageGeneratorFactory:       ai.NewImageGeneratorFactory(credentials),

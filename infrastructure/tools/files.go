@@ -6,6 +6,7 @@ package tools
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"nusashell/application"
+	"nusashell/domain/turndiff"
 	clock "nusashell/pkg/time"
 )
 
@@ -87,6 +89,13 @@ func fileToolInfos() []application.ToolInfo {
 // executeFileTool handles the file_* built-ins. Returns handled=false for
 // names it does not own so the caller can fall through to other handlers.
 func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
+	return executeFileToolCtx(context.Background(), name, argsJSON)
+}
+
+func executeFileToolCtx(ctx context.Context, name string, argsJSON []byte) (bool, string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var args map[string]any
 	_ = json.Unmarshal(argsJSON, &args)
 
@@ -200,8 +209,19 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 		if len(data) > fileContentMaxBytes {
 			return true, "", fmt.Errorf("content exceeds %d bytes", fileContentMaxBytes)
 		}
+		pre := readPathText(path)
 		if err := writeFileAtomic(path, data, 0o644); err != nil {
+			recordInexact(ctx)
 			return true, "", err
+		}
+		if !pre.exact || !isTrackableText(data) {
+			recordInexact(ctx)
+		} else {
+			var overwritten *string
+			if pre.exists {
+				overwritten = turndiff.StringPtr(pre.text)
+			}
+			recordDelta(ctx, turndiff.AddFile(path, string(data), overwritten))
 		}
 		meta := map[string]any{"bytes": len(data), "sha256": fileSHA256(data), "written": true}
 		addFileWhitespaceMeta(meta, inspectFileWhitespace(data))
@@ -293,7 +313,13 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			return true, yamlMD(meta, previewBody), nil
 		}
 		if err := writeFileAtomic(path, []byte(out), 0o644); err != nil {
+			recordInexact(ctx)
 			return true, "", err
+		}
+		if !isTrackableText(raw) || !isTrackableText([]byte(out)) {
+			recordInexact(ctx)
+		} else {
+			recordDelta(ctx, turndiff.UpdateFile(path, s, out, nil, nil))
 		}
 		return true, yamlMD(meta, ""), nil
 
@@ -352,8 +378,15 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 				return true, "", fmt.Errorf("%s is a non-empty directory; pass recursive=true to delete it", path)
 			}
 		}
+		pre := readPathText(path)
 		if err := os.RemoveAll(path); err != nil {
+			recordInexact(ctx)
 			return true, "", err
+		}
+		if pre.dir || !pre.exact {
+			recordInexact(ctx)
+		} else {
+			recordDelta(ctx, turndiff.DeleteFile(path, pre.text))
 		}
 		return true, yamlBlock(map[string]any{"deleted": true}), nil
 
@@ -363,17 +396,30 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 		if src == "" || dst == "" {
 			return true, "", fmt.Errorf("source and destination are required")
 		}
+		srcPre := readPathText(src)
+		dstPre := readPathText(dst)
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return true, "", err
 		}
 		if err := renameWithRetry(src, dst); err != nil {
 			// Fall back to copy+delete (e.g. cross-device rename).
 			if cerr := copyTree(src, dst); cerr != nil {
+				recordInexact(ctx)
 				return true, "", err
 			}
 			if rerr := os.RemoveAll(src); rerr != nil {
+				recordInexact(ctx)
 				return true, "", rerr
 			}
+		}
+		if srcPre.dir || !srcPre.exact || (dstPre.exists && !dstPre.exact) {
+			recordInexact(ctx)
+		} else {
+			var overwritten *string
+			if dstPre.exists {
+				overwritten = turndiff.StringPtr(dstPre.text)
+			}
+			recordDelta(ctx, turndiff.UpdateFile(src, srcPre.text, srcPre.text, turndiff.StringPtr(dst), overwritten))
 		}
 		return true, yamlBlock(map[string]any{"moved": true}), nil
 
@@ -383,8 +429,20 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 		if src == "" || dst == "" {
 			return true, "", fmt.Errorf("source and destination are required")
 		}
+		srcPre := readPathText(src)
+		dstPre := readPathText(dst)
 		if err := copyTree(src, dst); err != nil {
+			recordInexact(ctx)
 			return true, "", err
+		}
+		if srcPre.dir || !srcPre.exact || (dstPre.exists && !dstPre.exact) {
+			recordInexact(ctx)
+		} else {
+			var overwritten *string
+			if dstPre.exists {
+				overwritten = turndiff.StringPtr(dstPre.text)
+			}
+			recordDelta(ctx, turndiff.AddFile(dst, srcPre.text, overwritten))
 		}
 		return true, yamlBlock(map[string]any{"copied": true}), nil
 

@@ -36,7 +36,6 @@
 /infrastructure/sttinstall/      @jahrulnr
 /infrastructure/ttsinstall/      @jahrulnr
 /infrastructure/config/          @jahrulnr
-/infrastructure/journal/         @jahrulnr
 /infrastructure/testdata/        @jahrulnr
 
 # Frontend native JS/HTML/CSS — embedded by Go, no build step.

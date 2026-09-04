@@ -156,7 +156,7 @@ When the conversation's estimated tokens exceed the lesser of
 `settings.compaction_threshold` (default 0 = auto, which means 80% of the
 model's available input budget) and 80% of that budget, the provider
 summarizes the history non-streaming, the oldest messages are archived,
-and a new epoch is written onto the **same conversation ID** (journal,
+and a new epoch is written onto the **same conversation ID** (todos,
 todos, chunks, and the open room stay attached) via `ResetTranscript`
 then `Add`. `agent.compacted` is emitted.
 

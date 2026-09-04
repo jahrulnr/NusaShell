@@ -10,6 +10,7 @@ import (
 	"nusashell/application/service/toolpresentation"
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/domain/turndiff"
 )
 
 type toolExecResult struct {
@@ -202,6 +203,7 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 		toolCtx = WithWorkspace(toolCtx, run.Workspace)
 		toolCtx = WithRunID(toolCtx, run.ID)
 		toolCtx = WithToolCallID(toolCtx, toolCall.ID)
+		toolCtx, deltaCap := turndiff.WithCapture(toolCtx)
 		toolPresentation := toolpresentation.BuildToolPresentation(toolCall.Name, toolCall.Args, domain.ToolRunning, "")
 		executeTool := func() error {
 			if s, ok := a.Toolbox.(interface {
@@ -220,25 +222,9 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 			output, e = a.Toolbox.Execute(toolCtx, toolCall.Name, []byte(toolCall.Args))
 			return e
 		}
-		req := ClassifyMutation(toolCall.Name, []byte(toolCall.Args))
-		if a.Journal != nil && req.Class != domain.MutationNone {
-			req.ConversationID = run.ConversationID
-			req.RunID = run.ID
-			req.ToolCallID = toolCall.ID
-			req.WorkspaceRoot = run.Workspace
-			root := req.Cwd
-			if root == "" {
-				root = req.WorkspaceRoot
-			}
-			if root == "" {
-				root = "\x00journal"
-			}
-			mu := a.rootMutationLock(root)
-			mu.Lock()
-			err = a.Journal.WrapMutation(toolCtx, req, executeTool)
-			mu.Unlock()
-		} else {
-			err = executeTool()
+		err = executeTool()
+		if d, ok := deltaCap.Take(); ok {
+			a.trackTurnDiff(run, d)
 		}
 	}
 	status := domain.ToolOK

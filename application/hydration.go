@@ -54,9 +54,6 @@ type HydrationSource struct {
 	// slot is injected.
 	Todos  ConversationTodoPort
 	ConvID string
-	// Journal supplies workspace change state for the workspace_state slot.
-	// When nil, that slot is hidden.
-	Journal ChangeJournal
 	// ProjectMemory is the per-workspace project-memory store. When nil,
 	// the memory_project hydration slot is hidden.
 	ProjectMemory ProjectMemoryStore
@@ -115,9 +112,6 @@ func (b *HydrationBuilder) Build() HydrationResult {
 	appendSlot(b.readMcpList())
 	slots = append(slots, b.readToolList()...)
 	if slot := b.readTodoList(); slot.content != "" {
-		slots = append(slots, slot)
-	}
-	if slot := b.readWorkspaceState(); slot.content != "" {
 		slots = append(slots, slot)
 	}
 	calls := make([]domain.ToolCall, 0, len(slots))
@@ -397,44 +391,6 @@ func (b *HydrationBuilder) readTodoList() hydrationSlot {
 		return hydrationSlot{name: "todo_list", content: ""}
 	}
 	return hydrationSlot{name: "todo_list", content: strings.Join(sections, "\n\n")}
-}
-
-// workspaceStateHint is the short agent-facing note appended to the
-// workspace_state hydration payload. Kept out of the system prompt so it
-// only appears when the slot is present (i.e. when the session actually
-// changed files): it tells the model how to get the full git-like change
-// and restore behavior from the docs corpus instead of guessing.
-const workspaceStateHint = `Workspace file changes are recorded git-style in the journal sidecar (JournalPath above; pre-images in blobs/, archived events in journal.jsonl.gz). For the full change-history and restore behavior, read the docs corpus: docs_read(id="data-locations")`
-
-// readWorkspaceState injects accumulated workspace file changes for the
-// conversation so post-compaction context retains what the agent modified.
-// The payload carries the change list and the journal sidecar path, plus a
-// hint pointing at the docs corpus for the full restore semantics.
-func (b *HydrationBuilder) readWorkspaceState() hydrationSlot {
-	if b.source.Journal == nil {
-		return hydrationSlot{name: "workspace_state", content: ""}
-	}
-	workspace := strings.TrimSpace(b.source.RuntimeContext.Workspace)
-	if workspace == "" || b.source.ConvID == "" {
-		return hydrationSlot{name: "workspace_state", content: ""}
-	}
-	state, err := b.source.Journal.SessionState(context.Background(), b.source.ConvID, workspace)
-	if err != nil || state == nil || len(state.Changes) == 0 {
-		return hydrationSlot{name: "workspace_state", content: ""}
-	}
-	state.Hint = workspaceStateHint
-	content, err := json.Marshal(state)
-	if err != nil {
-		return hydrationSlot{name: "workspace_state", content: ""}
-	}
-	args, err := json.Marshal(map[string]string{
-		"conversation_id": b.source.ConvID,
-		"workspace":       workspace,
-	})
-	if err != nil {
-		return hydrationSlot{name: "workspace_state", content: ""}
-	}
-	return hydrationSlot{name: "workspace_state", args: string(args), content: string(content)}
 }
 
 // DefaultRuntimeContext builds a RuntimeContextSnapshot from the current

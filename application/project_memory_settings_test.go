@@ -54,14 +54,3 @@ func osUserHomeForTest(t *testing.T) string {
 	}
 	return home
 }
-
-func TestClassifyMutationMemoryProjectIsNone(t *testing.T) {
-	req := ClassifyMutation("memory_project", []byte(`{"op":"admit","kind":"debug","content":"x"}`))
-	if req.Class != domain.MutationNone {
-		t.Fatalf("memory_project writes must not journal the workspace, class=%v", req.Class)
-	}
-	req = ClassifyMutation("memory_project", []byte(`{"op":"archive","id":"BUG-x"}`))
-	if req.Class != domain.MutationNone {
-		t.Fatalf("archive must be MutationNone, class=%v", req.Class)
-	}
-}

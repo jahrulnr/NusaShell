@@ -37,9 +37,7 @@ const (
 	CompactionMaxToolCallChars = 200_000
 )
 
-// CompactionTrigger identifies why a compaction was run. Persisted with the
-// journal compaction event so the audit trail distinguishes turn-start
-// compaction, mid-turn proactive compaction, and stream-overflow recovery.
+// CompactionTrigger identifies why a compaction was run.
 type CompactionTrigger string
 
 const (
@@ -61,18 +59,6 @@ const (
 	// IsInFlightToolMessage) so the round's outputs land in the live tail.
 	CompactionTriggerMidTool CompactionTrigger = "mid_tool"
 )
-
-// CompactionEvent is the durable audit record written to the conversation
-// journal after a compaction succeeds: when it ran, which model produced the
-// handoff, the retention budget used, and the resulting summary. The journal
-// keeps the full-fidelity history while this record makes the compaction
-// lifecycle itself auditable and resumable across restarts.
-type CompactionEvent struct {
-	Trigger    CompactionTrigger `json:"trigger"`
-	Model      string            `json:"model,omitempty"`
-	KeepBudget int               `json:"keepBudget,omitempty"`
-	Summary    string            `json:"summary,omitempty"`
-}
 
 // CompactionTriggerTokens is the estimated-token watermark that starts
 // compaction. When CompactionThreshold is 0 (auto, the default), compaction

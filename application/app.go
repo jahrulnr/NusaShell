@@ -51,7 +51,6 @@ type App struct {
 	Bus                         *Bus
 	RoundStreams                *RoundStreamRegistry
 	Toolbox                     ToolExecutor
-	Journal                     ChangeJournal
 	MCPToolbox                  MCPToolbox
 	Factory                     ProviderFactory
 	ImageGeneratorFactory       ImageGeneratorFactory
@@ -130,10 +129,6 @@ type App struct {
 	// re-embedding the same content on every search. Content-addressed
 	// by (model_id, sha256(normalized_text)).
 	EmbeddingCache *jsonstore.EmbeddingCache
-	// journalRootsMu guards lazy creation of per-workspace-root mutexes used
-	// to serialize mutating tool calls against the same root.
-	journalRootsMu sync.Mutex
-	journalRoots   map[string]*sync.Mutex
 
 	// announcementLocksMu guards lazy creation of per-conversation mutexes
 	// serializing pending-announcement load-modify-save between publishers
@@ -247,7 +242,6 @@ type Deps struct {
 	Docs                        DocsSource
 	Bus                         *Bus
 	Toolbox                     ToolExecutor
-	Journal                     ChangeJournal
 	MCPToolbox                  MCPToolbox
 	Factory                     ProviderFactory
 	ImageGeneratorFactory       ImageGeneratorFactory       // optional; nil = generate_image unavailable
@@ -309,9 +303,7 @@ func NewApp(deps Deps) *App {
 		Bus:                         deps.Bus,
 		RoundStreams:                NewRoundStreamRegistry(),
 		Toolbox:                     deps.Toolbox,
-		Journal:                     deps.Journal,
 		MCPToolbox:                  deps.MCPToolbox,
-		journalRoots:                map[string]*sync.Mutex{},
 		announcementLocks:           map[string]*sync.Mutex{},
 		Factory:                     deps.Factory,
 		ImageGeneratorFactory:       deps.ImageGeneratorFactory,
