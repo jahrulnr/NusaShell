@@ -419,13 +419,46 @@ func TestResponsesRejectsNonTextSystemInstructions(t *testing.T) {
 	}
 }
 
-func TestResponsesInputRejectsNonTextToolResultOutput(t *testing.T) {
-	_, err := responsesInputItems([]core.Message{
-		core.Assistant(core.ToolUseBlock{ID: "call_1", Name: "lookup", Arguments: core.MustJSONRaw(map[string]any{})}),
-		core.ToolResult("call_1", core.ImageURL("https://example.test/a.png")),
+// TestResponsesInputSplitsToolResultMediaIntoUserMessage proves that when a
+// tool result carries non-text blocks (image/audio/video from read_media),
+// the Responses provider does NOT reject the request. Instead it:
+//  1. Sends the text portion as the function_call_output (Responses API
+//     only accepts a string output field).
+//  2. Reinjets the media blocks as a follow-up user message so the
+//     vision/audio-capable model still sees the media in the next round.
+//
+// This mirrors the compat provider's deferredMedia pattern. Without it,
+// read_media with image results fails on the Responses path with
+// "only text blocks are supported, got core.ImageBlock".
+func TestResponsesInputSplitsToolResultMediaIntoUserMessage(t *testing.T) {
+	items, err := responsesInputItems([]core.Message{
+		core.Assistant(core.ToolUseBlock{ID: "call_1", Name: "read_media", Arguments: core.MustJSONRaw(map[string]any{})}),
+		core.ToolResult("call_1",
+			core.TextBlock{Text: "Image loaded from /tmp/screenshot.png"},
+			core.ImageURL("https://example.test/a.png"),
+		),
 	})
-	if err == nil || !strings.Contains(err.Error(), "tool result") || !strings.Contains(err.Error(), "only text blocks") {
-		t.Fatalf("expected non-text tool result error, got %v", err)
+	if err != nil {
+		t.Fatalf("responsesInputItems returned error: %v (expected media to be split into a user message)", err)
+	}
+	// Expect: function_call (assistant) + function_call_output (text only) + user message (media)
+	if len(items) != 3 {
+		t.Fatalf("items = %d, want 3 (function_call + function_call_output + user media): %+v", len(items), items)
+	}
+	if items[0].Type != "function_call" || items[0].CallID != "call_1" {
+		t.Fatalf("items[0] = %+v, want function_call call_1", items[0])
+	}
+	if items[1].Type != "function_call_output" || items[1].CallID != "call_1" {
+		t.Fatalf("items[1] = %+v, want function_call_output call_1", items[1])
+	}
+	if items[1].Output != "Image loaded from /tmp/screenshot.png" {
+		t.Fatalf("function_call_output = %q, want text only", items[1].Output)
+	}
+	if items[2].Type != "message" || items[2].Role != "user" {
+		t.Fatalf("items[2] = %+v, want user message with media content", items[2])
+	}
+	if len(items[2].Content) != 1 || items[2].Content[0].Type != "input_image" {
+		t.Fatalf("items[2].Content = %+v, want single input_image", items[2].Content)
 	}
 }
 

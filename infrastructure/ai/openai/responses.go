@@ -802,9 +802,22 @@ func responsesInputString(messages []core.Message) (string, bool) {
 
 func responsesInputItems(messages []core.Message) ([]responsesInputItem, error) {
 	items := make([]responsesInputItem, 0, len(messages))
+	var deferredMedia []responsesContentItem
+	flushDeferredMedia := func() {
+		if len(deferredMedia) == 0 {
+			return
+		}
+		items = append(items, responsesInputItem{Type: "message", Role: "user", Content: deferredMedia})
+		deferredMedia = nil
+	}
 	for i, msg := range messages {
 		switch msg.Role {
 		case core.RoleSystem, core.RoleUser:
+			// Media is reinjected as a user message, but it must wait until
+			// every tool result for the preceding assistant tool_calls message
+			// is emitted. Otherwise the provider sees a user message between
+			// tool results and rejects the request as incomplete.
+			flushDeferredMedia()
 			content, err := responsesContent(msg.Blocks, "input_text")
 			if err != nil {
 				return nil, fmt.Errorf("openai: responses messages[%d]: %w", i, err)
@@ -817,6 +830,7 @@ func responsesInputItems(messages []core.Message) ([]responsesInputItem, error) 
 				items = append(items, responsesInputItem{Type: "message", Role: role, Content: content})
 			}
 		case core.RoleAssistant:
+			flushDeferredMedia()
 			for _, block := range msg.Blocks {
 				switch b := block.(type) {
 				case core.TextBlock, core.ImageBlock:
@@ -859,7 +873,7 @@ func responsesInputItems(messages []core.Message) ([]responsesInputItem, error) 
 				if result.Cache != nil {
 					return nil, fmt.Errorf("openai: responses messages[%d]: cache breakpoints are not supported on tool result blocks", i)
 				}
-				output, err := textOnlyBlocks(result.Content)
+				output, media, err := responsesToolResultTextAndMedia(result.Content)
 				if err != nil {
 					return nil, fmt.Errorf("tool result %q: %w", result.ToolUseID, err)
 				}
@@ -868,11 +882,19 @@ func responsesInputItems(messages []core.Message) ([]responsesInputItem, error) 
 					CallID: result.ToolUseID,
 					Output: output,
 				})
+				// Responses function_call_output only carries a string. Non-text
+				// blocks (image/audio/video from read_media) are reinjected as a
+				// follow-up user message so the vision/audio-capable model still
+				// sees the media in the next round.
+				if len(media) > 0 {
+					deferredMedia = append(deferredMedia, media...)
+				}
 			}
 		default:
 			return nil, fmt.Errorf("unsupported role %q", msg.Role)
 		}
 	}
+	flushDeferredMedia()
 	return items, nil
 }
 
@@ -961,6 +983,44 @@ func textOnlyBlocks(blocks []core.Block) (string, error) {
 		}
 	}
 	return out.String(), nil
+}
+
+// responsesToolResultTextAndMedia splits a tool result's content blocks into
+// the text portion (which the Responses function_call_output can carry as a
+// string) and the non-text media blocks (image/audio/video), serialized as
+// responsesContentItem parts for the caller to reinject as a follow-up user
+// message. Mirrors the compat provider's textAndMedia pattern.
+func responsesToolResultTextAndMedia(blocks []core.Block) (string, []responsesContentItem, error) {
+	var text strings.Builder
+	var media []responsesContentItem
+	for _, block := range blocks {
+		switch b := block.(type) {
+		case core.TextBlock:
+			if b.Cache != nil {
+				return "", nil, fmt.Errorf("cache breakpoints are not supported inside tool result content")
+			}
+			if text.Len() > 0 {
+				text.WriteString("\n")
+			}
+			text.WriteString(b.Text)
+		case core.ImageBlock:
+			url, err := imageURLValue(b)
+			if err != nil {
+				return "", nil, err
+			}
+			media = append(media, responsesContentItem{Type: "input_image", ImageURL: url, Detail: b.Detail})
+		case core.AudioBlock:
+			media = append(media, responsesContentItem{Type: "input_audio", InputAudio: &responsesInputAudio{Data: base64.StdEncoding.EncodeToString(b.Data), Format: audioFormat(b)}})
+		case core.VideoBlock:
+			if b.URL == "" {
+				return "", nil, fmt.Errorf("OpenAI Responses video blocks require a URL or data URL")
+			}
+			media = append(media, responsesContentItem{Type: "video_url", VideoURL: &responsesVideoURL{URL: b.URL}})
+		default:
+			return "", nil, fmt.Errorf("unsupported tool result content block %T", block)
+		}
+	}
+	return text.String(), media, nil
 }
 
 func (p *Provider) responsesText(req *ResponsesRequest) (*responsesText, error) {

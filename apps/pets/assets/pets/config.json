@@ -5,6 +5,7 @@
   "max_height": 208,
   "ws_url": "ws://127.0.0.1:9999/ws",
   "electron_path": "",
+  "event_delay": 1.0,
   "click_through": false,
   "shape_alpha_cutoff": 8,
   "bubble_enabled": true,

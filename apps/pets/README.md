@@ -29,6 +29,8 @@ internal/interaction/         # click-vs-drag policy, pure Go
 internal/shape/               # alpha -> binary mask, pure Go
 internal/state/               # state machine, pure Go
 internal/ws/                  # reconnecting WebSocket client, pure Go
+internal/detect/              # instalasi (go/electron) dan status running, pure Go
+internal/launcher/            # policy klik 1x dan spawn detached, pure Go
 internal/app/                 # SDL2 window lifetime
 internal/renderer/             # SDL2 texture upload, playback, frame shape
 internal/bubble/               # two-line layout, paint, and activity dwell clock
@@ -58,6 +60,7 @@ Konfigurasi minimal:
   "max_height": 208,
   "ws_url": "ws://127.0.0.1:9999/ws",
   "electron_path": "",
+  "event_delay": 1.0,
   "click_through": false,
   "shape_alpha_cutoff": 8,
   "bubble_enabled": true,
@@ -93,13 +96,16 @@ setiap frame animasi. Upload SDL memakai straight alpha agar tepi tidak
 digelapkan dua kali. X11 Shape tetap berupa mask biner: antialias raster
 memperhalus kurva, tetapi bukan transparansi per-pixel compositor desktop.
 
-Setiap isi bubble bertahan minimal **4 detik**. Event cepat digabung menjadi
-update terbaru tanpa antrean replay; animasi state pet tetap segera mengikuti
-event backend. Rotasi wording Thinking berlangsung setiap **5 detik** dan
-juga mendapat dwell minimal 4 detik sebelum diganti oleh event lain. Kembali
-ke idle menyembunyikan bubble setelah dwell yang sedang berjalan selesai.
-Status yang berlangsung sangat singkat bisa tidak ditampilkan karena
-digantikan event terbaru sebelum dwell berakhir.
+Setiap isi bubble bertahan minimal **1 detik** secara default. `event_delay`
+di `config.json` mengatur durasi ini dalam detik (float, default `1.0`,
+nilai `<= 0` kembali ke default), dan flag `--event-delay` menimpanya saat
+runtime. Event cepat digabung menjadi update terbaru tanpa antrean replay;
+animasi state pet tetap segera mengikuti event backend. Rotasi wording
+Thinking berlangsung setiap **5 detik** dan juga mendapat dwell yang sama
+sebelum diganti oleh event lain. Kembali ke idle menyembunyikan bubble
+setelah dwell yang sedang berjalan selesai. Status yang berlangsung sangat
+singkat bisa tidak ditampilkan karena digantikan event terbaru sebelum
+dwell berakhir.
 
 Contoh: `Thinking…` / `Thinking it through…`, `Executing…` /
 `read_file(...)`, dan `Waiting…` / pertanyaan dari event. Wording Thinking
@@ -157,12 +163,26 @@ go build -tags sdl2 -o bin/pets ./cmd/pets
   --electron-path /path/to/nusashell-electron
 ```
 
-Tanpa `--electron-path`, klik tetap aman tetapi tidak menjalankan apa pun.
-Perilaku pointer:
+Klik kiri menerapkan policy berbasis probe mesin saat klik terjadi. Runtime
+mendeteksi sendiri komponen yang terinstall (`~/.local/share/nusashell`,
+`~/.local/share/nusashell-electron`, launcher `~/.local/bin/nusashell*`,
+override env `NUSASHELL_GO_INSTALL_ROOT` / `NUSASHELL_ELECTRON_INSTALL_ROOT`,
+dan PATH); `--electron-path` hanya menambahkan path eksplisit yang menang.
+Status "running" diambil fresh saat klik: backend golang dicek lewat koneksi
+TCP ke host WebSocket (`ws_url`), electron dicek lewat proses
+`nusashell-desktop` di procfs. Perilaku klik:
 
-- klik kiri pada bagian mascot menjalankan `electron_path` setelah release;
-- drag hanya aktif selama tombol kiri masih di-hold, memindahkan pet dan tidak
-  menjalankan aplikasi; hover biasa tidak pernah memindahkan window;
+- klik kiri single (tanpa drag) pada bagian mascot → **electron first**:
+  jika wrapper electron sudah jalan, launcher single-instance mem-focus
+  window-nya; jika terinstall tapi belum jalan, wrapper dibuka (electron
+  ikut membawa backend miliknya sendiri);
+- jika electron tidak terinstall dan backend golang sedang jalan → fallback
+  **web**: browser default dibuka ke frontend (`ws_url` dikonversi ke
+  `http`, default `http://127.0.0.1:9999/`);
+- jika electron dan golang **tidak** sedang jalan → klik tidak mentrigger
+  apa pun; pet tidak pernah menyalakan golang maupun electron dari nol;
+- drag hanya aktif selama tombol kiri masih di-hold, memindahkan pet dan
+  tidak menjalankan aplikasi; hover biasa tidak pernah memindahkan window;
 - selama drag, pet memakai pose `running-right`/`running-left` sesuai arah
   seret horizontal; frame animasi tetap maju mengikuti delay authored (0.5×),
   tidak ikut dipercepat oleh cadence polling pointer;
@@ -222,6 +242,18 @@ server. Untuk menyimpan contact sheet, set `PETS_BUBBLE_PREVIEW_DIR` ke folder
 output yang sudah ada; test menulis `bubble-preview.png` ke sana.
 
 ## Changelog
+
+### 0.2.0
+
+- `event_delay` baru di config (detik, default 1.0, `<= 0` kembali ke
+  default) menggantikan dwell tetap 4 detik; flag `--event-delay` menimpanya.
+- Klik single memakai policy baru: focus/buka Electron wrapper (deteksi
+  running via procfs), fallback web via `xdg-open` ketika Electron tidak
+  terinstall dan backend golang jalan, dan no-op ketika Electron dan golang
+  sama-sama tidak jalan (pet tidak pernah start golang/electron).
+- Deteksi instalasi otomatis untuk Go core dan Electron (path installer,
+  launcher `~/.local/bin`, env override, PATH) ditambah probe backend via
+  koneksi TCP ke host `ws_url`.
 
 ### 0.1.3
 

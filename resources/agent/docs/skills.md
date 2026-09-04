@@ -72,18 +72,23 @@ Each skill directory contains `SKILL.md` plus optional support files
 
 Workflow:
 
-1. `skill(op="list")` (or `op="search"`) — find the skill and read its
-   `owned_by` flag. Search is only discovery; it does not load instructions.
-2. Construct the directory from the table above using `owned_by` and the
-   skill `name`.
-3. `file_read` the absolute `SKILL.md` before applying the skill's
-   instructions (or read a support file via its relative path when needed).
-   Use `file_list` first when you do not know which support files exist.
+1. `skill(op="list")` (or `op="search"`) — find the skill. Each result
+   includes a `path` field with the absolute path to the skill directory
+   on disk, and a `bundled` flag (`true` when the skill has support files
+   beyond `SKILL.md` — e.g. `references/`, `templates/`, `scripts/`,
+   `examples/`). Use `path` directly; do not construct the path from the
+   table below. Search is only discovery; it does not load instructions.
+2. `file_read` the absolute `SKILL.md` (append `/SKILL.md` to the `path`
+   from step 1) before applying the skill's instructions. When
+   `bundled=true`, run `file_list` on `path` first to discover support
+   files; when `bundled=false`, skip `file_list` — the skill is a single
+   `SKILL.md` with no subfiles. Read a support file by appending its
+   relative path to `path` when needed.
 
 Good example:
 
     skill(op="search", query="release checklist")
-    # → {"name":"release-checklist","owned_by":"user", ...}
+    # → {"name":"release-checklist","owned_by":"user","path":"/home/user/.config/nusashell/skills/release-checklist", ...}
     file_read(path="/home/user/.config/nusashell/skills/release-checklist/SKILL.md")
 
 Bad examples:

@@ -445,7 +445,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		}
 		items := make([]any, 0, len(skills))
 		for _, s := range skills {
-			items = append(items, map[string]any{"id": s.ID, "name": s.Name, "description": s.Description, "owned_by": s.EffectiveOwnedBy()})
+			items = append(items, map[string]any{"id": s.ID, "name": s.Name, "description": s.Description, "owned_by": s.EffectiveOwnedBy(), "path": s.Path, "bundled": s.Bundled})
 		}
 		return yamlJSONL(map[string]any{"count": len(skills)}, items), nil
 
@@ -473,7 +473,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			if !strings.Contains(strings.ToLower(s.Name+" "+s.Description), q) {
 				continue
 			}
-			items = append(items, map[string]any{"id": s.ID, "name": s.Name, "description": s.Description, "owned_by": s.EffectiveOwnedBy()})
+			items = append(items, map[string]any{"id": s.ID, "name": s.Name, "description": s.Description, "owned_by": s.EffectiveOwnedBy(), "path": s.Path, "bundled": s.Bundled})
 			if len(items) >= limit {
 				break
 			}
@@ -1516,7 +1516,7 @@ func (t *Toolbox) searchSkillsRanked(ctx context.Context, query string, limit in
 			continue
 		}
 		seen[sk.ID] = true
-		items = append(items, map[string]any{"id": sk.ID, "name": sk.Name, "description": sk.Description, "owned_by": sk.EffectiveOwnedBy()})
+		items = append(items, map[string]any{"id": sk.ID, "name": sk.Name, "description": sk.Description, "owned_by": sk.EffectiveOwnedBy(), "path": sk.Path, "bundled": sk.Bundled})
 		if len(items) >= limit {
 			break
 		}
@@ -1533,7 +1533,7 @@ func (t *Toolbox) searchSkillsRanked(ctx context.Context, query string, limit in
 			}
 			if strings.Contains(strings.ToLower(sk.Name+" "+sk.Description), q) {
 				seen[sk.ID] = true
-				items = append(items, map[string]any{"id": sk.ID, "name": sk.Name, "description": sk.Description, "owned_by": sk.EffectiveOwnedBy()})
+				items = append(items, map[string]any{"id": sk.ID, "name": sk.Name, "description": sk.Description, "owned_by": sk.EffectiveOwnedBy(), "path": sk.Path, "bundled": sk.Bundled})
 			}
 		}
 	}

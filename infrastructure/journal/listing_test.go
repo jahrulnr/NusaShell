@@ -95,3 +95,43 @@ func TestListing_mtimeChangeCountsAsModified(t *testing.T) {
 	}
 	_ = time.Now()
 }
+
+// TestListing_snapshotSkipsPermissionDeniedDirs proves that a single
+// unreadable subdirectory (e.g. systemd-private-* in /tmp) does NOT abort
+// the entire workspace walk. Accessible files outside the denied dir must
+// still appear in the snapshot, and the walk must not return an error.
+//
+// Without this, opaque mutations rooted at /tmp fail with
+// "pre-listing failed" whenever a systemd-private directory exists, even
+// though the agent's workspace files are perfectly readable.
+func TestListing_snapshotSkipsPermissionDeniedDirs(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission bits do not deny root access")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "readable.txt"), []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Create a subdirectory with no read/execute permission — simulates
+	// /tmp/systemd-private-* which is mode 0o700 owned by root.
+	denied := filepath.Join(root, "systemd-private-blocked")
+	if err := os.Mkdir(denied, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(denied, "secret.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Strip all permissions so the test user cannot read or enter it.
+	if err := os.Chmod(denied, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(denied, 0o755) })
+
+	snap, err := snapshotDir(root)
+	if err != nil {
+		t.Fatalf("snapshotDir returned error for permission-denied subdir: %v (expected skip)", err)
+	}
+	if _, ok := snap["readable.txt"]; !ok {
+		t.Fatal("missing readable.txt — permission-denied subdir aborted the walk")
+	}
+}

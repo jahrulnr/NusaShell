@@ -12,8 +12,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -29,9 +29,11 @@ import (
 	"nusashell-pets/internal/bubble"
 	"nusashell-pets/internal/char"
 	"nusashell-pets/internal/config"
+	"nusashell-pets/internal/detect"
 	"nusashell-pets/internal/direction"
 	"nusashell-pets/internal/events"
 	"nusashell-pets/internal/interaction"
+	"nusashell-pets/internal/launcher"
 	"nusashell-pets/internal/platform"
 	"nusashell-pets/internal/renderer"
 	"nusashell-pets/internal/shape"
@@ -64,6 +66,7 @@ func newApp() *cli.App {
 			&cli.StringFlag{Name: "spritesheet", Value: "", Usage: "hatch-pet v2 WebP atlas path (overrides config; relative paths use --assets)"},
 			&cli.StringFlag{Name: "ws-url", Value: "", Usage: "WebSocket URL (overrides config)"},
 			&cli.StringFlag{Name: "electron-path", Value: "", Usage: "Electron executable to launch on click (overrides config)"},
+			&cli.Float64Flag{Name: "event-delay", Value: 0, Usage: "minimum bubble dwell in seconds before a newer event is shown (overrides config); >0 required"},
 			&cli.BoolFlag{Name: "click-through", Value: false, Usage: "enable whole-window click-through (SIGUSR1 toggles it back)"},
 		},
 		Action: start,
@@ -88,6 +91,12 @@ func start(c *cli.Context) error {
 	if v := c.String("electron-path"); v != "" {
 		cfg.ElectronPath = v
 	}
+	if c.IsSet("event-delay") {
+		delay := c.Float64("event-delay")
+		if delay > 0 {
+			cfg.EventDelay = delay
+		}
+	}
 	clickThrough := cfg.ClickThrough
 	if c.IsSet("click-through") {
 		clickThrough = c.Bool("click-through")
@@ -101,7 +110,22 @@ func start(c *cli.Context) error {
 		spriteSheetPath = cfg.SpriteSheet
 	}
 	log.Info("pets: config loaded", "name", cfg.Name, "ws", cfg.WSURL,
-		"image", imagePath, "spritesheet", spriteSheetPath, "click_through", clickThrough, "states", stateNames(cfg.States))
+		"image", imagePath, "spritesheet", spriteSheetPath, "click_through", clickThrough,
+		"event_delay", cfg.EventDelay, "states", stateNames(cfg.States))
+
+	resolver := detect.DefaultResolver()
+	if goBin, ok := resolver.GoBinary(); ok {
+		log.Info("pets: go core installed", "bin", goBin)
+	} else {
+		log.Info("pets: go core not installed")
+	}
+	electronBin, electronInstalled := resolver.ElectronBinary(cfg.ElectronPath)
+	if electronInstalled {
+		log.Info("pets: electron installed", "bin", electronBin)
+	} else {
+		log.Info("pets: electron not installed", "configured_path", cfg.ElectronPath)
+	}
+	log.Info("pets: click targets", "web_url", launcher.WebURL(cfg.WSURL))
 
 	// Native Wayland cannot provide the X11 shaped input behavior this phase
 	// relies on. XWayland remains supported because DISPLAY is present.
@@ -262,17 +286,20 @@ func start(c *cli.Context) error {
 	}()
 	defer signal.Stop(sigCh)
 
-	return eventLoop(ctx, win, ren, cfg, machine, stateEvents, toggleClickThrough,
+	return eventLoop(ctx, win, ren, cfg, resolver, machine, stateEvents, toggleClickThrough,
 		clickThrough, setInputMode, setBoundingShape, dpy, log)
 }
 
 // eventLoop pumps SDL events, advances the animation on its own clock, and
 // handles click and drag gestures until the window is closed or ctx is
-// canceled. While a left-button hold drags the pet, the pointer is polled at
-// the display refresh cadence but the animation advances only on its authored
+// canceled. A single click (a press and release without dragging) applies the
+// pet click policy: focus or open the Electron wrapper, fall back to the web
+// frontend when only the backend is running, and do nothing when neither
+// runs. While a left-button hold drags the pet, the pointer is polled at the
+// display refresh cadence but the animation advances only on its authored
 // delay, so dragging never speeds playback up.
 func eventLoop(ctx context.Context, win *app.Window, ren *renderer.Renderer, cfg *config.Config,
-	machine *state.Machine, stateEvents <-chan state.Event, toggleEvents <-chan struct{},
+	resolver *detect.Resolver, machine *state.Machine, stateEvents <-chan state.Event, toggleEvents <-chan struct{},
 	clickThrough bool, setInputMode func(bool) error, setBoundingShape func(*shape.Mask) error,
 	dpy uintptr, log *slog.Logger) error {
 	controller := interaction.NewController(5)
@@ -284,7 +311,7 @@ func eventLoop(ctx context.Context, win *app.Window, ren *renderer.Renderer, cfg
 	var nextAnim time.Time // zero = render on the next loop iteration
 	lastShapeKey := ""
 	lastDragX := int32(0)
-	activity := bubble.Activity{}
+	activity := bubble.NewActivity(cfg.EventDelayDuration())
 	applyRenderedShape := func(rendered renderer.FrameResult) {
 		if rendered.Image == nil || setBoundingShape == nil {
 			return
@@ -351,6 +378,48 @@ func eventLoop(ctx context.Context, win *app.Window, ren *renderer.Renderer, cfg
 		log.Info("pets: click-through changed", "enabled", clickThrough)
 	}
 
+	// handleClick applies the single-click policy with a fresh probe of the
+	// machine state. A click never starts the Go backend; it only focuses or
+	// opens the Electron wrapper, or opens the web frontend when only the
+	// backend is up. When neither is running the click does nothing.
+	webURL := launcher.WebURL(cfg.WSURL)
+	dialer := net.Dialer{}
+	handleClick := func() {
+		st := launcher.Status{
+			GoRunning:       detect.GoRunning(cfg.WSURL, dialer.DialContext),
+			ElectronRunning: detect.ElectronRunning(detect.DefaultProcRoot),
+		}
+		electronBin, installed := resolver.ElectronBinary(cfg.ElectronPath)
+		st.ElectronInstalled = installed
+		switch launcher.Choose(st) {
+		case launcher.ActionOpenElectron:
+			if installed {
+				if spawnErr := launcher.Spawn(electronBin); spawnErr == nil {
+					log.Info("pets: click opens electron", "path", electronBin, "already_running", st.ElectronRunning)
+					return
+				} else {
+					log.Warn("pets: launch electron failed", "path", electronBin, "err", spawnErr)
+				}
+			}
+			// Fallback stays the web frontend when the backend is up.
+			if st.GoRunning {
+				if err := launcher.OpenWeb(webURL); err != nil {
+					log.Warn("pets: open web failed", "url", webURL, "err", err)
+					return
+				}
+				log.Info("pets: click falls back to web", "url", webURL)
+			}
+		case launcher.ActionOpenWeb:
+			log.Info("pets: click opens web", "url", webURL)
+			if err := launcher.OpenWeb(webURL); err != nil {
+				log.Warn("pets: open web failed", "url", webURL, "err", err)
+			}
+		case launcher.ActionNone:
+			log.Info("pets: click ignored", "go_running", st.GoRunning,
+				"electron_installed", st.ElectronInstalled, "electron_running", st.ElectronRunning)
+		}
+	}
+
 	for {
 		now := time.Now()
 		for ev := sdl.PollEvent(); ev != nil; ev = sdl.PollEvent() {
@@ -389,9 +458,8 @@ func eventLoop(ctx context.Context, win *app.Window, ren *renderer.Renderer, cfg
 				case e.Type == sdl.MOUSEBUTTONUP && e.Button == sdl.BUTTON_LEFT:
 					leftHeld = false
 					endRun()
-					if controller.Release(interaction.Point{X: e.X, Y: e.Y}) && !clickThrough && cfg.ElectronPath != "" {
-						log.Info("pets: launching electron", "path", cfg.ElectronPath)
-						launchElectron(cfg.ElectronPath, log)
+					if controller.Release(interaction.Point{X: e.X, Y: e.Y}) && !clickThrough {
+						handleClick()
 					}
 				}
 			case *sdl.MouseMotionEvent:
@@ -500,16 +568,6 @@ func resolveAssetPath(assetsPath, configured string) string {
 		return configured
 	}
 	return filepath.Join(assetsPath, configured)
-}
-
-// launchElectron starts the configured Electron executable detached.
-func launchElectron(path string, log *slog.Logger) {
-	cmd := exec.Command(path)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		log.Warn("pets: launch electron failed", "err", err)
-	}
 }
 
 // windowSize returns the overlay window size from the largest state frame,

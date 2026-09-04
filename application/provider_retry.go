@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"strings"
 	"time"
@@ -161,4 +162,25 @@ func shouldEmergencyCompact(err error, estimatedTokens, compactionTrigger int) b
 	}
 	_, ok := contextLimitFromError(err)
 	return ok
+}
+
+// isPrematureStreamEnd reports whether the provider returned a 2xx response
+// that started streaming but ended without completing the turn — no [DONE]
+// sentinel and no finish_reason. The stream's clean EOF is wrapped as a
+// network error with io.ErrUnexpectedEOF as the cause (see
+// infrastructure/ai/openai/stream.go and infrastructure/ai/compat/stream.go).
+//
+// This is distinct from a hard connection error (ECONNRESET, timeout): the
+// provider accepted the request and began generating, then the SSE channel
+// closed cleanly mid-stream. The partial content is valid, so the turn can
+// be continued with a nudge instead of failing or restarting from scratch.
+func isPrematureStreamEnd(err error) bool {
+	if err == nil {
+		return false
+	}
+	var upstream *domain.ProviderError
+	if !errors.As(err, &upstream) {
+		return false
+	}
+	return upstream.Kind == domain.KindConnect && errors.Is(err, io.ErrUnexpectedEOF)
 }

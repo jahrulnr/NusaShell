@@ -8,7 +8,7 @@ import (
 )
 
 func TestActivityHasTwoLinesAndRotatesThinkingCopy(t *testing.T) {
-	a := Activity{}
+	a := NewActivity(4 * time.Second)
 	now := time.Unix(100, 0)
 	a.Update(state.Event{State: state.StateThinking}, now)
 	header, first := a.Text(now)
@@ -44,7 +44,7 @@ func TestActivityHasTwoLinesAndRotatesThinkingCopy(t *testing.T) {
 }
 
 func TestActivityHoldsForFourSecondsAndCoalescesFastEvents(t *testing.T) {
-	a := Activity{}
+	a := NewActivity(4 * time.Second)
 	now := time.Unix(100, 0)
 	a.Update(state.Event{State: state.StateThinking}, now)
 	h, b := a.Text(now)
@@ -67,7 +67,7 @@ func TestActivityHoldsForFourSecondsAndCoalescesFastEvents(t *testing.T) {
 
 func TestActivityDefaultsAndExplicitMessages(t *testing.T) {
 	for _, s := range []state.PetState{state.StateThinking, state.StateReasoning, state.StateWaiting, state.StateDone, state.StateError} {
-		a := Activity{}
+		a := NewActivity(0) // zero dwell falls back to DefaultDwell
 		a.Update(state.Event{State: s}, time.Time{})
 		if h, b := a.Text(time.Time{}); h == "" || b == "" {
 			t.Fatalf("%s missing a line: %q / %q", s, h, b)
@@ -79,8 +79,40 @@ func TestActivityDefaultsAndExplicitMessages(t *testing.T) {
 	}
 }
 
+func TestActivityAdjustableDwell(t *testing.T) {
+	a := NewActivity(time.Second)
+	now := time.Unix(100, 0)
+	a.Update(state.Event{State: state.StateThinking}, now)
+	h, b := a.Text(now)
+	a.Update(state.Event{State: state.StateReasoning, Title: "Executing…", Message: "first(...)"}, now.Add(200*time.Millisecond))
+	a.Update(state.Event{State: state.StateReasoning, Title: "Executing…", Message: "latest(...)"}, now.Add(800*time.Millisecond))
+	if gotH, gotB := a.Text(now.Add(900 * time.Millisecond)); gotH != h || gotB != b {
+		t.Fatalf("bubble flickered before 1s dwell: %q / %q (now 900ms)", gotH, gotB)
+	}
+	if gotH, gotB := a.Text(now.Add(2 * time.Second)); gotH != "Executing…" || gotB != "latest(...)" {
+		t.Fatalf("1s dwell must already switch to newest: %q / %q", gotH, gotB)
+	}
+	// A fresh idle after the dwell must hide the bubble quickly, not wait 4s.
+	a.Update(state.Event{State: state.StateIdle}, now.Add(2*time.Second))
+	if gotH, _ := a.Text(now.Add(3 * time.Second)); gotH != "" {
+		t.Fatal("idle did not hide bubble shortly after 1s dwell")
+	}
+}
+
+func TestNewActivityDefaultsToOneSecond(t *testing.T) {
+	if got := NewActivity(0).effectiveDwell(); got != DefaultDwell {
+		t.Fatalf("zero dwell = %v, want %v", got, DefaultDwell)
+	}
+	if got := NewActivity(-time.Second).effectiveDwell(); got != DefaultDwell {
+		t.Fatalf("negative dwell = %v, want %v", got, DefaultDwell)
+	}
+	if got := NewActivity(1500 * time.Millisecond).effectiveDwell(); got != 1500*time.Millisecond {
+		t.Fatalf("custom dwell = %v, want 1.5s", got)
+	}
+}
+
 func TestThinkingRotationAlsoGetsMinimumDwell(t *testing.T) {
-	a := Activity{}
+	a := NewActivity(4 * time.Second)
 	now := time.Unix(100, 0)
 	a.Update(state.Event{State: state.StateThinking}, now)
 	a.Text(now)

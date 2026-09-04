@@ -17,9 +17,10 @@ import (
 const defaultMaxParallelTools = domain.DefaultMaxParallelTools
 
 type streamedTurnRound struct {
-	Content   string
-	Reasoning string
-	Response  ChatResponse
+	Content          string
+	Reasoning        string
+	Response         ChatResponse
+	ToolCallsStarted bool
 }
 
 func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, model string) (ProviderContext, *domain.Conversation, domain.Settings, error) {
@@ -66,9 +67,42 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 }
 
 func (a *App) streamTurnRound(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, promptCache *PromptCachePolicy, caps ModelCapabilities, round int) (streamedTurnRound, error) {
+	var partial *streamedTurnRound
 	for retry := 1; ; retry++ {
-		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, promptCache, caps, round)
-		if err == nil || retry >= maxProviderAttempts || text.Visible(roundResult.Content) != "" || text.Visible(roundResult.Reasoning) != "" {
+		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, partial, maxTokens, promptCache, caps, round)
+		if err == nil || retry >= maxProviderAttempts {
+			if partial != nil && err == nil {
+				roundResult.Content = partial.Content + roundResult.Content
+				roundResult.Reasoning = partial.Reasoning + roundResult.Reasoning
+			}
+			return roundResult, err
+		}
+		// Premature stream end (2xx response that cut mid-stream without
+		// [DONE] or finish_reason) with partial content and no tool calls
+		// in progress: retry with a continuation nudge instead of failing.
+		// The partial content is injected as an ephemeral assistant message
+		// followed by the announcement tool, so the model continues from
+		// exactly where it stopped. Tool-call failures are excluded because
+		// a tool call needs a clean restart, not a continuation.
+		if isPrematureStreamEnd(err) && !roundResult.ToolCallsStarted && (text.Visible(roundResult.Content) != "" || text.Visible(roundResult.Reasoning) != "") {
+			if partial != nil {
+				partial.Content += roundResult.Content
+				partial.Reasoning += roundResult.Reasoning
+			} else {
+				partialCopy := roundResult
+				partial = &partialCopy
+			}
+			continuation = true
+			a.prepareStreamRetry(run, messageID, retry, retryBaseDelay, err)
+			if waitErr := a.waitForRetry(run.Ctx, retryBaseDelay); waitErr != nil {
+				return roundResult, waitErr
+			}
+			continue
+		}
+		// Partial content was streamed but this is not a premature stream
+		// end (e.g. a 5xx after content, a tool-call error): fail the turn
+		// so the user can manually retry.
+		if text.Visible(roundResult.Content) != "" || text.Visible(roundResult.Reasoning) != "" {
 			return roundResult, err
 		}
 		adapted := a.learnFromStreamError(run, model, err, &caps)
@@ -166,7 +200,7 @@ func (a *App) prepareStreamRetry(run *TurnRun, messageID string, retry int, dela
 	}
 }
 
-func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, promptCache *PromptCachePolicy, caps ModelCapabilities, round int) (streamedTurnRound, error) {
+func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, partial *streamedTurnRound, maxTokens int, promptCache *PromptCachePolicy, caps ModelCapabilities, round int) (streamedTurnRound, error) {
 	var content strings.Builder
 	var reasoning strings.Builder
 	// Guard: strip effort for models that do not support reasoning. Sending
@@ -201,7 +235,11 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 	// the interrupted response; nothing is persisted, so later rounds keep
 	// the cache-stable system prefix.
 	if continuation {
-		messages = appendContinuationTool(messages)
+		if partial != nil && (text.Visible(partial.Content) != "" || text.Visible(partial.Reasoning) != "") {
+			messages = appendContinuationFromPartial(messages, *partial)
+		} else {
+			messages = appendContinuationTool(messages)
+		}
 	}
 	// Some providers/models reject assistant prefilling and require the
 	// request to end in a user message. When 400-learning has recorded this
@@ -307,7 +345,7 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter ProviderContext, convers
 			a.log("info", "agent", "server-side compaction captured for %s (%d items)", run.ConversationID, len(response.CompactionItems))
 		}
 	}
-	return streamedTurnRound{Content: content.String(), Reasoning: reasoning.String(), Response: response}, err
+	return streamedTurnRound{Content: content.String(), Reasoning: reasoning.String(), Response: response, ToolCallsStarted: len(announcedToolCalls) > 0}, err
 }
 
 // reasoningDeltaVisible is true once accumulated reasoning has something the

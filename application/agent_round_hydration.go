@@ -82,6 +82,28 @@ func appendContinuationTool(messages []ChatMessage) []ChatMessage {
 	)
 }
 
+// appendContinuationFromPartial injects the partial content from a
+// prematurely cut stream as an ephemeral assistant message, then appends the
+// continuation announcement tool. The model sees the partial text it already
+// produced and the "continue from where you stopped" instruction, so it
+// resumes the interrupted response without repeating prior text.
+//
+// This is the automatic-retry variant of appendContinuationTool: it carries
+// the partial content that was streamed but never persisted (the turn is
+// still in progress). Manual retries use appendContinuationTool directly
+// because the partial content is already in the conversation store.
+func appendContinuationFromPartial(messages []ChatMessage, partial streamedTurnRound) []ChatMessage {
+	msg := ChatMessage{Role: "assistant"}
+	if partial.Content != "" {
+		msg.Content = partial.Content
+	}
+	if partial.Reasoning != "" {
+		msg.Reasoning = partial.Reasoning
+	}
+	messages = append(messages, msg)
+	return appendContinuationTool(messages)
+}
+
 // estimateRequestTokens approximates provider tokens from the real request
 // payload: system + messages + tools JSON. ~4 chars/token with a surcharge
 // for non-ASCII (CJK-ish) characters, ~4 tokens per-message overhead, ~150

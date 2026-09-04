@@ -85,10 +85,12 @@ Bad examples:
   absolute file path only (text), and the image is carried as a tool result
   attachment. Native providers (Anthropic Messages) serialize the image
   block inside the tool result directly. Chat-compat providers
-  (OpenRouter, OpenAI-compat) cannot carry image blocks inside tool
-  results, so the provider serialization strips the image from the tool
-  message and reinjects it as a follow-up user message with an `image_url`
-  block, so the model still sees the pixels in the next round.
+  (OpenRouter, OpenAI-compat) and the native OpenAI Chat and Responses
+  providers cannot carry image/audio/video blocks inside tool results, so
+  the provider serialization strips the media from the tool message and
+  reinjects it as a follow-up user message with an `image_url` /
+  `input_audio` / `video_url` block, so the model still sees the pixels
+  in the next round.
 - **Non-vision model + fallback configured:** the image is described using
   the vision fallback model and the text description is returned as the
   tool result.

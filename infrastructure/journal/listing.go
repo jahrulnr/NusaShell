@@ -48,7 +48,14 @@ func snapshotDir(root string) (map[string]fileMeta, error) {
 	count := 0
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return err
+			// A single unreadable subdirectory (e.g. systemd-private-* in
+			// /tmp, mode 0o700 owned by root) must not abort the entire
+			// workspace walk. Skip the denied entry and continue listing
+			// the accessible files around it.
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if count >= maxListingEntries {
 			return filepath.SkipAll
@@ -72,7 +79,7 @@ func snapshotDir(root string) (map[string]fileMeta, error) {
 		}
 		info, err := d.Info()
 		if err != nil {
-			return err
+			return nil
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil

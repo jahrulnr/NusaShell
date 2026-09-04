@@ -343,11 +343,13 @@ func (s *Store) Save(skill *domain.Skill) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("skillfs: mkdir %s: %w", dir, err)
 	}
+	skill.Path = dir
 	// Write SKILL.md with frontmatter.
 	content := formatSkillMarkdown(skill)
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
 		return fmt.Errorf("skillfs: write SKILL.md: %w", err)
 	}
+	skill.Bundled = hasSupportFiles(dir)
 	// Update metadata.
 	skill.Touch(clock.NewTime().Time())
 	s.json.set(skill)
@@ -418,11 +420,14 @@ func (s *Store) loadSkillFromDir(id, dir string) (*domain.Skill, error) {
 		return nil, fmt.Errorf("skillfs: read %s: %w", skillFile, err)
 	}
 	name, desc, content := parseSkillMarkdown(string(data))
+	skillDir := filepath.Join(dir, id)
 	skill := &domain.Skill{
 		ID:          id,
 		Name:        name,
 		Description: desc,
 		Content:     content,
+		Path:        skillDir,
+		Bundled:     hasSupportFiles(skillDir),
 	}
 	// Merge metadata from skills.json. Try composite key first (for
 	// plugin skills), then flat key (for user/builtin), then the
@@ -636,6 +641,23 @@ func saveDeletedBuiltin(root string, deleted map[string]deletedEntry) error {
 
 // Compile-time interface check.
 var _ application.SkillStore = (*Store)(nil)
+
+// hasSupportFiles reports whether a skill directory contains any entries
+// besides SKILL.md (e.g. references/, templates/, scripts/, examples/).
+// Used to set Skill.Bundled so skill_search/skill_list results tell the
+// model whether file_list on the directory is worthwhile.
+func hasSupportFiles(skillDir string) bool {
+	entries, err := os.ReadDir(skillDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.Name() != "SKILL.md" {
+			return true
+		}
+	}
+	return false
+}
 
 // --- enriched skill file reads (port of Electron skill read) ---
 

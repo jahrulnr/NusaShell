@@ -7,11 +7,15 @@ import (
 	"nusashell-pets/internal/state"
 )
 
-const MinDwell = 4 * time.Second
+// DefaultDwell is the minimum time the bubble holds an event before an update
+// can switch to a newer one when no explicit dwell is configured.
+const DefaultDwell = time.Second
 
-// Activity is owned by the SDL loop. It holds each update for four seconds
-// and coalesces bursts to the latest event, without delaying pet animations.
+// Activity is owned by the SDL loop. It holds each update for a configurable
+// dwell (DefaultDwell when zero) and coalesces bursts to the latest event,
+// without delaying pet animations.
 type Activity struct {
+	dwell   time.Duration
 	current state.Event
 	pending *state.Event
 	since   time.Time
@@ -20,11 +24,25 @@ type Activity struct {
 	detail  string
 }
 
+// NewActivity creates an activity display with the given minimum dwell.
+// Non-positive dwell falls back to DefaultDwell.
+func NewActivity(dwell time.Duration) *Activity {
+	return &Activity{dwell: dwell}
+}
+
+// effectiveDwell returns the minimum hold time, falling back to the default.
+func (a *Activity) effectiveDwell() time.Duration {
+	if a == nil || a.dwell <= 0 {
+		return DefaultDwell
+	}
+	return a.dwell
+}
+
 func (a *Activity) Update(ev state.Event, now time.Time) {
 	if !state.Valid(ev.State) {
 		return
 	}
-	if a.current.State == "" || a.current.State == state.StateIdle || now.Sub(a.shownAt) >= MinDwell {
+	if a.current.State == "" || a.current.State == state.StateIdle || now.Sub(a.shownAt) >= a.effectiveDwell() {
 		a.current, a.since, a.pending = ev, now, nil
 		return
 	}
@@ -32,7 +50,7 @@ func (a *Activity) Update(ev state.Event, now time.Time) {
 }
 
 func (a *Activity) Text(now time.Time) (string, string) {
-	if a.pending != nil && now.Sub(a.shownAt) >= MinDwell {
+	if a.pending != nil && now.Sub(a.shownAt) >= a.effectiveDwell() {
 		a.current, a.since, a.pending = *a.pending, now, nil
 	}
 	ev := a.current

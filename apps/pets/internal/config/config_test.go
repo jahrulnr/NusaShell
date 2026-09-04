@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseDefaultsAndValidation(t *testing.T) {
@@ -103,6 +104,45 @@ func TestParseDefaultsAndValidation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestEventDelayDefaultsAndOverrides(t *testing.T) {
+	t.Parallel()
+	cfg, err := Parse([]byte(`{"spritesheet": "s.webp"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.EventDelay; got != DefaultEventDelay {
+		t.Fatalf("default event_delay = %v, want %v", got, DefaultEventDelay)
+	}
+	if got := cfg.EventDelayDuration(); got != time.Duration(DefaultEventDelay*float64(time.Second)) {
+		t.Fatalf("default dwell = %v, want %v", got, time.Duration(DefaultEventDelay*float64(time.Second)))
+	}
+	cfg, err = Parse([]byte(`{"spritesheet": "s.webp", "event_delay": 0.25}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.EventDelay; got != 0.25 {
+		t.Fatalf("event_delay = %v, want 0.25", got)
+	}
+	if got := cfg.EventDelayDuration(); got != 250*time.Millisecond {
+		t.Fatalf("dwell = %v, want 250ms", got)
+	}
+	// Zero and negative values must fall back to the default.
+	cfg, err = Parse([]byte(`{"spritesheet": "s.webp", "event_delay": 0}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.EventDelay; got != DefaultEventDelay {
+		t.Fatalf("event_delay 0 = %v, want default %v", got, DefaultEventDelay)
+	}
+	cfg, err = Parse([]byte(`{"spritesheet": "s.webp", "event_delay": -2}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.EventDelay; got != DefaultEventDelay {
+		t.Fatalf("event_delay -2 = %v, want default %v", got, DefaultEventDelay)
 	}
 }
 

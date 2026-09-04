@@ -209,3 +209,90 @@ func TestStore_GetWithAgentOwner(t *testing.T) {
 		t.Fatalf("Delete(agent owner): %v", err)
 	}
 }
+
+// TestStore_ListSetsAbsolutePath verifies that every skill returned by List
+// carries the absolute path to its directory on disk. The model uses this
+// path from skill_search/skill_list results to read the SKILL.md and
+// support files without needing a separate tool call to resolve the path.
+func TestStore_ListSetsAbsolutePath(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := s.Save(&domain.Skill{
+		Name:        "path-test",
+		Description: "verifies Path is set",
+		Content:     "# Path test\n",
+		State:       domain.SkillStateActive,
+		Origin:      domain.SkillOriginUser,
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	for _, sk := range s.List() {
+		if sk.ID != "path-test" {
+			continue
+		}
+		want := filepath.Join(s.root, "path-test")
+		if sk.Path != want {
+			t.Fatalf("Path = %q, want %q", sk.Path, want)
+		}
+		// Get must also return the path.
+		got, err := s.Get("path-test", "")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Path != want {
+			t.Fatalf("Get Path = %q, want %q", got.Path, want)
+		}
+		return
+	}
+	t.Fatal("path-test skill not found in List")
+}
+
+// TestStore_ListSetsBundledFlag verifies that the Bundled flag is set
+// correctly: true when a skill directory has support files beyond
+// SKILL.md, false when it only contains SKILL.md. The model uses this
+// flag from skill_search/skill_list results to decide whether to
+// file_list the skill directory for subfiles (references/, templates/,
+// scripts/, examples/) or skip straight to reading SKILL.md.
+func TestStore_ListSetsBundledFlag(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Skill with only SKILL.md → Bundled=false
+	if err := s.Save(&domain.Skill{
+		Name:        "bare-skill",
+		Description: "no subfiles",
+		Content:     "# Bare\n",
+		State:       domain.SkillStateActive,
+		Origin:      domain.SkillOriginUser,
+	}); err != nil {
+		t.Fatalf("Save bare: %v", err)
+	}
+	// Skill with a support file → Bundled=true
+	if err := s.Save(&domain.Skill{
+		Name:        "bundled-skill",
+		Description: "has subfiles",
+		Content:     "# Bundled\n",
+		State:       domain.SkillStateActive,
+		Origin:      domain.SkillOriginUser,
+	}); err != nil {
+		t.Fatalf("Save bundled: %v", err)
+	}
+	if err := s.WriteFile("bundled-skill", "", "references/guide.md", "# Guide\n"); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	for _, sk := range s.List() {
+		switch sk.ID {
+		case "bare-skill":
+			if sk.Bundled {
+				t.Errorf("bare-skill: Bundled=true, want false (only SKILL.md)")
+			}
+		case "bundled-skill":
+			if !sk.Bundled {
+				t.Errorf("bundled-skill: Bundled=false, want true (has references/guide.md)")
+			}
+		}
+	}
+}

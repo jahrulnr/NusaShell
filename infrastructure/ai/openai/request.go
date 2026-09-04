@@ -124,10 +124,23 @@ func supportsOpenAIReasoningEffortValue(effort string) bool {
 
 func convertMessages(messages []core.Message) ([]chatMessage, error) {
 	out := make([]chatMessage, 0, len(messages))
+	var deferredMedia []contentPart
+	flushDeferredMedia := func() {
+		if len(deferredMedia) == 0 {
+			return
+		}
+		out = append(out, chatMessage{Role: "user", Content: deferredMedia})
+		deferredMedia = nil
+	}
 	for i, msg := range messages {
 		converted := chatMessage{Role: string(msg.Role)}
 		switch msg.Role {
 		case core.RoleSystem, core.RoleUser, core.RoleAssistant:
+			// Media is reinjected as a user message, but it must wait until
+			// every tool result for the preceding assistant tool_calls message
+			// is emitted. Otherwise providers such as DeepSeek see a user
+			// message between tool results and reject the request as incomplete.
+			flushDeferredMedia()
 			content, toolCalls, reasoningContent, err := convertMessageBlocks(msg.Blocks)
 			if err != nil {
 				return nil, fmt.Errorf("openai: messages[%d]: %w", i, err)
@@ -136,17 +149,21 @@ func convertMessages(messages []core.Message) ([]chatMessage, error) {
 			converted.ToolCalls = toolCalls
 			converted.ReasoningContent = reasoningContent
 		case core.RoleTool:
-			toolMessages, err := convertToolMessage(msg.Blocks)
+			toolMessages, media, err := convertToolMessage(msg.Blocks)
 			if err != nil {
 				return nil, fmt.Errorf("openai: messages[%d]: %w", i, err)
 			}
 			out = append(out, toolMessages...)
+			if len(media) > 0 {
+				deferredMedia = append(deferredMedia, media...)
+			}
 			continue
 		default:
 			return nil, fmt.Errorf("openai: unsupported role %q", msg.Role)
 		}
 		out = append(out, converted)
 	}
+	flushDeferredMedia()
 	return out, nil
 }
 
@@ -256,22 +273,23 @@ func convertMessageBlocks(blocks []core.Block) (any, []toolCall, string, error) 
 	return parts, toolCalls, reasoningText, nil
 }
 
-func convertToolMessage(blocks []core.Block) ([]chatMessage, error) {
+func convertToolMessage(blocks []core.Block) ([]chatMessage, []contentPart, error) {
 	out := make([]chatMessage, 0, len(blocks))
+	var media []contentPart
 	for _, block := range blocks {
 		result, ok := block.(core.ToolResultBlock)
 		if !ok {
-			return nil, fmt.Errorf("tool role only supports ToolResultBlock, got %T", block)
+			return nil, nil, fmt.Errorf("tool role only supports ToolResultBlock, got %T", block)
 		}
-		text, err := toolResultText(result.Content)
+		text, resultMedia, err := toolResultTextAndMedia(result.Content)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		var content any = text
 		if result.Cache != nil {
 			breakpoint, err := convertPromptCacheBreakpoint(result.Cache)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			content = []contentPart{{Type: "text", Text: text, PromptCacheBreakpoint: breakpoint}}
 		}
@@ -280,8 +298,15 @@ func convertToolMessage(blocks []core.Block) ([]chatMessage, error) {
 			ToolCallID: result.ToolUseID,
 			Content:    content,
 		})
+		// Chat Completions tool results only carry text. Non-text blocks
+		// (image/audio/video from read_media) are reinjected as a follow-up
+		// user message so the vision-capable model still sees the media in
+		// the next round.
+		if len(resultMedia) > 0 {
+			media = append(media, resultMedia...)
+		}
 	}
-	return out, nil
+	return out, media, nil
 }
 
 func convertPromptCacheBreakpoint(cache *core.CacheControl) (*promptCacheBreakpoint, error) {
@@ -297,23 +322,42 @@ func convertPromptCacheBreakpoint(cache *core.CacheControl) (*promptCacheBreakpo
 	return &promptCacheBreakpoint{Mode: "explicit"}, nil
 }
 
-func toolResultText(blocks []core.Block) (string, error) {
+// toolResultTextAndMedia splits a tool result's content blocks into the text
+// portion (which Chat Completions tool results can carry as a string) and the
+// non-text media blocks (image/audio/video), serialized as contentPart parts
+// for the caller to reinject as a follow-up user message. Mirrors the compat
+// provider's textAndMedia pattern.
+func toolResultTextAndMedia(blocks []core.Block) (string, []contentPart, error) {
 	var text strings.Builder
+	var media []contentPart
 	for _, block := range blocks {
 		switch b := block.(type) {
 		case core.TextBlock:
 			if b.Cache != nil {
-				return "", fmt.Errorf("OpenAI Chat tool result content cache must be set on ToolResultBlock")
+				return "", nil, fmt.Errorf("OpenAI Chat tool result content cache must be set on ToolResultBlock")
 			}
 			if text.Len() > 0 {
 				text.WriteString("\n")
 			}
 			text.WriteString(b.Text)
+		case core.ImageBlock:
+			url, err := imageURLValue(b)
+			if err != nil {
+				return "", nil, err
+			}
+			media = append(media, contentPart{Type: "image_url", ImageURL: &imageURL{URL: url, Detail: b.Detail}})
+		case core.AudioBlock:
+			media = append(media, contentPart{Type: "input_audio", InputAudio: &inputAudio{Data: base64.StdEncoding.EncodeToString(b.Data), Format: audioFormat(b)}})
+		case core.VideoBlock:
+			if b.URL == "" {
+				return "", nil, fmt.Errorf("OpenAI Chat video blocks require a URL or data URL")
+			}
+			media = append(media, contentPart{Type: "video_url", VideoURL: &videoURL{URL: b.URL}})
 		default:
-			return "", fmt.Errorf("OpenAI Chat tool results only support text content, got %T", block)
+			return "", nil, fmt.Errorf("OpenAI Chat tool results unsupported content block %T", block)
 		}
 	}
-	return text.String(), nil
+	return text.String(), media, nil
 }
 
 // audioFormat normalizes an audio block's media type to the input_audio

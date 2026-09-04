@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // Defaults mirror myCat's CharPack defaults; only the bounding box is shrunk.
@@ -17,6 +18,9 @@ const (
 	DefaultMaxWidth  = 200
 	DefaultMaxHeight = 400
 	DefaultWSURL     = "ws://127.0.0.1:9999/ws"
+	// DefaultEventDelay is the minimum time in seconds the bubble holds the
+	// latest event before an update switches to a newer one (seconds).
+	DefaultEventDelay = 1.0
 	// DefaultShapeAlphaCutoff keeps every non-transparent source pixel in the
 	// X11 shape. Antialiased edge pixels remain visible without including the
 	// transparent canvas around the mascot.
@@ -37,6 +41,7 @@ type Config struct {
 	MaxHeight        int                    `json:"max_height"`
 	WSURL            string                 `json:"ws_url"`
 	ElectronPath     string                 `json:"electron_path"`
+	EventDelay       float64                `json:"event_delay"`
 	SpriteSheet      string                 `json:"spritesheet"`
 	Image            string                 `json:"image"`
 	ClickThrough     bool                   `json:"click_through"`
@@ -44,6 +49,12 @@ type Config struct {
 	BubbleEnabled    *bool                  `json:"bubble_enabled"`
 	BubbleFont       string                 `json:"bubble_font"`
 	States           map[string]StateConfig `json:"states"`
+}
+
+// EventDelayDuration is the bubble dwell in time.Duration. Values are
+// clamped to DefaultEventDelay when unset or non-positive.
+func (c *Config) EventDelayDuration() time.Duration {
+	return time.Duration(c.EventDelay * float64(time.Second))
 }
 
 // Bubbles reports whether the head speech bubble is enabled. Defaults to
@@ -82,6 +93,9 @@ func Parse(data []byte) (*Config, error) {
 	}
 	if c.WSURL == "" {
 		c.WSURL = DefaultWSURL
+	}
+	if c.EventDelay <= 0 {
+		c.EventDelay = DefaultEventDelay
 	}
 	if c.ShapeAlphaCutoff == 0 {
 		c.ShapeAlphaCutoff = DefaultShapeAlphaCutoff

@@ -50,6 +50,8 @@ type Skill struct {
 	Origin      SkillOrigin // user | agent | builtin
 	OwnedBy     string      // "user", "builtin", "plugin:<plugin-id>" — secondary key for disambiguation; "" defaults to Origin
 	PluginDir   string      // mount source directory for plugin-owned skills (read-only); empty for user/builtin
+	Path        string      // absolute path to the skill directory on disk; empty for embedded/in-memory skills
+	Bundled     bool        // true when the skill directory has support files beyond SKILL.md (references/, templates/, scripts/, examples/)
 	Pinned      bool        // pinned skills bypass decay and always surface
 	UsageCount  int         // incremented each time the skill is used in a turn
 	LastUsedAt  time.Time   // zero = never used

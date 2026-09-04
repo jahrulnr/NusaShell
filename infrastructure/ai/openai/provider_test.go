@@ -620,6 +620,50 @@ func TestChatConvertsResponseBlocks(t *testing.T) {
 	}
 }
 
+// TestConvertMessagesSplitsToolResultMediaIntoUserMessage proves that when a
+// tool result carries non-text blocks (image/audio/video from read_media),
+// the Chat Completions provider does NOT reject the request. Instead it:
+//  1. Sends the text portion as the tool message content (Chat Completions
+//     tool results only accept a string).
+//  2. Reinjets the media blocks as a follow-up user message so the
+//     vision/audio-capable model still sees the media in the next round.
+//
+// This mirrors the compat provider's deferredMedia pattern. Without it,
+// read_media with image results fails on the Chat path with
+// "OpenAI Chat tool results only support text content, got core.ImageBlock".
+func TestConvertMessagesSplitsToolResultMediaIntoUserMessage(t *testing.T) {
+	msgs, err := convertMessages([]core.Message{
+		core.Assistant(core.ToolUseBlock{ID: "call_1", Name: "read_media", Arguments: core.MustJSONRaw(map[string]any{})}),
+		core.ToolResult("call_1",
+			core.TextBlock{Text: "Image loaded from /tmp/screenshot.png"},
+			core.ImageURL("https://example.test/a.png"),
+		),
+	})
+	if err != nil {
+		t.Fatalf("convertMessages returned error: %v (expected media to be split into a user message)", err)
+	}
+	// Expect: assistant tool_call + tool message (text only) + user message (media)
+	if len(msgs) != 3 {
+		t.Fatalf("messages = %d, want 3 (assistant + tool + user media): %+v", len(msgs), msgs)
+	}
+	if msgs[0].Role != "assistant" || len(msgs[0].ToolCalls) != 1 || msgs[0].ToolCalls[0].ID != "call_1" {
+		t.Fatalf("msgs[0] = %+v, want assistant with tool_call call_1", msgs[0])
+	}
+	if msgs[1].Role != "tool" || msgs[1].ToolCallID != "call_1" {
+		t.Fatalf("msgs[1] = %+v, want tool message for call_1", msgs[1])
+	}
+	if got, ok := msgs[1].Content.(string); !ok || got != "Image loaded from /tmp/screenshot.png" {
+		t.Fatalf("msgs[1].Content = %v, want text only", msgs[1].Content)
+	}
+	if msgs[2].Role != "user" {
+		t.Fatalf("msgs[2].Role = %q, want user (deferred media)", msgs[2].Role)
+	}
+	parts, ok := msgs[2].Content.([]contentPart)
+	if !ok || len(parts) != 1 || parts[0].Type != "image_url" {
+		t.Fatalf("msgs[2].Content = %+v, want []contentPart with single image_url", msgs[2].Content)
+	}
+}
+
 func TestConvertResponseRejectsNil(t *testing.T) {
 	_, err := convertResponse(nil, &core.Request{Model: "gpt-4.1"})
 	if err == nil || !strings.Contains(err.Error(), "response cannot be nil") {

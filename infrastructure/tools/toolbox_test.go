@@ -125,7 +125,7 @@ func testToolbox(skills []*domain.Skill, plugins []*domain.Plugin, mcp *stubMCP)
 func TestSkillSearch(t *testing.T) {
 	tb := testToolbox(
 		[]*domain.Skill{
-			{ID: "s1", Name: "git-helper", Description: "Help with git operations", Origin: domain.SkillOriginUser},
+			{ID: "s1", Name: "git-helper", Description: "Help with git operations", Origin: domain.SkillOriginUser, Path: "/home/user/.local/nusashell/skills/git-helper", Bundled: true},
 			{ID: "s2", Name: "docker-pro", Description: "Docker container management"},
 			{ID: "s3", Name: "code-review", Description: "Review code for bugs"},
 		},
@@ -143,6 +143,12 @@ func TestSkillSearch(t *testing.T) {
 	}
 	if !strings.Contains(out, `"owned_by":"user"`) {
 		t.Errorf("skill search must expose the owner needed to resolve SKILL.md, got: %s", out)
+	}
+	if !strings.Contains(out, `"path":"/home/user/.local/nusashell/skills/git-helper"`) {
+		t.Errorf("skill search must expose the absolute path so the model can load the skill, got: %s", out)
+	}
+	if !strings.Contains(out, `"bundled":true`) {
+		t.Errorf("skill search must expose the bundled flag so the model knows subfiles exist, got: %s", out)
 	}
 	if strings.Contains(out, "docker-pro") {
 		t.Errorf("docker-pro should not match git query, got: %s", out)

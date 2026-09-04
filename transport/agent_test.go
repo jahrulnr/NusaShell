@@ -1380,7 +1380,10 @@ func TestAgentTurnContinuesAfterPartialTransientStreamFailure(t *testing.T) {
 	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
 		t.Fatal(err)
 	}
-	if len(conv.Messages) != 3 || conv.Messages[1].Content != "The answer starts here. " || conv.Messages[2].Content != "And continues after reconnecting." {
+	// With round-level continuation, the partial content from the first
+	// (truncated) stream is accumulated and prepended to the continuation
+	// text from the retry, producing a single seamless assistant message.
+	if len(conv.Messages) != 2 || conv.Messages[1].Content != "The answer starts here. And continues after reconnecting." || conv.Messages[1].Status != "done" {
 		t.Fatalf("partial stream was not continued: %+v", conv.Messages)
 	}
 }
@@ -1421,11 +1424,19 @@ func TestAgentTurnPartialStreamContinuationDoesNotConsumeToolRound(t *testing.T)
 	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
 		t.Fatal(err)
 	}
-	if len(conv.Messages) != 4 || conv.Messages[3].Content != "The tool result completes the answer." || conv.Messages[3].Status != "done" {
+	// With round-level continuation, the partial text from the truncated
+	// first stream is accumulated into the assistant message that also
+	// carries the tool call from the continuation retry. The tool round
+	// is not consumed by the continuation — the model still gets its
+	// tool round budget.
+	if len(conv.Messages) != 3 || conv.Messages[2].Content != "The tool result completes the answer." || conv.Messages[2].Status != "done" {
 		t.Fatalf("continued tool round = %+v", conv.Messages)
 	}
-	if len(conv.Messages[2].ToolCalls) != 1 || conv.Messages[2].ToolCalls[0].Name != "docs" || conv.Messages[2].ToolCalls[0].Status != "ok" {
-		t.Fatalf("tool after recovery = %+v", conv.Messages[2].ToolCalls)
+	if len(conv.Messages[1].ToolCalls) != 1 || conv.Messages[1].ToolCalls[0].Name != "docs" || conv.Messages[1].ToolCalls[0].Status != "ok" {
+		t.Fatalf("tool after recovery = %+v", conv.Messages[1].ToolCalls)
+	}
+	if conv.Messages[1].Content != "The answer starts here. " {
+		t.Fatalf("partial content not accumulated: %q", conv.Messages[1].Content)
 	}
 }
 
