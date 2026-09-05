@@ -68,20 +68,22 @@ active conversation.
 ### Release installer
 
 The release installer installs the Go core first and then asks whether the
-optional Electron desktop wrapper, the desktop pet (Linux only), and
-`NusaShell-mcp` plugins should be installed:
+login service (autostart), the optional Electron desktop wrapper, the
+desktop pet (Linux only), and `NusaShell-mcp` plugins should be installed:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.sh | bash
 ```
 
-Use `--install-electron`/`--no-electron`,
+Use `--install-service`/`--no-service`,
+`--install-electron`/`--no-electron`,
 `--install-pets`/`--no-pets`, and
 `--install-mcp`/`--no-mcp` to choose explicitly. The desktop pet is currently
 Linux-only; the installer on macOS ignores pets options. Set
 `NUSASHELL_NON_INTERACTIVE=1` for unattended installs; optional components
 default to not installed. See [`docs/INSTALL.md`](docs/INSTALL.md) for
-Windows, layouts, version pinning, and MCP details.
+Windows, layouts, version pinning, MCP details, and the
+`nusashell service` commands.
 
 Windows uses the equivalent PowerShell installer (pets is not offered there
 yet):

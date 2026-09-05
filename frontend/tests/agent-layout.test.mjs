@@ -360,6 +360,46 @@ test('Live tool deltas stay queued until the card exists and thinking pulse is p
   assert.match(agentView, /sealReasoningStreaming\(run\.bubble\)/);
 });
 
+test('A new live round drops previous-round tool cards even when the room is hidden', () => {
+  const resetFn = agentView.slice(
+    agentView.indexOf('function resetLiveRoundText'),
+    agentView.indexOf('// Active-message windowing sizes'),
+  );
+  assert.match(resetFn, /run\.toolJobs = new Map\(\)/,
+    'resetLiveRoundText must drop parked tool cards so the next thinking block is not remounted above the previous round');
+  assert.match(resetFn, /run\.toolArgs = new Map\(\)/);
+  assert.match(resetFn, /pendingToolDeltas = new Map\(\)/);
+  const hiddenRoundStart = agentView.slice(
+    agentView.indexOf('// Track round even when not active'),
+    agentView.indexOf("on('agent.context.estimate'"),
+  );
+  assert.match(hiddenRoundStart, /resetLiveRoundText\(run\);/);
+  assert.match(hiddenRoundStart, /if \(conversation_id !== state\.activeId\)/);
+});
+
+test('Switching rooms closes the hidden room stream so switch-back replays missed frames', () => {
+  const openFn = agentView.slice(
+    agentView.indexOf('async function openConversation(id)'),
+    agentView.indexOf('async function restorePendingAsks'),
+  );
+  assert.match(openFn, /closeRoundStream\(run\)/,
+    'the visible room owns the only live SSE; leaving a running room must freeze lastSeq');
+});
+
+test('Inactive rooms do not park completed tool cards on the live run', () => {
+  const started = agentView.slice(
+    agentView.indexOf("on('agent.tool.started'"),
+    agentView.indexOf("on('agent.tool.completed'"),
+  );
+  const completed = agentView.slice(
+    agentView.indexOf("on('agent.tool.completed'"),
+    agentView.indexOf("on('agent.turn.done'"),
+  );
+  assert.match(started, /conversation_id !== state\.activeId\) return/);
+  assert.match(completed, /conversation_id !== state\.activeId\) return/,
+    'tool.completed must not synthesize cards for a hidden room; reattach would dump them under the next thinking block');
+});
+
 test('Live delta rendering stays dirty while its DOM slot is temporarily detached', () => {
   assert.match(agentView, /run\.renderDirty = true/);
   assert.match(agentView, /function flushLiveRender\(run\) \{[\s\S]*!run\.renderScheduled && !run\.renderDirty/);

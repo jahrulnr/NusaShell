@@ -4,6 +4,8 @@ param(
   [string]$ElectronVersion = '',
   [switch]$InstallElectron,
   [switch]$NoElectron,
+  [switch]$InstallService,
+  [switch]$NoService,
   [switch]$InstallMcp,
   [switch]$NoMcp
 )
@@ -16,6 +18,7 @@ $ErrorActionPreference = 'Stop'
 $requestedVersion = if ($Version) { $Version } elseif ($env:NUSASHELL_VERSION) { $env:NUSASHELL_VERSION } else { '' }
 $requestedElectronVersion = if ($ElectronVersion) { $ElectronVersion } elseif ($env:NUSASHELL_ELECTRON_VERSION) { $env:NUSASHELL_ELECTRON_VERSION } else { '' }
 $electronOverride = if ($InstallElectron) { '1' } elseif ($NoElectron) { '0' } elseif ($env:NUSASHELL_INSTALL_ELECTRON) { $env:NUSASHELL_INSTALL_ELECTRON } else { '' }
+$serviceOverride = if ($InstallService) { '1' } elseif ($NoService) { '0' } elseif ($env:NUSASHELL_INSTALL_SERVICE) { $env:NUSASHELL_INSTALL_SERVICE } else { '' }
 $mcpOverride = if ($InstallMcp) { '1' } elseif ($NoMcp) { '0' } elseif ($env:NUSASHELL_INSTALL_MCP) { $env:NUSASHELL_INSTALL_MCP } else { '' }
 $semverPattern = '^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$'
 if ($requestedVersion -and $requestedVersion -notmatch $semverPattern) {
@@ -42,6 +45,7 @@ function Get-OptionalChoice([string]$Override, [string]$Question, [string]$Name)
   return $answer.ToLowerInvariant() -in @('y', 'yes')
 }
 
+$installServiceSelected = Get-OptionalChoice $serviceOverride 'Install nusashell as a login service (autostart)?' 'NUSASHELL_INSTALL_SERVICE'
 $installElectronSelected = Get-OptionalChoice $electronOverride 'Install Electron desktop wrapper?' 'NUSASHELL_INSTALL_ELECTRON'
 $installMcpSelected = Get-OptionalChoice $mcpOverride 'Install MCP plugins from NusaShell-mcp?' 'NUSASHELL_INSTALL_MCP'
 
@@ -207,6 +211,25 @@ try {
   Set-Content -LiteralPath $launcher -Encoding ascii -Value @('@echo off', '"%~dp0current\nusashell.exe" %*')
   Write-Host "Installed NusaShell Go core $resolvedVersion. Run: $launcher"
 
+  $shell = New-Object -ComObject WScript.Shell
+  $startMenuPrograms = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+  $coreShortcutPath = Join-Path $startMenuPrograms 'NusaShell.lnk'
+  New-Item -ItemType Directory -Force -Path (Split-Path $coreShortcutPath) | Out-Null
+  $coreShortcut = $shell.CreateShortcut($coreShortcutPath)
+  $coreShortcut.TargetPath = $launcher
+  $coreShortcut.WorkingDirectory = $root
+  $coreShortcut.IconLocation = "$(Join-Path $current 'nusashell.exe'),0"
+  $coreShortcut.Save()
+
+  if ($installServiceSelected) {
+    & (Join-Path $current 'nusashell.exe') service install
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host 'NusaShell starts automatically at login. Manage it with: nusashell service status'
+    } else {
+      Write-Warning 'NusaShell service install failed; run "nusashell service install" manually for details.'
+    }
+  }
+
   if ($installElectronSelected) {
     $electronManifestPath = Join-Path $temp 'electron-latest.json'
     $electronRelease = Get-StreamRelease 'electron' $requestedElectronVersion
@@ -237,7 +260,6 @@ try {
     Set-CurrentJunction $electronCurrent $electronTarget
     Remove-OldVersions $electronVersions $electronVersion $electronPrevious
 
-    $shell = New-Object -ComObject WScript.Shell
     $shortcutPaths = @(
       (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\NusaShell-Desktop.lnk'),
       (Join-Path ([Environment]::GetFolderPath('Desktop')) 'NusaShell-Desktop.lnk')

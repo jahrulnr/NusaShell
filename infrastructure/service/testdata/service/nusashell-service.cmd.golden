@@ -1,0 +1,6 @@
+@echo off
+rem NusaShell core service
+cd /d "C:\Users\test\AppData\Roaming\nusashell"
+set "NUSASHELL_SERVICE=1"
+set "NUSASHELL_DATA_DIR=C:\Users\test\AppData\Roaming\nusashell"
+"C:\Programs\NusaShell\current\nusashell.exe" >> "C:\Users\test\AppData\Roaming\nusashell\logs\service.log" 2>&1

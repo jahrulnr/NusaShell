@@ -1,0 +1,21 @@
+[Unit]
+Description=NusaShell core service
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+ExecStart="/opt/nusashell/current/nusashell"
+WorkingDirectory=/home/test/.config/nusashell
+Environment="NUSASHELL_SERVICE=1"
+Environment="NUSASHELL_DATA_DIR=/home/test/.config/nusashell"
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+TimeoutStartSec=30
+SuccessExitStatus=0 143
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

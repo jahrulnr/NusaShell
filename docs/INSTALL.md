@@ -26,22 +26,23 @@ curl -fsSL https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/i
 
 The installer always installs the Go core, then asks:
 
-1. whether to install the Electron desktop wrapper;
-2. whether to install the desktop pet (Linux only);
-3. whether to install first-party plugins from `NusaShell-mcp`.
+1. whether to install the login service for the Go core (autostart);
+2. whether to install the Electron desktop wrapper;
+3. whether to install the desktop pet (Linux only);
+4. whether to install first-party plugins from `NusaShell-mcp`.
 
 The default answer is no for all optional components. Choices can be made
 without a prompt, which is useful for automation:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.sh \
-  | bash -s -- --install-electron --install-pets --install-mcp
+  | bash -s -- --install-service --install-electron --install-pets --install-mcp
 ```
 
-Equivalent environment overrides are `NUSASHELL_INSTALL_ELECTRON=1|0`,
-`NUSASHELL_INSTALL_PETS=1|0`, and `NUSASHELL_INSTALL_MCP=1|0`. Set
-`NUSASHELL_NON_INTERACTIVE=1` to skip all of them unless an explicit `1`
-override or install flag is supplied.
+Equivalent environment overrides are `NUSASHELL_INSTALL_SERVICE=1|0`,
+`NUSASHELL_INSTALL_ELECTRON=1|0`, `NUSASHELL_INSTALL_PETS=1|0`, and
+`NUSASHELL_INSTALL_MCP=1|0`. Set `NUSASHELL_NON_INTERACTIVE=1` to skip all
+of them unless an explicit `1` override or install flag is supplied.
 
 Windows PowerShell:
 
@@ -52,7 +53,7 @@ irm https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.
 For explicit choices from a checked-out copy:
 
 ```powershell
-& .\scripts\install.ps1 -InstallElectron -InstallMcp
+& .\scripts\install.ps1 -InstallService -InstallElectron -InstallMcp
 ```
 
 Before piping a remote script, download and inspect it first. The installers
@@ -97,7 +98,55 @@ The program files and NusaShell data are deliberately separate.
 Linux and Windows keep a `current` symlink/junction and retain the active
 release plus one previous release. The old version is not removed while its
 process is still running. macOS uses an application bundle for Electron and
-the versioned Go layout for the core.
+the versioned Go layout for the core. Windows also writes a `NusaShell.lnk`
+Start Menu shortcut to the `nusashell.cmd` launcher.
+
+## Login service (autostart)
+
+The optional login service supervises the Go core server under the current
+user account: it starts at login and restarts the server if it exits. Run
+the installer with `--install-service` (or answer yes at the prompt), or
+manage it directly afterwards:
+
+```bash
+nusashell service install     # create + enable + start
+nusashell service status      # installed/loaded/running + drift check
+nusashell service stop
+nusashell service start
+nusashell service restart
+nusashell service uninstall   # disable + remove the definition
+```
+
+Each platform uses its native user-level mechanism — no root, no system
+scope:
+
+| Platform | Mechanism | Definition | Service logs |
+| --- | --- | --- | --- |
+| Linux | systemd user unit | `~/.config/systemd/user/nusashell.service` | journal (`journalctl --user -u nusashell`) |
+| macOS | LaunchAgent | `~/Library/LaunchAgents/id.nusashell.core.plist` | `<data>/logs/service-stdout.log`, `service-stderr.log` |
+| Windows | Scheduled Task `NusaShell Core` | task XML + `<data>/service/nusashell-service.cmd` (+ hidden `.vbs` launcher) | `<data>\logs\service.log` |
+
+Behavior shared across platforms:
+
+- The definition bakes in the current install (`current` symlink/junction
+  path) and `NUSASHELL_DATA_DIR`; `NUSASHELL_HOST`, `NUSASHELL_PORT`, and
+  `NUSASHELL_ALLOW_REMOTE` are inherited only when set at install time.
+- Restart is automatic (`Restart=always`, launchd `KeepAlive`, Windows
+  restart-on-failure), and the definition always sets `NUSASHELL_SERVICE=1`
+  so the supervised process can identify itself. Mutating `nusashell
+  service` commands refuse to run from inside that process, preventing
+  agent-initiated stop/restart loops.
+- Re-running `nusashell service install` regenerates the definition and
+  backs the previous one up as `.bak`; rewriting a symlinked definition is
+  refused. `nusashell service status` flags drift between the installed
+  definition and the current install.
+- On Linux, when the systemd user bus is unreachable (fresh SSH session),
+  the installer attempts `loginctl enable-linger` and otherwise prints the
+  remediation. On Windows, hosts that deny Scheduled Task creation fall
+  back to a Startup-folder entry running the same hidden launcher.
+
+`nusashell service uninstall` removes the definition (the macOS plist is
+moved to the Trash first) and the Windows startup fallback entry.
 
 The installer never deletes conversations, credentials, provider settings,
 skills, memory, or plugins. Remove the program paths only for an uninstall;
@@ -212,15 +261,21 @@ to stderr. This is a launcher fallback, not a Go core setting.
 
 ## Uninstall
 
-Close NusaShell first. Remove the relevant program paths:
+Stop the service first when it is installed: `nusashell service uninstall`
+(Linux: removes `~/.config/systemd/user/nusashell.service`; macOS: moves
+`~/Library/LaunchAgents/id.nusashell.core.plist` to the Trash; Windows:
+deletes the Scheduled Task and the Startup fallback entry). Close NusaShell
+and remove the relevant program paths:
 
 - Linux: `~/.local/share/nusashell`,
   `~/.local/share/nusashell-electron`, `~/.local/share/nusashell-pets`,
   `~/.local/bin/nusashell`, `~/.local/bin/nusashell-desktop`,
-  `~/.local/bin/nusashell-pets`, and the desktop entry.
+  `~/.local/bin/nusashell-pets`, and the desktop entries
+  (`nusashell-desktop.desktop`, `nusashell-pets.desktop`).
 - macOS: `~/.local/share/nusashell`, `~/.local/bin/nusashell`, and
   `~/Applications/NusaShell Desktop.app`.
 - Windows: `%LOCALAPPDATA%\Programs\NusaShell` and
-  `%LOCALAPPDATA%\Programs\NusaShell-Electron`, plus shortcuts.
+  `%LOCALAPPDATA%\Programs\NusaShell-Electron`, plus the Start Menu and
+  desktop shortcuts.
 
 Keep the application-data directory unless a full data wipe is intended.

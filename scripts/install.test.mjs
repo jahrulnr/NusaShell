@@ -39,7 +39,8 @@ test('installers preserve the release manifest, checksum, and version activation
     assert.match(source, /current/);
     assert.match(source, /versions/);
     assert.match(source, /NUSASHELL_INSTALL_ELECTRON/);
-    assert.match(source, /NUSASHELL_INSTALL_MCP/);
+    assert.match(source, /NUSASHELL_INSTALL_SERVICE/);
+    assert.match(source, /service install/);
     assert.match(source, /NusaShell-mcp/);
   }
   assert.match(releaseInstaller, /unshare -Ur true/);
@@ -51,17 +52,25 @@ test('installers preserve the release manifest, checksum, and version activation
   assert.match(releaseInstaller, /nusashell-desktop/);
   assert.match(releaseInstaller, /Install Electron/);
   assert.match(releaseInstaller, /Install MCP/);
+  assert.match(releaseInstaller, /Install nusashell as a login service/);
+  assert.match(releaseInstaller, /--install-service/);
+  assert.match(releaseInstaller, /--no-service/);
+  assert.match(releaseInstaller, /nusashell service status/);
   assert.match(releaseInstaller, /pets-latest\.json/);
   assert.match(releaseInstaller, /NUSASHELL_INSTALL_PETS/);
   assert.match(releaseInstaller, /Install desktop pet \(Linux only\)/);
   assert.match(releaseInstaller, /\.local\/share\/nusashell-pets/);
   assert.match(releaseInstaller, /nusashell-pets/);
+  assert.match(releaseInstaller, /nusashell-pets\.desktop/);
   assert.doesNotMatch(windowsInstaller, /pets-latest\.json/);
   assert.doesNotMatch(windowsInstaller, /NUSASHELL_INSTALL_PETS/);
+  assert.doesNotMatch(windowsInstaller, /nusashell-pets\.desktop/);
   assert.match(windowsInstaller, /nusashell\.exe/);
   assert.match(windowsInstaller, /LOCALAPPDATA.*Programs.*NusaShell/s);
   assert.match(windowsInstaller, /New-Item -ItemType Junction/);
   assert.match(windowsInstaller, /GetFolderPath\('Desktop'\)/);
+  assert.match(windowsInstaller, /NusaShell\.lnk/);
+  assert.match(windowsInstaller, /Install nusashell as a login service/);
   assert.match(windowsInstaller, /if \(\(Test-Path -LiteralPath \$Target\) -and/);
   assert.match(localInstaller, /apps\/electron\/VERSION/);
   assert.match(localWindowsInstaller, /apps\\electron\\VERSION/);
@@ -365,6 +374,92 @@ esac
   const launcher = await readFile(join(home, '.local', 'bin', 'nusashell-pets'), 'utf8');
   assert.match(launcher, /pets-program\/current\/nusashell-pets/);
   assert.match(launcher, /--assets ".*pets-program\/current\/assets\/pets"/);
+  const petsDesktop = await readFile(join(home, '.local', 'share', 'applications', 'nusashell-pets.desktop'), 'utf8');
+  assert.match(petsDesktop, /Exec=.*nusashell-pets/);
+  assert.match(petsDesktop, /Terminal=false/);
+});
+
+test('release Linux installer can opt into the login service', async () => {
+  if (process.platform !== 'linux') return;
+  const root = await mkdtemp(join(tmpdir(), 'nusashell-release-service-'));
+  temporaryDirectories.push(root);
+  const home = join(root, 'home');
+  const fakeBin = join(root, 'bin');
+  const payloadRoot = join(root, 'payload');
+  const releaseRoot = join(root, 'release');
+  const installRoot = join(root, 'program');
+  const calls = join(root, 'service-calls.log');
+  const payloadName = 'nusashell-0.1.0-linux-x64.tar.gz';
+  const archive = join(releaseRoot, payloadName);
+  const manifest = join(releaseRoot, 'latest.json');
+  const releaseIndex = join(releaseRoot, 'release-versions.json');
+  await mkdir(home, { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  await mkdir(payloadRoot, { recursive: true });
+  await mkdir(releaseRoot, { recursive: true });
+  await writeFile(join(payloadRoot, 'nusashell'), `#!/usr/bin/env sh\nif [ "$1" = service ]; then echo "$@" >> '${calls}'; fi\nexit 0\n`);
+  await chmod(join(payloadRoot, 'nusashell'), 0o755);
+  await execFileAsync('tar', ['-C', payloadRoot, '-czf', archive, 'nusashell']);
+  const sha256 = createHash('sha256').update(await readFile(archive)).digest('hex');
+  await writeFile(manifest, `${JSON.stringify({
+    version: '0.1.0',
+    files: {
+      'linux-x64': { name: payloadName, sha256 },
+    },
+  }, null, 2)}\n`);
+  await writeFile(releaseIndex, `${JSON.stringify({
+    schemaVersion: 1,
+    go: { version: '0.1.0', tag: 'go-v0.1.0', manifest: 'latest.json', releasedAt: '2026-01-01T00:00:00Z' },
+    electron: null,
+  }, null, 2)}\n`);
+  await writeFile(join(fakeBin, 'curl'), `#!/usr/bin/env sh
+set -eu
+url=''
+destination=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) destination="$2"; shift 2 ;;
+    https://*) url="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+case "$url" in
+  */release-versions.json) cp '${releaseIndex}' "$destination" ;;
+  */latest.json) cp '${manifest}' "$destination" ;;
+  *) cp '${archive}' "$destination" ;;
+esac
+`);
+  await chmod(join(fakeBin, 'curl'), 0o755);
+
+  await execFileAsync('bash', [script('install.sh').pathname, '--install-service', '--no-electron', '--no-mcp'], {
+    env: {
+      ...process.env,
+      HOME: home,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      NUSASHELL_RELEASE_BASE: 'https://fixture.invalid/releases',
+      NUSASHELL_RELEASE_INDEX: 'https://fixture.invalid/releases/release-versions.json',
+      NUSASHELL_GO_INSTALL_ROOT: installRoot,
+      NUSASHELL_VERSION: '',
+      NUSASHELL_NON_INTERACTIVE: '1',
+    },
+  });
+
+  assert.equal((await readFile(calls, 'utf8')).trim(), 'service install');
+
+  // A follow-up run without the service opt-in must not uninstall the service.
+  await execFileAsync('bash', [script('install.sh').pathname, '--no-electron', '--no-mcp'], {
+    env: {
+      ...process.env,
+      HOME: home,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      NUSASHELL_RELEASE_BASE: 'https://fixture.invalid/releases',
+      NUSASHELL_RELEASE_INDEX: 'https://fixture.invalid/releases/release-versions.json',
+      NUSASHELL_GO_INSTALL_ROOT: installRoot,
+      NUSASHELL_VERSION: '',
+      NUSASHELL_NON_INTERACTIVE: '1',
+    },
+  });
+  assert.equal((await readFile(calls, 'utf8')).trim(), 'service install');
 });
 
 test('release Linux installer installs an opted-in NusaShell-mcp plugin into Go app data', async () => {

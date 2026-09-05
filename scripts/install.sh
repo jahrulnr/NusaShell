@@ -18,6 +18,8 @@ Options:
                            Pin the optional Electron version (otherwise latest Electron).
   --install-electron      Install the Electron desktop wrapper.
   --no-electron            Do not install Electron.
+  --install-service       Install the login service for the Go core (autostart).
+  --no-service             Do not install the login service.
   --pets-version VERSION   Pin the optional desktop pet version (Linux only, otherwise latest).
   --install-pets          Install the desktop pet overlay (Linux only).
   --no-pets               Do not install the desktop pet.
@@ -29,6 +31,7 @@ Environment:
   NUSASHELL_VERSION             Pin a release version (otherwise latest).
   NUSASHELL_ELECTRON_VERSION    Pin the optional Electron version (otherwise latest Electron).
   NUSASHELL_INSTALL_ELECTRON   1/yes or 0/no; overrides the prompt.
+  NUSASHELL_INSTALL_SERVICE    1/yes or 0/no; overrides the prompt.
   NUSASHELL_PETS_VERSION        Pin the optional desktop pet version (Linux only).
   NUSASHELL_INSTALL_PETS       1/yes or 0/no; overrides the prompt (Linux only).
   NUSASHELL_INSTALL_MCP        1/yes or 0/no; overrides the prompt.
@@ -43,6 +46,11 @@ Environment:
   NUSASHELL_MAC_INSTALL_DIR    Override the macOS application directory.
   NUSASHELL_MCP_REPOSITORY     MCP repository slug (default: jahrulnr/NusaShell-mcp).
   NUSASHELL_MCP_PLUGINS        Space/comma-separated plugin keys to install.
+
+The login service runs `nusashell` (the Go core server) under the current
+user at login via systemd (Linux), launchd (macOS), or a Scheduled Task
+(Windows); see `nusashell service --help`. NUSASHELL_DATA_DIR, HOST, PORT,
+and ALLOW_REMOTE are inherited by the service when they are set here.
 EOF
 }
 
@@ -52,6 +60,7 @@ requested_pets_version="${NUSASHELL_PETS_VERSION:-}"
 electron_override="${NUSASHELL_INSTALL_ELECTRON:-}"
 pets_override="${NUSASHELL_INSTALL_PETS:-}"
 mcp_override="${NUSASHELL_INSTALL_MCP:-}"
+service_override="${NUSASHELL_INSTALL_SERVICE:-}"
 while (($# > 0)); do
   case "$1" in
     --version)
@@ -78,6 +87,14 @@ while (($# > 0)); do
       ;;
     --no-electron)
       electron_override=0
+      shift
+      ;;
+    --install-service)
+      service_override=1
+      shift
+      ;;
+    --no-service)
+      service_override=0
       shift
       ;;
     --pets-version)
@@ -204,6 +221,11 @@ prompt_yes_no() {
   esac
 }
 
+if prompt_yes_no "$service_override" 'Install nusashell as a login service (autostart)?'; then
+  install_service=1
+else
+  install_service=0
+fi
 if prompt_yes_no "$electron_override" 'Install Electron desktop wrapper?'; then
   install_electron=1
 else
@@ -232,6 +254,7 @@ release_index=''
 release_version=''
 release_tag=''
 release_manifest=''
+go_current=''
 
 download_release_index() {
   if [[ -z "$release_index" ]]; then
@@ -389,7 +412,19 @@ install_core_unix() {
   mkdir -p "$home_dir/.local/bin"
   printf '#!/usr/bin/env sh\nexec "%s/nusashell" "$@"\n' "$current" > "$home_dir/.local/bin/nusashell"
   chmod 0755 "$home_dir/.local/bin/nusashell"
+  go_current="$current"
   echo "Installed NusaShell Go core $resolved_version. Run: nusashell"
+}
+
+install_service_unix() {
+  if [[ -z "$go_current" || ! -x "$go_current/nusashell" ]]; then
+    fail 'Service install requires the NusaShell Go core.'
+  fi
+  if ! "$go_current/nusashell" service install; then
+    echo 'NusaShell service install failed; run "nusashell service install" manually for details.' >&2
+    return 0
+  fi
+  echo 'NusaShell starts automatically at login. Manage it with: nusashell service status'
 }
 
 install_electron_unix() {
@@ -519,9 +554,22 @@ install_pets_linux() {
   activate_unix_version "$root" "$target" "$pets_version"
   prune_unix_versions "$versions" "$pets_version" "$previous"
 
-  mkdir -p "$home_dir/.local/bin"
+  mkdir -p "$home_dir/.local/bin" "$home_dir/.local/share/applications"
   printf '#!/usr/bin/env sh\nexec "%s/nusashell-pets" --assets "%s/assets/pets" "$@"\n' "$current" "$current" > "$home_dir/.local/bin/nusashell-pets"
   chmod 0755 "$home_dir/.local/bin/nusashell-pets"
+  icon="$current/resources/nusashell.png"
+  {
+    echo '[Desktop Entry]'
+    echo 'Type=Application'
+    echo 'Name=NusaShell Pets'
+    echo 'Comment=NusaShell desktop pet'
+    echo "Exec=$home_dir/.local/bin/nusashell-pets"
+    if [[ -f "$icon" ]]; then
+      echo "Icon=$icon"
+    fi
+    echo 'Terminal=false'
+    echo 'Categories=Utility;Game;'
+  } > "$home_dir/.local/share/applications/nusashell-pets.desktop"
   echo "Installed NusaShell desktop pet $pets_version. Run: nusashell-pets"
 }
 
@@ -606,6 +654,9 @@ install_mcp_unix() {
 }
 
 install_core_unix
+if [[ "$install_service" == 1 ]]; then
+  install_service_unix
+fi
 if [[ "$install_electron" == 1 ]]; then
   install_electron_unix
 fi

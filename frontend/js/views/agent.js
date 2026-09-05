@@ -824,6 +824,14 @@ function resetLiveRoundText(run) {
   run.roundTerminalPending = null;
   run.turnDonePayload = null;
   run.turnDoneFinalized = false;
+  // Drop parked tool cards with the round they belonged to. A hidden room
+  // still receives turn.started / tool.completed; if those cards survive
+  // into the next thinking round, switch-back remounts them under the new
+  // Thinking block (thinking above, previous tools appended below).
+  clearToolTimers(run);
+  run.pendingToolDeltas = new Map();
+  run.toolJobs = new Map();
+  run.toolArgs = new Map();
 }
 
 // Active-message windowing sizes (messages, not turns). INITIAL_WINDOW keeps
@@ -1357,6 +1365,12 @@ async function openConversation(id) {
   setRoomsOpen(false);
   // Save per-room state for the current conversation before switching.
   saveRoomState(state.activeId);
+  // Only the visible room holds a live SSE. Close every other round stream
+  // before changing activeId so lastSeq freezes; switch-back reopens with
+  // after=<seq> and the server replays frames missed while this room was idle.
+  for (const run of state.runs.values()) {
+    if (run.conversationId !== id) closeRoundStream(run);
+  }
   const token = ++state.conversationLoadToken;
   state.activeId = id;
   setSubagentConversation(id);
@@ -1627,11 +1641,11 @@ function reattachActiveRun() {
   msgNode.classList.add('agent-pending');
   if (roundAlreadyPersisted(run.messageId)) {
     // This round already finished and was saved; the snapshot renders it.
-    // Keep the (empty) section attached: every run ref stays valid for the
-    // next round or in-flight tool updates. agent.turn.started appends a
-    // fresh section cleanly, and turn-end refresh repaints from snapshot.
+    // Drop the empty live section so switch-back does not park a second
+    // Thinking slot above the snapshot tools. agent.turn.started appends a
+    // fresh section for the next round, and turn-end refresh repaints.
     resetLiveRoundText(run);
-    run.toolJobs = new Map();
+    reasoningEl.closest('.agent-round')?.remove();
     run.msgNode = msgNode;
     run.bubble = bubble;
     run.reasoningEl = null;
@@ -2971,9 +2985,6 @@ function bindEvents() {
       run.strip = slot.strip;
       stampRunMessageId(run.msgNode, message_id);
     }
-    clearToolTimers(run);
-    run.pendingToolDeltas = new Map();
-    run.toolJobs = new Map();
     if (run.textBox && !run.raw) {
       run.textBox.append(thinkingDots());
     }
@@ -3089,6 +3100,10 @@ function bindEvents() {
       else refreshConversations();
       return;
     }
+    // Hidden rooms restore completed tools from the snapshot + round-stream
+    // replay on switch-back. Synthesizing cards here parks previous-round
+    // tools on the run; reattach then dumps them under the next Thinking.
+    if (conversation_id !== state.activeId) return;
     const flushedToolDelta = flushPendingToolDeltas(run);
     if (flushedToolDelta) updateRoomInfo(state.conversation, state.messages);
     // ask_question: the ask card is already sealed by agent.ask.answered

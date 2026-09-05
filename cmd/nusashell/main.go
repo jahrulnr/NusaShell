@@ -58,6 +58,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "service" {
+		if err := serviceCmd(os.Args[2:]); err != nil {
+			slog.Error("service command failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		slog.Error("nusashell exited with error", "error", err)
 		os.Exit(1)

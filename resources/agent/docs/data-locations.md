@@ -54,6 +54,14 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 Credentials never appear in the JSON/JSONL files. Deleting the data
 directory removes everything, including stored keys.
 
+The optional login service writes its platform definition outside the data
+directory: a systemd user unit at `~/.config/systemd/user/nusashell.service`
+(Linux), a LaunchAgent at `~/Library/LaunchAgents/id.nusashell.core.plist`
+(macOS), and a Scheduled Task named `NusaShell Core` plus a Startup-folder
+fallback entry (Windows). `nusashell service uninstall` removes all of them;
+`nusashell service status` reports installed/loaded/running state and flags
+definition drift against the current install.
+
 Selected provider keys can be copied into `credentials.db` from an
 environment variable with the explicit `nusashell seed-providers`
 subcommand (for example `OPENROUTER_API_KEY`); see the Providers page for

@@ -1,0 +1,2 @@
+' NusaShell core service
+CreateObject("WScript.Shell").Run """C:\Users\test\AppData\Roaming\nusashell\service\nusashell-service.cmd"""

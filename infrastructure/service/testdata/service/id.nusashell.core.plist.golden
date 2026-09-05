@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>id.nusashell.core</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/opt/nusashell/current/nusashell</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/home/test/.config/nusashell</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ExitTimeOut</key>
+    <integer>20</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>Umask</key>
+    <integer>63</integer>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>NUSASHELL_DATA_DIR</key>
+      <string>/home/test/.config/nusashell</string>
+      <key>NUSASHELL_SERVICE</key>
+      <string>1</string>
+    </dict>
+    <key>StandardInPath</key>
+    <string>/dev/null</string>
+    <key>StandardOutPath</key>
+    <string>/home/test/.config/nusashell/logs/service-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/home/test/.config/nusashell/logs/service-stderr.log</string>
+  </dict>
+</plist>
