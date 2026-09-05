@@ -28,8 +28,8 @@ const (
 	AgentDelegate AgentKind = "delegate"
 	// AgentLearner is the unified background learning agent (memory
 	// consolidate + optional skill evaluate/evolve in one spawn). It
-	// receives the same full toolbox as AgentConversation; typed learning
-	// output remains available alongside normal tool side effects.
+	// receives the same full toolbox as AgentConversation plus learn(),
+	// the dedicated typed-result tool. Profile writes still use file_*.
 	AgentLearner AgentKind = "learner"
 	// AgentMemoryConsolidator is a legacy alias for AgentLearner.
 	AgentMemoryConsolidator AgentKind = "memory-consolidator"
@@ -64,7 +64,7 @@ func (f *ToolFactory) Get(kind AgentKind, workspace string) []ToolDef {
 	}
 	switch kind {
 	case AgentLearner, AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator:
-		return f.baseTools(workspace)
+		return withLearnerResultTool(f.baseTools(workspace))
 	case AgentAutomation:
 		return filterACPToolDefs(f.baseTools(workspace))
 	case AgentDelegate:

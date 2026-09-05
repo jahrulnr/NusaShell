@@ -371,9 +371,9 @@ func (b *HydrationBuilder) readToolList() []hydrationSlot {
 // (completed items are noise for the model — the UI strip still shows them).
 // The checkpoint is reused while history remains intact; after compaction, a
 // fresh checkpoint restores the goal and open items from the todo store.
-// There is no real `todo_list` tool (the `todo` tool is a full-replace
-// writer), so the slot reads the todo store directly. Empty content (no
-// goal and no open items) hides the slot.
+// There is no real `todo_list` tool (the `todo` tool writes the list via
+// new/add/replace/delete), so the slot reads the todo store directly. Empty
+// content (no goal and no open items) hides the slot.
 func (b *HydrationBuilder) readTodoList() hydrationSlot {
 	if b.source.Todos == nil || b.source.ConvID == "" {
 		return hydrationSlot{name: "todo_list", content: ""}

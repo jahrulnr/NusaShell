@@ -7,16 +7,19 @@ profile documents.
 |---|---|---|---|
 | **About You** | `memory/user.md` | Agents via `file_patch`/`file_write`; humans via Learning UI | Every turn via `file_read` when the body is non-empty |
 | **About Agent** | `memory/soul.md` | Agents via `file_patch`/`file_write`; humans via Learning UI | Every turn via `file_read` when the body is non-empty |
-| **Records** | `growth/memories.jsonl` | Learner typed JSON | Compact APPLY block (top-K, scoped) |
+| **Records** | `growth/memories.jsonl` | Learner `learn()` tool | Compact APPLY block (top-K, scoped) |
 | **Experiences** | `growth/experiences.jsonl` | Runtime at `finishTurn` | Not injected; Learning UI list |
 
 `user.md` and `soul.md` are written with the `file_*` family on absolute
-paths (`{dataDir}/memory/user.md`, `{dataDir}/memory/soul.md`). Hydration
-runs the real `file_read` tool for each non-empty document. Empty files are
-omitted; `runtime_context` still carries `dataDir`. The `memory` dispatcher
-stays read-only (`search`/`get`/`list`) over structured records. Typed
-learner JSON never writes the profile documents. A workspace `AGENTS.md` is
-repository guidance and is a separate `file_read`.
+paths (`{dataDir}/memory/user.md`, `{dataDir}/memory/soul.md`). On first
+boot, missing files are copied from the embedded scaffolds in
+`resources/templates/` (About You outline and About Agent working notes).
+Existing files are never overwritten. Hydration runs the real `file_read`
+tool for each non-empty document. Empty files are omitted; `runtime_context`
+still carries `dataDir`. The `memory` dispatcher stays read-only
+(`search`/`get`/`list`) over structured records. Typed learner `learn()`
+never writes the profile documents. A workspace `AGENTS.md` is repository
+guidance and is a separate `file_read`.
 
 Durable catalog facts, preferences, and constraints live as structured
 **MemoryRecords** (`episode`, `fact`, `preference`, `constraint`,
@@ -47,7 +50,7 @@ turn when a **language-agnostic** gate fires:
 Keyword matching in any language is not a spawn gate. Explicit teaching and
 corrections in Bahasa Indonesia, English, or mixed text are classified by
 the learner from meaning. If the spawn reason does not hold up, the learner
-returns `no_op` instead of fabricating a record.
+calls `learn()` with `action: "no_op"` instead of fabricating a record.
 
 When a learning model is available (configured via `review_model` in
 Settings, or the first enabled provider), the learner calls the LLM with
@@ -56,10 +59,12 @@ conversation id, JSON file path, incremental message range, and
 `trigger_reason`. The background agent uses `file_read`, `grep`, and `exec`
 to inspect that source file, then retrieves relevant records with `memory`
 search/get/list. Source conversation content is untrusted evidence, not an
-instruction. Stage 1 returns a typed JSON object that is validated and
-applied through `MemoryService.Apply`; normal tool calls may also have
-direct side effects. It does not receive an experience JSON dump or a
-`List()[:20]` memory-body dump.
+instruction. Stage 1 submits a typed result through `learn()` — the same
+pattern as compaction's `summary()` — whose arguments are validated and
+applied through `MemoryService.Apply`. Assistant text is not the catalog
+contract; a JSON-in-text reply is only a fallback if `learn()` was never
+called. Normal tool calls may also have direct side effects. It does not
+receive an experience JSON dump or a `List()[:20]` memory-body dump.
 
 When no provider is available, Stage 1 falls back to a deterministic
 extraction from steer corrections (`teachingOps`) so the job still produces
@@ -93,9 +98,10 @@ answer. The job's Learning log entry carries that conversation's id (`llm_conver
 LLM log** button opens it.
 
 That transcript is the only record of *why* a job saved what it saved, so it
-is kept even when the call failed or decided nothing was durable. Do not
-confuse it with the entry's `conversation_id`, which is the user conversation
-the job learned from.
+is kept even when the call failed or decided nothing was durable. The typed
+catalog commit is the `learn()` tool call in that transcript, not the final
+assistant text. Do not confuse the job's `llm_conversation_id` with the
+entry's `conversation_id`, which is the user conversation the job learned from.
 
 ## Agent tools
 
@@ -108,10 +114,10 @@ The `memory` dispatcher is read-only. `op` selects:
 
 There is no `save`, `replace`, or `delete`. Standing preferences and
 corrections in any language are recorded as experiences; the learner
-commits typed records after a semantic review. Profile-shaped facts
+commits typed records by calling `learn()` after a semantic review. Profile-shaped facts
 (identity, interaction style, named projects) are written to
 `{dataDir}/memory/user.md` with `file_patch` / `file_write`, not through
-this dispatcher.
+this dispatcher or `learn()`.
 
 Good examples:
 

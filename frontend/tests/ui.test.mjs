@@ -46,6 +46,21 @@ test('dialog dismisses on Escape and restores as cancelled', async () => {
   });
 });
 
+test('toast coalesces the same kind and message instead of stacking', async () => {
+  await withDom('<body><div id="toast-container" class="toast-container"></div></body>', async (window) => {
+    window.requestAnimationFrame = (fn) => { fn(0); return 1; };
+    globalThis.requestAnimationFrame = window.requestAnimationFrame;
+    toast('NetworkError when attempting to fetch resource.', 'error');
+    toast('NetworkError when attempting to fetch resource.', 'error');
+    toast('Backend unreachable', 'error');
+    toast('Saved', 'success');
+    const nodes = [...document.querySelectorAll('.toast')];
+    assert.equal(nodes.length, 3);
+    assert.equal(nodes.filter((n) => n.classList.contains('toast-error')).length, 2);
+    assert.equal(nodes.filter((n) => n.classList.contains('toast-success')).length, 1);
+  });
+});
+
 test('toast stays visible while hovered, then dismisses after remaining timeout', async () => {
   await withDom('<body><div id="toast-container" class="toast-container"></div></body>', async (window) => {
     const originalSetTimeout = window.setTimeout;

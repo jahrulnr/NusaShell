@@ -23,7 +23,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `memory` | long-term memory dispatcher; `op` selects: `search`, `get`, `list` (retrievable records only; profile docs are `file_*` on `{dataDir}/memory/user.md` and `soul.md`) |
 | `memory_project` | per-workspace project memory dispatcher (listed only with a workspace); `op` selects: `query` (AND selectors), `list`, `read`, `admit` (upsert + lint), `skip` (negative admission, no write), `archive`, `lint`. User prefs stay in `memory`. See `docs(op="read", id="memory-project")` |
 | `docs` | product documentation dispatcher; `op` selects: `list {limit?}` (page ids/titles for vocabulary discovery), `search {query,limit?}` (BM25-ranked page ids/titles/snippets; multi-word terms need not be contiguous), and `read {id}` (full authoritative page). Use `list` when terminology is uncertain or search returns zero; after any search hit, `read` the relevant page before relying on its facts. Long `read` pages are truncated in-band (~32KiB) with `overflow_path` — continue via `file_read` |
-| `todo` | manage the conversation task checklist. Two modes: `replace` (default) full-replaces the list (an empty items array clears it); `patch` merges by ID — updates status/content of existing items, appends new ones, keeps untouched items unchanged. In `replace`, `content` may be omitted for an existing ID and its stored description is preserved; a new ID still requires non-empty `content`. In `patch`, `content` is optional for existing items and an empty value means keep the stored description. Use `patch` to update a single item without re-emitting the full list. Item IDs are shown in the hydrated checklist so statuses can be patched after compaction. Max 50 items, 500 chars each; prefer exactly one `in_progress` at a time. The optional `brief` argument is a living planning document (max ~10k tokens) with required markdown sections `## Objective` and `## Done when`, plus optional `## Findings` and `## Approach` that grow as the task progresses. It stays available through conversation history and is re-injected with the fresh hydration checkpoint immediately after the compacted handover user (the epoch anchor), before retained assistant rounds. The brief is mirrored to a plan file on disk; the result returns `plan_path` (absolute) — `file_read` it to re-read the latest brief, and hand it to ACP subagents. Set `clear_brief: true` to delete the brief and its plan file (items untouched); an empty `brief` string alone never clears. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
+| `todo` | manage the conversation task checklist. Modes: `new` (default) full-replaces the list (empty items clears it; every item needs `content`); `add` appends new items (`content` required; existing ids are rejected); `replace` updates status/content of existing items only (omit `content` to keep the stored description; unknown ids are rejected — use `add`); `delete` removes items by id (`status`/`content` ignored). Prefer add/replace/delete after the list exists. Item IDs are shown in the hydrated checklist so statuses can be replaced after compaction. Max 50 items, 500 chars each; prefer exactly one `in_progress` at a time. The optional `brief` argument is a living planning document (max ~10k tokens) with required markdown sections `## Objective` and `## Done when`, plus optional `## Findings` and `## Approach` that grow as the task progresses. It stays available through conversation history and is re-injected with the fresh hydration checkpoint immediately after the compacted handover user (the epoch anchor), before retained assistant rounds. The brief is mirrored to a plan file under the data directory (`conversations/<conv_id>/plan.md`); the result returns `plan_path` (absolute) — `file_read` it to re-read the latest brief, and hand it to ACP subagents. Set `clear_brief: true` to delete the brief and its plan file (items untouched); an empty `brief` string alone never clears. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
 | `ask_question` | block for a structured user decision; use only when progress genuinely requires a choice or approval. This is the only way to pause the todo-driven auto-continue chain for a user answer — a plain-text question in the reply does not pause it. Set `multi_select=true` whenever more than one option could fit (preferences, scope, priorities) so the user can pick several; the user can also add free text as a note/suggestion alongside the chosen options (when `allow_free_text=true`) |
 | `mcp_list` | list all plugins (MCP servers) with runtime state: every plugin appears, running or idle |
 | `tool_list` | list ALL tools of a running MCP server (no query); accepts plugin id only; returns compact entries (ref, name, server, description) without parameter schemas — load the full schema with `tool_schema` when needed; call after `mcp_enable` to discover tools |
@@ -52,6 +52,23 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `subagent_stop` | cancel a live ACP run (pending permissions fail closed) |
 | `subagent_wait` | wait for an async ACP run to finish |
 | `delegate` | spawn one internal NusaShell background agent: the same engine, headless, in a hidden pipeline room, with the standard toolbox (no `subagent`/`delegate`, no permission prompts). It does not receive this conversation's history — pass a compact brief with absolute paths. The model comes from Settings → Agent → Internal delegate model; empty inherits the parent conversation's active model. Always async: returns a run id immediately; the tool call stays `running` until the delegate finishes, then a synthetic `delegate_result` call carries only the terminal assistant output after all tool rounds. The same ACP-shaped dock/drawer/transcript UI is used for this run. Never listed for the delegate agent itself (no recursion) |
+
+### Learner `learn()` (background agent only)
+
+The conversation agent never sees this tool. The background learner keeps the
+full conversation toolbox and commits catalog records with `learn()`, the
+same way compaction commits a handoff with `summary()`.
+
+Good examples:
+
+    learn(stage_reached="consolidate", consolidate={"action":"no_op","reason_for_no_op":"one-off factual question"})
+    learn(stage_reached="consolidate", consolidate={"action":"write","entry":{"type":"preference","content":"Prefers Go over Python for CLI tools because of static binaries","evidence":"pakai Go aja untuk CLI"}})
+
+Bad examples:
+
+    {"stage_reached":"consolidate","consolidate":{"action":"no_op"}}  # assistant text, not a tool call
+    memory(op="save", body="prefers Go")  # memory is read-only; catalog writes go through learn()
+    learn()  # missing stage_reached and consolidate
 
 ### Documentation discovery and search
 
@@ -239,6 +256,24 @@ Use the skill catalog before repeating a `skill(op="list")` call. If the
 user says skills or plugin state changed, refresh with `skill(op="search")` or
 `mcp_list`. The built-in tool catalog always comes from `tools[]`. The MCP schemas and refs come from `mcp_search`.
 
+## Todo modes
+
+`new` creates or resets the whole list. After that, update with `replace`,
+append with `add`, and remove with `delete`. Do not send `mode=patch`.
+
+Good examples:
+
+    todo(mode="new", items=[{"id":"map-pipeline","content":"Map the learning pipeline","status":"in_progress"}], brief="## Objective\n...\n\n## Done when\n...")
+    todo(mode="add", items=[{"id":"cleanup-learned-skills","content":"Delete learned junk skills","status":"pending"}])
+    todo(mode="replace", items=[{"id":"map-pipeline","status":"completed"}])
+    todo(mode="delete", items=[{"id":"cleanup-learned-skills"}])
+
+Bad examples:
+
+    todo(mode="replace", items=[{"id":"cleanup-learned-skills","status":"completed"}])  # unknown id — use add
+    todo(mode="add", items=[{"id":"map-pipeline","status":"completed"}])  # missing content; existing id — use replace
+    todo(mode="patch", items=[{"id":"1","status":"completed"}])  # retired mode
+
 ## Todo brief quality
 
 The brief is the task's working note and the plan file ACP subagents read.
@@ -253,7 +288,7 @@ Constraint: `brief: ""` must keep meaning "no change" (KISS, no silent break).
 
 ## Done when
 - `todo(clear_brief=true)` empties the brief and deletes the plan file
-- `todo(brief="")` in patch mode leaves the brief untouched
+- `todo(brief="")` in replace mode leaves the brief untouched
 - go test ./infrastructure/jsonstore/... ./infrastructure/tools/... passes
 
 ## Findings
@@ -354,8 +389,10 @@ differentiated by their args `type` and result text:
 - `type: "peer_message"`: a message received from another conversation room via `conversation(op="send")`.
   Args carry `from` (sender conversation ID). Result text carries the quoted message and reply instructions.
 - `type: "task_memory"`: structured records relevant to this conversation are
-  new or updated. Args carry `hits` with snippet contents. Use them for the
-  current task; retrieve full records with `memory(op="search")` or
+  new or updated. Relevance is alphabetic word overlap (`[a-zA-Z]+`) between
+  the room title/workspace name and the record — punctuation, digits, and
+  emoji are ignored. Args carry `hits` with snippet contents. Use them for
+  the current task; retrieve full records with `memory(op="search")` or
   `memory(op="get")`. A record is announced once per conversation.
 
 Notices published while a conversation has no active turn queue on disk (the

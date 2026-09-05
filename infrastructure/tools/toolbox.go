@@ -193,7 +193,7 @@ func containsString(s []string, v string) bool {
 
 func (t *Toolbox) ListTools() []application.ToolInfo {
 	tools := []application.ToolInfo{
-		{Name: "todo", Description: "Manage the conversation task checklist. Two modes: `replace` (default, full-replace — empty items clears the list) and `patch` (merge by ID — update status/content of existing items, add new items, keep untouched items unchanged). In replace mode, `content` may be omitted for an existing ID (the stored description is preserved), while a new ID requires non-empty content. Use `patch` to update a single item's status without re-emitting the full list (saves tokens). In patch mode, `content` may be empty (meaning \"don't change content, only update status\"). The user can delete items from the UI — treat deleted items as gone and do not re-add them. The optional `brief` argument is a living markdown plan — required sections `## Objective` (user intent) and `## Done when` (acceptance criteria), plus optional `## Findings` and `## Approach` that grow as the task progresses — that survives compaction and is re-injected via hydration (the current checkpoint is reused until compaction, not re-injected each turn); update it as findings emerge and never drift from the Objective. The brief is mirrored to a plan file — the result returns `plan_path` (absolute); `file_read` it to re-read the brief and hand it to subagents that need the plan. Set `clear_brief: true` to delete the brief and its plan file (items are untouched unless you also clear them); an empty `brief` alone never clears.", InputSchema: obj("object", props("items", arrObj("Todo items (max 50). In replace mode: full list. In patch mode: only items to update/add.", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars). In replace mode optional for an existing ID (preserved from storage); required for a new ID. In patch mode optional for an existing ID (empty = keep existing)."), "status", strEnum("Item status; prefer exactly one in_progress at a time", "pending", "in_progress", "completed")), "id", "status"), "mode", strEnum("Update mode: replace (default, full-replace) or patch (merge by ID)", "replace", "patch"), "brief", str("Living planning document. Required sections: `## Objective` (user intent in their words), `## Done when` (acceptance criteria); optional, grows over time: `## Findings` (paths, line numbers), `## Approach` (key steps). Max ~10000 tokens."), "clear_brief", obj("boolean", nil)), "items")},
+		{Name: "todo", Description: "Manage the conversation task checklist. Modes: `new` (default, full-replace the list; empty items clears it; every item needs content), `add` (append new items; content required; existing ids are rejected), `replace` (update status/content of existing items only; omit content to keep the stored description; unknown ids are rejected), `delete` (remove items by id; status/content ignored). Prefer add/replace/delete after the list exists (saves tokens). The user can delete items from the UI — treat deleted items as gone and do not re-add them. The optional `brief` argument is a living markdown plan — required sections `## Objective` (user intent) and `## Done when` (acceptance criteria), plus optional `## Findings` and `## Approach` that grow as the task progresses — that survives compaction and is re-injected via hydration (the current checkpoint is reused until compaction, not re-injected each turn); update it as findings emerge and never drift from the Objective. The brief is mirrored to a plan file under the data directory — the result returns `plan_path` (absolute); `file_read` it to re-read the brief and hand it to subagents that need the plan. Set `clear_brief: true` to delete the brief and its plan file (items are untouched unless you also clear them); an empty `brief` alone never clears.", InputSchema: obj("object", props("items", arrObj("Todo items (max 50). new: full list. add: items to append. replace: items to update. delete: ids to remove.", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars). Required for new/add. Optional for replace (empty keeps stored text). Ignored for delete."), "status", strEnum("Item status; prefer exactly one in_progress at a time. Required for replace. Defaults to pending for new/add. Ignored for delete.", "pending", "in_progress", "completed")), "id"), "mode", strEnum("new (default, full list), add (append), replace (update existing), delete (remove by id)", "new", "add", "replace", "delete"), "brief", str("Living planning document. Required sections: `## Objective` (user intent in their words), `## Done when` (acceptance criteria); optional, grows over time: `## Findings` (paths, line numbers), `## Approach` (key steps). Max ~10000 tokens."), "clear_brief", obj("boolean", nil)), "items")},
 		{Name: "ask_question", Description: "Pause and ask the user a structured clarifying question before continuing. Use only for genuine decisions the user must make — not things you can figure out yourself. A plain-text reply does not pause auto-continue; only this tool does. Set multi_select=true when more than one option could fit (preferences, scope, priorities); the user can also add free text (when allow_free_text=true) or answer purely with text. The turn blocks until the user answers or cancels.", InputSchema: obj("object", props("question", str("The question to show the user"), "options", arrObj("Selectable choices (1-8). Mark one default when possible.", props("id", str("Stable option id"), "label", str("Short option label"), "description", str("Optional one-line explanation"), "default", obj("boolean", nil), "icon", str("Optional emoji or short icon glyph"), "image", str("Optional image URL or compact data URI")), "id", "label"), "allow_free_text", obj("boolean", nil), "multi_select", obj("boolean", nil)), "question", "options")},
 		{Name: "wait_until", Description: "Explain or create a durable wait_until step. Waiting never keeps a runner occupied.", InputSchema: obj("object", props("at", str("RFC3339 time")), "at")},
 		{Name: "sleep", Description: "Pause for the given number of seconds (max 300). Use for retry backoff or to wait between polls of an async automation(op=run). Does not consume a provider round — the turn resumes after the pause.", InputSchema: obj("object", props("seconds", intSchema("Seconds to sleep (1-300)")), "seconds")},
@@ -1587,15 +1587,26 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 		return "", err
 	}
 	mode := strings.TrimSpace(args.Mode)
-	patchMode := mode == "patch"
+	if mode == "" {
+		mode = "new"
+	}
+	switch mode {
+	case "patch":
+		return "", fmt.Errorf("unknown todo mode %q; use new (full list), add (append), replace (update existing), or delete", mode)
+	case "new", "add", "replace", "delete":
+	default:
+		return "", fmt.Errorf("unknown todo mode %q; use new, add, replace, or delete", mode)
+	}
+	if (mode == "add" || mode == "replace" || mode == "delete") && len(rawItems) == 0 {
+		return "", fmt.Errorf("%s requires at least one item", mode)
+	}
+	existing := t.Todos.Get(conversationID)
+	existingByID := make(map[string]domain.TodoItem, len(existing))
+	for _, item := range existing {
+		existingByID[item.ID] = item
+	}
 	items := make([]domain.TodoItem, 0, len(rawItems))
 	seenIDs := make(map[string]bool, len(rawItems))
-	existingContentByID := make(map[string]string)
-	if !patchMode {
-		for _, existing := range t.Todos.Get(conversationID) {
-			existingContentByID[existing.ID] = existing.Content
-		}
-	}
 	for _, raw := range rawItems {
 		id := strings.TrimSpace(raw.ID)
 		content := strings.TrimSpace(raw.Content)
@@ -1607,41 +1618,71 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 			return "", fmt.Errorf("duplicate item id: %s", id)
 		}
 		seenIDs[id] = true
-		// In replace mode, content may be omitted for an existing ID. Preserve
-		// the stored description so status-only updates do not spend tokens
-		// re-emitting the full checklist. A new item still needs content
-		// because there is nothing to preserve.
-		if !patchMode && content == "" {
-			if existingContent, ok := existingContentByID[id]; ok {
-				content = existingContent
-			} else {
-				return "", fmt.Errorf("each item requires non-empty content")
+		stored, exists := existingByID[id]
+		switch mode {
+		case "new":
+			if content == "" {
+				return "", fmt.Errorf("item %q requires non-empty content", id)
+			}
+			if status == "" {
+				status = domain.TodoPending
+			}
+		case "add":
+			if exists {
+				return "", fmt.Errorf("item %q already exists; use replace to update it", id)
+			}
+			if content == "" {
+				return "", fmt.Errorf("item %q requires non-empty content", id)
+			}
+			if status == "" {
+				status = domain.TodoPending
+			}
+		case "replace":
+			if !exists {
+				return "", fmt.Errorf("unknown item id %q; use add to create it", id)
+			}
+			if content == "" {
+				content = stored.Content
+			}
+			if status == "" {
+				return "", fmt.Errorf("item %q requires status", id)
+			}
+		case "delete":
+			if !exists {
+				return "", fmt.Errorf("unknown item id %q", id)
 			}
 		}
-		// In patch mode, an empty content means "don't change content, only
-		// update status" for an existing ID.
-		if content != "" && len(content) > todoMaxContentChars {
-			return "", fmt.Errorf("item content exceeds %d chars", todoMaxContentChars)
-		}
-		if !domain.IsValidTodoStatus(status) {
-			return "", fmt.Errorf("item status must be pending, in_progress, or completed")
+		if mode != "delete" {
+			if content != "" && len(content) > todoMaxContentChars {
+				return "", fmt.Errorf("item content exceeds %d chars", todoMaxContentChars)
+			}
+			if !domain.IsValidTodoStatus(status) {
+				return "", fmt.Errorf("item status must be pending, in_progress, or completed")
+			}
 		}
 		items = append(items, domain.TodoItem{ID: id, Content: content, Status: status})
 	}
-	if patchMode {
+	switch mode {
+	case "new":
+		if itemsPresent {
+			t.Todos.Set(conversationID, items)
+		}
+	case "add", "replace":
 		t.Todos.Patch(conversationID, items)
-	} else if itemsPresent {
-		// Replace mode only rewrites the list when the `items` key is
-		// present. An omitted `items` key leaves the existing list alone
-		// (so `{"clear_brief": true}` never wipes the checklist); an
-		// explicit `items: []` clears it.
-		t.Todos.Set(conversationID, items)
+	case "delete":
+		remaining := make([]domain.TodoItem, 0, len(existing)-len(items))
+		for _, item := range existing {
+			if !seenIDs[item.ID] {
+				remaining = append(remaining, item)
+			}
+		}
+		t.Todos.Set(conversationID, remaining)
 	}
 	if args.ClearBrief {
 		// Explicit clear: remove the brief and its mirrored plan file.
-		// Items are untouched (clear them separately with items: [] in
-		// replace mode). An empty `brief` arg alone never clears — it
-		// means "don't change the brief" so status patches are safe.
+		// Items are untouched (clear them separately with mode=new and
+		// items: []). An empty `brief` arg alone never clears — it
+		// means "don't change the brief" so status replaces are safe.
 		if err := t.Todos.ClearBrief(conversationID); err != nil {
 			return "", fmt.Errorf("clear brief: %w", err)
 		}
@@ -1654,14 +1695,7 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 	// Echoing wastes tokens (the brief alone can be ~10k tokens). The
 	// plan_path points at the mirrored plan file (always current) so the
 	// agent or an ACP subagent can file_read it later.
-	var summary domain.TodoSummary
-	if patchMode || !itemsPresent {
-		// Patch merged into the stored list, or replace mode left the
-		// list untouched (items key omitted) — summarize what's stored.
-		summary = domain.SummarizeTodos(t.Todos.Get(conversationID))
-	} else {
-		summary = domain.SummarizeTodos(items)
-	}
+	summary := domain.SummarizeTodos(t.Todos.Get(conversationID))
 	meta := map[string]any{
 		"ok":           true,
 		"conversation": conversationID,

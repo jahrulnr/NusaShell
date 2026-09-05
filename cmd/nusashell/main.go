@@ -157,17 +157,9 @@ func run() error {
 	bus := application.NewBus()
 	askService := application.NewAskQuestionService()
 	// The todo store mirrors each conversation's planning brief to a
-	// markdown plan file (Cursor-style) so the agent and ACP subagents can
-	// file_read it. Workspace resolution goes through the conversation
-	// store: workspace-rooted conversations mirror into
-	// <workspace>/.nusashell/plans/, the rest fall back to the data dir.
-	todoStore := jsonstore.NewTodoStore(filepath.Join(dataDir, "conversations", "todos.json"), dataDir, func(conversationID string) string {
-		conv, err := store.Get(conversationID)
-		if err != nil || conv == nil {
-			return ""
-		}
-		return conv.Workspace
-	})
+	// markdown plan file under the data directory so the agent and ACP
+	// subagents can file_read it without writing into the user workspace.
+	todoStore := jsonstore.NewTodoStore(filepath.Join(dataDir, "conversations", "todos.json"), dataDir)
 	providerStore := &jsonstore.Providers{S: store}
 	searcher := searchwire.New(tools.SearchwireConfigFromProviders(providerStore, credentials))
 	// Seed builtin skills from the embedded resources/agent/skills/ tree
@@ -212,6 +204,9 @@ func run() error {
 		slog.Warn("attachment store init failed", "error", err)
 	}
 	// Memory: always-injected user.md + soul.md, structured records under growth/.
+	if err := memorystore.SeedProfileDocs(dataDir); err != nil {
+		slog.Warn("profile memory template seed failed", "error", err)
+	}
 	userStore, err := memorystore.NewUser(dataDir)
 	if err != nil {
 		slog.Warn("user memory init failed", "error", err)

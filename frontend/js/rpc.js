@@ -30,6 +30,14 @@ function toError(res) {
   return null;
 }
 
+function rpcUnavailableError(method, cause) {
+  const err = new Error('Backend unreachable');
+  err.code = 'unavailable';
+  err.method = method;
+  err.cause = cause;
+  return err;
+}
+
 export async function rpc(method, payload = {}, { timeoutMs = 60000 } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -43,7 +51,7 @@ export async function rpc(method, payload = {}, { timeoutMs = 60000 } = {}) {
     });
   } catch (err) {
     if (err?.name === 'AbortError') throw new Error(`RPC timed out: ${method}`);
-    throw err;
+    throw rpcUnavailableError(method, err);
   } finally {
     clearTimeout(timeout);
   }

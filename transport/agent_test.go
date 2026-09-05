@@ -1934,7 +1934,7 @@ func TestAgentTurnRetryAfterAutoContinueRateLimit(t *testing.T) {
 	// The harness does not wire a todo store; without open todos the
 	// auto-continue chain never starts. Wire one and leave a todo open so
 	// turn 0 chains into turn 1.
-	h.app.Todos = jsonstore.NewTodoStore(filepath.Join(t.TempDir(), "todos.json"), t.TempDir(), nil)
+	h.app.Todos = jsonstore.NewTodoStore(filepath.Join(t.TempDir(), "todos.json"), t.TempDir())
 	h.app.Todos.Set(convID, []domain.TodoItem{{ID: "t1", Content: "keep working", Status: domain.TodoInProgress}})
 
 	// Turn 0 completes normally; the auto-continue turn 1 hits 429 on the

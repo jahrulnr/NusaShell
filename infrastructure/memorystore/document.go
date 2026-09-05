@@ -1,7 +1,9 @@
 // Package memorystore persists the two always-injected
 // documents: memory/user.md (About You) and memory/soul.md (About Agent).
 // Structured MemoryRecords live in jsonstore growth JSONL, not here.
-// Both adapters auto-create their files on first use. Agents write the
+// Both adapters auto-create their files on first use by copying the
+// embedded resources/templates/{user,soul}.md scaffolds when the file
+// is missing. Existing files are never overwritten. Agents write the
 // files with file_*; Learning UI uses Update/Replace.
 package memorystore
 
@@ -18,6 +20,7 @@ import (
 
 	"nusashell/domain"
 	clock "nusashell/pkg/time"
+	"nusashell/resources"
 )
 
 // ---- Document stores (user.md / soul.md) ----
@@ -71,8 +74,8 @@ type Document struct {
 }
 
 // newDocument opens (or auto-creates) a doc store at path with the given
-// token cap and loads its body into memory. The file is created empty with
-// YAML frontmatter if it does not exist.
+// token cap and loads its body into memory. A missing file is copied from
+// the embedded template with YAML frontmatter.
 func newDocument(path, kind string, tokenCap int) (*Document, error) {
 	d := &Document{path: path, cap: tokenCap * 4, kind: kind}
 	if err := d.load(true); err != nil {
@@ -93,9 +96,21 @@ func NewAgent(dataDir string) (*Document, error) {
 	return newDocument(filepath.Join(dataDir, SoulFile), domain.MemoryTierAgent, domain.AgentTokenCap)
 }
 
-// load reads the file from disk, creating it empty if create is true
-// and the file is missing. Safe to call repeatedly; subsequent calls
-// re-read the file so updates from other processes are picked up.
+// SeedProfileDocs copies embedded user.md and soul.md templates into
+// dataDir when those files do not already exist. Existing files are
+// left untouched, including empty ones the user (or an older install)
+// already created.
+func SeedProfileDocs(dataDir string) error {
+	if err := seedDocFile(filepath.Join(dataDir, UserFile), domain.MemoryTierUser); err != nil {
+		return err
+	}
+	return seedDocFile(filepath.Join(dataDir, SoulFile), domain.MemoryTierAgent)
+}
+
+// load reads the file from disk, creating it from the embedded template
+// if create is true and the file is missing. Safe to call repeatedly;
+// subsequent calls re-read the file so updates from other processes
+// are picked up.
 func (d *Document) load(create bool) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -104,15 +119,13 @@ func (d *Document) load(create bool) error {
 		if !create || !os.IsNotExist(err) {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(d.path), 0o755); err != nil {
+		if err := seedDocFile(d.path, d.kind); err != nil {
 			return err
 		}
-		if err := os.WriteFile(d.path, []byte(emptyDocFile()), 0o644); err != nil {
+		raw, err = os.ReadFile(d.path)
+		if err != nil {
 			return err
 		}
-		d.entry = domain.DocumentEntry{}
-		d.loaded = true
-		return nil
 	}
 	entry, err := parseDoc(string(raw), d.kind)
 	if err != nil {
@@ -196,26 +209,40 @@ func (d *Document) Replace(oldText, content string) error {
 // so the file reads as clean writing when opened by hand. Caller must
 // hold d.mu.
 func (d *Document) writeFile() error {
-	fm := docFrontmatter{
-		LastUpdated: clock.NewTime().RFC3339(),
-		Version:     DocVersion,
-	}
-	fmBytes, _ := yaml.Marshal(fm)
-	var b strings.Builder
-	b.WriteString("---\n")
-	b.Write(fmBytes)
-	b.WriteString("---\n\n")
-	b.WriteString(d.entry.Content)
-	if d.entry.Content != "" && !strings.HasSuffix(d.entry.Content, "\n") {
-		b.WriteString("\n")
-	}
-	return os.WriteFile(d.path, []byte(b.String()), 0o644)
+	return os.WriteFile(d.path, []byte(wrapFrontmatter(d.entry.Content)), 0o644)
 }
 
-// emptyDocFile returns the content written when a document file is
-// auto-created: YAML frontmatter with the current timestamp + version,
-// followed by an empty body.
-func emptyDocFile() string {
+func templateFile(kind string) string {
+	switch kind {
+	case domain.MemoryTierUser:
+		return "user.md"
+	case domain.MemoryTierAgent:
+		return "soul.md"
+	default:
+		return ""
+	}
+}
+
+// seedDocFile copies the embedded template for kind to path when the
+// file does not exist. It wraps the template body with current
+// frontmatter so last_updated is the first-install time. If the
+// template is missing, it writes an empty document with frontmatter.
+func seedDocFile(path, kind string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	body := strings.TrimSpace(resources.Template(templateFile(kind)))
+	return os.WriteFile(path, []byte(wrapFrontmatter(body)), 0o644)
+}
+
+// wrapFrontmatter returns YAML frontmatter (last_updated + version)
+// followed by the document body.
+func wrapFrontmatter(body string) string {
 	fm := docFrontmatter{
 		LastUpdated: clock.NewTime().RFC3339(),
 		Version:     DocVersion,
@@ -225,6 +252,10 @@ func emptyDocFile() string {
 	b.WriteString("---\n")
 	b.Write(fmBytes)
 	b.WriteString("---\n\n")
+	b.WriteString(body)
+	if body != "" && !strings.HasSuffix(body, "\n") {
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 

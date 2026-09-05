@@ -1,7 +1,7 @@
-// Package resources embeds static agent resources (prompts, docs, skills)
-// from the resources/ tree so they ship inside the binary and stay editable
-// as plain markdown files. Mirrors NusaShell Electron's resources/agent/
-// layout.
+// Package resources embeds static agent resources (prompts, docs, skills,
+// and first-install profile templates) from the resources/ tree so they
+// ship inside the binary and stay editable as plain markdown files.
+// Mirrors NusaShell Electron's resources/agent/ layout.
 package resources
 
 import (
@@ -35,6 +35,13 @@ var BuiltinSkillsFS embed.FS
 //go:embed sounds/*.wav
 var SoundsFS embed.FS
 
+// TemplatesFS embeds first-install profile documents from
+// resources/templates/. On boot, missing memory/user.md and
+// memory/soul.md are copied from here into the data directory.
+//
+//go:embed templates/*.md
+var TemplatesFS embed.FS
+
 // SoundAssets returns the embedded sounds filesystem rooted at the
 // sounds/ directory. Callers use fs.Sub to serve files at /sounds/.
 func SoundAssets() (fs.FS, error) {
@@ -49,6 +56,20 @@ func Prompt(name string) string {
 		name += ".md"
 	}
 	data, err := PromptsFS.ReadFile("agent/prompts/" + name)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// Template returns the content of a named first-install template file
+// (e.g. "user.md", "soul.md") from resources/templates/. The .md
+// extension is appended when the caller omits it.
+func Template(name string) string {
+	if len(name) < 3 || name[len(name)-3:] != ".md" {
+		name += ".md"
+	}
+	data, err := TemplatesFS.ReadFile("templates/" + name)
 	if err != nil {
 		return ""
 	}

@@ -24,8 +24,11 @@ func TestAgentAutoCreates(t *testing.T) {
 		t.Fatalf("soul.md not auto-created: %v", err)
 	}
 	mem := a.Load()
-	if len(mem.Entries) != 1 || mem.Entries[0].Content != "" {
-		t.Errorf("new agent document should be empty, got %+v", mem)
+	if len(mem.Entries) != 1 {
+		t.Fatalf("new agent document should have 1 entry, got %+v", mem)
+	}
+	if !strings.Contains(mem.Entries[0].Content, "# About Agent") {
+		t.Errorf("new agent document should be seeded from template, got %+v", mem)
 	}
 	if !strings.HasPrefix(a.Path(), path) {
 		t.Errorf("Path = %q, want under %q", a.Path(), path)
@@ -75,8 +78,11 @@ func TestUserAutoCreates(t *testing.T) {
 		t.Fatalf("user.md not auto-created: %v", err)
 	}
 	mem := p.Load()
-	if len(mem.Entries) != 1 || mem.Entries[0].Content != "" {
-		t.Errorf("new user document should be empty, got %+v", mem)
+	if len(mem.Entries) != 1 {
+		t.Fatalf("new user document should have 1 entry, got %+v", mem)
+	}
+	if !strings.Contains(mem.Entries[0].Content, "# Overview") {
+		t.Errorf("new user document should be seeded from template, got %+v", mem)
 	}
 }
 
@@ -192,8 +198,54 @@ func TestUserAutoCreateHasYAMLFrontmatter(t *testing.T) {
 		t.Errorf("frontmatter version should be %d", DocVersion)
 	}
 	mem := p.Load()
-	if len(mem.Entries) != 1 || mem.Entries[0].Content != "" {
-		t.Errorf("auto-created user document should be empty, got %+v", mem)
+	if len(mem.Entries) != 1 {
+		t.Fatalf("auto-created user document should have 1 entry, got %+v", mem)
+	}
+	if !strings.Contains(mem.Entries[0].Content, "# Overview") {
+		t.Errorf("auto-created user document should keep template body, got %+v", mem)
+	}
+}
+
+func TestSeedProfileDocsDoesNotOverwriteExisting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, UserFile)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const existing = "already written by the user\n"
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SeedProfileDocs(dir); err != nil {
+		t.Fatalf("SeedProfileDocs: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != existing {
+		t.Errorf("existing user.md must not be overwritten, got %q", raw)
+	}
+}
+
+func TestSeedProfileDocsCopiesMissingFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := SeedProfileDocs(dir); err != nil {
+		t.Fatalf("SeedProfileDocs: %v", err)
+	}
+	userRaw, err := os.ReadFile(filepath.Join(dir, UserFile))
+	if err != nil {
+		t.Fatalf("user.md missing after seed: %v", err)
+	}
+	soulRaw, err := os.ReadFile(filepath.Join(dir, SoulFile))
+	if err != nil {
+		t.Fatalf("soul.md missing after seed: %v", err)
+	}
+	if !strings.Contains(string(userRaw), "# Overview") {
+		t.Errorf("seeded user.md missing template body, got:\n%s", userRaw)
+	}
+	if !strings.Contains(string(soulRaw), "# About Agent") {
+		t.Errorf("seeded soul.md missing template body, got:\n%s", soulRaw)
 	}
 }
 

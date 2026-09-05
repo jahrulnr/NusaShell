@@ -17,34 +17,26 @@ import (
 // Legacy `goal` field in persisted JSON is transparently read into Brief.
 //
 // The brief is mirrored to a markdown plan file so the agent (and ACP
-// subagents) can file_read it. The mirror path is resolved per conversation:
-//   - With workspace: <workspace>/.nusashell/plans/<conversation_id>.plan.md
-//   - Without workspace: <datadir>/conversations/<conversation_id>/plan.md
+// subagents) can file_read it. The mirror always lives in the data
+// directory, never the user workspace:
+//
+//	<datadir>/conversations/<conversation_id>/plan.md
 type TodoStore struct {
 	mu    sync.RWMutex
 	path  string
 	store map[string]domain.ConversationTodos
-	// dataDir is the NusaShell data directory, used as the fallback plan
-	// file location when a conversation has no workspace.
+	// dataDir is the NusaShell data directory, used for the plan file.
 	dataDir string
-	// workspaceFor resolves the absolute workspace path for a conversation
-	// ID. Returns "" when the conversation has no workspace. Injected by
-	// the composition root; nil disables workspace-based plan paths.
-	workspaceFor func(conversationID string) string
 }
 
 // NewTodoStore opens or creates the todo store at path. A missing or corrupt
 // file is treated as an empty store so the shell can still boot.
-// dataDir is the NusaShell data directory (fallback plan file location).
-// workspaceFor resolves the absolute workspace for a conversation ID; pass
-// nil when workspace resolution is unavailable (plan files fall back to
-// the dataDir location).
-func NewTodoStore(path, dataDir string, workspaceFor func(conversationID string) string) *TodoStore {
+// dataDir is the NusaShell data directory (plan file location).
+func NewTodoStore(path, dataDir string) *TodoStore {
 	t := &TodoStore{
-		path:         path,
-		dataDir:      dataDir,
-		workspaceFor: workspaceFor,
-		store:        make(map[string]domain.ConversationTodos),
+		path:    path,
+		dataDir: dataDir,
+		store:   make(map[string]domain.ConversationTodos),
 	}
 	t.load()
 	return t
@@ -136,16 +128,9 @@ func (t *TodoStore) PlanPath(conversationID string) string {
 }
 
 // planPathLocked resolves the plan file path for a conversation. Callers
-// must hold at least a read lock. Workspace-rooted conversations mirror to
-// <workspace>/.nusashell/plans/<id>.plan.md (inside the workspace so ACP
-// subagents sandboxed to it can read the file); conversations without a
-// workspace fall back to <datadir>/conversations/<id>/plan.md.
+// must hold at least a read lock. Plans always live under the data
+// directory so user workspaces stay free of generated .nusashell/ files.
 func (t *TodoStore) planPathLocked(conversationID string) string {
-	if t.workspaceFor != nil {
-		if ws := t.workspaceFor(conversationID); ws != "" {
-			return filepath.Join(ws, ".nusashell", "plans", conversationID+".plan.md")
-		}
-	}
 	if t.dataDir == "" {
 		return ""
 	}
@@ -204,7 +189,7 @@ func (t *TodoStore) Clear(conversationID string) {
 // Patch merges items by ID into the existing list. Items with an existing
 // ID update their status (always) and content (only when non-empty). Items
 // with a new ID are appended. Items not in the patch are kept unchanged.
-// This is the backend for the todo tool's mode:"patch".
+// This is the backend for the todo tool's add and replace modes.
 func (t *TodoStore) Patch(conversationID string, patches []domain.TodoItem) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

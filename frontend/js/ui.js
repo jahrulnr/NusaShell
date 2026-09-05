@@ -43,7 +43,24 @@ export function timeAgo(iso) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+const activeToasts = new Map();
+
+function toastKey(message, kind) {
+  return `${kind}\0${String(message ?? '')}`;
+}
+
+function toastIsLive(node) {
+  return Boolean(node) && (node.isConnected || document.contains(node));
+}
+
 export function toast(message, kind = 'info', timeout = 4000) {
+  const key = toastKey(message, kind);
+  const existing = activeToasts.get(key);
+  if (existing && toastIsLive(existing.node)) {
+    existing.restart(timeout);
+    return existing.remove;
+  }
+
   const container = document.getElementById('toast-container');
   const dismiss = el('button', { class: 'toast-dismiss', text: '×', title: 'Dismiss', 'aria-label': 'Dismiss' });
   const node = el('div', { class: `toast toast-${kind}`, role: 'status' },
@@ -56,6 +73,7 @@ export function toast(message, kind = 'info', timeout = 4000) {
   let remaining = timeout;
   let startedAt = Date.now();
   const remove = () => {
+    if (activeToasts.get(key)?.node === node) activeToasts.delete(key);
     clearTimeout(timer);
     timer = null;
     node.classList.remove('toast-show');
@@ -66,7 +84,12 @@ export function toast(message, kind = 'info', timeout = 4000) {
     startedAt = Date.now();
     timer = setTimeout(remove, Math.max(0, remaining));
   };
+  const restart = (nextTimeout = timeout) => {
+    remaining = nextTimeout;
+    arm();
+  };
   arm();
+  activeToasts.set(key, { node, remove, restart });
   node.addEventListener('mouseenter', () => {
     if (timer == null) return;
     clearTimeout(timer);

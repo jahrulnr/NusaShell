@@ -139,12 +139,15 @@ func TestToolFactoryAutomationAgentOmitsACPTools(t *testing.T) {
 	}
 }
 
-func TestToolFactoryLearningAgentsMatchConversationTools(t *testing.T) {
+func TestToolFactoryLearningAgentsKeepConversationToolsPlusLearn(t *testing.T) {
 	f := &ToolFactory{
 		Toolbox:     func() []ToolInfo { return factoryStubTools() },
 		Dispatchers: FilterDispatcherToolInfos,
 	}
 	conversation := f.Get(AgentConversation, "/ws")
+	if hasTool(conversation, learnerResultToolName) {
+		t.Fatalf("conversation agent must not advertise %s, got %v", learnerResultToolName, namesOf(conversation))
+	}
 	for _, kind := range []AgentKind{
 		AgentLearner,
 		AgentMemoryConsolidator,
@@ -152,8 +155,13 @@ func TestToolFactoryLearningAgentsMatchConversationTools(t *testing.T) {
 		AgentSkillEvaluator,
 	} {
 		got := f.Get(kind, "/ws")
-		if !reflect.DeepEqual(got, conversation) {
-			t.Fatalf("%s toolset differs from conversation agent:\nconversation=%v\nlearning=%v", kind, namesOf(conversation), namesOf(got))
+		if !hasTool(got, learnerResultToolName) {
+			t.Fatalf("%s missing %s in %v", kind, learnerResultToolName, namesOf(got))
+		}
+		for _, want := range namesOf(conversation) {
+			if !hasTool(got, want) {
+				t.Fatalf("%s missing conversation tool %q in %v", kind, want, namesOf(got))
+			}
 		}
 	}
 	for _, want := range []string{
@@ -164,8 +172,13 @@ func TestToolFactoryLearningAgentsMatchConversationTools(t *testing.T) {
 			t.Fatalf("conversation fixture missing full-tool assertion %q in %v", want, namesOf(conversation))
 		}
 	}
-	if got, want := namesOf(f.Get(AgentMemoryConsolidator, "")), namesOf(f.Get(AgentConversation, "")); !reflect.DeepEqual(got, want) {
-		t.Fatalf("learning workspace gating differs from conversation:\nconversation=%v\nlearning=%v", want, got)
+	learningNoWS := f.Get(AgentMemoryConsolidator, "")
+	conversationNoWS := f.Get(AgentConversation, "")
+	if hasTool(conversationNoWS, "memory_project") || hasTool(learningNoWS, "memory_project") {
+		t.Fatal("memory_project must stay hidden without a workspace")
+	}
+	if !hasTool(learningNoWS, learnerResultToolName) {
+		t.Fatalf("learner without workspace still needs %s", learnerResultToolName)
 	}
 }
 
@@ -214,7 +227,32 @@ func TestLearningToolCallsAreNotRejectedByOldPolicy(t *testing.T) {
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("executed learning tools = %v, want %v", got, want)
 			}
+
+			learn := app.runOneTool(run, "", domain.ToolCall{
+				ID:   "call-learn",
+				Name: learnerResultToolName,
+				Args: `{"stage_reached":"consolidate","consolidate":{"action":"no_op","reason_for_no_op":"nothing durable"}}`,
+			}, ModelCapabilities{}, domain.Settings{}, 1)
+			if learn.status == domain.ToolFailed {
+				t.Fatalf("learn() was rejected: %s", learn.output)
+			}
+			if !reflect.DeepEqual(box.calls, want) {
+				t.Fatalf("learn() must not hit the conversation toolbox, calls=%v", box.calls)
+			}
 		})
+	}
+}
+
+func TestLearnerResultToolRejectedForConversationAgent(t *testing.T) {
+	app := &App{Bus: NewBus(), Toolbox: &countingToolbox{}}
+	run := &TurnRun{ID: "conv-run", ToolKind: AgentConversation, Ctx: context.Background()}
+	res := app.runOneTool(run, "", domain.ToolCall{
+		ID:   "call-learn",
+		Name: learnerResultToolName,
+		Args: `{"stage_reached":"consolidate","consolidate":{"action":"no_op","reason_for_no_op":"x"}}`,
+	}, ModelCapabilities{}, domain.Settings{}, 1)
+	if res.status != domain.ToolFailed {
+		t.Fatalf("conversation agent must not execute learn(), status=%s output=%s", res.status, res.output)
 	}
 }
 

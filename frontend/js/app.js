@@ -182,11 +182,8 @@ async function boot() {
     onStatus: setConnection,
   });
 
-  // surface backend events as toasts where useful
-  on('logs.append', (payload) => {
-    const entry = payload?.entry ?? payload;
-    if (entry?.level === 'error') toast(entry.message, 'error', 5000);
-  });
+  // Error-level log lines stay in the Logs view. Toasting them here doubled
+  // the same failure with agent.turn.error / RPC catch toasts in one workflow.
   on('learning.job.started', () => {
     toast('Learning job started.', 'info', 3500);
   });

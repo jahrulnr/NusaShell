@@ -289,8 +289,7 @@ func TestExecTodoLegacyGoalArgMapsToBrief(t *testing.T) {
 	}
 }
 
-// Patch mode: update status of existing item by ID without re-emitting full list.
-func TestExecTodoPatchUpdatesStatusByID(t *testing.T) {
+func TestExecTodoReplaceUpdatesStatusByID(t *testing.T) {
 	todoPort := &stubTodoPort{
 		items: map[string][]domain.TodoItem{"conv_1": {
 			{ID: "1", Content: "Design API", Status: domain.TodoCompleted},
@@ -301,20 +300,19 @@ func TestExecTodoPatchUpdatesStatusByID(t *testing.T) {
 	toolbox := &Toolbox{Todos: todoPort}
 	ctx := application.WithConversationID(context.Background(), "conv_1")
 
-	// Patch: mark item 2 as completed, leave others unchanged.
 	args, _ := json.Marshal(map[string]any{
-		"mode": "patch",
+		"mode": "replace",
 		"items": []map[string]any{
 			{"id": "2", "status": "completed"},
 		},
 	})
 	_, err := toolbox.execTodo(ctx, args)
 	if err != nil {
-		t.Fatalf("patch should succeed: %v", err)
+		t.Fatalf("replace should succeed: %v", err)
 	}
 	items := todoPort.Get("conv_1")
 	if len(items) != 3 {
-		t.Fatalf("patch should keep all items, got %d", len(items))
+		t.Fatalf("replace should keep all items, got %d", len(items))
 	}
 	if items[1].Status != domain.TodoCompleted {
 		t.Errorf("item 2 status should be completed, got %s", items[1].Status)
@@ -327,8 +325,7 @@ func TestExecTodoPatchUpdatesStatusByID(t *testing.T) {
 	}
 }
 
-// Patch mode: content empty = keep existing content.
-func TestExecTodoPatchEmptyContentKeepsExisting(t *testing.T) {
+func TestExecTodoReplaceEmptyContentKeepsExisting(t *testing.T) {
 	todoPort := &stubTodoPort{
 		items: map[string][]domain.TodoItem{"conv_1": {
 			{ID: "1", Content: "Original content", Status: domain.TodoPending},
@@ -338,14 +335,14 @@ func TestExecTodoPatchEmptyContentKeepsExisting(t *testing.T) {
 	ctx := application.WithConversationID(context.Background(), "conv_1")
 
 	args, _ := json.Marshal(map[string]any{
-		"mode": "patch",
+		"mode": "replace",
 		"items": []map[string]any{
 			{"id": "1", "content": "", "status": "in_progress"},
 		},
 	})
 	_, err := toolbox.execTodo(ctx, args)
 	if err != nil {
-		t.Fatalf("patch with empty content should succeed: %v", err)
+		t.Fatalf("replace with empty content should succeed: %v", err)
 	}
 	items := todoPort.Get("conv_1")
 	if items[0].Content != "Original content" {
@@ -356,8 +353,35 @@ func TestExecTodoPatchEmptyContentKeepsExisting(t *testing.T) {
 	}
 }
 
-// Patch mode: new ID = add new item.
-func TestExecTodoPatchAddsNewItem(t *testing.T) {
+func TestExecTodoReplaceRejectsUnknownID(t *testing.T) {
+	todoPort := &stubTodoPort{
+		items: map[string][]domain.TodoItem{"conv_1": {
+			{ID: "map-pipeline", Content: "Map pipeline", Status: domain.TodoCompleted},
+		}},
+	}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	args, _ := json.Marshal(map[string]any{
+		"mode": "replace",
+		"items": []map[string]any{
+			{"id": "map-pipeline", "status": "completed"},
+			{"id": "cleanup-learned-skills", "status": "completed"},
+		},
+	})
+	err := mustExecTodoError(t, toolbox, ctx, args)
+	if !strings.Contains(err.Error(), "cleanup-learned-skills") {
+		t.Fatalf("error should name the unknown id, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "add") {
+		t.Fatalf("error should point at add, got: %v", err)
+	}
+	if got := len(todoPort.Get("conv_1")); got != 1 {
+		t.Fatalf("failed replace must not mutate the list, got %d items", got)
+	}
+}
+
+func TestExecTodoAddAppendsNewItem(t *testing.T) {
 	todoPort := &stubTodoPort{
 		items: map[string][]domain.TodoItem{"conv_1": {
 			{ID: "1", Content: "Existing", Status: domain.TodoPending},
@@ -367,26 +391,140 @@ func TestExecTodoPatchAddsNewItem(t *testing.T) {
 	ctx := application.WithConversationID(context.Background(), "conv_1")
 
 	args, _ := json.Marshal(map[string]any{
-		"mode": "patch",
+		"mode": "add",
 		"items": []map[string]any{
 			{"id": "2", "content": "New item", "status": "pending"},
 		},
 	})
 	_, err := toolbox.execTodo(ctx, args)
 	if err != nil {
-		t.Fatalf("patch with new item should succeed: %v", err)
+		t.Fatalf("add should succeed: %v", err)
 	}
 	items := todoPort.Get("conv_1")
 	if len(items) != 2 {
-		t.Fatalf("should have 2 items after patch, got %d", len(items))
+		t.Fatalf("should have 2 items after add, got %d", len(items))
 	}
 	if items[1].ID != "2" || items[1].Content != "New item" {
 		t.Errorf("new item not added correctly: %+v", items[1])
 	}
 }
 
-// Patch mode: brief is preserved when not sent.
-func TestExecTodoPatchPreservesBrief(t *testing.T) {
+func TestExecTodoAddRejectsExistingID(t *testing.T) {
+	todoPort := &stubTodoPort{
+		items: map[string][]domain.TodoItem{"conv_1": {
+			{ID: "1", Content: "Existing", Status: domain.TodoPending},
+		}},
+	}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	args, _ := json.Marshal(map[string]any{
+		"mode": "add",
+		"items": []map[string]any{
+			{"id": "1", "content": "Duplicate", "status": "pending"},
+		},
+	})
+	err := mustExecTodoError(t, toolbox, ctx, args)
+	if !strings.Contains(err.Error(), `"1"`) || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("error should name the existing id, got: %v", err)
+	}
+}
+
+func TestExecTodoAddRequiresContent(t *testing.T) {
+	todoPort := &stubTodoPort{}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	args, _ := json.Marshal(map[string]any{
+		"mode":  "add",
+		"items": []map[string]any{{"id": "new", "status": "pending"}},
+	})
+	err := mustExecTodoError(t, toolbox, ctx, args)
+	if !strings.Contains(err.Error(), "content") {
+		t.Fatalf("add without content should mention content, got: %v", err)
+	}
+}
+
+func TestExecTodoDeleteRemovesItems(t *testing.T) {
+	todoPort := &stubTodoPort{
+		items: map[string][]domain.TodoItem{"conv_1": {
+			{ID: "1", Content: "Keep me", Status: domain.TodoPending},
+			{ID: "2", Content: "Drop me", Status: domain.TodoInProgress},
+			{ID: "3", Content: "Drop me too", Status: domain.TodoCompleted},
+		}},
+	}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	args, _ := json.Marshal(map[string]any{
+		"mode":  "delete",
+		"items": []map[string]any{{"id": "2"}, {"id": "3"}},
+	})
+	_, err := toolbox.execTodo(ctx, args)
+	if err != nil {
+		t.Fatalf("delete should succeed: %v", err)
+	}
+	items := todoPort.Get("conv_1")
+	if len(items) != 1 || items[0].ID != "1" {
+		t.Fatalf("expected only item 1 remaining, got %+v", items)
+	}
+}
+
+func TestExecTodoDeleteRejectsUnknownID(t *testing.T) {
+	todoPort := &stubTodoPort{
+		items: map[string][]domain.TodoItem{"conv_1": {
+			{ID: "1", Content: "Keep me", Status: domain.TodoPending},
+		}},
+	}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	args, _ := json.Marshal(map[string]any{
+		"mode":  "delete",
+		"items": []map[string]any{{"id": "missing"}},
+	})
+	err := mustExecTodoError(t, toolbox, ctx, args)
+	if !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("error should name the unknown id, got: %v", err)
+	}
+	if got := len(todoPort.Get("conv_1")); got != 1 {
+		t.Fatalf("failed delete must not mutate the list, got %d items", got)
+	}
+}
+
+func TestExecTodoNewRequiresContent(t *testing.T) {
+	todoPort := &stubTodoPort{}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	args, _ := json.Marshal(map[string]any{
+		"mode":  "new",
+		"items": []map[string]any{{"id": "new", "status": "pending"}},
+	})
+	err := mustExecTodoError(t, toolbox, ctx, args)
+	if !strings.Contains(err.Error(), "content") {
+		t.Fatalf("new without content should mention content, got: %v", err)
+	}
+}
+
+func TestExecTodoRetiredPatchModeErrors(t *testing.T) {
+	todoPort := &stubTodoPort{
+		items: map[string][]domain.TodoItem{"conv_1": {{ID: "1", Content: "Task", Status: domain.TodoPending}}},
+	}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	args, _ := json.Marshal(map[string]any{
+		"mode":  "patch",
+		"items": []map[string]any{{"id": "1", "status": "completed"}},
+	})
+	err := mustExecTodoError(t, toolbox, ctx, args)
+	if !strings.Contains(err.Error(), "replace") || !strings.Contains(err.Error(), "new") {
+		t.Fatalf("retired patch mode should name the new modes, got: %v", err)
+	}
+}
+
+func TestExecTodoReplacePreservesBrief(t *testing.T) {
 	todoPort := &stubTodoPort{
 		briefs: map[string]string{"conv_1": "## Objective\nOriginal\n\n## Done when\nDone"},
 		items:  map[string][]domain.TodoItem{"conv_1": {{ID: "1", Content: "Task", Status: domain.TodoPending}}},
@@ -395,24 +533,21 @@ func TestExecTodoPatchPreservesBrief(t *testing.T) {
 	ctx := application.WithConversationID(context.Background(), "conv_1")
 
 	args, _ := json.Marshal(map[string]any{
-		"mode": "patch",
+		"mode": "replace",
 		"items": []map[string]any{
 			{"id": "1", "status": "completed"},
 		},
 	})
 	_, err := toolbox.execTodo(ctx, args)
 	if err != nil {
-		t.Fatalf("patch should succeed: %v", err)
+		t.Fatalf("replace should succeed: %v", err)
 	}
 	if todoPort.GetBrief("conv_1") != "## Objective\nOriginal\n\n## Done when\nDone" {
 		t.Errorf("brief should be preserved, got %q", todoPort.GetBrief("conv_1"))
 	}
 }
 
-// Replace mode can update the status of existing items without re-emitting
-// their content. This is a full list replacement, but content omitted for a
-// known ID means "keep the existing description".
-func TestExecTodoReplaceModePreservesExistingContentOnStatusUpdate(t *testing.T) {
+func TestExecTodoReplaceBulkStatusUpdateKeepsContent(t *testing.T) {
 	todoPort := &stubTodoPort{
 		items: map[string][]domain.TodoItem{"conv_1": {
 			{ID: "1", Content: "Research Hermes", Status: domain.TodoCompleted},
@@ -452,20 +587,13 @@ func TestExecTodoReplaceModePreservesExistingContentOnStatusUpdate(t *testing.T)
 	}
 }
 
-// Replace mode still requires content when an ID does not exist yet; there is
-// nothing to preserve for a newly introduced item.
-func TestExecTodoReplaceModeRequiresContentForNewItem(t *testing.T) {
-	todoPort := &stubTodoPort{}
-	toolbox := &Toolbox{Todos: todoPort}
-	ctx := application.WithConversationID(context.Background(), "conv_1")
-
-	args, _ := json.Marshal(map[string]any{
-		"items": []map[string]any{{"id": "new", "status": "pending"}},
-		"mode":  "replace",
-	})
-	if _, err := toolbox.execTodo(ctx, args); err == nil {
-		t.Fatal("replace mode should require content for a new item")
+func mustExecTodoError(t *testing.T, toolbox *Toolbox, ctx context.Context, args []byte) error {
+	t.Helper()
+	_, err := toolbox.execTodo(ctx, args)
+	if err == nil {
+		t.Fatal("expected error")
 	}
+	return err
 }
 
 func TestTodoToolSchemaAllowsStatusOnlyUpdates(t *testing.T) {
@@ -496,11 +624,11 @@ func TestTodoToolSchemaAllowsStatusOnlyUpdates(t *testing.T) {
 	if !ok {
 		t.Fatalf("todo item required fields have unexpected type: %#v", itemSchema["required"])
 	}
-	if len(required) != 2 || required[0] != "id" || required[1] != "status" {
-		t.Fatalf("todo item required fields = %#v, want [id status]", required)
+	if len(required) != 1 || required[0] != "id" {
+		t.Fatalf("todo item required fields = %#v, want [id]", required)
 	}
-	if !strings.Contains(todo.Description, "`content` may be omitted for an existing ID") {
-		t.Fatalf("todo description does not document status-only replace updates: %s", todo.Description)
+	if !strings.Contains(todo.Description, "`replace`") || !strings.Contains(todo.Description, "`add`") || !strings.Contains(todo.Description, "`delete`") {
+		t.Fatalf("todo description does not document new/add/replace/delete: %s", todo.Description)
 	}
 }
 
@@ -566,14 +694,13 @@ func TestExecTodoEmptyBriefDoesNotClear(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// Patch with an empty brief — must NOT clear.
-	patch, _ := json.Marshal(map[string]any{
-		"mode":  "patch",
+	replaceArgs, _ := json.Marshal(map[string]any{
+		"mode":  "replace",
 		"items": []map[string]any{{"id": "1", "status": "completed"}},
 		"brief": "",
 	})
-	if _, err := toolbox.execTodo(ctx, patch); err != nil {
-		t.Fatalf("patch: %v", err)
+	if _, err := toolbox.execTodo(ctx, replaceArgs); err != nil {
+		t.Fatalf("replace: %v", err)
 	}
 	if todoPort.GetBrief("conv_1") != "## Objective\nX\n\n## Done when\nY" {
 		t.Errorf("empty brief must not clear, got %q", todoPort.GetBrief("conv_1"))

@@ -42,8 +42,8 @@ func (a *App) maybeAnnounceTaskMemory(conversationID string, conversation *domai
 	if a.MemoryRecords == nil || conversation == nil || conversation.EffectiveType() != domain.ConversationTypeConversation {
 		return
 	}
-	query := strings.ToLower(taskMemoryQuery(conversation))
-	if strings.TrimSpace(query) == "" {
+	queryWords := taskMemoryAlphaWords(taskMemoryQuery(conversation))
+	if len(queryWords) == 0 {
 		return
 	}
 	cutoff := clockNow().Add(-taskMemoryRecency)
@@ -63,8 +63,7 @@ func (a *App) maybeAnnounceTaskMemory(conversationID string, conversation *domai
 		if anchor.Before(cutoff) {
 			continue
 		}
-		blob := strings.ToLower(recordSearchText(rec))
-		if query != "" && !strings.Contains(blob, query) && !strings.Contains(blob, strings.ToLower(filepath.Base(conversation.Workspace))) {
+		if !taskMemorySharesWord(queryWords, taskMemoryAlphaWords(recordSearchText(rec))) {
 			continue
 		}
 		selected = append(selected, taskMemoryHit{
@@ -103,6 +102,45 @@ func taskMemoryQuery(conversation *domain.Conversation) string {
 		parts = append(parts, filepath.Base(ws))
 	}
 	return strings.Join(parts, " ")
+}
+
+// taskMemoryAlphaWords extracts lowercase [a-zA-Z]+ tokens. Punctuation,
+// digits, emoji, and other non-letters are separators, so an empty
+// workspace (filepath.Base("") == ".") cannot match a period in a body.
+func taskMemoryAlphaWords(s string) map[string]bool {
+	words := map[string]bool{}
+	var b strings.Builder
+	flush := func() {
+		if b.Len() == 0 {
+			return
+		}
+		words[b.String()] = true
+		b.Reset()
+	}
+	for _, r := range s {
+		if r >= 'A' && r <= 'Z' {
+			r += 'a' - 'A'
+		}
+		if r >= 'a' && r <= 'z' {
+			b.WriteRune(r)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return words
+}
+
+func taskMemorySharesWord(query, blob map[string]bool) bool {
+	if len(query) == 0 || len(blob) == 0 {
+		return false
+	}
+	for w := range query {
+		if blob[w] {
+			return true
+		}
+	}
+	return false
 }
 
 var clockNow = func() time.Time {

@@ -166,6 +166,13 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 	var outputAttachments []domain.Attachment
 	var err error
 	switch toolCall.Name {
+	case learnerResultToolName:
+		if !isLearnerKind(run.ToolKind) {
+			output = "error: learn is only available to the learner agent"
+			err = fmt.Errorf("learn is only available to the learner agent")
+		} else {
+			output, err = acknowledgeLearnerResult(toolCall.Args)
+		}
 	case "read_media":
 		kind, sniffErr := mediaread.SniffMediaKind([]byte(toolCall.Args))
 		if sniffErr != nil {

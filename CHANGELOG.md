@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-09-05
+
+### Changed
+
+- **Todo plan files stay in the data directory.** A `todo` brief is
+  mirrored to `{dataDir}/conversations/<id>/plan.md` only. NusaShell no
+  longer creates `<workspace>/.nusashell/plans/`. Existing leftover
+  folders in user projects are unused and safe to delete.
+- **First boot seeds `user.md` and `soul.md` from embedded templates.**
+  Missing `{dataDir}/memory/user.md` and `soul.md` are copied from
+  `resources/templates/` instead of empty files. Existing files are never
+  overwritten.
+- **Learner catalog commits use `learn()`, not assistant-text JSON.** The
+  background learner still has the full conversation toolbox. The typed
+  Stage 1/2/3 result is a dedicated tool (same pattern as compaction's
+  `summary()`): arguments are validated and applied, assistant text is only
+  a fallback. Profile documents still use `file_patch` / `file_write`.
+
 ## [0.4.4] - 2026-09-05
 
 ### Changed
@@ -33,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Skills workspace can delete learned and user-owned skills.** Delete
   confirms, then calls `skills.delete`. Builtin and plugin-owned skills
   stay without a Delete control.
+- **`todo` modes are `new`, `add`, `replace`, and `delete`.** `new`
+  (default) full-replaces the checklist. `add` appends items, `replace`
+  updates existing items (omit content to keep the stored text), and
+  `delete` removes by id. Retired `patch` is rejected with those names.
+  Unknown ids on replace/delete are named in the error.
 
 ### Fixed
 

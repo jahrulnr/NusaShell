@@ -113,3 +113,79 @@ func TestTruncateUTF8(t *testing.T) {
 		t.Errorf("truncated %q from %q", got, s)
 	}
 }
+
+func TestTaskMemoryAlphaWords(t *testing.T) {
+	got := taskMemoryAlphaWords(`hey. gimana 🎉 nusashell saat ini? .tmpcQpqGO`)
+	want := map[string]bool{
+		"hey": true, "gimana": true, "nusashell": true, "saat": true, "ini": true, "tmpcqpqgo": true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for w := range want {
+		if !got[w] {
+			t.Errorf("missing %q in %v", w, got)
+		}
+	}
+	if len(taskMemoryAlphaWords("")) != 0 {
+		t.Fatal("empty input must yield no words")
+	}
+	if len(taskMemoryAlphaWords("... 🎉 123 !")) != 0 {
+		t.Fatal("punctuation, emoji, and digits must not yield words")
+	}
+	if len(taskMemoryAlphaWords(".")) != 0 {
+		t.Fatal("filepath.Base(\"\") token must not yield a word")
+	}
+}
+
+func TestMaybeAnnounceTaskMemoryIgnoresEmptyWorkspacePunctuation(t *testing.T) {
+	now := time.Now()
+	oldClock := clockNow
+	clockNow = func() time.Time { return now }
+	defer func() { clockNow = oldClock }()
+
+	conv := &domain.Conversation{
+		ID:    "c1",
+		Title: "hey. gimana menurut mu folder ini?",
+	}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	recs := &fakeMemoryRecordStore{items: []*domain.MemoryRecord{{
+		ID:            "rec-junk",
+		Type:          domain.MemoryTypePreference,
+		Status:        domain.MemoryStatusLearned,
+		Body:          "sip, useless bagi multi lang. yaudah, buat jadi summary ya.",
+		Scope:         domain.MemoryScope{Project: "OtherProject"},
+		LastConfirmed: now,
+	}}}
+	app := &App{Conversations: store, MemoryRecords: recs, Bus: NewBus(), Logs: &fakeLogStore{}}
+
+	app.maybeAnnounceTaskMemory("c1", conv)
+	got, _ := store.Get("c1")
+	if len(got.PendingAnnouncements) != 0 {
+		t.Fatalf("period/punctuation must not match, pending = %+v", got.PendingAnnouncements)
+	}
+}
+
+func TestMaybeAnnounceTaskMemoryMatchesSharedAlphabeticWord(t *testing.T) {
+	now := time.Now()
+	oldClock := clockNow
+	clockNow = func() time.Time { return now }
+	defer func() { clockNow = oldClock }()
+
+	conv := &domain.Conversation{ID: "c1", Title: "hey. 🎉", Workspace: "/tmp/.tmpcQpqGO"}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	recs := &fakeMemoryRecordStore{items: []*domain.MemoryRecord{{
+		ID:            "rec-ws",
+		Type:          domain.MemoryTypeFact,
+		Status:        domain.MemoryStatusLearned,
+		Body:          "tmpcQpqGO is an empty trap workspace.",
+		LastConfirmed: now,
+	}}}
+	app := &App{Conversations: store, MemoryRecords: recs, Bus: NewBus(), Logs: &fakeLogStore{}}
+
+	app.maybeAnnounceTaskMemory("c1", conv)
+	got, _ := store.Get("c1")
+	if len(got.PendingAnnouncements) != 1 {
+		t.Fatalf("shared alphabetic word must match, pending = %+v", got.PendingAnnouncements)
+	}
+}

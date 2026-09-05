@@ -223,7 +223,7 @@ cache key is a routing hint, not a guarantee of a cache hit.
 | conversations | JSON | `{data}/conversations/<id>.json` |
 | providers, plugins, settings | JSON | `{data}/config/*.json` + `{data}/plugins/` |
 | skills | markdown + JSON | `{data}/skills/<id>/` (`SKILL.md`, `meta.json`, `versions/<n>/`) |
-| profile documents | Markdown | `{data}/memory/user.md`, `{data}/memory/soul.md` |
+| profile documents | Markdown | `{data}/memory/user.md`, `{data}/memory/soul.md` (first boot copies embedded `resources/templates/` when missing) |
 | growth catalogs | JSONL | `{data}/growth/{experiences,memories,jobs,operations}.jsonl` |
 | learning search/log | JSONL | `{data}/learning/{edges,embeddings,trajectory}.jsonl` |
 | logs | JSONL | `{data}/logs.jsonl` |

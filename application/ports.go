@@ -224,8 +224,8 @@ type ConversationSummaryDTO struct {
 }
 
 // ConversationTodoPort is the per-conversation todo checklist store. The
-// model owns the list (full-replace via the `todo` tool, or patch by ID
-// via mode:"patch"); the user can delete items from the UI. The brief (a
+// model owns the list (full-replace via todo mode "new", add/replace/delete
+// by ID); the user can delete items from the UI. The brief (a
 // living planning document) is set alongside items and survives compaction
 // via hydration. Implementations must be safe for concurrent use.
 type ConversationTodoPort interface {
@@ -238,16 +238,14 @@ type ConversationTodoPort interface {
 	// the mirror plan file, leaving items intact. Persists to disk.
 	ClearBrief(conversationID string) error
 	// PlanPath returns the absolute path to the conversation's plan file
-	// mirror (.nusashell/plans/<id>.plan.md in workspace, or
-	// <datadir>/conversations/<id>/plan.md when no workspace). Returns
-	// empty string when the brief is empty or the path cannot be resolved.
+	// mirror (<datadir>/conversations/<id>/plan.md). Returns empty string
+	// when the brief is empty or the path cannot be resolved.
 	PlanPath(conversationID string) string
 	// Patch merges items by ID into the existing list. Items with an
 	// existing ID update their status (always) and content (only when
 	// non-empty). Items with a new ID are appended. Items not in the
 	// patch are kept unchanged. This is the backend for the todo tool's
-	// mode:"patch" — it lets the model update a single item's status
-	// without re-emitting the full list.
+	// add (append) and replace (update existing) modes.
 	Patch(conversationID string, items []domain.TodoItem)
 }
 

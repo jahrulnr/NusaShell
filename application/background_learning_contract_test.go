@@ -33,6 +33,16 @@ func TestBackgroundLearningPromptIsUnifiedLearner(t *testing.T) {
 	if !strings.Contains(prompt, "explicit_teaching") || !strings.Contains(prompt, "repeated_procedure") {
 		t.Error("learner must document the five language-agnostic trigger categories")
 	}
+	if !strings.Contains(prompt, "learn(") && !strings.Contains(prompt, "`learn`") {
+		t.Error("learner must tell the model to submit results via learn()")
+	}
+	if strings.Contains(prompt, "Return ONLY that JSON object") {
+		t.Error("learner must not treat assistant text as the JSON contract")
+	}
+	userPrompt := resources.UserPrompt("learner")
+	if !strings.Contains(userPrompt, "learn") {
+		t.Error("learner user prompt must ask for learn(), not a JSON-only reply")
+	}
 	if resources.Prompt("learn") != "" {
 		t.Fatal("learn.md must not remain as a second unified review prompt")
 	}

@@ -36,6 +36,9 @@ var continuePrompt = resources.Prompt("continue")
 // to call the summary() tool with the handoff checkpoint text.
 var compactionPrompt = resources.Prompt("compaction")
 
+// learnerPrompt is the background learner system prompt. The model keeps the
+// full conversation toolbox and commits catalog records with learn(), the
+// same way compaction commits a handoff with summary().
 var learnerPrompt = resources.LearnerPrompt()
 
 // compactionHandoffUserPrompt is the last user message on a compaction

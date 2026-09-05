@@ -308,6 +308,8 @@ func (a *App) prepareConsolidationOp(op *domain.LearningOperation) {
 // source handoff and decided nothing was durable" and "the model was unreachable"
 // are different answers, and only the transcript tells them apart. The
 // caller falls back to deterministic extraction when this returns no ops.
+// Typed catalog results prefer the learn() tool-call arguments; assistant
+// text is a fallback.
 func (a *App) consolidateViaLLM(job *domain.LearningJob, exp *domain.Experience) ([]domain.LearningOperation, string) {
 	ops, convID, _ := a.consolidateViaLLMAt(job, exp, a.learningSourceForExperience(exp))
 	return ops, convID
