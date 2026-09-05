@@ -211,7 +211,7 @@ func run() error {
 	if err != nil {
 		slog.Warn("attachment store init failed", "error", err)
 	}
-	// Memory: human-only user.md + soul.md, structured records under growth/.
+	// Memory: always-injected user.md + soul.md, structured records under growth/.
 	userStore, err := memorystore.NewUser(dataDir)
 	if err != nil {
 		slog.Warn("user memory init failed", "error", err)

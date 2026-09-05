@@ -19,7 +19,7 @@ View title and a Save settings button with a live status indicator.
 
 ## Card groups
 
-Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system.
+Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, periodic review interval, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system.
 
 - **Agent group** (`#settings-group-agent`):
   - Section: Settings
@@ -197,7 +197,7 @@ Toggle compaction, set max input tokens (fallback context window, default 200000
 
 ## Learning
 
-Background jobs consolidate recorded experience into memory records and skills. The review model routes those jobs to a cheaper or faster model (default uses the conversation's active model).
+Background jobs run a single learner that consolidates recorded experience into memory records and, for repeated procedures, may evaluate and evolve a skill. The review model routes those jobs to a cheaper or faster model (default uses the conversation's active model). The periodic review interval runs the learner after N unreviewed user turns or tool-loop iterations (default 10, 0 disables); steer, recovery, repeated failure, and repeated procedure still enqueue immediately.
 
 - **Learning title** (`#settings-learning-title`):
   - Section: Settings
@@ -207,6 +207,11 @@ Background jobs consolidate recorded experience into memory records and skills. 
   - Section: Settings
   - Type: select
   - Notes: Routes background learning jobs to a dedicated model; empty uses the conversation's active model.
+
+- **Periodic review interval** (`#settings-learner-nudge-interval`):
+  - Section: Settings
+  - Type: number
+  - Notes: Unreviewed user turns or tool-loop iterations before the learner runs without a structural signal; default 10, 0 disables periodic review.
 
 ## Project memory
 

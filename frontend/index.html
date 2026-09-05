@@ -367,6 +367,7 @@
                   <button class="mini-btn" id="skills-promote" type="button" hidden>Promote</button>
                   <select id="skills-rollback-version" class="select" aria-label="Rollback version"></select>
                   <button class="mini-btn ghost" id="skills-rollback" type="button">Rollback</button>
+                  <button class="mini-btn danger" id="skills-delete" type="button" hidden>Delete</button>
                 </div>
               </div>
               <div class="skills-file-viewer" id="skill-file-viewer" hidden>
@@ -865,12 +866,16 @@
             <section class="settings-card settings-learning-card" aria-labelledby="settings-learning-title">
               <div class="settings-card-title">Learning</div>
               <h2 id="settings-learning-title" class="sr-only">Learning</h2>
-              <p class="settings-card-copy">Background jobs consolidate recorded experience into memory records and skills. Separate from project memory and from the embedding model used for search.</p>
+              <p class="settings-card-copy">Background jobs run a single learner that consolidates recorded experience into memory records and, for repeated procedures, may evaluate and evolve a skill. Separate from project memory and from the embedding model used for search.</p>
               <label class="settings-field" for="settings-review-model">Review model
                 <select id="settings-review-model">
                   <option value="">Default — use the conversation's active model</option>
                 </select>
                 <small>Route background learning jobs to a cheaper or faster model. Leave as default to use the active model.</small>
+              </label>
+              <label class="settings-field" for="settings-learner-nudge-interval">Periodic review interval
+                <input id="settings-learner-nudge-interval" type="number" min="0" max="100" step="1" inputmode="numeric" value="10">
+                <small>Run the learner after this many unreviewed user turns or tool-loop iterations, even without a correction or repeated workflow (default 10). Set 0 to disable periodic review; structural signals still enqueue.</small>
               </label>
             </section>
             <section class="settings-card settings-project-memory-card" aria-labelledby="settings-project-memory-title">

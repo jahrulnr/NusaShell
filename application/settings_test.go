@@ -172,3 +172,46 @@ func TestHandleSettingsSetSlowDown(t *testing.T) {
 		t.Fatalf("SlowDown after clear = %d, want 0", got)
 	}
 }
+
+func TestHandleSettingsSetLearnerNudgeInterval(t *testing.T) {
+	app := &App{Settings: &memSettingsStore{s: domain.DefaultSettings()}, Logs: &fakeLogStore{}}
+
+	if dto := settingsDTO(app.Settings.Get()); dto.LearnerNudgeInterval != domain.DefaultLearnerNudgeInterval {
+		t.Fatalf("unset DTO = %d, want default %d", dto.LearnerNudgeInterval, domain.DefaultLearnerNudgeInterval)
+	}
+
+	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{LearnerNudgeInterval: intPtr(4)}); rpcErr != nil {
+		t.Fatalf("set learner_nudge_interval=4: %v", rpcErr.Message)
+	}
+	if got := domain.EffectiveLearnerNudgeInterval(app.Settings.Get().LearnerNudgeInterval); got != 4 {
+		t.Fatalf("stored = %d, want 4", got)
+	}
+	if dto := settingsDTO(app.Settings.Get()); dto.LearnerNudgeInterval != 4 {
+		t.Fatalf("DTO = %d, want 4", dto.LearnerNudgeInterval)
+	}
+
+	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{LearnerNudgeInterval: intPtr(0)}); rpcErr != nil {
+		t.Fatalf("set learner_nudge_interval=0: %v", rpcErr.Message)
+	}
+	if dto := settingsDTO(app.Settings.Get()); dto.LearnerNudgeInterval != 0 {
+		t.Fatalf("DTO after disable = %d, want 0", dto.LearnerNudgeInterval)
+	}
+
+	for _, bad := range []int{-1, domain.LearnerNudgeIntervalCap + 1} {
+		if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{LearnerNudgeInterval: intPtr(bad)}); rpcErr == nil {
+			t.Fatalf("learner_nudge_interval=%d must be rejected", bad)
+		}
+	}
+}
+
+func TestLearnerNudgeIntervalUsesSettings(t *testing.T) {
+	app := &App{}
+	if got := app.learnerNudgeInterval(); got != domain.DefaultLearnerNudgeInterval {
+		t.Fatalf("nil settings = %d, want default", got)
+	}
+	zero := 0
+	app.Settings = &fakeSettings{Settings: domain.Settings{LearnerNudgeInterval: &zero}}
+	if got := app.learnerNudgeInterval(); got != 0 {
+		t.Fatalf("disabled = %d, want 0", got)
+	}
+}

@@ -590,7 +590,7 @@ func TestRunLearningJobAdvancesCursorAfterSuccessfulEvolution(t *testing.T) {
 			},
 		}}},
 		Skills:       &fakeSkillStore{items: map[string]*domain.Skill{}},
-		learningTurn: learningTurnStub(t, AgentSkillEvolver, `{"kind":"skill.create","name":"debug-nginx","purpose":"debug nginx","trigger":"nginx fails","steps":"1. inspect logs"}`, "conv_learning_evolve"),
+		learningTurn: learningTurnStub(t, AgentLearner, `{"kind":"skill.create","name":"debug-nginx","purpose":"debug nginx","trigger":"nginx fails","steps":"1. inspect logs"}`, "conv_learning_evolve"),
 	}
 
 	app.runLearningJob("job_cursor_evolve")

@@ -11,11 +11,15 @@ import (
 )
 
 // Close releases resources held by the app (file handles, background
-// goroutines). Safe to call multiple times. Tests should call this via
-// t.Cleanup so that Windows does not fail TempDir removal with "file
-// in use" errors from the embedding cache and trajectory log handles.
+// goroutines). Safe to call multiple times. It cancels the lifecycle
+// loop, then waits for in-flight learning jobs so tests can remove
+// t.TempDir on Windows and Darwin without "directory not empty".
 func (a *App) Close() {
 	a.CloseLifecycle()
+	a.goSafeMu.Lock()
+	a.goSafeClosed = true
+	a.goSafeMu.Unlock()
+	a.goSafeWG.Wait()
 	if a.Acp != nil {
 		a.Acp.Close()
 	}
@@ -51,8 +55,15 @@ func (a *App) log(level, source, format string, args ...any) {
 // Use it for fire-and-forget goroutines whose panic would otherwise take
 // down the whole server (agent turns, review agents, background monitors).
 func (a *App) goSafe(source string, fn func()) {
+	tracked := source == "learning"
+	if tracked && !a.beginTrackedGoSafe() {
+		return
+	}
 	go func() {
 		defer func() {
+			if tracked {
+				a.goSafeWG.Done()
+			}
 			if r := recover(); r != nil {
 				stack := debug.Stack()
 				a.log("error", source, "goroutine panic recovered: %v\n%s", r, stack)
@@ -65,6 +76,19 @@ func (a *App) goSafe(source string, fn func()) {
 		}()
 		fn()
 	}()
+}
+
+// beginTrackedGoSafe records a learning goroutine so Close can wait for it.
+// Returns false when Close has already started draining so WaitGroup is
+// never Add-ed after Wait.
+func (a *App) beginTrackedGoSafe() bool {
+	a.goSafeMu.Lock()
+	defer a.goSafeMu.Unlock()
+	if a.goSafeClosed {
+		return false
+	}
+	a.goSafeWG.Add(1)
+	return true
 }
 
 // GoSafe starts a recovered background goroutine. The composition root

@@ -44,6 +44,47 @@ type llmSkillProposal struct {
 	Risk          string `json:"risk,omitempty"`
 }
 
+type learnerResult struct {
+	StageReached string              `json:"stage_reached"`
+	Consolidate  *learnerConsolidate `json:"consolidate"`
+	Evaluate     *learnerEvaluate    `json:"evaluate"`
+	Evolve       *learnerEvolve      `json:"evolve"`
+}
+
+type learnerConsolidate struct {
+	Stage         string        `json:"stage"`
+	Action        string        `json:"action"`
+	Entry         *learnerEntry `json:"entry"`
+	ReasonForNoOp string        `json:"reason_for_no_op,omitempty"`
+}
+
+type learnerEntry struct {
+	Type       string `json:"type"`
+	Content    string `json:"content"`
+	Evidence   string `json:"evidence"`
+	Supersedes string `json:"supersedes"`
+}
+
+type learnerEvaluate struct {
+	Stage              string             `json:"stage"`
+	Approved           bool               `json:"approved"`
+	Reason             string             `json:"reason"`
+	ProposedSkillShape *learnerSkillShape `json:"proposed_skill_shape"`
+}
+
+type learnerSkillShape struct {
+	Name               string `json:"name"`
+	TriggerDescription string `json:"trigger_description"`
+	StepsSummary       string `json:"steps_summary"`
+}
+
+type learnerEvolve struct {
+	Stage       string `json:"stage"`
+	Action      string `json:"action"`
+	SkillID     string `json:"skill_id"`
+	DiffSummary string `json:"diff_summary"`
+}
+
 // learningModelID returns the configured learning-job model override. An
 // empty string means "let the headless turn resolve the first enabled
 // provider", which is also the behavior when no override is set.
@@ -209,7 +250,7 @@ func parseLLMOperationsResult(text string, jobID string, expID string) ([]domain
 			ID:        domain.NewULID(domain.IDPrefixLearnOp),
 			Kind:      kind,
 			Status:    domain.LearningOpProposed,
-			Actor:     domain.ActorConsolidator,
+			Actor:     domain.ActorLearner,
 			JobID:     jobID,
 			Payload:   r.Payload,
 			Evidence:  []string{expID},
@@ -345,22 +386,31 @@ func (a *App) buildLearningPromptAt(instruction string, source learningSource) s
 // consolidator. Experience and memory bodies are deliberately not serialized
 // into role=user; the agent reads the source conversation through file_read.
 func (a *App) buildConsolidatorPacket(exp *domain.Experience) string {
-	return a.buildConsolidatorPacketAt(exp, a.learningSourceForExperience(exp))
+	return a.buildLearnerPacketAt(exp, a.learningSourceForExperience(exp), "", 0)
 }
 
 func (a *App) buildConsolidatorPacketAt(exp *domain.Experience, source learningSource) string {
-	return a.buildLearningPromptAt(resources.ConsolidatorUserPrompt(), source)
+	return a.buildLearnerPacketAt(exp, source, "", 0)
 }
 
-// buildSkillEvolverPacket builds the short user instruction for the skill
-// evolver. The source conversation and selected skills are retrieved by the
-// background agent through bounded tools, not embedded in role=user.
 func (a *App) buildSkillEvolverPacket(exp *domain.Experience) string {
-	return a.buildSkillEvolverPacketAt(exp, a.learningSourceForExperience(exp))
+	return a.buildLearnerPacketAt(exp, a.learningSourceForExperience(exp), domain.TriggerRepeatedProcedure, 3)
 }
 
 func (a *App) buildSkillEvolverPacketAt(exp *domain.Experience, source learningSource) string {
-	return a.buildLearningPromptAt(resources.SkillEvolverUserPrompt(), source)
+	return a.buildLearnerPacketAt(exp, source, domain.TriggerRepeatedProcedure, 3)
+}
+
+func (a *App) buildLearnerPacketAt(exp *domain.Experience, source learningSource, reason string, procedureCount int) string {
+	var b strings.Builder
+	b.WriteString(strings.TrimSpace(resources.LearnerUserPrompt()))
+	if reason != "" {
+		fmt.Fprintf(&b, "\n\ntrigger_reason: %s", reason)
+		if reason == domain.TriggerRepeatedProcedure && procedureCount > 0 {
+			fmt.Fprintf(&b, "\nprocedure_count: %d", procedureCount)
+		}
+	}
+	return a.buildLearningPromptAt(b.String(), source)
 }
 
 // parseLLMSkillProposal parses an LLM JSON response into a skill proposal.

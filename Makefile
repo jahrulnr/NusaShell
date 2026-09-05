@@ -57,7 +57,7 @@ fmt:
 	@echo "gofmt: done"
 
 ## check: full verification baseline.
-check: fmt-check test vet build
+check: fmt fmt-check test vet build
 
 ## verify-local: run native repository gates plus Windows/macOS compile checks.
 verify-local:

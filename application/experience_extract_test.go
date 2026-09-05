@@ -96,17 +96,41 @@ func TestExtractExperienceHeadlessFlag(t *testing.T) {
 	conv := &domain.Conversation{
 		ID: "conv_3",
 		Messages: []domain.Message{
-			{Role: domain.RoleUser, Content: "remember I prefer Go"},
+			{Role: domain.RoleUser, Content: "ingat ya, saya lebih suka Go", Steer: true},
 		},
 	}
 	exp := ExtractExperience(conv, true)
 	if !exp.Headless {
 		t.Fatal("headless")
 	}
-	if !exp.Signals.ExplicitTeaching {
-		t.Fatal("teaching signal")
+	if len(exp.Corrections) == 0 {
+		t.Fatal("steer correction should still be extracted")
 	}
 	if domain.DecideLearningTrigger(exp, nil).Enqueue {
 		t.Fatal("headless must not enqueue")
+	}
+}
+
+func TestExtractExperienceDoesNotKeywordMatchTeaching(t *testing.T) {
+	for _, text := range []string{
+		"please remember that I prefer Go",
+		"ingat ya, saya lebih suka Go",
+		"jangan lupa pakai pnpm",
+	} {
+		conv := &domain.Conversation{
+			ID:     "conv_teach",
+			Status: "idle",
+			Messages: []domain.Message{
+				{Role: domain.RoleUser, Content: text},
+				{Role: domain.RoleAssistant, Content: "ok"},
+			},
+		}
+		exp := ExtractExperience(conv, false)
+		if exp.Signals.ExplicitTeaching {
+			t.Fatalf("keyword/teaching phrase set ExplicitTeaching: %q", text)
+		}
+		if domain.DecideLearningTrigger(exp, nil).Enqueue {
+			t.Fatalf("teaching phrase enqueued without periodic/structural gate: %q", text)
+		}
 	}
 }

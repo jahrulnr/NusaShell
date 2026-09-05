@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-09-05
+
+### Changed
+
+- **Background learning is one `learner` agent with three internal stages.**
+  Memory consolidator, skill evolver, and skill evaluator no longer spawn as
+  separate agents. Stage 1 always consolidates memory. Stage 2 (evaluate) and
+  Stage 3 (evolve) run only for `repeated_procedure` with count ≥ 3, in the
+  same headless turn, and still cannot promote a skill to trusted.
+- **Learner spawn is language-agnostic.** English keyword gates
+  (`remember`, `don't forget`, `no,`, `stop`, …) are gone. The orchestrator
+  enqueues after a finished interactive turn on structural signals (steer,
+  recovery, repeated failure, repeated procedure) or a Hermes-style periodic
+  nudge. The interval is `learner_nudge_interval` in Settings → Memory &
+  search → Learning (default 10; 0 disables periodic review). The learner
+  classifies teaching and correction from meaning, so Bahasa Indonesia and
+  other languages work the same as English. If the spawn reason does not
+  hold up, the job no-ops instead of fabricating a record.
+- **Profile documents (`user.md` / `soul.md`) are writable via `file_*`.**
+  The conversation agent and the learner patch `{dataDir}/memory/user.md`
+  and `soul.md` using the Primary Memory Writing Rules. Hydration still
+  injects a real `file_read` of each non-empty file. The `memory`
+  dispatcher stays read-only over structured records. Typed learner JSON
+  still does not write the profile documents. The user-tier token cap is
+  4000 so the two-tier outline fits.
+- **Skills workspace can delete learned and user-owned skills.** Delete
+  confirms, then calls `skills.delete`. Builtin and plugin-owned skills
+  stay without a Delete control.
+
+### Fixed
+
+- **`App.Close` waits for background learner jobs** before releasing
+  caches, so macOS/Windows tests no longer fail `TempDir` cleanup with
+  "directory not empty" after an agent turn queues a learner.
+- **Learning prompt tests assert `filepath.Abs` of the conversation file**
+  so Windows CI does not require a Unix `/tmp/...` string.
+
 ## [0.4.3] - 2026-09-05
 
 ### Fixed

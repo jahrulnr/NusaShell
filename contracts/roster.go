@@ -1228,6 +1228,7 @@ type SettingsDTO struct {
 	MaxParallelTools           int      `json:"max_parallel_tools,omitempty"`
 	SlowDown                   int      `json:"slow_down"`
 	ReviewModel                string   `json:"review_model,omitempty"`
+	LearnerNudgeInterval       int      `json:"learner_nudge_interval"`
 	DelegateModel              string   `json:"delegate_model,omitempty"`
 	EmbeddingProviderID        string   `json:"embedding_provider_id,omitempty"`
 	EmbeddingModelID           string   `json:"embedding_model_id,omitempty"`
@@ -1281,28 +1282,29 @@ type SettingsSetRequest struct {
 	// range 0–60. Saved values apply instantly to running conversations —
 	// the round loop re-reads the live setting, so no stop or idle turn is
 	// needed.
-	SlowDown            *int    `json:"slow_down,omitempty"`
-	ReviewModel         *string `json:"review_model,omitempty"`
-	DelegateModel       *string `json:"delegate_model,omitempty"`
-	EmbeddingProviderID *string `json:"embedding_provider_id,omitempty"`
-	EmbeddingModelID    *string `json:"embedding_model_id,omitempty"`
-	VisionProviderID    *string `json:"vision_provider_id,omitempty"`
-	VisionModelID       *string `json:"vision_model_id,omitempty"`
-	AudioProviderID     *string `json:"audio_provider_id,omitempty"`
-	AudioModelID        *string `json:"audio_model_id,omitempty"`
-	STTOfflineModel     *string `json:"stt_offline_model,omitempty"`
-	STTOfflineLanguage  *string `json:"stt_offline_language,omitempty"`
-	VideoProviderID     *string `json:"video_provider_id,omitempty"`
-	VideoModelID        *string `json:"video_model_id,omitempty"`
-	TTSProviderID       *string `json:"tts_provider_id,omitempty"`
-	TTSModelID          *string `json:"tts_model_id,omitempty"`
-	ImageProviderID     *string `json:"image_provider_id,omitempty"`
-	ImageModelID        *string `json:"image_model_id,omitempty"`
-	VideoGenProviderID  *string `json:"video_gen_provider_id,omitempty"`
-	VideoGenModelID     *string `json:"video_gen_model_id,omitempty"`
-	WebAnswerProvider   *string `json:"web_answer_provider,omitempty"`
-	WebAnswerModel      *string `json:"web_answer_model,omitempty"`
-	WebAnswerAPIKey     *string `json:"web_answer_api_key,omitempty"`
+	SlowDown             *int    `json:"slow_down,omitempty"`
+	ReviewModel          *string `json:"review_model,omitempty"`
+	LearnerNudgeInterval *int    `json:"learner_nudge_interval,omitempty"`
+	DelegateModel        *string `json:"delegate_model,omitempty"`
+	EmbeddingProviderID  *string `json:"embedding_provider_id,omitempty"`
+	EmbeddingModelID     *string `json:"embedding_model_id,omitempty"`
+	VisionProviderID     *string `json:"vision_provider_id,omitempty"`
+	VisionModelID        *string `json:"vision_model_id,omitempty"`
+	AudioProviderID      *string `json:"audio_provider_id,omitempty"`
+	AudioModelID         *string `json:"audio_model_id,omitempty"`
+	STTOfflineModel      *string `json:"stt_offline_model,omitempty"`
+	STTOfflineLanguage   *string `json:"stt_offline_language,omitempty"`
+	VideoProviderID      *string `json:"video_provider_id,omitempty"`
+	VideoModelID         *string `json:"video_model_id,omitempty"`
+	TTSProviderID        *string `json:"tts_provider_id,omitempty"`
+	TTSModelID           *string `json:"tts_model_id,omitempty"`
+	ImageProviderID      *string `json:"image_provider_id,omitempty"`
+	ImageModelID         *string `json:"image_model_id,omitempty"`
+	VideoGenProviderID   *string `json:"video_gen_provider_id,omitempty"`
+	VideoGenModelID      *string `json:"video_gen_model_id,omitempty"`
+	WebAnswerProvider    *string `json:"web_answer_provider,omitempty"`
+	WebAnswerModel       *string `json:"web_answer_model,omitempty"`
+	WebAnswerAPIKey      *string `json:"web_answer_api_key,omitempty"`
 	// WebSearchStrategy selects how the web_search tool routes queries
 	// across searchwire sources: "auto" (default, all sources),
 	// "round_robin", "random", or a bare source name. The per-provider API

@@ -213,7 +213,7 @@ Notable additions, removals, and breaking changes live in
 [`CHANGELOG.md`](CHANGELOG.md). The current `[Unreleased]` section covers the
 PWA-grade shell, deterministic hydration placement, the dispatcher-family
 tool refactor, and the experience-learning system (JSONL growth stores,
-signal-triggered jobs, human-only profile documents).
+signal-triggered jobs, always-injected profile documents).
 
 ## License
 

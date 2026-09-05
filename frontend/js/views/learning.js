@@ -606,7 +606,7 @@ function renderLog() {
   if (state.logEntries.length === 0) {
     logEl.appendChild(el('div', { class: 'learning-empty' }, [
       el('strong', { text: 'No learning activity yet' }),
-      el('span', { text: 'Signal-based learning jobs record consolidations and skill updates here.' }),
+      el('span', { text: 'The learner records consolidations and skill updates here.' }),
     ]));
     return;
   }

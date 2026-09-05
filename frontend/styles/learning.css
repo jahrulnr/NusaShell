@@ -808,6 +808,7 @@
 
 .learning-log-activity {
   margin-top: 8px;
+  padding: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
@@ -816,6 +817,12 @@
      the feed off screen. */
   max-height: 420px;
   overflow-y: auto;
+  flex-direction: column;
+  display: flex;
+}
+
+.learning-log-activity .agent-message.user {
+  padding: 10px;
 }
 
 /* Agent-style flow inside the activity panel: tool events reuse the Agent

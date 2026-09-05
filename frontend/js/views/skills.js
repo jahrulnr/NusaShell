@@ -106,6 +106,12 @@ function skillStatus(skill) {
   return String(skill?.status || 'trusted').toLowerCase();
 }
 
+export function skillIsDeletable(skill) {
+  const owner = String(skill?.owned_by || skill?.origin || '').trim();
+  if (!owner || owner.startsWith('plugin:')) return false;
+  return owner === 'learned' || owner === 'user';
+}
+
 function versionLabel(skill) {
   const version = Number(skill?.version) || 1;
   const active = Number(skill?.active_version) || version;
@@ -147,6 +153,7 @@ function initLifecycleActions() {
   }
   document.getElementById('skills-promote')?.addEventListener('click', () => { void promoteSkill(); });
   document.getElementById('skills-rollback')?.addEventListener('click', () => { void rollbackSkill(); });
+  document.getElementById('skills-delete')?.addEventListener('click', () => { void deleteSkill(); });
 }
 
 function renderLifecycle(skill) {
@@ -155,6 +162,7 @@ function renderLifecycle(skill) {
   const versionMeta = document.getElementById('skill-version-meta');
   const promoteBtn = document.getElementById('skills-promote');
   const rollbackBtn = document.getElementById('skills-rollback');
+  const deleteBtn = document.getElementById('skills-delete');
   if (!wrap || !skill) {
     if (wrap) wrap.hidden = true;
     return;
@@ -170,6 +178,11 @@ function renderLifecycle(skill) {
     const canPromote = status === 'experimental' || status === 'validated';
     promoteBtn.hidden = !canPromote;
     promoteBtn.disabled = !canPromote;
+  }
+  if (deleteBtn) {
+    const canDelete = skillIsDeletable(skill);
+    deleteBtn.hidden = !canDelete;
+    deleteBtn.disabled = !canDelete;
   }
   const options = versionOptions(skill);
   const current = String(skill.active_version || skill.version || options[0]?.value || '1');
@@ -206,6 +219,28 @@ async function rollbackSkill() {
     await refresh();
   } catch (err) {
     toast(err.message || 'Rollback failed.', 'error');
+  }
+}
+
+async function deleteSkill() {
+  if (!state.activeId || !skillIsDeletable(state.activeSkill)) return;
+  const name = state.activeSkill?.name || state.activeId;
+  const ok = await confirmDialog(
+    'Delete this skill?',
+    `"${name}" and its version snapshots will be removed.`,
+    'Delete',
+  );
+  if (!ok) return;
+  try {
+    await rpc('skills.delete', { id: state.activeId, owned_by: state.activeOwnedBy || undefined });
+    toast('Skill deleted.', 'success');
+    state.activeId = null;
+    state.activeOwnedBy = '';
+    state.activeSkill = null;
+    showEmpty();
+    await refresh();
+  } catch (err) {
+    toast(err.message || 'Delete failed.', 'error');
   }
 }
 
@@ -272,6 +307,11 @@ function showEmpty() {
   document.getElementById('skill-file-viewer').hidden = true;
   const lifecycle = document.getElementById('skill-lifecycle');
   if (lifecycle) lifecycle.hidden = true;
+  const deleteBtn = document.getElementById('skills-delete');
+  if (deleteBtn) {
+    deleteBtn.hidden = true;
+    deleteBtn.disabled = true;
+  }
   const tree = document.getElementById('skill-files-tree');
   if (tree) tree.replaceChildren();
   const empty = document.getElementById('skill-tree-empty');

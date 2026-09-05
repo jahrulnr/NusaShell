@@ -1316,7 +1316,7 @@ func TestAgentTurnRetriesTransientCompactionFailure(t *testing.T) {
 
 	// The learning trigger may fire after a compaction turn (the compaction
 	// summary is stored with the Steer flag, which ExtractExperience treats
-	// as a user correction). The LLM-backed consolidator makes one
+	// as a user correction). The LLM-backed learner makes one
 	// non-streaming call to the same provider, so the total may be 3
 	// (compaction + compaction retry + turn) or 4 (with the learning call).
 	// Wait briefly for the async learning job to settle, then accept either.

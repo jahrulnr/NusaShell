@@ -1,8 +1,6 @@
 package application
 
 import (
-	"strings"
-
 	"nusashell/contracts"
 	"nusashell/domain"
 	clock "nusashell/pkg/time"
@@ -30,22 +28,24 @@ func (a *App) recordExperience(conv *domain.Conversation, headless bool) {
 		}
 		history = append(history, *h)
 	}
-	trig := domain.DecideLearningTrigger(exp, history)
+	turns, iters := domain.CountUnreviewedLearningProgress(conv.Messages, conv.LastReviewedMsgCount)
+	trig := domain.DecideLearningTriggerWith(exp, history, domain.LearningReviewProgress{
+		UnreviewedUserTurns: turns,
+		UnreviewedToolIters: iters,
+		Interval:            a.learnerNudgeInterval(),
+	})
 	if !trig.Enqueue {
 		return
 	}
 	now := clock.NewTime().Time()
 	job := &domain.LearningJob{
 		ID:           domain.NewULID(domain.IDPrefixLearnJob),
-		Kind:         domain.LearningJobConsolidate,
+		Kind:         domain.LearningJobLearner,
 		ExperienceID: exp.ID,
 		Reason:       trig.Reason,
 		Priority:     trig.Priority,
 		Status:       domain.LearningJobQueued,
 		CreatedAt:    now,
-	}
-	if strings.Contains(trig.Reason, "procedure") {
-		job.Kind = domain.LearningJobEvolveSkill
 	}
 	if err := a.LearningJobs.Save(job); err != nil {
 		a.log("warn", "learning", "learning job save failed: %v", err)
@@ -54,4 +54,11 @@ func (a *App) recordExperience(conv *domain.Conversation, headless bool) {
 	a.log("info", "learning", "job queued: id=%s kind=%s reason=%s conv=%s", job.ID, job.Kind, job.Reason, conv.ID)
 	jobID := job.ID
 	a.goSafe("learning", func() { a.runLearningJob(jobID) })
+}
+
+func (a *App) learnerNudgeInterval() int {
+	if a == nil || a.Settings == nil {
+		return domain.DefaultLearnerNudgeInterval
+	}
+	return domain.EffectiveLearnerNudgeInterval(a.Settings.Get().LearnerNudgeInterval)
 }

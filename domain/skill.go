@@ -316,6 +316,12 @@ type Settings struct {
 	// reviews to a cheaper/faster model; reviews re-send the transcript
 	// tail, so the model choice directly affects background cost.
 	ReviewModel string `json:"review_model,omitempty"`
+	// LearnerNudgeInterval is the Hermes-style periodic spawn gate: how
+	// many unreviewed user turns or tool-loop iterations enqueue the
+	// learner without a structural signal. nil = product default (10).
+	// 0 = disabled (structural signals only). Pointer so a missing JSON
+	// field stays "use default" instead of collapsing to disabled.
+	LearnerNudgeInterval *int `json:"learner_nudge_interval,omitempty"`
 	// DelegateModel selects the model used by the internal delegate agent.
 	// When empty, the delegate inherits the parent conversation's active model;
 	// if the parent has no model, normal headless model resolution applies.
@@ -440,6 +446,10 @@ func NormalizeSettings(settings Settings) Settings {
 	// or unset (-1 from JSON omitempty on older files) needs the default.
 	if settings.MaxAutoContinues < 0 {
 		settings.MaxAutoContinues = DefaultSettings().MaxAutoContinues
+	}
+	if settings.LearnerNudgeInterval != nil {
+		v := EffectiveLearnerNudgeInterval(settings.LearnerNudgeInterval)
+		settings.LearnerNudgeInterval = &v
 	}
 	// RepeatedToolLimit: 0 is a valid sentinel (disabled). Negative or
 	// unset (-1 from JSON omitempty on older files) needs the default.

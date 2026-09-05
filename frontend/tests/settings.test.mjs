@@ -42,6 +42,14 @@ test('Learning review threshold and skill nudge interval are gone', () => {
   assert.doesNotMatch(settingsView, /skill_nudge_interval/);
 });
 
+test('Periodic learner nudge interval is exposed in Memory & search settings', () => {
+  assert.match(html, /id="settings-learner-nudge-interval"/);
+  assert.match(html, /id="settings-learner-nudge-interval" type="number" min="0" max="100"/);
+  assert.match(settingsView, /learner_nudge_interval/);
+  assert.match(settingsView, /settings-learner-nudge-interval/);
+  assert.match(settingsView, /learnerNudgeInterval < 0 \|\| learnerNudgeInterval > 100/);
+});
+
 test('Slow Down per-round delay is exposed in settings UI', () => {
   assert.match(html, /id="settings-slow-down"/);
   assert.match(settingsView, /slow_down/);

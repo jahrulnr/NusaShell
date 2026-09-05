@@ -55,6 +55,34 @@ func Prompt(name string) string {
 	return string(data)
 }
 
+func joinPromptSections(parts ...string) string {
+	var b strings.Builder
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(p)
+	}
+	return b.String()
+}
+
+// SystemPrompt is the interactive conversation system prompt: identity and
+// operating rules from system.md plus the Primary Memory Writing Rules.
+func SystemPrompt() string {
+	return Prompt("system")
+}
+
+// LearnerPrompt loads the unified learner system prompt plus the same
+// Primary Memory Writing Rules the conversation agent sees (the learner
+// does not receive system.md).
+func LearnerPrompt() string {
+	return Prompt("learner")
+}
+
 // UserPrompt returns the content of a named user-role prompt file from
 // resources/agent/prompts/user/. These are short, imperative user
 // messages injected as the opening user turn for background agents
@@ -108,34 +136,39 @@ func TranscribeAudioPrompt() string {
 	return UserPrompt("transcribe-audio")
 }
 
-// ConsolidatorPrompt loads the memory-consolidator system prompt.
+// LearnerUserPrompt loads the short learner user-role instruction.
+func LearnerUserPrompt() string {
+	return UserPrompt("learner")
+}
+
+// ConsolidatorPrompt is a legacy alias for LearnerPrompt.
 func ConsolidatorPrompt() string {
-	return Prompt("memory-consolidator")
+	return LearnerPrompt()
 }
 
-// ConsolidatorUserPrompt loads the short consolidator user-role instruction.
+// ConsolidatorUserPrompt is a legacy alias for LearnerUserPrompt.
 func ConsolidatorUserPrompt() string {
-	return UserPrompt("memory-consolidator")
+	return LearnerUserPrompt()
 }
 
-// SkillEvolverPrompt loads the skill-evolver system prompt.
+// SkillEvolverPrompt is a legacy alias for LearnerPrompt.
 func SkillEvolverPrompt() string {
-	return Prompt("skill-evolver")
+	return LearnerPrompt()
 }
 
-// SkillEvolverUserPrompt loads the short skill-evolver user-role instruction.
+// SkillEvolverUserPrompt is a legacy alias for LearnerUserPrompt.
 func SkillEvolverUserPrompt() string {
-	return UserPrompt("skill-evolver")
+	return LearnerUserPrompt()
 }
 
-// SkillEvaluatorPrompt loads the skill-evaluator system prompt.
+// SkillEvaluatorPrompt is a legacy alias for LearnerPrompt.
 func SkillEvaluatorPrompt() string {
-	return Prompt("skill-evaluator")
+	return LearnerPrompt()
 }
 
-// SkillEvaluatorUserPrompt loads the skill-evaluator user-role packet instruction.
+// SkillEvaluatorUserPrompt is a legacy alias for LearnerUserPrompt.
 func SkillEvaluatorUserPrompt() string {
-	return UserPrompt("skill-evaluator")
+	return LearnerUserPrompt()
 }
 
 // Brief new agent after compaction to continue conversation

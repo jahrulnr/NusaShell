@@ -38,7 +38,7 @@ const (
 
 // MemoryRecord is a structured durable fact/preference/constraint. It is
 // the catalog that replaced free-text fragments. user.md and soul.md remain
-// separate human-only documents and are never stored as MemoryRecords.
+// separate always-injected documents and are never stored as MemoryRecords.
 type MemoryRecord struct {
 	ID                       string      `json:"id"`
 	Type                     string      `json:"type"`

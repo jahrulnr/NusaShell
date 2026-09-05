@@ -517,7 +517,6 @@
   font-size: 15px;
   line-height: 1.65;
 }
-.agent-message.assistant .agent-bubble-text > p { margin: .4em 0 .75em; }
 
 .agent-bubble-text { min-width: 0; max-width: 100%; font-size: 1rem; overflow-wrap: anywhere; }
 /* Inline media in markdown (images and videos from ![alt](url) syntax) */
@@ -963,7 +962,6 @@
   min-width: 0;
   max-width: 100%;
   width: 100%;
-  margin: 8px 0 14px;
   padding-left: 0;
   color: var(--text-dim);
 }

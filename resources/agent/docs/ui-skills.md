@@ -31,7 +31,7 @@ Searchable list of installed skills. Each row shows the skill name, a status bad
 
 ## Detail
 
-Read-only file viewer for the selected skill plus lifecycle controls. Shows the skill name, description, owner, status badge, and Version/ActiveVersion. Experimental and validated skills can be promoted (skills.promote). Rollback picks a version from the custom select and calls skills.rollback. User-owned trusted skills can still be saved with skills.save; learned experimental skills are not overwritten in place from this viewer. Plugin-owned skills are read-only. On phones the catalog, file tree, and file viewer stack vertically inside one scrollable workspace so every file remains reachable.
+Read-only file viewer for the selected skill plus lifecycle controls. Shows the skill name, description, owner, status badge, and Version/ActiveVersion. Experimental and validated skills can be promoted (skills.promote). Rollback picks a version from the custom select and calls skills.rollback. Learned and user-owned skills can be deleted (skills.delete) after a confirm dialog; builtin and plugin-owned skills stay hidden from Delete. User-owned trusted skills can still be saved with skills.save; learned experimental skills are not overwritten in place from this viewer. Plugin-owned skills are read-only. On phones the catalog, file tree, and file viewer stack vertically inside one scrollable workspace so every file remains reachable.
 
 - **Editor title** (`#skill-editor-title`):
   - Section: Skills
@@ -71,6 +71,11 @@ Read-only file viewer for the selected skill plus lifecycle controls. Shows the 
   - Section: Skills
   - Type: button
   - Action: Rolls the selected skill back to the chosen version via skills.rollback.
+
+- **Delete skill** (`#skills-delete`):
+  - Section: Skills
+  - Type: button
+  - Action: Deletes a learned or user-owned skill after confirmation via skills.delete. Hidden for builtin and plugin-owned skills.
 
 - **Skill file viewer** (`#skill-file-viewer`):
   - Section: Skills editor pane

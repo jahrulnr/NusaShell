@@ -6,7 +6,7 @@ Edit the always-injected user.md and soul.md documents, browse recorded experien
 
 ## Header stats
 
-Live counts of memory records and learning edges. The record count refreshes in real time when a consolidator job, a human retire, or an About You/About Agent save emits `memory.updated`.
+Live counts of memory records and learning edges. The record count refreshes in real time when a learner job, a human retire, or an About You/About Agent save emits `memory.updated`.
 
 - **Memory count** (`#learning-stat-memory`):
   - Section: Learning

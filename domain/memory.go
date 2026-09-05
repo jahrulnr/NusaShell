@@ -6,12 +6,12 @@ import (
 	"unicode"
 )
 
-// Memory has two human-owned always-injected documents (user.md, soul.md)
-// plus structured MemoryRecords under growth/memories.jsonl. Agents and
-// consolidators never write the two documents.
+// Memory has two always-injected profile documents (user.md, soul.md)
+// plus structured MemoryRecords under growth/memories.jsonl. Agents write
+// the documents with file_*; typed learner JSON never writes them.
 
 // UserTokenCap is the soft token budget for the user tier (user.md).
-const UserTokenCap = 1000
+const UserTokenCap = 4000
 
 // UserCharCap is the character approximation of UserTokenCap.
 const UserCharCap = UserTokenCap * 4

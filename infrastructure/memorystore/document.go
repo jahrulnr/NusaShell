@@ -1,7 +1,8 @@
-// Package memorystore persists the two human-only always-injected
+// Package memorystore persists the two always-injected
 // documents: memory/user.md (About You) and memory/soul.md (About Agent).
 // Structured MemoryRecords live in jsonstore growth JSONL, not here.
-// Both adapters auto-create their files on first use.
+// Both adapters auto-create their files on first use. Agents write the
+// files with file_*; Learning UI uses Update/Replace.
 package memorystore
 
 import (

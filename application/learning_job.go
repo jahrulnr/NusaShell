@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -56,7 +57,7 @@ func (a *App) startLearningJob(job *domain.LearningJob) {
 
 func (a *App) executeLearningJob(job *domain.LearningJob, source *learningSource) (string, []domain.LearningOperation, error, bool) {
 	switch job.Kind {
-	case domain.LearningJobConsolidate:
+	case domain.LearningJobLearner, domain.LearningJobConsolidate:
 		ops, convID, err, reviewed := a.consolidateJobAt(job, source)
 		return convID, ops, err, reviewed
 	case domain.LearningJobEvolveSkill:
@@ -115,7 +116,7 @@ func (a *App) advanceLearningCursorAfterReview(source *learningSource, runErr er
 func (a *App) captureLearningSource(job *domain.LearningJob) *learningSource {
 	source := &learningSource{}
 	if job == nil ||
-		(job.Kind != domain.LearningJobConsolidate && job.Kind != domain.LearningJobEvolveSkill) ||
+		(job.Kind != domain.LearningJobLearner && job.Kind != domain.LearningJobConsolidate && job.Kind != domain.LearningJobEvolveSkill) ||
 		a == nil || a.Experiences == nil || job.ExperienceID == "" {
 		return source
 	}
@@ -179,10 +180,13 @@ func (a *App) advanceLearningCursor(source *learningSource) error {
 // evolveSkillJob, so only jobs that would otherwise be invisible in the feed
 // are recorded here.
 func (a *App) recordLearningJobTrajectory(job *domain.LearningJob, convID string, ops []domain.LearningOperation) {
-	if a.Trajectory == nil || job == nil || job.Kind != domain.LearningJobConsolidate {
+	if a.Trajectory == nil || job == nil {
 		return
 	}
-	a.Trajectory.Record("consolidate", learningJobDetail(job, convID, ops))
+	switch job.Kind {
+	case domain.LearningJobLearner, domain.LearningJobConsolidate:
+		a.Trajectory.Record("consolidate", learningJobDetail(job, convID, ops))
+	}
 }
 
 // learningJobDetail builds the trajectory detail for a finished learning job.
@@ -252,7 +256,9 @@ func (a *App) consolidateJobAt(job *domain.LearningJob, source *learningSource) 
 	// deterministic rule-based extraction (teachingOps) so the job still
 	// produces output in offline/no-provider setups.
 	ops, convID, sourceReviewed := a.consolidateViaLLMAt(job, exp, sourceValue)
-	ops = consolidationOpsOrFallback(ops, exp, job.ID)
+	if !sourceReviewed {
+		ops = consolidationOpsOrFallback(ops, exp, job.ID)
+	}
 	if len(ops) == 0 {
 		return nil, convID, nil, sourceReviewed
 	}
@@ -308,26 +314,217 @@ func (a *App) consolidateViaLLM(job *domain.LearningJob, exp *domain.Experience)
 }
 
 func (a *App) consolidateViaLLMAt(job *domain.LearningJob, exp *domain.Experience, source learningSource) ([]domain.LearningOperation, string, bool) {
-	if strings.TrimSpace(resources.ConsolidatorPrompt()) == "" {
+	if strings.TrimSpace(resources.LearnerPrompt()) == "" {
 		return nil, "", false
 	}
-	prompt := a.buildConsolidatorPacketAt(exp, source)
-	text, convID, err := a.doLearningTurn(WithWorkspace(context.Background(), exp.Scope.Workspace), AgentMemoryConsolidator, a.learningModelID(), prompt)
+	prompt := a.buildLearnerPacketAt(exp, source, job.Reason, procedureCountForJob(a, exp, job))
+	text, convID, err := a.doLearningTurn(WithWorkspace(context.Background(), exp.Scope.Workspace), AgentLearner, a.learningModelID(), prompt)
 	if err != nil {
-		a.log("debug", "learning", "consolidator LLM call failed, using deterministic fallback: %v", err)
+		a.log("debug", "learning", "learner LLM call failed, using deterministic fallback: %v", err)
 		return nil, convID, false
+	}
+	if result := parseLearnerResult(text); result != nil {
+		ops := opsFromLearnerConsolidate(result.Consolidate, job.ID, exp.ID)
+		if job.Reason == domain.TriggerRepeatedProcedure && result.Evaluate != nil && result.Evaluate.Approved {
+			a.applyLearnerEvolve(job, exp, result)
+		}
+		if len(ops) == 0 {
+			a.log("debug", "learning", "learner LLM returned no operations")
+			return nil, convID, true
+		}
+		a.log("info", "learning", "learner LLM returned %d operations", len(ops))
+		return ops, convID, true
 	}
 	ops, parsed := parseLLMOperationsResult(text, job.ID, exp.ID)
-	if !parsed {
-		a.log("debug", "learning", "consolidator LLM response could not be parsed")
-		return nil, convID, false
+	if parsed {
+		if len(ops) == 0 {
+			a.log("debug", "learning", "learner LLM returned no operations")
+			return nil, convID, true
+		}
+		a.log("info", "learning", "learner LLM returned %d operations", len(ops))
+		return ops, convID, true
 	}
-	if len(ops) == 0 {
-		a.log("debug", "learning", "consolidator LLM returned no operations")
-		return nil, convID, true
+	a.log("debug", "learning", "learner LLM response could not be parsed")
+	return nil, convID, false
+}
+
+func procedureCountForJob(a *App, exp *domain.Experience, job *domain.LearningJob) int {
+	if a == nil || exp == nil || job == nil || job.Reason != domain.TriggerRepeatedProcedure {
+		return 0
 	}
-	a.log("info", "learning", "consolidator LLM returned %d operations", len(ops))
-	return ops, convID, true
+	fp := strings.TrimSpace(exp.Signals.ProcedureFingerprint)
+	if fp == "" || a.Experiences == nil {
+		return 0
+	}
+	n := 1
+	for _, h := range a.Experiences.ListByConversation(exp.ConversationID) {
+		if h == nil || h.ID == exp.ID {
+			continue
+		}
+		if h.Signals.ProcedureFingerprint == fp {
+			n++
+		}
+	}
+	return n
+}
+
+func parseLearnerResult(text string) *learnerResult {
+	jsonText := extractJSONFromText(text)
+	var result learnerResult
+	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
+		return nil
+	}
+	if strings.TrimSpace(result.StageReached) == "" && result.Consolidate == nil {
+		return nil
+	}
+	return &result
+}
+
+func opsFromLearnerConsolidate(stage *learnerConsolidate, jobID, expID string) []domain.LearningOperation {
+	if stage == nil {
+		return nil
+	}
+	action := strings.TrimSpace(strings.ToLower(stage.Action))
+	if action == "" || action == "no_op" {
+		return nil
+	}
+	if stage.Entry == nil {
+		return nil
+	}
+	evidence := strings.TrimSpace(stage.Entry.Evidence)
+	content := strings.TrimSpace(stage.Entry.Content)
+	if evidence == "" || content == "" {
+		return nil
+	}
+	now := clock.NewTime().Time()
+	typ := memoryTypeFromLearner(stage.Entry.Type)
+	supersedes := strings.TrimSpace(stage.Entry.Supersedes)
+	if strings.EqualFold(supersedes, "null") {
+		supersedes = ""
+	}
+	var ops []domain.LearningOperation
+	if action == "supersede" && supersedes != "" {
+		ops = append(ops, domain.LearningOperation{
+			ID:        domain.NewULID(domain.IDPrefixLearnOp),
+			Kind:      domain.OpMemoryContradict,
+			Status:    domain.LearningOpProposed,
+			Actor:     domain.ActorLearner,
+			JobID:     jobID,
+			TargetID:  supersedes,
+			Evidence:  []string{expID, evidence},
+			Reason:    "learner supersede",
+			CreatedAt: now,
+		})
+	}
+	kind := domain.OpMemoryUpsert
+	if action == "update" {
+		kind = domain.OpMemoryUpsert
+	}
+	ops = append(ops, domain.LearningOperation{
+		ID:       domain.NewULID(domain.IDPrefixLearnOp),
+		Kind:     kind,
+		Status:   domain.LearningOpProposed,
+		Actor:    domain.ActorLearner,
+		JobID:    jobID,
+		Evidence: []string{expID, evidence},
+		Payload: map[string]any{
+			"body":  content,
+			"type":  typ,
+			"scope": domain.MemoryScopeUser,
+		},
+		CreatedAt: now,
+	})
+	return ops
+}
+
+func memoryTypeFromLearner(t string) string {
+	switch strings.TrimSpace(strings.ToLower(t)) {
+	case domain.MemoryTypeFact:
+		return domain.MemoryTypeFact
+	case domain.MemoryTypePreference:
+		return domain.MemoryTypePreference
+	case "procedure":
+		return domain.MemoryTypeConstraint
+	case "correction_of_prior_memory":
+		return domain.MemoryTypePreference
+	default:
+		return domain.MemoryTypeBelief
+	}
+}
+
+func (a *App) applyLearnerEvolve(job *domain.LearningJob, exp *domain.Experience, result *learnerResult) {
+	if a == nil || a.Skills == nil || exp == nil || result == nil || result.Evaluate == nil || !result.Evaluate.Approved {
+		return
+	}
+	name := learnedSkillName(exp.Goal)
+	if result.Evolve != nil && strings.TrimSpace(result.Evolve.SkillID) != "" {
+		name = learnedSkillName(result.Evolve.SkillID)
+	} else if result.Evaluate.ProposedSkillShape != nil && strings.TrimSpace(result.Evaluate.ProposedSkillShape.Name) != "" {
+		name = learnedSkillName(result.Evaluate.ProposedSkillShape.Name)
+	}
+	body, description := learnerSkillBody(result, exp)
+	if !skillMeetsMinimumBar(body) {
+		body, description = a.deterministicSkillBody(exp)
+	}
+	if !skillMeetsMinimumBar(body) {
+		return
+	}
+	skill := newLearnedSkill(name, description, body)
+	if !a.applyLearnedSkillRevision(skill, name) {
+		return
+	}
+	skill.EnsureStatusDefault()
+	if domain.CreatorMayPromote(domain.ActorLearner) {
+		return
+	}
+	if err := a.Skills.Save(skill); err != nil {
+		a.log("warn", "learning", "learner evolve save failed: %v", err)
+		return
+	}
+	a.emitSkillLifecycle("evolve", skill.ID, string(skill.Status), "")
+}
+
+func learnerSkillBody(result *learnerResult, exp *domain.Experience) (string, string) {
+	var name, trigger, steps string
+	if result != nil && result.Evaluate != nil && result.Evaluate.ProposedSkillShape != nil {
+		shape := result.Evaluate.ProposedSkillShape
+		name = strings.TrimSpace(shape.Name)
+		trigger = strings.TrimSpace(shape.TriggerDescription)
+		steps = strings.TrimSpace(shape.StepsSummary)
+	}
+	if name == "" {
+		name = "Learned Workflow"
+	}
+	if trigger == "" {
+		trigger = "When the same goal recurs and this procedure matches the task context."
+	}
+	if steps == "" && exp != nil {
+		var b strings.Builder
+		for i, act := range exp.Actions {
+			fmt.Fprintf(&b, "%d. `%s`\n", i+1, act.Name)
+		}
+		steps = strings.TrimSpace(b.String())
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n\n", name)
+	b.WriteString("## Purpose\n")
+	if exp != nil {
+		b.WriteString("Repeat the verified workflow for: ")
+		b.WriteString(clip(exp.Goal, 180))
+		b.WriteString(".\n\n")
+	} else {
+		b.WriteString(name + "\n\n")
+	}
+	b.WriteString("## Trigger\n")
+	b.WriteString(trigger)
+	b.WriteString("\n\n## Steps\n")
+	b.WriteString(steps)
+	b.WriteString("\n")
+	desc := clip(name, 200)
+	if exp != nil && desc == name {
+		desc = clip(exp.Goal, 200)
+	}
+	return b.String(), desc
 }
 
 func matchingRecordID(store MemoryRecordStore, body, typ, project string) string {
@@ -370,7 +567,7 @@ func teachingOps(exp *domain.Experience, jobID string) []domain.LearningOperatio
 			ID:       domain.NewULID(domain.IDPrefixLearnOp),
 			Kind:     domain.OpMemoryUpsert,
 			Status:   domain.LearningOpProposed,
-			Actor:    domain.ActorConsolidator,
+			Actor:    domain.ActorLearner,
 			JobID:    jobID,
 			Evidence: []string{exp.ID},
 			Payload: map[string]any{
@@ -521,11 +718,11 @@ func (a *App) evolveSkillViaLLM(exp *domain.Experience) (string, string, string)
 }
 
 func (a *App) evolveSkillViaLLMAt(exp *domain.Experience, source learningSource) (string, string, string, bool) {
-	if strings.TrimSpace(resources.SkillEvolverPrompt()) == "" {
+	if strings.TrimSpace(resources.LearnerPrompt()) == "" {
 		return "", "", "", false
 	}
-	prompt := a.buildSkillEvolverPacketAt(exp, source)
-	text, convID, err := a.doLearningTurn(WithWorkspace(context.Background(), exp.Scope.Workspace), AgentSkillEvolver, a.learningModelID(), prompt)
+	prompt := a.buildLearnerPacketAt(exp, source, domain.TriggerRepeatedProcedure, 3)
+	text, convID, err := a.doLearningTurn(WithWorkspace(context.Background(), exp.Scope.Workspace), AgentLearner, a.learningModelID(), prompt)
 	if err != nil {
 		a.log("debug", "learning", "skill evolver LLM call failed, using deterministic fallback: %v", err)
 		return "", "", convID, false

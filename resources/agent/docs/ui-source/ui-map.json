@@ -241,7 +241,7 @@
         {
           "heading": "Detail",
           "paragraphs": [
-            "Read-only file viewer for the selected skill plus lifecycle controls. Shows the skill name, description, owner, status badge, and Version/ActiveVersion. Experimental and validated skills can be promoted (skills.promote). Rollback picks a version from the custom select and calls skills.rollback. User-owned trusted skills can still be saved with skills.save; learned experimental skills are not overwritten in place from this viewer. Plugin-owned skills are read-only. On phones the catalog, file tree, and file viewer stack vertically inside one scrollable workspace so every file remains reachable."
+            "Read-only file viewer for the selected skill plus lifecycle controls. Shows the skill name, description, owner, status badge, and Version/ActiveVersion. Experimental and validated skills can be promoted (skills.promote). Rollback picks a version from the custom select and calls skills.rollback. Learned and user-owned skills can be deleted (skills.delete) after a confirm dialog; builtin and plugin-owned skills stay hidden from Delete. User-owned trusted skills can still be saved with skills.save; learned experimental skills are not overwritten in place from this viewer. Plugin-owned skills are read-only. On phones the catalog, file tree, and file viewer stack vertically inside one scrollable workspace so every file remains reachable."
           ],
           "controls": [
             "skill-editor-title",
@@ -252,6 +252,7 @@
             "skills-promote",
             "skills-rollback-version",
             "skills-rollback",
+            "skills-delete",
             "skill-file-viewer",
             "skill-files-tree",
             "skill-file-content"
@@ -396,7 +397,7 @@
         {
           "heading": "Header stats",
           "paragraphs": [
-            "Live counts of memory records and learning edges. The record count refreshes in real time when a consolidator job, a human retire, or an About You/About Agent save emits `memory.updated`."
+            "Live counts of memory records and learning edges. The record count refreshes in real time when a learner job, a human retire, or an About You/About Agent save emits `memory.updated`."
           ],
           "controls": [
             "learning-stat-memory",
@@ -610,7 +611,7 @@
         {
           "heading": "Card groups",
           "paragraphs": [
-            "Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system."
+            "Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, periodic review interval, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system."
           ],
           "controls": [
             "settings-group-agent",
@@ -683,11 +684,12 @@
         {
           "heading": "Learning",
           "paragraphs": [
-            "Background jobs consolidate recorded experience into memory records and skills. The review model routes those jobs to a cheaper or faster model (default uses the conversation's active model)."
+            "Background jobs run a single learner that consolidates recorded experience into memory records and, for repeated procedures, may evaluate and evolve a skill. The review model routes those jobs to a cheaper or faster model (default uses the conversation's active model). The periodic review interval runs the learner after N unreviewed user turns or tool-loop iterations (default 10, 0 disables); steer, recovery, repeated failure, and repeated procedure still enqueue immediately."
           ],
           "controls": [
             "settings-learning-title",
-            "settings-review-model"
+            "settings-review-model",
+            "settings-learner-nudge-interval"
           ]
         },
         {
@@ -1330,6 +1332,12 @@
       "type": "button",
       "action": "Rolls the selected skill back to the chosen version via skills.rollback."
     },
+    "skills-delete": {
+      "label": "Delete skill",
+      "section": "Skills",
+      "type": "button",
+      "action": "Deletes a learned or user-owned skill after confirmation via skills.delete. Hidden for builtin and plugin-owned skills."
+    },
     "plugins-add-mcp": {
       "label": "Add MCP",
       "section": "Plugins",
@@ -1783,6 +1791,12 @@
       "section": "Settings",
       "type": "select",
       "notes": "Routes background learning jobs to a dedicated model; empty uses the conversation's active model."
+    },
+    "settings-learner-nudge-interval": {
+      "label": "Periodic review interval",
+      "section": "Settings",
+      "type": "number",
+      "notes": "Unreviewed user turns or tool-loop iterations before the learner runs without a structural signal; default 10, 0 disables periodic review."
     },
     "settings-project-memory-base": {
       "label": "Project memory directory",

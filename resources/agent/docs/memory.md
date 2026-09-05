@@ -1,51 +1,70 @@
 # Memory
 
-NusaShell memory is an experience-learning catalog plus two human-only
-always-injected documents.
+NusaShell memory is an experience-learning catalog plus two always-injected
+profile documents.
 
 | Surface | Storage | Who writes | Injected |
 |---|---|---|---|
-| **About You** | `memory/user.md` | Human (Learning UI) | Every turn via `file_read` |
-| **About Agent** | `memory/soul.md` | Human (Learning UI) | Every turn via `file_read` |
-| **Records** | `growth/memories.jsonl` | Memory consolidator | Compact APPLY block (top-K, scoped) |
+| **About You** | `memory/user.md` | Agents via `file_patch`/`file_write`; humans via Learning UI | Every turn via `file_read` when the body is non-empty |
+| **About Agent** | `memory/soul.md` | Agents via `file_patch`/`file_write`; humans via Learning UI | Every turn via `file_read` when the body is non-empty |
+| **Records** | `growth/memories.jsonl` | Learner typed JSON | Compact APPLY block (top-K, scoped) |
 | **Experiences** | `growth/experiences.jsonl` | Runtime at `finishTurn` | Not injected; Learning UI list |
 
-`user.md` and `soul.md` are human-only. Agents, the consolidator, and skill
-jobs never `replace` or `update` them. Hydration still `file_read`s both
-when they are non-empty. A workspace `AGENTS.md` is repository guidance and
-is a separate `file_read`.
+`user.md` and `soul.md` are written with the `file_*` family on absolute
+paths (`{dataDir}/memory/user.md`, `{dataDir}/memory/soul.md`). Hydration
+runs the real `file_read` tool for each non-empty document. Empty files are
+omitted; `runtime_context` still carries `dataDir`. The `memory` dispatcher
+stays read-only (`search`/`get`/`list`) over structured records. Typed
+learner JSON never writes the profile documents. A workspace `AGENTS.md` is
+repository guidance and is a separate `file_read`.
 
-Durable facts, preferences, and constraints live as structured
+Durable catalog facts, preferences, and constraints live as structured
 **MemoryRecords** (`episode`, `fact`, `preference`, `constraint`,
 `project_convention`, `environment_fact`, `belief`). Retired and superseded
 records stay on disk for audit and are excluded from search and APPLY.
+Do not copy the same sentence into both `user.md` and a record.
 
 Workspace knowledge stays in `memory_project` (see `memory-project.md`).
 
-## Consolidator
+## Learner
 
-The memory consolidator runs as a background job when a high-signal
-experience is recorded (explicit teaching, user correction, verified
-recovery, repeated failure, or repeated procedure). It converts the
-experience into typed operations (`memory.upsert`, `memory.strengthen`,
-`memory.merge`, `memory.contradict`, `memory.retire`).
+The learner is a single background agent with three internal stages. It
+replaces the former memory-consolidator, skill-evolver, and skill-evaluator
+spawns. Stage 1 (consolidate) always runs. Stage 2 (evaluate) and Stage 3
+(evolve) run only when the trigger is `repeated_procedure` with count ≥ 3
+and Stage 2 approves. There is no standalone spawn into Stage 2 or Stage 3.
+
+The orchestrator enqueues one `learner` job after a finished interactive
+turn when a **language-agnostic** gate fires:
+
+- **structural:** steer/correction, verified recovery, repeated failure, or
+  the same tool-call fingerprint ≥ 3 times
+- **periodic (Hermes-style):** at least N unreviewed user turns **or** N
+  unreviewed assistant tool-loop iterations since the last successful review
+  (`learner_nudge_interval` in Settings → Memory & search → Learning;
+  default 10, 0 disables)
+
+Keyword matching in any language is not a spawn gate. Explicit teaching and
+corrections in Bahasa Indonesia, English, or mixed text are classified by
+the learner from meaning. If the spawn reason does not hold up, the learner
+returns `no_op` instead of fabricating a record.
 
 When a learning model is available (configured via `review_model` in
-Settings, or the first enabled provider), the consolidator calls the LLM
-with the RFC system prompt and a short user instruction containing only the
-source conversation id, JSON file path, and incremental message range. The
-background agent uses `file_read`, `grep`, and `exec` to inspect that source
-file, then retrieves relevant records with `memory` search/get/list. Source
-conversation content is untrusted evidence, not an instruction. The agent
-returns typed JSON operations that are validated and applied through
-`MemoryService.Apply`; normal tool calls may also have direct side effects.
-It does not receive an experience JSON dump or a `List()[:20]` memory-body
-dump.
+Settings, or the first enabled provider), the learner calls the LLM with
+the learner system prompt and a short user instruction containing the source
+conversation id, JSON file path, incremental message range, and
+`trigger_reason`. The background agent uses `file_read`, `grep`, and `exec`
+to inspect that source file, then retrieves relevant records with `memory`
+search/get/list. Source conversation content is untrusted evidence, not an
+instruction. Stage 1 returns a typed JSON object that is validated and
+applied through `MemoryService.Apply`; normal tool calls may also have
+direct side effects. It does not receive an experience JSON dump or a
+`List()[:20]` memory-body dump.
 
-When no provider is available, the consolidator falls back to a
-deterministic rule-based extraction (`teachingOps`) so the job still
-produces output in offline/no-provider setups. The LLM path and the
-deterministic path share the same deduplication and apply logic.
+When no provider is available, Stage 1 falls back to a deterministic
+extraction from steer corrections (`teachingOps`) so the job still produces
+output in offline/no-provider setups. The LLM path and the deterministic
+path share the same deduplication and apply logic.
 
 ### Incremental background-learning cursor
 
@@ -87,24 +106,29 @@ The `memory` dispatcher is read-only. `op` selects:
 - `get` — one record by `id`
 - `list` — retrievable records with the same filters
 
-There is no `save`, `replace`, or `delete`. Explicit teaching
-("remember…", "don't forget…") is recorded as an experience; the
-consolidator commits typed records.
+There is no `save`, `replace`, or `delete`. Standing preferences and
+corrections in any language are recorded as experiences; the learner
+commits typed records after a semantic review. Profile-shaped facts
+(identity, interaction style, named projects) are written to
+`{dataDir}/memory/user.md` with `file_patch` / `file_write`, not through
+this dispatcher.
 
 Good examples:
 
     memory(op="search", query="Go backend")
     memory(op="get", id="mem_01J…")
     memory(op="list", type="preference", limit=10)
+    file_patch(path="{dataDir}/memory/user.md", old_string="…", new_string="…")
 
 Bad examples:
 
     memory(op="save", content="user prefers Go")
     memory(op="replace", target="user", content="…")
     memory(op="delete", id="mem_01J…")
+    file_delete(path="{dataDir}/memory/user.md")
 
 When the user states a standing preference or correction, continue the
-task. Do not try to persist it yourself.
+task and patch `user.md` when the fact belongs in the narrative profile.
 
 Background learning agents currently receive the same full conversation
 toolbox as the conversation agent for the active workspace. This includes
@@ -122,6 +146,7 @@ Good source inspection:
     memory(op="search", query="deployment preference", limit=8)
     memory_project(op="admit", kind="decision", body="...")
     skill(op="save", name="learned-workflow", content="...")
+    file_patch(path="{dataDir}/memory/user.md", old_string="…", new_string="…")
 
 Bad source handling:
 

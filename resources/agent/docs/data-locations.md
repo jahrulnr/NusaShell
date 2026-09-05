@@ -13,7 +13,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 
 | Path | Content | Format |
 | --- | --- | --- |
-| `config/settings.json` | compaction / caching / sound / user prompt / learning-job model (`review_model`) | JSON |
+| `config/settings.json` | compaction / caching / sound / user prompt / learning-job model (`review_model`) / periodic learner interval (`learner_nudge_interval`) | JSON |
 | `config/providers.json` | provider configs (no keys) | JSON |
 | `config/acp-agents.json` | ACP subagent configs (command/args/env; env values stored locally, keys only on the wire) | JSON |
 | `config/mcp-servers.json` | manual MCP server registry | JSON |
@@ -26,11 +26,11 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `skills/.provenance.json` | skill authorship log (createdBy, createdAt) | JSON |
 | `skills/.deleted-builtin.json` | builtin skills the user deleted (so they are not re-seeded) | JSON |
 | `plugins/<id>/` | plugins (manual MCP servers and installed plugins): `manifest.json` + optional `ui/` + optional `skills/` (mounted read-only as `plugin:<id>` skills) | JSON + files |
-| `memory/user.md` | human-only always-injected user document (~1k token cap; Learning → About You) | Markdown |
-| `memory/soul.md` | human-only always-injected agent document (~1k token cap; Learning → About Agent) | Markdown |
+| `memory/user.md` | always-injected user profile (~4k token cap; agents write via `file_*`; Learning → About You) | Markdown |
+| `memory/soul.md` | always-injected agent document (~1k token cap; agents write via `file_*`; Learning → About Agent) | Markdown |
 | `growth/experiences.jsonl` | experience events recorded at finishTurn | JSONL |
-| `growth/memories.jsonl` | structured MemoryRecord catalog (consolidator writes; humans retire) | JSONL |
-| `growth/jobs.jsonl` | learning jobs (consolidate / evolve_skill / evaluate / retire_stale) | JSONL |
+| `growth/memories.jsonl` | structured MemoryRecord catalog (learner writes; humans retire) | JSONL |
+| `growth/jobs.jsonl` | learning jobs (`learner`, plus legacy `consolidate` / `evolve_skill` / `evaluate` / `retire_stale`) | JSONL |
 | `growth/operations.jsonl` | typed learning-operation audit | JSONL |
 | `memory_project/{key}/` | per-workspace project memory (`index.md`, `guardrails.md`, … plus `archive/`). Default base; override with Settings → Project memory (`project_memory_base`, for example `~/.memory`) | Markdown |
 | `learning/edges.jsonl` | learning edges: content/embedding and metadata `related` links, plus `used_with` links for nodes observed together in one agent turn; stale endpoints are pruned during graph rebuild | JSONL |

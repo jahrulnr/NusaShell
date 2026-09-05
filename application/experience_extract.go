@@ -49,15 +49,12 @@ func ExtractExperience(conv *domain.Conversation, headless bool) domain.Experien
 			if text == "" {
 				continue
 			}
-			if msg.Steer || domain.DetectCorrectionHeuristic(text) {
+			if msg.Steer {
 				exp.Corrections = append(exp.Corrections, domain.UserCorrection{
 					Type:     "approach",
 					UserSaid: clip(text, maxCorrectionChars),
-					Explicit: msg.Steer || domain.DetectExplicitTeaching(text),
+					Explicit: true,
 				})
-			}
-			if domain.DetectExplicitTeaching(text) {
-				exp.Signals.ExplicitTeaching = true
 			}
 			if !msg.Steer {
 				lastUser = text

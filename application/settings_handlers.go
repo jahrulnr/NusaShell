@@ -44,6 +44,13 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if req.ReviewModel != nil {
 		s.ReviewModel = strings.TrimSpace(*req.ReviewModel)
 	}
+	if req.LearnerNudgeInterval != nil {
+		v := *req.LearnerNudgeInterval
+		if v < 0 || v > domain.LearnerNudgeIntervalCap {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "learner nudge interval must be between 0 and 100 (0 = disabled)"}
+		}
+		s.LearnerNudgeInterval = &v
+	}
 	if req.DelegateModel != nil {
 		s.DelegateModel = strings.TrimSpace(*req.DelegateModel)
 	}
@@ -298,6 +305,7 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		CompactionSummaryMaxTokens: s.CompactionSummaryMaxTokens,
 		CompactionSummaryMinChars:  s.CompactionSummaryMinChars,
 		ReviewModel:                s.ReviewModel,
+		LearnerNudgeInterval:       domain.EffectiveLearnerNudgeInterval(s.LearnerNudgeInterval),
 		DelegateModel:              s.DelegateModel,
 		PromptCaching:              s.PromptCaching,
 		MaxToolRounds:              s.MaxToolRounds,

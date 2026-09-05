@@ -215,6 +215,7 @@ export async function refresh() {
     state.compactionModel = settings.compaction_model ?? '';
     state.reviewModel = settings.review_model ?? '';
     state.delegateModel = settings.delegate_model ?? '';
+    document.getElementById('settings-learner-nudge-interval').value = settings.learner_nudge_interval ?? 10;
     sttLanguageSelect.setSelected([['id', 'en'].includes(settings.stt_offline_language) ? settings.stt_offline_language : '']);
     document.getElementById('settings-project-memory-base').value = settings.project_memory_base ?? '';
     document.getElementById('settings-auto-continues').value = settings.max_auto_continues ?? 10;
@@ -806,6 +807,11 @@ async function save() {
     const compactionValue = compactionSelect.getSelected()?.[0] ?? '';
     const reviewValue = reviewSelect.getSelected()?.[0] ?? '';
     const delegateValue = delegateSelect.getSelected()?.[0] ?? '';
+    const learnerNudgeInterval = Number(document.getElementById('settings-learner-nudge-interval').value);
+    if (!Number.isInteger(learnerNudgeInterval) || learnerNudgeInterval < 0 || learnerNudgeInterval > 100) {
+      setStatus('Periodic review interval must be between 0 and 100 (0 = disabled).', true);
+      return;
+    }
     const maxAutoContinues = Number(document.getElementById('settings-auto-continues').value);
     if (!Number.isInteger(maxAutoContinues) || maxAutoContinues < 0 || maxAutoContinues > 10000) {
       setStatus('Max auto-continues must be between 0 and 10,000 (0 = unlimited).', true);
@@ -838,6 +844,7 @@ async function save() {
       compaction_summary_min_chars: compactionSummaryMinChars || null,
       compaction_model: compactionValue || null,
       review_model: reviewValue || null,
+      learner_nudge_interval: learnerNudgeInterval,
       delegate_model: delegateValue || null,
       max_output_tokens: maxOutputTokens,
       embedding_provider_id: embProviderId || null,

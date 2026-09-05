@@ -146,6 +146,7 @@ func TestToolFactoryLearningAgentsMatchConversationTools(t *testing.T) {
 	}
 	conversation := f.Get(AgentConversation, "/ws")
 	for _, kind := range []AgentKind{
+		AgentLearner,
 		AgentMemoryConsolidator,
 		AgentSkillEvolver,
 		AgentSkillEvaluator,
@@ -170,6 +171,7 @@ func TestToolFactoryLearningAgentsMatchConversationTools(t *testing.T) {
 
 func TestLearningToolCallsAreNotRejectedByOldPolicy(t *testing.T) {
 	for _, kind := range []AgentKind{
+		AgentLearner,
 		AgentMemoryConsolidator,
 		AgentSkillEvolver,
 		AgentSkillEvaluator,

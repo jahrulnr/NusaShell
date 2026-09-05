@@ -10,7 +10,7 @@ import (
 // systemPrompt is loaded once from resources/agent/prompts/system.md at init
 // time. The markdown owns identity, tool/context protocol, operating rules,
 // and intent/evidence routing as one merged document.
-var systemPrompt = resources.Prompt("system")
+var systemPrompt = resources.SystemPrompt()
 
 // automationPrompt is the system prompt for headless Automation workflow
 // agent steps. It is loaded once from
@@ -36,9 +36,7 @@ var continuePrompt = resources.Prompt("continue")
 // to call the summary() tool with the handoff checkpoint text.
 var compactionPrompt = resources.Prompt("compaction")
 
-var consolidatorPrompt = resources.Prompt("memory-consolidator")
-var skillEvolverPrompt = resources.Prompt("skill-evolver")
-var skillEvaluatorPrompt = resources.Prompt("skill-evaluator")
+var learnerPrompt = resources.LearnerPrompt()
 
 // compactionHandoffUserPrompt is the last user message on a compaction
 // Complete request. System-prompt instructions are not enough: if the
@@ -79,12 +77,8 @@ func buildSystemPromptForRun(run *TurnRun, c *domain.Conversation, userPrompt st
 			base = automationPrompt
 		case AgentDelegate:
 			base = delegatePrompt
-		case AgentMemoryConsolidator:
-			base = consolidatorPrompt
-		case AgentSkillEvolver:
-			base = skillEvolverPrompt
-		case AgentSkillEvaluator:
-			base = skillEvaluatorPrompt
+		case AgentLearner, AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator:
+			base = learnerPrompt
 		}
 	}
 	var sb strings.Builder

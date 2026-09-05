@@ -26,18 +26,16 @@ const (
 	// pipeline room, with ACP tools AND the delegate tool itself removed
 	// so delegated agents cannot recurse.
 	AgentDelegate AgentKind = "delegate"
-	// AgentMemoryConsolidator is the background job that turns conversation
-	// evidence into durable memory records. It receives the same full toolbox
-	// as AgentConversation; typed learning output remains available alongside
-	// normal tool side effects.
+	// AgentLearner is the unified background learning agent (memory
+	// consolidate + optional skill evaluate/evolve in one spawn). It
+	// receives the same full toolbox as AgentConversation; typed learning
+	// output remains available alongside normal tool side effects.
+	AgentLearner AgentKind = "learner"
+	// AgentMemoryConsolidator is a legacy alias for AgentLearner.
 	AgentMemoryConsolidator AgentKind = "memory-consolidator"
-	// AgentSkillEvolver is the background job that proposes skill updates
-	// from observed tool patterns. It receives the same full toolbox as
-	// AgentConversation.
+	// AgentSkillEvolver is a legacy alias for AgentLearner.
 	AgentSkillEvolver AgentKind = "skill-evolver"
-	// AgentSkillEvaluator is the background job that scores whether a
-	// skill still matches current usage. It receives the same full toolbox as
-	// AgentConversation.
+	// AgentSkillEvaluator is a legacy alias for AgentLearner.
 	AgentSkillEvaluator AgentKind = "skill-evaluator"
 )
 
@@ -65,7 +63,7 @@ func (f *ToolFactory) Get(kind AgentKind, workspace string) []ToolDef {
 		return nil
 	}
 	switch kind {
-	case AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator:
+	case AgentLearner, AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator:
 		return f.baseTools(workspace)
 	case AgentAutomation:
 		return filterACPToolDefs(f.baseTools(workspace))

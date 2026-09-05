@@ -2,9 +2,10 @@ package domain
 
 import "time"
 
-// Learning job kinds. The consolidator and skill agents are separate;
-// the creator is never the evaluator.
+// Learning job kinds. New work uses LearningJobLearner (one spawn, internal
+// stages). Legacy kind strings remain so persisted jobs.jsonl still loads.
 const (
+	LearningJobLearner     = "learner"
 	LearningJobConsolidate = "consolidate"
 	LearningJobEvolveSkill = "evolve_skill"
 	LearningJobEvaluate    = "evaluate"
@@ -39,6 +40,7 @@ const (
 )
 
 const (
+	ActorLearner      = "background.learner"
 	ActorConsolidator = "background.memory-consolidator"
 	ActorSkillEvolver = "background.skill-evolution"
 	ActorSkillEval    = "background.skill-evaluator"
@@ -51,7 +53,8 @@ const (
 )
 
 // LearningJob is one queued background learning unit. Jobs are JSONL
-// upsert-by-id; they never spawn from a turn-count threshold.
+// upsert-by-id. Spawn is Hermes-style: structural signals or a periodic
+// unreviewed-turn / tool-iteration nudge, never keyword matching.
 type LearningJob struct {
 	ID           string           `json:"id"`
 	Kind         string           `json:"kind"`
@@ -94,7 +97,7 @@ func ValidLearningOpKind(kind string) bool {
 	return false
 }
 
-// CreatorMayPromote is always false: the learner is never the evaluator.
+// CreatorMayPromote is always false: the learner never marks a skill trusted.
 func CreatorMayPromote(actor string) bool {
 	return false
 }

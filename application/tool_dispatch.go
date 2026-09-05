@@ -88,7 +88,7 @@ var dispatchFamilies = []dispatchFamily{
 		members: []string{"search", "get", "list"},
 		def: ToolInfo{
 			Name:        "memory",
-			Description: "Durable memory records (read-only); \"op\" selects: search {query,type?,status?,scope?,project?,limit?} substring match over retrievable records; get {id} one record; list {type?,status?,scope?,project?,limit?} retrievable records. Agents do not write, replace, or delete memory — consolidators own writes.",
+			Description: "Durable memory records (read-only); \"op\" selects: search {query,type?,status?,scope?,project?,limit?} substring match over retrievable records; get {id} one record; list {type?,status?,scope?,project?,limit?} retrievable records. Agents do not write, replace, or delete memory — the learner owns writes.",
 			InputSchema: objSchema(
 				pEnum("op", "Operation", "search", "get", "list"),
 				pStr("query", "Search query (op=search)"),
@@ -120,7 +120,7 @@ var dispatchFamilies = []dispatchFamily{
 		members: []string{"query", "list", "read", "admit", "skip", "archive", "lint"},
 		def: ToolInfo{
 			Name:        "memory_project",
-			Description: "Per-workspace project memory (skill-compatible anchored markdown); advertised only when a workspace is set. \"op\" selects: query {topic?|kind?|related?|id?, archive?, full?, limit?} AND selectors, at least one required; list files in read priority; read {kind} or {id}; admit {kind,content,id?} upsert then lint (debug also pattern-tracks); skip {reason} records a negative admission with no disk write; archive {id} moves a live entry to archive/; lint reports problems. Never store user preferences here — those belong in human-edited user.md or structured memory records. See docs(op=\"read\", id=\"memory-project\").",
+			Description: "Per-workspace project memory (skill-compatible anchored markdown); advertised only when a workspace is set. \"op\" selects: query {topic?|kind?|related?|id?, archive?, full?, limit?} AND selectors, at least one required; list files in read priority; read {kind} or {id}; admit {kind,content,id?} upsert then lint (debug also pattern-tracks); skip {reason} records a negative admission with no disk write; archive {id} moves a live entry to archive/; lint reports problems. Never store user preferences here — those belong in user.md (file_patch/file_write) or structured memory records. See docs(op=\"read\", id=\"memory-project\").",
 			InputSchema: objSchema(
 				pEnum("op", "Operation", "query", "list", "read", "admit", "skip", "archive", "lint"),
 				pStr("topic", "Topic selector (op=query)"),

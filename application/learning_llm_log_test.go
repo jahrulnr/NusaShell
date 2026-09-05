@@ -107,7 +107,7 @@ func TestConsolidateJobReturnsLLMConversationID(t *testing.T) {
 	app := &App{
 		Experiences:   &fakeExperienceStore{items: []*domain.Experience{exp}},
 		MemoryRecords: &fakeMemoryRecordStore{},
-		learningTurn: learningTurnStub(t, AgentMemoryConsolidator,
+		learningTurn: learningTurnStub(t, AgentLearner,
 			`[{"kind":"memory.upsert","payload":{"body":"prefers dark mode","type":"preference"}}]`, "conv_llm_1"),
 	}
 	_, convID, err := app.consolidateJob(&domain.LearningJob{ID: "job_llm_1", ExperienceID: "exp_llm_1", Kind: domain.LearningJobConsolidate})
@@ -161,7 +161,7 @@ func TestRunLearningJobRecordsLLMConversationInTrajectory(t *testing.T) {
 		LearningJobs:  jobs,
 		Experiences:   &fakeExperienceStore{items: []*domain.Experience{exp}},
 		MemoryRecords: &fakeMemoryRecordStore{},
-		learningTurn: learningTurnStub(t, AgentMemoryConsolidator,
+		learningTurn: learningTurnStub(t, AgentLearner,
 			`[{"kind":"memory.upsert","payload":{"body":"run gofmt before commit","type":"constraint"}}]`, "conv_llm_2"),
 	}
 	app.runLearningJob("job_llm_2")
@@ -235,7 +235,7 @@ func TestHandleLearningLogLiftsLLMConversationID(t *testing.T) {
 // an automation transcript. Both stay out of the Agent room list, and the
 // learning ones are the ones the Learning log opens.
 func TestHeadlessConversationTypeByAgentKind(t *testing.T) {
-	for _, kind := range []AgentKind{AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator} {
+	for _, kind := range []AgentKind{AgentLearner, AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator} {
 		if got := headlessConversationType(kind); got != domain.ConversationTypeBackground {
 			t.Errorf("headlessConversationType(%q) = %q, want %q", kind, got, domain.ConversationTypeBackground)
 		}

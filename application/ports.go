@@ -154,7 +154,7 @@ type LearningOpStore interface {
 
 // MemoryDocumentStore is the shared contract for a single-file memory
 // document (user.md and soul.md). Humans edit these via Learning UI RPCs.
-// Agents and consolidators never write them.
+// Agents write the files with file_*; typed learner JSON never writes them.
 type MemoryDocumentStore interface {
 	Load() *domain.MemoryDocument
 	Update(entries []domain.DocumentEntry) error

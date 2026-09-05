@@ -38,7 +38,7 @@ type App struct {
 	LearningOps   LearningOpStore
 	User          MemoryDocumentStore
 	// Agent is the agent-tier memory document (soul.md). Humans edit it
-	// from Learning → About Agent; agents never write it.
+	// from Learning → About Agent; agents write it with file_*.
 	Agent           MemoryDocumentStore
 	ProjectMemory   ProjectMemoryStore
 	LearningEdges   LearningEdgeStore
@@ -168,6 +168,13 @@ type App struct {
 	// requests can be gated and messages can be user-friendly.
 	rlMu      sync.Mutex
 	rlWindows map[string]time.Time // providerID → next allowed request time
+
+	// goSafeWG tracks in-flight source=="learning" goroutines (lifecycle
+	// loop and background learner jobs) so Close can drain them before
+	// tests remove t.TempDir. goSafeClosed prevents Add after Wait.
+	goSafeMu     sync.Mutex
+	goSafeWG     sync.WaitGroup
+	goSafeClosed bool
 
 	// Logger is an optional structured logger used for crash recovery
 	// diagnostics from fire-and-forget goroutines. Nil = slog.Default().

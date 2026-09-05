@@ -3,8 +3,6 @@ package domain
 import (
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 )
 
 // Experience is a structured record of one interaction episode. It is the
@@ -73,12 +71,44 @@ type ExperienceSignals struct {
 type LearningPriority int
 
 const (
-	PriorityP0Teaching  LearningPriority = 0 // explicit teaching / correction
-	PriorityP1Recovery  LearningPriority = 1 // verified failure + recovery / skill regression
+	PriorityP0Teaching  LearningPriority = 0 // steer / explicit correction
+	PriorityP1Recovery  LearningPriority = 1 // verified failure + recovery / repeated failure
 	PriorityP2Recurring LearningPriority = 2 // repeated workflow
 	PriorityP3Novel     LearningPriority = 3 // novel verified procedure
-	PriorityP4Inferred  LearningPriority = 4 // low-confidence inference (unused in v1 rules)
+	PriorityP4Inferred  LearningPriority = 4 // periodic review (Hermes-style nudge)
 )
+
+// Learning trigger reasons. Orchestrator spawn uses structural and periodic
+// reasons only. explicit_teaching is classified inside the learner, never by
+// matching words in any language.
+const (
+	TriggerExplicitTeaching  = "explicit_teaching"
+	TriggerCorrection        = "correction"
+	TriggerRecovery          = "recovery"
+	TriggerRepeatedFailure   = "repeated_failure"
+	TriggerRepeatedProcedure = "repeated_procedure"
+	TriggerPeriodic          = "periodic"
+)
+
+// DefaultLearnerNudgeInterval is the Hermes-style periodic spawn gate:
+// unreviewed user turns or tool-loop iterations. Zero disables periodic spawn.
+const DefaultLearnerNudgeInterval = 10
+
+// LearnerNudgeIntervalCap is the maximum configurable periodic interval.
+const LearnerNudgeIntervalCap = 100
+
+// EffectiveLearnerNudgeInterval resolves a settings value: nil or negative
+// uses the product default, 0 disables periodic spawn, and values above the
+// cap are clamped.
+func EffectiveLearnerNudgeInterval(value *int) int {
+	if value == nil || *value < 0 {
+		return DefaultLearnerNudgeInterval
+	}
+	if *value > LearnerNudgeIntervalCap {
+		return LearnerNudgeIntervalCap
+	}
+	return *value
+}
 
 // LearningTrigger is the decision to enqueue background learning.
 type LearningTrigger struct {
@@ -87,96 +117,12 @@ type LearningTrigger struct {
 	Priority LearningPriority
 }
 
-const (
-	teachPhraseRemember = "remember"
-	teachPhraseLearn    = "learn this"
-	teachPhraseSkill    = "make this a skill"
-	teachPhraseCreate   = "create a skill"
-	teachPhraseDontFgt  = "don't forget"
-	teachPhraseDoNotFgt = "do not forget"
-)
-
-// DetectExplicitTeaching reports whether text is an explicit remember/learn/skill request.
-func DetectExplicitTeaching(text string) bool {
-	n := strings.ToLower(strings.TrimSpace(text))
-	if n == "" {
-		return false
-	}
-	switch {
-	case strings.Contains(n, teachPhraseLearn),
-		strings.Contains(n, teachPhraseSkill),
-		strings.Contains(n, teachPhraseCreate),
-		strings.Contains(n, teachPhraseDontFgt),
-		strings.Contains(n, teachPhraseDoNotFgt):
-		return true
-	}
-	return containsWord(n, teachPhraseRemember)
-}
-
-// DetectCorrectionHeuristic reports whether a user message is correcting
-// the agent. Cues must start the message or a new sentence so prose like
-// "I stopped by the office, no problem" is not a correction. Steer already
-// counts separately in ExtractExperience.
-func DetectCorrectionHeuristic(text string) bool {
-	n := strings.ToLower(strings.TrimSpace(text))
-	if n == "" {
-		return false
-	}
-	if correctionCueAtStart(n) {
-		return true
-	}
-	for i := 0; i < len(n); i++ {
-		switch n[i] {
-		case '\n':
-			if correctionCueAtStart(n[i+1:]) {
-				return true
-			}
-		case '.', '!', '?':
-			if i+1 < len(n) && n[i+1] == ' ' && correctionCueAtStart(n[i+2:]) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func correctionCueAtStart(s string) bool {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return false
-	}
-	for _, cue := range []string{"no,", "no.", "don't ", "do not ", "stop ", "not that", "i said"} {
-		if strings.HasPrefix(s, cue) {
-			return true
-		}
-	}
-	if strings.HasPrefix(s, "wrong") {
-		rest := s[len("wrong"):]
-		if rest == "" {
-			return true
-		}
-		r, _ := utf8.DecodeRuneInString(rest)
-		return !unicode.IsLetter(r)
-	}
-	return false
-}
-
-func containsWord(haystack, word string) bool {
-	start := 0
-	for {
-		i := strings.Index(haystack[start:], word)
-		if i < 0 {
-			return false
-		}
-		i += start
-		beforeOK := i == 0 || !unicode.IsLetter(rune(haystack[i-1]))
-		after := i + len(word)
-		afterOK := after >= len(haystack) || !unicode.IsLetter(rune(haystack[after]))
-		if beforeOK && afterOK {
-			return true
-		}
-		start = i + len(word)
-	}
+// LearningReviewProgress is the cheap periodic spawn input. Interval 0
+// disables the periodic gate so only structural signals enqueue.
+type LearningReviewProgress struct {
+	UnreviewedUserTurns int
+	UnreviewedToolIters int
+	Interval            int
 }
 
 // ProcedureFingerprint concatenates tool names for recurrence matching.
@@ -195,22 +141,53 @@ func ProcedureFingerprint(actions []ExperienceAction) string {
 	return strings.Join(parts, ">")
 }
 
-// DecideLearningTrigger applies the MVP signal rules. Headless episodes
-// are recorded but never enqueue a learner. Factual Q&A and a first-time
-// successful multi-tool turn (no teaching, correction, recovery, or
-// repeated procedure) do not enqueue.
+// CountUnreviewedLearningProgress counts user turns and assistant tool-loop
+// rounds in messages[start:]. Tool iterations are assistant messages that
+// issued at least one tool call, matching Hermes's per-API-round counter.
+func CountUnreviewedLearningProgress(messages []Message, start int) (userTurns, toolIters int) {
+	if start < 0 {
+		start = 0
+	}
+	if start > len(messages) {
+		return 0, 0
+	}
+	for _, msg := range messages[start:] {
+		if IsHydrationMessage(msg) || (msg.Role == RoleUser && IsCompactionSummary(msg.Content)) {
+			continue
+		}
+		switch msg.Role {
+		case RoleUser:
+			if strings.TrimSpace(msg.Content) != "" {
+				userTurns++
+			}
+		case RoleAssistant:
+			if len(msg.ToolCalls) > 0 {
+				toolIters++
+			}
+		}
+	}
+	return userTurns, toolIters
+}
+
+// DecideLearningTrigger applies language-agnostic spawn rules. Headless
+// episodes are recorded but never enqueue a learner. Factual Q&A and a
+// first-time successful multi-tool turn do not enqueue unless the periodic
+// nudge interval has elapsed.
 func DecideLearningTrigger(exp Experience, history []Experience) LearningTrigger {
+	return DecideLearningTriggerWith(exp, history, LearningReviewProgress{})
+}
+
+// DecideLearningTriggerWith is DecideLearningTrigger plus the Hermes periodic
+// gate (every N unreviewed user turns or tool iterations).
+func DecideLearningTriggerWith(exp Experience, history []Experience, progress LearningReviewProgress) LearningTrigger {
 	if exp.Headless {
 		return LearningTrigger{}
 	}
-	if exp.Signals.ExplicitTeaching {
-		return LearningTrigger{Enqueue: true, Reason: "explicit_teaching", Priority: PriorityP0Teaching}
-	}
 	if exp.Signals.UserCorrections > 0 || len(exp.Corrections) > 0 {
-		return LearningTrigger{Enqueue: true, Reason: "user_correction", Priority: PriorityP0Teaching}
+		return LearningTrigger{Enqueue: true, Reason: TriggerCorrection, Priority: PriorityP0Teaching}
 	}
 	if exp.Signals.RootCauseRecovered && exp.Outcome.Status == "success" {
-		return LearningTrigger{Enqueue: true, Reason: "verified_recovery", Priority: PriorityP1Recovery}
+		return LearningTrigger{Enqueue: true, Reason: TriggerRecovery, Priority: PriorityP1Recovery}
 	}
 	if sig := strings.TrimSpace(exp.Signals.FailureSignature); sig != "" {
 		n := 1
@@ -220,7 +197,7 @@ func DecideLearningTrigger(exp Experience, history []Experience) LearningTrigger
 			}
 		}
 		if n >= 2 {
-			return LearningTrigger{Enqueue: true, Reason: "repeated_failure", Priority: PriorityP1Recovery}
+			return LearningTrigger{Enqueue: true, Reason: TriggerRepeatedFailure, Priority: PriorityP1Recovery}
 		}
 	}
 	if fp := strings.TrimSpace(exp.Signals.ProcedureFingerprint); fp != "" && strings.Count(fp, ">") >= 2 {
@@ -231,8 +208,13 @@ func DecideLearningTrigger(exp Experience, history []Experience) LearningTrigger
 			}
 		}
 		if n >= 3 {
-			return LearningTrigger{Enqueue: true, Reason: "repeated_procedure", Priority: PriorityP2Recurring}
+			return LearningTrigger{Enqueue: true, Reason: TriggerRepeatedProcedure, Priority: PriorityP2Recurring}
 		}
+	}
+	if progress.Interval > 0 &&
+		(progress.UnreviewedUserTurns >= progress.Interval ||
+			progress.UnreviewedToolIters >= progress.Interval) {
+		return LearningTrigger{Enqueue: true, Reason: TriggerPeriodic, Priority: PriorityP4Inferred}
 	}
 	return LearningTrigger{}
 }

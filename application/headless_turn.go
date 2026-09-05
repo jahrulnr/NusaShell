@@ -16,7 +16,7 @@ import (
 // Neither appears in agent.conversations.list.
 func headlessConversationType(kind AgentKind) domain.ConversationType {
 	switch kind {
-	case AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator:
+	case AgentLearner, AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator:
 		return domain.ConversationTypeBackground
 	default:
 		return domain.ConversationTypeAutomation
@@ -29,12 +29,8 @@ func headlessConversationType(kind AgentKind) domain.ConversationType {
 // "[pipeline] " prefix.
 func headlessTurnTitle(kind AgentKind, prompt string) string {
 	switch kind {
-	case AgentMemoryConsolidator:
-		return "[learning] memory consolidation"
-	case AgentSkillEvolver:
-		return "[learning] skill evolution"
-	case AgentSkillEvaluator:
-		return "[learning] skill evaluation"
+	case AgentLearner, AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator:
+		return "[learning] learner"
 	default:
 		return "[pipeline] " + text.Truncate(prompt, 60)
 	}
