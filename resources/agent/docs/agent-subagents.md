@@ -187,9 +187,13 @@ without `output_path`. Read the path only when the full thought/tool
 transcript is needed. The Agent drawer receives live transcript events
 independently; the tool result never carries the full DTO.
 
-`subagent_steer` and `subagent_stop` acknowledge the current run status.
-Their provider-facing results are bounded and omit intermediate transcript
-noise.
+`subagent_steer` and `subagent_stop` persist compact tool results, not the
+full run DTO. Steer returns `status` / `id` / `workspace` plus
+`Steer accepted.` and does not include last-turn text. Stop returns the
+same bounded completion shape as `subagent_wait` (last meaningful turn,
+plus `output_path` when the cancelled run is persisted). The Agent drawer
+still receives live transcript events independently; read `output_path`
+only when the full thought/tool transcript is needed.
 
 Good example — wait with a bounded timeout:
 

@@ -289,11 +289,10 @@ func TestProviderToolContentSubagentWaitMalformedFallback(t *testing.T) {
 	}
 }
 
-// TestProviderToolContentSubagentSteerStripsTranscript verifies that
-// subagent_steer results (YAML of the full AcpRunDTO including the
-// complete transcript) are summarized to a short text for the provider,
-// same as subagent_wait. The model only needs to know the steer was
-// accepted and the current status, not the full transcript history.
+// TestProviderToolContentSubagentSteerStripsTranscript is a legacy
+// regression: older rooms persisted YAML of the full AcpRunDTO. New
+// steer results are already compact; the summarizer must still strip
+// transcript dumps so those payloads never reach the provider whole.
 func TestProviderToolContentSubagentSteerStripsTranscript(t *testing.T) {
 	output := "---\n" +
 		"id: run_steer\n" +
@@ -336,9 +335,10 @@ func TestProviderToolContentSubagentSteerStripsTranscript(t *testing.T) {
 	}
 }
 
-// TestProviderToolContentSubagentStopStripsTranscript verifies that
-// subagent_stop results (YAML of the full AcpRunDTO at terminal state)
-// are summarized to a short text for the provider, same as subagent_wait.
+// TestProviderToolContentSubagentStopStripsTranscript is a legacy
+// regression: older rooms persisted YAML of the full AcpRunDTO at
+// terminal state. New stop results reuse SubagentCompletionResult; the
+// summarizer must still strip transcript dumps from those old payloads.
 func TestProviderToolContentSubagentStopStripsTranscript(t *testing.T) {
 	output := "---\n" +
 		"id: run_stop\n" +

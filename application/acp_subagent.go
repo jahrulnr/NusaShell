@@ -9,8 +9,6 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
-
-	"gopkg.in/yaml.v3"
 )
 
 func (a *App) acpReady(id string) (*domain.AcpAgent, AcpRuntime, *contracts.RPCError) {
@@ -198,12 +196,15 @@ func (a *App) SteerAcpRun(ctx context.Context, argsJSON []byte) (string, error) 
 	if err := json.Unmarshal(argsJSON, &args); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
-	res, rpcErr := a.handleAcpRunsSteer(contracts.AcpRunSteerRequest{ID: args.ID, Text: args.Text})
+	_, rpcErr := a.handleAcpRunsSteer(contracts.AcpRunSteerRequest{ID: args.ID, Text: args.Text})
 	if rpcErr != nil {
 		return "", fmt.Errorf("%s", rpcErr.Message)
 	}
-	b, _ := yaml.Marshal(res)
-	return "---\n" + strings.TrimRight(string(b), "\n") + "\n---", nil
+	run, _, getErr := a.acpRun(args.ID)
+	if getErr != nil {
+		return "", fmt.Errorf("%s", getErr.Message)
+	}
+	return domain.SubagentSteerResult(run), nil
 }
 
 func (a *App) StopAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
@@ -213,12 +214,16 @@ func (a *App) StopAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
 	if err := json.Unmarshal(argsJSON, &args); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
-	res, rpcErr := a.handleAcpRunsStop(contracts.AcpRunIDRequest{ID: args.ID})
+	_, rpcErr := a.handleAcpRunsStop(contracts.AcpRunIDRequest{ID: args.ID})
 	if rpcErr != nil {
 		return "", fmt.Errorf("%s", rpcErr.Message)
 	}
-	b, _ := yaml.Marshal(res)
-	return "---\n" + strings.TrimRight(string(b), "\n") + "\n---", nil
+	run, _, getErr := a.acpRun(args.ID)
+	if getErr != nil {
+		return "", fmt.Errorf("%s", getErr.Message)
+	}
+	outputPath := a.persistAcpRun(run)
+	return domain.SubagentCompletionResult(run, outputPath), nil
 }
 
 func (a *App) WaitAcpRun(ctx context.Context, argsJSON []byte) (string, error) {

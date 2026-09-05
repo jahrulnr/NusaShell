@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`subagent_steer` and `subagent_stop` no longer dump the full ACP run into
+  the parent conversation.** Those agent tools used to persist YAML of the
+  entire `AcpRunDTO` — prompt, modes, and every transcript chunk — so a
+  cancelled run could add ~19 KiB of subagent history to `tc.Output`. The
+  provider summarizer only hid that dump from the next model request; the
+  conversation JSON, inspectors, and any raw output readers still carried it.
+  Steer now returns a compact ack (`status` / `id` / `workspace` plus
+  `Steer accepted.`). Stop returns the same last-turn completion shape as
+  `subagent_wait` / `subagent_result`, with `output_path` after persist.
+  RPC `acp.runs.steer` / `acp.runs.stop` still return the full DTO for the
+  Agent drawer. The tooloutput summarizer remains as defense for rooms that
+  already stored the old dump.
+
 ## [0.4.2] - 2026-09-05
 
 ### Removed

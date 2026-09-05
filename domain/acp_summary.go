@@ -219,6 +219,31 @@ func lastThoughtText(run *AcpRun) string {
 	return ""
 }
 
+// SubagentSteerResult builds the compact tool result for `subagent_steer`.
+// The parent only needs confirmation that the steer was accepted and the
+// current status; transcript, prompt, and last-turn text stay out of the
+// parent conversation. Full history remains in the Agent drawer / ACP store.
+func SubagentSteerResult(run *AcpRun) string {
+	var y strings.Builder
+	y.WriteString("---\n")
+	y.WriteString("status: ")
+	y.WriteString(YamlScalar(string(run.Status)))
+	y.WriteString("\n")
+	if run.ID != "" {
+		y.WriteString("id: ")
+		y.WriteString(YamlScalar(run.ID))
+		y.WriteString("\n")
+	}
+	if run.Workspace != "" {
+		y.WriteString("workspace: ")
+		y.WriteString(YamlScalar(run.Workspace))
+		y.WriteString("\n")
+	}
+	y.WriteString("---\n\n")
+	y.WriteString("Steer accepted.")
+	return y.String()
+}
+
 // yamlScalar quotes a string for YAML if it contains characters that
 // require quoting. Minimal escaper for flat key:value headers.
 func YamlScalar(s string) string {

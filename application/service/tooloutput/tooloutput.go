@@ -46,6 +46,9 @@ func SummarizeToolContent(toolName, rawOutput string) string {
 			return summary
 		}
 	}
+	// Compact wait/steer/stop results pass through the same parser. Legacy
+	// rooms may still hold a full AcpRunDTO YAML dump; the summarizer is
+	// defense-in-depth so those payloads never reach the provider whole.
 	if toolName == "subagent_wait" || toolName == "subagent_steer" || toolName == "subagent_stop" {
 		if summary, ok := summarizeSubagentWaitOutput(rawOutput); ok {
 			return summary
@@ -134,9 +137,10 @@ func quotePath(s string) string {
 	return fmt.Sprintf("%q", s)
 }
 
-// summarizeSubagentWaitOutput parses compact subagent_wait frontmatter plus
-// its last-turn body. It also accepts the full DTO returned by steer/stop and
-// older wait results, but only returns a bounded provider-facing summary.
+// summarizeSubagentWaitOutput parses compact wait/steer/stop frontmatter plus
+// an optional last-turn body. Happy-path tool results are already compact;
+// this also accepts legacy full-DTO YAML dumps persisted in older rooms and
+// returns only a bounded provider-facing summary.
 func summarizeSubagentWaitOutput(rawOutput string) (string, bool) {
 	header, compactBody, ok := splitYAMLFrontmatter(rawOutput)
 	if !ok {

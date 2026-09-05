@@ -212,6 +212,45 @@ func TestSubagentCompletionResultYAMLHeaderFormat(t *testing.T) {
 	}
 }
 
+func TestSubagentSteerResultOmitsTranscriptAndPrompt(t *testing.T) {
+	run := &AcpRun{
+		TaskState: TaskState[AcpRunStatus]{ID: "acprun_steer", Status: AcpRunRunning},
+		Workspace: "/tmp/proj",
+		Prompt:    "private parent prompt that must not leak",
+		Transcript: []AcpTranscriptChunk{
+			{Kind: "text", Text: "Intermediate progress."},
+			{Kind: "thought", Text: "long private reasoning"},
+			{Kind: "text", Text: "Last meaningful turn."},
+		},
+	}
+	got := SubagentSteerResult(run)
+	if !strings.HasPrefix(got, "---\n") {
+		t.Fatalf("expected YAML frontmatter, got %q", got[:min(20, len(got))])
+	}
+	for _, want := range []string{
+		"status: running",
+		"id: acprun_steer",
+		"workspace: /tmp/proj",
+		"Steer accepted.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("steer result missing %q:\n%s", want, got)
+		}
+	}
+	for _, leaked := range []string{
+		"transcript:",
+		run.Prompt,
+		"Intermediate progress.",
+		"long private reasoning",
+		"Last meaningful turn.",
+		"output_path:",
+	} {
+		if strings.Contains(got, leaked) {
+			t.Errorf("steer result leaked %q:\n%s", leaked, got)
+		}
+	}
+}
+
 func TestYamlScalarQuoting(t *testing.T) {
 	cases := []struct {
 		in, want string
