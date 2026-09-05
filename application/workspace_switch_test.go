@@ -295,3 +295,54 @@ func TestAddTurnMessagesWorkspaceSwitchOmitsMissingAgentsMD(t *testing.T) {
 		t.Fatalf("missing AGENTS.md must leave announcement only, got %+v", notice.ToolCalls)
 	}
 }
+
+func TestWorkspaceSwitchNoticeIncludesInstructionFiles(t *testing.T) {
+	newWS := instructionFixture(t)
+	conv := workspaceSwitchFixture("/old/ws")
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"conv_1": conv}}
+	app := &App{
+		Conversations:    store,
+		Logs:             &fakeLogStore{},
+		Bus:              NewBus(),
+		Toolbox:          &agentsMDToolbox{body: "---\nbytes: 8\n---\n\n# root\n"},
+		DirectoryBrowser: fakeDirBrowser{},
+	}
+	saved := setWorkspace(t, app, "conv_1", newWS)
+	app.addTurnMessages(saved,
+		domain.Message{ID: "m_user", Role: domain.RoleUser, Content: "go", Status: domain.StatusDone},
+		domain.Message{ID: "m_asst", Role: domain.RoleAssistant},
+	)
+	var args string
+	for _, m := range saved.Messages {
+		for _, tc := range m.ToolCalls {
+			if tc.Name == domain.AnnouncementToolName {
+				args = tc.Args
+			}
+		}
+	}
+	if args == "" {
+		t.Fatal("missing workspace_changed announcement")
+	}
+	var payload struct {
+		Type             string   `json:"type"`
+		To               string   `json:"to"`
+		InstructionFiles []string `json:"instruction_files"`
+	}
+	if err := json.Unmarshal([]byte(args), &payload); err != nil {
+		t.Fatalf("announcement args: %v (%s)", err, args)
+	}
+	if payload.Type != "workspace_changed" || payload.To != newWS {
+		t.Fatalf("announcement args = %+v", payload)
+	}
+	joined := strings.Join(payload.InstructionFiles, ",")
+	for _, want := range []string{"AGENTS.md", "application/AGENTS.md"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("instruction_files missing %s: %v", want, payload.InstructionFiles)
+		}
+	}
+	for _, p := range payload.InstructionFiles {
+		if strings.Contains(p, "node_modules") || strings.Contains(p, "vendor") || strings.Contains(p, ".experimental") {
+			t.Fatalf("instruction_files leaked ignored path %q", p)
+		}
+	}
+}

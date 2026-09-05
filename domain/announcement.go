@@ -60,12 +60,15 @@ func AutoContinueAnnouncementArgs(continuesUsed, openTodos int) string {
 // WorkspaceChangedAnnouncementArgs builds the self-describing args payload
 // for a workspace-switch announcement: type plus the previous and new
 // absolute paths so the model reads the change from the data itself.
-func WorkspaceChangedAnnouncementArgs(from, to string) string {
+// instructionFiles is the gitignore-aware AGENTS.md index for the new
+// workspace (runtime_context is not rebuilt on a mid-conversation switch).
+func WorkspaceChangedAnnouncementArgs(from, to string, instructionFiles []string) string {
 	b, err := json.Marshal(struct {
-		Type string `json:"type"`
-		From string `json:"from,omitempty"`
-		To   string `json:"to"`
-	}{Type: "workspace_changed", From: from, To: to})
+		Type             string   `json:"type"`
+		From             string   `json:"from,omitempty"`
+		To               string   `json:"to"`
+		InstructionFiles []string `json:"instruction_files,omitempty"`
+	}{Type: "workspace_changed", From: from, To: to, InstructionFiles: instructionFiles})
 	if err != nil {
 		return "{}"
 	}

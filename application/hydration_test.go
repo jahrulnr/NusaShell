@@ -218,6 +218,34 @@ func TestHydrationRuntimeContext(t *testing.T) {
 	}
 }
 
+func TestHydrationRuntimeContextListsInstructionFiles(t *testing.T) {
+	dir := instructionFixture(t)
+	app := &App{Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": {ID: "c1"}}}}
+	msgs := app.buildHydration(&domain.Conversation{ID: "c1", Workspace: dir})
+	runtimeSlot := findHydrationTool(msgs, "runtime_context")
+	if runtimeSlot == nil {
+		t.Fatal("runtime_context hydration slot missing")
+	}
+	var ctx RuntimeContextSnapshot
+	if err := json.Unmarshal([]byte(runtimeSlot.Content), &ctx); err != nil {
+		t.Fatalf("runtime_context payload not JSON: %v", err)
+	}
+	if ctx.Workspace != dir {
+		t.Fatalf("workspace = %q, want %q", ctx.Workspace, dir)
+	}
+	joined := strings.Join(ctx.InstructionFiles, ",")
+	for _, want := range []string{"AGENTS.md", "application/AGENTS.md", "frontend/AGENTS.md"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("instructionFiles missing %s: %v", want, ctx.InstructionFiles)
+		}
+	}
+	for _, p := range ctx.InstructionFiles {
+		if strings.Contains(p, "node_modules") || strings.Contains(p, "vendor") || strings.Contains(p, ".experimental") {
+			t.Fatalf("instructionFiles leaked ignored path %q", p)
+		}
+	}
+}
+
 func TestHydrationMemory(t *testing.T) {
 	// Each always-injected memory document is represented by its own real
 	// file_read call/result pair. The result is kept verbatim, including the

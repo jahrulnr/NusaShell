@@ -38,17 +38,28 @@ func TestIsAnnouncementCallID(t *testing.T) {
 func TestWorkspaceChangedAnnouncementArgs(t *testing.T) {
 	from := "/old/ws"
 	to := "/new/ws"
-	raw := WorkspaceChangedAnnouncementArgs(from, to)
+	raw := WorkspaceChangedAnnouncementArgs(from, to, nil)
 	var parsed struct {
-		Type string `json:"type"`
-		From string `json:"from"`
-		To   string `json:"to"`
+		Type             string   `json:"type"`
+		From             string   `json:"from"`
+		To               string   `json:"to"`
+		InstructionFiles []string `json:"instruction_files"`
 	}
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		t.Fatalf("args must be valid JSON: %v (%s)", err, raw)
 	}
 	if parsed.Type != "workspace_changed" || parsed.From != from || parsed.To != to {
 		t.Fatalf("args must self-describe the switch: %s", raw)
+	}
+	if len(parsed.InstructionFiles) != 0 {
+		t.Fatalf("empty index must omit instruction_files, got %s", raw)
+	}
+	withFiles := WorkspaceChangedAnnouncementArgs(from, to, []string{"AGENTS.md", "application/AGENTS.md"})
+	if err := json.Unmarshal([]byte(withFiles), &parsed); err != nil {
+		t.Fatalf("args with files must be valid JSON: %v (%s)", err, withFiles)
+	}
+	if strings.Join(parsed.InstructionFiles, ",") != "AGENTS.md,application/AGENTS.md" {
+		t.Fatalf("instruction_files = %v, want root then scoped", parsed.InstructionFiles)
 	}
 	msg := WorkspaceChangedAnnouncementMessage(from, to)
 	if !strings.Contains(msg, from) || !strings.Contains(msg, to) {

@@ -55,11 +55,12 @@ var compactionHandoffUserPrompt = resources.UserPrompt("compaction")
 // varies per conversation/turn.
 //
 // The active workspace is NOT appended here — it travels in the
-// runtime_context hydration slot (see HydrationBuilder.readRuntimeContext),
-// which is re-injected whenever the workspace changes (the set-workspace
-// handler strips the stale checkpoint) or after compaction.
-// Duplicating it in the system prompt would break cache stability on
-// workspace switch for no benefit.
+// runtime_context hydration slot (see HydrationBuilder.readRuntimeContext).
+// Mid-conversation workspace switches keep the existing checkpoint
+// (transcripts are append-only) and inject a visible workspace_changed
+// announcement that carries instruction_files. Compaction rebuilds hydration
+// for the next epoch. Duplicating the workspace in the system prompt would
+// break cache stability on every folder pick.
 //
 // Compaction summaries carry role=user (not system) so they appear in the
 // provider request's messages array as the first live message after

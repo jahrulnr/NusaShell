@@ -231,6 +231,7 @@ func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage) *doma
 func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	ctx := DefaultRuntimeContext(a.effectiveWorkspace(c.Workspace))
 	ctx.DataDir = a.DataDir
+	ctx.InstructionFiles = listInstructionFiles(c.Workspace)
 	// The runtime context slot also carries the active background/async tool
 	// runs so the model always knows which subagents/delegates were spawned
 	// and are still pending (fed into the compaction re-hydration too).

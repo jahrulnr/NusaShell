@@ -301,7 +301,7 @@ func (a *App) workspaceSwitchNotice(from, to string) domain.Message {
 	calls := []domain.ToolCall{{
 		ID:     domain.AnnouncementToolCallPrefix + nonce.Random(),
 		Name:   domain.AnnouncementToolName,
-		Args:   domain.WorkspaceChangedAnnouncementArgs(from, to),
+		Args:   domain.WorkspaceChangedAnnouncementArgs(from, to, listInstructionFiles(to)),
 		Status: domain.ToolOK,
 		Output: domain.WorkspaceChangedAnnouncementMessage(from, to),
 	}}

@@ -22,6 +22,10 @@ type RuntimeContextSnapshot struct {
 	RuntimeOS   string `json:"runtimeOs"`
 	Workspace   string `json:"workspace,omitempty"`
 	DataDir     string `json:"dataDir,omitempty"`
+	// InstructionFiles lists workspace-relative AGENTS.md paths that are
+	// not gitignored (root first). Hidden when empty so a room without a
+	// workspace does not invent a catalog.
+	InstructionFiles []string `json:"instructionFiles,omitempty"`
 	// BackgroundRuns lists the active background/async tool runs (subagent,
 	// delegate) for this conversation, so a fresh context knows which
 	// background agents were spawned and are still pending — even after
