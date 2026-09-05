@@ -77,6 +77,9 @@ SINCE: 2026-07-24
 	if !strings.Contains(out, "BUG-port") {
 		t.Fatalf("query output = %s", out)
 	}
+	if !strings.Contains(out, "BUG-port\tdebug\t") {
+		t.Fatalf("query compact must be memory-query.sh TSV, got %s", out)
+	}
 }
 
 func TestExecuteMemoryProjectAdmitLintRollback(t *testing.T) {
@@ -113,9 +116,19 @@ TOPICS: [Deploy, too-many, topics, here]
 	if err == nil {
 		t.Fatal("expected lint failure")
 	}
+	if !strings.Contains(err.Error(), "LINT FAIL [debug.md]:") || !strings.Contains(err.Error(), "memory-lint:") {
+		t.Fatalf("admit lint error must match memory-lint.sh stdout, got %v", err)
+	}
 	after, _ := os.ReadFile(path)
 	if string(after) != string(before) {
 		t.Fatal("lint failure changed the file")
+	}
+	out, err := tb.Execute(ctx, "memory_project", []byte(`{"op":"lint"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "memory-lint: clean" {
+		t.Fatalf("lint clean = %q", out)
 	}
 }
 

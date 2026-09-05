@@ -5,6 +5,7 @@ package projectmemory
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -19,10 +20,12 @@ import (
 // from dataDir + an optional Settings override so a Settings change takes
 // effect without restart.
 type Store struct {
-	dataDir  string
-	override func() string
-	now      func() time.Time
-	mu       sync.Mutex
+	dataDir        string
+	override       func() string
+	now            func() time.Time
+	gitPorcelain   func(workspace string) []string
+	skipMemoryGate func() bool
+	mu             sync.Mutex
 }
 
 // New constructs a store. override may be nil (empty = default base).
@@ -123,7 +126,7 @@ func (s *Store) List(workspace string) ([]string, error) {
 	for _, kind := range domain.ProjectKindReadOrder {
 		name := kind + ".md"
 		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
-			out = append(out, name)
+			out = append(out, filepath.Join(dir, name))
 			seen[name] = true
 		}
 	}
@@ -136,7 +139,7 @@ func (s *Store) List(workspace string) ([]string, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") || seen[e.Name()] {
 			continue
 		}
-		extra = append(extra, e.Name())
+		extra = append(extra, filepath.Join(dir, e.Name()))
 	}
 	sort.Strings(extra)
 	out = append(out, extra...)
@@ -152,7 +155,7 @@ func (s *Store) List(workspace string) ([]string, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		archNames = append(archNames, filepath.ToSlash(filepath.Join("archive", e.Name())))
+		archNames = append(archNames, filepath.Join(dir, "archive", e.Name()))
 	}
 	sort.Strings(archNames)
 	return append(out, archNames...), nil
@@ -311,18 +314,18 @@ func (s *Store) Archive(workspace, id string) error {
 	return nil
 }
 
-func (s *Store) Lint(workspace string) ([]domain.ProjectMemoryLintProblem, error) {
+func (s *Store) Lint(workspace string, kinds ...string) ([]domain.ProjectMemoryLintProblem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.lintLocked(workspace)
+	return s.lintLocked(workspace, kinds...)
 }
 
-func (s *Store) lintLocked(workspace string) ([]domain.ProjectMemoryLintProblem, error) {
+func (s *Store) lintLocked(workspace string, kinds ...string) ([]domain.ProjectMemoryLintProblem, error) {
 	blobs, err := s.loadBlobs(workspace, true)
 	if err != nil {
 		return nil, err
 	}
-	return domain.LintProjectMemory(blobs, domain.ProjectPatternThreshold), nil
+	return domain.LintProjectMemory(blobs, domain.ProjectPatternThreshold, kinds...), nil
 }
 
 func (s *Store) IndexExtract(workspace string) (domain.ProjectIndexExtract, bool, error) {
@@ -353,6 +356,325 @@ func (s *Store) IndexExtract(workspace string) (domain.ProjectIndexExtract, bool
 		return x, false, nil
 	}
 	return x, true, nil
+}
+
+func (s *Store) TrackPatterns(workspace, kind string) (string, error) {
+	kind = domain.NormalizeProjectKindFile(kind)
+	if kind == "" {
+		return "", fmt.Errorf("kind is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.trackPatternsLocked(s.dir(workspace), kind)
+}
+
+func (s *Store) Path(workspace, kind string, create bool) (string, error) {
+	kind = domain.NormalizeProjectKindFile(kind)
+	if kind == "" {
+		return "", fmt.Errorf("kind is required")
+	}
+	dir := s.dir(workspace)
+	path := domain.ProjectMemoryKindPath(s.base(), domain.ProjectMemoryKey(workspace), kind)
+	if create {
+		if err := os.MkdirAll(filepath.Join(dir, "archive"), 0o755); err != nil {
+			return "", err
+		}
+		f, err := os.OpenFile(path, os.O_CREATE, 0o644)
+		if err != nil {
+			return "", err
+		}
+		_ = f.Close()
+	}
+	return path, nil
+}
+
+func (s *Store) ScriptPath(workspace, name string, create bool) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("name is required")
+	}
+	key := domain.ProjectMemoryKey(workspace)
+	path := domain.ProjectMemoryScriptPath(s.base(), key, name)
+	if create {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return "", err
+		}
+	}
+	return path, nil
+}
+
+func (s *Store) Audit(workspace string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.auditLocked(workspace)
+}
+
+func (s *Store) Gate(workspace, reason string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.gateLocked(workspace, reason)
+}
+
+func (s *Store) auditLocked(workspace string) (string, error) {
+	base := s.base()
+	key := domain.ProjectMemoryKey(workspace)
+	dir := s.dir(workspace)
+	in := domain.MemoryAuditInput{Base: base, Key: key, DevAccessCount: -1}
+	if _, err := os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			return domain.FormatMemoryAudit(in), nil
+		}
+		return "", err
+	}
+	in.Present = true
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	var names []string
+	for _, e := range ents {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	topicCounts := map[string]int{}
+	var topicOrder []string
+	for _, name := range names {
+		raw, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return "", err
+		}
+		text := string(raw)
+		entries := strings.Count(text, "### BEGIN_ENTRY:")
+		in.Files = append(in.Files, domain.MemoryAuditFile{
+			Name: name, Lines: strings.Count(text, "\n"), Entries: entries,
+		})
+		seenScope := map[string]int{}
+		for _, line := range strings.Split(text, "\n") {
+			if strings.HasPrefix(line, "SCOPE: ") {
+				seenScope[line]++
+			}
+			if strings.HasPrefix(line, "LINKS: [") && !strings.HasPrefix(line, "LINKS: []") {
+				in.EntriesWithLinks++
+			}
+			if strings.HasPrefix(line, "TOPICS: ") {
+				val := strings.TrimPrefix(line, "TOPICS: ")
+				val = strings.TrimPrefix(val, "[")
+				val = strings.TrimSuffix(val, "]")
+				for _, part := range strings.Split(val, ",") {
+					topic := strings.TrimSpace(part)
+					if topic == "" {
+						continue
+					}
+					if _, ok := topicCounts[topic]; !ok {
+						topicOrder = append(topicOrder, topic)
+					}
+					topicCounts[topic]++
+				}
+			}
+		}
+		for scope, n := range seenScope {
+			if n > 1 {
+				in.DuplicateScopeLines = append(in.DuplicateScopeLines, name+": "+scope)
+			}
+		}
+	}
+	sort.Strings(in.DuplicateScopeLines)
+	type tc struct {
+		n int
+		t string
+	}
+	var rows []tc
+	for t, n := range topicCounts {
+		rows = append(rows, tc{n: n, t: t})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].n != rows[j].n {
+			return rows[i].n > rows[j].n
+		}
+		return rows[i].t < rows[j].t
+	})
+	for _, r := range rows {
+		in.TopicRows = append(in.TopicRows, domain.FormatUniqCountRow(r.n, r.t))
+	}
+	gpath := filepath.Join(dir, "guardrails.md")
+	if raw, err := os.ReadFile(gpath); err == nil {
+		in.HasGuardrails = true
+		in.GuardrailsLines = strings.Count(string(raw), "\n")
+		in.GuardrailsActive = strings.Count(string(raw), "STATUS: ACTIVE")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "debug.md")); err == nil {
+		in.HasDebug = true
+	}
+	dpath := filepath.Join(dir, "dev-access.md")
+	if raw, err := os.ReadFile(dpath); err == nil {
+		in.DevAccessCount = strings.Count(string(raw), "KIND: DEV_ACCESS")
+	}
+	problems, err := s.lintLocked(workspace)
+	if err != nil {
+		return "", err
+	}
+	in.LintProblems = problems
+	return domain.FormatMemoryAudit(in), nil
+}
+
+func (s *Store) gateLocked(workspace, reason string) (string, error) {
+	dir := s.dir(workspace)
+	var notes []string
+	for _, kind := range []string{"debug", "deploy"} {
+		if fileExists(filepath.Join(dir, kind+".md")) || fileExists(filepath.Join(dir, "archive", kind+".md")) {
+			n, err := s.trackPatternsLocked(dir, kind)
+			if err == nil && n != "" {
+				notes = append(notes, n)
+			}
+		}
+	}
+	problems, err := s.lintLocked(workspace)
+	if err != nil {
+		return "", err
+	}
+	touchRaw := ""
+	if b, err := os.ReadFile(filepath.Join(dir, "touch-map.md")); err == nil {
+		touchRaw = string(b)
+	}
+	in := domain.MemoryGateInput{
+		LintProblems:   problems,
+		PatternNotes:   strings.Join(notes, "\n"),
+		SkipGate:       s.gateSkipped(),
+		ChangedFiles:   s.changedFiles(workspace),
+		MemoryTouched:  s.memoryTouched(dir),
+		TouchMapRaw:    touchRaw,
+		NoUpdateReason: strings.TrimSpace(reason),
+	}
+	res := domain.EvaluateMemoryGate(in)
+	if !res.OK {
+		return res.Message, fmt.Errorf("%s", res.Message)
+	}
+	return res.Message, nil
+}
+
+func (s *Store) gateSkipped() bool {
+	if s.skipMemoryGate != nil {
+		return s.skipMemoryGate()
+	}
+	return os.Getenv("SKIP_MEMORY_GATE") == "1"
+}
+
+func (s *Store) changedFiles(workspace string) []string {
+	if s.gitPorcelain != nil {
+		return s.gitPorcelain(workspace)
+	}
+	cmd := exec.Command("git", "-C", workspace, "status", "--porcelain")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			files = append(files, fields[1])
+		}
+	}
+	return files
+}
+
+func (s *Store) memoryTouched(dir string) bool {
+	cutoff := s.now().Add(-60 * time.Minute)
+	touched := false
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return err
+		}
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil {
+			return nil
+		}
+		if strings.Count(rel, string(os.PathSeparator)) > 1 {
+			return nil
+		}
+		if !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		if info.ModTime().After(cutoff) {
+			touched = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return touched
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func (s *Store) MigrateFromV1(oldBase string, projectPaths ...string) (string, error) {
+	if strings.TrimSpace(oldBase) == "" || len(projectPaths) == 0 {
+		return "", fmt.Errorf("usage: old_base and at least one project path are required")
+	}
+	if _, err := os.Stat(oldBase); err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("source missing: %s", oldBase)
+		}
+		return "", err
+	}
+	newBase := s.base()
+	total := 0
+	var lines []string
+	for _, projectPath := range projectPaths {
+		key := domain.ProjectMemoryKey(projectPath)
+		destDir := filepath.Join(newBase, key)
+		if err := os.MkdirAll(filepath.Join(destDir, "archive"), 0o755); err != nil {
+			return "", err
+		}
+		matches, err := filepath.Glob(filepath.Join(oldBase, "*-"+key+"-*.md"))
+		if err != nil {
+			return "", err
+		}
+		sort.Strings(matches)
+		for _, f := range matches {
+			name := strings.TrimSuffix(filepath.Base(f), ".md")
+			needle := "-" + key + "-"
+			idx := strings.LastIndex(name, needle)
+			if idx < 0 {
+				continue
+			}
+			kind := domain.NormalizeProjectKindFile(name[idx+len(needle):])
+			dest := filepath.Join(destDir, kind+".md")
+			body, err := os.ReadFile(f)
+			if err != nil {
+				return "", err
+			}
+			marker := fmt.Sprintf("\n<!-- migrated from %s, review and convert to anchored entries -->\n\n", filepath.Base(f))
+			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+				return "", err
+			}
+			df, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+			if err != nil {
+				return "", err
+			}
+			if _, err := df.WriteString(marker); err != nil {
+				_ = df.Close()
+				return "", err
+			}
+			if _, err := df.Write(body); err != nil {
+				_ = df.Close()
+				return "", err
+			}
+			if err := df.Close(); err != nil {
+				return "", err
+			}
+			lines = append(lines, fmt.Sprintf("appended: %s -> %s/%s.md", filepath.Base(f), key, kind))
+			total++
+		}
+	}
+	lines = append(lines, fmt.Sprintf("done migrated=%d dest_base=%s", total, newBase))
+	lines = append(lines, fmt.Sprintf("next: open each %s/{key}/*.md, pull out do_not_repeat/obsolete_since lines into guardrails.md as GUARDRAIL entries.", newBase))
+	return strings.Join(lines, "\n") + "\n", nil
 }
 
 func (s *Store) trackPatternsLocked(dir, sourceKind string) (string, error) {
@@ -426,7 +748,8 @@ func (s *Store) trackPatternsLocked(dir, sourceKind string) (string, error) {
 			continue
 		}
 		if shouldSuggestPattern(prevCount, occ, threshold) {
-			notes = append(notes, fmt.Sprintf("memory-pattern: '%s' (%s) has occurred %dx. Promote the stable procedure to playbook.md.", key, sourceKind, occ))
+			script := domain.ProjectMemoryScriptPath(s.base(), filepath.Base(dir), key+".sh")
+			notes = append(notes, domain.FormatPatternTrackNote(key, sourceKind, occ, script))
 		}
 	}
 	if changed {

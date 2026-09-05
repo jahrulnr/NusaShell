@@ -28,6 +28,8 @@ func (t *Toolbox) executeProjectMemory(ctx context.Context, op string, argsJSON 
 		Limit   int    `json:"limit"`
 		Content string `json:"content"`
 		Reason  string `json:"reason"`
+		Name    string `json:"name"`
+		Create  bool   `json:"create"`
 	}
 	if err := json.Unmarshal(argsJSON, &args); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -45,25 +47,13 @@ func (t *Toolbox) executeProjectMemory(ctx context.Context, op string, argsJSON 
 		if err != nil {
 			return "", err
 		}
-		items := make([]any, 0, len(hits))
-		for _, h := range hits {
-			row := map[string]any{"id": h.ID, "kind": h.Kind, "file": h.File, "scope": h.Scope}
-			if q.Full {
-				row["body"] = h.Body
-			}
-			items = append(items, row)
-		}
-		return yamlJSONL(map[string]any{"count": len(hits)}, items), nil
+		return domain.FormatProjectMemoryHits(hits, q.Full), nil
 	case "list":
 		files, err := t.ProjectMemory.List(ws)
 		if err != nil {
 			return "", err
 		}
-		items := make([]any, 0, len(files))
-		for _, f := range files {
-			items = append(items, map[string]any{"file": f})
-		}
-		return yamlJSONL(map[string]any{"count": len(files)}, items), nil
+		return domain.FormatProjectMemoryList(files), nil
 	case "read":
 		body, err := t.ProjectMemory.Read(ws, args.Kind, args.ID)
 		if err != nil {
@@ -95,19 +85,61 @@ func (t *Toolbox) executeProjectMemory(ctx context.Context, op string, argsJSON 
 		}
 		return yamlBlock(map[string]any{"status": "archived", "id": args.ID}), nil
 	case "lint":
-		problems, err := t.ProjectMemory.Lint(ws)
+		var kinds []string
+		if k := strings.TrimSpace(args.Kind); k != "" {
+			kinds = []string{k}
+		}
+		problems, err := t.ProjectMemory.Lint(ws, kinds...)
 		if err != nil {
 			return "", err
 		}
-		items := make([]any, 0, len(problems))
-		for _, p := range problems {
-			items = append(items, map[string]any{"file": p.File, "message": p.Message})
-		}
-		status := "clean"
+		report := domain.FormatLintReport(problems)
 		if len(problems) > 0 {
-			status = "issues"
+			return "", &domain.ProjectMemoryLintError{Problems: problems}
 		}
-		return yamlJSONL(map[string]any{"status": status, "count": len(problems)}, items), nil
+		return report, nil
+	case "audit":
+		out, err := t.ProjectMemory.Audit(ws)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimRight(out, "\n"), nil
+	case "gate":
+		out, err := t.ProjectMemory.Gate(ws, args.Reason)
+		if err != nil {
+			return "", err
+		}
+		return out, nil
+	case "pattern_track":
+		kind := strings.TrimSpace(args.Kind)
+		if kind == "" {
+			return "", fmt.Errorf("kind is required")
+		}
+		out, err := t.ProjectMemory.TrackPatterns(ws, kind)
+		if err != nil {
+			return "", err
+		}
+		return out, nil
+	case "path":
+		kind := strings.TrimSpace(args.Kind)
+		if kind == "" {
+			return "", fmt.Errorf("kind is required")
+		}
+		p, err := t.ProjectMemory.Path(ws, kind, args.Create)
+		if err != nil {
+			return "", err
+		}
+		return p + "\n", nil
+	case "script_path":
+		name := strings.TrimSpace(args.Name)
+		if name == "" {
+			return "", fmt.Errorf("name is required")
+		}
+		p, err := t.ProjectMemory.ScriptPath(ws, name, args.Create)
+		if err != nil {
+			return "", err
+		}
+		return p + "\n", nil
 	default:
 		return "", fmt.Errorf("unknown memory_project op %q", op)
 	}

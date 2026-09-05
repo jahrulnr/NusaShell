@@ -768,11 +768,22 @@ func (s *stubProjectMemoryStore) Admit(string, string, string, string) (domain.P
 	return domain.ProjectMemoryAdmitResult{}, nil
 }
 func (s *stubProjectMemoryStore) Archive(string, string) error { return nil }
-func (s *stubProjectMemoryStore) Lint(string) ([]domain.ProjectMemoryLintProblem, error) {
+func (s *stubProjectMemoryStore) Lint(string, ...string) ([]domain.ProjectMemoryLintProblem, error) {
 	return nil, nil
 }
 func (s *stubProjectMemoryStore) IndexExtract(string) (domain.ProjectIndexExtract, bool, error) {
 	return s.extract, s.ok, nil
+}
+func (s *stubProjectMemoryStore) Audit(string) (string, error) { return "", nil }
+func (s *stubProjectMemoryStore) Gate(string, string) (string, error) {
+	return "", nil
+}
+func (s *stubProjectMemoryStore) TrackPatterns(string, string) (string, error) {
+	return "", nil
+}
+func (s *stubProjectMemoryStore) Path(string, string, bool) (string, error) { return "", nil }
+func (s *stubProjectMemoryStore) ScriptPath(string, string, bool) (string, error) {
+	return "", nil
 }
 
 func hydrationHasSlot(result HydrationResult, name string) bool {

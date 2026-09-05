@@ -189,15 +189,129 @@ LINKS: [mystery:V-missing]
 	if len(problems) == 0 {
 		t.Fatal("lint accepted malformed topics and dangling links")
 	}
-	joined := problemsJoin(problems)
-	if !strings.Contains(joined, "kebab-case") {
-		t.Fatalf("expected kebab topic error, got %s", joined)
+	got := FormatLintReport(problems)
+	want := strings.Join([]string{
+		"LINT FAIL [bad-links.md]: X-bad-links has 4 TOPICS; maximum is 3.",
+		"LINT FAIL [bad-links.md]: X-bad-links topic 'Deploy' must be lowercase kebab-case.",
+		"LINT FAIL [bad-links.md]: X-bad-links uses unknown link relation 'mystery'.",
+		"LINT FAIL [bad-links.md]: X-bad-links link target 'V-missing' does not exist in live memory or archive.",
+		"memory-lint: 4 issue(s) found.",
+	}, "\n")
+	if got != want {
+		t.Fatalf("lint report != memory-lint.sh stdout\ngot:\n%s\nwant:\n%s", got, want)
 	}
-	if !strings.Contains(joined, "unknown link relation") {
-		t.Fatalf("expected unknown relation, got %s", joined)
+	err := (&ProjectMemoryLintError{Problems: problems}).Error()
+	if err != want {
+		t.Fatalf("LintError.Error() must match memory-lint.sh stdout, got:\n%s", err)
 	}
-	if !strings.Contains(joined, "does not exist") {
-		t.Fatalf("expected dangling target, got %s", joined)
+}
+
+func TestLintReportsMalformedLinkWithoutColon(t *testing.T) {
+	raw := `### BEGIN_ENTRY: X-bad-form ###
+ID: X-bad-form
+KIND: EXAMPLE
+SCOPE: missing colon
+LINKS: [related_to D-missing]
+### END_ENTRY: X-bad-form ###
+`
+	problems := LintProjectMemory([]ProjectMemoryFileBlob{{
+		Rel: "bad-form.md", Kind: "bad-form", Raw: raw,
+	}}, 3)
+	got := FormatLintReport(problems)
+	if !strings.Contains(got, "X-bad-form link 'related_to D-missing' must be relation:TARGET_ID.") {
+		t.Fatalf("expected malformed-link message from memory-lint.sh, got:\n%s", got)
+	}
+}
+
+func TestLintOrphansAndDuplicateScopeMatchScript(t *testing.T) {
+	raw := `# heading allowed
+loose fact that is invisible to anchors
+
+### BEGIN_ENTRY: D-one ###
+ID: D-one
+KIND: DECISION
+STATUS: ACTIVE
+SCOPE: login service
+### END_ENTRY: D-one ###
+### BEGIN_ENTRY: D-two ###
+ID: D-two
+KIND: DECISION
+STATUS: ACTIVE
+SCOPE: login service
+### END_ENTRY: D-two ###
+`
+	problems := LintProjectMemory([]ProjectMemoryFileBlob{{
+		Rel: "decisions.md", Kind: "decisions", Raw: raw,
+	}}, 3)
+	got := FormatLintReport(problems)
+	if !strings.Contains(got, "LINT FAIL [decisions.md]: unresolved duplicate SCOPE \"login service\":") {
+		t.Fatalf("missing duplicate SCOPE block:\n%s", got)
+	}
+	if !strings.Contains(got, "  ID=D-one STATUS=ACTIVE") || !strings.Contains(got, "  ID=D-two STATUS=ACTIVE") {
+		t.Fatalf("missing SCOPE member rows:\n%s", got)
+	}
+	if !strings.Contains(got, "  -> merge into one entry, mark the older one SUPERSEDED/RETIRED, set SUPERSEDES.") {
+		t.Fatalf("missing duplicate SCOPE hint:\n%s", got)
+	}
+	if !strings.Contains(got, "LINT FAIL [decisions.md]: text found outside any anchored entry (invisible to anchor-based reads):") {
+		t.Fatalf("missing orphan header:\n%s", got)
+	}
+	if !strings.Contains(got, "  line 2: loose fact that is invisible to anchors") {
+		t.Fatalf("missing orphan line listing:\n%s", got)
+	}
+}
+
+func TestFormatProjectMemoryHitsMatchesQueryScript(t *testing.T) {
+	hits := []ProjectMemoryHit{
+		{ID: "BUG-deploy-health", Kind: "debug", File: "debug.md", Scope: "local deploy health check", Body: "### BEGIN_ENTRY: BUG-deploy-health ###\nID: BUG-deploy-health\n### END_ENTRY: BUG-deploy-health ###\n"},
+	}
+	compact := FormatProjectMemoryHits(hits, false)
+	if compact != "BUG-deploy-health\tdebug\tdebug.md\tlocal deploy health check\n" {
+		t.Fatalf("compact query != memory-query.sh TSV: %q", compact)
+	}
+	full := FormatProjectMemoryHits(hits, true)
+	if !strings.HasPrefix(full, "### BEGIN_ENTRY: BUG-deploy-health ###\n") {
+		t.Fatalf("full query missing body: %q", full)
+	}
+	if !strings.HasSuffix(full, "\n\n") {
+		t.Fatalf("memory-query.sh --full prints body plus extra newline, got %q", full)
+	}
+}
+
+func TestFormatPatternTrackNoteMatchesScript(t *testing.T) {
+	got := FormatPatternTrackNote("trace-turn", "debug", 3, "/tmp/memory/proj/scripts/trace-turn.sh")
+	want := "memory-pattern: 'trace-turn' (debug) has occurred 3x.\n  Promote the stable procedure to playbook.md.\n  If the steps are deterministic, consider a shared shortcut script:\n    /tmp/memory/proj/scripts/trace-turn.sh"
+	if got != want {
+		t.Fatalf("pattern note != memory-pattern-track.sh stdout\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestFormatLintReportClean(t *testing.T) {
+	if got := FormatLintReport(nil); got != "memory-lint: clean" {
+		t.Fatalf("clean report = %q", got)
+	}
+}
+
+func TestEvaluateMemoryGateMatchesScript(t *testing.T) {
+	pass := EvaluateMemoryGate(MemoryGateInput{})
+	if !pass.OK || !strings.Contains(pass.Message, "memory-lint: clean") || !strings.Contains(pass.Message, "no working-tree changes to evaluate") {
+		t.Fatalf("empty worktree gate = %+v", pass)
+	}
+	fail := EvaluateMemoryGate(MemoryGateInput{
+		ChangedFiles: []string{"a.go", "b.go", "c.go"},
+	})
+	if fail.OK || !strings.Contains(fail.Message, "3 file(s) changed") {
+		t.Fatalf("durable without memory = %+v", fail)
+	}
+	if !strings.Contains(fail.Message, `memory_project(op="gate", reason=`) {
+		t.Fatalf("gate fail must point at the NusaShell op, got %s", fail.Message)
+	}
+	ok := EvaluateMemoryGate(MemoryGateInput{
+		ChangedFiles:   []string{"a.go", "b.go", "c.go"},
+		NoUpdateReason: "implementation only",
+	})
+	if !ok.OK || !strings.Contains(ok.Message, "no memory update admitted: implementation only") {
+		t.Fatalf("--no-update equivalent = %+v", ok)
 	}
 }
 

@@ -33,7 +33,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `growth/memories.jsonl` | structured MemoryRecord catalog (learner writes; humans retire) | JSONL |
 | `growth/jobs.jsonl` | learning jobs (`learner`, plus legacy `consolidate` / `evolve_skill` / `evaluate` / `retire_stale`) | JSONL |
 | `growth/operations.jsonl` | typed learning-operation audit | JSONL |
-| `memory_project/{key}/` | per-workspace project memory (`index.md`, `guardrails.md`, … plus `archive/`). Default base; override with Settings → Project memory (`project_memory_base`, for example `~/.memory`) | Markdown |
+| `memory_project/{key}/` | per-workspace project memory (`index.md`, `guardrails.md`, … plus `archive/` and `scripts/`). Default base; override with Settings → Project memory (`project_memory_base`, for example `~/.memory`) | Markdown |
 | `learning/edges.jsonl` | learning edges: content/embedding and metadata `related` links, plus `used_with` links for nodes observed together in one agent turn; stale endpoints are pruned during graph rebuild | JSONL |
 | `learning/embeddings.jsonl` | embedding cache for memory/skill entries | JSONL |
 | `learning/trajectory.jsonl` | learning trajectory log (one event per line). Job entries carry `job_id`, `status`, the applied `mutations`, and `llm_conversation_id` pointing at the persisted LLM transcript | JSONL |

@@ -186,12 +186,14 @@ TOPICS: [deploy]
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(listed, ",") != "playbook.md,debug.md,validation.md,archive/debug.md" {
-		// playbook before debug in read order; validation after debug; archive last
-		joined := strings.Join(listed, ",")
-		if !strings.HasPrefix(joined, "playbook.md") || !strings.Contains(joined, "archive/debug.md") {
-			t.Fatalf("list order = %s", joined)
-		}
+	want := []string{
+		filepath.Join(dir, "playbook.md"),
+		filepath.Join(dir, "debug.md"),
+		filepath.Join(dir, "validation.md"),
+		filepath.Join(dir, "archive", "debug.md"),
+	}
+	if strings.Join(listed, ",") != strings.Join(want, ",") {
+		t.Fatalf("list order = %s", strings.Join(listed, ","))
 	}
 }
 
@@ -212,6 +214,9 @@ TOPICS: [Deploy, too-many, topics, here]
 	}
 	if _, ok := err.(*domain.ProjectMemoryLintError); !ok {
 		t.Fatalf("want LintError, got %T %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "LINT FAIL [debug.md]:") || !strings.Contains(err.Error(), "memory-lint:") {
+		t.Fatalf("admit lint error must match memory-lint.sh stdout, got %v", err)
 	}
 	after := mustRead(t, filepath.Join(memoryDir(data, ws), "debug.md"))
 	if after != before {
@@ -303,6 +308,80 @@ func mustWrite(t *testing.T, path, body string) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPathAndScriptPathMatchHelpers(t *testing.T) {
+	st, ws, data := testStore(t)
+	p, err := st.Path(ws, "decision", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(memoryDir(data, ws), "decisions.md")
+	if p != want {
+		t.Fatalf("path = %s want %s", p, want)
+	}
+	if _, err := os.Stat(p); err != nil {
+		t.Fatal(err)
+	}
+	sp, err := st.ScriptPath(ws, "trace turn.sh", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(sp, filepath.Join("scripts", "trace-turn.sh")) && !strings.Contains(sp, "trace-turn.sh") && !strings.Contains(filepath.Base(sp), "trace") {
+		t.Fatalf("script path = %s", sp)
+	}
+	if filepath.Base(sp) != "trace-turn.sh" {
+		t.Fatalf("sanitize = %s want trace-turn.sh", filepath.Base(sp))
+	}
+}
+
+func TestGateNoUpdateAndDurableFail(t *testing.T) {
+	st, ws, data := testStore(t)
+	if _, err := st.Admit(ws, "debug", "BUG-ok", debugContent("BUG-ok", "")); err != nil {
+		t.Fatal(err)
+	}
+	dir := memoryDir(data, ws)
+	old := time.Now().Add(-2 * time.Hour)
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() {
+			_ = os.Chtimes(path, old, old)
+		}
+		return err
+	})
+	st.now = time.Now
+	st.gitPorcelain = func(string) []string { return []string{"one.txt", "two.txt", "three.txt"} }
+	_, err := st.Gate(ws, "")
+	if err == nil || !strings.Contains(err.Error(), "memory-gate: FAIL") {
+		t.Fatalf("expected gate fail, got %v", err)
+	}
+	out, err := st.Gate(ws, "implementation only; no durable cross-task knowledge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "no memory update admitted:") {
+		t.Fatalf("gate --no-update output = %s", out)
+	}
+}
+
+func TestAuditMissingAndPresent(t *testing.T) {
+	st, ws, _ := testStore(t)
+	out, err := st.Audit(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "status: missing") || !strings.Contains(out, "memory_base:") {
+		t.Fatalf("missing audit = %s", out)
+	}
+	if _, err := st.Admit(ws, "debug", "BUG-ok", debugContent("BUG-ok", "")); err != nil {
+		t.Fatal(err)
+	}
+	out, err = st.Audit(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "status: present") || !strings.Contains(out, "audit_status: clean") {
+		t.Fatalf("present audit = %s", out)
 	}
 }
 

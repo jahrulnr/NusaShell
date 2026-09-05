@@ -169,8 +169,13 @@ type ProjectMemoryStore interface {
 	Read(workspace, kind, id string) (string, error)
 	Admit(workspace, kind, id, content string) (domain.ProjectMemoryAdmitResult, error)
 	Archive(workspace, id string) error
-	Lint(workspace string) ([]domain.ProjectMemoryLintProblem, error)
+	Lint(workspace string, kinds ...string) ([]domain.ProjectMemoryLintProblem, error)
 	IndexExtract(workspace string) (domain.ProjectIndexExtract, bool, error)
+	Audit(workspace string) (string, error)
+	Gate(workspace, reason string) (string, error)
+	TrackPatterns(workspace, kind string) (string, error)
+	Path(workspace, kind string, create bool) (string, error)
+	ScriptPath(workspace, name string, create bool) (string, error)
 }
 
 // LearningEdgeStore persists bitemporal edges between learning nodes.

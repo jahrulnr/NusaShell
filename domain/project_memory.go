@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -131,6 +132,7 @@ type ProjectMemoryEntry struct {
 type ProjectMemoryLink struct {
 	Relation string
 	Target   string
+	Raw      string // original list token; used by memory-lint.sh messages
 }
 
 // ProjectMemoryQuery mirrors memory-query.sh selectors (AND-combined).
@@ -153,10 +155,12 @@ type ProjectMemoryHit struct {
 	Body  string // set when Full is true
 }
 
-// ProjectMemoryLintProblem is one memory-lint finding.
+// ProjectMemoryLintProblem is one memory-lint.sh finding.
 type ProjectMemoryLintProblem struct {
 	File    string
 	Message string
+	Details []string // extra lines under the LINT FAIL header (without indent)
+	Hint    string   // memory-lint.sh "  -> ..." remediation, without the prefix
 }
 
 // ProjectIndexExtract is the compact hydration payload from IDX-project.
@@ -419,10 +423,11 @@ func parseLinks(raw string) []ProjectMemoryLink {
 	out := make([]ProjectMemoryLink, 0, len(items))
 	for _, item := range items {
 		rel, target, ok := strings.Cut(item, ":")
-		if !ok || rel == "" || target == "" {
+		if !ok {
+			out = append(out, ProjectMemoryLink{Raw: item})
 			continue
 		}
-		out = append(out, ProjectMemoryLink{Relation: rel, Target: target})
+		out = append(out, ProjectMemoryLink{Relation: rel, Target: target, Raw: item})
 	}
 	return out
 }
@@ -466,12 +471,9 @@ func MatchProjectMemoryQuery(entries []ProjectMemoryEntry, q ProjectMemoryQuery)
 			continue
 		}
 		if wantedRelated != "" {
-			if e.ID == wantedRelated {
-				continue
-			}
 			linksTo := false
 			for _, l := range e.Links {
-				if l.Target == wantedRelated {
+				if l.Target != "" && l.Target == wantedRelated {
 					linksTo = true
 					break
 				}
@@ -644,6 +646,70 @@ func NormalizePatternKey(raw string) string {
 		return ""
 	}
 	return key
+}
+
+// SanitizeProjectMemoryScriptName matches memory-script-path.sh
+// (keep [A-Za-z0-9_.-], replace everything else with '-').
+func SanitizeProjectMemoryScriptName(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '.' || r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	return b.String()
+}
+
+// ProjectMemoryScriptPath is memory-script-path.sh output: {base}/{key}/scripts/{name}.
+func ProjectMemoryScriptPath(base, key, name string) string {
+	return filepath.Join(base, key, "scripts", SanitizeProjectMemoryScriptName(name))
+}
+
+// ProjectMemoryKindPath is memory-path.sh output: {base}/{key}/{kind}.md.
+func ProjectMemoryKindPath(base, key, kind string) string {
+	return filepath.Join(base, key, NormalizeProjectKindFile(kind)+".md")
+}
+
+// FormatProjectMemoryHits is memory-query.sh stdout: TSV rows, or anchored
+// bodies with an extra trailing newline per hit (--full).
+func FormatProjectMemoryHits(hits []ProjectMemoryHit, full bool) string {
+	var b strings.Builder
+	for _, h := range hits {
+		if full {
+			body := h.Body
+			if !strings.HasSuffix(body, "\n") {
+				body += "\n"
+			}
+			b.WriteString(body)
+			b.WriteByte('\n')
+			continue
+		}
+		b.WriteString(h.ID)
+		b.WriteByte('\t')
+		b.WriteString(h.Kind)
+		b.WriteByte('\t')
+		b.WriteString(h.File)
+		b.WriteByte('\t')
+		b.WriteString(h.Scope)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// FormatProjectMemoryList is memory-list.sh stdout: one absolute path per line.
+func FormatProjectMemoryList(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	return strings.Join(paths, "\n") + "\n"
+}
+
+// FormatPatternTrackNote is memory-pattern-track.sh stdout when a threshold fires.
+func FormatPatternTrackNote(patternKey, kind string, occurrences int, scriptPath string) string {
+	return fmt.Sprintf("memory-pattern: '%s' (%s) has occurred %dx.\n  Promote the stable procedure to playbook.md.\n  If the steps are deterministic, consider a shared shortcut script:\n    %s", patternKey, kind, occurrences, scriptPath)
 }
 
 // PatternEntryID builds P-{kind}-{key} truncated to 56 chars after the kind-key slug.
