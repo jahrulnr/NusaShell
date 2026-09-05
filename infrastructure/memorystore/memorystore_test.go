@@ -238,4 +238,3 @@ func TestUserMultiParagraphDocument(t *testing.T) {
 		t.Errorf("ID should be user_ prefixed, got %q", loaded.Entries[0].ID)
 	}
 }
-

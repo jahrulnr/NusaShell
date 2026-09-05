@@ -22,6 +22,25 @@ records stay on disk for audit and are excluded from search and APPLY.
 
 Workspace knowledge stays in `memory_project` (see `memory-project.md`).
 
+## Consolidator
+
+The memory consolidator runs as a background job when a high-signal
+experience is recorded (explicit teaching, user correction, verified
+recovery, repeated failure, or repeated procedure). It converts the
+experience into typed operations (`memory.upsert`, `memory.strengthen`,
+`memory.merge`, `memory.contradict`, `memory.retire`).
+
+When a learning model is available (configured via `review_model` in
+Settings, or the first enabled provider), the consolidator calls the LLM
+with the RFC system prompt and a compact packet (experience JSON + related
+memories + scope). The LLM returns typed JSON operations that are
+validated and applied through `MemoryService.Apply`.
+
+When no provider is available, the consolidator falls back to a
+deterministic rule-based extraction (`teachingOps`) so the job still
+produces output in offline/no-provider setups. The LLM path and the
+deterministic path share the same deduplication and apply logic.
+
 ## Agent tools
 
 The `memory` dispatcher is read-only. `op` selects:

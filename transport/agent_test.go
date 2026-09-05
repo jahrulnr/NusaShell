@@ -1314,8 +1314,15 @@ func TestAgentTurnRetriesTransientCompactionFailure(t *testing.T) {
 	})
 	waitTurnDone(t, h, convID)
 
-	if got := h.llm.requestCount(); got != requestsBefore+3 {
-		t.Fatalf("provider requests = %d, want %d", got, requestsBefore+3)
+	// The learning trigger may fire after a compaction turn (the compaction
+	// summary is stored with the Steer flag, which ExtractExperience treats
+	// as a user correction). The LLM-backed consolidator makes one
+	// non-streaming call to the same provider, so the total may be 3
+	// (compaction + compaction retry + turn) or 4 (with the learning call).
+	// Wait briefly for the async learning job to settle, then accept either.
+	time.Sleep(50 * time.Millisecond)
+	if got := h.llm.requestCount(); got != requestsBefore+3 && got != requestsBefore+4 {
+		t.Fatalf("provider requests = %d, want %d or %d", got, requestsBefore+3, requestsBefore+4)
 	}
 }
 

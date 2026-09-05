@@ -55,6 +55,27 @@ sets trusted either. `skill.updated` events carry `op` (`evolve` from a
 learning job, `promote` from this UI) so telemetry can tell queued
 evolution from a human promotion.
 
+## Skill evolver
+
+The skill evolver runs as a background job when a repeated procedure is
+detected (same tool fingerprint across 3+ episodes) or the user explicitly
+asks to "make this a skill". It creates learned skills as `experimental`.
+
+When a learning model is available, the evolver calls the LLM with the RFC
+skill-evolver system prompt and a packet (experience JSON + related
+skills). The LLM returns a skill proposal with the full RFC schema:
+purpose, trigger, preconditions, steps, verification, recovery, and
+anti-patterns.
+
+When no provider is available, the evolver falls back to a deterministic
+template that structures the experience data into the minimum required
+sections (purpose, trigger, steps, verification).
+
+Both paths are gated by a minimum bar check: the generated skill body must
+contain at least `Purpose`, `Trigger`, and `Steps` sections. Skills that
+do not meet this bar are not saved. This prevents below-quality skills from
+polluting the experimental store.
+
 Path layout:
 
 | Owner | Directory |

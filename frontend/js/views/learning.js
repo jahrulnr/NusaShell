@@ -614,6 +614,70 @@ function renderLog() {
   }
 }
 
+// renderTranscript renders a learning-job transcript (experience or review)
+// as an agent-style flow: Thinking disclosures, tool event cards, and a
+// final conclusion. Replayed user messages are never shown.
+export function renderTranscript(transcript) {
+  const wrapper = el('div', {});
+  const container = el('div', { class: 'learning-log-detail' });
+  wrapper.appendChild(container);
+  if (!transcript || !Array.isArray(transcript.messages)) return wrapper;
+
+  const toolCardMap = new Map(); // tool_call_id → { card, toolCall }
+
+  for (const msg of transcript.messages) {
+    if (msg.role === 'user') continue; // never render replayed user messages
+
+    if (msg.role === 'assistant') {
+      // Reasoning goes into a Thinking disclosure.
+      if (msg.reasoning) {
+        container.appendChild(reasoningDisclosure(msg.reasoning));
+      }
+      // Pre-tool narration (content alongside tool_calls) is also a Thinking
+      // disclosure, not a standalone note.
+      if (msg.content && msg.tool_calls?.length) {
+        container.appendChild(reasoningDisclosure(msg.content));
+      }
+      // Tool calls become event cards. renderToolCallCard returns null for
+      // ACP bookkeeping (subagent_wait, subagent_result).
+      if (msg.tool_calls?.length) {
+        for (const tc of msg.tool_calls) {
+          // Transcript tool calls are completed; set a default status so
+          // toolTerminalMeta summarizes the args instead of showing "Running".
+          const normalizedTc = { ...tc, status: tc.status || 'ok' };
+          const card = renderToolCallCard(normalizedTc);
+          if (card) {
+            // In a transcript, tool results are visible by default.
+            card.open = true;
+            container.appendChild(card);
+            if (tc.id) toolCardMap.set(tc.id, { card, toolCall: normalizedTc });
+          }
+        }
+      }
+      // Final assistant text (no tool_calls) is the conclusion.
+      if (msg.content && !msg.tool_calls?.length) {
+        const conclusion = el('div', { class: 'learning-log-conclusion' });
+        conclusion.innerHTML = renderMarkdown(msg.content);
+        container.appendChild(conclusion);
+      }
+      continue;
+    }
+
+    if (msg.role === 'tool' && msg.tool_result) {
+      const entry = toolCardMap.get(msg.tool_result.tool_call_id);
+      if (entry) {
+        // Preserve the args-derived meta text so the card summary still
+        // reflects what was requested, not just the raw output.
+        const meta = toolTerminalMeta(entry.toolCall);
+        setToolTerminalOutput(entry.card, msg.tool_result.content || '', 'ok', meta);
+      }
+      continue;
+    }
+  }
+
+  return wrapper;
+}
+
 export function renderLogEntry(entry) {
   const headChildren = [
     el('span', { class: `learning-log-type learning-type-${entry.type}`, text: typeLabel(entry.type) }),
@@ -634,7 +698,8 @@ export function renderLogEntry(entry) {
   // concise without leaking a provider's verbose error body; the raw
   // diagnostic remains in the backend log/trajectory for diagnosis.
   if (entry.status === 'error') {
-    parts.push(el('div', { class: 'learning-log-error', text: 'Background learning job failed during automatic processing.' }));
+    const label = entry.type === 'review' ? 'review' : 'learning job';
+    parts.push(el('div', { class: 'learning-log-error', text: `Background ${label} failed during automatic processing.` }));
   }
   if (entry.status === 'skipped') {
     const reason = entry.detail?.reason || 'deferred';
@@ -670,6 +735,11 @@ export function renderLogEntry(entry) {
       el('span', { class: 'learning-log-conv-label', text: 'Source' }),
       el('span', { class: 'learning-log-conv-title', text: entry.conversation_title || 'Untitled conversation' }),
     ]));
+  }
+
+  // Review entries with a review_id get a details button.
+  if (entry.type === 'review' && entry.review_id) {
+    parts.push(el('button', { class: 'learning-log-open', text: 'View review details' }));
   }
 
   // Saved outcomes: one compact line per mutation so the feed shows what
@@ -710,6 +780,12 @@ function typeLabel(type) {
     case 'review_model': return 'Learning model';
     default: return type.replace(/_/g, ' ');
   }
+}
+
+// oneLine collapses a string to a single trimmed line capped at maxLen.
+function oneLine(s, maxLen = 180) {
+  const line = String(s || '').replace(/\s+/g, ' ').trim();
+  return line.length > maxLen ? `${line.slice(0, maxLen)}…` : line;
 }
 
 // detailText renders non-conversation detail fields (numbers, counts) so
