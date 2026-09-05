@@ -39,7 +39,7 @@ func TestConsolidateJobDoesNotWriteProfileDocs(t *testing.T) {
 		User:          &panicDocStore{t: t},
 		Agent:         &panicDocStore{t: t},
 	}
-	if err := app.consolidateJob(&domain.LearningJob{ID: "job_1", ExperienceID: "exp_1", Kind: domain.LearningJobConsolidate}); err != nil {
+	if _, _, err := app.consolidateJob(&domain.LearningJob{ID: "job_1", ExperienceID: "exp_1", Kind: domain.LearningJobConsolidate}); err != nil {
 		t.Fatal(err)
 	}
 	if len(app.MemoryRecords.List()) != 1 {
@@ -58,7 +58,7 @@ func TestConsolidateJobSetARecall(t *testing.T) {
 		Experiences:   &fakeExperienceStore{items: []*domain.Experience{exp}},
 		MemoryRecords: records,
 	}
-	if err := app.consolidateJob(&domain.LearningJob{ID: "job_a", ExperienceID: "exp_a"}); err != nil {
+	if _, _, err := app.consolidateJob(&domain.LearningJob{ID: "job_a", ExperienceID: "exp_a"}); err != nil {
 		t.Fatal(err)
 	}
 	found := false
@@ -84,7 +84,7 @@ func TestConsolidateJobSetDOneOffPackageManagerStaysEpisode(t *testing.T) {
 		Experiences:   &fakeExperienceStore{items: []*domain.Experience{exp}},
 		MemoryRecords: records,
 	}
-	if err := app.consolidateJob(&domain.LearningJob{ID: "job_d", ExperienceID: "exp_d"}); err != nil {
+	if _, _, err := app.consolidateJob(&domain.LearningJob{ID: "job_d", ExperienceID: "exp_d"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, rec := range records.List() {
@@ -117,10 +117,10 @@ func TestConsolidateJobSetCStrengthensDuplicate(t *testing.T) {
 		Experiences:   &fakeExperienceStore{items: []*domain.Experience{exp1, exp2}},
 		MemoryRecords: records,
 	}
-	if err := app.consolidateJob(&domain.LearningJob{ID: "job_c1", ExperienceID: "exp_c1"}); err != nil {
+	if _, _, err := app.consolidateJob(&domain.LearningJob{ID: "job_c1", ExperienceID: "exp_c1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.consolidateJob(&domain.LearningJob{ID: "job_c2", ExperienceID: "exp_c2"}); err != nil {
+	if _, _, err := app.consolidateJob(&domain.LearningJob{ID: "job_c2", ExperienceID: "exp_c2"}); err != nil {
 		t.Fatal(err)
 	}
 	live := 0
@@ -174,7 +174,7 @@ func TestEvolveSkillJobStaysExperimentalAndRespectsRevisionCap(t *testing.T) {
 	}
 	job := &domain.LearningJob{ExperienceID: "exp_e", Kind: domain.LearningJobEvolveSkill}
 	for i := 0; i < domain.MaxSkillRevisions+3; i++ {
-		if err := app.evolveSkillJob(job); err != nil {
+		if _, err := app.evolveSkillJob(job); err != nil {
 			t.Fatalf("evolve %d: %v", i, err)
 		}
 	}
@@ -213,7 +213,7 @@ func TestEvolveSkillJobEmitsEvolveOp(t *testing.T) {
 		Trajectory:  NewTrajectoryRecorder(dir),
 	}
 	t.Cleanup(func() { _ = app.Trajectory.Close() })
-	if err := app.evolveSkillJob(&domain.LearningJob{ExperienceID: "exp_e2", Kind: domain.LearningJobEvolveSkill}); err != nil {
+	if _, err := app.evolveSkillJob(&domain.LearningJob{ExperienceID: "exp_e2", Kind: domain.LearningJobEvolveSkill}); err != nil {
 		t.Fatal(err)
 	}
 	ev := waitBusEvent(t, ch, contracts.EventSkillUpdated)

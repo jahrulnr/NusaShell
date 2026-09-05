@@ -320,6 +320,9 @@ func (a *App) handleLearningLog(req contracts.LearningLogRequest) (any, *contrac
 		if reviewID, ok := e.Detail["review_id"].(string); ok {
 			entry.ReviewID = reviewID
 		}
+		if llmConvID, ok := e.Detail["llm_conversation_id"].(string); ok {
+			entry.LLMConversationID = llmConvID
+		}
 		if status, ok := e.Detail["status"].(string); ok {
 			entry.Status = status
 		}
@@ -363,7 +366,7 @@ func (a *App) handleLearningLog(req contracts.LearningLogRequest) (any, *contrac
 		if len(e.Detail) > 0 {
 			detail := make(map[string]json.RawMessage, len(e.Detail))
 			for k, v := range e.Detail {
-				if k == "conversation" || k == "mutations" || k == "review_id" || k == "status" || k == "error" {
+				if k == "conversation" || k == "mutations" || k == "review_id" || k == "llm_conversation_id" || k == "status" || k == "error" {
 					continue
 				}
 				b, err := json.Marshal(v)

@@ -1433,11 +1433,17 @@ type LearningLogMutationDTO struct {
 }
 
 type LearningLogEntryDTO struct {
-	TS                string                     `json:"ts"`
-	Type              string                     `json:"type"` // extract|edge_build|consolidate|decay|prune|job
-	ConversationID    string                     `json:"conversation_id,omitempty"`
-	ConversationTitle string                     `json:"conversation_title,omitempty"`
-	ReviewID          string                     `json:"review_id,omitempty"`
+	TS                string `json:"ts"`
+	Type              string `json:"type"` // extract|edge_build|consolidate|decay|prune|job
+	ConversationID    string `json:"conversation_id,omitempty"`
+	ConversationTitle string `json:"conversation_title,omitempty"`
+	ReviewID          string `json:"review_id,omitempty"`
+	// LLMConversationID is the persisted transcript of the background LLM
+	// run that produced this entry. Opening it shows the exact prompt,
+	// tool rounds, and answer the model produced, stored as a
+	// type=background conversation. It is distinct from ConversationID,
+	// which is the user conversation the job learned from.
+	LLMConversationID string                     `json:"llm_conversation_id,omitempty"`
 	Status            string                     `json:"status,omitempty"` // done|error|skipped
 	Error             string                     `json:"error,omitempty"`  // generic job failure status; raw provider details stay server-side
 	Mutations         []LearningLogMutationDTO   `json:"mutations,omitempty"`

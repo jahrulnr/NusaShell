@@ -41,6 +41,19 @@ deterministic rule-based extraction (`teachingOps`) so the job still
 produces output in offline/no-provider setups. The LLM path and the
 deterministic path share the same deduplication and apply logic.
 
+## The job transcript
+
+The LLM call runs as a headless agent turn rather than a bare completion, so
+the whole run is persisted as a `type=background` conversation: the packet
+that was sent, every tool round, and the final answer. The job's Learning log
+entry carries that conversation's id (`llm_conversation_id`) and its **View
+LLM log** button opens it.
+
+That transcript is the only record of *why* a job saved what it saved, so it
+is kept even when the call failed or decided nothing was durable. Do not
+confuse it with the entry's `conversation_id`, which is the user conversation
+the job learned from.
+
 ## Agent tools
 
 The `memory` dispatcher is read-only. `op` selects:

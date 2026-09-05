@@ -35,6 +35,7 @@ test-frontend:
 		node --check "$$f" || fail=1; \
 	done; \
 	if [ "$$fail" -eq 1 ]; then echo "frontend: syntax check failed"; exit 1; fi; \
+	node --test scripts/agent-instructions.test.mjs; \
 	echo "frontend: syntax ok"
 
 ## test-frontend-e2e: one cross-layer UI smoke flow against a real Go server.

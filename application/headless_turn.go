@@ -10,6 +10,36 @@ import (
 	clock "nusashell/pkg/time"
 )
 
+// headlessConversationType maps an agent kind to the persisted conversation
+// type. Learning jobs are background transcripts; every other headless run
+// (pipeline agent steps, internal delegates) is an automation transcript.
+// Neither appears in agent.conversations.list.
+func headlessConversationType(kind AgentKind) domain.ConversationType {
+	switch kind {
+	case AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator:
+		return domain.ConversationTypeBackground
+	default:
+		return domain.ConversationTypeAutomation
+	}
+}
+
+// headlessTurnTitle names the persisted transcript. Learning jobs carry a
+// stable readable title so learning/trajectory.jsonl and the conversation
+// store stay auditable; other headless runs keep the historical
+// "[pipeline] " prefix.
+func headlessTurnTitle(kind AgentKind, prompt string) string {
+	switch kind {
+	case AgentMemoryConsolidator:
+		return "[learning] memory consolidation"
+	case AgentSkillEvolver:
+		return "[learning] skill evolution"
+	case AgentSkillEvaluator:
+		return "[learning] skill evaluation"
+	default:
+		return "[pipeline] " + text.Truncate(prompt, 60)
+	}
+}
+
 // RunHeadlessTurn executes a full agent turn synchronously (no Agent room)
 // and returns the final assistant text as {"output": text}. It is the backing
 // implementation for pipeline agent steps. The persisted conversation is
@@ -33,9 +63,9 @@ func (a *App) runHeadlessTurnKindObserved(ctx context.Context, prompt, model str
 		return nil, "", err
 	}
 
-	repo := NewConversation(a.Conversations, "[pipeline] "+text.Truncate(prompt, 60))
+	repo := NewConversation(a.Conversations, headlessTurnTitle(kind, prompt))
 	conv := repo.Conversation()
-	conv.Origin = domain.ConversationOriginPipeline
+	conv.Type = headlessConversationType(kind)
 	conv.Model = provider.ID + ":" + bareModel
 	conv.Status = "running"
 	now := clock.NewTime().Time()

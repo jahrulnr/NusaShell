@@ -9,6 +9,64 @@ Instructions for humans and coding agents working in this repository.
 - Make decisions grounded in repository evidence and established project constraints; do not hide uncertainty or invent completed work.
 - When backend has changed, makesure frontend is working. Refactor frontend behavior if backend have some breaking changes.
 
+
+
+## Scoped instructions and reuse-first workflow
+
+The root file contains repository-wide rules. Before editing a path, read the
+closest scoped `AGENTS.md` below. NusaShell currently hydrates this root file
+only, while other agents may discover nested files automatically, so do not
+assume a scoped file was loaded.
+
+
+| Scope                                 | Instructions               |
+| ------------------------------------- | -------------------------- |
+| Domain policy and entities            | `domain/AGENTS.md`         |
+| Use cases, ports, agent runtime       | `application/AGENTS.md`    |
+| RPC, event, and DTO wire shapes       | `contracts/AGENTS.md`      |
+| External adapters and persistence     | `infrastructure/AGENTS.md` |
+| HTTP, WebSocket, SSE, static delivery | `transport/AGENTS.md`      |
+| Process wiring and lifecycle          | `cmd/nusashell/AGENTS.md`  |
+| Native web interface                  | `frontend/AGENTS.md`       |
+| Cross-boundary fixtures and fakes     | `testdata/AGENTS.md`       |
+
+
+**Before creating a file, package, exported symbol, helper, schema, event, or
+UI primitive:**
+
+1. Inspect the relevant package, its tests, and adjacent layers. Search by
+  behavior and protocol string, not only by the proposed name.
+2. Identify the closest existing extension seam and at least one concrete
+  reuse candidate. Prefer extending it, composing it, or deleting and
+   replacing a superseded path over adding a parallel path.
+3. If reuse is rejected, record the specific mismatch in the task plan or PR
+  notes. "Cleaner", "more generic", and possible future use are not enough.
+4. Implement the smallest vertical change that satisfies the current
+  acceptance criteria. Do not add unused options, interfaces with one
+   speculative implementation, compatibility ladders, or duplicate sources
+   of truth.
+5. Refactor only with green characterization tests. Similar-looking code may
+  remain separate until a stable shared responsibility is demonstrated;
+   two copies alone do not justify a generic abstraction.
+
+Prefer a local unexported helper before a new shared package. Prefer an
+existing dependency before adding a new one. A new dependency or cross-layer
+abstraction must reduce more complexity now than it introduces.
+
+Scoped instructions contain only deltas from this file. Keep each
+`AGENTS.md` readable in one default `file_read`: the repository check enforces
+a root-to-leaf instruction chain below 24 KiB, leaving 8 KiB of margin
+under the 32 KiB default used by NusaShell and Codex. Run:
+
+```text
+node --test scripts/agent-instructions.test.mjs
+```
+
+Layer-local `ROADMAP.md` files are optional, not default. Create one only for
+an approved, user-visible initiative with explicit outcome, confidence, and
+dependencies. Never use a layer roadmap as a parking lot for speculative
+refactors or abstractions.
+
 ## Architecture principles
 
 - **TDD:** follow red → green → refactor. Write or extend a failing test for behavior before implementation; make the smallest change that passes; refactor only while tests are green.
@@ -19,6 +77,8 @@ Instructions for humans and coding agents working in this repository.
 - **Testability:** keep I/O at adapters and inject clocks, filesystem, network clients, process runners, and other effects. Code must support deterministic unit tests and isolated integration tests.
 - **Non-functional testing:** support tests for concurrency and race safety, cancellation, timeouts, ordering, backpressure, resource cleanup, startup/shutdown, compatibility, observability, and performance where the contract requires it.
 - **Logging:** use structured logging with context, include request IDs, and log at appropriate levels (debug, info, warn, error), traceable from who to whom like pirate find the treasure.
+
+
 
 ## Layer responsibilities
 
@@ -31,6 +91,8 @@ Instructions for humans and coding agents working in this repository.
 - `frontend/`: native JavaScript, HTML, CSS, and static assets. Use browser APIs and ES modules; do not require a production Node build.
 - `testdata/`: stable fixtures, golden files, compatibility samples, and non-secret test assets.
 
+
+
 ## Protocol and frontend rules
 
 - WebSocket is for event-driven updates, subscriptions, and real-time/agent streaming.
@@ -41,14 +103,18 @@ Instructions for humans and coding agents working in this repository.
 - Embed production frontend assets with Go (`embed.FS` or equivalent). Test MIME types, module imports, deep links, cache behavior, and 404 handling.
 - Do not hide frontend traceability behind a required bundle. If an exception is approved, document source mapping and debugging procedure.
 
+
+
 ## Frontend style
 
 - `frontend/` is native JavaScript, HTML, and CSS. Use browser APIs and ES
-  modules; do not require a production Node build.
+modules; do not require a production Node build.
 - Do not render visible native browser controls or dialogs (`<select>`
-  option menus, `alert()`, `confirm()`, `prompt()`). Use a styled select
-  library (e.g. Slim Select) or custom components that match the existing
-  visual language. Native controls should only appear as a last resort.
+option menus, `alert()`, `confirm()`, `prompt()`). Use a styled select
+library (e.g. Slim Select) or custom components that match the existing
+visual language. Native controls should only appear as a last resort.
+
+
 
 ## Provider adapters (core port)
 
@@ -58,27 +124,27 @@ upstream. This rule applies to the wire implementations, not to every
 infrastructure adapter or the AI composition root:
 
 - `infrastructure/ai/core/` — core Blocks-based types (`Request`,
-  `Message`, `Block`, `Thinking`, `Tool`, `Response`, `Stream`, error
-  model). This is the shared contract between NusaShell and the providers.
+`Message`, `Block`, `Thinking`, `Tool`, `Response`, `Stream`, error
+model). This is the shared contract between NusaShell and the providers.
 - `infrastructure/ai/anthropic/`, `infrastructure/ai/openai/`,
-  `infrastructure/ai/openrouter/`, `infrastructure/ai/compat/` — the
-  ported providers. They only import the core package, never
-  `nusashell/application` or `nusashell/domain`.
+`infrastructure/ai/openrouter/`, `infrastructure/ai/compat/` — the
+ported providers. They only import the core package, never
+`nusashell/application` or `nusashell/domain`.
 - `infrastructure/ai/adapter.go` — the single thin adapter implementing
-  `application.AIProvider`: translates `application.ChatRequest` →
-  `core.Request` (blocks, attachments, effort, strip params, prompt
-  cache) and maps core errors → `application.UpstreamError`. It is the
-  only request/response translation bridge between the application chat
-  contract and the core provider contract.
+`application.AIProvider`: translates `application.ChatRequest` →
+`core.Request` (blocks, attachments, effort, strip params, prompt
+cache) and maps core errors → `application.UpstreamError`. It is the
+only request/response translation bridge between the application chat
+contract and the core provider contract.
 - `infrastructure/ai/factory.go`, `handler.go`, `models.go`, `internal/`,
-  and the media client packages (`imagegen`, `stt`, `tts`, `videogen`) are
-  outer adapters/composition helpers, not ported wire implementations. They
-  may import application ports and domain entities when constructing or
-  adapting those ports. Likewise, infrastructure adapters such as
-  `acpruntime` and `tools` may import application interfaces and
-  domain entities; this is the intended adapter → inner-layer direction, not
-  a dependency-rule exception. They must not import concrete application
-  services or make domain depend on infrastructure.
+and the media client packages (`imagegen`, `stt`, `tts`, `videogen`) are
+outer adapters/composition helpers, not ported wire implementations. They
+may import application ports and domain entities when constructing or
+adapting those ports. Likewise, infrastructure adapters such as
+`acpruntime` and `tools` may import application interfaces and
+domain entities; this is the intended adapter → inner-layer direction, not
+a dependency-rule exception. They must not import concrete application
+services or make domain depend on infrastructure.
 
 Supported provider kinds are `messages`, `responses`, and `chat`
 (OpenRouter hosts are auto-detected by Base URL). There is intentionally
@@ -102,22 +168,24 @@ Do not weaken or delete tests merely to make a suite pass. Do not commit secrets
 ## Versioning and release changes
 
 - Release versions use the `{major}.{minor}.{patch}` format without a `v`
-  prefix in version files. Use a patch bump for a backward-compatible fix, a
-  minor bump for backward-compatible functionality, and a major bump for a
-  breaking change.
+prefix in version files. Use a patch bump for a backward-compatible fix, a
+minor bump for backward-compatible functionality, and a major bump for a
+breaking change.
 - The root `VERSION` is the Go core release version. Fixes that change the Go
-  core or embedded frontend must bump only `VERSION`; Electron-only fixes must
-  bump only `apps/electron/VERSION`. If both products change, bump both
-  version files independently and synchronize Electron metadata with
-  `make electron-version-sync`.
+core or embedded frontend must bump only `VERSION`; Electron-only fixes must
+bump only `apps/electron/VERSION`. If both products change, bump both
+version files independently and synchronize Electron metadata with
+`make electron-version-sync`.
 - Documentation, unit-test-only, CI, and release-tooling changes do not need a
-  product version bump. If path-based detection still schedules a publisher,
-  an already-existing stream tag must be treated as a skipped release, not a
-  failed workflow; the release pointer must remain unchanged.
+product version bump. If path-based detection still schedules a publisher,
+an already-existing stream tag must be treated as a skipped release, not a
+failed workflow; the release pointer must remain unchanged.
 - Before considering a product release complete, confirm its version source,
-  stream tag, release manifest, and `release-versions.json` pointer all refer
-  to the same `{major}.{minor}.{patch}` version. Never reuse an immutable
-  `go-v<VERSION>` or `electron-v<VERSION>` tag; bump the relevant stream first.
+stream tag, release manifest, and `release-versions.json` pointer all refer
+to the same `{major}.{minor}.{patch}` version. Never reuse an immutable
+`go-v<VERSION>` or `electron-v<VERSION>` tag; bump the relevant stream first.
+
+
 
 ## Change documentation
 
@@ -128,6 +196,8 @@ When a behavior or public wire contract changes, update the relevant package doc
 - **Dead or superseded code is deleted, not kept.** If a component, adapter, fallback path, or compatibility shim is no longer reachable or no longer reflects how the system works, remove it in the same change instead of leaving it behind "just in case". Unused code is a maintenance tax: it rots, misleads readers, and inflates the surface the next change must consider.
 - **Breaking changes are confirmed with the user first.** Anything that alters persisted data, wire contracts, public RPC methods, provider semantics, or user-visible behavior must be surfaced to the user before implementation — do not silently break old behavior.
 - **Fallbacks to old code are opt-in, not automatic.** Before adding a fallback layer (old path + new path), ask the user whether they need it. Fallback is a complexity multiplier: duplicated logic that must be maintained twice, diverging behavior, and silent masking of errors. The default is one correct path, with the old code deleted — not a fallback ladder.
+
+
 
 ## Documentation sync (required)
 
@@ -142,24 +212,24 @@ UI must update the matching documentation in the same change.**
 When adding, renaming, removing, or changing:
 
 - **Agent tools or built-in tool list** → update `resources/agent/docs/tools.md`
-  and the tool advertisement in `application/prompts.go` in the same change.
+and the tool advertisement in `application/prompts.go` in the same change.
 - **Provider kinds, auth model, base URL rules, or model import behavior** →
-  update `resources/agent/docs/providers.md`.
+update `resources/agent/docs/providers.md`.
 - **Automations, pipelines, CI runs, scheduling, or webhooks** → update
-  `resources/agent/docs/automation.md`.
+`resources/agent/docs/automation.md`.
 - **Plugins / MCP servers, tool discovery, install/register/enable flows** →
-  update `resources/agent/docs/mcp.md`.
+update `resources/agent/docs/mcp.md`.
 - **ACP subagent delegation, async completion, or permissions** → update
-  `resources/agent/docs/agent-subagents.md`.
+`resources/agent/docs/agent-subagents.md`.
 - **Image/audio/video/document attachments, vision fallback, read_media,
-  or folder attachments** → update
-  `resources/agent/docs/agent-attachments.md`.
+or folder attachments** → update
+`resources/agent/docs/agent-attachments.md`.
 - **Data files, data directory layout, or persisted artifacts** → update
-  `resources/agent/docs/data-locations.md`.
+`resources/agent/docs/data-locations.md`.
 - **Skills, memory, or learning subsystem behavior** → update the matching
-  `resources/agent/docs/skills.md` / `resources/agent/docs/memory.md`.
+`resources/agent/docs/skills.md` / `resources/agent/docs/memory.md`.
 - **System prompt rules or identity** → update `application/prompts.go` and
-  the matching `resources/agent/prompts/*.md` file.
+the matching `resources/agent/prompts/*.md` file.
 
 Docs under `resources/agent/docs/*.md` are **agent work guidance**: each
 workflow doc must include concrete good/bad tool-call examples so the agent
@@ -177,52 +247,13 @@ concept (`docs` tool, op="search") and update every page that mentions it.
 When changing launcher or view UI:
 
 - Update `resources/agent/docs/ui-source/ui-map.json` and regenerate
-  `resources/agent/docs/ui-*.md` by running `make scan-ui-docs` whenever
-  a `data-view`, view control, button, modal, or interaction in `frontend/`
-  is added, renamed, removed, or changed.
+`resources/agent/docs/ui-*.md` by running `make scan-ui-docs` whenever
+a `data-view`, view control, button, modal, or interaction in `frontend/`
+is added, renamed, removed, or changed.
 - The CI `test-backend` job runs `go run ./cmd/scan-ui-docs -check` and fails
-  if any view is undocumented or a mapped control ID is missing from source,
-  or if committed `ui-*.md` differ from generated content (drift gate).
+if any view is undocumented or a mapped control ID is missing from source,
+or if committed `ui-*.md` differ from generated content (drift gate).
 - The CI `build` job regenerates `ui-*.md` before `go build` so the embedded
-  corpus is always fresh.
-- Do **not** edit `resources/agent/docs/ui-*.md` files manually; they
-  are generated from the UI map.
-
-## Experiments (`.experimental/`)
-
-`.experimental/` is the approved scratch space for proving a theory before it
-lands in NusaShell. Use it for: testing logic, testing upstream behavior
-(provider quirks, SSE edge cases, OAuth flows), spike implementations,
-side-by-side comparisons with other projects, and any proof-of-concept that
-should not touch the production tree yet.
-
-- Create a new subfolder under `.experimental/` per experiment (e.g.
-  `.experimental/sse-multiline/`, `.experimental/agent-round-spike/`).
-  Create the folder if it does not exist.
-- One experiment per folder; keep experiments isolated and self-contained.
-- Experiments are not part of the build: they must not be imported by
-  `cmd/nusashell`, `application`, `domain`, `contracts`, `infrastructure`, or
-  `transport`. They are not covered by `go test ./...` from the repo root
-  unless they carry their own `go.mod` or are explicitly wired in.
-- Treat an experiment as throwaway evidence, not a permanent feature. Once
-  the theory is proven, port the minimal correct version into the real
-  package and delete or archive the experiment folder.
-- Credentials policy is scoped to `.experimental/` only:
-  - **Allowed:** local-only credentials that are useless if leaked — e.g.
-    personal `omniroute` / `9router` tokens, local OAuth fixtures tied
-    to a single machine. These may be read from
-    the user's home directory at runtime and quoted in experiment output
-    because exposure to the internet or another git checkout does not let
-    anyone else use them.
-  - **Forbidden:** credentials that would let a third party impersonate the
-    user or bill against an account from anywhere — e.g. raw OpenAI API
-    keys, Anthropic API keys, production OAuth client secrets, anything
-    that works outside the originating machine. Never commit these to
-    `.experimental/`; load them from the environment or a git-ignored file
-    under the user's home directory instead.
-  - When in doubt, prefer reading from `~/.config/...` or an env var over writing the value into a file under
-    `.experimental/`.
-  - If a credential must live in a file under `.experimental/` (e.g. a
-    fixture JSON), add it to `.gitignore` so it never gets committed.
-- Reference experiments in PRs or decisions when they informed the final
-  implementation, but do not depend on them at runtime.
+corpus is always fresh.
+- Do **not** edit `resources/agent/docs/ui-*.md` files manually; they  
+are generated from the UI map.

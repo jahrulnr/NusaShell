@@ -558,4 +558,36 @@ func TestHiddenFromRoomList(t *testing.T) {
 	if !legacy.HiddenFromRoomList() {
 		t.Fatal("legacy [pipeline] titles must stay hidden after Origin is introduced")
 	}
+	// Typed job transcripts are hidden even without the legacy markers.
+	background := NewConversation("conv_bg", "[learning] memory consolidation")
+	background.Type = ConversationTypeBackground
+	if !background.HiddenFromRoomList() {
+		t.Fatal("background job transcripts must be hidden from the Agent list")
+	}
+	automation := NewConversation("conv_auto", "step output")
+	automation.Type = ConversationTypeAutomation
+	if !automation.HiddenFromRoomList() {
+		t.Fatal("automation transcripts must be hidden from the Agent list")
+	}
+}
+
+func TestEffectiveTypeMigratesLegacyOrigin(t *testing.T) {
+	if (*Conversation)(nil).EffectiveType() != ConversationTypeConversation {
+		t.Fatal("nil conversation must read as an interactive room")
+	}
+	// A conversation written before Type existed keeps its meaning: the
+	// pipeline Origin means automation, anything else means a room.
+	legacyPipeline := &Conversation{ID: "conv_a", Origin: ConversationOriginPipeline}
+	if got := legacyPipeline.EffectiveType(); got != ConversationTypeAutomation {
+		t.Fatalf("legacy pipeline origin = %q, want %q", got, ConversationTypeAutomation)
+	}
+	legacyRoom := &Conversation{ID: "conv_b"}
+	if got := legacyRoom.EffectiveType(); got != ConversationTypeConversation {
+		t.Fatalf("untyped conversation = %q, want %q", got, ConversationTypeConversation)
+	}
+	// An explicit Type always wins, so a migrated record never flips back.
+	typed := &Conversation{ID: "conv_c", Origin: ConversationOriginPipeline, Type: ConversationTypeBackground}
+	if got := typed.EffectiveType(); got != ConversationTypeBackground {
+		t.Fatalf("typed conversation = %q, want %q", got, ConversationTypeBackground)
+	}
 }

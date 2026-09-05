@@ -47,52 +47,61 @@ type llmSkillProposal struct {
 	Risk          string `json:"risk,omitempty"`
 }
 
-// learningModelContext resolves a model for background learning and returns
-// a ProviderContext plus the bare model ID ready for a non-streaming Chat call.
-// Returns nil when no enabled provider is available (deterministic fallback).
-func (a *App) learningModelContext() (*ProviderContext, string) {
-	if a.Providers == nil || a.Factory == nil {
-		return nil, ""
+// learningModelID returns the configured learning-job model override. An
+// empty string means "let the headless turn resolve the first enabled
+// provider", which is also the behavior when no override is set.
+func (a *App) learningModelID() string {
+	if a.Settings == nil {
+		return ""
 	}
-	model := ""
-	if a.Settings != nil {
-		model = a.Settings.Get().ReviewModel
-	}
-	provider, bareModel, apiKey, err := a.resolveHeadlessModel(model)
-	if err != nil || provider == nil {
-		return nil, ""
-	}
-	coreProv, err := a.Factory(context.Background(), provider, apiKey)
-	if err != nil || coreProv == nil {
-		return nil, ""
-	}
-	pc := NewProviderContext(provider, coreProv)
-	return &pc, bareModel
+	return strings.TrimSpace(a.Settings.Get().ReviewModel)
 }
 
-// callLearningModel makes a non-streaming LLM call with a system + user
-// prompt pair and returns the response text. Returns an error when the
-// provider is unavailable, the call times out, or the response is empty.
-func (a *App) callLearningModel(system, user string) (string, error) {
-	pc, model := a.learningModelContext()
-	if pc == nil {
-		return "", fmt.Errorf("no learning model available")
+// runLearningTurn executes one learning-job LLM call as a headless agent turn
+// and returns the final assistant text plus the id of the conversation that
+// now holds its transcript.
+//
+// Routing the call through the agent turn loop (instead of a bare
+// non-streaming completion) is what makes a background job auditable: the
+// packet, every tool round, and the final answer are persisted as a
+// background conversation, so the Learning log can show exactly what the
+// model saw and did. The conversation id is returned even on failure — a
+// failed call is precisely when the transcript matters most, as long as the
+// turn got far enough to persist one.
+// learningTurnAvailable reports whether the pieces a headless run needs are
+// wired: a provider to resolve, a factory to build it, a conversation store
+// to persist the transcript into, and the run registry tracking in-flight
+// turns. A partial App (tests, a server without providers yet) is not an
+// error to crash on — it means "no model available", and the caller falls
+// back to deterministic extraction.
+func (a *App) learningTurnAvailable() bool {
+	return a != nil && a.Providers != nil && a.Factory != nil && a.Conversations != nil && a.runs != nil
+}
+
+func (a *App) runLearningTurn(ctx context.Context, kind AgentKind, model, packet string) (string, string, error) {
+	if !a.learningTurnAvailable() {
+		return "", "", fmt.Errorf("no learning model available")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), learningCallTimeout)
+	ctx, cancel := context.WithTimeout(ctx, learningCallTimeout)
 	defer cancel()
-	resp, err := pc.Complete(ctx, ChatRequest{
-		Model:    model,
-		System:   system,
-		Messages: []ChatMessage{{Role: "user", Content: user}},
-	})
+	out, convID, err := a.runHeadlessTurnKind(ctx, packet, model, domain.TrustTrusted, nil, kind)
 	if err != nil {
-		return "", err
+		return "", convID, err
 	}
-	text := strings.TrimSpace(resp.Content)
-	if text == "" {
-		return "", fmt.Errorf("empty response from learning model")
+	text, _ := out["output"].(string)
+	if strings.TrimSpace(text) == "" {
+		return "", convID, fmt.Errorf("empty response from learning model")
 	}
-	return text, nil
+	return strings.TrimSpace(text), convID, nil
+}
+
+// doLearningTurn runs one learning-job LLM call through the injected seam
+// when a test installed one, otherwise through the real headless turn.
+func (a *App) doLearningTurn(ctx context.Context, kind AgentKind, model, packet string) (string, string, error) {
+	if a.learningTurn != nil {
+		return a.learningTurn(ctx, kind, model, packet)
+	}
+	return a.runLearningTurn(ctx, kind, model, packet)
 }
 
 // extractJSONFromText finds the first JSON array or object in text that may

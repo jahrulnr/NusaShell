@@ -3,11 +3,12 @@
 
 import { rpc, on, off } from '../rpc.js';
 import { el, debounce, createSelect, toast, fmtTime, confirmDialog } from '../ui.js';
-import { renderMarkdown } from '../markdown.js';
 import { resolvedFontFamily } from '../font-preferences.js';
-// Reuse the Agent view's thinking/tool components so the review activity
-// reads exactly like a live agent conversation (minus the user side).
-import { reasoningDisclosure, renderToolCallCard, setToolTerminalOutput, setToolTerminalPresentation, setToolTerminalStatus, toolTerminalMeta } from './agent/render.js';
+// A learning job's LLM run is persisted as a background conversation, so the
+// log renders it with the Agent view's own transcript renderer. Reusing it
+// beats keeping a parallel renderer here: the two used to drift, and the
+// drift is invisible until one of them renders a message wrong.
+import { renderConversation } from './agent/render.js';
 import { DataSet, Network } from '../../vendor/vis-network/vis-network.esm.min.js';
 
 const state = {
@@ -614,68 +615,53 @@ function renderLog() {
   }
 }
 
-// renderTranscript renders a learning-job transcript (experience or review)
-// as an agent-style flow: Thinking disclosures, tool event cards, and a
-// final conclusion. Replayed user messages are never shown.
-export function renderTranscript(transcript) {
-  const wrapper = el('div', {});
-  const container = el('div', { class: 'learning-log-detail' });
-  wrapper.appendChild(container);
-  if (!transcript || !Array.isArray(transcript.messages)) return wrapper;
+// fetchLLMTranscript loads the messages of the background conversation that
+// holds a learning job's LLM run.
+async function fetchLLMTranscript(convID) {
+  const res = await rpc('agent.conversations.get', { id: convID });
+  return res.messages || [];
+}
 
-  const toolCardMap = new Map(); // tool_call_id → { card, toolCall }
-
-  for (const msg of transcript.messages) {
-    if (msg.role === 'user') continue; // never render replayed user messages
-
-    if (msg.role === 'assistant') {
-      // Reasoning goes into a Thinking disclosure.
-      if (msg.reasoning) {
-        container.appendChild(reasoningDisclosure(msg.reasoning));
-      }
-      // Pre-tool narration (content alongside tool_calls) is also a Thinking
-      // disclosure, not a standalone note.
-      if (msg.content && msg.tool_calls?.length) {
-        container.appendChild(reasoningDisclosure(msg.content));
-      }
-      // Tool calls become event cards. renderToolCallCard returns null for
-      // ACP bookkeeping (subagent_wait, subagent_result).
-      if (msg.tool_calls?.length) {
-        for (const tc of msg.tool_calls) {
-          // Transcript tool calls are completed; set a default status so
-          // toolTerminalMeta summarizes the args instead of showing "Running".
-          const normalizedTc = { ...tc, status: tc.status || 'ok' };
-          const card = renderToolCallCard(normalizedTc);
-          if (card) {
-            // In a transcript, tool results are visible by default.
-            card.open = true;
-            container.appendChild(card);
-            if (tc.id) toolCardMap.set(tc.id, { card, toolCall: normalizedTc });
-          }
-        }
-      }
-      // Final assistant text (no tool_calls) is the conclusion.
-      if (msg.content && !msg.tool_calls?.length) {
-        const conclusion = el('div', { class: 'learning-log-conclusion' });
-        conclusion.innerHTML = renderMarkdown(msg.content);
-        container.appendChild(conclusion);
-      }
-      continue;
-    }
-
-    if (msg.role === 'tool' && msg.tool_result) {
-      const entry = toolCardMap.get(msg.tool_result.tool_call_id);
-      if (entry) {
-        // Preserve the args-derived meta text so the card summary still
-        // reflects what was requested, not just the raw output.
-        const meta = toolTerminalMeta(entry.toolCall);
-        setToolTerminalOutput(entry.card, msg.tool_result.content || '', 'ok', meta);
-      }
-      continue;
-    }
+// toggleLearningTranscript loads the background conversation holding a
+// learning job's LLM run and renders it inline below the log entry. It is a
+// persisted agent transcript, so the Agent view's renderer draws it: the
+// packet the model was shown, its tool rounds, and its final answer. That
+// packet is the useful part — it is what explains why a job saved what it
+// saved. Repeated clicks collapse the panel again.
+//
+// load is the fetch seam; tests inject a stub so the click path is testable
+// without a server.
+export async function toggleLearningTranscript(btn, load = fetchLLMTranscript) {
+  const entry = btn.closest('.learning-log-entry');
+  if (!entry) return;
+  const existing = entry.querySelector('.learning-log-activity');
+  if (existing) {
+    existing.remove();
+    btn.textContent = 'View LLM log';
+    return;
   }
-
-  return wrapper;
+  const convID = btn.dataset.llmConversationId || '';
+  if (!convID) return;
+  const label = btn.textContent;
+  btn.textContent = 'Loading…';
+  btn.disabled = true;
+  const panel = el('div', { class: 'learning-log-activity' });
+  try {
+    panel.appendChild(renderConversation(await load(convID)));
+    entry.appendChild(panel);
+    btn.textContent = 'Hide LLM log';
+  } catch (e) {
+    // A missing transcript is not exceptional: conversations can be pruned
+    // while the job itself still happened. Say so instead of failing
+    // silently, which is exactly how the old button behaved.
+    panel.appendChild(el('div', { class: 'learning-log-error' }, [
+      el('span', { text: e?.message ? `LLM log unavailable: ${e.message}` : 'LLM log unavailable.' }),
+    ]));
+    entry.appendChild(panel);
+    btn.textContent = label;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 export function renderLogEntry(entry) {
@@ -737,9 +723,21 @@ export function renderLogEntry(entry) {
     ]));
   }
 
-  // Review entries with a review_id get a details button.
-  if (entry.type === 'review' && entry.review_id) {
-    parts.push(el('button', { class: 'learning-log-open', text: 'View review details' }));
+  // Jobs that ran a model expose the conversation holding its transcript, so
+  // the entry can open that exact LLM log. Entries recorded before the
+  // transcript existed (legacy review ids) have nothing to open: they render
+  // no button rather than a dead one.
+  const llmConversationID = entry.llm_conversation_id || '';
+  if (llmConversationID) {
+    const btn = el('button', {
+      class: 'learning-log-open',
+      type: 'button',
+      text: 'View LLM log',
+      title: 'Show the background model transcript',
+    });
+    btn.dataset.llmConversationId = llmConversationID;
+    btn.addEventListener('click', () => { void toggleLearningTranscript(btn); });
+    parts.push(el('div', { class: 'learning-log-transcript-row' }, [btn]));
   }
 
   // Saved outcomes: one compact line per mutation so the feed shows what

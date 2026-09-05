@@ -1,13 +1,11 @@
 package application
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"nusashell/domain"
-	"nusashell/infrastructure/ai/core"
 )
 
 func TestExtractJSONFromTextPlainJSON(t *testing.T) {
@@ -163,42 +161,34 @@ func TestParseLLMSkillProposalWrongKind(t *testing.T) {
 	}
 }
 
-// stubCoreProvider is a minimal core.Provider that returns a fixed text response.
-type stubCoreProvider struct {
-	text string
-}
-
-func (s *stubCoreProvider) Name() string { return "stub" }
-func (s *stubCoreProvider) Chat(_ context.Context, _ *core.Request) (*core.Response, error) {
-	return &core.Response{Blocks: []core.Block{core.TextBlock{Text: s.text}}}, nil
-}
-func (s *stubCoreProvider) Stream(_ context.Context, _ *core.Request) (core.Stream, error) {
-	return nil, nil
-}
-
+// TestConsolidateViaLLMWithProvider drives the LLM path through the
+// learning-turn seam: it proves a model answer is parsed into an applied
+// operation AND that the id of the conversation holding that answer comes
+// back, which is what lets the Learning log open the transcript.
 func TestConsolidateViaLLMWithProvider(t *testing.T) {
 	llmResponse := `[{"kind":"memory.upsert","payload":{"body":"User prefers dark mode for IDE","type":"preference","scope":"user"},"reason":"explicit teaching","risk":"low"}]`
 	records := &fakeMemoryRecordStore{}
 	app := &App{
 		Experiences:   &fakeExperienceStore{items: []*domain.Experience{{ID: "exp_llm", Goal: "remember I prefer dark mode", Signals: domain.ExperienceSignals{ExplicitTeaching: true}}}},
 		MemoryRecords: records,
-		Providers: &fakeProviderStore{items: map[string]*domain.Provider{
-			"stub": {ID: "stub", Name: "Stub", Enabled: true, Kind: domain.ProviderChat, Models: []domain.Model{{ID: "stub-model"}}},
-		}},
-		Credentials: &memCreds{},
-		Factory: func(_ context.Context, _ *domain.Provider, _ string) (core.Provider, error) {
-			return &stubCoreProvider{text: llmResponse}, nil
-		},
-		Settings: &fakeSettings{},
+		Settings:      &fakeSettings{},
+		learningTurn:  learningTurnStub(t, AgentMemoryConsolidator, llmResponse, "conv_llm_provider"),
 	}
-	if err := app.consolidateJob(&domain.LearningJob{ID: "job_llm", ExperienceID: "exp_llm", Kind: domain.LearningJobConsolidate}); err != nil {
+	ops, convID, err := app.consolidateJob(&domain.LearningJob{ID: "job_llm", ExperienceID: "exp_llm", Kind: domain.LearningJobConsolidate})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if len(ops) != 1 {
+		t.Fatalf("ops=%d, want 1 parsed operation", len(ops))
 	}
 	if len(records.List()) != 1 {
 		t.Fatalf("records=%d, want 1", len(records.List()))
 	}
 	if !strings.Contains(records.List()[0].Body, "dark mode") {
 		t.Fatalf("record body=%q", records.List()[0].Body)
+	}
+	if convID != "conv_llm_provider" {
+		t.Fatalf("conversation id = %q, want conv_llm_provider", convID)
 	}
 }
 
@@ -214,7 +204,7 @@ func TestConsolidateViaLLMFallsBackWhenNoProvider(t *testing.T) {
 		Experiences:   &fakeExperienceStore{items: []*domain.Experience{exp}},
 		MemoryRecords: records,
 	}
-	if err := app.consolidateJob(&domain.LearningJob{ID: "job_fb", ExperienceID: "exp_fb"}); err != nil {
+	if _, _, err := app.consolidateJob(&domain.LearningJob{ID: "job_fb", ExperienceID: "exp_fb"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(records.List()) != 1 {
@@ -238,7 +228,7 @@ func TestEvolveSkillJobDeterministicBodyMeetsBar(t *testing.T) {
 		Skills:      skills,
 		Experiences: &fakeExperienceStore{items: []*domain.Experience{exp}},
 	}
-	if err := app.evolveSkillJob(&domain.LearningJob{ExperienceID: "exp_bar", Kind: domain.LearningJobEvolveSkill}); err != nil {
+	if _, err := app.evolveSkillJob(&domain.LearningJob{ExperienceID: "exp_bar", Kind: domain.LearningJobEvolveSkill}); err != nil {
 		t.Fatal(err)
 	}
 	var got *domain.Skill
@@ -268,7 +258,7 @@ func TestEvolveSkillJobSkipsBelowBarBody(t *testing.T) {
 		Skills:      skills,
 		Experiences: &fakeExperienceStore{items: []*domain.Experience{exp}},
 	}
-	if err := app.evolveSkillJob(&domain.LearningJob{ExperienceID: "exp_skip", Kind: domain.LearningJobEvolveSkill}); err != nil {
+	if _, err := app.evolveSkillJob(&domain.LearningJob{ExperienceID: "exp_skip", Kind: domain.LearningJobEvolveSkill}); err != nil {
 		t.Fatal(err)
 	}
 	if len(skills.List()) != 0 {

@@ -811,38 +811,11 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
-  overflow: hidden;
-}
-
-/* Banner: the accent-tinted strip keeps the digest visually distinct from
-   a user-facing Agent view conversation while stating what it is. */
-.learning-log-activity-banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  background: var(--accent-wash);
-  border-bottom: 1px solid var(--accent-border);
-}
-.learning-log-activity-badge {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--accent);
-  padding: 2px 8px;
-  border-radius: 10px;
-  border: 1px solid var(--accent-border);
-  background: var(--accent-soft);
-  flex: none;
-}
-.learning-log-activity-meta {
-  font-size: 11px;
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-}
-.learning-log-activity-step {
-  margin: 1rem;
+  /* A job transcript runs long (the packet plus every tool round). Cap the
+     panel and let it scroll so one expanded entry cannot push the rest of
+     the feed off screen. */
+  max-height: 420px;
+  overflow-y: auto;
 }
 
 /* Agent-style flow inside the activity panel: tool events reuse the Agent
@@ -853,17 +826,6 @@
 .learning-log-activity .agent-tool-event {
   margin: 6px 10px 0;
 }
-/* Final verdict line: what the review agent decided (saved / nothing
-   found...), rendered like a short agent reply at the end of the flow. */
-.learning-log-conclusion {
-  margin: 8px 12px 12px;
-  font-size: 12px;
-  color: var(--text);
-  line-height: 1.5;
-  word-break: break-word;
-}
-.learning-log-conclusion p:first-child { margin-top: 0; }
-.learning-log-conclusion p:last-child { margin-bottom: 0; }
 
 /* Experience + memory-record catalog */
 .learning-catalog-panel {

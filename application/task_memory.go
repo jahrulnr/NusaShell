@@ -36,7 +36,10 @@ type taskMemoryHit struct {
 }
 
 func (a *App) maybeAnnounceTaskMemory(conversationID string, conversation *domain.Conversation) {
-	if a.MemoryRecords == nil || conversation == nil || conversation.Origin == domain.ConversationOriginPipeline {
+	// Job transcripts (background learning, automation steps) are not rooms:
+	// announcing task memory into them would write records from a job's own
+	// output instead of the user's conversation.
+	if a.MemoryRecords == nil || conversation == nil || conversation.EffectiveType() != domain.ConversationTypeConversation {
 		return
 	}
 	query := strings.ToLower(taskMemoryQuery(conversation))

@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -30,11 +31,16 @@ func (a *App) runLearningJob(id string) {
 		})
 	}
 	var runErr error
+	// convID is the conversation holding the job's LLM transcript; ops are
+	// the mutations the job actually applied. Both feed the learning
+	// trajectory so the feed can explain the outcome.
+	var convID string
+	var ops []domain.LearningOperation
 	switch job.Kind {
 	case domain.LearningJobConsolidate:
-		runErr = a.consolidateJob(job)
+		ops, convID, runErr = a.consolidateJob(job)
 	case domain.LearningJobEvolveSkill:
-		runErr = a.evolveSkillJob(job)
+		convID, runErr = a.evolveSkillJob(job)
 	case domain.LearningJobEvaluate:
 		runErr = a.evaluateSkillJob(job)
 	case domain.LearningJobRetire:
@@ -69,16 +75,73 @@ func (a *App) runLearningJob(id string) {
 		}
 	}
 	_ = a.LearningJobs.Save(job)
+	a.recordLearningJobTrajectory(job, convID, ops)
 	a.emitMemoryUpdated()
 }
 
-func (a *App) consolidateJob(job *domain.LearningJob) error {
+// recordLearningJobTrajectory appends a finished job's outcome to the
+// learning trajectory so the Learning log feed shows it. Skill evolution
+// already records its own lifecycle event (with the transcript id) inside
+// evolveSkillJob, so only jobs that would otherwise be invisible in the feed
+// are recorded here.
+func (a *App) recordLearningJobTrajectory(job *domain.LearningJob, convID string, ops []domain.LearningOperation) {
+	if a.Trajectory == nil || job == nil || job.Kind != domain.LearningJobConsolidate {
+		return
+	}
+	a.Trajectory.Record("consolidate", learningJobDetail(job, convID, ops))
+}
+
+// learningJobDetail builds the trajectory detail for a finished learning job.
+// job_id ties the entry back to learning.jobs.status and llm_conversation_id
+// points at the persisted transcript, so the feed can open the exact LLM run
+// that produced this outcome. The raw error is deliberately omitted: the
+// generic failure line in the UI is enough, and provider bodies stay
+// server-side.
+func learningJobDetail(job *domain.LearningJob, convID string, ops []domain.LearningOperation) map[string]interface{} {
+	detail := map[string]interface{}{
+		"job_id": job.ID,
+		"kind":   string(job.Kind),
+		"status": string(job.Status),
+	}
+	if convID != "" {
+		detail["llm_conversation_id"] = convID
+	}
+	if mutations := learningJobMutations(ops); len(mutations) > 0 {
+		detail["mutations"] = mutations
+	}
+	return detail
+}
+
+// learningJobMutations converts applied learning operations into the compact
+// rows the Learning feed renders. The snippet prefers the stored body, then a
+// named target (skills), then the model's stated reason, so a row is never
+// blank.
+func learningJobMutations(ops []domain.LearningOperation) []map[string]string {
+	out := make([]map[string]string, 0, len(ops))
+	for _, op := range ops {
+		snippet := payloadString(op.Payload, "body")
+		if snippet == "" {
+			snippet = payloadString(op.Payload, "name")
+		}
+		if snippet == "" {
+			snippet = op.Reason
+		}
+		out = append(out, map[string]string{"kind": string(op.Kind), "snippet": clip(snippet, 180)})
+	}
+	return out
+}
+
+// consolidateJob runs the consolidation for one job and returns the applied
+// operations plus the id of the conversation holding the LLM transcript.
+// The conversation id is returned even when the job produced nothing or
+// failed: the transcript is exactly what explains that outcome.
+func (a *App) consolidateJob(job *domain.LearningJob) ([]domain.LearningOperation, string, error) {
 	if a.Experiences == nil || a.MemoryRecords == nil {
-		return fmt.Errorf("growth stores not configured")
+		return nil, "", fmt.Errorf("growth stores not configured")
 	}
 	exp, err := a.Experiences.Get(job.ExperienceID)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
 	svc := NewMemoryService(a.MemoryRecords, a.LearningOps)
 
@@ -88,12 +151,12 @@ func (a *App) consolidateJob(job *domain.LearningJob) error {
 	// path fails or no provider is configured, fall back to the
 	// deterministic rule-based extraction (teachingOps) so the job still
 	// produces output in offline/no-provider setups.
-	ops := a.consolidateViaLLM(job, exp)
+	ops, convID := a.consolidateViaLLM(job, exp)
 	if len(ops) == 0 {
 		ops = teachingOps(exp, job.ID)
 	}
 	if len(ops) == 0 {
-		return nil
+		return nil, convID, nil
 	}
 	for i := range ops {
 		if ops[i].Kind == domain.OpMemoryUpsert {
@@ -109,36 +172,37 @@ func (a *App) consolidateJob(job *domain.LearningJob) error {
 			}
 		}
 		if err := svc.Apply(&ops[i]); err != nil {
-			return err
+			return ops[:i], convID, err
 		}
 	}
-	return nil
+	return ops, convID, nil
 }
 
-// consolidateViaLLM calls the LLM-backed memory consolidator with the RFC
-// system + user prompts and parses the typed operations from the response.
-// Returns nil (no ops) when the LLM is unavailable, the response is
-// malformed, or the LLM correctly determines there is nothing durable to
-// store. The caller falls back to deterministic extraction when this returns
-// empty.
-func (a *App) consolidateViaLLM(job *domain.LearningJob, exp *domain.Experience) []domain.LearningOperation {
-	system := resources.ConsolidatorPrompt()
-	if strings.TrimSpace(system) == "" {
-		return nil
+// consolidateViaLLM calls the LLM-backed memory consolidator and parses the
+// typed operations from its response. It returns the parsed operations and
+// the id of the conversation holding the call's transcript.
+//
+// The conversation id comes back even when ops is empty: "the model saw the
+// packet and decided nothing was durable" and "the model was unreachable"
+// are different answers, and only the transcript tells them apart. The
+// caller falls back to deterministic extraction when this returns no ops.
+func (a *App) consolidateViaLLM(job *domain.LearningJob, exp *domain.Experience) ([]domain.LearningOperation, string) {
+	if strings.TrimSpace(resources.ConsolidatorPrompt()) == "" {
+		return nil, ""
 	}
 	packet := a.buildConsolidatorPacket(exp)
-	text, err := a.callLearningModel(system, packet)
+	text, convID, err := a.doLearningTurn(context.Background(), AgentMemoryConsolidator, a.learningModelID(), packet)
 	if err != nil {
 		a.log("debug", "learning", "consolidator LLM call failed, using deterministic fallback: %v", err)
-		return nil
+		return nil, convID
 	}
 	ops := parseLLMOperations(text, job.ID, exp.ID)
 	if len(ops) == 0 {
 		a.log("debug", "learning", "consolidator LLM returned no operations")
-		return nil
+		return nil, convID
 	}
 	a.log("info", "learning", "consolidator LLM returned %d operations", len(ops))
-	return ops
+	return ops, convID
 }
 
 func matchingRecordID(store MemoryRecordStore, body, typ, project string) string {
@@ -213,16 +277,20 @@ func teachingOps(exp *domain.Experience, jobID string) []domain.LearningOperatio
 	return ops
 }
 
-func (a *App) evolveSkillJob(job *domain.LearningJob) error {
+// evolveSkillJob proposes one learned skill and returns the id of the
+// conversation holding the evolver's transcript. The id comes back even when
+// no skill was written: "the model declined to propose" and "the model was
+// unreachable" look identical in the log without it.
+func (a *App) evolveSkillJob(job *domain.LearningJob) (string, error) {
 	if a.Skills == nil || a.Experiences == nil {
-		return fmt.Errorf("skill store not configured")
+		return "", fmt.Errorf("skill store not configured")
 	}
 	exp, err := a.Experiences.Get(job.ExperienceID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if len(exp.Actions) < 3 {
-		return nil
+		return "", nil
 	}
 	name := "learned-" + domain.SkillSlug(strings.TrimSpace(exp.Goal))
 	if name == "learned-" || len(name) < 12 {
@@ -239,13 +307,13 @@ func (a *App) evolveSkillJob(job *domain.LearningJob) error {
 	// anti-patterns). If the LLM path fails or no provider is configured,
 	// fall back to a deterministic template that still meets the minimum
 	// bar (purpose, trigger, steps) by structuring the experience data.
-	body, description := a.evolveSkillViaLLM(exp)
+	body, description, convID := a.evolveSkillViaLLM(exp)
 	if body == "" {
 		body, description = a.deterministicSkillBody(exp)
 	}
 	if !skillMeetsMinimumBar(body) {
 		a.log("debug", "learning", "skill body does not meet minimum bar, skipping")
-		return nil
+		return convID, nil
 	}
 
 	skill := &domain.Skill{
@@ -261,7 +329,7 @@ func (a *App) evolveSkillJob(job *domain.LearningJob) error {
 	}
 	if existing, err := a.Skills.Get(name, string(domain.SkillOriginLearned)); err == nil && existing != nil {
 		if existing.Version >= domain.MaxSkillRevisions {
-			return nil
+			return convID, nil
 		}
 		skill.ID = existing.ID
 		skill.Name = existing.Name
@@ -269,15 +337,15 @@ func (a *App) evolveSkillJob(job *domain.LearningJob) error {
 	}
 	skill.EnsureStatusDefault()
 	if domain.CreatorMayPromote(domain.ActorSkillEvolver) {
-		return fmt.Errorf("evolver must not promote")
+		return convID, fmt.Errorf("evolver must not promote")
 	}
 	if err := a.Skills.Save(skill); err != nil {
-		return err
+		return convID, err
 	}
-	a.emitSkillLifecycle("evolve", skill.ID, string(skill.Status))
+	a.emitSkillLifecycle("evolve", skill.ID, string(skill.Status), convID)
 	// Evaluate in the same job goroutine. Nested goSafe races the skill
 	// store with the still-finishing turn.
-	return a.evaluateSkillJob(&domain.LearningJob{
+	return convID, a.evaluateSkillJob(&domain.LearningJob{
 		Kind:    domain.LearningJobEvaluate,
 		SkillID: skill.ID,
 		Reason:  "post_evolve",
@@ -285,24 +353,23 @@ func (a *App) evolveSkillJob(job *domain.LearningJob) error {
 }
 
 // evolveSkillViaLLM calls the LLM-backed skill evolver (RFC section 20-21)
-// and returns (body, description) when the proposal is valid. Returns empty
-// strings when the LLM is unavailable, the response is malformed, or the
-// proposal lacks the required fields.
-func (a *App) evolveSkillViaLLM(exp *domain.Experience) (string, string) {
-	system := resources.SkillEvolverPrompt()
-	if strings.TrimSpace(system) == "" {
-		return "", ""
+// and returns (body, description, conversationID). The conversation id comes
+// back even when the proposal is unusable, so the caller can still surface
+// the transcript that explains the empty result.
+func (a *App) evolveSkillViaLLM(exp *domain.Experience) (string, string, string) {
+	if strings.TrimSpace(resources.SkillEvolverPrompt()) == "" {
+		return "", "", ""
 	}
 	packet := a.buildSkillEvolverPacket(exp)
-	text, err := a.callLearningModel(system, packet)
+	text, convID, err := a.doLearningTurn(context.Background(), AgentSkillEvolver, a.learningModelID(), packet)
 	if err != nil {
 		a.log("debug", "learning", "skill evolver LLM call failed, using deterministic fallback: %v", err)
-		return "", ""
+		return "", "", convID
 	}
 	prop := parseLLMSkillProposal(text)
 	if prop == nil {
 		a.log("debug", "learning", "skill evolver LLM returned no valid proposal")
-		return "", ""
+		return "", "", convID
 	}
 	var b strings.Builder
 	b.WriteString("# " + strings.TrimSpace(prop.Name) + "\n\n")
@@ -344,7 +411,7 @@ func (a *App) evolveSkillViaLLM(exp *domain.Experience) (string, string) {
 		desc = clip(exp.Goal, 200)
 	}
 	a.log("info", "learning", "skill evolver LLM returned proposal: kind=%s name=%s", prop.Kind, prop.Name)
-	return b.String(), desc
+	return b.String(), desc, convID
 }
 
 // deterministicSkillBody builds a skill body from the experience data that
@@ -416,7 +483,10 @@ func (a *App) evaluateSkillJob(job *domain.LearningJob) error {
 	return nil
 }
 
-func (a *App) emitSkillLifecycle(op, id, status string) {
+// emitSkillLifecycle announces a skill change and records it in the learning
+// trajectory. conversationID links the event to the persisted LLM transcript
+// that produced it, so the Learning log can open that exact run.
+func (a *App) emitSkillLifecycle(op, id, status, conversationID string) {
 	if a == nil {
 		return
 	}
@@ -428,9 +498,13 @@ func (a *App) emitSkillLifecycle(op, id, status string) {
 		})
 	}
 	if a.Trajectory != nil {
-		a.Trajectory.Record("skill_"+op, map[string]interface{}{
+		detail := map[string]interface{}{
 			"id":     id,
 			"status": status,
-		})
+		}
+		if conversationID != "" {
+			detail["llm_conversation_id"] = conversationID
+		}
+		a.Trajectory.Record("skill_"+op, detail)
 	}
 }

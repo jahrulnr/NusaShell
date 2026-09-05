@@ -129,8 +129,13 @@ func TestPipelineAgentStepDoesNotAppearInRoomList(t *testing.T) {
 	if err != nil || saved == nil {
 		t.Fatalf("store get: %v", err)
 	}
-	if saved.Origin != domain.ConversationOriginPipeline {
-		t.Fatalf("origin = %q, want %q", saved.Origin, domain.ConversationOriginPipeline)
+	// Pipeline agent steps persist an automation transcript, not an Agent
+	// room: the type is what keeps it out of agent.conversations.list.
+	if saved.Type != domain.ConversationTypeAutomation {
+		t.Fatalf("type = %q, want %q", saved.Type, domain.ConversationTypeAutomation)
+	}
+	if !saved.HiddenFromRoomList() {
+		t.Fatal("automation transcripts must stay out of agent.conversations.list")
 	}
 }
 

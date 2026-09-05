@@ -206,7 +206,8 @@ func (a *App) handleSkillsPromote(req contracts.SkillPromoteRequest) (any, *cont
 	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
 	}
-	a.emitSkillLifecycle("promote", s.ID, string(s.Status))
+	// Promotion is a human decision, not a model run: no transcript to link.
+	a.emitSkillLifecycle("promote", s.ID, string(s.Status), "")
 	return contracts.SkillReadResult{Skill: contracts.SkillFull{SkillDTO: skillDTO(s), Content: s.Content}}, nil
 }
 

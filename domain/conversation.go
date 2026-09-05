@@ -158,9 +158,14 @@ type Conversation struct {
 	// LastAnnouncedRecords tracks memory record IDs already delivered as
 	// a task_memory announcement in this conversation.
 	LastAnnouncedRecords []string `json:"last_announced_records,omitempty"`
-	// Origin marks conversations that are not Agent rooms. Pipeline agent
-	// steps persist a conversation so the turn loop and automation(op="steer") can work;
-	// those must not appear in agent.conversations.list.
+	// Type classifies why this conversation exists: an interactive Agent
+	// room, a background job transcript, or an automation agent-step
+	// transcript. Only "conversation" appears in agent.conversations.list;
+	// the other two are addressable by id but hidden from the room list.
+	Type ConversationType `json:"type,omitempty"`
+	// Origin is the legacy pre-Type marker for non-room conversations. It is
+	// read (never written) so conversations persisted before Type existed
+	// keep their hidden-from-list behavior; EffectiveType migrates it.
 	Origin string `json:"Origin,omitempty"`
 	// PendingWorkspaceAnnouncement is set when the user picks a new
 	// workspace on a room that already has a user message. The next
@@ -222,11 +227,65 @@ func (c *Conversation) DrainPendingAnnouncements() []PendingAnnouncement {
 	return out
 }
 
+// ConversationType classifies why a conversation exists. The zero value is
+// never persisted: writers always set one of the constants below, and
+// EffectiveType maps a missing value (records written before this field
+// existed) to ConversationTypeConversation.
+type ConversationType string
+
+const (
+	// ConversationTypeConversation is an interactive Agent room: created by
+	// the user, listed in agent.conversations.list.
+	ConversationTypeConversation ConversationType = "conversation"
+	// ConversationTypeBackground is a background job transcript. Learning
+	// jobs (memory consolidation, skill evolution) persist one so the
+	// Learning log can show the exact LLM transcript that produced a
+	// mutation. Addressable by id, never listed as a room.
+	ConversationTypeBackground ConversationType = "background"
+	// ConversationTypeAutomation is a pipeline/automation agent-step
+	// transcript. It is persisted so the turn loop and
+	// automation(op="steer") can work, and stays out of the room list.
+	ConversationTypeAutomation ConversationType = "automation"
+)
+
 // ConversationOriginPipeline is stored on conversations created by
 // pipeline agent steps. They are implementation details, not Agent rooms.
+// Legacy: superseded by ConversationTypeAutomation, still read so records
+// written before Type existed migrate correctly.
 const ConversationOriginPipeline = "pipeline"
 
 const pipelineRoomTitlePrefix = "[pipeline] "
+
+// EffectiveType returns the conversation's type, migrating legacy records
+// that predate the Type field: an Origin of "pipeline" means automation,
+// anything else is an interactive room.
+func (c *Conversation) EffectiveType() ConversationType {
+	if c == nil {
+		return ConversationTypeConversation
+	}
+	if c.Type != "" {
+		return c.Type
+	}
+	if c.Origin == ConversationOriginPipeline {
+		return ConversationTypeAutomation
+	}
+	return ConversationTypeConversation
+}
+
+// HiddenFromRoomList reports whether this conversation is a job transcript
+// rather than an interactive Agent room. Type is authoritative; the
+// historical "[pipeline] " title prefix covers files written before Origin
+// existed.
+func (c *Conversation) HiddenFromRoomList() bool {
+	if c == nil {
+		return false
+	}
+	switch c.EffectiveType() {
+	case ConversationTypeBackground, ConversationTypeAutomation:
+		return true
+	}
+	return strings.HasPrefix(c.Title, pipelineRoomTitlePrefix)
+}
 
 // NewConversation creates an empty conversation.
 func NewConversation(id, title string) *Conversation {
@@ -241,20 +300,6 @@ func NewConversation(id, title string) *Conversation {
 }
 
 func (c *Conversation) Touch() { c.UpdatedAt = clock.NewTime().Time() }
-
-// HiddenFromRoomList reports whether this conversation is a pipeline
-// agent-step transcript rather than an interactive Agent room. Origin is
-// authoritative; the historical "[pipeline] " title prefix covers files
-// written before Origin existed.
-func (c *Conversation) HiddenFromRoomList() bool {
-	if c == nil {
-		return false
-	}
-	if c.Origin == ConversationOriginPipeline {
-		return true
-	}
-	return strings.HasPrefix(c.Title, pipelineRoomTitlePrefix)
-}
 
 // AbandonedTurnError is stored on in-flight assistant messages when a process
 // restart finds a conversation still marked running. No live turn can exist
