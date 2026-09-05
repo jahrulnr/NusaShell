@@ -9,16 +9,12 @@ Instructions for humans and coding agents working in this repository.
 - Make decisions grounded in repository evidence and established project constraints; do not hide uncertainty or invent completed work.
 - When backend has changed, makesure frontend is working. Refactor frontend behavior if backend have some breaking changes.
 
-
-
 ## Scoped instructions and reuse-first workflow
 
 The root file contains repository-wide rules. Before editing a path, read the
 closest scoped `AGENTS.md` below. NusaShell currently hydrates this root file
 only, while other agents may discover nested files automatically, so do not
 assume a scoped file was loaded.
-
-
 | Scope                                 | Instructions               |
 | ------------------------------------- | -------------------------- |
 | Domain policy and entities            | `domain/AGENTS.md`         |
@@ -29,8 +25,6 @@ assume a scoped file was loaded.
 | Process wiring and lifecycle          | `cmd/nusashell/AGENTS.md`  |
 | Native web interface                  | `frontend/AGENTS.md`       |
 | Cross-boundary fixtures and fakes     | `testdata/AGENTS.md`       |
-
-
 **Before creating a file, package, exported symbol, helper, schema, event, or
 UI primitive:**
 
@@ -78,8 +72,6 @@ refactors or abstractions.
 - **Non-functional testing:** support tests for concurrency and race safety, cancellation, timeouts, ordering, backpressure, resource cleanup, startup/shutdown, compatibility, observability, and performance where the contract requires it.
 - **Logging:** use structured logging with context, include request IDs, and log at appropriate levels (debug, info, warn, error), traceable from who to whom like pirate find the treasure.
 
-
-
 ## Layer responsibilities
 
 - `domain/`: pure entities, value objects, policies, and domain services.
@@ -91,8 +83,6 @@ refactors or abstractions.
 - `frontend/`: native JavaScript, HTML, CSS, and static assets. Use browser APIs and ES modules; do not require a production Node build.
 - `testdata/`: stable fixtures, golden files, compatibility samples, and non-secret test assets.
 
-
-
 ## Protocol and frontend rules
 
 - WebSocket is for event-driven updates, subscriptions, and real-time/agent streaming.
@@ -103,8 +93,6 @@ refactors or abstractions.
 - Embed production frontend assets with Go (`embed.FS` or equivalent). Test MIME types, module imports, deep links, cache behavior, and 404 handling.
 - Do not hide frontend traceability behind a required bundle. If an exception is approved, document source mapping and debugging procedure.
 
-
-
 ## Frontend style
 
 - `frontend/` is native JavaScript, HTML, and CSS. Use browser APIs and ES
@@ -113,8 +101,6 @@ modules; do not require a production Node build.
 option menus, `alert()`, `confirm()`, `prompt()`). Use a styled select
 library (e.g. Slim Select) or custom components that match the existing
 visual language. Native controls should only appear as a last resort.
-
-
 
 ## Provider adapters (core port)
 
@@ -156,6 +142,9 @@ retries were removed — errors surface explicitly to the retry loop.
 Before considering a change complete, run the narrowest relevant tests first, then the repository gates:
 
 ```text
+make check
+
+# or alternatively
 gofmt
 go test ./...
 go test -race ./...
@@ -185,8 +174,6 @@ stream tag, release manifest, and `release-versions.json` pointer all refer
 to the same `{major}.{minor}.{patch}` version. Never reuse an immutable
 `go-v<VERSION>` or `electron-v<VERSION>` tag; bump the relevant stream first.
 
-
-
 ## Change documentation
 
 When a behavior or public wire contract changes, update the relevant package documentation and golden fixtures. Record intentional compatibility breaks and non-functional trade-offs explicitly.
@@ -196,8 +183,6 @@ When a behavior or public wire contract changes, update the relevant package doc
 - **Dead or superseded code is deleted, not kept.** If a component, adapter, fallback path, or compatibility shim is no longer reachable or no longer reflects how the system works, remove it in the same change instead of leaving it behind "just in case". Unused code is a maintenance tax: it rots, misleads readers, and inflates the surface the next change must consider.
 - **Breaking changes are confirmed with the user first.** Anything that alters persisted data, wire contracts, public RPC methods, provider semantics, or user-visible behavior must be surfaced to the user before implementation — do not silently break old behavior.
 - **Fallbacks to old code are opt-in, not automatic.** Before adding a fallback layer (old path + new path), ask the user whether they need it. Fallback is a complexity multiplier: duplicated logic that must be maintained twice, diverging behavior, and silent masking of errors. The default is one correct path, with the old code deleted — not a fallback ladder.
-
-
 
 ## Documentation sync (required)
 
@@ -257,3 +242,7 @@ or if committed `ui-*.md` differ from generated content (drift gate).
 corpus is always fresh.
 - Do **not** edit `resources/agent/docs/ui-*.md` files manually; they  
 are generated from the UI map.
+
+## Auto Generate file
+
+When `make run` or `make gen-catalog`; that will generate [catalog_gen.go](./infrastructure/config/catalog_gen.go) file. So, ignore this file because always automaticly show as uncommitted file.
