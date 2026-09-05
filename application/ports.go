@@ -32,6 +32,13 @@ type ConversationStore interface {
 	GetChunk(id string, index int) ([]domain.Message, error)
 }
 
+// ConversationFileLocator exposes the persisted JSON path for a conversation
+// to bounded background inspection tools. It is optional so in-memory stores
+// used by tests and alternate adapters need not pretend to have a file.
+type ConversationFileLocator interface {
+	ConversationPath(id string) string
+}
+
 type ProviderStore interface {
 	List() []*domain.Provider
 	Get(id string) (*domain.Provider, error)

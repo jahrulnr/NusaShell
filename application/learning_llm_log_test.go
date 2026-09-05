@@ -53,15 +53,15 @@ func (s *fakeLearningJobStore) Save(j *domain.LearningJob) error {
 
 // learningTurnStub stands in for the provider-backed learning turn so job
 // plumbing is testable without wiring a provider. It asserts the turn is
-// routed to the expected agent kind and receives a non-empty packet.
+// routed to the expected agent kind and receives a non-empty prompt.
 func learningTurnStub(t *testing.T, wantKind AgentKind, text, convID string) func(context.Context, AgentKind, string, string) (string, string, error) {
 	t.Helper()
-	return func(_ context.Context, kind AgentKind, _, packet string) (string, string, error) {
+	return func(_ context.Context, kind AgentKind, _, prompt string) (string, string, error) {
 		if kind != wantKind {
 			t.Errorf("learning turn kind = %q, want %q", kind, wantKind)
 		}
-		if strings.TrimSpace(packet) == "" {
-			t.Error("learning turn packet must not be empty")
+		if strings.TrimSpace(prompt) == "" {
+			t.Error("learning turn prompt must not be empty")
 		}
 		return text, convID, nil
 	}

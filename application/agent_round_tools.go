@@ -162,7 +162,6 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 		a.emitToolCompleted(run, toolCall, res)
 		return res
 	}
-
 	var output string
 	var outputAttachments []domain.Attachment
 	var err error

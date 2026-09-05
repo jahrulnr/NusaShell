@@ -20,8 +20,9 @@ type TurnRun struct {
 	// dynamic 400-learning classifier to key learned param rules.
 	ProviderID string
 	// Headless marks unattended turns (pipeline agent steps). When true,
-	// ACP subagent tools are filtered from the tool set so permission
-	// prompts never stall a headless run.
+	// the default AgentAutomation kind filters ACP subagent tools so
+	// permission prompts never stall a pipeline run. Background learning
+	// kinds intentionally opt into the full conversation toolbox.
 	Headless bool
 	// ToolKind overrides the ToolFactory agent kind for this run (empty =
 	// default by Headless: conversation vs automation). Internal delegates

@@ -113,7 +113,7 @@ func ConsolidatorPrompt() string {
 	return Prompt("memory-consolidator")
 }
 
-// ConsolidatorUserPrompt loads the consolidator user-role packet instruction.
+// ConsolidatorUserPrompt loads the short consolidator user-role instruction.
 func ConsolidatorUserPrompt() string {
 	return UserPrompt("memory-consolidator")
 }
@@ -123,7 +123,7 @@ func SkillEvolverPrompt() string {
 	return Prompt("skill-evolver")
 }
 
-// SkillEvolverUserPrompt loads the skill-evolver user-role packet instruction.
+// SkillEvolverUserPrompt loads the short skill-evolver user-role instruction.
 func SkillEvolverUserPrompt() string {
 	return UserPrompt("skill-evolver")
 }

@@ -27,14 +27,17 @@ const (
 	// so delegated agents cannot recurse.
 	AgentDelegate AgentKind = "delegate"
 	// AgentMemoryConsolidator is the background job that turns conversation
-	// evidence into durable memory records. Writes go through typed
-	// learning ops, not toolbox memory mutations.
+	// evidence into durable memory records. It receives the same full toolbox
+	// as AgentConversation; typed learning output remains available alongside
+	// normal tool side effects.
 	AgentMemoryConsolidator AgentKind = "memory-consolidator"
 	// AgentSkillEvolver is the background job that proposes skill updates
-	// from observed tool patterns. Writes go through typed learning ops.
+	// from observed tool patterns. It receives the same full toolbox as
+	// AgentConversation.
 	AgentSkillEvolver AgentKind = "skill-evolver"
 	// AgentSkillEvaluator is the background job that scores whether a
-	// skill still matches current usage. It does not mutate memory.
+	// skill still matches current usage. It receives the same full toolbox as
+	// AgentConversation.
 	AgentSkillEvaluator AgentKind = "skill-evaluator"
 )
 
@@ -63,7 +66,7 @@ func (f *ToolFactory) Get(kind AgentKind, workspace string) []ToolDef {
 	}
 	switch kind {
 	case AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator:
-		return f.learningJobTools(workspace)
+		return f.baseTools(workspace)
 	case AgentAutomation:
 		return filterACPToolDefs(f.baseTools(workspace))
 	case AgentDelegate:
@@ -107,26 +110,6 @@ func (f *ToolFactory) baseTools(workspace string) []ToolDef {
 		}
 		seen[t.Name] = true
 		out = append(out, ToolDef(t))
-	}
-	return out
-}
-
-// learningJobTools is the shared policy for memory-consolidator,
-// skill-evolver, and skill-evaluator: conversation tools minus ACP and
-// delegate, with file-write tools stripped. Typed learning ops perform
-// memory writes later.
-func (f *ToolFactory) learningJobTools(workspace string) []ToolDef {
-	return filterMemoryWriteToolDefs(filterDelegateToolDefs(filterACPToolDefs(f.baseTools(workspace))))
-}
-
-func filterMemoryWriteToolDefs(defs []ToolDef) []ToolDef {
-	out := make([]ToolDef, 0, len(defs))
-	for _, d := range defs {
-		switch d.Name {
-		case "file_write", "file_patch", "file_delete":
-			continue
-		}
-		out = append(out, d)
 	}
 	return out
 }

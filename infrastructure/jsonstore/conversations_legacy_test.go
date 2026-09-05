@@ -62,3 +62,20 @@ func TestSafeSegmentRejectsUnsafeIDs(t *testing.T) {
 		t.Errorf("safeSegment(conv_abc123) = %v, want nil", err)
 	}
 }
+
+func TestConversationPathIsAbsoluteAndSafe(t *testing.T) {
+	store := &Store{dir: "relative-data"}
+	root, err := filepath.Abs(store.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(root, "conversations", "conv_abc123.json")
+	if got := store.ConversationPath("conv_abc123"); got != want {
+		t.Fatalf("ConversationPath() = %q, want %q", got, want)
+	}
+	for _, id := range []string{"", "../escape", "a/b", `..\win`, "conv_\x00x"} {
+		if got := store.ConversationPath(id); got != "" {
+			t.Errorf("ConversationPath(%q) = %q, want empty", id, got)
+		}
+	}
+}

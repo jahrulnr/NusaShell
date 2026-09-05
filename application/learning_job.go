@@ -12,13 +12,35 @@ import (
 )
 
 func (a *App) runLearningJob(id string) {
-	if a == nil || a.LearningJobs == nil {
+	job := a.loadLearningJob(id)
+	if job == nil {
 		return
+	}
+	// Capture the source before dispatch. The prompt and cursor update must
+	// refer to this same boundary even if the transcript grows while the
+	// background turn is running.
+	source := a.captureLearningSource(job)
+	a.startLearningJob(job)
+	convID, ops, runErr, sourceReviewed := a.executeLearningJob(job, source)
+	a.finishLearningJob(job, runErr)
+	_ = a.LearningJobs.Save(job)
+	a.advanceLearningCursorAfterReview(source, runErr, sourceReviewed)
+	a.recordLearningJobTrajectory(job, convID, ops)
+	a.emitMemoryUpdated()
+}
+
+func (a *App) loadLearningJob(id string) *domain.LearningJob {
+	if a == nil || a.LearningJobs == nil {
+		return nil
 	}
 	job, err := a.LearningJobs.Get(id)
-	if err != nil || job == nil {
-		return
+	if err != nil {
+		return nil
 	}
+	return job
+}
+
+func (a *App) startLearningJob(job *domain.LearningJob) {
 	now := clock.NewTime().Time()
 	job.Status = domain.LearningJobRunning
 	job.StartedAt = &now
@@ -30,26 +52,29 @@ func (a *App) runLearningJob(id string) {
 			Status: job.Status,
 		})
 	}
-	var runErr error
-	// convID is the conversation holding the job's LLM transcript; ops are
-	// the mutations the job actually applied. Both feed the learning
-	// trajectory so the feed can explain the outcome.
-	var convID string
-	var ops []domain.LearningOperation
+}
+
+func (a *App) executeLearningJob(job *domain.LearningJob, source *learningSource) (string, []domain.LearningOperation, error, bool) {
 	switch job.Kind {
 	case domain.LearningJobConsolidate:
-		ops, convID, runErr = a.consolidateJob(job)
+		ops, convID, err, reviewed := a.consolidateJobAt(job, source)
+		return convID, ops, err, reviewed
 	case domain.LearningJobEvolveSkill:
-		convID, runErr = a.evolveSkillJob(job)
+		convID, err, reviewed := a.evolveSkillJobAt(job, source)
+		return convID, nil, err, reviewed
 	case domain.LearningJobEvaluate:
-		runErr = a.evaluateSkillJob(job)
+		return "", nil, a.evaluateSkillJob(job), false
 	case domain.LearningJobRetire:
 		if a.lifecycle != nil {
 			a.lifecycle.PruneOnce()
 		}
+		return "", nil, nil, false
 	default:
-		runErr = fmt.Errorf("unknown job kind %s", job.Kind)
+		return "", nil, fmt.Errorf("unknown job kind %s", job.Kind), false
 	}
+}
+
+func (a *App) finishLearningJob(job *domain.LearningJob, runErr error) {
 	done := clock.NewTime().Time()
 	job.FinishedAt = &done
 	if runErr != nil {
@@ -64,19 +89,88 @@ func (a *App) runLearningJob(id string) {
 				Error:  "learning job failed",
 			})
 		}
-	} else {
-		job.Status = domain.LearningJobDone
-		if a.Bus != nil {
-			a.Bus.Emit(contracts.EventLearningJobDone, contracts.LearningJobEvent{
-				JobID:  job.ID,
-				Kind:   job.Kind,
-				Status: job.Status,
-			})
-		}
+		return
 	}
-	_ = a.LearningJobs.Save(job)
-	a.recordLearningJobTrajectory(job, convID, ops)
-	a.emitMemoryUpdated()
+	job.Status = domain.LearningJobDone
+	if a.Bus != nil {
+		a.Bus.Emit(contracts.EventLearningJobDone, contracts.LearningJobEvent{
+			JobID:  job.ID,
+			Kind:   job.Kind,
+			Status: job.Status,
+		})
+	}
+}
+
+func (a *App) advanceLearningCursorAfterReview(source *learningSource, runErr error, sourceReviewed bool) {
+	if runErr != nil || !sourceReviewed {
+		return
+	}
+	if err := a.advanceLearningCursor(source); err != nil {
+		// The learning mutation already succeeded. Do not turn a marker
+		// persistence failure into a duplicate-prone job retry.
+		a.log("warn", "learning", "cursor persistence failed: conversation=%s boundary=%d err=%v", source.conversationID, source.messageEnd, err)
+	}
+}
+
+func (a *App) captureLearningSource(job *domain.LearningJob) *learningSource {
+	source := &learningSource{}
+	if job == nil ||
+		(job.Kind != domain.LearningJobConsolidate && job.Kind != domain.LearningJobEvolveSkill) ||
+		a == nil || a.Experiences == nil || job.ExperienceID == "" {
+		return source
+	}
+	exp, err := a.Experiences.Get(job.ExperienceID)
+	if err != nil || exp == nil {
+		return source
+	}
+	captured := a.learningSourceForExperience(exp)
+	return &captured
+}
+
+func (a *App) resolveLearningSource(exp *domain.Experience, source *learningSource) learningSource {
+	if source != nil {
+		return *source
+	}
+	return a.learningSourceForExperience(exp)
+}
+
+func (a *App) advanceLearningCursor(source *learningSource) error {
+	if a == nil || a.Conversations == nil || source == nil ||
+		!source.boundaryCaptured || source.conversationID == "" {
+		return nil
+	}
+
+	lock := a.conversationTurnLock(source.conversationID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	conversation, err := a.Conversations.Get(source.conversationID)
+	if err != nil {
+		return err
+	}
+	if conversation == nil {
+		return fmt.Errorf("conversation %s is missing", source.conversationID)
+	}
+
+	currentStart, currentEnd := learningMessageRangeForConversation(conversation)
+	capturedEnd := source.messageEnd
+	if capturedEnd < 0 {
+		capturedEnd = 0
+	}
+	if capturedEnd > currentEnd {
+		capturedEnd = currentEnd
+	}
+	target := currentStart
+	if capturedEnd > target {
+		target = capturedEnd
+	}
+	if target == conversation.LastReviewedMsgCount {
+		return nil
+	}
+
+	repo := bindConversation(a.Conversations, conversation)
+	repo.Conversation().LastReviewedMsgCount = target
+	return repo.Save()
 }
 
 // recordLearningJobTrajectory appends a finished job's outcome to the
@@ -136,46 +230,68 @@ func learningJobMutations(ops []domain.LearningOperation) []map[string]string {
 // The conversation id is returned even when the job produced nothing or
 // failed: the transcript is exactly what explains that outcome.
 func (a *App) consolidateJob(job *domain.LearningJob) ([]domain.LearningOperation, string, error) {
+	ops, convID, err, _ := a.consolidateJobAt(job, nil)
+	return ops, convID, err
+}
+
+func (a *App) consolidateJobAt(job *domain.LearningJob, source *learningSource) ([]domain.LearningOperation, string, error, bool) {
 	if a.Experiences == nil || a.MemoryRecords == nil {
-		return nil, "", fmt.Errorf("growth stores not configured")
+		return nil, "", fmt.Errorf("growth stores not configured"), false
 	}
 	exp, err := a.Experiences.Get(job.ExperienceID)
 	if err != nil {
-		return nil, "", err
+		return nil, "", err, false
 	}
+	sourceValue := a.resolveLearningSource(exp, source)
 	svc := NewMemoryService(a.MemoryRecords, a.LearningOps)
 
 	// Try the LLM-backed consolidator first (RFC section 14, 18-19). When a
-	// learning model is available, the consolidator receives the experience
-	// packet plus related memories and returns typed operations. If the LLM
+	// learning model is available, the consolidator receives a short source
+	// handoff and returns typed operations. If the LLM
 	// path fails or no provider is configured, fall back to the
 	// deterministic rule-based extraction (teachingOps) so the job still
 	// produces output in offline/no-provider setups.
-	ops, convID := a.consolidateViaLLM(job, exp)
+	ops, convID, sourceReviewed := a.consolidateViaLLMAt(job, exp, sourceValue)
+	ops = consolidationOpsOrFallback(ops, exp, job.ID)
 	if len(ops) == 0 {
-		ops = teachingOps(exp, job.ID)
+		return nil, convID, nil, sourceReviewed
 	}
-	if len(ops) == 0 {
-		return nil, convID, nil
+	return a.applyConsolidationOps(ops, convID, sourceReviewed, svc)
+}
+
+func consolidationOpsOrFallback(ops []domain.LearningOperation, exp *domain.Experience, jobID string) []domain.LearningOperation {
+	if len(ops) > 0 {
+		return ops
 	}
+	return teachingOps(exp, jobID)
+}
+
+func (a *App) applyConsolidationOps(ops []domain.LearningOperation, convID string, sourceReviewed bool, svc *MemoryService) ([]domain.LearningOperation, string, error, bool) {
 	for i := range ops {
-		if ops[i].Kind == domain.OpMemoryUpsert {
-			body := payloadString(ops[i].Payload, "body")
-			typ := payloadString(ops[i].Payload, "type")
-			project := payloadString(ops[i].Payload, "project")
-			if id := matchingRecordID(a.MemoryRecords, body, typ, project); id != "" {
-				ops[i].Kind = domain.OpMemoryStrengthen
-				if ops[i].Payload == nil {
-					ops[i].Payload = map[string]any{}
-				}
-				ops[i].Payload["id"] = id
-			}
-		}
+		a.prepareConsolidationOp(&ops[i])
 		if err := svc.Apply(&ops[i]); err != nil {
-			return ops[:i], convID, err
+			return ops[:i], convID, err, false
 		}
 	}
-	return ops, convID, nil
+	return ops, convID, nil, sourceReviewed
+}
+
+func (a *App) prepareConsolidationOp(op *domain.LearningOperation) {
+	if op.Kind != domain.OpMemoryUpsert {
+		return
+	}
+	body := payloadString(op.Payload, "body")
+	typ := payloadString(op.Payload, "type")
+	project := payloadString(op.Payload, "project")
+	id := matchingRecordID(a.MemoryRecords, body, typ, project)
+	if id == "" {
+		return
+	}
+	op.Kind = domain.OpMemoryStrengthen
+	if op.Payload == nil {
+		op.Payload = map[string]any{}
+	}
+	op.Payload["id"] = id
 }
 
 // consolidateViaLLM calls the LLM-backed memory consolidator and parses the
@@ -183,26 +299,35 @@ func (a *App) consolidateJob(job *domain.LearningJob) ([]domain.LearningOperatio
 // the id of the conversation holding the call's transcript.
 //
 // The conversation id comes back even when ops is empty: "the model saw the
-// packet and decided nothing was durable" and "the model was unreachable"
+// source handoff and decided nothing was durable" and "the model was unreachable"
 // are different answers, and only the transcript tells them apart. The
 // caller falls back to deterministic extraction when this returns no ops.
 func (a *App) consolidateViaLLM(job *domain.LearningJob, exp *domain.Experience) ([]domain.LearningOperation, string) {
+	ops, convID, _ := a.consolidateViaLLMAt(job, exp, a.learningSourceForExperience(exp))
+	return ops, convID
+}
+
+func (a *App) consolidateViaLLMAt(job *domain.LearningJob, exp *domain.Experience, source learningSource) ([]domain.LearningOperation, string, bool) {
 	if strings.TrimSpace(resources.ConsolidatorPrompt()) == "" {
-		return nil, ""
+		return nil, "", false
 	}
-	packet := a.buildConsolidatorPacket(exp)
-	text, convID, err := a.doLearningTurn(context.Background(), AgentMemoryConsolidator, a.learningModelID(), packet)
+	prompt := a.buildConsolidatorPacketAt(exp, source)
+	text, convID, err := a.doLearningTurn(WithWorkspace(context.Background(), exp.Scope.Workspace), AgentMemoryConsolidator, a.learningModelID(), prompt)
 	if err != nil {
 		a.log("debug", "learning", "consolidator LLM call failed, using deterministic fallback: %v", err)
-		return nil, convID
+		return nil, convID, false
 	}
-	ops := parseLLMOperations(text, job.ID, exp.ID)
+	ops, parsed := parseLLMOperationsResult(text, job.ID, exp.ID)
+	if !parsed {
+		a.log("debug", "learning", "consolidator LLM response could not be parsed")
+		return nil, convID, false
+	}
 	if len(ops) == 0 {
 		a.log("debug", "learning", "consolidator LLM returned no operations")
-		return nil, convID
+		return nil, convID, true
 	}
 	a.log("info", "learning", "consolidator LLM returned %d operations", len(ops))
-	return ops, convID
+	return ops, convID, true
 }
 
 func matchingRecordID(store MemoryRecordStore, body, typ, project string) string {
@@ -282,41 +407,84 @@ func teachingOps(exp *domain.Experience, jobID string) []domain.LearningOperatio
 // no skill was written: "the model declined to propose" and "the model was
 // unreachable" look identical in the log without it.
 func (a *App) evolveSkillJob(job *domain.LearningJob) (string, error) {
+	convID, err, _ := a.evolveSkillJobAt(job, nil)
+	return convID, err
+}
+
+func (a *App) evolveSkillJobAt(job *domain.LearningJob, source *learningSource) (string, error, bool) {
 	if a.Skills == nil || a.Experiences == nil {
-		return "", fmt.Errorf("skill store not configured")
+		return "", fmt.Errorf("skill store not configured"), false
 	}
 	exp, err := a.Experiences.Get(job.ExperienceID)
 	if err != nil {
-		return "", err
+		return "", err, false
 	}
 	if len(exp.Actions) < 3 {
-		return "", nil
+		return "", nil, false
 	}
-	name := "learned-" + domain.SkillSlug(strings.TrimSpace(exp.Goal))
-	if name == "learned-" || len(name) < 12 {
-		name = "learned-workflow"
-	}
-	if len(name) > 48 {
-		name = name[:48]
-	}
+	sourceValue := a.resolveLearningSource(exp, source)
+	name := learnedSkillName(exp.Goal)
 
 	// Try the LLM-backed skill evolver first (RFC section 20-21). When a
-	// learning model is available, the evolver receives the experience
-	// packet and returns a skill proposal with the full RFC schema
+	// learning model is available, the evolver receives a short source
+	// handoff and returns a skill proposal with the full RFC schema
 	// (purpose, trigger, preconditions, steps, verification, recovery,
 	// anti-patterns). If the LLM path fails or no provider is configured,
 	// fall back to a deterministic template that still meets the minimum
 	// bar (purpose, trigger, steps) by structuring the experience data.
-	body, description, convID := a.evolveSkillViaLLM(exp)
-	if body == "" {
-		body, description = a.deterministicSkillBody(exp)
-	}
+	body, description, convID, sourceReviewed := a.evolvedSkillDraft(exp, sourceValue)
 	if !skillMeetsMinimumBar(body) {
 		a.log("debug", "learning", "skill body does not meet minimum bar, skipping")
-		return convID, nil
+		return convID, nil, sourceReviewed
 	}
 
-	skill := &domain.Skill{
+	skill := newLearnedSkill(name, description, body)
+	if !a.applyLearnedSkillRevision(skill, name) {
+		return convID, nil, sourceReviewed
+	}
+	skill.EnsureStatusDefault()
+	if domain.CreatorMayPromote(domain.ActorSkillEvolver) {
+		return convID, fmt.Errorf("evolver must not promote"), false
+	}
+	if err := a.Skills.Save(skill); err != nil {
+		return convID, err, false
+	}
+	a.emitSkillLifecycle("evolve", skill.ID, string(skill.Status), convID)
+	// Evaluate in the same job goroutine. Nested goSafe races the skill
+	// store with the still-finishing turn.
+	evalErr := a.evaluateSkillJob(&domain.LearningJob{
+		Kind:    domain.LearningJobEvaluate,
+		SkillID: skill.ID,
+		Reason:  "post_evolve",
+	})
+	if evalErr != nil {
+		return convID, evalErr, false
+	}
+	return convID, nil, sourceReviewed
+}
+
+func learnedSkillName(goal string) string {
+	name := "learned-" + domain.SkillSlug(strings.TrimSpace(goal))
+	if name == "learned-" || len(name) < 12 {
+		name = "learned-workflow"
+	}
+	if len(name) > 48 {
+		return name[:48]
+	}
+	return name
+}
+
+func (a *App) evolvedSkillDraft(exp *domain.Experience, source learningSource) (string, string, string, bool) {
+	body, description, convID, sourceReviewed := a.evolveSkillViaLLMAt(exp, source)
+	if body != "" {
+		return body, description, convID, sourceReviewed
+	}
+	body, description = a.deterministicSkillBody(exp)
+	return body, description, convID, sourceReviewed
+}
+
+func newLearnedSkill(name, description, body string) *domain.Skill {
+	return &domain.Skill{
 		ID:            name,
 		Name:          name,
 		Description:   description,
@@ -327,29 +495,20 @@ func (a *App) evolveSkillJob(job *domain.LearningJob) (string, error) {
 		ActiveVersion: 1,
 		OwnedBy:       string(domain.SkillOriginLearned),
 	}
-	if existing, err := a.Skills.Get(name, string(domain.SkillOriginLearned)); err == nil && existing != nil {
-		if existing.Version >= domain.MaxSkillRevisions {
-			return convID, nil
-		}
-		skill.ID = existing.ID
-		skill.Name = existing.Name
-		skill.Status = domain.SkillStatusExperimental
+}
+
+func (a *App) applyLearnedSkillRevision(skill *domain.Skill, name string) bool {
+	existing, err := a.Skills.Get(name, string(domain.SkillOriginLearned))
+	if err != nil || existing == nil {
+		return true
 	}
-	skill.EnsureStatusDefault()
-	if domain.CreatorMayPromote(domain.ActorSkillEvolver) {
-		return convID, fmt.Errorf("evolver must not promote")
+	if existing.Version >= domain.MaxSkillRevisions {
+		return false
 	}
-	if err := a.Skills.Save(skill); err != nil {
-		return convID, err
-	}
-	a.emitSkillLifecycle("evolve", skill.ID, string(skill.Status), convID)
-	// Evaluate in the same job goroutine. Nested goSafe races the skill
-	// store with the still-finishing turn.
-	return convID, a.evaluateSkillJob(&domain.LearningJob{
-		Kind:    domain.LearningJobEvaluate,
-		SkillID: skill.ID,
-		Reason:  "post_evolve",
-	})
+	skill.ID = existing.ID
+	skill.Name = existing.Name
+	skill.Status = domain.SkillStatusExperimental
+	return true
 }
 
 // evolveSkillViaLLM calls the LLM-backed skill evolver (RFC section 20-21)
@@ -357,19 +516,24 @@ func (a *App) evolveSkillJob(job *domain.LearningJob) (string, error) {
 // back even when the proposal is unusable, so the caller can still surface
 // the transcript that explains the empty result.
 func (a *App) evolveSkillViaLLM(exp *domain.Experience) (string, string, string) {
+	body, description, convID, _ := a.evolveSkillViaLLMAt(exp, a.learningSourceForExperience(exp))
+	return body, description, convID
+}
+
+func (a *App) evolveSkillViaLLMAt(exp *domain.Experience, source learningSource) (string, string, string, bool) {
 	if strings.TrimSpace(resources.SkillEvolverPrompt()) == "" {
-		return "", "", ""
+		return "", "", "", false
 	}
-	packet := a.buildSkillEvolverPacket(exp)
-	text, convID, err := a.doLearningTurn(context.Background(), AgentSkillEvolver, a.learningModelID(), packet)
+	prompt := a.buildSkillEvolverPacketAt(exp, source)
+	text, convID, err := a.doLearningTurn(WithWorkspace(context.Background(), exp.Scope.Workspace), AgentSkillEvolver, a.learningModelID(), prompt)
 	if err != nil {
 		a.log("debug", "learning", "skill evolver LLM call failed, using deterministic fallback: %v", err)
-		return "", "", convID
+		return "", "", convID, false
 	}
 	prop := parseLLMSkillProposal(text)
 	if prop == nil {
 		a.log("debug", "learning", "skill evolver LLM returned no valid proposal")
-		return "", "", convID
+		return "", "", convID, false
 	}
 	var b strings.Builder
 	b.WriteString("# " + strings.TrimSpace(prop.Name) + "\n\n")
@@ -411,7 +575,7 @@ func (a *App) evolveSkillViaLLM(exp *domain.Experience) (string, string, string)
 		desc = clip(exp.Goal, 200)
 	}
 	a.log("info", "learning", "skill evolver LLM returned proposal: kind=%s name=%s", prop.Kind, prop.Name)
-	return b.String(), desc, convID
+	return b.String(), desc, convID, true
 }
 
 // deterministicSkillBody builds a skill body from the experience data that

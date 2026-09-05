@@ -26,7 +26,7 @@ type App struct {
 	// learningTurn runs one learning-job LLM call and returns (text,
 	// conversation id, error). Nil means use the real headless turn; tests
 	// install a stub so job plumbing is testable without a provider.
-	learningTurn func(ctx context.Context, kind AgentKind, model, packet string) (string, string, error)
+	learningTurn func(ctx context.Context, kind AgentKind, model, prompt string) (string, string, error)
 
 	Conversations ConversationStore
 	Providers     ProviderStore

@@ -14,6 +14,13 @@ func TestBackgroundLearningPromptsAreSeparateAgents(t *testing.T) {
 	if strings.TrimSpace(consolidator) == "" || strings.TrimSpace(evolver) == "" || strings.TrimSpace(evaluator) == "" {
 		t.Fatal("consolidator, evolver, and evaluator prompts must be non-empty")
 	}
+	for name, prompt := range map[string]string{
+		"consolidator": consolidator,
+		"evolver":      evolver,
+		"evaluator":    evaluator,
+	} {
+		assertBackgroundPromptCapabilities(t, name, prompt)
+	}
 	for _, banned := range []string{"user.md", "soul.md"} {
 		if !strings.Contains(consolidator, banned) {
 			t.Errorf("consolidator must mention %q as forbidden writes", banned)
@@ -33,5 +40,19 @@ func TestBackgroundLearningPromptsAreSeparateAgents(t *testing.T) {
 	}
 	if resources.Prompt("improve") != "" {
 		t.Fatal("improve.md must not remain as a second background prompt")
+	}
+}
+
+func assertBackgroundPromptCapabilities(t *testing.T, name, prompt string) {
+	t.Helper()
+	normalized := strings.Join(strings.Fields(strings.ToLower(prompt)), " ")
+	for _, required := range []string{
+		"full conversation toolbox",
+		"direct tool side effects are enabled",
+		"security restrictions",
+	} {
+		if !strings.Contains(normalized, required) {
+			t.Errorf("%s prompt must document %q", name, required)
+		}
 	}
 }

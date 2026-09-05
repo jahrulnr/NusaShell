@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.3] - 2026-09-05
 
 ### Fixed
 
@@ -21,6 +21,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   RPC `acp.runs.steer` / `acp.runs.stop` still return the full DTO for the
   Agent drawer. The tooloutput summarizer remains as defense for rooms that
   already stored the old dump.
+
+### Changed
+
+- **Background learning agents now use the full conversation toolbox in
+  exploratory mode.** Consolidator, evolver, and evaluator turns receive the
+  same workspace-scoped tools as the conversation agent, including direct file
+  and learning-state writes, ACP/delegation, automation, and `mcp_call`.
+  Source handoffs remain short and untrusted, transcripts remain auditable,
+  and typed learning outputs stay covered without being the only write path.
+  Learning-agent-specific security hardening is intentionally deferred.
+
+### Fixed
+
+- **Background learning now advances its incremental transcript cursor only
+  after a successful source review.** Provider, parse, and applied-job
+  failures retry the same range; overlapping jobs advance monotonically, and
+  messages appended while a job runs remain for the next review.
 
 ## [0.4.2] - 2026-09-05
 

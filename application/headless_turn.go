@@ -44,8 +44,9 @@ func headlessTurnTitle(kind AgentKind, prompt string) string {
 // and returns the final assistant text as {"output": text}. It is the backing
 // implementation for pipeline agent steps. The persisted conversation is
 // marked Origin=pipeline so it stays out of agent.conversations.list while
-// remaining addressable for automation(op="steer"). ACP subagent tools are filtered out
-// so permission prompts never stall a headless run.
+// remaining addressable for automation(op="steer"). AgentAutomation turns
+// filter ACP subagent tools so permission prompts never stall a pipeline run;
+// background learning kinds intentionally use the full conversation toolbox.
 func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error) {
 	return a.runHeadlessTurnKind(ctx, prompt, model, trust, schema, AgentAutomation)
 }
@@ -66,6 +67,7 @@ func (a *App) runHeadlessTurnKindObserved(ctx context.Context, prompt, model str
 	repo := NewConversation(a.Conversations, headlessTurnTitle(kind, prompt))
 	conv := repo.Conversation()
 	conv.Type = headlessConversationType(kind)
+	conv.Workspace = WorkspaceFromContext(ctx)
 	conv.Model = provider.ID + ":" + bareModel
 	conv.Status = "running"
 	now := clock.NewTime().Time()

@@ -2,7 +2,10 @@ package application
 
 import (
 	"context"
+	"reflect"
 	"testing"
+
+	"nusashell/domain"
 )
 
 // factoryStubToolbox advertises a fixed tool set standing in for the real
@@ -15,20 +18,47 @@ func (s *factoryStubToolbox) Execute(ctx context.Context, name string, argsJSON 
 	return "", nil
 }
 
+type countingToolbox struct {
+	calls []string
+}
+
+func (s *countingToolbox) ListTools() []ToolInfo { return nil }
+
+func (s *countingToolbox) Execute(_ context.Context, name string, _ []byte) (string, error) {
+	s.calls = append(s.calls, name)
+	return "unexpected execution", nil
+}
+
 func factoryStubTools() []ToolInfo {
 	return []ToolInfo{
 		{Name: "file_read"},
 		{Name: "file_list"},
+		{Name: "file_mkdir"},
 		{Name: "grep"},
+		{Name: "find_file"},
+		{Name: "file_info"},
+		{Name: "show"},
 		{Name: "file_write"},
 		{Name: "file_patch"},
 		{Name: "file_delete"},
+		{Name: "file_move"},
+		{Name: "file_copy"},
 		{Name: "exec"},
 		{Name: "web_search"},
 		{Name: "web_fetch"},
+		{Name: "todo"},
+		{Name: "ask_question"},
+		{Name: "mcp_list"},
+		{Name: "tool_list"},
+		{Name: "tool_schema"},
+		{Name: "mcp_search"},
+		{Name: "mcp_call"},
 		{Name: "memory"},
 		{Name: "skill"},
 		{Name: "subagent"},
+		{Name: "subagent_steer"},
+		{Name: "subagent_stop"},
+		{Name: "subagent_wait"},
 		{Name: "delegate"},
 		{Name: "automation"},
 	}
@@ -109,28 +139,80 @@ func TestToolFactoryAutomationAgentOmitsACPTools(t *testing.T) {
 	}
 }
 
-func TestToolFactoryMemoryConsolidatorOmitsACPDelegateAndWrites(t *testing.T) {
+func TestToolFactoryLearningAgentsMatchConversationTools(t *testing.T) {
 	f := &ToolFactory{
 		Toolbox:     func() []ToolInfo { return factoryStubTools() },
 		Dispatchers: FilterDispatcherToolInfos,
 	}
-	defs := f.Get(AgentMemoryConsolidator, "")
-	// Writes go through typed learning ops, so the consolidator must never be
-	// able to edit files directly.
-	for _, banned := range []string{"file_write", "file_patch", "file_delete"} {
-		if hasTool(defs, banned) {
-			t.Fatalf("consolidator must not advertise %s, got %v", banned, namesOf(defs))
+	conversation := f.Get(AgentConversation, "/ws")
+	for _, kind := range []AgentKind{
+		AgentMemoryConsolidator,
+		AgentSkillEvolver,
+		AgentSkillEvaluator,
+	} {
+		got := f.Get(kind, "/ws")
+		if !reflect.DeepEqual(got, conversation) {
+			t.Fatalf("%s toolset differs from conversation agent:\nconversation=%v\nlearning=%v", kind, namesOf(conversation), namesOf(got))
 		}
 	}
-	for _, want := range []string{"file_read", "file_list", "grep", "web_search", "web_fetch", "docs", "skill", "memory"} {
-		if !hasTool(defs, want) {
-			t.Fatalf("memory consolidator missing %q in %v", want, namesOf(defs))
+	for _, want := range []string{
+		"file_write", "file_patch", "file_mkdir", "file_delete", "file_move", "file_copy",
+		"skill", "memory_project", "subagent", "delegate", "automation", "mcp_call",
+	} {
+		if !hasTool(conversation, want) {
+			t.Fatalf("conversation fixture missing full-tool assertion %q in %v", want, namesOf(conversation))
 		}
 	}
-	for _, banned := range []string{"subagent", "delegate", "file_write", "file_patch", "file_delete"} {
-		if hasTool(defs, banned) {
-			t.Fatalf("memory consolidator must not see %q, got %v", banned, namesOf(defs))
-		}
+	if got, want := namesOf(f.Get(AgentMemoryConsolidator, "")), namesOf(f.Get(AgentConversation, "")); !reflect.DeepEqual(got, want) {
+		t.Fatalf("learning workspace gating differs from conversation:\nconversation=%v\nlearning=%v", want, got)
+	}
+}
+
+func TestLearningToolCallsAreNotRejectedByOldPolicy(t *testing.T) {
+	for _, kind := range []AgentKind{
+		AgentMemoryConsolidator,
+		AgentSkillEvolver,
+		AgentSkillEvaluator,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			box := &countingToolbox{}
+			app := &App{Bus: NewBus(), Toolbox: box}
+			run := &TurnRun{ID: "learning-run", ToolKind: kind, Ctx: context.Background()}
+			calls := []struct {
+				name string
+				args string
+			}{
+				{"file_write", `{}`},
+				{"skill", `{"op":"save","name":"learned-example","content":"## Steps\n1. do"}`},
+				{"skill", `{"op":"delete","id":"learned-example"}`},
+				{"memory_project", `{"op":"admit","kind":"decision","body":"exploratory write"}`},
+				{"subagent", `{}`},
+				{"subagent_steer", `{}`},
+				{"subagent_stop", `{}`},
+				{"subagent_wait", `{}`},
+				{"delegate", `{}`},
+				{"automation", `{"op":"list"}`},
+				{"mcp_call", `{"ref":"plugin:tool"}`},
+			}
+			for _, call := range calls {
+				res := app.runOneTool(run, "", domain.ToolCall{
+					ID:   "call-" + call.name,
+					Name: call.name,
+					Args: call.args,
+				}, ModelCapabilities{}, domain.Settings{}, 1)
+				if res.status == domain.ToolFailed {
+					t.Fatalf("learning tool %q was rejected: %s", call.name, res.output)
+				}
+			}
+			got := append([]string(nil), box.calls...)
+			want := make([]string, 0, len(calls))
+			for _, call := range calls {
+				want = append(want, call.name)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("executed learning tools = %v, want %v", got, want)
+			}
+		})
 	}
 }
 

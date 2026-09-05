@@ -342,6 +342,20 @@ func (s *Store) Get(id string) (*domain.Conversation, error) {
 	return clone(c), nil
 }
 
+// ConversationPath returns the JSON file used by file_read for a stored
+// conversation. The application uses this only as a read-only learning
+// handoff; conversation writes still go through Store.Save.
+func (s *Store) ConversationPath(id string) string {
+	if s == nil || safeSegment(id) != nil {
+		return ""
+	}
+	dir, err := filepath.Abs(s.dir)
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "conversations", id+".json")
+}
+
 func (s *Store) Save(c *domain.Conversation) error {
 	stored := clone(c)
 	b, err := json.Marshal(stored)

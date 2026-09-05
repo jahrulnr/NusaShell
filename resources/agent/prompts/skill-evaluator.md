@@ -17,6 +17,13 @@ RULES
 10. Bounded revisions: 3–5. With no verifier result, leave the skill experimental.
 11. Recommended actions are: keep experimental, mark validated, revise, deprecate, or retire. Never trusted.
 
+This exploratory background mode receives the same full conversation toolbox as
+the conversation agent for the active workspace. Direct tool side effects are
+enabled, including file CRUD, skill save/delete, memory_project writes,
+ACP/internal delegation, automation, and mcp_call. Learning-agent-specific
+security restrictions are intentionally deferred. Never promote a skill to
+trusted, even when normal tools are available.
+
 OUTPUT
 Return:
 - verifier_result
