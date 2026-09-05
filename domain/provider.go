@@ -28,6 +28,11 @@ const (
 	ProviderDriverOpenRouter ProviderDriver = "openrouter"
 )
 
+// CacheTTLOff is the selectable prompt-cache value that disables caching
+// for a provider. Empty CacheTTL still means "use the first advertised
+// duration"; off is stored explicitly so existing providers stay cached.
+const CacheTTLOff = "off"
+
 // ValidDriver reports whether driver is supported. The empty driver keeps the
 // legacy host-detected routing for providers created before explicit drivers.
 func ValidDriver(driver ProviderDriver) bool {
@@ -44,7 +49,8 @@ func ValidDriver(driver ProviderDriver) bool {
 // without scattering switch statements across the codebase.
 type KindCapabilities struct {
 	// RequiresKey is true when the provider kind needs a user-supplied API
-	// key. Local endpoints (LM Studio via chat kind) work without one.
+	// key. Every kind is optional: local and gateway hosts may run without
+	// auth, and official endpoints 401 if a key is actually required.
 	RequiresKey bool
 	// HasModelListing is true when the provider kind exposes a GET /models
 	// (or /v1/models) endpoint for chat model discovery.
@@ -77,7 +83,7 @@ type KindCapabilities struct {
 
 var kindCaps = map[ProviderKind]KindCapabilities{
 	ProviderMessages: {
-		RequiresKey:              true,
+		RequiresKey:              false,
 		HasModelListing:          true,
 		HasEmbeddings:            true,
 		HasImageEndpoint:         false,
@@ -88,7 +94,7 @@ var kindCaps = map[ProviderKind]KindCapabilities{
 		CacheTTLs:                []string{"5m", "1h"},
 	},
 	ProviderResponses: {
-		RequiresKey:              true,
+		RequiresKey:              false,
 		HasModelListing:          true,
 		HasEmbeddings:            true,
 		HasImageEndpoint:         true,
@@ -99,7 +105,7 @@ var kindCaps = map[ProviderKind]KindCapabilities{
 		CacheTTLs:                []string{"30m"},
 	},
 	ProviderChat: {
-		RequiresKey:              false, // LM Studio and local endpoints work without a key
+		RequiresKey:              false, // local and gateway hosts may omit a key
 		HasModelListing:          true,
 		HasEmbeddings:            true,
 		HasImageEndpoint:         true,
@@ -159,10 +165,24 @@ func CacheTTLsFor(kind ProviderKind, driver ProviderDriver) []string {
 	}
 }
 
+// SelectableCacheTTLs is CacheTTLsFor plus CacheTTLOff when the kind can
+// send a prompt cache. Off is last so empty CacheTTL still defaults to the
+// first advertised duration.
+func SelectableCacheTTLs(kind ProviderKind, driver ProviderDriver) []string {
+	ttls := CacheTTLsFor(kind, driver)
+	if len(ttls) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ttls)+1)
+	out = append(out, ttls...)
+	return append(out, CacheTTLOff)
+}
+
 // ValidCacheTTL reports whether ttl may be stored for this kind+driver.
-// Empty ttl is valid and means "use the kind default".
+// Empty ttl is valid and means "use the kind default". CacheTTLOff disables
+// prompt caching for the provider.
 func ValidCacheTTL(kind ProviderKind, driver ProviderDriver, ttl string) bool {
-	if ttl == "" {
+	if ttl == "" || ttl == CacheTTLOff {
 		return true
 	}
 	for _, allowed := range CacheTTLsFor(kind, driver) {
@@ -173,9 +193,13 @@ func ValidCacheTTL(kind ProviderKind, driver ProviderDriver, ttl string) bool {
 	return false
 }
 
-// NormalizeCacheTTL returns ttl when it is advertised for this kind+driver,
-// otherwise the first advertised value (empty when the kind has no caching).
+// NormalizeCacheTTL returns ttl when it is advertised for this kind+driver
+// or CacheTTLOff. Otherwise it returns the first advertised duration (empty
+// when the kind has no caching).
 func NormalizeCacheTTL(kind ProviderKind, driver ProviderDriver, ttl string) string {
+	if ttl == CacheTTLOff {
+		return CacheTTLOff
+	}
 	allowed := CacheTTLsFor(kind, driver)
 	if ttl != "" {
 		for _, candidate := range allowed {
@@ -293,8 +317,9 @@ type Provider struct {
 	HasAPIKey bool
 	Models    []Model
 	// CacheTTL is the selected prompt-cache duration for this provider
-	// ("5m", "1h", or "30m"). Empty means use the first value from
-	// CacheTTLsFor(kind, driver).
+	// ("5m", "1h", "30m", or CacheTTLOff). Empty means use the first value
+	// from CacheTTLsFor(kind, driver). CacheTTLOff disables prompt caching
+	// for this provider even when Settings prompt caching is on.
 	CacheTTL  string
 	UpdatedAt time.Time
 }

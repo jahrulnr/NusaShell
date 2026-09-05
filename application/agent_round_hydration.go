@@ -151,6 +151,10 @@ func buildPromptCachePolicy(settings domain.Settings, p *domain.Provider, model,
 	if !settings.PromptCaching || p == nil {
 		return nil
 	}
+	ttl := domain.NormalizeCacheTTL(p.Kind, domain.WireCacheDriver(p.Kind, p.EffectiveDriver(), p.BaseURL), p.CacheTTL)
+	if ttl == domain.CacheTTLOff {
+		return nil
+	}
 	if prefix == "" {
 		prefix = promptCacheConversationPrefix
 	}
@@ -167,7 +171,7 @@ func buildPromptCachePolicy(settings domain.Settings, p *domain.Provider, model,
 	return &PromptCachePolicy{
 		Mode: "auto",
 		Key:  prefix + full[:suffixLength],
-		TTL:  domain.NormalizeCacheTTL(p.Kind, p.EffectiveDriver(), p.CacheTTL),
+		TTL:  ttl,
 	}
 }
 

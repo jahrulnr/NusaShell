@@ -159,6 +159,54 @@ func isOpenRouterBaseURL(baseURL string) bool {
 	return host == "openrouter.ai" || strings.HasSuffix(host, ".openrouter.ai")
 }
 
+func hostnameOf(baseURL string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+// IsOpenCodeHost reports whether baseURL points at OpenCode Zen
+// (opencode.ai), including Console Go (`/zen/go/v1`).
+func IsOpenCodeHost(baseURL string) bool {
+	host := hostnameOf(baseURL)
+	return host == "opencode.ai" || strings.HasSuffix(host, ".opencode.ai")
+}
+
+// UsesOpenRouterWire reports whether this provider should speak the
+// OpenRouter request format (reasoning object, reasoning_details,
+// cache_retention, provider.order).
+//
+// Chat kind: only genuine openrouter.ai hosts. Custom providers default
+// to Driver=openrouter, which previously forced this wire onto OpenCode
+// and TokenRouter and 400'd (missing reasoning_content / unknown
+// parameter: reasoning). Non-chat kinds still follow the explicit driver
+// because OpenRouter messages/responses have no vanilla-chat equivalent.
+func UsesOpenRouterWire(kind ProviderKind, driver ProviderDriver, baseURL string) bool {
+	if kind == ProviderChat {
+		return IsOpenRouterHost(kind, baseURL)
+	}
+	return driver == ProviderDriverOpenRouter || isOpenRouterBaseURL(baseURL)
+}
+
+// WireCacheDriver returns the driver whose prompt-cache TTL enum matches
+// what the host will accept. This is independent of UsesOpenRouterWire:
+//
+//   - Genuine OpenRouter chat: cache_control 5m/1h
+//   - OpenCode Zen/Go: Console Go validates TTL as 5m|1h (HTTP 422 on 30m)
+//     even though the message wire is vanilla Chat (reasoning_content)
+//   - Other Chat hosts: OpenAI prompt_cache_options 30m
+func WireCacheDriver(kind ProviderKind, driver ProviderDriver, baseURL string) ProviderDriver {
+	if kind == ProviderChat && IsOpenCodeHost(baseURL) {
+		return ProviderDriverOpenRouter
+	}
+	if kind == ProviderChat && !UsesOpenRouterWire(kind, driver, baseURL) {
+		return ProviderDriverAuto
+	}
+	return driver
+}
+
 // IsOpenRouterHost reports whether a chat-kind provider with the given base
 // URL should use the OpenRouter wire format (extra headers, reasoning object,
 // reasoning_details, cache_retention). Only genuine OpenRouter hosts qualify;

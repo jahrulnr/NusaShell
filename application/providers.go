@@ -30,7 +30,8 @@ func (a *App) providerNameByID(providerID string) string {
 func (a *App) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 	caps := domain.KindCaps(p.Kind)
 	driver := p.EffectiveDriver()
-	ttls := domain.CacheTTLsFor(p.Kind, driver)
+	cacheDriver := domain.WireCacheDriver(p.Kind, driver, p.BaseURL)
+	ttls := domain.SelectableCacheTTLs(p.Kind, cacheDriver)
 	dto := contracts.ProviderDTO{
 		ID:         p.ID,
 		Driver:     string(driver),
@@ -42,7 +43,7 @@ func (a *App) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 		CacheStyle: caps.PromptCacheStyle,
 	}
 	if len(ttls) > 0 {
-		dto.CacheTTL = domain.NormalizeCacheTTL(p.Kind, driver, p.CacheTTL)
+		dto.CacheTTL = domain.NormalizeCacheTTL(p.Kind, cacheDriver, p.CacheTTL)
 	}
 	_, hasKey, _ := a.Credentials.Get(p.ID)
 	dto.HasAPIKey = hasKey
@@ -178,13 +179,14 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 	p.BaseURL = baseURL
 	p.Enabled = req.Enabled
 	p.UpdatedAt = clock.NewTime().Time()
+	cacheDriver := domain.WireCacheDriver(kind, driver, baseURL)
 	if req.CacheTTL != nil {
 		ttl := strings.TrimSpace(*req.CacheTTL)
-		if !domain.ValidCacheTTL(kind, driver, ttl) {
+		if !domain.ValidCacheTTL(kind, cacheDriver, ttl) {
 			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "cache_ttl is not supported for this provider"}
 		}
 		p.CacheTTL = ttl
-	} else if !domain.ValidCacheTTL(kind, driver, p.CacheTTL) {
+	} else if !domain.ValidCacheTTL(kind, cacheDriver, p.CacheTTL) {
 		p.CacheTTL = ""
 	}
 
@@ -234,12 +236,9 @@ func (a *App) providerWithKey(id string) (*domain.Provider, string, *contracts.R
 	if err != nil {
 		return nil, "", &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
-	key, has, err := a.Credentials.Get(id)
+	key, _, err := a.Credentials.Get(id)
 	if err != nil {
 		return nil, "", rpcInternal(err)
-	}
-	if !has && domain.RequiresKey(p.Kind) {
-		return nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: "provider has no API key configured"}
 	}
 	return p, key, nil
 }

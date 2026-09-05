@@ -15,8 +15,8 @@ func TestKindCapabilities(t *testing.T) {
 		wantCache  string
 		wantTTLs   []string
 	}{
-		{ProviderMessages, true, true, true, false, false, false, false, "anthropic", []string{"5m", "1h"}},
-		{ProviderResponses, true, true, true, true, true, false, true, "openai", []string{"30m"}},
+		{ProviderMessages, false, true, true, false, false, false, false, "anthropic", []string{"5m", "1h"}},
+		{ProviderResponses, false, true, true, true, true, false, true, "openai", []string{"30m"}},
 		{ProviderChat, false, true, true, true, true, true, true, "openai", []string{"5m", "1h", "30m"}},
 	}
 	for _, tc := range tests {
@@ -62,8 +62,8 @@ func TestKindCapabilities(t *testing.T) {
 func TestProviderKindCapabilitiesMethod(t *testing.T) {
 	p := &Provider{Kind: ProviderMessages}
 	caps := p.KindCapabilities()
-	if !caps.RequiresKey {
-		t.Fatal("messages kind should require key")
+	if caps.RequiresKey {
+		t.Fatal("messages kind must not require a key")
 	}
 	if caps.HasImageEndpoint {
 		t.Fatal("messages kind should not have image endpoint")
@@ -92,14 +92,14 @@ func TestValidKind(t *testing.T) {
 }
 
 func TestRequiresKey(t *testing.T) {
-	if !RequiresKey(ProviderMessages) {
-		t.Error("messages should require key")
+	if RequiresKey(ProviderMessages) {
+		t.Error("messages must not require a key")
 	}
-	if !RequiresKey(ProviderResponses) {
-		t.Error("responses should require key")
+	if RequiresKey(ProviderResponses) {
+		t.Error("responses must not require a key")
 	}
 	if RequiresKey(ProviderChat) {
-		t.Error("chat should not require key")
+		t.Error("chat must not require a key")
 	}
 }
 
@@ -131,12 +131,31 @@ func TestCacheTTLsFor(t *testing.T) {
 	}
 }
 
+func TestSelectableCacheTTLsIncludeOff(t *testing.T) {
+	got := SelectableCacheTTLs(ProviderMessages, ProviderDriverAnthropic)
+	want := []string{"5m", "1h", CacheTTLOff}
+	if len(got) != len(want) {
+		t.Fatalf("selectable = %v, want %v", got, want)
+	}
+	for i, ttl := range want {
+		if got[i] != ttl {
+			t.Errorf("selectable[%d] = %q, want %q", i, got[i], ttl)
+		}
+	}
+	if got := SelectableCacheTTLs(ProviderResponses, ProviderDriverOpenAI); len(got) != 2 || got[0] != "30m" || got[1] != CacheTTLOff {
+		t.Errorf("responses selectable = %v, want [30m off]", got)
+	}
+}
+
 func TestNormalizeCacheTTL(t *testing.T) {
 	if got := NormalizeCacheTTL(ProviderMessages, ProviderDriverAnthropic, ""); got != "5m" {
 		t.Errorf("empty messages TTL = %q, want 5m", got)
 	}
 	if got := NormalizeCacheTTL(ProviderMessages, ProviderDriverAnthropic, "1h"); got != "1h" {
 		t.Errorf("messages 1h = %q, want 1h", got)
+	}
+	if got := NormalizeCacheTTL(ProviderMessages, ProviderDriverAnthropic, CacheTTLOff); got != CacheTTLOff {
+		t.Errorf("messages off = %q, want off", got)
 	}
 	if got := NormalizeCacheTTL(ProviderResponses, ProviderDriverOpenAI, ""); got != "30m" {
 		t.Errorf("empty responses TTL = %q, want 30m", got)
@@ -156,6 +175,9 @@ func TestValidCacheTTL(t *testing.T) {
 	if !ValidCacheTTL(ProviderMessages, ProviderDriverAnthropic, "1h") {
 		t.Error("1h is valid for messages")
 	}
+	if !ValidCacheTTL(ProviderMessages, ProviderDriverAnthropic, CacheTTLOff) {
+		t.Error("off is valid for messages")
+	}
 	if ValidCacheTTL(ProviderMessages, ProviderDriverAnthropic, "30m") {
 		t.Error("30m is not valid for messages")
 	}
@@ -164,6 +186,9 @@ func TestValidCacheTTL(t *testing.T) {
 	}
 	if !ValidCacheTTL(ProviderResponses, ProviderDriverOpenAI, "30m") {
 		t.Error("30m is valid for responses")
+	}
+	if !ValidCacheTTL(ProviderResponses, ProviderDriverOpenAI, CacheTTLOff) {
+		t.Error("off is valid for responses")
 	}
 }
 

@@ -86,7 +86,8 @@ what belongs there.
 
 When you move from one task to the next, read the relevant skill for that specific task just before starting it; not all at once upfront. Avoid eagerly reading every skill that isn't relevant to the current step in your `todo` plan, as that clutters your context with unused information and dilutes your focus.
 
-Example: for "build a website with an admin panel", do: create todo list → read frontend skill → build frontend → read backend skill → build backend. Do NOT: create todo list → read frontend skill → read backend skill → build frontend → build backend.
+Example: for "build a website with an admin panel", do: create `todo` list → update first `todo` to `in_progress` → read frontend skill → build frontend → mark first `todo` as `done` and mark second `todo` to `pending` → read backend skill → build backend → mark all `todo` as done then report summaries to user. 
+Do NOT: create todo list → read frontend skill → read backend skill → build frontend → build backend.
 
 When you need a tool call, follow these rules:
 - Prefer parallel tool calls over sequential ones when the calls are independent; it cuts round-trip latency.

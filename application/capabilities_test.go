@@ -290,6 +290,44 @@ func TestModelCapabilitiesReasoningReplayPatternFallback(t *testing.T) {
 	}
 }
 
+// TestModelCapabilitiesReasoningReplayOpenCodeHost proves that OpenCode
+// Zen/Go (generated provider IDs, empty InterleavedField on glm-5.3 /
+// deepseek-v4-flash) still requires reasoning_content replay. The static
+// "opencode-go" whitelist never matches NusaShell's prov_* IDs; the host
+// plus the model's Reasoning flag is the durable signal. Non-reasoning
+// models on the same host must not get a forced reasoning_content placeholder.
+func TestModelCapabilitiesReasoningReplayOpenCodeHost(t *testing.T) {
+	provider := &domain.Provider{
+		ID:      "prov_b9587aa5f937c4f2",
+		BaseURL: "https://opencode.ai/zen/go/v1",
+		Models: []domain.Model{
+			{ID: "glm-5.3-flash", Reasoning: true},
+			{ID: "deepseek-v4-flash", Reasoning: true},
+			{ID: "omen-alpha", Reasoning: false},
+		},
+	}
+	for _, model := range []string{"glm-5.3-flash", "deepseek-v4-flash"} {
+		caps := modelCapabilitiesWithLearned(provider, model, nil, nil)
+		if !caps.ReasoningReplay {
+			t.Errorf("%s on opencode.ai: ReasoningReplay = false, want true", model)
+		}
+	}
+	nonReasoning := modelCapabilitiesWithLearned(provider, "omen-alpha", nil, nil)
+	if nonReasoning.ReasoningReplay {
+		t.Errorf("omen-alpha (non-reasoning) on opencode.ai: ReasoningReplay = true, want false")
+	}
+
+	other := &domain.Provider{
+		ID:      "prov_other",
+		BaseURL: "https://api.openai.com/v1",
+		Models:  []domain.Model{{ID: "gpt-5.5"}},
+	}
+	caps := modelCapabilitiesWithLearned(other, "gpt-5.5", nil, nil)
+	if caps.ReasoningReplay {
+		t.Errorf("gpt-5.5 on openai.com: ReasoningReplay = true, want false")
+	}
+}
+
 // TestModelCapabilitiesReasoningFlagFromCatalog proves the Reasoning
 // capability is resolved from the model's catalog metadata. A model with
 // Reasoning=true gets caps.Reasoning=true; a model without it gets false.

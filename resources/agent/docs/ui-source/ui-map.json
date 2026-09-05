@@ -350,7 +350,7 @@
     },
     "providers": {
       "title": "Providers",
-      "purpose": "Configure persistent Anthropic, OpenAI, and OpenRouter cards, add unlimited custom OpenRouter-compatible providers by wire format (Messages, Responses, Chat), and manage spawn-only ACP subagent binaries. Chat API keys live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.",
+      "purpose": "Configure persistent Anthropic, OpenAI, and OpenRouter cards, add unlimited custom OpenRouter-compatible providers by wire format (Messages, Responses, Chat), and manage spawn-only ACP subagent binaries. Provider API keys are optional and live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.",
       "howToOpen": "Click the Providers item in the left sidebar.",
       "sections": [
         {
@@ -367,7 +367,7 @@
         {
           "heading": "Chat providers",
           "paragraphs": [
-            "The registry always shows persistent Anthropic, OpenAI, and OpenRouter cards, even before configuration. Anthropic uses the Anthropic Messages driver; OpenAI uses the OpenAI Responses driver; OpenRouter and custom providers use the OpenRouter driver. OpenRouter and custom forms expose Messages, Responses, and Chat API kinds. Selecting a card opens the detail pane for editing its base URL, API key, enabled state, prompt-cache TTL, importing models, and testing connectivity. These models appear in the Agent composer."
+            "The registry always shows persistent Anthropic, OpenAI, and OpenRouter cards, even before configuration. Anthropic uses the Anthropic Messages driver; OpenAI uses the OpenAI Responses driver; OpenRouter and custom providers use the OpenRouter driver. OpenRouter and custom forms expose Messages, Responses, and Chat API kinds. Selecting a card opens the detail pane for editing its base URL, optional API key, enabled state, prompt-cache TTL, importing models, and testing connectivity. These models appear in the Agent composer."
           ],
           "controls": [
             "provider-llm-section",
@@ -668,7 +668,7 @@
         {
           "heading": "Context compaction",
           "paragraphs": [
-            "Toggle compaction, set max input tokens (fallback context window, default 200000), compaction threshold and summary quality knobs, pick an optional compaction model, and enable provider prompt caching. Cache TTL is chosen per provider on the Providers detail pane. Completion limits and sampling are under Agent runtime."
+            "Toggle compaction, set max input tokens (fallback context window, default 200000), compaction threshold and summary quality knobs, pick an optional compaction model, and enable provider prompt caching. Cache TTL (including off) is chosen per provider on the Providers detail pane. Completion limits and sampling are under Agent runtime."
           ],
           "controls": [
             "settings-context-title",
@@ -1486,8 +1486,8 @@
       "label": "Prompt cache TTL",
       "section": "Providers",
       "type": "chip-group",
-      "action": "Selects the prompt-cache duration sent to this provider when Settings prompt caching is on. Messages and OpenRouter chat offer 5m/1h; Responses and other Chat hosts offer 30m.",
-      "notes": "Buttons inside the provider detail pane (class provider-cache-ttl-chip). The registry card shows the selected value only.",
+      "action": "Selects the prompt-cache duration sent to this provider when Settings prompt caching is on, or off to skip caching for this provider. Messages and OpenRouter chat offer 5m/1h/off; Responses and other Chat hosts offer 30m/off.",
+      "notes": "Buttons inside the provider detail pane (class provider-cache-ttl-chip). The last chip is off. Empty stored TTL still defaults to the first duration. The registry card shows the selected value only.",
       "selector": ".provider-cache-ttl-chip"
     },
     "learning-stat-memory": {
@@ -1836,7 +1836,7 @@
       "label": "Prompt caching",
       "section": "Settings",
       "type": "checkbox",
-      "notes": "Master switch for provider-side prompt caching. The cache duration is selected per provider (Cache TTL chips on the Providers detail pane)."
+      "notes": "Master switch for provider-side prompt caching. Per-provider Cache TTL chips on the Providers detail pane pick the duration or off."
     },
     "settings-sound-notifications": {
       "label": "Sound notifications",
@@ -2761,13 +2761,13 @@
       "label": "Provider route trigger",
       "section": "Agent",
       "type": "button",
-      "action": "Toggles the upstream provider route menu (router icon = multi-provider, home icon = single upstream)."
+      "action": "Toggles the upstream provider route menu (router icon = multi-provider, home icon = single upstream). Empty lists on a routing-capable model title the trigger 'No provider in this model' and stay non-interactive."
     },
     "route-menu": {
       "label": "Provider route menu",
       "section": "Agent",
       "type": "dialog",
-      "notes": "Lists searchable upstream providers for the selected model with quantization, latency, throughput, and per-provider input/output pricing badges; Auto restores gateway load balancing and has no single fixed price."
+      "notes": "Lists searchable upstream providers for the selected model with quantization, latency, throughput, and per-provider input/output pricing badges; Auto restores gateway load balancing and has no single fixed price. HTTP 4xx/5xx listing failures show 'No provider in this model' instead of the upstream HTML body."
     }
   }
 }

@@ -299,12 +299,12 @@ The message input with attachments, model picker, workspace selector, provider s
 - **Provider route trigger** (`#route-trigger`):
   - Section: Agent
   - Type: button
-  - Action: Toggles the upstream provider route menu (router icon = multi-provider, home icon = single upstream).
+  - Action: Toggles the upstream provider route menu (router icon = multi-provider, home icon = single upstream). Empty lists on a routing-capable model title the trigger 'No provider in this model' and stay non-interactive.
 
 - **Provider route menu** (`#route-menu`):
   - Section: Agent
   - Type: dialog
-  - Notes: Lists searchable upstream providers for the selected model with quantization, latency, throughput, and per-provider input/output pricing badges; Auto restores gateway load balancing and has no single fixed price.
+  - Notes: Lists searchable upstream providers for the selected model with quantization, latency, throughput, and per-provider input/output pricing badges; Auto restores gateway load balancing and has no single fixed price. HTTP 4xx/5xx listing failures show 'No provider in this model' instead of the upstream HTML body.
 
 - **Workspace selector** (`#agent-workspace-btn`):
   - Section: Agent

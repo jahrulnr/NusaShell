@@ -740,12 +740,13 @@ type ProviderDTO struct {
 	HasAPIKey  bool       `json:"has_api_key"`
 	Models     []ModelDTO `json:"models,omitempty"`
 	Error      string     `json:"error,omitempty"`
-	// CacheTTLs is the prompt-cache TTL enum from this provider's OpenAPI
-	// spec (or SDK fallback). Empty when the provider kind has no caching.
+	// CacheTTLs is the selectable prompt-cache TTL enum for this provider,
+	// including "off". Empty when the provider kind has no caching.
 	CacheTTLs  []string `json:"cache_ttls,omitempty"`
 	CacheStyle string   `json:"cache_style,omitempty"` // "anthropic" | "openai" | ""
 	// CacheTTL is the selected prompt-cache duration for this provider.
-	// Empty in the store means the first advertised cache_ttls value.
+	// Empty in the store means the first advertised duration. "off" disables
+	// prompt caching for this provider.
 	CacheTTL string `json:"cache_ttl,omitempty"`
 }
 
@@ -762,7 +763,8 @@ type ProviderSaveRequest struct {
 	APIKey  string `json:"api_key,omitempty"`
 	Enabled bool   `json:"enabled"`
 	// CacheTTL is the selected prompt-cache duration. Omitted on update
-	// preserves the stored value; invalid values are rejected.
+	// preserves the stored value; invalid values are rejected. "off"
+	// disables prompt caching for this provider.
 	CacheTTL *string `json:"cache_ttl,omitempty"`
 }
 

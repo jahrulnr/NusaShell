@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"nusashell/contracts"
@@ -157,5 +158,80 @@ func TestHandleModelEndpointsFetchErrorSurfaces(t *testing.T) {
 	_, rpcErr := app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "m"})
 	if rpcErr == nil || rpcErr.Code != contracts.CodeProvider {
 		t.Fatalf("rpcErr = %+v, want CodeProvider", rpcErr)
+	}
+}
+
+func TestHandleModelEndpointsSkipsHTTPClientError(t *testing.T) {
+	routeProvider := &fakeRouteProvider{err: &domain.ProviderError{
+		Kind:       domain.KindHTTPStatus,
+		StatusCode: 404,
+		Err:        fmt.Errorf("provider returned HTTP 404: <!DOCTYPE html><title>Not Found | opencode</title>"),
+	}}
+	providers := map[string]*domain.Provider{
+		"p1": {
+			ID: "p1", Name: "OpenCode", Enabled: true,
+			Driver: domain.ProviderDriverOpenRouter, Kind: domain.ProviderChat,
+			Models: []domain.Model{{ID: "big-pickle", CanonicalSlug: "big-pickle"}},
+		},
+	}
+	app := newEndpointsTestApp(t, func(_ context.Context, _ *domain.Provider, _ string) (core.Provider, error) {
+		return routeProvider, nil
+	}, nil, providers)
+
+	res, rpcErr := app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "big-pickle"})
+	if rpcErr != nil {
+		t.Fatalf("4xx handleModelEndpoints: %+v", rpcErr)
+	}
+	first := res.(contracts.ModelEndpointsResult)
+	if len(first.Routes) != 0 {
+		t.Fatalf("4xx result = %+v, want empty routes", first)
+	}
+	if first.Cached {
+		t.Fatalf("first 4xx result should not report cache hit")
+	}
+
+	res, rpcErr = app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "big-pickle"})
+	if rpcErr != nil {
+		t.Fatalf("cached 4xx handleModelEndpoints: %+v", rpcErr)
+	}
+	if !res.(contracts.ModelEndpointsResult).Cached {
+		t.Fatal("second 4xx call should be served from cache")
+	}
+	if routeProvider.calls != 1 {
+		t.Fatalf("lister called %d times, want 1 (4xx cached as empty)", routeProvider.calls)
+	}
+}
+
+func TestHandleModelEndpointsSkipsHTTPServerErrorWithoutCache(t *testing.T) {
+	routeProvider := &fakeRouteProvider{err: &domain.ProviderError{
+		Kind:       domain.KindHTTPStatus,
+		StatusCode: 503,
+		Err:        fmt.Errorf("provider returned HTTP 503: <html>unavailable</html>"),
+	}}
+	providers := map[string]*domain.Provider{
+		"p1": {
+			ID: "p1", Name: "OR", Enabled: true,
+			Driver: domain.ProviderDriverOpenRouter, Kind: domain.ProviderChat,
+			Models: []domain.Model{{ID: "m", CanonicalSlug: "m"}},
+		},
+	}
+	app := newEndpointsTestApp(t, func(_ context.Context, _ *domain.Provider, _ string) (core.Provider, error) {
+		return routeProvider, nil
+	}, nil, providers)
+
+	res, rpcErr := app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "m"})
+	if rpcErr != nil {
+		t.Fatalf("5xx handleModelEndpoints: %+v", rpcErr)
+	}
+	if len(res.(contracts.ModelEndpointsResult).Routes) != 0 {
+		t.Fatalf("5xx result = %+v, want empty", res)
+	}
+
+	_, rpcErr = app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "m"})
+	if rpcErr != nil {
+		t.Fatalf("second 5xx handleModelEndpoints: %+v", rpcErr)
+	}
+	if routeProvider.calls != 2 {
+		t.Fatalf("lister called %d times, want 2 (5xx not cached)", routeProvider.calls)
 	}
 }

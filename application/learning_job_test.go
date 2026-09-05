@@ -309,7 +309,7 @@ func TestExtractExperienceOneOffPnpmDoesNotEnqueue(t *testing.T) {
 			}},
 		},
 	}
-	exp := ExtractExperience(conv, false)
+	exp := domain.ExtractExperience(conv, false)
 	if domain.DecideLearningTrigger(exp, nil).Enqueue {
 		t.Fatalf("one-off pnpm enqueued: %+v", exp)
 	}

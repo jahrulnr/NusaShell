@@ -8,7 +8,7 @@ profile documents.
 | **About You** | `memory/user.md` | Agents via `file_patch`/`file_write`; humans via Learning UI | Every turn via `file_read` when the body is non-empty |
 | **About Agent** | `memory/soul.md` | Agents via `file_patch`/`file_write`; humans via Learning UI | Every turn via `file_read` when the body is non-empty |
 | **Records** | `growth/memories.jsonl` | Learner `learn()` tool | Compact APPLY block (top-K, scoped) |
-| **Experiences** | `growth/experiences.jsonl` | Runtime at `finishTurn` | Not injected; Learning UI list |
+| **Experiences** | `growth/experiences.jsonl` | Runtime at `finishTurn` | Not injected; Learning UI list. Hidden hydration checkpoint tools (`hydrate-*`: `runtime_context`, AGENTS.md/`user.md`/`soul.md` `file_read`, `memory_project`, `skill`, …) are omitted from actions and fingerprints. |
 
 `user.md` and `soul.md` are written with the `file_*` family on absolute
 paths (`{dataDir}/memory/user.md`, `{dataDir}/memory/soul.md`). On first
@@ -38,7 +38,9 @@ spawns. Stage 1 (consolidate) always runs. Stage 2 (evaluate) and Stage 3
 and Stage 2 approves. There is no standalone spawn into Stage 2 or Stage 3.
 
 The orchestrator enqueues one `learner` job after a finished interactive
-turn when a **language-agnostic** gate fires:
+turn when a **language-agnostic** gate fires. Hidden hydration checkpoints
+are excluded from the experience (they are not agent work and cannot form
+a repeated-procedure fingerprint).
 
 - **structural:** steer/correction, verified recovery, repeated failure, or
   the same tool-call fingerprint ≥ 3 times

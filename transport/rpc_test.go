@@ -570,8 +570,8 @@ func TestProviderCacheTTLIsSelectableAndPersisted(t *testing.T) {
 	if saved.Providers[0].CacheTTL != "1h" {
 		t.Fatalf("saved cache_ttl = %q, want 1h", saved.Providers[0].CacheTTL)
 	}
-	if len(saved.Providers[0].CacheTTLs) != 2 || saved.Providers[0].CacheTTLs[0] != "5m" {
-		t.Fatalf("cache_ttls = %v, want [5m 1h]", saved.Providers[0].CacheTTLs)
+	if len(saved.Providers[0].CacheTTLs) != 3 || saved.Providers[0].CacheTTLs[0] != "5m" || saved.Providers[0].CacheTTLs[2] != "off" {
+		t.Fatalf("cache_ttls = %v, want [5m 1h off]", saved.Providers[0].CacheTTLs)
 	}
 
 	listed := h.rpcOK(t, "ai.providers.list", nil)

@@ -72,7 +72,8 @@ func listOpenAIModels(ctx context.Context, baseURL string, headers map[string]st
 // model: GET /models/{author}/{slug}/endpoints. slug is the canonical
 // identity plus any request variant (:free, :batch). One HTTP request per
 // model; there is no bulk endpoint, so callers cache aggressively. Returns
-// an empty slice (not an error) when the gateway returns no endpoints.
+// an empty slice (not an error) when the gateway returns no endpoints or
+// answers HTTP 4xx (hosts such as OpenCode that do not implement this API).
 func listOpenRouterEndpoints(ctx context.Context, baseURL string, headers map[string]string, client *http.Client, canonicalSlug string) ([]domain.ModelRoute, error) {
 	base := strings.TrimRight(baseURL, "/")
 	segments := strings.Split(canonicalSlug, "/")
@@ -97,6 +98,9 @@ func listOpenRouterEndpoints(ctx context.Context, baseURL string, headers map[st
 		} `json:"data"`
 	}
 	if err := aiutil.DoJSON(ctx, client, http.MethodGet, url, headers, nil, &out); err != nil {
+		if code := domain.HTTPStatusCode(err); code >= 400 && code <= 499 {
+			return []domain.ModelRoute{}, nil
+		}
 		return nil, err
 	}
 	routes := make([]domain.ModelRoute, 0, len(out.Data.Endpoints))

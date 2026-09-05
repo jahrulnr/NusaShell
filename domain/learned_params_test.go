@@ -41,6 +41,11 @@ func TestClassify400ErrorRequiredField(t *testing.T) {
 		{`field 'reasoning_content' is required`, LearnedActionInject, "reasoning_content"},
 		{`reasoning_content is a required field`, LearnedActionInject, "reasoning_content"},
 		{`reasoning_content must be provided`, LearnedActionInject, "reasoning_content"},
+		// OpenCode Console Go wraps the field in backticks and inserts
+		// "in the thinking mode" between the name and "must be passed back".
+		// The classifier must capture reasoning_content, not the noun "mode".
+		{"The `reasoning_content` in the thinking mode must be passed back to the API.", LearnedActionInject, "reasoning_content"},
+		{"provider returned HTTP 400: invalid_request_error: Error from provider (Console Go): Upstream request failed: [invalid_request_error] The `reasoning_content` in the thinking mode must be passed back to the API.", LearnedActionInject, "reasoning_content"},
 	}
 	for _, c := range cases {
 		action, param := Classify400Error(c.body)

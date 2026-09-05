@@ -19,6 +19,7 @@ func TestIsOpenRouterHost(t *testing.T) {
 		{name: "tokenrouter", kind: ProviderChat, baseURL: "https://api.tokenrouter.com/v1", want: false},
 		{name: "9router localhost", kind: ProviderChat, baseURL: "http://localhost:20128/v1", want: false},
 		{name: "opencode zen", kind: ProviderChat, baseURL: "https://opencode.ai/zen/v1", want: false},
+		{name: "opencode zen go", kind: ProviderChat, baseURL: "https://opencode.ai/zen/go/v1", want: false},
 		{name: "one-api", kind: ProviderChat, baseURL: "https://gateway.example.com/v1", want: false},
 		{name: "direct openai", kind: ProviderChat, baseURL: "https://api.openai.com/v1", want: false},
 		// Only the chat kind can be an OpenRouter host.
@@ -32,5 +33,152 @@ func TestIsOpenRouterHost(t *testing.T) {
 				t.Fatalf("IsOpenRouterHost(%q, %q) = %v, want %v", tc.kind, tc.baseURL, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestUsesOpenRouterWire(t *testing.T) {
+	tests := []struct {
+		name    string
+		kind    ProviderKind
+		driver  ProviderDriver
+		baseURL string
+		want    bool
+	}{
+		{
+			name:    "genuine openrouter host",
+			kind:    ProviderChat,
+			driver:  ProviderDriverAuto,
+			baseURL: "https://openrouter.ai/api/v1",
+			want:    true,
+		},
+		{
+			name:    "openrouter driver on openrouter host",
+			kind:    ProviderChat,
+			driver:  ProviderDriverOpenRouter,
+			baseURL: "https://openrouter.ai/api/v1",
+			want:    true,
+		},
+		// Custom providers default to the openrouter driver. That must not
+		// force the OpenRouter wire onto OpenAI-compatible aggregators —
+		// OpenCode Console Go 400s when assistant history is sent as
+		// `reasoning` instead of `reasoning_content`.
+		{
+			name:    "opencode zen go with default openrouter driver",
+			kind:    ProviderChat,
+			driver:  ProviderDriverOpenRouter,
+			baseURL: "https://opencode.ai/zen/go/v1",
+			want:    false,
+		},
+		{
+			name:    "opencode zen with default openrouter driver",
+			kind:    ProviderChat,
+			driver:  ProviderDriverOpenRouter,
+			baseURL: "https://opencode.ai/zen/v1",
+			want:    false,
+		},
+		{
+			name:    "tokenrouter with default openrouter driver",
+			kind:    ProviderChat,
+			driver:  ProviderDriverOpenRouter,
+			baseURL: "https://api.tokenrouter.com/v1",
+			want:    false,
+		},
+		{
+			name:    "custom chat host with default openrouter driver",
+			kind:    ProviderChat,
+			driver:  ProviderDriverOpenRouter,
+			baseURL: "https://example.test/v1",
+			want:    false,
+		},
+		{
+			name:    "openrouter driver still selects openrouter for responses",
+			kind:    ProviderResponses,
+			driver:  ProviderDriverOpenRouter,
+			baseURL: "https://example.test/v1",
+			want:    true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := UsesOpenRouterWire(tc.kind, tc.driver, tc.baseURL)
+			if got != tc.want {
+				t.Fatalf("UsesOpenRouterWire(%q, %q, %q) = %v, want %v",
+					tc.kind, tc.driver, tc.baseURL, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWireCacheDriver(t *testing.T) {
+	tests := []struct {
+		name    string
+		kind    ProviderKind
+		driver  ProviderDriver
+		baseURL string
+		want    ProviderDriver
+	}{
+		{
+			name:    "opencode zen go keeps 5m/1h cache enum",
+			kind:    ProviderChat,
+			driver:  ProviderDriverOpenRouter,
+			baseURL: "https://opencode.ai/zen/go/v1",
+			want:    ProviderDriverOpenRouter,
+		},
+		{
+			name:    "opencode zen keeps 5m/1h cache enum",
+			kind:    ProviderChat,
+			driver:  ProviderDriverOpenRouter,
+			baseURL: "https://opencode.ai/zen/v1",
+			want:    ProviderDriverOpenRouter,
+		},
+		{
+			name:    "openrouter.ai keeps openrouter cache enum",
+			kind:    ProviderChat,
+			driver:  ProviderDriverOpenRouter,
+			baseURL: "https://openrouter.ai/api/v1",
+			want:    ProviderDriverOpenRouter,
+		},
+		{
+			name:    "tokenrouter uses vanilla chat cache enum",
+			kind:    ProviderChat,
+			driver:  ProviderDriverOpenRouter,
+			baseURL: "https://api.tokenrouter.com/v1",
+			want:    ProviderDriverAuto,
+		},
+		{
+			name:    "messages openrouter driver unchanged",
+			kind:    ProviderMessages,
+			driver:  ProviderDriverOpenRouter,
+			baseURL: "https://example.test/v1",
+			want:    ProviderDriverOpenRouter,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := WireCacheDriver(tc.kind, tc.driver, tc.baseURL)
+			if got != tc.want {
+				t.Fatalf("WireCacheDriver(%q, %q, %q) = %q, want %q",
+					tc.kind, tc.driver, tc.baseURL, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsOpenCodeHost(t *testing.T) {
+	tests := []struct {
+		baseURL string
+		want    bool
+	}{
+		{"https://opencode.ai/zen/go/v1", true},
+		{"https://opencode.ai/zen/v1", true},
+		{"https://api.opencode.ai/v1", true},
+		{"https://openrouter.ai/api/v1", false},
+		{"https://api.tokenrouter.com/v1", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := IsOpenCodeHost(tc.baseURL); got != tc.want {
+			t.Fatalf("IsOpenCodeHost(%q) = %v, want %v", tc.baseURL, got, tc.want)
+		}
 	}
 }

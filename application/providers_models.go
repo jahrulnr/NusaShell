@@ -220,10 +220,7 @@ func (a *App) autoImportAllProviders(ctx context.Context) {
 		if !p.Enabled {
 			continue
 		}
-		key, has, _ := a.Credentials.Get(p.ID)
-		if !has && domain.RequiresKey(p.Kind) {
-			continue
-		}
+		key, _, _ := a.Credentials.Get(p.ID)
 		importCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		_, err := a.importModelsForProvider(importCtx, p, key)
 		cancel()

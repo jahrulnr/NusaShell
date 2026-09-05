@@ -503,12 +503,9 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 				Message: fmt.Sprintf("model %q is not available on provider %q", modelID, p.Name),
 			}
 		}
-		key, has, err := a.Credentials.Get(p.ID)
+		key, _, err := a.Credentials.Get(p.ID)
 		if err != nil {
 			return nil, nil, "", rpcInternal(err)
-		}
-		if !has && domain.RequiresKey(p.Kind) {
-			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q has no API key", p.Name)}
 		}
 		m := p.FindModel(modelID)
 		a.applyModelOverrides(p, m)
@@ -518,12 +515,9 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 		if !p.Enabled || !p.HasModel(model) {
 			continue
 		}
-		key, has, err := a.Credentials.Get(p.ID)
+		key, _, err := a.Credentials.Get(p.ID)
 		if err != nil {
 			return nil, nil, "", rpcInternal(err)
-		}
-		if !has && domain.RequiresKey(p.Kind) {
-			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q has no API key", p.Name)}
 		}
 		m := p.FindModel(model)
 		a.applyModelOverrides(p, m)

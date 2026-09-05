@@ -53,24 +53,31 @@ func TestNewFactoryRejectsUnknownKind(t *testing.T) {
 func TestNewFactoryUsesExplicitProviderDrivers(t *testing.T) {
 	f := NewFactory(&stubCreds{})
 	tests := []struct {
-		name   string
-		driver domain.ProviderDriver
-		kind   domain.ProviderKind
-		key    string
-		want   string
+		name    string
+		driver  domain.ProviderDriver
+		kind    domain.ProviderKind
+		key     string
+		baseURL string
+		want    string
 	}{
 		{name: "anthropic messages", driver: domain.ProviderDriverAnthropic, kind: domain.ProviderMessages, key: "key", want: "anthropic"},
 		{name: "openai responses", driver: domain.ProviderDriverOpenAI, kind: domain.ProviderResponses, key: "key", want: "openai"},
-		{name: "openrouter chat", driver: domain.ProviderDriverOpenRouter, kind: domain.ProviderChat, want: "openrouter"},
+		{name: "openrouter chat on custom host uses openai chat wire", driver: domain.ProviderDriverOpenRouter, kind: domain.ProviderChat, want: "openai"},
+		{name: "openrouter chat on openrouter.ai", driver: domain.ProviderDriverOpenRouter, kind: domain.ProviderChat, baseURL: "https://openrouter.ai/api/v1", want: "openrouter"},
+		{name: "opencode zen go with default openrouter driver", driver: domain.ProviderDriverOpenRouter, kind: domain.ProviderChat, baseURL: "https://opencode.ai/zen/go/v1", want: "openai"},
 		{name: "openrouter responses", driver: domain.ProviderDriverOpenRouter, kind: domain.ProviderResponses, key: "key", want: "openrouter"},
 		{name: "openrouter messages", driver: domain.ProviderDriverOpenRouter, kind: domain.ProviderMessages, key: "key", want: "openrouter"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			baseURL := tc.baseURL
+			if baseURL == "" {
+				baseURL = "https://example.test/v1"
+			}
 			provider, err := f(nil, &domain.Provider{
 				Driver:  tc.driver,
 				Kind:    tc.kind,
-				BaseURL: "https://example.test/v1",
+				BaseURL: baseURL,
 			}, tc.key)
 			if err != nil {
 				t.Fatalf("factory returned error: %v", err)

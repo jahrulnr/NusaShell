@@ -46,6 +46,14 @@ func modelCapabilitiesWithLearned(provider *domain.Provider, model string, cache
 		} else {
 			caps.ReasoningReplay = domain.RequiresReasoningReplay(provider.ID, model, "")
 		}
+		// Generated prov_* IDs never match the static "opencode-go"
+		// whitelist. Console Go still requires reasoning_content replay
+		// in thinking mode (glm-5.3-flash has no interleaved catalog
+		// field). Do not force replay onto non-reasoning models on the
+		// same host — unused reasoning_content can 400.
+		if domain.IsOpenCodeHost(provider.BaseURL) && caps.Reasoning {
+			caps.ReasoningReplay = true
+		}
 	}
 	// Apply learned disabled modalities as proactive override. A previous
 	// 400 that taught us "this model is text-only" (or lacks audio/video)

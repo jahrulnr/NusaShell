@@ -346,10 +346,10 @@ type ChatRequest struct {
 	// reasoning_content (Chat Completions) or reasoning items (Responses
 	// API) to be echoed back on every assistant message in subsequent
 	// turns. Resolved from the model's InterleavedField catalog signal
-	// (preferred) or a provider/model pattern fallback, or upgraded at
-	// runtime by the dynamic 400-learning classifier. When false, the
-	// field is omitted — providers that ignore it (OpenAI, Anthropic)
-	// are unaffected.
+	// (preferred), a provider/model pattern fallback, an OpenCode host
+	// (opencode.ai / Console Go), or upgraded at runtime by the 400
+	// classifier. When false, the field is omitted — providers that
+	// ignore it (OpenAI, Anthropic) are unaffected.
 	ReasoningReplay bool
 	// StripParams is the list of request fields the dynamic 400-learning
 	// classifier has marked as unsupported for this provider+model. Each
@@ -381,8 +381,10 @@ type PromptCachePolicy struct {
 	// the provider supports it.
 	Mode string
 	// TTL is the provider cache duration: "5m", "1h", or "30m".
-	// Anthropic and OpenRouter cache_control use 5m/1h; OpenAI Responses
-	// and OpenAI-compatible Chat send 30m as prompt_cache_options.ttl.
+	// Anthropic and genuine OpenRouter hosts use cache_control 5m/1h;
+	// OpenAI Responses and vanilla OpenAI Chat (including OpenCode) send
+	// 30m as prompt_cache_options.ttl. The stored driver is not enough:
+	// custom providers default to openrouter but still speak Chat.
 	TTL string
 	// Key is a stable routing key sent as prompt_cache_key where the selected
 	// wire supports it. NusaShell keeps it at 32 ASCII characters and uses a

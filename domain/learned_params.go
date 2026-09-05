@@ -382,6 +382,13 @@ var unsupportedParamRe = regexp.MustCompile(`(?i)(?:unsupported|unknown)\s+param
 // the isParamStopword guard (below) cover that case.
 var requiredFieldRe = regexp.MustCompile(`(?i)(?:field\s+['"]?)?([A-Za-z_][A-Za-z0-9_]*)(?:['"]?)?\s+(?:must be passed back|is required|is a required field|must be provided)`)
 
+// quotedRequiredFieldRe matches a backticked or quoted identifier that is
+// later described as required / "must be passed back". OpenCode Console Go
+// says: The `reasoning_content` in the thinking mode must be passed back.
+// requiredFieldRe would capture the noun "mode" (the word immediately
+// before "must be passed back"); this pattern captures the quoted field.
+var quotedRequiredFieldRe = regexp.MustCompile("(?i)[`'\"]([A-Za-z_][A-Za-z0-9_]*)[`'\"].{0,80}?(?:must be passed back|is required|is a required field|must be provided)")
+
 // missingFieldRe matches the "missing <field>" family of errors where the
 // required field directly follows the word "missing" (Gemini-style). This is
 // a stronger signal than requiredFieldRe for those bodies because it names
@@ -475,14 +482,18 @@ func ExtractContextLimit(body string) (int, string, bool) {
 //     (Gemini-style "missing a thought_signature"). Checked before the
 //     required-field pattern because it captures the field itself, not the
 //     word that happens to sit before "is required".
-//  2. "required field" pattern — a model explicitly requiring a field like
+//  2. quoted-field + "must be passed back" — OpenCode Console Go wraps the
+//     field in backticks and inserts prose ("in the thinking mode") between
+//     the name and the requirement verb. Checked before the adjacent-word
+//     required-field pattern so "mode" is not captured.
+//  3. "required field" pattern — a model explicitly requiring a field like
 //     reasoning_content. Captured identifiers that are prose stopwords
 //     ("this", "it", ...) are rejected as false positives.
-//  3. "text-only" pattern — the model rejects all non-text content; we
+//  4. "text-only" pattern — the model rejects all non-text content; we
 //     disable the vision modality (most common trigger) and retry.
-//  4. "unsupported parameter" pattern — the model rejects a specific
+//  5. "unsupported parameter" pattern — the model rejects a specific
 //     parameter; we strip it and retry.
-//  5. assistant-prefill / "no user query" patterns — the provider requires
+//  6. assistant-prefill / "no user query" patterns — the provider requires
 //     a user message at the end (or at least one user message); we inject a
 //     minimal user message on retry.
 func Classify400Error(body string) (LearnedParamAction, string) {
@@ -491,6 +502,9 @@ func Classify400Error(body string) (LearnedParamAction, string) {
 		return "", ""
 	}
 	if m := missingFieldRe.FindStringSubmatch(b); len(m) > 1 && !isParamStopword(m[1]) {
+		return LearnedActionInject, strings.ToLower(m[1])
+	}
+	if m := quotedRequiredFieldRe.FindStringSubmatch(b); len(m) > 1 && !isParamStopword(m[1]) {
 		return LearnedActionInject, strings.ToLower(m[1])
 	}
 	if m := requiredFieldRe.FindStringSubmatch(b); len(m) > 1 && !isParamStopword(m[1]) {

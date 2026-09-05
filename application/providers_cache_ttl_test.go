@@ -128,11 +128,11 @@ func TestProviderDTOAdvertisesSendableCacheTTLs(t *testing.T) {
 	app, _, _ := newSeedTestApp()
 	or := &domain.Provider{
 		ID: "openrouter", Driver: domain.ProviderDriverOpenRouter, Kind: domain.ProviderChat,
-		Name: "OpenRouter", Enabled: true,
+		Name: "OpenRouter", Enabled: true, BaseURL: "https://openrouter.ai/api/v1",
 	}
 	dto := app.providerDTO(or)
-	if got := dto.CacheTTLs; len(got) != 2 || got[0] != "5m" || got[1] != "1h" {
-		t.Errorf("openrouter chat cache_ttls = %v, want [5m 1h]", dto.CacheTTLs)
+	if got := dto.CacheTTLs; len(got) != 3 || got[0] != "5m" || got[1] != "1h" || got[2] != domain.CacheTTLOff {
+		t.Errorf("openrouter chat cache_ttls = %v, want [5m 1h off]", dto.CacheTTLs)
 	}
 	if dto.CacheTTL != "5m" {
 		t.Errorf("openrouter default cache_ttl = %q, want 5m", dto.CacheTTL)
@@ -143,10 +143,47 @@ func TestProviderDTOAdvertisesSendableCacheTTLs(t *testing.T) {
 		Name: "OpenAI", Enabled: true,
 	}
 	dto = app.providerDTO(oa)
-	if got := dto.CacheTTLs; len(got) != 1 || got[0] != "30m" {
-		t.Errorf("openai cache_ttls = %v, want [30m]", dto.CacheTTLs)
+	if got := dto.CacheTTLs; len(got) != 2 || got[0] != "30m" || got[1] != domain.CacheTTLOff {
+		t.Errorf("openai cache_ttls = %v, want [30m off]", dto.CacheTTLs)
 	}
 	if dto.CacheTTL != "30m" {
 		t.Errorf("openai default cache_ttl = %q, want 30m", dto.CacheTTL)
+	}
+
+	oc := &domain.Provider{
+		ID: "prov_oc", Driver: domain.ProviderDriverOpenRouter, Kind: domain.ProviderChat,
+		Name: "OpenCode", Enabled: true, BaseURL: "https://opencode.ai/zen/go/v1", CacheTTL: "1h",
+	}
+	dto = app.providerDTO(oc)
+	if got := dto.CacheTTLs; len(got) != 3 || got[0] != "5m" || got[1] != "1h" || got[2] != domain.CacheTTLOff {
+		t.Errorf("opencode cache_ttls = %v, want [5m 1h off]", dto.CacheTTLs)
+	}
+	if dto.CacheTTL != "1h" {
+		t.Errorf("opencode effective cache_ttl = %q, want 1h", dto.CacheTTL)
+	}
+}
+
+func TestHandleProvidersSavePersistsCacheTTLOff(t *testing.T) {
+	app, providers, _ := newSeedTestApp()
+	res, rpcErr := app.handleProvidersSave(contracts.ProviderSaveRequest{
+		Kind:     "messages",
+		Name:     "Anthropic",
+		BaseURL:  "https://api.anthropic.com",
+		Enabled:  true,
+		CacheTTL: strPtr(domain.CacheTTLOff),
+	})
+	if rpcErr != nil {
+		t.Fatalf("save: %+v", rpcErr)
+	}
+	out := res.(contracts.ProvidersListResult)
+	if out.Providers[0].CacheTTL != domain.CacheTTLOff {
+		t.Errorf("dto cache_ttl = %q, want off", out.Providers[0].CacheTTL)
+	}
+	stored, err := providers.Get(out.Providers[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.CacheTTL != domain.CacheTTLOff {
+		t.Errorf("stored cache_ttl = %q, want off", stored.CacheTTL)
 	}
 }

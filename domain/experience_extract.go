@@ -1,11 +1,9 @@
-package application
+package domain
 
 import (
-	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
-	"nusashell/domain"
 	clock "nusashell/pkg/time"
 )
 
@@ -17,23 +15,26 @@ const (
 )
 
 // ExtractExperience builds a cheap structured episode from a finished turn.
-// It never calls an LLM.
-func ExtractExperience(conv *domain.Conversation, headless bool) domain.Experience {
+// It never calls an LLM. Hidden hydration checkpoint tools (call IDs with
+// HydrateToolCallPrefix) are not agent work: they are omitted from Actions,
+// SkillIDs, and ProcedureFingerprint so they cannot look like a repeated
+// procedure.
+func ExtractExperience(conv *Conversation, headless bool) Experience {
 	now := clock.NewTime().Time()
-	exp := domain.Experience{
-		ID:             domain.NewULID(domain.IDPrefixExp),
+	exp := Experience{
+		ID:             NewULID(IDPrefixExp),
 		ConversationID: "",
 		Timestamp:      now,
 		Headless:       headless,
-		Outcome:        domain.ExperienceOutcome{Status: "unknown"},
-		Actions:        []domain.ExperienceAction{},
-		Corrections:    []domain.UserCorrection{},
+		Outcome:        ExperienceOutcome{Status: "unknown"},
+		Actions:        []ExperienceAction{},
+		Corrections:    []UserCorrection{},
 	}
 	if conv == nil {
 		return exp
 	}
 	exp.ConversationID = conv.ID
-	exp.Scope = domain.ExperienceScope{
+	exp.Scope = ExperienceScope{
 		Workspace: conv.Workspace,
 		Project:   workspaceProject(conv.Workspace),
 	}
@@ -44,13 +45,13 @@ func ExtractExperience(conv *domain.Conversation, headless bool) domain.Experien
 	skillIDs := []string{}
 	for _, msg := range conv.Messages {
 		switch msg.Role {
-		case domain.RoleUser:
+		case RoleUser:
 			text := strings.TrimSpace(msg.Content)
 			if text == "" {
 				continue
 			}
 			if msg.Steer {
-				exp.Corrections = append(exp.Corrections, domain.UserCorrection{
+				exp.Corrections = append(exp.Corrections, UserCorrection{
 					Type:     "approach",
 					UserSaid: clip(text, maxCorrectionChars),
 					Explicit: true,
@@ -59,21 +60,27 @@ func ExtractExperience(conv *domain.Conversation, headless bool) domain.Experien
 			if !msg.Steer {
 				lastUser = text
 			}
-		case domain.RoleAssistant:
+		case RoleAssistant:
+			if IsHydrationMessage(msg) {
+				continue
+			}
 			if strings.TrimSpace(msg.Content) != "" {
 				lastAssistant = msg.Content
 			}
-			if msg.Status == domain.StatusError {
+			if msg.Status == StatusError {
 				exp.Outcome.Status = "fail"
 			}
 			for _, tc := range msg.ToolCalls {
+				if IsHydrationCallID(tc.ID) {
+					continue
+				}
 				if len(exp.Actions) >= maxActionSteps {
 					break
 				}
-				act := domain.ExperienceAction{
+				act := ExperienceAction{
 					Name:   tc.Name,
 					Digest: clip(tc.Args, maxDigestChars),
-					Failed: tc.Status == domain.ToolFailed,
+					Failed: tc.Status == ToolFailed,
 				}
 				exp.Actions = append(exp.Actions, act)
 				if act.Failed {
@@ -92,7 +99,7 @@ func ExtractExperience(conv *domain.Conversation, headless bool) domain.Experien
 	exp.Signals.UserCorrections = len(exp.Corrections)
 	exp.Signals.FailedActions = failed
 	exp.Signals.FailureSignature = failSig
-	exp.Signals.ProcedureFingerprint = domain.ProcedureFingerprint(exp.Actions)
+	exp.Signals.ProcedureFingerprint = ProcedureFingerprint(exp.Actions)
 	exp.Signals.SkillIDs = skillIDs
 	exp.Signals.Retries = failed
 	if exp.Outcome.Status != "fail" {
@@ -112,10 +119,14 @@ func ExtractExperience(conv *domain.Conversation, headless bool) domain.Experien
 
 func workspaceProject(workspace string) string {
 	workspace = strings.TrimSpace(workspace)
+	workspace = strings.TrimRight(workspace, `/\`)
 	if workspace == "" {
 		return ""
 	}
-	return filepath.Base(workspace)
+	if i := strings.LastIndexAny(workspace, `/\`); i >= 0 {
+		return workspace[i+1:]
+	}
+	return workspace
 }
 
 func clip(s string, max int) string {

@@ -88,6 +88,36 @@ func TestResolveModelQualified(t *testing.T) {
 	}
 }
 
+func TestResolveModelAllowsMissingAPIKey(t *testing.T) {
+	model := domain.Model{ID: "local-model"}
+	providers := &fakeProviderStore{items: map[string]*domain.Provider{
+		"opencode": {
+			ID: "opencode", Name: "OpenCode", Enabled: true,
+			Kind: domain.ProviderMessages, Driver: domain.ProviderDriverOpenRouter,
+			BaseURL: "http://127.0.0.1:4096", Models: []domain.Model{model},
+		},
+		"local-responses": {
+			ID: "local-responses", Name: "Local Responses", Enabled: true,
+			Kind: domain.ProviderResponses, Driver: domain.ProviderDriverOpenRouter,
+			BaseURL: "http://127.0.0.1:8080/v1", Models: []domain.Model{model},
+		},
+	}}
+	app := &App{Providers: providers, Credentials: &fakeCreds{keys: map[string]string{}}}
+
+	for _, id := range []string{"opencode:local-model", "local-responses:local-model"} {
+		p, _, key, err := app.resolveModelWithMeta(id)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", id, err)
+		}
+		if p == nil {
+			t.Fatalf("%s: expected provider", id)
+		}
+		if key != "" {
+			t.Errorf("%s: key = %q, want empty", id, key)
+		}
+	}
+}
+
 func TestResolveModelQualifiedNotFound(t *testing.T) {
 	providers := &fakeProviderStore{items: map[string]*domain.Provider{
 		"openrouter": {ID: "openrouter", Enabled: true, Kind: domain.ProviderChat, Models: []domain.Model{{ID: "gpt-4o"}}},

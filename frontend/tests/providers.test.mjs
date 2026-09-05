@@ -45,11 +45,13 @@ test('provider registry preserves custom providers and selected API kinds', () =
 });
 
 test('cache TTL chips use sendable values and keep a selected default', () => {
-  assert.deepEqual(cacheTTLsFor({ kind: 'messages', driver: 'anthropic' }), ['5m', '1h']);
-  assert.deepEqual(cacheTTLsFor({ kind: 'responses', driver: 'openai' }), ['30m']);
-  assert.deepEqual(cacheTTLsFor({ kind: 'chat', driver: 'openrouter' }), ['5m', '1h']);
-  assert.deepEqual(cacheTTLsFor({ kind: 'chat', driver: 'openai' }), ['30m']);
+  assert.deepEqual(cacheTTLsFor({ kind: 'messages', driver: 'anthropic' }), ['5m', '1h', 'off']);
+  assert.deepEqual(cacheTTLsFor({ kind: 'responses', driver: 'openai' }), ['30m', 'off']);
+  assert.deepEqual(cacheTTLsFor({ kind: 'chat', driver: 'openrouter' }), ['5m', '1h', 'off']);
+  assert.deepEqual(cacheTTLsFor({ kind: 'chat', driver: 'openai' }), ['30m', 'off']);
+  assert.deepEqual(cacheTTLsFor({ kind: 'messages', cache_ttls: ['5m', '1h'] }), ['5m', '1h', 'off']);
   assert.equal(effectiveCacheTTL({ kind: 'messages', driver: 'anthropic' }), '5m');
   assert.equal(effectiveCacheTTL({ kind: 'messages', driver: 'anthropic', cache_ttl: '1h' }), '1h');
+  assert.equal(effectiveCacheTTL({ kind: 'messages', driver: 'anthropic', cache_ttl: 'off' }), 'off');
   assert.equal(effectiveCacheTTL({ kind: 'responses', driver: 'openai' }), '30m');
 });

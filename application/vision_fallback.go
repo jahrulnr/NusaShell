@@ -76,10 +76,7 @@ func (a *App) resolveVisionProvider(providerID string) (*domain.Provider, string
 func (a *App) resolveFallbackProvider(providerID string) (*domain.Provider, string, bool) {
 	for _, p := range a.Providers.List() {
 		if p.ID == providerID && p.Enabled {
-			key, has, _ := a.Credentials.Get(p.ID)
-			if !has && domain.RequiresKey(p.Kind) {
-				return nil, "", false
-			}
+			key, _, _ := a.Credentials.Get(p.ID)
 			return p, key, true
 		}
 	}

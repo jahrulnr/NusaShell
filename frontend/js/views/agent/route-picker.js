@@ -2,7 +2,8 @@
 // model on aggregator gateways (OpenRouter). Always visible next to the
 // model picker; the icon communicates capability:
 //   - router icon + clickable menu = multi-provider model, "Auto" default
-//   - home icon + dashed border = single upstream, non-interactive
+//   - home icon + dashed border = no listed upstreams, non-interactive
+//     ("No provider in this model" when route_support is true)
 // The list is fetched on model selection (RPC ai.models.endpoints),
 // cached per (provider, model) in this session, and pinned routes are
 // stored by the caller in state + localStorage.
@@ -14,6 +15,19 @@ const ICONS = {
   home: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 9.5V20a1 1 0 0 0 1 1h3.5v-5.5a2 2 0 0 1 4 0V21h3.5a1 1 0 0 0 1-1V9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   spinner: '<svg class="agent-route-spin" viewBox="0 0 24 24" width="13" height="13" fill="none" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 };
+
+const NO_PROVIDER_COPY = 'No provider in this model';
+
+function isHTTPFailureMessage(message) {
+  const text = String(message ?? '');
+  return /HTTP [45]\d\d/.test(text) || /<!DOCTYPE|<html[\s>]/i.test(text);
+}
+
+function emptyRouteCopy(error) {
+  if (!error || isHTTPFailureMessage(error)) return NO_PROVIDER_COPY;
+  const text = String(error);
+  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
+}
 
 function positionMenu(menu, trigger) {
   const rect = trigger.getBoundingClientRect();
@@ -127,10 +141,16 @@ export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute,
         state.loading = false;
         state.error = null;
       } catch (error) {
-        console.warn('route picker:', error);
+        const message = (error && error.message) || 'fetch failed';
         state.loading = false;
         state.routes = [];
-        state.error = (error && error.message) || 'fetch failed';
+        if (isHTTPFailureMessage(message)) {
+          state.error = null;
+          sessionCache.set(key, []);
+        } else {
+          console.warn('route picker:', error);
+          state.error = message;
+        }
       }
     }
     const routes = state.routes || [];
@@ -141,7 +161,7 @@ export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute,
     } else {
       setIcon('home');
       trigger.classList.add('is-single');
-      trigger.title = state.error ? `Gagal memuat daftar provider: ${state.error}` : 'Provider tunggal — diatur oleh gateway';
+      trigger.title = emptyRouteCopy(state.error);
     }
   }
 
@@ -150,9 +170,7 @@ export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute,
     const routes = state.routes || [];
     const route = getSelectedRoute() || '';
     if (!routes.length) {
-      menu.append(el('div', { class: 'agent-model-empty', text: state.error
-        ? `Gagal memuat daftar provider: ${state.error}`
-        : 'Auto — gateway mengelola pemilihan provider.' }));
+      menu.append(el('div', { class: 'agent-model-empty', text: emptyRouteCopy(state.error) }));
       return;
     }
     const list = el('div', { class: 'agent-model-list' });
@@ -221,8 +239,8 @@ export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute,
       noResults.hidden = !search.value.trim() || visibleCount > 0;
     }, 120));
     menu.append(searchBar, list, noResults);
-    if (state.error) {
-      menu.append(el('div', { class: 'agent-route-note', text: `Fetch gagal — menampilkan cache lama. ${state.error}` }));
+    if (state.error && !isHTTPFailureMessage(state.error)) {
+      menu.append(el('div', { class: 'agent-route-note', text: `Fetch gagal — menampilkan cache lama. ${emptyRouteCopy(state.error)}` }));
     }
   };
 

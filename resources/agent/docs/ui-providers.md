@@ -1,6 +1,6 @@
 # Providers
 
-Configure persistent Anthropic, OpenAI, and OpenRouter cards, add unlimited custom OpenRouter-compatible providers by wire format (Messages, Responses, Chat), and manage spawn-only ACP subagent binaries. Chat API keys live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.
+Configure persistent Anthropic, OpenAI, and OpenRouter cards, add unlimited custom OpenRouter-compatible providers by wire format (Messages, Responses, Chat), and manage spawn-only ACP subagent binaries. Provider API keys are optional and live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.
 
 **How to open:** Click the Providers item in the left sidebar.
 
@@ -24,7 +24,7 @@ View title plus Add custom provider (unlimited OpenRouter-compatible gateways) a
 
 ## Chat providers
 
-The registry always shows persistent Anthropic, OpenAI, and OpenRouter cards, even before configuration. Anthropic uses the Anthropic Messages driver; OpenAI uses the OpenAI Responses driver; OpenRouter and custom providers use the OpenRouter driver. OpenRouter and custom forms expose Messages, Responses, and Chat API kinds. Selecting a card opens the detail pane for editing its base URL, API key, enabled state, prompt-cache TTL, importing models, and testing connectivity. These models appear in the Agent composer.
+The registry always shows persistent Anthropic, OpenAI, and OpenRouter cards, even before configuration. Anthropic uses the Anthropic Messages driver; OpenAI uses the OpenAI Responses driver; OpenRouter and custom providers use the OpenRouter driver. OpenRouter and custom forms expose Messages, Responses, and Chat API kinds. Selecting a card opens the detail pane for editing its base URL, optional API key, enabled state, prompt-cache TTL, importing models, and testing connectivity. These models appear in the Agent composer.
 
 - **Chat providers section** (`#provider-llm-section`):
   - Section: Providers
@@ -43,8 +43,8 @@ The registry always shows persistent Anthropic, OpenAI, and OpenRouter cards, ev
 - **Prompt cache TTL** (`.provider-cache-ttl-chip`):
   - Section: Providers
   - Type: chip-group
-  - Action: Selects the prompt-cache duration sent to this provider when Settings prompt caching is on. Messages and OpenRouter chat offer 5m/1h; Responses and other Chat hosts offer 30m.
-  - Notes: Buttons inside the provider detail pane (class provider-cache-ttl-chip). The registry card shows the selected value only.
+  - Action: Selects the prompt-cache duration sent to this provider when Settings prompt caching is on, or off to skip caching for this provider. Messages and OpenRouter chat offer 5m/1h/off; Responses and other Chat hosts offer 30m/off.
+  - Notes: Buttons inside the provider detail pane (class provider-cache-ttl-chip). The last chip is off. Empty stored TTL still defaults to the first duration. The registry card shows the selected value only.
 
 ## ACP subagents
 

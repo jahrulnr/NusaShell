@@ -180,12 +180,9 @@ func (a *App) resolveHeadlessModel(modelID string) (*domain.Provider, string, st
 		if !p.Enabled || len(p.Models) == 0 {
 			continue
 		}
-		key, has, err := a.Credentials.Get(p.ID)
+		key, _, err := a.Credentials.Get(p.ID)
 		if err != nil {
 			return nil, "", "", fmt.Errorf("read credential for %s: %w", p.Name, err)
-		}
-		if !has && domain.RequiresKey(p.Kind) {
-			continue
 		}
 		m := &p.Models[0]
 		a.applyModelOverrides(p, m)

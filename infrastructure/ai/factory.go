@@ -19,16 +19,16 @@ import (
 
 // NewFactory returns a ProviderFactory closure that builds the single
 // provider Adapter for a stored provider config. For chat-kind providers:
-//   - Genuine OpenRouter hosts (openrouter.ai) or an explicit
-//     ProviderDriverOpenRouter use the OpenRouter adapter (OpenRouter wire
-//     format: reasoning object, reasoning_details, cache_retention,
+//   - Genuine OpenRouter hosts (openrouter.ai) use the OpenRouter adapter
+//     (OpenRouter wire: reasoning object, reasoning_details, cache_retention,
 //     provider routing, attribution headers).
 //   - Every other chat-kind host (direct OpenAI, OpenAI-compatible
 //     aggregators like TokenRouter/9Router/OpenCode, local endpoints) uses
-//     the vanilla OpenAI Chat adapter. Aggregators implement the OpenAI
-//     wire and reject OpenRouter-specific params — e.g. TokenRouter returns
-//     HTTP 400 "Unknown parameter: 'reasoning'" for the OpenRouter
-//     reasoning object — so they must NOT receive the OpenRouter format.
+//     the vanilla OpenAI Chat adapter, even when the stored driver is
+//     openrouter (the custom-provider default). Aggregators implement the
+//     OpenAI wire and reject OpenRouter-specific params — OpenCode Console
+//     Go 400s without `reasoning_content`; TokenRouter 400s on the
+//     OpenRouter `reasoning` object.
 func NewFactory(_ application.CredentialStore) application.ProviderFactory {
 	return func(ctx context.Context, p *domain.Provider, apiKey string) (core.Provider, error) {
 		if !domain.ValidKind(p.Kind) {
@@ -39,7 +39,7 @@ func NewFactory(_ application.CredentialStore) application.ProviderFactory {
 		return &Adapter{
 			ProviderKind: p.Kind,
 			Driver:       driver,
-			OpenRouter:   driver == domain.ProviderDriverOpenRouter || domain.IsOpenRouterHost(p.Kind, p.BaseURL),
+			OpenRouter:   domain.UsesOpenRouterWire(p.Kind, driver, p.BaseURL),
 			BaseURL:      p.BaseURL,
 			APIKey:       apiKey,
 			Client:       client,

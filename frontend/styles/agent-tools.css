@@ -20,6 +20,7 @@
 }
 .agent-tool-card[data-tool] .agent-tool-request {
   border-inline-start: 2px solid var(--agent-tool-accent-border);
+  padding-left: 4px;
 }
 .agent-tool-card[data-tool] .agent-tool-result {
   min-width: 0;

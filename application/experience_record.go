@@ -10,7 +10,7 @@ func (a *App) recordExperience(conv *domain.Conversation, headless bool) {
 	if a == nil || a.Experiences == nil || conv == nil {
 		return
 	}
-	exp := ExtractExperience(conv, headless)
+	exp := domain.ExtractExperience(conv, headless)
 	if err := a.Experiences.Save(&exp); err != nil {
 		a.log("warn", "learning", "experience save failed: %v", err)
 		return

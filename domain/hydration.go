@@ -4,7 +4,9 @@ package domain
 // runtime-hydration synthetic transcript. Tool calls with this prefix are
 // precomputed snapshots (runtime_context, AGENTS.md via file_read, memory,
 // skill, mcp_list, tool_list), never real gateway executions. They are
-// filtered from compaction summaries and UI rendering.
+// filtered from compaction summaries, UI rendering, and experience
+// extraction (they are not agent work and must not form a procedure
+// fingerprint).
 //
 // The prefix uses only characters allowed by strict provider ID patterns
 // (e.g. Bedrock requires ^[a-zA-Z0-9_-]+$). The previous "hydrate:" prefix

@@ -155,7 +155,7 @@ How agents treat MCP plugin usage contracts. Install and enable plugins on the P
 
 ## Context compaction
 
-Toggle compaction, set max input tokens (fallback context window, default 200000), compaction threshold and summary quality knobs, pick an optional compaction model, and enable provider prompt caching. Cache TTL is chosen per provider on the Providers detail pane. Completion limits and sampling are under Agent runtime.
+Toggle compaction, set max input tokens (fallback context window, default 200000), compaction threshold and summary quality knobs, pick an optional compaction model, and enable provider prompt caching. Cache TTL (including off) is chosen per provider on the Providers detail pane. Completion limits and sampling are under Agent runtime.
 
 - **Context compaction title** (`#settings-context-title`):
   - Section: Settings
@@ -193,7 +193,7 @@ Toggle compaction, set max input tokens (fallback context window, default 200000
 - **Prompt caching** (`#settings-prompt-caching`):
   - Section: Settings
   - Type: checkbox
-  - Notes: Master switch for provider-side prompt caching. The cache duration is selected per provider (Cache TTL chips on the Providers detail pane).
+  - Notes: Master switch for provider-side prompt caching. Per-provider Cache TTL chips on the Providers detail pane pick the duration or off.
 
 ## Learning
 

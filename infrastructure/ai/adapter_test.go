@@ -215,6 +215,23 @@ func TestAdapterChatNoKeyOptional(t *testing.T) {
 	}
 }
 
+func TestAdapterAllKindsNoKeyOptional(t *testing.T) {
+	base := "http://127.0.0.1:4096"
+	cases := []Adapter{
+		{ProviderKind: domain.ProviderMessages, Driver: domain.ProviderDriverOpenRouter, BaseURL: base},
+		{ProviderKind: domain.ProviderResponses, Driver: domain.ProviderDriverOpenRouter, BaseURL: base + "/v1"},
+		{ProviderKind: domain.ProviderChat, Driver: domain.ProviderDriverOpenRouter, BaseURL: base + "/v1"},
+		{ProviderKind: domain.ProviderMessages, Driver: domain.ProviderDriverAnthropic, BaseURL: base},
+		{ProviderKind: domain.ProviderResponses, Driver: domain.ProviderDriverOpenAI, BaseURL: base + "/v1"},
+		{ProviderKind: domain.ProviderChat, OpenRouter: false, BaseURL: base + "/v1"},
+	}
+	for _, a := range cases {
+		if _, err := a.providerFor(); err != nil {
+			t.Errorf("kind=%s driver=%q: providerFor without key: %v", a.ProviderKind, a.Driver, err)
+		}
+	}
+}
+
 func TestAdapterRouting(t *testing.T) {
 	// Genuine OpenRouter host → OpenRouter adapter (wire: reasoning object).
 	a := &Adapter{ProviderKind: domain.ProviderChat, OpenRouter: true, BaseURL: "https://openrouter.ai/api/v1", APIKey: "k"}
@@ -239,6 +256,26 @@ func TestAdapterRouting(t *testing.T) {
 		t.Fatalf("tokenrouter adapter name = %q, want openai", p.Name())
 	}
 
+	// Custom providers default to Driver=openrouter. When the factory has
+	// already decided OpenRouter=false (OpenCode / TokenRouter host),
+	// providerFor must still build the vanilla Chat adapter — the Driver
+	// switch used to take openrouter.NewForAPI first and send `reasoning`
+	// instead of `reasoning_content`.
+	a = &Adapter{
+		ProviderKind: domain.ProviderChat,
+		Driver:       domain.ProviderDriverOpenRouter,
+		OpenRouter:   false,
+		BaseURL:      "https://opencode.ai/zen/go/v1",
+		APIKey:       "k",
+	}
+	p, err = a.providerFor()
+	if err != nil {
+		t.Fatalf("opencode providerFor: %v", err)
+	}
+	if p.Name() != "openai" {
+		t.Fatalf("opencode+openrouter-driver adapter name = %q, want openai", p.Name())
+	}
+
 	// Chat-kind with api.openai.com stays on the vanilla OpenAI chat adapter.
 	a = &Adapter{ProviderKind: domain.ProviderChat, OpenRouter: false, BaseURL: "https://api.openai.com/v1", APIKey: "k"}
 	p, err = a.providerFor()
@@ -247,6 +284,65 @@ func TestAdapterRouting(t *testing.T) {
 	}
 	if p.Name() != "openai" {
 		t.Fatalf("openai direct adapter name = %q, want openai", p.Name())
+	}
+}
+
+func TestOpenCodeSessionHeaders(t *testing.T) {
+	h := http.Header{}
+	openCodeSessionHeaders(h, nil)
+	if got := h.Get(openCodeSessionHeader); got != "" {
+		t.Fatalf("nil opts header = %q, want empty", got)
+	}
+	openCodeSessionHeaders(h, core.ProviderOptions{"prompt_cache_key": "nusashell_cv_abc"})
+	if got := h.Get(openCodeSessionHeader); got != "nusashell_cv_abc" {
+		t.Fatalf("prompt_cache_key header = %q", got)
+	}
+	h = http.Header{}
+	openCodeSessionHeaders(h, core.ProviderOptions{"session_id": "sess-1"})
+	if got := h.Get(openCodeSessionHeader); got != "sess-1" {
+		t.Fatalf("session_id header = %q", got)
+	}
+}
+
+func TestAdapterOpenCodeChatSendsSessionHeader(t *testing.T) {
+	var gotSession string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSession = r.Header.Get(openCodeSessionHeader)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"model":"deepseek-v4-flash","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+
+	a := &Adapter{
+		ProviderKind: domain.ProviderChat,
+		Driver:       domain.ProviderDriverOpenRouter,
+		OpenRouter:   false,
+		BaseURL:      "https://opencode.ai/zen/go/v1",
+		APIKey:       "k",
+		Client:       srv.Client(),
+	}
+	// Point the Chat adapter at the test server while keeping an OpenCode
+	// BaseURL so requestHeaders still attaches x-opencode-session.
+	p, err := openai.New(openai.Config{
+		API:            openai.APIChat,
+		APIKey:         "k",
+		BaseURL:        srv.URL + "/v1",
+		HTTPClient:     srv.Client(),
+		RequestHeaders: a.requestHeaders(),
+	})
+	if err != nil {
+		t.Fatalf("openai.New: %v", err)
+	}
+	_, err = p.Chat(context.Background(), &core.Request{
+		Model:           "deepseek-v4-flash",
+		Messages:        []core.Message{core.UserText("hi")},
+		ProviderOptions: core.ProviderOptions{"prompt_cache_key": "nusashell_cv_opencode"},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if gotSession != "nusashell_cv_opencode" {
+		t.Fatalf("x-opencode-session = %q, want nusashell_cv_opencode", gotSession)
 	}
 }
 
@@ -444,5 +540,47 @@ func TestAdapterListModelEndpoints(t *testing.T) {
 	}
 	if len(routes) != 0 {
 		t.Fatalf("direct routes = %+v, want empty", routes)
+	}
+
+	// Custom providers default to Driver=openrouter. Without a genuine
+	// OpenRouter host (OpenRouter=false) that must not hit /endpoints.
+	tagged := &Adapter{
+		ProviderKind: domain.ProviderChat,
+		Driver:       domain.ProviderDriverOpenRouter,
+		OpenRouter:   false,
+		BaseURL:      srv.URL,
+		Client:       srv.Client(),
+	}
+	routes, err = tagged.ListModelEndpoints(context.Background(), "x")
+	if err != nil {
+		t.Fatalf("tagged ListModelEndpoints: %v", err)
+	}
+	if len(routes) != 0 {
+		t.Fatalf("tagged routes = %+v, want empty", routes)
+	}
+}
+
+func TestAdapterListModelEndpointsHTTP4xxReturnsEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><title>Not Found | opencode</title></html>`))
+	}))
+	defer srv.Close()
+
+	ad := &Adapter{
+		ProviderKind: domain.ProviderChat,
+		Driver:       domain.ProviderDriverOpenRouter,
+		BaseURL:      srv.URL,
+		APIKey:       "k",
+		Client:       srv.Client(),
+		OpenRouter:   true,
+	}
+	routes, err := ad.ListModelEndpoints(context.Background(), "big-pickle")
+	if err != nil {
+		t.Fatalf("4xx ListModelEndpoints: %v", err)
+	}
+	if len(routes) != 0 {
+		t.Fatalf("4xx routes = %+v, want empty", routes)
 	}
 }

@@ -67,3 +67,66 @@ test('route menu offers provider search and renders per-provider pricing', async
     cleanup(dom);
   }
 });
+
+test('route-support with an empty list titles No provider in this model', async () => {
+  const dom = makeDom();
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ ok: true, result: { routes: [] } }) });
+  try {
+    const picker = bindRoutePicker({
+      getModels: () => [{ provider_id: 'opencode', id: 'big-pickle', route_support: true }],
+      getSelectedModel: () => 'opencode:big-pickle',
+      getSelectedRoute: () => '',
+      selectRoute: () => {},
+    });
+    await picker.refresh();
+    const trigger = document.getElementById('route-trigger');
+    assert.equal(trigger.title, 'No provider in this model');
+    assert.equal(trigger.classList.contains('is-single'), true);
+    trigger.click();
+    assert.equal(document.getElementById('route-menu').hidden, true);
+  } finally {
+    cleanup(dom);
+  }
+});
+
+test('HTTP 404 HTML from endpoints is not dumped into the trigger title', async () => {
+  const dom = makeDom();
+  const html = '<!DOCTYPE html><html><title>Not Found | opencode</title></html>';
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      ok: false,
+      error: { code: 'PROVIDER_ERROR', message: `provider returned HTTP 404: ${html}` },
+    }),
+  });
+  try {
+    const picker = bindRoutePicker({
+      getModels: () => [{ provider_id: 'opencode', id: 'deepseek-v4-flash', route_support: true }],
+      getSelectedModel: () => 'opencode:deepseek-v4-flash',
+      getSelectedRoute: () => '',
+      selectRoute: () => {},
+    });
+    await picker.refresh();
+    const title = document.getElementById('route-trigger').title;
+    assert.equal(title, 'No provider in this model');
+    assert.doesNotMatch(title, /<!DOCTYPE|<html|Gagal memuat/i);
+  } finally {
+    cleanup(dom);
+  }
+});
+
+test('models without route support keep the single-gateway title', async () => {
+  const dom = makeDom();
+  try {
+    const picker = bindRoutePicker({
+      getModels: () => [{ provider_id: 'openai', id: 'gpt-5', route_support: false }],
+      getSelectedModel: () => 'openai:gpt-5',
+      getSelectedRoute: () => '',
+      selectRoute: () => {},
+    });
+    await picker.refresh();
+    assert.equal(document.getElementById('route-trigger').title, 'Provider tunggal — diatur oleh gateway');
+  } finally {
+    cleanup(dom);
+  }
+});

@@ -40,10 +40,9 @@ type Config struct {
 	RequestHeaders func(http.Header, core.ProviderOptions)
 
 	// APIKeyOptional allows construction and request sending without an API
-	// key. Used by chat-kind providers on local/OpenAI-compatible endpoints
-	// that need no auth (LM Studio, Ollama, vLLM, OpenCode/Zen free tier).
-	// When false (default) an empty key is rejected, preserving the strict
-	// behavior required by the official OpenAI endpoints.
+	// key. Used by hosts that need no auth (LM Studio, Ollama, vLLM,
+	// OpenCode, local gateways). When false (default) an empty key is
+	// rejected.
 	APIKeyOptional bool
 
 	// PromptCacheParams declares that a compatible endpoint accepts OpenAI's

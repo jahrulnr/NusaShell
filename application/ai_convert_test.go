@@ -377,6 +377,68 @@ func TestToCoreRequestMessagesCacheControlUsesTTL(t *testing.T) {
 	}
 }
 
+// TestToCoreRequestVanillaChatNeverPutsTTLOnSystemBreakpoint is the
+// OpenCode Console Go failure: after host detection routes chat to the
+// OpenAI adapter, a 5m/1h TTL leftover from the openrouter driver must
+// not land on messages[0] as cache_control (the Chat adapter errors
+// "cache breakpoint TTL must be set with prompt_cache_options.ttl").
+func TestToCoreRequestVanillaChatNeverPutsTTLOnSystemBreakpoint(t *testing.T) {
+	req := ChatRequest{
+		Model:         "deepseek-v4-flash",
+		System:        "you are helpful",
+		PromptCaching: true,
+		PromptCache:   &PromptCachePolicy{Mode: "auto", TTL: "1h", Key: "pc_oc"},
+	}
+	cr := ToCoreRequest(req, domain.ProviderChat, false)
+	tb, ok := cr.Messages[0].Blocks[0].(core.TextBlock)
+	if !ok {
+		t.Fatalf("system block = %#v", cr.Messages[0].Blocks)
+	}
+	if tb.Cache != nil {
+		t.Fatalf("vanilla chat system cache = %#v, want nil (OpenCode Chat has no cache_control breakpoint)", tb.Cache)
+	}
+	if cr.ProviderOptions["prompt_cache_options"] != nil {
+		t.Fatalf("vanilla chat must not send prompt_cache_options for 1h TTL (Console Go only accepts 5m|1h on cache_control, OpenAI Chat only accepts 30m): %#v", cr.ProviderOptions["prompt_cache_options"])
+	}
+	if got := cr.ProviderOptions["prompt_cache_key"]; got != "pc_oc" {
+		t.Fatalf("prompt_cache_key = %#v, want pc_oc", got)
+	}
+}
+
+func TestNewProviderContextOpenCodeIsNotOpenRouter(t *testing.T) {
+	p := &domain.Provider{
+		ID:      "prov_b9587aa5f937c4f2",
+		Driver:  domain.ProviderDriverOpenRouter,
+		Kind:    domain.ProviderChat,
+		BaseURL: "https://opencode.ai/zen/go/v1",
+	}
+	pc := NewProviderContext(p, nil)
+	if pc.OpenRouter {
+		t.Fatal("OpenCode zen/go must not convert requests as OpenRouter wire")
+	}
+	if pc.Driver != domain.ProviderDriverOpenRouter {
+		t.Fatalf("Driver = %q, want stored openrouter (cache TTL enum), OpenRouter=%v", pc.Driver, pc.OpenRouter)
+	}
+	if pc.BaseURL != p.BaseURL {
+		t.Fatalf("BaseURL = %q, want %q", pc.BaseURL, p.BaseURL)
+	}
+}
+
+func TestBuildPromptCachePolicyForContextOpenCodeIgnoresOpenRouterFlag(t *testing.T) {
+	settings := domain.Settings{PromptCaching: true}
+	adapter := ProviderContext{
+		ProviderID: "prov_oc",
+		Kind:       domain.ProviderChat,
+		Driver:     domain.ProviderDriverOpenRouter,
+		OpenRouter: false,
+		BaseURL:    "https://opencode.ai/zen/go/v1",
+	}
+	policy := buildPromptCachePolicyForContext(settings, adapter, "deepseek-v4-flash", "conv_abc", promptCacheConversationPrefix)
+	if policy == nil || policy.TTL != "5m" {
+		t.Fatalf("opencode context TTL = %+v, want 5m (5m/1h enum, not 30m)", policy)
+	}
+}
+
 func TestToCoreRequestResponsesSendsPromptCacheOptions(t *testing.T) {
 	req := ChatRequest{
 		Model:          "gpt-5",

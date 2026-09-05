@@ -7,6 +7,7 @@ package resources
 import (
 	"embed"
 	"io/fs"
+	"strconv"
 	"strings"
 )
 
@@ -123,7 +124,13 @@ func UserPrompt(name string) string {
 }
 
 const (
-	compactedSummaries = "{{compacted_summaries}}"
+	compactedSummaries      = "{{compacted_summaries}}"
+	learnerTriggerReason    = "{{trigger_reason}}"
+	learnerProcedureCount   = "{{procedure_count}}"
+	learnerConversationID   = "{{conversation_id}}"
+	learnerConversationFile = "{{conversation_file}}"
+	learnerMessageStart     = "{{message_start}}"
+	learnerMessageEnd       = "{{message_end}}"
 )
 
 func AudioVisionSystemPrompt() string {
@@ -157,9 +164,22 @@ func TranscribeAudioPrompt() string {
 	return UserPrompt("transcribe-audio")
 }
 
-// LearnerUserPrompt loads the short learner user-role instruction.
+// LearnerUserPrompt loads the learner user-role template with unsubstituted
+// {{placeholders}}. Prefer RenderLearnerUserPrompt when sending a turn.
 func LearnerUserPrompt() string {
 	return UserPrompt("learner")
+}
+
+// RenderLearnerUserPrompt fills user/learner.md placeholders for one learning turn.
+func RenderLearnerUserPrompt(triggerReason string, procedureCount int, conversationID, conversationFile string, messageStart, messageEnd int) string {
+	return strings.NewReplacer(
+		learnerTriggerReason, triggerReason,
+		learnerProcedureCount, strconv.Itoa(procedureCount),
+		learnerConversationID, conversationID,
+		learnerConversationFile, conversationFile,
+		learnerMessageStart, strconv.Itoa(messageStart),
+		learnerMessageEnd, strconv.Itoa(messageEnd),
+	).Replace(UserPrompt("learner"))
 }
 
 // ConsolidatorPrompt is a legacy alias for LearnerPrompt.

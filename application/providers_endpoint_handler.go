@@ -13,8 +13,10 @@ import (
 // model on its gateway. Cache-first (TTL 24h, keyed per provider+model);
 // on a miss it fetches from the gateway. Gateways without a route
 // concept (non-OpenRouter) return an empty list immediately so the
-// frontend shows the non-interactive home icon. A fetch error is
-// surfaced so the UI can hint at account-level blocking.
+// frontend shows the non-interactive home icon. HTTP 4xx/5xx from the
+// listing call are skipped as an empty list (HTML 404 bodies from hosts
+// that lack this API must not reach the UI); only non-HTTP fetch errors
+// surface as CodeProvider.
 func (a *App) handleModelEndpoints(req contracts.ModelEndpointsRequest) (any, *contracts.RPCError) {
 	providerID := strings.TrimSpace(req.ProviderID)
 	modelID := strings.TrimSpace(req.ModelID)
@@ -54,6 +56,12 @@ func (a *App) handleModelEndpoints(req contracts.ModelEndpointsRequest) (any, *c
 	defer cancel()
 	routes, err := lister.ListModelEndpoints(ctx, m.EndpointsSlug())
 	if err != nil {
+		if code := domain.HTTPStatusCode(err); code >= 400 && code <= 599 {
+			if code < 500 {
+				cache.set(providerID, modelID, nil)
+			}
+			return toEndpointsResult(nil, false, time.Now()), nil
+		}
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
 	}
 	cache.set(providerID, modelID, routes)

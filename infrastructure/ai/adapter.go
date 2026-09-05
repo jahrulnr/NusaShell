@@ -41,36 +41,70 @@ type Adapter struct {
 // Name returns the provider kind string for diagnostics.
 func (a *Adapter) Name() string { return string(a.ProviderKind) }
 
+const openCodeSessionHeader = "x-opencode-session"
+
+// openCodeSessionHeaders copies the conversation prompt-cache key onto
+// OpenCode's documented cache-affinity header. Official Go docs require
+// x-opencode-session so Console Go can optimize prompt caching; they do
+// not document OpenAI prompt_cache_options.ttl=30m (HTTP 422: Input
+// should be '5m' or '1h').
+func openCodeSessionHeaders(h http.Header, opts core.ProviderOptions) {
+	if h == nil || opts == nil {
+		return
+	}
+	key, _ := opts["prompt_cache_key"].(string)
+	if strings.TrimSpace(key) == "" {
+		key, _ = opts["session_id"].(string)
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	h.Set(openCodeSessionHeader, key)
+}
+
+func (a *Adapter) requestHeaders() func(http.Header, core.ProviderOptions) {
+	if domain.IsOpenCodeHost(a.BaseURL) {
+		return openCodeSessionHeaders
+	}
+	return nil
+}
+
 // providerFor builds the litellm provider for this adapter's kind.
 func (a *Adapter) providerFor() (core.Provider, error) {
+	optional := strings.TrimSpace(a.APIKey) == ""
+	headers := a.requestHeaders()
 	switch a.Driver {
 	case domain.ProviderDriverAnthropic:
 		if a.ProviderKind != domain.ProviderMessages {
 			return nil, &application.ErrUnsupportedProvider{Kind: string(a.ProviderKind)}
 		}
-		return anthropic.New(anthropic.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client})
+		return anthropic.New(anthropic.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional, RequestHeaders: headers})
 	case domain.ProviderDriverOpenAI:
 		if a.ProviderKind != domain.ProviderResponses {
 			return nil, &application.ErrUnsupportedProvider{Kind: string(a.ProviderKind)}
 		}
-		return openai.New(openai.Config{API: openai.APIResponses, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client})
+		return openai.New(openai.Config{API: openai.APIResponses, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional, RequestHeaders: headers})
 	case domain.ProviderDriverOpenRouter:
+		if a.ProviderKind == domain.ProviderChat && !a.OpenRouter {
+			return openai.New(openai.Config{API: openai.APIChat, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional, RequestHeaders: headers})
+		}
 		return openrouter.NewForAPI(openrouter.Config{
 			APIKey:         a.APIKey,
 			BaseURL:        a.BaseURL,
 			HTTPClient:     a.Client,
-			APIKeyOptional: a.ProviderKind == domain.ProviderChat && a.APIKey == "",
+			APIKeyOptional: optional,
 		}, string(a.ProviderKind))
 	}
 	switch {
 	case a.ProviderKind == domain.ProviderMessages:
-		return anthropic.New(anthropic.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client})
+		return anthropic.New(anthropic.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional, RequestHeaders: headers})
 	case a.ProviderKind == domain.ProviderResponses:
-		return openai.New(openai.Config{API: openai.APIResponses, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client})
+		return openai.New(openai.Config{API: openai.APIResponses, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional, RequestHeaders: headers})
 	case a.ProviderKind == domain.ProviderChat && a.OpenRouter:
-		return openrouter.New(openrouter.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: a.APIKey == ""})
+		return openrouter.New(openrouter.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional})
 	case a.ProviderKind == domain.ProviderChat:
-		return openai.New(openai.Config{API: openai.APIChat, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: a.APIKey == ""})
+		return openai.New(openai.Config{API: openai.APIChat, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional, RequestHeaders: headers})
 	default:
 		return nil, &application.ErrUnsupportedProvider{Kind: string(a.ProviderKind)}
 	}
@@ -104,7 +138,7 @@ func (a *Adapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model
 		if apiKey != "" {
 			headers["Authorization"] = "Bearer " + apiKey
 		}
-		if a.OpenRouter || a.Driver == domain.ProviderDriverOpenRouter {
+		if a.OpenRouter {
 			for k, v := range aiutil.OpenRouterAttributionHeaders() {
 				headers[k] = v
 			}
@@ -119,7 +153,7 @@ func (a *Adapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model
 // callers never branch on gateway type. slug is the canonical identity
 // plus any request variant (:free, :batch).
 func (a *Adapter) ListModelEndpoints(ctx context.Context, slug string) ([]domain.ModelRoute, error) {
-	if !a.OpenRouter && a.Driver != domain.ProviderDriverOpenRouter {
+	if !a.OpenRouter {
 		return nil, nil
 	}
 	headers := map[string]string{}

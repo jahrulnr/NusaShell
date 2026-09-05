@@ -48,6 +48,16 @@ func (e *ProviderError) Unwrap() error {
 	return e.Err
 }
 
+// HTTPStatusCode returns the provider HTTP status wrapped in err, or 0
+// when err is not a ProviderError with a status.
+func HTTPStatusCode(err error) int {
+	var pe *ProviderError
+	if errors.As(err, &pe) {
+		return pe.StatusCode
+	}
+	return 0
+}
+
 // CanAutoRetry reports whether an agent may transparently retry this
 // provider failure. It is intentionally conservative: a retry must have a
 // reasonable chance of succeeding without user changes. In particular, an

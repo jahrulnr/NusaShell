@@ -321,7 +321,9 @@ type ProviderContext struct {
 	Provider   core.Provider
 	ProviderID string
 	Kind       domain.ProviderKind
+	Driver     domain.ProviderDriver
 	OpenRouter bool
+	BaseURL    string
 }
 
 // Complete calls provider.Chat with the converted request and returns the
@@ -352,20 +354,19 @@ func NewProviderContext(p *domain.Provider, provider core.Provider) ProviderCont
 		Provider:   provider,
 		ProviderID: p.ID,
 		Kind:       p.Kind,
-		OpenRouter: p.EffectiveDriver() == domain.ProviderDriverOpenRouter || domain.IsOpenRouterHost(p.Kind, p.BaseURL),
+		Driver:     p.EffectiveDriver(),
+		OpenRouter: domain.UsesOpenRouterWire(p.Kind, p.EffectiveDriver(), p.BaseURL),
+		BaseURL:    p.BaseURL,
 	}
 }
 
 // buildPromptCachePolicyForContext preserves the provider identity needed for
-// a stable key after a provider has been reduced to ProviderContext. The
-// context keeps only the routing facts the application needs, so reconstruct
-// the effective driver for cache TTL normalization here.
+// a stable key after a provider has been reduced to ProviderContext. Pass
+// the stored driver and BaseURL through so WireCacheDriver can split
+// OpenCode (5m/1h) from vanilla Chat (30m) without reconstructing driver
+// from the OpenRouter message-wire flag.
 func buildPromptCachePolicyForContext(settings domain.Settings, adapter ProviderContext, model, conversationID, prefix string) *PromptCachePolicy {
-	driver := domain.ProviderDriverAuto
-	if adapter.OpenRouter {
-		driver = domain.ProviderDriverOpenRouter
-	}
-	provider := &domain.Provider{ID: adapter.ProviderID, Kind: adapter.Kind, Driver: driver}
+	provider := &domain.Provider{ID: adapter.ProviderID, Kind: adapter.Kind, Driver: adapter.Driver, BaseURL: adapter.BaseURL}
 	return buildPromptCachePolicy(settings, provider, model, conversationID, prefix)
 }
 

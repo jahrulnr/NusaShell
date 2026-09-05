@@ -103,10 +103,26 @@ func TestBuildPromptCachePolicyTTLFromProvider(t *testing.T) {
 		t.Fatalf("openai default TTL = %+v, want 30m", policy)
 	}
 
-	openrouter := &domain.Provider{ID: "openrouter", Driver: domain.ProviderDriverOpenRouter, Kind: domain.ProviderChat, CacheTTL: "1h"}
+	openrouter := &domain.Provider{ID: "openrouter", Driver: domain.ProviderDriverOpenRouter, Kind: domain.ProviderChat, CacheTTL: "1h", BaseURL: "https://openrouter.ai/api/v1"}
 	policy = buildPromptCachePolicy(settings, openrouter, "anthropic/claude-sonnet-4", "conv_abc", promptCacheConversationPrefix)
 	if policy == nil || policy.TTL != "1h" {
 		t.Fatalf("openrouter TTL = %+v, want 1h", policy)
+	}
+
+	off := &domain.Provider{ID: "anthropic", Driver: domain.ProviderDriverAnthropic, Kind: domain.ProviderMessages, CacheTTL: domain.CacheTTLOff}
+	if policy = buildPromptCachePolicy(settings, off, "claude-sonnet-4-6", "conv_abc", promptCacheConversationPrefix); policy != nil {
+		t.Fatalf("off TTL must skip prompt cache, got %+v", policy)
+	}
+
+	// OpenCode Console Go validates cache TTL as 5m|1h (not OpenAI 30m).
+	// The Chat message wire stays vanilla; only the TTL enum follows 5m/1h.
+	opencode := &domain.Provider{
+		ID: "prov_oc", Driver: domain.ProviderDriverOpenRouter, Kind: domain.ProviderChat,
+		BaseURL: "https://opencode.ai/zen/go/v1", CacheTTL: "1h",
+	}
+	policy = buildPromptCachePolicy(settings, opencode, "deepseek-v4-flash", "conv_abc", promptCacheConversationPrefix)
+	if policy == nil || policy.TTL != "1h" {
+		t.Fatalf("opencode TTL = %+v, want 1h", policy)
 	}
 }
 

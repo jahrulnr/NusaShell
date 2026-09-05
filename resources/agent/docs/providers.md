@@ -23,7 +23,7 @@ selects the wire format:
   other hosts to the vanilla OpenAI Chat implementation.
 
 The three built-in cards remain visible before they are configured. Configure a
-card with its base URL and key, then import models. OpenRouter and custom
+card with its base URL and an optional key, then import models. OpenRouter and custom
 providers can each use a different API kind and base URL.
 
 **Host detection for `chat`:** only a genuine OpenRouter host
@@ -36,8 +36,11 @@ Completions wire (`reasoning_effort`, `reasoning_content`, `max_tokens`).
 Aggregators implement the OpenAI wire and reject OpenRouter-specific params:
 for example TokenRouter returns HTTP 400 `Unknown parameter: 'reasoning'`
 for the OpenRouter `reasoning` object, so they must not receive the OpenRouter
-format. A provider with an explicit `openrouter` driver is always treated as
-OpenRouter regardless of host.
+format. For `chat` kind, host detection wins over the stored driver:
+custom providers default to `openrouter`, but OpenCode / TokenRouter /
+other non-`openrouter.ai` hosts still use the vanilla Chat wire
+(`reasoning_content`). An explicit `openrouter` driver still selects the
+OpenRouter package for `messages` and `responses`.
 
 ## Kinds
 
@@ -49,8 +52,8 @@ OpenRouter regardless of host.
   works with OpenAI, DeepSeek, LM Studio, vLLM and any compatible endpoint.
   Genuine OpenRouter hosts use the OpenRouter chat implementation for this
   kind, including its provider options and attribution headers; all other
-  `chat` hosts use the vanilla OpenAI Chat wire (see host detection above).
-  Providers without an explicit driver retain host-detected routing.
+  `chat` hosts use the vanilla OpenAI Chat wire (see host detection above),
+  including custom providers whose stored driver is `openrouter`.
 
 ## Streaming completion and request-shape recovery
 
@@ -91,26 +94,34 @@ provider supplied a safe retry window.
 
 ## Prompt cache TTL
 
-Settings → **Prompt caching** turns provider-side prompt cache on for a
-turn. The **Cache TTL** chips on a provider's detail pane pick the duration
-that NusaShell actually sends:
+Settings → **Prompt caching** is the master switch. The **Cache TTL** chips
+on a provider's detail pane pick what that provider sends, or turn cache
+off for that provider only:
 
 - `messages` (Anthropic `cache_control`): `5m` or `1h`. Default `5m`.
 - `responses` (OpenAI `prompt_cache_options.ttl`): `30m`.
-- `chat` on the OpenRouter driver (`cache_control`): `5m` or `1h`. Default
-  `5m`. OpenRouter does not accept `30m` as `cache_control` TTL.
-- other `chat` hosts (OpenAI Chat `prompt_cache_key` +
-  `prompt_cache_options`): `30m`.
+- `chat` on a genuine OpenRouter host (`cache_control`): `5m` or `1h`.
+  Default `5m`. OpenRouter does not accept `30m` as `cache_control` TTL.
+- `chat` on OpenCode Zen/Go: `5m` or `1h` (Console Go validates this
+  enum and 422s on `30m`). The Chat body does not send
+  `prompt_cache_options` or `cache_control`; cache affinity uses
+  `x-opencode-session` (see OpenCode Zen and Go below).
+- other `chat` hosts (TokenRouter, OpenAI Chat `prompt_cache_key` +
+  `prompt_cache_options`): `30m`. Putting 5m/1h on a Chat system
+  breakpoint is rejected locally.
+- `off` skips prompt-cache markers for this provider even when the Settings
+  switch is on.
 
-The selected value is stored on the provider (`cache_ttl`) and applied on
-the next turn while prompt caching is enabled. Registry cards show the
-selected TTL, not the full enum.
+Empty stored `cache_ttl` still means the first duration above. `off` is
+stored explicitly and applied on the next turn. Registry cards show the
+selected value, including `off`.
 
 ## Prompt-cache keys and sessions
 
-When prompt caching is enabled, NusaShell creates one stable 32-character
-ASCII key per provider/model/conversation. The visible prefix separates agent
-workloads without increasing the key length:
+When prompt caching is enabled and the provider Cache TTL is not `off`,
+NusaShell creates one stable 32-character ASCII key per
+provider/model/conversation. The visible prefix separates agent workloads
+without increasing the key length:
 
 - `nusashell_cv_` + 19 hexadecimal characters — normal conversation turns.
 - `nusashell_bg_` + 19 hexadecimal characters — headless/background and
@@ -130,25 +141,58 @@ path:
 - OpenRouter Messages and Responses: the same session value is sent as the
   documented `x-session-id` header; Responses also retains
   `prompt_cache_key` in the body through its OpenAI-compatible adapter.
+- OpenCode Zen/Go: `prompt_cache_key` in the Chat body plus the documented
+  `x-opencode-session` header (same key). See
+  [OpenCode Go](https://opencode.ai/docs/go/).
 
 An unknown HTTP header is normally ignored by an HTTP server, but that is not
 a cross-gateway contract and it does not make an unknown JSON body field safe.
 Strict gateways can reject unsupported body parameters: LiteLLM documents that
 unsupported OpenAI parameters raise by default, while provider-specific
 parameters are forwarded to the upstream body. Therefore NusaShell sends the
-stable key on the documented/known OpenAI-compatible paths and uses the
-OpenRouter-specific session header only for OpenRouter. It does not inject an
-arbitrary `X-NusaShell-*` header or an undocumented cache-key field into
-Anthropic or unrelated gateways.
+stable key on the documented/known OpenAI-compatible paths, uses the
+OpenRouter-specific `x-session-id` header only for OpenRouter, and uses
+OpenCode's documented `x-opencode-session` header only for OpenCode hosts.
+It does not inject an arbitrary `X-NusaShell-*` header or an undocumented
+cache-key field into Anthropic or unrelated gateways.
 
 OpenRouter's current prompt-caching guide documents `prompt_cache_key`,
 `session_id`/`x-session-id`, the 256-character session limit, and Sessions-view
 grouping. OpenAI documents `prompt_cache_key` as a routing/cache hint (not a
 guaranteed cache hit). Anthropic documents `cache_control` TTLs and breakpoint
-rules. See [OpenRouter prompt caching](https://openrouter.ai/docs/guides/best-practices/prompt-caching),
+rules. OpenCode Go documents `x-opencode-session` as the prompt-cache
+affinity header. See [OpenRouter prompt caching](https://openrouter.ai/docs/guides/best-practices/prompt-caching),
 [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching),
 [Claude prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching),
+[OpenCode Go](https://opencode.ai/docs/go/),
+[OpenCode Zen](https://opencode.ai/docs/zen/),
 and [LiteLLM input parameters](https://docs.litellm.ai/docs/completion/input).
+
+## OpenCode Zen and Go
+
+OpenCode does not publish a full OpenAPI catalog like OpenAI, Anthropic, or
+OpenRouter. The authoritative pages are [Zen](https://opencode.ai/docs/zen/)
+and [Go](https://opencode.ai/docs/go/). Add OpenCode as a custom provider and
+match **kind + Base URL** to the model endpoint in those tables:
+
+| Kind | Base URL | Typical models |
+| --- | --- | --- |
+| `chat` | `https://opencode.ai/zen/go/v1` (Go) or `https://opencode.ai/zen/v1` (Zen) | DeepSeek, GLM, Kimi, MiMo, Hy, Omen |
+| `messages` | same root; operation is `/v1/messages` | MiniMax, Qwen on Go |
+| `responses` | same root; operation is `/v1/responses` | Grok, GPT 5.6 Luna, Muse Spark on Go |
+
+Model lists: `GET https://opencode.ai/zen/go/v1/models` (Go) and
+`GET https://opencode.ai/zen/v1/models` (Zen). There is no
+`/models/{id}/endpoints` route picker.
+
+Chat hosts use the vanilla OpenAI Chat wire (`reasoning_content`), not
+OpenRouter `reasoning`. Thinking-mode models require `reasoning_content` on
+every assistant message that had thinking. Non-reasoning models on the same
+host do not get a forced `reasoning_content` placeholder. Prompt cache on Go uses the
+`x-opencode-session` header (the conversation prompt-cache key). Cache TTL
+chips are `5m`, `1h`, or `off`. Console Go rejects
+`prompt_cache_options.ttl=30m`. Chat requests do not send that field or
+OpenRouter `cache_control` breakpoints.
 
 **Base URL is required for all three kinds.** The UI suggests a per-kind
 default (`https://api.anthropic.com` for Messages, `https://api.openai.com/v1`
@@ -171,14 +215,14 @@ Chat      → https://gateway.example.com/v1     (→ /v1/chat/completions)
 
 ## API keys
 
-`messages` and `responses` require a user-supplied API key. `chat` works
-without a key against local endpoints that need no auth, and both chat wire
-implementations accept keyless providers — the vanilla OpenAI Chat adapter
-skips the `Authorization` header when no key is present, and the OpenRouter
-adapter (used for genuine OpenRouter hosts) does the same; the upstream
-decides (e.g. OpenCode/Zen free tier). When a key is present it is sent
-normally. Keys are stored in the SQLite credential store
-(`credentials.db`) inside the data directory, never in the JSON files.
+API keys are optional for every kind (`messages`, `responses`, and `chat`).
+Add and edit use the same rule: a blank key is stored as no credential, and
+NusaShell still lists, tests, imports, and chats. Wire adapters skip
+`Authorization` / `x-api-key` when no key is present; the upstream decides
+(e.g. OpenCode, LM Studio, Ollama, Zen free tier). Official vendor endpoints
+return 401 if they actually require a key. When a key is present it is sent
+normally. Keys are stored in the SQLite credential store (`credentials.db`)
+inside the data directory, never in the JSON files.
 
 ### Seeding keys from the environment (explicit)
 
@@ -441,6 +485,12 @@ the gateway (Auto).
 - **Direct providers** (Anthropic, OpenAI, local chat) have no route
   concept: the handler returns an empty list without fetching, and the
   frontend shows a non-interactive home icon next to the model picker.
+- **Hosts without an endpoints API** (OpenCode, some aggregators) may still
+  advertise `route_support` when their driver is OpenRouter. Listing then
+  returns HTTP 4xx HTML; NusaShell skips that body and shows an empty list
+  titled "No provider in this model". HTTP 5xx is also skipped without
+  caching so a later refresh can recover. Non-HTTP fetch errors still
+  surface as `PROVIDER_ERROR`.
 - **Pinning wire:** when a conversation has a non-empty `provider_route`
   and the provider is a chat-kind OpenRouter gateway, the adapter sends
   `provider: {order: [route], allow_fallbacks: false}` — a hard pin: if

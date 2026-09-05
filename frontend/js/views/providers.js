@@ -93,18 +93,22 @@ export function mergeProviderRegistry(configured = []) {
 }
 
 export function cacheTTLsFor(provider = {}) {
-  if (Array.isArray(provider.cache_ttls) && provider.cache_ttls.length) return provider.cache_ttls;
-  if (provider.kind === 'messages') return ['5m', '1h'];
-  if (provider.kind === 'responses') return ['30m'];
-  if (provider.driver === 'openrouter') return ['5m', '1h'];
-  if (provider.kind === 'chat') return ['30m'];
-  return [];
+  let ttls = [];
+  if (Array.isArray(provider.cache_ttls) && provider.cache_ttls.length) {
+    ttls = [...provider.cache_ttls];
+  } else if (provider.kind === 'messages') ttls = ['5m', '1h'];
+  else if (provider.kind === 'responses') ttls = ['30m'];
+  else if (provider.driver === 'openrouter') ttls = ['5m', '1h'];
+  else if (provider.kind === 'chat') ttls = ['30m'];
+  if (!ttls.length) return ttls;
+  return ttls.includes('off') ? ttls : [...ttls, 'off'];
 }
 
 export function effectiveCacheTTL(provider = {}) {
   const ttls = cacheTTLsFor(provider);
+  if (provider.cache_ttl === 'off') return 'off';
   if (provider.cache_ttl && ttls.includes(provider.cache_ttl)) return provider.cache_ttl;
-  return ttls[0] || '';
+  return ttls.find((ttl) => ttl !== 'off') || '';
 }
 
 function providerMeta(provider) {
@@ -157,12 +161,19 @@ function renderCacheTTLBadge(p) {
   const selected = effectiveCacheTTL(p);
   if (!selected) return null;
   const style = p.cache_style || (p.kind === 'messages' ? 'anthropic' : 'openai');
-  const title = style === 'anthropic'
-    ? `Selected cache_control TTL: ${selected}`
-    : selected === '30m'
-      ? 'Selected prompt_cache_options.ttl: 30m'
-      : `Selected cache TTL: ${selected}`;
-  const label = p.id === 'openrouter' ? `${selected} · via upstream` : selected;
+  let title;
+  if (selected === 'off') {
+    title = 'Prompt cache disabled for this provider';
+  } else if (style === 'anthropic') {
+    title = `Selected cache_control TTL: ${selected}`;
+  } else if (selected === '30m') {
+    title = 'Selected prompt_cache_options.ttl: 30m';
+  } else {
+    title = `Selected cache TTL: ${selected}`;
+  }
+  const label = selected === 'off'
+    ? 'off'
+    : (p.id === 'openrouter' ? `${selected} · via upstream` : selected);
   return el('span', { class: 'provider-cache-ttl', title, text: `cache ${label}` });
 }
 
@@ -236,7 +247,7 @@ async function saveProviderCacheTTL(provider, ttl) {
   if (!ttl || ttl === effectiveCacheTTL(provider)) return;
   try {
     await rpc('ai.providers.save', providerSaveFields(provider, { cache_ttl: ttl }));
-    toast(`Cache TTL ${ttl}`, 'success');
+    toast(ttl === 'off' ? 'Prompt cache off' : `Cache TTL ${ttl}`, 'success');
     await refresh();
   } catch (err) {
     toast(err.message, 'error');
@@ -277,7 +288,9 @@ function renderCacheTTLPicks(p) {
     text: ttl,
     dataset: { ttl },
     'aria-pressed': ttl === selected ? 'true' : 'false',
-    title: `Use prompt cache TTL ${ttl}`,
+    title: ttl === 'off'
+      ? 'Disable prompt cache for this provider'
+      : `Use prompt cache TTL ${ttl}`,
   }));
   const picks = el('dd', { class: 'provider-cache-ttl-picks', id: 'provider-cache-ttl' },
     ...chips,
@@ -420,11 +433,11 @@ async function addProvider(provider = null) {
   if (initialBaseURL === undefined) initialBaseURL = '';
   let message;
   if (!provider) {
-    message = 'Custom providers use the OpenRouter-compatible provider driver. API keys are stored in the local SQLite credential store.';
+    message = 'Custom providers use the OpenRouter-compatible provider driver. API keys are optional and stored in the local SQLite credential store.';
   } else if (provider.builtin) {
-    message = 'Update this built-in provider. OpenRouter-compatible cards can use any supported API kind.';
+    message = 'Update this built-in provider. OpenRouter-compatible cards can use any supported API kind. API keys are optional.';
   } else {
-    message = 'Update the custom provider. It uses the OpenRouter-compatible provider driver.';
+    message = 'Update the custom provider. It uses the OpenRouter-compatible provider driver. API keys are optional.';
   }
   const res = await dialog({
     title: provider ? 'Edit provider' : 'Add custom provider',
@@ -447,7 +460,7 @@ async function addProvider(provider = null) {
       }] : []),
       { name: 'name', label: 'Name', value: provider?.name ?? '', placeholder: 'e.g. my provider' },
       { name: 'base_url', label: 'Base URL', value: initialBaseURL, placeholder: `API base URL — vendor endpoint or AI gateway (e.g. ${KIND_DEFAULTS[initialKind] ?? 'https://gateway.example/v1'})` },
-      { name: 'api_key', label: 'API key', type: 'password', value: '', placeholder: provider?.has_api_key ? 'leave blank to keep current key' : 'sk-…' },
+      { name: 'api_key', label: 'API key (optional)', type: 'password', value: '', placeholder: provider?.has_api_key ? 'leave blank to keep current key' : 'leave blank if the host needs no auth' },
     ],
     actions: [
       { label: 'Cancel', value: null },

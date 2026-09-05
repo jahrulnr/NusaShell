@@ -34,6 +34,9 @@ type Config struct {
 	// provider options. OpenRouter uses this for x-session-id when it
 	// delegates Messages to the Anthropic wire adapter.
 	RequestHeaders func(http.Header, core.ProviderOptions)
+	// APIKeyOptional allows construction and request sending without an API
+	// key. Used by custom Messages hosts that need no auth.
+	APIKeyOptional bool
 }
 
 type HTTPClient interface {
@@ -45,7 +48,7 @@ type Provider struct {
 }
 
 func New(cfg Config) (*Provider, error) {
-	if cfg.APIKey == "" && cfg.APIKeyFunc == nil {
+	if cfg.APIKey == "" && cfg.APIKeyFunc == nil && !cfg.APIKeyOptional {
 		return nil, fmt.Errorf("anthropic: api key is required")
 	}
 	if cfg.HTTPClient != nil && cfg.Transport != nil {
@@ -176,12 +179,14 @@ func (p *Provider) setHeaders(ctx context.Context, req *http.Request, options co
 		}
 		key = resolved
 	}
-	if key == "" {
+	if key == "" && !p.cfg.APIKeyOptional {
 		return fmt.Errorf("anthropic: api key is required")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", p.cfg.UserAgent)
-	req.Header.Set("x-api-key", key)
+	if key != "" {
+		req.Header.Set("x-api-key", key)
+	}
 	req.Header.Set("anthropic-version", p.cfg.Version)
 	if p.cfg.Beta != "" {
 		req.Header.Set("anthropic-beta", p.cfg.Beta)

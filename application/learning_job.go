@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"nusashell/contracts"
 	"nusashell/domain"
@@ -870,4 +871,13 @@ func (a *App) emitSkillLifecycle(op, id, status, conversationID string) {
 		}
 		a.Trajectory.Record("skill_"+op, detail)
 	}
+}
+
+func clip(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if max <= 0 || utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:max])
 }

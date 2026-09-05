@@ -110,6 +110,7 @@ func NewForAPI(cfg Config, api string) (core.Provider, error) {
 			UserAgent:      cfg.UserAgent,
 			Headers:        openRouterHeaders(cfg.Headers),
 			RequestHeaders: mapSessionHeader,
+			APIKeyOptional: cfg.APIKeyOptional,
 		})
 		if err != nil {
 			return nil, err
@@ -130,6 +131,7 @@ func NewForAPI(cfg Config, api string) (core.Provider, error) {
 			UserAgent:      cfg.UserAgent,
 			Headers:        openRouterHeaders(cfg.Headers),
 			RequestHeaders: mapSessionHeader,
+			APIKeyOptional: cfg.APIKeyOptional,
 		})
 		if err != nil {
 			return nil, err
