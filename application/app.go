@@ -28,13 +28,14 @@ type App struct {
 	Providers     ProviderStore
 	Credentials   CredentialStore
 	Skills        SkillStore
-	Memory        MemoryStore
+	Experiences   ExperienceStore
+	MemoryRecords MemoryRecordStore
+	LearningJobs  LearningJobStore
+	LearningOps   LearningOpStore
 	User          MemoryDocumentStore
-	// Agent is the agent-tier memory document (soul.md) holding agent
-	// working knowledge curated by the background learning agent. Same document
-	// contract as the user tier.
+	// Agent is the agent-tier memory document (soul.md). Humans edit it
+	// from Learning → About Agent; agents never write it.
 	Agent           MemoryDocumentStore
-	Fragments       FragmentStore
 	ProjectMemory   ProjectMemoryStore
 	LearningEdges   LearningEdgeStore
 	LearnedParams   LearnedParamStore
@@ -98,8 +99,7 @@ type App struct {
 	sttInstallCancel context.CancelFunc
 	sttInstallDoneCh chan struct{}
 
-	// learningMu guards lazy init of learningSearcher and graphService,
-	// plus the per-conversation turn counter for threshold-based review.
+	// learningMu guards lazy init of learningSearcher and graphService.
 	learningMu       sync.RWMutex
 	learningSearcher *LearningSearcher
 	graphService     *LearningGraphService
@@ -112,28 +112,14 @@ type App struct {
 	// manual corrections always win. Initialized once at App construction
 	// from the ModelOverrides store.
 	modelOverrides  *modeloverrides.Cache
-	ReviewAgent     *BackgroundReviewAgent
 	lifecycle       *LifecycleManager
 	lifecycleCancel context.CancelFunc
-	// turnsSinceReview tracks turns since the last learning review per
-	// conversation. When the count reaches LearningReviewThreshold, the
-	// review fires and the counter resets.
-	turnsSinceReview map[string]int
-	// toolCallsSinceReview tracks tool calls since the last learning
-	// review per conversation. When the count reaches SkillNudgeInterval,
-	// the review fires and the counter resets. Independent of the turn
-	// counter so tool-heavy but user-turn-light coding sessions still
-	// trigger skill review.
-	toolCallsSinceReview map[string]int
-	// EmbeddingCache stores computed embedding vectors to avoid
-	// re-embedding the same content on every search. Content-addressed
-	// by (model_id, sha256(normalized_text)).
-	EmbeddingCache *jsonstore.EmbeddingCache
+	EmbeddingCache  *jsonstore.EmbeddingCache
 
 	// announcementLocksMu guards lazy creation of per-conversation mutexes
 	// serializing pending-announcement load-modify-save between publishers
-	// (RPC handlers, review agent) and the turn worker's round-boundary
-	// drain, so entries are never lost or double-injected.
+	// (RPC handlers) and the turn worker's round-boundary drain, so entries
+	// are never lost or double-injected.
 	announcementLocksMu sync.Mutex
 	announcementLocks   map[string]*sync.Mutex
 
@@ -224,10 +210,12 @@ type Deps struct {
 	Providers                   ProviderStore
 	Credentials                 CredentialStore
 	Skills                      SkillStore
-	Memory                      MemoryStore
+	Experiences                 ExperienceStore
+	MemoryRecords               MemoryRecordStore
+	LearningJobs                LearningJobStore
+	LearningOps                 LearningOpStore
 	User                        MemoryDocumentStore
 	Agent                       MemoryDocumentStore
-	Fragments                   FragmentStore
 	ProjectMemory               ProjectMemoryStore
 	LearningEdges               LearningEdgeStore
 	LearnedParams               LearnedParamStore
@@ -285,10 +273,12 @@ func NewApp(deps Deps) *App {
 		Providers:                   deps.Providers,
 		Credentials:                 deps.Credentials,
 		Skills:                      deps.Skills,
-		Memory:                      deps.Memory,
+		Experiences:                 deps.Experiences,
+		MemoryRecords:               deps.MemoryRecords,
+		LearningJobs:                deps.LearningJobs,
+		LearningOps:                 deps.LearningOps,
 		Agent:                       deps.Agent,
 		User:                        deps.User,
-		Fragments:                   deps.Fragments,
 		ProjectMemory:               deps.ProjectMemory,
 		LearningEdges:               deps.LearningEdges,
 		LearnedParams:               deps.LearnedParams,
@@ -330,17 +320,10 @@ func NewApp(deps Deps) *App {
 		Automation:                  deps.Automation,
 		runs:                        map[string]*TurnRun{},
 		delegateRuns:                map[string]*domain.AcpRun{},
-		turnsSinceReview:            map[string]int{},
-		toolCallsSinceReview:        map[string]int{},
 		pendingRuns:                 map[string]map[string]string{},
 		learnedParams:               learnedparams.New(deps.LearnedParams),
 		modelOverrides:              modeloverrides.New(deps.ModelOverrides),
 	}
-	// Wire the unified background learning agent. Uses the conversation's
-	// configured model ("global LLM") with a curation toolset and the
-	// unified post-conversation prompt (single agentic pass for memory
-	// and skills).
-	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
 	// Wire the ask_question service callback so pending asks emit an
 	// EventAskPending over the bus. The UI renders a question card from
 	// this event and answers via the agent.ask.answer RPC.
@@ -389,25 +372,19 @@ func NewApp(deps Deps) *App {
 	}
 	// Wire the lifecycle manager (decay + prune). Started by StartLifecycle,
 	// stopped by CloseLifecycle.
-	if deps.Memory != nil {
-		app.lifecycle = NewLifecycleManager(deps.Memory, deps.Skills, domain.DefaultLifecycleConfig())
+	if deps.MemoryRecords != nil {
+		app.lifecycle = NewLifecycleManager(deps.MemoryRecords, deps.Skills, domain.DefaultLifecycleConfig())
 		app.lifecycle.SetLogger(app.log)
 	}
-	// Wire the embedding cache + edge builder. The cache persists to
-	// learning/embeddings.jsonl and avoids re-embedding on every search.
-	// The edge builder pre-computes similarity, metadata, and token-overlap
-	// edges as a background job; successful turns record used_with edges.
 	if deps.DataDir != "" {
 		if cache, err := jsonstore.NewEmbeddingCache(deps.DataDir); err == nil {
 			app.EmbeddingCache = cache
 		}
 		app.Trajectory = NewTrajectoryRecorder(deps.DataDir)
-		// Load persisted turn counters so review thresholds survive restarts.
-		app.loadTurnCounters(deps.DataDir)
 	}
-	if deps.Fragments != nil && deps.Skills != nil {
+	if deps.MemoryRecords != nil && deps.Skills != nil {
 		app.edgeBuilder = NewEdgeBuilder(
-			deps.Fragments, deps.Skills, app.graph(),
+			deps.MemoryRecords, deps.Skills, app.graph(),
 			nil, // embedder is resolved lazily via ResolveEmbedder
 			app.EmbeddingCache,
 			DefaultEdgeBuilderConfig(),
@@ -438,6 +415,8 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 		return a.dispatchSkills(method, payload)
 	case strings.HasPrefix(method, "memory."):
 		return a.dispatchMemory(method, payload)
+	case strings.HasPrefix(method, "experience."):
+		return a.dispatchExperience(method, payload)
 	case strings.HasPrefix(method, "learning."):
 		return a.dispatchLearning(method, payload)
 	case strings.HasPrefix(method, "docs."):

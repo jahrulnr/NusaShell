@@ -14,9 +14,9 @@ func TestDispatchOpRoutesOps(t *testing.T) {
 		{"skill", `{"op":"list","limit":5}`, "list"},
 		{"skill", `{"op":"save","name":"x","content":"y"}`, "save"},
 		{"skill", `{"op":"delete","id":"x"}`, "delete"},
-		{"memory", `{"op":"save","content":"x"}`, "save"},
-		{"memory", `{"op":"SAVE","content":"x"}`, "save"}, // op match is case-insensitive
-		{"memory", `{"op":" search ","query":"q"}`, "search"},
+		{"memory", `{"op":"search","query":"x"}`, "search"},
+		{"memory", `{"op":"GET","id":"mem_1"}`, "get"}, // op match is case-insensitive
+		{"memory", `{"op":" list "}`, "list"},
 		{"docs", `{"op":"list"}`, "list"},
 		{"docs", `{"op":"search","query":"mcp"}`, "search"},
 		{"memory_project", `{"op":"query","kind":"index"}`, "query"},
@@ -43,7 +43,7 @@ func TestDispatchOpRejectsBadOp(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected error for args %s", args)
 		}
-		if !strings.Contains(err.Error(), "op") || !strings.Contains(err.Error(), "save") {
+		if !strings.Contains(err.Error(), "op") || !strings.Contains(err.Error(), "search") {
 			t.Fatalf("error should be self-describing (mention op + valid ops), got: %v", err)
 		}
 	}
@@ -88,7 +88,7 @@ func TestOpArg(t *testing.T) {
 		args string
 		want string
 	}{
-		{`{"op":"save","content":"x"}`, "save"},
+		{`{"op":"search","query":"x"}`, "search"},
 		{`{"op":" SEARCH "}`, "search"},
 		{`{}`, ""},
 		{`not-json`, ""},
@@ -177,7 +177,17 @@ func TestDocsDispatcherOpsAreExplicit(t *testing.T) {
 	}
 }
 
-func TestMemoryDispatcherUsesCanonicalUserTier(t *testing.T) {
+func TestMemoryDispatcherIsReadOnly(t *testing.T) {
+	for _, op := range []string{"search", "get", "list"} {
+		if _, err := DispatchOp("memory", []byte(`{"op":"`+op+`"}`)); err != nil {
+			t.Fatalf("memory op %q rejected: %v", op, err)
+		}
+	}
+	for _, op := range []string{"save", "replace", "delete"} {
+		if _, err := DispatchOp("memory", []byte(`{"op":"`+op+`"}`)); err == nil {
+			t.Fatalf("memory op %q must not be advertised", op)
+		}
+	}
 	var memory ToolInfo
 	for _, info := range DispatcherToolInfos() {
 		if info.Name == "memory" {
@@ -185,24 +195,38 @@ func TestMemoryDispatcherUsesCanonicalUserTier(t *testing.T) {
 			break
 		}
 	}
-	if strings.Contains(strings.ToLower(memory.Description), "primary") {
-		t.Fatalf("memory description must use canonical user tier, got: %s", memory.Description)
+	if strings.Contains(strings.ToLower(memory.Description), "save") {
+		t.Fatalf("memory description must not advertise writes, got: %s", memory.Description)
 	}
 	properties, ok := memory.InputSchema["properties"].(map[string]any)
 	if !ok {
 		t.Fatal("memory schema must expose properties")
 	}
-	target, ok := properties["target"].(map[string]any)
-	if !ok {
-		t.Fatal("memory schema must expose target")
+	if _, hasTarget := properties["target"]; hasTarget {
+		t.Fatal("memory schema must not expose a write target")
 	}
-	values, ok := target["enum"].([]any)
+	opSchema, ok := properties["op"].(map[string]any)
 	if !ok {
-		t.Fatal("memory target schema must expose an enum")
+		t.Fatal("memory schema must expose the op property")
 	}
+	values, ok := opSchema["enum"].([]any)
+	if !ok {
+		t.Fatal("memory op schema must expose an enum")
+	}
+	seen := map[string]bool{}
 	for _, value := range values {
-		if value == "primary" {
-			t.Fatal("memory target schema must not advertise the removed primary alias")
+		if op, ok := value.(string); ok {
+			seen[op] = true
+		}
+	}
+	for _, want := range []string{"search", "get", "list"} {
+		if !seen[want] {
+			t.Fatalf("memory op schema must advertise %q", want)
+		}
+	}
+	for _, deny := range []string{"save", "replace", "delete"} {
+		if seen[deny] {
+			t.Fatalf("memory op schema must not advertise %q", deny)
 		}
 	}
 }

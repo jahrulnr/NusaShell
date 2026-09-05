@@ -19,7 +19,7 @@ View title and a Save settings button with a live status indicator.
 
 ## Card groups
 
-Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning review, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system.
+Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system.
 
 - **Agent group** (`#settings-group-agent`):
   - Section: Settings
@@ -34,7 +34,7 @@ Settings cards are clustered under labeled groups so unrelated controls are not 
 - **Memory & search group** (`#settings-group-memory`):
   - Section: Settings
   - Type: heading
-  - Notes: Card group for learning review, project memory, and embeddings.
+  - Notes: Card group for learning jobs, project memory, and embeddings.
 
 - **Media understanding group** (`#settings-group-understand`):
   - Section: Settings
@@ -197,26 +197,16 @@ Toggle compaction, set max input tokens (fallback context window, default 200000
 
 ## Learning
 
-Background review that extracts user learnings and skill-worthy patterns. The learning review threshold is turns (default 10, 0 disables turn-based review). The skill review threshold is tool calls (default 15, 0 disables). The review model routes autolearn reviews to a cheaper or faster model (default uses the conversation's active model).
+Background jobs consolidate recorded experience into memory records and skills. The review model routes those jobs to a cheaper or faster model (default uses the conversation's active model).
 
 - **Learning title** (`#settings-learning-title`):
   - Section: Settings
   - Type: text
 
-- **Learning review threshold** (`#settings-learning-threshold`):
-  - Section: Settings
-  - Type: number
-  - Notes: Turns before review; 0 disables turn-based review.
-
-- **Skill review threshold** (`#settings-skill-nudge-interval`):
-  - Section: Settings
-  - Type: number
-  - Notes: Tool calls before skill review; 0 disables tool-based review.
-
 - **Review model** (`#settings-review-model`):
   - Section: Settings
   - Type: select
-  - Notes: Routes background autolearn reviews to a dedicated model; empty uses the conversation's active model.
+  - Notes: Routes background learning jobs to a dedicated model; empty uses the conversation's active model.
 
 ## Project memory
 

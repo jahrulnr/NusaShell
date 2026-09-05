@@ -1428,7 +1428,7 @@ func TestCompactionRequestEndsWithUserHandoffAfterToolRound(t *testing.T) {
 	msgs := []domain.Message{
 		{ID: "u0", Role: domain.RoleUser, Content: "start the work", Status: domain.StatusDone},
 		{ID: "a0", Role: domain.RoleAssistant, Content: "reading the review agent", Status: domain.StatusDone, ToolCalls: []domain.ToolCall{
-			{ID: "call_read", Name: "file_read", Args: `{"path":"application/learning_review_agent.go"}`, Output: toolOut},
+			{ID: "call_read", Name: "file_read", Args: `{"path":"application/learning_job.go"}`, Output: toolOut},
 		}},
 	}
 	for i := 0; i < 12; i++ {

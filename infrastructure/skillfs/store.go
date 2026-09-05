@@ -1,20 +1,16 @@
-// Package skillfs implements a filesystem-backed skill store that mirrors
-// NusaShell Electron's skill architecture:
+// Package skillfs implements a filesystem-backed skill store:
 //
 //   - Builtin skills are embedded in the binary (resources/agent/skills/)
-//     and seeded into the user data directory on startup.
+//     and seeded into the user data directory on startup as trusted curated.
 //   - Skill content (SKILL.md + support files) lives on the filesystem
 //     under <datadir>/skills/<name>/.
-//   - Skill metadata (state, origin, usage, pinned) is cataloged in
-//     skills.json alongside the other JSON stores.
+//   - Per-skill meta.json is the source of truth for status, origin,
+//     owned_by, version, active_version, usage, and category.
+//   - Git-style snapshots live under <skilldir>/versions/<n>/SKILL.md.
+//   - skills.json may cache usage counts; it is not the status/version SoT.
 //   - Provenance is tracked in .provenance.json per skill directory.
 //   - User-deleted builtin skills are recorded in .deleted-builtin.json
 //     so they are not re-seeded on restart.
-//
-// The SkillStore interface is unchanged — List/Get/Save/Delete — but
-// content is read from and written to the filesystem, not skills.json.
-// skills.json only stores metadata (the Content field is always loaded
-// from SKILL.md at read time).
 package skillfs
 
 import (
@@ -29,6 +25,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,10 +40,8 @@ import (
 var skillIDRe = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 // Store implements application.SkillStore backed by the filesystem.
-// Skill content (SKILL.md) is read from <root>/<name>/SKILL.md. Metadata
-// (state, origin, usage, pinned) is persisted in skills.json via the
-// embedded jsonstore. Content is never stored in skills.json — only
-// cataloged metadata.
+// Skill content (SKILL.md) is read from <root>/<name>/SKILL.md. Per-skill
+// meta.json is the source of truth; skills.json is a usage cache.
 type Store struct {
 	root string // <datadir>/skills
 	json *jsonMetaStore
@@ -76,7 +71,7 @@ func New(root string) (*Store, error) {
 // resources/agent/skills/ tree into the user data directory. Skills the
 // user intentionally deleted (listed in .deleted-builtin.json) are
 // skipped. Existing builtin skills are overwritten so updates propagate.
-// User/agent-owned skills are never touched.
+// User/learned-owned skills are never touched.
 func SeedBuiltinSkills(root string) error {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return fmt.Errorf("skillfs: mkdir %s: %w", root, err)
@@ -109,7 +104,7 @@ func SeedBuiltinSkills(root string) error {
 		}
 
 		// Skip if the skill exists and is not builtin-origin (user or
-		// agent created it — don't overwrite their version).
+		// learned created it — don't overwrite their version).
 		destDir := filepath.Join(root, skillID)
 		if origin, ok := provenance[skillID]; ok && origin.CreatedBy != "builtin" {
 			if _, err := os.Stat(filepath.Join(destDir, "SKILL.md")); err == nil {
@@ -137,6 +132,10 @@ func SeedBuiltinSkills(root string) error {
 			return os.WriteFile(destPath, data, 0o644)
 		}); err != nil {
 			continue // skip broken skill, don't abort whole seed
+		}
+
+		if err := writeBuiltinMetaIfMissing(destDir); err != nil {
+			return err
 		}
 
 		// Record provenance.
@@ -269,14 +268,13 @@ func (s *Store) Get(id, ownedBy string) (*domain.Skill, error) {
 
 // getWithOwner returns the skill with the exact owner.
 func (s *Store) getWithOwner(id, ownedBy string) (*domain.Skill, error) {
-	// Root-resident owners: user, builtin, and agent-authored skills all
-	// live directly under s.root (skill op=save persists agent-origin skills
-	// there), so an exact-owner lookup for them resolves against the root,
-	// NOT against a plugin mount.
+	// Root-resident owners: user, builtin, and learned skills all live
+	// directly under s.root, so an exact-owner lookup for them resolves
+	// against the root, NOT against a plugin mount.
 	if ownedBy == "user" || ownedBy == "builtin" ||
 		ownedBy == string(domain.SkillOriginUser) ||
 		ownedBy == string(domain.SkillOriginBuiltin) ||
-		ownedBy == string(domain.SkillOriginAgent) {
+		ownedBy == string(domain.SkillOriginLearned) {
 		skill, err := s.loadSkillFromDir(id, s.root)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q not found", id)
@@ -322,41 +320,87 @@ func (s *Store) skillsByID(id string) []*domain.Skill {
 	return out
 }
 
-// Save writes a skill's SKILL.md to the filesystem and updates metadata
-// in skills.json. The skill ID is the folder name, which must match the
-// skill name (lowercase with hyphens, matching the SKILL_ID pattern).
-// If the skill has no ID, the name is used as the ID. If an existing
-// skill is renamed, the old folder is removed.
+// Save writes a skill's SKILL.md, an immutable versions/<n>/ snapshot, and
+// meta.json. User saves are trusted and increment Version on update.
+// Learned saves must not replace a trusted curated directory; colliding
+// learned IDs are prefixed with "learned-".
 func (s *Store) Save(skill *domain.Skill) error {
-	// Plugin-owned skills are read-only.
+	if skill == nil {
+		return fmt.Errorf("skillfs: skill is required")
+	}
 	if strings.HasPrefix(skill.EffectiveOwnedBy(), "plugin:") {
 		return fmt.Errorf("plugin-owned skills are read-only; uninstall the plugin to modify")
 	}
-	// Use the skill name as the folder ID (matching Electron's pattern).
 	if skill.ID == "" {
 		skill.ID = skill.Name
+	}
+	if skill.Origin == domain.SkillOriginUser {
+		skill.Status = domain.SkillStatusTrusted
+		if skill.OwnedBy == "" {
+			skill.OwnedBy = "user"
+		}
+	}
+	skill.EnsureStatusDefault()
+	if skill.Origin == domain.SkillOriginLearned {
+		skill.ID = s.uniquifyLearnedID(skill.ID)
 	}
 	if !skillIDRe.MatchString(skill.ID) {
 		return fmt.Errorf("skillfs: invalid skill id %q (must be lowercase with hyphens)", skill.ID)
 	}
+
+	existing, existingErr := s.loadSkillFromDir(skill.ID, s.root)
+	if existingErr == nil {
+		if skill.Origin == domain.SkillOriginLearned {
+			if existing.Origin != domain.SkillOriginLearned || !existing.CanAgentMutate() {
+				return fmt.Errorf("skillfs: cannot overwrite trusted curated skill %q", skill.ID)
+			}
+		}
+		next := existing.Version
+		if next < 1 {
+			next = 1
+		}
+		skill.Version = next + 1
+		skill.ActiveVersion = skill.Version
+		if skill.Origin == "" {
+			skill.Origin = existing.Origin
+		}
+		if skill.OwnedBy == "" {
+			skill.OwnedBy = existing.OwnedBy
+		}
+		if skill.Status == "" {
+			skill.Status = existing.Status
+		}
+		if skill.Origin == domain.SkillOriginUser {
+			skill.Status = domain.SkillStatusTrusted
+		}
+	} else {
+		if skill.Version < 1 {
+			skill.Version = 1
+		}
+		skill.ActiveVersion = skill.Version
+	}
+
 	dir := filepath.Join(s.root, skill.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("skillfs: mkdir %s: %w", dir, err)
 	}
 	skill.Path = dir
-	// Write SKILL.md with frontmatter.
 	content := formatSkillMarkdown(skill)
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
 		return fmt.Errorf("skillfs: write SKILL.md: %w", err)
 	}
+	if err := snapshotVersion(dir, skill.Version, content); err != nil {
+		return err
+	}
 	skill.Bundled = hasSupportFiles(dir)
-	// Update metadata.
 	skill.Touch(clock.NewTime().Time())
+	if err := writeSkillMeta(dir, skill); err != nil {
+		return err
+	}
 	s.json.set(skill)
 	if err := s.json.save(); err != nil {
 		return err
 	}
-	// Update provenance for new skills.
 	prov, _ := loadProvenance(s.root)
 	if _, exists := prov[skill.ID]; !exists {
 		origin := string(skill.Origin)
@@ -411,8 +455,9 @@ func (s *Store) Delete(id, ownedBy string) error {
 }
 
 // loadSkillFromDir reads SKILL.md from <dir>/<id>/SKILL.md and merges
-// metadata from skills.json. The dir parameter is the parent directory
-// (either s.root for user/builtin skills, or a plugin mount directory).
+// metadata from meta.json (source of truth). skills.json is a fallback
+// cache. One-shot: missing meta.json + old origin "agent" becomes
+// Origin=learned, Status=experimental, Version=1, then meta.json is written.
 func (s *Store) loadSkillFromDir(id, dir string) (*domain.Skill, error) {
 	skillFile := filepath.Join(dir, id, "SKILL.md")
 	data, err := os.ReadFile(skillFile)
@@ -429,39 +474,148 @@ func (s *Store) loadSkillFromDir(id, dir string) (*domain.Skill, error) {
 		Path:        skillDir,
 		Bundled:     hasSupportFiles(skillDir),
 	}
-	// Merge metadata from skills.json. Try composite key first (for
-	// plugin skills), then flat key (for user/builtin), then the
-	// "agent:<id>" composite that Save writes for agent-origin skills
-	// (their OwnedBy is empty during load, so the first probe misses).
 	applyMeta := func(meta *skillMeta) {
 		skill.Category = meta.Category
-		skill.State = meta.State
+		skill.Status = meta.Status
 		skill.Origin = meta.Origin
 		skill.OwnedBy = meta.OwnedBy
 		skill.PluginDir = meta.PluginDir
-		skill.Pinned = meta.Pinned
+		skill.Version = meta.Version
+		skill.ActiveVersion = meta.ActiveVersion
 		skill.UsageCount = meta.UsageCount
 		skill.LastUsedAt = meta.LastUsedAt
 		skill.UpdatedAt = meta.UpdatedAt
 	}
-	if meta, ok := s.json.get(metaKey(id, skill.OwnedBy)); ok {
-		applyMeta(meta)
-	} else if meta, ok := s.json.get(id); ok {
-		applyMeta(meta)
-	} else if meta, ok := s.json.get(string(domain.SkillOriginAgent) + ":" + id); ok {
-		applyMeta(meta)
-	}
-	// If no metadata, set defaults from provenance.
-	skill.EnsureStateDefault()
-	if skill.Origin == "" {
-		prov, _ := loadProvenance(s.root)
-		if entry, ok := prov[id]; ok {
-			skill.Origin = domain.SkillOrigin(entry.CreatedBy)
-		} else {
-			skill.Origin = domain.SkillOriginUser
+
+	if dirMeta, ok := readSkillMeta(skillDir); ok {
+		applyMeta(dirMeta)
+	} else {
+		if meta, ok := s.json.get(metaKey(id, skill.OwnedBy)); ok {
+			applyMeta(meta)
+		} else if meta, ok := s.json.get(id); ok {
+			applyMeta(meta)
+		} else if meta, ok := s.json.get("learned:" + id); ok {
+			applyMeta(meta)
+		} else if meta, ok := s.json.get("agent:" + id); ok {
+			// One-shot read of the retired origin value; persist as learned.
+			applyMeta(meta)
+		}
+		if string(skill.Origin) == "agent" {
+			skill.Origin = domain.SkillOriginLearned
+			skill.Status = domain.SkillStatusExperimental
+			if skill.Version < 1 {
+				skill.Version = 1
+			}
+			if skill.OwnedBy == "" || skill.OwnedBy == "agent" {
+				skill.OwnedBy = string(domain.SkillOriginLearned)
+			}
+			s.json.delete("agent:" + id)
+		}
+		if skill.Origin == "" {
+			prov, _ := loadProvenance(s.root)
+			if entry, ok := prov[id]; ok {
+				if entry.CreatedBy == "agent" {
+					skill.Origin = domain.SkillOriginLearned
+				} else {
+					skill.Origin = domain.SkillOrigin(entry.CreatedBy)
+				}
+			} else {
+				skill.Origin = domain.SkillOriginUser
+			}
+		}
+		skill.EnsureStatusDefault()
+		if dir == s.root {
+			if err := writeSkillMeta(skillDir, skill); err == nil {
+				s.json.set(skill)
+				_ = s.json.save()
+			}
 		}
 	}
+	skill.EnsureStatusDefault()
 	return skill, nil
+}
+
+// Promote sets Status=trusted for experimental or validated skills.
+// CreatorMayPromote is always false; this is a persistence primitive for
+// a later human RPC, not an agent-callable mutation.
+func (s *Store) Promote(id, ownedBy string) (*domain.Skill, error) {
+	skill, err := s.Get(id, ownedBy)
+	if err != nil {
+		return nil, err
+	}
+	if strings.HasPrefix(skill.EffectiveOwnedBy(), "plugin:") {
+		return nil, fmt.Errorf("plugin-owned skills are read-only")
+	}
+	if skill.Status != domain.SkillStatusExperimental && skill.Status != domain.SkillStatusValidated {
+		return nil, fmt.Errorf("skill %q cannot be promoted from status %s", id, skill.Status)
+	}
+	skill.Status = domain.SkillStatusTrusted
+	skill.Touch(clock.NewTime().Time())
+	if err := s.persistSkill(skill); err != nil {
+		return nil, err
+	}
+	return skill, nil
+}
+
+// Rollback checks out versions/<n>/SKILL.md as the live root SKILL.md.
+func (s *Store) Rollback(id, ownedBy string, version int) (*domain.Skill, error) {
+	skill, err := s.Get(id, ownedBy)
+	if err != nil {
+		return nil, err
+	}
+	if strings.HasPrefix(skill.EffectiveOwnedBy(), "plugin:") {
+		return nil, fmt.Errorf("plugin-owned skills are read-only")
+	}
+	if version < 1 {
+		return nil, fmt.Errorf("skillfs: invalid version %d", version)
+	}
+	skillDir := filepath.Join(s.root, skill.ID)
+	snap := filepath.Join(skillDir, "versions", strconv.Itoa(version), "SKILL.md")
+	data, err := os.ReadFile(snap)
+	if err != nil {
+		return nil, fmt.Errorf("skill %q version %d not found", id, version)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), data, 0o644); err != nil {
+		return nil, fmt.Errorf("skillfs: rollback SKILL.md: %w", err)
+	}
+	name, desc, content := parseSkillMarkdown(string(data))
+	if name != "" {
+		skill.Name = name
+	}
+	skill.Description = desc
+	skill.Content = content
+	skill.ActiveVersion = version
+	skill.Touch(clock.NewTime().Time())
+	if err := s.persistSkill(skill); err != nil {
+		return nil, err
+	}
+	return skill, nil
+}
+
+func (s *Store) persistSkill(skill *domain.Skill) error {
+	if skill.Path == "" {
+		skill.Path = filepath.Join(s.root, skill.ID)
+	}
+	if err := writeSkillMeta(skill.Path, skill); err != nil {
+		return err
+	}
+	s.json.set(skill)
+	return s.json.save()
+}
+
+func (s *Store) uniquifyLearnedID(id string) string {
+	existing, err := s.loadSkillFromDir(id, s.root)
+	if err != nil {
+		return id
+	}
+	if existing.Origin != domain.SkillOriginLearned {
+		prefixed := "learned-" + id
+		if strings.HasPrefix(id, "learned-") {
+			return id
+		}
+		return prefixed
+	}
+	return id
 }
 
 // --- SKILL.md parsing / formatting ---
@@ -520,15 +674,16 @@ func formatSkillMarkdown(s *domain.Skill) string {
 // --- Metadata store (skills.json) ---
 
 type skillMeta struct {
-	Category   string             `json:"category,omitempty"`
-	State      domain.SkillState  `json:"state,omitempty"`
-	Origin     domain.SkillOrigin `json:"origin,omitempty"`
-	OwnedBy    string             `json:"owned_by,omitempty"`
-	PluginDir  string             `json:"plugin_dir,omitempty"` // mount source for plugin skills
-	Pinned     bool               `json:"pinned,omitempty"`
-	UsageCount int                `json:"usage_count,omitempty"`
-	LastUsedAt time.Time          `json:"last_used_at,omitempty"`
-	UpdatedAt  time.Time          `json:"updated_at,omitempty"`
+	Category      string             `json:"category,omitempty"`
+	Status        domain.SkillStatus `json:"status,omitempty"`
+	Origin        domain.SkillOrigin `json:"origin,omitempty"`
+	OwnedBy       string             `json:"owned_by,omitempty"`
+	PluginDir     string             `json:"plugin_dir,omitempty"`
+	Version       int                `json:"version,omitempty"`
+	ActiveVersion int                `json:"active_version,omitempty"`
+	UsageCount    int                `json:"usage_count,omitempty"`
+	LastUsedAt    time.Time          `json:"last_used_at,omitempty"`
+	UpdatedAt     time.Time          `json:"updated_at,omitempty"`
 }
 
 type jsonMetaStore struct {
@@ -544,15 +699,16 @@ func (j *jsonMetaStore) get(id string) (*skillMeta, bool) {
 func (j *jsonMetaStore) set(s *domain.Skill) {
 	key := metaKey(s.ID, s.EffectiveOwnedBy())
 	j.items[key] = &skillMeta{
-		Category:   s.Category,
-		State:      s.State,
-		Origin:     s.Origin,
-		OwnedBy:    s.OwnedBy,
-		PluginDir:  s.PluginDir,
-		Pinned:     s.Pinned,
-		UsageCount: s.UsageCount,
-		LastUsedAt: s.LastUsedAt,
-		UpdatedAt:  s.UpdatedAt,
+		Category:      s.Category,
+		Status:        s.Status,
+		Origin:        s.Origin,
+		OwnedBy:       s.OwnedBy,
+		PluginDir:     s.PluginDir,
+		Version:       s.Version,
+		ActiveVersion: s.ActiveVersion,
+		UsageCount:    s.UsageCount,
+		LastUsedAt:    s.LastUsedAt,
+		UpdatedAt:     s.UpdatedAt,
 	}
 }
 
@@ -564,6 +720,134 @@ func metaKey(id, ownedBy string) string {
 		return id
 	}
 	return ownedBy + ":" + id
+}
+
+func skillMetaPath(skillDir string) string {
+	return filepath.Join(skillDir, "meta.json")
+}
+
+func readSkillMeta(skillDir string) (*skillMeta, bool) {
+	data, err := os.ReadFile(skillMetaPath(skillDir))
+	if err != nil {
+		return nil, false
+	}
+	var meta skillMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, false
+	}
+	return &meta, true
+}
+
+func writeSkillMeta(skillDir string, s *domain.Skill) error {
+	if s == nil {
+		return fmt.Errorf("skillfs: skill is required")
+	}
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		return fmt.Errorf("skillfs: mkdir %s: %w", skillDir, err)
+	}
+	meta := skillMeta{
+		Category:      s.Category,
+		Status:        s.Status,
+		Origin:        s.Origin,
+		OwnedBy:       s.OwnedBy,
+		Version:       s.Version,
+		ActiveVersion: s.ActiveVersion,
+		UsageCount:    s.UsageCount,
+		LastUsedAt:    s.LastUsedAt,
+		UpdatedAt:     s.UpdatedAt,
+	}
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(skillMetaPath(skillDir), data, 0o644)
+}
+
+func writeBuiltinMetaIfMissing(skillDir string) error {
+	if _, ok := readSkillMeta(skillDir); ok {
+		return nil
+	}
+	sk := &domain.Skill{
+		Origin:        domain.SkillOriginBuiltin,
+		OwnedBy:       "builtin",
+		Status:        domain.SkillStatusTrusted,
+		Version:       1,
+		ActiveVersion: 1,
+	}
+	sk.EnsureStatusDefault()
+	sk.Touch(clock.NewTime().Time())
+	return writeSkillMeta(skillDir, sk)
+}
+
+func snapshotVersion(skillDir string, version int, skillMD string) error {
+	if version < 1 {
+		version = 1
+	}
+	verDir := filepath.Join(skillDir, "versions", strconv.Itoa(version))
+	if err := os.MkdirAll(verDir, 0o755); err != nil {
+		return fmt.Errorf("skillfs: mkdir %s: %w", verDir, err)
+	}
+	if err := os.WriteFile(filepath.Join(verDir, "SKILL.md"), []byte(skillMD), 0o644); err != nil {
+		return fmt.Errorf("skillfs: write version snapshot: %w", err)
+	}
+	return copySupportFiles(skillDir, verDir)
+}
+
+func copySupportFiles(srcDir, destDir string) error {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if name == "SKILL.md" || name == "meta.json" || name == "versions" {
+			continue
+		}
+		src := filepath.Join(srcDir, name)
+		dest := filepath.Join(destDir, name)
+		if e.IsDir() {
+			if err := copyDir(src, dest); err != nil {
+				return err
+			}
+			continue
+		}
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(dest, data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyDir(src, dest string) error {
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		from := filepath.Join(src, e.Name())
+		to := filepath.Join(dest, e.Name())
+		if e.IsDir() {
+			if err := copyDir(from, to); err != nil {
+				return err
+			}
+			continue
+		}
+		data, err := os.ReadFile(from)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(to, data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (j *jsonMetaStore) delete(id string) {
@@ -652,9 +936,11 @@ func hasSupportFiles(skillDir string) bool {
 		return false
 	}
 	for _, e := range entries {
-		if e.Name() != "SKILL.md" {
-			return true
+		name := e.Name()
+		if name == "SKILL.md" || name == "meta.json" || name == "versions" {
+			continue
 		}
+		return true
 	}
 	return false
 }
@@ -814,6 +1100,10 @@ func (s *Store) WriteFile(id, ownedBy, path, content string) error {
 	}
 	// Touch skill metadata so UpdatedAt reflects the change.
 	skill.Touch(clock.NewTime().Time())
+	skill.Bundled = hasSupportFiles(filepath.Join(s.root, id))
+	if err := writeSkillMeta(filepath.Join(s.root, id), skill); err != nil {
+		return err
+	}
 	s.json.set(skill)
 	_ = s.json.save()
 	return nil
@@ -849,6 +1139,9 @@ func (s *Store) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 				continue
 			}
 			name := entry.Name()
+			if prefix == "" && (name == "versions" || name == "meta.json") {
+				continue
+			}
 			relPath := name
 			if prefix != "" {
 				relPath = prefix + "/" + name
@@ -970,15 +1263,26 @@ func (s *Store) Install(zipData []byte) (string, error) {
 	}
 	name, description := parseFrontmatter(string(skillMD))
 
-	// Register metadata.
 	skill := &domain.Skill{
-		ID:          topLevel,
-		Name:        name,
-		Description: description,
-		State:       domain.SkillStateActive,
-		Origin:      domain.SkillOriginUser,
-		OwnedBy:     "user",
-		UpdatedAt:   clock.NewTime().Time(),
+		ID:            topLevel,
+		Name:          name,
+		Description:   description,
+		Status:        domain.SkillStatusTrusted,
+		Origin:        domain.SkillOriginUser,
+		OwnedBy:       "user",
+		Version:       1,
+		ActiveVersion: 1,
+		UpdatedAt:     clock.NewTime().Time(),
+	}
+	if dirMeta, ok := readSkillMeta(destDir); ok && dirMeta.Version >= 1 {
+		skill.Version = dirMeta.Version + 1
+		skill.ActiveVersion = skill.Version
+	}
+	if err := snapshotVersion(destDir, skill.Version, string(skillMD)); err != nil {
+		return "", err
+	}
+	if err := writeSkillMeta(destDir, skill); err != nil {
+		return "", err
 	}
 	s.json.set(skill)
 	if err := s.json.save(); err != nil {
@@ -1058,7 +1362,9 @@ func (s *Store) MountPluginSkills(pluginID, pluginSkillsDir string) error {
 			continue
 		}
 		skill.SetOwner(owner, pluginSkillsDir)
-		skill.Origin = domain.SkillOriginUser // placeholder; OwnedBy is authoritative
+		skill.Origin = domain.SkillOriginPlugin
+		skill.Status = domain.SkillStatusTrusted
+		skill.EnsureStatusDefault()
 		skill.Touch(clock.NewTime().Time())
 		s.json.set(skill)
 	}

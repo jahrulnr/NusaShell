@@ -20,7 +20,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `find_file` | find files by glob pattern with `**` recursive matching (e.g. `**/*.go`) and brace expansion (e.g. `*.{go,ts}`); skips .git/node_modules/vendor; returns matching paths sorted alphabetically |
 | `show` | render a file from disk in the UI. `op=html` reads an HTML file and displays it in a sandboxed iframe (write the file first with `file_write`, then `show` it — use `file_patch` for edits, `file_read` to inspect). `op=image` reads an image file and displays it inline. `op=audio` reads an audio file (mp3, wav, ogg, m4a) and displays an inline player. `op=video` reads a video file (mp4, webm, mov, avi) and displays an inline player. `op=pdf` validates a PDF by its `%PDF-` magic bytes and displays it in the browser's native PDF viewer. `width`/`height` control the iframe viewport (html only, default 720x400). The tool result to the model is metadata only (path, name, media_type, size_bytes for media/PDF; path, width, height, title for html) — no file content or base64 payload is ever embedded in the tool output, so it does not bloat the conversation JSON or enter the provider request. The frontend loads the file via `/local-file?path=` on demand. Use `read_media` instead when the model needs to see image/audio/video/PDF content. Replaces the former `artifact_*` tools — file_* handles CRUD, `show` only handles display |
 | `skill` | skill library dispatcher; `op` selects: `list`, `search`, `save`, `delete`. `search` is discovery metadata only (`id`, `name`, `description`, `owned_by`); it never loads `SKILL.md`. After selecting a skill, read its absolute `SKILL.md` with `file_read` before applying it. Support files also use `file_read`; list a skill folder with `file_list`; `delete {id,owned_by?}` removes a user/agent-owned skill (plugin-owned skills cannot be deleted directly) (see `docs(op="read", id="skills")` for the path layout) |
-| `memory` | long-term memory dispatcher; `op` selects: `save` (idempotent dedup), `replace` (user/agent document substring/body rewrite or fragment update), `search` (BM25 ranked fragments), `list`, `delete` |
+| `memory` | long-term memory dispatcher; `op` selects: `search`, `get`, `list` (retrievable records only; agents do not write) |
 | `memory_project` | per-workspace project memory dispatcher (listed only with a workspace); `op` selects: `query` (AND selectors), `list`, `read`, `admit` (upsert + lint), `skip` (negative admission, no write), `archive`, `lint`. User prefs stay in `memory`. See `docs(op="read", id="memory-project")` |
 | `docs` | product documentation dispatcher; `op` selects: `list {limit?}` (page ids/titles for vocabulary discovery), `search {query,limit?}` (BM25-ranked page ids/titles/snippets; multi-word terms need not be contiguous), and `read {id}` (full authoritative page). Use `list` when terminology is uncertain or search returns zero; after any search hit, `read` the relevant page before relying on its facts. Long `read` pages are truncated in-band (~32KiB) with `overflow_path` — continue via `file_read` |
 | `todo` | manage the conversation task checklist. Two modes: `replace` (default) full-replaces the list (an empty items array clears it); `patch` merges by ID — updates status/content of existing items, appends new ones, keeps untouched items unchanged. In `replace`, `content` may be omitted for an existing ID and its stored description is preserved; a new ID still requires non-empty `content`. In `patch`, `content` is optional for existing items and an empty value means keep the stored description. Use `patch` to update a single item without re-emitting the full list. Item IDs are shown in the hydrated checklist so statuses can be patched after compaction. Max 50 items, 500 chars each; prefer exactly one `in_progress` at a time. The optional `brief` argument is a living planning document (max ~10k tokens) with required markdown sections `## Objective` and `## Done when`, plus optional `## Findings` and `## Approach` that grow as the task progresses. It stays available through conversation history and is re-injected with the fresh hydration checkpoint immediately after the compacted handover user (the epoch anchor), before retained assistant rounds. The brief is mirrored to a plan file on disk; the result returns `plan_path` (absolute) — `file_read` it to re-read the latest brief, and hand it to ACP subagents. Set `clear_brief: true` to delete the brief and its plan file (items untouched); an empty `brief` string alone never clears. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
@@ -186,19 +186,18 @@ form. There are no per-verb aliases: a call named like an old verb
 
 Ops per family:
 
-- `skill`: `list {limit?}` (returns `owned_by`+`shadowed` flags for path
-  resolution); `search {query,limit?}` (discovery metadata only, never the
-  SKILL.md body); `save {name,content,description?,id?,path?}` — with `path`
-  set, writes a support file (`references/…`, `scripts/…`) inside an existing
-  skill; `delete {id,owned_by?}` — removes a user/agent-owned skill
-  (plugin-owned skills cannot be deleted directly). After discovery, read the
-  selected absolute `SKILL.md` with `file_read` before applying it; support
-  files are also read with `file_read` and listed with `file_list` (see
-  `docs(op="read", id="skills")`).
-- `memory`: `save {content,category?,project?,task?,tags?}` is idempotent for
-  exact normalized duplicates; `replace {target,content,old_text?,id?}` edits
-  a user/agent document or one fragment; `search` is BM25-ranked with metadata
-  filters; `list`; `delete {id}`.
+- `skill`: `list {limit?,status?}` (routable trusted|validated by default;
+  returns `owned_by`, `status`, `version`, `path`); `search {query,limit?,status?}`
+  (discovery metadata only, never the SKILL.md body); `save {name,content,description?,id?,path?}`
+  creates or versions a learned experimental skill, or writes a support file
+  when `path` is set (the skill must already exist and be agent-mutable);
+  `delete {id,owned_by?}` removes a learned candidate/experimental skill.
+  After discovery, read the selected absolute `SKILL.md` with `file_read`
+  before applying it (see `docs(op="read", id="skills")`).
+- `memory`: `search {query,type?,status?,scope?,project?,limit?}` over
+  retrievable records; `get {id}`; `list` with the same filters. Agents do
+  not write memory. Teaching and corrections are recorded as experiences;
+  the consolidator commits records. See `docs(op="read", id="memory")`.
 - `docs`: `list {limit?}` for page ids/titles when vocabulary is unknown;
   `search {query,limit?}` for known vocabulary (terms need not be a
   contiguous phrase; results include a selection snippet); then MUST `read
@@ -345,20 +344,17 @@ differentiated by their args `type` and result text:
   turn (subagent list, user instructions, providers). Args carry `changed`.
   The new system prompt and tool descriptions are already in this request —
   re-read the affected surfaces instead of relying on stale assumptions.
-- `type: "memory_changed"`: memory was updated outside this conversation
-  (user, the background learning agent, or another room's agent). Call
-  `memory` op=list to refresh before relying on remembered facts.
+- `type: "memory_changed"`: About You / About Agent documents changed in
+  Learning, or a structured record was announced from another room. Call
+  `memory` op=search or op=list before relying on remembered facts.
 - `type: "skills_changed"`: the skill library changed. Call `skill` op=list
   to refresh before relying on a previously known skill.
 - `type: "peer_message"`: a message received from another conversation room via `conversation(op="send")`.
   Args carry `from` (sender conversation ID). Result text carries the quoted message and reply instructions.
-- `type: "task_memory"`: fragments relevant to this conversation are new or
-  updated (written by another conversation or the background learning
-  agent).
-  Args carry `hits` with snippet contents — the facts are in the result
-  text. Use them for the current task; retrieve full entries with
-  `memory(op="search")` when a snippet needs more context. A fragment is
-  announced once per conversation.
+- `type: "task_memory"`: structured records relevant to this conversation are
+  new or updated. Args carry `hits` with snippet contents. Use them for the
+  current task; retrieve full records with `memory(op="search")` or
+  `memory(op="get")`. A record is announced once per conversation.
 
 Notices published while a conversation has no active turn queue on disk (the
 same queue later carries room-to-room peer messages). The queue deduplicates

@@ -361,6 +361,13 @@
                   <h2 id="skill-editor-title">No file selected</h2>
                   <span id="skill-editor-meta"></span>
                 </div>
+                <div class="skills-lifecycle" id="skill-lifecycle" hidden>
+                  <span class="skill-status-badge" id="skill-status-badge"></span>
+                  <span class="skill-version-meta" id="skill-version-meta"></span>
+                  <button class="mini-btn" id="skills-promote" type="button" hidden>Promote</button>
+                  <select id="skills-rollback-version" class="select" aria-label="Rollback version"></select>
+                  <button class="mini-btn ghost" id="skills-rollback" type="button">Rollback</button>
+                </div>
               </div>
               <div class="skills-file-viewer" id="skill-file-viewer" hidden>
                 <div class="skills-file-viewer-head">
@@ -431,7 +438,7 @@
           <div>
             <div class="view-kicker"><span class="view-kicker-dot"></span>Learning</div>
             <h1>Memory &amp; knowledge graph</h1>
-            <p>Search accumulated memory entries, explore the knowledge graph, and review what autolearn saved.</p>
+            <p>Edit always-on memory, browse recorded experience and memory records, and explore how they connect.</p>
           </div>
           <div class="learning-header-stats">
             <span class="learning-stat" id="learning-stat-memory">0 memories</span>
@@ -441,6 +448,7 @@
         <div class="tabs learning-tabs" role="tablist" aria-label="Learning sections">
           <button class="tab active" type="button" id="learning-tab-about" data-learning-tab="about" role="tab" aria-selected="true" aria-controls="learning-panel-about">About You</button>
           <button class="tab" type="button" id="learning-tab-agent" data-learning-tab="agent" role="tab" aria-selected="false" aria-controls="learning-panel-agent">About Agent</button>
+          <button class="tab" type="button" id="learning-tab-experience" data-learning-tab="experience" role="tab" aria-selected="false" aria-controls="learning-panel-experience">Experience</button>
           <button class="tab" type="button" id="learning-tab-memory" data-learning-tab="memory" role="tab" aria-selected="false" aria-controls="learning-panel-memory">Memory &amp; Graph</button>
           <button class="tab" type="button" id="learning-tab-log" data-learning-tab="log" role="tab" aria-selected="false" aria-controls="learning-panel-log">Learning log</button>
         </div>
@@ -493,11 +501,29 @@
               </div>
             </div>
           </div>
+          <div class="learning-panel learning-catalog-panel" id="learning-panel-experience" data-learning-panel="experience" role="tabpanel" aria-labelledby="learning-tab-experience" hidden>
+            <div class="learning-catalog-grid">
+              <section class="learning-catalog-section" aria-labelledby="learning-experience-heading">
+                <div class="learning-pane-head">
+                  <h2 id="learning-experience-heading">Experience</h2>
+                  <span id="learning-experience-count">0</span>
+                </div>
+                <div class="learning-catalog-list" id="learning-experience-list"></div>
+              </section>
+              <section class="learning-catalog-section" aria-labelledby="learning-records-heading">
+                <div class="learning-pane-head">
+                  <h2 id="learning-records-heading">Memory records</h2>
+                  <button class="mini-btn ghost" id="learning-record-retire" type="button" disabled>Retire</button>
+                </div>
+                <div class="learning-catalog-list" id="learning-records-list"></div>
+              </section>
+            </div>
+          </div>
           <div class="learning-panel" id="learning-panel-memory" data-learning-panel="memory" role="tabpanel" aria-labelledby="learning-tab-memory" hidden>
             <div class="learning-search-bar">
               <label class="learning-search-query">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-                <input type="search" id="learning-search-input" placeholder="Search memories and skills…" autocomplete="off">
+                <input type="search" id="learning-search-input" placeholder="Search records and skills…" autocomplete="off">
               </label>
               <div class="learning-search-actions">
                 <select id="learning-kind-filter" class="select" aria-label="Filter learning entries by kind"></select>
@@ -513,7 +539,7 @@
                 <div class="learning-results" id="learning-results">
                   <div class="learning-empty">
                     <strong>Loading…</strong>
-                    <span>Gathering memories and skills.</span>
+                    <span>Gathering records and skills.</span>
                   </div>
                 </div>
               </div>
@@ -529,7 +555,7 @@
                 <div class="learning-graph" id="learning-graph"></div>
                 <div class="learning-graph-legend">
                   <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-skill"></span>Skill</span>
-                  <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-memory"></span>Fragment</span>
+                  <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-memory"></span>Record</span>
                   <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-user"></span>User</span>
                   <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-related"></span>Related</span>
                   <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-used"></span>Used with</span>
@@ -839,20 +865,12 @@
             <section class="settings-card settings-learning-card" aria-labelledby="settings-learning-title">
               <div class="settings-card-title">Learning</div>
               <h2 id="settings-learning-title" class="sr-only">Learning</h2>
-              <p class="settings-card-copy">Background review that extracts user learnings and skill-worthy patterns. Separate from project memory and from the embedding model used for search.</p>
-              <label class="settings-field" for="settings-learning-threshold">Learning review threshold (turns)
-                <input id="settings-learning-threshold" type="number" min="0" max="1000" step="1" inputmode="numeric" value="10">
-                <small>How many turns to accumulate before extracting learnings (default 10). Set 0 to disable turn-based review; compaction-triggered review still runs.</small>
-              </label>
-              <label class="settings-field" for="settings-skill-nudge-interval">Skill review threshold (tool calls)
-                <input id="settings-skill-nudge-interval" type="number" min="0" max="1000" step="1" inputmode="numeric" value="15">
-                <small>How many tool calls to accumulate before reviewing for skill-worthy patterns (default 15). Catches tool-heavy coding sessions that don't reach the turn threshold. Set 0 to disable.</small>
-              </label>
+              <p class="settings-card-copy">Background jobs consolidate recorded experience into memory records and skills. Separate from project memory and from the embedding model used for search.</p>
               <label class="settings-field" for="settings-review-model">Review model
                 <select id="settings-review-model">
                   <option value="">Default — use the conversation's active model</option>
                 </select>
-                <small>Route background autolearn reviews to a cheaper or faster model. Reviews re-read the recent transcript, so this directly controls background cost. Leave as default to use the active model.</small>
+                <small>Route background learning jobs to a cheaper or faster model. Leave as default to use the active model.</small>
               </label>
             </section>
             <section class="settings-card settings-project-memory-card" aria-labelledby="settings-project-memory-title">

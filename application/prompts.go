@@ -36,6 +36,10 @@ var continuePrompt = resources.Prompt("continue")
 // to call the summary() tool with the handoff checkpoint text.
 var compactionPrompt = resources.Prompt("compaction")
 
+var consolidatorPrompt = resources.Prompt("memory-consolidator")
+var skillEvolverPrompt = resources.Prompt("skill-evolver")
+var skillEvaluatorPrompt = resources.Prompt("skill-evaluator")
+
 // compactionHandoffUserPrompt is the last user message on a compaction
 // Complete request. System-prompt instructions are not enough: if the
 // transcript ends on assistant/tool, reasoning models continue the agent
@@ -75,6 +79,12 @@ func buildSystemPromptForRun(run *TurnRun, c *domain.Conversation, userPrompt st
 			base = automationPrompt
 		case AgentDelegate:
 			base = delegatePrompt
+		case AgentMemoryConsolidator:
+			base = consolidatorPrompt
+		case AgentSkillEvolver:
+			base = skillEvolverPrompt
+		case AgentSkillEvaluator:
+			base = skillEvaluatorPrompt
 		}
 	}
 	var sb strings.Builder

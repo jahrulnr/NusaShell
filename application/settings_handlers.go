@@ -232,20 +232,6 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "plugin_contract_mode must be off, hint, or require"}
 		}
 	}
-	if req.LearningReviewThreshold != nil {
-		v := *req.LearningReviewThreshold
-		if v < 0 {
-			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "learning_review_threshold must be >= 0 (0 disables turn-based review)"}
-		}
-		s.LearningReviewThreshold = v
-	}
-	if req.SkillNudgeInterval != nil {
-		v := *req.SkillNudgeInterval
-		if v < 0 {
-			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "skill_nudge_interval must be >= 0 (0 disables tool-based review)"}
-		}
-		s.SkillNudgeInterval = v
-	}
 	if req.MaxAutoContinues != nil {
 		v := *req.MaxAutoContinues
 		if v < 0 {
@@ -343,8 +329,6 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		TopK:                       s.TopK,
 		FrequencyPenalty:           s.FrequencyPenalty,
 		PresencePenalty:            s.PresencePenalty,
-		LearningReviewThreshold:    s.LearningReviewThreshold,
-		SkillNudgeInterval:         s.SkillNudgeInterval,
 		MaxAutoContinues:           s.MaxAutoContinues,
 		SoundNotifications:         s.SoundNotifications,
 		UserPrompt:                 s.UserPrompt,

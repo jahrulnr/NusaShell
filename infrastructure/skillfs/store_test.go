@@ -1,6 +1,7 @@
 package skillfs
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,7 @@ func newTestStore(t *testing.T) *Store {
 		Name:        "test-skill",
 		Description: "test",
 		Content:     "# Test\n",
-		State:       domain.SkillStateActive,
+		Status:      domain.SkillStatusTrusted,
 		Origin:      domain.SkillOriginUser,
 	}); err != nil {
 		t.Fatalf("seed Save: %v", err)
@@ -41,8 +42,8 @@ func TestStore_SaveNewSkillDerivesIDFromName(t *testing.T) {
 		Name:        "new-skill",
 		Description: "created by the review agent",
 		Content:     "# New skill\n",
-		State:       domain.SkillStateActive,
-		Origin:      domain.SkillOriginAgent,
+		Status:      domain.SkillStatusExperimental,
+		Origin:      domain.SkillOriginLearned,
 	}
 	if err := s.Save(skill); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -152,7 +153,7 @@ func TestStore_WriteFile_overwritesExisting(t *testing.T) {
 // by the agent (skill op=save with Origin=agent) live in the root dir, but an
 // exact-owner lookup used to fail with "owner agent not mounted" because
 // getWithOwner only knew user/builtin/plugin owners.
-func TestStore_GetWithAgentOwner(t *testing.T) {
+func TestStore_GetWithLearnedOwner(t *testing.T) {
 	s, err := New(t.TempDir())
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -161,52 +162,49 @@ func TestStore_GetWithAgentOwner(t *testing.T) {
 		Name:        "mcp-call-json-escaping",
 		Description: "created by the background review agent",
 		Content:     "# Agent skill\n",
-		State:       domain.SkillStateActive,
-		Origin:      domain.SkillOriginAgent,
+		Status:      domain.SkillStatusExperimental,
+		Origin:      domain.SkillOriginLearned,
 	}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	// Exact owner lookup — this is what the Skills UI sends on click.
-	got, err := s.Get("mcp-call-json-escaping", string(domain.SkillOriginAgent))
+	got, err := s.Get("mcp-call-json-escaping", string(domain.SkillOriginLearned))
 	if err != nil {
-		t.Fatalf("Get(agent owner): %v", err)
+		t.Fatalf("Get(learned owner): %v", err)
 	}
 	if got.Name != "mcp-call-json-escaping" {
 		t.Fatalf("Name = %q", got.Name)
 	}
 
-	// Files listing for the same owner must resolve too (same resolver path).
-	files, err := s.Files("mcp-call-json-escaping", string(domain.SkillOriginAgent))
+	files, err := s.Files("mcp-call-json-escaping", string(domain.SkillOriginLearned))
 	if err != nil {
-		t.Fatalf("Files(agent owner): %v", err)
+		t.Fatalf("Files(learned owner): %v", err)
 	}
 	if len(files) == 0 {
 		t.Fatalf("Files returned no entries")
 	}
 
-	// Priority resolution without an explicit owner still works.
 	if _, err := s.Get("mcp-call-json-escaping", ""); err != nil {
 		t.Fatalf("Get(priority): %v", err)
 	}
 
-	// Metadata written under the "agent:<id>" composite key must be read
-	// back after a fresh store load (pinned/usage/last_used survive restart).
 	reread, err := New(s.root)
 	if err != nil {
 		t.Fatalf("New(reload): %v", err)
 	}
-	got, err = reread.Get("mcp-call-json-escaping", string(domain.SkillOriginAgent))
+	got, err = reread.Get("mcp-call-json-escaping", string(domain.SkillOriginLearned))
 	if err != nil {
 		t.Fatalf("Get(reload): %v", err)
 	}
-	if got.Origin != domain.SkillOriginAgent {
-		t.Fatalf("Origin = %q, want agent (metadata under agent:<id> key was not read back)", got.Origin)
+	if got.Origin != domain.SkillOriginLearned {
+		t.Fatalf("Origin = %q, want learned (meta.json was not read back)", got.Origin)
+	}
+	if got.Status != domain.SkillStatusExperimental {
+		t.Fatalf("Status = %q, want experimental", got.Status)
 	}
 
-	// And deletion via the UI path must succeed for agent-owned skills.
-	if err := s.Delete("mcp-call-json-escaping", string(domain.SkillOriginAgent)); err != nil {
-		t.Fatalf("Delete(agent owner): %v", err)
+	if err := s.Delete("mcp-call-json-escaping", string(domain.SkillOriginLearned)); err != nil {
+		t.Fatalf("Delete(learned owner): %v", err)
 	}
 }
 
@@ -223,7 +221,7 @@ func TestStore_ListSetsAbsolutePath(t *testing.T) {
 		Name:        "path-test",
 		Description: "verifies Path is set",
 		Content:     "# Path test\n",
-		State:       domain.SkillStateActive,
+		Status:      domain.SkillStatusTrusted,
 		Origin:      domain.SkillOriginUser,
 	}); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -265,7 +263,7 @@ func TestStore_ListSetsBundledFlag(t *testing.T) {
 		Name:        "bare-skill",
 		Description: "no subfiles",
 		Content:     "# Bare\n",
-		State:       domain.SkillStateActive,
+		Status:      domain.SkillStatusTrusted,
 		Origin:      domain.SkillOriginUser,
 	}); err != nil {
 		t.Fatalf("Save bare: %v", err)
@@ -275,7 +273,7 @@ func TestStore_ListSetsBundledFlag(t *testing.T) {
 		Name:        "bundled-skill",
 		Description: "has subfiles",
 		Content:     "# Bundled\n",
-		State:       domain.SkillStateActive,
+		Status:      domain.SkillStatusTrusted,
 		Origin:      domain.SkillOriginUser,
 	}); err != nil {
 		t.Fatalf("Save bundled: %v", err)
@@ -294,5 +292,211 @@ func TestStore_ListSetsBundledFlag(t *testing.T) {
 				t.Errorf("bundled-skill: Bundled=false, want true (has references/guide.md)")
 			}
 		}
+	}
+}
+
+func TestStore_UserSaveSnapshotsAndIncrementsVersion(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	skill := &domain.Skill{
+		Name:        "user-skill",
+		Description: "curated",
+		Content:     "# v1\n",
+		Origin:      domain.SkillOriginUser,
+	}
+	if err := s.Save(skill); err != nil {
+		t.Fatalf("Save v1: %v", err)
+	}
+	if skill.Status != domain.SkillStatusTrusted {
+		t.Fatalf("Status = %q, want trusted", skill.Status)
+	}
+	if skill.Version != 1 || skill.ActiveVersion != 1 {
+		t.Fatalf("version=%d active=%d", skill.Version, skill.ActiveVersion)
+	}
+	snap := filepath.Join(s.root, "user-skill", "versions", "1", "SKILL.md")
+	if _, err := os.Stat(snap); err != nil {
+		t.Fatalf("missing v1 snapshot: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.root, "user-skill", "meta.json")); err != nil {
+		t.Fatalf("missing meta.json: %v", err)
+	}
+
+	skill.Content = "# v2\n"
+	if err := s.Save(skill); err != nil {
+		t.Fatalf("Save v2: %v", err)
+	}
+	if skill.Version != 2 || skill.ActiveVersion != 2 {
+		t.Fatalf("after update version=%d active=%d", skill.Version, skill.ActiveVersion)
+	}
+	if _, err := os.Stat(filepath.Join(s.root, "user-skill", "versions", "2", "SKILL.md")); err != nil {
+		t.Fatalf("missing v2 snapshot: %v", err)
+	}
+}
+
+func TestStore_PromoteAndRollback(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := s.Save(&domain.Skill{
+		Name:    "learned-flow",
+		Content: "# experimental\n",
+		Origin:  domain.SkillOriginLearned,
+		Status:  domain.SkillStatusExperimental,
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := s.Save(&domain.Skill{
+		ID:      "learned-flow",
+		Name:    "learned-flow",
+		Content: "# experimental v2\n",
+		Origin:  domain.SkillOriginLearned,
+		Status:  domain.SkillStatusExperimental,
+	}); err != nil {
+		t.Fatalf("Save v2: %v", err)
+	}
+
+	promoted, err := s.Promote("learned-flow", string(domain.SkillOriginLearned))
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if promoted.Status != domain.SkillStatusTrusted {
+		t.Fatalf("Promote status = %q", promoted.Status)
+	}
+	if _, err := s.Promote("learned-flow", string(domain.SkillOriginLearned)); err == nil {
+		t.Fatal("second Promote of trusted skill must fail")
+	}
+
+	rolled, err := s.Rollback("learned-flow", string(domain.SkillOriginLearned), 1)
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if rolled.ActiveVersion != 1 {
+		t.Fatalf("ActiveVersion = %d, want 1", rolled.ActiveVersion)
+	}
+	if !strings.Contains(rolled.Content, "experimental") || strings.Contains(rolled.Content, "v2") {
+		t.Fatalf("rollback content = %q", rolled.Content)
+	}
+}
+
+func TestStore_LearnedSaveDoesNotOverwriteTrusted(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := s.Save(&domain.Skill{
+		Name:    "git-helper",
+		Content: "# curated\n",
+		Origin:  domain.SkillOriginUser,
+	}); err != nil {
+		t.Fatalf("Save user: %v", err)
+	}
+	learned := &domain.Skill{
+		Name:    "git-helper",
+		Content: "# learned\n",
+		Origin:  domain.SkillOriginLearned,
+		Status:  domain.SkillStatusExperimental,
+	}
+	if err := s.Save(learned); err != nil {
+		t.Fatalf("Save learned: %v", err)
+	}
+	if learned.ID != "learned-git-helper" {
+		t.Fatalf("learned ID = %q, want learned-git-helper", learned.ID)
+	}
+	got, err := s.Get("git-helper", "")
+	if err != nil {
+		t.Fatalf("Get curated: %v", err)
+	}
+	if got.Origin != domain.SkillOriginUser {
+		t.Fatalf("curated origin = %q", got.Origin)
+	}
+	if !strings.Contains(got.Content, "curated") {
+		t.Fatalf("curated content overwritten: %q", got.Content)
+	}
+}
+
+func TestStore_OneShotMapsRetiredAgentOrigin(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "old-agent-skill")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: old-agent-skill\n---\n\n# body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := map[string]map[string]any{
+		"agent:old-agent-skill": {
+			"origin":   "agent",
+			"state":    "active",
+			"pinned":   true,
+			"owned_by": "agent",
+		},
+	}
+	raw, _ := json.Marshal(cache)
+	if err := os.WriteFile(filepath.Join(root, "skills.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	got, err := s.Get("old-agent-skill", "")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Origin != domain.SkillOriginLearned {
+		t.Fatalf("Origin = %q, want learned", got.Origin)
+	}
+	if got.Status != domain.SkillStatusExperimental {
+		t.Fatalf("Status = %q, want experimental", got.Status)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "meta.json")); err != nil {
+		t.Fatalf("one-shot must persist meta.json: %v", err)
+	}
+	metaRaw, err := os.ReadFile(filepath.Join(dir, "meta.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(metaRaw), `"agent"`) {
+		t.Fatalf("meta.json must not keep origin agent: %s", metaRaw)
+	}
+
+	reread, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := reread.Get("old-agent-skill", string(domain.SkillOriginLearned))
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if again.Origin != domain.SkillOriginLearned || again.Status != domain.SkillStatusExperimental {
+		t.Fatalf("reload origin=%q status=%q", again.Origin, again.Status)
+	}
+}
+
+func TestSeedBuiltinSkillsWritesTrustedMeta(t *testing.T) {
+	root := t.TempDir()
+	if err := SeedBuiltinSkills(root); err != nil {
+		t.Fatalf("SeedBuiltinSkills: %v", err)
+	}
+	s, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get("automation-authoring", "")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Origin != domain.SkillOriginBuiltin {
+		t.Fatalf("Origin = %q", got.Origin)
+	}
+	if got.Status != domain.SkillStatusTrusted {
+		t.Fatalf("Status = %q", got.Status)
+	}
+	if !got.Routable() {
+		t.Fatal("builtin seed must be routable")
 	}
 }

@@ -19,13 +19,14 @@ without the model being told:
 - **Settings.UserPrompt** — appended to the system prompt as
   `<user_instructions>`, breaking the cached system block globally.
 - **Memory / skills changes** — alter hydration slot content; mid-epoch
-  changes are currently invisible to the model until compaction.
+  changes would otherwise stay invisible to the model until compaction.
 - **Provider/model changes** — change the cache key (provider+model+conversation),
   forcing a fresh shard.
 
-Today only `restart`, `auto_continue`, `interrupted`, and `workspace_changed`
-are announced (`domain/announcement.go`). The rest change the request payload
-silently.
+Those surfaces now announce through the queue below (`config_changed`,
+`memory_changed`, `skills_changed`) in addition to `restart`,
+`auto_continue`, `interrupted`, and `workspace_changed`
+(`domain/announcement.go`).
 
 ## Delivery semantics
 
@@ -56,7 +57,7 @@ per-conversation pending queue IS the queue:
 ## Architecture
 
 ```
-publisher (RPC handler / review agent / cross-conversation tool path)
+publisher (RPC handler / Skills UI / About You·Agent save / cross-conversation tool path)
    │  publishAnnouncement(convID, ev): lock → append (coalesce) → save
    ▼
 Conversation.PendingAnnouncements (persisted, per-conversation queue)
@@ -102,8 +103,8 @@ the self-describing args pattern of `AutoContinueAnnouncementArgs`:
 | Type | Publishers | Args | Result text (implicit, model re-reads details) |
 |------|-----------|------|------------------------------------------------|
 | `config_changed` | `acp.agents.save/delete`, `settings.save` (UserPrompt), `ai.providers.save` | `{type, changed: ["subagent","user_prompt"]}` | "Tool/system configuration changed since your last turn: subagent list, user instructions. Re-read the affected tool descriptions and instructions." |
-| `memory_changed` | `memory.save`/`memory.delete` RPC, review agent, `memory` tool from other conversations | `{type, tier: "user"\|"fragment", op: "save"\|"replace"\|"delete"}` | "Memory was updated outside this conversation. Call `memory` op=list to refresh." |
-| `skills_changed` | `skills.save/install/delete` RPC, `skill` tool from other conversations | `{type, op}` | "The skill library changed. Call `skill` op=list to refresh." |
+| `memory_changed` | `memory.user.update` / `memory.agent.update` RPC | `{type, tier: "user"\|"agent", op: "update"}` | "Memory was updated outside this conversation. Call `memory` op=list to refresh." |
+| `skills_changed` | `skills.save` / `install` / `delete` RPC, `skill` tool (`save`/`delete`) from other conversations | `{type, op}` | "The skill library changed. Call `skill` op=list to refresh." |
 
 Rules:
 
@@ -112,13 +113,15 @@ Rules:
   request. It only flags the change and points at the refresh tool. Example
   (settings): "User instruction from system prompt has changed: ..." — the
   model sees the new instruction in the same request.
-- **No self-announcement.** When the agent itself calls `memory`/`skill`
-  tools in this conversation, no event is published — the model already knows
-  (it made the call). Only external mutations announce: UI RPC, the
-  background review agent, other conversations.
-- **Review agent → all conversations.** A review-agent memory write
-  publishes to every visible conversation (fan-out). Idle conversations get
-  the pending entry too (drained at next turn start).
+- **No self-announcement.** When the agent itself calls `skill` tools in
+  this conversation, no event is published — the model already knows
+  (it made the call). Only external mutations announce: UI RPC, other
+  conversations. The `memory` tool is read-only (`search`/`get`/`list`);
+  it does not publish `memory_changed`.
+- **Fan-out.** Profile-document updates and skill-library writes publish
+  to every visible conversation. Idle conversations get the pending entry
+  too (drained at next turn start). Consolidator jobs emit `memory.updated`
+  for the Learning UI; they do not enqueue `memory_changed` announcements.
 
 ## Worker lifecycle
 
@@ -142,9 +145,9 @@ Rules:
 
 ## Persistence
 
-- `domain.Conversation` gains `PendingAnnouncements []PendingAnnouncement`
-  (generalizing `PendingWorkspaceAnnouncement`; the workspace flag stays as
-  is). Each entry: `{id, type, args, message, created_at}`.
+- `domain.Conversation` carries `PendingAnnouncements []PendingAnnouncement`
+  (the workspace flag stays as is). Each entry:
+  `{id, type, args, message, created_at}`.
 - Publish appends the pending entry and saves (single commit point in the
   handler, after the store write succeeds).
 - Announcements injected into the transcript are persisted like restart /
@@ -159,10 +162,9 @@ Rules:
 | `handleAcpAgentsSave` / `handleAcpAgentsDelete` (`application/acp_handlers.go`) | `config_changed` (subagent) |
 | `handleSettingsSave` (`application/settings_handlers.go`) when `UserPrompt` changed | `config_changed` (user_prompt) |
 | `handleProvidersSave` / `handleProvidersDelete` (`application/providers.go`) | `config_changed` (provider) |
-| `handleMemorySave` / `handleMemoryDelete` (`application/memory_handlers.go`) | `memory_changed` |
-| Review agent memory/skill writes (`application/review_agent_rules.go`) | `memory_changed` / `skills_changed` (fan-out) |
+| `handleMemoryUserUpdate` / `handleMemoryAgentUpdate` (`application/memory_handlers.go`) | `memory_changed` |
 | `handleSkillsSave` / `handleSkillsInstall` / `handleSkillsDelete` (`application/skills_handlers.go`) | `skills_changed` |
-| `memory` / `skill` tool execution when the calling conversation differs from the affected one | `memory_changed` / `skills_changed` |
+| `skill` tool `save`/`delete` when the calling conversation differs from the affected one | `skills_changed` |
 
 ## Test plan
 
@@ -175,8 +177,8 @@ Rules:
   (user → workspace → pending → restart → assistant); idle-then-message
   delivery; restart survival.
 - Publisher tests: each handler publishes the right event only on real
-  change (e.g. UserPrompt unchanged → no event); review agent fan-out to all
-  conversations; hidden/self conversations skipped.
+  change (e.g. UserPrompt unchanged → no event); profile-document fan-out
+  to all conversations; hidden/self conversations skipped.
 - Compaction test: announcements are stripped; fresh hydration carries the
   state.
 - Regression: `TestAppendContinuationTool` and the system-prompt stability

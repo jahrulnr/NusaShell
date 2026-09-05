@@ -10,16 +10,13 @@ import (
 	"nusashell/domain"
 )
 
-// model_override is a LOCAL tool available only to the unified background
-// learning agent. It lets the agent correct a model's catalog metadata (vision,
-// context window, etc.) for a specific provider+model pair. Corrections are
-// stored in the manual override registry and applied at resolve time AFTER
-// learned 400-adaptations, so they always win and survive catalog re-imports.
+// model_override is a LOCAL tool for background learning jobs. It lets the
+// agent correct a model's catalog metadata (vision, context window, etc.)
+// for a specific provider+model pair. Corrections are stored in the manual
+// override registry and applied at resolve time AFTER learned 400-adaptations,
+// so they always win and survive catalog re-imports.
 //
-// It is NOT registered in Toolbox and NOT dispatched via Toolbox.Execute —
-// runReviewLoop executes it directly, the same way it handles
-// review_transcript. This keeps the capability scoped to the review agent
-// and lets it touch the modelOverridesCache without exposing a general RPC.
+// It is NOT registered in Toolbox and NOT dispatched via Toolbox.Execute.
 //
 // Ops:
 //   - set:    create/merge an override (at least one field required)
@@ -28,7 +25,8 @@ import (
 
 const modelOverrideToolName = "model_override"
 
-// modelOverrideToolDef is the tool definition sent to the review LLM.
+// modelOverrideToolDef is the tool definition advertised to learning jobs
+// that correct catalog metadata.
 var modelOverrideToolDef = ToolDef{
 	Name: modelOverrideToolName,
 	Description: "Correct a model's catalog metadata for a specific provider+model pair. " +
@@ -91,14 +89,13 @@ type modelOverrideToolArgs struct {
 // executeModelOverride runs a model_override call against the App's override
 // cache. It returns the tool-result content string, a mutation snippet for
 // the Learning log (empty when the call did not mutate the registry), and an
-// error. It is the local handler invoked by runReviewLoop — NOT dispatched
-// via Toolbox.Execute.
-func (r *BackgroundReviewAgent) executeModelOverride(argsJSON []byte) (output, snippet string, err error) {
+// error. It is NOT dispatched via Toolbox.Execute.
+func (r *App) executeModelOverride(argsJSON []byte) (output, snippet string, err error) {
 	var args modelOverrideToolArgs
 	if err := json.Unmarshal(argsJSON, &args); err != nil {
 		return fmt.Sprintf("error: invalid model_override arguments: %v", err), "", err
 	}
-	cache := r.app.modelOverrides
+	cache := r.modelOverrides
 	if cache == nil {
 		return "error: model override store is not configured", "", fmt.Errorf("model override store not configured")
 	}
@@ -146,8 +143,8 @@ func (r *BackgroundReviewAgent) executeModelOverride(argsJSON []byte) (output, s
 }
 
 // formatOverrideList renders all current overrides as a compact, readable
-// table for the review agent's context.
-func (r *BackgroundReviewAgent) formatOverrideList(cache *modeloverrides.Cache) string {
+// table for the agent's context.
+func (r *App) formatOverrideList(cache *modeloverrides.Cache) string {
 	list := cache.List()
 	if len(list) == 0 {
 		return "no model overrides currently set"

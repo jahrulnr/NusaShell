@@ -172,8 +172,8 @@ func run() error {
 	searcher := searchwire.New(tools.SearchwireConfigFromProviders(providerStore, credentials))
 	// Seed builtin skills from the embedded resources/agent/skills/ tree
 	// into the user data directory, then create the filesystem-backed
-	// skill store. Skill content (SKILL.md) lives on disk; metadata
-	// (state, usage, provenance) is cataloged in skills.json.
+	// skill store. Skill content (SKILL.md) lives on disk; status, version,
+	// and origin live in each skill's meta.json. skills.json is a usage cache.
 	skillsRoot := filepath.Join(dataDir, "skills")
 	if err := skillfs.SeedBuiltinSkills(skillsRoot); err != nil {
 		slog.Warn("builtin skill seed failed", "error", err)
@@ -211,10 +211,7 @@ func run() error {
 	if err != nil {
 		slog.Warn("attachment store init failed", "error", err)
 	}
-	// Memory tiers: user.md (always-injected user rules, ~1k token cap),
-	// soul.md (always-injected agent working knowledge, ~1k token cap),
-	// and fragments (memory/fragments/*.md, unlimited, searchable). All
-	// auto-create their files/directories on first use.
+	// Memory: human-only user.md + soul.md, structured records under growth/.
 	userStore, err := memorystore.NewUser(dataDir)
 	if err != nil {
 		slog.Warn("user memory init failed", "error", err)
@@ -223,20 +220,20 @@ func run() error {
 	if err != nil {
 		slog.Warn("soul memory init failed", "error", err)
 	}
-	fragmentStore, err := memorystore.NewFragments(dataDir)
-	if err != nil {
-		slog.Warn("fragment memory init failed", "error", err)
-	}
+	experiences := &jsonstore.Experiences{S: store}
+	memoryRecords := &jsonstore.MemoryRecords{S: store}
+	learningJobs := &jsonstore.LearningJobs{S: store}
+	learningOps := &jsonstore.LearningOps{S: store}
 	settingsPort := &jsonstore.Settings{S: store}
 	projectMemoryStore := projectmemory.New(dataDir, func() string {
 		return settingsPort.Get().ProjectMemoryBase
 	})
 	tb := &tools.Toolbox{
 		Skills:                 skillStore,
-		Memory:                 &jsonstore.Memory{S: store},
+		MemoryRecords:          memoryRecords,
+		Experiences:            experiences,
 		User:                   userStore,
 		Agent:                  agentStore,
-		Fragments:              fragmentStore,
 		ProjectMemory:          projectMemoryStore,
 		Docs:                   docSource,
 		Plugins:                pluginStore,
@@ -257,10 +254,12 @@ func run() error {
 		Providers:                   providerStore,
 		Credentials:                 credentials,
 		Skills:                      skillStore,
-		Memory:                      &jsonstore.Memory{S: store},
+		Experiences:                 experiences,
+		MemoryRecords:               memoryRecords,
+		LearningJobs:                learningJobs,
+		LearningOps:                 learningOps,
 		User:                        userStore,
 		Agent:                       agentStore,
-		Fragments:                   fragmentStore,
 		ProjectMemory:               projectMemoryStore,
 		LearningEdges:               &jsonstore.LearningEdges{S: store},
 		LearnedParams:               &jsonstore.LearnedParams{S: store},

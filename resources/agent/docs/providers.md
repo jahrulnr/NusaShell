@@ -114,7 +114,7 @@ workloads without increasing the key length:
 
 - `nusashell_cv_` + 19 hexadecimal characters — normal conversation turns.
 - `nusashell_bg_` + 19 hexadecimal characters — headless/background and
-  learning-review turns.
+  learning-job turns.
 
 The key is sent through the wire only where the selected adapter has a useful
 path:

@@ -8,14 +8,13 @@ import (
 	"nusashell/domain"
 )
 
-func newReviewAgentForOverrideTest(t *testing.T) *BackgroundReviewAgent {
+func newAppForOverrideTest(t *testing.T) *App {
 	t.Helper()
-	app := &App{modelOverrides: modeloverrides.New(&fakeModelOverrideStore{})}
-	return NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	return &App{modelOverrides: modeloverrides.New(&fakeModelOverrideStore{})}
 }
 
 func TestExecuteModelOverrideSet(t *testing.T) {
-	r := newReviewAgentForOverrideTest(t)
+	r := newAppForOverrideTest(t)
 	out, snippet, err := r.executeModelOverride([]byte(
 		`{"op":"set","provider":"tokenrouter","model":"deepseek/deepseek-v4-flash","vision":false,"context":1000000,"reason":"catalog wrong"}`))
 	if err != nil {
@@ -27,7 +26,7 @@ func TestExecuteModelOverrideSet(t *testing.T) {
 	if snippet == "" {
 		t.Error("set must produce a mutation snippet")
 	}
-	o := r.app.modelOverrides.Get("tokenrouter", "deepseek/deepseek-v4-flash")
+	o := r.modelOverrides.Get("tokenrouter", "deepseek/deepseek-v4-flash")
 	if o == nil {
 		t.Fatal("override not stored")
 	}
@@ -43,7 +42,7 @@ func TestExecuteModelOverrideSet(t *testing.T) {
 }
 
 func TestExecuteModelOverrideSetRejectsNoFields(t *testing.T) {
-	r := newReviewAgentForOverrideTest(t)
+	r := newAppForOverrideTest(t)
 	out, snippet, err := r.executeModelOverride([]byte(
 		`{"op":"set","provider":"p","model":"m"}`))
 	if err == nil {
@@ -58,7 +57,7 @@ func TestExecuteModelOverrideSetRejectsNoFields(t *testing.T) {
 }
 
 func TestExecuteModelOverrideRemove(t *testing.T) {
-	r := newReviewAgentForOverrideTest(t)
+	r := newAppForOverrideTest(t)
 	_, _, _ = r.executeModelOverride([]byte(
 		`{"op":"set","provider":"p","model":"m","vision":true}`))
 
@@ -72,7 +71,7 @@ func TestExecuteModelOverrideRemove(t *testing.T) {
 	if snippet == "" {
 		t.Error("remove must produce a mutation snippet")
 	}
-	if r.app.modelOverrides.Get("p", "m") != nil {
+	if r.modelOverrides.Get("p", "m") != nil {
 		t.Error("override should be gone")
 	}
 
@@ -87,7 +86,7 @@ func TestExecuteModelOverrideRemove(t *testing.T) {
 }
 
 func TestExecuteModelOverrideList(t *testing.T) {
-	r := newReviewAgentForOverrideTest(t)
+	r := newAppForOverrideTest(t)
 	out, snippet, err := r.executeModelOverride([]byte(`{"op":"list"}`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -107,7 +106,7 @@ func TestExecuteModelOverrideList(t *testing.T) {
 }
 
 func TestExecuteModelOverrideUnknownOp(t *testing.T) {
-	r := newReviewAgentForOverrideTest(t)
+	r := newAppForOverrideTest(t)
 	out, _, err := r.executeModelOverride([]byte(`{"op":"destroy"}`))
 	if err == nil {
 		t.Error("unknown op must fail")
@@ -118,8 +117,7 @@ func TestExecuteModelOverrideUnknownOp(t *testing.T) {
 }
 
 func TestExecuteModelOverrideNilCache(t *testing.T) {
-	app := &App{} // modelOverrides is nil
-	r := NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	r := &App{} // modelOverrides is nil
 	out, _, err := r.executeModelOverride([]byte(`{"op":"list"}`))
 	if err == nil {
 		t.Error("nil cache must error")

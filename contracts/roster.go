@@ -45,6 +45,8 @@ const (
 	MethodSkillsDelete   = "skills.delete"
 	MethodSkillsFileRead = "skills.file.read"
 	MethodSkillsInstall  = "skills.install"
+	MethodSkillsPromote  = "skills.promote"
+	MethodSkillsRollback = "skills.rollback"
 
 	MethodPluginList          = "plugin.list"
 	MethodPluginSave          = "plugin.save"
@@ -61,11 +63,20 @@ const (
 	MethodPluginSetAutoStart  = "plugin.set_autostart"
 
 	MethodMemoryList        = "memory.list"
-	MethodMemorySave        = "memory.save"
 	MethodMemorySearch      = "memory.search"
-	MethodMemoryDelete      = "memory.delete"
+	MethodMemoryGet         = "memory.get"
+	MethodMemoryRetire      = "memory.retire"
 	MethodMemoryUserUpdate  = "memory.user.update"
 	MethodMemoryAgentUpdate = "memory.agent.update"
+
+	MethodExperienceList = "experience.list"
+	MethodExperienceGet  = "experience.get"
+
+	MethodLearningSearch     = "learning.search"
+	MethodLearningGraph      = "learning.graph"
+	MethodLearningLog        = "learning.log"
+	MethodLearningJobsList   = "learning.jobs.list"
+	MethodLearningJobsStatus = "learning.jobs.status"
 
 	MethodTodosGet    = "agent.todos.get"
 	MethodTodosDelete = "agent.todos.delete"
@@ -132,9 +143,10 @@ const (
 	EventAskAnswered           = "agent.ask.answered"
 	EventAskCancelled          = "agent.ask.cancelled"
 
-	EventLearningReviewStarted = "learning.review.started"
-	EventLearningReviewDone    = "learning.review.done"
-	EventLearningReviewError   = "learning.review.error"
+	EventExperienceRecorded = "experience.recorded"
+	EventLearningJobStarted = "learning.job.started"
+	EventLearningJobDone    = "learning.job.done"
+	EventLearningJobError   = "learning.job.error"
 
 	EventMemoryUpdated        = "memory.updated"
 	EventSkillUpdated         = "skill.updated"
@@ -576,21 +588,6 @@ type CompactionFailedEvent struct {
 	Error          string `json:"error"`
 }
 
-// LearningReviewEvent is emitted when the background learning review
-// (autolearn) starts, completes, or errors so the Learning view can refresh
-// its lifecycle state. The review is fire-and-forget; Status is "started",
-// "done", or "error". Error is retained for wire compatibility but is not
-// populated for background failures; verbose provider diagnostics stay in
-// the backend log/trajectory instead of being pushed to the frontend.
-// Cooldown skips are recorded in the learning trajectory rather than emitted
-// as lifecycle events, so the UI does not show a false start/done pair.
-type LearningReviewEvent struct {
-	ConversationID string `json:"conversation_id"`
-	Status         string `json:"status"`           // "started" | "done" | "error"
-	Reason         string `json:"reason,omitempty"` // "threshold" | "compaction"
-	Error          string `json:"error,omitempty"`  // reserved for compatibility; not sent for background failures
-}
-
 type SteerEvent struct {
 	ConversationID string `json:"conversation_id"`
 	SteerID        string `json:"steer_id,omitempty"`
@@ -808,18 +805,19 @@ type ModelEndpointsResult struct {
 // ---- skills ----
 
 type SkillDTO struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Category    string `json:"category,omitempty"`
-	State       string `json:"state,omitempty"`
-	Origin      string `json:"origin,omitempty"`
-	OwnedBy     string `json:"owned_by,omitempty"`
-	Shadowed    bool   `json:"shadowed,omitempty"`
-	Pinned      bool   `json:"pinned"`
-	UsageCount  int    `json:"usage_count,omitempty"`
-	LastUsedAt  string `json:"last_used_at,omitempty"`
-	UpdatedAt   string `json:"updated_at"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Description   string `json:"description,omitempty"`
+	Category      string `json:"category,omitempty"`
+	Status        string `json:"status,omitempty"`
+	Version       int    `json:"version,omitempty"`
+	ActiveVersion int    `json:"active_version,omitempty"`
+	Origin        string `json:"origin,omitempty"`
+	OwnedBy       string `json:"owned_by,omitempty"`
+	Shadowed      bool   `json:"shadowed,omitempty"`
+	UsageCount    int    `json:"usage_count,omitempty"`
+	LastUsedAt    string `json:"last_used_at,omitempty"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 type SkillsListResult struct {
@@ -1068,17 +1066,17 @@ type PluginToolsListResult struct {
 // ---- memory ----
 
 type MemoryEntryDTO struct {
-	ID        string   `json:"id"`
-	Content   string   `json:"content"`
-	Tags      []string `json:"tags,omitempty"`
-	Source    string   `json:"source,omitempty"`
-	CreatedAt string   `json:"created_at"`
-	// Fragment metadata (populated when reading from the fragments store).
-	Category string `json:"category,omitempty"`
-	Project  string `json:"project,omitempty"`
-	Task     string `json:"task,omitempty"`
-	// Tier marks the memory source: "user" (user document), "agent" (agent
-	// document), or "fragment" (searchable archive).
+	ID        string             `json:"id"`
+	Content   string             `json:"content"`
+	Body      string             `json:"body,omitempty"`
+	Type      string             `json:"type,omitempty"`
+	Status    string             `json:"status,omitempty"`
+	Scope     domain.MemoryScope `json:"scope,omitempty"`
+	Source    string             `json:"source,omitempty"`
+	CreatedAt string             `json:"created_at"`
+	UpdatedAt string             `json:"updated_at,omitempty"`
+	Project   string             `json:"project,omitempty"`
+	// Tier marks the memory source: "user", "agent", or "record".
 	Tier string `json:"tier,omitempty"`
 }
 
@@ -1108,21 +1106,13 @@ type MemoryAgentUpdateResult struct {
 	Entry MemoryEntryDTO `json:"entry"`
 }
 
-type MemorySaveRequest struct {
-	Content  string   `json:"content"`
-	Tags     []string `json:"tags,omitempty"`
-	Category string   `json:"category,omitempty"`
-	Project  string   `json:"project,omitempty"`
-	Task     string   `json:"task,omitempty"`
-}
-
 type MemorySearchRequest struct {
-	Query    string   `json:"query"`
-	Limit    int      `json:"limit,omitempty"`
-	Category string   `json:"category,omitempty"`
-	Project  string   `json:"project,omitempty"`
-	Task     string   `json:"task,omitempty"`
-	Tags     []string `json:"tags,omitempty"`
+	Query   string `json:"query"`
+	Limit   int    `json:"limit,omitempty"`
+	Type    string `json:"type,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Scope   string `json:"scope,omitempty"`
+	Project string `json:"project,omitempty"`
 }
 
 type MemoryIDRequest struct {
@@ -1263,8 +1253,6 @@ type SettingsDTO struct {
 	TopK                       *int     `json:"top_k,omitempty"`
 	FrequencyPenalty           *float64 `json:"frequency_penalty,omitempty"`
 	PresencePenalty            *float64 `json:"presence_penalty,omitempty"`
-	LearningReviewThreshold    int      `json:"learning_review_threshold,omitempty"`
-	SkillNudgeInterval         int      `json:"skill_nudge_interval,omitempty"`
 	MaxAutoContinues           int      `json:"max_auto_continues,omitempty"`
 	SoundNotifications         bool     `json:"sound_notifications"`
 	UserPrompt                 string   `json:"user_prompt,omitempty"`
@@ -1320,22 +1308,20 @@ type SettingsSetRequest struct {
 	// "round_robin", "random", or a bare source name. The per-provider API
 	// keys are write-only — they are stored in the credential store and
 	// never returned by settings.get.
-	WebSearchStrategy       *string         `json:"web_search_strategy,omitempty"`
-	WebSearchBraveAPIKey    *string         `json:"web_search_brave_api_key,omitempty"`
-	WebSearchSerperAPIKey   *string         `json:"web_search_serper_api_key,omitempty"`
-	WebSearchTavilyAPIKey   *string         `json:"web_search_tavily_api_key,omitempty"`
-	Temperature             json.RawMessage `json:"temperature,omitempty"`
-	TopP                    json.RawMessage `json:"top_p,omitempty"`
-	TopK                    json.RawMessage `json:"top_k,omitempty"`
-	FrequencyPenalty        json.RawMessage `json:"frequency_penalty,omitempty"`
-	PresencePenalty         json.RawMessage `json:"presence_penalty,omitempty"`
-	LearningReviewThreshold *int            `json:"learning_review_threshold,omitempty"`
-	SkillNudgeInterval      *int            `json:"skill_nudge_interval,omitempty"`
-	MaxAutoContinues        *int            `json:"max_auto_continues,omitempty"`
-	SoundNotifications      *bool           `json:"sound_notifications,omitempty"`
-	UserPrompt              *string         `json:"user_prompt,omitempty"`
-	PluginContractMode      *string         `json:"plugin_contract_mode,omitempty"`
-	ProjectMemoryBase       *string         `json:"project_memory_base,omitempty"`
+	WebSearchStrategy     *string         `json:"web_search_strategy,omitempty"`
+	WebSearchBraveAPIKey  *string         `json:"web_search_brave_api_key,omitempty"`
+	WebSearchSerperAPIKey *string         `json:"web_search_serper_api_key,omitempty"`
+	WebSearchTavilyAPIKey *string         `json:"web_search_tavily_api_key,omitempty"`
+	Temperature           json.RawMessage `json:"temperature,omitempty"`
+	TopP                  json.RawMessage `json:"top_p,omitempty"`
+	TopK                  json.RawMessage `json:"top_k,omitempty"`
+	FrequencyPenalty      json.RawMessage `json:"frequency_penalty,omitempty"`
+	PresencePenalty       json.RawMessage `json:"presence_penalty,omitempty"`
+	MaxAutoContinues      *int            `json:"max_auto_continues,omitempty"`
+	SoundNotifications    *bool           `json:"sound_notifications,omitempty"`
+	UserPrompt            *string         `json:"user_prompt,omitempty"`
+	PluginContractMode    *string         `json:"plugin_contract_mode,omitempty"`
+	ProjectMemoryBase     *string         `json:"project_memory_base,omitempty"`
 }
 
 // ---- offline TTS install ----
@@ -1395,13 +1381,6 @@ var OfflineSTTModelIDs = []string{
 
 // ---- learning ----
 
-const (
-	MethodLearningSearch           = "learning.search"
-	MethodLearningGraph            = "learning.graph"
-	MethodLearningLog              = "learning.log"
-	MethodLearningReviewTranscript = "learning.review.transcript"
-)
-
 type LearningSearchRequest struct {
 	Query string `json:"query"`
 	Kind  string `json:"kind,omitempty"`  // "skills" | "memory" | "" (both)
@@ -1411,7 +1390,7 @@ type LearningSearchRequest struct {
 type LearningSearchResultItem struct {
 	ID      string  `json:"id"`
 	Kind    string  `json:"kind"`           // "skill" | "memory"
-	Tier    string  `json:"tier,omitempty"` // "user" | "fragment" (memory only)
+	Tier    string  `json:"tier,omitempty"` // "user" | "agent" | "record" (memory only)
 	Name    string  `json:"name,omitempty"`
 	Content string  `json:"content,omitempty"`
 	Score   float32 `json:"score"`
@@ -1430,7 +1409,7 @@ type LearningGraphResult struct {
 type LearningGraphNode struct {
 	ID   string `json:"id"`
 	Kind string `json:"kind"`           // "skill" | "memory"
-	Tier string `json:"tier,omitempty"` // memory only: "user" | "fragment"
+	Tier string `json:"tier,omitempty"` // memory only: "user" | "agent" | "record"
 	Name string `json:"name,omitempty"`
 }
 
@@ -1455,47 +1434,18 @@ type LearningLogMutationDTO struct {
 
 type LearningLogEntryDTO struct {
 	TS                string                     `json:"ts"`
-	Type              string                     `json:"type"` // review|extract|edge_build|consolidate|decay|prune
+	Type              string                     `json:"type"` // extract|edge_build|consolidate|decay|prune|job
 	ConversationID    string                     `json:"conversation_id,omitempty"`
 	ConversationTitle string                     `json:"conversation_title,omitempty"`
 	ReviewID          string                     `json:"review_id,omitempty"`
-	Status            string                     `json:"status,omitempty"` // done|error|skipped (review only; skipped reasons are in detail)
-	Error             string                     `json:"error,omitempty"`  // generic review failure status; raw provider details stay server-side
+	Status            string                     `json:"status,omitempty"` // done|error|skipped
+	Error             string                     `json:"error,omitempty"`  // generic job failure status; raw provider details stay server-side
 	Mutations         []LearningLogMutationDTO   `json:"mutations,omitempty"`
 	Detail            map[string]json.RawMessage `json:"detail,omitempty"`
 }
 
 type LearningLogResult struct {
 	Entries []LearningLogEntryDTO `json:"entries"`
-}
-
-// ---- review transcript ----
-
-type LearningReviewTranscriptRequest struct {
-	ID string `json:"id"`
-}
-
-type ToolResultDTO struct {
-	ToolCallID   string               `json:"tool_call_id,omitempty"`
-	Name         string               `json:"name,omitempty"`
-	Content      string               `json:"content,omitempty"`
-	Presentation *ToolPresentationDTO `json:"presentation,omitempty"`
-}
-
-type LearningReviewTranscriptMessageDTO struct {
-	Role       string         `json:"role"` // user | assistant | tool
-	Content    string         `json:"content,omitempty"`
-	Reasoning  string         `json:"reasoning,omitempty"`
-	ToolCalls  []ToolCallDTO  `json:"tool_calls,omitempty"`
-	ToolResult *ToolResultDTO `json:"tool_result,omitempty"`
-}
-
-type LearningReviewTranscriptResult struct {
-	ID             string                               `json:"id"`
-	ConversationID string                               `json:"conversation_id"`
-	Model          string                               `json:"model"`
-	CreatedAt      string                               `json:"created_at"`
-	Messages       []LearningReviewTranscriptMessageDTO `json:"messages"`
 }
 
 // Settings watcher events: config/settings.json changed outside the app.

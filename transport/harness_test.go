@@ -607,7 +607,7 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fragmentStore, err := memorystore.NewFragments(dataDir)
+	agentStore, err := memorystore.NewAgent(dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,14 +616,19 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	memoryRecords := &jsonstore.MemoryRecords{S: store}
+	experiences := &jsonstore.Experiences{S: store}
+	learningJobs := &jsonstore.LearningJobs{S: store}
+	learningOps := &jsonstore.LearningOps{S: store}
 	tb := &tools.Toolbox{
-		Skills:    skillStore,
-		Memory:    &jsonstore.Memory{S: store},
-		User:      userStore,
-		Fragments: fragmentStore,
-		Docs:      docSource,
-		Plugins:   pluginStore,
-		MCP:       mcpManager,
+		Skills:        skillStore,
+		MemoryRecords: memoryRecords,
+		Experiences:   experiences,
+		User:          userStore,
+		Agent:         agentStore,
+		Docs:          docSource,
+		Plugins:       pluginStore,
+		MCP:           mcpManager,
 	}
 	app := application.NewApp(application.Deps{
 		Version:       "test",
@@ -632,9 +637,12 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 		Providers:     &jsonstore.Providers{S: store},
 		Credentials:   creds,
 		Skills:        skillStore,
-		Memory:        &jsonstore.Memory{S: store},
+		Experiences:   experiences,
+		MemoryRecords: memoryRecords,
+		LearningJobs:  learningJobs,
+		LearningOps:   learningOps,
 		User:          userStore,
-		Fragments:     fragmentStore,
+		Agent:         agentStore,
 		Logs:          &jsonstore.Logs{S: store},
 		Settings:      &jsonstore.Settings{S: store},
 		Docs:          docSource,

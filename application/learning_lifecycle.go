@@ -5,26 +5,27 @@ import (
 	"time"
 
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
-// MaxMemoryEntries is the hard capacity limit for memory entries. The
-// lifecycle manager prunes low-strength entries when this is exceeded.
+// MaxMemoryEntries is the hard capacity limit for memory records. The
+// lifecycle manager retires weak records when this is exceeded.
 const MaxMemoryEntries = domain.MaxMemoryEntries
 
 // LifecycleConfig controls the decay and prune cycle for learning memory.
 type LifecycleConfig = domain.LifecycleConfig
 
-// LifecycleManager runs background decay and prune operations on the
-// memory store. Decay reduces a synthetic "strength" score for each entry
-// based on time since last access and access count. Prune removes entries
-// whose strength falls below the threshold.
+// LifecycleManager runs background decay and prune operations on
+// MemoryRecords. Decay reduces a synthetic "strength" score for each record
+// based on time since last access and access count. Prune retires records
+// whose strength falls below the threshold (it does not delete them).
 //
-// The manager does not persist a strength field on MemoryEntry (the domain
+// The manager does not persist a strength field on MemoryRecord (the domain
 // model stays simple). Instead, strength is computed on-the-fly from
-// CreatedAt and the entry's Tags (which encode the signal weight). This
-// keeps the storage format stable and avoids migration.
+// CreatedAt and the record type/evidence. This keeps the storage format
+// stable.
 type LifecycleManager struct {
-	memory MemoryStore
+	memory MemoryRecordStore
 	skills SkillStore
 	cfg    LifecycleConfig
 	log    func(level, source, format string, args ...any)
@@ -43,7 +44,7 @@ func (m *LifecycleManager) logf(level, format string, args ...any) {
 }
 
 // NewLifecycleManager creates a manager with the given config.
-func NewLifecycleManager(memory MemoryStore, skills SkillStore, cfg LifecycleConfig) *LifecycleManager {
+func NewLifecycleManager(memory MemoryRecordStore, skills SkillStore, cfg LifecycleConfig) *LifecycleManager {
 	if cfg.DecayInterval == 0 {
 		cfg = domain.DefaultLifecycleConfig()
 	}
@@ -75,10 +76,10 @@ func (m *LifecycleManager) runDecay() {
 	// tick to keep the log clean.
 }
 
-// runPrune removes memory entries whose computed strength falls below
-// the threshold. Strength is derived from age and initial signal weight
-// (encoded in tags). Frequently accessed entries (newer CreatedAt) decay
-// slower per the memex formula.
+// runPrune retires memory records whose computed strength falls below
+// the threshold. Strength is derived from age and initial signal weight.
+// Frequently accessed records (newer CreatedAt) decay slower per the
+// memex formula.
 func (m *LifecycleManager) runPrune() {
 	entries := m.memory.List()
 	if len(entries) == 0 {
@@ -93,19 +94,28 @@ func (m *LifecycleManager) runPrune() {
 	if len(entries) <= target {
 		// Still prune entries below threshold. Snapshot IDs first to
 		// avoid mutating the slice while iterating.
-		var toDelete []string
+		var toRetire []string
 		for _, e := range entries {
-			if domain.MemoryStrength(e, m.cfg) < m.cfg.PruneThreshold {
-				toDelete = append(toDelete, e.ID)
+			if e == nil || e.Status == domain.MemoryStatusRetired {
+				continue
+			}
+			if domain.MemoryRecordStrength(e, m.cfg) < m.cfg.PruneThreshold {
+				toRetire = append(toRetire, e.ID)
 			}
 		}
-		for _, id := range toDelete {
-			_ = m.memory.Delete(id)
+		for _, id := range toRetire {
+			rec, err := m.memory.Get(id)
+			if err != nil || rec == nil {
+				continue
+			}
+			rec.Retire(clock.NewTime().Time())
+			rec.Source = "lifecycle"
+			_ = m.memory.Save(rec)
 		}
-		if len(toDelete) > 0 {
-			m.logf("info", "pruned %d weak entries (had %d, threshold=%.2f)", len(toDelete), len(entries), m.cfg.PruneThreshold)
+		if len(toRetire) > 0 {
+			m.logf("info", "retired %d weak records (had %d, threshold=%.2f)", len(toRetire), len(entries), m.cfg.PruneThreshold)
 		} else {
-			m.logf("debug", "prune tick: %d entries, none below threshold", len(entries))
+			m.logf("debug", "prune tick: %d records, none below threshold", len(entries))
 		}
 		return
 	}
@@ -116,7 +126,7 @@ func (m *LifecycleManager) runPrune() {
 	}
 	scored := make([]entry, len(entries))
 	for i, e := range entries {
-		scored[i] = entry{id: e.ID, score: domain.MemoryStrength(e, m.cfg)}
+		scored[i] = entry{id: e.ID, score: domain.MemoryRecordStrength(e, m.cfg)}
 	}
 	// Simple sort: weakest first.
 	for i := 0; i < len(scored); i++ {
@@ -128,9 +138,15 @@ func (m *LifecycleManager) runPrune() {
 	}
 	toPrune := len(scored) - target
 	for i := 0; i < toPrune; i++ {
-		_ = m.memory.Delete(scored[i].id)
+		rec, err := m.memory.Get(scored[i].id)
+		if err != nil || rec == nil {
+			continue
+		}
+		rec.Retire(clock.NewTime().Time())
+		rec.Source = "lifecycle"
+		_ = m.memory.Save(rec)
 	}
-	m.logf("info", "pruned %d over-capacity entries (had %d, target=%d)", toPrune, len(entries), target)
+	m.logf("info", "retired %d over-capacity records (had %d, target=%d)", toPrune, len(entries), target)
 }
 
 // PruneOnce runs a single prune cycle immediately. Used by tests and

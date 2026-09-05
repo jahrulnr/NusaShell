@@ -65,21 +65,21 @@ func DefaultEdgeBuilderConfig() EdgeBuilderConfig {
 // user memory is a single working-set document, not a graph node with
 // meaningful similarity edges, so it is intentionally excluded.
 type EdgeBuilder struct {
-	fragments FragmentStore
-	skills    SkillStore
-	user      MemoryDocumentStore
-	graph     *LearningGraphService
-	embed     Embedder
-	cache     *jsonstore.EmbeddingCache
-	cfg       EdgeBuilderConfig
-	modelID   string
-	buildMu   sync.Mutex
+	records MemoryRecordStore
+	skills  SkillStore
+	user    MemoryDocumentStore
+	graph   *LearningGraphService
+	embed   Embedder
+	cache   *jsonstore.EmbeddingCache
+	cfg     EdgeBuilderConfig
+	modelID string
+	buildMu sync.Mutex
 }
 
 // NewEdgeBuilder creates an edge builder. embed and cache may be nil —
 // in that case deterministic metadata and token-overlap discovery still runs.
 func NewEdgeBuilder(
-	fragments FragmentStore,
+	records MemoryRecordStore,
 	skills SkillStore,
 	graph *LearningGraphService,
 	embed Embedder,
@@ -91,13 +91,13 @@ func NewEdgeBuilder(
 		cfg = DefaultEdgeBuilderConfig()
 	}
 	return &EdgeBuilder{
-		fragments: fragments,
-		skills:    skills,
-		graph:     graph,
-		embed:     embed,
-		cache:     cache,
-		cfg:       cfg,
-		modelID:   modelID,
+		records: records,
+		skills:  skills,
+		graph:   graph,
+		embed:   embed,
+		cache:   cache,
+		cfg:     cfg,
+		modelID: modelID,
 	}
 }
 
@@ -131,7 +131,7 @@ func (b *EdgeBuilder) SetEmbedder(embed Embedder, modelID string) {
 // main entry point — call it as a background job after memory/skill
 // changes, or on a periodic timer.
 func (b *EdgeBuilder) Build(ctx context.Context) error {
-	if b == nil || b.graph == nil || b.fragments == nil || b.skills == nil {
+	if b == nil || b.graph == nil || b.records == nil || b.skills == nil {
 		return nil
 	}
 	b.buildMu.Lock()
@@ -164,7 +164,7 @@ func (b *EdgeBuilder) Build(ctx context.Context) error {
 // node clinging to the skill hubs; without them the token-overlap pass
 // only produces memory↔skill spokes.
 func (b *EdgeBuilder) buildTokenOverlapEdges() {
-	memories := b.fragments.List(domain.FragmentSearchFilter{Limit: 500})
+	memories := retrievableRecords(b.records, 500)
 	skills := b.skills.List()
 	minLen := b.cfg.MinTokenLen
 	if minLen <= 0 {
@@ -180,7 +180,7 @@ func (b *EdgeBuilder) buildTokenOverlapEdges() {
 	}
 	memToks := make([]memTokens, 0, len(memories))
 	for _, m := range memories {
-		toks := textsim.TokenizeForOverlap(m.Content, minLen)
+		toks := textsim.TokenizeForOverlap(recordSearchText(m), minLen)
 		if len(toks) == 0 {
 			continue
 		}
@@ -250,14 +250,14 @@ const maxSpecificTagFrequency = domain.MaxSpecificTagFrequency
 // whose useful context lives in frontmatter rather than prose. It also links
 // a fragment tag to a skill name/category, which makes freshly saved memories
 // discoverable in the graph before an embedding provider is configured.
-func (b *EdgeBuilder) buildMetadataEdges(memories []*domain.MemoryFragment, skills []*domain.Skill) {
+func (b *EdgeBuilder) buildMetadataEdges(memories []*domain.MemoryRecord, skills []*domain.Skill) {
 	tagFrequency := make(map[string]int)
 	for _, memory := range memories {
 		if memory == nil {
 			continue
 		}
-		seen := make(map[string]struct{}, len(memory.Tags))
-		for _, tag := range memory.Tags {
+		seen := map[string]struct{}{}
+		for _, tag := range recordMetaTags(memory) {
 			key := learningMetadataKey(tag)
 			if key == "" {
 				continue
@@ -269,7 +269,6 @@ func (b *EdgeBuilder) buildMetadataEdges(memories []*domain.MemoryFragment, skil
 			tagFrequency[key]++
 		}
 	}
-
 	for i := 0; i < len(memories); i++ {
 		left := memories[i]
 		if left == nil || left.ID == "" {
@@ -280,13 +279,12 @@ func (b *EdgeBuilder) buildMetadataEdges(memories []*domain.MemoryFragment, skil
 			if right == nil || right.ID == "" {
 				continue
 			}
-			weight := fragmentMetadataWeight(left, right, tagFrequency)
+			weight := recordMetadataWeight(left, right, tagFrequency)
 			if weight > 0 {
 				_, _ = b.graph.AddEdge(left.ID, right.ID, domain.EdgeRelated, weight)
 			}
 		}
 	}
-
 	for _, memory := range memories {
 		if memory == nil || memory.ID == "" {
 			continue
@@ -295,24 +293,30 @@ func (b *EdgeBuilder) buildMetadataEdges(memories []*domain.MemoryFragment, skil
 			if skill == nil || skill.ID == "" {
 				continue
 			}
-			if fragmentSkillMetadataMatch(memory, skill, tagFrequency) {
+			if recordSkillMetadataMatch(memory, skill, tagFrequency) {
 				_, _ = b.graph.AddEdge(memory.ID, skill.ID, domain.EdgeRelated, 0.4)
 			}
 		}
 	}
 }
 
-func fragmentMetadataWeight(left, right *domain.MemoryFragment, tagFrequency map[string]int) float64 {
-	weight := 0.0
-	if sameLearningMetadata(left.Project, right.Project) {
-		weight += 0.35
+func recordMetaTags(m *domain.MemoryRecord) []string {
+	if m == nil {
+		return nil
 	}
-	if sameLearningMetadata(left.Task, right.Task) {
-		weight += 0.35
-	}
+	return []string{m.Type, m.Scope.Level, m.Scope.Project, m.Scope.Domain, m.Scope.Task, m.Subject}
+}
 
-	leftTags := learningTagSet(left.Tags)
-	rightTags := learningTagSet(right.Tags)
+func recordMetadataWeight(left, right *domain.MemoryRecord, tagFrequency map[string]int) float64 {
+	weight := 0.0
+	if sameLearningMetadata(left.Scope.Project, right.Scope.Project) {
+		weight += 0.35
+	}
+	if sameLearningMetadata(left.Scope.Task, right.Scope.Task) {
+		weight += 0.35
+	}
+	leftTags := learningTagSet(recordMetaTags(left))
+	rightTags := learningTagSet(recordMetaTags(right))
 	sharedTags := 0
 	for tag := range leftTags {
 		if _, ok := rightTags[tag]; !ok || tagFrequency[tag] > maxSpecificTagFrequency {
@@ -332,12 +336,12 @@ func fragmentMetadataWeight(left, right *domain.MemoryFragment, tagFrequency map
 	return weight
 }
 
-func fragmentSkillMetadataMatch(memory *domain.MemoryFragment, skill *domain.Skill, tagFrequency map[string]int) bool {
+func recordSkillMetadataMatch(memory *domain.MemoryRecord, skill *domain.Skill, tagFrequency map[string]int) bool {
 	if memory == nil || skill == nil {
 		return false
 	}
 	keys := learningMetadataSet([]string{skill.Name, skill.Category})
-	for tag := range learningTagSet(memory.Tags) {
+	for tag := range learningTagSet(recordMetaTags(memory)) {
 		if tagFrequency[tag] > maxSpecificTagFrequency {
 			continue
 		}
@@ -395,7 +399,7 @@ func (b *EdgeBuilder) pruneDanglingEdges() {
 	// The graph viewport is intentionally capped, but pruning must inspect the
 	// complete fragment catalog so entries outside that viewport are not
 	// mistaken for deleted nodes.
-	for _, memory := range b.fragments.List(domain.FragmentSearchFilter{}) {
+	for _, memory := range retrievableRecords(b.records, 0) {
 		if memory != nil && memory.ID != "" {
 			known[memory.ID] = struct{}{}
 		}
@@ -448,7 +452,7 @@ func learningEdgePairKey(edge *domain.LearningEdge) string {
 // buildEmbeddingEdges creates edges between entries with cosine similarity
 // above the threshold. Uses the embedding cache to avoid re-embedding.
 func (b *EdgeBuilder) buildEmbeddingEdges(ctx context.Context) error {
-	memories := b.fragments.List(domain.FragmentSearchFilter{Limit: 500})
+	memories := retrievableRecords(b.records, 500)
 	skills := b.skills.List()
 
 	// Collect all texts to embed
@@ -458,7 +462,7 @@ func (b *EdgeBuilder) buildEmbeddingEdges(ctx context.Context) error {
 	}
 	var allEntries []entry
 	for _, m := range memories {
-		allEntries = append(allEntries, entry{m.ID, m.Content})
+		allEntries = append(allEntries, entry{m.ID, recordSearchText(m)})
 	}
 	for _, s := range skills {
 		allEntries = append(allEntries, entry{s.ID, s.Name + " " + s.Description + " " + s.Content})
@@ -529,4 +533,21 @@ func (b *EdgeBuilder) embedWithCache(ctx context.Context, texts []string) ([][]f
 	}
 
 	return vectors, nil
+}
+
+func retrievableRecords(store MemoryRecordStore, limit int) []*domain.MemoryRecord {
+	if store == nil {
+		return nil
+	}
+	out := make([]*domain.MemoryRecord, 0)
+	for _, m := range store.List() {
+		if m == nil || !m.Retrievable() {
+			continue
+		}
+		out = append(out, m)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
 }

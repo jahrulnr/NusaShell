@@ -5,8 +5,7 @@ import "strings"
 // AgentKind identifies the agent personalities that see different tool
 // sets. The toolbox holds every tool definition; ToolFactory is the single
 // policy table for which agent sees which tools, replacing the scattered
-// per-site filters (review whitelist, workspace gating, headless ACP
-// removal).
+// per-site filters (workspace gating, headless ACP removal).
 type AgentKind string
 
 const (
@@ -27,11 +26,16 @@ const (
 	// pipeline room, with ACP tools AND the delegate tool itself removed
 	// so delegated agents cannot recurse.
 	AgentDelegate AgentKind = "delegate"
-	// AgentReview is the unified background learning agent. It receives the
-	// completed conversation evidence and can inspect, research, and curate
-	// durable memory and agent-owned skills. The name is retained for the
-	// learning.review wire surface and persisted history compatibility.
-	AgentReview AgentKind = "review"
+	// AgentMemoryConsolidator is the background job that turns conversation
+	// evidence into durable memory records. Writes go through typed
+	// learning ops, not toolbox memory mutations.
+	AgentMemoryConsolidator AgentKind = "memory-consolidator"
+	// AgentSkillEvolver is the background job that proposes skill updates
+	// from observed tool patterns. Writes go through typed learning ops.
+	AgentSkillEvolver AgentKind = "skill-evolver"
+	// AgentSkillEvaluator is the background job that scores whether a
+	// skill still matches current usage. It does not mutate memory.
+	AgentSkillEvaluator AgentKind = "skill-evaluator"
 )
 
 // ToolFactory builds the advertised tool list per agent kind. The factory
@@ -58,8 +62,8 @@ func (f *ToolFactory) Get(kind AgentKind, workspace string) []ToolDef {
 		return nil
 	}
 	switch kind {
-	case AgentReview:
-		return f.reviewTools(workspace)
+	case AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator:
+		return f.learningJobTools(workspace)
 	case AgentAutomation:
 		return filterACPToolDefs(f.baseTools(workspace))
 	case AgentDelegate:
@@ -107,15 +111,22 @@ func (f *ToolFactory) baseTools(workspace string) []ToolDef {
 	return out
 }
 
-// reviewTools is the unified AgentReview policy: the local transcript and
-// model tools plus read-only evidence/research tools and the memory/skill
-// dispatcher roots. The runtime gate decides which operations may mutate.
-func (f *ToolFactory) reviewTools(workspace string) []ToolDef {
-	out := []ToolDef{reviewTranscriptToolDef, modelOverrideToolDef}
-	for _, t := range f.baseTools(workspace) {
-		if backgroundLearningToolWhitelist()[t.Name] && t.Name != reviewTranscriptToolName {
-			out = append(out, t)
+// learningJobTools is the shared policy for memory-consolidator,
+// skill-evolver, and skill-evaluator: conversation tools minus ACP and
+// delegate, with file-write tools stripped. Typed learning ops perform
+// memory writes later.
+func (f *ToolFactory) learningJobTools(workspace string) []ToolDef {
+	return filterMemoryWriteToolDefs(filterDelegateToolDefs(filterACPToolDefs(f.baseTools(workspace))))
+}
+
+func filterMemoryWriteToolDefs(defs []ToolDef) []ToolDef {
+	out := make([]ToolDef, 0, len(defs))
+	for _, d := range defs {
+		switch d.Name {
+		case "file_write", "file_patch", "file_delete":
+			continue
 		}
+		out = append(out, d)
 	}
 	return out
 }

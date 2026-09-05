@@ -8,7 +8,7 @@ import (
 	"nusashell/domain"
 )
 
-func TestMaybeAnnounceTaskMemoryAnnouncesNewFragmentOnce(t *testing.T) {
+func TestMaybeAnnounceTaskMemoryAnnouncesNewRecordOnce(t *testing.T) {
 	now := time.Now()
 	oldClock := clockNow
 	clockNow = func() time.Time { return now }
@@ -16,14 +16,14 @@ func TestMaybeAnnounceTaskMemoryAnnouncesNewFragmentOnce(t *testing.T) {
 
 	conv := &domain.Conversation{ID: "c1", Title: "Fix memory announcement queue", Workspace: "/w/nusashell"}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
-	frags := &fakeFragmentStore{frags: []*domain.MemoryFragment{{
-		ID: "frag-new", Category: domain.FragmentCategoryProject, Project: "nusashell",
-		// The fake search is a substring match on the full query
-		// (title words + workspace basename), so the content carries it.
-		Content:   "Fix memory announcement queue nusashell: the queue dedupes exact duplicates by Type+Args+Message.",
-		UpdatedAt: now,
+	recs := &fakeMemoryRecordStore{items: []*domain.MemoryRecord{{
+		ID:            "rec-new",
+		Type:          domain.MemoryTypeFact,
+		Status:        domain.MemoryStatusLearned,
+		Body:          "Fix memory announcement queue nusashell: the queue dedupes exact duplicates by Type+Args+Message.",
+		LastConfirmed: now,
 	}}}
-	app := &App{Conversations: store, Fragments: frags, Bus: NewBus(), Logs: &fakeLogStore{}}
+	app := &App{Conversations: store, MemoryRecords: recs, Bus: NewBus(), Logs: &fakeLogStore{}}
 
 	app.maybeAnnounceTaskMemory("c1", conv)
 
@@ -38,26 +38,25 @@ func TestMaybeAnnounceTaskMemoryAnnouncesNewFragmentOnce(t *testing.T) {
 	if pa.Type != taskMemoryAnnounceType {
 		t.Fatalf("type = %q, want %q", pa.Type, taskMemoryAnnounceType)
 	}
-	if !strings.Contains(pa.Args, `"type":"task_memory"`) || !strings.Contains(pa.Args, "frag-new") {
+	if !strings.Contains(pa.Args, `"type":"task_memory"`) || !strings.Contains(pa.Args, "rec-new") {
 		t.Errorf("args missing type/hits: %s", pa.Args)
 	}
 	if !strings.Contains(pa.Message, "task memory") {
 		t.Errorf("message = %q", pa.Message)
 	}
-	if len(got.LastAnnouncedFragments) != 1 || got.LastAnnouncedFragments[0] != "frag-new" {
-		t.Fatalf("dedup marker = %+v, want frag-new", got.LastAnnouncedFragments)
+	if len(got.LastAnnouncedRecords) != 1 || got.LastAnnouncedRecords[0] != "rec-new" {
+		t.Fatalf("dedup marker = %+v, want rec-new", got.LastAnnouncedRecords)
 	}
 
-	// Second call must not re-announce the same fragment.
 	again, _ := store.Get("c1")
 	app.maybeAnnounceTaskMemory("c1", again)
 	got2, _ := store.Get("c1")
 	if len(got2.PendingAnnouncements) != 1 {
-		t.Fatalf("fragment must be announced once, pending = %+v", got2.PendingAnnouncements)
+		t.Fatalf("record must be announced once, pending = %+v", got2.PendingAnnouncements)
 	}
 }
 
-func TestMaybeAnnounceTaskMemorySkipsOldFragments(t *testing.T) {
+func TestMaybeAnnounceTaskMemorySkipsOldRecords(t *testing.T) {
 	now := time.Now()
 	oldClock := clockNow
 	clockNow = func() time.Time { return now }
@@ -65,24 +64,26 @@ func TestMaybeAnnounceTaskMemorySkipsOldFragments(t *testing.T) {
 
 	conv := &domain.Conversation{ID: "c1", Title: "Brief chit-chat room"}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
-	frags := &fakeFragmentStore{frags: []*domain.MemoryFragment{{
-		ID: "frag-old", Category: domain.FragmentCategoryTask,
-		Content:   "ancient fact",
-		UpdatedAt: now.Add(-200 * time.Hour),
+	recs := &fakeMemoryRecordStore{items: []*domain.MemoryRecord{{
+		ID:            "rec-old",
+		Type:          domain.MemoryTypeFact,
+		Status:        domain.MemoryStatusLearned,
+		Body:          "ancient fact",
+		LastConfirmed: now.Add(-200 * time.Hour),
 	}}}
-	app := &App{Conversations: store, Fragments: frags, Bus: NewBus(), Logs: &fakeLogStore{}}
+	app := &App{Conversations: store, MemoryRecords: recs, Bus: NewBus(), Logs: &fakeLogStore{}}
 
 	app.maybeAnnounceTaskMemory("c1", conv)
 	got, _ := store.Get("c1")
 	if len(got.PendingAnnouncements) != 0 {
-		t.Fatalf("old fragment must not be announced, pending = %+v", got.PendingAnnouncements)
+		t.Fatalf("old record must not be announced, pending = %+v", got.PendingAnnouncements)
 	}
 }
 
 func TestTaskMemorySkipsPipelineOrigin(t *testing.T) {
 	conv := &domain.Conversation{ID: "c1", Origin: domain.ConversationOriginPipeline, Title: "pipeline step"}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
-	app := &App{Conversations: store, Fragments: &fakeFragmentStore{}, Bus: NewBus(), Logs: &fakeLogStore{}}
+	app := &App{Conversations: store, MemoryRecords: &fakeMemoryRecordStore{}, Bus: NewBus(), Logs: &fakeLogStore{}}
 	app.maybeAnnounceTaskMemory("c1", conv)
 	got, _ := store.Get("c1")
 	if len(got.PendingAnnouncements) != 0 {
@@ -107,7 +108,8 @@ func TestTruncateUTF8(t *testing.T) {
 		t.Errorf("short string must pass through, got %q", got)
 	}
 	s := "héllo wörld"
-	if got := truncateUTF8(s, 6); len(got) > 6 || !strings.HasPrefix(s, got) {
+	got := truncateUTF8(s, 6)
+	if !strings.HasPrefix(got, "héllo") || !strings.HasSuffix(got, "…") {
 		t.Errorf("truncated %q from %q", got, s)
 	}
 }

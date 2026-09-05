@@ -2,7 +2,7 @@
 // Uses vis-network for graph rendering (vendored ESM standalone build).
 
 import { rpc, on, off } from '../rpc.js';
-import { el, debounce, createSelect, toast, fmtTime } from '../ui.js';
+import { el, debounce, createSelect, toast, fmtTime, confirmDialog } from '../ui.js';
 import { renderMarkdown } from '../markdown.js';
 import { resolvedFontFamily } from '../font-preferences.js';
 // Reuse the Agent view's thinking/tool components so the review activity
@@ -19,9 +19,13 @@ const state = {
   edgeCount: 0,
   logEntries: [],
   logLoaded: false,
-  runningReviews: new Set(), // conversation IDs with in-flight reviews
-  reviewEventHandlers: null, // cleanup funcs for event listeners
-  learningEventHandlers: null, // cleanup funcs for memory/skill update listeners
+  runningJobs: 0,
+  catalogLoaded: false,
+  experiences: [],
+  records: [],
+  selectedRecordId: null,
+  selectedExperienceId: null,
+  learningEventHandlers: null, // cleanup funcs for memory/skill/job listeners
   graphRefreshTimer: null, // debounce timer coalescing background graph refreshes
   userMemory: null,
   userLoaded: false,
@@ -98,12 +102,12 @@ export async function initLearning() {
 
   initTabs();
   initSplitter();
-  initReviewEventListeners();
   initLearningUpdateListeners();
+  initCatalogActions();
 
   await loadStats();
   initGraph();
-  // Initial search: empty query lists all skills + memories so the results
+  // Initial search: empty query lists all skills + records so the results
   // pane is populated immediately (backend returns an unfiltered listing
   // for empty queries). The graph loads in parallel. The learning log
   // loads lazily on first tab switch to keep init light.
@@ -129,6 +133,9 @@ function initTabs() {
       });
       if (target === 'about' && !state.userLoaded) void loadStats();
       if (target === 'agent' && !state.agentLoaded) void loadStats();
+      if (target === 'experience') {
+        void loadCatalog();
+      }
       if (target === 'log') {
         loadLog();
         // The graph canvas was possibly hidden while the other panel was
@@ -139,49 +146,8 @@ function initTabs() {
   }
 }
 
-// Real-time review status: when a review starts, show a "running"
-// indicator at the top of the log. When it finishes (done or error),
-// refresh the log so the final status appears from the trajectory.
-function initReviewEventListeners() {
-  if (state.reviewEventHandlers) return;
-  const onStarted = (payload) => {
-    const convId = payload?.conversation_id;
-    if (convId) state.runningReviews.add(convId);
-    showRunningIndicator();
-  };
-  const onDone = (payload) => {
-    const convId = payload?.conversation_id;
-    if (convId) state.runningReviews.delete(convId);
-    if (state.runningReviews.size === 0) hideRunningIndicator();
-    if (state.logLoaded) loadLog();
-    // A review may have promoted/demoted memory or saved skills —
-    // refresh the memory & graph panes too.
-    loadStats();
-    scheduleGraphRefresh();
-    doSearch();
-  };
-  const onError = (payload) => {
-    const convId = payload?.conversation_id;
-    if (convId) state.runningReviews.delete(convId);
-    if (state.runningReviews.size === 0) hideRunningIndicator();
-    if (state.logLoaded) loadLog();
-  };
-  on('learning.review.started', onStarted);
-  on('learning.review.done', onDone);
-  on('learning.review.error', onError);
-  state.reviewEventHandlers = [
-    () => off('learning.review.started', onStarted),
-    () => off('learning.review.done', onDone),
-    () => off('learning.review.error', onError),
-  ];
-}
-
-// Real-time memory & skill updates: when a tool or review agent mutates
-// memory or skills, the backend emits memory.updated / skill.updated so
-// the Learning tab can refresh its stats, search results, and graph
-// without polling. A single debounced graph refresh coalesces bursts
-// (e.g. a review that saves several fragments in quick succession, or a
-// review.done landing right after its memory.updated events) so the
+// A single debounced graph refresh coalesces bursts (a job that writes
+// several records, or job.done landing right after memory.updated) so the
 // layout is not restarted repeatedly.
 let graphRefreshTimer = null;
 function scheduleGraphRefresh() {
@@ -192,6 +158,9 @@ function scheduleGraphRefresh() {
   }, 300);
 }
 
+// Real-time learning status: jobs refresh the catalog, log, search, and
+// graph. Experience recording only needs the experience list. Memory
+// updates refresh documents, records, search, and graph.
 function initLearningUpdateListeners() {
   if (state.learningEventHandlers) return;
   const onMemoryUpdated = () => {
@@ -203,11 +172,41 @@ function initLearningUpdateListeners() {
     scheduleGraphRefresh();
     doSearch();
   };
+  const onExperienceRecorded = () => {
+    void loadExperiences();
+  };
+  const onJobStarted = () => {
+    state.runningJobs += 1;
+    showRunningIndicator();
+    if (state.logLoaded) loadLog();
+  };
+  const onJobDone = () => {
+    state.runningJobs = Math.max(0, state.runningJobs - 1);
+    if (state.runningJobs === 0) hideRunningIndicator();
+    if (state.logLoaded) loadLog();
+    loadStats();
+    void loadExperiences();
+    scheduleGraphRefresh();
+    doSearch();
+  };
+  const onJobError = () => {
+    state.runningJobs = Math.max(0, state.runningJobs - 1);
+    if (state.runningJobs === 0) hideRunningIndicator();
+    if (state.logLoaded) loadLog();
+  };
   on('memory.updated', onMemoryUpdated);
   on('skill.updated', onSkillUpdated);
+  on('experience.recorded', onExperienceRecorded);
+  on('learning.job.started', onJobStarted);
+  on('learning.job.done', onJobDone);
+  on('learning.job.error', onJobError);
   state.learningEventHandlers = [
     () => off('memory.updated', onMemoryUpdated),
     () => off('skill.updated', onSkillUpdated),
+    () => off('experience.recorded', onExperienceRecorded),
+    () => off('learning.job.started', onJobStarted),
+    () => off('learning.job.done', onJobDone),
+    () => off('learning.job.error', onJobError),
     () => { if (graphRefreshTimer) clearTimeout(graphRefreshTimer); },
   ];
 }
@@ -294,7 +293,7 @@ function showRunningIndicator() {
   if (!indicator) {
     indicator = el('div', { id: 'learning-log-running', class: 'learning-log-running' }, [
       el('span', { class: 'learning-log-running-dot' }),
-      el('span', { text: 'Autolearn running…' }),
+      el('span', { text: 'Learning job running…' }),
     ]);
     logEl.insertBefore(indicator, logEl.firstChild);
   }
@@ -303,6 +302,203 @@ function showRunningIndicator() {
 function hideRunningIndicator() {
   const indicator = document.getElementById('learning-log-running');
   if (indicator) indicator.remove();
+}
+
+function isDocumentTier(tier) {
+  const value = String(tier || '').toLowerCase();
+  return value === 'user' || value === 'agent';
+}
+
+function isMemoryRecord(entry) {
+  if (!entry) return false;
+  if (isDocumentTier(entry.tier)) return false;
+  const tier = String(entry.tier || '').toLowerCase();
+  return tier === 'record' || tier === 'records' || entry.body != null || entry.type != null;
+}
+
+function listFrom(res, ...keys) {
+  for (const key of keys) {
+    if (Array.isArray(res?.[key])) return res[key];
+  }
+  if (Array.isArray(res)) return res;
+  return [];
+}
+
+function initCatalogActions() {
+  const retireBtn = document.getElementById('learning-record-retire');
+  if (retireBtn) {
+    retireBtn.addEventListener('click', () => {
+      if (state.selectedRecordId) void retireRecord(state.selectedRecordId);
+    });
+  }
+}
+
+async function loadCatalog() {
+  state.catalogLoaded = true;
+  await Promise.all([loadExperiences(), loadStats()]);
+}
+
+async function loadExperiences() {
+  const listEl = document.getElementById('learning-experience-list');
+  const countEl = document.getElementById('learning-experience-count');
+  if (!listEl) return;
+  try {
+    const res = await rpc('experience.list');
+    state.experiences = listFrom(res, 'experiences', 'entries', 'items');
+    renderExperiences();
+    if (countEl) countEl.textContent = String(state.experiences.length);
+  } catch (e) {
+    state.experiences = [];
+    listEl.innerHTML = '';
+    listEl.appendChild(el('div', { class: 'learning-empty' }, [
+      el('strong', { text: 'Experience unavailable' }),
+      el('span', { text: e.message || 'Could not load experience.list.' }),
+    ]));
+    if (countEl) countEl.textContent = '0';
+  }
+}
+
+function signalChips(signals) {
+  if (!signals || typeof signals !== 'object') return [];
+  const chips = [];
+  const push = (ok, label) => { if (ok) chips.push(el('span', { class: 'learning-signal', text: label })); };
+  push(signals.explicit_teaching, 'teaching');
+  push(Number(signals.user_corrections) > 0, `corrections ${signals.user_corrections}`);
+  push(Number(signals.retries) > 0, `retries ${signals.retries}`);
+  push(Number(signals.failed_actions) > 0, `failed ${signals.failed_actions}`);
+  push(signals.verified_success, 'verified');
+  push(signals.novel_workflow, 'novel');
+  push(signals.root_cause_recovered, 'recovered');
+  return chips;
+}
+
+function renderExperiences() {
+  const listEl = document.getElementById('learning-experience-list');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  if (state.experiences.length === 0) {
+    listEl.appendChild(el('div', { class: 'learning-empty' }, [
+      el('strong', { text: 'No experience yet' }),
+      el('span', { text: 'Completed conversations record a goal, outcome, and signals here. Episodes are read-only.' }),
+    ]));
+    return;
+  }
+  for (const exp of state.experiences) {
+    const selected = exp.id === state.selectedExperienceId;
+    const outcome = exp.outcome?.status || (typeof exp.outcome === 'string' ? exp.outcome : 'unknown');
+    const card = el('button', {
+      class: `learning-catalog-card${selected ? ' active' : ''}`,
+      type: 'button',
+      'data-id': exp.id,
+    }, [
+      el('div', { class: 'learning-catalog-card-head' }, [
+        el('span', { class: `learning-outcome learning-outcome-${outcome}`, text: String(outcome) }),
+        el('span', { class: 'learning-catalog-time', text: fmtTime(exp.timestamp || exp.created_at) }),
+      ]),
+      el('div', { class: 'learning-catalog-title', text: exp.goal || 'Untitled episode' }),
+      el('div', { class: 'learning-catalog-signals' }, signalChips(exp.signals)),
+    ]);
+    card.addEventListener('click', () => { void openExperience(exp.id); });
+    listEl.appendChild(card);
+    if (selected && exp._detail) {
+      listEl.appendChild(renderExperienceDetail(exp._detail));
+    }
+  }
+}
+
+function renderExperienceDetail(exp) {
+  const observations = (exp.observations || []).slice(0, 4);
+  const actions = (exp.actions || []).slice(0, 6);
+  return el('div', { class: 'learning-experience-detail' }, [
+    exp.scope?.project ? el('div', { class: 'learning-catalog-meta', text: `Project ${exp.scope.project}` }) : null,
+    actions.length ? el('div', { class: 'learning-catalog-meta', text: `Actions: ${actions.map((a) => a.name || a).join(' → ')}` }) : null,
+    observations.length ? el('div', { class: 'learning-catalog-meta', text: observations.join(' · ') }) : null,
+  ]);
+}
+
+async function openExperience(id) {
+  if (state.selectedExperienceId === id) {
+    state.selectedExperienceId = null;
+    renderExperiences();
+    return;
+  }
+  state.selectedExperienceId = id;
+  renderExperiences();
+  try {
+    const res = await rpc('experience.get', { id });
+    const detail = res.experience || res.entry || res;
+    const idx = state.experiences.findIndex((item) => item.id === id);
+    if (idx >= 0) state.experiences[idx] = { ...state.experiences[idx], ...detail, _detail: detail };
+    renderExperiences();
+  } catch (e) {
+    toast(e.message || 'Could not load experience.', 'error');
+  }
+}
+
+function recordBody(entry) {
+  return entry.body || [entry.subject, entry.predicate, entry.object].filter(Boolean).join(' ') || entry.content || '';
+}
+
+function renderRecords() {
+  const listEl = document.getElementById('learning-records-list');
+  const retireBtn = document.getElementById('learning-record-retire');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  const records = state.records;
+  if (records.length === 0) {
+    listEl.appendChild(el('div', { class: 'learning-empty' }, [
+      el('strong', { text: 'No memory records' }),
+      el('span', { text: 'Structured facts, preferences, and constraints appear here. Retire a record to keep it off retrieval without deleting the audit trail.' }),
+    ]));
+    if (retireBtn) retireBtn.disabled = true;
+    return;
+  }
+  for (const rec of records) {
+    const selected = rec.id === state.selectedRecordId;
+    const status = rec.status || 'learned';
+    const retired = status === 'retired';
+    const card = el('button', {
+      class: `learning-catalog-card${selected ? ' active' : ''}${retired ? ' retired' : ''}`,
+      type: 'button',
+      'data-id': rec.id,
+    }, [
+      el('div', { class: 'learning-catalog-card-head' }, [
+        rec.type ? el('span', { class: 'learning-result-kind learning-kind-memory', text: rec.type }) : null,
+        el('span', { class: `learning-record-status learning-record-status-${status}`, text: status }),
+        el('span', { class: 'learning-catalog-time', text: fmtTime(rec.updated_at || rec.created_at) }),
+      ]),
+      el('div', { class: 'learning-catalog-title', text: recordBody(rec) || rec.id }),
+      rec.scope?.level || rec.scope?.project
+        ? el('div', { class: 'learning-catalog-meta', text: [rec.scope.level, rec.scope.project, rec.scope.repo].filter(Boolean).join(' · ') })
+        : null,
+    ]);
+    card.addEventListener('click', () => {
+      state.selectedRecordId = rec.id;
+      renderRecords();
+    });
+    listEl.appendChild(card);
+  }
+  if (retireBtn) {
+    const selected = records.find((r) => r.id === state.selectedRecordId);
+    retireBtn.disabled = !selected || selected.status === 'retired';
+  }
+}
+
+async function retireRecord(id) {
+  const rec = state.records.find((r) => r.id === id);
+  if (!rec || rec.status === 'retired') return;
+  const ok = await confirmDialog('Retire this record?', 'It stays on disk for audit but is excluded from search and agent context.', 'Retire');
+  if (!ok) return;
+  try {
+    await rpc('memory.retire', { id });
+    toast('Memory record retired.', 'success', 2000);
+    state.selectedRecordId = null;
+    await loadStats();
+    doSearch();
+    loadGraph();
+  } catch (e) {
+    toast(e.message || 'Failed to retire memory record.', 'error', 4000);
+  }
 }
 
 // Draggable splitter between results pane and graph pane. Persists the
@@ -369,6 +565,7 @@ function initSplitter() {
 
 export async function refresh() {
   await loadStats();
+  await loadExperiences();
   await loadGraph();
   // Refresh the log too — but only if it has been opened at least once
   // (lazy-loading keeps init light).
@@ -408,7 +605,7 @@ function renderLog() {
   if (state.logEntries.length === 0) {
     logEl.appendChild(el('div', { class: 'learning-empty' }, [
       el('strong', { text: 'No learning activity yet' }),
-      el('span', { text: 'Autolearn runs in the background after enough turns and records what it saved here.' }),
+      el('span', { text: 'Signal-based learning jobs record consolidations and skill updates here.' }),
     ]));
     return;
   }
@@ -421,8 +618,7 @@ export function renderLogEntry(entry) {
   const headChildren = [
     el('span', { class: `learning-log-type learning-type-${entry.type}`, text: typeLabel(entry.type) }),
   ];
-  // Status badge: review entries carry a status (done|error|skipped). Other
-  // event types (prune, decay, etc.) do not have a status.
+	// Status badge: job entries may carry a status (done|error|skipped).
   if (entry.status) {
     headChildren.push(el('span', {
       class: `learning-log-status learning-log-status-${entry.status}`,
@@ -434,16 +630,16 @@ export function renderLogEntry(entry) {
 
   const parts = [head];
 
-  // Review failures are automatic/background work. Keep the Learning log
+  // Job failures are automatic/background work. Keep the Learning log
   // concise without leaking a provider's verbose error body; the raw
   // diagnostic remains in the backend log/trajectory for diagnosis.
   if (entry.status === 'error') {
-    parts.push(el('div', { class: 'learning-log-error', text: 'Background review failed during automatic processing.' }));
+    parts.push(el('div', { class: 'learning-log-error', text: 'Background learning job failed during automatic processing.' }));
   }
   if (entry.status === 'skipped') {
     const reason = entry.detail?.reason || 'deferred';
     const messages = {
-      already_running: 'Coalesced: another review is already running.',
+      already_running: 'Coalesced: another learning job is already running.',
       cooldown_active: 'Deferred: retry cooldown is active.',
     };
     parts.push(el('div', { class: 'learning-log-skipped', text: messages[reason] || `Deferred: ${reason}.` }));
@@ -457,18 +653,18 @@ export function renderLogEntry(entry) {
     // Note: handleLearningLog lifts detail.status into entry.Status, so the
     // outcome is read from entry.status, not d.status.
     if (entry.status === 'ok' && d.resolved) {
-      parts.push(el('div', { class: 'learning-log-skipped', text: `Reviews run on the override model “${d.resolved}”.` }));
+      parts.push(el('div', { class: 'learning-log-skipped', text: `Learning jobs run on the override model “${d.resolved}”.` }));
     } else {
       const bare = String(d.requested || '').split(':').pop();
       const hint = bare ? ` (configured override: ${bare})` : '';
-      parts.push(el('div', { class: 'learning-log-error', text: `Review model override failed — reviews fell back to the conversation model${hint}.` }));
+      parts.push(el('div', { class: 'learning-log-error', text: `Learning-job model override failed — jobs fell back to the conversation model${hint}.` }));
     }
     return el('div', { class: 'learning-log-entry' }, parts);
   }
 
   // Source conversation as a compact "Source <title>" line. The raw
   // conversation id and the replayed transcript text do not belong in the
-  // activity digest — the log is about what the review agent did.
+  // activity digest — the log is about what learning jobs stored.
   if (entry.conversation_id) {
     parts.push(el('div', { class: 'learning-log-conv' }, [
       el('span', { class: 'learning-log-conv-label', text: 'Source' }),
@@ -477,7 +673,7 @@ export function renderLogEntry(entry) {
   }
 
   // Saved outcomes: one compact line per mutation so the feed shows what
-  // the review actually stored. A finished review with zero mutations says
+  // the job actually stored. A finished job with zero mutations says
   // so explicitly instead of leaving a silent gap.
   if (entry.mutations && entry.mutations.length > 0) {
     const saves = el('div', { class: 'learning-log-saves' });
@@ -498,173 +694,20 @@ export function renderLogEntry(entry) {
     parts.push(el('div', { class: 'learning-log-detail', text: extras }));
   }
 
-  // "View review details" button: expands an activity digest of what the
-  // background review agent actually did. Only review entries have a
-  // review_id; other event types (prune, decay, etc.) have no run record.
-  if (entry.review_id) {
-    const transcriptRow = el('div', { class: 'learning-log-transcript-row' }, [
-      el('button', {
-        class: 'learning-log-open',
-        type: 'button',
-        text: 'View review details',
-        title: 'Show the background review agent activity',
-      }),
-    ]);
-    const btn = transcriptRow.querySelector('.learning-log-open');
-    btn.addEventListener('click', () => toggleTranscript(entry.review_id, btn));
-    parts.push(transcriptRow);
-  }
-
   return el('div', { class: 'learning-log-entry' }, parts);
-}
-
-// toggleTranscript fetches and renders the review agent's activity digest
-// (its tool steps + outcome + conclusion) inline below the log entry.
-// Toggles open/closed on repeated clicks.
-async function toggleTranscript(reviewID, btn) {
-  const entry = btn.closest('.learning-log-entry');
-  if (!entry) return;
-  const existing = entry.querySelector('.learning-log-activity');
-  if (existing) {
-    existing.remove();
-    btn.textContent = 'View review details';
-    return;
-  }
-  btn.textContent = 'Loading…';
-  btn.disabled = true;
-  try {
-    const res = await rpc('learning.review.transcript', { id: reviewID });
-    const view = renderTranscript(res);
-    entry.appendChild(view);
-    btn.textContent = 'Hide review details';
-  } catch (e) {
-    toast(e.message || 'Failed to load review details.', 'error', 4000);
-    btn.textContent = 'View review details';
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-// oneLine collapses whitespace and truncates a mutation snippet so log rows
-// stay scannable. Full tool inputs and outputs live inside their collapsible
-// terminal cards instead.
-function oneLine(text, max) {
-  const clean = (text || '').replace(/\s+/g, ' ').trim();
-  if (!clean) return '';
-  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
-}
-
-// renderTranscript renders what the background review agent did as an
-// agent-style flow — thinking disclosures, terminal-style tool cards, and a
-// final conclusion — exactly like the Agent view conversation, minus the user
-// side: the replayed transcript message (role "user") is never rendered. This
-// answers "what did the agent do and store?".
-export function renderTranscript(transcript) {
-  const view = el('div', { class: 'learning-log-activity' });
-  // Banner: makes it obvious this is background review agent activity.
-  view.appendChild(el('div', { class: 'learning-log-activity-banner' }, [
-    el('span', { class: 'learning-log-activity-badge', text: 'Background review agent' }),
-    el('span', { class: 'learning-log-activity-meta', text: transcript.model || '' }),
-    el('span', { class: 'learning-log-activity-meta', text: fmtTime(transcript.created_at) }),
-  ]));
-
-  const items = collectAgentFlow(transcript.messages || []);
-  if (items.length === 0) {
-    view.appendChild(el('div', { class: 'learning-log-detail', text: 'No steps recorded.' }));
-    return view;
-  }
-
-  const detailStep = document.createElement("div")
-  detailStep.className = "learning-log-activity-step"
-  for (const item of items) {
-    detailStep.appendChild(item);
-  }
-  view.appendChild(detailStep)
-  return view;
-}
-
-// collectAgentFlow converts the review agent's message history into the
-// Agent view's visual language: a thinking disclosure per assistant round,
-// one tool call card per call (paired with its tool result), and the final
-// conclusion line.
-// Replayed user messages are dropped — this view shows agent work only.
-function collectAgentFlow(messages) {
-  const items = [];
-  const cardsById = new Map();
-  let lastCard = null;
-
-  const applyResult = (card, content, presentation) => {
-    if (!card) return;
-    const output = String(content || '');
-    const failed = /^error:/i.test(output.trim());
-    const status = failed ? 'fail' : 'ok';
-    if (presentation) {
-      setToolTerminalPresentation(card, presentation);
-      setToolTerminalStatus(card, status);
-      return;
-    }
-    // Refresh the summary-line meta that was rendered as "Running".
-    const meta = card._toolName
-      ? toolTerminalMeta({ name: card._toolName, args: card._toolArgs, status })
-      : '';
-    setToolTerminalOutput(card, output, status, meta);
-  };
-
-  for (const msg of messages) {
-    // Tool results merge into their call card. Never rendered standalone.
-    if (msg.role === 'tool' && msg.tool_result) {
-      const id = msg.tool_result.tool_call_id;
-      applyResult((id && cardsById.get(id)) || lastCard, msg.tool_result.content, msg.tool_result.presentation);
-      continue;
-    }
-    // The replayed source-conversation transcript (role "user") stays hidden.
-    if (msg.role !== 'assistant') continue;
-
-    if (msg.tool_calls?.length) {
-      // Some OpenAI-compatible models (including Minimax through OpenRouter)
-      // put their pre-tool reasoning in the normal content field instead of
-      // the provider reasoning field. Treat that round text as Thinking so
-      // the background log has the same collapsed interaction as Agent.
-      const thinking = [msg.reasoning, msg.content]
-        .filter((text) => typeof text === 'string' && text.trim())
-        .join('\n\n');
-      if (thinking) {
-        items.push(reasoningDisclosure(thinking));
-      }
-      for (const call of msg.tool_calls) {
-        const card = renderToolCallCard({ id: call.id, name: call.name, args: call.args ?? '', status: 'running', output: '', presentation: call.presentation });
-        // ACP wait/result entries are provider bookkeeping for the same
-        // delegation card. The shared renderer returns null for them, so do
-        // not put a non-node into the Learning activity fragment.
-        if (!card) continue;
-        if (call.id) cardsById.set(call.id, card);
-        lastCard = card;
-        items.push(card);
-      }
-      continue;
-    }
-    if (msg.reasoning?.trim()) {
-      items.push(reasoningDisclosure(msg.reasoning));
-    }
-    if (typeof msg.content === 'string' && msg.content.trim()) {
-      // Terminal text response: the review's verdict.
-      const conclusion = el('div', { class: 'learning-log-conclusion' });
-      conclusion.innerHTML = renderMarkdown(msg.content);
-      items.push(conclusion);
-    }
-  }
-  return items;
 }
 
 function typeLabel(type) {
   switch (type) {
-    case 'review': return 'Autolearn review';
+    case 'review': return 'Learning job';
     case 'extract': return 'Extraction';
     case 'edge_build': return 'Edge build';
     case 'consolidate': return 'Consolidation';
+    case 'skill_evolve': return 'Skill evolved';
+    case 'skill_promote': return 'Skill promoted';
     case 'decay': return 'Decay';
     case 'prune': return 'Prune';
-    case 'review_model': return 'Review model';
+    case 'review_model': return 'Learning model';
     default: return type.replace(/_/g, ' ');
   }
 }
@@ -691,13 +734,17 @@ function detailText(entry) {
 async function loadStats() {
   try {
     const { entries } = await rpc('memory.list');
-    state.memoryCount = entries.length;
+    const all = entries || [];
+    const records = all.filter(isMemoryRecord);
+    state.records = records;
+    state.memoryCount = records.length;
     document.getElementById('learning-stat-memory').textContent =
-      `${state.memoryCount} memor${state.memoryCount === 1 ? 'y' : 'ies'}`;
-    const user = (entries || []).find((entry) => entry.tier === 'user') || null;
-    const agent = (entries || []).find((entry) => entry.tier === 'agent') || null;
+      `${state.memoryCount} record${state.memoryCount === 1 ? '' : 's'}`;
+    const user = all.find((entry) => entry.tier === 'user') || null;
+    const agent = all.find((entry) => entry.tier === 'agent') || null;
     setMemoryDocumentEditor(MEMORY_EDITORS.user, user);
     setMemoryDocumentEditor(MEMORY_EDITORS.agent, agent);
+    renderRecords();
   } catch (e) {
     // memory.list might fail if store not initialized
     state.userLoaded = false;
@@ -733,6 +780,12 @@ async function doSearch() {
   }
 }
 
+function memoryTierLabel(tier) {
+  if (tier === 'user') return 'User memory';
+  if (tier === 'agent') return 'Soul memory';
+  return 'Record';
+}
+
 function renderResults() {
   const resultsEl = document.getElementById('learning-results');
   resultsEl.innerHTML = '';
@@ -744,9 +797,10 @@ function renderResults() {
     return;
   }
   for (const item of state.results) {
-    const isLong = item.content && item.content.length > 200;
-    const contentEl = item.content
-      ? el('div', { class: 'learning-result-content collapsed', text: item.content })
+    const text = item.content || item.body || '';
+    const isLong = text && text.length > 200;
+    const contentEl = text
+      ? el('div', { class: 'learning-result-content collapsed', text })
       : null;
     if (isLong && contentEl) {
       contentEl.title = 'Click to expand/collapse';
@@ -760,22 +814,13 @@ function renderResults() {
     const headerRight = el('div', { class: 'learning-result-header-right' }, [
       el('span', { class: 'learning-result-score', text: score }),
     ]);
-    if (item.kind === 'memory') {
-      const delBtn = el('button', {
-        class: 'learning-result-delete',
-        type: 'button',
-        title: 'Delete memory',
-        'aria-label': 'Delete memory',
-        text: '×',
-      });
-      delBtn.addEventListener('click', (e) => deleteMemory(item.id, e));
-      headerRight.appendChild(delBtn);
-    }
+    const tier = item.kind === 'memory' ? (item.tier || 'record') : '';
+    const displayTier = item.kind === 'memory' && !isDocumentTier(tier) ? 'record' : tier;
     const card = el('div', { class: 'learning-result-card', 'data-id': item.id, 'data-kind': item.kind }, [
       el('div', { class: 'learning-result-header' }, [
-        el('span', { class: `learning-result-kind learning-kind-${item.kind}`, text: item.kind }),
-        item.kind === 'memory' && item.tier
-          ? el('span', { class: `learning-result-tier learning-tier-${item.tier}`, text: item.tier, title: item.tier === 'user' ? 'User memory' : 'Fragment' })
+        el('span', { class: `learning-result-kind learning-kind-${item.kind}`, text: item.kind === 'memory' ? 'record' : item.kind }),
+        item.kind === 'memory'
+          ? el('span', { class: `learning-result-tier learning-tier-${displayTier}`, text: displayTier, title: memoryTierLabel(displayTier) })
           : null,
         headerRight,
       ]),
@@ -790,51 +835,6 @@ function renderResults() {
     });
     resultsEl.appendChild(card);
   }
-}
-
-async function deleteMemory(id, event) {
-  event.stopPropagation();
-  const ok = await confirmDelete(id);
-  if (!ok) return;
-  try {
-    await rpc('memory.delete', { id });
-    toast('Memory deleted.', 'success', 2000);
-    // Remove from local state + re-render without a full reload.
-    state.results = state.results.filter((r) => !(r.id === id && r.kind === 'memory'));
-    renderResults();
-    document.getElementById('learning-results-count').textContent = String(state.results.length);
-    // Refresh stats + graph in the background.
-    loadStats();
-    loadGraph();
-  } catch (e) {
-    toast(e.message || 'Failed to delete memory.', 'error', 4000);
-  }
-}
-
-// Inline confirmation: a small popover asking "Delete this memory?" with
-// confirm/cancel. Avoids native confirm() per the frontend style rules.
-function confirmDelete(id) {
-  // Synchronous-style confirmation via a transient inline dialog. Returns
-  // true only if the user clicks confirm. We use a simple approach: render
-  // a modal-like overlay and resolve on click.
-  return new Promise((resolve) => {
-    const overlay = el('div', { class: 'learning-confirm-overlay' }, [
-      el('div', { class: 'learning-confirm-dialog' }, [
-        el('strong', { text: 'Delete this memory?' }),
-        el('span', { text: 'This cannot be undone.' }),
-        el('div', { class: 'learning-confirm-actions' }, [
-          el('button', { class: 'mini-btn', type: 'button', text: 'Cancel' }),
-          el('button', { class: 'mini-btn danger', type: 'button', text: 'Delete' }),
-        ]),
-      ]),
-    ]);
-    document.body.appendChild(overlay);
-    const [cancelBtn, deleteBtn] = overlay.querySelectorAll('button');
-    const close = (result) => { overlay.remove(); resolve(result); };
-    cancelBtn.addEventListener('click', () => close(false));
-    deleteBtn.addEventListener('click', () => close(true));
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
-  });
 }
 
 // Bounded re-layout for graph refreshes. network.stabilize() always
@@ -1143,7 +1143,7 @@ function initGraph() {
       skill: { color: { background: GRAPH_PALETTE.ocean, border: GRAPH_PALETTE.oceanBorder }, size: 20 },
       memory: { color: { background: GRAPH_PALETTE.earth, border: GRAPH_PALETTE.earthBorder }, size: 14 },
       // User memory is one document (not per-fact), so it gets a
-      // distinct shape + color instead of masquerading as a fragment.
+      // distinct shape + color instead of masquerading as a record.
       'memory-user': { color: { background: GRAPH_PALETTE.leaf, border: GRAPH_PALETTE.leafBorder }, size: 16, shape: 'square' },
     },
     physics: {
@@ -1200,9 +1200,9 @@ async function loadGraph({ preservePositions = true } = {}) {
   if (!state.nodes) return;
   try {
     // Fetch pre-computed graph from backend (nodes + edges). Related edges
-    // combine embedding, content/token overlap, and fragment metadata;
+    // combine embedding, content/token overlap, and record metadata;
     // used-with edges come from learning nodes observed in one successful
-    // agent or review turn. Nothing is computed client-side.
+    // agent or learning-job turn. Nothing is computed client-side.
     const { nodes, edges } = await rpc('learning.graph');
 
     // Keep current positions (pinned for the layout) so unchanged nodes
@@ -1249,7 +1249,7 @@ async function loadGraph({ preservePositions = true } = {}) {
       `${state.edgeCount} edge${state.edgeCount === 1 ? '' : 's'}`;
     const memCount = newNodes.filter((n) => n.group === 'memory' || n.group === 'memory-user').length;
     document.getElementById('learning-stat-memory').textContent =
-      `${memCount} memor${memCount === 1 ? 'y' : 'ies'}`;
+      `${memCount} record${memCount === 1 ? '' : 's'}`;
     // Bounded re-layout for the new/changed nodes, then the
     // stabilizationIterationsDone handler freezes the graph again.
     // Auto-fit after data load + render settled. Defer to next frame so

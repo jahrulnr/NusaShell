@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Turn-count and tool-nudge background review.** `learning_review_threshold`,
+  `skill_nudge_interval`, `learning.review.*` events, `learning.review.transcript`,
+  fragment memory (`memory/fragments/`, `memory.save` fragments),
+  `memory(op=save|replace|delete)`, agent writes to `user.md`/`soul.md`,
+  in-place trusted skill overwrite, and the unified review agent that wrote
+  memory and skills directly are gone. There is no compatibility alias.
+
 - **`file_patch` no longer takes `expected_sha256`.** The fail-closed
   precondition (refuse to patch when the file hash differs from the one a
   previous `file_read` returned) is gone: a too-disciplined model that
@@ -21,6 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only the *precondition* is removed.
 
 ### Added
+
+- **Experience learning system.** Turns record structured experiences
+  (`growth/experiences.jsonl`). Signal-based jobs (correction, teaching,
+  repeated failure/procedure, verified recovery) enqueue a memory
+  consolidator and skill evolution agents that return typed operations.
+  Jobs enqueue on teaching, correction, verified recovery, repeated failure,
+  or the same procedure fingerprint seen at least three times — not on a
+  first successful multi-tool turn. Correction cues must start the user
+  message or a new sentence. Durable knowledge is `growth/memories.jsonl`
+  records shown under About You / About Agent. Skills are git-style versions
+  with human promote to trusted. Persistence is JSON/JSONL only. There is
+  no boot migrator for old fragment files.
 
 - **TPM context-cap learning from OpenAI rate-limit errors.** When an
   official OpenAI account rejects a request for tokens per minute, NusaShell
@@ -80,7 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Announcement queue for prompt-cache-breaking changes.** A persisted
   per-conversation queue delivers config, memory, and skills changes (ACP
   subagent save/delete, settings user instructions, provider save/delete,
-  memory/skills RPC, background review writes, cross-conversation tool calls)
+  memory/skills RPC, background learning-job writes, cross-conversation tool calls)
   to agent conversations as `announcement` tool calls (`config_changed`,
   `memory_changed`, `skills_changed`). Publish appends to the queue
   (coalesced by type, latest wins); the turn worker drains it at turn start
@@ -382,6 +401,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Linux Electron development startup.** `make electron-dev` now detects an
   unavailable `chrome-sandbox` helper on user-owned filesystems and uses an
   explicit development-only fallback instead of aborting before the app opens.
+
+## [0.4.1] - 2026-09-05
+
+### Changed
+
+- **`ChangeJournal` replaced with an in-memory `turndiff` tracker.** The
+  retired `ChangeJournal` subsystem (per-conversation `journal.jsonl` sidecar,
+  content-addressed pre-image blobs, gzip-archived events, per-workspace-root
+  mutex registry, and a durable compaction audit trail) is gone. A leaf
+  `domain/turndiff` package now tracks the net git unified diff of committed
+  `file_*` mutations for the current turn, rendered from in-memory snapshots
+  rather than the workspace. Binary, directory, and partial-failure mutations
+  invalidate the tracker instead of guessing content. A boot-time
+  `RemoveOrphanJournalSidecars` deletes any leftover
+  `conversations/<conv_id>.journal/` directories from prior installs.
+  - **Live `agent.turn.diff` event (`agent/turn.diff`).** A new
+    `TurnDiffEvent` carries `run_id`, `conversation_id`, and `unified_diff`
+    so consumers see the accumulated diff of `file_*` mutations while the
+    turn runs, plus a final payload on turn end and on interrupt. Registered
+    in `contracts/roster.go` with a golden envelope fixture
+    (`contracts/testdata/golden/turn-diff-event.json`).
+  - **New `domain/turndiff` package.** `Tracker` (ported from Codex
+    `TurnDiffTracker`) tracks ordered `Delta`s of `FileChange`s (Add / Update /
+    Delete) with optional rename and overwrite pre-images, caches per-path
+    rendered diffs, and falls back to a coarse replace on rewrites too large
+    for LCS. `oid.go` provides git blob OIDs and the `ZeroOID` /
+    `RegularFileMode` constants used by the renderer. `capture.go` is the
+    `context.WithValue` plumbing so file tools record deltas without
+    changing their result type.
+  - **`infrastructure/tools/file_delta.go`** captures pre-image text and
+    decides "exact" (UTF-8, NUL-free, regular file) vs "inexact" (binary,
+    directory, unreadable, partial failure) per mutation. `file_write`,
+    `file_patch`, `file_delete`, `file_move`, and `file_copy` now record
+    deltas; `file_mkdir` and `file_info` are not tracked. `executeFileTool`
+    was split into a `context`-aware `executeFileToolCtx` so the toolbox
+    can thread `ctx` through.
+  - **App plumbing.** `App.Journal` / `Deps.Journal` and the
+    `application/journal.go` port are removed. `runOneTool` no longer
+    classifies mutations, locks per-root, or wraps execution in
+    `Journal.WrapMutation`; it just calls the toolbox and `trackTurnDiff`
+    on the captured delta. `runTurn` initializes a fresh `turndiff.Tracker`
+    with `WithDisplayRoot(Workspace)`. `finishTurn` and `interruptTurn`
+    emit the final `agent.turn.diff` payload. The
+    `infrastructure/journal/` package, `domain/journal.go`,
+    `application/journal*.go`, and the matching test files are deleted;
+    `application/orphan_journals.go` and its test are added. The
+    `/infrastructure/journal/` entry is removed from `.github/CODEOWNERS`
+    and the AGENTS.md dependency-rule example drops `journal`.
+  - **Dependencies & types.** `domain.CompactionEvent` (the per-compaction
+    audit record) is removed; `recordCompaction` is gone. The
+    `application.hydration` `workspace_state` slot and its `JournalHint`
+    are removed (no more post-compaction "what the agent changed"
+    injection from disk). The `pkg/hash` package doc comment drops
+    "journaling" from the layers it supports.
+  - **Docs.** `resources/agent/docs/data-locations.md` no longer lists the
+    `conversations/<conv_id>.journal/` sidecar; the `conversations/*.chunks/`
+    row now omits "journal" from the list of state kept under the same
+    conversation ID. `docs/architecture.md` mirrors the same wording.
+
+### Notes
+
+- This is a **persisted-data breaking change**: prior installs left
+  per-conversation `*.journal/` sidecars on disk; NusaShell 0.4.1 deletes
+  them on first boot (one-shot, best-effort). The compaction audit trail
+  per turn is gone — compaction events are no longer durably recorded
+  beyond the live `agent.compacting` / `agent.compacted` event stream.
+- This is a **wire surface addition, not a removal**: the WebSocket
+  vocabulary gains `agent.turn.diff`. Existing consumers that ignore
+  unknown event types are unaffected.
 
 ## [0.1.0] - 2026-08-13
 

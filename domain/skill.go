@@ -19,43 +19,47 @@ const DefaultMaxAutoContinues = 10
 // in Settings); this constant is the factory default.
 const DefaultMaxParallelTools = 6
 
-// SkillState controls the skill lifecycle: active skills are surfaced to
-// the agent, stale skills are still searchable but de-prioritized, and
-// archived skills are hidden from default listings.
-type SkillState string
+// SkillStatus is the promotion state machine. Generated skills start as
+// candidate/experimental; Routable() skills (trusted and validated) appear
+// in default hydration and search.
+type SkillStatus string
 
 const (
-	SkillStateActive   SkillState = "active"
-	SkillStateStale    SkillState = "stale"
-	SkillStateArchived SkillState = "archived"
+	SkillStatusCandidate    SkillStatus = "candidate"
+	SkillStatusExperimental SkillStatus = "experimental"
+	SkillStatusValidated    SkillStatus = "validated"
+	SkillStatusTrusted      SkillStatus = "trusted"
+	SkillStatusDeprecated   SkillStatus = "deprecated"
+	SkillStatusRetired      SkillStatus = "retired"
 )
 
-// SkillOrigin records who created the skill so the curator can distinguish
-// user-authored skills from agent-discovered ones.
+// SkillOrigin records who provided the skill.
 type SkillOrigin string
 
 const (
 	SkillOriginUser    SkillOrigin = "user"
-	SkillOriginAgent   SkillOrigin = "agent"
+	SkillOriginLearned SkillOrigin = "learned"
 	SkillOriginBuiltin SkillOrigin = "builtin"
+	SkillOriginPlugin  SkillOrigin = "plugin"
 )
 
 type Skill struct {
-	ID          string
-	Name        string
-	Description string
-	Content     string
-	Category    string      // optional grouping (e.g. "git", "k8s")
-	State       SkillState  // active | stale | archived (default active)
-	Origin      SkillOrigin // user | agent | builtin
-	OwnedBy     string      // "user", "builtin", "plugin:<plugin-id>" — secondary key for disambiguation; "" defaults to Origin
-	PluginDir   string      // mount source directory for plugin-owned skills (read-only); empty for user/builtin
-	Path        string      // absolute path to the skill directory on disk; empty for embedded/in-memory skills
-	Bundled     bool        // true when the skill directory has support files beyond SKILL.md (references/, templates/, scripts/, examples/)
-	Pinned      bool        // pinned skills bypass decay and always surface
-	UsageCount  int         // incremented each time the skill is used in a turn
-	LastUsedAt  time.Time   // zero = never used
-	UpdatedAt   time.Time
+	ID            string
+	Name          string
+	Description   string
+	Content       string
+	Category      string      // optional grouping (e.g. "git", "k8s")
+	Status        SkillStatus // candidate → … → trusted → deprecated → retired
+	Version       int         // immutable snapshot number currently checked out
+	ActiveVersion int         // pointer used for rollback; equals Version when live
+	Origin        SkillOrigin // user | learned | builtin | plugin
+	OwnedBy       string      // "user", "builtin", "plugin:<plugin-id>" — secondary key for disambiguation; "" defaults to Origin
+	PluginDir     string      // mount source directory for plugin-owned skills (read-only); empty for user/builtin
+	Path          string      // absolute path to the skill directory on disk; empty for embedded/in-memory skills
+	Bundled       bool        // true when the skill directory has support files beyond SKILL.md (references/, templates/, scripts/, examples/)
+	UsageCount    int         // incremented each time the skill is used in a turn
+	LastUsedAt    time.Time   // zero = never used
+	UpdatedAt     time.Time
 }
 
 // EffectiveOwnedBy returns OwnedBy if set, otherwise a stringified Origin.
@@ -86,13 +90,49 @@ func (s *Skill) SetOwner(ownedBy, pluginDir string) {
 	s.PluginDir = pluginDir
 }
 
-// EnsureStateDefault defaults an empty State to active. Non-empty states
-// are preserved.
-func (s *Skill) EnsureStateDefault() {
-	if s == nil || s.State != "" {
+// EnsureStatusDefault fills Status and Version when empty. Learned skills
+// default to experimental; curated (user/builtin/plugin) default to trusted.
+func (s *Skill) EnsureStatusDefault() {
+	if s == nil {
 		return
 	}
-	s.State = SkillStateActive
+	if s.Origin == SkillOriginLearned && s.OwnedBy == "" {
+		s.OwnedBy = string(SkillOriginLearned)
+	}
+	if s.Status == "" {
+		if s.Origin == SkillOriginLearned {
+			s.Status = SkillStatusExperimental
+		} else {
+			s.Status = SkillStatusTrusted
+		}
+	}
+	if s.Version < 1 {
+		s.Version = 1
+	}
+	if s.ActiveVersion < 1 {
+		s.ActiveVersion = s.Version
+	}
+}
+
+// Routable reports whether the skill may appear in default hydration/search.
+func (s *Skill) Routable() bool {
+	if s == nil {
+		return false
+	}
+	return s.Status == SkillStatusTrusted || s.Status == SkillStatusValidated
+}
+
+// CanAgentMutate reports whether the conversational agent may save a new
+// version. Trusted curated skills are not overwritten in place; learned
+// experimental skills may grow a new version.
+func (s *Skill) CanAgentMutate() bool {
+	if s == nil {
+		return false
+	}
+	if s.Origin == SkillOriginLearned {
+		return s.Status == SkillStatusCandidate || s.Status == SkillStatusExperimental
+	}
+	return false
 }
 
 // SkillOwnerPriority returns the resolution priority for an owner.
@@ -127,54 +167,6 @@ type SkillFileEntry struct {
 	Type      string // "file" | "directory"
 	SizeBytes int64
 	Editable  bool
-}
-
-type MemoryEntry struct {
-	ID        string
-	Target    string // "memory" (project notes) or "user" (profile facts); default "memory"
-	Content   string
-	Tags      []string
-	Source    string // "user" | "agent" | "system" (default "user")
-	CreatedAt time.Time
-}
-
-// MergeFrom absorbs another entry's tags and content into the receiver.
-// Tags are unioned without duplicates. Content is appended with a merge
-// marker only when it differs (exact duplicate content is not appended).
-// A nil absorbed entry is a no-op.
-func (e *MemoryEntry) MergeFrom(absorbed *MemoryEntry) {
-	if e == nil || absorbed == nil {
-		return
-	}
-	tagSet := make(map[string]bool, len(e.Tags))
-	for _, t := range e.Tags {
-		tagSet[t] = true
-	}
-	for _, t := range absorbed.Tags {
-		if !tagSet[t] {
-			e.Tags = append(e.Tags, t)
-			tagSet[t] = true
-		}
-	}
-	if e.Content != absorbed.Content {
-		e.Content = e.Content + "\n— merged: " + absorbed.Content
-	}
-}
-
-// Memory target constants and per-target character limits.
-const (
-	MemoryTargetMemory = "memory" // project/task notes
-	MemoryTargetUser   = "user"   // user-profile facts (preferences, habits)
-	MemoryLimitMemory  = 2200     // chars across all "memory" entries
-	MemoryLimitUser    = 1375     // chars across all "user" entries
-)
-
-// MemoryLimit returns the total character budget for a target.
-func MemoryLimit(target string) int {
-	if target == MemoryTargetUser {
-		return MemoryLimitUser
-	}
-	return MemoryLimitMemory
 }
 
 // LearningEdgeType classifies the relationship between two learning nodes.
@@ -318,22 +310,7 @@ type Settings struct {
 	TopK             *int     `json:"top_k,omitempty"`
 	FrequencyPenalty *float64 `json:"frequency_penalty,omitempty"`
 	PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
-	// LearningReviewThreshold controls when the background learning
-	// review fires. The review extracts observations (decisions,
-	// preferences, errors, facts) from accumulated turns and writes
-	// them to memory through the approval gate. Set to 0 to disable
-	// turn-based review (compaction-triggered review still runs).
-	// Default: 10 turns.
-	LearningReviewThreshold int `json:"learning_review_threshold,omitempty"`
-	// SkillNudgeInterval controls when the background learning review
-	// fires based on tool-call count rather than user turns. Coding
-	// sessions are tool-heavy but user-turn-light; this trigger catches
-	// skill-worthy patterns (multi-step tool workflows) that would
-	// otherwise never reach the turn threshold. Counts individual tool
-	// calls across all turns. Set to 0 to disable tool-based review.
-	// Default: 15 tool calls.
-	SkillNudgeInterval int `json:"skill_nudge_interval,omitempty"`
-	// ReviewModel selects the model used by the background learning agent.
+	// ReviewModel selects the model used by background learning agents.
 	// When empty, the conversation's active model is used. Format:
 	// "providerID:modelID" (same as CompactionModel). Useful for routing
 	// reviews to a cheaper/faster model; reviews re-send the transcript
@@ -413,8 +390,6 @@ func DefaultSettings() Settings {
 		MaxInputTokens:             200000,
 		MaxOutputTokens:            65536,
 		MaxParallelTools:           DefaultMaxParallelTools,
-		LearningReviewThreshold:    10,
-		SkillNudgeInterval:         15,
 		MaxAutoContinues:           DefaultMaxAutoContinues,
 		SoundNotifications:         true,
 		RepeatedToolLimit:          3,

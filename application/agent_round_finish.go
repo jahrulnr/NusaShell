@@ -1,8 +1,6 @@
 package application
 
 import (
-	"context"
-
 	"nusashell/application/service/toolpresentation"
 	"nusashell/contracts"
 	"nusashell/domain"
@@ -159,132 +157,13 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage,
 	a.emitFinalTurnDiff(run)
 	a.log("info", "agent", "turn finished: %s (in %d / out %d)", run.ID, usage.InputTokens, usage.OutputTokens)
 
-	// Threshold-based learning review: accumulate turns since the last
-	// review and only fire when the threshold is reached. This avoids
-	// burning extraction cycles on short "hi/thanks" exchanges. The
-	// compaction hook (subscribeCompactionReview) fires independently
-	// when a conversation is compacted, so learning still happens for
-	// long conversations that compact before reaching the threshold.
 	// Pipeline agent steps are unattended automation, not user rooms.
 	if !run.Headless {
-		a.incrementTurnCounter(conversation.ID)
-		// Task-memory announcements: surface fragments relevant to this
-		// conversation that are new or changed since they were last
-		// delivered, via the shared announcement channel.
+		a.recordExperience(conversation, false)
 		a.maybeAnnounceTaskMemory(run.ConversationID, conversation)
 	}
 
 	return nil
-}
-
-// incrementTurnCounter bumps the per-conversation turn counter and
-// triggers a learning review if the threshold is reached. The threshold
-// is read from settings (default 10, 0 disables turn-based review).
-// Counters are persisted to disk so they survive server restarts.
-func (a *App) incrementTurnCounter(conversationID string) {
-	if a.ReviewAgent == nil {
-		return
-	}
-	threshold := a.Settings.Get().LearningReviewThreshold
-	if threshold <= 0 {
-		return // turn-based review disabled
-	}
-	a.learningMu.Lock()
-	a.turnsSinceReview[conversationID]++
-	count := a.turnsSinceReview[conversationID]
-	a.learningMu.Unlock()
-	// Persist so the counter survives restarts.
-	a.saveTurnCounters()
-	if count < threshold {
-		return
-	}
-	a.flushLearningReview(conversationID, "threshold")
-}
-
-// incrementToolCallCounter bumps the per-conversation tool-call counter and
-// triggers a learning review if the skill-nudge threshold is reached. This
-// catches skill-worthy patterns in tool-heavy but user-turn-light coding
-// sessions that would never reach the turn threshold. The threshold is read
-// from settings (default 15, 0 disables tool-based review). Counters are
-// persisted to disk so they survive server restarts.
-func (a *App) incrementToolCallCounter(conversationID string) {
-	if a.ReviewAgent == nil {
-		return
-	}
-	threshold := a.Settings.Get().SkillNudgeInterval
-	if threshold <= 0 {
-		return // tool-based review disabled
-	}
-	a.learningMu.Lock()
-	a.toolCallsSinceReview[conversationID]++
-	count := a.toolCallsSinceReview[conversationID]
-	a.learningMu.Unlock()
-	a.saveTurnCounters()
-	if count < threshold {
-		return
-	}
-	a.flushLearningReview(conversationID, "skill_nudge")
-}
-
-// flushLearningReview resets the turn counter for a conversation and
-// fires a background LLM review over the recent transcript. Called when
-// the threshold is reached or when a compaction event fires (whichever
-// comes first). The review uses the conversation's configured model
-// (the "global LLM") with a restricted toolset and the review
-// prompt. It is fire-and-forget — it never blocks or fails the parent
-// turn.
-func (a *App) flushLearningReview(conversationID string, reason string) {
-	if a.ReviewAgent == nil {
-		return
-	}
-	// Reset the counters on every trigger attempt, including deferred ones.
-	// The counters measure "activity since the last trigger attempt"; once an
-	// attempt is made (even if rejected by cooldown/in-flight), the activity
-	// is acknowledged. Without this reset the counters stay at/above the
-	// threshold so every subsequent tool call/turn re-enters this function,
-	// flooding the learning log with "review triggered" events for the whole
-	// cooldown window. A deferred trigger still leaves the pending flag set
-	// inside acquireReview, so activity that arrived while a review was
-	// running is picked up by the coalesced follow-up after release.
-	a.learningMu.Lock()
-	a.turnsSinceReview[conversationID] = 0
-	a.toolCallsSinceReview[conversationID] = 0
-	a.learningMu.Unlock()
-	a.saveTurnCounters()
-	// Reserve synchronously before launching the worker. Rejected triggers
-	// log "review deferred" (coalesced) inside reserveReviewWithReason; only a
-	// trigger that wins the slot logs "review triggered" and launches work.
-	if !a.ReviewAgent.reserveReview(conversationID) {
-		return
-	}
-	a.log("info", "learning", "review triggered: conv=%s reason=%s", conversationID, reason)
-	a.goSafe("learning", func() {
-		if a.Bus != nil {
-			a.Bus.Emit(contracts.EventLearningReviewStarted, contracts.LearningReviewEvent{
-				ConversationID: conversationID,
-				Status:         "started",
-				Reason:         reason,
-			})
-		}
-		err := a.ReviewAgent.runReservedReview(context.Background(), conversationID)
-		if err != nil {
-			a.ReviewAgent.recordReviewError(conversationID, err.Error())
-			if a.Bus != nil {
-				a.Bus.Emit(contracts.EventLearningReviewError, contracts.LearningReviewEvent{
-					ConversationID: conversationID,
-					Status:         "error",
-				})
-			}
-			return
-		}
-		if a.Bus != nil {
-			a.Bus.Emit(contracts.EventLearningReviewDone, contracts.LearningReviewEvent{
-				ConversationID: conversationID,
-				Status:         "done",
-				Reason:         reason,
-			})
-		}
-	})
 }
 
 // truncateToolError prevents oversized error messages from wasting tokens

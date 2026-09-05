@@ -25,17 +25,6 @@ func (a *AcpAgents) Get(id string) (*domain.AcpAgent, error) {
 func (a *AcpAgents) Save(v *domain.AcpAgent) error { return a.S.SaveAcpAgent(v) }
 func (a *AcpAgents) Delete(id string) error        { return a.S.DeleteAcpAgent(id) }
 
-type Memory struct{ S *Store }
-
-func (m *Memory) List() []*domain.MemoryEntry { return m.S.ListMemories() }
-func (m *Memory) Save(v *domain.MemoryEntry) error {
-	return m.S.SaveMemory(v)
-}
-func (m *Memory) Delete(id string) error { return m.S.DeleteMemory(id) }
-func (m *Memory) Replace(target, oldText, content string) error {
-	return m.S.ReplaceMemory(target, oldText, content)
-}
-
 type LearningEdges struct{ S *Store }
 
 func (l *LearningEdges) List() []*domain.LearningEdge { return l.S.ListLearningEdges() }

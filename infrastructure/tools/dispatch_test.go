@@ -7,40 +7,44 @@ import (
 
 	"nusashell/domain"
 	docsinfra "nusashell/infrastructure/docs"
-	"nusashell/infrastructure/memorystore"
+	"nusashell/infrastructure/jsonstore"
 )
 
 // Dispatcher roots must behave exactly like their canonical per-op
 // implementations — same handler, same idempotence guarantees.
 
-func TestExecuteDispatcherMemorySaveRoutesAndDedups(t *testing.T) {
-	dir := t.TempDir()
-	fragments, err := memorystore.NewFragments(dir)
+func TestExecuteDispatcherMemorySearchRoutes(t *testing.T) {
+	st, err := jsonstore.New(t.TempDir())
 	if err != nil {
+		t.Fatal(err)
+	}
+	recs := &jsonstore.MemoryRecords{S: st}
+	if err := recs.Save(&domain.MemoryRecord{
+		ID:     "mem_1",
+		Type:   domain.MemoryTypePreference,
+		Body:   "User prefers Indonesian",
+		Status: domain.MemoryStatusLearned,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	tb := testToolbox(nil, nil, &stubMCP{})
-	tb.Fragments = fragments
+	tb.MemoryRecords = recs
 
-	out, err := tb.Execute(context.Background(), "memory", []byte(`{"op":"save","content":"User prefers Indonesian\n","category":"user"}`))
+	out, err := tb.Execute(context.Background(), "memory", []byte(`{"op":"search","query":"Indonesian"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "status: saved") {
-		t.Fatalf("first dispatcher save output = %s", out)
+	if !strings.Contains(out, "mem_1") {
+		t.Fatalf("dispatcher search output = %s", out)
 	}
-	out, err = tb.Execute(context.Background(), "memory", []byte(`{"op":"save","content":"  User prefers Indonesian  \r\n","category":"user"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "status: unchanged") || !strings.Contains(out, "reason: exact_duplicate") {
-		t.Fatalf("duplicate dispatcher save output = %s", out)
+	if _, err := tb.Execute(context.Background(), "memory", []byte(`{"op":"save","content":"User prefers Indonesian"}`)); err == nil {
+		t.Fatal("memory save must not route")
 	}
 }
 
 func TestExecuteDispatcherSkillList(t *testing.T) {
 	tb := testToolbox(
-		[]*domain.Skill{{ID: "s1", Name: "git-helper", Description: "Help with git operations"}},
+		[]*domain.Skill{{ID: "s1", Name: "git-helper", Description: "Help with git operations", Status: domain.SkillStatusTrusted}},
 		nil, &stubMCP{},
 	)
 	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"list"}`))
@@ -88,7 +92,7 @@ func TestExecuteDispatcherUnknownOpFailsLoud(t *testing.T) {
 // just an unknown tool (fail loud).
 func TestRetiredPerOpNamesAreUnknownTools(t *testing.T) {
 	tb := testToolbox(
-		[]*domain.Skill{{ID: "s1", Name: "git-helper"}},
+		[]*domain.Skill{{ID: "s1", Name: "git-helper", Status: domain.SkillStatusTrusted}},
 		nil, &stubMCP{},
 	)
 	if _, err := tb.Execute(context.Background(), "skill_list", []byte(`{}`)); err == nil {
@@ -117,27 +121,26 @@ func TestAllAdvertisedFamilyOpsRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fragments, err := memorystore.NewFragments(t.TempDir())
+	st, err := jsonstore.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
+	recs := &jsonstore.MemoryRecords{S: st}
 	tb := testToolbox(
-		[]*domain.Skill{{ID: "s1", Name: "git-helper", Content: "how to rebase"}},
+		[]*domain.Skill{{ID: "s1", Name: "git-helper", Content: "how to rebase", Status: domain.SkillStatusTrusted}},
 		nil, &stubMCP{},
 	)
 	tb.Docs = docsSource
-	tb.Fragments = fragments
+	tb.MemoryRecords = recs
 
 	cases := []struct{ name, args string }{
 		{"skill", `{"op":"list"}`},
 		{"skill", `{"op":"search","query":"git"}`},
 		{"skill", `{"op":"save","name":"probe","content":"c"}`},
 		{"skill", `{"op":"delete","id":"probe"}`},
-		{"memory", `{"op":"save","content":"User prefers Indonesian","category":"user"}`},
-		{"memory", `{"op":"replace","target":"fragment","id":"nope","content":"c"}`},
 		{"memory", `{"op":"search","query":"Indonesian"}`},
+		{"memory", `{"op":"get","id":"nope"}`},
 		{"memory", `{"op":"list"}`},
-		{"memory", `{"op":"delete","id":"nope"}`},
 		{"docs", `{"op":"list"}`},
 		{"docs", `{"op":"search","query":"automation"}`},
 		{"docs", `{"op":"read","id":"automation"}`},

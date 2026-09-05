@@ -9,10 +9,10 @@ import (
 )
 
 func TestBuildTokenOverlapEdges(t *testing.T) {
-	mem := &fakeFragmentStore{frags: []*domain.MemoryFragment{
-		{ID: "frag_1", Content: "use docker for container builds"},
-		{ID: "frag_2", Content: "prefer postgres for the database"},
-		{ID: "frag_3", Content: "docker compose for local container orchestration"},
+	mem := &fakeMemoryRecordStore{items: []*domain.MemoryRecord{
+		{ID: "frag_1", Status: domain.MemoryStatusLearned, Body: "use docker for container builds"},
+		{ID: "frag_2", Status: domain.MemoryStatusLearned, Body: "prefer postgres for the database"},
+		{ID: "frag_3", Status: domain.MemoryStatusLearned, Body: "docker compose for local container orchestration"},
 	}}
 	skills := &fakeSkillStore{items: map[string]*domain.Skill{
 		"skill_1": {ID: "skill_1", Name: "docker", Description: "container builds", Content: "how to build docker images"},
@@ -56,9 +56,9 @@ func TestBuildTokenOverlapEdges(t *testing.T) {
 }
 
 func TestBuildTokenOverlapSkipsUnrelatedMemoryPairs(t *testing.T) {
-	mem := &fakeFragmentStore{frags: []*domain.MemoryFragment{
-		{ID: "frag_1", Content: "prefer postgres for the database"},
-		{ID: "frag_2", Content: "user likes dark mode and prefers Indonesian"},
+	mem := &fakeMemoryRecordStore{items: []*domain.MemoryRecord{
+		{ID: "frag_1", Status: domain.MemoryStatusLearned, Body: "prefer postgres for the database"},
+		{ID: "frag_2", Status: domain.MemoryStatusLearned, Body: "user likes dark mode and prefers Indonesian"},
 	}}
 	graph := NewLearningGraphService(&fakeEdgeStore{})
 	b := NewEdgeBuilder(mem, &fakeSkillStore{}, graph, nil, nil, DefaultEdgeBuilderConfig(), "")
@@ -73,10 +73,10 @@ func TestBuildTokenOverlapSkipsUnrelatedMemoryPairs(t *testing.T) {
 }
 
 func TestBuildRelatedEdgesUsesLearningMetadataWhenContentIsSparse(t *testing.T) {
-	mem := &fakeFragmentStore{frags: []*domain.MemoryFragment{
-		{ID: "frag_frontend_a", Content: "mobile shell", Project: "NusaShell", Tags: []string{"frontend", "mobile", "nusashell"}},
-		{ID: "frag_frontend_b", Content: "responsive shell", Project: "NusaShell", Tags: []string{"frontend", "mobile", "nusashell"}},
-		{ID: "frag_unrelated", Content: "recipe ingredients", Project: "Cooking", Tags: []string{"recipe"}},
+	mem := &fakeMemoryRecordStore{items: []*domain.MemoryRecord{
+		{ID: "frag_frontend_a", Body: "mobile shell", Status: domain.MemoryStatusLearned, Type: domain.MemoryTypeFact, Scope: domain.MemoryScope{Project: "NusaShell", Domain: "frontend"}, Subject: "mobile"},
+		{ID: "frag_frontend_b", Body: "responsive shell", Status: domain.MemoryStatusLearned, Type: domain.MemoryTypeFact, Scope: domain.MemoryScope{Project: "NusaShell", Domain: "frontend"}, Subject: "mobile"},
+		{ID: "frag_unrelated", Body: "recipe ingredients", Status: domain.MemoryStatusLearned, Type: domain.MemoryTypeEpisode, Scope: domain.MemoryScope{Project: "Cooking", Domain: "recipe"}},
 	}}
 	graph := NewLearningGraphService(&fakeEdgeStore{})
 	b := NewEdgeBuilder(mem, &fakeSkillStore{}, graph, nil, nil, DefaultEdgeBuilderConfig(), "")
@@ -96,7 +96,7 @@ func TestBuildPrunesDanglingEdges(t *testing.T) {
 	store := &fakeEdgeStore{edges: []*domain.LearningEdge{
 		{ID: "dangling", SourceID: "frag_live", TargetID: "frag_deleted", Type: domain.EdgeRelated},
 	}}
-	mem := &fakeFragmentStore{frags: []*domain.MemoryFragment{{ID: "frag_live", Content: "live fact"}}}
+	mem := &fakeMemoryRecordStore{items: []*domain.MemoryRecord{{ID: "frag_live", Status: domain.MemoryStatusLearned, Body: "live fact"}}}
 	graph := NewLearningGraphService(store)
 	b := NewEdgeBuilder(mem, &fakeSkillStore{}, graph, nil, nil, DefaultEdgeBuilderConfig(), "")
 
@@ -124,14 +124,6 @@ func TestLearningNodeIDsFromToolOutput(t *testing.T) {
 	if !containsString(memoryIDs, "frag_1") {
 		t.Fatalf("memory IDs = %v, want frag_1", memoryIDs)
 	}
-	savedMemoryIDs := learningNodeIDsFromTool(app,
-		domain.ToolCall{Name: "memory", Args: `{"op":"save","content":"frontend"}`},
-		"---\nstatus: saved\nfragment_id: frag_saved\n---",
-	)
-	if !containsString(savedMemoryIDs, "frag_saved") {
-		t.Fatalf("saved memory IDs = %v, want frag_saved", savedMemoryIDs)
-	}
-
 	skillIDs := learningNodeIDsFromTool(app,
 		domain.ToolCall{Name: "skill", Args: `{"op":"search","query":"frontend"}`},
 		"---\ncount: 1\n---\n{\"id\":\"skill_frontend\",\"name\":\"frontend\"}",
@@ -193,8 +185,8 @@ func containsString(values []string, want string) bool {
 }
 
 func TestBuildTokenOverlapMinLen(t *testing.T) {
-	mem := &fakeFragmentStore{frags: []*domain.MemoryFragment{
-		{ID: "frag_1", Content: "use go"},
+	mem := &fakeMemoryRecordStore{items: []*domain.MemoryRecord{
+		{ID: "frag_1", Status: domain.MemoryStatusLearned, Body: "use go"},
 	}}
 	skills := &fakeSkillStore{items: map[string]*domain.Skill{
 		"skill_1": {ID: "skill_1", Name: "go", Description: "", Content: "go programming"},
@@ -233,8 +225,8 @@ func TestTokenizeForOverlap(t *testing.T) {
 }
 
 func TestEdgeBuilderIdempotent(t *testing.T) {
-	mem := &fakeFragmentStore{frags: []*domain.MemoryFragment{
-		{ID: "frag_1", Content: "docker container build"},
+	mem := &fakeMemoryRecordStore{items: []*domain.MemoryRecord{
+		{ID: "frag_1", Status: domain.MemoryStatusLearned, Body: "docker container build"},
 	}}
 	skills := &fakeSkillStore{items: map[string]*domain.Skill{
 		"skill_1": {ID: "skill_1", Name: "docker", Description: "container", Content: "build images"},

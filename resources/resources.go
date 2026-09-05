@@ -108,23 +108,34 @@ func TranscribeAudioPrompt() string {
 	return UserPrompt("transcribe-audio")
 }
 
-// ReviewPrompt loads the unified post-conversation learning prompt
-// (review.md). There is intentionally one background agent: it gathers
-// evidence, researches when needed, curates both memory tiers and
-// fragments, and manages agent-owned skills in a single agentic pass so
-// memory and skills never drift into each other's territory.
-func ReviewPrompt() string {
-	return Prompt("learn")
+// ConsolidatorPrompt loads the memory-consolidator system prompt.
+func ConsolidatorPrompt() string {
+	return Prompt("memory-consolidator")
 }
 
-// ReviewUserPrompt loads the user-role prompt
-// (prompts/user/review.md). This is injected as the opening user message
-// for the unified background learning agent. Models treat user messages as
-// direct instructions, which they obey more reliably than system-prompt
-// guidelines — so the trigger is a short imperative user message,
-// not a long system-prompt directive.
-func ReviewUserPrompt() string {
-	return UserPrompt("learn")
+// ConsolidatorUserPrompt loads the consolidator user-role packet instruction.
+func ConsolidatorUserPrompt() string {
+	return UserPrompt("memory-consolidator")
+}
+
+// SkillEvolverPrompt loads the skill-evolver system prompt.
+func SkillEvolverPrompt() string {
+	return Prompt("skill-evolver")
+}
+
+// SkillEvolverUserPrompt loads the skill-evolver user-role packet instruction.
+func SkillEvolverUserPrompt() string {
+	return UserPrompt("skill-evolver")
+}
+
+// SkillEvaluatorPrompt loads the skill-evaluator system prompt.
+func SkillEvaluatorPrompt() string {
+	return Prompt("skill-evaluator")
+}
+
+// SkillEvaluatorUserPrompt loads the skill-evaluator user-role packet instruction.
+func SkillEvaluatorUserPrompt() string {
+	return UserPrompt("skill-evaluator")
 }
 
 // Brief new agent after compaction to continue conversation

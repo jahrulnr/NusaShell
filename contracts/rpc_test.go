@@ -54,10 +54,13 @@ func TestRosterUniqueness(t *testing.T) {
 		MethodProvidersList, MethodProvidersSave, MethodProvidersDelete, MethodProvidersTest,
 		MethodProvidersImport, MethodModelsList, MethodModelsEndpoints,
 		MethodSkillsList, MethodSkillsRead, MethodSkillsSave, MethodSkillsDelete,
+		MethodSkillsFileRead, MethodSkillsInstall, MethodSkillsPromote, MethodSkillsRollback,
 		MethodPluginList, MethodPluginSave, MethodPluginDelete, MethodPluginTest,
 		MethodPluginStop, MethodPluginToolsList, MethodPluginUninstall,
-		MethodMemoryList, MethodMemorySave, MethodMemorySearch, MethodMemoryDelete,
+		MethodMemoryList, MethodMemorySearch, MethodMemoryGet, MethodMemoryRetire,
 		MethodMemoryUserUpdate, MethodMemoryAgentUpdate,
+		MethodExperienceList, MethodExperienceGet,
+		MethodLearningSearch, MethodLearningGraph, MethodLearningLog, MethodLearningJobsList, MethodLearningJobsStatus,
 		MethodTodosGet, MethodTodosDelete,
 		MethodDocsList, MethodDocsSearch, MethodDocsRead,
 		MethodLogsList, MethodLogsClear,
@@ -98,7 +101,7 @@ func TestRosterUniqueness(t *testing.T) {
 		EventAutomationEvent,
 		EventAcpRunStarted, EventAcpRunUpdated, EventAcpRunDone,
 		EventAcpPermissionRequested, EventAcpPermissionDecided, EventAcpSessionModeChanged,
-		EventLearningReviewStarted, EventLearningReviewDone, EventLearningReviewError,
+		EventExperienceRecorded, EventLearningJobStarted, EventLearningJobDone, EventLearningJobError,
 		EventSettingsApplied, EventSettingsRejected,
 	}
 	seenEv := map[string]bool{}

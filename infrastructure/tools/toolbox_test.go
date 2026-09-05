@@ -17,7 +17,6 @@ import (
 	"nusashell/domain"
 	docsinfra "nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
-	"nusashell/infrastructure/memorystore"
 	"nusashell/infrastructure/pluginfs"
 	clock "nusashell/pkg/time"
 	"nusashell/resources"
@@ -37,6 +36,22 @@ func (s *stubSkillStore) Get(id, ownedBy string) (*domain.Skill, error) {
 }
 func (s *stubSkillStore) Save(sk *domain.Skill) error     { return nil }
 func (s *stubSkillStore) Delete(id, ownedBy string) error { return nil }
+func (s *stubSkillStore) Promote(id, ownedBy string) (*domain.Skill, error) {
+	sk, err := s.Get(id, ownedBy)
+	if err != nil {
+		return nil, err
+	}
+	sk.Status = domain.SkillStatusTrusted
+	return sk, nil
+}
+func (s *stubSkillStore) Rollback(id, ownedBy string, version int) (*domain.Skill, error) {
+	sk, err := s.Get(id, ownedBy)
+	if err != nil {
+		return nil, err
+	}
+	sk.ActiveVersion = version
+	return sk, nil
+}
 func (s *stubSkillStore) ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error) {
 	return nil, fmt.Errorf("not implemented")
 }
@@ -125,9 +140,10 @@ func testToolbox(skills []*domain.Skill, plugins []*domain.Plugin, mcp *stubMCP)
 func TestSkillSearch(t *testing.T) {
 	tb := testToolbox(
 		[]*domain.Skill{
-			{ID: "s1", Name: "git-helper", Description: "Help with git operations", Origin: domain.SkillOriginUser, Path: "/home/user/.local/nusashell/skills/git-helper", Bundled: true},
-			{ID: "s2", Name: "docker-pro", Description: "Docker container management"},
-			{ID: "s3", Name: "code-review", Description: "Review code for bugs"},
+			{ID: "s1", Name: "git-helper", Description: "Help with git operations", Origin: domain.SkillOriginUser, Status: domain.SkillStatusTrusted, Path: "/home/user/.local/nusashell/skills/git-helper", Bundled: true},
+			{ID: "s2", Name: "docker-pro", Description: "Docker container management", Status: domain.SkillStatusTrusted},
+			{ID: "s3", Name: "code-review", Description: "Review code for bugs", Status: domain.SkillStatusTrusted},
+			{ID: "s4", Name: "wip-skill", Description: "experimental git notes", Origin: domain.SkillOriginLearned, Status: domain.SkillStatusExperimental},
 		},
 		nil, &stubMCP{},
 	)
@@ -153,17 +169,65 @@ func TestSkillSearch(t *testing.T) {
 	if strings.Contains(out, "docker-pro") {
 		t.Errorf("docker-pro should not match git query, got: %s", out)
 	}
+	if strings.Contains(out, "wip-skill") {
+		t.Errorf("experimental skills must not appear in default search, got: %s", out)
+	}
 }
 
-func TestMemoryReplaceRejectsRemovedPrimaryTier(t *testing.T) {
-	user, err := memorystore.NewUser(t.TempDir())
+func TestMemorySearchListsRetrievableRecords(t *testing.T) {
+	st, err := jsonstore.New(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewUser: %v", err)
+		t.Fatal(err)
 	}
-	tb := &Toolbox{User: user}
-	_, err = tb.Execute(context.Background(), "memory", []byte(`{"op":"replace","target":"primary","content":"stale alias"}`))
-	if err == nil || !strings.Contains(err.Error(), `target must be "user"`) {
-		t.Fatalf("removed primary target must fail with canonical target guidance, got: %v", err)
+	recs := &jsonstore.MemoryRecords{S: st}
+	if err := recs.Save(&domain.MemoryRecord{
+		ID:     "mem_1",
+		Type:   domain.MemoryTypePreference,
+		Body:   "User prefers Go",
+		Status: domain.MemoryStatusLearned,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := recs.Save(&domain.MemoryRecord{
+		ID:     "mem_retired",
+		Type:   domain.MemoryTypeFact,
+		Body:   "retired Go fact",
+		Status: domain.MemoryStatusRetired,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tb := testToolbox(nil, nil, &stubMCP{})
+	tb.MemoryRecords = recs
+
+	out, err := tb.Execute(context.Background(), "memory", []byte(`{"op":"search","query":"Go"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "mem_1") {
+		t.Fatalf("search missed retrievable record: %s", out)
+	}
+	if strings.Contains(out, "mem_retired") {
+		t.Fatalf("search must skip retired records: %s", out)
+	}
+
+	got, err := tb.Execute(context.Background(), "memory", []byte(`{"op":"get","id":"mem_1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "User prefers Go") {
+		t.Fatalf("get output = %s", got)
+	}
+
+	listed, err := tb.Execute(context.Background(), "memory", []byte(`{"op":"list"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(listed, "mem_1") || strings.Contains(listed, "mem_retired") {
+		t.Fatalf("list output = %s", listed)
+	}
+
+	if _, err := tb.Execute(context.Background(), "memory", []byte(`{"op":"save","content":"nope"}`)); err == nil {
+		t.Fatal("memory save must be unknown")
 	}
 }
 
@@ -183,9 +247,9 @@ func (s *stubSkillSearcher) SearchSkills(_ context.Context, _ string, topK int) 
 func TestSkillSearchUsesRankedSearcher(t *testing.T) {
 	tb := testToolbox(
 		[]*domain.Skill{
-			{ID: "s1", Name: "git-helper", Description: "Help with git operations", Origin: domain.SkillOriginUser},
-			{ID: "s2", Name: "git-advanced", Description: "Advanced git workflows", Origin: domain.SkillOriginBuiltin},
-			{ID: "docker-pro", Name: "docker-pro", Description: "Docker container management"},
+			{ID: "s1", Name: "git-helper", Description: "Help with git operations", Origin: domain.SkillOriginUser, Status: domain.SkillStatusTrusted},
+			{ID: "s2", Name: "git-advanced", Description: "Advanced git workflows", Origin: domain.SkillOriginBuiltin, Status: domain.SkillStatusTrusted},
+			{ID: "docker-pro", Name: "docker-pro", Description: "Docker container management", Status: domain.SkillStatusTrusted},
 		},
 		nil, &stubMCP{},
 	)
@@ -213,8 +277,8 @@ func TestSkillSearchRecallFallback(t *testing.T) {
 	// so recall never regresses below the plain matcher.
 	tb := testToolbox(
 		[]*domain.Skill{
-			{ID: "s1", Name: "review", Description: "Review code for bugs"},
-			{ID: "s2", Name: "reviews", Description: "Handle review sessions"},
+			{ID: "s1", Name: "review", Description: "Review code for bugs", Status: domain.SkillStatusTrusted},
+			{ID: "s2", Name: "reviews", Description: "Handle review sessions", Status: domain.SkillStatusTrusted},
 		},
 		nil, &stubMCP{},
 	)
@@ -233,7 +297,7 @@ func TestSkillSearchRecallFallback(t *testing.T) {
 
 func TestSkillSearchCaseInsensitive(t *testing.T) {
 	tb := testToolbox(
-		[]*domain.Skill{{ID: "s1", Name: "Code-Review", Description: "Review code"}},
+		[]*domain.Skill{{ID: "s1", Name: "Code-Review", Description: "Review code", Status: domain.SkillStatusTrusted}},
 		nil, &stubMCP{},
 	)
 	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"search","query":"CODE"}`))
@@ -247,7 +311,7 @@ func TestSkillSearchCaseInsensitive(t *testing.T) {
 
 func TestSkillSearchEmptyQuery(t *testing.T) {
 	tb := testToolbox(
-		[]*domain.Skill{{ID: "s1", Name: "test", Description: "test"}},
+		[]*domain.Skill{{ID: "s1", Name: "test", Description: "test", Status: domain.SkillStatusTrusted}},
 		nil, &stubMCP{},
 	)
 	_, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"search","query":""}`))
@@ -258,7 +322,7 @@ func TestSkillSearchEmptyQuery(t *testing.T) {
 
 func TestSkillSearchNoMatch(t *testing.T) {
 	tb := testToolbox(
-		[]*domain.Skill{{ID: "s1", Name: "git", Description: "git tool"}},
+		[]*domain.Skill{{ID: "s1", Name: "git", Description: "git tool", Status: domain.SkillStatusTrusted}},
 		nil, &stubMCP{},
 	)
 	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"search","query":"nonexistent"}`))
@@ -273,7 +337,7 @@ func TestSkillSearchNoMatch(t *testing.T) {
 func TestSkillListLimit(t *testing.T) {
 	skills := []*domain.Skill{}
 	for i := 0; i < 5; i++ {
-		skills = append(skills, &domain.Skill{ID: "s", Name: "skill", Description: "desc"})
+		skills = append(skills, &domain.Skill{ID: "s", Name: "skill", Description: "desc", Status: domain.SkillStatusTrusted})
 	}
 	tb := testToolbox(skills, nil, &stubMCP{})
 	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"list","limit":2}`))
@@ -1154,33 +1218,6 @@ func TestListToolsIncludesDispatcherRoots(t *testing.T) {
 	}
 }
 
-func TestMemorySaveExactDuplicateIsIdempotent(t *testing.T) {
-	dir := t.TempDir()
-	fragments, err := memorystore.NewFragments(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tb := testToolbox(nil, nil, &stubMCP{})
-	tb.Fragments = fragments
-	out, err := tb.Execute(context.Background(), "memory", []byte(`{"op":"save","content":"User prefers Indonesian\n","category":"user"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "status: saved") {
-		t.Fatalf("first save output = %s", out)
-	}
-	out, err = tb.Execute(context.Background(), "memory", []byte(`{"op":"save","content":"  User prefers Indonesian  \r\n","category":"user"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "status: unchanged") || !strings.Contains(out, "reason: exact_duplicate") {
-		t.Fatalf("duplicate save output = %s", out)
-	}
-	if got := len(fragments.List(domain.FragmentSearchFilter{})); got != 1 {
-		t.Fatalf("fragment count = %d, want 1", got)
-	}
-}
-
 func TestListToolsIncludesMemoryReplace(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
 	names := advertisedNames(tb)
@@ -1425,7 +1462,7 @@ func (s *skillFileStoreStub) WriteFile(id, ownedBy, path, content string) error 
 }
 
 func TestSkillSaveWithPath_writesSupportFile(t *testing.T) {
-	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{skills: []*domain.Skill{{ID: "my-skill", Name: "my-skill"}}}}
+	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{skills: []*domain.Skill{{ID: "my-skill", Name: "my-skill", Origin: domain.SkillOriginLearned, Status: domain.SkillStatusExperimental}}}}
 	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
 	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"save","name":"my-skill","path":"references/errors.md","content":"# Error recipes\n"}`))
 	if err != nil {
@@ -1444,7 +1481,7 @@ func TestSkillSaveWithPath_writesSupportFile(t *testing.T) {
 }
 
 func TestSkillSaveWithPath_emptyPathUsesSaveNotWriteFile(t *testing.T) {
-	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{skills: []*domain.Skill{{ID: "my-skill", Name: "my-skill"}}}}
+	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{skills: []*domain.Skill{{ID: "my-skill", Name: "my-skill", Origin: domain.SkillOriginLearned, Status: domain.SkillStatusExperimental}}}}
 	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
 	_, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"save","name":"my-skill","path":"","content":"# Updated\n"}`))
 	if err != nil {
@@ -1481,6 +1518,12 @@ func TestSkillSaveNewSkillLeavesIDForStoreToDerive(t *testing.T) {
 	}
 	if store.saved.ID != "" {
 		t.Fatalf("new skill ID = %q, want empty so the store derives it from name", store.saved.ID)
+	}
+	if store.saved.Origin != domain.SkillOriginLearned {
+		t.Fatalf("Origin = %q, want learned", store.saved.Origin)
+	}
+	if store.saved.Status != domain.SkillStatusExperimental {
+		t.Fatalf("Status = %q, want experimental", store.saved.Status)
 	}
 }
 

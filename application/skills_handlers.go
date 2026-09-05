@@ -10,23 +10,22 @@ import (
 )
 
 func skillDTO(s *domain.Skill) contracts.SkillDTO {
+	s.EnsureStatusDefault()
 	dto := contracts.SkillDTO{
-		ID:          s.ID,
-		Name:        s.Name,
-		Description: s.Description,
-		Category:    s.Category,
-		State:       string(s.State),
-		Origin:      string(s.Origin),
-		OwnedBy:     s.EffectiveOwnedBy(),
-		Pinned:      s.Pinned,
-		UsageCount:  s.UsageCount,
-		UpdatedAt:   clock.NewTime(s.UpdatedAt).Format(timeRFC3339),
+		ID:            s.ID,
+		Name:          s.Name,
+		Description:   s.Description,
+		Category:      s.Category,
+		Status:        string(s.Status),
+		Version:       s.Version,
+		ActiveVersion: s.ActiveVersion,
+		Origin:        string(s.Origin),
+		OwnedBy:       s.EffectiveOwnedBy(),
+		UsageCount:    s.UsageCount,
+		UpdatedAt:     clock.NewTime(s.UpdatedAt).Format(timeRFC3339),
 	}
 	if !s.LastUsedAt.IsZero() {
 		dto.LastUsedAt = clock.NewTime(s.LastUsedAt).Format(timeRFC3339)
-	}
-	if s.State == "" {
-		dto.State = string(domain.SkillStateActive)
 	}
 	if s.Origin == "" {
 		dto.Origin = string(domain.SkillOriginUser)
@@ -163,7 +162,7 @@ func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.
 	} else {
 		s = &domain.Skill{
 			ID:     domain.SkillSlug(name),
-			State:  domain.SkillStateActive,
+			Status: domain.SkillStatusTrusted,
 			Origin: domain.SkillOriginUser,
 		}
 	}
@@ -197,4 +196,30 @@ func (a *App) handleSkillsDelete(req contracts.SkillIDRequest) (any, *contracts.
 		domain.AnnouncementSkillsChangedMessage(),
 	), "")
 	return map[string]bool{"ok": true}, nil
+}
+
+func (a *App) handleSkillsPromote(req contracts.SkillPromoteRequest) (any, *contracts.RPCError) {
+	if strings.TrimSpace(req.ID) == "" {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "skill id is required"}
+	}
+	s, err := a.Skills.Promote(req.ID, req.OwnedBy)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
+	}
+	a.emitSkillLifecycle("promote", s.ID, string(s.Status))
+	return contracts.SkillReadResult{Skill: contracts.SkillFull{SkillDTO: skillDTO(s), Content: s.Content}}, nil
+}
+
+func (a *App) handleSkillsRollback(req contracts.SkillRollbackRequest) (any, *contracts.RPCError) {
+	if strings.TrimSpace(req.ID) == "" || req.Version < 1 {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "skill id and version are required"}
+	}
+	s, err := a.Skills.Rollback(req.ID, req.OwnedBy, req.Version)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
+	}
+	if a.Bus != nil {
+		a.Bus.Emit(contracts.EventSkillUpdated, map[string]any{"id": s.ID, "status": s.Status, "active_version": s.ActiveVersion})
+	}
+	return contracts.SkillReadResult{Skill: contracts.SkillFull{SkillDTO: skillDTO(s), Content: s.Content}}, nil
 }

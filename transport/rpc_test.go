@@ -14,6 +14,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/contracts"
+	"nusashell/domain"
 )
 
 // ---- envelope ----
@@ -783,16 +784,48 @@ func TestSkillLifecycle(t *testing.T) {
 		t.Fatalf("skill = %+v", full)
 	}
 
-	// update preserves id
+	// update creates vN+1 and does not mutate the trusted body in place
 	updated := h.rpcOK(t, "skills.save", map[string]any{"id": sid, "name": "code-review", "content": "v2"})
 	var upd struct {
 		Skill struct {
-			ID string `json:"id"`
+			ID            string `json:"id"`
+			Content       string `json:"content"`
+			Version       int    `json:"version"`
+			ActiveVersion int    `json:"active_version"`
+			Status        string `json:"status"`
 		} `json:"skill"`
 	}
-	_ = json.Unmarshal(updated.Result, &upd)
+	if err := json.Unmarshal(updated.Result, &upd); err != nil {
+		t.Fatal(err)
+	}
 	if upd.Skill.ID != sid {
 		t.Fatalf("update changed id: %s != %s", upd.Skill.ID, sid)
+	}
+	if upd.Skill.Content != "v2" {
+		t.Fatalf("live content = %q, want v2", upd.Skill.Content)
+	}
+	if upd.Skill.Version != 2 || upd.Skill.ActiveVersion != 2 {
+		t.Fatalf("version=%d active=%d, want 2/2", upd.Skill.Version, upd.Skill.ActiveVersion)
+	}
+	if upd.Skill.Status != string(domain.SkillStatusTrusted) {
+		t.Fatalf("human save status = %q, want trusted", upd.Skill.Status)
+	}
+
+	rolled := h.rpcOK(t, "skills.rollback", map[string]any{"id": sid, "version": 1})
+	var rb struct {
+		Skill struct {
+			Content       string `json:"content"`
+			ActiveVersion int    `json:"active_version"`
+		} `json:"skill"`
+	}
+	if err := json.Unmarshal(rolled.Result, &rb); err != nil {
+		t.Fatal(err)
+	}
+	if rb.Skill.ActiveVersion != 1 {
+		t.Fatalf("rollback active_version = %d, want 1", rb.Skill.ActiveVersion)
+	}
+	if rb.Skill.Content == "v2" {
+		t.Fatal("rollback must restore v1 body, not leave v2 in place")
 	}
 
 	h.rpcOK(t, "skills.delete", map[string]any{"id": sid})
@@ -807,33 +840,100 @@ func TestSkillLifecycle(t *testing.T) {
 func TestMemoryHandlers(t *testing.T) {
 	h := newHarness(t, nil)
 
-	h.rpcOK(t, "memory.save", map[string]any{"content": "user prefers dark mode", "tags": []string{"prefs"}})
-	h.rpcOK(t, "memory.save", map[string]any{"content": "project is Go"})
+	now := time.Now()
+	if err := h.app.MemoryRecords.Save(&domain.MemoryRecord{
+		ID:            "mem_dark",
+		Type:          domain.MemoryTypePreference,
+		Body:          "user prefers dark mode",
+		Status:        domain.MemoryStatusLearned,
+		LastConfirmed: now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.MemoryRecords.Save(&domain.MemoryRecord{
+		ID:            "mem_go",
+		Type:          domain.MemoryTypeFact,
+		Body:          "project is Go",
+		Status:        domain.MemoryStatusLearned,
+		LastConfirmed: now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	search := h.rpcOK(t, "memory.search", map[string]any{"query": "dark mode"})
 	var out struct {
 		Entries []struct {
-			ID      string   `json:"id"`
-			Content string   `json:"content"`
-			Tags    []string `json:"tags"`
+			ID     string `json:"id"`
+			Body   string `json:"body"`
+			Type   string `json:"type"`
+			Status string `json:"status"`
+			Tier   string `json:"tier"`
 		} `json:"entries"`
 	}
 	if err := json.Unmarshal(search.Result, &out); err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Entries) != 1 || out.Entries[0].Content != "user prefers dark mode" || len(out.Entries[0].Tags) != 1 {
+	if len(out.Entries) != 1 || out.Entries[0].Body != "user prefers dark mode" || out.Entries[0].Tier != contracts.MemoryTierRecord {
 		t.Fatalf("search = %+v", out)
 	}
 
-	res := h.rpc(t, "memory.save", map[string]any{"content": "   "})
-	if res.OK || res.Error == nil || res.Error.Code != "VALIDATION_ERROR" {
-		t.Fatalf("blank memory must fail, got %+v", res)
+	got := h.rpcOK(t, "memory.get", map[string]any{"id": "mem_dark"})
+	var rec struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(got.Result, &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec.ID != "mem_dark" {
+		t.Fatalf("get = %+v", rec)
 	}
 
-	h.rpcOK(t, "memory.delete", map[string]any{"id": out.Entries[0].ID})
-	res = h.rpc(t, "memory.delete", map[string]any{"id": "nope"})
+	retired := h.rpcOK(t, "memory.retire", map[string]any{"id": "mem_dark"})
+	if err := json.Unmarshal(retired.Result, &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Status != domain.MemoryStatusRetired {
+		t.Fatalf("retire status = %q", rec.Status)
+	}
+
+	search = h.rpcOK(t, "memory.search", map[string]any{"query": "dark mode"})
+	out.Entries = nil
+	if err := json.Unmarshal(search.Result, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Entries) != 0 {
+		t.Fatalf("retired records must not appear in search, got %+v", out)
+	}
+
+	res := h.rpc(t, "memory.retire", map[string]any{"id": "nope"})
 	if res.OK || res.Error == nil || res.Error.Code != "NOT_FOUND" {
-		t.Fatalf("delete missing memory must be NOT_FOUND, got %+v", res)
+		t.Fatalf("retire missing memory must be NOT_FOUND, got %+v", res)
+	}
+
+	h.rpcOK(t, "memory.user.update", map[string]any{"content": "I prefer dark mode."})
+	listed := h.rpcOK(t, "memory.list", map[string]any{})
+	var list struct {
+		Entries []struct {
+			Tier    string `json:"tier"`
+			Content string `json:"content"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(listed.Result, &list); err != nil {
+		t.Fatal(err)
+	}
+	foundUser := false
+	for _, e := range list.Entries {
+		if e.Tier == domain.MemoryTierUser && strings.Contains(e.Content, "dark mode") {
+			foundUser = true
+		}
+	}
+	if !foundUser {
+		t.Fatalf("memory.list missing user doc: %+v", list)
 	}
 }
 

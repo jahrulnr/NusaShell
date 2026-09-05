@@ -2,10 +2,8 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
-	"nusashell/contracts"
 	"nusashell/domain"
 )
 
@@ -115,9 +113,8 @@ func (a *App) runAutoUpdateOnce(ctx context.Context) {
 	}
 }
 
-// StartLifecycle starts the lifecycle (decay/prune) loop and the
-// compaction-triggered learning review subscriber. Safe to call once at
-// server startup. No-op if no lifecycle manager is configured.
+// StartLifecycle starts the lifecycle (decay/prune) loop. Safe to call
+// once at server startup. No-op if no lifecycle manager is configured.
 func (a *App) StartLifecycle() {
 	if a.lifecycle == nil {
 		return
@@ -126,40 +123,6 @@ func (a *App) StartLifecycle() {
 	a.lifecycleCancel = cancel
 	a.goSafe("learning", func() { a.lifecycle.Run(ctx) })
 	a.log("info", "learning", "lifecycle manager started (decay=%s prune=%s)", domain.DefaultLifecycleConfig().DecayInterval, domain.DefaultLifecycleConfig().PruneInterval)
-
-	// Subscribe to compaction events: when a conversation is compacted,
-	// flush the learning review for that conversation. Compaction is a
-	// natural checkpoint — the full context is being summarized, so
-	// extracting learnings at the same time is free context-wise.
-	if a.ReviewAgent != nil && a.Bus != nil {
-		a.goSafe("learning", func() { a.subscribeCompactionReview(ctx) })
-	}
-}
-
-// subscribeCompactionReview listens for compaction events and triggers
-// a learning review for the compacted conversation. Exits when ctx is
-// cancelled.
-func (a *App) subscribeCompactionReview(ctx context.Context) {
-	_, events, unsubscribe := a.Bus.Subscribe()
-	defer unsubscribe()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case ev, ok := <-events:
-			if !ok {
-				return
-			}
-			if ev.Type != contracts.EventCompacted {
-				continue
-			}
-			var ce contracts.CompactedEvent
-			if err := json.Unmarshal(ev.Payload, &ce); err != nil {
-				continue
-			}
-			a.flushLearningReview(ce.ConversationID, "compaction")
-		}
-	}
 }
 
 // CloseLifecycle stops the background decay/prune loop. Safe to call
@@ -169,6 +132,4 @@ func (a *App) CloseLifecycle() {
 		a.lifecycleCancel()
 		a.lifecycleCancel = nil
 	}
-	// Persist turn counters so review thresholds survive restarts.
-	a.saveTurnCounters()
 }

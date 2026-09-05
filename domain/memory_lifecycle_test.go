@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"math"
 	"testing"
 	"time"
 )
@@ -31,59 +30,55 @@ func TestDefaultLifecycleConfig(t *testing.T) {
 	}
 }
 
-func TestMemoryStrengthFresh(t *testing.T) {
-	cfg := DefaultLifecycleConfig()
-	fresh := &MemoryEntry{Content: "test", Tags: []string{"fact"}, CreatedAt: time.Now()}
-	if s := MemoryStrength(fresh, cfg); s < 0.79 || s > 0.81 {
-		t.Errorf("fresh fact strength = %v, want ~0.8", s)
-	}
-}
-
-func TestMemoryStrengthHalfLife(t *testing.T) {
-	cfg := DefaultLifecycleConfig()
-	old := &MemoryEntry{Content: "test", Tags: []string{"fact"}, CreatedAt: time.Now().Add(-168 * time.Hour)}
-	if s := MemoryStrength(old, cfg); s < 0.39 || s > 0.41 {
-		t.Errorf("1-week-old fact strength = %v, want ~0.4", s)
-	}
-}
-
-func TestMemoryStrengthNearZeroAfterFourWeeks(t *testing.T) {
-	cfg := DefaultLifecycleConfig()
-	ancient := &MemoryEntry{Content: "test", Tags: []string{"fact"}, CreatedAt: time.Now().Add(-672 * time.Hour)}
-	if s := MemoryStrength(ancient, cfg); s > 0.05 {
-		t.Errorf("4-week-old fact strength = %v, want < 0.05", s)
-	}
-}
-
-func TestMemoryStrengthByTag(t *testing.T) {
+func TestMemoryRecordStrengthFresh(t *testing.T) {
 	cfg := DefaultLifecycleConfig()
 	now := time.Now()
-	cases := []struct {
-		tags []string
-		want float64
-	}{
-		{[]string{"fact"}, 0.8},
-		{[]string{"error", "fix"}, 0.7},
-		{[]string{"decision"}, 0.6},
-		{[]string{"preference"}, 0.5},
-		{nil, 0.5},
-	}
-	for _, tc := range cases {
-		e := &MemoryEntry{Content: "test", Tags: tc.tags, CreatedAt: now}
-		got := MemoryStrength(e, cfg)
-		if math.Abs(got-tc.want) > 0.01 {
-			t.Errorf("tags=%v strength = %v, want ~%v", tc.tags, got, tc.want)
-		}
+	fresh := &MemoryRecord{Body: "prefer Go", Utility: 0.8, Status: MemoryStatusLearned, LastConfirmed: now, CreatedAt: now}
+	if s := MemoryRecordStrength(fresh, cfg); s < 0.79 || s > 0.81 {
+		t.Errorf("fresh strength = %v, want ~0.8", s)
 	}
 }
 
-func TestMemoryStrengthClamped(t *testing.T) {
+func TestMemoryRecordStrengthHalfLife(t *testing.T) {
 	cfg := DefaultLifecycleConfig()
-	// Negative half-life would produce unbounded values; guard against that
-	// by ensuring the result is always in [0, 1].
+	now := time.Now()
+	old := &MemoryRecord{Body: "prefer Go", Utility: 0.8, Status: MemoryStatusLearned, LastConfirmed: now.Add(-168 * time.Hour), CreatedAt: now.Add(-168 * time.Hour)}
+	if s := MemoryRecordStrength(old, cfg); s < 0.39 || s > 0.41 {
+		t.Errorf("1-week-old strength = %v, want ~0.4", s)
+	}
+}
+
+func TestMemoryRecordStrengthRetiredIsZero(t *testing.T) {
+	cfg := DefaultLifecycleConfig()
+	retired := &MemoryRecord{Body: "old", Utility: 0.9, Status: MemoryStatusRetired, LastConfirmed: time.Now()}
+	if s := MemoryRecordStrength(retired, cfg); s != 0 {
+		t.Errorf("retired strength = %v, want 0", s)
+	}
+}
+
+func TestMemoryRecordStrengthIgnoresUpdatedAtTouch(t *testing.T) {
+	cfg := DefaultLifecycleConfig()
+	now := time.Now()
+	old := now.Add(-168 * time.Hour)
+	touched := &MemoryRecord{
+		Body:          "prefer Go",
+		Utility:       0.8,
+		Status:        MemoryStatusLearned,
+		CreatedAt:     old,
+		UpdatedAt:     now,
+		LastConfirmed: time.Time{},
+	}
+	s := MemoryRecordStrength(touched, cfg)
+	if s < 0.39 || s > 0.41 {
+		t.Errorf("touched-but-unconfirmed strength = %v, want ~0.4 from CreatedAt", s)
+	}
+}
+
+func TestMemoryRecordStrengthClamped(t *testing.T) {
+	cfg := DefaultLifecycleConfig()
 	cfg.DecayHalfLife = -1
-	e := &MemoryEntry{Content: "test", Tags: []string{"fact"}, CreatedAt: time.Now()}
-	if s := MemoryStrength(e, cfg); s < 0 || s > 1 {
+	e := &MemoryRecord{Body: "test", Utility: 0.8, Status: MemoryStatusLearned, LastConfirmed: time.Now()}
+	if s := MemoryRecordStrength(e, cfg); s < 0 || s > 1 {
 		t.Errorf("strength = %v, want in [0, 1]", s)
 	}
 }

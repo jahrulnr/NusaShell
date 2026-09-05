@@ -46,14 +46,14 @@ func defaultSearchOptions() SearchOptions {
 // to BM25 + graph only.
 type LearningSearcher struct {
 	skills SkillStore
-	memory MemoryStore
+	memory MemoryRecordStore
 	embed  Embedder // nil = BM25-only
 	graph  *LearningGraphService
 }
 
 // NewLearningSearcher creates a searcher. embed and graph may be nil
 // for BM25-only search.
-func NewLearningSearcher(skills SkillStore, memory MemoryStore, embed Embedder, graph *LearningGraphService) *LearningSearcher {
+func NewLearningSearcher(skills SkillStore, memory MemoryRecordStore, embed Embedder, graph *LearningGraphService) *LearningSearcher {
 	return &LearningSearcher{skills: skills, memory: memory, embed: embed, graph: graph}
 }
 
@@ -145,10 +145,20 @@ func (s *LearningSearcher) searchMemoryWithOpts(ctx context.Context, query strin
 	if len(entries) == 0 {
 		return nil, nil
 	}
+	live := make([]*domain.MemoryRecord, 0, len(entries))
+	for _, e := range entries {
+		if e != nil && e.Retrievable() {
+			live = append(live, e)
+		}
+	}
+	entries = live
+	if len(entries) == 0 {
+		return nil, nil
+	}
 
 	docs := make([]jsonstore.BM25Doc, len(entries))
 	for i, e := range entries {
-		docs[i] = jsonstore.BM25Doc{ID: e.ID, Text: e.Content + " " + strings.Join(e.Tags, " ")}
+		docs[i] = jsonstore.BM25Doc{ID: e.ID, Text: recordSearchText(e)}
 	}
 
 	var lists [][]string
@@ -216,7 +226,7 @@ func collectSeeds(lists [][]string) []string {
 // function is: score *= (1 + decayFactor * recencyWeight) where
 // recencyWeight is 1.0 for entries accessed today, decaying to 0 over
 // 30 days. This mirrors memex's temporal decay multiplier.
-func (s *LearningSearcher) applyTemporalDecay(fused []rrfResult, skills []*domain.Skill, memories []*domain.MemoryEntry) []rrfResult {
+func (s *LearningSearcher) applyTemporalDecay(fused []rrfResult, skills []*domain.Skill, memories []*domain.MemoryRecord) []rrfResult {
 	if len(fused) == 0 {
 		return fused
 	}
@@ -229,7 +239,7 @@ func (s *LearningSearcher) applyTemporalDecay(fused []rrfResult, skills []*domai
 	for _, sk := range skills {
 		skillMap[sk.ID] = sk
 	}
-	memMap := make(map[string]*domain.MemoryEntry, len(memories))
+	memMap := make(map[string]*domain.MemoryRecord, len(memories))
 	for _, m := range memories {
 		memMap[m.ID] = m
 	}
@@ -242,7 +252,10 @@ func (s *LearningSearcher) applyTemporalDecay(fused []rrfResult, skills []*domai
 				lastUsed = sk.UpdatedAt
 			}
 		} else if m, ok := memMap[fused[i].ID]; ok {
-			lastUsed = m.CreatedAt
+			lastUsed = m.LastConfirmed
+			if lastUsed.IsZero() {
+				lastUsed = m.UpdatedAt
+			}
 		}
 		if lastUsed.IsZero() {
 			continue
@@ -373,4 +386,11 @@ func ResolveEmbedder(providers ProviderStore, creds CredentialStore, factory Emb
 		return embed
 	}
 	return nil
+}
+
+func recordSearchText(e *domain.MemoryRecord) string {
+	if e == nil {
+		return ""
+	}
+	return strings.TrimSpace(strings.Join([]string{e.Body, e.Subject, e.Predicate, e.Object, e.Type, e.Scope.Project}, " "))
 }

@@ -55,6 +55,33 @@ test('soul memory editor uses the dedicated update RPC', () => {
   assert.match(learningView, /learning-agent-memory/);
 });
 
+test('Experience tab lists episodes and memory records', () => {
+  const doc = new JSDOM(learningHTML).window.document;
+  const tab = doc.querySelector('#learning-tab-experience');
+  assert.equal(tab?.dataset.learningTab, 'experience');
+  assert.ok(doc.querySelector('#learning-experience-list'));
+  assert.ok(doc.querySelector('#learning-records-list'));
+  assert.ok(doc.querySelector('#learning-record-retire'));
+  assert.match(learningView, /experience\.list/);
+  assert.match(learningView, /experience\.get/);
+  assert.match(learningView, /memory\.retire/);
+  assert.doesNotMatch(learningView, /memory\.delete/);
+});
+
+test('Learning subscribes to jobs and recorded experience, not review events', () => {
+  assert.match(learningView, /experience\.recorded/);
+  assert.match(learningView, /learning\.job\.started/);
+  assert.match(learningView, /learning\.job\.done/);
+  assert.match(learningView, /learning\.job\.error/);
+  assert.doesNotMatch(learningView, /learning\.review\.started/);
+});
+
+test('Search and graph copy talks about records, not fragments', () => {
+  assert.match(learningHTML, /Search records and skills/);
+  assert.match(learningHTML, />Record</);
+  assert.doesNotMatch(learningHTML, />Fragment</);
+});
+
 test('About You uses the available desktop width while retaining a comfortable mobile inset', () => {
   assert.match(learningCSS, /\.learning-about-card\s*\{[\s\S]*?width:\s*min\(1180px,\s*calc\(100%\s*-\s*32px\)\);/);
   assert.match(learningCSS, /\.learning-about-card\s*\{[\s\S]*?box-sizing:\s*border-box;/);

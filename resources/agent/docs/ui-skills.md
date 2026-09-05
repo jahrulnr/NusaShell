@@ -6,13 +6,16 @@ Browse and read installed skill packages (SKILL.md + support files). Skills come
 
 ## Header
 
-View title and a New skill button.
+View title and an Install skill button for .skill or .zip archives.
 
-- **`#new-skill-btn`** (missing map entry)
+- **Install skill button** (`#install-skill-btn`):
+  - Section: Skills header
+  - Type: button
+  - Notes: Opens file picker to install a .skill or .zip archive.
 
 ## Catalog
 
-Searchable list of installed skills. Each row shows the skill name, an owner badge (user/builtin/plugin:<id>), and last-updated time. Shadowed skills are dimmed. The count reflects persisted skills.
+Searchable list of installed skills. Each row shows the skill name, a status badge (experimental/validated/trusted/…), an owner badge (user/builtin/plugin:<id>), version, and last-updated time. Shadowed skills are dimmed. The count reflects persisted skills.
 
 - **Skills count** (`#skills-count`):
   - Section: Skills
@@ -28,7 +31,7 @@ Searchable list of installed skills. Each row shows the skill name, an owner bad
 
 ## Detail
 
-Read-only viewer for the selected skill. Shows the skill name, description, and owner, plus a file tree (SKILL.md + support files) on the left and the selected file's content on the right. Plugin-owned skills are read-only. On phones the catalog, file tree, and file viewer stack vertically inside one scrollable workspace so every file remains reachable.
+Read-only file viewer for the selected skill plus lifecycle controls. Shows the skill name, description, owner, status badge, and Version/ActiveVersion. Experimental and validated skills can be promoted (skills.promote). Rollback picks a version from the custom select and calls skills.rollback. User-owned trusted skills can still be saved with skills.save; learned experimental skills are not overwritten in place from this viewer. Plugin-owned skills are read-only. On phones the catalog, file tree, and file viewer stack vertically inside one scrollable workspace so every file remains reachable.
 
 - **Editor title** (`#skill-editor-title`):
   - Section: Skills
@@ -43,6 +46,31 @@ Read-only viewer for the selected skill. Shows the skill name, description, and 
   - Section: Skills
   - Type: text
   - Notes: Empty state shown when no file is selected. Prompts user to pick a file from the skill tree.
+
+- **Skill status** (`#skill-status-badge`):
+  - Section: Skills
+  - Type: text
+  - Notes: Promotion status: candidate, experimental, validated, trusted, deprecated, or retired.
+
+- **Skill version** (`#skill-version-meta`):
+  - Section: Skills
+  - Type: text
+  - Notes: Shows Version and ActiveVersion for the selected skill.
+
+- **Promote skill** (`#skills-promote`):
+  - Section: Skills
+  - Type: button
+  - Action: Promotes an experimental or validated skill via skills.promote.
+
+- **Rollback version** (`#skills-rollback-version`):
+  - Section: Skills
+  - Type: select
+  - Notes: Custom select of skill versions used by Rollback.
+
+- **Rollback skill** (`#skills-rollback`):
+  - Section: Skills
+  - Type: button
+  - Action: Rolls the selected skill back to the chosen version via skills.rollback.
 
 - **Skill file viewer** (`#skill-file-viewer`):
   - Section: Skills editor pane

@@ -57,6 +57,9 @@ type HydrationSource struct {
 	// ProjectMemory is the per-workspace project-memory store. When nil,
 	// the memory_project hydration slot is hidden.
 	ProjectMemory ProjectMemoryStore
+	// ApplyBlock is the compact Know-and-Act instruction built from
+	// top-K retrievable memory records. Empty hides the slot.
+	ApplyBlock string
 }
 
 // HydrationBuilder produces an ephemeral synthetic tool transcript
@@ -108,6 +111,7 @@ func (b *HydrationBuilder) Build() HydrationResult {
 		appendSlot(slot)
 	}
 	appendSlot(b.readProjectMemory())
+	appendSlot(b.readApplyBlock())
 	appendSlot(b.readSkills())
 	appendSlot(b.readMcpList())
 	slots = append(slots, b.readToolList()...)
@@ -246,6 +250,18 @@ func (b *HydrationBuilder) readProjectMemory() hydrationSlot {
 	content, _ := json.Marshal(extract)
 	args := `{"op":"query","kind":"index","full":true}`
 	return hydrationSlot{name: "memory_project", args: args, content: string(content)}
+}
+
+func (b *HydrationBuilder) readApplyBlock() hydrationSlot {
+	text := strings.TrimSpace(b.source.ApplyBlock)
+	if text == "" {
+		return hydrationSlot{name: "memory", content: ""}
+	}
+	return hydrationSlot{
+		name:    "memory",
+		args:    `{"op":"list"}`,
+		content: text,
+	}
 }
 
 // stripYAMLFrontmatter removes a leading "---\n...\n---" block from text.

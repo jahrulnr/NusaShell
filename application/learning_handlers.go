@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
-	"time"
 
-	"nusashell/application/service/toolpresentation"
 	"nusashell/contracts"
 	"nusashell/domain"
 	clock "nusashell/pkg/time"
@@ -59,18 +57,21 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 				}
 			}
 			// Fragments.
-			if a.Fragments != nil {
-				for _, f := range a.Fragments.List(domain.FragmentSearchFilter{Limit: 200}) {
-					name := f.Content
+			if a.MemoryRecords != nil {
+				for _, f := range a.MemoryRecords.List() {
+					if f == nil || !f.Retrievable() {
+						continue
+					}
+					name := f.Body
 					if len(name) > 40 {
 						name = name[:40] + "…"
 					}
 					items = append(items, contracts.LearningSearchResultItem{
 						ID:      f.ID,
 						Kind:    "memory",
-						Tier:    "fragment",
+						Tier:    contracts.MemoryTierRecord,
 						Name:    name,
-						Content: f.Content,
+						Content: f.Body,
 					})
 				}
 			}
@@ -105,25 +106,27 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 		}
 	}
 	if kind == "" || kind == "memory" {
-		// Search fragments via BM25.
-		if a.Fragments != nil {
-			hits := a.Fragments.Search(domain.FragmentSearchFilter{
-				Query: query,
-				Limit: limit,
-			})
-			for _, h := range hits {
-				name := h.Fragment.Content
-				if len(name) > 40 {
-					name = name[:40] + "…"
+		if a.MemoryRecords != nil {
+			results, err := searcher.SearchMemory(ctx, query, limit)
+			if err == nil {
+				for _, r := range results {
+					m, err := a.MemoryRecords.Get(r.ID)
+					if err != nil || m == nil {
+						continue
+					}
+					name := m.Body
+					if len(name) > 40 {
+						name = name[:40] + "…"
+					}
+					items = append(items, contracts.LearningSearchResultItem{
+						ID:      m.ID,
+						Kind:    "memory",
+						Tier:    contracts.MemoryTierRecord,
+						Name:    name,
+						Content: m.Body,
+						Score:   float32(r.Score),
+					})
 				}
-				items = append(items, contracts.LearningSearchResultItem{
-					ID:      h.Fragment.ID,
-					Kind:    "memory",
-					Tier:    "fragment",
-					Name:    name,
-					Content: h.Fragment.Content,
-					Score:   float32(h.Score),
-				})
 			}
 		}
 		// Also search user memory via substring.
@@ -205,13 +208,16 @@ func (a *App) handleLearningGraph() (any, *contracts.RPCError) {
 		}
 	}
 	// Fragment nodes (one node per fact).
-	if a.Fragments != nil {
-		for _, f := range a.Fragments.List(domain.FragmentSearchFilter{Limit: 500}) {
+	if a.MemoryRecords != nil {
+		for _, f := range a.MemoryRecords.List() {
+			if f == nil || !f.Retrievable() {
+				continue
+			}
 			nodes = append(nodes, contracts.LearningGraphNode{
 				ID:   f.ID,
 				Kind: "memory",
-				Tier: "fragment",
-				Name: memoryNodeLabel(f.Content),
+				Tier: contracts.MemoryTierRecord,
+				Name: memoryNodeLabel(f.Body),
 			})
 		}
 	}
@@ -372,59 +378,4 @@ func (a *App) handleLearningLog(req contracts.LearningLogRequest) (any, *contrac
 		out = append(out, entry)
 	}
 	return contracts.LearningLogResult{Entries: out}, nil
-}
-
-// handleLearningReviewTranscript returns the review agent's own
-// conversation (LLM exchanges + tool calls + tool results) for a given
-// review ID. This is the "background agent conversation" the user opens
-// from the learning log — not the source conversation that was reviewed.
-func (a *App) handleLearningReviewTranscript(req contracts.LearningReviewTranscriptRequest) (any, *contracts.RPCError) {
-	if req.ID == "" {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "review transcript id is required"}
-	}
-	t := ReadReviewTranscript(a.DataDir, req.ID)
-	if t == nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "review transcript not found"}
-	}
-	msgs := make([]contracts.LearningReviewTranscriptMessageDTO, 0, len(t.Messages))
-	toolCallsByID := make(map[string]domain.ToolCall)
-	for _, m := range t.Messages {
-		dto := contracts.LearningReviewTranscriptMessageDTO{
-			Role:      m.Role,
-			Content:   m.Content,
-			Reasoning: m.Reasoning,
-		}
-		for _, tc := range m.ToolCalls {
-			dto.ToolCalls = append(dto.ToolCalls, toolCallDTO(tc))
-			if tc.ID != "" {
-				toolCallsByID[tc.ID] = tc
-			}
-		}
-		if m.ToolResult != nil {
-			resultName := m.ToolResult.Name
-			resultArgs := ""
-			if call, ok := toolCallsByID[m.ToolResult.ToolCallID]; ok {
-				// Tool results do not carry args in the review transcript wire
-				// shape. Reuse the matching call so the frontend presentation
-				// can keep the real Request panel instead of falling back to
-				// `tool()` or an empty dispatcher payload.
-				resultName = call.Name
-				resultArgs = call.Args
-			}
-			dto.ToolResult = &contracts.ToolResultDTO{
-				ToolCallID:   m.ToolResult.ToolCallID,
-				Name:         resultName,
-				Content:      m.ToolResult.Content,
-				Presentation: toolpresentation.BuildToolPresentation(resultName, resultArgs, toolpresentation.ToolResultPresentationStatus(m.ToolResult.Content), m.ToolResult.Content),
-			}
-		}
-		msgs = append(msgs, dto)
-	}
-	return contracts.LearningReviewTranscriptResult{
-		ID:             t.ID,
-		ConversationID: t.ConversationID,
-		Model:          t.Model,
-		CreatedAt:      clock.NewTime(t.CreatedAt).Format(time.RFC3339),
-		Messages:       msgs,
-	}, nil
 }

@@ -1,7 +1,8 @@
 # Project memory
 
-Project memory is a **separate** store from user memory (`memory/user.md` +
-fragments). It keeps durable, reusable facts about the
+Project memory is a **separate** store from the human profile documents
+(`memory/user.md`, `memory/soul.md`) and structured memory records. It keeps
+durable, reusable facts about the
 **active workspace** in skill-compatible anchored markdown so later
 tasks skip expensive rediscovery.
 
@@ -25,7 +26,7 @@ passes:
 
 Do not store feature-completion notes, one-off test results, commit
 summaries, or facts obvious from the repo. Never store user preferences
-or profile facts here — those belong in `memory` (user document/fragments).
+or profile facts here — those belong in `memory/user.md` or structured memory records.
 
 ## Ops
 

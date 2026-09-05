@@ -1,10 +1,11 @@
 # Tool dispatcher families
 
 One advertised tool per family instead of one tool per verb. `skill`,
-`memory`, `docs`, `memory_project`, `automation`, and `automation_schedule` are
-dispatched by a required `op` field (`memory` + `op=save`), replacing per-verb
-schemas with one family each. New verbs cost an enum value, not a new schema —
-prompt growth per feature is sub-linear.
+`memory`, `docs`, `memory_project`, `conversation`, `automation`, and
+`automation_schedule` are dispatched by a required `op` field
+(`memory` + `op=search`), replacing per-verb schemas with one family each.
+New verbs cost an enum value, not a new schema — prompt growth per feature
+is sub-linear.
 
 ## Single naming layer
 
@@ -15,15 +16,16 @@ Root+op is the ONLY form of these tools anywhere in the system:
   minus `memory_project` when the turn has no workspace) plus every
   non-family built-in. There are no per-verb names on any roster.
 - **Persistence** — a call is stored exactly as emitted:
-  `{name:"memory", args:{op:"save",…}}`. History, UI, and transcripts show
+  `{name:"memory", args:{op:"search",…}}`. History, UI, and transcripts show
   the root form.
 - **Execution** — `Toolbox.Execute` resolves root+op via `DispatchOp`
   (missing/unknown ops fail loud with the valid list) and routes to its
   handler. The resolved `root+"_"+op` string is a private routing key inside
   Execute and never escapes it.
-- **Internal callers** — hydration checkpoints, the review agent, and tests
-  call the same root form (`Execute(ctx, "memory", {"op":"list",…})`). No
-  caller has a special naming dialect.
+- **Internal callers** — hydration checkpoints, background learning jobs,
+  and tests call the same root form
+  (`Execute(ctx, "memory", {"op":"list",…})`). No caller has a special
+  naming dialect.
 - **No aliases** — a call named like an old verb (`memory_save`,
   `docs_read`, …) is simply an unknown tool and fails loud. Pre-migration
   conversations keep their stored strings; replaying those specific calls

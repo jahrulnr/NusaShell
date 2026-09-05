@@ -40,7 +40,10 @@ type Store struct {
 	conversations  map[string]*domain.Conversation
 	providers      []*domain.Provider
 	acpAgents      []*domain.AcpAgent
-	memories       []*domain.MemoryEntry
+	experiences    []*domain.Experience
+	memoryRecords  []*domain.MemoryRecord
+	learningJobs   []*domain.LearningJob
+	learningOps    []*domain.LearningOperation
 	learningEdges  []*domain.LearningEdge
 	learnedParams  *domain.LearnedParamRegistry
 	modelOverrides *domain.ModelOverrideRegistry
@@ -57,7 +60,7 @@ func New(dir string) (*Store, error) {
 		conversations: map[string]*domain.Conversation{},
 		settings:      domain.DefaultSettings(),
 	}
-	for _, sub := range []string{"conversations", "config", "memory", "learning"} {
+	for _, sub := range []string{"conversations", "config", "memory", "learning", "growth"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			return nil, err
 		}
@@ -124,29 +127,8 @@ func (s *Store) load() error {
 		return err
 	}
 	s.settings = domain.NormalizeSettings(s.settings)
-	// memories: JSONL. Primary file is memory/memory.jsonl;
-	// memory/legacy.jsonl is still loaded for backward compatibility with
-	// stores predating the save-vs-delete file split fix.
-	for _, name := range []string{"memory/memory.jsonl", "memory/legacy.jsonl"} {
-		b, err := os.ReadFile(filepath.Join(s.dir, name))
-		if err != nil {
-			if !os.IsNotExist(err) {
-				return err
-			}
-			continue
-		}
-		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-			if line == "" {
-				continue
-			}
-			var e domain.MemoryEntry
-			if err := json.Unmarshal([]byte(line), &e); err == nil {
-				if e.Target == "" {
-					e.Target = domain.MemoryTargetMemory
-				}
-				s.memories = append(s.memories, &e)
-			}
-		}
+	if err := s.loadGrowth(); err != nil {
+		return err
 	}
 	// learning_edges: JSONL
 	if b, err := os.ReadFile(filepath.Join(s.dir, "learning", "edges.jsonl")); err == nil {
@@ -333,10 +315,9 @@ func saveRegistry[T any](s *Store, ptr **T, v *T, path string) error {
 	return s.writeJSON(path, stored)
 }
 
-func providerID(p *domain.Provider) string  { return p.ID }
-func acpAgentID(a *domain.AcpAgent) string  { return a.ID }
-func memoryID(e *domain.MemoryEntry) string { return e.ID }
-func edgeID(e *domain.LearningEdge) string  { return e.ID }
+func providerID(p *domain.Provider) string { return p.ID }
+func acpAgentID(a *domain.AcpAgent) string { return a.ID }
+func edgeID(e *domain.LearningEdge) string { return e.ID }
 
 // ---- conversations ----
 
@@ -549,78 +530,6 @@ func (s *Store) DeleteAcpAgent(id string) (err error) {
 		return s.writeJSON("config/acp-agents.json", items)
 	})
 	return err
-}
-
-// ---- memory ----
-
-func (s *Store) ListMemories() []*domain.MemoryEntry { return listSlice(s, s.memories) }
-
-func (s *Store) SaveMemory(e *domain.MemoryEntry) error {
-	if e.Target == "" {
-		e.Target = domain.MemoryTargetMemory
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	used := s.targetChars(e.Target)
-	limit := domain.MemoryLimit(e.Target)
-	if used+len(e.Content) > limit {
-		return fmt.Errorf("memory target %q at %d/%d chars; adding %d would exceed the limit — use memory with op=replace to merge or remove stale entries first", e.Target, used, limit, len(e.Content))
-	}
-	stored := clone(e)
-	s.memories = append(s.memories, stored)
-	return s.appendJSONL("memory/memory.jsonl", stored)
-}
-
-func (s *Store) DeleteMemory(id string) (err error) {
-	s.memories, err = removeSlice(s, s.memories, id, memoryID, "memory", func(items []*domain.MemoryEntry) error {
-		return s.writeJSONL("memory/memory.jsonl", items)
-	})
-	return err
-}
-
-// ReplaceMemory finds the single entry in target whose content contains
-// oldText as a substring, replaces its content with content, and preserves
-// its ID, Target, Source, and CreatedAt. Returns an error if zero or
-// multiple entries match.
-func (s *Store) ReplaceMemory(target, oldText, content string) error {
-	if target == "" {
-		target = domain.MemoryTargetMemory
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	indices := make([]int, 0, 1)
-	for i, e := range s.memories {
-		if e.Target != target {
-			continue
-		}
-		if strings.Contains(e.Content, oldText) {
-			indices = append(indices, i)
-		}
-	}
-	if len(indices) == 0 {
-		return fmt.Errorf("no %q entry contains %q", target, oldText)
-	}
-	if len(indices) > 1 {
-		return fmt.Errorf("multiple %q entries contain %q — use a more specific substring", target, oldText)
-	}
-	used := s.targetChars(target)
-	old := s.memories[indices[0]]
-	if used-len(old.Content)+len(content) > domain.MemoryLimit(target) {
-		return fmt.Errorf("replacement would exceed the %q char limit (%d/%d)", target, used-len(old.Content)+len(content), domain.MemoryLimit(target))
-	}
-	s.memories[indices[0]].Content = content
-	return s.writeJSONL("memory/memory.jsonl", s.memories)
-}
-
-// targetChars returns the total content length across entries in a target.
-func (s *Store) targetChars(target string) int {
-	total := 0
-	for _, e := range s.memories {
-		if e.Target == target {
-			total += len(e.Content)
-		}
-	}
-	return total
 }
 
 func (s *Store) appendJSONL(name string, v any) error {

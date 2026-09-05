@@ -212,7 +212,8 @@ repository template at [`.github/pull_request_template.md`](.github/pull_request
 Notable additions, removals, and breaking changes live in
 [`CHANGELOG.md`](CHANGELOG.md). The current `[Unreleased]` section covers the
 PWA-grade shell, deterministic hydration placement, the dispatcher-family
-tool refactor, and the review-agent hydration tool.
+tool refactor, and the experience-learning system (JSONL growth stores,
+signal-triggered jobs, human-only profile documents).
 
 ## License
 

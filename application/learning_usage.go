@@ -39,20 +39,6 @@ func learningNodeIDsFromTool(app *App, toolCall domain.ToolCall, output string) 
 
 	ids := extractLearningOutputIDs(output)
 	switch root {
-	case "memory":
-		switch op {
-		case "replace":
-			if learningStringArg(args, "target") == "fragment" {
-				ids = appendLearningID(ids, learningStringArg(args, "id"))
-			}
-			if learningStringArg(args, "target") == domain.MemoryTierUser && app != nil && app.User != nil {
-				if user := app.User.Load(); user != nil {
-					for _, entry := range user.Entries {
-						ids = appendLearningID(ids, entry.ID)
-					}
-				}
-			}
-		}
 	case "skill":
 		// A save of an existing skill can be identified from args even when
 		// an older toolbox output did not include the saved ID. For a new

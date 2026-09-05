@@ -94,6 +94,7 @@ dispatchers, each owning its routing table in a separate file:
 | `plugin.*` | `dispatchPlugin` | `application/plugin_dispatch.go` |
 | `skills.*` | `dispatchSkills` | `application/skills_dispatch.go` |
 | `memory.*` | `dispatchMemory` | `application/memory_dispatch.go` |
+| `experience.*` | `dispatchExperience` | `application/experience_handlers.go` |
 | `learning.*` | `dispatchLearning` | `application/learning_dispatch.go` |
 | `docs.*` | `dispatchDocs` | `application/docs_dispatch.go` |
 | `settings.*` | `dispatchSettings` | `application/settings_dispatch.go` |
@@ -195,12 +196,13 @@ message IDs are never deleted.
 
 `settings.get` and `settings.set` expose the persisted agent runtime knobs:
 compaction (enabled, threshold, optional dedicated model), prompt caching,
-`max_tool_rounds` (1–10000), parallel tool limits, learning review threshold,
-an optional dedicated review model (background autolearn), and max
-input/output token ceilings. Browser-only preferences such as the default
-model, icon-only sidebar, and automatic WebSocket reconnect stay in local
-storage because they describe one browser client rather than the local agent
-process.
+`max_tool_rounds` (1–10000), parallel tool limits, an optional dedicated
+`review_model` for background learning jobs (consolidator / skill evolver /
+evaluator), and max input/output token ceilings. Learning jobs enqueue from
+experience signals, not a turn-count threshold. Browser-only preferences
+such as the default model, icon-only sidebar, and automatic WebSocket
+reconnect stay in local storage because they describe one browser client
+rather than the local agent process.
 
 ### Prompt caching
 
@@ -208,7 +210,7 @@ Messages-format providers mark the system prompt and tool definitions with
 `cache_control: ephemeral`; cache hits appear in `usage.cache_read`.
 OpenAI Responses and Chat providers receive a stable `prompt_cache_key`; the
 key is 32 ASCII characters and is namespaced as `nusashell_cv_` for normal
-conversation turns or `nusashell_bg_` for headless/background review turns.
+conversation turns or `nusashell_bg_` for headless/background learning-job turns.
 OpenRouter Chat receives that key plus `session_id` so its provider routing and
 Logs → Sessions grouping remain stable. OpenRouter Messages/Responses carry
 the same session value in the documented `x-session-id` header. A provider
@@ -219,9 +221,16 @@ cache key is a routing hint, not a guarantee of a cache hit.
 | Store | Format | Location |
 | --- | --- | --- |
 | conversations | JSON | `{data}/conversations/<id>.json` |
-| providers, skills, plugins, settings | JSON | `{data}/*.json` + `{data}/plugins/` |
-| memory, logs | JSONL | `{data}/*.jsonl` |
+| providers, plugins, settings | JSON | `{data}/config/*.json` + `{data}/plugins/` |
+| skills | markdown + JSON | `{data}/skills/<id>/` (`SKILL.md`, `meta.json`, `versions/<n>/`) |
+| profile documents | Markdown | `{data}/memory/user.md`, `{data}/memory/soul.md` |
+| growth catalogs | JSONL | `{data}/growth/{experiences,memories,jobs,operations}.jsonl` |
+| learning search/log | JSONL | `{data}/learning/{edges,embeddings,trajectory}.jsonl` |
+| logs | JSONL | `{data}/logs.jsonl` |
 | API keys | SQLite | `{data}/credentials.db` |
+
+The full tree, including automation and attachments, is in
+`resources/agent/docs/data-locations.md`.
 
 Credentials never touch the JSON/JSONL files. All writes are atomic
 (temp + rename). The log file is a bounded ring (2000 entries).
@@ -268,8 +277,10 @@ are ported from the litellm provider tree (Blocks-based request/response
 model with explicit validation) and selected by a single thin adapter that
 switches on the provider kind.
 
-## Proposed PWA and offline-first design
+## PWA shell
 
-The current application requires a running Go backend. The proposed, not yet
-implemented PWA shell, local offline data, and backend-recovery design is
-recorded in [`decisions/001-pwa-offline-first.md`](decisions/001-pwa-offline-first.md).
+The embedded frontend ships as an installable PWA (`manifest.webmanifest`,
+`sw.js`): network-first with cache fallback for shell assets, never for
+`/rpc`, `/ws`, `/stream`, `/local-file`, `/sounds`, or `/plugins/*`. When
+the Go backend is unreachable, a full-window offline overlay covers every
+view. Live agent work still requires the local process.

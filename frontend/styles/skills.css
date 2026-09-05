@@ -232,3 +232,50 @@
 .skill-owner-badge.builtin { background: var(--panel-raised); color: var(--purple-bright); }
 .skills-list-item.shadowed { opacity: 0.55; }
 .skills-list-item.shadowed .skill-owner-badge { opacity: 1; }
+
+.skills-lifecycle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.skills-pane-head .skills-lifecycle span {
+  display: inline-flex;
+  overflow: visible;
+  white-space: nowrap;
+  text-overflow: unset;
+}
+.skill-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font: 8.5px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--panel-raised);
+  color: var(--text-dim);
+  flex: none;
+}
+.skill-status-experimental { color: var(--amber); background: rgba(210, 153, 34, 0.14); }
+.skill-status-validated { color: var(--blue-info); background: rgba(88, 166, 255, 0.14); }
+.skill-status-trusted { color: var(--green-bright); background: rgba(86, 207, 145, 0.14); }
+.skill-status-candidate { color: var(--text-dim); }
+.skill-status-deprecated,
+.skill-status-retired { color: var(--text-faint); }
+.skill-version-meta {
+  color: var(--text-faint);
+  font: 10px var(--font-mono);
+}
+.skills-lifecycle .ss-main {
+  min-width: 92px;
+  max-width: 140px;
+}
+@media (max-width: 760px) {
+  .skills-lifecycle {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}

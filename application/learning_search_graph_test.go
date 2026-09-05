@@ -60,7 +60,7 @@ func TestSearchWithGraphBFSChannel(t *testing.T) {
 		"skill_docker": {ID: "skill_docker", Name: "docker", Description: "container builds", Content: "how to build docker images"},
 		"skill_k8s":    {ID: "skill_k8s", Name: "kubernetes", Description: "orchestration", Content: "deploy pods k8s"},
 	}}
-	mem := &fakeMemoryStore{}
+	mem := &fakeMemoryRecordStore{}
 	store := &fakeEdgeStore{}
 	g := NewLearningGraphService(store)
 	// Connect docker → k8s (related)

@@ -34,6 +34,12 @@ func (s *stubSkillStoreHyd) Install(zipData []byte) (string, error) {
 }
 func (s *stubSkillStoreHyd) MountPluginSkills(pluginID, dir string) error { return nil }
 func (s *stubSkillStoreHyd) UnmountPluginSkills(pluginID string) error    { return nil }
+func (s *stubSkillStoreHyd) Promote(id, ownedBy string) (*domain.Skill, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s *stubSkillStoreHyd) Rollback(id, ownedBy string, version int) (*domain.Skill, error) {
+	return nil, fmt.Errorf("not implemented")
+}
 
 // stubHydrationExecutor is a scripted ToolExecutor for hydration tests. It
 // records every call and returns the scripted output per tool name.
@@ -827,5 +833,46 @@ func TestHydrationProjectMemoryHiddenOnEmptyStore(t *testing.T) {
 	})
 	if hydrationHasSlot(b.Build(), "memory_project") {
 		t.Fatal("memory_project must hide when store is nil")
+	}
+}
+
+func TestHydrationApplyBlockHiddenWhenEmpty(t *testing.T) {
+	result := NewHydrationBuilder(HydrationSource{
+		RuntimeContext: RuntimeContextSnapshot{
+			CurrentDate: "2026-01-01T00:00:00Z",
+			Environment: "test",
+			RuntimeOS:   "linux/amd64",
+		},
+	}).Build()
+	if hydrationHasSlot(result, "memory") {
+		t.Fatal("empty ApplyBlock must hide the memory list slot")
+	}
+}
+
+func TestHydrationApplyBlockShownWithListOp(t *testing.T) {
+	block := "APPLY:\n- [project] prefer Go over Rust"
+	result := NewHydrationBuilder(HydrationSource{
+		RuntimeContext: RuntimeContextSnapshot{
+			CurrentDate: "2026-01-01T00:00:00Z",
+			Environment: "test",
+			RuntimeOS:   "linux/amd64",
+		},
+		ApplyBlock: block,
+	}).Build()
+	if !hydrationHasSlot(result, "memory") {
+		t.Fatal("ApplyBlock must appear as a memory slot")
+	}
+	var args string
+	for _, c := range result.Messages[0].ToolCalls {
+		if c.Name == "memory" {
+			args = c.Args
+			break
+		}
+	}
+	if args != `{"op":"list"}` {
+		t.Fatalf("memory slot args=%q, want {\"op\":\"list\"}", args)
+	}
+	if got := hydrationResultByName(t, result, "memory"); got != block {
+		t.Fatalf("ApplyBlock content=%q", got)
 	}
 }

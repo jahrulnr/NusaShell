@@ -32,10 +32,10 @@ func ptrBool(v bool) *bool { return &v }
 type Toolbox struct {
 	Skills          application.SkillStore
 	SkillSearcher   application.SkillSearcher // optional; nil = substring fallback
-	Memory          application.MemoryStore   // legacy — used by lifecycle/learning subsystems
+	Experiences     application.ExperienceStore
+	MemoryRecords   application.MemoryRecordStore
 	User            application.MemoryDocumentStore
 	Agent           application.MemoryDocumentStore
-	Fragments       application.FragmentStore
 	ProjectMemory   application.ProjectMemoryStore
 	Docs            application.DocsSource
 	Plugins         application.PluginStore
@@ -432,27 +432,29 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 
 	case name == "skill_list":
 		var args struct {
-			Limit int `json:"limit"`
+			Limit  int    `json:"limit"`
+			Status string `json:"status"`
 		}
 		_ = json.Unmarshal(argsJSON, &args)
 		limit := args.Limit
 		if limit <= 0 {
 			limit = 100
 		}
-		skills := t.Skills.List()
+		skills := filterSkills(t.Skills.List(), args.Status)
 		if limit < len(skills) {
 			skills = skills[:limit]
 		}
 		items := make([]any, 0, len(skills))
 		for _, s := range skills {
-			items = append(items, map[string]any{"id": s.ID, "name": s.Name, "description": s.Description, "owned_by": s.EffectiveOwnedBy(), "path": s.Path, "bundled": s.Bundled})
+			items = append(items, formatSkillJSON(s))
 		}
 		return yamlJSONL(map[string]any{"count": len(skills)}, items), nil
 
 	case name == "skill_search":
 		var args struct {
-			Query string `json:"query"`
-			Limit int    `json:"limit"`
+			Query  string `json:"query"`
+			Limit  int    `json:"limit"`
+			Status string `json:"status"`
 		}
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
@@ -465,15 +467,15 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			limit = 50
 		}
 		if t.SkillSearcher != nil {
-			return t.searchSkillsRanked(ctx, args.Query, limit)
+			return t.searchSkillsRanked(ctx, args.Query, limit, args.Status)
 		}
 		q := strings.ToLower(args.Query)
 		var items []any
-		for _, s := range t.Skills.List() {
+		for _, s := range filterSkills(t.Skills.List(), args.Status) {
 			if !strings.Contains(strings.ToLower(s.Name+" "+s.Description), q) {
 				continue
 			}
-			items = append(items, map[string]any{"id": s.ID, "name": s.Name, "description": s.Description, "owned_by": s.EffectiveOwnedBy(), "path": s.Path, "bundled": s.Bundled})
+			items = append(items, formatSkillJSON(s))
 			if len(items) >= limit {
 				break
 			}
@@ -498,11 +500,14 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		if strings.TrimSpace(args.Content) == "" {
 			return "", fmt.Errorf("skill content is required")
 		}
-		// When path is set, write a support file (references/, templates/,
-		// scripts/) inside an existing skill — mirrors skill read's name+path
-		// pattern. The skill must already exist; creation is not supported
-		// in this mode.
 		if path := strings.TrimSpace(args.Path); path != "" {
+			existing, err := t.Skills.Get(name, "")
+			if err != nil {
+				return "", fmt.Errorf("skill save: %w", err)
+			}
+			if !existing.CanAgentMutate() {
+				return "", fmt.Errorf("cannot mutate trusted curated skill %q", name)
+			}
 			if err := t.Skills.WriteFile(name, "", path, args.Content); err != nil {
 				return "", fmt.Errorf("skill save: %w", err)
 			}
@@ -514,11 +519,22 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			if err != nil {
 				return "", fmt.Errorf("skill %q not found: %w", args.ID, err)
 			}
+			if !existing.CanAgentMutate() {
+				return "", fmt.Errorf("cannot mutate trusted curated skill %q", args.ID)
+			}
+			s = existing
+		} else if existing, err := t.Skills.Get(name, ""); err == nil {
+			if !existing.CanAgentMutate() {
+				return "", fmt.Errorf("cannot mutate trusted curated skill %q", name)
+			}
 			s = existing
 		} else {
 			s = &domain.Skill{
-				State:  domain.SkillStateActive,
-				Origin: domain.SkillOriginAgent,
+				Origin:        domain.SkillOriginLearned,
+				Status:        domain.SkillStatusExperimental,
+				OwnedBy:       string(domain.SkillOriginLearned),
+				Version:       1,
+				ActiveVersion: 1,
 			}
 		}
 		s.Name = name
@@ -542,215 +558,111 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		if id == "" {
 			return "", fmt.Errorf("skill id is required")
 		}
-		if _, err := t.Skills.Get(id, args.OwnedBy); err != nil {
+		skill, err := t.Skills.Get(id, args.OwnedBy)
+		if err != nil {
 			return "", err
+		}
+		if skill.Origin != domain.SkillOriginLearned || (skill.Status != domain.SkillStatusCandidate && skill.Status != domain.SkillStatusExperimental) {
+			return "", fmt.Errorf("only learned candidate/experimental skills can be deleted")
 		}
 		if err := t.Skills.Delete(id, args.OwnedBy); err != nil {
 			return "", err
 		}
 		return yamlBlock(map[string]any{"status": "deleted", "id": id}), nil
 
-	case name == "memory_save":
-		var args struct {
-			Content  string   `json:"content"`
-			Category string   `json:"category"`
-			Project  string   `json:"project"`
-			Task     string   `json:"task"`
-			Tags     []string `json:"tags"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return "", fmt.Errorf("invalid args: %w", err)
-		}
-		if strings.TrimSpace(args.Content) == "" {
-			return "", fmt.Errorf("content is required")
-		}
-		if t.Fragments == nil {
-			return "", fmt.Errorf("fragment store not configured")
-		}
-		frag := &domain.MemoryFragment{
-			Category: args.Category,
-			Project:  args.Project,
-			Task:     args.Task,
-			Tags:     args.Tags,
-			Content:  domain.NormalizeMemoryContent(args.Content),
-			Source:   "agent",
-		}
-		// Prefer the store's atomic capability. The fallback keeps custom/test
-		// stores compatible while still making memory save idempotent.
-		if idempotent, ok := t.Fragments.(application.FragmentSaveIfAbsent); ok {
-			existing, saved, err := idempotent.SaveIfAbsent(frag)
-			if err != nil {
-				return "", err
-			}
-			if !saved {
-				return yamlBlock(map[string]any{"status": "unchanged", "reason": "exact_duplicate", "fragment_id": existing.ID, "category": existing.Category}), nil
-			}
-		} else {
-			want := domain.NormalizeMemoryContent(frag.Content)
-			for _, existing := range t.Fragments.List(domain.FragmentSearchFilter{}) {
-				if domain.NormalizeMemoryContent(existing.Content) == want {
-					return yamlBlock(map[string]any{"status": "unchanged", "reason": "exact_duplicate", "fragment_id": existing.ID, "category": existing.Category}), nil
-				}
-			}
-			if err := t.Fragments.Save(frag); err != nil {
-				return "", err
-			}
-		}
-		return yamlBlock(map[string]any{"status": "saved", "fragment_id": frag.ID, "category": frag.Category}), nil
-
-	case name == "memory_replace":
-		var args struct {
-			Target  string `json:"target"`
-			OldText string `json:"old_text"`
-			ID      string `json:"id"`
-			Content string `json:"content"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return "", fmt.Errorf("invalid args: %w", err)
-		}
-		if strings.TrimSpace(args.Content) == "" {
-			return "", fmt.Errorf("content is required")
-		}
-		switch args.Target {
-		case "user":
-			if t.User == nil {
-				return "", fmt.Errorf("user tier store not configured")
-			}
-			if strings.TrimSpace(args.OldText) == "" {
-				// No old_text: rewrite the entire user document body.
-				if err := t.User.Update([]domain.DocumentEntry{{Content: args.Content, Source: "agent"}}); err != nil {
-					return "", err
-				}
-				return yamlBlock(map[string]any{"status": "rewritten", "target": "user"}), nil
-			}
-			if err := t.User.Replace(args.OldText, args.Content); err != nil {
-				return "", err
-			}
-			return yamlBlock(map[string]any{"status": "replaced", "target": "user"}), nil
-		case "agent":
-			if t.Agent == nil {
-				return "", fmt.Errorf("agent tier store not configured")
-			}
-			if strings.TrimSpace(args.OldText) == "" {
-				// No old_text: rewrite the entire agent document body.
-				if err := t.Agent.Update([]domain.DocumentEntry{{Content: args.Content, Source: "agent"}}); err != nil {
-					return "", err
-				}
-				return yamlBlock(map[string]any{"status": "rewritten", "target": "agent"}), nil
-			}
-			if err := t.Agent.Replace(args.OldText, args.Content); err != nil {
-				return "", err
-			}
-			return yamlBlock(map[string]any{"status": "replaced", "target": "agent"}), nil
-		case "fragment":
-			if t.Fragments == nil {
-				return "", fmt.Errorf("fragment store not configured")
-			}
-			if args.ID == "" {
-				return "", fmt.Errorf("id is required for fragment target")
-			}
-			frag := t.Fragments.Get(args.ID)
-			if frag == nil {
-				return "", fmt.Errorf("fragment %s not found", args.ID)
-			}
-			frag.Content = args.Content
-			if err := t.Fragments.Save(frag); err != nil {
-				return "", err
-			}
-			return yamlBlock(map[string]any{"status": "updated", "target": "fragment"}), nil
-		default:
-			return "", fmt.Errorf("target must be \"user\", \"agent\", or \"fragment\"")
-		}
-
 	case name == "memory_search":
+		if t.MemoryRecords == nil {
+			return "", fmt.Errorf("memory record store not configured")
+		}
 		var args struct {
-			Query    string   `json:"query"`
-			Category string   `json:"category"`
-			Project  string   `json:"project"`
-			Task     string   `json:"task"`
-			Tags     []string `json:"tags"`
-			Limit    int      `json:"limit"`
+			Query   string `json:"query"`
+			Type    string `json:"type"`
+			Status  string `json:"status"`
+			Scope   string `json:"scope"`
+			Project string `json:"project"`
+			Limit   int    `json:"limit"`
 		}
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
-		}
-		if t.Fragments == nil {
-			return "", fmt.Errorf("fragment store not configured")
 		}
 		limit := args.Limit
 		if limit <= 0 {
 			limit = 20
 		}
-		hits := t.Fragments.Search(domain.FragmentSearchFilter{
-			Query:    args.Query,
-			Category: args.Category,
-			Project:  args.Project,
-			Task:     args.Task,
-			Tags:     args.Tags,
-			Limit:    limit,
-		})
-		items := make([]any, 0, len(hits))
-		for _, h := range hits {
-			items = append(items, formatFragmentJSON(h.Fragment, h.Score))
+		filter := domain.MemorySearchFilter{
+			Query:   args.Query,
+			Type:    args.Type,
+			Status:  args.Status,
+			Scope:   args.Scope,
+			Project: args.Project,
+			Limit:   limit,
 		}
-		return yamlJSONL(map[string]any{"count": len(hits)}, items), nil
-
-	case name == "memory_list":
-		var args struct {
-			Target   string `json:"target"`
-			Category string `json:"category"`
-			Project  string `json:"project"`
-			Limit    int    `json:"limit"`
-		}
-		_ = json.Unmarshal(argsJSON, &args)
-		limit := args.Limit
-		if limit <= 0 {
-			limit = 50
-		}
-		if args.Target == "user" {
-			// The user tier is a single document, not a list. Reading it via
-			// list was a design wart; file_read is the honest path.
-			if t.User == nil {
-				return "", fmt.Errorf("user memory is a single document, not a list — and no user store is configured")
+		items := make([]any, 0)
+		for _, rec := range t.MemoryRecords.List() {
+			if !memoryRecordMatches(rec, filter) {
+				continue
 			}
-			return "", fmt.Errorf("user memory is a single document, not a list — read it with file_read(path=%q)", t.User.Path())
-		}
-		if args.Target == "agent" {
-			// Same single-document rule for the agent tier.
-			if t.Agent == nil {
-				return "", fmt.Errorf("soul memory is a single document, not a list — and no agent store is configured")
+			items = append(items, formatMemoryRecordJSON(rec))
+			if len(items) >= limit {
+				break
 			}
-			return "", fmt.Errorf("soul memory is a single document, not a list — read it with file_read(path=%q)", t.Agent.Path())
 		}
-		// Default: list fragments
-		if t.Fragments == nil {
-			return yamlBlock(map[string]any{"target": "fragments", "count": 0, "error": "fragment store not configured"}), nil
-		}
-		frags := t.Fragments.List(domain.FragmentSearchFilter{
-			Category: args.Category,
-			Project:  args.Project,
-			Limit:    limit,
-		})
-		items := make([]any, 0, len(frags))
-		for _, f := range frags {
-			items = append(items, formatFragmentJSON(f, 0))
-		}
-		return yamlJSONL(map[string]any{"target": "fragments", "count": len(frags)}, items), nil
+		return yamlJSONL(map[string]any{"count": len(items)}, items), nil
 
-	case name == "memory_delete":
+	case name == "memory_get":
+		if t.MemoryRecords == nil {
+			return "", fmt.Errorf("memory record store not configured")
+		}
 		var args struct {
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
 		}
-		if t.Fragments == nil {
-			return "", fmt.Errorf("fragment store not configured")
+		id := strings.TrimSpace(args.ID)
+		if id == "" {
+			return "", fmt.Errorf("id is required")
 		}
-		if err := t.Fragments.Delete(args.ID); err != nil {
+		rec, err := t.MemoryRecords.Get(id)
+		if err != nil {
 			return "", err
 		}
-		return yamlBlock(map[string]any{"status": "deleted"}), nil
+		return yamlBlock(formatMemoryRecordJSON(rec)), nil
+
+	case name == "memory_list":
+		if t.MemoryRecords == nil {
+			return yamlBlock(map[string]any{"count": 0, "error": "memory record store not configured"}), nil
+		}
+		var args struct {
+			Type    string `json:"type"`
+			Status  string `json:"status"`
+			Scope   string `json:"scope"`
+			Project string `json:"project"`
+			Limit   int    `json:"limit"`
+		}
+		_ = json.Unmarshal(argsJSON, &args)
+		limit := args.Limit
+		if limit <= 0 {
+			limit = 50
+		}
+		filter := domain.MemorySearchFilter{
+			Type:    args.Type,
+			Status:  args.Status,
+			Scope:   args.Scope,
+			Project: args.Project,
+			Limit:   limit,
+		}
+		items := make([]any, 0)
+		for _, rec := range t.MemoryRecords.List() {
+			if !memoryRecordMatches(rec, filter) {
+				continue
+			}
+			items = append(items, formatMemoryRecordJSON(rec))
+			if len(items) >= limit {
+				break
+			}
+		}
+		return yamlJSONL(map[string]any{"count": len(items)}, items), nil
 
 	case name == "docs_list":
 		var args struct {
@@ -1202,14 +1114,14 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if strings.TrimSpace(args.Ref) == "" {
 			return "", fmt.Errorf("ref is required (use mcp_search to find tools and their refs)")
 		}
-		// Tolerant parsing: accept arguments_json as a JSON string (legacy)
+		// Tolerant parsing: accept arguments_json as a JSON string
 		// or as a JSON object directly (canonical form matching MCP spec).
 		// Omitting arguments_json entirely defaults to {}.
 		var toolArgs map[string]any
 		if len(args.ArgumentsJSON) == 0 || string(args.ArgumentsJSON) == "null" {
 			toolArgs = map[string]any{}
 		} else if len(args.ArgumentsJSON) > 0 && args.ArgumentsJSON[0] == '"' {
-			// Legacy form: arguments_json is a JSON string containing escaped JSON.
+			// arguments_json is a JSON string containing escaped JSON.
 			var encoded string
 			if err := json.Unmarshal(args.ArgumentsJSON, &encoded); err != nil {
 				return "", fmt.Errorf("arguments_json must be a JSON object or a JSON string encoding a JSON object: %v", err)
@@ -1465,11 +1377,6 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		return yamlBlock(map[string]any{"status": "slept"}), nil
 	}
 
-	// MCP plugin tools are NOT callable by name. There is exactly one
-	// execution contract: mcp_call with a ref (<server>:<tool>) obtained from
-	// mcp_search / tool_list. The legacy mcp__<server>__<tool>
-	// dispatch was removed — those names are never advertised in tools[] and
-	// gave the model a second, ambiguous way to reach the same tool.
 	return "", fmt.Errorf("unknown tool: %s", name)
 }
 
@@ -1495,12 +1402,12 @@ func (t *Toolbox) executeWaitUntil(argsJSON []byte) (string, error) {
 // searchSkillsRanked runs the ranked skill search (BM25 + graph + recency,
 // no embedding) and appends substring matches the ranker missed (plural or
 // inflected forms) so recall never regresses below the plain matcher.
-func (t *Toolbox) searchSkillsRanked(ctx context.Context, query string, limit int) (string, error) {
+func (t *Toolbox) searchSkillsRanked(ctx context.Context, query string, limit int, status string) (string, error) {
 	results, err := t.SkillSearcher.SearchSkills(ctx, query, limit)
 	if err != nil {
 		return "", fmt.Errorf("skill search: %w", err)
 	}
-	skills := t.Skills.List()
+	skills := filterSkills(t.Skills.List(), status)
 	byKey := make(map[string]*domain.Skill, len(skills))
 	for _, sk := range skills {
 		byKey[sk.ID] = sk
@@ -1516,12 +1423,11 @@ func (t *Toolbox) searchSkillsRanked(ctx context.Context, query string, limit in
 			continue
 		}
 		seen[sk.ID] = true
-		items = append(items, map[string]any{"id": sk.ID, "name": sk.Name, "description": sk.Description, "owned_by": sk.EffectiveOwnedBy(), "path": sk.Path, "bundled": sk.Bundled})
+		items = append(items, formatSkillJSON(sk))
 		if len(items) >= limit {
 			break
 		}
 	}
-	// Recall fallback: substring matches the ranker missed, in store order.
 	if len(items) < limit {
 		q := strings.ToLower(query)
 		for _, sk := range skills {
@@ -1533,7 +1439,7 @@ func (t *Toolbox) searchSkillsRanked(ctx context.Context, query string, limit in
 			}
 			if strings.Contains(strings.ToLower(sk.Name+" "+sk.Description), q) {
 				seen[sk.ID] = true
-				items = append(items, map[string]any{"id": sk.ID, "name": sk.Name, "description": sk.Description, "owned_by": sk.EffectiveOwnedBy(), "path": sk.Path, "bundled": sk.Bundled})
+				items = append(items, formatSkillJSON(sk))
 			}
 		}
 	}
@@ -1623,8 +1529,8 @@ func rankMCPItems(items []any, query string) []any {
 // is a living planning document that stays visible in tool history while the
 // hydration checkpoint is reused, then is included in the fresh checkpoint
 // after compaction. Requires a conversation id in the context (set via
-// WithConversationID by the turn runner). Legacy `goal` arg is accepted for
-// backward compat and mapped to `brief`.
+// WithConversationID by the turn runner). An empty `goal` is ignored; a
+// non-empty `goal` fills `brief` when brief is omitted.
 const (
 	todoMaxItems        = 50
 	todoMaxContentChars = 500
@@ -1643,7 +1549,7 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 		Items      json.RawMessage `json:"items"`
 		Mode       string          `json:"mode"`
 		Brief      string          `json:"brief"`
-		Goal       string          `json:"goal"` // legacy, mapped to brief
+		Goal       string          `json:"goal"` // mapped to brief when brief is empty
 		ClearBrief bool            `json:"clear_brief"`
 	}
 	if err := json.Unmarshal(argsJSON, &args); err != nil {
@@ -1669,7 +1575,6 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 	}
 	brief := strings.TrimSpace(args.Brief)
 	if brief == "" && args.Goal != "" {
-		// Backward compat: legacy `goal` arg maps to `brief`.
 		brief = strings.TrimSpace(args.Goal)
 	}
 	if args.ClearBrief && brief != "" {
@@ -2187,26 +2092,80 @@ func pluginMatchesServer(p *domain.Plugin, server string) bool {
 	return p.Manifest.ID == server
 }
 
-// formatFragmentJSON renders a fragment as a map for JSONL output.
-// Score is included when non-zero (BM25 search results).
-func formatFragmentJSON(f *domain.MemoryFragment, score float64) map[string]any {
-	m := map[string]any{
-		"id":         f.ID,
-		"category":   string(f.Category),
-		"updated_at": clock.NewTime(f.UpdatedAt).Format(time.RFC3339),
-		"content":    f.Content,
+// formatSkillJSON renders a skill as discovery metadata for list/search.
+func formatSkillJSON(s *domain.Skill) map[string]any {
+	return map[string]any{
+		"id":          s.ID,
+		"name":        s.Name,
+		"description": s.Description,
+		"owned_by":    s.EffectiveOwnedBy(),
+		"status":      string(s.Status),
+		"path":        s.Path,
+		"bundled":     s.Bundled,
 	}
-	if f.Project != "" {
-		m["project"] = f.Project
+}
+
+func filterSkills(skills []*domain.Skill, status string) []*domain.Skill {
+	status = strings.TrimSpace(status)
+	out := make([]*domain.Skill, 0, len(skills))
+	for _, s := range skills {
+		if s == nil {
+			continue
+		}
+		if status != "" {
+			if string(s.Status) == status {
+				out = append(out, s)
+			}
+			continue
+		}
+		if s.Routable() {
+			out = append(out, s)
+		}
 	}
-	if f.Task != "" {
-		m["task"] = f.Task
+	return out
+}
+
+func memoryRecordMatches(m *domain.MemoryRecord, filter domain.MemorySearchFilter) bool {
+	if m == nil {
+		return false
 	}
-	if len(f.Tags) > 0 {
-		m["tags"] = f.Tags
+	if !filter.IncludeRetired && !m.Retrievable() {
+		return false
 	}
-	if score > 0 {
-		m["score"] = score
+	if filter.Type != "" && m.Type != filter.Type {
+		return false
 	}
-	return m
+	if filter.Status != "" && m.Status != filter.Status {
+		return false
+	}
+	if filter.Scope != "" && m.Scope.Level != filter.Scope {
+		return false
+	}
+	if filter.Project != "" && m.Scope.Project != filter.Project {
+		return false
+	}
+	if q := strings.TrimSpace(filter.Query); q != "" {
+		hay := strings.ToLower(m.Body + " " + m.Subject + " " + m.Predicate + " " + m.Object)
+		if !strings.Contains(hay, strings.ToLower(q)) {
+			return false
+		}
+	}
+	return true
+}
+
+func formatMemoryRecordJSON(m *domain.MemoryRecord) map[string]any {
+	out := map[string]any{
+		"id":     m.ID,
+		"type":   m.Type,
+		"body":   m.Body,
+		"status": m.Status,
+		"scope":  m.Scope.Level,
+	}
+	if m.Subject != "" {
+		out["subject"] = m.Subject
+	}
+	if m.Scope.Project != "" {
+		out["project"] = m.Scope.Project
+	}
+	return out
 }

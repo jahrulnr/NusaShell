@@ -24,7 +24,7 @@ func (a *App) learningSearch() *LearningSearcher {
 			a.graphService = NewLearningGraphService(a.LearningEdges)
 		}
 	}
-	a.learningSearcher = NewLearningSearcher(a.Skills, a.Memory, embed, a.graphService)
+	a.learningSearcher = NewLearningSearcher(a.Skills, a.MemoryRecords, embed, a.graphService)
 	return a.learningSearcher
 }
 

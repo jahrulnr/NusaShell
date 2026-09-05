@@ -16,5 +16,7 @@ func (a *App) dispatchSkills(method string, payload json.RawMessage) (any, *cont
 		contracts.MethodSkillsDelete:   decodeReq(a.handleSkillsDelete),
 		contracts.MethodSkillsFileRead: decodeReq(a.handleSkillsFileRead),
 		contracts.MethodSkillsInstall:  decodeReq(a.handleSkillsInstall),
+		contracts.MethodSkillsPromote:  decodeReq(a.handleSkillsPromote),
+		contracts.MethodSkillsRollback: decodeReq(a.handleSkillsRollback),
 	}, "skills")(method, payload)
 }

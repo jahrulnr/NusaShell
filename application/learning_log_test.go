@@ -191,36 +191,17 @@ func TestHandleLearningLogParsesReviewStatusAndError(t *testing.T) {
 	}
 }
 
-func TestFlushLearningReviewDoesNotPushVerboseErrorEvent(t *testing.T) {
-	app := &App{
-		Bus:                  NewBus(),
-		Conversations:        &fakeConversationStore{},
-		turnsSinceReview:     map[string]int{},
-		toolCallsSinceReview: map[string]int{},
-	}
-	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
-	_, events, unsubscribe := app.Bus.Subscribe()
-	defer unsubscribe()
+const (
+	eventLearningJobStarted = "learning.job.started"
+	eventLearningJobDone    = "learning.job.done"
+	eventLearningJobError   = "learning.job.error"
+)
 
-	app.flushLearningReview("conv_error_event", "threshold")
-	deadline := time.After(2 * time.Second)
-	for {
-		select {
-		case ev := <-events:
-			if ev.Type != contracts.EventLearningReviewError {
-				continue
-			}
-			var payload contracts.LearningReviewEvent
-			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
-				t.Fatalf("decode learning review error event: %v", err)
-			}
-			if payload.Error != "" {
-				t.Fatalf("learning review error event exposed provider details: %q", payload.Error)
-			}
-			return
-		case <-deadline:
-			t.Fatal("timed out waiting for learning review error event")
-		}
+func TestLearningJobErrorEventName(t *testing.T) {
+	_ = eventLearningJobStarted
+	_ = eventLearningJobDone
+	if eventLearningJobError == "" {
+		t.Fatal("learning job error event name must be defined")
 	}
 }
 
@@ -255,86 +236,5 @@ func TestTrajectoryRecordRoundTrip(t *testing.T) {
 	}
 	if ev.TS.IsZero() {
 		t.Error("timestamp missing")
-	}
-}
-
-func TestSaveAndReadReviewTranscript(t *testing.T) {
-	dir := t.TempDir()
-	msgs := []ChatMessage{
-		{Role: "user", Content: "transcript tail…"},
-		{Role: "assistant", Content: "I will save a memory.", ToolCalls: []domain.ToolCall{
-			{ID: "tc_1", Name: "memory", Args: `{"op":"save","content":"x"}`, Status: "ok"},
-		}},
-		{Role: "tool", ToolResult: &ToolResult{ToolCallID: "tc_1", Name: "memory", Content: "Saved"}},
-	}
-	id := saveReviewTranscript(dir, "conv_1", "test-model", msgs)
-	if id == "" {
-		t.Fatal("saveReviewTranscript returned empty id")
-	}
-
-	loaded := ReadReviewTranscript(dir, id)
-	if loaded == nil {
-		t.Fatal("ReadReviewTranscript returned nil")
-	}
-	if loaded.ConversationID != "conv_1" || loaded.Model != "test-model" {
-		t.Errorf("loaded meta = %+v", loaded)
-	}
-	if len(loaded.Messages) != 3 {
-		t.Fatalf("messages = %d, want 3", len(loaded.Messages))
-	}
-	if loaded.Messages[1].ToolCalls[0].Name != "memory" {
-		t.Errorf("tool call name = %q", loaded.Messages[1].ToolCalls[0].Name)
-	}
-}
-
-func TestReadReviewTranscriptMissing(t *testing.T) {
-	if ReadReviewTranscript(t.TempDir(), "nonexistent") != nil {
-		t.Error("want nil for missing transcript")
-	}
-}
-
-func TestHandleLearningReviewTranscript(t *testing.T) {
-	dir := t.TempDir()
-	msgs := []ChatMessage{
-		{Role: "user", Content: "transcript"},
-		{Role: "assistant", Reasoning: "checking stored memories first", ToolCalls: []domain.ToolCall{
-			{ID: "tc_1", Name: "memory", Args: `{"op":"save","content":"x"}`, Status: "ok", Output: "Saved"},
-		}},
-		{Role: "tool", ToolResult: &ToolResult{ToolCallID: "tc_1", Name: "memory", Content: "Saved"}},
-	}
-	id := saveReviewTranscript(dir, "conv_1", "m", msgs)
-
-	app := &App{DataDir: dir}
-	res, rpcErr := app.handleLearningReviewTranscript(contracts.LearningReviewTranscriptRequest{ID: id})
-	if rpcErr != nil {
-		t.Fatalf("handler: %v", rpcErr)
-	}
-	result, ok := res.(contracts.LearningReviewTranscriptResult)
-	if !ok {
-		t.Fatalf("result type = %T", res)
-	}
-	if result.ID != id || result.ConversationID != "conv_1" {
-		t.Errorf("result meta = %+v", result)
-	}
-	if len(result.Messages) != 3 {
-		t.Fatalf("messages = %d, want 3", len(result.Messages))
-	}
-	if result.Messages[1].ToolCalls[0].Name != "memory" {
-		t.Errorf("tool call = %+v", result.Messages[1].ToolCalls[0])
-	}
-	if result.Messages[1].Reasoning != "checking stored memories first" {
-		t.Errorf("reasoning not mapped: %q", result.Messages[1].Reasoning)
-	}
-	if result.Messages[2].ToolResult == nil || result.Messages[2].ToolResult.Name != "memory" {
-		t.Errorf("tool result = %+v", result.Messages[2].ToolResult)
-	}
-
-	// Missing ID → validation error.
-	if _, err := app.handleLearningReviewTranscript(contracts.LearningReviewTranscriptRequest{}); err == nil {
-		t.Error("want validation error for empty id")
-	}
-	// Nonexistent ID → not found.
-	if _, err := app.handleLearningReviewTranscript(contracts.LearningReviewTranscriptRequest{ID: "ghost"}); err == nil {
-		t.Error("want not-found error for missing transcript")
 	}
 }

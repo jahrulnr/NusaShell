@@ -67,7 +67,9 @@ const (
 	IDPrefixConv     = "conv"   // conversations
 	IDPrefixEdge     = "edge"   // learning graph edges (ULID)
 	IDPrefixEvt      = "evt"    // automation events
-	IDPrefixFrag     = "frag"   // memory fragments (ULID)
+	IDPrefixExp      = "exp"    // experience events (ULID)
+	IDPrefixLearnJob = "ljob"   // growth learning jobs (ULID)
+	IDPrefixLearnOp  = "lop"    // typed learning operations (ULID)
 	IDPrefixJob      = "job"    // Automation jobs
 	IDPrefixLog      = "log"    // log entries
 	IDPrefixMcp      = "mcp"    // MCP tool call IDs

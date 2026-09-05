@@ -1,0 +1,38 @@
+{
+  "id": "exp_01TESTEXAMPLE000000000000",
+  "conversation_id": "conv_01TEST",
+  "timestamp": "2026-09-05T00:00:00Z",
+  "scope": {
+    "workspace": "/workspace/nusa",
+    "project": "nusa",
+    "environment": "linux"
+  },
+  "goal": "debug nginx upload",
+  "actions": [
+    {"name": "file_read", "digest": "nginx.conf"},
+    {"name": "exec", "digest": "curl -I", "failed": true},
+    {"name": "file_patch", "digest": "symlink"}
+  ],
+  "user_corrections": [
+    {
+      "type": "procedure",
+      "user_said": "inspect the symlink before chmod",
+      "explicit": true
+    }
+  ],
+  "outcome": {
+    "status": "success",
+    "verification": ["curl 200"]
+  },
+  "signals": {
+    "user_corrections": 1,
+    "retries": 1,
+    "failed_actions": 1,
+    "verified_success": true,
+    "novel_workflow": true,
+    "explicit_teaching": false,
+    "failure_signature": "nginx-403",
+    "procedure_fingerprint": "file_read>exec>file_patch",
+    "root_cause_recovered": true
+  }
+}

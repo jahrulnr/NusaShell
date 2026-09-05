@@ -252,6 +252,9 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 		source.ConvID = c.ID
 	}
 	source.ProjectMemory = a.ProjectMemory
+	if a.MemoryRecords != nil {
+		source.ApplyBlock = domain.BuildApplyBlock(a.MemoryRecords.List(), domain.ApplyBlockTokenCap)
+	}
 	return NewHydrationBuilder(source).Build().Messages
 }
 

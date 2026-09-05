@@ -105,26 +105,17 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 			a.recordLearningTurnNodes(run, results[i].learningNodeIDs)
 		}
 	}
-	// Cross-conversation announcements: the memory/skill libraries are
-	// global, so a successful mutating call by this conversation's agent is
+	// Cross-conversation announcements: the skill library is global, so a
+	// successful mutating skill call by this conversation's agent is
 	// external news to every OTHER active agent. The caller's own room is
 	// skipped — the model already knows it made the call (no
-	// self-announcement).
+	// self-announcement). The memory dispatcher is read-only.
 	for i := range toolCalls {
 		r := results[i]
 		if r.status != domain.ToolOK {
 			continue
 		}
 		switch toolCalls[i].Name {
-		case "memory":
-			op := OpArg([]byte(toolCalls[i].Args))
-			if op == "save" || op == "replace" || op == "delete" {
-				a.publishAnnouncementToAll(newAnnouncement(
-					"memory_changed",
-					domain.AnnouncementMemoryChangedArgs("", op),
-					domain.AnnouncementMemoryChangedMessage(),
-				), run.ConversationID)
-			}
 		case "skill":
 			op := OpArg([]byte(toolCalls[i].Args))
 			if op == "save" || op == "delete" {
@@ -258,12 +249,6 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 	}
 	a.emitToolCompleted(run, toolCall, res)
 	a.emitLearningMutationEvents(toolCall.Name, status)
-	// Skill nudge: count tool calls per conversation so tool-heavy but
-	// user-turn-light coding sessions trigger skill review independently
-	// of the turn threshold.
-	if !run.Headless && (status == domain.ToolOK || status == domain.ToolFailed) {
-		a.incrementToolCallCounter(run.ConversationID)
-	}
 	return res
 }
 

@@ -109,25 +109,23 @@ func TestToolFactoryAutomationAgentOmitsACPTools(t *testing.T) {
 	}
 }
 
-func TestToolFactoryReviewAgentWhitelistedWithLocalTools(t *testing.T) {
+func TestToolFactoryMemoryConsolidatorOmitsACPDelegateAndWrites(t *testing.T) {
 	f := &ToolFactory{
 		Toolbox:     func() []ToolInfo { return factoryStubTools() },
 		Dispatchers: FilterDispatcherToolInfos,
 	}
-	defs := f.Get(AgentReview, "")
-	// Local tools always present.
-	if !hasTool(defs, reviewTranscriptToolName) || !hasTool(defs, modelOverrideToolName) {
-		t.Fatalf("background learning agent missing local tools, got %v", namesOf(defs))
+	defs := f.Get(AgentMemoryConsolidator, "")
+	if hasTool(defs, "review_transcript") {
+		t.Fatalf("consolidator must not advertise review_transcript, got %v", namesOf(defs))
 	}
-	// Curation + evidence + research roster.
-	for _, want := range []string{"memory", "skill", "file_read", "file_list", "grep", "web_search", "web_fetch", "docs"} {
+	for _, want := range []string{"file_read", "file_list", "grep", "web_search", "web_fetch", "docs", "skill", "memory"} {
 		if !hasTool(defs, want) {
-			t.Fatalf("background learning agent missing %q in %v", want, namesOf(defs))
+			t.Fatalf("memory consolidator missing %q in %v", want, namesOf(defs))
 		}
 	}
-	for _, banned := range []string{"exec", "file_write", "file_patch", "file_delete", "show", "subagent", "delegate", "automation", "memory_project"} {
+	for _, banned := range []string{"subagent", "delegate", "file_write", "file_patch", "file_delete"} {
 		if hasTool(defs, banned) {
-			t.Fatalf("background learning agent must not see %q, got %v", banned, namesOf(defs))
+			t.Fatalf("memory consolidator must not see %q, got %v", banned, namesOf(defs))
 		}
 	}
 }
@@ -166,8 +164,8 @@ func TestToolFactoryNilToolbox(t *testing.T) {
 	if defs := f.Get(AgentConversation, "/ws"); defs != nil {
 		t.Fatalf("conversation agent without toolbox must get nil, got %v", namesOf(defs))
 	}
-	if defs := f.Get(AgentReview, ""); defs != nil {
-		t.Fatalf("review agent without toolbox must get nil, got %v", namesOf(defs))
+	if defs := f.Get(AgentMemoryConsolidator, ""); defs != nil {
+		t.Fatalf("memory consolidator without toolbox must get nil, got %v", namesOf(defs))
 	}
 	// Compaction still works without a toolbox.
 	if defs := f.Get(AgentCompaction, ""); len(defs) != 1 {

@@ -155,11 +155,9 @@ type Conversation struct {
 	// LastReviewedMsgCount onward, avoiding re-reading already reviewed
 	// content. Zero means "never reviewed" (review from the start).
 	LastReviewedMsgCount int `json:"last_reviewed_msg_count,omitempty"`
-	// LastAnnouncedFragments tracks fragment IDs whose task_memory
-	// announcement has already been delivered to this conversation, so a
-	// fragment is announced once across turns and restarts (dedup state
-	// for the announcement engine).
-	LastAnnouncedFragments []string `json:"last_announced_fragments,omitempty"`
+	// LastAnnouncedRecords tracks memory record IDs already delivered as
+	// a task_memory announcement in this conversation.
+	LastAnnouncedRecords []string `json:"last_announced_records,omitempty"`
 	// Origin marks conversations that are not Agent rooms. Pipeline agent
 	// steps persist a conversation so the turn loop and automation(op="steer") can work;
 	// those must not appear in agent.conversations.list.

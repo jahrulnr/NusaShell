@@ -7,8 +7,9 @@ import (
 	clock "nusashell/pkg/time"
 )
 
-// MaxMemoryEntries is the hard capacity limit for memory entries. The
-// lifecycle manager prunes low-strength entries when this is exceeded.
+// MaxMemoryEntries is the hard capacity limit for live (non-retired)
+// memory records. The lifecycle manager retires low-utility records when
+// this is exceeded.
 const MaxMemoryEntries = 500
 
 // LifecycleConfig controls the decay and prune cycle for learning memory.
@@ -31,45 +32,31 @@ func DefaultLifecycleConfig() LifecycleConfig {
 	}
 }
 
-// MemoryStrength returns the decayed strength of a memory entry.
-// Formula (from memex temporal.go):
-//
-//	lambda = ln(2) / halfLifeHours
-//	stability = 1 + log1p(accessCount)  — but we don't track access
-//	count yet, so stability = 1 (flat decay).
-//	multiplier = baseStrength * exp(-lambda * hoursSinceCreated / stability)
-//
-// baseStrength is derived from the signal tag: fact=0.8, error=0.7,
-// decision=0.6, preference=0.5, default=0.5.
-//
-// The result is clamped to [0, 1] — decay never goes negative, and we
-// don't exceed 1. A non-positive DecayHalfLife is treated as no decay
-// (returns the base strength, clamped).
-func MemoryStrength(e *MemoryEntry, cfg LifecycleConfig) float64 {
-	if e == nil {
+// MemoryRecordStrength is utility decayed by time since last confirmation.
+// UpdatedAt is a row-write stamp and must not reset decay; only
+// LastConfirmed (else CreatedAt) is the anchor.
+func MemoryRecordStrength(m *MemoryRecord, cfg LifecycleConfig) float64 {
+	if m == nil || !m.Retrievable() {
 		return 0
 	}
-	base := 0.5
-	for _, tag := range e.Tags {
-		switch tag {
-		case "fact":
-			base = 0.8
-		case "error", "fix":
-			base = 0.7
-		case "decision":
-			base = 0.6
-		case "preference":
-			base = 0.5
-		}
+	base := m.Utility
+	if base <= 0 {
+		base = 0.5
 	}
 	if cfg.DecayHalfLife <= 0 {
 		return clamp01(base)
 	}
-	hoursSince := clock.NewTime().Since(e.CreatedAt).Hours()
+	anchor := m.LastConfirmed
+	if anchor.IsZero() {
+		anchor = m.CreatedAt
+	}
+	hoursSince := clock.NewTime().Since(anchor).Hours()
 	lambda := math.Ln2 / cfg.DecayHalfLife
-	stability := 1.0
-	strength := base * math.Exp(-lambda*hoursSince/stability)
-	return clamp01(strength)
+	stability := m.Stability
+	if stability <= 0 {
+		stability = 1
+	}
+	return clamp01(base * math.Exp(-lambda*hoursSince/stability))
 }
 
 func clamp01(x float64) float64 {

@@ -35,10 +35,11 @@ test('WebSocket reconnect is an explicit persisted preference', () => {
   assert.match(rpc, /lsSet\('nusashell\.autoReconnect'/);
 });
 
-test('Skill nudge interval is exposed in settings UI', () => {
-  assert.match(html, /id="settings-skill-nudge-interval"/);
-  assert.match(settingsView, /skill_nudge_interval/);
-  assert.match(settingsView, /settings-skill-nudge-interval/);
+test('Learning review threshold and skill nudge interval are gone', () => {
+  assert.doesNotMatch(html, /id="settings-learning-threshold"/);
+  assert.doesNotMatch(html, /id="settings-skill-nudge-interval"/);
+  assert.doesNotMatch(settingsView, /learning_review_threshold/);
+  assert.doesNotMatch(settingsView, /skill_nudge_interval/);
 });
 
 test('Slow Down per-round delay is exposed in settings UI', () => {

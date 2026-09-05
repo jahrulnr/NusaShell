@@ -1,9 +1,7 @@
-// Package memorystore implements the three-tier memory persistence
-// adapters: two single-file documents (memory/user.md for the user
-// tier and memory/soul.md for the agent tier),
-// plus one markdown file per entry under memory/fragments/ for the
-// unlimited searchable archive. All adapters auto-create their files and
-// directories on first use.
+// Package memorystore persists the two human-only always-injected
+// documents: memory/user.md (About You) and memory/soul.md (About Agent).
+// Structured MemoryRecords live in jsonstore growth JSONL, not here.
+// Both adapters auto-create their files on first use.
 package memorystore
 
 import (

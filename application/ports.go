@@ -78,6 +78,14 @@ type SkillStore interface {
 	// registers the skill metadata. The archive must contain a top-level
 	// directory with a SKILL.md file. Returns the installed skill ID.
 	Install(zipData []byte) (string, error)
+	// Promote sets Status=trusted. Only experimental or validated skills
+	// can be promoted. This is the persistence primitive for a later
+	// human RPC; CreatorMayPromote is always false so learners never
+	// call this themselves.
+	Promote(id, ownedBy string) (*domain.Skill, error)
+	// Rollback checks out an immutable snapshot: ActiveVersion=version
+	// and copies versions/<n>/SKILL.md over the root SKILL.md.
+	Rollback(id, ownedBy string, version int) (*domain.Skill, error)
 	// MountPluginSkills scans a plugin's skills/ directory and registers
 	// all skill packages found there with owned_by="plugin:<pluginID>".
 	// File content is read from the plugin directory (mount, no copy).
@@ -112,48 +120,42 @@ type PluginInstaller interface {
 	Update(ctx context.Context, pluginID string) (*domain.Plugin, error)
 }
 
-type MemoryStore interface {
-	List() []*domain.MemoryEntry
-	Save(e *domain.MemoryEntry) error
+type ExperienceStore interface {
+	List() []*domain.Experience
+	Get(id string) (*domain.Experience, error)
+	Save(e *domain.Experience) error
+	ListByConversation(conversationID string) []*domain.Experience
+}
+
+type MemoryRecordStore interface {
+	List() []*domain.MemoryRecord
+	Get(id string) (*domain.MemoryRecord, error)
+	Save(e *domain.MemoryRecord) error
 	Delete(id string) error
-	Replace(target, oldText, content string) error
+}
+
+type LearningJobStore interface {
+	List() []*domain.LearningJob
+	Get(id string) (*domain.LearningJob, error)
+	Save(j *domain.LearningJob) error
+}
+
+type LearningOpStore interface {
+	List() []*domain.LearningOperation
+	Save(op *domain.LearningOperation) error
 }
 
 // MemoryDocumentStore is the shared contract for a single-file memory
-// document (user.md and soul.md): free-form prose maintained in place
-// via Replace (substring match) or Update (rewrite the entire body).
-// There is no per-entry create/delete — the agent maintains the document
-// like a README.
+// document (user.md and soul.md). Humans edit these via Learning UI RPCs.
+// Agents and consolidators never write them.
 type MemoryDocumentStore interface {
 	Load() *domain.MemoryDocument
 	Update(entries []domain.DocumentEntry) error
 	Replace(oldText, content string) error // substring match update
 	// Path returns the absolute filesystem path of the document file.
-	// Used by the review agent to pre-inject the file via file_read.
 	Path() string
 }
 
-// FragmentStore is the unlimited, searchable memory archive backed by
-// one markdown file per entry under memory/fragments/. Foreground
-// agents create, update, delete, and search fragments.
-type FragmentStore interface {
-	List(filter domain.FragmentSearchFilter) []*domain.MemoryFragment
-	Get(id string) *domain.MemoryFragment
-	Save(f *domain.MemoryFragment) error
-	Delete(id string) error
-	Search(filter domain.FragmentSearchFilter) []domain.FragmentSearchHit
-}
-
-// FragmentSaveIfAbsent is an optional capability for fragment stores that can
-// atomically enforce exact-content idempotency. Callers should fall back to a
-// deterministic List scan when a store does not implement it.
-type FragmentSaveIfAbsent interface {
-	SaveIfAbsent(f *domain.MemoryFragment) (existing *domain.MemoryFragment, saved bool, err error)
-}
-
-// ProjectMemoryStore is the per-workspace, skill-compatible project memory
-// adapter ({base}/{key}/{kind}.md). It is independent of user memory
-// (user.md + fragments). Empty workspace is rejected by the tool layer.
 type ProjectMemoryStore interface {
 	Query(workspace string, q domain.ProjectMemoryQuery) ([]domain.ProjectMemoryHit, error)
 	List(workspace string) ([]string, error)

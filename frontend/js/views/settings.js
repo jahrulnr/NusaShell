@@ -216,8 +216,6 @@ export async function refresh() {
     state.reviewModel = settings.review_model ?? '';
     state.delegateModel = settings.delegate_model ?? '';
     sttLanguageSelect.setSelected([['id', 'en'].includes(settings.stt_offline_language) ? settings.stt_offline_language : '']);
-    document.getElementById('settings-learning-threshold').value = settings.learning_review_threshold ?? 10;
-    document.getElementById('settings-skill-nudge-interval').value = settings.skill_nudge_interval ?? 15;
     document.getElementById('settings-project-memory-base').value = settings.project_memory_base ?? '';
     document.getElementById('settings-auto-continues').value = settings.max_auto_continues ?? 10;
     document.getElementById('settings-slow-down').value = settings.slow_down ?? 0;
@@ -808,16 +806,6 @@ async function save() {
     const compactionValue = compactionSelect.getSelected()?.[0] ?? '';
     const reviewValue = reviewSelect.getSelected()?.[0] ?? '';
     const delegateValue = delegateSelect.getSelected()?.[0] ?? '';
-    const learningThreshold = Number(document.getElementById('settings-learning-threshold').value);
-    if (!Number.isInteger(learningThreshold) || learningThreshold < 0 || learningThreshold > 1000) {
-      setStatus('Learning review threshold must be between 0 and 1,000.', true);
-      return;
-    }
-    const skillNudgeInterval = Number(document.getElementById('settings-skill-nudge-interval').value);
-    if (!Number.isInteger(skillNudgeInterval) || skillNudgeInterval < 0 || skillNudgeInterval > 1000) {
-      setStatus('Skill review threshold must be between 0 and 1,000.', true);
-      return;
-    }
     const maxAutoContinues = Number(document.getElementById('settings-auto-continues').value);
     if (!Number.isInteger(maxAutoContinues) || maxAutoContinues < 0 || maxAutoContinues > 10000) {
       setStatus('Max auto-continues must be between 0 and 10,000 (0 = unlimited).', true);
@@ -875,8 +863,6 @@ async function save() {
       web_search_brave_api_key: webSearchBraveAPIKey || null,
       web_search_serper_api_key: webSearchSerperAPIKey || null,
       web_search_tavily_api_key: webSearchTavilyAPIKey || null,
-      learning_review_threshold: learningThreshold,
-      skill_nudge_interval: skillNudgeInterval,
       project_memory_base: document.getElementById('settings-project-memory-base').value.trim() || null,
       max_auto_continues: maxAutoContinues,
       slow_down: slowDown,
