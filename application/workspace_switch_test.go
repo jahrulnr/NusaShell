@@ -50,10 +50,10 @@ func workspaceSwitchFixture(oldWS string) *domain.Conversation {
 	}
 }
 
-func pickWorkspace(t *testing.T, app *App, id string) *domain.Conversation {
+func setWorkspace(t *testing.T, app *App, id, path string) *domain.Conversation {
 	t.Helper()
-	if _, rpcErr := app.handleConversationsPickWorkspace(contracts.ConversationIDRequest{ID: id}); rpcErr != nil {
-		t.Fatalf("pick workspace: %v", rpcErr)
+	if _, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{ID: id, Path: path}); rpcErr != nil {
+		t.Fatalf("set workspace: %v", rpcErr)
 	}
 	saved, err := app.Conversations.Get(id)
 	if err != nil {
@@ -68,16 +68,14 @@ func TestHandleConversationsPickWorkspaceQueuesNoticeWithoutInserting(t *testing
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"conv_1": conv}}
 	newWS := t.TempDir()
 	app := &App{
-		Conversations: store,
-		Logs:          &fakeLogStore{},
-		Bus:           NewBus(),
-		Toolbox:       &agentsMDToolbox{body: "---\nbytes: 12\n---\n\n# Rules\n"},
-		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
-			return newWS, nil
-		}),
+		Conversations:    store,
+		Logs:             &fakeLogStore{},
+		Bus:              NewBus(),
+		Toolbox:          &agentsMDToolbox{body: "---\nbytes: 12\n---\n\n# Rules\n"},
+		DirectoryBrowser: fakeDirBrowser{},
 	}
 
-	saved := pickWorkspace(t, app, "conv_1")
+	saved := setWorkspace(t, app, "conv_1", newWS)
 	if saved.Workspace != newWS {
 		t.Fatalf("workspace = %q, want %q", saved.Workspace, newWS)
 	}
@@ -104,14 +102,12 @@ func TestHandleConversationsPickWorkspaceEmptyRoomDoesNotQueueNotice(t *testing.
 		"conv_1": {ID: "conv_1", Title: "Empty"},
 	}}
 	app := &App{
-		Conversations: store,
-		Logs:          &fakeLogStore{},
-		Bus:           NewBus(),
-		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
-			return t.TempDir(), nil
-		}),
+		Conversations:    store,
+		Logs:             &fakeLogStore{},
+		Bus:              NewBus(),
+		DirectoryBrowser: fakeDirBrowser{},
 	}
-	saved := pickWorkspace(t, app, "conv_1")
+	saved := setWorkspace(t, app, "conv_1", t.TempDir())
 	if saved.PendingWorkspaceAnnouncement {
 		t.Fatal("empty room must not queue a workspace-switch notice")
 	}
@@ -122,14 +118,12 @@ func TestHandleConversationsPickWorkspaceSamePathDoesNotQueueNotice(t *testing.T
 	conv := workspaceSwitchFixture(ws)
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"conv_1": conv}}
 	app := &App{
-		Conversations: store,
-		Logs:          &fakeLogStore{},
-		Bus:           NewBus(),
-		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
-			return ws, nil
-		}),
+		Conversations:    store,
+		Logs:             &fakeLogStore{},
+		Bus:              NewBus(),
+		DirectoryBrowser: fakeDirBrowser{},
 	}
-	saved := pickWorkspace(t, app, "conv_1")
+	saved := setWorkspace(t, app, "conv_1", ws)
 	if saved.PendingWorkspaceAnnouncement {
 		t.Fatal("re-picking the same workspace must not queue a notice")
 	}
@@ -147,15 +141,13 @@ func TestAddTurnMessagesInjectsWorkspaceSwitchNotice(t *testing.T) {
 	conv := workspaceSwitchFixture(oldWS)
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"conv_1": conv}}
 	app := &App{
-		Conversations: store,
-		Logs:          &fakeLogStore{},
-		Bus:           NewBus(),
-		Toolbox:       &agentsMDToolbox{body: agentsBody},
-		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
-			return newWS, nil
-		}),
+		Conversations:    store,
+		Logs:             &fakeLogStore{},
+		Bus:              NewBus(),
+		Toolbox:          &agentsMDToolbox{body: agentsBody},
+		DirectoryBrowser: fakeDirBrowser{},
 	}
-	saved := pickWorkspace(t, app, "conv_1")
+	saved := setWorkspace(t, app, "conv_1", newWS)
 
 	app.addTurnMessages(saved,
 		domain.Message{ID: "m_user", Role: domain.RoleUser, Content: "Sip, gas implement C", Status: domain.StatusDone},
@@ -274,16 +266,15 @@ func TestAddTurnMessagesInjectsWorkspaceSwitchNotice(t *testing.T) {
 func TestAddTurnMessagesWorkspaceSwitchOmitsMissingAgentsMD(t *testing.T) {
 	conv := workspaceSwitchFixture("/old/ws")
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"conv_1": conv}}
+	ws := t.TempDir()
 	app := &App{
-		Conversations: store,
-		Logs:          &fakeLogStore{},
-		Bus:           NewBus(),
-		Toolbox:       &agentsMDToolbox{err: fmt.Errorf("open AGENTS.md: no such file")},
-		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
-			return t.TempDir(), nil
-		}),
+		Conversations:    store,
+		Logs:             &fakeLogStore{},
+		Bus:              NewBus(),
+		Toolbox:          &agentsMDToolbox{err: fmt.Errorf("open AGENTS.md: no such file")},
+		DirectoryBrowser: fakeDirBrowser{},
 	}
-	saved := pickWorkspace(t, app, "conv_1")
+	saved := setWorkspace(t, app, "conv_1", ws)
 	app.addTurnMessages(saved,
 		domain.Message{ID: "m_user", Role: domain.RoleUser, Content: "go", Status: domain.StatusDone},
 		domain.Message{ID: "m_asst", Role: domain.RoleAssistant},

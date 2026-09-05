@@ -23,6 +23,7 @@ import (
 	"nusashell/infrastructure/attachmentfs"
 	"nusashell/infrastructure/automation"
 	"nusashell/infrastructure/config"
+	"nusashell/infrastructure/dirbrowser"
 	"nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
 	"nusashell/infrastructure/mcpclient"
@@ -36,7 +37,6 @@ import (
 	"nusashell/infrastructure/sttinstall"
 	"nusashell/infrastructure/tools"
 	"nusashell/infrastructure/ttsinstall"
-	"nusashell/infrastructure/workspacepicker"
 	"nusashell/transport"
 
 	"github.com/jahrulnr/searchwire"
@@ -292,7 +292,8 @@ func run() error {
 		EmbedderFactory:             ai.NewEmbedderFactory(),
 		EmbeddingModelListerFactory: ai.NewEmbeddingModelListerFactory(),
 		ModelCatalog:                modelcatalog.New(nil),
-		WorkspacePicker:             workspacepicker.Zenity{},
+		DirectoryBrowser:            dirbrowser.OS{},
+		DefaultWorkspace:            hostHomeDir(),
 		AcpAgents:                   &jsonstore.AcpAgents{S: store},
 		Acp:                         acpRuntime,
 		AcpRunStorage:               jsonstore.NewAcpRunStore(dataDir),
@@ -398,6 +399,17 @@ func run() error {
 
 func defaultDataDir() string {
 	return config.DefaultDataDir()
+}
+
+// hostHomeDir is the fallback workspace (home of the user running the
+// process). An empty result disables the fallback, which only happens when
+// the platform cannot resolve the home directory.
+func hostHomeDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home
 }
 
 func envOr(key, fallback string) string {

@@ -233,7 +233,7 @@ func (a *App) triggerBackgroundCompletionTurn(conversationID string) {
 		Ctx:            turnCtx,
 		Cancel:         cancel,
 		ProviderID:     provider.ID,
-		Workspace:      conv.Workspace,
+		Workspace:      a.effectiveWorkspace(conv.Workspace),
 	}
 	a.runsMu.Lock()
 	a.runs[run.ID] = run

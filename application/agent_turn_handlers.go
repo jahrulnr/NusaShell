@@ -93,7 +93,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	// is not killed when the HTTP response is sent. The turn is cancelled
 	// explicitly via handleTurnsStop or server shutdown.
 	turnCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	run := &TurnRun{ID: domain.NewID(domain.IDPrefixRun), ConversationID: c.ID, MessageID: asstMsg.ID, Ctx: turnCtx, Cancel: cancel, ProviderID: provider.ID, Workspace: c.Workspace}
+	run := &TurnRun{ID: domain.NewID(domain.IDPrefixRun), ConversationID: c.ID, MessageID: asstMsg.ID, Ctx: turnCtx, Cancel: cancel, ProviderID: provider.ID, Workspace: a.effectiveWorkspace(c.Workspace)}
 	a.runsMu.Lock()
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
@@ -172,7 +172,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	}
 
 	turnCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	run := &TurnRun{ID: domain.NewID(domain.IDPrefixRun), ConversationID: c.ID, MessageID: targetMsgID, Ctx: turnCtx, Cancel: cancel, ProviderID: provider.ID, Workspace: c.Workspace}
+	run := &TurnRun{ID: domain.NewID(domain.IDPrefixRun), ConversationID: c.ID, MessageID: targetMsgID, Ctx: turnCtx, Cancel: cancel, ProviderID: provider.ID, Workspace: a.effectiveWorkspace(c.Workspace)}
 	a.runsMu.Lock()
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()

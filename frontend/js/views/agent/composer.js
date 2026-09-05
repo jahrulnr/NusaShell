@@ -3,6 +3,7 @@ import { el, toast } from '../../ui.js';
 import { inspectAttachmentContent, toDataURL } from '../../agent-ui.js';
 import { resolveDroppedFilePath } from '../../desktop-file-path.js';
 import { agentForm, composerInput, composerStack, sendButton } from './domrefs.js';
+import { openWorkspacePicker } from './workspace-picker.js';
 
 export function bindComposer({ state, createConversation, beginTurn, refreshConversations, renderAttachments, updateComposerStatus, showSteerQueued, clearSteerQueue, promoteSteerToTranscript, stopActiveRun }) {
   const form = document.getElementById('agent-form');
@@ -330,8 +331,10 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
 
   async function chooseWorkspace() {
     if (!state.activeId) await createConversation();
+    const path = await openWorkspacePicker({ initial: state.conversation?.workspace || '' });
+    if (path == null) return; // Cancelled: the conversation stays unchanged.
     try {
-      const { conversation } = await rpc('agent.conversations.pick-workspace', { id: state.activeId });
+      const { conversation } = await rpc('agent.conversations.set-workspace', { id: state.activeId, path });
       state.conversation = conversation;
       updateComposerStatus();
       await refreshConversations();

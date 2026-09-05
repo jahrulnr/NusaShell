@@ -46,8 +46,8 @@ Requirements:
 
 - Go 1.26.5 or newer
 - Node.js 24 or newer for frontend tests and E2E checks
-- A desktop folder-dialog provider on Linux (install `zenity` if no compatible
-  provider is already available). Windows and macOS use their system dialogs.
+- Nothing extra for workspace selection: the in-app folder browser walks the
+  server's directories from any device, including mobile browsers on the LAN.
 
 ```bash
 # SSH (recommended for contributors with commit access)

@@ -1406,6 +1406,32 @@
   .agent-workspace-btn { max-width: 120px; }
 }
 
+/* ============ Workspace picker (in-app folder browser) ============ */
+/* Higher specificity so it beats .ui-dialog from modals.css (loaded later). */
+.ui-dialog.workspace-picker-dialog {
+  width: min(560px, 100%);
+  max-height: min(82vh, 640px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.workspace-picker-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 14px 20px 10px; overflow: hidden; }
+.workspace-picker-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-height: 20px; overflow-x: auto; font: 11px var(--font-mono); color: var(--text-dim); }
+.workspace-picker-crumb { flex: none; border: 0; padding: 2px 5px; border-radius: 5px; background: transparent; color: var(--text-dim); font: inherit; cursor: pointer; }
+.workspace-picker-crumb:hover { color: var(--accent); }
+.workspace-picker-crumb.is-current { color: var(--text); }
+.workspace-picker-crumb-sep { flex: none; color: var(--text-faint); }
+.workspace-picker-path-row { display: flex; gap: 8px; }
+.workspace-picker-path { flex: 1 1 auto; min-width: 0; box-sizing: border-box; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt); color: var(--text); font: 12px var(--font-mono); }
+.workspace-picker-path:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.workspace-picker-list { flex: 1 1 auto; min-height: 140px; overflow-y: auto; border: 1px solid var(--border-soft); border-radius: 10px; padding: 6px; background: var(--panel-alt); }
+.workspace-picker-row { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; padding: 8px 10px; border-radius: 7px; background: transparent; color: var(--text); text-align: left; font: 12px var(--font-mono); cursor: pointer; }
+.workspace-picker-row:hover, .workspace-picker-row:focus-visible { background: var(--panel); color: var(--accent); }
+.workspace-picker-row-icon { flex: none; }
+.workspace-picker-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-picker-status { min-height: 16px; font-size: 11px; line-height: 1.4; color: var(--text-dim); overflow-wrap: anywhere; }
+.workspace-picker-status-text.is-error { color: var(--red-bright); }
+
 /* ============ Agent view frame ============ */
 .view.active.agent-view { background: var(--harbor); border: 0; border-radius: 0; }
 .content:has(.agent-view.active) { padding: 0; }

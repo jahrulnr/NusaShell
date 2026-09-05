@@ -72,12 +72,17 @@ type App struct {
 	ModelCatalog                ModelCataloger
 	TTSInstaller                TTSInstaller
 	STTInstaller                STTInstaller
-	WorkspacePicker             WorkspacePicker
-	AcpAgents                   AcpAgentStore
-	Acp                         AcpRuntime
-	AcpRunStorage               domain.AcpRunStorage
-	retrySleeper                RetrySleeper
-	imageGenSem                 chan struct{}
+	DirectoryBrowser            DirectoryBrowser
+	// defaultWorkspace is the fallback workspace (wired from the host home
+	// dir) applied when a conversation has not picked one yet. It keeps
+	// workspace-gated tools such as memory_project usable before the user
+	// chooses a folder, instead of resolving relative paths against ".".
+	defaultWorkspace string
+	AcpAgents        AcpAgentStore
+	Acp              AcpRuntime
+	AcpRunStorage    domain.AcpRunStorage
+	retrySleeper     RetrySleeper
+	imageGenSem      chan struct{}
 
 	// startedAt is the wall-clock time this process came up. Conversations
 	// whose last activity predates it were used before the restart; the
@@ -257,7 +262,8 @@ type Deps struct {
 	ModelCatalog                ModelCataloger              // optional; nil = skip enrichment from models.dev
 	TTSInstaller                TTSInstaller                // optional; nil = one-click offline TTS install unavailable
 	STTInstaller                STTInstaller                // optional; nil = one-click offline STT install unavailable
-	WorkspacePicker             WorkspacePicker
+	DirectoryBrowser            DirectoryBrowser            // optional; nil = in-app workspace browser unavailable
+	DefaultWorkspace            string                      // fallback workspace (host home dir) when a conversation has none
 	RetrySleeper                RetrySleeper
 	AcpAgents                   AcpAgentStore
 	Acp                         AcpRuntime
@@ -317,7 +323,8 @@ func NewApp(deps Deps) *App {
 		VideoModelListerFactory:     deps.VideoModelListerFactory,
 		EmbedderFactory:             deps.EmbedderFactory,
 		EmbeddingModelListerFactory: deps.EmbeddingModelListerFactory,
-		WorkspacePicker:             deps.WorkspacePicker,
+		DirectoryBrowser:            deps.DirectoryBrowser,
+		defaultWorkspace:            strings.TrimSpace(deps.DefaultWorkspace),
 		ModelCatalog:                deps.ModelCatalog,
 		TTSInstaller:                deps.TTSInstaller,
 		STTInstaller:                deps.STTInstaller,

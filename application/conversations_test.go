@@ -214,40 +214,42 @@ func TestHandleConversationsDeleteCancelsActiveRun(t *testing.T) {
 	}
 }
 
-func TestHandleConversationsPickWorkspaceRejectsRelativePath(t *testing.T) {
+func TestHandleConversationsSetWorkspaceRejectsRelativePath(t *testing.T) {
 	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
 		"conv_1": {ID: "conv_1", Title: "Test"},
 	}}
 	app := &App{
-		Conversations: convStore,
-		Logs:          &fakeLogStore{},
-		Bus:           NewBus(),
-		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
-			return filepath.Join("rel", "workspace"), nil
-		}),
+		Conversations:    convStore,
+		Logs:             &fakeLogStore{},
+		Bus:              NewBus(),
+		DirectoryBrowser: fakeDirBrowser{},
 	}
 
-	_, rpcErr := app.handleConversationsPickWorkspace(contracts.ConversationIDRequest{ID: "conv_1"})
+	_, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{
+		ID:   "conv_1",
+		Path: filepath.Join("rel", "workspace"),
+	})
 	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
 		t.Fatalf("want VALIDATION_ERROR for a relative workspace, got %+v", rpcErr)
 	}
 }
 
-func TestHandleConversationsPickWorkspaceAcceptsAbsolutePath(t *testing.T) {
+func TestHandleConversationsSetWorkspaceAcceptsAbsolutePath(t *testing.T) {
 	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
 		"conv_1": {ID: "conv_1", Title: "Test"},
 	}}
 	workspace := t.TempDir()
 	app := &App{
-		Conversations: convStore,
-		Logs:          &fakeLogStore{},
-		Bus:           NewBus(),
-		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
-			return workspace, nil
-		}),
+		Conversations:    convStore,
+		Logs:             &fakeLogStore{},
+		Bus:              NewBus(),
+		DirectoryBrowser: fakeDirBrowser{},
 	}
 
-	resp, rpcErr := app.handleConversationsPickWorkspace(contracts.ConversationIDRequest{ID: "conv_1"})
+	resp, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{
+		ID:   "conv_1",
+		Path: workspace,
+	})
 	if rpcErr != nil {
 		t.Fatalf("absolute workspace rejected: %v", rpcErr)
 	}
@@ -257,11 +259,12 @@ func TestHandleConversationsPickWorkspaceAcceptsAbsolutePath(t *testing.T) {
 	}
 }
 
-// TestHandleConversationsPickWorkspaceSerializesTurnSave reproduces the
-// workspace-picker/turn-completion race. The real JSON store returns clones;
-// if the picker saves its pre-picker clone after a turn saves the latest
-// message, that completed turn disappears from the conversation file.
-func TestHandleConversationsPickWorkspaceSerializesTurnSave(t *testing.T) {
+// TestHandleConversationsSetWorkspaceSerializesTurnSave reproduces the
+// workspace-set/turn-completion race. The real JSON store returns clones;
+// if the set handler saves a stale pre-validation clone after a turn saves
+// the latest message, that completed turn disappears from the conversation
+// file. EnsureDir stands in for the slow pre-lock I/O phase.
+func TestHandleConversationsSetWorkspaceSerializesTurnSave(t *testing.T) {
 	workspace := t.TempDir()
 	store := &cloningConvStore{
 		conv: &domain.Conversation{
@@ -272,34 +275,37 @@ func TestHandleConversationsPickWorkspaceSerializesTurnSave(t *testing.T) {
 			},
 		},
 	}
-	pickerStarted := make(chan struct{})
-	releasePicker := make(chan struct{})
+	ensureStarted := make(chan struct{})
+	releaseEnsure := make(chan struct{})
 	released := false
 	defer func() {
 		if !released {
-			close(releasePicker)
+			close(releaseEnsure)
 		}
 	}()
 	app := &App{
 		Conversations: store,
 		Logs:          &fakeLogStore{},
 		Bus:           NewBus(),
-		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
-			close(pickerStarted)
-			<-releasePicker
-			return workspace, nil
-		}),
+		DirectoryBrowser: fakeDirBrowser{ensure: func(context.Context, string) error {
+			close(ensureStarted)
+			<-releaseEnsure
+			return nil
+		}},
 	}
 
-	pickDone := make(chan *contracts.RPCError, 1)
+	setDone := make(chan *contracts.RPCError, 1)
 	go func() {
-		_, rpcErr := app.handleConversationsPickWorkspace(contracts.ConversationIDRequest{ID: "conv_1"})
-		pickDone <- rpcErr
+		_, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{
+			ID:   "conv_1",
+			Path: workspace,
+		})
+		setDone <- rpcErr
 	}()
-	<-pickerStarted
+	<-ensureStarted
 
 	// Model the final persistence step of a concurrent turn. It is allowed to
-	// complete while the native picker is open; the picker must re-read the
+	// complete while the path is validated; the handler must re-read the
 	// latest snapshot before it applies the workspace change.
 	turnSaveStarted := make(chan struct{})
 	turnSaveDone := make(chan struct{})
@@ -325,18 +331,18 @@ func TestHandleConversationsPickWorkspaceSerializesTurnSave(t *testing.T) {
 	select {
 	case <-turnSaveDone:
 	case <-time.After(time.Second):
-		t.Fatal("turn save did not complete while workspace picker was open")
+		t.Fatal("turn save did not complete while the workspace set handler was pre-lock")
 	}
 
-	close(releasePicker)
+	close(releaseEnsure)
 	released = true
-	if rpcErr := <-pickDone; rpcErr != nil {
-		t.Fatalf("pick workspace: %v", rpcErr)
+	if rpcErr := <-setDone; rpcErr != nil {
+		t.Fatalf("set workspace: %v", rpcErr)
 	}
 	select {
 	case <-turnSaveDone:
 	case <-time.After(time.Second):
-		t.Fatal("turn save did not complete after workspace picker released")
+		t.Fatal("turn save did not complete after the ensure released")
 	}
 
 	got, err := store.Get("conv_1")
@@ -358,26 +364,27 @@ func TestHandleConversationsPickWorkspaceSerializesTurnSave(t *testing.T) {
 	}
 }
 
-// TestHandleConversationsPickWorkspaceEmptyRoomDoesNotInsertHydration pins
-// that picking a workspace before the first user must not persist a
+// TestHandleConversationsSetWorkspaceEmptyRoomDoesNotInsertHydration pins
+// that setting a workspace before the first user must not persist a
 // checkpoint at index 0. The first turn's addTurnMessages parks it after
 // the user so OpenAI/Claude see system → user → hydration.
-func TestHandleConversationsPickWorkspaceEmptyRoomDoesNotInsertHydration(t *testing.T) {
+func TestHandleConversationsSetWorkspaceEmptyRoomDoesNotInsertHydration(t *testing.T) {
 	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
 		"conv_1": {ID: "conv_1", Title: "Test"},
 	}}
 	workspace := t.TempDir()
 	app := &App{
-		Conversations: convStore,
-		Logs:          &fakeLogStore{},
-		Bus:           NewBus(),
-		Toolbox:       &recordingToolbox{},
-		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
-			return workspace, nil
-		}),
+		Conversations:    convStore,
+		Logs:             &fakeLogStore{},
+		Bus:              NewBus(),
+		Toolbox:          &recordingToolbox{},
+		DirectoryBrowser: fakeDirBrowser{},
 	}
-	if _, rpcErr := app.handleConversationsPickWorkspace(contracts.ConversationIDRequest{ID: "conv_1"}); rpcErr != nil {
-		t.Fatalf("pick workspace: %v", rpcErr)
+	if _, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{
+		ID:   "conv_1",
+		Path: workspace,
+	}); rpcErr != nil {
+		t.Fatalf("set workspace: %v", rpcErr)
 	}
 	saved := convStore.convs["conv_1"]
 	for _, m := range saved.Messages {
@@ -387,10 +394,11 @@ func TestHandleConversationsPickWorkspaceEmptyRoomDoesNotInsertHydration(t *test
 	}
 }
 
-// TestHandleConversationsPickWorkspaceKeepsFormedHydration pins that a
-// mid-conversation workspace pick must not strip or rebuild formed hydration.
-// The visible workspace_changed notice is queued for the next user turn.
-func TestHandleConversationsPickWorkspaceKeepsFormedHydration(t *testing.T) {
+// TestHandleConversationsSetWorkspaceKeepsFormedHydration pins that a
+// mid-conversation workspace change must not strip or rebuild formed
+// hydration. The visible workspace_changed notice is queued for the next
+// user turn.
+func TestHandleConversationsSetWorkspaceKeepsFormedHydration(t *testing.T) {
 	hydID := domain.HydrateToolCallPrefix + "abc123_0"
 	conv := &domain.Conversation{
 		ID:    "conv_1",
@@ -408,22 +416,23 @@ func TestHandleConversationsPickWorkspaceKeepsFormedHydration(t *testing.T) {
 	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{"conv_1": conv}}
 	newWS := t.TempDir()
 	app := &App{
-		Conversations: convStore,
-		Logs:          &fakeLogStore{},
-		Bus:           NewBus(),
-		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
-			return newWS, nil
-		}),
+		Conversations:    convStore,
+		Logs:             &fakeLogStore{},
+		Bus:              NewBus(),
+		DirectoryBrowser: fakeDirBrowser{},
 	}
-	if _, rpcErr := app.handleConversationsPickWorkspace(contracts.ConversationIDRequest{ID: "conv_1"}); rpcErr != nil {
-		t.Fatalf("pick workspace: %v", rpcErr)
+	if _, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{
+		ID:   "conv_1",
+		Path: newWS,
+	}); rpcErr != nil {
+		t.Fatalf("set workspace: %v", rpcErr)
 	}
 	saved := convStore.convs["conv_1"]
 	if saved.Workspace != newWS {
 		t.Fatalf("workspace = %q, want %q", saved.Workspace, newWS)
 	}
 	if !saved.PendingWorkspaceAnnouncement {
-		t.Fatal("mid-conversation pick must queue a visible notice; formed hydration stays")
+		t.Fatal("mid-conversation workspace change must queue a visible notice; formed hydration stays")
 	}
 	foundOld := false
 	for _, m := range saved.Messages {
@@ -431,7 +440,7 @@ func TestHandleConversationsPickWorkspaceKeepsFormedHydration(t *testing.T) {
 			foundOld = true
 		}
 		if m.ID != "m1" && m.ID != "m2" && m.ID != "m3" {
-			t.Fatalf("pick must not splice messages, got extra %+v", m)
+			t.Fatalf("set must not splice messages, got extra %+v", m)
 		}
 	}
 	if !foundOld {

@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -222,27 +224,25 @@ func TestConversationLifecycle(t *testing.T) {
 	}
 }
 
-func TestConversationWorkspacePickerPersistsPerConversation(t *testing.T) {
+func TestConversationWorkspaceSetPersistsPerConversation(t *testing.T) {
 	h := newHarness(t, nil)
 	firstID := h.newConversation(t)
 	secondID := h.newConversation(t)
 	workspace := t.TempDir()
-	h.app.WorkspacePicker = application.WorkspacePickerFunc(func(context.Context) (string, error) {
-		return workspace, nil
-	})
+	h.app.DirectoryBrowser = dirBrowserStubForTest{dir: workspace}
 
-	picked := h.rpcOK(t, "agent.conversations.pick-workspace", map[string]any{"id": firstID})
+	set := h.rpcOK(t, "agent.conversations.set-workspace", map[string]any{"id": firstID, "path": workspace})
 	var result struct {
 		Conversation struct {
 			ID        string `json:"id"`
 			Workspace string `json:"workspace"`
 		} `json:"conversation"`
 	}
-	if err := json.Unmarshal(picked.Result, &result); err != nil {
+	if err := json.Unmarshal(set.Result, &result); err != nil {
 		t.Fatal(err)
 	}
 	if result.Conversation.ID != firstID || result.Conversation.Workspace != workspace {
-		t.Fatalf("picked workspace = %+v", result.Conversation)
+		t.Fatalf("set workspace = %+v", result.Conversation)
 	}
 
 	other := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": secondID})
@@ -257,6 +257,79 @@ func TestConversationWorkspacePickerPersistsPerConversation(t *testing.T) {
 	if untouched.Conversation.Workspace != "" {
 		t.Fatalf("workspace leaked into a different conversation: %q", untouched.Conversation.Workspace)
 	}
+}
+
+func TestWorkspaceListDirsRoundTrip(t *testing.T) {
+	h := newHarness(t, nil)
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.app.DirectoryBrowser = dirBrowserStubForTest{dir: root}
+
+	listed := h.rpcOK(t, "agent.workspace.list-dirs", map[string]any{"path": root})
+	var result struct {
+		Path    string `json:"path"`
+		Parent  string `json:"parent"`
+		Entries []struct {
+			Name string `json:"name"`
+			Path string `json:"path"`
+		} `json:"entries"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := json.Unmarshal(listed.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Path != root {
+		t.Fatalf("path = %q, want %q", result.Path, root)
+	}
+	if result.Parent != filepath.Dir(root) {
+		t.Fatalf("parent = %q, want %q", result.Parent, filepath.Dir(root))
+	}
+	if len(result.Entries) != 1 || result.Entries[0].Name != "sub" {
+		t.Fatalf("entries = %+v, want [sub]", result.Entries)
+	}
+	if result.Truncated {
+		t.Fatal("truncated must be false")
+	}
+}
+
+// dirBrowserStubForTest mirrors the real dirbrowser adapter against the
+// test temp dir instead of the user home, so transport tests stay isolated
+// from the host machine.
+type dirBrowserStubForTest struct{ dir string }
+
+func (s dirBrowserStubForTest) ListDirs(_ context.Context, path string) (application.DirListing, error) {
+	if path == "" {
+		path = s.dir
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return application.DirListing{}, err
+	}
+	dirs := make([]contracts.WorkspaceDirEntry, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dirs = append(dirs, contracts.WorkspaceDirEntry{
+			Name: entry.Name(),
+			Path: filepath.Join(path, entry.Name()),
+		})
+	}
+	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Name < dirs[j].Name })
+	return application.DirListing{Path: path, Parent: filepath.Dir(path), Entries: dirs}, nil
+}
+
+func (s dirBrowserStubForTest) EnsureDir(_ context.Context, path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fs.ErrInvalid
+	}
+	return nil
 }
 
 func TestTurnPersistsValidatedAttachments(t *testing.T) {

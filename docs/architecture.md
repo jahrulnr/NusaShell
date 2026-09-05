@@ -129,11 +129,19 @@ the matching domain dispatcher, and add a handler-level test in
 
 ### Conversation workspace and attachments
 
-Each conversation has an optional absolute `workspace` path. The frontend
-selects it through `agent.conversations.pick-workspace`; the composition root
-uses the host folder dialog, so this is a real local path rather than a
-browser directory handle. Canceling the dialog leaves the conversation
+Each conversation has an optional absolute `workspace` path on the NusaShell
+host. The frontend opens an in-app folder browser that walks server
+directories through `agent.workspace.list-dirs` and persists the selection
+through `agent.conversations.set-workspace`; the application validates the
+path (absolute, existing directory) before storing it. No host dialog is
+involved, so workspace selection works from any device, including mobile
+browsers over the LAN. Canceling the picker leaves the conversation
 unchanged.
+
+Until a workspace is picked, the active workspace defaults to the host home
+directory (wired from `os.UserHomeDir()`), so workspace-gated features such
+as `memory_project` work from the first turn instead of resolving relative
+paths against `.`.
 
 `agent.turns.start` accepts an optional `attachments` array. It supports up
 to four attachments per turn, each at most 4 MiB: UTF-8 text (`text/plain`),

@@ -309,7 +309,7 @@ The message input with attachments, model picker, workspace selector, provider s
 - **Workspace selector** (`#agent-workspace-btn`):
   - Section: Agent
   - Type: button
-  - Action: Opens the host folder dialog.
+  - Action: Opens the in-app workspace folder browser (server-side directories via agent.workspace.list-dirs).
 
 - **Workspace label** (`#agent-workspace-label`):
   - Section: Agent

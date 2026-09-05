@@ -112,15 +112,32 @@ test('Electron loads the real web shell and preserves composer/workspace interac
   await page.waitForFunction(() => document.querySelectorAll('.agent-attachment').length === 2);
   assert.match(await page.locator('.agent-attachment').nth(1).textContent(), /electron-project/);
 
-  // The Go backend's native zenity call is already covered by transport tests;
-  // intercept only this RPC here so the renderer interaction can be tested
-  // deterministically without opening a host folder dialog in CI.
+  // The in-app workspace browser replaced the native zenity call. Both RPCs
+  // are intercepted here so the renderer interaction can be tested
+  // deterministically without touching the host filesystem in CI.
   await page.locator('#new-conversation-btn').click();
   await page.locator('#conversation-list .agent-conversation-item').first().waitFor({ state: 'visible', timeout: 10000 });
-  let workspaceRPC;
-  await page.route('**/rpc/agent/conversations/pick-workspace', async (route) => {
+  const workspaceRPCs = [];
+  await page.route('**/rpc/agent/workspace/list-dirs', async (route) => {
     const request = JSON.parse(route.request().postData() || '{}');
-    workspaceRPC = request;
+    workspaceRPCs.push(request);
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        result: {
+          path: '/tmp/electron-workspace',
+          parent: '/tmp',
+          entries: [],
+          truncated: false,
+        },
+      }),
+    });
+  });
+  await page.route('**/rpc/agent/conversations/set-workspace', async (route) => {
+    const request = JSON.parse(route.request().postData() || '{}');
+    workspaceRPCs.push(request);
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -129,16 +146,25 @@ test('Electron loads the real web shell and preserves composer/workspace interac
         result: {
           conversation: {
             id: request.payload?.id,
-            workspace: '/tmp/electron-workspace',
+            workspace: request.payload?.path,
           },
         },
       }),
     });
   });
   await page.locator('#agent-workspace-btn').click();
+  // The picker popup lists the folder, then enables "Use this folder".
+  await page.waitForFunction(() => {
+    const buttons = [...document.querySelectorAll('.ui-dialog-actions button')];
+    const select = buttons[buttons.length - 1];
+    return select && !select.disabled;
+  });
+  await page.locator('.ui-dialog-actions button').last().click();
   await page.waitForFunction(() => document.querySelector('#agent-workspace-label')?.textContent === 'electron-workspace');
-  assert.equal(workspaceRPC?.method, 'agent.conversations.pick-workspace');
-  assert.ok(workspaceRPC?.payload?.id, 'workspace RPC must target the active conversation');
+  assert.equal(workspaceRPCs[0]?.method, 'agent.workspace.list-dirs');
+  assert.equal(workspaceRPCs[1]?.method, 'agent.conversations.set-workspace');
+  assert.equal(workspaceRPCs[1]?.payload?.path, '/tmp/electron-workspace');
+  assert.ok(workspaceRPCs[1]?.payload?.id, 'workspace RPC must target the active conversation');
 
   const bridgeState = await page.evaluate(() => ({
     bridgeAvailable: typeof window.nusashellDesktop?.getPathForFile === 'function',

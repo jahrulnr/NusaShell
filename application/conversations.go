@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"path/filepath"
 	"strings"
 
@@ -189,21 +190,33 @@ func (a *App) handleConversationsDelete(req contracts.ConversationIDRequest) (an
 	return map[string]bool{"ok": true}, nil
 }
 
-func (a *App) handleConversationsPickWorkspace(req contracts.ConversationIDRequest) (any, *contracts.RPCError) {
-	// Validate the conversation before opening the native picker, but do not
-	// hold the turn lock while the user is choosing a folder. Once the picker
-	// returns, the latest conversation is read under the same lock as turn
-	// persistence so an older pre-picker snapshot cannot overwrite a completed
-	// message.
+func (a *App) handleConversationsSetWorkspace(req contracts.ConversationSetWorkspaceRequest) (any, *contracts.RPCError) {
+	// Validate the conversation and the candidate path before doing any
+	// filesystem work, and do not hold the turn lock during EnsureDir.
+	// Once the path is confirmed, the latest conversation is read under the
+	// same lock as turn persistence so a stale snapshot cannot overwrite a
+	// completed message.
 	if _, rpcErr := a.getConversation(req.ID); rpcErr != nil {
 		return nil, rpcErr
 	}
 
-	if a.WorkspacePicker == nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "workspace folder picker is unavailable"}
+	if a.DirectoryBrowser == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "workspace folder browser is unavailable"}
 	}
-	workspace, err := a.WorkspacePicker.Choose(context.Background())
-	if err != nil && !errors.Is(err, context.Canceled) {
+	workspace := strings.TrimSpace(req.Path)
+	if workspace == "" {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "workspace path is required"}
+	}
+	if !filepath.IsAbs(workspace) {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "workspace path must be absolute"}
+	}
+	if err := a.DirectoryBrowser.EnsureDir(context.Background(), workspace); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "workspace directory does not exist"}
+		}
+		if errors.Is(err, fs.ErrInvalid) {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "workspace path is not a directory"}
+		}
 		return nil, rpcInternal(err)
 	}
 
@@ -214,16 +227,6 @@ func (a *App) handleConversationsPickWorkspace(req contracts.ConversationIDReque
 	c, rpcErr := a.getConversation(req.ID)
 	if rpcErr != nil {
 		return nil, rpcErr
-	}
-	if err != nil {
-		return contracts.ConversationGetResult{Conversation: convDTO(c)}, nil
-	}
-	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		return contracts.ConversationGetResult{Conversation: convDTO(c)}, nil
-	}
-	if !filepath.IsAbs(workspace) {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "workspace path must be absolute"}
 	}
 	repo := bindConversation(a.Conversations, c)
 	oldWorkspace := strings.TrimSpace(c.Workspace)

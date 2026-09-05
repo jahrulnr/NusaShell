@@ -12,24 +12,25 @@ import (
 const (
 	MethodAppInfo = "app.info"
 
-	MethodConversationsList          = "agent.conversations.list"
-	MethodConversationsCreate        = "agent.conversations.create"
-	MethodConversationsGet           = "agent.conversations.get"
-	MethodConversationsRename        = "agent.conversations.rename"
-	MethodConversationsDelete        = "agent.conversations.delete"
-	MethodConversationsPickWorkspace = "agent.conversations.pick-workspace"
-	MethodConversationsChunk         = "agent.conversations.chunk"
-	MethodTurnsStart                 = "agent.turns.start"
-	MethodTurnsStop                  = "agent.turns.stop"
-	MethodToolStop                   = "agent.tools.stop"
-	MethodTurnsRetry                 = "agent.turns.retry"
-	MethodTurnsSteer                 = "agent.turns.steer"
-	MethodTurnsCancelSteer           = "agent.turns.cancel-steer"
-	MethodTurnsActive                = "agent.turns.active"
-	MethodAskAnswer                  = "agent.ask.answer"
-	MethodAskCancel                  = "agent.ask.cancel"
-	MethodAskPending                 = "agent.ask.pending"
-	MethodToolContracts              = "agent.tools.contracts"
+	MethodConversationsList         = "agent.conversations.list"
+	MethodConversationsCreate       = "agent.conversations.create"
+	MethodConversationsGet          = "agent.conversations.get"
+	MethodConversationsRename       = "agent.conversations.rename"
+	MethodConversationsDelete       = "agent.conversations.delete"
+	MethodConversationsSetWorkspace = "agent.conversations.set-workspace"
+	MethodConversationsChunk        = "agent.conversations.chunk"
+	MethodWorkspaceListDirs         = "agent.workspace.list-dirs"
+	MethodTurnsStart                = "agent.turns.start"
+	MethodTurnsStop                 = "agent.turns.stop"
+	MethodToolStop                  = "agent.tools.stop"
+	MethodTurnsRetry                = "agent.turns.retry"
+	MethodTurnsSteer                = "agent.turns.steer"
+	MethodTurnsCancelSteer          = "agent.turns.cancel-steer"
+	MethodTurnsActive               = "agent.turns.active"
+	MethodAskAnswer                 = "agent.ask.answer"
+	MethodAskCancel                 = "agent.ask.cancel"
+	MethodAskPending                = "agent.ask.pending"
+	MethodToolContracts             = "agent.tools.contracts"
 
 	MethodProvidersList   = "ai.providers.list"
 	MethodProvidersSave   = "ai.providers.save"
@@ -305,6 +306,40 @@ type ConversationGetResult struct {
 
 type ConversationIDRequest struct {
 	ID string `json:"id"`
+}
+
+// ConversationSetWorkspaceRequest persists an explicit absolute workspace
+// path. The path comes from the in-app folder browser (agent.workspace
+// .list-dirs), so it is a server-host path validated by the application
+// before it is stored.
+type ConversationSetWorkspaceRequest struct {
+	ID   string `json:"id"`
+	Path string `json:"path"`
+}
+
+// ---- workspace browsing ----
+
+// WorkspaceListDirsRequest asks the host to list the subdirectories of a
+// folder for the in-app workspace picker. An empty path means the host
+// home directory.
+type WorkspaceListDirsRequest struct {
+	Path string `json:"path,omitempty"`
+}
+
+type WorkspaceDirEntry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// WorkspaceListDirsResult carries the resolved absolute path (so the
+// frontend breadcrumb stays in sync even when the request path was empty)
+// and the subdirectory entries, sorted by name. Truncated is set when the
+// listing exceeds the entry cap.
+type WorkspaceListDirsResult struct {
+	Path      string              `json:"path"`
+	Parent    string              `json:"parent,omitempty"`
+	Entries   []WorkspaceDirEntry `json:"entries"`
+	Truncated bool                `json:"truncated"`
 }
 
 // ConversationChunkRequest loads an archived pre-compaction chunk by index.

@@ -56,7 +56,7 @@ var compactionHandoffUserPrompt = resources.UserPrompt("compaction")
 //
 // The active workspace is NOT appended here — it travels in the
 // runtime_context hydration slot (see HydrationBuilder.readRuntimeContext),
-// which is re-injected whenever the workspace changes (the pick-workspace
+// which is re-injected whenever the workspace changes (the set-workspace
 // handler strips the stale checkpoint) or after compaction.
 // Duplicating it in the system prompt would break cache stability on
 // workspace switch for no benefit.

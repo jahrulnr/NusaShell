@@ -1245,7 +1245,7 @@
       "label": "Workspace selector",
       "section": "Agent",
       "type": "button",
-      "action": "Opens the host folder dialog."
+      "action": "Opens the in-app workspace folder browser (server-side directories via agent.workspace.list-dirs)."
     },
     "agent-workspace-label": {
       "label": "Workspace label",

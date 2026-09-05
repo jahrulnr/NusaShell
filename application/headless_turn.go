@@ -96,7 +96,7 @@ func (a *App) runHeadlessTurnKindObserved(ctx context.Context, prompt, model str
 		Headless:       true,
 		ToolKind:       kind,
 		RiskTierCap:    domain.TrustLevelToRiskTierCap(trust),
-		Workspace:      conv.Workspace,
+		Workspace:      a.effectiveWorkspace(conv.Workspace),
 	}
 	if onUpdate != nil {
 		run.HeadlessUpdate = func() { onUpdate(convID) }

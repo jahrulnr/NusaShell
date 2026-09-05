@@ -13,7 +13,7 @@ import (
 // ToolFactory prevents a tool from being executable but invisible to the UI,
 // or advertised to the UI without being executable.
 func (a *App) handleToolContracts(req contracts.ToolContractsRequest) (any, *contracts.RPCError) {
-	workspace := strings.TrimSpace(req.Workspace)
+	workspace := a.effectiveWorkspace(req.Workspace)
 	defs := toolFactoryFor(a).Get(AgentConversation, workspace)
 	tools := make([]contracts.ToolContractDTO, 0, len(defs))
 	for _, def := range defs {

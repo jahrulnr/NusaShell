@@ -50,12 +50,18 @@ func (a *App) dispatchAgent(ctx context.Context, method string, payload json.Raw
 			return nil, rpcErr
 		}
 		return a.handleConversationsDelete(req)
-	case contracts.MethodConversationsPickWorkspace:
-		var req contracts.ConversationIDRequest
+	case contracts.MethodConversationsSetWorkspace:
+		var req contracts.ConversationSetWorkspaceRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
 			return nil, rpcErr
 		}
-		return a.handleConversationsPickWorkspace(req)
+		return a.handleConversationsSetWorkspace(req)
+	case contracts.MethodWorkspaceListDirs:
+		var req contracts.WorkspaceListDirsRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleWorkspaceListDirs(req)
 	case contracts.MethodTurnsStart:
 		var req contracts.TurnStartRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {

@@ -47,8 +47,8 @@ func TestRosterUniqueness(t *testing.T) {
 	methods := []string{
 		MethodAppInfo,
 		MethodConversationsList, MethodConversationsCreate, MethodConversationsGet,
-		MethodConversationsRename, MethodConversationsDelete, MethodConversationsPickWorkspace,
-		MethodConversationsChunk, MethodTurnsStart, MethodTurnsStop, MethodToolStop,
+		MethodConversationsRename, MethodConversationsDelete, MethodConversationsSetWorkspace,
+		MethodConversationsChunk, MethodWorkspaceListDirs, MethodTurnsStart, MethodTurnsStop, MethodToolStop,
 		MethodTurnsRetry, MethodTurnsSteer, MethodTurnsCancelSteer, MethodTurnsActive,
 		MethodToolContracts,
 		MethodProvidersList, MethodProvidersSave, MethodProvidersDelete, MethodProvidersTest,

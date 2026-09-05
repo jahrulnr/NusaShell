@@ -229,7 +229,7 @@ func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage) *doma
 // App's read-only stores when the current history epoch does not already have
 // one, normally on the initial turn or immediately after compaction.
 func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
-	ctx := DefaultRuntimeContext(c.Workspace)
+	ctx := DefaultRuntimeContext(a.effectiveWorkspace(c.Workspace))
 	ctx.DataDir = a.DataDir
 	// The runtime context slot also carries the active background/async tool
 	// runs so the model always knows which subagents/delegates were spawned

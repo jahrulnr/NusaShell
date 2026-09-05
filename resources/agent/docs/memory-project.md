@@ -6,8 +6,10 @@ durable, reusable facts about the
 **active workspace** in skill-compatible anchored markdown so later
 tasks skip expensive rediscovery.
 
-The tool is advertised only when the conversation has a workspace. If
-it is not listed, do not call it.
+The tool is advertised whenever the project memory store is configured.
+Until the user picks a workspace, the active workspace defaults to the
+host home directory, so `memory_project` is usable from the first turn.
+If it is not listed, do not call it.
 
 Default files live under `{dataDir}/memory_project/{key}/`. Settings →
 Project memory (`project_memory_base`, under Memory & search) can point

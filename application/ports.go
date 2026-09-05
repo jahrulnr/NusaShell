@@ -282,16 +282,28 @@ type AttachmentStore interface {
 	ReadFile(absPath string) ([]byte, error)
 }
 
-// WorkspacePicker is the host-native directory chooser. It lives behind an
-// application port because a browser cannot disclose an absolute local path to
-// the Go process safely, while an Electron-equivalent workspace needs one.
-type WorkspacePicker interface {
-	Choose(ctx context.Context) (string, error)
+// DirectoryBrowser reads the host filesystem for the in-app workspace
+// picker. The browser cannot see the server's folders, so the application
+// exposes a bounded directory listing over RPC and validates the selected
+// path before it is persisted as a conversation workspace.
+type DirectoryBrowser interface {
+	// ListDirs returns the subdirectories of path, sorted by name and
+	// capped. An empty path means the host home directory; the resolved
+	// absolute path and its parent are returned so the frontend breadcrumb
+	// stays in sync.
+	ListDirs(ctx context.Context, path string) (DirListing, error)
+	// EnsureDir confirms the candidate workspace path exists and is a
+	// directory.
+	EnsureDir(ctx context.Context, path string) error
 }
 
-type WorkspacePickerFunc func(ctx context.Context) (string, error)
-
-func (f WorkspacePickerFunc) Choose(ctx context.Context) (string, error) { return f(ctx) }
+// DirListing is the DirectoryBrowser result. Entries is never nil.
+type DirListing struct {
+	Path      string
+	Parent    string
+	Entries   []contracts.WorkspaceDirEntry
+	Truncated bool
+}
 
 // ---- AI provider port ----
 
