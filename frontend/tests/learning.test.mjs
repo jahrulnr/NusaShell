@@ -130,7 +130,9 @@ test('a source conversation line is shown without leaking the raw id', () => {
 
 test('an entry without a transcript renders no button instead of a dead one', () => {
   for (const entry of [
-    { type: 'review', status: 'done', review_id: 'review_1' },
+    // A legacy review entry (recorded before job transcripts existed) and a
+    // job that ran without a model: neither has anything to open.
+    { type: 'review', status: 'done' },
     { type: 'consolidate', status: 'done' },
     { type: 'consolidate', status: 'error' },
   ]) {

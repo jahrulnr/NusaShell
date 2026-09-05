@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-05
+
 ### Removed
+
+- **Legacy review remnants in the Learning stack.** `LearningLogEntryDTO.ReviewID` and
+  `LearningLogEntryDTO.Error` (never read by the frontend), the unreachable
+  `review_transcript` routing branch and `reviewScripts` stub queue in the e2e
+  harness, `TestStorePath` (migrated into `TestSafeSegmentRejectsUnsafeIDs`,
+  which guards the still-live `safeSegment` check), and the `jsonstore`
+  `Store.Path()` method that only the retired review agent ever called.
 
 - **Turn-count and tool-nudge background review.** `learning_review_threshold`,
   `skill_nudge_interval`, `learning.review.*` events, `learning.review.transcript`,
@@ -28,6 +37,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only the *precondition* is removed.
 
 ### Added
+
+- **LLM log for learning jobs.** The Learning log's dead details button is a
+  real control again: learning jobs (memory consolidation, skill evolution)
+  now run their LLM call as a headless agent turn, so the packet the model
+  was shown, its tool rounds, and its final answer are persisted as a
+  `type=background` conversation. Job entries carry `llm_conversation_id`
+  and their **View LLM log** button opens that exact transcript inline,
+  rendered by the same renderer as the Agent view. The transcript is kept
+  even when the call failed or produced nothing — a failed job is precisely
+  the one worth inspecting.
+
+- **Conversation `type`.** Conversations are now classified as
+  `conversation` (interactive Agent room), `background` (learning-job
+  transcript), or `automation` (pipeline agent step). Only `conversation`
+  appears in `agent.conversations.list`; the other two stay addressable by
+  id. Records written before the field existed keep their meaning: a legacy
+  `Origin: pipeline` reads as `automation`.
 
 - **Experience learning system.** Turns record structured experiences
   (`growth/experiences.jsonl`). Signal-based jobs (correction, teaching,
@@ -67,6 +93,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Learning jobs surface in the Learning log.** `runLearningJob` now records
+  a trajectory event (job id, status, applied mutations, transcript id), so
+  consolidation and skill-evolution outcomes appear in the feed instead of
+  being invisible background work. `learning.log` entries also stopped
+  shipping provider-shaped error text and internal review ids to the UI.
 - **Auto-continue no longer stops on a trailing `?`.** A plain-text question is not a user-decision gate. Only `ask_question` blocks the turn; while TODOs remain, the chain continues and the continue prompt tells the model to call that tool.
 - **Live agent deltas moved from WebSocket to per-round SSE streams (`GET /stream`).** This is a **breaking wire change**: `agent.message.delta`, `agent.reasoning.delta`, and `agent.tool.delta` WS events are removed. The frontend now opens one SSE stream per round (`?run_id=&message_id=&after=<seq>`) on `agent.turn.started`, receives `round.delta` frames (`seq`, `kind` = text | reasoning | tool) and a terminal `round.done` frame (`state`, `usage`, `next`). `after=` replay makes reconnects, room switches, and page reloads self-healing: the server stages live round content in an in-memory registry (bounded, sealed TTL) and the round is committed to the conversation store atomically at seal, so snapshots never see torn mid-round state. `next` chaining carries tool-loop and auto-continue rounds forward, removing the previous room-buffer/pending-event workarounds. The WebSocket keeps signaling and lifecycle events (`agent.turn.started`, `agent.tool.started/completed`, `agent.turn.done/error`, steer, ask, compaction).
 

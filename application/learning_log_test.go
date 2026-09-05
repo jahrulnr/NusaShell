@@ -147,19 +147,16 @@ func TestHandleLearningLogEnrichesReviewEntries(t *testing.T) {
 	}
 }
 
-func TestHandleLearningLogParsesReviewStatusAndError(t *testing.T) {
+// A failed job still reports its status, but the provider-shaped error stays
+// server-side: the UI renders its own generic failure line, so shipping the
+// raw error would only leak provider internals into the feed.
+func TestHandleLearningLogParsesStatusAndKeepsErrorServerSide(t *testing.T) {
 	dir := t.TempDir()
 	writeTrajectory(t, dir, []string{
-		`{"ts":"2026-08-19T09:00:00Z","type":"review","detail":{"conversation":"conv_ok","status":"done","mutations":[]}}`,
-		`{"ts":"2026-08-19T10:00:00Z","type":"review","detail":{"conversation":"conv_err","status":"error","error":"no model configured","mutations":[]}}`,
+		`{"ts":"2026-08-19T09:00:00Z","type":"consolidate","detail":{"job_id":"job_ok","status":"done","mutations":[]}}`,
+		`{"ts":"2026-08-19T10:00:00Z","type":"consolidate","detail":{"job_id":"job_err","status":"error","error":"no model configured","mutations":[]}}`,
 	})
-	app := &App{
-		DataDir: dir,
-		Conversations: &titleConversationStore{convs: map[string]*domain.Conversation{
-			"conv_ok":  {ID: "conv_ok", Title: "OK"},
-			"conv_err": {ID: "conv_err", Title: "Err"},
-		}},
-	}
+	app := &App{DataDir: dir}
 	res, rpcErr := app.handleLearningLog(contracts.LearningLogRequest{Limit: 10})
 	if rpcErr != nil {
 		t.Fatalf("handleLearningLog: %v", rpcErr)
@@ -168,26 +165,20 @@ func TestHandleLearningLogParsesReviewStatusAndError(t *testing.T) {
 	if len(result.Entries) != 2 {
 		t.Fatalf("entries = %d, want 2", len(result.Entries))
 	}
-	// Newest first: error entry on top.
+	// Newest first: the failed job on top.
 	top := result.Entries[0]
 	if top.Status != "error" {
 		t.Errorf("top status = %q, want error", top.Status)
-	}
-	if top.Error != "Background review failed during automatic processing." {
-		t.Errorf("top error = %q, want generic background failure", top.Error)
 	}
 	if _, ok := top.Detail["status"]; ok {
 		t.Error("status should not appear in raw detail")
 	}
 	if _, ok := top.Detail["error"]; ok {
-		t.Error("error should not appear in raw detail")
+		t.Error("the raw error must stay server-side instead of riding along in detail")
 	}
 	bottom := result.Entries[1]
 	if bottom.Status != "done" {
 		t.Errorf("bottom status = %q, want done", bottom.Status)
-	}
-	if bottom.Error != "" {
-		t.Errorf("bottom error = %q, want empty", bottom.Error)
 	}
 }
 

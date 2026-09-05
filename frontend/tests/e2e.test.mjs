@@ -140,8 +140,6 @@ function installBrowserGlobals(dom, baseURL) {
 //     -> completeText (must satisfy the backend quality guard:
 //     summaries shorter than compactionSummaryMinChars (200) are retried
 //     and ultimately fail the turn with EventCompactionFailed).
-//   - autolearn review agent: streaming requests advertising
-//     tools:["review_transcript"] -> reviewScripts queue.
 //   - main chat: every other streaming request -> scripts queue.
 const LONG_COMPACTION_SUMMARY = 'SUMMARY: user explored compaction e2e test. '
   + 'They seeded four large turns about Go concurrency, verified token estimates, '
@@ -153,10 +151,6 @@ const LONG_COMPACTION_SUMMARY = 'SUMMARY: user explored compaction e2e test. '
 function fakeLLM(port, { contextLength = 1000 } = {}) {
   let completeText = 'compaction summary: user likes Go.';
   let scripts = [];
-  // Autolearn review-agent scripts live in their own queue: the review
-  // agent fires concurrently with compaction/post-compaction turns and
-  // used to pop from `scripts`, racing the main chat for the next stub.
-  let reviewScripts = [];
   let sendDone = true;
   // sendFinish controls the trailing finish_reason chunk. Compat streams
   // treat finish_reason without [DONE] as a normal termination (many
@@ -194,11 +188,7 @@ function fakeLLM(port, { contextLength = 1000 } = {}) {
           }));
           return;
         }
-        // Streaming: route by consumer role so background subsystems
-        // cannot steal each other's scripted replies.
-        const toolNames = new Set((parsed.tools || []).map((t) => t?.function?.name));
-        const pool = toolNames.has('review_transcript') ? reviewScripts : scripts;
-        const steps = pool.shift() || [{ text: 'ok' }];
+        const steps = scripts.shift() || [{ text: 'ok' }];
         res.writeHead(200, { 'Content-Type': 'text/event-stream' });
         for (const step of steps) {
           const delta = {};
@@ -231,7 +221,6 @@ function fakeLLM(port, { contextLength = 1000 } = {}) {
     server,
     setComplete: (text) => { completeText = text; },
     setScripts: (s) => { scripts = s; },
-    setReviewScripts: (s) => { reviewScripts = s; },
     setSendDone: (v) => { sendDone = v; },
     setSendFinish: (v) => { sendFinish = v; },
     requests: () => requests,

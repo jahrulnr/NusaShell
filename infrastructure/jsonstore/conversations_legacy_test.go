@@ -49,24 +49,16 @@ func TestLoadIgnoresLegacySidecarsAndUnparsableFiles(t *testing.T) {
 	}
 }
 
-// TestStorePath verifies the Path method returns the absolute file path for
-// a conversation ID and rejects unsafe path segments.
-func TestStorePath(t *testing.T) {
-	dir := t.TempDir()
-	s, err := New(dir)
-	if err != nil {
-		t.Fatalf("New: %v", err)
+// TestSafeSegmentRejectsUnsafeIDs guards the path-segment check shared by the
+// conversation and ACP run stores. An id that could escape its directory must
+// be rejected instead of silently writing outside the store.
+func TestSafeSegmentRejectsUnsafeIDs(t *testing.T) {
+	for _, id := range []string{"", "../etc/passwd", "..", "a/b", `..\win`, "conv_\x00x"} {
+		if err := safeSegment(id); err == nil {
+			t.Errorf("safeSegment(%q) = nil, want an error", id)
+		}
 	}
-	got := s.Path("conv_abc123")
-	want := filepath.Join(dir, "conversations", "conv_abc123.json")
-	if got != want {
-		t.Errorf("Path = %q, want %q", got, want)
-	}
-	// Unsafe IDs must return "" to prevent path traversal.
-	if s.Path("../etc/passwd") != "" {
-		t.Error("Path should reject path traversal attempts")
-	}
-	if s.Path("") != "" {
-		t.Error("Path should reject empty ID")
+	if err := safeSegment("conv_abc123"); err != nil {
+		t.Errorf("safeSegment(conv_abc123) = %v, want nil", err)
 	}
 }

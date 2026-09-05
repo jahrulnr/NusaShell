@@ -96,8 +96,8 @@ func readTrajectoryDetail(t *testing.T, dir, wantType string) map[string]interfa
 }
 
 // A consolidation job must hand back the id of the conversation that holds
-// its LLM transcript. Without it the Learning log has nothing to open, which
-// is exactly how the "View review details" button became a dead control.
+// its LLM transcript. Without it the log has nothing to open, which is
+// exactly how the details button became a control that did nothing.
 func TestConsolidateJobReturnsLLMConversationID(t *testing.T) {
 	exp := &domain.Experience{
 		ID:      "exp_llm_1",
@@ -184,7 +184,8 @@ func TestRunLearningJobRecordsLLMConversationInTrajectory(t *testing.T) {
 		t.Fatalf("mutations = %v, want the applied operation listed", detail["mutations"])
 	}
 	first, _ := mutations[0].(map[string]interface{})
-	if !strings.Contains(strings.ToLower(fmtString(first["snippet"])), "gofmt") {
+	snippet, _ := first["snippet"].(string)
+	if !strings.Contains(strings.ToLower(snippet), "gofmt") {
 		t.Errorf("mutation snippet = %v, want the saved body", first["snippet"])
 	}
 }
@@ -247,9 +248,4 @@ func TestHeadlessConversationTypeByAgentKind(t *testing.T) {
 	if title := headlessTurnTitle(AgentMemoryConsolidator, "anything"); !strings.Contains(title, "learning") {
 		t.Errorf("learning turn title = %q, want a readable learning label", title)
 	}
-}
-
-func fmtString(v interface{}) string {
-	s, _ := v.(string)
-	return s
 }

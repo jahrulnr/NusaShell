@@ -342,17 +342,6 @@ func (s *Store) Get(id string) (*domain.Conversation, error) {
 	return clone(c), nil
 }
 
-// Path returns the absolute file path where a conversation's JSON is stored.
-// Used by the review agent to expose the path in the review_transcript tool
-// result so the agent can file_read the full conversation when the bounded
-// segment lacks context. Returns "" for unsafe IDs.
-func (s *Store) Path(id string) string {
-	if err := safeSegment(id); err != nil {
-		return ""
-	}
-	return filepath.Join(s.dir, "conversations", id+".json")
-}
-
 func (s *Store) Save(c *domain.Conversation) error {
 	stored := clone(c)
 	b, err := json.Marshal(stored)

@@ -40,12 +40,8 @@ const transcriptMessages = [
   { id: 'm2', role: 'assistant', content: 'Saved one durable constraint.', created_at: '2026-09-05T10:00:05Z' },
 ];
 
-// The transcript is a conversation, so the button must read it with the
-// conversation RPC. Guarded here because a handler pointed at a method the
-// backend no longer serves is how the original button died silently.
 test('the LLM log is fetched with agent.conversations.get', () => {
   assert.match(learningView, /agent\.conversations\.get/);
-  assert.doesNotMatch(learningView, /learning\.review\.transcript/);
 });
 
 test('clicking the LLM log button renders the transcript inline', async () => {

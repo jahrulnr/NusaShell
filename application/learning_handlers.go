@@ -317,21 +317,15 @@ func (a *App) handleLearningLog(req contracts.LearningLogRequest) (any, *contrac
 			entry.ConversationID = convID
 			entry.ConversationTitle = titles[convID]
 		}
-		if reviewID, ok := e.Detail["review_id"].(string); ok {
-			entry.ReviewID = reviewID
-		}
+		// review_id is deliberately not lifted into a column: it only ever
+		// appears on review entries written before job transcripts existed,
+		// and those have nothing to open. The exclude list below keeps the
+		// id out of the raw detail so it never reaches the UI.
 		if llmConvID, ok := e.Detail["llm_conversation_id"].(string); ok {
 			entry.LLMConversationID = llmConvID
 		}
 		if status, ok := e.Detail["status"].(string); ok {
 			entry.Status = status
-		}
-		if errMsg, ok := e.Detail["error"].(string); ok {
-			if e.Type == "review" && entry.Status == "error" {
-				entry.Error = "Background review failed during automatic processing."
-			} else {
-				entry.Error = errMsg
-			}
 		}
 		if raw, ok := e.Detail["mutations"]; ok {
 			if list, ok := raw.([]interface{}); ok {
@@ -366,6 +360,9 @@ func (a *App) handleLearningLog(req contracts.LearningLogRequest) (any, *contrac
 		if len(e.Detail) > 0 {
 			detail := make(map[string]json.RawMessage, len(e.Detail))
 			for k, v := range e.Detail {
+				// Structured columns and internal ids never ride along in the
+				// raw passthrough. error in particular is provider-shaped and
+				// would otherwise leak into the feed.
 				if k == "conversation" || k == "mutations" || k == "review_id" || k == "llm_conversation_id" || k == "status" || k == "error" {
 					continue
 				}

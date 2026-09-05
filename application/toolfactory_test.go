@@ -115,8 +115,12 @@ func TestToolFactoryMemoryConsolidatorOmitsACPDelegateAndWrites(t *testing.T) {
 		Dispatchers: FilterDispatcherToolInfos,
 	}
 	defs := f.Get(AgentMemoryConsolidator, "")
-	if hasTool(defs, "review_transcript") {
-		t.Fatalf("consolidator must not advertise review_transcript, got %v", namesOf(defs))
+	// Writes go through typed learning ops, so the consolidator must never be
+	// able to edit files directly.
+	for _, banned := range []string{"file_write", "file_patch", "file_delete"} {
+		if hasTool(defs, banned) {
+			t.Fatalf("consolidator must not advertise %s, got %v", banned, namesOf(defs))
+		}
 	}
 	for _, want := range []string{"file_read", "file_list", "grep", "web_search", "web_fetch", "docs", "skill", "memory"} {
 		if !hasTool(defs, want) {
