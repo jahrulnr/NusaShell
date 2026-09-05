@@ -139,18 +139,25 @@ func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.
 	if strings.TrimSpace(req.Content) == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "skill content is required"}
 	}
-	// When path is set, write a support file inside an existing skill.
-	if path := strings.TrimSpace(req.Path); path != "" {
-		if err := a.Skills.WriteFile(name, "", path, req.Content); err != nil {
+	rel, support, err := domain.SkillSaveSupportPath(req.Path)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
+	}
+	if support {
+		lookup := name
+		if id := strings.TrimSpace(req.ID); id != "" {
+			lookup = id
+		}
+		if err := a.Skills.WriteFile(lookup, "", rel, req.Content); err != nil {
 			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 		}
-		a.log("info", "skills", "skill file saved: %s/%s", name, path)
+		a.log("info", "skills", "skill file saved: %s/%s", lookup, rel)
 		a.publishAnnouncementToAll(newAnnouncement(
 			"skills_changed",
 			domain.AnnouncementSkillsChangedArgs("save"),
 			domain.AnnouncementSkillsChangedMessage(),
 		), "")
-		return contracts.SkillReadResult{Skill: contracts.SkillFull{SkillDTO: contracts.SkillDTO{ID: name, Name: name}}}, nil
+		return contracts.SkillReadResult{Skill: contracts.SkillFull{SkillDTO: contracts.SkillDTO{ID: lookup, Name: name}}}, nil
 	}
 	var s *domain.Skill
 	if req.ID != "" {

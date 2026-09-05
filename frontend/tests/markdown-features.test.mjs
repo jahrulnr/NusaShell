@@ -47,6 +47,8 @@ test('file:// link renders as clickable <a> with decoded data-local-path', () =>
   const html = renderMarkdown('[doc](file:///home/user/doc.md)\n');
   assert.match(html, /data-local-path="\/home\/user\/doc\.md"/);
   assert.match(html, /class="agent-local-link"/);
+  assert.doesNotMatch(html, /href="file:/);
+  assert.match(html, /href="\/local-file\?path=/);
   assert.doesNotMatch(html, /target="_blank"/);
 });
 

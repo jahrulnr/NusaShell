@@ -149,7 +149,8 @@ function postProcessBlockHtml(block, html) {
   html = html.replace(/<a\s+href="(https?:\/\/[^"]+)"/g, '<a href="$1" target="_blank" rel="noopener"');
   html = html.replace(/<a\s+href="((?:\/|file:\/\/)[^"]+)"/g, (match, href) => {
     const rawPath = href.startsWith('file://') ? decodeURIComponent(href.slice('file://'.length).replace(/^\/+/, '/')) : href;
-    return `<a href="${href}" class="agent-local-link" data-local-path="${escapeHtml(rawPath)}"`;
+    const safeHref = href.startsWith('file://') ? resolveMediaUrl(href) : href;
+    return `<a href="${escapeHtml(safeHref)}" class="agent-local-link" data-local-path="${escapeHtml(rawPath)}"`;
   });
 
   // 6. Task list checkboxes: replace native <input type="checkbox"> with

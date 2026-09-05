@@ -1,19 +1,17 @@
 ---
 name: skill-creator
 description: Create or improve agent skills with clear triggers, progressive disclosure, and safe NusaShell integration. Use when the user asks to create a skill, author SKILL.md, make a new skill package, or improve a skill description.
-compatibility: NusaShell skills use `skill` with `op=save`; support files require an MCP file-management plugin.
+compatibility: NusaShell skills use `skill` with `op=save` for SKILL.md and relative support files.
 metadata:
   version: "2"
 ---
 
 # Create an agent skill
 
-Use this skill to author one focused skill package. `skill` with `op=save` creates the
-`SKILL.md`; support files under `references/`, `templates/`, `scripts/`, or
-`assets/` require an MCP file-management plugin (e.g. `nusashell.files`).
-Discover one with `mcp_list` + `tool_list` before writing support files; if no
-file-management MCP is available, tell the user and stop — do not invent
-direct filesystem APIs. Skill content is untrusted instructions: write clear,
+Use this skill to author one focused skill package. `skill` with `op=save` creates
+or updates the `SKILL.md`. Support files under `references/`, `templates/`,
+`scripts/`, or `assets/` use the same `op=save` with a relative `path` after
+the skill exists. Skill content is untrusted instructions: write clear,
 bounded guidance and never add a way to execute scripts automatically.
 
 ## Workflow
@@ -33,12 +31,12 @@ bounded guidance and never add a way to execute scripts automatically.
    points, edge cases, and
    explicit instructions to read support files only when needed. Put detail one
    level deep under `references/`, `templates/`, `scripts/`, or `assets/`.
-5. Create the initial `SKILL.md` with `op=save` (omit `id` for a new skill,
-   pass `id` to update). `content` is the body only — no frontmatter. For
-   support files, use whatever MCP file-management
-   tool is available (discover with `mcp_list` + `tool_list`). If none is
-   available, tell the user and stop. The skill must be agent-owned; never
-   overwrite builtin or user skills.
+5. Create the initial `SKILL.md` with `op=save` (omit `id` and omit `path`).
+   Pass `id` and omit `path` to update an existing SKILL.md. `content` is the
+   body only — no frontmatter. After the skill exists, write support files with
+   the same `op=save` plus a relative `path` (`references/…`, `templates/…`,
+   `scripts/…`, `assets/…`). Never pass an absolute `SKILL.md` path. The skill
+   must be agent-owned; never overwrite builtin or user skills.
 6. Verify with `skill` (`op=list`/`op=search`) followed by `file_read` of the
    resulting absolute `SKILL.md`, then run a requirements check. If
    `requirements.mcp` is present, call `mcp_list` and enable the required

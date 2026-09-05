@@ -1,7 +1,8 @@
 // Sound notifications for agent turn events.
 //
-// Plays a notification sound when an agent turn completes or fails, gated
-// by the SoundNotifications setting (default on). Sounds are served from
+// Plays a notification sound when an agent turn completes or fails, or when
+// an ask_question card is waiting for an answer, gated by the
+// SoundNotifications setting (default on). Sounds are served from
 // the embedded /sounds/ endpoint and are preloaded on first use so the
 // first turn-complete plays without a fetch delay.
 //
@@ -11,9 +12,11 @@
 
 const SOUND_COMPLETE = '/sounds/notification.wav';
 const SOUND_ERROR = '/sounds/notification-error.wav';
+const SOUND_ASK = '/sounds/notification-ask_question.wav';
 
 let completeAudio = null;
 let errorAudio = null;
+let askAudio = null;
 let preloaded = false;
 
 // preload lazily creates the Audio elements so the browser fetches the
@@ -27,6 +30,8 @@ function preload() {
   completeAudio.preload = 'auto';
   errorAudio = new Audio(SOUND_ERROR);
   errorAudio.preload = 'auto';
+  askAudio = new Audio(SOUND_ASK);
+  askAudio.preload = 'auto';
 }
 
 // playComplete plays the turn-complete notification. Silently no-ops when
@@ -49,6 +54,19 @@ export function playError(soundEnabled) {
   if (!errorAudio) return;
   errorAudio.currentTime = 0;
   errorAudio.play().catch(() => {
+    // Autoplay blocked or fetch failed — silently ignore.
+  });
+}
+
+// playAsk plays the ask_question-pending notification, announcing that an
+// interactive question card is waiting for an answer. Same gating as
+// playComplete.
+export function playAsk(soundEnabled) {
+  if (!soundEnabled) return;
+  preload();
+  if (!askAudio) return;
+  askAudio.currentTime = 0;
+  askAudio.play().catch(() => {
     // Autoplay blocked or fetch failed — silently ignore.
   });
 }

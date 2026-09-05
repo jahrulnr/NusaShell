@@ -46,7 +46,7 @@ test('service worker is network-first with cache fallback and never caches dynam
   assert.match(sw, /addEventListener\('fetch'/);
   assert.match(sw, /request\.method !== 'GET'/, 'only GETs are cacheable');
   assert.match(sw, /url\.origin !== self\.location\.origin/, 'same-origin only');
-  for (const endpoint of ['/rpc/', '/local-file', '/sounds/', '/plugins/']) {
+  for (const endpoint of ['/rpc/', '/ws', '/stream', '/local-file', '/sounds/', '/plugins/']) {
     assert.ok(sw.includes(`'${endpoint}'`), `must never cache ${endpoint}`);
   }
   assert.match(sw, /caches\.match\('\.\/index\.html'\)/, 'navigations fall back to the cached shell');

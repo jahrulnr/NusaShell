@@ -58,7 +58,7 @@ import { highlightCode } from '../highlight-render.js';
 import { attachZoomButtons } from '../media-zoom.js';
 import { parseArtifactOutput } from '../artifact-render.js';
 import { createAskCard, sealAskCard, cancelAskCard } from './ask-card.js';
-import { playComplete, playError } from '../sounds.js';
+import { playComplete, playError, playAsk } from '../sounds.js';
 import { loadToolContracts, normalizeToolCall } from './agent/tool-contracts.js';
 
 // placeToolCard appends a tool card to the right container: standalone cards
@@ -3420,6 +3420,10 @@ function bindEvents() {
     // Electron's createStreamingToolCard). It lives in the tool strip,
     // not nested inside a tool terminal <details>.
     if (!run.strip) return;
+    // Announce the pending question with a sound so the user notices the
+    // interactive card even if they are not staring at the thread. Same
+    // SoundNotifications gate as turn-complete / turn-error.
+    playAsk(state.settings?.sound_notifications !== false);
     const card = createAskCard(tool_call_id, { question, options, allow_free_text, multi_select }, {
       runId: run_id,
       onSubmit: (err) => toast(err instanceof Error ? err.message : 'Could not send answer', 'error'),

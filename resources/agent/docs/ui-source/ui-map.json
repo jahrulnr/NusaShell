@@ -1842,7 +1842,7 @@
       "label": "Sound notifications",
       "section": "Settings",
       "type": "checkbox",
-      "notes": "Play a sound when an agent turn completes or fails. Default on."
+      "notes": "Play a sound when an agent turn completes, fails, or awaits an ask_question answer. Default on."
     },
     "settings-temperature": {
       "label": "Temperature",

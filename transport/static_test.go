@@ -141,7 +141,7 @@ func TestPWAServing(t *testing.T) {
 		t.Fatalf("sw.js content type = %q", ct)
 	}
 	swBody, _ := io.ReadAll(resp.Body)
-	for _, needle := range []string{"nusashell-shell-v1", "'fetch'", "/rpc/", "/plugins/", "./js/pip.js"} {
+	for _, needle := range []string{"nusashell-shell-v2", "'fetch'", "/rpc/", "/plugins/", "./js/pip.js"} {
 		if !strings.Contains(string(swBody), needle) {
 			t.Fatalf("sw.js missing %s", needle)
 		}
@@ -183,7 +183,7 @@ func TestPWAServing(t *testing.T) {
 // them on turn-complete / turn-error events.
 func TestSoundsEndpoint(t *testing.T) {
 	h := newHarness(t, nil)
-	for _, name := range []string{"notification.wav", "notification-error.wav"} {
+	for _, name := range []string{"notification.wav", "notification-error.wav", "notification-ask_question.wav"} {
 		resp, err := http.Get(h.server.URL + "/sounds/" + name)
 		if err != nil {
 			t.Fatalf("GET /sounds/%s: %v", name, err)

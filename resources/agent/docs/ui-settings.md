@@ -547,7 +547,7 @@ Choose a bundled interface font for this browser; the font applies immediately a
 - **Sound notifications** (`#settings-sound-notifications`):
   - Section: Settings
   - Type: checkbox
-  - Notes: Play a sound when an agent turn completes or fails. Default on.
+  - Notes: Play a sound when an agent turn completes, fails, or awaits an ask_question answer. Default on.
 
 ## Connection
 

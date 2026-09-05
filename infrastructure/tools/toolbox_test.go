@@ -1527,13 +1527,71 @@ func TestSkillSaveNewSkillLeavesIDForStoreToDerive(t *testing.T) {
 	}
 }
 
+func TestSkillSaveAbsoluteSkillMDPathCreatesNewSkill(t *testing.T) {
+	store := &skillSaveRecordingStore{stubSkillStore: &stubSkillStore{}}
+	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
+	payload := `{"op":"save","name":"tool-mapping","description":"Map tools","content":"# Tool Mapping\n","path":"/home/u/.config/nusashell/skills/learned-tool-mapping/SKILL.md"}`
+	_, err := tb.Execute(context.Background(), "skill", []byte(payload))
+	if err != nil {
+		t.Fatalf("create with absolute SKILL.md path: %v", err)
+	}
+	if store.saved == nil {
+		t.Fatal("Save was not called")
+	}
+	if store.saved.ID != "" {
+		t.Fatalf("new skill ID = %q, want empty so the store derives it from name", store.saved.ID)
+	}
+	if store.saved.Name != "tool-mapping" {
+		t.Fatalf("Name = %q, want tool-mapping", store.saved.Name)
+	}
+	if store.saved.Content != "# Tool Mapping\n" {
+		t.Fatalf("Content = %q", store.saved.Content)
+	}
+}
+
+func TestSkillSaveRelativeSkillMDPathUpdatesBody(t *testing.T) {
+	existing := &domain.Skill{ID: "my-skill", Name: "my-skill", Origin: domain.SkillOriginLearned, Status: domain.SkillStatusExperimental}
+	store := &skillSaveRecordingStore{stubSkillStore: &stubSkillStore{skills: []*domain.Skill{existing}}}
+	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
+	_, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"save","id":"my-skill","name":"my-skill","path":"SKILL.md","content":"# Updated\n"}`))
+	if err != nil {
+		t.Fatalf("update with path=SKILL.md: %v", err)
+	}
+	if store.saved == nil {
+		t.Fatal("Save was not called")
+	}
+	if store.saved.ID != "my-skill" {
+		t.Fatalf("ID = %q, want my-skill", store.saved.ID)
+	}
+	if store.saved.Content != "# Updated\n" {
+		t.Fatalf("Content = %q, want updated body", store.saved.Content)
+	}
+}
+
+func TestSkillSaveAbsoluteSupportPathRejected(t *testing.T) {
+	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{skills: []*domain.Skill{{ID: "my-skill", Name: "my-skill", Origin: domain.SkillOriginLearned, Status: domain.SkillStatusExperimental}}}}
+	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
+	_, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"save","name":"my-skill","path":"/tmp/errors.md","content":"x"}`))
+	if err == nil {
+		t.Fatal("expected error for absolute support path")
+	}
+	if !strings.Contains(err.Error(), "relative support file") {
+		t.Fatalf("error = %v, want relative-support-file hint", err)
+	}
+	if len(store.written) != 0 {
+		t.Fatalf("WriteFile should not be called, got %v", store.written)
+	}
+}
+
 func TestSkillSaveWithPath_nonexistentSkill_rejected(t *testing.T) {
 	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{}}
-	store.writeErr = fmt.Errorf("skill %q not found", "no-such")
 	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
 	_, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"save","name":"no-such","path":"references/x.md","content":"x"}`))
 	if err == nil {
 		t.Fatal("expected error for nonexistent skill, got nil")
+	}
+	if !strings.Contains(err.Error(), "omit path") {
+		t.Fatalf("error = %v, want omit-path create hint", err)
 	}
 }
 

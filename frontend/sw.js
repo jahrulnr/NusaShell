@@ -6,14 +6,18 @@
 // an upgrade). When the server is down, every navigation and asset is served
 // from this cache so the app boots and shows the full-screen offline state.
 //
-// Never cached: /ws (WebSocket handshake), POST /rpc/*, /local-file (large
-// dynamic local files), /sounds (notification blips), /plugins/* (plugin UIs
-// come from the plugin store and can be installed/uninstalled at runtime).
+// Never cached: /ws (WebSocket handshake), GET /stream (per-round SSE),
+// POST /rpc/*, /local-file (large dynamic local files), /sounds
+// (notification blips), /plugins/* (plugin UIs come from the plugin store
+// and can be installed/uninstalled at runtime). Cloning an SSE body in
+// this worker breaks Firefox (Failed to load /stream: unexpected error).
 
-const CACHE = 'nusashell-shell-v1';
+const CACHE = 'nusashell-shell-v2';
 
 const NEVER_CACHE = [
   '/rpc/',
+  '/ws',
+  '/stream',
   '/local-file',
   '/sounds/',
   '/plugins/',

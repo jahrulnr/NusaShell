@@ -247,9 +247,21 @@ func TestSkillDispatcherOpsAreExplicit(t *testing.T) {
 	if !strings.Contains(skill.Description, "file_read") || !strings.Contains(skill.Description, "MUST") {
 		t.Fatalf("skill description must require file_read after discovery: %s", skill.Description)
 	}
+	if !strings.Contains(skill.Description, "omit id") || !strings.Contains(skill.Description, "omit path") {
+		t.Fatalf("skill description must distinguish create (omit id and path) from update: %s", skill.Description)
+	}
 	properties, ok := skill.InputSchema["properties"].(map[string]any)
 	if !ok {
 		t.Fatal("skill schema must expose properties")
+	}
+	pathSchema, ok := properties["path"].(map[string]any)
+	if !ok {
+		t.Fatal("skill schema must expose path")
+	}
+	pathDesc, _ := pathSchema["description"].(string)
+	pathDescLower := strings.ToLower(pathDesc)
+	if !strings.Contains(pathDescLower, "omit") || !strings.Contains(pathDescLower, "skill.md") {
+		t.Fatalf("path description must say omit it for SKILL.md create/update, got %q", pathDesc)
 	}
 	opSchema, ok := properties["op"].(map[string]any)
 	if !ok {

@@ -500,15 +500,23 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		if strings.TrimSpace(args.Content) == "" {
 			return "", fmt.Errorf("skill content is required")
 		}
-		if path := strings.TrimSpace(args.Path); path != "" {
-			existing, err := t.Skills.Get(name, "")
+		rel, support, err := domain.SkillSaveSupportPath(args.Path)
+		if err != nil {
+			return "", fmt.Errorf("skill save: %w", err)
+		}
+		if support {
+			lookup := name
+			if id := strings.TrimSpace(args.ID); id != "" {
+				lookup = id
+			}
+			existing, err := t.Skills.Get(lookup, "")
 			if err != nil {
-				return "", fmt.Errorf("skill save: %w", err)
+				return "", fmt.Errorf("skill save: skill %q not found; omit path to create SKILL.md, or pass the existing skill id to write a support file", lookup)
 			}
 			if !existing.CanAgentMutate() {
-				return "", fmt.Errorf("cannot mutate trusted curated skill %q", name)
+				return "", fmt.Errorf("cannot mutate trusted curated skill %q", lookup)
 			}
-			if err := t.Skills.WriteFile(name, "", path, args.Content); err != nil {
+			if err := t.Skills.WriteFile(lookup, "", rel, args.Content); err != nil {
 				return "", fmt.Errorf("skill save: %w", err)
 			}
 			return yamlBlock(map[string]any{"status": "saved"}), nil
