@@ -50,6 +50,20 @@ func TestEndpointsCacheRejectsLegacyEntriesWithoutPricingSchema(t *testing.T) {
 	}
 }
 
+func TestEndpointsCacheRejectsPriorSchemaVersion(t *testing.T) {
+	c := newEndpointsCache("")
+	c.mu.Lock()
+	c.items[c.key("p1", "z-ai/glm-5.2:free")] = endpointsCacheEntry{
+		Version:   endpointCacheSchemaVersion - 1,
+		Routes:    []domain.ModelRoute{{Slug: "baidu/fp8", Name: "Baidu"}},
+		FetchedAt: time.Now().Unix(),
+	}
+	c.mu.Unlock()
+	if _, ok := c.get("p1", "z-ai/glm-5.2:free"); ok {
+		t.Fatal("prior schema must miss so :free variants refetch their own routes")
+	}
+}
+
 func TestEndpointsCacheExpiry(t *testing.T) {
 	c := newEndpointsCache("")
 	c.set("p1", "m1", []domain.ModelRoute{{Slug: "a"}})

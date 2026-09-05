@@ -52,7 +52,7 @@ func (a *App) handleModelEndpoints(req contracts.ModelEndpointsRequest) (any, *c
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	routes, err := lister.ListModelEndpoints(ctx, m.CanonicalSlug)
+	routes, err := lister.ListModelEndpoints(ctx, m.EndpointsSlug())
 	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
 	}

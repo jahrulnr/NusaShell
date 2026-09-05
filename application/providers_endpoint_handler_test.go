@@ -118,6 +118,30 @@ func TestHandleModelEndpoints(t *testing.T) {
 	}
 }
 
+func TestHandleModelEndpointsPreservesFreeVariant(t *testing.T) {
+	routeProvider := &fakeRouteProvider{routes: []domain.ModelRoute{{Slug: "decart/fp4", Name: "Decart"}}}
+	providers := map[string]*domain.Provider{
+		"p1": {
+			ID: "p1", Name: "OpenRouter", Enabled: true,
+			Driver: domain.ProviderDriverOpenRouter, Kind: domain.ProviderChat,
+			Models: []domain.Model{{
+				ID:            "z-ai/glm-5.2:free",
+				CanonicalSlug: "z-ai/glm-5.2-20260616",
+			}},
+		},
+	}
+	app := newEndpointsTestApp(t, func(_ context.Context, _ *domain.Provider, _ string) (core.Provider, error) {
+		return routeProvider, nil
+	}, nil, providers)
+
+	if _, rpcErr := app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "z-ai/glm-5.2:free"}); rpcErr != nil {
+		t.Fatalf("handleModelEndpoints: %+v", rpcErr)
+	}
+	if routeProvider.slug != "z-ai/glm-5.2-20260616:free" {
+		t.Fatalf("lister slug = %q, want canonical plus :free variant", routeProvider.slug)
+	}
+}
+
 func TestHandleModelEndpointsFetchErrorSurfaces(t *testing.T) {
 	routeProvider := &fakeRouteProvider{err: errNotFound}
 	providers := map[string]*domain.Provider{

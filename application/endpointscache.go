@@ -30,9 +30,10 @@ func (a *App) endpoints() *endpointsCache {
 // same model with a different set of upstreams.
 const endpointCacheTTL = 24 * time.Hour
 
-// endpointCacheSchemaVersion forces a refresh after the route shape changes
-// so old entries cannot hide newly available per-provider pricing.
-const endpointCacheSchemaVersion = 2
+// endpointCacheSchemaVersion forces a refresh after the route shape or
+// lookup slug changes so old entries cannot hide pricing or mix a :free
+// variant with its paid sibling's upstream list.
+const endpointCacheSchemaVersion = 3
 
 // endpointsCacheEntry is one cached route list.
 type endpointsCacheEntry struct {

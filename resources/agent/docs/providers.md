@@ -417,10 +417,13 @@ silent provider switching between turns and prompt-cache misses. NusaShell
 lets the user pin one upstream per model (fail-closed) or leave routing to
 the gateway (Auto).
 
-- **Data source:** `GET /models/{canonical_slug}/endpoints` (one request
-  per model; there is no bulk endpoint). The canonical slug is captured
-  from `GET /models` at import time (`canonical_slug`, falling back to the
-  model ID). Response `tag` fields are the routing slugs used in
+- **Data source:** `GET /models/{slug}/endpoints` (one request per model;
+  there is no bulk endpoint). The lookup slug is the imported
+  `canonical_slug` (falling back to the model ID) plus any request
+  variant on the model ID (`:free`, `:batch`, …). OpenRouter's
+  `canonical_slug` is the undated identity shared by paid and free
+  siblings, so listing endpoints without the variant returns the paid
+  route list. Response `tag` fields are the routing slugs used in
   `provider.order`.
 - **RPC:** `ai.models.endpoints {provider_id, model_id}` returns
   `{routes:[{slug,name,quantization,status,latency,throughput,input_cost,

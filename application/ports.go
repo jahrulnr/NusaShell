@@ -454,7 +454,7 @@ type ModelLister interface {
 // providers return an empty list and nil error so callers never branch on
 // gateway type.
 type ModelEndpointsLister interface {
-	ListModelEndpoints(ctx context.Context, canonicalSlug string) ([]domain.ModelRoute, error)
+	ListModelEndpoints(ctx context.Context, slug string) ([]domain.ModelRoute, error)
 }
 
 // EmbeddingModelLister is implemented by providers that can enumerate

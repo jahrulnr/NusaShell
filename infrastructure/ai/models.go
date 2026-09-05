@@ -69,9 +69,10 @@ func listOpenAIModels(ctx context.Context, baseURL string, headers map[string]st
 }
 
 // listOpenRouterEndpoints fetches the upstream providers that can serve a
-// model: GET /models/{author}/{slug}/endpoints. One HTTP request per model;
-// there is no bulk endpoint, so callers cache aggressively. Returns an
-// empty slice (not an error) when the gateway returns no endpoints.
+// model: GET /models/{author}/{slug}/endpoints. slug is the canonical
+// identity plus any request variant (:free, :batch). One HTTP request per
+// model; there is no bulk endpoint, so callers cache aggressively. Returns
+// an empty slice (not an error) when the gateway returns no endpoints.
 func listOpenRouterEndpoints(ctx context.Context, baseURL string, headers map[string]string, client *http.Client, canonicalSlug string) ([]domain.ModelRoute, error) {
 	base := strings.TrimRight(baseURL, "/")
 	segments := strings.Split(canonicalSlug, "/")

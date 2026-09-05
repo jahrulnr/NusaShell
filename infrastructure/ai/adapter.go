@@ -116,8 +116,9 @@ func (a *Adapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model
 // ListModelEndpoints implements application.ModelEndpointsLister. Only
 // OpenRouter gateways have the concept of upstream providers; direct
 // providers (Anthropic, OpenAI, local chat) return an empty list so
-// callers never branch on gateway type.
-func (a *Adapter) ListModelEndpoints(ctx context.Context, canonicalSlug string) ([]domain.ModelRoute, error) {
+// callers never branch on gateway type. slug is the canonical identity
+// plus any request variant (:free, :batch).
+func (a *Adapter) ListModelEndpoints(ctx context.Context, slug string) ([]domain.ModelRoute, error) {
 	if !a.OpenRouter && a.Driver != domain.ProviderDriverOpenRouter {
 		return nil, nil
 	}
@@ -132,5 +133,5 @@ func (a *Adapter) ListModelEndpoints(ctx context.Context, canonicalSlug string) 
 	if base == "" {
 		base = openRouterDefaultBaseURL
 	}
-	return listOpenRouterEndpoints(ctx, base, headers, a.Client, canonicalSlug)
+	return listOpenRouterEndpoints(ctx, base, headers, a.Client, slug)
 }

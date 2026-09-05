@@ -288,3 +288,48 @@ func TestIsTPMDominatedRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestModelEndpointsSlugPreservesGatewayVariant(t *testing.T) {
+	cases := []struct {
+		name, id, canonical, want string
+	}{
+		{
+			name:      "free variant on dated canonical",
+			id:        "z-ai/glm-5.2:free",
+			canonical: "z-ai/glm-5.2-20260616",
+			want:      "z-ai/glm-5.2-20260616:free",
+		},
+		{
+			name:      "paid sibling keeps canonical",
+			id:        "z-ai/glm-5.2",
+			canonical: "z-ai/glm-5.2-20260616",
+			want:      "z-ai/glm-5.2-20260616",
+		},
+		{
+			name:      "batch variant",
+			id:        "openai/gpt-6-astra:batch",
+			canonical: "openai/gpt-6-astra-20260903",
+			want:      "openai/gpt-6-astra-20260903:batch",
+		},
+		{
+			name:      "canonical already has variant",
+			id:        "z-ai/glm-5.2:free",
+			canonical: "z-ai/glm-5.2:free",
+			want:      "z-ai/glm-5.2:free",
+		},
+		{
+			name:      "empty canonical",
+			id:        "z-ai/glm-5.2:free",
+			canonical: "",
+			want:      "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Model{ID: tc.id, CanonicalSlug: tc.canonical}.EndpointsSlug()
+			if got != tc.want {
+				t.Fatalf("EndpointsSlug() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

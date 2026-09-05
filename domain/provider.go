@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // ProviderKind names the wire API shape, not a vendor: Messages (Anthropic
 // Messages API), Responses (OpenAI Responses API), Chat (any OpenAI-compatible
@@ -205,7 +208,7 @@ const (
 
 type Model struct {
 	ID               string
-	CanonicalSlug    string // gateway-canonical slug for per-model endpoints (OpenRouter); "" when unknown
+	CanonicalSlug    string // gateway-canonical slug (OpenRouter); variants like :free live on ID
 	DisplayName      string // human-readable name (e.g. "GPT-5.5"), from catalog
 	Context          int
 	MaxOutput        int     // max completion tokens, when known
@@ -232,6 +235,35 @@ type Model struct {
 	// turns or the upstream 400s with "reasoning_content must be passed
 	// back". Empty when the model does not use interleaved reasoning.
 	InterleavedField string
+}
+
+// EndpointsSlug is the OpenRouter path used to list upstream endpoints.
+// CanonicalSlug is the stable undated identity and does not include request
+// variants such as :free or :batch. Those live on ID and must be appended
+// or the gateway returns the paid/default route list for the sibling model.
+func (m Model) EndpointsSlug() string {
+	base := strings.TrimSpace(m.CanonicalSlug)
+	if base == "" {
+		return ""
+	}
+	variant := modelIDVariant(m.ID)
+	if variant == "" || strings.HasSuffix(base, variant) {
+		return base
+	}
+	return base + variant
+}
+
+// modelIDVariant returns the OpenRouter variant suffix from a model ID
+// (":free", ":batch"), or "" when the local name has no colon.
+func modelIDVariant(id string) string {
+	id = strings.TrimSpace(id)
+	if i := strings.LastIndex(id, "/"); i >= 0 {
+		id = id[i+1:]
+	}
+	if i := strings.Index(id, ":"); i >= 0 {
+		return id[i:]
+	}
+	return ""
 }
 
 // ModelRoute describes one upstream endpoint that serves a model on an

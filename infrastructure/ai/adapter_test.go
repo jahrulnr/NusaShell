@@ -425,6 +425,17 @@ func TestAdapterListModelEndpoints(t *testing.T) {
 		t.Fatalf("route[2] zero pricing = %+v, want explicit zero values", routes[2])
 	}
 
+	routes, err = ad.ListModelEndpoints(context.Background(), "z-ai/glm-5.2-20260616:free")
+	if err != nil {
+		t.Fatalf("variant ListModelEndpoints: %v", err)
+	}
+	if gotPath != "/models/z-ai/glm-5.2-20260616:free/endpoints" && gotPath != "/models/z-ai/glm-5.2-20260616%3Afree/endpoints" {
+		t.Fatalf("variant request path = %q", gotPath)
+	}
+	if len(routes) != 3 {
+		t.Fatalf("variant routes = %+v", routes)
+	}
+
 	// Non-OpenRouter adapters report no routes without hitting the network.
 	direct := &Adapter{ProviderKind: domain.ProviderChat, BaseURL: srv.URL, Client: srv.Client()}
 	routes, err = direct.ListModelEndpoints(context.Background(), "x")

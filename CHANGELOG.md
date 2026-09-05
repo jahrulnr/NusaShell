@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.5] - 2026-09-05
 
+### Fixed
+
+- **OpenRouter route picker keeps `:free` / `:batch` variants.** Endpoint
+  lookup now appends the model ID variant onto `canonical_slug`. Free
+  models such as `z-ai/glm-5.2:free` no longer list the paid sibling's
+  upstreams. Stale `endpoints_cache.json` entries are refetched.
+
 ### Changed
 
 - **Todo plan files stay in the data directory.** A `todo` brief is
