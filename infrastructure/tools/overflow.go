@@ -122,7 +122,7 @@ func attachSpillMeta(meta map[string]any, path string, bytes int64, keep bool) {
 	meta["truncated"] = true
 	meta["overflow_path"] = path
 	meta["overflow_bytes"] = bytes
-	// In-band exec output is a head+tail sample, not a prefix of the
-	// spill file. file_read the overflow from offset 0 for the complete log.
+	// In-band exec output is a 20k 50/50 head+tail sample, not a prefix
+	// of the spill file. file_read the overflow from offset 0 for the complete log.
 	meta["next_offset_bytes"] = 0
 }

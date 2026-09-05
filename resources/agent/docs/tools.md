@@ -6,7 +6,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 
 | Tool | Purpose |
 | --- | --- |
-| `exec` | run a shell command as a child process; combined stdout/stderr streamed live to the tool terminal as it is produced (head/tail elision for huge output) plus an optional per-call Stop button while running; default shell is POSIX `sh` on Unix/macOS, on Windows `auto` resolves Git Bash first (POSIX syntax works best) then PowerShell — `cmd` only via explicit `shell="cmd"`, plus optional kinds `bash`/`powershell`/`pwsh`/`wsl` (wsl maps cwd under /mnt); no absolute wall-clock limit — running commands keep producing, but silence longer than `idle_timeout_ms` (default 180000) fails the run; optional explicit `timeout_ms`; optional absolute `cwd`; the whole child tree dies on cancel/timeout (Stop button or composer Stop); on Windows select shells via `shell=` instead of invoking cmd.exe/powershell.exe inside a bash command line (MSYS path conversion mangles drive-letter paths like `Z:/x`). When the full log exceeds ~32KiB, YAML includes `overflow_path` (absolute file under the platform temp dir `nusashell/`) with the complete stdout/stderr — `file_read` it from offset 0 |
+| `exec` | run a shell command as a child process; combined stdout/stderr streamed live to the tool terminal as it is produced plus an optional per-call Stop button while running; default shell is POSIX `sh` on Unix/macOS, on Windows `auto` resolves Git Bash first (POSIX syntax works best) then PowerShell — `cmd` only via explicit `shell="cmd"`, plus optional kinds `bash`/`powershell`/`pwsh`/`wsl` (wsl maps cwd under /mnt); no absolute wall-clock limit — running commands keep producing, but silence longer than `idle_timeout_ms` (default 180000) fails the run; optional explicit `timeout_ms`; optional absolute `cwd`; the whole child tree dies on cancel/timeout (Stop button or composer Stop); on Windows select shells via `shell=` instead of invoking cmd.exe/powershell.exe inside a bash command line (MSYS path conversion mangles drive-letter paths like `Z:/x`). In-band stdout/stderr is capped at 20000 characters as a 50/50 head+tail sample with `... (output truncated) ...` in the middle (the middle is dropped, not rejected). When the full log is larger, YAML includes `overflow_path` (absolute file under the platform temp dir `nusashell/`) with the complete stdout/stderr — `file_read` it from offset 0 |
 | `file_read` | read a text file by absolute path (up to `max_bytes`, default 32768; byte mode: continue with `offset_bytes` when truncated — the result echoes `offset_bytes`/`next_offset_bytes`, always byte counts, never line numbers; line mode: pass `start_line`/`end_line` (1-based, inclusive; either one switches to line mode and `offset_bytes` is ignored) to read by line numbers as grep reports them — the result echoes `start_line`/`end_line` and continues with `next_start_line` when truncated; `total_lines` always reports the complete file's line count so grep line numbers map directly; `sha256` is the version of the complete file, including bytes outside the returned page; metadata also reports `line_ending`, `tabs`, `carriage_returns`, and `trailing_whitespace_lines`; use `show_whitespace=true` to render invisible whitespace as visible markers; binary files are reported, not dumped) |
 | `file_write` | create or overwrite a text file atomically (temp file + rename); parent directories created automatically; `encoding` is utf8, escaped visible-whitespace text, or base64; escaped text understands `\t`, `\r`, `\n`, and `\\` and preserves the resulting bytes; transient Windows file-lock errors during the rename are retried briefly; the result includes the written file's `sha256` and whitespace metadata |
 | `file_patch` | exact substring replace; after an exact miss, safely auto-heals one unique whitespace-equivalent match by default and reports `healed: true`; set `auto_heal=false` for exact-only behavior; repeated exact matches still require 1-based `occurrence`, while ambiguous whitespace matches never write and report the current version plus candidate line numbers (`candidate_lines=[...]`); use `encoding=escaped` when copying markers from `file_read(show_whitespace=true)`; success returns the new `sha256` and whitespace metadata; a no-match context failure returns the current version, whitespace statistics, and a nearby excerpt with invisible characters rendered visibly; `preview=true` returns the result without writing |
@@ -134,12 +134,22 @@ file_read(path="big.log", offset_bytes=32768)
 grep(...) → overflow_path: /tmp/nusashell/grep-ab12.txt  next_offset_bytes: 32768
 file_read(path="/tmp/nusashell/grep-ab12.txt", offset_bytes=32768)
 
+# GOOD — oversized exec: in-band is a 20k head+tail sample, not a prefix
+exec(command="python3 -c 'print(\"x\"*50000)'")
+  → head ... (output truncated) ... tail
+  overflow_path: /tmp/nusashell/exec-ab12.txt  next_offset_bytes: 0
+file_read(path="/tmp/nusashell/exec-ab12.txt")  # offset 0, complete log
+
 Spill files live under the platform temp dir (`nusashell/`) and are swept
 after 24 hours while the server is running.
 
 # BAD — treating a line number as a byte offset
 grep(...) → line 900
 file_read(path="big.log", offset_bytes=900)   # lands mid-line ~14, not line 900
+
+# BAD — treating exec in-band as a prefix of the spill
+exec(...) → overflow_path: /tmp/nusashell/exec-ab12.txt  next_offset_bytes: 0
+file_read(path="/tmp/nusashell/exec-ab12.txt", offset_bytes=20000)  # skips the real start
 
 # BAD — arithmetic between coordinate systems
 file_read(...) → next_offset_bytes: 32768

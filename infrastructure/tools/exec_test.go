@@ -105,13 +105,79 @@ func TestExecTailBuffer(t *testing.T) {
 	if !strings.HasPrefix(snap, "01234567") || !strings.HasSuffix(snap, "CDEFGHIJ") {
 		t.Fatalf("buffer shape wrong: %q", snap)
 	}
-	if !strings.Contains(snap, "elided") {
-		t.Fatalf("missing elision marker: %q", snap)
+	if !strings.Contains(snap, "... (output truncated) ...") {
+		t.Fatalf("missing truncation marker: %q", snap)
 	}
 	small := newTailBuffer(100, 100)
 	small.Write([]byte("short"))
 	if got := small.Snapshot(); got != "short" {
 		t.Fatalf("small buffer altered: %q", got)
+	}
+}
+
+func TestExecTailBufferKeepsEqualHeadAndTailAtTwentyK(t *testing.T) {
+	if execHeadBytes != 10_000 || execTailBytes != 10_000 {
+		t.Fatalf("exec in-band budget must be 10k+10k, got head=%d tail=%d", execHeadBytes, execTailBytes)
+	}
+	head := strings.Repeat("H", execHeadBytes)
+	mid := strings.Repeat("M", 8_000)
+	tail := strings.Repeat("T", execTailBytes)
+	b := newTailBuffer(execHeadBytes, execTailBytes)
+	if _, err := b.Write([]byte(head + mid + tail)); err != nil {
+		t.Fatal(err)
+	}
+	snap := b.Snapshot()
+	if !strings.HasPrefix(snap, head) {
+		t.Fatalf("head lost: prefix=%q", snap[:min(len(snap), 32)])
+	}
+	if !strings.HasSuffix(snap, tail) {
+		t.Fatalf("tail lost: suffix=%q", snap[max(0, len(snap)-32):])
+	}
+	if strings.Contains(snap, "M") {
+		t.Fatalf("middle should be dropped, snapshot still contains M")
+	}
+	if !strings.Contains(snap, "... (output truncated) ...") {
+		t.Fatalf("missing truncation marker: %q", snap[execHeadBytes-8:min(len(snap), execHeadBytes+40)])
+	}
+	if got := strings.Count(snap, "H") + strings.Count(snap, "T"); got != 20_000 {
+		t.Fatalf("kept payload chars = %d, want 20000", got)
+	}
+}
+
+func TestExecInBandTruncatesToTwentyKHeadAndTail(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix shell syntax")
+	}
+	tb := &Toolbox{}
+	out, err := tb.Execute(context.Background(), "exec",
+		[]byte(`{"command":"python3 -c 'print(\"H\"*10000 + \"M\"*8000 + \"T\"*10000, end=\"\")'"}`))
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if !strings.Contains(out, strings.Repeat("H", 32)) {
+		t.Fatalf("expected in-band head: %s", out[:min(len(out), 400)])
+	}
+	if !strings.Contains(out, strings.Repeat("T", 32)) {
+		t.Fatalf("expected in-band tail: %s", out[max(0, len(out)-400):])
+	}
+	if strings.Contains(out, "M") {
+		t.Fatalf("middle should be dropped from in-band exec output")
+	}
+	if !strings.Contains(out, "... (output truncated) ...") {
+		t.Fatalf("missing truncation marker: %s", out[min(len(out), 9000):min(len(out), 10200)])
+	}
+	if !strings.Contains(out, "overflow_path:") {
+		t.Fatalf("truncated exec must spill the full log: %s", out[:min(len(out), 500)])
+	}
+	path := overflowPathFrom(t, out)
+	t.Cleanup(func() { _ = os.Remove(path) })
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(saved), "H") != 10000 || strings.Count(string(saved), "M") != 8000 || strings.Count(string(saved), "T") != 10000 {
+		t.Fatalf("spill should keep the full 28000-char payload, got H=%d M=%d T=%d bytes=%d",
+			strings.Count(string(saved), "H"), strings.Count(string(saved), "M"), strings.Count(string(saved), "T"), len(saved))
 	}
 }
 

@@ -27,13 +27,18 @@ import (
 const (
 	execDefaultIdleTimeout = 180 * time.Second
 	execMaxWatchTimeout    = time.Hour
-	execHeadBytes          = 8 << 10
-	execTailBytes          = 16 << 10
+	// execInlineMaxBytes is the in-band stdout/stderr budget shown to the
+	// model: first half + last half, middle dropped. Matches Cursor Shell's
+	// "truncated to 20000 characters" head+tail sample.
+	execInlineMaxBytes   = 20_000
+	execHeadBytes        = execInlineMaxBytes / 2
+	execTailBytes        = execInlineMaxBytes / 2
+	execTruncationMarker = "\n... (output truncated) ...\n"
 )
 
 func execToolInfos() []application.ToolInfo {
 	return []application.ToolInfo{
-		{Name: "exec", Description: "Run a shell command as a child process and return combined stdout/stderr. Default shell: POSIX sh on Unix/macOS; on Windows auto-resolves Git Bash then PowerShell (cmd only via shell=\"cmd\"). Optional shell kind: bash, powershell, pwsh, cmd, wsl. No absolute wall-clock limit: a running command that keeps producing output keeps running. Silence longer than idle_timeout_ms (default 180000) cancels the run as failed. Optional timeout_ms adds an explicit hard cap. Long-lived processes are killed together with their children. On Windows, select shells via the shell parameter rather than invoking cmd.exe or powershell.exe inside a bash command line — MSYS path conversion mangles drive-letter paths such as Z:/x. Combined output is streamed live (head+tail elision in-band). When the full log exceeds ~32KiB, overflow_path is an absolute file under the platform temp dir (nusashell/); file_read it from offset 0 for the complete stdout/stderr.", InputSchema: obj("object", props("command", str("Shell command to run"), "cwd", str("Optional working directory (absolute path); with shell=wsl WSL maps it under /mnt"), "idle_timeout_ms", intSchema("Cancel when no output for this long (default 180000, max 3600000)"), "timeout_ms", intSchema("Optional explicit wall-clock cap in milliseconds"), "shell", strEnum("Shell kind override (default auto: Git Bash when installed, else PowerShell on Windows; sh elsewhere)", "auto", "bash", "powershell", "pwsh", "cmd", "wsl")), "command")},
+		{Name: "exec", Description: "Run a shell command as a child process and return combined stdout/stderr. Default shell: POSIX sh on Unix/macOS; on Windows auto-resolves Git Bash then PowerShell (cmd only via shell=\"cmd\"). Optional shell kind: bash, powershell, pwsh, cmd, wsl. No absolute wall-clock limit: a running command that keeps producing output keeps running. Silence longer than idle_timeout_ms (default 180000) cancels the run as failed. Optional timeout_ms adds an explicit hard cap. Long-lived processes are killed together with their children. On Windows, select shells via the shell parameter rather than invoking cmd.exe or powershell.exe inside a bash command line — MSYS path conversion mangles drive-letter paths such as Z:/x. Combined output is streamed live. In-band stdout/stderr is capped at 20000 characters as a 50/50 head+tail sample with \"... (output truncated) ...\" in the middle. When the full log is larger, overflow_path is an absolute file under the platform temp dir (nusashell/); file_read it from offset 0 for the complete stdout/stderr.", InputSchema: obj("object", props("command", str("Shell command to run"), "cwd", str("Optional working directory (absolute path); with shell=wsl WSL maps it under /mnt"), "idle_timeout_ms", intSchema("Cancel when no output for this long (default 180000, max 3600000)"), "timeout_ms", intSchema("Optional explicit wall-clock cap in milliseconds"), "shell", strEnum("Shell kind override (default auto: Git Bash when installed, else PowerShell on Windows; sh elsewhere)", "auto", "bash", "powershell", "pwsh", "cmd", "wsl")), "command")},
 	}
 }
 
@@ -257,7 +262,7 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 	return total, nil
 }
 
-// Snapshot returns head + elision marker + tail (or whatever exists).
+// Snapshot returns head + truncation marker + tail (or whatever exists).
 func (b *tailBuffer) Snapshot() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -265,6 +270,6 @@ func (b *tailBuffer) Snapshot() string {
 	case b.dropped == 0:
 		return string(b.head) + string(b.tail)
 	default:
-		return string(b.head) + fmt.Sprintf("\n… [%d bytes elided] …\n", b.dropped) + string(b.tail)
+		return string(b.head) + execTruncationMarker + string(b.tail)
 	}
 }

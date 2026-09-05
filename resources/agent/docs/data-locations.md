@@ -49,7 +49,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `automation/workflows.db` | workflows, runs, schedules, events, waits, locks | SQLite |
 | `automation/pipelines/` | pipeline definition YAML files (one per workflow, auto-discovered on boot) | YAML |
 | `automation/runs/` | local executor scratch directories | files |
-| platform temp `/nusashell/` | runtime scratch only: oversized tool results (`grep`, `exec`, `web_fetch`, `web_search`, `docs`) spilled when in-band output exceeds ~32KiB, plus TTS/STT/plugin installer staging and whisper work dirs. Path is `filepath.Join(os.TempDir(), "nusashell")` — `%TEMP%\nusashell` on Windows. Callers go through `infrastructure/nusatemp` — never dump files at the temp root. A background sweeper deletes files and directories aged 24h+; OS reboot may empty the parent temp dir earlier. | files |
+| platform temp `/nusashell/` | runtime scratch only: oversized tool results spilled when in-band output exceeds the tool cap (`exec` 20k head+tail sample; `grep` / `web_fetch` / `web_search` / `docs` ~32KiB prefix), plus TTS/STT/plugin installer staging and whisper work dirs. Path is `filepath.Join(os.TempDir(), "nusashell")` — `%TEMP%\nusashell` on Windows. Callers go through `infrastructure/nusatemp` — never dump files at the temp root. A background sweeper deletes files and directories aged 24h+; OS reboot may empty the parent temp dir earlier. | files |
 
 Credentials never appear in the JSON/JSONL files. Deleting the data
 directory removes everything, including stored keys.
