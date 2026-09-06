@@ -1326,7 +1326,7 @@ function updateConversationItem(item, c) {
 // the old per-item delete listener so the delegated list handler stays small.
 async function deleteConversation(id) {
   const conv = state.conversations.find((c) => c.id === id);
-  const ok = await confirmDialog('Delete conversation', '"' + (conv?.title || 'Untitled') + '" and all of its messages will be removed.', 'Delete');
+  const ok = await confirmDialog('Delete conversation', '"' + (conv?.title || 'Untitled') + '" and all of its messages, attachments, and subagent runs will be removed. Workspace files are kept.', 'Delete');
   if (!ok) return;
   try {
     await rpc('agent.conversations.delete', { id });

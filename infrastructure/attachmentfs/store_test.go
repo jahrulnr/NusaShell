@@ -129,6 +129,65 @@ func TestWriteBytesRejectsTraversalName(t *testing.T) {
 	}
 }
 
+// TestRemoveDeletesDirAndIsIdempotent pins the cascade hook used by
+// handleConversationsDelete: Remove must delete <root>/<id>/ entirely, and
+// a missing dir is a no-op success so retried deletes stay safe.
+func TestRemoveDeletesDirAndIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	store, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.WriteBytes("conv_1", "a.png", []byte("A")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.WriteBytes("conv_1", "b.png", []byte("B")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.WriteBytes("conv_2", "sibling.png", []byte("S")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Remove("conv_1"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "conv_1")); !os.IsNotExist(err) {
+		t.Errorf("expected conv_1 dir gone, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "conv_2", "sibling.png")); err != nil {
+		t.Errorf("sibling conv_2 must survive: %v", err)
+	}
+	// Idempotent: removing again is a no-op success.
+	if err := store.Remove("conv_1"); err != nil {
+		t.Errorf("second Remove must succeed (no-op), got %v", err)
+	}
+	if err := store.Remove("never-existed"); err != nil {
+		t.Errorf("Remove of missing id must succeed, got %v", err)
+	}
+}
+
+// TestRemoveRejectsTraversalID guards the cascade from path traversal: a
+// hostile conversationID must be rejected before any RemoveAll.
+func TestRemoveRejectsTraversalID(t *testing.T) {
+	dir := t.TempDir()
+	store, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pre-existing target outside the store: the cascade must not touch it.
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("sentinel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"", "../escape", "..", "a/b", `..\win`, "conv_\x00x"} {
+		if err := store.Remove(id); err == nil {
+			t.Errorf("Remove(%q) = nil, want an error", id)
+		}
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Errorf("sentinel outside store was deleted: %v", err)
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

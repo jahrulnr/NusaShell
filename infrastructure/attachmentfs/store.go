@@ -114,3 +114,19 @@ func (s *Store) ReadFile(absPath string) ([]byte, error) {
 	}
 	return data, nil
 }
+
+// Remove deletes the entire attachment directory for a conversation
+// (<root>/<conversationID>/). Used by the cascade conversation-delete hook.
+// A missing directory is a no-op success so retried deletes stay safe. The
+// conversationID is checked against the same path-segment rules as
+// WriteBytes' name so a hostile id cannot escape the store root.
+func (s *Store) Remove(conversationID string) error {
+	if conversationID == "" || strings.ContainsRune(conversationID, filepath.Separator) || strings.Contains(conversationID, "..") || strings.ContainsRune(conversationID, 0) {
+		return fmt.Errorf("attachmentfs: invalid conversation id %q", conversationID)
+	}
+	dir := filepath.Join(s.root, conversationID)
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("attachmentfs: remove %s: %w", dir, err)
+	}
+	return nil
+}

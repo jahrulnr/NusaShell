@@ -54,6 +54,16 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 Credentials never appear in the JSON/JSONL files. Deleting the data
 directory removes everything, including stored keys.
 
+Deleting a conversation via `agent.conversations.delete` cascades to its
+data-dir sidecars: `conversations/<id>.json`, the archived
+`conversations/<id>.chunks/` directory, the `conversations/<id>.acp/`
+subagent run snapshots, the `conversations/<id>/` plan directory, and
+`attachments/<id>/` (image/file attachments + generated images). Live ACP
+runs for the conversation are stopped first. Workspace files
+(`file_write` / `show` results) live under the user-selected workspace and
+are kept; growth experiences, learning jobs, and memory records are also
+unaffected by conversation delete.
+
 The optional login service writes its platform definition outside the data
 directory: a systemd user unit at `~/.config/systemd/user/nusashell.service`
 (Linux), a LaunchAgent at `~/Library/LaunchAgents/id.nusashell.core.plist`

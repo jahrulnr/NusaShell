@@ -5,6 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] - 2026-09-05
+
+### Added
+
+- **`ask_question` plays a notification sound.** When an agent turn calls
+  `ask_question` on the active conversation, the interactive question card
+  is announced with the previously unused
+  `resources/sounds/notification-ask_question.wav` (served at
+  `/sounds/notification-ask_question.wav`), gated by the same Sound
+  notifications setting as the turn-complete / turn-error sounds. The
+  frontend preloads it with the other announcement blips, and
+  `TestSoundsEndpoint` now covers all three notification sounds.
+
+- **Provider Cache TTL can be turned off.** The provider detail chips include
+  `off`, which skips prompt-cache markers for that provider even when
+  Settings → Prompt caching is on. Existing providers keep their duration
+  default.
+
+### Changed
+
+- **Workspace picker is now an in-app folder browser.** Workspace selection
+  no longer opens the host OS dialog (zenity); the frontend walks server
+  directories through the new `agent.workspace.list-dirs` RPC and persists
+  the choice with `agent.conversations.set-workspace` (replacing
+  `agent.conversations.pick-workspace`). The `github.com/ncruces/zenity`
+  dependency and the workspacepicker adapter were removed. Selection now
+  works from any device, including mobile browsers over the LAN; canceling
+  the picker still leaves the conversation unchanged.
+
+- **Default workspace falls back to the host home directory.** Until the
+  user picks a folder, the active workspace is the home directory of the
+  user running the process instead of resolving relative tool paths against
+  `.`, so `memory_project` and other workspace-gated features work from the
+  first turn without path conflicts.
+
+### Fixed
+
+- **`skill(op=save)` create does not take `id` or `path`.** Passing an
+  absolute `SKILL.md` path was treated as a support-file write against a
+  skill that did not exist yet (`skill "tool-mapping" not found`). Empty
+  path, `SKILL.md`, and absolute `…/SKILL.md` now save the body (create or
+  update). Relative `path` still writes a support file inside an existing
+  learned skill. The advertised schema and skills docs now distinguish the
+  three modes.
+- **OpenCode Console Go echoes `reasoning_content`.** Custom providers
+  default to the `openrouter` driver, which previously sent OpenRouter
+  `reasoning` / `cache_retention` to `https://opencode.ai/zen/go/v1`. Chat
+  host detection now wins: OpenCode uses the vanilla Chat wire and
+  injects `reasoning_content` (placeholder on hydration) so thinking-mode
+  models no longer 400. Replay is gated on the model's Reasoning flag, not
+  every model on `opencode.ai`. The 400 learner also recognizes Console Go's
+  `` `reasoning_content` in the thinking mode must be passed back ``
+  wording instead of learning a bogus `mode` inject. Chat still does not
+  put OpenRouter `cache_control` TTLs on the system message (the Chat
+  adapter rejects that as "cache breakpoint TTL must be set with
+  prompt_cache_options.ttl").
+- **OpenCode Console Go cache TTL is `5m` or `1h`.** Remapping OpenCode to
+  OpenAI `prompt_cache_options.ttl=30m` caused HTTP 422 `Input should be
+  '5m' or '1h'`. OpenCode keeps the 5m/1h chips but does not send that TTL
+  on the Chat body; the conversation prompt-cache key is copied to the
+  documented `x-opencode-session` header
+  ([Go docs](https://opencode.ai/docs/go/)).
+- **Route picker skips HTTP 4xx/5xx HTML.** `ai.models.endpoints` treats a
+  4xx/5xx listing response (OpenCode SPA 404, gateway outage) as an empty
+  route list instead of dumping the HTML body. The trigger title is
+  **No provider in this model**. Direct providers still say
+  "Provider tunggal — diatur oleh gateway". OpenCode no longer calls the
+  OpenRouter `/endpoints` path just because its stored driver is
+  `openrouter`.
+- **Learning experiences skip hydration tools.** Hidden `hydrate-*`
+  checkpoint calls (`runtime_context`, AGENTS.md / `user.md` / `soul.md`
+  `file_read`, `memory_project`, `skill`, …) are not recorded as experience
+  actions, so they no longer look like a repeated procedure.
+- **Service worker no longer intercepts live SSE.** `GET /stream` (and
+  `/ws`) bypass the PWA cache. Firefox was failing those EventSource
+  fetches with "A ServiceWorker intercepted the request and encountered
+  an unexpected error" because the worker cloned the streaming body.
+  Markdown `file://` links now proxy through `/local-file` so the page
+  origin does not try to load `file:///`.
+
 ## [0.4.5] - 2026-09-05
 
 ### Fixed

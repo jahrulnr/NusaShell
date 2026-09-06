@@ -280,6 +280,12 @@ type AttachmentStore interface {
 	// ReadFile returns the bytes of a previously saved attachment. The path
 	// must live under the store root; paths outside it are rejected.
 	ReadFile(absPath string) ([]byte, error)
+	// Remove deletes the entire directory of attachments for a conversation
+	// (<root>/<conversationID>/). Missing directories are a no-op success so
+	// retried deletes stay safe. Unsafe conversation IDs (empty, separators,
+	// "..", NUL) are rejected before any filesystem call. Implementations
+	// that maintain no per-conversation directory may no-op.
+	Remove(conversationID string) error
 }
 
 // DirectoryBrowser reads the host filesystem for the in-app workspace

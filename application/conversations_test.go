@@ -14,6 +14,26 @@ import (
 
 var errNotFound = errors.New("not found")
 
+// recordingAcpStorage captures Save calls so persistAcpRun can be asserted
+// without dragging in the JSON store. It implements domain.AcpRunStorage.
+type recordingAcpStorage struct {
+	saved []domain.AcpRunRecord
+}
+
+func (r *recordingAcpStorage) Save(rec domain.AcpRunRecord) error {
+	r.saved = append(r.saved, rec)
+	return nil
+}
+func (r *recordingAcpStorage) Load(runID string) (domain.AcpRunRecord, bool) {
+	return domain.AcpRunRecord{}, false
+}
+func (r *recordingAcpStorage) List(conversationID string) []domain.AcpRunRecord {
+	return nil
+}
+func (r *recordingAcpStorage) Path(conversationID, runID string) string {
+	return "/tmp/recording-acp/" + conversationID + "/" + runID + ".json"
+}
+
 // fakeLogStore is a no-op LogStore for testing.
 type fakeLogStore struct{}
 
@@ -211,6 +231,164 @@ func TestHandleConversationsDeleteCancelsActiveRun(t *testing.T) {
 	}
 	if ctx.Err() == nil {
 		t.Fatal("expected active run to be cancelled")
+	}
+}
+
+// cascadeFakeAcp records Stop calls and returns a fixed set of live runs
+// for List(convID). Only List and Stop are exercised by the cascade tests;
+// the remaining AcpRuntime methods panic so an accidental dependency
+// surfaces immediately.
+type cascadeFakeAcp struct {
+	liveRuns map[string][]*domain.AcpRun
+	stops    []string
+}
+
+func (f *cascadeFakeAcp) List(conversationID string) []*domain.AcpRun {
+	return f.liveRuns[conversationID]
+}
+
+func (f *cascadeFakeAcp) Stop(runID string) error {
+	f.stops = append(f.stops, runID)
+	return nil
+}
+
+func (f *cascadeFakeAcp) panicOther() {}
+
+func (f *cascadeFakeAcp) Probe(context.Context, *domain.AcpAgent) (domain.AcpAgent, error) {
+	f.panicOther()
+	return domain.AcpAgent{}, nil
+}
+func (f *cascadeFakeAcp) Authenticate(context.Context, *domain.AcpAgent, string) error {
+	f.panicOther()
+	return nil
+}
+func (f *cascadeFakeAcp) RefreshCatalog(context.Context, *domain.AcpAgent) (domain.AcpAgent, error) {
+	f.panicOther()
+	return domain.AcpAgent{}, nil
+}
+func (f *cascadeFakeAcp) Spawn(context.Context, AcpSpawnRequest) (*domain.AcpRun, error) {
+	f.panicOther()
+	return nil, nil
+}
+func (f *cascadeFakeAcp) Steer(string, string) error { f.panicOther(); return nil }
+func (f *cascadeFakeAcp) Wait(context.Context, string) (*domain.AcpRun, error) {
+	f.panicOther()
+	return nil, nil
+}
+func (f *cascadeFakeAcp) Get(string) (*domain.AcpRun, bool) { f.panicOther(); return nil, false }
+func (f *cascadeFakeAcp) DecidePermission(string, string, string, domain.PermissionOutcome) error {
+	f.panicOther()
+	return nil
+}
+func (f *cascadeFakeAcp) PromoteRisk(string, domain.RiskTier) error { f.panicOther(); return nil }
+func (f *cascadeFakeAcp) SetMode(context.Context, string, string) error {
+	f.panicOther()
+	return nil
+}
+func (f *cascadeFakeAcp) Close() {}
+
+// recordingAttachmentStore wraps a memAttachmentStore and captures Remove
+// calls so the cascade test can assert the conversation id is forwarded.
+type recordingAttachmentStore struct {
+	*memAttachmentStore
+	removed []string
+}
+
+func (r *recordingAttachmentStore) Remove(conversationID string) error {
+	r.removed = append(r.removed, conversationID)
+	return r.memAttachmentStore.Remove(conversationID)
+}
+
+func TestHandleConversationsDeleteCascadesSidecars(t *testing.T) {
+	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
+		"conv_1": {ID: "conv_1", Title: "Test"},
+		"conv_2": {ID: "conv_2", Title: "Sibling"},
+	}}
+	attach := &recordingAttachmentStore{memAttachmentStore: &memAttachmentStore{root: t.TempDir()}}
+	acp := &cascadeFakeAcp{liveRuns: map[string][]*domain.AcpRun{
+		"conv_1": {{TaskState: domain.TaskState[domain.AcpRunStatus]{ID: "run_a", Status: domain.AcpRunRunning}}},
+		"conv_2": {{TaskState: domain.TaskState[domain.AcpRunStatus]{ID: "run_b", Status: domain.AcpRunRunning}}},
+	}}
+	app := &App{
+		Conversations: convStore,
+		Todos:         &fakeTodoPort{items: map[string][]domain.TodoItem{"conv_1": {{ID: "1", Content: "Task", Status: domain.TodoPending}}}},
+		Attachments:   attach,
+		Acp:           acp,
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+	}
+
+	if _, rpcErr := app.handleConversationsDelete(contracts.ConversationIDRequest{ID: "conv_1"}); rpcErr != nil {
+		t.Fatalf("delete: %v", rpcErr)
+	}
+	if _, err := convStore.Get("conv_1"); err == nil {
+		t.Error("expected conv_1 removed from store")
+	}
+	if attach.removed == nil || attach.removed[0] != "conv_1" {
+		t.Errorf("Attachments.Remove not called for conv_1: %+v", attach.removed)
+	}
+	if len(acp.stops) != 1 || acp.stops[0] != "run_a" {
+		t.Errorf("Acp.Stop must only target conv_1's run: got %+v", acp.stops)
+	}
+}
+
+func TestHandleConversationsDeleteNilPortsStillSucceeds(t *testing.T) {
+	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
+		"conv_1": {ID: "conv_1", Title: "Test"},
+	}}
+	app := &App{Conversations: convStore, Logs: &fakeLogStore{}, Bus: NewBus()}
+	if _, rpcErr := app.handleConversationsDelete(contracts.ConversationIDRequest{ID: "conv_1"}); rpcErr != nil {
+		t.Fatalf("delete: %v", rpcErr)
+	}
+	if _, err := convStore.Get("conv_1"); err == nil {
+		t.Error("expected conv_1 removed from store")
+	}
+}
+
+func TestPersistAcpRunSkipsWhenConversationGone(t *testing.T) {
+	// Conversation is deleted before persistAcpRun fires. The store must
+	// not be written to: a late OnDone must not recreate the
+	// conversations/<id>.acp/ sidecar or leave a stale JSON document.
+	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{}}
+	storage := &recordingAcpStorage{}
+	app := &App{
+		Conversations: convStore,
+		AcpRunStorage: storage,
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+	}
+	run := &domain.AcpRun{
+		TaskState:      domain.TaskState[domain.AcpRunStatus]{ID: "run_x", Status: domain.AcpRunCompleted},
+		ConversationID: "conv_gone",
+	}
+	if path := app.persistAcpRun(run); path != "" {
+		t.Errorf("persistAcpRun after delete must return empty path, got %q", path)
+	}
+	if len(storage.saved) != 0 {
+		t.Errorf("AcpRunStorage.Save must be skipped, got %+v", storage.saved)
+	}
+}
+
+func TestPersistAcpRunStillSavesWhenConversationExists(t *testing.T) {
+	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
+		"conv_live": {ID: "conv_live", Title: "live"},
+	}}
+	storage := &recordingAcpStorage{}
+	app := &App{
+		Conversations: convStore,
+		AcpRunStorage: storage,
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+	}
+	run := &domain.AcpRun{
+		TaskState:      domain.TaskState[domain.AcpRunStatus]{ID: "run_y", Status: domain.AcpRunCompleted},
+		ConversationID: "conv_live",
+	}
+	if path := app.persistAcpRun(run); path == "" {
+		t.Errorf("persistAcpRun must produce a path when conversation exists, got empty")
+	}
+	if len(storage.saved) != 1 {
+		t.Errorf("AcpRunStorage.Save expected once, got %+v", storage.saved)
 	}
 }
 

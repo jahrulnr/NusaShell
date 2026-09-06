@@ -177,8 +177,28 @@ func (a *App) handleConversationsDelete(req contracts.ConversationIDRequest) (an
 	if _, rpcErr := a.getConversation(req.ID); rpcErr != nil {
 		return nil, rpcErr
 	}
+	// Cascade: stop live processes and wipe sidecar data so a deleted
+	// conversation leaves no orphan attachments, ACP snapshots, plan
+	// files, or compaction chunks behind. The conversation JSON is kept
+	// until last: any failure in the cascade steps leaves a retryable
+	// state (the JSON is still on disk, sidecars can be retried).
+	if a.Acp != nil {
+		for _, run := range a.Acp.List(req.ID) {
+			if run == nil {
+				continue
+			}
+			if err := a.Acp.Stop(run.ID); err != nil {
+				a.log("warn", "agent", "delete: failed to stop ACP run %s: %v", run.ID, err)
+			}
+		}
+	}
 	if run := a.activeRunForConversation(req.ID); run != nil {
 		run.Cancel()
+	}
+	if a.Attachments != nil {
+		if err := a.Attachments.Remove(req.ID); err != nil {
+			a.log("warn", "agent", "delete: failed to remove attachments for %s: %v", req.ID, err)
+		}
 	}
 	if err := a.Conversations.Delete(req.ID); err != nil {
 		return nil, rpcInternal(err)

@@ -78,6 +78,18 @@ func (a *App) persistAcpRun(run *domain.AcpRun) string {
 	if run == nil || run.Live() || a.AcpRunStorage == nil {
 		return ""
 	}
+	// Race guard: if the conversation was deleted between OnDone being
+	// scheduled and the deferred completion callback firing, skip the
+	// write so a late completion cannot recreate conversations/<id>.acp/
+	// sidecars the cascade just removed. completeSubagentRunLocked and
+	// triggerBackgroundCompletionTurn already short-circuit on missing
+	// conversation via loadRepo; this guard protects persistAcpRun when
+	// it is called from paths that have not yet taken the lock.
+	if a.Conversations != nil {
+		if _, err := a.Conversations.Get(run.ConversationID); err != nil {
+			return ""
+		}
+	}
 	record := domain.AcpRunRecord{
 		ID:               run.ID,
 		AgentID:          run.AgentID,

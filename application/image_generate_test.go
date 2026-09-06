@@ -58,6 +58,19 @@ func (m *memAttachmentStore) ReadFile(absPath string) ([]byte, error) {
 	return append([]byte(nil), data...), nil
 }
 
+func (m *memAttachmentStore) Remove(conversationID string) error {
+	if m.files == nil {
+		return nil
+	}
+	prefix := filepath.Join(m.root, conversationID) + string(filepath.Separator)
+	for path := range m.files {
+		if strings.HasPrefix(path, prefix) {
+			delete(m.files, path)
+		}
+	}
+	return nil
+}
+
 type scriptedImageGen struct {
 	got    ImageGenRequest
 	result *ImageGenResult

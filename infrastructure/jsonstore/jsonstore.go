@@ -375,20 +375,28 @@ func (s *Store) Save(c *domain.Conversation) error {
 func (s *Store) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := safeSegment(id); err != nil {
+		return err
+	}
 	if _, ok := s.conversations[id]; !ok {
 		return fmt.Errorf("%w: conversation %s", ErrNotFound, id)
 	}
 	delete(s.conversations, id)
-	if err := os.Remove(filepath.Join(s.dir, "conversations", id+".json")); err != nil && !os.IsNotExist(err) {
-		return err
+	convDir := filepath.Join(s.dir, "conversations")
+	// Cascade sidecars: JSON transcript, archived chunks, ACP run snapshots,
+	// and the plan directory used by the brief mirror. safeSegment above
+	// guarantees `id` cannot escape `convDir`, so RemoveAll on the plan
+	// directory (conversations/<id>/) cannot touch siblings.
+	sidecars := []string{
+		filepath.Join(convDir, id+".json"),
+		filepath.Join(convDir, id+".chunks"),
+		filepath.Join(convDir, id+".acp"),
+		filepath.Join(convDir, id),
 	}
-	// Remove any archived chunks for this conversation.
-	chunkDir := filepath.Join(s.dir, "conversations", id+".chunks")
-	if entries, err := os.ReadDir(chunkDir); err == nil {
-		for _, e := range entries {
-			_ = os.Remove(filepath.Join(chunkDir, e.Name()))
+	for _, p := range sidecars {
+		if err := os.RemoveAll(p); err != nil && !os.IsNotExist(err) {
+			return err
 		}
-		_ = os.Remove(chunkDir)
 	}
 	return nil
 }
