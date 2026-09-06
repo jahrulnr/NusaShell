@@ -196,7 +196,7 @@ func TestRPCPetsStatusReturnsSnapshot(t *testing.T) {
 
 func TestRPCPetsInstallSingleFlight(t *testing.T) {
 	inst := &fakePetsInstaller{
-		status: contracts.PetsStatusResult{Supported: runtime.GOOS == "linux"},
+		status: contracts.PetsStatusResult{Supported: true},
 		block:  make(chan struct{}),
 	}
 	app := petsApp(inst)
@@ -235,7 +235,7 @@ func TestRPCPetsInstallSingleFlight(t *testing.T) {
 
 func TestRPCPetsInstallErrorSurfacesOnBus(t *testing.T) {
 	inst := &fakePetsInstaller{
-		status:   contracts.PetsStatusResult{Supported: runtime.GOOS == "linux"},
+		status:   contracts.PetsStatusResult{Supported: true},
 		failWith: errors.New("network down"),
 	}
 	app := petsApp(inst)
@@ -274,7 +274,7 @@ func TestRPCPetsInstallErrorSurfacesOnBus(t *testing.T) {
 func TestRPCPetsLaunchSurfacesSpawnFailure(t *testing.T) {
 	inst := &fakePetsInstaller{
 		status: contracts.PetsStatusResult{
-			Supported: runtime.GOOS == "linux",
+			Supported: true,
 			Installed: true,
 			Path:      "/opt/pets/nusashell-pets",
 		},
@@ -296,7 +296,7 @@ func TestRPCPetsLaunchSurfacesSpawnFailure(t *testing.T) {
 func TestRPCPetsLaunchSuccess(t *testing.T) {
 	inst := &fakePetsInstaller{
 		status: contracts.PetsStatusResult{
-			Supported: runtime.GOOS == "linux",
+			Supported: true,
 			Installed: true,
 			Path:      "/opt/pets/nusashell-pets",
 		},

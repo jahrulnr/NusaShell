@@ -48,6 +48,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workspace list-dirs test uses a platform-absolute path.** The
   `CoercesNilEntriesToEmpty` test hardcoded `/home/tuan`, which is not an
   absolute path on Windows; it now uses `t.TempDir()`.
+- **Pets install/launch tests no longer assume Linux.** Five fake-installer
+  tests gated `Supported` on `runtime.GOOS == "linux"`, so on macOS and
+  Windows the install-start handler refused and the tests panicked/failed.
+  The single-flight, error-bus, and launch tests now use
+  `Supported: true` like the other success-path tests.
+- **Symlinked-workspace git test skips Windows.** The realpath-mismatch
+  reproduction (macOS `/var` → `/private/var`) is not representative on
+  Windows runners, where directory symlinks need Developer Mode; the test
+  now skips there instead of failing.
 
 ## [0.4.6] - 2026-09-05
 

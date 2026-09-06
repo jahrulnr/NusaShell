@@ -117,7 +117,7 @@ func (f *fakePetsInstaller) installCount() int {
 
 func TestPetsInstallSingleFlight(t *testing.T) {
 	inst := &fakePetsInstaller{
-		status: contracts.PetsStatusResult{Supported: runtime.GOOS == "linux"},
+		status: contracts.PetsStatusResult{Supported: true},
 		block:  make(chan struct{}),
 	}
 	app := petsApp(inst)

@@ -63,6 +63,13 @@ func TestListInstructionFilesGitSymlinkedWorkspace(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
+	if runtime.GOOS == "windows" {
+		// Windows runners only get usable directory symlinks with
+		// Developer Mode; this test reproduces the macOS /var →
+		// /private/var realpath mismatch, which Windows does not exhibit
+		// (short-name casing is covered by wsRelativeTo + EvalSymlinks).
+		t.Skip("directory symlinks are not representative on Windows runners")
+	}
 	base := t.TempDir()
 	fixture := filepath.Join(base, "real")
 	writeInstructionFile(t, filepath.Join(fixture, "AGENTS.md"), "# root\n")
