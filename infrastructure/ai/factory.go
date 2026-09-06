@@ -10,7 +10,6 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
-	"nusashell/infrastructure/ai/core"
 	"nusashell/infrastructure/ai/embeddings"
 	"nusashell/infrastructure/ai/imagegen"
 	ttsclient "nusashell/infrastructure/ai/tts"
@@ -30,7 +29,7 @@ import (
 //     Go 400s without `reasoning_content`; TokenRouter 400s on the
 //     OpenRouter `reasoning` object.
 func NewFactory(_ application.CredentialStore) application.ProviderFactory {
-	return func(ctx context.Context, p *domain.Provider, apiKey string) (core.Provider, error) {
+	return func(ctx context.Context, p *domain.Provider, apiKey string) (application.AIProvider, error) {
 		if !domain.ValidKind(p.Kind) {
 			return nil, &application.ErrUnsupportedProvider{Kind: string(p.Kind)}
 		}

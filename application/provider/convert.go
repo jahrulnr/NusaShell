@@ -1,4 +1,4 @@
-package application
+package provider
 
 import (
 	"context"
@@ -320,12 +320,12 @@ func intPtrIf(cond bool, v int) *int {
 	return &v
 }
 
-// ProviderContext bundles a core.Provider with the kind and openRouter flag
-// needed for request conversion and error mapping. It replaces the old
-// AIProvider interface methods (Complete/Stream) with thin wrappers that
-// call core.Provider.Chat/Stream + ToCoreRequest/FromCoreResponse/MapCoreError.
-type ProviderContext struct {
-	Provider   core.Provider
+// Context bundles an AIProvider with the kind and openRouter flag needed
+// for request conversion and error mapping. It replaces the old AIProvider
+// interface methods (Complete/Stream) with thin wrappers that call
+// AIProvider.Chat/Stream + ToCoreRequest/FromCoreResponse/MapCoreError.
+type Context struct {
+	Provider   AIProvider
 	ProviderID string
 	Kind       domain.ProviderKind
 	Driver     domain.ProviderDriver
@@ -335,29 +335,38 @@ type ProviderContext struct {
 
 // Complete calls provider.Chat with the converted request and returns the
 // converted response. Error mapping is applied so the retry loop keeps working.
-func (pc ProviderContext) Complete(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+func (pc Context) Complete(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	return CompleteViaCore(ctx, pc.Provider, req, pc.Kind, pc.OpenRouter)
 }
 
 // Stream calls provider.Stream, sets up the idle watchdog, dispatches
 // content/reasoning deltas, and returns the converted response.
-func (pc ProviderContext) Stream(ctx context.Context, req ChatRequest, onDelta, onReasoning func(string)) (ChatResponse, error) {
+func (pc Context) Stream(ctx context.Context, req ChatRequest, onDelta, onReasoning func(string)) (ChatResponse, error) {
 	return StreamViaCore(ctx, pc.Provider, req, pc.Kind, pc.OpenRouter, onDelta, onReasoning)
 }
+
+// ToolUseStart is a provider-side tool-call construction event. Re-exported
+// so application/agent can subscribe without importing infrastructure/ai/core.
+type ToolUseStart = core.ToolUseStart
+
+// ToolUseDelta is a provider-side tool-call argument-progress event.
+type ToolUseDelta = core.ToolUseDelta
 
 // StreamWithToolActivity is the chat-stream variant used by the interactive
 // agent. Tool construction callbacks fire while the provider is still
 // assembling arguments, before the completed tool call is validated or
 // executed. Other callers can keep using Stream when they only need answer
 // and reasoning deltas.
-func (pc ProviderContext) StreamWithToolActivity(ctx context.Context, req ChatRequest, onDelta, onReasoning func(string), onToolStart func(core.ToolUseStart), onToolDelta func(core.ToolUseDelta)) (ChatResponse, error) {
+func (pc Context) StreamWithToolActivity(ctx context.Context, req ChatRequest, onDelta, onReasoning func(string), onToolStart func(ToolUseStart), onToolDelta func(ToolUseDelta)) (ChatResponse, error) {
 	return StreamViaCoreWithToolActivity(ctx, pc.Provider, req, pc.Kind, pc.OpenRouter, onDelta, onReasoning, onToolStart, onToolDelta)
 }
 
-// NewProviderContext builds a ProviderContext from a domain.Provider and a
-// core.Provider (typically returned by ProviderFactory).
-func NewProviderContext(p *domain.Provider, provider core.Provider) ProviderContext {
-	return ProviderContext{
+// NewProviderContext builds a Context from a domain.Provider and an
+// AIProvider (typically returned by Factory). The second argument is
+// AIProvider rather than core.Provider so root application code does not
+// import core.
+func NewProviderContext(p *domain.Provider, provider AIProvider) Context {
+	return Context{
 		Provider:   provider,
 		ProviderID: p.ID,
 		Kind:       p.Kind,
@@ -365,16 +374,6 @@ func NewProviderContext(p *domain.Provider, provider core.Provider) ProviderCont
 		OpenRouter: domain.UsesOpenRouterWire(p.Kind, p.EffectiveDriver(), p.BaseURL),
 		BaseURL:    p.BaseURL,
 	}
-}
-
-// buildPromptCachePolicyForContext preserves the provider identity needed for
-// a stable key after a provider has been reduced to ProviderContext. Pass
-// the stored driver and BaseURL through so WireCacheDriver can split
-// OpenCode (5m/1h) from vanilla Chat (30m) without reconstructing driver
-// from the OpenRouter message-wire flag.
-func buildPromptCachePolicyForContext(settings domain.Settings, adapter ProviderContext, model, conversationID, prefix string) *PromptCachePolicy {
-	provider := &domain.Provider{ID: adapter.ProviderID, Kind: adapter.Kind, Driver: adapter.Driver, BaseURL: adapter.BaseURL}
-	return buildPromptCachePolicy(settings, provider, model, conversationID, prefix)
 }
 
 // MapCoreError translates litellm/core errors into domain.ProviderError
@@ -416,7 +415,7 @@ func MapCoreError(err error, kind domain.ProviderKind) error {
 // CompleteViaCore calls provider.Chat with the converted request and returns
 // the converted response. Error mapping is applied so the retry loop keeps
 // working.
-func CompleteViaCore(ctx context.Context, provider core.Provider, req ChatRequest, kind domain.ProviderKind, openRouter bool) (ChatResponse, error) {
+func CompleteViaCore(ctx context.Context, provider AIProvider, req ChatRequest, kind domain.ProviderKind, openRouter bool) (ChatResponse, error) {
 	resp, err := provider.Chat(ctx, ToCoreRequest(req, kind, openRouter))
 	if err != nil {
 		return ChatResponse{}, MapCoreError(err, kind)
@@ -427,7 +426,7 @@ func CompleteViaCore(ctx context.Context, provider core.Provider, req ChatReques
 // StreamViaCore calls provider.Stream, sets up the idle watchdog, dispatches
 // content/reasoning deltas via core.HandleWith, and returns the converted
 // response. Error mapping is applied.
-func StreamViaCore(ctx context.Context, provider core.Provider, req ChatRequest, kind domain.ProviderKind, openRouter bool, onDelta, onReasoning func(string)) (ChatResponse, error) {
+func StreamViaCore(ctx context.Context, provider AIProvider, req ChatRequest, kind domain.ProviderKind, openRouter bool, onDelta, onReasoning func(string)) (ChatResponse, error) {
 	return StreamViaCoreWithToolActivity(ctx, provider, req, kind, openRouter, onDelta, onReasoning, nil, nil)
 }
 
@@ -435,7 +434,7 @@ func StreamViaCore(ctx context.Context, provider core.Provider, req ChatRequest,
 // provider-side tool construction. The callbacks never receive raw argument
 // chunks from the application boundary; callers can use them as an activity
 // signal while core continues to aggregate and validate the final tool call.
-func StreamViaCoreWithToolActivity(ctx context.Context, provider core.Provider, req ChatRequest, kind domain.ProviderKind, openRouter bool, onDelta, onReasoning func(string), onToolStart func(core.ToolUseStart), onToolDelta func(core.ToolUseDelta)) (ChatResponse, error) {
+func StreamViaCoreWithToolActivity(ctx context.Context, provider AIProvider, req ChatRequest, kind domain.ProviderKind, openRouter bool, onDelta, onReasoning func(string), onToolStart func(ToolUseStart), onToolDelta func(ToolUseDelta)) (ChatResponse, error) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stream, err := provider.Stream(streamCtx, ToCoreRequest(req, kind, openRouter))

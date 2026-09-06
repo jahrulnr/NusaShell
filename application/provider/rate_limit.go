@@ -1,18 +1,9 @@
-package application
-
-// Provider rate-limit window tracker.
-//
-// Some gateways (TokenRouter) enforce short request windows (e.g. 5 requests
-// per minute) WITHOUT sending a Retry-After header. The agent retry policy
-// deliberately does not retry 429s without Retry-After because the exponential
-// backoff is far shorter than the window and would make the limit worse.
-// Instead we remember, per provider, when the window is expected to clear and
-// gate further requests client-side, and surface a human-readable message.
+package provider
 
 import (
-	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"nusashell/domain"
@@ -23,68 +14,68 @@ import (
 // Retry-After header. TokenRouter uses 1 minute; other gateways are similar.
 const DefaultRateLimitWindow = domain.DefaultRateLimitWindow
 
-func (a *App) initRateLimitWindows() {
-	a.rlMu.Lock()
-	defer a.rlMu.Unlock()
-	if a.rlWindows == nil {
-		a.rlWindows = make(map[string]time.Time)
+// RateLimiter remembers per-provider 429 windows so subsequent requests can
+// wait client-side instead of hammering a gateway that omitted Retry-After.
+type RateLimiter struct {
+	mu      sync.Mutex
+	windows map[string]time.Time
+}
+
+// NewRateLimiter returns an empty limiter.
+func NewRateLimiter() *RateLimiter {
+	return &RateLimiter{windows: make(map[string]time.Time)}
+}
+
+func (r *RateLimiter) init() {
+	if r.windows == nil {
+		r.windows = make(map[string]time.Time)
 	}
 }
 
-// MarkProviderRateLimited records that a provider rejected a request with a
-// 429. If nextAllowed is zero, defaults to now + DefaultRateLimitWindow.
-func (a *App) MarkProviderRateLimited(providerID string, nextAllowed time.Time) {
-	if providerID == "" {
+// Mark records that a provider rejected a request with a 429. If nextAllowed
+// is zero, defaults to now + DefaultRateLimitWindow.
+func (r *RateLimiter) Mark(providerID string, nextAllowed time.Time) {
+	if r == nil || providerID == "" {
 		return
 	}
-	a.initRateLimitWindows()
-	a.rlMu.Lock()
-	defer a.rlMu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.init()
 	if nextAllowed.IsZero() {
 		nextAllowed = clock.NewTime().Time().Add(DefaultRateLimitWindow)
 	}
-	a.rlWindows[providerID] = nextAllowed
+	r.windows[providerID] = nextAllowed
 }
 
-// ProviderRateLimitWait returns how long the caller should wait before
-// sending another request to this provider, or 0 if not rate-limited (or the
-// window already cleared).
-func (a *App) ProviderRateLimitWait(providerID string) time.Duration {
-	if providerID == "" {
+// Wait returns how long the caller should wait before sending another request
+// to this provider, or 0 if not rate-limited (or the window already cleared).
+func (r *RateLimiter) Wait(providerID string) time.Duration {
+	if r == nil || providerID == "" {
 		return 0
 	}
-	a.initRateLimitWindows()
-	a.rlMu.Lock()
-	defer a.rlMu.Unlock()
-	next, ok := a.rlWindows[providerID]
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.init()
+	next, ok := r.windows[providerID]
 	if !ok {
 		return 0
 	}
 	wait := clock.NewTime().Until(next)
 	if wait <= 0 {
-		delete(a.rlWindows, providerID)
+		delete(r.windows, providerID)
 		return 0
 	}
 	return wait
 }
 
-// friendlyRateLimitError renders a 429 into a human-readable message that
-// tells the user how long to wait, instead of a raw provider JSON blob.
-func (a *App) friendlyRateLimitError(providerID string, upstream *domain.ProviderError, wait time.Duration) error {
-	providerLabel := a.providerNameByID(providerID)
-	// A structural tokens-per-minute rejection (one request needs more tokens
-	// than the entire per-minute budget) is not a "wait and retry" situation —
-	// the request itself must shrink. Surface the provider's own numbers and
-	// point at compaction instead of the requests-per-minute message, which
-	// only applies to request-count (RPM) limits.
+func FriendlyRateLimitError(providerLabel string, upstream *domain.ProviderError, wait time.Duration) error {
+	if providerLabel == "" {
+		providerLabel = "provider"
+	}
 	body := ""
 	if upstream != nil && upstream.Err != nil {
 		body = upstream.Err.Error()
 	}
-	// A TPM rejection where this request needs more than half the
-	// per-minute budget is a compaction problem, not a wait problem —
-	// surface the provider's own numbers (including what is already used
-	// this minute) and point at the compaction that is about to run.
 	if limit, used, requested, ok := domain.ParseTPMError(body); ok && requested*2 > limit {
 		return fmt.Errorf("%s is rate-limited on tokens per minute: this request needs %d tokens (limit %d/min, %d already used). The conversation will be compacted to fit, or reduce the input/output tokens.", providerLabel, requested, limit, used)
 	}
@@ -95,13 +86,11 @@ func (a *App) friendlyRateLimitError(providerID string, upstream *domain.Provide
 	return fmt.Errorf("%s is rate-limited (max ~5 requests/min). Wait ~%ds and try again.", providerLabel, secs)
 }
 
-var _ = context.Background
-var _ = domain.ProviderChat
-
-// decorateRateLimitError converts a 429 upstream error into a friendly
-// user-facing error and records the provider rate-limit window. Returns the
-// original error unchanged for non-429 failures.
-func (a *App) decorateRateLimitError(providerID string, err error) error {
+// Decorate converts a 429 upstream error into a friendly user-facing error
+// and records the provider rate-limit window. Returns the original error
+// unchanged for non-429 failures. providerName is the human label used in
+// the message (empty falls back to "provider").
+func (r *RateLimiter) Decorate(providerID, providerName string, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -109,14 +98,13 @@ func (a *App) decorateRateLimitError(providerID string, err error) error {
 	if !errors.As(err, &upstream) || upstream.StatusCode != 429 {
 		return err
 	}
-	// Record the window: prefer the provider's Retry-After, else our default.
 	next := clock.NewTime().Time()
 	if upstream.RetryAfter > 0 {
 		next = next.Add(upstream.RetryAfter)
 	} else {
 		next = next.Add(DefaultRateLimitWindow)
 	}
-	a.MarkProviderRateLimited(providerID, next)
-	wait := a.ProviderRateLimitWait(providerID)
-	return a.friendlyRateLimitError(providerID, upstream, wait)
+	r.Mark(providerID, next)
+	wait := r.Wait(providerID)
+	return FriendlyRateLimitError(providerName, upstream, wait)
 }

@@ -1,4 +1,4 @@
-package application
+package provider
 
 import (
 	"context"
@@ -274,27 +274,27 @@ const tpmOverflowBody = "openai: stream error: Request too large for gpt-5.6-lun
 // waiting for the window to drain is the right fix.
 func TestIsTPMDominatedRequestApp(t *testing.T) {
 	structural := &domain.ProviderError{Kind: domain.KindSSETransport, Temporary: true, Err: errors.New(tpmOverflowBody)}
-	if !isTPMDominatedRequest(structural) {
+	if !tpmDominatedRequest(structural) {
 		t.Fatal("requested > limit must be dominated (structural subset)")
 	}
 	// Wrapping layers must not hide the signal.
-	if !isTPMDominatedRequest(fmt.Errorf("stream round failed: %w", structural)) {
+	if !tpmDominatedRequest(fmt.Errorf("stream round failed: %w", structural)) {
 		t.Fatal("wrapped dominant TPM must still be detected")
 	}
 	dominant := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
 		Err: errors.New("Request too large for gpt-5.6-luna on tokens per min (TPM): Limit 500000, Used 271036, Requested 355391.")}
-	if !isTPMDominatedRequest(dominant) {
+	if !tpmDominatedRequest(dominant) {
 		t.Fatal("requested > half the budget must be dominated")
 	}
 	modest := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
 		Err: errors.New("Request too large on tokens per min (TPM): Limit 500000, Used 271036, Requested 40000.")}
-	if isTPMDominatedRequest(modest) {
+	if tpmDominatedRequest(modest) {
 		t.Fatal("requested <= half the budget is congestion, not dominated")
 	}
-	if isTPMDominatedRequest(errors.New("boom")) {
+	if tpmDominatedRequest(errors.New("boom")) {
 		t.Fatal("unrelated error must not match")
 	}
-	if isTPMDominatedRequest(nil) {
+	if tpmDominatedRequest(nil) {
 		t.Fatal("nil error must not match")
 	}
 }

@@ -1,4 +1,4 @@
-package application
+package provider
 
 import (
 	"encoding/json"
@@ -10,17 +10,12 @@ import (
 	"nusashell/domain"
 )
 
-// endpoints returns the lazily-initialized route cache persisted under
-// the app data dir. Thread-safe via sync.Once.
-func (a *App) endpoints() *endpointsCache {
-	a.endpointsCacheOnce.Do(func() {
-		path := ""
-		if a.DataDir != "" {
-			path = filepath.Join(a.DataDir, "endpoints_cache.json")
-		}
-		a.endpointsCacheVal = newEndpointsCache(path)
-	})
-	return a.endpointsCacheVal
+func (s *Service) endpoints() *endpointsCache {
+	path := ""
+	if s != nil && s.dataDir != "" {
+		path = filepath.Join(s.dataDir, "endpoints_cache.json")
+	}
+	return newEndpointsCache(path)
 }
 
 // endpointCacheTTL is how long a model's route list is reused before a
@@ -28,6 +23,7 @@ func (a *App) endpoints() *endpointsCache {
 // so 24h keeps the picker instant without hammering the gateway. The
 // cache key is provider_id + model_id because each gateway may serve the
 // same model with a different set of upstreams.
+
 const endpointCacheTTL = 24 * time.Hour
 
 // endpointCacheSchemaVersion forces a refresh after the route shape or

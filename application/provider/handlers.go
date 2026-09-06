@@ -1,4 +1,4 @@
-package application
+package provider
 
 import (
 	"context"
@@ -8,26 +8,42 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/pkg/rpcdispatch"
 	clock "nusashell/pkg/time"
 )
 
 // providerNameByID resolves a provider ID to its human-readable name. Falls
 // back to the ID itself when the provider is not found (deleted, disabled, or
 // never existed) so logs and errors always show something identifiable.
-func (a *App) providerNameByID(providerID string) string {
+func (s *Service) ProviderName(providerID string) string {
+	return s.providerNameByID(providerID)
+}
+
+func (s *Service) ProviderDTO(p *domain.Provider) contracts.ProviderDTO {
+	return s.providerDTO(p)
+}
+
+func (s *Service) EnrichModelsAtRead(p *domain.Provider) {
+	if s.catalog == nil || p == nil {
+		return
+	}
+	s.enrichProviderModelsAtRead(p)
+}
+
+func (s *Service) providerNameByID(providerID string) string {
 	if providerID == "" {
 		return "provider"
 	}
-	if a.Providers == nil {
+	if s.store == nil {
 		return providerID
 	}
-	if p, err := a.Providers.Get(providerID); err == nil && p.Name != "" {
+	if p, err := s.store.Get(providerID); err == nil && p.Name != "" {
 		return p.Name
 	}
 	return providerID
 }
 
-func (a *App) providerDTO(p *domain.Provider) contracts.ProviderDTO {
+func (s *Service) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 	caps := domain.KindCaps(p.Kind)
 	driver := p.EffectiveDriver()
 	cacheDriver := domain.WireCacheDriver(p.Kind, driver, p.BaseURL)
@@ -45,7 +61,7 @@ func (a *App) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 	if len(ttls) > 0 {
 		dto.CacheTTL = domain.NormalizeCacheTTL(p.Kind, cacheDriver, p.CacheTTL)
 	}
-	_, hasKey, _ := a.Credentials.Get(p.ID)
+	_, hasKey, _ := s.credentials.Get(p.ID)
 	dto.HasAPIKey = hasKey
 	dto.Configured = hasKey || !domain.RequiresKey(p.Kind)
 	for _, m := range p.Models {
@@ -116,16 +132,16 @@ func validateProviderDriver(driver domain.ProviderDriver, kind domain.ProviderKi
 	return nil
 }
 
-func (a *App) handleProvidersList() (any, *contracts.RPCError) {
-	list := a.Providers.List()
+func (s *Service) HandleList() (any, *contracts.RPCError) {
+	list := s.store.List()
 	out := make([]contracts.ProviderDTO, 0, len(list))
 	for _, p := range list {
-		out = append(out, a.providerDTO(p))
+		out = append(out, s.providerDTO(p))
 	}
 	return contracts.ProvidersListResult{Providers: out}, nil
 }
 
-func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *contracts.RPCError) {
+func (s *Service) HandleSave(req contracts.ProviderSaveRequest) (any, *contracts.RPCError) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "provider name is required"}
@@ -142,7 +158,7 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 
 	var p *domain.Provider
 	if req.ID != "" {
-		existing, err := a.Providers.Get(req.ID)
+		existing, err := s.store.Get(req.ID)
 		if err != nil {
 			if defaults, ok := builtInProvider(req.ID); ok {
 				p = defaults
@@ -191,54 +207,46 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 	}
 
 	if req.APIKey != "" {
-		if err := a.Credentials.Set(p.ID, req.APIKey); err != nil {
-			return nil, rpcInternal(err)
+		if err := s.credentials.Set(p.ID, req.APIKey); err != nil {
+			return nil, rpcdispatch.Internal(err)
 		}
 		p.HasAPIKey = true
 	}
-	if err := a.Providers.Save(p); err != nil {
-		return nil, rpcInternal(err)
+	if err := s.store.Save(p); err != nil {
+		return nil, rpcdispatch.Internal(err)
 	}
-	a.log("info", "ai", "provider saved: %s (%s)", p.Name, p.Kind)
+	s.info("provider saved: %s (%s)", p.Name, p.Kind)
 	// Provider changes alter cache keys (provider+model+conversation) and
 	// can add/remove tools (web_answer, generate_media): announce globally.
-	a.publishAnnouncementToAll(newAnnouncement(
-		"config_changed",
-		domain.AnnouncementConfigChangedArgs([]string{"provider"}),
-		domain.AnnouncementConfigChangedMessage([]string{"provider"}),
-	), "")
-	return contracts.ProvidersListResult{Providers: []contracts.ProviderDTO{a.providerDTO(p)}}, nil
+	s.configChanged()
+	return contracts.ProvidersListResult{Providers: []contracts.ProviderDTO{s.providerDTO(p)}}, nil
 }
 
-func (a *App) handleProvidersDelete(req contracts.ProviderIDRequest) (any, *contracts.RPCError) {
-	p, err := a.Providers.Get(req.ID)
+func (s *Service) HandleDelete(req contracts.ProviderIDRequest) (any, *contracts.RPCError) {
+	p, err := s.store.Get(req.ID)
 	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
 	name := p.Name
-	if err := a.Providers.Delete(req.ID); err != nil {
-		return nil, rpcInternal(err)
+	if err := s.store.Delete(req.ID); err != nil {
+		return nil, rpcdispatch.Internal(err)
 	}
-	if err := a.Credentials.Delete(req.ID); err != nil {
-		a.log("warn", "ai", "failed to delete credential for %s: %v", name, err)
+	if err := s.credentials.Delete(req.ID); err != nil {
+		s.warn("failed to delete credential for %s: %v", name, err)
 	}
-	a.log("info", "ai", "provider deleted: %s", name)
-	a.publishAnnouncementToAll(newAnnouncement(
-		"config_changed",
-		domain.AnnouncementConfigChangedArgs([]string{"provider"}),
-		domain.AnnouncementConfigChangedMessage([]string{"provider"}),
-	), "")
+	s.info("provider deleted: %s", name)
+	s.configChanged()
 	return map[string]bool{"ok": true}, nil
 }
 
-func (a *App) providerWithKey(id string) (*domain.Provider, string, *contracts.RPCError) {
-	p, err := a.Providers.Get(id)
+func (s *Service) providerWithKey(id string) (*domain.Provider, string, *contracts.RPCError) {
+	p, err := s.store.Get(id)
 	if err != nil {
 		return nil, "", &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
-	key, _, err := a.Credentials.Get(id)
+	key, _, err := s.credentials.Get(id)
 	if err != nil {
-		return nil, "", rpcInternal(err)
+		return nil, "", rpcdispatch.Internal(err)
 	}
 	return p, key, nil
 }
@@ -249,14 +257,14 @@ func (a *App) providerWithKey(id string) (*domain.Provider, string, *contracts.R
 // never depends on imported models, and never trips model-routing failures
 // on the upstream (a 502 on a specific model stays invisible here and only
 // surfaces when actually chatting).
-func (a *App) handleProvidersTest(req contracts.ProviderIDRequest) (any, *contracts.RPCError) {
-	p, key, rpcErr := a.providerWithKey(req.ID)
+func (s *Service) HandleTest(req contracts.ProviderIDRequest) (any, *contracts.RPCError) {
+	p, key, rpcErr := s.providerWithKey(req.ID)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	adapter, err := a.Factory(ctx, p, key)
+	adapter, err := s.factory(ctx, p, key)
 	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
 	}
@@ -267,7 +275,7 @@ func (a *App) handleProvidersTest(req contracts.ProviderIDRequest) (any, *contra
 	start := clock.NewTime().Time()
 	models, err := lister.ListModels(ctx, key)
 	if err != nil {
-		a.log("warn", "ai", "provider test failed: %s [%s, probe /models]: %v", p.Name, p.Kind, err)
+		s.warn("provider test failed: %s [%s, probe /models]: %v", p.Name, p.Kind, err)
 		return nil, &contracts.RPCError{
 			Code:    contracts.CodeProvider,
 			Message: fmt.Sprintf("%s (probe: GET /models)", err.Error()),

@@ -1,4 +1,4 @@
-package application
+package provider
 
 import (
 	"context"
@@ -12,14 +12,14 @@ import (
 	clock "nusashell/pkg/time"
 )
 
-func (a *App) handleProvidersImport(req contracts.ProviderIDRequest) (any, *contracts.RPCError) {
-	p, key, rpcErr := a.providerWithKey(req.ID)
+func (s *Service) HandleImport(req contracts.ProviderIDRequest) (any, *contracts.RPCError) {
+	p, key, rpcErr := s.providerWithKey(req.ID)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	models, err := a.importModelsForProvider(ctx, p, key)
+	models, err := s.importModelsForProvider(ctx, p, key)
 	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
 	}
@@ -39,8 +39,8 @@ func (a *App) handleProvidersImport(req contracts.ProviderIDRequest) (any, *cont
 // a dedicated /embeddings/models endpoint, separate from the chat /models
 // endpoint, and the gateway may be configured with any chat API kind
 // (chat, responses, or messages).
-func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, key string) ([]domain.Model, error) {
-	adapter, err := a.Factory(ctx, p, key)
+func (s *Service) importModelsForProvider(ctx context.Context, p *domain.Provider, key string) ([]domain.Model, error) {
+	adapter, err := s.factory(ctx, p, key)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +50,7 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 	}
 	models, err := lister.ListModels(ctx, key)
 	if err != nil {
-		a.log("warn", "ai", "model import failed: %s: %v", p.Name, err)
+		s.warn("model import failed: %s: %v", p.Name, err)
 		return nil, err
 	}
 	// Tag embedding models from the chat /models response so the learning
@@ -66,8 +66,8 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 	// Fetch embedding models from the separate /embeddings/models endpoint.
 	// This is provider-kind agnostic — works for chat, responses, and
 	// messages kinds. Skipped if no EmbeddingModelListerFactory is wired.
-	if a.EmbeddingModelListerFactory != nil {
-		embLister := a.EmbeddingModelListerFactory(p)
+	if s.embeddingListerFactory != nil {
+		embLister := s.embeddingListerFactory(p)
 		if embLister != nil {
 			embIDs, _ := embLister.ListEmbeddingModels(ctx, key)
 			byID := make(map[string]int, len(models))
@@ -105,8 +105,8 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 	// full chat roster, which would misclassify every chat model as TTS
 	// (e.g. OpenCode ignores output_modalities=speech). Their IDs keep
 	// Kind="" and are classified by the catalog + allowlist pass below.
-	if a.ImageModelListerFactory != nil && p.KindCapabilities().HasImageEndpoint {
-		imgLister := a.ImageModelListerFactory(p)
+	if s.imageListerFactory != nil && p.KindCapabilities().HasImageEndpoint {
+		imgLister := s.imageListerFactory(p)
 		if imgLister != nil {
 			imgIDs, _ := imgLister.ListImageModels(ctx, key)
 			for _, id := range imgIDs {
@@ -125,8 +125,8 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			}
 		}
 	}
-	if a.SpeechModelListerFactory != nil && p.KindCapabilities().HasSpeechEndpoint {
-		spLister := a.SpeechModelListerFactory(p)
+	if s.speechListerFactory != nil && p.KindCapabilities().HasSpeechEndpoint {
+		spLister := s.speechListerFactory(p)
 		if spLister != nil {
 			spIDs, _ := spLister.ListSpeechModels(ctx, key)
 			for _, id := range spIDs {
@@ -138,8 +138,8 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			}
 		}
 	}
-	if a.VideoModelListerFactory != nil && p.KindCapabilities().HasVideoEndpoint {
-		vLister := a.VideoModelListerFactory(p)
+	if s.videoListerFactory != nil && p.KindCapabilities().HasVideoEndpoint {
+		vLister := s.videoListerFactory(p)
 		if vLister != nil {
 			vIDs, _ := vLister.ListVideoModels(ctx, key)
 			for _, id := range vIDs {
@@ -156,11 +156,11 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 	// tool call, structured output, vision) that provider /models endpoints
 	// often don't return. Skipped if no catalog is configured or the catalog
 	// fetch fails — provider-imported data stays as-is.
-	if a.ModelCatalog != nil {
-		if err := a.ModelCatalog.EnsureLoaded(ctx); err == nil {
+	if s.catalog != nil {
+		if err := s.catalog.EnsureLoaded(ctx); err == nil {
 			enriched := 0
 			for i := range models {
-				meta := a.ModelCatalog.Lookup(catalogHintFromModelID(models[i].ID), models[i].ID)
+				meta := s.catalog.Lookup(catalogHintFromModelID(models[i].ID), models[i].ID)
 				if meta == nil {
 					continue
 				}
@@ -207,7 +207,7 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 				enriched++
 			}
 			if enriched > 0 {
-				a.log("info", "ai", "enriched %d/%d models from models.dev catalog for %s", enriched, len(models), p.Name)
+				s.info("enriched %d/%d models from models.dev catalog for %s", enriched, len(models), p.Name)
 			}
 		}
 	}
@@ -219,8 +219,8 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 	// output_modalities=speech) would misclassify every chat model as TTS.
 	// Unknown models keep Kind="" and appear in the chat picker.
 	for i := range models {
-		if a.ModelCatalog != nil {
-			if meta := a.ModelCatalog.Lookup(catalogHintFromModelID(models[i].ID), models[i].ID); meta != nil {
+		if s.catalog != nil {
+			if meta := s.catalog.Lookup(catalogHintFromModelID(models[i].ID), models[i].ID); meta != nil {
 				switch meta.Kind {
 				case "tts":
 					models[i].Kind = domain.ModelKindTTS
@@ -246,10 +246,10 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 	}
 	p.Models = models
 	p.UpdatedAt = clock.NewTime().Time()
-	if err := a.Providers.Save(p); err != nil {
+	if err := s.store.Save(p); err != nil {
 		return nil, err
 	}
-	a.log("info", "ai", "imported %d models from %s", len(models), p.Name)
+	s.info("imported %d models from %s", len(models), p.Name)
 	return models, nil
 }
 
@@ -279,3 +279,6 @@ func catalogHintFromModelID(modelID string) string {
 	}
 	return ""
 }
+
+// CatalogHintFromModelID is exported for root tests that pin prefix matching.
+func CatalogHintFromModelID(modelID string) string { return catalogHintFromModelID(modelID) }

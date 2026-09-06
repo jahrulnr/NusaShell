@@ -1,4 +1,4 @@
-package application
+package automation
 
 import (
 	"context"
@@ -8,14 +8,17 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/pkg/rpcdispatch"
 	clock "nusashell/pkg/time"
 )
 
-func (a *App) handleAutomation(ctx context.Context, method string, payload json.RawMessage) (any, *contracts.RPCError) {
-	if a.Automation == nil {
+// Dispatch routes automation.* RPC methods. steer is injected so this
+// package never holds *App; App implements HeadlessTurnRunner.
+func (a *Automation) Dispatch(ctx context.Context, method string, payload json.RawMessage, steer HeadlessTurnRunner) (any, *contracts.RPCError) {
+	if a == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "automation is not configured"}
 	}
-	auto := a.Automation
+	auto := a
 	switch method {
 	case contracts.MethodAutomationValidate:
 		var req contracts.AutomationWorkspaceRequest
@@ -40,13 +43,13 @@ func (a *App) handleAutomation(ctx context.Context, method string, payload json.
 			return nil, rpcWorkflowRunError(err)
 		}
 		if run == nil {
-			return nil, rpcInternal(err)
+			return nil, rpcdispatch.Internal(err)
 		}
 		return runDTO(run), nil
 	case contracts.MethodAutomationRunsList:
 		runs, err := auto.Runs.List(ctx, RunFilter{Limit: 50})
 		if err != nil {
-			return nil, rpcInternal(err)
+			return nil, rpcdispatch.Internal(err)
 		}
 		out := make([]contracts.RunDTO, 0, len(runs))
 		for _, r := range runs {
@@ -69,7 +72,7 @@ func (a *App) handleAutomation(ctx context.Context, method string, payload json.
 			return nil, err
 		}
 		if err := auto.Exec.Cancel(ctx, req.ID); err != nil {
-			return nil, rpcInternal(err)
+			return nil, rpcdispatch.Internal(err)
 		}
 		run, _ := auto.Runs.Get(ctx, req.ID)
 		return runDTO(run), nil
@@ -96,8 +99,11 @@ func (a *App) handleAutomation(ctx context.Context, method string, payload json.
 		if convID == "" {
 			return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "no running agent step to steer"}
 		}
-		if err := a.SteerHeadlessTurn(convID, req.Text); err != nil {
-			return nil, rpcInternal(err)
+		if steer == nil {
+			return nil, &contracts.RPCError{Code: contracts.CodeInternal, Message: "headless turn runner not configured"}
+		}
+		if err := steer.SteerHeadlessTurn(convID, req.Text); err != nil {
+			return nil, rpcdispatch.Internal(err)
 		}
 		return map[string]any{"steered": true, "conversation_id": convID}, nil
 	case contracts.MethodAutomationRunsRetry:
@@ -127,7 +133,7 @@ func (a *App) handleAutomation(ctx context.Context, method string, payload json.
 		}
 		chunks, err := auto.Logs.Read(ctx, req.JobID, req.After, limit)
 		if err != nil {
-			return nil, rpcInternal(err)
+			return nil, rpcdispatch.Internal(err)
 		}
 		raw := make([]json.RawMessage, 0, len(chunks))
 		for _, c := range chunks {
@@ -155,7 +161,7 @@ func (a *App) handleAutomation(ctx context.Context, method string, payload json.
 			return nil, err
 		}
 		if err := auto.Exec.Cancel(ctx, req.ID); err != nil {
-			return nil, rpcInternal(err)
+			return nil, rpcdispatch.Internal(err)
 		}
 		return map[string]bool{"ok": true}, nil
 	case contracts.MethodAutomationArtifactsList:
@@ -172,7 +178,7 @@ func (a *App) handleAutomation(ctx context.Context, method string, payload json.
 	case contracts.MethodAutomationList:
 		list, err := auto.Workflows.List(ctx)
 		if err != nil {
-			return nil, rpcInternal(err)
+			return nil, rpcdispatch.Internal(err)
 		}
 		out := make([]contracts.WorkflowDTO, 0, len(list))
 		for _, w := range list {
@@ -216,7 +222,7 @@ func (a *App) handleAutomation(ctx context.Context, method string, payload json.
 			return validationDTO(r), &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
 		}
 		if err != nil {
-			return nil, rpcInternal(err)
+			return nil, rpcdispatch.Internal(err)
 		}
 		avail, reason := auto.AvailabilityOf(ctx, saved)
 		return map[string]any{"workflow": workflowDTO(saved, avail, reason), "validation": validationDTO(r)}, nil
@@ -226,7 +232,7 @@ func (a *App) handleAutomation(ctx context.Context, method string, payload json.
 			return nil, err
 		}
 		if err := auto.Workflows.Delete(ctx, req.ID); err != nil {
-			return nil, rpcInternal(err)
+			return nil, rpcdispatch.Internal(err)
 		}
 		return map[string]bool{"ok": true}, nil
 	case contracts.MethodAutomationEnable, contracts.MethodAutomationDisable:
@@ -261,7 +267,7 @@ func (a *App) handleAutomation(ctx context.Context, method string, payload json.
 	case contracts.MethodAutomationEvents:
 		evs, err := auto.Events.ListEvents(ctx, 50)
 		if err != nil {
-			return nil, rpcInternal(err)
+			return nil, rpcdispatch.Internal(err)
 		}
 		out := make([]contracts.EventDTO, 0, len(evs))
 		for _, e := range evs {
@@ -278,13 +284,13 @@ func (a *App) handleAutomation(ctx context.Context, method string, payload json.
 		}
 		ev := domain.Event{ID: req.ID, Type: req.Type, Source: req.Source, Subject: req.Subject, Attributes: req.Attributes, Time: clock.NewTime().Time()}
 		if err := auto.Sched.IngestEvent(ctx, ev); err != nil {
-			return nil, rpcInternal(err)
+			return nil, rpcdispatch.Internal(err)
 		}
 		return map[string]bool{"ok": true}, nil
 	case contracts.MethodAutomationSchedules:
 		list, err := auto.Schedules.List(ctx)
 		if err != nil {
-			return nil, rpcInternal(err)
+			return nil, rpcdispatch.Internal(err)
 		}
 		out := make([]contracts.ScheduleDTO, 0, len(list))
 		for _, rec := range list {
@@ -310,7 +316,7 @@ func (a *App) handleAutomation(ctx context.Context, method string, payload json.
 		}
 		deps, err := auto.Caps.Dependents(ctx, strings.TrimPrefix(req.ID, "plugin:"))
 		if err != nil {
-			return nil, rpcInternal(err)
+			return nil, rpcdispatch.Internal(err)
 		}
 		names := make([]string, 0, len(deps))
 		for _, d := range deps {
@@ -323,7 +329,7 @@ func (a *App) handleAutomation(ctx context.Context, method string, payload json.
 			return nil, err
 		}
 		if err := auto.Caps.SetDisabled(ctx, req.ID, !req.Enabled); err != nil {
-			return nil, rpcInternal(err)
+			return nil, rpcdispatch.Internal(err)
 		}
 		return map[string]bool{"ok": true}, nil
 	default:
@@ -335,5 +341,5 @@ func rpcWorkflowRunError(err error) *contracts.RPCError {
 	if strings.Contains(err.Error(), "invalid workflow") {
 		return &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
 	}
-	return rpcInternal(err)
+	return rpcdispatch.Internal(err)
 }

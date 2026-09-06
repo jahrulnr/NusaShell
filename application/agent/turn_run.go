@@ -1,0 +1,251 @@
+package agent
+
+import (
+	"context"
+	"sync"
+
+	"nusashell/domain"
+	"nusashell/domain/turndiff"
+	clock "nusashell/pkg/time"
+)
+
+// TurnRun tracks one streaming agent turn.
+type TurnRun struct {
+	ID             string
+	ConversationID string
+	MessageID      string
+	Ctx            context.Context
+	Cancel         context.CancelFunc
+	// ProviderID is the resolved provider for this turn, used by the
+	// dynamic 400-learning classifier to key learned param rules.
+	ProviderID string
+	// Headless marks unattended turns (pipeline agent steps). When true,
+	// the default AgentAutomation kind filters ACP subagent tools so
+	// permission prompts never stall a pipeline run. Background learning
+	// kinds intentionally opt into the full conversation toolbox.
+	Headless bool
+	// ToolKind overrides the ToolFactory agent kind for this run (empty =
+	// default by Headless: conversation vs automation). Internal delegates
+	// set AgentDelegate so the delegate tool itself is not advertised.
+	ToolKind AgentKind
+	// RiskTierCap is the maximum ACP RiskTier that may be promoted to
+	// during a headless turn. Derived from the workflow TrustLevel via
+	// domain.TrustLevelToRiskTierCap. Empty means no cap (interactive turns).
+	RiskTierCap domain.RiskTier
+	// HeadlessUpdate is called at safe round boundaries for an observed
+	// headless run. Internal delegates use it to mirror their hidden
+	// conversation into the shared ACP-shaped transcript UI.
+	HeadlessUpdate func()
+	// Workspace is the absolute workspace root of the conversation, captured
+	// at turn start so tool execution can attribute mutations without
+	// re-reading the conversation.
+	Workspace string
+
+	turnDiffMu sync.Mutex
+	// TurnDiff accumulates the net git unified diff of committed file_*
+	// mutations for this turn. Ephemeral: never persisted. Nil until the
+	// turn loop allocates it.
+	TurnDiff *turndiff.Tracker
+
+	messageMu   sync.RWMutex
+	steerMu     sync.Mutex
+	steerQueued *SteerEntry
+
+	toolCancelMu sync.Mutex
+	toolCancels  map[string]context.CancelFunc
+
+	runDoneMu sync.Mutex
+	runDone   []PendingRunDone
+
+	// learningNodes records memory/skill IDs observed by successful tools in
+	// this turn. Tool calls may run concurrently, so access is synchronized;
+	// used_with edges are emitted later in deterministic persistence order.
+	learningNodesMu sync.Mutex
+	learningNodes   map[string]struct{}
+}
+
+// registerToolCancel exposes a per-tool cancellation handle to the RPC layer
+// while the tool is in flight. It intentionally does not touch r.Cancel:
+// stopping a tool must leave the enclosing agent turn alive.
+func (r *TurnRun) RegisterToolCancel(toolCallID string, cancel context.CancelFunc) {
+	if r == nil || toolCallID == "" || cancel == nil {
+		return
+	}
+	r.toolCancelMu.Lock()
+	if r.toolCancels == nil {
+		r.toolCancels = make(map[string]context.CancelFunc)
+	}
+	r.toolCancels[toolCallID] = cancel
+	r.toolCancelMu.Unlock()
+}
+
+func (r *TurnRun) UnregisterToolCancel(toolCallID string) {
+	if r == nil || toolCallID == "" {
+		return
+	}
+	r.toolCancelMu.Lock()
+	delete(r.toolCancels, toolCallID)
+	r.toolCancelMu.Unlock()
+}
+
+func (r *TurnRun) CancelTool(toolCallID string) bool {
+	if r == nil || toolCallID == "" {
+		return false
+	}
+	r.toolCancelMu.Lock()
+	cancel, ok := r.toolCancels[toolCallID]
+	r.toolCancelMu.Unlock()
+	if !ok {
+		return false
+	}
+	cancel()
+	return true
+}
+
+// pendingRunDone is a finished background run waiting to be injected
+// into the parent turn at the next steer-style tool-round boundary.
+// Complete delivers the result into the parent conversation (patch the
+// original tool call + inject the synthetic result message); producers
+// include ACP subagents and internal delegates.
+type PendingRunDone struct {
+	RunID    string
+	Complete func(conversationID string) error
+}
+
+// SteerEntry is a user message queued for injection at the next tool round
+// boundary while a turn is running.
+type SteerEntry struct {
+	ID      string
+	Text    string
+	Status  string // "queued" | "applied" | "cancelled"
+	Message domain.Message
+}
+
+func (r *TurnRun) CurrentMessageID() string {
+	r.messageMu.RLock()
+	defer r.messageMu.RUnlock()
+	return r.MessageID
+}
+
+func (r *TurnRun) SetMessageID(id string) {
+	if id == "" {
+		return
+	}
+	r.messageMu.Lock()
+	r.MessageID = id
+	r.messageMu.Unlock()
+}
+
+// queueSteer stores a steer entry for this run. Returns false if a steer is
+// already queued (only one at a time).
+func (r *TurnRun) QueueSteer(entry *SteerEntry) bool {
+	r.steerMu.Lock()
+	defer r.steerMu.Unlock()
+	if r.steerQueued != nil {
+		return false
+	}
+	r.steerQueued = entry
+	return true
+}
+
+// cancelSteerEntry removes a queued steer and returns it (with its text) so the
+// caller can emit a cancel event that lets the frontend restore the draft to
+// the composer. Returns nil if no queued steer exists.
+func (r *TurnRun) CancelSteerEntry() *SteerEntry {
+	r.steerMu.Lock()
+	defer r.steerMu.Unlock()
+	if r.steerQueued == nil || r.steerQueued.Status != "queued" {
+		return nil
+	}
+	r.steerQueued.Status = "cancelled"
+	entry := r.steerQueued
+	r.steerQueued = nil
+	return entry
+}
+
+// drainSteer returns the queued steer entry and marks it applied, or nil if
+// no steer is queued. Called by the agent loop at a safe boundary.
+func (r *TurnRun) DrainSteer() *SteerEntry {
+	r.steerMu.Lock()
+	defer r.steerMu.Unlock()
+	if r.steerQueued == nil || r.steerQueued.Status != "queued" {
+		return nil
+	}
+	r.steerQueued.Status = "applied"
+	entry := r.steerQueued
+	r.steerQueued = nil
+	return entry
+}
+
+// queuedSteer returns the current queued steer without consuming it.
+func (r *TurnRun) QueuedSteer() *SteerEntry {
+	r.steerMu.Lock()
+	defer r.steerMu.Unlock()
+	if r.steerQueued == nil || r.steerQueued.Status != "queued" {
+		return nil
+	}
+	return r.steerQueued
+}
+
+// requeueSteer puts a previously drained entry back when persist failed.
+// Returns false if another steer occupied the slot.
+func (r *TurnRun) RequeueSteer(entry *SteerEntry) bool {
+	if entry == nil {
+		return false
+	}
+	r.steerMu.Lock()
+	defer r.steerMu.Unlock()
+	if r.steerQueued != nil {
+		return false
+	}
+	entry.Status = "queued"
+	r.steerQueued = entry
+	return true
+}
+
+func (r *TurnRun) QueueRunDone(entry PendingRunDone) {
+	if r == nil || entry.Complete == nil {
+		return
+	}
+	r.runDoneMu.Lock()
+	defer r.runDoneMu.Unlock()
+	r.runDone = append(r.runDone, entry)
+}
+
+func (r *TurnRun) DrainRunDone() []PendingRunDone {
+	if r == nil {
+		return nil
+	}
+	r.runDoneMu.Lock()
+	defer r.runDoneMu.Unlock()
+	out := r.runDone
+	r.runDone = nil
+	return out
+}
+
+func (r *TurnRun) RequeueRunDone(entries []PendingRunDone) {
+	if r == nil || len(entries) == 0 {
+		return
+	}
+	r.runDoneMu.Lock()
+	defer r.runDoneMu.Unlock()
+	r.runDone = append(entries, r.runDone...)
+}
+
+// newSteerEntry builds a queued steer with a persistable user message.
+func newSteerEntry(text string, attachments []domain.Attachment) *SteerEntry {
+	return &SteerEntry{
+		ID:     domain.NewID(domain.IDPrefixSteer),
+		Text:   text,
+		Status: "queued",
+		Message: domain.Message{
+			ID:          domain.NewID(domain.IDPrefixMsg),
+			Role:        domain.RoleUser,
+			Content:     text,
+			Attachments: attachments,
+			CreatedAt:   clock.NewTime().Time(),
+			Status:      domain.StatusDone,
+			Steer:       true,
+		},
+	}
+}

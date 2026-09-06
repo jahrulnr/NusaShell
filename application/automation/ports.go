@@ -1,4 +1,4 @@
-package application
+package automation
 
 import (
 	"context"
@@ -25,6 +25,11 @@ type FrozenClock struct{ T time.Time }
 
 func (c *FrozenClock) Now() time.Time          { return c.T }
 func (c *FrozenClock) Advance(d time.Duration) { c.T = c.T.Add(d) }
+
+// Emitter publishes automation lifecycle events. Root *Bus assigns.
+type Emitter interface {
+	Emit(event string, payload any)
+}
 
 // WorkflowStore persists automation definitions (not conversation JSON).
 type WorkflowStore interface {

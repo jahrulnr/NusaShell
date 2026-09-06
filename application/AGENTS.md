@@ -17,12 +17,19 @@ the root instructions.
 
 Start with these established seams before adding another service or runner:
 
-- `ports.go` and `automation_ports.go` for effect boundaries.
-- `app.go` plus the existing `*_dispatch.go` file for an RPC domain.
-- `conversation_repository.go` for transcript creation, append, compaction,
-  and persistence. Do not mutate formed transcripts through a parallel path.
-- `bus.go` for shared lifecycle events and `roundstream.go` for live round
-  deltas. Do not invent a second event channel.
+- `ports.go` for effect boundaries still on
+  the root package. Migrated subsystems
+  (`plugins`, `logs`, `telemetry`, `settings`, `pets`, `skills`,
+  `conversation`, `provider`, `media`, `memory`, `automation`, `learn`,
+  `tools`, `subagent`, `agent`) define consumer-side ports and a `Deps` struct locally;
+  root `App.Dispatch` only routes to `Service.Dispatch` (or the automation facade).
+- `app.go` plus the matching feature `Dispatch` for an RPC domain.
+- `application/conversation` for transcript creation, append, compaction,
+  and persistence (`NewConversation` / `Bind` re-exported from root).
+  Do not mutate formed transcripts through a parallel path.
+- `bus.go` for shared lifecycle events and `application/agent` (round
+  streams, turn loop) for live round deltas. Do not invent a second event
+  channel.
 - `app_runtime.go` and `App.goSafe` for fire-and-forget work.
 - `service/` leaf packages for already-extracted pure helpers.
 - Existing handlers, policy functions, and their fakes in the nearest

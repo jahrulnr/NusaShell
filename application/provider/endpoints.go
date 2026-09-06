@@ -1,4 +1,4 @@
-package application
+package provider
 
 import (
 	"context"
@@ -17,13 +17,13 @@ import (
 // listing call are skipped as an empty list (HTML 404 bodies from hosts
 // that lack this API must not reach the UI); only non-HTTP fetch errors
 // surface as CodeProvider.
-func (a *App) handleModelEndpoints(req contracts.ModelEndpointsRequest) (any, *contracts.RPCError) {
+func (s *Service) HandleModelEndpoints(req contracts.ModelEndpointsRequest) (any, *contracts.RPCError) {
 	providerID := strings.TrimSpace(req.ProviderID)
 	modelID := strings.TrimSpace(req.ModelID)
 	if providerID == "" || modelID == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "provider_id and model_id are required"}
 	}
-	p, err := a.Providers.Get(providerID)
+	p, err := s.store.Get(providerID)
 	if err != nil || p == nil || !p.Enabled {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "provider is not available or not enabled"}
 	}
@@ -32,7 +32,7 @@ func (a *App) handleModelEndpoints(req contracts.ModelEndpointsRequest) (any, *c
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "model is not available on provider"}
 	}
 
-	cache := a.endpoints()
+	cache := s.endpoints()
 	if routes, ok := cache.get(providerID, modelID); ok {
 		return toEndpointsResult(routes, true, time.Now()), nil
 	}
@@ -41,8 +41,8 @@ func (a *App) handleModelEndpoints(req contracts.ModelEndpointsRequest) (any, *c
 		// model (or the slug was never captured). Empty list = home icon.
 		return toEndpointsResult(nil, false, time.Now()), nil
 	}
-	key, _, _ := a.Credentials.Get(providerID)
-	adapter, err := a.Factory(context.Background(), p, key)
+	key, _, _ := s.credentials.Get(providerID)
+	adapter, err := s.factory(context.Background(), p, key)
 	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
 	}

@@ -162,7 +162,7 @@ Rules:
 | `handleAcpAgentsSave` / `handleAcpAgentsDelete` (`application/acp_handlers.go`) | `config_changed` (subagent) |
 | `handleSettingsSave` (`application/settings_handlers.go`) when `UserPrompt` changed | `config_changed` (user_prompt) |
 | `handleProvidersSave` / `handleProvidersDelete` (`application/providers.go`) | `config_changed` (provider) |
-| `handleMemoryUserUpdate` / `handleMemoryAgentUpdate` (`application/memory_handlers.go`) | `memory_changed` |
+| `HandleUserUpdate` / `HandleAgentUpdate` (`application/memory/`) | `memory_changed` |
 | `handleSkillsSave` / `handleSkillsInstall` / `handleSkillsDelete` (`application/skills_handlers.go`) | `skills_changed` |
 | `skill` tool `save`/`delete` when the calling conversation differs from the affected one | `skills_changed` |
 

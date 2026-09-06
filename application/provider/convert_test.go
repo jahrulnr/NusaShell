@@ -1,4 +1,4 @@
-package application
+package provider
 
 import (
 	"fmt"
@@ -426,14 +426,14 @@ func TestNewProviderContextOpenCodeIsNotOpenRouter(t *testing.T) {
 
 func TestBuildPromptCachePolicyForContextOpenCodeIgnoresOpenRouterFlag(t *testing.T) {
 	settings := domain.Settings{PromptCaching: true}
-	adapter := ProviderContext{
+	adapter := Context{
 		ProviderID: "prov_oc",
 		Kind:       domain.ProviderChat,
 		Driver:     domain.ProviderDriverOpenRouter,
 		OpenRouter: false,
 		BaseURL:    "https://opencode.ai/zen/go/v1",
 	}
-	policy := buildPromptCachePolicyForContext(settings, adapter, "deepseek-v4-flash", "conv_abc", promptCacheConversationPrefix)
+	policy := BuildPromptCachePolicyForContext(settings, adapter, "deepseek-v4-flash", "conv_abc", domain.PromptCacheConversationPrefix)
 	if policy == nil || policy.TTL != "5m" {
 		t.Fatalf("opencode context TTL = %+v, want 5m (5m/1h enum, not 30m)", policy)
 	}

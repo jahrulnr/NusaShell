@@ -1,4 +1,4 @@
-package application
+package automation
 
 import (
 	"context"
@@ -29,7 +29,7 @@ type ExecutionScheduler struct {
 	Agent    AgentStepRunner
 	Runners  RunnerRegistry
 	Waits    WaitStore
-	Bus      *Bus
+	Bus      Emitter
 	Clock    Clock
 	MaxJobs  int
 	Notifier RunNotifier

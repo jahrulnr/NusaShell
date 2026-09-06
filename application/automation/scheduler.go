@@ -1,4 +1,4 @@
-package application
+package automation
 
 import (
 	"context"
@@ -23,7 +23,7 @@ type AutomationScheduler struct {
 	Caps      CapabilityResolver
 	Exec      *ExecutionScheduler
 	Clock     Clock
-	Bus       *Bus
+	Bus       Emitter
 }
 
 func (s *AutomationScheduler) now() time.Time {

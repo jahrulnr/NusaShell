@@ -1,4 +1,4 @@
-package application
+package provider
 
 import (
 	"fmt"
@@ -49,8 +49,8 @@ var envProviderSpecs = []envProviderSpec{
 // (supporting secret rotation). Providers whose key is already current are
 // left untouched and produce no action line. Model import is left to the
 // normal import flow. getenv is injected so the effect is testable.
-func (a *App) SeedProvidersFromEnv(getenv func(string) string) []string {
-	if a.Providers == nil || a.Credentials == nil {
+func (s *Service) SeedFromEnv(getenv func(string) string) []string {
+	if s.store == nil || s.credentials == nil {
 		return nil
 	}
 	var actions []string
@@ -59,10 +59,10 @@ func (a *App) SeedProvidersFromEnv(getenv func(string) string) []string {
 		if key == "" {
 			continue
 		}
-		existing, err := a.Providers.Get(spec.ID)
+		existing, err := s.store.Get(spec.ID)
 		if err != nil {
-			if err := a.Credentials.Set(spec.ID, key); err != nil {
-				a.log("warn", "ai", "env seed: failed to store %s credential: %v", spec.Name, err)
+			if err := s.credentials.Set(spec.ID, key); err != nil {
+				s.warn("env seed: failed to store %s credential: %v", spec.Name, err)
 				continue
 			}
 			p := &domain.Provider{
@@ -75,33 +75,33 @@ func (a *App) SeedProvidersFromEnv(getenv func(string) string) []string {
 				HasAPIKey: true,
 				UpdatedAt: clock.NewTime().Time(),
 			}
-			if err := a.Providers.Save(p); err != nil {
-				a.log("warn", "ai", "env seed: failed to save provider %s: %v", spec.Name, err)
+			if err := s.store.Save(p); err != nil {
+				s.warn("env seed: failed to save provider %s: %v", spec.Name, err)
 				continue
 			}
-			a.log("info", "ai", "seeded provider %s from %s", spec.Name, spec.EnvVar)
+			s.info("seeded provider %s from %s", spec.Name, spec.EnvVar)
 			actions = append(actions, fmt.Sprintf("%s created from %s", spec.Name, spec.EnvVar))
 			continue
 		}
-		cur, has, err := a.Credentials.Get(spec.ID)
+		cur, has, err := s.credentials.Get(spec.ID)
 		if err != nil {
-			a.log("warn", "ai", "env seed: failed to read %s credential: %v", spec.Name, err)
+			s.warn("env seed: failed to read %s credential: %v", spec.Name, err)
 			continue
 		}
 		if has && cur == key {
 			continue
 		}
-		if err := a.Credentials.Set(spec.ID, key); err != nil {
-			a.log("warn", "ai", "env seed: failed to update %s credential: %v", spec.Name, err)
+		if err := s.credentials.Set(spec.ID, key); err != nil {
+			s.warn("env seed: failed to update %s credential: %v", spec.Name, err)
 			continue
 		}
 		existing.HasAPIKey = true
 		existing.UpdatedAt = clock.NewTime().Time()
-		if err := a.Providers.Save(existing); err != nil {
-			a.log("warn", "ai", "env seed: failed to persist %s: %v", spec.Name, err)
+		if err := s.store.Save(existing); err != nil {
+			s.warn("env seed: failed to persist %s: %v", spec.Name, err)
 			continue
 		}
-		a.log("info", "ai", "refreshed %s API key from %s", spec.Name, spec.EnvVar)
+		s.info("refreshed %s API key from %s", spec.Name, spec.EnvVar)
 		actions = append(actions, fmt.Sprintf("%s API key refreshed from %s", spec.Name, spec.EnvVar))
 	}
 	return actions

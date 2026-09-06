@@ -5,15 +5,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
+	"nusashell/application/agent"
+	"nusashell/application/learn"
+	"nusashell/application/logs"
+	"nusashell/application/media"
+	"nusashell/application/memory"
+	"nusashell/application/pets"
+	"nusashell/application/plugins"
+	"nusashell/application/provider"
 	"nusashell/application/service/learnedparams"
 	"nusashell/application/service/modeloverrides"
+	"nusashell/application/subagent"
+	"nusashell/application/telemetry"
+	"nusashell/application/tools"
 	"nusashell/contracts"
 	"nusashell/domain"
-	"nusashell/infrastructure/ai/core"
 	"nusashell/infrastructure/jsonstore"
 	clock "nusashell/pkg/time"
 )
@@ -83,36 +94,12 @@ type App struct {
 	Acp              AcpRuntime
 	AcpRunStorage    domain.AcpRunStorage
 	retrySleeper     RetrySleeper
-	imageGenSem      chan struct{}
 
 	// startedAt is the wall-clock time this process came up. Conversations
 	// whose last activity predates it were used before the restart; the
 	// first user message after restart injects a restart announcement
 	// (see handleTurnsStart).
 	startedAt time.Time
-
-	// ttsInstallMu guards the single in-flight offline TTS install
-	// (settings.tts_install_start is single-flight).
-	ttsInstallMu     sync.Mutex
-	ttsInstallActive bool
-
-	// endpointsCache caches per-model upstream route lists (OpenRouter),
-	// persisted under DataDir so restarts keep the picker instant.
-	// Lazily initialized on first use.
-	endpointsCacheOnce sync.Once
-	endpointsCacheVal  *endpointsCache
-
-	// sttInstallMu guards the single in-flight offline STT install plus
-	// its cancel handle (settings.stt_install_cancel).
-	sttInstallMu     sync.Mutex
-	sttInstallActive bool
-	sttInstallCancel context.CancelFunc
-	sttInstallDoneCh chan struct{}
-
-	// petsInstallMu guards the single in-flight desktop pet install
-	// (settings.pets_install_start is single-flight).
-	petsInstallMu     sync.Mutex
-	petsInstallActive bool
 
 	// autostartOnce guards StartPetAutoLaunch so a test or boot path that
 	// calls it twice does not spawn two pet overlays.
@@ -152,18 +139,25 @@ type App struct {
 
 	Automation *Automation
 
+	pluginSvc    *plugins.Service
+	logsSvc      *logs.Service
+	telemetrySvc *telemetry.Service
+	petsSvc      *pets.Service
+	mediaSvc     *media.Service
+	memorySvc    *memory.Service
+	learnMu      sync.Mutex
+	learnSvc     *learn.Service
+	toolsSvc     *tools.Service
+	subagentSvc  *subagent.Service
+	agentMu      sync.Mutex
+	agentSvc     *agent.Service
+	rateLimiter  *provider.RateLimiter
+
 	runsMu              sync.Mutex
 	runs                map[string]*TurnRun
 	startMu             sync.Mutex
 	conversationTurnsMu sync.Mutex
 	conversationTurns   map[string]*sync.Mutex
-
-	// delegateRuns mirrors internal delegate runs onto the ACP run surface.
-	// The delegate engine is local, but the UI contract is intentionally the
-	// same as ACP so both run families share the dock, drawer, transcript
-	// hydration, and lifecycle events.
-	delegateRunsMu sync.RWMutex
-	delegateRuns   map[string]*domain.AcpRun
 
 	// pendingRuns tracks active (not-yet-completed) background run IDs
 	// per conversation — the shared push-completion registry. Today the
@@ -178,12 +172,6 @@ type App struct {
 	pendingRunsMu sync.Mutex
 	pendingRuns   map[string]map[string]string // conversationID → set of runIDs → spawning tool
 
-	// rlMu guards per-provider rate-limit windows (see rate_limit.go).
-	// MarkProviderRateLimited records when a 429 window clears so client
-	// requests can be gated and messages can be user-friendly.
-	rlMu      sync.Mutex
-	rlWindows map[string]time.Time // providerID → next allowed request time
-
 	// goSafeWG tracks in-flight source=="learning" goroutines (lifecycle
 	// loop and background learner jobs) so Close can drain them before
 	// tests remove t.TempDir. goSafeClosed prevents Add after Wait.
@@ -196,6 +184,221 @@ type App struct {
 	Logger *slog.Logger
 }
 
+// goSafe runs fn in a new goroutine with panic recovery. A panic is logged
+// to both the in-app Logs view (via a.log) and the structured logger (so it
+// is visible even when the UI is closed) and does not crash the process.
+// Use it for fire-and-forget goroutines whose panic would otherwise take
+// down the whole server (agent turns, review agents, background monitors).
+func (a *App) goSafe(source string, fn func()) {
+	tracked := source == "learning"
+	if tracked && !a.beginTrackedGoSafe() {
+		return
+	}
+	go func() {
+		defer func() {
+			if tracked {
+				a.goSafeWG.Done()
+			}
+			if r := recover(); r != nil {
+				stack := debug.Stack()
+				a.log("error", source, "goroutine panic recovered: %v\n%s", r, stack)
+				logger := a.Logger
+				if logger == nil {
+					logger = slog.Default()
+				}
+				logger.Error("goroutine panic recovered", "source", source, "panic", r, "stack", string(stack))
+			}
+		}()
+		fn()
+	}()
+}
+
+// beginTrackedGoSafe records a learning goroutine so Close can wait for it.
+// Returns false when Close has already started draining so WaitGroup is
+// never Add-ed after Wait.
+func (a *App) beginTrackedGoSafe() bool {
+	a.goSafeMu.Lock()
+	defer a.goSafeMu.Unlock()
+	if a.goSafeClosed {
+		return false
+	}
+	a.goSafeWG.Add(1)
+	return true
+}
+
+// GoSafe starts a recovered background goroutine. The composition root
+// (cmd/nusashell) uses this for fire-and-forget work that must not crash
+// the process (same recover as the unexported goSafe helper).
+func (a *App) GoSafe(source string, fn func()) {
+	a.goSafe(source, fn)
+}
+
+const mcpAutostartTimeout = 20 * time.Second
+
+// StartAutoUpdateLoop periodically checks catalog updates and upgrades
+// plugins with AutoUpdate enabled. Interval defaults to 6h. Safe no-op when
+// installer or store are unavailable.
+func (a *App) StartAutoUpdateLoop(ctx context.Context, interval time.Duration) {
+	if a.Plugins == nil || a.PluginInstaller == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 6 * time.Hour
+	}
+	a.goSafe("autoupdate", func() {
+		a.runAutoUpdateOnce(ctx)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				a.runAutoUpdateOnce(ctx)
+			}
+		}
+	})
+	a.log("info", "plugin", "auto-update loop started (interval=%s)", interval)
+}
+
+// StartMCPAutostart connects every plugin whose manifest has mcp.autostart.
+// It runs synchronously so automations and the agent toolbox see those
+// tools before the first FireDue tick. A failed connect is logged and
+// skipped; the process still starts.
+func (a *App) StartMCPAutostart(ctx context.Context) {
+	if a.Plugins == nil || a.MCPToolbox == nil {
+		return
+	}
+	list, err := a.Plugins.List()
+	if err != nil {
+		a.log("warn", "plugin", "autostart list: %v", err)
+		return
+	}
+	for _, p := range list {
+		if p == nil || !p.Manifest.MCP.Autostart {
+			continue
+		}
+		if err := a.connectPluginMCP(ctx, p); err != nil {
+			a.log("warn", "plugin", "autostart connect %s: %v", p.Manifest.ID, err)
+			continue
+		}
+		a.log("info", "plugin", "autostart connected: %s", p.Manifest.ID)
+	}
+}
+
+func (a *App) connectPluginMCP(ctx context.Context, p *domain.Plugin) error {
+	if a.MCPToolbox == nil || p == nil {
+		return nil
+	}
+	connectCtx, cancel := context.WithTimeout(ctx, mcpAutostartTimeout)
+	defer cancel()
+	_, err := a.MCPToolbox.Connect(connectCtx, p)
+	return err
+}
+
+func (a *App) runAutoUpdateOnce(ctx context.Context) {
+	installed, err := a.Plugins.List()
+	if err != nil {
+		a.log("warn", "autoupdate", "list plugins: %v", err)
+		return
+	}
+	var targets []*domain.Plugin
+	for _, p := range installed {
+		if p.Manifest.AutoUpdate {
+			targets = append(targets, p)
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	updates, err := a.PluginInstaller.CheckUpdates(checkCtx, installed)
+	if err != nil {
+		a.log("warn", "autoupdate", "check updates: %v", err)
+		return
+	}
+	byID := map[string]domain.PluginCatalogEntry{}
+	for _, u := range updates {
+		byID[u.PluginID] = u
+	}
+	for _, p := range targets {
+		entry, ok := byID[p.Manifest.ID]
+		if !ok {
+			continue
+		}
+		updateCtx, cancelUpd := context.WithTimeout(ctx, 5*time.Minute)
+		updated, err := a.PluginInstaller.Update(updateCtx, entry.ID)
+		cancelUpd()
+		if err != nil {
+			a.log("warn", "autoupdate", "update %s: %v", p.Manifest.ID, err)
+			continue
+		}
+		a.MCPToolbox.Drop("plugin:" + updated.Manifest.ID)
+		a.log("info", "autoupdate", "auto-updated %s → v%s", updated.Manifest.Name, updated.Manifest.Version)
+	}
+}
+
+// StartLifecycle starts the lifecycle (decay/prune) loop. Safe to call
+// once at server startup. No-op if no lifecycle manager is configured.
+func (a *App) StartLifecycle() {
+	if a.lifecycle == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.lifecycleCancel = cancel
+	a.goSafe("learning", func() { a.lifecycle.Run(ctx) })
+	a.log("info", "learning", "lifecycle manager started (decay=%s prune=%s)", domain.DefaultLifecycleConfig().DecayInterval, domain.DefaultLifecycleConfig().PruneInterval)
+}
+
+// CloseLifecycle stops the background decay/prune loop. Safe to call
+// at server shutdown. No-op if not started.
+func (a *App) CloseLifecycle() {
+	if a.lifecycleCancel != nil {
+		a.lifecycleCancel()
+		a.lifecycleCancel = nil
+	}
+}
+
+// Close releases resources held by the app (file handles, background
+// goroutines). Safe to call multiple times. It cancels the lifecycle
+// loop, then waits for in-flight learning jobs so tests can remove
+// t.TempDir on Windows and Darwin without "directory not empty".
+func (a *App) Close() {
+	a.CloseLifecycle()
+	a.goSafeMu.Lock()
+	a.goSafeClosed = true
+	a.goSafeMu.Unlock()
+	a.goSafeWG.Wait()
+	if a.Acp != nil {
+		a.Acp.Close()
+	}
+	if a.EmbeddingCache != nil {
+		_ = a.EmbeddingCache.Close()
+	}
+	if a.Trajectory != nil {
+		_ = a.Trajectory.Close()
+	}
+}
+
+func (a *App) log(level, source, format string, args ...any) {
+	e := &domain.LogEntry{
+		ID:      domain.NewID(domain.IDPrefixLog),
+		Time:    clock.NewTime().Time(),
+		Level:   level,
+		Source:  source,
+		Message: fmt.Sprintf(format, args...),
+	}
+	if a.Logs != nil {
+		a.Logs.Append(e)
+	}
+	if a.Bus != nil {
+		a.Bus.Emit(contracts.EventLogAppend, contracts.LogAppendEvent{Entry: contracts.LogEntryDTO{
+			ID: e.ID, Time: clock.NewTime(e.Time).Format(timeRFC3339), Level: e.Level, Source: e.Source, Message: e.Message,
+		}})
+	}
+}
+
 // MCPToolbox gives use cases access to connected MCP servers and their tools.
 type MCPToolbox interface {
 	ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
@@ -203,30 +406,8 @@ type MCPToolbox interface {
 	Drop(serverID string)
 }
 
-type DocsSource interface {
-	List() []DocMeta
-	Search(query string, limit int) []DocHit
-	Read(id string) (DocFull, error)
-}
-
-type DocMeta struct {
-	ID    string
-	Title string
-	Path  string
-}
-
-type DocHit struct {
-	DocMeta
-	Snippet string
-}
-
-type DocFull struct {
-	DocMeta
-	Content string
-}
-
 // ProviderFactory builds a provider adapter for a stored config + key.
-type ProviderFactory func(ctx context.Context, p *domain.Provider, apiKey string) (core.Provider, error)
+type ProviderFactory = provider.Factory
 
 // Deps is the wiring for NewApp.
 type Deps struct {
@@ -327,7 +508,9 @@ func NewApp(deps Deps) *App {
 		ImageGeneratorFactory:       deps.ImageGeneratorFactory,
 		SpeechTranscriberFactory:    deps.SpeechTranscriberFactory,
 		OfflineTranscriberFactory:   deps.OfflineTranscriberFactory,
+		SpeechSynthesizerFactory:    deps.SpeechSynthesizerFactory,
 		OfflineSynthesizer:          deps.OfflineSynthesizer,
+		ModelOverrides:              deps.ModelOverrides,
 		ImageModelListerFactory:     deps.ImageModelListerFactory,
 		SpeechModelListerFactory:    deps.SpeechModelListerFactory,
 		VideoGeneratorFactory:       deps.VideoGeneratorFactory,
@@ -344,13 +527,12 @@ func NewApp(deps Deps) *App {
 		Acp:                         deps.Acp,
 		AcpRunStorage:               deps.AcpRunStorage,
 		retrySleeper:                deps.RetrySleeper,
-		imageGenSem:                 make(chan struct{}, maxConcurrentImageGens),
 		startedAt:                   clock.NewTime().Time(),
 		Logger:                      deps.Logger,
 		Automation:                  deps.Automation,
 		runs:                        map[string]*TurnRun{},
-		delegateRuns:                map[string]*domain.AcpRun{},
 		pendingRuns:                 map[string]map[string]string{},
+		rateLimiter:                 provider.NewRateLimiter(),
 		learnedParams:               learnedparams.New(deps.LearnedParams),
 		modelOverrides:              modeloverrides.New(deps.ModelOverrides),
 	}
@@ -400,6 +582,13 @@ func NewApp(deps Deps) *App {
 			},
 		)
 	}
+	if deps.DataDir != "" {
+		if cache, err := jsonstore.NewEmbeddingCache(deps.DataDir); err == nil {
+			app.EmbeddingCache = cache
+		}
+		app.Trajectory = NewTrajectoryRecorder(deps.DataDir)
+	}
+	app.wireFeatureServices()
 	// Wire the lifecycle manager (decay + prune). Started by StartLifecycle,
 	// stopped by CloseLifecycle.
 	if deps.MemoryRecords != nil {
@@ -410,23 +599,36 @@ func NewApp(deps Deps) *App {
 	// stale "running"/"queued" rows become error so the UI shows the truth
 	// and later spawns are not shadowed by ghost jobs.
 	app.RecoverStaleLearningJobs()
-	if deps.DataDir != "" {
-		if cache, err := jsonstore.NewEmbeddingCache(deps.DataDir); err == nil {
-			app.EmbeddingCache = cache
-		}
-		app.Trajectory = NewTrajectoryRecorder(deps.DataDir)
-	}
-	if deps.MemoryRecords != nil && deps.Skills != nil {
-		app.edgeBuilder = NewEdgeBuilder(
-			deps.MemoryRecords, deps.Skills, app.graph(),
-			nil, // embedder is resolved lazily via ResolveEmbedder
-			app.EmbeddingCache,
-			DefaultEdgeBuilderConfig(),
-			"", // model ID resolved lazily
-		)
-		app.edgeBuilder.SetUserStore(deps.User)
+	if svc := app.learnService(); svc != nil {
+		svc.InitEdgeBuilder()
 	}
 	return app
+}
+
+func (a *App) wireFeatureServices() {
+	pluginDeps := plugins.Deps{
+		Store:     a.Plugins,
+		Installer: a.PluginInstaller,
+		MCP:       a.MCPToolbox,
+		Skills:    a.Skills,
+		Log:       a.log,
+	}
+	if a.Automation != nil {
+		pluginDeps.Caps = a.Automation.Caps
+	}
+	a.pluginSvc = plugins.New(pluginDeps)
+	a.logsSvc = logs.New(logs.Deps{Store: a.Logs})
+	a.telemetrySvc = telemetry.New(telemetry.Deps{
+		Conversations: a.Conversations,
+		Providers:     a.Providers,
+	})
+	a.petsSvc = pets.New(a.petsDeps())
+	a.mediaSvc = media.New(a.mediaDeps())
+	a.memorySvc = memory.New(a.memoryDeps())
+	a.learnSvc = learn.New(a.learnDeps())
+	a.toolsSvc = tools.New(a.toolsDeps())
+	a.subagentSvc = subagent.New(a.subagentDeps())
+	a.agentSvc = agent.New(a.agentDeps())
 }
 
 // Dispatch routes an RPC method to its use case. Transport handlers are the
@@ -442,25 +644,25 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 	case strings.HasPrefix(method, "ai."):
 		return a.dispatchAI(method, payload)
 	case strings.HasPrefix(method, "acp."):
-		return a.dispatchAcp(method, payload)
+		return a.subagentService().Dispatch(method, payload)
 	case strings.HasPrefix(method, "plugin."):
-		return a.dispatchPlugin(method, payload)
+		return a.pluginService().Dispatch(method, payload)
 	case strings.HasPrefix(method, "skills."):
-		return a.dispatchSkills(method, payload)
+		return a.skillsService().Dispatch(method, payload)
 	case strings.HasPrefix(method, "memory."):
-		return a.dispatchMemory(method, payload)
+		return a.memoryService().Dispatch(method, payload)
 	case strings.HasPrefix(method, "experience."):
 		return a.dispatchExperience(method, payload)
 	case strings.HasPrefix(method, "learning."):
 		return a.dispatchLearning(method, payload)
 	case strings.HasPrefix(method, "docs."):
-		return a.dispatchDocs(method, payload)
+		return a.toolsService().Dispatch(method, payload)
 	case strings.HasPrefix(method, "settings."):
 		return a.dispatchSettings(method, payload)
 	case strings.HasPrefix(method, "logs."):
-		return a.dispatchLogs(method, payload)
+		return a.logsService().Dispatch(method, payload)
 	case strings.HasPrefix(method, "telemetry."):
-		return a.dispatchTelemetry(method, payload)
+		return a.telemetryService().Dispatch(method, payload)
 	case strings.HasPrefix(method, "automation."):
 		return a.handleAutomation(ctx, method, payload)
 	}

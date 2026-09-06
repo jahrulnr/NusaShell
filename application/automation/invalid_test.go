@@ -1,4 +1,4 @@
-package application
+package automation
 
 import (
 	"context"

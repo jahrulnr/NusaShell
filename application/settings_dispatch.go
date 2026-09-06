@@ -6,19 +6,17 @@ import (
 	"nusashell/contracts"
 )
 
-// dispatchSettings routes settings.* RPC methods to their handlers. Called
-// by App.Dispatch for any method whose first segment is "settings".
+// dispatchSettings routes settings.* RPC methods. Get/set live in the
+// settings package; pets methods in pets; TTS/STT install in media.
 func (a *App) dispatchSettings(method string, payload json.RawMessage) (any, *contracts.RPCError) {
-	return tableDispatcher(map[string]rpcHandler{
-		contracts.MethodSettingsGet:              noPayload(a.handleSettingsGet),
-		contracts.MethodSettingsSet:              decodeReq(a.handleSettingsSet),
-		contracts.MethodSettingsTTSInstallStatus: noPayload(a.handleTTSSettingsInstallStatus),
-		contracts.MethodSettingsTTSInstallStart:  decodeReq(a.handleTTSSettingsInstallStart),
-		contracts.MethodSettingsSTTInstallStatus: noPayload(a.handleSTTSettingsInstallStatus),
-		contracts.MethodSettingsSTTInstallStart:  decodeReq(a.handleSTTSettingsInstallStart),
-		contracts.MethodSettingsSTTInstallCancel: noPayload(a.handleSTTSettingsInstallCancel),
-		contracts.MethodPetsStatus:               noPayload(a.handlePetsStatus),
-		contracts.MethodPetsInstallStart:         decodeReq(a.handlePetsInstallStart),
-		contracts.MethodPetsLaunch:               noPayload(a.handlePetsLaunch),
-	}, "settings")(method, payload)
+	switch method {
+	case contracts.MethodPetsStatus, contracts.MethodPetsInstallStart, contracts.MethodPetsLaunch:
+		return a.petsService().Dispatch(method, payload)
+	case contracts.MethodSettingsTTSInstallStatus, contracts.MethodSettingsTTSInstallStart,
+		contracts.MethodSettingsSTTInstallStatus, contracts.MethodSettingsSTTInstallStart,
+		contracts.MethodSettingsSTTInstallCancel:
+		return a.mediaService().Dispatch(method, payload)
+	default:
+		return a.settingsService().Dispatch(method, payload)
+	}
 }

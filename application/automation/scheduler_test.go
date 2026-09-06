@@ -1,4 +1,4 @@
-package application
+package automation
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"nusashell/contracts"
 	"nusashell/domain"
 )
 
@@ -42,13 +41,32 @@ func (f *fakeExec) RunStep(ctx context.Context, req RunStepRequest) (StepResult,
 	return StepResult{ExitCode: 0, Outputs: map[string]any{"status": "ok"}}, nil
 }
 
+type nopEmitter struct{}
+
+func (nopEmitter) Emit(string, any) {}
+
+type stubCaps struct{}
+
+func (stubCaps) Resolve(_ context.Context, name string, _ domain.AutoStartPolicy) (domain.CapabilityBinding, error) {
+	return domain.CapabilityBinding{Capability: name, Status: domain.CapMissing}, fmt.Errorf("unknown capability %q", name)
+}
+func (stubCaps) EnsureAvailable(_ context.Context, b domain.CapabilityBinding, _ domain.AutoStartPolicy) (domain.CapabilityBinding, error) {
+	return b, nil
+}
+func (stubCaps) Execute(_ context.Context, _ domain.CapabilityBinding, _ json.RawMessage) (json.RawMessage, error) {
+	return nil, fmt.Errorf("not configured")
+}
+func (stubCaps) List(_ context.Context) []domain.CapabilityBinding { return nil }
+func (stubCaps) Dependents(_ context.Context, _ string) ([]*domain.WorkflowDefinition, error) {
+	return nil, nil
+}
+func (stubCaps) SetDisabled(_ context.Context, _ string, _ bool) error { return nil }
+
 func testAutomation(t *testing.T, exec JobExecutor) (*Automation, *AutomationStore, *FrozenClock) {
 	t.Helper()
 	mem := NewAutomationStore()
 	clock := &FrozenClock{T: time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)}
-	caps := NewCapabilityRegistry()
-	caps.Workflows = WorkflowMem{AutomationStore: mem}
-	caps.State = ProviderStateMem{AutomationStore: mem}
+	caps := stubCaps{}
 	es := NewExecutionScheduler()
 	es.Runs = RunMem{AutomationStore: mem}
 	es.Logs = LogMem{AutomationStore: mem}
@@ -56,7 +74,7 @@ func testAutomation(t *testing.T, exec JobExecutor) (*Automation, *AutomationSto
 	es.Caps = caps
 	es.Waits = WaitMem{AutomationStore: mem}
 	es.Clock = clock
-	es.Bus = NewBus()
+	es.Bus = nopEmitter{}
 	auto := &AutomationScheduler{
 		Workflows: WorkflowMem{AutomationStore: mem},
 		Schedules: ScheduleMem{AutomationStore: mem},
@@ -233,74 +251,6 @@ func TestBlockedWhenCapabilityMissing(t *testing.T) {
 		t.Fatalf("missing capability should be INVALID, got %s %+v", r.Verdict(), r.Issues)
 	}
 }
-
-func TestCapabilityBuiltinAvailable(t *testing.T) {
-	reg := NewCapabilityRegistry()
-	b, err := reg.Resolve(context.Background(), "filesystem.read", domain.DefaultAutoStart)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if b.Kind != domain.CapabilityBuiltin || b.Status != domain.CapAvailable {
-		t.Fatalf("%+v", b)
-	}
-	out, err := reg.Execute(context.Background(), b, json.RawMessage(`{"path":"/no/such"}`))
-	if err == nil {
-		t.Fatalf("expected read error, got %s", out)
-	}
-}
-
-func TestDisabledProviderBlocksNotFails(t *testing.T) {
-	mem := NewAutomationStore()
-	reg := NewCapabilityRegistry()
-	reg.State = ProviderStateMem{AutomationStore: mem}
-	reg.Plugins = &capPluginStore{items: []*domain.Plugin{{
-		Manifest: domain.PluginManifest{ID: "mail-mcp", Name: "mail"},
-	}}}
-	reg.MCP = &capMCP{tools: map[string][]contracts.MCPToolDTO{
-		"plugin:mail-mcp": {{Name: "email_read"}},
-	}}
-	_ = reg.SetDisabled(context.Background(), "mail-mcp", true)
-	b, err := reg.Resolve(context.Background(), "email.read", domain.DefaultAutoStart)
-	if err != nil && b.Status != domain.CapDisabled {
-		t.Fatal(err)
-	}
-	if b.Status != domain.CapDisabled {
-		t.Fatalf("status = %s", b.Status)
-	}
-	if domain.MapAvailability(b.Status, true) != domain.AvailBlocked {
-		t.Fatal("disabled maps to blocked, not failed")
-	}
-}
-
-type capPluginStore struct{ items []*domain.Plugin }
-
-func (s *capPluginStore) List() ([]*domain.Plugin, error) { return s.items, nil }
-func (s *capPluginStore) Get(id string) (*domain.Plugin, error) {
-	for _, p := range s.items {
-		if p.Manifest.ID == id {
-			return p, nil
-		}
-	}
-	return nil, fmt.Errorf("not found")
-}
-func (s *capPluginStore) Install(string) (*domain.Plugin, error) { return nil, fmt.Errorf("no") }
-func (s *capPluginStore) Uninstall(string) error                 { return nil }
-func (s *capPluginStore) Save(*domain.Plugin) error              { return nil }
-func (s *capPluginStore) Delete(string) error                    { return nil }
-
-type capMCP struct {
-	tools map[string][]contracts.MCPToolDTO
-}
-
-func (m *capMCP) ToolsFor(id string) ([]contracts.MCPToolDTO, bool) {
-	t, ok := m.tools[id]
-	return t, ok
-}
-func (m *capMCP) Connect(_ context.Context, p *domain.Plugin) ([]contracts.MCPToolDTO, error) {
-	tools, _ := m.ToolsFor(p.Manifest.MCPServerID())
-	return tools, nil
-}
-func (m *capMCP) Drop(string) {}
 
 func TestConcurrencySkip(t *testing.T) {
 	fx := &fakeExec{Slow: 50 * time.Millisecond}

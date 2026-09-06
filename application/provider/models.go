@@ -1,4 +1,4 @@
-package application
+package provider
 
 import (
 	"context"
@@ -9,74 +9,51 @@ import (
 	"nusashell/infrastructure/config"
 )
 
-func (a *App) handleModelsList() (any, *contracts.RPCError) {
+func (s *Service) HandleModelsList() (any, *contracts.RPCError) {
 	// Enrich models with catalog metadata at read time, not just at import.
 	// This ensures models imported before a catalog update (or before the
 	// suffix-stripping fix) still get reasoning efforts, capabilities, and
 	// pricing filled in without requiring a manual re-import.
-	if a.ModelCatalog != nil {
-		_ = a.ModelCatalog.EnsureLoaded(context.Background())
+	if s.catalog != nil {
+		_ = s.catalog.EnsureLoaded(context.Background())
 	}
 	var out []contracts.ModelDTO
-	for _, p := range a.Providers.List() {
-		if !p.Enabled {
-			continue
-		}
-		if a.ModelCatalog != nil && a.ModelCatalog.Loaded() {
-			a.enrichProviderModelsAtRead(p)
-		}
-		// Read-time embedding tagging via the allowlist — runs even without
-		// the models.dev catalog so embedding models imported before their
-		// name entered the catalog (or before native capability detection)
-		// surface in the Embedding model picker without a re-import.
-		for i := range p.Models {
-			if p.Models[i].Kind == "" && config.IsKnownEmbeddingModel(p.Models[i].ID) {
-				p.Models[i].Kind = domain.ModelKindEmbedding
+	if s.store != nil {
+		for _, p := range s.store.List() {
+			if !p.Enabled {
+				continue
 			}
+			if s.catalog != nil && s.catalog.Loaded() {
+				s.enrichProviderModelsAtRead(p)
+			}
+			// Read-time embedding tagging via the allowlist — runs even without
+			// the models.dev catalog so embedding models imported before their
+			// name entered the catalog (or before native capability detection)
+			// surface in the Embedding model picker without a re-import.
+			for i := range p.Models {
+				if p.Models[i].Kind == "" && config.IsKnownEmbeddingModel(p.Models[i].ID) {
+					p.Models[i].Kind = domain.ModelKindEmbedding
+				}
+			}
+			out = append(out, modelsDTO(p)...)
 		}
-		out = append(out, modelsDTO(p)...)
 	}
-	// Installed offline piper voices surface as speech models in the picker:
-	// once the one-click installer finishes, the user can select the voice
-	// directly in Settings → Speech generation (provider "piper") instead of
-	// relying on the automatic fallback alone.
-	out = append(out, offlineTTSModels(a.TTSInstaller)...)
+	// Installed offline piper voices surface as speech models in the picker.
+	if s.offlineTTS != nil {
+		out = append(out, s.offlineTTS()...)
+	}
 	if out == nil {
 		out = []contracts.ModelDTO{}
 	}
 	return contracts.ModelsListResult{Models: out}, nil
 }
 
-// offlineTTSModels maps installed piper voices to speech model entries so
-// the Settings model picker shows them after install. Returns nil when no
-// installer is wired or nothing is installed.
-func offlineTTSModels(inst TTSInstaller) []contracts.ModelDTO {
-	if inst == nil {
-		return nil
-	}
-	var out []contracts.ModelDTO
-	for _, v := range inst.Status().Voices {
-		if !v.Installed {
-			continue
-		}
-		out = append(out, contracts.ModelDTO{
-			ID:           v.ID,
-			ProviderID:   OfflineTTSProviderID,
-			ProviderName: "Offline piper",
-			DisplayName:  v.Label,
-			Kind:         string(domain.ModelKindTTS),
-			TTS:          true,
-		})
-	}
-	return out
-}
-
 // enrichProviderModelsAtRead fills in missing metadata from the catalog
 // without persisting — it's a read-time enrichment so the UI always shows
 // current capabilities even for models imported before a catalog update.
-func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
+func (s *Service) enrichProviderModelsAtRead(p *domain.Provider) {
 	for i := range p.Models {
-		meta := a.ModelCatalog.Lookup(catalogHintFromModelID(p.Models[i].ID), p.Models[i].ID)
+		meta := s.catalog.Lookup(catalogHintFromModelID(p.Models[i].ID), p.Models[i].ID)
 		if meta != nil {
 			isFreeVariant := isFreeTierModel(p.Models[i].ID)
 			if p.Models[i].Context == 0 {
@@ -129,7 +106,7 @@ func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
 		// imported before the catalog grew (or before Ollama native capability
 		// detection existed) surface in Settings → Embedding model without a
 		// manual re-import.
-		if meta := a.ModelCatalog.Lookup(catalogHintFromModelID(p.Models[i].ID), p.Models[i].ID); meta != nil {
+		if meta := s.catalog.Lookup(catalogHintFromModelID(p.Models[i].ID), p.Models[i].ID); meta != nil {
 			switch meta.Kind {
 			case "tts":
 				p.Models[i].Kind = domain.ModelKindTTS
@@ -182,50 +159,46 @@ func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
 	return out
 }
 
-// StartAutoModelImport launches a background goroutine that re-imports
-// models from all enabled providers every 4 hours. This keeps the model
-// list fresh without requiring the user to manually click "import" after
-// a provider adds new models. The goroutine exits when ctx is cancelled.
-// An initial import runs 30 seconds after startup to avoid blocking the
-// server boot.
-func (a *App) StartAutoModelImport(ctx context.Context) {
-	a.goSafe("ai", func() {
-		// Delay the initial import so the server is fully up and serving
-		// requests before we start hitting provider APIs.
+// AutoImportAll re-imports models from all enabled providers, first after a
+// 30s boot delay and then every 4 hours until ctx is cancelled. The App
+// wrapper launches this via goSafe.
+func (s *Service) AutoImportAll(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(30 * time.Second):
+	}
+	s.importAllProviders(ctx)
+
+	ticker := time.NewTicker(4 * time.Hour)
+	defer ticker.Stop()
+	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(30 * time.Second):
+		case <-ticker.C:
+			s.importAllProviders(ctx)
 		}
-		a.autoImportAllProviders(ctx)
-
-		ticker := time.NewTicker(4 * time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				a.autoImportAllProviders(ctx)
-			}
-		}
-	})
+	}
 }
 
-// autoImportAllProviders iterates all enabled providers and re-imports
-// their model lists. Failures are logged but do not stop the loop — one
-// provider being down should not prevent imports from the others.
-func (a *App) autoImportAllProviders(ctx context.Context) {
-	for _, p := range a.Providers.List() {
+func (s *Service) importAllProviders(ctx context.Context) {
+	if s.store == nil {
+		return
+	}
+	for _, p := range s.store.List() {
 		if !p.Enabled {
 			continue
 		}
-		key, _, _ := a.Credentials.Get(p.ID)
+		key := ""
+		if s.credentials != nil {
+			key, _, _ = s.credentials.Get(p.ID)
+		}
 		importCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		_, err := a.importModelsForProvider(importCtx, p, key)
+		_, err := s.importModelsForProvider(importCtx, p, key)
 		cancel()
 		if err != nil {
-			a.log("warn", "ai", "auto-import failed: %s: %v", p.Name, err)
+			s.warn("auto-import failed: %s: %v", p.Name, err)
 		}
 	}
 }

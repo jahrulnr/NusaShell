@@ -5,7 +5,7 @@
 //
 // The litellm providers speak the shared core.Request/Response model
 // (Blocks-based). Boundary translation (application.ChatRequest ←>
-// core.Request/Response) and error mapping live in application/ai_convert.go.
+// core.Request/Response) and error mapping live in application/provider.
 package ai
 
 import (
@@ -27,7 +27,7 @@ import (
 // Providers without an explicit Driver retain host-detected routing.
 //
 // Conversion between application.ChatRequest/ChatResponse and
-// core.Request/Response is handled in application/ai_convert.go.
+// core.Request/Response is handled in application/provider.
 // Error mapping is handled by application.MapCoreError.
 type Adapter struct {
 	ProviderKind domain.ProviderKind

@@ -1,4 +1,4 @@
-package application
+package automation
 
 import (
 	"context"
@@ -25,7 +25,7 @@ type Automation struct {
 	Events    EventStore
 	Exec      *ExecutionScheduler
 	Sched     *AutomationScheduler
-	Caps      *CapabilityRegistry
+	Caps      CapabilityResolver
 	Logs      ExecutionLogStore
 	Clock     Clock
 }

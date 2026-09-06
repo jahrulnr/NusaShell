@@ -1,7 +1,6 @@
-package application
+package provider
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,37 +12,9 @@ import (
 )
 
 const (
-	maxProviderAttempts = domain.MaxProviderAttempts
-	retryBaseDelay      = domain.RetryBaseDelay
-	retryMaxDelay       = domain.RetryMaxDelay
+	retryBaseDelay = domain.RetryBaseDelay
+	retryMaxDelay  = domain.RetryMaxDelay
 )
-
-// RetrySleeper makes the backoff wait deterministic in tests while keeping
-// the production retry loop cancellation-aware.
-type RetrySleeper func(context.Context, time.Duration) error
-
-func sleepForRetry(ctx context.Context, delay time.Duration) error {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-// waitForRetry uses the injected sleeper when one is configured and falls
-// back to the production cancellation-aware wait. Keeping that choice here
-// lets every agent use the same retry loop without making tests sleep or
-// requiring every lightweight App fixture to wire a dependency.
-func (a *App) waitForRetry(ctx context.Context, delay time.Duration) error {
-	sleeper := sleepForRetry
-	if a != nil && a.retrySleeper != nil {
-		sleeper = a.retrySleeper
-	}
-	return sleeper(ctx, delay)
-}
 
 func providerRetryDelay(err error, retry int) (time.Duration, bool) {
 	if !isRetryableProviderError(err) {
@@ -96,12 +67,6 @@ func describeProviderError(err error) string {
 	return strings.Join(parts, " ")
 }
 
-// isContextOverflowError reports whether the provider rejected the request
-// because the prompt + max_output combination exceeded the model's context
-// window. Providers return HTTP 400 with body containing phrases like
-// "maximum context length", "context_length_exceeded", or "reduce the length
-// of the input prompt". Used by the emergency-compaction safety net to force
-// a compaction and retry instead of failing the turn.
 func isContextOverflowError(err error) bool {
 	var upstream *domain.ProviderError
 	if !errors.As(err, &upstream) {
@@ -124,10 +89,6 @@ func isContextOverflowError(err error) bool {
 
 var contextOverflowPhrases = domain.ContextOverflowPhrases
 
-// contextLimitFromError extracts the explicit context-window limit from a
-// provider 400 overflow error, if one is present. Used to force emergency
-// compaction when our local estimate is below the trigger but the provider
-// already told us the actual limit.
 func contextLimitFromError(err error) (int, bool) {
 	var upstream *domain.ProviderError
 	if !errors.As(err, &upstream) || upstream.Err == nil {
@@ -137,21 +98,8 @@ func contextLimitFromError(err error) (int, bool) {
 	return n, ok
 }
 
-// shouldEmergencyCompact reports whether a provider error should trigger
-// destructive emergency compaction. The body must match an explicit overflow
-// phrase (not a generic field name like "input_tokens"). Normally the local
-// token estimate must already exceed the compaction trigger, but if the
-// provider states a concrete context limit we trust the error even when the
-// heuristic estimate is low — different tokenizers can count more tokens than
-// our chars/4 estimate.
 func shouldEmergencyCompact(err error, estimatedTokens, compactionTrigger int) bool {
-	// A TPM rejection where the request dominates the per-minute budget
-	// (structural: needs more than the whole budget; or dominant: more
-	// than half of it) cannot be fixed by waiting — the only recovery is
-	// shrinking the request via emergency compaction. Dominant requests
-	// also cover every structural case (requested > limit implies
-	// requested > limit/2), so one predicate gates both.
-	if isTPMDominatedRequest(err) {
+	if tpmDominatedRequest(err) {
 		return true
 	}
 	if !isContextOverflowError(err) {
@@ -164,16 +112,22 @@ func shouldEmergencyCompact(err error, estimatedTokens, compactionTrigger int) b
 	return ok
 }
 
-// isPrematureStreamEnd reports whether the provider returned a 2xx response
-// that started streaming but ended without completing the turn — no [DONE]
-// sentinel and no finish_reason. The stream's clean EOF is wrapped as a
-// network error with io.ErrUnexpectedEOF as the cause (see
-// infrastructure/ai/openai/stream.go and infrastructure/ai/compat/stream.go).
-//
-// This is distinct from a hard connection error (ECONNRESET, timeout): the
-// provider accepted the request and began generating, then the SSE channel
-// closed cleanly mid-stream. The partial content is valid, so the turn can
-// be continued with a nudge instead of failing or restarting from scratch.
+func tpmDominatedRequest(err error) bool {
+	limit, _, requested, ok := domain.ParseTPMError(errBody(err))
+	return ok && requested*2 > limit
+}
+
+func errBody(err error) string {
+	if err == nil {
+		return ""
+	}
+	var upstream *domain.ProviderError
+	if errors.As(err, &upstream) && upstream.Err != nil {
+		return upstream.Err.Error()
+	}
+	return err.Error()
+}
+
 func isPrematureStreamEnd(err error) bool {
 	if err == nil {
 		return false
@@ -184,3 +138,16 @@ func isPrematureStreamEnd(err error) bool {
 	}
 	return upstream.Kind == domain.KindConnect && errors.Is(err, io.ErrUnexpectedEOF)
 }
+
+// Exported names for root wrappers. Unexported names stay so in-package
+// tests and the original call sites keep matching.
+
+func RetryDelay(err error, retry int) (time.Duration, bool) { return providerRetryDelay(err, retry) }
+func IsRetryableError(err error) bool                       { return isRetryableProviderError(err) }
+func DescribeError(err error) string                        { return describeProviderError(err) }
+func IsContextOverflow(err error) bool                      { return isContextOverflowError(err) }
+func ContextLimit(err error) (int, bool)                    { return contextLimitFromError(err) }
+func ShouldEmergencyCompact(err error, estimatedTokens, compactionTrigger int) bool {
+	return shouldEmergencyCompact(err, estimatedTokens, compactionTrigger)
+}
+func IsPrematureStreamEnd(err error) bool { return isPrematureStreamEnd(err) }

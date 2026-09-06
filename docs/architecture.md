@@ -12,7 +12,7 @@ only on a trusted network (`NUSASHELL_HOST`).
 ```text
 frontend/        native ES modules, no build step; embedded via go:embed
 transport/       HTTP /rpc/{method...}, WebSocket /ws, static assets
-application/     use cases, agent runner, ports, event bus (Bus)
+application/     use cases, ports, event bus (Bus); agent turn loop in application/agent
 domain/          pure entities and policies (no I/O imports)
 contracts/       wire types, method roster, golden JSON fixtures
 infrastructure/  jsonstore, sqlitestore, ai adapters, mcpclient, tools, docs, automation
@@ -63,7 +63,8 @@ after a race or reload.
 
 Since the round-stream refactor, **live agent deltas do not travel the
 WebSocket at all**. Each round (one assistant message, `(run_id,
-message_id)`) is staged in an in-memory `application.RoundStreamRegistry`
+message_id)`) is staged in an in-memory `application/agent.RoundStreamRegistry`
+(aliased as `application.RoundStreamRegistry`)
 with a per-stream monotonic `seq`. The frontend opens `GET
 /stream?run_id=&message_id=` when `agent.turn.started` fires (or when
 re-attaching to a running turn after reload/room switch), receives
@@ -88,19 +89,19 @@ dispatchers, each owning its routing table in a separate file:
 
 | Prefix | Dispatcher | File |
 | --- | --- | --- |
-| `agent.*` | `dispatchAgent` | `application/agent_dispatch.go` |
-| `ai.*` | `dispatchAI` | `application/ai_dispatch.go` |
+| `agent.*` | `dispatchAgent` → `conversation` / `agent.Service` | `application/agent_wrappers.go`, `application/agent/`, `application/conversation/` |
+| `ai.*` | `provider.Service.Dispatch` | `application/provider/` |
 | `acp.*` | `dispatchAcp` | `application/acp.go` |
-| `plugin.*` | `dispatchPlugin` | `application/plugin_dispatch.go` |
-| `skills.*` | `dispatchSkills` | `application/skills_dispatch.go` |
-| `memory.*` | `dispatchMemory` | `application/memory_dispatch.go` |
-| `experience.*` | `dispatchExperience` | `application/experience_handlers.go` |
-| `learning.*` | `dispatchLearning` | `application/learning_dispatch.go` |
+| `plugin.*` | `plugins.Service.Dispatch` | `application/plugins/` |
+| `skills.*` | `skills.Service.Dispatch` | `application/skills/` |
+| `memory.*` | `memory.Service.Dispatch` | `application/memory/` |
+| `experience.*` | `learn.Service.Dispatch` | `application/learn/` |
+| `learning.*` | `learn.Service.Dispatch` | `application/learn/` |
 | `docs.*` | `dispatchDocs` | `application/docs_dispatch.go` |
-| `settings.*` | `dispatchSettings` | `application/settings_dispatch.go` |
-| `logs.*` | `dispatchLogs` | `application/logs_dispatch.go` |
-| `telemetry.*` | `dispatchTelemetry` | `application/telemetry.go` |
-| `automation.*` | `handleAutomation` | `application/automation_handlers.go` |
+| `settings.*` | `dispatchSettings` → `settings` / `pets` / `media` | `application/settings/`, `application/pets/`, `application/media/` |
+| `logs.*` | `logs.Service.Dispatch` | `application/logs/` |
+| `telemetry.*` | `telemetry.Service.Dispatch` | `application/telemetry/` |
+| `automation.*` | `Automation.Dispatch` | `application/automation/` |
 | `app.info` | inline | `application/app.go` |
 
 Adding a new method means: add the constant to `contracts/`, add a case to

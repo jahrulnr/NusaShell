@@ -4,11 +4,13 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 
+	"nusashell/application/conversation"
+	"nusashell/application/learn"
+	"nusashell/application/memory"
+	"nusashell/application/provider"
 	"nusashell/contracts"
 	"nusashell/domain"
-	"nusashell/infrastructure/ai/core"
 	"nusashell/infrastructure/ai/modelcatalog"
 )
 
@@ -138,12 +140,7 @@ type ExperienceStore interface {
 	Delete(id string) error
 }
 
-type MemoryRecordStore interface {
-	List() []*domain.MemoryRecord
-	Get(id string) (*domain.MemoryRecord, error)
-	Save(e *domain.MemoryRecord) error
-	Delete(id string) error
-}
+type MemoryRecordStore = memory.RecordStore
 
 type LearningJobStore interface {
 	List() []*domain.LearningJob
@@ -154,10 +151,7 @@ type LearningJobStore interface {
 	Delete(id string) error
 }
 
-type LearningOpStore interface {
-	List() []*domain.LearningOperation
-	Save(op *domain.LearningOperation) error
-}
+type LearningOpStore = memory.OpStore
 
 // MemoryDocumentStore is the shared contract for a single-file memory
 // document (user.md and soul.md). Humans edit these via Learning UI RPCs.
@@ -227,13 +221,8 @@ type ConversationMessenger interface {
 	Send(currentConvID, targetConvID, content string) error
 }
 
-type ConversationSummaryDTO struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Summary   string `json:"summary,omitempty"`
-	Status    string `json:"status,omitempty"`
-	UpdatedAt string `json:"updated_at"`
-}
+// ConversationSummaryDTO is the compact room card used by the conversation tool.
+type ConversationSummaryDTO = conversation.SummaryDTO
 
 // ConversationTodoPort is the per-conversation todo checklist store. The
 // model owns the list (full-replace via todo mode "new", add/replace/delete
@@ -318,186 +307,20 @@ type DirListing struct {
 	Truncated bool
 }
 
-// ---- AI provider port ----
+// ---- AI provider port (owned by application/provider) ----
 
-type ToolDef struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"input_schema"`
-}
-
-type ChatMessage struct {
-	Role        string // user | assistant | system | tool
-	Content     string
-	Reasoning   string              // assistant thinking text (persisted, not replayed)
-	ToolCalls   []domain.ToolCall   // assistant
-	ToolResult  *ToolResult         // tool
-	Attachments []domain.Attachment // user only
-}
-
-type ToolResult struct {
-	ToolCallID  string
-	Name        string
-	Content     string
-	Attachments []domain.Attachment // optional image attachments (read_media tool)
-}
-
-type ChatRequest struct {
-	Model         string
-	System        string
-	Messages      []ChatMessage
-	Tools         []ToolDef
-	PromptCaching bool
-	MaxTokens     int
-	Effort        string // reasoning effort: "auto" (omit) or a level from the model's SupportedEfforts
-	// ProviderRoute pins the upstream provider for this model on
-	// aggregator gateways (OpenRouter). Empty means auto/load-balanced;
-	// when set, the adapter sends provider.order=[route] with
-	// allow_fallbacks=false (fail-closed, session cache stays warm).
-	ProviderRoute string
-	// Sampling parameters. nil = use provider default. Set from
-	// domain.Settings at turn start.
-	Temperature      *float64
-	TopP             *float64
-	TopK             *int
-	FrequencyPenalty *float64
-	PresencePenalty  *float64
-	// PromptCache controls provider-side prompt caching. When non-nil and
-	// PromptCaching is true, adapters translate the policy to their native
-	// wire format (prompt_cache_key for OpenAI/OpenRouter Chat, cache_control
-	// for Anthropic/OpenRouter block caching). OpenRouter also uses the key as
-	// its session affinity/grouping identifier.
-	PromptCache *PromptCachePolicy
-	// ConversationID is the stable ID of the conversation this request
-	// belongs to. It is included in the application-generated PromptCache key
-	// so requests from separate conversations do not share a cache namespace.
-	ConversationID string
-	// ReasoningReplay is true when the target upstream requires
-	// reasoning_content (Chat Completions) or reasoning items (Responses
-	// API) to be echoed back on every assistant message in subsequent
-	// turns. Resolved from the model's InterleavedField catalog signal
-	// (preferred), a provider/model pattern fallback, an OpenCode host
-	// (opencode.ai / Console Go), or upgraded at runtime by the 400
-	// classifier. When false, the field is omitted — providers that
-	// ignore it (OpenAI, Anthropic) are unaffected.
-	ReasoningReplay bool
-	// StripParams is the list of request fields the dynamic 400-learning
-	// classifier has marked as unsupported for this provider+model. Each
-	// entry names a ChatRequest field ("reasoning_effort", "temperature",
-	// "top_p", "top_k", "frequency_penalty", "presence_penalty"). The
-	// adapter omits the field from the wire request when listed here.
-	StripParams []string
-	// ToolChoice forces a specific tool when set (provider-native object).
-	// Compaction uses this to require summary() instead of a free-text reply.
-	ToolChoice any
-	// CompactionBlob carries opaque server-side compaction items
-	// (OpenAI Responses context_management encrypted_content) that must be
-	// replayed as a prefix of the next request's input. Set by the
-	// server-side compaction path; the OpenAI Responses adapter forwards it
-	// via the "compaction_items" provider option. Empty for the client-side
-	// path.
-	CompactionBlob string
-	// ContextManagement carries server-side context management directives
-	// (OpenAI Responses context_management). When non-empty, the adapter
-	// forwards it to the wire request so the server can compact context
-	// automatically when the threshold is crossed.
-	ContextManagement []map[string]any
-}
-
-// PromptCachePolicy is the provider-neutral cache intent. Adapters translate
-// it to their native wire format. Mirrors the TS AgentPromptCachePolicy.
-type PromptCachePolicy struct {
-	// Mode: "auto" (default) or "off". "off" disables caching even when
-	// the provider supports it.
-	Mode string
-	// TTL is the provider cache duration: "5m", "1h", or "30m".
-	// Anthropic and genuine OpenRouter hosts use cache_control 5m/1h;
-	// OpenAI Responses and vanilla OpenAI Chat (including OpenCode) send
-	// 30m as prompt_cache_options.ttl. The stored driver is not enough:
-	// custom providers default to openrouter but still speak Chat.
-	TTL string
-	// Key is a stable routing key sent as prompt_cache_key where the selected
-	// wire supports it. NusaShell keeps it at 32 ASCII characters and uses a
-	// visible agent namespace: "nusashell_cv_<digest>" for normal conversation
-	// turns and "nusashell_bg_<digest>" for headless/background learning turns.
-	Key string
-}
-
-type ChatUsage struct {
-	InputTokens  int
-	OutputTokens int
-	CacheRead    int
-	CacheWrite   int
-}
-
-// ContextTokens is the authoritative context fill for a single
-// request/response round: the full prompt (uncached input plus any cached or
-// cache-written input) plus the generated output. This is what actually
-// occupies the model's context window after the round.
-//
-// Use the LAST round's ContextTokens as the conversation's context usage, not
-// the sum of per-round usage: each tool round re-sends the growing history, so
-// summing InputTokens across rounds double counts the prompt and can exceed
-// the window.
-//
-// InputTokens is the UNCACHED input for all providers: each provider converter
-// (anthropic, openai, compat/openrouter) normalizes at the boundary —
-// OpenAI-style adapters subtract cached_tokens from prompt_tokens, Anthropic
-// reports input_tokens as uncached already. ContextTokens therefore sums
-// InputTokens + CacheRead + CacheWrite + OutputTokens uniformly — no
-// per-provider branching needed.
-func (u ChatUsage) ContextTokens() int {
-	return u.InputTokens + u.CacheRead + u.CacheWrite + u.OutputTokens
-}
-
-type ChatResponse struct {
-	Content    string
-	Reasoning  string
-	ToolCalls  []domain.ToolCall
-	Usage      ChatUsage
-	StopReason string
-	// Warnings carries provider-level notices (dropped unsupported content
-	// blocks, malformed tool arguments, strict-tool omissions) that would
-	// otherwise be silently lost. Empty when the provider reported none.
-	Warnings []string
-	// CompactionItems carries opaque server-side compaction items (OpenAI
-	// Responses context_management). When non-empty, the application layer
-	// stores them on the conversation and replays them as a prefix on the
-	// next turn. Each entry is the raw JSON of a compaction output item.
-	CompactionItems []json.RawMessage
-}
-
-// AIProvider is the chat provider port. It embeds core.Provider so the
-// application can call Chat/Stream directly. Conversion between
-// application.ChatRequest/ChatResponse and core.Request/Response is handled
-// by ToCoreRequest/FromCoreResponse/CompleteViaCore/StreamViaCore in
-// ai_convert.go. Error mapping is handled by MapCoreError.
-type AIProvider interface {
-	core.Provider
-}
-
-// ModelLister is implemented by providers that can enumerate models.
-type ModelLister interface {
-	ListModels(ctx context.Context, apiKey string) ([]domain.Model, error)
-}
-
-// ModelEndpointsLister is implemented by aggregator gateways (OpenRouter)
-// that can enumerate the upstream providers serving a model. Non-gateway
-// providers return an empty list and nil error so callers never branch on
-// gateway type.
-type ModelEndpointsLister interface {
-	ListModelEndpoints(ctx context.Context, slug string) ([]domain.ModelRoute, error)
-}
-
-// EmbeddingModelLister is implemented by providers that can enumerate
-// embedding models separately from chat models. Some AI gateways expose
-// embedding models on a dedicated /embeddings/models endpoint rather than
-// the standard /models endpoint. This interface lets the application layer
-// fetch embedding models from any provider kind (chat, responses, messages)
-// without coupling the embedding concern to a specific chat adapter.
-type EmbeddingModelLister interface {
-	ListEmbeddingModels(ctx context.Context, apiKey string) ([]string, error)
-}
+type ToolDef = provider.ToolDef
+type ChatMessage = provider.ChatMessage
+type ToolResult = provider.ToolResult
+type ChatRequest = provider.ChatRequest
+type PromptCachePolicy = provider.PromptCachePolicy
+type ChatUsage = provider.ChatUsage
+type ChatResponse = provider.ChatResponse
+type AIProvider = provider.AIProvider
+type ProviderContext = provider.Context
+type ModelLister = provider.ModelLister
+type ModelEndpointsLister = provider.ModelEndpointsLister
+type EmbeddingModelLister = provider.EmbeddingModelLister
 
 // SkillSearcher ranks the skill library for the skill tool (op=search).
 // Implemented by App: BM25 + graph + recency with embedding forced off
@@ -507,26 +330,12 @@ type SkillSearcher interface {
 	SearchSkills(ctx context.Context, query string, topK int) ([]SearchResult, error)
 }
 
-// Embedder is implemented by providers that can produce embedding vectors.
-// This is an optional capability — not all AIProvider implementations support
-// embeddings (e.g. Anthropic Messages). The learning layer uses
-// this to build a vector index for semantic skill/memory search. When no
-// configured provider implements Embedder, the learning layer falls back to
-// BM25-only keyword search.
-type Embedder interface {
-	// Embed returns a vector for a single text input.
-	Embed(ctx context.Context, text string) ([]float32, error)
-	// EmbedBatch returns vectors for multiple inputs in one call.
-	EmbedBatch(ctx context.Context, texts []string) ([][]float32, error)
-	// Dim returns the embedding dimensionality. Must be stable across calls.
-	Dim() int
-}
-
-// EmbedderFactory builds an Embedder for a given provider, if the provider
-// supports embeddings. Returns nil, nil if the provider kind does not support
-// embeddings (caller falls back to BM25). Returns an error only on auth or
-// connectivity failure.
-type EmbedderFactory func(p *domain.Provider, apiKey string) (Embedder, error)
+// Embedder / EmbedderFactory are owned by application/learn; root aliases
+// keep infrastructure factories and App.EmbedderFactory compiling.
+type (
+	Embedder        = learn.Embedder
+	EmbedderFactory = learn.EmbedderFactory
+)
 
 // EmbeddingModelListerFactory builds an EmbeddingModelLister for a given
 // provider. Returns nil if the provider kind does not expose a separate
@@ -563,44 +372,9 @@ type SpeechModelLister interface {
 // OAuth; Anthropic Messages).
 type SpeechModelListerFactory func(p *domain.Provider) SpeechModelLister
 
-// ---- video generation port ----
-
-// VideoGenerator produces short videos from a text prompt via the async
-// submit/poll/download flow (OpenRouter-style POST /videos). Implementations
-// block until the clip is downloaded or ctx is cancelled — generation takes
-// tens of seconds to minutes, which is expected, not an error.
-type VideoGenerator interface {
-	Generate(ctx context.Context, req VideoGenRequest) (*VideoGenResult, error)
-}
-
-// VideoGenRequest is one generation call.
-type VideoGenRequest struct {
-	Model       string
-	Prompt      string
-	DurationSec int    // 0 = provider default; per-model minimums apply upstream
-	Resolution  string // e.g. "480p"/"720p"; empty = provider default
-	// References are optional source images for image-to-video generation.
-	// The first reference becomes the first frame; subsequent references
-	// are sent as additional input_references for style/identity guidance.
-	// Models that only support text-to-video will reject the request
-	// upstream — the picker badges i2i-capable models via Vision=true.
-	References []ImageReference
-}
-
-// VideoGenResult is the downloaded clip plus metadata for persistence.
-type VideoGenResult struct {
-	Video     []byte
-	MediaType string // "video/mp4"
-	Ext       string // "mp4"
-	Provider  string
-	Model     string
-	JobID     string
-	CostUSD   float64 // reported by the provider when available
-}
-
-// VideoGeneratorFactory builds a VideoGenerator for a configured provider.
-// Optional; nil = video generation unavailable.
-type VideoGeneratorFactory func(p *domain.Provider, apiKey string) (VideoGenerator, error)
+// Video generation request types live in application/media and are
+// re-exported from media_wrappers.go so infrastructure keeps compiling
+// against application.VideoGenRequest etc.
 
 // VideoModelLister enumerates video-generation models via the dedicated
 // /videos/models endpoint (OpenRouter). Hosts without it return empty.
@@ -612,133 +386,16 @@ type VideoModelLister interface {
 // provider kind cannot expose a video catalog.
 type VideoModelListerFactory func(p *domain.Provider) VideoModelLister
 
-// ---- image generation port ----
+// Image generation and speech transcription request types live in
+// application/media and are re-exported from media_wrappers.go.
 
-// ImageGenerator produces images from a text prompt and optional reference
-// images. Implemented by OpenAI Images, OpenRouter Image API, and Codex
-// ChatGPT plan image endpoints.
-type ImageGenerator interface {
-	Generate(ctx context.Context, req ImageGenRequest) (*ImageGenResult, error)
-}
+// ToolInfo / ToolExecutor live in application/tools and are re-exported
+// from tools_wrappers.go so infrastructure keeps compiling against
+// application.ToolInfo.
 
-// ImageGenRequest is the provider-neutral generate/edit request.
-type ImageGenRequest struct {
-	Model      string
-	Prompt     string
-	Size       string // auto | 1024x1024 | 1536x1024 | 1024x1536
-	Quality    string // auto | low | medium | high
-	Background string // auto | transparent | opaque
-	N          int
-	References []ImageReference
-	// TurnID is sent as a turn correlation header by image backends that
-	// support it (currently unused; reserved for future attribution).
-	TurnID string
-}
-
-// ImageReference is a source image for image-to-image editing.
-type ImageReference struct {
-	MediaType string
-	Data      []byte
-}
-
-// GeneratedImage is one decoded image from an image-generation response.
-type GeneratedImage struct {
-	Bytes     []byte
-	MediaType string
-}
-
-// ImageGenResult is the decoded response from an image backend.
-type ImageGenResult struct {
-	Images      []GeneratedImage
-	Provider    string // "openai" | "openrouter"
-	Model       string
-	UsageTokens int
-	CostUSD     float64
-}
-
-// ImageGeneratorFactory builds an ImageGenerator for a configured provider.
-// Returns an error when the provider kind has no image-generation API
-// (Anthropic Messages has none). OpenAI and OpenRouter hosts serve image
-// generation directly.
-type ImageGeneratorFactory func(p *domain.Provider, apiKey string) (ImageGenerator, error)
-
-// ---- speech transcription port ----
-
-// SpeechTranscriber converts recorded audio into text via a provider's
-// dedicated transcription endpoint (OpenAI-style POST /audio/transcriptions,
-// multipart). Probe-verified 2026-08-23: catalog models of kind "stt"
-// (gpt-4o-mini-transcribe, whisper-1) work ONLY through this endpoint — chat
-// input_audio and the Responses API reject them.
-type SpeechTranscriber interface {
-	Transcribe(ctx context.Context, req STTRequest) (string, error)
-}
-
-// STTRequest is one transcription call: raw audio bytes plus metadata.
-type STTRequest struct {
-	Model    string
-	Data     []byte
-	Filename string // e.g. "clip.mp3"; extension drives server-side decoding
-	Language string // optional ISO-639-1 hint; empty = auto-detect
-	Prompt   string // optional spelling/style hint for the model
-}
-
-// SpeechTranscriberFactory builds a SpeechTranscriber for a provider.
-// Optional; nil = STT routing unavailable and read_media falls back to the
-// multimodal chat path with a clear error when an stt-kind model is picked.
-type SpeechTranscriberFactory func(p *domain.Provider, apiKey string) (SpeechTranscriber, error)
-
-// ---- agent tools port ----
-
-type ToolInfo struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"input_schema"`
-}
-
-type ToolExecutor interface {
-	ListTools() []ToolInfo
-	Execute(ctx context.Context, name string, argsJSON []byte) (string, error)
-}
-
-// ---- ACP subagent ports ----
-
-type AcpAgentStore interface {
-	List() []*domain.AcpAgent
-	Get(id string) (*domain.AcpAgent, error)
-	Save(a *domain.AcpAgent) error
-	Delete(id string) error
-}
-
-type AcpSpawnRequest struct {
-	Agent            *domain.AcpAgent
-	ConversationID   string
-	ParentToolCallID string
-	Prompt           string
-	Workspace        string
-	ModeID           string
-	ModelID          string
-}
-
-type AcpPermissionDecision struct {
-	OptionID string
-	Outcome  domain.PermissionOutcome
-}
-
-type AcpRuntime interface {
-	Probe(ctx context.Context, agent *domain.AcpAgent) (domain.AcpAgent, error)
-	Authenticate(ctx context.Context, agent *domain.AcpAgent, methodID string) error
-	RefreshCatalog(ctx context.Context, agent *domain.AcpAgent) (domain.AcpAgent, error)
-	Spawn(ctx context.Context, req AcpSpawnRequest) (*domain.AcpRun, error)
-	Steer(runID, text string) error
-	Stop(runID string) error
-	Wait(ctx context.Context, runID string) (*domain.AcpRun, error)
-	Get(runID string) (*domain.AcpRun, bool)
-	List(conversationID string) []*domain.AcpRun
-	DecidePermission(runID, requestID, optionID string, outcome domain.PermissionOutcome) error
-	PromoteRisk(runID string, tier domain.RiskTier) error
-	SetMode(ctx context.Context, runID, modeID string) error
-	Close()
-}
+// ACP ports live in application/subagent and are re-exported from
+// subagent_wrappers.go so infrastructure keeps compiling against
+// application.AcpSpawnRequest / AcpRuntime / AcpAgentStore.
 
 // ModelCataloger is the read-only capability source used to enrich
 // provider models (context window, pricing, reasoning, vision, ...). It

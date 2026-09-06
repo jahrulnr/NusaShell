@@ -30,7 +30,7 @@ Canonical path: `.nusashell/pipeline.yaml`. Schema version 1. Jobs declare `need
 ## 4. Runtime
 
 - Domain types live in `domain/` (workflow, run, DAG, validation).
-- Application ports and schedulers live in `application/` (`ExecutionScheduler`).
+- Application ports and schedulers live in `application/automation/` (`ExecutionScheduler`). Root aliases keep `application.ExecutionScheduler` compiling for infrastructure.
 - YAML loader, SQLite store, and local executor live in `infrastructure/automation/`.
 - RPC methods are `automation.*` in `contracts/automation.go`.
 - Runs persist as snapshots. Waiting (`wait_until`) parks the run without occupying the executor. Disabled/missing MCP capabilities produce BLOCKED, not FAILED, when the provider exists but is unavailable.
