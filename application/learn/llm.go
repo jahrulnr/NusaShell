@@ -413,7 +413,9 @@ func (s *Service) LearnerSkillCreatorReference() (path, content string) {
 	if content == "" {
 		return "", ""
 	}
-	return filepath.Join(strings.TrimRight(s.deps.DataDir, `/\`), "skills", "skill-creator", "SKILL.md"), content
+	// Forward slashes in the agent file_read path keep hydration / tool
+	// slots portable across Windows (filepath.Join would use backslashes).
+	return filepath.ToSlash(filepath.Join(strings.TrimRight(s.deps.DataDir, `/\`), "skills", "skill-creator", "SKILL.md")), content
 }
 
 // parseLLMSkillProposal parses an LLM JSON response into a skill proposal.

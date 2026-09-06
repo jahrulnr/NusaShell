@@ -241,14 +241,38 @@ find the latest Go and Electron releases even when their versions differ.
 ## Development from a checkout
 
 ```bash
+make install                        # interactive local build+install (Go → optional pets/Electron)
+make install-release                # download published releases (same as curl | bash)
+make install-bin                    # flat Go CLI copy into ~/.local/bin only
 make go-dev                         # native Go server
 make -C apps/electron dev           # stage a dev backend and run the wrapper
 make -C apps/electron test          # wrapper policy/unit tests
 make -C apps/electron ui-test       # real Electron renderer smoke flow
 make -C apps/electron package       # wrapper-only unpacked package
-make -C apps/electron install-local # install that local wrapper package
+make -C apps/electron install-local # package + install Electron only (--electron-only)
 make -C apps/electron dist          # native Electron installer for this OS
 ```
+
+`make install` runs `scripts/install-local.sh` (or `scripts/install-local.ps1`
+on Windows). It always builds and installs the Go core from this tree into the
+same versioned layout as the release installer, then prompts for:
+
+1. login service (autostart);
+2. Electron desktop wrapper (build via `apps/electron` package, then install);
+3. desktop pet on Linux (build via `apps/pets` with SDL2, then install).
+
+It does **not** download GitHub releases and does **not** install NusaShell-mcp
+(use `make install-release` / `scripts/install.sh` for that).
+
+`make install-release` is the curl/PowerShell experience: download and verify
+published payloads.
+
+`make install-bin` only copies a freshly built `nusashell` into `~/.local/bin`
+(override with `NUSASHELL_INSTALL_DIR`).
+
+`make -C apps/electron install-local` packages Electron and runs
+`install-local.sh --electron-only` / `install-local.ps1 -ElectronOnly`. It is
+not a full product install.
 
 `make -C apps/electron dev` and `ui-test` stage an ignored current-platform Go
 binary under `apps/electron/runtime/` solely for local development/testing.

@@ -107,6 +107,8 @@ steps are skipped and its pointer is left unchanged; the workflow remains
 successful so test-only or documentation-only follow-up work does not create a
 failed release.
 
-Linux/macOS release installation is in `scripts/install.sh`; Windows is in
-`scripts/install.ps1`. Checkout-only wrapper installation is in
-`scripts/install-local.sh` and `scripts/install-local.ps1`.
+Linux/macOS release installation (GitHub downloads) is in `scripts/install.sh`;
+Windows is in `scripts/install.ps1`. Checkout build+install is
+`scripts/install-local.sh` / `scripts/install-local.ps1` (`make install`).
+Electron-only from a packaged tree uses `--electron-only` /
+`-ElectronOnly` via `make -C apps/electron install-local`.

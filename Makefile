@@ -11,7 +11,7 @@ VERSION_FILE ?= VERSION
 NUSASHELL_VERSION := $(shell tr -d '\r\n' < "$(VERSION_FILE)")
 GO_LDFLAGS ?= -X main.version=$(NUSASHELL_VERSION)
 
-.PHONY: all build test race vet fmt check verify-local hooks run go-dev install install-release test-frontend test-frontend-e2e scan-ui-docs scan-ui-docs-check gen-catalog gen-catalog-check go-version installer-test go-release go-release-manifest release-index-check
+.PHONY: all build test race vet fmt check verify-local hooks run go-dev install install-bin install-release test-frontend test-frontend-e2e scan-ui-docs scan-ui-docs-check gen-catalog gen-catalog-check go-version installer-test go-release go-release-manifest release-index-check
 
 all: check
 
@@ -131,20 +131,28 @@ go-release-manifest:
 release-index-check:
 	node --input-type=module -e "import { readFile } from 'node:fs/promises'; import { validateReleaseIndex } from './scripts/release-index.mjs'; validateReleaseIndex(JSON.parse(await readFile('release-versions.json', 'utf8')));"
 
-## install: build and install the `nusashell` CLI into ~/.local/bin so the
-## Go app is runnable as `nusashell` from anywhere. Override the destination
-## with NUSASHELL_INSTALL_DIR. The Electron desktop installer uses the separate
-## `nusashell-desktop` launcher, so both entrypoints can coexist.
-install: build
+## install: interactive local installer — build this checkout’s Go core, then
+## optionally build+install the login service, desktop pet (Linux), and Electron.
+## Same prompt style as the curl release installer, but compiles from source
+## instead of downloading GitHub releases. See scripts/install-local.sh / .ps1.
+install:
+	@case "$$(uname -s)" in \
+	  MINGW*|MSYS*|CYGWIN*) powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-local.ps1 ;; \
+	  *) bash scripts/install-local.sh ;; \
+	esac
+
+## install-bin: build this checkout and copy only the Go CLI into ~/.local/bin
+## (flat path; no versioned layout / optional components). Override destination
+## with NUSASHELL_INSTALL_DIR.
+install-bin: build
 	@dest="$${NUSASHELL_INSTALL_DIR:-$${HOME}/.local/bin}"; \
 	mkdir -p "$$dest"; \
 	install -m 0755 ./bin/nusashell "$$dest/nusashell"; \
 	echo "installed: $$dest/nusashell"; \
 	echo "run: nusashell"
 
-## install-release: execute the cross-platform release installer. The Go core
-## is always installed; optional Electron/MCP choices can be supplied through
-## NUSASHELL_INSTALL_ELECTRON and NUSASHELL_INSTALL_MCP.
+## install-release: download+install published GitHub releases (curl/irm flow).
+## Use this for the same experience as `curl … | bash` / `irm … | iex`.
 install-release:
 	@case "$$(uname -s)" in \
 	  MINGW*|MSYS*|CYGWIN*) powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 ;; \

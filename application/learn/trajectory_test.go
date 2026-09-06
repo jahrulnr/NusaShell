@@ -58,3 +58,44 @@ func TestTrajectoryRecorderEmptyDirReturnsNil(t *testing.T) {
 		t.Error("expected nil for empty dataDir")
 	}
 }
+
+func TestTrajectoryRecorderDeleteEventsRewritesWhileOpen(t *testing.T) {
+	dir := t.TempDir()
+	r := NewTrajectoryRecorder(dir)
+	if r == nil {
+		t.Fatal("expected non-nil recorder")
+	}
+	r.Record("consolidate", map[string]interface{}{
+		"job_id":              "job_a",
+		"llm_conversation_id": "conv_learn_a",
+	})
+	r.Record("consolidate", map[string]interface{}{"job_id": "job_b"})
+
+	removed := r.DeleteEvents(func(ev TrajectoryEvent) bool {
+		return DetailString(ev.Detail, "job_id") == "job_a"
+	})
+	if len(removed) != 1 || removed[0] != "conv_learn_a" {
+		t.Fatalf("transcript ids = %#v", removed)
+	}
+
+	events := ReadTrajectory(dir, 100)
+	for _, ev := range events {
+		if DetailString(ev.Detail, "job_id") == "job_a" {
+			t.Fatalf("job_a still present: %+v", ev)
+		}
+	}
+	r.Record("consolidate", map[string]interface{}{"job_id": "job_c"})
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	events = ReadTrajectory(dir, 100)
+	foundC := false
+	for _, ev := range events {
+		if DetailString(ev.Detail, "job_id") == "job_c" {
+			foundC = true
+		}
+	}
+	if !foundC {
+		t.Fatal("append after DeleteEvents must still work")
+	}
+}

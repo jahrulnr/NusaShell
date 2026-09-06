@@ -112,15 +112,28 @@ See [`docs/electron.md`](docs/electron.md) for the runtime boundary,
 development overrides, packaging, and CI details. See
 [`docs/INSTALL.md`](docs/INSTALL.md) for release installers and versioning.
 
-To run the Go app from anywhere as a `nusashell` command (the desktop release
-uses the separate `nusashell-desktop` launcher):
+To install from this checkout (build Go, then optionally pets/Electron):
 
 ```bash
-make install              # builds ./bin/nusashell and installs to ~/.local/bin
+make install              # interactive local build+install (scripts/install-local.*)
 nusashell                 # starts the server (default http://127.0.0.1:10994)
 ```
 
-Set `NUSASHELL_INSTALL_DIR` to install to a different directory.
+To install published GitHub releases (same as curl / irm):
+
+```bash
+make install-release      # scripts/install.sh / install.ps1
+```
+
+For a flat checkout-only Go CLI copy without the versioned layout:
+
+```bash
+make install-bin          # builds ./bin/nusashell → ~/.local/bin
+```
+
+Set `NUSASHELL_INSTALL_DIR` to change the `install-bin` destination. Optional
+local/release components use the flags/env documented in
+[`docs/INSTALL.md`](docs/INSTALL.md).
 
 ## Development and verification
 

@@ -31,12 +31,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`make install` builds from this checkout.** It runs
+  `scripts/install-local.sh` / `install-local.ps1`: always build+install the
+  Go core, then optionally the login service, desktop pet (Linux, SDL2), and
+  Electron (package then install). GitHub release download remains
+  `make install-release` (`scripts/install.sh` / `install.ps1`). Electron-only
+  from a packaged tree is `make -C apps/electron install-local`
+  (`--electron-only` / `-ElectronOnly`). Flat CLI copy is `make install-bin`.
 - **Desktop pet no longer writes a `.desktop` menu entry.** Pets install
   still places `~/.local/bin/nusashell-pets` and is launched from the
   NusaShell UI; it does not create `nusashell-pets.desktop`.
 
 ### Fixed
 
+- **Windows learning cleanup and skill-creator paths.** Trajectory
+  `DeleteEvents` now closes the open log before replace (Windows cannot
+  rename over an open file / existing destination), so deleting a learning
+  job also removes its LLM transcript. Learner skill-creator hydration paths
+  use forward slashes via `filepath.ToSlash` so Windows file_read slots match
+  Unix expectations.
 - **Todo and project memory see the active conversation again.** After the
   agent package extract, `todo` and `memory_project` read a different Go
   context key type than the turn loop wrote, so every call failed with

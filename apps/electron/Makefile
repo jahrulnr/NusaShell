@@ -53,11 +53,13 @@ dev: build-backend deps
 package: deps
 	npm run package:dir
 
-## install-local: package and install Electron under the user profile.
+## install-local: package and install only the Electron wrapper from this
+## checkout (does not rebuild the Go core / pets). Full local product install
+## is `make install` at the repository root.
 install-local: package
 	@case "$$(uname -s)" in \
-		MINGW*|MSYS*|CYGWIN*) powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(REPO_ROOT)/scripts/install-local.ps1";; \
-		*) bash "$(REPO_ROOT)/scripts/install-local.sh";; \
+		MINGW*|MSYS*|CYGWIN*) powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(REPO_ROOT)/scripts/install-local.ps1" -ElectronOnly;; \
+		*) bash "$(REPO_ROOT)/scripts/install-local.sh" --electron-only;; \
 	esac
 
 ## dist: create native Electron wrapper artifacts for this platform.

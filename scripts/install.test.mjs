@@ -72,8 +72,22 @@ test('installers preserve the release manifest, checksum, and version activation
   assert.match(windowsInstaller, /NusaShell\.lnk/);
   assert.match(windowsInstaller, /Install nusashell as a login service/);
   assert.match(windowsInstaller, /if \(\(Test-Path -LiteralPath \$Target\) -and/);
+
+  assert.match(localInstaller, /--electron-only/);
+  assert.match(localInstaller, /go build/);
+  assert.match(localInstaller, /Build and install Electron desktop wrapper/);
+  assert.match(localInstaller, /Build and install desktop pet \(Linux only\)/);
+  assert.match(localInstaller, /apps\/pets\/VERSION/);
   assert.match(localInstaller, /apps\/electron\/VERSION/);
+  assert.match(localInstaller, /NUSASHELL_LOCAL_GO_BINARY/);
+  assert.match(localInstaller, /NUSASHELL_LOCAL_PETS_DIR/);
+  assert.doesNotMatch(localInstaller, /release-versions\.json/);
+  assert.doesNotMatch(localInstaller, /pets-latest\.json/);
+  assert.match(localWindowsInstaller, /ElectronOnly/);
+  assert.match(localWindowsInstaller, /go build/);
+  assert.match(localWindowsInstaller, /Build and install Electron desktop wrapper/);
   assert.match(localWindowsInstaller, /apps\\electron\\VERSION/);
+  assert.doesNotMatch(localWindowsInstaller, /release-versions\.json/);
 
   for (const source of [releaseInstaller, localInstaller, windowsInstaller, localWindowsInstaller]) {
     assert.doesNotMatch(source, /Application Support[\\/]nusashell-desktop/);
@@ -96,7 +110,7 @@ test('local Linux Electron installer activates a versioned wrapper without touch
   await writeFile(join(build, 'resources', 'nusashell.png'), 'icon');
   await chmod(join(build, 'nusashell-desktop'), 0o755);
 
-  await execFileAsync('bash', [script('install-local.sh').pathname], {
+  await execFileAsync('bash', [script('install-local.sh').pathname, '--electron-only'], {
     env: {
       ...process.env,
       HOME: home,
@@ -114,6 +128,52 @@ test('local Linux Electron installer activates a versioned wrapper without touch
   );
   assert.equal((await readFile(join(home, '.local', 'share', 'applications', 'nusashell-desktop.desktop'), 'utf8')).includes('nusashell-desktop'), true);
   assert.equal(await realpath(join(installRoot, 'current', 'nusashell-desktop')), join(installRoot, 'versions', '0.1.0', 'nusashell-desktop'));
+});
+
+test('local Linux installer builds layout for Go and pets from checkout fixtures', async () => {
+  if (process.platform !== 'linux') return;
+  const root = await mkdtemp(join(tmpdir(), 'nusashell-local-full-'));
+  temporaryDirectories.push(root);
+  const home = join(root, 'home');
+  const goBinary = join(root, 'fake-nusashell');
+  const petsStage = join(root, 'pets-stage');
+  const goInstallRoot = join(root, 'go-program');
+  const petsInstallRoot = join(root, 'pets-program');
+  await mkdir(home, { recursive: true });
+  await mkdir(join(petsStage, 'assets', 'pets'), { recursive: true });
+  await writeFile(goBinary, '#!/usr/bin/env sh\nexit 0\n');
+  await chmod(goBinary, 0o755);
+  await writeFile(join(petsStage, 'nusashell-pets'), '#!/usr/bin/env sh\nexit 0\n');
+  await chmod(join(petsStage, 'nusashell-pets'), 0o755);
+  await writeFile(join(petsStage, 'assets', 'pets', 'config.json'), '{}');
+
+  await execFileAsync('bash', [
+    script('install-local.sh').pathname,
+    '--no-service',
+    '--no-electron',
+    '--install-pets',
+  ], {
+    env: {
+      ...process.env,
+      HOME: home,
+      NUSASHELL_GO_INSTALL_ROOT: goInstallRoot,
+      NUSASHELL_PETS_INSTALL_ROOT: petsInstallRoot,
+      NUSASHELL_LOCAL_GO_BINARY: goBinary,
+      NUSASHELL_LOCAL_PETS_DIR: petsStage,
+      NUSASHELL_NON_INTERACTIVE: '1',
+    },
+  });
+
+  const goVersion = (await readFile(new URL('../VERSION', import.meta.url), 'utf8')).trim();
+  const petsVersion = (await readFile(new URL('../apps/pets/VERSION', import.meta.url), 'utf8')).trim();
+  assert.equal(await realpath(join(goInstallRoot, 'current')), join(goInstallRoot, 'versions', goVersion));
+  assert.equal(await realpath(join(petsInstallRoot, 'current')), join(petsInstallRoot, 'versions', petsVersion));
+  const goLauncher = await readFile(join(home, '.local', 'bin', 'nusashell'), 'utf8');
+  assert.match(goLauncher, /go-program\/current\/nusashell/);
+  const petsLauncher = await readFile(join(home, '.local', 'bin', 'nusashell-pets'), 'utf8');
+  assert.match(petsLauncher, /pets-program\/current\/nusashell-pets/);
+  assert.match(petsLauncher, /--assets ".*pets-program\/current\/assets\/pets"/);
+  assert.equal(await fileExists(join(home, '.local', 'share', 'applications', 'nusashell-pets.desktop')), false);
 });
 
 test('release Linux installer verifies and activates a local fixture archive', async () => {

@@ -126,13 +126,21 @@ func (r *TrajectoryRecorder) DeleteEvents(match func(TrajectoryEvent) bool) []st
 	if err := os.WriteFile(tmp, []byte(strings.Join(kept, "\n")+"\n"), 0o644); err != nil {
 		return nil
 	}
+	// Close before replace: Windows cannot rename over an open file, and
+	// os.Rename refuses to replace an existing destination on Windows.
+	_ = r.file.Close()
+	r.file = nil
+	_ = os.Remove(path)
 	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		f, openErr := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if openErr == nil {
+			r.file = f
+		}
 		return nil
 	}
-	_ = r.file.Close()
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		r.file = nil
 		return transcripts
 	}
 	r.file = f
