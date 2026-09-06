@@ -1574,7 +1574,7 @@
       "label": "Experience list",
       "section": "Learning",
       "type": "list",
-      "notes": "Read-only episodes from experience.list. Click a row to load experience.get."
+      "notes": "Read-only episodes from experience.list, newest first. Click a row to load experience.get."
     },
     "learning-records-list": {
       "label": "Memory records list",

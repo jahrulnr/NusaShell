@@ -632,7 +632,8 @@ test('BH-SETTINGS-01: sampling parameters cannot be cleared to null once set', a
 // The transcript is DYNAMIC: slots whose real tool reports nothing (no
 // plugins, no todos, empty memory documents) are omitted entirely. In this
 // harness (fresh data dir, seeded user + soul documents, embedded skills, no
-// plugins) the visible slots are runtime_context, file_read, file_read, skill.
+// plugins) the visible slots are runtime_context, file_list, file_read,
+// file_read, skill.
 function findHydration(messages) {
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
@@ -774,7 +775,7 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
     const slots = hydrationSlotNames(hydration);
     assert.deepEqual(
       slots,
-      ['runtime_context', 'file_read', 'file_read', 'skill'],
+      ['runtime_context', 'file_list', 'file_read', 'file_read', 'skill'],
       `HYDR-NEW-ROOM: hydration slots must be the dynamic transcript in order, got ${JSON.stringify(slots)}`,
     );
 
@@ -982,7 +983,7 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     const slots = hydrationSlotNames(hydration);
     assert.deepEqual(
       slots,
-      ['runtime_context', 'file_read', 'file_read', 'skill'],
+      ['runtime_context', 'file_list', 'file_read', 'file_read', 'skill'],
       `HYDR-POST-COMPACTION: hydration slots must be the dynamic transcript in order, got ${JSON.stringify(slots)}`,
     );
 

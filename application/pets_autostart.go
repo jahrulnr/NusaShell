@@ -12,11 +12,11 @@ import (
 // reloading the web UI never stops the pet.
 //
 // Conditions for a launch:
-//   1. settings.pets_auto_start is true
-//   2. PetsInstaller is wired (not nil)
-//   3. Platform is Linux (the pet is Linux-only)
-//   4. The pet binary resolves on disk (status.installed && status.path)
-//   5. No install is currently running
+//  1. settings.pets_auto_start is true
+//  2. PetsInstaller is wired (not nil)
+//  3. Platform is Linux (the pet is Linux-only)
+//  4. The pet binary resolves on disk (status.installed && status.path)
+//  5. No install is currently running
 //
 // Single-flight via autostartOnce — calling StartPetAutoLaunch twice on
 // the same App is a no-op. Tests that need to exercise multiple boot

@@ -345,7 +345,7 @@ async function loadExperiences() {
   if (!listEl) return;
   try {
     const res = await rpc('experience.list');
-    state.experiences = listFrom(res, 'experiences', 'entries', 'items');
+    state.experiences = sortExperiencesNewestFirst(listFrom(res, 'experiences', 'entries', 'items'));
     renderExperiences();
     if (countEl) countEl.textContent = String(state.experiences.length);
   } catch (e) {
@@ -357,6 +357,17 @@ async function loadExperiences() {
     ]));
     if (countEl) countEl.textContent = '0';
   }
+}
+
+// The backend lists experiences oldest first; the Experience tab shows the
+// newest episodes on top so fresh work is immediately visible.
+export function sortExperiencesNewestFirst(entries) {
+  const at = (v) => {
+    if (!v) return 0;
+    const t = Date.parse(v.timestamp || v.created_at || '');
+    return Number.isNaN(t) ? 0 : t;
+  };
+  return (entries || []).slice().sort((a, b) => at(b) - at(a));
 }
 
 function signalChips(signals) {

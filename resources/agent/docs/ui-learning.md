@@ -108,7 +108,7 @@ Read-only list of recorded episodes from experience.list. Each row shows the goa
 - **Experience list** (`#learning-experience-list`):
   - Section: Learning
   - Type: list
-  - Notes: Read-only episodes from experience.list. Click a row to load experience.get.
+  - Notes: Read-only episodes from experience.list, newest first. Click a row to load experience.get.
 
 - **Memory records list** (`#learning-records-list`):
   - Section: Learning

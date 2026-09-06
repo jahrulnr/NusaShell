@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderLogEntry } from '../js/views/learning.js';
+import { renderLogEntry, sortExperiencesNewestFirst } from '../js/views/learning.js';
 
 const learningCSS = await readFile(new URL('../styles/learning.css', import.meta.url), 'utf8');
 const globalCSS = await readFile(new URL('../styles/global.css', import.meta.url), 'utf8');
@@ -66,6 +66,23 @@ test('Experience tab lists episodes and memory records', () => {
   assert.match(learningView, /experience\.get/);
   assert.match(learningView, /memory\.retire/);
   assert.doesNotMatch(learningView, /memory\.delete/);
+  assert.match(learningView, /sortExperiencesNewestFirst\(listFrom/);
+});
+
+test('Experience items are sorted newest first without mutating the payload', () => {
+  const items = [
+    { id: 'oldest', timestamp: '2026-01-01T00:00:00Z' },
+    { id: 'newest', timestamp: '2026-09-01T00:00:00Z' },
+    { id: 'middle', timestamp: '2026-05-01T00:00:00Z' },
+    { id: 'untimed' },
+  ];
+  const sorted = sortExperiencesNewestFirst(items);
+  assert.deepEqual(
+    sorted.map((e) => e.id),
+    ['newest', 'middle', 'oldest', 'untimed'],
+  );
+  assert.deepEqual(items.map((e) => e.id), ['oldest', 'newest', 'middle', 'untimed'], 'payload must not be reordered in place');
+  assert.deepEqual(sortExperiencesNewestFirst(null), []);
 });
 
 test('Learning subscribes to jobs and recorded experience, not review events', () => {
