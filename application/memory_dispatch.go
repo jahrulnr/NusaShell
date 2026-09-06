@@ -12,6 +12,7 @@ func (a *App) dispatchMemory(method string, payload json.RawMessage) (any, *cont
 		contracts.MethodMemorySearch:      decodeReq(a.handleMemorySearch),
 		contracts.MethodMemoryGet:         decodeReq(a.handleMemoryGet),
 		contracts.MethodMemoryRetire:      decodeReq(a.handleMemoryRetire),
+		contracts.MethodMemoryDelete:      decodeReq(a.handleMemoryDelete),
 		contracts.MethodMemoryUserUpdate:  decodeReq(a.handleMemoryUserUpdate),
 		contracts.MethodMemoryAgentUpdate: decodeReq(a.handleMemoryAgentUpdate),
 	}, "memory")(method, payload)

@@ -17,4 +17,4 @@ conversation_id: {{conversation_id}}
 conversation_file: {{conversation_file}}
 message_range: [{{message_start}},{{message_end}}) (zero-based, end-exclusive)
 
-Read the source file and treat its contents as evidence. Retrieve only relevant memory or skill records with search tools. Use web_fetch/web_search only when justified per the RESEARCH POLICY above. Finish by calling learn() with the typed result.
+Use `file_info`, then read the source file and treat its contents as evidence. Retrieve only relevant memory or skill records with search tools. Use web_fetch/web_search only when justified per the RESEARCH POLICY above. Finish by calling learn() with the typed result.

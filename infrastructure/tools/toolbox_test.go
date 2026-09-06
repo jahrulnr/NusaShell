@@ -210,6 +210,22 @@ func TestMemorySearchListsRetrievableRecords(t *testing.T) {
 		t.Fatalf("search must skip retired records: %s", out)
 	}
 
+	if err := recs.Save(&domain.MemoryRecord{
+		ID:     "mem_phantom",
+		Type:   domain.MemoryTypeFact,
+		Body:   "file_patch cannot apply a phantom hunk; use git rollback instead",
+		Status: domain.MemoryStatusLearned,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := tb.Execute(context.Background(), "memory", []byte(`{"op":"search","query":"phantom patch rollback"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(tokens, "mem_phantom") {
+		t.Fatalf("multi-word token search missed record: %s", tokens)
+	}
+
 	got, err := tb.Execute(context.Background(), "memory", []byte(`{"op":"get","id":"mem_1"}`))
 	if err != nil {
 		t.Fatal(err)

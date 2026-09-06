@@ -49,6 +49,22 @@ func SoundAssets() (fs.FS, error) {
 	return fs.Sub(SoundsFS, "sounds")
 }
 
+// BuiltinSkill returns the embedded SKILL.md body of a bundled skill
+// (resources/agent/skills/<name>/SKILL.md), or "" when the skill does not
+// exist in the bundle. The bundle is the canonical fallback when a live
+// skill directory has been deleted or not yet seeded.
+func BuiltinSkill(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
+		return ""
+	}
+	data, err := BuiltinSkillsFS.ReadFile("agent/skills/" + name + "/SKILL.md")
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 // Prompt returns the content of a named prompt file (e.g. "system.md",
 // "continue.md") from resources/agent/prompts/. The .md extension is
 // appended when the caller omits it.

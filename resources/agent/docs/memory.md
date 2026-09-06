@@ -8,7 +8,7 @@ profile documents.
 | **About You** | `memory/user.md` | Agents via `file_patch`/`file_write`; humans via Learning UI | Every turn via `file_read` when the body is non-empty |
 | **About Agent** | `memory/soul.md` | Agents via `file_patch`/`file_write`; humans via Learning UI | Every turn via `file_read` when the body is non-empty |
 | **Records** | `growth/memories.jsonl` | Learner `learn()` tool | Compact APPLY block (top-K, scoped) |
-| **Experiences** | `growth/experiences.jsonl` | Runtime at `finishTurn` | Not injected; Learning UI list. Hidden hydration checkpoint tools (`hydrate-*`: `runtime_context`, AGENTS.md/`user.md`/`soul.md` `file_read`, `memory_project`, `skill`, …) are omitted from actions and fingerprints. |
+| **Experiences** | `growth/experiences.jsonl` | Runtime at `finishTurn` | Not injected; Learning UI list. Hidden hydration checkpoint tools (`hydrate-*` call ids) plus harness-injected calls (`runtime_context`, `announcement`, `mcp_list`, `tool_list`) are omitted from actions, fingerprints, and review-progress counting; each experience records at most 120 actions from the current user turn (not the first 120 of the whole conversation). |
 
 `user.md` and `soul.md` are written with the `file_*` family on absolute
 paths (`{dataDir}/memory/user.md`, `{dataDir}/memory/soul.md`). On first
@@ -48,8 +48,10 @@ turn when a **language-agnostic** gate fires. Hidden hydration checkpoints
 are excluded from the experience (they are not agent work and cannot form
 a repeated-procedure fingerprint).
 
-- **structural:** steer/correction, verified recovery, repeated failure, or
-  the same tool-call fingerprint ≥ 3 times
+- **structural:** steer/correction, verified recovery (the same tool failed
+  then succeeded in the current turn), repeated failure, or the same
+  tool-call fingerprint ≥ 3 times. A failed tool plus unrelated successes
+  is not recovery. Action count alone is not verified success.
 - **periodic (Hermes-style):** at least N unreviewed user turns **or** N
   unreviewed assistant tool-loop iterations since the last successful review
   (`learner_nudge_interval` in Settings → Memory & search → Learning;
@@ -77,7 +79,37 @@ receive an experience JSON dump or a `List()[:20]` memory-body dump.
 When no provider is available, Stage 1 falls back to a deterministic
 extraction from steer corrections (`teachingOps`) so the job still produces
 output in offline/no-provider setups. The LLM path and the deterministic
-path share the same deduplication and apply logic.
+path share the same deduplication and apply logic. The fallback only emits
+distilled corrections (`Desired` behavior); it never turns raw user text
+into a record. Every typed upsert, from either path, must pass the
+durability gate: no questions (the learner's own "no_op" contract), no
+verbatim/near-verbatim echoes of user messages, and no trivial fragments.
+Bodies are distilled declarative statements; the learner prompt repeats
+this as a hard rule. A gated op is recorded as `rejected` in the
+operations log without writing anything, and the source range still counts
+as reviewed so the same junk is not re-committed on the next review.
+
+- **Deduplication is semantic, not byte-equal.** Each upsert first looks for
+  an existing record of the same type/project: an identical normalized body
+  strengthens it in place (`evidence_count` grows, `last_confirmed`
+  advances); a near-duplicate body (token overlap ≥ 0.55) merges into it —
+  the original creation date and scope win, novel sentences are appended up
+  to a 1000-char body cap, and evidence accumulates. The same event retold
+  five times (a provider outage, a repeated user preference) therefore
+  converges into one record instead of five parallel entries.
+
+- **Supersede retires the named record.** `learn()` action `supersede` emits
+  `memory.contradict` for `entry.supersedes` (id on both `target_id` and
+  `payload.id`) then upserts the corrected body. Apply looks up that id from
+  payload or target. A rejected op does not abort the rest of the batch, so
+  a missing supersede target cannot swallow the correction upsert.
+
+- **Stale jobs are recovered on startup.** A job left `running` (or `queued`
+  but never started) for over 10 minutes belongs to a previous app instance;
+  `RecoverStaleLearningJobs` marks it `error` with an "interrupted"
+  reason. It is not requeued (re-running the headless turn could
+  double-apply mutations); the source cursor never advanced, so the
+  periodic nudge reviews the same content later.
 
 ### Incremental background-learning cursor
 
@@ -88,8 +120,10 @@ response parses successfully and the job's typed result is applied
 successfully, `last_reviewed_msg_count` advances to the captured end. The
 update is monotonic, so overlapping jobs cannot move it backward.
 
-Provider failures, response-parse failures, and applied-job failures leave the
-cursor unchanged so the unreviewed range is retried. A deterministic fallback
+Provider failures, response-parse failures, and batches where every applied
+op failed leave the cursor unchanged so the unreviewed range is retried. A
+rejected op in a mixed batch does not abort later ops; if at least one op is
+accepted the job completes and the cursor advances. A deterministic fallback
 may still complete a job when the LLM is unavailable, but it does not claim
 the source range was reviewed. Messages appended while a job runs remain for
 the next job; completion never advances to the post-job transcript length.
@@ -106,17 +140,32 @@ answer. The job's Learning log entry carries that conversation's id (`llm_conver
 LLM log** button opens it.
 
 That transcript is the only record of *why* a job saved what it saved, so it
-is kept even when the call failed or decided nothing was durable. The typed
-catalog commit is the `learn()` tool call in that transcript, not the final
-assistant text. Do not confuse the job's `llm_conversation_id` with the
-entry's `conversation_id`, which is the user conversation the job learned from.
+is kept even when the call failed or decided nothing was durable. The same
+id is stored on the job row (`growth/jobs.jsonl`) so the audit trail is not
+only in the trajectory feed. The typed catalog commit is the `learn()` tool
+call in that transcript, not the final assistant text. Do not confuse the
+job's `llm_conversation_id` with the entry's `conversation_id`, which is the
+user conversation the job learned from.
+
+Learning turns hydrate against the NusaShell data directory (`{dataDir}`),
+not the source conversation's workspace: the checkpoint carries
+`runtime_context` (OS + dataDir), the profile documents (`user.md` /
+`soul.md`, needed when the learner updates a profile-shaped fact), the
+bundled `skill-creator` SKILL.md as a direct `file_read` slot (the
+skill-authoring reference for Stages 2-3 — resolved from the live skill
+store with the embedded bundle as the guaranteed fallback), and a
+data-directory listing. The user project's AGENTS.md and file tree are not
+injected into learning jobs. The learner is never expected to discover any
+of this on its own: instruction is context, not a scavenger hunt.
 
 ## Agent tools
 
 The `memory` dispatcher is read-only. `op` selects:
 
-- `search` — substring/BM25 over retrievable records (`query`, optional
-  `type`, `status`, `scope`, `project`, `limit`)
+- `search` — token AND match over retrievable records (`query`, optional
+  `type`, `status`, `scope`, `project`, `limit`). A contiguous phrase still
+  matches; multi-word queries also match when every term appears in the
+  record, even if the words are not adjacent.
 - `get` — one record by `id`
 - `list` — retrievable records with the same filters
 
@@ -130,6 +179,7 @@ this dispatcher or `learn()`.
 Good examples:
 
     memory(op="search", query="Go backend")
+    memory(op="search", query="phantom patch rollback")
     memory(op="get", id="mem_01J…")
     memory(op="list", type="preference", limit=10)
     file_patch(path="{dataDir}/memory/user.md", old_string="…", new_string="…")
@@ -177,14 +227,21 @@ retrieved evidence justify them.
 
 After `memory_project` IDX, hydration may include a compact APPLY block of
 top-K retrievable records with scope. Use it. Project-scoped lines override
-broader user-level lines. Do not dump the catalog.
+broader user-level lines. Do not dump the catalog. The block is pre-sorted
+(constraints and preferences first, then evidence count, then recency),
+near-duplicate bodies collapse into their strongest representative line,
+and each body is trimmed to ~180 characters, so a long-winded research note
+cannot starve the whole budget.
 
 ## Human UI
 
 Learning keeps **About You** / **About Agent** editors
 (`memory.user.update` / `memory.agent.update`). Structured records render
-below those editors. Humans may **retire** a record; they do not edit or
-promote records.
+below those editors. Humans may **delete** a record (`memory.delete`):
+the row, its graph edges, and its retrieval presence are removed for good.
+They do not edit or promote records. The internal lifecycle still retires
+weak records (`retired`/`superseded` stay on disk for audit), but a
+user delete is a delete.
 
 ## Graph and search
 

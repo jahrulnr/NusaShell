@@ -54,6 +54,15 @@ type HydrationSource struct {
 	// document (memory/soul.md). When set, hydration emits a separate direct
 	// file_read call for the document.
 	AgentPath string
+	// SkillCreatorPath is the canonical path of the bundled skill-creator
+	// SKILL.md under the data directory. SkillCreatorContent is its body.
+	// Background learner turns attach both as a direct file_read hydration
+	// slot so the evaluate/evolve stages follow the authoring reference
+	// without spending tool rounds searching for it — the model is never
+	// expected to discover this on its own. When Content is empty the slot
+	// is hidden.
+	SkillCreatorPath    string
+	SkillCreatorContent string
 	// Todos is the per-conversation todo checklist. When nil, no todo_list
 	// slot is injected.
 	Todos  ConversationTodoPort
@@ -115,6 +124,7 @@ func (b *HydrationBuilder) Build() HydrationResult {
 	for _, slot := range b.readMemory() {
 		appendSlot(slot)
 	}
+	appendSlot(b.readSkillCreator())
 	appendSlot(b.readProjectMemory())
 	appendSlot(b.readApplyBlock())
 	appendSlot(b.readSkills())
@@ -266,6 +276,19 @@ func (b *HydrationBuilder) readMemory() []hydrationSlot {
 		slots = append(slots, hydrationSlot{name: "file_read", args: args, content: out})
 	}
 	return slots
+}
+
+// readSkillCreator attaches the bundled skill-creator SKILL.md as a direct
+// file_read slot for background learner turns. The content is resolved by
+// the caller (live skill store first, embedded bundle as the guaranteed
+// fallback); the model must never have to discover the authoring reference
+// on its own. Hidden when the content is empty.
+func (b *HydrationBuilder) readSkillCreator() hydrationSlot {
+	if b.source.SkillCreatorPath == "" || strings.TrimSpace(b.source.SkillCreatorContent) == "" {
+		return hydrationSlot{name: "file_read", content: ""}
+	}
+	args := fmt.Sprintf(`{"path":%q}`, b.source.SkillCreatorPath)
+	return hydrationSlot{name: "file_read", args: args, content: b.source.SkillCreatorContent}
 }
 
 // readProjectMemory injects a compact IDX-project extract (PURPOSE, LOCKS,

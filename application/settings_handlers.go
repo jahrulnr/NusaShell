@@ -249,6 +249,9 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if req.SoundNotifications != nil {
 		s.SoundNotifications = *req.SoundNotifications
 	}
+	if req.PetsAutoStart != nil {
+		s.PetsAutoStart = *req.PetsAutoStart
+	}
 	if req.UserPrompt != nil {
 		s.UserPrompt = strings.TrimSpace(*req.UserPrompt)
 	}
@@ -339,6 +342,7 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		PresencePenalty:            s.PresencePenalty,
 		MaxAutoContinues:           s.MaxAutoContinues,
 		SoundNotifications:         s.SoundNotifications,
+		PetsAutoStart:              s.PetsAutoStart,
 		UserPrompt:                 s.UserPrompt,
 		ProjectMemoryBase:          s.ProjectMemoryBase,
 	}

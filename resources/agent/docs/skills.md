@@ -75,6 +75,21 @@ that ran Stage 1. Those stages run when the trigger is `repeated_procedure`
 correction, recovery, repeated failure, or periodic review. Learned skills
 are created as `experimental`.
 
+Evolution converges on a canonical skill: when the proposed skill has no
+exact id, the runtime adopts the closest existing learned skill on the same
+topic (token overlap ≥ 0.6) and revises it under the original id instead of
+spawning a near-duplicate folder, and the `learned-` prefix is applied
+exactly once to names the model may already have prefixed. Skill names and
+descriptions are topic slugs and distilled purposes — the raw user goal
+sentence is never reused as a description.
+
+Stage 2/3 jobs do not re-learn the authoring methodology and are never
+expected to look for it: the learner hydration checkpoint attaches the
+bundled `skill-creator` SKILL.md as a direct `file_read` tool result on
+every learning turn (live skill store first, embedded bundle as the
+guaranteed fallback), so the learner follows the same authoring rules
+hand-written skills follow.
+
 When a learning model is available, the same learner turn that consolidated
 memory may continue to evaluate whether the repeated workflow should become
 a skill, then create or update it. The short user instruction contains the

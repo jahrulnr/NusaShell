@@ -187,9 +187,11 @@ func (a *App) handleLearningGraph() (any, *contracts.RPCError) {
 	nodes := make([]contracts.LearningGraphNode, 0)
 	for _, s := range a.Skills.List() {
 		nodes = append(nodes, contracts.LearningGraphNode{
-			ID:   s.ID,
-			Kind: "skill",
-			Name: s.Name,
+			ID:      s.ID,
+			Kind:    "skill",
+			Name:    s.Name,
+			OwnedBy: s.OwnedBy,
+			Status:  string(s.Status),
 		})
 	}
 	// User memory nodes. User memory is a single prose document (one entry

@@ -11,6 +11,7 @@ func (a *App) dispatchLearning(method string, payload json.RawMessage) (any, *co
 		contracts.MethodLearningSearch:     decodeReq(a.handleLearningSearch),
 		contracts.MethodLearningGraph:      noPayload(a.handleLearningGraph),
 		contracts.MethodLearningLog:        decodeReq(a.handleLearningLog),
+		contracts.MethodLearningLogDelete:  decodeReq(a.handleLearningLogDelete),
 		contracts.MethodLearningJobsList:   noPayload(a.handleLearningJobsList),
 		contracts.MethodLearningJobsStatus: decodeReq(a.handleLearningJobsStatus),
 	}, "learning")(method, payload)

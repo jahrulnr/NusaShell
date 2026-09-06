@@ -46,6 +46,29 @@ func TestFinalHeadlessAssistantMessageKeepsAnEmptyFinalRoundEmpty(t *testing.T) 
 	}
 }
 
+func TestHeadlessWorkspaceLearnerUsesDataDir(t *testing.T) {
+	tests := []struct {
+		name    string
+		kind    AgentKind
+		ctxWS   string
+		dataDir string
+		want    string
+	}{
+		{"learner with dataDir", AgentLearner, "/media/disk/project", "/home/u/.config/nusashell", "/home/u/.config/nusashell"},
+		{"legacy learner alias", AgentMemoryConsolidator, "/proj", "/data/nusashell", "/data/nusashell"},
+		{"learner without dataDir keeps ctx", AgentLearner, "/proj", "", "/proj"},
+		{"automation keeps ctx workspace", AgentAutomation, "/proj", "/data/nusashell", "/proj"},
+		{"delegate keeps ctx workspace", AgentDelegate, "/proj", "/data/nusashell", "/proj"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := headlessWorkspace(tt.ctxWS, tt.kind, tt.dataDir); got != tt.want {
+				t.Fatalf("headlessWorkspace(%q, %s, %q) = %q, want %q", tt.ctxWS, tt.kind, tt.dataDir, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHeadlessTurnsDoNotBroadcastRoomCompletion(t *testing.T) {
 	bus := NewBus()
 	app := &App{Bus: bus}

@@ -23,6 +23,16 @@ type ExperienceDTO struct {
 
 type ExperienceListResult struct {
 	Experiences []ExperienceDTO `json:"experiences"`
+	// Total is the number of experiences matching the (unfiltered) list,
+	// before pagination.
+	Total int `json:"total"`
+}
+
+// ExperienceListRequest pages the experience catalog, newest first.
+// Offset defaults to 0; limit defaults to 50 and is capped at 200.
+type ExperienceListRequest struct {
+	Offset int `json:"offset,omitempty"`
+	Limit  int `json:"limit,omitempty"`
 }
 
 type ExperienceIDRequest struct {
@@ -92,16 +102,17 @@ func MemoryRecordDTOFromDomain(m *domain.MemoryRecord) MemoryRecordDTO {
 }
 
 type LearningJobDTO struct {
-	ID           string `json:"id"`
-	Kind         string `json:"kind"`
-	ExperienceID string `json:"experience_id,omitempty"`
-	SkillID      string `json:"skill_id,omitempty"`
-	Reason       string `json:"reason,omitempty"`
-	Priority     int    `json:"priority"`
-	Status       string `json:"status"`
-	Error        string `json:"error,omitempty"`
-	CreatedAt    string `json:"created_at"`
-	Revision     int    `json:"revision,omitempty"`
+	ID                string `json:"id"`
+	Kind              string `json:"kind"`
+	ExperienceID      string `json:"experience_id,omitempty"`
+	SkillID           string `json:"skill_id,omitempty"`
+	Reason            string `json:"reason,omitempty"`
+	Priority          int    `json:"priority"`
+	Status            string `json:"status"`
+	Error             string `json:"error,omitempty"`
+	CreatedAt         string `json:"created_at"`
+	Revision          int    `json:"revision,omitempty"`
+	LLMConversationID string `json:"llm_conversation_id,omitempty"`
 }
 
 type LearningJobListResult struct {
@@ -125,16 +136,17 @@ func LearningJobDTOFromDomain(j *domain.LearningJob) LearningJobDTO {
 		return LearningJobDTO{}
 	}
 	return LearningJobDTO{
-		ID:           j.ID,
-		Kind:         j.Kind,
-		ExperienceID: j.ExperienceID,
-		SkillID:      j.SkillID,
-		Reason:       j.Reason,
-		Priority:     int(j.Priority),
-		Status:       j.Status,
-		Error:        j.Error,
-		CreatedAt:    j.CreatedAt.UTC().Format(time.RFC3339),
-		Revision:     j.Revision,
+		ID:                j.ID,
+		Kind:              j.Kind,
+		ExperienceID:      j.ExperienceID,
+		SkillID:           j.SkillID,
+		Reason:            j.Reason,
+		Priority:          int(j.Priority),
+		Status:            j.Status,
+		Error:             j.Error,
+		CreatedAt:         j.CreatedAt.UTC().Format(time.RFC3339),
+		Revision:          j.Revision,
+		LLMConversationID: j.LLMConversationID,
 	}
 }
 

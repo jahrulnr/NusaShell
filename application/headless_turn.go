@@ -23,6 +23,21 @@ func headlessConversationType(kind AgentKind) domain.ConversationType {
 	}
 }
 
+// headlessWorkspace resolves the workspace a headless turn hydrates against.
+// Background learning kinds operate on the NusaShell data directory itself
+// (profile documents, growth/learning stores, skills) and the learner prompt
+// expects its checkpoint to expose exactly those surfaces, so their turns
+// use the data dir instead of the source conversation's project tree (no
+// user-project AGENTS.md/file_list leaking into every learning job).
+// Pipeline and delegate turns keep the context workspace. An empty dataDir
+// (tests, partial wiring) falls back to the context workspace unchanged.
+func headlessWorkspace(ctxWorkspace string, kind AgentKind, fallbackDataDir string) string {
+	if isLearnerKind(kind) && strings.TrimSpace(fallbackDataDir) != "" {
+		return fallbackDataDir
+	}
+	return ctxWorkspace
+}
+
 // headlessTurnTitle names the persisted transcript. Learning jobs carry a
 // stable readable title so learning/trajectory.jsonl and the conversation
 // store stay auditable; other headless runs keep the historical
@@ -63,7 +78,7 @@ func (a *App) runHeadlessTurnKindObserved(ctx context.Context, prompt, model str
 	repo := NewConversation(a.Conversations, headlessTurnTitle(kind, prompt))
 	conv := repo.Conversation()
 	conv.Type = headlessConversationType(kind)
-	conv.Workspace = WorkspaceFromContext(ctx)
+	conv.Workspace = headlessWorkspace(WorkspaceFromContext(ctx), kind, a.DataDir)
 	conv.Model = provider.ID + ":" + bareModel
 	conv.Status = "running"
 	now := clock.NewTime().Time()

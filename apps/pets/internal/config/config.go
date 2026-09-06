@@ -17,7 +17,7 @@ import (
 const (
 	DefaultMaxWidth  = 200
 	DefaultMaxHeight = 400
-	DefaultWSURL     = "ws://127.0.0.1:9999/ws"
+	DefaultWSURL     = "ws://127.0.0.1:10994/ws"
 	// DefaultEventDelay is the minimum time in seconds the bubble holds the
 	// latest event before an update switches to a newer one (seconds).
 	DefaultEventDelay = 1.0

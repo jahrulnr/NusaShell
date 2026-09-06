@@ -72,7 +72,7 @@ func TestHandlePluginSaveSSETransport(t *testing.T) {
 	app := NewApp(Deps{Plugins: store, MCPToolbox: mcp, Logs: &fakeLogStore{}})
 
 	if _, err := app.handlePluginSave(contracts.PluginSaveRequest{
-		Name: "legacy", Transport: "sse", URL: "http://localhost:9999/sse",
+		Name: "legacy", Transport: "sse", URL: "http://localhost:10994/sse",
 	}); err != nil {
 		t.Fatal(err)
 	}

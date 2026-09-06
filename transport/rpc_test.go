@@ -1137,12 +1137,13 @@ func TestSettingsHandlers(t *testing.T) {
 			CompactionThreshold int  `json:"compaction_threshold"`
 			PromptCaching       bool `json:"prompt_caching"`
 			MaxToolRounds       int  `json:"max_tool_rounds"`
+			PetsAutoStart       bool `json:"pets_auto_start"`
 		} `json:"settings"`
 	}
 	if err := json.Unmarshal(gotten.Result, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !out.Settings.CompactionEnabled || out.Settings.CompactionThreshold != 0 || !out.Settings.PromptCaching || out.Settings.MaxToolRounds != 8 {
+	if !out.Settings.CompactionEnabled || out.Settings.CompactionThreshold != 0 || !out.Settings.PromptCaching || out.Settings.MaxToolRounds != 8 || out.Settings.PetsAutoStart {
 		t.Fatalf("defaults = %+v", out.Settings)
 	}
 
@@ -1159,6 +1160,15 @@ func TestSettingsHandlers(t *testing.T) {
 	}
 	if out.Settings.CompactionThreshold != 5000 || out.Settings.PromptCaching || out.Settings.MaxToolRounds != maxToolRounds {
 		t.Fatalf("after set = %+v", out.Settings)
+	}
+
+	h.rpcOK(t, "settings.set", map[string]any{"pets_auto_start": true})
+	afterPet := h.rpcOK(t, "settings.get", map[string]any{})
+	if err := json.Unmarshal(afterPet.Result, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.Settings.PetsAutoStart {
+		t.Fatalf("pets_auto_start after set = false, want true: %+v", out.Settings)
 	}
 
 	// 0 is valid (auto = 80% of model context window).

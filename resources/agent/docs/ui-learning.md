@@ -103,7 +103,7 @@ The editable agent-tier memory document. Reload reads the persisted value again;
 
 ## Experience
 
-Read-only list of recorded episodes from experience.list. Each row shows the goal, outcome status, signals, and timestamp. Clicking a row loads experience.get and expands detail. Structured memory records from memory.list sit beside it; humans may retire a selected record with memory.retire after a styled confirm. The lists refresh on experience.recorded, learning.job.started/done/error, and memory.updated.
+Paginated list of recorded episodes from experience.list (newest first, 25 per page, Prev/Next controls). Each row shows the goal, outcome status, signals, and timestamp, with a per-row delete control that calls experience.delete after a styled confirm. Clicking a row loads experience.get and expands detail. Structured memory records from memory.list sit beside it; a selected record can be deleted with memory.delete after a styled confirm. The lists refresh on experience.recorded, experience.deleted, learning.job.started/done/error, and memory.updated.
 
 - **Experience list** (`#learning-experience-list`):
   - Section: Learning
@@ -113,12 +113,12 @@ Read-only list of recorded episodes from experience.list. Each row shows the goa
 - **Memory records list** (`#learning-records-list`):
   - Section: Learning
   - Type: list
-  - Notes: Structured MemoryRecord rows from memory.list (tier record). Select a row, then retire.
+  - Notes: Structured MemoryRecord rows from memory.list (tier record). Select a row, then delete.
 
-- **Retire memory record** (`#learning-record-retire`):
+- **Delete memory record** (`#learning-record-delete`):
   - Section: Learning
   - Type: button
-  - Action: Calls memory.retire after a styled confirm. Disabled until a non-retired record is selected.
+  - Action: Calls memory.delete after a styled confirm. Removes the record, its graph edges, and its retrieval presence permanently. Disabled until a record is selected.
 
 ## Search bar
 

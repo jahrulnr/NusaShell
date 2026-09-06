@@ -98,7 +98,7 @@ func TestPluginManifestValidateRemoteURL(t *testing.T) {
 		wantErr   bool
 	}{
 		{"http url ok", PluginTransportHTTP, "https://mcp.example.com/mcp", false},
-		{"sse url ok", PluginTransportSSE, "http://localhost:9999/sse", false},
+		{"sse url ok", PluginTransportSSE, "http://localhost:10994/sse", false},
 		{"missing url", PluginTransportHTTP, "", true},
 		{"non-http scheme", PluginTransportHTTP, "wss://mcp.example.com", true},
 		{"sse non-http scheme", PluginTransportSSE, "ftp://host/sse", true},

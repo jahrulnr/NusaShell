@@ -12,7 +12,7 @@ import (
 
 // DefaultWebURL is the web frontend fallback when the WebSocket URL cannot
 // be converted.
-const DefaultWebURL = "http://127.0.0.1:9999/"
+const DefaultWebURL = "http://127.0.0.1:10994/"
 
 // Status is the machine state sampled at click time.
 type Status struct {

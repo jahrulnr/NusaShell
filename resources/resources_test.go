@@ -36,6 +36,19 @@ func TestRenderLearnerUserPromptFillsPlaceholders(t *testing.T) {
 	}
 }
 
+func TestBuiltinSkillAccessor(t *testing.T) {
+	body := BuiltinSkill("skill-creator")
+	if body == "" || !strings.Contains(body, "Create an agent skill") {
+		t.Fatalf("embedded skill-creator missing: %q", body[:min(len(body), 80)])
+	}
+	if BuiltinSkill("no-such-skill-xyz") != "" {
+		t.Fatal("unknown skill must return empty")
+	}
+	if BuiltinSkill("../evil") != "" || BuiltinSkill("a/b") != "" {
+		t.Fatal("path traversal inputs must be rejected")
+	}
+}
+
 func TestRenderLearnerUserPromptRepeatedProcedureCount(t *testing.T) {
 	got := RenderLearnerUserPrompt("repeated_procedure", 3, "c", "/p", 0, 0)
 	if !strings.Contains(got, "procedure_count: 3") {

@@ -447,12 +447,12 @@
         {
           "heading": "Experience",
           "paragraphs": [
-            "Read-only list of recorded episodes from experience.list. Each row shows the goal, outcome status, signals, and timestamp. Clicking a row loads experience.get and expands detail. Structured memory records from memory.list sit beside it; humans may retire a selected record with memory.retire after a styled confirm. The lists refresh on experience.recorded, learning.job.started/done/error, and memory.updated."
+            "Paginated list of recorded episodes from experience.list (newest first, 25 per page, Prev/Next controls). Each row shows the goal, outcome status, signals, and timestamp, with a per-row delete control that calls experience.delete after a styled confirm. Clicking a row loads experience.get and expands detail. Structured memory records from memory.list sit beside it; a selected record can be deleted with memory.delete after a styled confirm. The lists refresh on experience.recorded, experience.deleted, learning.job.started/done/error, and memory.updated."
           ],
           "controls": [
             "learning-experience-list",
             "learning-records-list",
-            "learning-record-retire"
+            "learning-record-delete"
           ]
         },
         {
@@ -1580,13 +1580,19 @@
       "label": "Memory records list",
       "section": "Learning",
       "type": "list",
-      "notes": "Structured MemoryRecord rows from memory.list (tier record). Select a row, then retire."
+      "notes": "Structured MemoryRecord rows from memory.list (tier record). Select a row, then delete."
     },
-    "learning-record-retire": {
-      "label": "Retire memory record",
+    "learning-record-delete": {
+      "label": "Delete memory record",
       "section": "Learning",
       "type": "button",
-      "action": "Calls memory.retire after a styled confirm. Disabled until a non-retired record is selected."
+      "action": "Calls memory.delete after a styled confirm. Removes the record, its graph edges, and its retrieval presence permanently. Disabled until a record is selected."
+    },
+    "learning-graph-delete": {
+      "label": "Delete selected graph node",
+      "section": "Learning",
+      "type": "button",
+      "action": "Enabled when a memory record or learned skill node is selected. Calls memory.delete or skills.delete after a styled confirm, then reloads the graph and search results."
     },
     "learning-tab-log": {
       "label": "Learning log tab",

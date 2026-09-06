@@ -165,7 +165,7 @@ artwork regardless of the current working directory. Run it with:
 nusashell-pets
 ```
 
-The default runtime expects the NusaShell Go core on `ws://127.0.0.1:9999/ws`
+The default runtime expects the NusaShell Go core on `ws://127.0.0.1:10994/ws`
 and an X11 (or XWayland) session. Native Wayland is rejected with a hint,
 because the always-on-top and shaped-input behavior needs X11 Shape.
 

@@ -67,15 +67,18 @@ const (
 	MethodMemorySearch      = "memory.search"
 	MethodMemoryGet         = "memory.get"
 	MethodMemoryRetire      = "memory.retire"
+	MethodMemoryDelete      = "memory.delete"
 	MethodMemoryUserUpdate  = "memory.user.update"
 	MethodMemoryAgentUpdate = "memory.agent.update"
 
-	MethodExperienceList = "experience.list"
-	MethodExperienceGet  = "experience.get"
+	MethodExperienceList   = "experience.list"
+	MethodExperienceGet    = "experience.get"
+	MethodExperienceDelete = "experience.delete"
 
 	MethodLearningSearch     = "learning.search"
 	MethodLearningGraph      = "learning.graph"
 	MethodLearningLog        = "learning.log"
+	MethodLearningLogDelete  = "learning.log.delete"
 	MethodLearningJobsList   = "learning.jobs.list"
 	MethodLearningJobsStatus = "learning.jobs.status"
 
@@ -153,9 +156,11 @@ const (
 	EventAskCancelled          = "agent.ask.cancelled"
 
 	EventExperienceRecorded = "experience.recorded"
+	EventExperienceDeleted  = "experience.deleted"
 	EventLearningJobStarted = "learning.job.started"
 	EventLearningJobDone    = "learning.job.done"
 	EventLearningJobError   = "learning.job.error"
+	EventLearningLogDeleted = "learning.log.deleted"
 
 	EventMemoryUpdated        = "memory.updated"
 	EventSkillUpdated         = "skill.updated"
@@ -1305,6 +1310,7 @@ type SettingsDTO struct {
 	PresencePenalty            *float64 `json:"presence_penalty,omitempty"`
 	MaxAutoContinues           int      `json:"max_auto_continues,omitempty"`
 	SoundNotifications         bool     `json:"sound_notifications"`
+	PetsAutoStart              bool     `json:"pets_auto_start"`
 	UserPrompt                 string   `json:"user_prompt,omitempty"`
 	PluginContractMode         string   `json:"plugin_contract_mode,omitempty"`
 	ProjectMemoryBase          string   `json:"project_memory_base,omitempty"`
@@ -1370,6 +1376,7 @@ type SettingsSetRequest struct {
 	PresencePenalty       json.RawMessage `json:"presence_penalty,omitempty"`
 	MaxAutoContinues      *int            `json:"max_auto_continues,omitempty"`
 	SoundNotifications    *bool           `json:"sound_notifications,omitempty"`
+	PetsAutoStart         *bool           `json:"pets_auto_start,omitempty"`
 	UserPrompt            *string         `json:"user_prompt,omitempty"`
 	PluginContractMode    *string         `json:"plugin_contract_mode,omitempty"`
 	ProjectMemoryBase     *string         `json:"project_memory_base,omitempty"`
@@ -1513,6 +1520,9 @@ type LearningGraphNode struct {
 	Kind string `json:"kind"`           // "skill" | "memory"
 	Tier string `json:"tier,omitempty"` // memory only: "user" | "agent" | "record"
 	Name string `json:"name,omitempty"`
+	// Skill-only deletion metadata: which skills the graph can remove.
+	OwnedBy string `json:"owned_by,omitempty"`
+	Status  string `json:"status,omitempty"`
 }
 
 type LearningGraphEdge struct {
@@ -1552,6 +1562,18 @@ type LearningLogEntryDTO struct {
 
 type LearningLogResult struct {
 	Entries []LearningLogEntryDTO `json:"entries"`
+}
+
+// LearningLogDeleteRequest removes one learning log entry by its job id:
+// the job row, its trajectory events, and the background LLM transcript
+// conversation the job ran in. Used when a learning run is wrong, noisy,
+// or no longer wanted.
+type LearningLogDeleteRequest struct {
+	JobID string `json:"job_id"`
+}
+
+type LearningLogDeleteResult struct {
+	Deleted bool `json:"deleted"`
 }
 
 // Settings watcher events: config/settings.json changed outside the app.

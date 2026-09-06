@@ -82,7 +82,8 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps Mode
 		question = "Describe this image and answer the following question:\n" + question
 	}
 
-	description, err := a.describeOneImage(run.Ctx, adapter, a.providerNameByID(settings.VisionProviderID), settings.VisionModelID, image, question)
+	maxOut := domain.ResolveMaxOutput(provider, settings.VisionModelID, settings)
+	description, err := a.describeOneImage(run.Ctx, adapter, a.providerNameByID(settings.VisionProviderID), settings.VisionModelID, image, question, maxOut)
 	if err != nil {
 		return "Image description failed: " + err.Error(), nil, err
 	}

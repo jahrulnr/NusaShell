@@ -111,6 +111,15 @@ func (f *fakeExperienceStore) Get(id string) (*domain.Experience, error) {
 	}
 	return nil, fmt.Errorf("experience %s not found", id)
 }
+func (f *fakeExperienceStore) Delete(id string) error {
+	for i, e := range f.items {
+		if e != nil && e.ID == id {
+			f.items = append(f.items[:i], f.items[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("experience %s not found", id)
+}
 func (f *fakeExperienceStore) Save(e *domain.Experience) error {
 	if e == nil {
 		return fmt.Errorf("nil experience")

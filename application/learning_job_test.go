@@ -30,10 +30,23 @@ func (p *panicDocStore) Replace(oldText, content string) error {
 }
 func (p *panicDocStore) Path() string { return "" }
 
+// failingMemoryRecordStore fails every Save so tests can exercise the
+// applied-operation failure path (cursor must not advance).
+type failingMemoryRecordStore struct {
+	*fakeMemoryRecordStore
+}
+
+func (f *failingMemoryRecordStore) Save(*domain.MemoryRecord) error {
+	return fmt.Errorf("store failure")
+}
+
 func TestConsolidateJobDoesNotWriteProfileDocs(t *testing.T) {
 	exp := &domain.Experience{
-		ID:      "exp_1",
-		Goal:    "remember I prefer dark mode",
+		ID:   "exp_1",
+		Goal: "remember I prefer dark mode",
+		Corrections: []domain.UserCorrection{{
+			Type: "preference", Desired: "prefers dark mode for the editor UI", Explicit: true,
+		}},
 		Signals: domain.ExperienceSignals{ExplicitTeaching: true},
 	}
 	app := &App{
@@ -52,8 +65,11 @@ func TestConsolidateJobDoesNotWriteProfileDocs(t *testing.T) {
 
 func TestConsolidateJobSetARecall(t *testing.T) {
 	exp := &domain.Experience{
-		ID:      "exp_a",
-		Goal:    "I prefer Go for backend work",
+		ID:   "exp_a",
+		Goal: "I prefer Go for backend work",
+		Corrections: []domain.UserCorrection{{
+			Type: "preference", Desired: "User prefers Go for backend work", Explicit: true,
+		}},
 		Signals: domain.ExperienceSignals{ExplicitTeaching: true},
 	}
 	records := &fakeMemoryRecordStore{}
@@ -103,15 +119,15 @@ func TestConsolidateJobSetDOneOffPackageManagerStaysEpisode(t *testing.T) {
 func TestConsolidateJobSetCStrengthensDuplicate(t *testing.T) {
 	exp1 := &domain.Experience{
 		ID:          "exp_c1",
-		Goal:        "use pnpm in this repo",
-		Corrections: []domain.UserCorrection{{Type: "preference", Desired: "use pnpm in this repo", Explicit: true}},
+		Goal:        "switch this repo to pnpm",
+		Corrections: []domain.UserCorrection{{Type: "preference", Desired: "use pnpm for dependencies in this repo", Explicit: true}},
 		Signals:     domain.ExperienceSignals{UserCorrections: 1},
 		Scope:       domain.ExperienceScope{Project: "app"},
 	}
 	exp2 := &domain.Experience{
 		ID:          "exp_c2",
-		Goal:        "use pnpm in this repo",
-		Corrections: []domain.UserCorrection{{Type: "preference", Desired: "use pnpm in this repo", Explicit: true}},
+		Goal:        "switch this repo to pnpm",
+		Corrections: []domain.UserCorrection{{Type: "preference", Desired: "use pnpm for dependencies in this repo", Explicit: true}},
 		Signals:     domain.ExperienceSignals{UserCorrections: 1},
 		Scope:       domain.ExperienceScope{Project: "app"},
 	}
@@ -413,7 +429,7 @@ func TestRunLearningJobDoesNotAdvanceCursorOnLearningFailure(t *testing.T) {
 		{name: "parse failure", response: "not json", wantStatus: domain.LearningJobDone},
 		{
 			name:       "applied operation failure",
-			response:   `[{"kind":"memory.upsert","payload":{}}]`,
+			response:   `[{"kind":"memory.upsert","payload":{"body":"User prefers Go for backend work","type":"preference"}}]`,
 			wantStatus: domain.LearningJobError,
 		},
 	}
@@ -445,7 +461,7 @@ func TestRunLearningJobDoesNotAdvanceCursorOnLearningFailure(t *testing.T) {
 					Goal:           "remember this preference",
 					Signals:        domain.ExperienceSignals{ExplicitTeaching: true},
 				}}},
-				MemoryRecords: &fakeMemoryRecordStore{},
+				MemoryRecords: &failingMemoryRecordStore{fakeMemoryRecordStore: &fakeMemoryRecordStore{}},
 				learningTurn: func(_ context.Context, _ AgentKind, _, _ string) (string, string, error) {
 					return tc.response, "conv_learning_failure", tc.turnErr
 				},

@@ -22,6 +22,8 @@ import {
   positionGraphByRelations,
   graphEdgeWidth,
   fitGraphToView,
+  graphNodeDeletable,
+  graphVisNodeFromDTO,
 } from '../js/views/learning.js';
 
 function distance(a, b) {
@@ -272,4 +274,45 @@ test('keepGraphPositions preserves extra node fields when merging positions', ()
   const prev = { a: { x: 1, y: 2 } };
   const out = keepGraphPositions([{ id: 'a', label: 'A', group: 'memory', size: 14 }], prev);
   assert.deepEqual(out, [{ id: 'a', label: 'A', group: 'memory', size: 14, x: 1, y: 2, fixed: { x: true, y: true } }]);
+});
+
+test('graphNodeDeletable allows memory records and learned/experimental skills only', () => {
+  assert.equal(graphNodeDeletable(null), false);
+  assert.equal(graphNodeDeletable({ kind: 'memory', tier: 'record' }), true);
+  assert.equal(graphNodeDeletable({ kind: 'memory', tier: 'user' }), false);
+  assert.equal(graphNodeDeletable({ kind: 'skill', owned_by: 'learned' }), true);
+  assert.equal(graphNodeDeletable({ kind: 'skill', status: 'experimental' }), true);
+  assert.equal(graphNodeDeletable({ kind: 'skill', owned_by: 'builtin' }), false);
+  assert.equal(graphNodeDeletable({ group: 'memory' }), false, 'vis group alone is not enough');
+});
+
+test('graph vis nodes keep deletion metadata from the graph DTO', () => {
+  const record = graphVisNodeFromDTO({
+    id: 'mem_1', kind: 'memory', tier: 'record', name: 'prefer dark mode',
+    relationCount: 2, size: 16,
+  });
+  assert.equal(record.kind, 'memory');
+  assert.equal(record.tier, 'record');
+  assert.equal(record.name, 'prefer dark mode');
+  assert.equal(graphNodeDeletable(record), true);
+
+  const learned = graphVisNodeFromDTO({
+    id: 'learned-fmt', kind: 'skill', name: 'gofmt', owned_by: 'learned',
+    status: 'experimental', relationCount: 1, size: 20,
+  });
+  assert.equal(learned.owned_by, 'learned');
+  assert.equal(graphNodeDeletable(learned), true);
+
+  const builtin = graphVisNodeFromDTO({
+    id: 'docs', kind: 'skill', name: 'docs', owned_by: 'builtin',
+    status: 'trusted', relationCount: 0, size: 14,
+  });
+  assert.equal(graphNodeDeletable(builtin), false);
+
+  const userMem = graphVisNodeFromDTO({
+    id: 'user_1', kind: 'memory', tier: 'user', name: 'About you',
+    relationCount: 0, size: 16,
+  });
+  assert.equal(userMem.group, 'memory-user');
+  assert.equal(graphNodeDeletable(userMem), false);
 });

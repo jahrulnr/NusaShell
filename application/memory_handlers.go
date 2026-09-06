@@ -133,27 +133,17 @@ func (a *App) handleMemorySearch(req contracts.MemorySearchRequest) (any, *contr
 	}
 	q := strings.ToLower(strings.TrimSpace(req.Query))
 	out := make([]contracts.MemoryEntryDTO, 0)
+	filter := domain.MemorySearchFilter{
+		Query:   q,
+		Type:    req.Type,
+		Status:  req.Status,
+		Scope:   req.Scope,
+		Project: req.Project,
+		Limit:   limit,
+	}
 	for _, m := range a.MemoryRecords.List() {
-		if m == nil || !m.Retrievable() {
+		if !m.Matches(filter) {
 			continue
-		}
-		if req.Type != "" && m.Type != req.Type {
-			continue
-		}
-		if req.Status != "" && m.Status != req.Status {
-			continue
-		}
-		if req.Scope != "" && m.Scope.Level != req.Scope {
-			continue
-		}
-		if req.Project != "" && !strings.EqualFold(m.Scope.Project, req.Project) {
-			continue
-		}
-		if q != "" {
-			blob := strings.ToLower(strings.Join([]string{m.Body, m.Subject, m.Predicate, m.Object, m.Type}, " "))
-			if !strings.Contains(blob, q) {
-				continue
-			}
 		}
 		out = append(out, recordDTO(m))
 		if len(out) >= limit {
@@ -174,6 +164,30 @@ func (a *App) handleMemoryGet(req contracts.MemoryIDRequest) (any, *contracts.RP
 	if err != nil || m == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "memory not found"}
 	}
+	return recordDTO(m), nil
+}
+
+// handleMemoryDelete deletes a memory record for good: the record row,
+// its graph edges, and its retrieval-visible presence. Retire was the
+// only human action before, but users want irrelevant entries gone, not
+// just hidden; the lifecycle still retires internally for audit.
+func (a *App) handleMemoryDelete(req contracts.MemoryIDRequest) (any, *contracts.RPCError) {
+	if strings.TrimSpace(req.ID) == "" {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "memory id is required"}
+	}
+	if a.MemoryRecords == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeInternal, Message: "memory record store not configured"}
+	}
+	m, err := a.MemoryRecords.Get(req.ID)
+	if err != nil || m == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "memory not found"}
+	}
+	if err := a.MemoryRecords.Delete(req.ID); err != nil {
+		return nil, rpcInternal(err)
+	}
+	a.pruneLearningEdges(req.ID)
+	a.InvalidateLearningSearcher()
+	a.emitMemoryUpdated()
 	return recordDTO(m), nil
 }
 

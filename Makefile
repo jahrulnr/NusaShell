@@ -88,7 +88,7 @@ fmt-check:
 	fi
 	@echo "gofmt: ok"
 
-## run: build and start the development server (listens on NUSASHELL_PORT/9999).
+## run: build and start the development server (listens on NUSASHELL_PORT/10994).
 run: scan-ui-docs build
 	./bin/nusashell
 

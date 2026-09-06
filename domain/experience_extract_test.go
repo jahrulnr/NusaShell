@@ -79,8 +79,8 @@ func TestExtractExperienceThreeToolSuccessDoesNotEnqueue(t *testing.T) {
 		},
 	}
 	exp := ExtractExperience(conv, false)
-	if !exp.Signals.VerifiedSuccess {
-		t.Fatalf("expected verified success signal: %+v", exp.Signals)
+	if exp.Signals.VerifiedSuccess {
+		t.Fatalf("action count must not mint verified_success: %+v", exp.Signals)
 	}
 	trig := DecideLearningTrigger(exp, nil)
 	if trig.Enqueue {
@@ -214,5 +214,78 @@ func TestExtractExperienceHydrationOnlyIsNotVerifiedSuccess(t *testing.T) {
 	}
 	if DecideLearningTrigger(exp, nil).Enqueue {
 		t.Fatalf("hydration-only turn enqueued: %+v", exp)
+	}
+}
+
+func TestExtractExperienceRootCauseRecoveredRequiresSameToolFailThenSuccess(t *testing.T) {
+	conv := &Conversation{
+		ID:     "conv_recover",
+		Status: "idle",
+		Messages: []Message{
+			{Role: RoleUser, Content: "run the tests"},
+			{Role: RoleAssistant, Content: "retrying", ToolCalls: []ToolCall{
+				{Name: "exec", Status: ToolFailed, Args: `{"command":"go test ./missing"}`},
+				{Name: "exec", Status: ToolOK, Args: `{"command":"go test ./domain"}`},
+			}},
+		},
+	}
+	exp := ExtractExperience(conv, false)
+	if !exp.Signals.RootCauseRecovered {
+		t.Fatalf("same tool fail then success must be recovery: %+v", exp.Signals)
+	}
+	if DecideLearningTrigger(exp, nil).Reason != TriggerRecovery {
+		t.Fatalf("recovery should enqueue: %+v", DecideLearningTrigger(exp, nil))
+	}
+}
+
+func TestExtractExperienceUnrelatedToolFailureIsNotRecovery(t *testing.T) {
+	conv := &Conversation{
+		ID:     "conv_typo",
+		Status: "idle",
+		Messages: []Message{
+			{Role: RoleUser, Content: "inspect the repo"},
+			{Role: RoleAssistant, Content: "done", ToolCalls: []ToolCall{
+				{Name: "exec", Status: ToolFailed, Args: `{"command":"ls fooo"}`},
+				{Name: "file_read", Status: ToolOK, Args: `{"path":"main.go"}`},
+				{Name: "grep", Status: ToolOK, Args: `{"pattern":"func"}`},
+			}},
+		},
+	}
+	exp := ExtractExperience(conv, false)
+	if exp.Signals.RootCauseRecovered {
+		t.Fatalf("a failed tool plus other successes is not recovery: %+v", exp.Signals)
+	}
+	if DecideLearningTrigger(exp, nil).Enqueue {
+		t.Fatalf("typo shell failure enqueued recovery: %+v", DecideLearningTrigger(exp, nil))
+	}
+}
+
+func TestExtractExperienceActionsAreFromCurrentTurn(t *testing.T) {
+	var firstTurn []ToolCall
+	for i := 0; i < maxActionSteps; i++ {
+		firstTurn = append(firstTurn, ToolCall{ID: "old", Name: "exec", Status: ToolOK, Args: "{}"})
+	}
+	conv := &Conversation{
+		ID:     "conv_long",
+		Status: "idle",
+		Messages: []Message{
+			{Role: RoleUser, Content: "first task"},
+			{Role: RoleAssistant, Content: "done", ToolCalls: firstTurn},
+			{Role: RoleUser, Content: "now search for the handler"},
+			{Role: RoleAssistant, Content: "found it", ToolCalls: []ToolCall{
+				{Name: "grep", Status: ToolOK, Args: `{"pattern":"handle"}`},
+				{Name: "file_read", Status: ToolOK, Args: `{"path":"app.go"}`},
+			}},
+		},
+	}
+	exp := ExtractExperience(conv, false)
+	if exp.Goal != "now search for the handler" {
+		t.Fatalf("goal=%q", exp.Goal)
+	}
+	if len(exp.Actions) != 2 || exp.Actions[0].Name != "grep" || exp.Actions[1].Name != "file_read" {
+		t.Fatalf("current-turn actions=%+v, want grep then file_read", exp.Actions)
+	}
+	if exp.Signals.ProcedureFingerprint != "grep>file_read" {
+		t.Fatalf("fingerprint=%q", exp.Signals.ProcedureFingerprint)
 	}
 }

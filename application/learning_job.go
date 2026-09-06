@@ -24,6 +24,9 @@ func (a *App) runLearningJob(id string) {
 	source := a.captureLearningSource(job)
 	a.startLearningJob(job)
 	convID, ops, runErr, sourceReviewed := a.executeLearningJob(job, source)
+	if convID != "" {
+		job.LLMConversationID = convID
+	}
 	a.finishLearningJob(job, runErr)
 	_ = a.LearningJobs.Save(job)
 	a.advanceLearningCursorAfterReview(source, runErr, sourceReviewed)
@@ -263,7 +266,7 @@ func (a *App) consolidateJobAt(job *domain.LearningJob, source *learningSource) 
 	if len(ops) == 0 {
 		return nil, convID, nil, sourceReviewed
 	}
-	return a.applyConsolidationOps(ops, convID, sourceReviewed, svc)
+	return a.applyConsolidationOps(ops, convID, sourceReviewed, svc, exp)
 }
 
 func consolidationOpsOrFallback(ops []domain.LearningOperation, exp *domain.Experience, jobID string) []domain.LearningOperation {
@@ -273,14 +276,75 @@ func consolidationOpsOrFallback(ops []domain.LearningOperation, exp *domain.Expe
 	return teachingOps(exp, jobID)
 }
 
-func (a *App) applyConsolidationOps(ops []domain.LearningOperation, convID string, sourceReviewed bool, svc *MemoryService) ([]domain.LearningOperation, string, error, bool) {
+func (a *App) applyConsolidationOps(ops []domain.LearningOperation, convID string, sourceReviewed bool, svc *MemoryService, exp *domain.Experience) ([]domain.LearningOperation, string, error, bool) {
+	userTexts := domain.UserTextsForExperience(exp)
+	var firstErr error
+	accepted := 0
 	for i := range ops {
+		if ops[i].Kind == domain.OpMemoryUpsert {
+			if body := payloadString(ops[i].Payload, "body"); !domain.ValidDurableMemoryBody(body, userTexts) {
+				svc.Reject(&ops[i], "rejected: not durable memory (question, raw user echo, or trivial fragment)")
+				continue
+			}
+		}
 		a.prepareConsolidationOp(&ops[i])
 		if err := svc.Apply(&ops[i]); err != nil {
-			return ops[:i], convID, err, false
+			a.log("warn", "learning", "consolidation op rejected: kind=%s target=%s err=%v", ops[i].Kind, memoryOpTargetID(&ops[i]), err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
+		accepted++
+	}
+	if accepted == 0 && firstErr != nil {
+		return ops, convID, firstErr, false
 	}
 	return ops, convID, nil, sourceReviewed
+}
+
+// nearDuplicateMemoryThreshold is the minimum overlap at which an incoming
+// body counts as a near-duplicate of an existing record. Above it the
+// runtime merges the new evidence into the existing record instead of
+// creating a parallel entry (or strengthens it when the text is identical).
+const nearDuplicateMemoryThreshold = 0.55
+
+// findMemoryMatch locates the existing record that an incoming memory
+// upsert should target instead of creating a fresh duplicate. It returns
+// (id, exact): exact=true for identical normalized bodies (the caller can
+// strengthen in place); exact=false for near-duplicates the caller should
+// merge into. Matching is scoped to the same type and project.
+func findMemoryMatch(store MemoryRecordStore, body, typ, project string) (id string, exact bool) {
+	if store == nil {
+		return "", false
+	}
+	want := domain.NormalizeMemoryContent(body)
+	if want == "" {
+		return "", false
+	}
+	bestID, bestSim := "", 0.0
+	for _, rec := range store.List() {
+		if rec == nil || !rec.Retrievable() {
+			continue
+		}
+		if typ != "" && rec.Type != typ {
+			continue
+		}
+		if project != "" && !strings.EqualFold(rec.Scope.Project, project) {
+			continue
+		}
+		if domain.NormalizeMemoryContent(rec.Body) == want {
+			return rec.ID, true
+		}
+		if sim := domain.MemorySimilarity(body, rec.Body); sim > bestSim {
+			bestSim = sim
+			bestID = rec.ID
+		}
+	}
+	if bestSim >= nearDuplicateMemoryThreshold {
+		return bestID, false
+	}
+	return "", false
 }
 
 func (a *App) prepareConsolidationOp(op *domain.LearningOperation) {
@@ -290,15 +354,20 @@ func (a *App) prepareConsolidationOp(op *domain.LearningOperation) {
 	body := payloadString(op.Payload, "body")
 	typ := payloadString(op.Payload, "type")
 	project := payloadString(op.Payload, "project")
-	id := matchingRecordID(a.MemoryRecords, body, typ, project)
+	id, exact := findMemoryMatch(a.MemoryRecords, body, typ, project)
 	if id == "" {
 		return
 	}
-	op.Kind = domain.OpMemoryStrengthen
 	if op.Payload == nil {
 		op.Payload = map[string]any{}
 	}
 	op.Payload["id"] = id
+	if exact {
+		// Purely identical text: strengthen the existing record rather than
+		// writing a second copy. Near-duplicates stay OpMemoryUpsert and
+		// MemoryService merges them into the existing record by id.
+		op.Kind = domain.OpMemoryStrengthen
+	}
 }
 
 // consolidateViaLLM calls the LLM-backed memory consolidator and parses the
@@ -408,12 +477,15 @@ func opsFromLearnerConsolidate(stage *learnerConsolidate, jobID, expID string) [
 	var ops []domain.LearningOperation
 	if action == "supersede" && supersedes != "" {
 		ops = append(ops, domain.LearningOperation{
-			ID:        domain.NewULID(domain.IDPrefixLearnOp),
-			Kind:      domain.OpMemoryContradict,
-			Status:    domain.LearningOpProposed,
-			Actor:     domain.ActorLearner,
-			JobID:     jobID,
-			TargetID:  supersedes,
+			ID:       domain.NewULID(domain.IDPrefixLearnOp),
+			Kind:     domain.OpMemoryContradict,
+			Status:   domain.LearningOpProposed,
+			Actor:    domain.ActorLearner,
+			JobID:    jobID,
+			TargetID: supersedes,
+			Payload: map[string]any{
+				"id": supersedes,
+			},
 			Evidence:  []string{expID, evidence},
 			Reason:    "learner supersede",
 			CreatedAt: now,
@@ -530,31 +602,13 @@ func learnerSkillBody(result *learnerResult, exp *domain.Experience) (string, st
 	return b.String(), desc
 }
 
-func matchingRecordID(store MemoryRecordStore, body, typ, project string) string {
-	if store == nil {
-		return ""
-	}
-	want := domain.NormalizeMemoryContent(body)
-	if want == "" {
-		return ""
-	}
-	for _, rec := range store.List() {
-		if rec == nil || !rec.Retrievable() {
-			continue
-		}
-		if typ != "" && rec.Type != typ {
-			continue
-		}
-		if project != "" && !strings.EqualFold(rec.Scope.Project, project) {
-			continue
-		}
-		if domain.NormalizeMemoryContent(rec.Body) == want {
-			return rec.ID
-		}
-	}
-	return ""
-}
-
+// teachingOps is the deterministic no-provider fallback. It may only emit
+// distilled corrections (Desired behavior), never raw user text: the
+// durability gate rejects anything that echoes the user's own words, so
+// emitting them here would produce rejected operations. Extraction does not
+// populate Desired yet, which means the fallback is intentionally quiet
+// today — fabricating "preferences" from raw steers was the source of the
+// verbatim junk records (e.g. a user question stored as a preference).
 func teachingOps(exp *domain.Experience, jobID string) []domain.LearningOperation {
 	if exp == nil {
 		return nil
@@ -582,13 +636,12 @@ func teachingOps(exp *domain.Experience, jobID string) []domain.LearningOperatio
 			CreatedAt: now,
 		})
 	}
-	if exp.Signals.ExplicitTeaching {
-		add(exp.Goal, domain.MemoryTypePreference)
-	}
 	for _, c := range exp.Corrections {
 		text := strings.TrimSpace(c.Desired)
 		if text == "" {
-			text = strings.TrimSpace(c.UserSaid)
+			// No distilled form: skip. UserSaid would be a raw echo and the
+			// gate rejects it anyway.
+			continue
 		}
 		kind := domain.MemoryTypePreference
 		if c.Type == "fact" {
@@ -664,14 +717,64 @@ func (a *App) evolveSkillJobAt(job *domain.LearningJob, source *learningSource) 
 }
 
 func learnedSkillName(goal string) string {
-	name := "learned-" + domain.SkillSlug(strings.TrimSpace(goal))
-	if name == "learned-" || len(name) < 12 {
-		name = "learned-workflow"
+	name := strings.TrimSpace(goal)
+	// Strip any framework/status prefixes the model may have included
+	// (or repeated across evolutions): "learned-", "skill-", "workflow-".
+	// The "learned-" prefix is a status marker applied exactly once here.
+	lower := strings.ToLower(name)
+	for strings.HasPrefix(lower, "learned-") || strings.HasPrefix(lower, "skill-") || strings.HasPrefix(lower, "workflow-") {
+		if i := strings.Index(lower, "-"); i >= 0 {
+			name = strings.TrimPrefix(name, name[:i+1])
+			lower = strings.ToLower(name)
+			continue
+		}
+		break
 	}
-	if len(name) > 48 {
-		return name[:48]
+	if strings.TrimSpace(name) == "" {
+		return "learned-workflow"
 	}
-	return name
+	slug := domain.SkillSlug(name)
+	if slug == "skill" {
+		// SkillSlug's empty-result default would produce the meaningless
+		// "learned-skill" for names without ASCII letters.
+		return "learned-workflow"
+	}
+	result := "learned-" + slug
+	if len(result) > 48 {
+		result = result[:48]
+	}
+	return result
+}
+
+// canonicalSkillTopicThreshold is the minimum name-overlap at which two
+// learned skills are considered the same topic. Above it, evolution updates
+// the existing (canonical) skill instead of spawning a near-duplicate
+// folder like learned-tool-mapping vs learned-tool-mapping-workflow.
+const canonicalSkillTopicThreshold = 0.6
+
+// findCanonicalLearnedSkill returns the existing learned skill that the
+// proposed skill revises, when one exists. Exact ids win; otherwise the
+// closest topic match (token overlap of the slugified names) above the
+// threshold is adopted, so repeated evolutions converge on one skill.
+func findCanonicalLearnedSkill(store SkillStore, name string) *domain.Skill {
+	if store == nil {
+		return nil
+	}
+	proposed := strings.ToLower(strings.TrimSpace(name))
+	proposed = strings.TrimPrefix(proposed, "learned-")
+	for _, s := range store.List() {
+		if s == nil || s.Origin != domain.SkillOriginLearned {
+			continue
+		}
+		id := strings.ToLower(strings.TrimSpace(s.ID))
+		if id == proposed || id == strings.ToLower(strings.TrimSpace(name)) {
+			return s
+		}
+		if domain.MemorySimilarity(proposed, strings.TrimPrefix(id, "learned-")) >= canonicalSkillTopicThreshold {
+			return s
+		}
+	}
+	return nil
 }
 
 func (a *App) evolvedSkillDraft(exp *domain.Experience, source learningSource) (string, string, string, bool) {
@@ -700,6 +803,12 @@ func newLearnedSkill(name, description, body string) *domain.Skill {
 func (a *App) applyLearnedSkillRevision(skill *domain.Skill, name string) bool {
 	existing, err := a.Skills.Get(name, string(domain.SkillOriginLearned))
 	if err != nil || existing == nil {
+		// No skill under the exact proposed id: adopt the closest existing
+		// learned skill on the same topic (if any) so evolution refines one
+		// canonical skill instead of piling up near-duplicate folders.
+		existing = findCanonicalLearnedSkill(a.Skills, name)
+	}
+	if existing == nil {
 		return true
 	}
 	if existing.Version >= domain.MaxSkillRevisions {
@@ -772,10 +881,27 @@ func (a *App) evolveSkillViaLLMAt(exp *domain.Experience, source learningSource)
 	}
 	desc := prop.Description
 	if desc == "" {
-		desc = clip(exp.Goal, 200)
+		desc = firstLearnedSentence(prop.Purpose)
+	}
+	if desc == "" {
+		desc = "Learned workflow: " + strings.TrimPrefix(strings.TrimSpace(prop.Name), "learned-")
 	}
 	a.log("info", "learning", "skill evolver LLM returned proposal: kind=%s name=%s", prop.Kind, prop.Name)
 	return b.String(), desc, convID, true
+}
+
+// firstLearnedSentence returns the first sentence of a body as the skill
+// description seed, without trailing punctuation noise. It never falls back
+// to user goal text; the skill name carries the topic.
+func firstLearnedSentence(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	if i := strings.Index(text, "."); i > 0 && i < 220 {
+		text = text[:i+1]
+	}
+	return clip(text, 200)
 }
 
 // deterministicSkillBody builds a skill body from the experience data that
@@ -821,7 +947,9 @@ func (a *App) deterministicSkillBody(exp *domain.Experience) (string, string) {
 		b.WriteString("Confirm the task goal is achieved without errors.\n")
 	}
 
-	return b.String(), clip(exp.Goal, 200)
+	// The deterministic path has no LLM-authored description; never paste
+	// the raw goal sentence into the description field.
+	return b.String(), "Learned workflow extracted from a NusaShell session"
 }
 
 func (a *App) evaluateSkillJob(job *domain.LearningJob) error {

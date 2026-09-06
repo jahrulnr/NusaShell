@@ -88,7 +88,7 @@ var dispatchFamilies = []dispatchFamily{
 		members: []string{"search", "get", "list"},
 		def: ToolInfo{
 			Name:        "memory",
-			Description: "Durable memory records (read-only); \"op\" selects: search {query,type?,status?,scope?,project?,limit?} substring match over retrievable records; get {id} one record; list {type?,status?,scope?,project?,limit?} retrievable records. Agents do not write, replace, or delete memory — the learner owns writes.",
+			Description: "Durable memory records (read-only); \"op\" selects: search {query,type?,status?,scope?,project?,limit?} token AND match over retrievable records (multi-word terms need not be a contiguous phrase); get {id} one record; list {type?,status?,scope?,project?,limit?} retrievable records. Agents do not write, replace, or delete memory — the learner owns writes.",
 			InputSchema: objSchema(
 				pEnum("op", "Operation", "search", "get", "list"),
 				pStr("query", "Search query (op=search)"),

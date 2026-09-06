@@ -13,7 +13,7 @@ import (
 const (
 	// DefaultBackendAddr is where the pet falls back to when the WebSocket
 	// URL cannot be parsed.
-	DefaultBackendAddr = "127.0.0.1:9999"
+	DefaultBackendAddr = "127.0.0.1:10994"
 	// ProbeTimeout bounds how long a click waits on an unreachable backend.
 	ProbeTimeout = 250 * time.Millisecond
 	// DefaultProcRoot is the Linux procfs mount point.

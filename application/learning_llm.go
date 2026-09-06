@@ -370,6 +370,11 @@ func safeLearningConversationID(conversationID string) bool {
 // learner turn (Stage 1 always; Stage 2/3 only when trigger_reason is
 // repeated_procedure). Experience and memory bodies are not serialized
 // into role=user; the agent reads the source conversation through file_read.
+//
+// The skill-authoring reference for Stages 2-3 is NOT carried here: the
+// runtime attaches the skill-creator SKILL.md as a hydration file_read slot
+// (see learnerSkillCreatorReference), so the model receives it as a tool
+// result without having to search for it.
 func (a *App) buildLearnerPacketAt(exp *domain.Experience, source learningSource, reason string, procedureCount int) string {
 	return resources.RenderLearnerUserPrompt(
 		reason,
@@ -379,6 +384,30 @@ func (a *App) buildLearnerPacketAt(exp *domain.Experience, source learningSource
 		source.messageStart,
 		source.messageEnd,
 	)
+}
+
+// learnerSkillCreatorReference resolves the skill-creator SKILL.md for the
+// learner hydration slot: the live skill store wins (the editable copy the
+// skill tools also serve), and the embedded bundle guarantees presence when
+// the live copy was deleted or not yet seeded. Returns ("", "") only when
+// neither source is available or the data directory is unknown.
+func (a *App) learnerSkillCreatorReference() (path, content string) {
+	if a == nil || strings.TrimSpace(a.DataDir) == "" {
+		return "", ""
+	}
+	content = ""
+	if a.Skills != nil {
+		if s, err := a.Skills.Get("skill-creator", ""); err == nil && s != nil {
+			content = strings.TrimSpace(s.Content)
+		}
+	}
+	if content == "" {
+		content = strings.TrimSpace(resources.BuiltinSkill("skill-creator"))
+	}
+	if content == "" {
+		return "", ""
+	}
+	return filepath.Join(strings.TrimRight(a.DataDir, `/\`), "skills", "skill-creator", "SKILL.md"), content
 }
 
 // parseLLMSkillProposal parses an LLM JSON response into a skill proposal.

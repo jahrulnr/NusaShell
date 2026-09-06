@@ -5,6 +5,88 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] - 2026-09-06
+
+### Fixed
+
+- **Learner supersede actually retires the old record.** `learn()` action
+  `supersede` now writes the target id on both `payload.id` and `target_id`;
+  Apply reads either field. A rejected op no longer aborts the rest of the
+  batch, so a missing supersede target cannot swallow the correction upsert.
+- **Memory search matches tokens, not only a contiguous phrase.** Query
+  `phantom patch rollback` finds records that contain those words anywhere
+  in the body.
+- **Recovery spawn is fail-then-success on the same tool.** A typo in `exec`
+  plus unrelated successful tools is not P1 recovery. Verified success is
+  no longer inferred from "at least three actions".
+- **Experience actions come from the current turn.** The 120-action cap
+  applies to messages since the latest user prompt, so later turns of a
+  long conversation still form fingerprints.
+- **Learning jobs persist `llm_conversation_id`.** The transcript id from
+  the headless learner turn is stored on the job row, not only in the
+  trajectory feed.
+- **Learner stops committing raw user text as memory.** Every typed
+  `memory.upsert` now passes a durability gate: questions, verbatim or
+  near-verbatim echoes of user messages, and trivial fragments are recorded
+  as `rejected` operations without writing anything (source range still
+  counts as reviewed, so junk is not re-committed on the next nudge). The
+  deterministic no-provider fallback only emits distilled `Desired`
+  corrections instead of replaying steer text, and the learner prompt now
+  states the distil-vs-echo rule explicitly.
+- **Near-duplicate memory records merge instead of piling up.** Upsert
+  matching is semantic (token overlap ≥ 0.55) rather than byte-equal:
+  identical bodies strengthen the existing record, near-identical bodies
+  merge into it (creation date and type preserved, novel text appended up
+  to a 1000-char cap, evidence accumulated). Repeated retellings of the
+  same event converge into one record.
+- **Skill evolution converges on a canonical skill.** Proposals with no
+  exact id adopt the closest existing learned skill on the same topic
+  (name overlap ≥ 0.6) and revise it instead of spawning near-duplicate
+  folders; the `learned-` prefix is applied exactly once (no more
+  `learned-learned-*`); the raw user goal sentence is no longer used as
+  the skill description.
+- **Stale learning jobs are recovered on startup.** Jobs left `running` or
+  `queued` for over 10 minutes after a restart are marked `error` with an
+  "interrupted" reason instead of pretending to be active.
+- **Experiences stop counting harness noise.** `runtime_context`,
+  `announcement`, `mcp_list`, and `tool_list` calls (hydration checkpoints
+  and injected announcements) are omitted from experience actions,
+  fingerprints, failure signatures, and review-progress counting, and the
+  recorded-action cap is raised from 40 to 120 so long turns keep their
+  productive tail.
+- **APPLY hydration no longer starves on verbose records.** The block is
+  pre-sorted (constraints/preferences first, then evidence, then recency),
+  near-duplicate bodies collapse into one line, and bodies are trimmed to
+  ~180 characters.
+- **Learning jobs hydrate against the NusaShell data directory.** Background
+  learner turns point their workspace at `{dataDir}` instead of the source
+  conversation's workspace, so the checkpoint shows the surfaces the
+  learner actually operates on (profile documents, growth/learning stores)
+  without dragging the user project's AGENTS.md and file tree into every
+  job.
+- **Stages 2-3 get `skill-creator` forced into the checkpoint.** The learner
+  system prompt no longer carries the full skill authoring tutorial, and
+  the model is never expected to search for it: every learning turn's
+  hydration checkpoint attaches the bundled `skill-creator` SKILL.md as a
+  direct `file_read` tool result (live skill store first, embedded bundle
+  as the guaranteed fallback when the live copy is missing), following the
+  repo's own progressive-disclosure principle — instruction is context,
+  not a scavenger hunt.
+- **Prompts follow the non-tools construction guide.** Per `resources/AGENTS.md`: the learner, automation, and delegate prompts are rewritten role-first — they describe the agent's objective, constraints, stages, and output contracts, and no longer expose orchestration details (spawning mechanics, toolbox disclosure, hydration vocabulary, scheduler plumbing). The system prompt gained a highest-priority natural-response style rule (no tool narration, errors reported briefly) with a correct vs incorrect example pair.
+- **Learning surfaces grow real deletion + experience pagination.**
+  - `memory.delete` replaces retire as the human action: the record, its
+    graph edges, and its retrieval presence are removed permanently
+    (lifecycle retirement stays internal).
+  - `experience.list` is paginated (offset/limit, newest first, total)
+    and `experience.delete` removes an episode plus any learning jobs
+    queued from it.
+  - `learning.log.delete` removes a job's trajectory events, its job row,
+    and the background LLM transcript conversation.
+  - The Learning UI adds: Delete on memory records, per-row delete and
+    Prev/Next pagination on Experience, per-entry delete on the Learning
+    log, and node deletion on the Knowledge graph (records via
+    `memory.delete`, learned skills via `skills.delete`).
+
 ## [0.4.7] - 2026-09-06
 
 ### Added

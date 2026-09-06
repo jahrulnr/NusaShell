@@ -61,12 +61,35 @@ test('Experience tab lists episodes and memory records', () => {
   assert.equal(tab?.dataset.learningTab, 'experience');
   assert.ok(doc.querySelector('#learning-experience-list'));
   assert.ok(doc.querySelector('#learning-records-list'));
-  assert.ok(doc.querySelector('#learning-record-retire'));
+  assert.ok(doc.querySelector('#learning-record-delete'));
   assert.match(learningView, /experience\.list/);
   assert.match(learningView, /experience\.get/);
-  assert.match(learningView, /memory\.retire/);
-  assert.doesNotMatch(learningView, /memory\.delete/);
+  assert.match(learningView, /experience\.delete/);
+  assert.match(learningView, /memory\.delete/);
+  assert.ok(doc.querySelector('#learning-graph-delete'));
+  assert.match(learningView, /learning-experience-prev/);
+  assert.match(learningView, /learning-experience-next/);
   assert.match(learningView, /sortExperiencesNewestFirst\(listFrom/);
+});
+
+test('Learning init control declarations precede their first use', () => {
+  // Regression guard for the class of bug where a control is referenced in
+  // initLearning but its `const` declaration is missing (runtime
+  // ReferenceError: graphDeleteBtn is not defined).
+  for (const name of ['graphDeleteBtn']) {
+    const decl = learningView.indexOf(`const ${name} = document.getElementById`);
+    const use = learningView.indexOf(`${name}.addEventListener`);
+    assert.ok(decl >= 0, `${name} must be declared in initLearning`);
+    assert.ok(use > decl, `${name} must be declared before its listener is attached`);
+  }
+  // Same wiring for the record delete button.
+  assert.ok(learningView.indexOf(`const deleteBtn = document.getElementById('learning-record-delete')`) >= 0);
+  // The retire action is gone: no stale id, no stale RPC, no dangling
+  // call to a function that no longer exists.
+  assert.ok(!learningView.includes('learning-record-retire'));
+  assert.ok(!learningView.includes('memory.retire'));
+  assert.ok(!learningView.includes('retireRecord'));
+  assert.ok(learningView.includes(`rpc('memory.delete', { id })`));
 });
 
 test('Experience items are sorted newest first without mutating the payload', () => {

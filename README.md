@@ -61,7 +61,7 @@ export NUSASHELL_HOST=127.0.0.1
 make run
 ```
 
-Open `http://127.0.0.1:9999`, configure a provider, then choose a folder from
+Open `http://127.0.0.1:10994`, configure a provider, then choose a folder from
 the composer’s workspace button. The selected folder is the workspace for the
 active conversation.
 
@@ -117,7 +117,7 @@ uses the separate `nusashell-desktop` launcher):
 
 ```bash
 make install              # builds ./bin/nusashell and installs to ~/.local/bin
-nusashell                 # starts the server (default http://127.0.0.1:9999)
+nusashell                 # starts the server (default http://127.0.0.1:10994)
 ```
 
 Set `NUSASHELL_INSTALL_DIR` to install to a different directory.
@@ -177,7 +177,7 @@ through RPC, WebSocket events, application services, and local persistence.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `NUSASHELL_HOST` | `127.0.0.1` | HTTP listen host |
-| `NUSASHELL_PORT` | `9999` | HTTP listen port |
+| `NUSASHELL_PORT` | `10994` | HTTP listen port |
 | `NUSASHELL_DATA_DIR` | platform config directory plus `nusashell` | Local data directory |
 | `NUSASHELL_DEV` | unset | Serve `frontend/` directly from disk for development |
 

@@ -976,9 +976,7 @@ async function savePetsAutoStart(event) {
   const desired = toggle.checked;
   toggle.disabled = true;
   try {
-    const settings = (await rpc('settings.get', {})).settings || {};
-    settings.pets_auto_start = desired;
-    await rpc('settings.set', { settings });
+    await rpc('settings.set', { pets_auto_start: desired });
     setPetStatus(desired ? 'Pet will start with the Go shell.' : 'Pet stays manual.');
   } catch (err) {
     toggle.checked = !desired;

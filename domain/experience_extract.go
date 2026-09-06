@@ -11,14 +11,35 @@ const (
 	maxGoalChars       = 400
 	maxCorrectionChars = 400
 	maxDigestChars     = 80
-	maxActionSteps     = 40
+	maxActionSteps     = 120
 )
+
+// harnessToolNames are injected runtime/harness tool calls that are never
+// agent-initiated work. They must not shape experiences, fingerprints, or
+// review progress. Hydration checkpoint calls are already excluded by their
+// "hydrate-" call-id prefix; the name list additionally covers transcripts
+// recorded before the prefix existed, plus announcement injections that
+// never carry the prefix (but still land in the persisted transcript).
+var harnessToolNames = map[string]bool{
+	"runtime_context": true,
+	"announcement":    true,
+	"mcp_list":        true,
+	"tool_list":       true,
+}
+
+// IsHarnessToolCall reports whether a tool call is injected runtime
+// activity (hydration checkpoint or harness announcement) rather than agent
+// work, independent of its call id.
+func IsHarnessToolCall(name string) bool {
+	return harnessToolNames[strings.TrimSpace(name)]
+}
 
 // ExtractExperience builds a cheap structured episode from a finished turn.
 // It never calls an LLM. Hidden hydration checkpoint tools (call IDs with
 // HydrateToolCallPrefix) are not agent work: they are omitted from Actions,
 // SkillIDs, and ProcedureFingerprint so they cannot look like a repeated
-// procedure.
+// procedure. Actions are taken from the current user turn (messages since
+// the latest non-steer user prompt), capped at maxActionSteps.
 func ExtractExperience(conv *Conversation, headless bool) Experience {
 	now := clock.NewTime().Time()
 	exp := Experience{
@@ -43,7 +64,8 @@ func ExtractExperience(conv *Conversation, headless bool) Experience {
 	failed := 0
 	var failSig string
 	skillIDs := []string{}
-	for _, msg := range conv.Messages {
+	start := experienceTurnStart(conv.Messages)
+	for _, msg := range conv.Messages[start:] {
 		switch msg.Role {
 		case RoleUser:
 			text := strings.TrimSpace(msg.Content)
@@ -72,6 +94,9 @@ func ExtractExperience(conv *Conversation, headless bool) Experience {
 			}
 			for _, tc := range msg.ToolCalls {
 				if IsHydrationCallID(tc.ID) {
+					continue
+				}
+				if IsHarnessToolCall(tc.Name) {
 					continue
 				}
 				if len(exp.Actions) >= maxActionSteps {
@@ -107,14 +132,42 @@ func ExtractExperience(conv *Conversation, headless bool) Experience {
 			exp.Outcome.Status = "success"
 		}
 	}
-	if exp.Outcome.Status == "success" && failed > 0 && len(exp.Actions) > failed {
+	if exp.Outcome.Status == "success" && sameToolFailedThenSucceeded(exp.Actions) {
 		exp.Signals.RootCauseRecovered = true
-		exp.Outcome.Verification = []string{"turn completed after failed tool"}
-	}
-	if exp.Outcome.Status == "success" && len(exp.Actions) >= 3 {
-		exp.Signals.VerifiedSuccess = true
+		exp.Outcome.Verification = []string{"same tool failed then succeeded"}
 	}
 	return exp
+}
+
+// experienceTurnStart is the index of the latest non-steer user message.
+// Actions, fingerprints, and recovery signals are taken from that turn
+// onward so a long conversation's first 120 tools cannot hide later work.
+func experienceTurnStart(messages []Message) int {
+	start := 0
+	for i, msg := range messages {
+		if msg.Role == RoleUser && !msg.Steer && strings.TrimSpace(msg.Content) != "" {
+			start = i
+		}
+	}
+	return start
+}
+
+func sameToolFailedThenSucceeded(actions []ExperienceAction) bool {
+	failed := make(map[string]bool)
+	for _, act := range actions {
+		name := strings.TrimSpace(act.Name)
+		if name == "" {
+			continue
+		}
+		if act.Failed {
+			failed[name] = true
+			continue
+		}
+		if failed[name] {
+			return true
+		}
+	}
+	return false
 }
 
 func workspaceProject(workspace string) string {

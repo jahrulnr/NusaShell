@@ -2168,31 +2168,7 @@ func filterSkills(skills []*domain.Skill, status string) []*domain.Skill {
 }
 
 func memoryRecordMatches(m *domain.MemoryRecord, filter domain.MemorySearchFilter) bool {
-	if m == nil {
-		return false
-	}
-	if !filter.IncludeRetired && !m.Retrievable() {
-		return false
-	}
-	if filter.Type != "" && m.Type != filter.Type {
-		return false
-	}
-	if filter.Status != "" && m.Status != filter.Status {
-		return false
-	}
-	if filter.Scope != "" && m.Scope.Level != filter.Scope {
-		return false
-	}
-	if filter.Project != "" && m.Scope.Project != filter.Project {
-		return false
-	}
-	if q := strings.TrimSpace(filter.Query); q != "" {
-		hay := strings.ToLower(m.Body + " " + m.Subject + " " + m.Predicate + " " + m.Object)
-		if !strings.Contains(hay, strings.ToLower(q)) {
-			return false
-		}
-	}
-	return true
+	return m.Matches(filter)
 }
 
 func formatMemoryRecordJSON(m *domain.MemoryRecord) map[string]any {

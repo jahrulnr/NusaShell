@@ -43,18 +43,18 @@ test('electronDevArgs uses the Linux no-sandbox fallback only for an unconfigure
 });
 
 test('normalizeLoopbackURL accepts local HTTP URLs and rejects remote content', () => {
-  assert.equal(normalizeLoopbackURL('http://127.0.0.1:9999').toString(), 'http://127.0.0.1:9999/');
-  assert.equal(normalizeLoopbackURL('http://localhost:9999/app').pathname, '/app');
+  assert.equal(normalizeLoopbackURL('http://127.0.0.1:10994').toString(), 'http://127.0.0.1:10994/');
+  assert.equal(normalizeLoopbackURL('http://localhost:10994/app').pathname, '/app');
   assert.throws(() => normalizeLoopbackURL('https://example.com'), /loopback URL/);
   assert.throws(() => normalizeLoopbackURL('file:///tmp/index.html'), /http or https/);
-  assert.throws(() => normalizeLoopbackURL('http://user:pass@127.0.0.1:9999'), /credentials/);
+  assert.throws(() => normalizeLoopbackURL('http://user:pass@127.0.0.1:10994'), /credentials/);
 });
 
 test('navigation policy allows only the backend origin', () => {
-  const appURL = 'http://127.0.0.1:9999/';
-  assert.equal(isSameOriginURL('http://127.0.0.1:9999/plugins/demo/', appURL), true);
+  const appURL = 'http://127.0.0.1:10994/';
+  assert.equal(isSameOriginURL('http://127.0.0.1:10994/plugins/demo/', appURL), true);
   assert.equal(isSameOriginURL('http://127.0.0.1:10000/', appURL), false);
-  assert.equal(isSameOriginURL('https://127.0.0.1:9999/', appURL), false);
+  assert.equal(isSameOriginURL('https://127.0.0.1:10994/', appURL), false);
   assert.equal(isExternalHTTPURL('https://www.example.com/docs'), true);
   assert.equal(isExternalHTTPURL('javascript:alert(1)'), false);
 });

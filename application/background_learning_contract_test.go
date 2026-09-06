@@ -12,7 +12,7 @@ func TestBackgroundLearningPromptIsUnifiedLearner(t *testing.T) {
 	if strings.TrimSpace(prompt) == "" {
 		t.Fatal("learner prompt must be non-empty")
 	}
-	assertBackgroundPromptCapabilities(t, "learner", prompt)
+	assertBackgroundPromptRoleFocused(t, "learner", prompt)
 	for _, doc := range []string{"user.md", "soul.md"} {
 		if !strings.Contains(prompt, doc) {
 			t.Errorf("learner must mention %q", doc)
@@ -36,6 +36,12 @@ func TestBackgroundLearningPromptIsUnifiedLearner(t *testing.T) {
 	if !strings.Contains(prompt, "learn(") && !strings.Contains(prompt, "`learn`") {
 		t.Error("learner must tell the model to submit results via learn()")
 	}
+	if !strings.Contains(prompt, "evidence") {
+		t.Error("learner must require evidence for every entry")
+	}
+	if !strings.Contains(prompt, "skill-authoring reference") {
+		t.Error("learner must reference the attached skill-authoring reference for Stages 2-3")
+	}
 	if strings.Contains(prompt, "Return ONLY that JSON object") {
 		t.Error("learner must not treat assistant text as the JSON contract")
 	}
@@ -54,6 +60,28 @@ func TestBackgroundLearningPromptIsUnifiedLearner(t *testing.T) {
 	}
 }
 
+// assertBackgroundPromptRoleFocused guards the prompt-construction contract
+// from resources/AGENTS.md: the learner prompt describes role, objectives,
+// constraints, and output requirements — never the orchestration around it.
+func assertBackgroundPromptRoleFocused(t *testing.T, name, prompt string) {
+	t.Helper()
+	normalized := strings.Join(strings.Fields(strings.ToLower(prompt)), " ")
+	for _, leaked := range []string{
+		"full conversation toolbox",
+		"direct tool side effects are enabled",
+		"exploratory background mode",
+		"security restrictions",
+		"orchestrator",
+		"hydration",
+		"checkpoint",
+		"spawned headlessly",
+	} {
+		if strings.Contains(normalized, leaked) {
+			t.Errorf("%s prompt must not expose orchestration detail %q", name, leaked)
+		}
+	}
+}
+
 func TestSystemPromptIncludesMemoryWritingRules(t *testing.T) {
 	prompt := resources.SystemPrompt()
 	if !strings.Contains(prompt, "Primary Memory Writing Rules") {
@@ -67,19 +95,5 @@ func TestSystemPromptIncludesMemoryWritingRules(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "{dataDir}/memory/user.md") {
 		t.Fatal("system prompt must name the absolute user.md path pattern")
-	}
-}
-
-func assertBackgroundPromptCapabilities(t *testing.T, name, prompt string) {
-	t.Helper()
-	normalized := strings.Join(strings.Fields(strings.ToLower(prompt)), " ")
-	for _, required := range []string{
-		"full conversation toolbox",
-		"direct tool side effects are enabled",
-		"security restrictions",
-	} {
-		if !strings.Contains(normalized, required) {
-			t.Errorf("%s prompt must document %q", name, required)
-		}
 	}
 }

@@ -132,6 +132,10 @@ type ExperienceStore interface {
 	Get(id string) (*domain.Experience, error)
 	Save(e *domain.Experience) error
 	ListByConversation(conversationID string) []*domain.Experience
+	// Delete removes an experience. Experiences deleted by the user are
+	// gone for good: they feed the learning pipeline, but the user owns
+	// the catalog.
+	Delete(id string) error
 }
 
 type MemoryRecordStore interface {
@@ -145,6 +149,9 @@ type LearningJobStore interface {
 	List() []*domain.LearningJob
 	Get(id string) (*domain.LearningJob, error)
 	Save(j *domain.LearningJob) error
+	// Delete removes a job row (e.g. when its learning log entry is
+	// removed by the user).
+	Delete(id string) error
 }
 
 type LearningOpStore interface {

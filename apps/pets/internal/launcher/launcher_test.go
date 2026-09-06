@@ -68,7 +68,7 @@ func TestWebURLDerivedFromWebSocketURL(t *testing.T) {
 		wsURL string
 		want  string
 	}{
-		{"ws://127.0.0.1:9999/ws", "http://127.0.0.1:9999/"},
+		{"ws://127.0.0.1:10994/ws", "http://127.0.0.1:10994/"},
 		{"wss://host.example:8443/ws/x", "https://host.example:8443/"},
 		{"", DefaultWebURL},
 		{"garbage", DefaultWebURL},

@@ -11,7 +11,7 @@ import { JSDOM } from 'jsdom';
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..', '..');
 
-function withDom(bodyHtml = '', fn, { url = 'http://127.0.0.1:9999/' } = {}) {
+function withDom(bodyHtml = '', fn, { url = 'http://127.0.0.1:10994/' } = {}) {
   const html = `<!DOCTYPE html><html><body>${bodyHtml}</body></html>`;
   const dom = new JSDOM(html, { url });
   const previousDocument = globalThis.document;
@@ -170,7 +170,7 @@ test('cache warming collects stylesheets, scripts, icons, and font urls from the
       const fontsCss = `@font-face { src: url("fonts/inter.woff2") format("woff2"); }
 @font-face { src: url('fonts/jetbrains.woff2') format("woff2"); }`;
       const stubFetch = async () => ({ text: async () => fontsCss });
-      const fonts = await extractFontUrls(stubFetch, 'http://127.0.0.1:9999/index.html');
+      const fonts = await extractFontUrls(stubFetch, 'http://127.0.0.1:10994/index.html');
       assert.deepEqual(fonts, ['/fonts/inter.woff2', '/fonts/jetbrains.woff2']);
     },
     ),

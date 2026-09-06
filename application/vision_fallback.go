@@ -50,9 +50,10 @@ func (a *App) describeImagesWithFallback(ctx context.Context, settings domain.Se
 
 	out := make([]domain.Attachment, 0, len(attachments)+len(imageIdxs))
 	out = append(out, attachments...)
+	maxOut := domain.ResolveMaxOutput(provider, settings.VisionModelID, settings)
 	for _, idx := range imageIdxs {
 		img := attachments[idx]
-		description, err := a.describeOneImage(ctx, adapter, a.providerNameByID(settings.VisionProviderID), settings.VisionModelID, img, defaultDescribeImagePrompt)
+		description, err := a.describeOneImage(ctx, adapter, a.providerNameByID(settings.VisionProviderID), settings.VisionModelID, img, defaultDescribeImagePrompt, maxOut)
 		if err != nil {
 			a.log("warn", "vision", "image description failed for %q: %v", img.Name, err)
 			continue
@@ -144,9 +145,12 @@ func (a *App) enrichWithVisionDescriptions(ctx context.Context, conversation *do
 // one source of truth.
 var defaultDescribeImagePrompt = resources.DescribeImagePrompt()
 
-func (a *App) describeOneImage(ctx context.Context, adapter ProviderContext, providerName, model string, image domain.Attachment, prompt string) (string, error) {
+func (a *App) describeOneImage(ctx context.Context, adapter ProviderContext, providerName, model string, image domain.Attachment, prompt string, maxTokens int) (string, error) {
 	if strings.TrimSpace(prompt) == "" {
 		prompt = defaultDescribeImagePrompt
+	}
+	if maxTokens <= 0 {
+		maxTokens = domain.DefaultSettings().MaxOutputTokens
 	}
 	req := ChatRequest{
 		Model:  model,
@@ -158,7 +162,7 @@ func (a *App) describeOneImage(ctx context.Context, adapter ProviderContext, pro
 				Attachments: []domain.Attachment{image},
 			},
 		},
-		MaxTokens: 400,
+		MaxTokens: maxTokens,
 	}
 	resp, err := a.completeWithRetry(ctx, adapter, req)
 	if err != nil {

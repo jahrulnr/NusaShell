@@ -7,6 +7,36 @@ import (
 	"nusashell/domain"
 )
 
+func TestContradictUsesTargetIDWhenPayloadIDMissing(t *testing.T) {
+	rec := &domain.MemoryRecord{
+		ID:     "mem_old",
+		Type:   domain.MemoryTypeFact,
+		Body:   "file_patch can roll back a phantom hunk",
+		Status: domain.MemoryStatusLearned,
+		Scope:  domain.MemoryScope{Level: domain.MemoryScopeUser},
+	}
+	store := &fakeMemoryRecordStore{items: []*domain.MemoryRecord{rec}}
+	svc := NewMemoryService(store, nil)
+	op := &domain.LearningOperation{
+		Kind:     domain.OpMemoryContradict,
+		TargetID: "mem_old",
+		Reason:   "learner supersede",
+	}
+	if err := svc.Apply(op); err != nil {
+		t.Fatalf("contradict via TargetID: %v", err)
+	}
+	got, err := store.Get("mem_old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != domain.MemoryStatusSuperseded {
+		t.Fatalf("status=%s, want superseded", got.Status)
+	}
+	if op.Status != domain.LearningOpAccepted {
+		t.Fatalf("op status=%s", op.Status)
+	}
+}
+
 func TestStrengthenDoesNotResetUpdatedAt(t *testing.T) {
 	created := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	rec := &domain.MemoryRecord{

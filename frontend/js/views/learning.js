@@ -23,9 +23,12 @@ const state = {
   runningJobs: 0,
   catalogLoaded: false,
   experiences: [],
+  experiencesPage: 0,
+  experiencesTotal: 0,
   records: [],
   selectedRecordId: null,
   selectedExperienceId: null,
+  selectedGraphNodeId: null,
   learningEventHandlers: null, // cleanup funcs for memory/skill/job listeners
   graphRefreshTimer: null, // debounce timer coalescing background graph refreshes
   userMemory: null,
@@ -73,6 +76,7 @@ export async function initLearning() {
   const searchBtn = document.getElementById('learning-search-btn');
   const refreshBtn = document.getElementById('learning-graph-refresh');
   const fitBtn = document.getElementById('learning-graph-fit');
+  const graphDeleteBtn = document.getElementById('learning-graph-delete');
   const logRefreshBtn = document.getElementById('learning-log-refresh');
 
   input.addEventListener('input', debounce(() => doSearch(), 200));
@@ -98,6 +102,9 @@ export async function initLearning() {
     fitGraphToView(state.network, state.nodes, 300);
   });
   logRefreshBtn.addEventListener('click', () => loadLog());
+  if (graphDeleteBtn) {
+    graphDeleteBtn.addEventListener('click', () => { void deleteSelectedGraphNode(); });
+  }
   initMemoryDocumentEditor(MEMORY_EDITORS.user);
   initMemoryDocumentEditor(MEMORY_EDITORS.agent);
 
@@ -326,10 +333,10 @@ function listFrom(res, ...keys) {
 }
 
 function initCatalogActions() {
-  const retireBtn = document.getElementById('learning-record-retire');
-  if (retireBtn) {
-    retireBtn.addEventListener('click', () => {
-      if (state.selectedRecordId) void retireRecord(state.selectedRecordId);
+  const deleteBtn = document.getElementById('learning-record-delete');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', () => {
+      if (state.selectedRecordId) void deleteRecord(state.selectedRecordId);
     });
   }
 }
@@ -339,17 +346,26 @@ async function loadCatalog() {
   await Promise.all([loadExperiences(), loadStats()]);
 }
 
+// The backend pages experiences newest first; the page size keeps the DOM
+// bounded even when the catalog grows without limit.
+const EXPERIENCE_PAGE_SIZE = 25;
+
 async function loadExperiences() {
   const listEl = document.getElementById('learning-experience-list');
   const countEl = document.getElementById('learning-experience-count');
   if (!listEl) return;
   try {
-    const res = await rpc('experience.list');
+    const res = await rpc('experience.list', {
+      offset: state.experiencesPage * EXPERIENCE_PAGE_SIZE,
+      limit: EXPERIENCE_PAGE_SIZE,
+    });
     state.experiences = sortExperiencesNewestFirst(listFrom(res, 'experiences', 'entries', 'items'));
+    state.experiencesTotal = Number.isFinite(Number(res.total)) ? Number(res.total) : state.experiences.length;
     renderExperiences();
-    if (countEl) countEl.textContent = String(state.experiences.length);
+    if (countEl) countEl.textContent = String(state.experiencesTotal);
   } catch (e) {
     state.experiences = [];
+    state.experiencesTotal = 0;
     listEl.innerHTML = '';
     listEl.appendChild(el('div', { class: 'learning-empty' }, [
       el('strong', { text: 'Experience unavailable' }),
@@ -391,8 +407,9 @@ function renderExperiences() {
   if (state.experiences.length === 0) {
     listEl.appendChild(el('div', { class: 'learning-empty' }, [
       el('strong', { text: 'No experience yet' }),
-      el('span', { text: 'Completed conversations record a goal, outcome, and signals here. Episodes are read-only.' }),
+      el('span', { text: 'Completed conversations record a goal, outcome, and signals here. Episodes can be deleted from the catalog.' }),
     ]));
+    renderExperiencePagination(listEl);
     return;
   }
   for (const exp of state.experiences) {
@@ -406,6 +423,17 @@ function renderExperiences() {
       el('div', { class: 'learning-catalog-card-head' }, [
         el('span', { class: `learning-outcome learning-outcome-${outcome}`, text: String(outcome) }),
         el('span', { class: 'learning-catalog-time', text: fmtTime(exp.timestamp || exp.created_at) }),
+        el('span', {
+          class: 'learning-card-delete',
+          role: 'button',
+          tabindex: '0',
+          title: 'Delete experience',
+          text: '×',
+          onclick: (event) => {
+            event.stopPropagation();
+            void confirmDeleteExperience(exp.id);
+          },
+        }),
       ]),
       el('div', { class: 'learning-catalog-title', text: exp.goal || 'Untitled episode' }),
       el('div', { class: 'learning-catalog-signals' }, signalChips(exp.signals)),
@@ -415,6 +443,57 @@ function renderExperiences() {
     if (selected && exp._detail) {
       listEl.appendChild(renderExperienceDetail(exp._detail));
     }
+  }
+  renderExperiencePagination(listEl);
+}
+
+function renderExperiencePagination(listEl) {
+  const total = state.experiencesTotal || 0;
+  const pages = Math.max(1, Math.ceil(total / EXPERIENCE_PAGE_SIZE));
+  const bar = el('div', { class: 'learning-pagination' }, [
+    el('button', {
+      class: 'mini-btn ghost',
+      id: 'learning-experience-prev',
+      type: 'button',
+      disabled: state.experiencesPage <= 0,
+      text: '← Prev',
+      onclick: () => {
+        if (state.experiencesPage > 0) {
+          state.experiencesPage -= 1;
+          void loadExperiences();
+        }
+      },
+    }),
+    el('span', { class: 'learning-pagination-info', id: 'learning-experience-page', text: `Page ${state.experiencesPage + 1} of ${pages}` }),
+    el('button', {
+      class: 'mini-btn ghost',
+      id: 'learning-experience-next',
+      type: 'button',
+      disabled: state.experiencesPage + 1 >= pages,
+      text: 'Next →',
+      onclick: () => {
+        if (state.experiencesPage + 1 < pages) {
+          state.experiencesPage += 1;
+          void loadExperiences();
+        }
+      },
+    }),
+  ]);
+  listEl.appendChild(bar);
+}
+
+async function confirmDeleteExperience(id) {
+  const ok = await confirmDialog('Delete this experience?', 'The episode and any learning jobs queued from it are removed permanently.', 'Delete');
+  if (!ok) return;
+  try {
+    await rpc('experience.delete', { id });
+    toast('Experience deleted.', 'success', 2000);
+    if (state.selectedExperienceId === id) state.selectedExperienceId = null;
+    // Walk back when the last item of a page was deleted.
+    if (state.experiences.length === 1 && state.experiencesPage > 0) state.experiencesPage -= 1;
+    await loadExperiences();
+  } catch (e) {
+    toast(e.message || 'Failed to delete experience.', 'error', 4000);
   }
 }
 
@@ -453,16 +532,16 @@ function recordBody(entry) {
 
 function renderRecords() {
   const listEl = document.getElementById('learning-records-list');
-  const retireBtn = document.getElementById('learning-record-retire');
+  const deleteBtn = document.getElementById('learning-record-delete');
   if (!listEl) return;
   listEl.innerHTML = '';
   const records = state.records;
   if (records.length === 0) {
     listEl.appendChild(el('div', { class: 'learning-empty' }, [
       el('strong', { text: 'No memory records' }),
-      el('span', { text: 'Structured facts, preferences, and constraints appear here. Retire a record to keep it off retrieval without deleting the audit trail.' }),
+      el('span', { text: 'Structured facts, preferences, and constraints appear here. Delete a record to remove it permanently.' }),
     ]));
-    if (retireBtn) retireBtn.disabled = true;
+    if (deleteBtn) deleteBtn.disabled = true;
     return;
   }
   for (const rec of records) {
@@ -490,26 +569,26 @@ function renderRecords() {
     });
     listEl.appendChild(card);
   }
-  if (retireBtn) {
+  if (deleteBtn) {
     const selected = records.find((r) => r.id === state.selectedRecordId);
-    retireBtn.disabled = !selected || selected.status === 'retired';
+    deleteBtn.disabled = !selected;
   }
 }
 
-async function retireRecord(id) {
+async function deleteRecord(id) {
   const rec = state.records.find((r) => r.id === id);
-  if (!rec || rec.status === 'retired') return;
-  const ok = await confirmDialog('Retire this record?', 'It stays on disk for audit but is excluded from search and agent context.', 'Retire');
+  if (!rec || !rec.id) return;
+  const ok = await confirmDialog('Delete this record?', 'It is removed from the catalog and the knowledge graph permanently.', 'Delete');
   if (!ok) return;
   try {
-    await rpc('memory.retire', { id });
-    toast('Memory record retired.', 'success', 2000);
+    await rpc('memory.delete', { id });
+    toast('Memory record deleted.', 'success', 2000);
     state.selectedRecordId = null;
     await loadStats();
     doSearch();
     loadGraph();
   } catch (e) {
-    toast(e.message || 'Failed to retire memory record.', 'error', 4000);
+    toast(e.message || 'Failed to delete memory record.', 'error', 4000);
   }
 }
 
@@ -585,6 +664,23 @@ export async function refresh() {
 }
 
 // ---- Learning log (autolearn trajectory) ----
+
+// deleteLogEntry removes one learning log entry by job id (job row,
+// trajectory events, and the LLM transcript conversation). The log is a
+// record of what the learner did, so entries stay until the user says
+// otherwise.
+async function deleteLogEntry(jobId) {
+  if (!jobId) return;
+  const ok = await confirmDialog('Delete this learning log entry?', `Job ${jobId} and its LLM transcript are removed permanently.`, 'Delete');
+  if (!ok) return;
+  try {
+    await rpc('learning.log.delete', { job_id: jobId });
+    toast('Learning log entry deleted.', 'success', 2000);
+    await loadLog();
+  } catch (e) {
+    toast(e.message || 'Failed to delete learning log entry.', 'error', 4000);
+  }
+}
 
 async function loadLog() {
   const logEl = document.getElementById('learning-log');
@@ -687,6 +783,22 @@ export function renderLogEntry(entry) {
     }));
   }
   headChildren.push(el('span', { class: 'learning-log-time', text: fmtTime(entry.ts) }));
+  // Every background-run entry is tied to a job id: offer deletion so
+  // wrong or noisy runs can be removed from the log (with their transcript).
+  const jobId = entry.detail?.job_id;
+  if (jobId) {
+    headChildren.push(el('span', {
+      class: 'learning-log-delete',
+      role: 'button',
+      tabindex: '0',
+      title: 'Delete log entry',
+      text: '×',
+      onclick: (event) => {
+        event.stopPropagation();
+        void deleteLogEntry(jobId);
+      },
+    }));
+  }
   const head = el('div', { class: 'learning-log-entry-head' }, headChildren);
 
   const parts = [head];
@@ -1200,6 +1312,81 @@ export function keepGraphPositions(nodes, prevPositions) {
   });
 }
 
+// graphVisNodeFromDTO maps a learning.graph node onto a vis-network item.
+// kind/tier/owned_by/status/name must ride along: graphNodeDeletable and the
+// confirm copy read them off the DataSet, not the original RPC payload.
+export function graphVisNodeFromDTO(n) {
+  const group = n.kind === 'memory' && n.tier === 'user' ? 'memory-user' : n.kind;
+  const relationLabel = `${n.relationCount} relation${n.relationCount === 1 ? '' : 's'}`;
+  return {
+    id: n.id,
+    label: n.name || n.id,
+    name: n.name,
+    group,
+    size: n.size,
+    relationSize: n.size,
+    relationCount: n.relationCount,
+    kind: n.kind,
+    tier: n.tier,
+    owned_by: n.owned_by,
+    status: n.status,
+    title: group === 'memory-user'
+      ? `User memory: ${n.name || n.id} • ${relationLabel}`
+      : `${n.name || n.id} • ${relationLabel}`,
+  };
+}
+
+// graphNodeDeletable reports whether a graph node can be deleted from the
+// graph view: structured memory records and learned skills. User-memory
+// (the About You document) and builtin skills are edited elsewhere and are
+// never deletable here.
+export function graphNodeDeletable(node) {
+  if (!node) return false;
+  if (node.kind === 'memory') return String(node.tier || '').toLowerCase() === 'record';
+  if (node.kind === 'skill') return String(node.owned_by || '').toLowerCase() === 'learned' || String(node.status || '').toLowerCase() === 'experimental';
+  return false;
+}
+
+function syncGraphDeleteButton() {
+  const btn = document.getElementById('learning-graph-delete');
+  if (!btn) return;
+  const node = selectedGraphNode();
+  btn.disabled = !graphNodeDeletable(node);
+}
+
+function selectedGraphNode() {
+  if (!state.selectedGraphNodeId || !state.nodes) return null;
+  return state.nodes.get(state.selectedGraphNodeId) || null;
+}
+
+// deleteSelectedGraphNode removes the selected graph node: a memory record
+// via memory.delete, a learned skill via skills.delete. Both paths also
+// refresh the search results and the graph itself.
+async function deleteSelectedGraphNode() {
+  const node = selectedGraphNode();
+  if (!graphNodeDeletable(node)) {
+    toast('This node cannot be deleted from the graph.', 'error', 3000);
+    return;
+  }
+  const label = node.kind === 'memory' ? 'memory record' : 'learned skill';
+  const ok = await confirmDialog(`Delete this ${label}?`, `"${node.name || node.id}" is removed permanently (edges included).`, 'Delete');
+  if (!ok) return;
+  try {
+    if (node.kind === 'memory') {
+      await rpc('memory.delete', { id: node.id });
+    } else {
+      await rpc('skills.delete', { id: node.id });
+    }
+    toast(`${label[0].toUpperCase()}${label.slice(1)} deleted.`, 'success', 2000);
+    state.selectedGraphNodeId = null;
+    syncGraphDeleteButton();
+    await loadGraph({ preservePositions: false });
+    doSearch();
+  } catch (e) {
+    toast(e.message || `Failed to delete ${label}.`, 'error', 4000);
+  }
+}
+
 function initGraph() {
   const container = document.getElementById('learning-graph');
   if (!container) return;
@@ -1260,6 +1447,16 @@ function initGraph() {
     },
   };
   state.network = new Network(container, { nodes: state.nodes, edges: state.edges }, options);
+  // Node selection drives the Delete control. vis-network can emit
+  // deselectNode after click when replacing a selection; click.nodes and
+  // getSelectedNodes() are the source of truth, so a stray deselect cannot
+  // re-disable the button.
+  state.network.on('click', (params) => {
+    const selected = state.network.getSelectedNodes() || [];
+    state.selectedGraphNodeId = selected[0] || (params.nodes && params.nodes[0]) || null;
+    syncGraphDeleteButton();
+  });
+  syncGraphDeleteButton();
   window.addEventListener('nusashell:font-change', () => {
     if (!state.network) return;
     const face = graphFont();
@@ -1295,21 +1492,7 @@ async function loadGraph({ preservePositions = true } = {}) {
     // laid out by the bounded stabilize() below.
     const prevPositions = preservePositions && state.network ? state.network.getPositions() : {};
 
-    const newNodes = keepGraphPositions(sizeGraphNodesByRelations(nodes, edges).map((n) => {
-      const group = n.kind === 'memory' && n.tier === 'user' ? 'memory-user' : n.kind;
-      const relationLabel = `${n.relationCount} relation${n.relationCount === 1 ? '' : 's'}`;
-      return {
-        id: n.id,
-        label: n.name || n.id,
-        group,
-        size: n.size,
-        relationSize: n.size,
-        relationCount: n.relationCount,
-        title: group === 'memory-user'
-          ? `User memory: ${n.name || n.id} • ${relationLabel}`
-          : `${n.name || n.id} • ${relationLabel}`,
-      };
-    }), prevPositions);
+    const newNodes = keepGraphPositions(sizeGraphNodesByRelations(nodes, edges).map(graphVisNodeFromDTO), prevPositions);
 
     const edgeColors = {
       related: GRAPH_PALETTE.deepOcean,

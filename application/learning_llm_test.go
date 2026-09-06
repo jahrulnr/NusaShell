@@ -76,6 +76,41 @@ func TestParseLearnerResultConsolidateWrite(t *testing.T) {
 	}
 }
 
+func TestParseLearnerResultSupersedeWithID(t *testing.T) {
+	text := `{
+		"stage_reached": "consolidate",
+		"consolidate": {
+			"action": "supersede",
+			"entry": {
+				"type": "fact",
+				"content": "file_patch cannot roll back a phantom hunk",
+				"evidence": "user corrected the phantom rollback claim",
+				"supersedes": "mem_phantom_1"
+			}
+		}
+	}`
+	result := parseLearnerResult(text)
+	if result == nil || result.Consolidate == nil {
+		t.Fatalf("parse learner result: %+v", result)
+	}
+	ops := opsFromLearnerConsolidate(result.Consolidate, "job_sup", "exp_sup")
+	if len(ops) != 2 {
+		t.Fatalf("supersede with id must emit contradict+upsert, got %d ops: %+v", len(ops), ops)
+	}
+	if ops[0].Kind != domain.OpMemoryContradict {
+		t.Fatalf("op0 kind=%s, want %s", ops[0].Kind, domain.OpMemoryContradict)
+	}
+	if ops[0].TargetID != "mem_phantom_1" {
+		t.Fatalf("op0 TargetID=%q", ops[0].TargetID)
+	}
+	if payloadString(ops[0].Payload, "id") != "mem_phantom_1" {
+		t.Fatalf("op0 payload id=%v, applier reads Payload[\"id\"]", ops[0].Payload)
+	}
+	if ops[1].Kind != domain.OpMemoryUpsert {
+		t.Fatalf("op1 kind=%s, want upsert of the correction", ops[1].Kind)
+	}
+}
+
 func TestParseLearnerResultNoOpWithoutEvidence(t *testing.T) {
 	text := `{"stage_reached":"consolidate","consolidate":{"action":"write","entry":{"type":"fact","content":"x","evidence":""}}}`
 	result := parseLearnerResult(text)
@@ -291,6 +326,42 @@ func assertPromptIncludes(t *testing.T, prompt string, values []string) {
 	}
 }
 
+func TestLearnerSkillCreatorReference(t *testing.T) {
+	// Live skill store wins.
+	skills := &fakeSkillStore{items: map[string]*domain.Skill{
+		"skill-creator": {
+			ID: "skill-creator", Name: "skill-creator", Origin: domain.SkillOriginBuiltin,
+			Content: "# Create an agent skill\n\nLive copy.",
+		},
+	}}
+	app := &App{DataDir: "/home/u/.config/nusashell", Skills: skills}
+	path, content := app.learnerSkillCreatorReference()
+	if path != "/home/u/.config/nusashell/skills/skill-creator/SKILL.md" {
+		t.Fatalf("path = %q", path)
+	}
+	if !strings.Contains(content, "Live copy.") {
+		t.Fatalf("live store content must win, got %q", content)
+	}
+
+	// Missing live skill falls back to the embedded bundle (never empty in
+	// a shipped binary).
+	app2 := &App{DataDir: "/home/u/.config/nusashell", Skills: &fakeSkillStore{items: map[string]*domain.Skill{}}}
+	path2, content2 := app2.learnerSkillCreatorReference()
+	if path2 == "" || !strings.Contains(content2, "Create an agent skill") {
+		t.Fatalf("embedded fallback missing: path=%q content=%q", path2, content2[:min(len(content2), 60)])
+	}
+
+	// No data dir → no reference.
+	app3 := &App{Skills: skills}
+	if p, c := app3.learnerSkillCreatorReference(); p != "" || c != "" {
+		t.Fatalf("empty dataDir must yield empty reference, got %q %q", p, c)
+	}
+	var nilApp *App
+	if p, c := nilApp.learnerSkillCreatorReference(); p != "" || c != "" {
+		t.Fatalf("nil app must yield empty reference")
+	}
+}
+
 func TestLearningMessageRangeClampsInvalidMarkers(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -449,9 +520,14 @@ func TestConsolidateViaLLMWithProvider(t *testing.T) {
 
 func TestConsolidateViaLLMFallsBackWhenNoProvider(t *testing.T) {
 	// No Providers/Factory set: should fall back to deterministic teachingOps.
+	// The fallback only emits distilled corrections (Desired), so the fixture
+	// carries one; raw user text would (correctly) be rejected by the gate.
 	exp := &domain.Experience{
-		ID:      "exp_fb",
-		Goal:    "remember I prefer Go",
+		ID:   "exp_fb",
+		Goal: "remember this preference",
+		Corrections: []domain.UserCorrection{{
+			Type: "preference", Desired: "User prefers Go for backend work", Explicit: true,
+		}},
 		Signals: domain.ExperienceSignals{ExplicitTeaching: true},
 	}
 	records := &fakeMemoryRecordStore{}

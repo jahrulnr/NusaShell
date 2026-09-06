@@ -31,7 +31,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `memory/soul.md` | always-injected agent document (~1k token cap; first boot copies `resources/templates/soul.md` when missing; agents write via `file_*`; Learning → About Agent) | Markdown |
 | `growth/experiences.jsonl` | experience events recorded at finishTurn | JSONL |
 | `growth/memories.jsonl` | structured MemoryRecord catalog (learner writes; humans retire) | JSONL |
-| `growth/jobs.jsonl` | learning jobs (`learner`, plus legacy `consolidate` / `evolve_skill` / `evaluate` / `retire_stale`) | JSONL |
+| `growth/jobs.jsonl` | learning jobs (`learner`, plus legacy `consolidate` / `evolve_skill` / `evaluate` / `retire_stale`). Finished jobs carry `llm_conversation_id` pointing at the persisted LLM transcript | JSONL |
 | `growth/operations.jsonl` | typed learning-operation audit | JSONL |
 | `memory_project/{key}/` | per-workspace project memory (`index.md`, `guardrails.md`, … plus `archive/` and `scripts/`). Default base; override with Settings → Project memory (`project_memory_base`, for example `~/.memory`) | Markdown |
 | `learning/edges.jsonl` | learning edges: content/embedding and metadata `related` links, plus `used_with` links for nodes observed together in one agent turn; stale endpoints are pruned during graph rebuild | JSONL |

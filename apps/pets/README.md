@@ -58,7 +58,7 @@ Konfigurasi minimal:
   "spritesheet": "spritesheet.webp",
   "max_width": 192,
   "max_height": 208,
-  "ws_url": "ws://127.0.0.1:9999/ws",
+  "ws_url": "ws://127.0.0.1:10994/ws",
   "electron_path": "",
   "event_delay": 1.0,
   "click_through": false,
@@ -178,7 +178,7 @@ TCP ke host WebSocket (`ws_url`), electron dicek lewat proses
   ikut membawa backend miliknya sendiri);
 - jika electron tidak terinstall dan backend golang sedang jalan → fallback
   **web**: browser default dibuka ke frontend (`ws_url` dikonversi ke
-  `http`, default `http://127.0.0.1:9999/`);
+  `http`, default `http://127.0.0.1:10994/`);
 - jika electron dan golang **tidak** sedang jalan → klik tidak mentrigger
   apa pun; pet tidak pernah menyalakan golang maupun electron dari nol;
 - drag hanya aktif selama tombol kiri masih di-hold, memindahkan pet dan

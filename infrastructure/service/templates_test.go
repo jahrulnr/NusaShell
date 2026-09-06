@@ -180,14 +180,14 @@ func TestServiceEnvList(t *testing.T) {
 }
 
 func TestServiceEnvCheckedPropagatesOverrides(t *testing.T) {
-	opts := Options{BinaryPath: "/x", DataDir: "/d", Host: "127.0.0.1", Port: "9999", AllowRemote: true}
+	opts := Options{BinaryPath: "/x", DataDir: "/d", Host: "127.0.0.1", Port: "10994", AllowRemote: true}
 	env, _ := ServiceEnvChecked(opts)
 	joined := strings.Join(env, "\n")
 	for _, want := range []string{
 		"NUSASHELL_SERVICE=1",
 		"NUSASHELL_DATA_DIR=/d",
 		"NUSASHELL_HOST=127.0.0.1",
-		"NUSASHELL_PORT=9999",
+		"NUSASHELL_PORT=10994",
 		"NUSASHELL_ALLOW_REMOTE=1",
 	} {
 		if !strings.Contains(joined, want) {

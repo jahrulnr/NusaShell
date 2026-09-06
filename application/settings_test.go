@@ -204,6 +204,41 @@ func TestHandleSettingsSetLearnerNudgeInterval(t *testing.T) {
 	}
 }
 
+func TestHandleSettingsSetPetsAutoStart(t *testing.T) {
+	app := &App{Settings: &memSettingsStore{s: domain.DefaultSettings()}, Logs: &fakeLogStore{}}
+
+	if dto := settingsDTO(app.Settings.Get()); dto.PetsAutoStart {
+		t.Fatal("default PetsAutoStart = true, want false")
+	}
+
+	on := true
+	got, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{PetsAutoStart: &on})
+	if rpcErr != nil {
+		t.Fatalf("set pets_auto_start=true: %v", rpcErr.Message)
+	}
+	if !app.Settings.Get().PetsAutoStart {
+		t.Fatal("PetsAutoStart after set = false, want true")
+	}
+	res, ok := got.(contracts.SettingsGetResult)
+	if !ok {
+		t.Fatalf("set result type = %T, want SettingsGetResult", got)
+	}
+	if !res.Settings.PetsAutoStart {
+		t.Fatal("settings.set result pets_auto_start = false, want true")
+	}
+	if dto := settingsDTO(app.Settings.Get()); !dto.PetsAutoStart {
+		t.Fatal("settingsDTO.PetsAutoStart = false, want true")
+	}
+
+	off := false
+	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{PetsAutoStart: &off}); rpcErr != nil {
+		t.Fatalf("set pets_auto_start=false: %v", rpcErr.Message)
+	}
+	if app.Settings.Get().PetsAutoStart {
+		t.Fatal("PetsAutoStart after clear = true, want false")
+	}
+}
+
 func TestLearnerNudgeIntervalUsesSettings(t *testing.T) {
 	app := &App{}
 	if got := app.learnerNudgeInterval(); got != domain.DefaultLearnerNudgeInterval {

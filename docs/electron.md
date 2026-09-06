@@ -57,7 +57,7 @@ and UI-test process. `package` and `dist` do not depend on
 For an already-running loopback server:
 
 ```bash
-NUSASHELL_ELECTRON_URL=http://127.0.0.1:9999/ npm --prefix apps/electron run dev
+NUSASHELL_ELECTRON_URL=http://127.0.0.1:10994/ npm --prefix apps/electron run dev
 ```
 
 For a custom core binary:

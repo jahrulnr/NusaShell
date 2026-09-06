@@ -83,6 +83,62 @@ func (r *TrajectoryRecorder) Close() error {
 	return r.file.Close()
 }
 
+// DeleteEvents rewrites the trajectory log without events matching the
+// predicate, and returns the `llm_conversation_id` values of the removed
+// events so callers can also delete the transcripts. Best-effort: a log
+// that cannot be rewritten is left untouched. The append handle is
+// reopened against the rewritten file so subsequent records keep landing
+// in the log.
+func (r *TrajectoryRecorder) DeleteEvents(match func(TrajectoryEvent) bool) []string {
+	if r == nil || r.file == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	path := r.file.Name()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	kept := make([]string, 0, len(lines))
+	var transcripts []string
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var ev TrajectoryEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			kept = append(kept, line)
+			continue
+		}
+		if match(ev) {
+			if id := detailString(ev.Detail, "llm_conversation_id"); id != "" {
+				transcripts = append(transcripts, id)
+			}
+			continue
+		}
+		kept = append(kept, line)
+	}
+
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(strings.Join(kept, "\n")+"\n"), 0o644); err != nil {
+		return nil
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return nil
+	}
+	_ = r.file.Close()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		r.file = nil
+		return transcripts
+	}
+	r.file = f
+	return transcripts
+}
+
 // trajectoryFileName is the trajectory log path inside a data directory.
 func trajectoryFileName(dataDir string) string {
 	return filepath.Join(dataDir, "learning", "trajectory.jsonl")

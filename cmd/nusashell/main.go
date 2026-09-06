@@ -116,7 +116,7 @@ func seedProvidersCmd() error {
 
 func run() error {
 	host := envOr("NUSASHELL_HOST", "127.0.0.1")
-	port := envOr("NUSASHELL_PORT", "9999")
+	port := envOr("NUSASHELL_PORT", "10994")
 	dataDir := envOr("NUSASHELL_DATA_DIR", defaultDataDir())
 	dev := os.Getenv("NUSASHELL_DEV") != ""
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,6 +49,19 @@ func (s *fakeLearningJobStore) Save(j *domain.LearningJob) error {
 		s.items = map[string]*domain.LearningJob{}
 	}
 	s.items[j.ID] = j
+	return nil
+}
+
+func (s *fakeLearningJobStore) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.items == nil {
+		return fmt.Errorf("learning job %s not found", id)
+	}
+	if _, ok := s.items[id]; !ok {
+		return fmt.Errorf("learning job %s not found", id)
+	}
+	delete(s.items, id)
 	return nil
 }
 
@@ -187,6 +201,14 @@ func TestRunLearningJobRecordsLLMConversationInTrajectory(t *testing.T) {
 	snippet, _ := first["snippet"].(string)
 	if !strings.Contains(strings.ToLower(snippet), "gofmt") {
 		t.Errorf("mutation snippet = %v, want the saved body", first["snippet"])
+	}
+
+	saved, err := jobs.Get("job_llm_2")
+	if err != nil || saved == nil {
+		t.Fatalf("saved job: %v", err)
+	}
+	if saved.LLMConversationID != "conv_llm_2" {
+		t.Fatalf("job llm_conversation_id = %q, want conv_llm_2", saved.LLMConversationID)
 	}
 }
 

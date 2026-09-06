@@ -18,12 +18,14 @@ type fakeVisionAdapter struct {
 	// their output in Reasoning instead of Content.
 	reasoningOnly bool
 	calls         int
+	lastReq       *core.Request
 }
 
 func (f *fakeVisionAdapter) Name() string { return "fake-vision" }
 
-func (f *fakeVisionAdapter) Chat(_ context.Context, _ *core.Request) (*core.Response, error) {
+func (f *fakeVisionAdapter) Chat(_ context.Context, req *core.Request) (*core.Response, error) {
 	f.calls++
+	f.lastReq = req
 	resp := &core.Response{FinishReason: core.FinishReasonStop}
 	if f.reasoningOnly {
 		resp.Blocks = append(resp.Blocks, core.ReasoningBlock{Text: f.description})
@@ -302,5 +304,35 @@ func TestEnrichWithVisionDescriptionsSkipsWhenAlreadyDescribed(t *testing.T) {
 	}
 	if nDesc != 1 {
 		t.Fatalf("description attachments = %d, want 1", nDesc)
+	}
+}
+
+// TestDescribeImagesWithFallbackUsesResolvedMaxOutput is the 400-token
+// truncation bug: describeOneImage hardcoded MaxTokens=400, which cut off
+// UI descriptions (and reasoning-model thinking) even though the user
+// prompt's "400 words" is only a soft hint. The fallback must use the
+// same ResolveMaxOutput ceiling as a normal completion.
+func TestDescribeImagesWithFallbackUsesResolvedMaxOutput(t *testing.T) {
+	adapter := &fakeVisionAdapter{description: "a detailed UI screenshot"}
+	app := visionFallbackTestApp(adapter, nil)
+	settings := domain.Settings{
+		VisionProviderID: "vision-prov",
+		VisionModelID:    "gpt-4o",
+		MaxOutputTokens:  8192,
+	}
+	atts := []domain.Attachment{
+		{Type: "image", Name: "ui.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
+	}
+	_ = app.describeImagesWithFallback(context.Background(), settings, atts)
+	if adapter.lastReq == nil {
+		t.Fatal("expected vision Chat to be called")
+	}
+	got := 0
+	if adapter.lastReq.MaxTokens != nil {
+		got = *adapter.lastReq.MaxTokens
+	}
+	want := domain.ResolveMaxOutput(&domain.Provider{ID: "vision-prov", Enabled: true, Kind: domain.ProviderChat}, "gpt-4o", settings)
+	if got != want {
+		t.Fatalf("MaxTokens=%d, want resolved max output %d (not a hardcoded 400)", got, want)
 	}
 }

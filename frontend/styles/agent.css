@@ -377,7 +377,7 @@
 /* ============ Messages & bubbles ============ */
 .agent-bubble {
   min-width: 0;
-  max-width: 100%;
+  max-width: 80%;
   padding: 11px 13px;
   border-radius: 11px;
   color: var(--text);
@@ -386,7 +386,7 @@
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
-.agent-message.user .agent-bubble { background: var(--accent-soft); border-color: var(--accent-border); color: var(--text); border-bottom-right-radius: 3px; font-weight: 500; white-space: normal; }
+.agent-message.user .agent-bubble { background: var(--accent-soft); border-color: var(--accent-border); color: var(--text); border-bottom-right-radius: 3px; white-space: normal; }
 .agent-message.assistant .agent-bubble { white-space: normal; }
 .agent-message.assistant .agent-bubble > :first-child { margin-top: 0; }
 .agent-message.assistant .agent-bubble > :last-child { margin-bottom: 0; margin-top: 1rem; }

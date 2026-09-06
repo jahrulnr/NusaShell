@@ -100,6 +100,17 @@ func (e *Experiences) ListByConversation(conversationID string) []*domain.Experi
 	return out
 }
 
+func (e *Experiences) Delete(id string) error {
+	next, err := removeSlice(e.S, e.S.experiences, id, func(x *domain.Experience) string { return x.ID }, "experience", func(items []*domain.Experience) error {
+		return e.S.writeJSONL(growthExperiencesFile, items)
+	})
+	if err != nil {
+		return err
+	}
+	e.S.experiences = next
+	return nil
+}
+
 // MemoryRecords adapter.
 
 type MemoryRecords struct{ S *Store }
@@ -147,6 +158,17 @@ func (j *LearningJobs) Save(v *domain.LearningJob) error {
 		return fmt.Errorf("job id required")
 	}
 	return upsertJSONL(j.S, &j.S.learningJobs, v, func(x *domain.LearningJob) string { return x.ID }, growthJobsFile)
+}
+
+func (j *LearningJobs) Delete(id string) error {
+	next, err := removeSlice(j.S, j.S.learningJobs, id, func(x *domain.LearningJob) string { return x.ID }, "learning job", func(items []*domain.LearningJob) error {
+		return j.S.writeJSONL(growthJobsFile, items)
+	})
+	if err != nil {
+		return err
+	}
+	j.S.learningJobs = next
+	return nil
 }
 
 // LearningOps adapter.

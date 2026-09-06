@@ -143,7 +143,9 @@ func ProcedureFingerprint(actions []ExperienceAction) string {
 
 // CountUnreviewedLearningProgress counts user turns and assistant tool-loop
 // rounds in messages[start:]. Tool iterations are assistant messages that
-// issued at least one tool call, matching Hermes's per-API-round counter.
+// issued at least one real tool call (hydration checkpoints and harness
+// injections such as announcements do not count), matching Hermes's
+// per-API-round counter.
 func CountUnreviewedLearningProgress(messages []Message, start int) (userTurns, toolIters int) {
 	if start < 0 {
 		start = 0
@@ -161,12 +163,29 @@ func CountUnreviewedLearningProgress(messages []Message, start int) (userTurns, 
 				userTurns++
 			}
 		case RoleAssistant:
-			if len(msg.ToolCalls) > 0 {
+			if hasRealToolIteration(msg.ToolCalls) {
 				toolIters++
 			}
 		}
 	}
 	return userTurns, toolIters
+}
+
+// hasRealToolIteration reports whether at least one tool call in the round
+// is agent work rather than injected runtime activity. Rounds that only
+// carried hydration checkpoints or harness announcements are skipped so the
+// periodic nudge fires on real work, not on injected noise.
+func hasRealToolIteration(toolCalls []ToolCall) bool {
+	for _, tc := range toolCalls {
+		if IsHydrationCallID(tc.ID) {
+			continue
+		}
+		if IsHarnessToolCall(tc.Name) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // DecideLearningTrigger applies language-agnostic spawn rules. Headless

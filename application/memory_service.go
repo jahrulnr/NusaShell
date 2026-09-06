@@ -3,8 +3,8 @@ package application
 import (
 	"fmt"
 	"strings"
-
 	"time"
+	"unicode/utf8"
 
 	"nusashell/domain"
 	clock "nusashell/pkg/time"
@@ -42,6 +42,13 @@ func (s *MemoryService) Apply(op *domain.LearningOperation) error {
 			s.saveOp(op)
 			return err
 		}
+		if existing, gerr := s.records.Get(rec.ID); gerr == nil && existing != nil && existing.Retrievable() {
+			// The upsert targets an existing record (prepared by the near-
+			// duplicate matcher). Merge instead of creating a parallel copy:
+			// keep the original creation date and type, fold in the new
+			// evidence, and append only genuinely new body text.
+			rec = mergeIntoExisting(existing, rec, now)
+		}
 		if err := s.records.Save(rec); err != nil {
 			op.Status = domain.LearningOpRejected
 			op.Reason = err.Error()
@@ -52,7 +59,7 @@ func (s *MemoryService) Apply(op *domain.LearningOperation) error {
 		op.TargetType = "memory"
 		op.Status = domain.LearningOpAccepted
 	case domain.OpMemoryStrengthen:
-		id := payloadString(op.Payload, "id")
+		id := memoryOpTargetID(op)
 		rec, err := s.records.Get(id)
 		if err != nil {
 			op.Status = domain.LearningOpRejected
@@ -75,7 +82,7 @@ func (s *MemoryService) Apply(op *domain.LearningOperation) error {
 		op.TargetID = rec.ID
 		op.Status = domain.LearningOpAccepted
 	case domain.OpMemoryRetire, domain.OpMemoryContradict:
-		id := payloadString(op.Payload, "id")
+		id := memoryOpTargetID(op)
 		rec, err := s.records.Get(id)
 		if err != nil {
 			op.Status = domain.LearningOpRejected
@@ -141,6 +148,83 @@ func (s *MemoryService) saveOp(op *domain.LearningOperation) {
 	}
 }
 
+// Reject records a proposed operation that failed the durability gate as
+// rejected, without applying any catalog change. The operation stays in the
+// operations log (audit trail) with its reason.
+func (s *MemoryService) Reject(op *domain.LearningOperation, reason string) {
+	if op == nil {
+		return
+	}
+	op.Status = domain.LearningOpRejected
+	op.Reason = reason
+	if op.CreatedAt.IsZero() {
+		op.CreatedAt = clock.NewTime().Time()
+	}
+	s.saveOp(op)
+}
+
+// maxMemoryBodyRunes caps the merged body of a memory record. Bodies beyond
+// the cap keep only the original text plus a pointer to the appended
+// evidence ids, so the APPLY block never sees an unbounded mega-record.
+const maxMemoryBodyRunes = 1000
+
+// mergeIntoExisting folds a fresh upsert into the record it targets: the
+// original creation date, status, and scope win; evidence and supporting
+// experiences accumulate; body text is appended only when it is new and the
+// merged size stays within budget.
+func mergeIntoExisting(existing, incoming *domain.MemoryRecord, now time.Time) *domain.MemoryRecord {
+	merged := existing
+	merged.Body = mergeMemoryBodies(existing.Body, incoming.Body)
+	merged.EvidenceCount = existing.EvidenceCount + incoming.EvidenceCount
+	merged.SupportingExperiences = appendUnique(existing.SupportingExperiences, incoming.SupportingExperiences...)
+	merged.LastConfirmed = now
+	domain.NormalizeMemoryRecord(merged, now)
+	return merged
+}
+
+func mergeMemoryBodies(existing, incoming string) string {
+	existing = strings.TrimSpace(existing)
+	incoming = strings.TrimSpace(incoming)
+	if existing == "" {
+		return incoming
+	}
+	if incoming == "" {
+		return existing
+	}
+	if strings.Contains(existing, incoming) || strings.Contains(incoming, existing) {
+		return existing
+	}
+	if utf8.RuneCountInString(existing)+utf8.RuneCountInString(incoming) > maxMemoryBodyRunes {
+		// The existing record is authoritative at the cap; the new text is
+		// still represented by the appended evidence.
+		return existing
+	}
+	return existing + "\n" + incoming
+}
+
+func appendUnique(base []string, extra ...string) []string {
+	out := make([]string, 0, len(base)+len(extra))
+	seen := make(map[string]struct{}, len(base)+len(extra))
+	for _, s := range base {
+		if s == "" {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	for _, s := range extra {
+		if s == "" {
+			continue
+		}
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
 func recordFromPayload(op *domain.LearningOperation, now time.Time) (*domain.MemoryRecord, error) {
 	body := payloadString(op.Payload, "body")
 	if body == "" {
@@ -186,4 +270,18 @@ func payloadString(payload map[string]any, key string) string {
 	}
 	s, _ := v.(string)
 	return strings.TrimSpace(s)
+}
+
+// memoryOpTargetID is the record id a strengthen/retire/contradict op
+// targets. Learner supersede historically wrote the id on TargetID and left
+// Payload nil; Apply used to read only Payload["id"], so every supersede
+// looked up "" and was rejected. Prefer payload, then TargetID.
+func memoryOpTargetID(op *domain.LearningOperation) string {
+	if op == nil {
+		return ""
+	}
+	if id := payloadString(op.Payload, "id"); id != "" {
+		return id
+	}
+	return strings.TrimSpace(op.TargetID)
 }

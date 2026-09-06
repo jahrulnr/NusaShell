@@ -56,18 +56,19 @@ const (
 // upsert-by-id. Spawn is Hermes-style: structural signals or a periodic
 // unreviewed-turn / tool-iteration nudge, never keyword matching.
 type LearningJob struct {
-	ID           string           `json:"id"`
-	Kind         string           `json:"kind"`
-	ExperienceID string           `json:"experience_id,omitempty"`
-	SkillID      string           `json:"skill_id,omitempty"`
-	Reason       string           `json:"reason"`
-	Priority     LearningPriority `json:"priority"`
-	Status       string           `json:"status"`
-	Error        string           `json:"error,omitempty"`
-	CreatedAt    time.Time        `json:"created_at"`
-	StartedAt    *time.Time       `json:"started_at,omitempty"`
-	FinishedAt   *time.Time       `json:"finished_at,omitempty"`
-	Revision     int              `json:"revision,omitempty"`
+	ID                string           `json:"id"`
+	Kind              string           `json:"kind"`
+	ExperienceID      string           `json:"experience_id,omitempty"`
+	SkillID           string           `json:"skill_id,omitempty"`
+	Reason            string           `json:"reason"`
+	Priority          LearningPriority `json:"priority"`
+	Status            string           `json:"status"`
+	Error             string           `json:"error,omitempty"`
+	CreatedAt         time.Time        `json:"created_at"`
+	StartedAt         *time.Time       `json:"started_at,omitempty"`
+	FinishedAt        *time.Time       `json:"finished_at,omitempty"`
+	Revision          int              `json:"revision,omitempty"`
+	LLMConversationID string           `json:"llm_conversation_id,omitempty"`
 }
 
 // LearningOperation is a typed write the LLM proposed. The runtime decides

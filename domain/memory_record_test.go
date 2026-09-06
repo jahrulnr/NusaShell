@@ -35,6 +35,41 @@ func TestNormalizeMemoryRecordDefaults(t *testing.T) {
 	}
 }
 
+func TestMemoryQueryMatchesAllTokens(t *testing.T) {
+	hay := "file_patch cannot apply a phantom hunk; use git rollback instead"
+	if !MemoryQueryMatches(hay, "phantom patch rollback") {
+		t.Fatal("multi-word query must match when every token appears, even non-contiguously")
+	}
+	if MemoryQueryMatches(hay, "phantom patch spaceship") {
+		t.Fatal("AND match must reject a missing token")
+	}
+	if !MemoryQueryMatches(hay, "phantom hunk") {
+		t.Fatal("contiguous phrase must still match")
+	}
+	if MemoryQueryMatches(hay, "golang") {
+		t.Fatal("unrelated single token must not match")
+	}
+	if !MemoryQueryMatches(hay, "") {
+		t.Fatal("empty query is unconstrained")
+	}
+}
+
+func TestMemoryRecordMatchesQueryTokens(t *testing.T) {
+	rec := &MemoryRecord{
+		ID:     "mem_1",
+		Type:   MemoryTypeFact,
+		Body:   "file_patch cannot apply a phantom hunk; use git rollback instead",
+		Status: MemoryStatusLearned,
+	}
+	if !rec.Matches(MemorySearchFilter{Query: "phantom patch rollback"}) {
+		t.Fatal("retrievable record must match token AND query")
+	}
+	retired := &MemoryRecord{ID: "mem_r", Body: "phantom patch rollback", Status: MemoryStatusRetired}
+	if retired.Matches(MemorySearchFilter{Query: "phantom"}) {
+		t.Fatal("retired records must stay out of default search")
+	}
+}
+
 func TestPolicyRankOrder(t *testing.T) {
 	if PolicyRank("explicit_local") >= PolicyRank("stable_preference") {
 		t.Fatal("explicit local must outrank stable preference")

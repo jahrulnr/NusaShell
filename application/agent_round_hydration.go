@@ -252,6 +252,13 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	if a.Agent != nil {
 		source.AgentPath = a.Agent.Path()
 	}
+	// Background learner turns get the skill-creator authoring reference
+	// forced into the checkpoint as a direct file_read slot: evaluate/evolve
+	// (Stage 2/3) must follow it without spending tool rounds searching for
+	// it. Live store first, embedded bundle as the guaranteed fallback.
+	if c.Type == domain.ConversationTypeBackground {
+		source.SkillCreatorPath, source.SkillCreatorContent = a.learnerSkillCreatorReference()
+	}
 	if a.Todos != nil {
 		source.Todos = a.Todos
 		source.ConvID = c.ID

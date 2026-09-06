@@ -222,7 +222,8 @@ Ops per family:
   After discovery, read the selected absolute `SKILL.md` with `file_read`
   before applying it (see `docs(op="read", id="skills")`).
 - `memory`: `search {query,type?,status?,scope?,project?,limit?}` over
-  retrievable records; `get {id}`; `list` with the same filters. This
+  retrievable records (multi-word terms need not be a contiguous phrase;
+  every term must appear); `get {id}`; `list` with the same filters. This
   dispatcher does not write. Write `user.md` / `soul.md` with `file_patch`
   or `file_write` on the absolute `{dataDir}/memory/` paths. Teaching and
   corrections are also recorded as experiences; the learner commits catalog

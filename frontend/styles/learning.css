@@ -936,6 +936,38 @@
   line-height: 1.45;
 }
 
+/* Per-item delete controls: experience rows, learning log entries. */
+.learning-card-delete,
+.learning-log-delete {
+  margin-left: auto;
+  padding: 0 5px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1.2;
+  cursor: pointer;
+  user-select: none;
+}
+.learning-card-delete:hover,
+.learning-log-delete:hover {
+  background: var(--red-border);
+  color: var(--red-bright);
+}
+
+.learning-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 2px;
+}
+.learning-pagination-info {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
 @media (max-width: 900px) {
   .learning-catalog-grid {
     grid-template-columns: 1fr;

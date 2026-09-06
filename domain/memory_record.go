@@ -82,6 +82,58 @@ type MemorySearchFilter struct {
 	IncludeRetired bool
 }
 
+// MemoryQueryMatches reports whether haystack contains query. A contiguous
+// phrase still matches; multi-word queries also match when every token
+// appears somewhere in haystack (order-independent AND). Empty query matches
+// everything so filters can omit it.
+func MemoryQueryMatches(haystack, query string) bool {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return true
+	}
+	hay := strings.ToLower(haystack)
+	if strings.Contains(hay, q) {
+		return true
+	}
+	tokens := strings.Fields(q)
+	if len(tokens) <= 1 {
+		return false
+	}
+	for _, tok := range tokens {
+		if !strings.Contains(hay, tok) {
+			return false
+		}
+	}
+	return true
+}
+
+// Matches reports whether the record satisfies filter. Non-empty fields AND.
+func (m *MemoryRecord) Matches(filter MemorySearchFilter) bool {
+	if m == nil {
+		return false
+	}
+	if !filter.IncludeRetired && !m.Retrievable() {
+		return false
+	}
+	if filter.Type != "" && m.Type != filter.Type {
+		return false
+	}
+	if filter.Status != "" && m.Status != filter.Status {
+		return false
+	}
+	if filter.Scope != "" && m.Scope.Level != filter.Scope {
+		return false
+	}
+	if filter.Project != "" && !strings.EqualFold(m.Scope.Project, filter.Project) {
+		return false
+	}
+	if strings.TrimSpace(filter.Query) == "" {
+		return true
+	}
+	hay := strings.Join([]string{m.Body, m.Subject, m.Predicate, m.Object, m.Type}, " ")
+	return MemoryQueryMatches(hay, filter.Query)
+}
+
 // ValidMemoryType reports whether t is a known record type.
 func ValidMemoryType(t string) bool {
 	switch t {

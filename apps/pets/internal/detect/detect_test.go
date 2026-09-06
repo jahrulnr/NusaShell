@@ -159,7 +159,7 @@ func TestBackendAddrFromWebSocketURL(t *testing.T) {
 		wsURL string
 		want  string
 	}{
-		{"ws://127.0.0.1:9999/ws", "127.0.0.1:9999"},
+		{"ws://127.0.0.1:10994/ws", "127.0.0.1:10994"},
 		{"wss://host.example:8443/ws", "host.example:8443"},
 		{"ws://localhost:1234", "localhost:1234"},
 		{"", DefaultBackendAddr},
@@ -179,11 +179,11 @@ func TestGoRunningProbesWebSocketHost(t *testing.T) {
 		gotAddr = address
 		return nil, os.ErrNotExist
 	}
-	if GoRunning("ws://127.0.0.1:9999/ws", dial) {
+	if GoRunning("ws://127.0.0.1:10994/ws", dial) {
 		t.Fatal("dial error must report not running")
 	}
-	if gotAddr != "127.0.0.1:9999" {
-		t.Fatalf("dialed %q, want 127.0.0.1:9999", gotAddr)
+	if gotAddr != "127.0.0.1:10994" {
+		t.Fatalf("dialed %q, want 127.0.0.1:10994", gotAddr)
 	}
 }
 

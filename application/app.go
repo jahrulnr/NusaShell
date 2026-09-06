@@ -406,6 +406,10 @@ func NewApp(deps Deps) *App {
 		app.lifecycle = NewLifecycleManager(deps.MemoryRecords, deps.Skills, domain.DefaultLifecycleConfig())
 		app.lifecycle.SetLogger(app.log)
 	}
+	// Reconcile learning jobs abandoned by a previous instance's restart:
+	// stale "running"/"queued" rows become error so the UI shows the truth
+	// and later spawns are not shadowed by ghost jobs.
+	app.RecoverStaleLearningJobs()
 	if deps.DataDir != "" {
 		if cache, err := jsonstore.NewEmbeddingCache(deps.DataDir); err == nil {
 			app.EmbeddingCache = cache
