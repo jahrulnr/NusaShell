@@ -4,7 +4,8 @@ import { rpc, on, emit } from '../rpc.js';
 import { el, fmtTime, toast, confirmDialog, debounce } from '../ui.js';
 import { renderMarkdown } from '../markdown.js';
 import { incrementalRender } from '../incremental-render.js';
-import { estimateContextTokens, formatContextUsage, effectiveContextWindow, previousWindowStart, conversationTail, isThreadAtBottom, updateScrollPin } from '../agent-ui.js';
+import { estimateContextTokens, formatContextUsage, effectiveContextWindow, previousWindowStart, conversationTail, isThreadAtBottom, updateScrollPin, shouldDetachFollow, isNestedScrollerEvent } from '../agent-ui.js';
+import { createThreadFollow, stickThreadToBottom } from '../thread-follow.js';
 import { bindComposer, updateSendAvailability } from './agent/composer.js';
 import { bindModelPicker } from './agent/model-picker.js';
 import { bindRoutePicker } from './agent/route-picker.js';
@@ -58,7 +59,7 @@ import { highlightCode } from '../highlight-render.js';
 import { attachZoomButtons } from '../media-zoom.js';
 import { parseArtifactOutput } from '../artifact-render.js';
 import { createAskCard, sealAskCard, cancelAskCard } from './ask-card.js';
-import { playComplete, playError, playAsk } from '../sounds.js';
+import { playComplete, playError, playAsk, shouldPlayAgentTurnSound } from '../sounds.js';
 import { loadToolContracts, normalizeToolCall } from './agent/tool-contracts.js';
 
 // placeToolCard appends a tool card to the right container: standalone cards
@@ -167,7 +168,6 @@ const state = {
 const MAX_LIVE_TOOL_JOBS = 128;
 const ACTIVITY_ROTATE_MS = 5000;
 const SCROLL_TOLERANCE = 24;
-const FOLLOW_SETTLE_FRAMES = 3;
 const INITIAL_SCROLL_SETTLE_FRAMES = 8;
 
 const THREAD_SCROLL_EVENTS = Object.freeze({
@@ -178,10 +178,6 @@ const THREAD_SCROLL_EVENTS = Object.freeze({
   touchUp: 'agent.touch.up',
 });
 
-let followFrame = null;
-let followThread = null;
-let followFrames = 0;
-let followSequence = 0;
 let initialScrollSequence = 0;
 let scrollBinding = null;
 
@@ -236,6 +232,9 @@ function syncAgentActivity(run, rotate = false) {
     if (run.activityTimer) clearInterval(run.activityTimer);
     run.activityTimer = null;
     if (run.activityNode) setAgentActivityStatus(run.activityNode, { visible: false });
+    // Hiding the status shrinks the live bubble. Follow that geometry so
+    // the row cannot leave a hole above the composer.
+    if (run.conversationId === state.activeId) scrollToBottom();
     return;
   }
   const status = ensureAgentActivityStatus(run);
@@ -260,6 +259,10 @@ function syncAgentActivity(run, rotate = false) {
   if (!run.activityTimer) {
     run.activityTimer = setInterval(() => syncAgentActivity(run, true), ACTIVITY_ROTATE_MS);
   }
+  // Showing or moving .agent-activity-status grows the last message. That
+  // used to shove a flex end-marker toward the composer; stick to the new
+  // content end instead. Copy rotation does not change layout.
+  if (!rotate && run.conversationId === state.activeId) scrollToBottom();
 }
 
 function stopAgentActivity(run) {
@@ -651,6 +654,10 @@ function applyRoundDeltaFrame(run, frame) {
         if (run.conversationId === state.activeId) syncRunLoadingIndicator(run);
         break;
       }
+      if (frame.name === 'ask_question') {
+        if (run.conversationId === state.activeId) syncRunLoadingIndicator(run);
+        break;
+      }
       if (run.conversationId !== state.activeId) break;
       sealReasoningStreaming(run.reasoningEl);
       ensureLiveToolJob(run, frame.tool_call_id, frame.name, frame.args, frame.presentation);
@@ -766,6 +773,10 @@ function ensureLiveToolJob(run, toolCallId, name, args, presentation) {
   // runs. Wait/result calls only unblock or inform the provider and must not
   // create a second terminal row in the visible transcript.
   if (isSubagentAuxiliaryTool(name)) return null;
+  // ask_question is a standalone card created by agent.ask.pending /
+  // restorePendingAsks. Round-stream tool frames must not mount a terminal
+  // or patch presentation.request onto the human question.
+  if (name === 'ask_question') return null;
   if (args != null) run.toolArgs.set(toolCallId, args);
   const existing = run.toolJobs.get(toolCallId);
   if (existing) {
@@ -861,14 +872,6 @@ function applyConversationTail() {
 // back, it's restored. This prevents state from one room leaking into another.
 const savedRooms = new Map(); // conversationId -> { pinned, steerDraft, attachments, model }
 
-const THREAD_END_MARKER_ID = 'agent-thread-end-marker';
-let threadEndMarker = null;
-let threadEndMarkerThread = null;
-let threadEndObserver = null;
-let threadEndObserverThread = null;
-let threadMutationObserver = null;
-let threadMutationObserverThread = null;
-
 function scheduleFrame(thread, callback) {
   const view = thread?.ownerDocument?.defaultView;
   const raf = view?.requestAnimationFrame || globalThis.requestAnimationFrame;
@@ -886,6 +889,15 @@ function scheduleFrame(thread, callback) {
   return { id, cancel: () => clearTimeout(id) };
 }
 
+const threadFollow = createThreadFollow({
+  getThread: agentThread,
+  isFollowing: () => state.pinned && !state.followDetached,
+  onStick(thread) {
+    state.pinGeom = { thread, scrollTop: thread.scrollTop };
+  },
+  scheduleFrame,
+});
+
 function emitThreadScrollEvent(thread, type, detail = {}) {
   const EventCtor = thread?.ownerDocument?.defaultView?.CustomEvent || globalThis.CustomEvent;
   if (typeof EventCtor !== 'function' || typeof thread?.dispatchEvent !== 'function') return;
@@ -893,11 +905,7 @@ function emitThreadScrollEvent(thread, type, detail = {}) {
 }
 
 function cancelScheduledFollow() {
-  followSequence++;
-  followFrame?.cancel?.();
-  followFrame = null;
-  followThread = null;
-  followFrames = 0;
+  threadFollow.cancel();
 }
 
 function cancelInitialScroll() {
@@ -942,94 +950,15 @@ function scrollDirectionFromGeometry(thread) {
   return '';
 }
 
-function startAutoFollow(thread, source = 'marker') {
+function startAutoFollow(thread, source = 'geometry') {
   if (!thread || state.followDetached) return false;
   const wasPinned = state.pinned;
   state.pinned = true;
   if (!wasPinned) {
     emitThreadScrollEvent(thread, THREAD_SCROLL_EVENTS.autoFollowStart, { source });
   }
+  threadFollow.nudge();
   return true;
-}
-
-function observerConstructor(thread, name) {
-  return thread?.ownerDocument?.defaultView?.[name] || globalThis[name];
-}
-
-// Keep a tiny, invisible node at the end of the outer transcript. Its
-// intersection is the authoritative visual signal for whether the user is
-// still following the live tail. The marker is deliberately maintained here,
-// rather than in render.js, because every append/replace path in this view
-// must keep the scroll anchor after the newest content.
-function ensureThreadEndMarker() {
-  const thread = agentThread();
-  if (!thread) return null;
-
-  let marker = threadEndMarker?.parentElement === thread ? threadEndMarker : null;
-  if (!marker) {
-    marker = [...thread.children].find((child) => child.id === THREAD_END_MARKER_ID) || null;
-  }
-  if (!marker) {
-    marker = el('div', {
-      id: THREAD_END_MARKER_ID,
-      class: 'agent-thread-end-marker',
-      'aria-hidden': 'true',
-    });
-  }
-  if (marker.parentElement !== thread || thread.lastElementChild !== marker) {
-    thread.append(marker);
-  }
-
-  if (threadEndObserver && (threadEndObserverThread !== thread || threadEndMarker !== marker)) {
-    threadEndObserver.disconnect();
-    threadEndObserver = null;
-    threadEndObserverThread = null;
-  }
-  threadEndMarker = marker;
-  threadEndMarkerThread = thread;
-  if (!threadEndObserver) {
-    const IntersectionObserverCtor = observerConstructor(thread, 'IntersectionObserver');
-    if (typeof IntersectionObserverCtor === 'function') {
-      threadEndObserver = new IntersectionObserverCtor(([entry]) => {
-        if (!entry || entry.target !== threadEndMarker || threadEndMarkerThread !== thread) return;
-        // The marker is a RE-PIN signal only. It must never unpin: while tool
-        // cards spam the tail, content growth pushes the marker out of the
-        // viewport between follow-scrolls, and treating that as "the user
-        // scrolled up" killed autoscroll mid-turn. Unpinning is decided
-        // exclusively by updateScrollPin (direction-aware scroll events).
-        if ((entry.isIntersecting || isThreadAtBottom(thread)) && !state.followDetached) {
-          startAutoFollow(thread, 'end-marker');
-        }
-      }, { root: thread, threshold: 0.01 });
-      threadEndObserverThread = thread;
-      threadEndObserver.observe(marker);
-    }
-  } else {
-    // Re-observing is harmless and covers a marker that was detached by
-    // replaceChildren before being reused for this render.
-    threadEndObserver.observe(marker);
-  }
-
-  bindThreadEndMarker(thread);
-
-  return marker;
-}
-
-function bindThreadEndMarker(thread) {
-  const MutationObserverCtor = observerConstructor(thread, 'MutationObserver');
-  if (typeof MutationObserverCtor !== 'function') return;
-  if (threadMutationObserver && threadMutationObserverThread !== thread) {
-    threadMutationObserver.disconnect();
-    threadMutationObserver = null;
-    threadMutationObserverThread = null;
-  }
-  if (threadMutationObserver) return;
-  threadMutationObserver = new MutationObserverCtor(() => {
-    if (agentThread() !== thread) return;
-    ensureThreadEndMarker();
-  });
-  threadMutationObserverThread = thread;
-  threadMutationObserver.observe(thread, { childList: true });
 }
 
 export async function initAgent() {
@@ -1234,7 +1163,6 @@ async function createConversation(title = '') {
     state.todoRenderToken++;
     await refreshConversations();
     renderEmptyThread();
-    ensureThreadEndMarker();
     renderAttachments();
     renderTodoStrip();
     updateComposerStatus();
@@ -1344,7 +1272,6 @@ async function deleteConversation(id) {
       state.todoRenderToken++;
       clearSteerQueue();
       renderEmptyThread();
-      ensureThreadEndMarker();
       renderAttachments();
       renderTodoStrip();
       updateComposerStatus();
@@ -1702,7 +1629,6 @@ function renderThread(messages, force = true, disclosureState = null) {
   if (!thread) return;
   if (!messages.length) {
     renderEmptyThread();
-    ensureThreadEndMarker();
     return;
   }
   const preservedScrollTop = !force && !state.pinned ? thread.scrollTop : null;
@@ -1718,7 +1644,6 @@ function renderThread(messages, force = true, disclosureState = null) {
   }
   thread.replaceChildren(renderConversation(messages, retryTurn));
   restoreDisclosureState(thread, disclosureState);
-  ensureThreadEndMarker();
   mountCompactionStatus(state.activeId, runForConversation(state.activeId));
   // Render any Mermaid diagrams in the freshly painted thread (settle point,
   // not per-delta).
@@ -2059,16 +1984,8 @@ function mountCompactionStatus(conversationId, run = runForConversation(conversa
   if (!entry || !compactionRunMatches(run, entry.runId)) return;
   const host = run?.bubble?.isConnected ? run.bubble : agentThread();
   if (!host) return;
-  const thread = agentThread();
-  const marker = host === thread ? ensureThreadEndMarker() : null;
   if (!entry.node || !entry.node.isConnected) entry.node = renderCompactionStatus();
-  if (entry.node.parentElement === host) {
-    if (marker?.parentElement === host && entry.node.nextSibling !== marker) host.insertBefore(entry.node, marker);
-  } else if (marker?.parentElement === host) {
-    host.insertBefore(entry.node, marker);
-  } else {
-    host.append(entry.node);
-  }
+  if (host.lastElementChild !== entry.node) host.append(entry.node);
   syncRunLoadingIndicator(run);
 }
 
@@ -2467,11 +2384,14 @@ function endTurn(runId, keepRun = false) {
 function bindScrollPin() {
   const thread = agentThread();
   if (!thread) return;
-  if (scrollBinding?.thread === thread) return;
+  if (scrollBinding?.thread === thread) {
+    threadFollow.attach(thread);
+    return;
+  }
   scrollBinding?.dispose?.();
-  ensureThreadEndMarker();
-  bindThreadEndMarker(thread);
+  threadFollow.attach(thread);
   const onWheel = (event) => {
+    if (isNestedScrollerEvent(event.target, thread)) return;
     if (event.deltaY < 0) markUserScrollIntent(thread, 'up', 'wheel');
     else if (event.deltaY > 0) markUserScrollIntent(thread, 'down', 'wheel');
   };
@@ -2480,6 +2400,7 @@ function bindScrollPin() {
     emitThreadScrollEvent(thread, THREAD_SCROLL_EVENTS.touchDown, { source: 'touch' });
   };
   const onTouchMove = (event) => {
+    if (isNestedScrollerEvent(event.target, thread)) return;
     const y = event.touches?.[0]?.clientY;
     if (!Number.isFinite(y) || !Number.isFinite(state.touchY)) return;
     const delta = y - state.touchY;
@@ -2523,7 +2444,7 @@ function bindScrollPin() {
         source: 'scroll',
       });
     }
-    if (direction === 'up') {
+    if (shouldDetachFollow(state, thread, { intent, geometryDirection, tolerance: SCROLL_TOLERANCE })) {
       state.userScroll = 'up';
       state.followDetached = true;
       state.pinned = false;
@@ -2652,8 +2573,7 @@ function syncActiveThreadPin() {
 
 function scrollThreadToBottomNow(thread, force = false) {
   if (!thread) return;
-  ensureThreadEndMarker();
-  thread.scrollTop = thread.scrollHeight;
+  stickThreadToBottom(thread);
   state.pinGeom = { thread, scrollTop: thread.scrollTop };
   if (force) {
     const wasPinned = state.pinned;
@@ -2682,7 +2602,6 @@ function scrollThreadToBottomHard() {
     cancelled: false,
   };
   state.initialScroll = transaction;
-  ensureThreadEndMarker();
   state.suppressTopLoad = true;
   state.suppressScrollTracking = true;
   state.followDetached = false;
@@ -2709,7 +2628,6 @@ function scrollThreadToBottomHard() {
       return;
     }
     transaction.thread = thread;
-    ensureThreadEndMarker();
     scrollThreadToBottomNow(thread, true);
     transaction.frames++;
     if (transaction.frames < INITIAL_SCROLL_SETTLE_FRAMES) {
@@ -2723,39 +2641,11 @@ function scrollThreadToBottomHard() {
 }
 
 // Live deltas frequently arrive in bursts: one frame can contain a reasoning
-// update, several parallel tool updates, and a status mutation. Coalesce those
-// requests and keep the tail pinned for a few settling frames. The transaction
-// is cancelled synchronously by a user scroll-up.
+// update, several parallel tool updates, and an activity-status mutation.
+// Coalesce those requests onto one rAF stick. ResizeObserver keeps following
+// after the last delta if mermaid, tools, or .agent-activity-status still grow.
 function scheduleScrollToBottom() {
-  const thread = agentThread();
-  if (!thread || !state.pinned || state.followDetached) return;
-  ensureThreadEndMarker();
-  followThread = thread;
-  followFrames = Math.max(followFrames, FOLLOW_SETTLE_FRAMES);
-  if (followFrame) return;
-  const sequence = followSequence;
-  const follow = () => {
-    followFrame = null;
-    if (
-      sequence !== followSequence
-      || followThread !== thread
-      || agentThread() !== thread
-      || !state.pinned
-      || state.followDetached
-    ) {
-      followFrames = 0;
-      followThread = null;
-      return;
-    }
-    scrollThreadToBottomNow(thread);
-    followFrames--;
-    if (followFrames > 0) {
-      followFrame = scheduleFrame(thread, follow);
-    } else {
-      followThread = null;
-    }
-  };
-  followFrame = scheduleFrame(thread, follow);
+  threadFollow.nudge();
 }
 
 function scrollToBottom(force = false) {
@@ -3327,13 +3217,19 @@ function bindEvents() {
     }
     const isAgentRoom = conversation_id === state.activeId
       || state.conversations.some((c) => c.id === conversation_id);
-    if (isAgentRoom) {
+    if (shouldPlayAgentTurnSound(state.settings?.sound_notifications !== false, {
+      conversationId: conversation_id,
+      rooms: state.conversations,
+      headless: payload.headless,
+    })) {
       if (error) {
         toast(error, 'error');
-        playError(state.settings?.sound_notifications !== false);
+        playError(true);
       } else {
-        playComplete(state.settings?.sound_notifications !== false);
+        playComplete(true);
       }
+    } else if (isAgentRoom && error) {
+      toast(error, 'error');
     }
     if (conversation_id === state.activeId && !willAutoContinue && !awaitRoundTerminal) {
       void refreshActiveConversation({ preserveLiveNode: preservedLiveNode });
@@ -3351,7 +3247,11 @@ function bindEvents() {
     const isAgentRoom = conversation_id === state.activeId
       || state.conversations.some((c) => c.id === conversation_id);
     if (conversation_id === state.activeId) syncActiveThreadPin();
-    if (isAgentRoom) playError(state.settings?.sound_notifications !== false);
+    if (shouldPlayAgentTurnSound(state.settings?.sound_notifications !== false, {
+      conversationId: conversation_id,
+      rooms: state.conversations,
+      headless: payload.headless,
+    })) playError(true);
     const run = getRunOrQueue('agent.turn.error', payload);
     const fallbackNode = !run && conversation_id === state.activeId && message_id
       ? findMessageNode(agentThread(), message_id)
@@ -3419,7 +3319,6 @@ function bindEvents() {
       const node = renderMessage(notice);
       const thread = agentThread();
       if (thread && node) thread.append(node);
-      ensureThreadEndMarker();
       // The announcement is another live-tail mutation. Follow only when the
       // reader is still pinned; a completion/auto-continue notification must
       // not yank someone who has deliberately scrolled up.
@@ -3594,7 +3493,6 @@ function promoteSteerToTranscript(text) {
   } else {
     thread.append(steerNode);
   }
-  ensureThreadEndMarker();
   if (run) {
     run.nextRoundAnchor = steerNode;
     run.awaitingSteerRound = false;
@@ -3695,10 +3593,15 @@ async function refreshActiveConversation({ preserveLiveNode = null } = {}) {
     // the thread here causes a visible jump and can make a reader lose their
     // position. The next room switch/reload still renders from state.messages.
     if (preserveLiveNode?.isConnected && thread?.contains(preserveLiveNode)) {
-      ensureThreadEndMarker();
       updateOlderSentinel();
       updateRoomInfo(state.conversation, state.messages);
       updateComposerStatus();
+      // Keep the streamed node, but still settle mermaid/zoom. Concurrent
+      // mermaid.render can wipe the zoom trigger; skipping enhancement here
+      // left diagrams without a magnifier until a room remount.
+      void renderMermaidDiagrams(preserveLiveNode);
+      void highlightCode(preserveLiveNode);
+      attachZoomButtons(preserveLiveNode);
       return;
     }
     const liveNode = liveRun?.msgNode?.isConnected ? liveRun.msgNode : null;

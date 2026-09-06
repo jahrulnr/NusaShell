@@ -264,6 +264,35 @@ test('attachMermaidZoomButton adds a trigger to a single block', () => {
   } finally { cleanup(); }
 });
 
+test('attachMermaidZoomButton restores the trigger after an SVG innerHTML wipe', () => {
+  makeDom();
+  try {
+    const block = document.createElement('div');
+    block.className = 'mermaid-block';
+    block.innerHTML = '<svg viewBox="0 0 10 10"><rect/></svg>';
+    attachMermaidZoomButton(block);
+    assert.equal(block.querySelectorAll('.media-zoom-trigger').length, 1);
+    // A second in-flight mermaid.render replaces innerHTML and keeps the
+    // data-zoom-attached flag on the block — the live-complete race.
+    block.innerHTML = '<svg viewBox="0 0 10 10"><rect/></svg>';
+    assert.equal(block.getAttribute('data-zoom-attached'), '1', 'flag survives innerHTML');
+    assert.equal(block.querySelector('.media-zoom-trigger'), null, 'button was wiped');
+    attachMermaidZoomButton(block);
+    assert.equal(block.querySelectorAll('.media-zoom-trigger').length, 1, 'trigger restored');
+  } finally { cleanup(); }
+});
+
+test('attachZoomButtons finds a mermaid-block when that block is the container', () => {
+  makeDom();
+  try {
+    const block = document.createElement('div');
+    block.className = 'mermaid-block';
+    block.innerHTML = '<svg viewBox="0 0 10 10"><rect/></svg>';
+    attachZoomButtons(block);
+    assert.ok(block.querySelector('.media-zoom-trigger'), 'self-targeted mermaid block still gets a trigger');
+  } finally { cleanup(); }
+});
+
 test('attachZoomButtons handles null/missing container gracefully', () => {
   makeDom();
   try {

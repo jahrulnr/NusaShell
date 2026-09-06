@@ -6,6 +6,17 @@ import (
 	"nusashell/pkg/text"
 )
 
+// emitInteractiveTurnEvent publishes Agent-room lifecycle to the UI bus.
+// Headless learning and pipeline turns stay off this channel so their
+// completion cannot play the same notification as a conversation the user
+// is watching.
+func (a *App) emitInteractiveTurnEvent(run *TurnRun, typ string, payload any) {
+	if a == nil || a.Bus == nil || run == nil || run.Headless {
+		return
+	}
+	a.Bus.Emit(typ, payload)
+}
+
 func (a *App) updateMessage(c *domain.Conversation, msgID string, fn func(*domain.Message)) {
 	for i := range c.Messages {
 		if c.Messages[i].ID == msgID {
@@ -71,7 +82,7 @@ func (a *App) failTurn(run *TurnRun, msgID string, err error) {
 	}
 	a.discardQueuedSteer(run)
 	a.sealRound(run, msgID, 0, contracts.RoundStateError, nil, nil, err.Error())
-	a.Bus.Emit(contracts.EventTurnError, contracts.TurnErrorEvent{
+	a.emitInteractiveTurnEvent(run, contracts.EventTurnError, contracts.TurnErrorEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, MessageID: msgID, Message: err.Error(),
 	})
 }
@@ -100,7 +111,7 @@ func (a *App) failStreamTurn(run *TurnRun, msgID, model string, round streamedTu
 	}
 	a.discardQueuedSteer(run)
 	a.sealRound(run, msgID, 0, contracts.RoundStateError, nil, nil, err.Error())
-	a.Bus.Emit(contracts.EventTurnError, contracts.TurnErrorEvent{
+	a.emitInteractiveTurnEvent(run, contracts.EventTurnError, contracts.TurnErrorEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, MessageID: msgID, Message: err.Error(),
 	})
 }
@@ -128,7 +139,7 @@ func (a *App) interruptTurn(run *TurnRun, msgID string, round streamedTurnRound,
 	}
 	a.sealRound(run, msgID, 0, contracts.RoundStateInterrupted, nil, usageDTO(usage), "")
 	a.discardQueuedSteer(run)
-	a.Bus.Emit(contracts.EventTurnDone, contracts.TurnDoneEvent{
+	a.emitInteractiveTurnEvent(run, contracts.EventTurnDone, contracts.TurnDoneEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, MessageID: msgID, Model: model,
 		Usage:         &contracts.UsageDTO{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens},
 		ContextTokens: contextTokens,

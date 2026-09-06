@@ -60,6 +60,9 @@ node --test frontend/tests/*.test.mjs
 make scan-ui-docs-check
 ```
 
+`make check` includes the frontend Node suite (`make test-frontend`) after
+the Go gates.
+
 For visual changes, run the real interface at desktop and mobile widths, take
 a screenshot, and inspect focus, overflow, spacing, empty/error states, and
 contrast. Passing jsdom tests is not visual verification.

@@ -274,7 +274,7 @@ and `mcp_call` stay generic terminal views. See
 ## Verification baseline
 
 ```text
-make check   # gofmt + go test -race + go vet + go build
+make check   # gofmt + go test -race + go vet + go build + frontend tests
 ```
 
 Handler-level tests in `transport/` drive the real HTTP/WS/SSE handlers

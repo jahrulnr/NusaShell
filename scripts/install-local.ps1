@@ -12,7 +12,7 @@ $buildDir = if ($env:NUSASHELL_BUILD_DIR) {
   Join-Path $repoRoot 'apps\electron\dist\win-unpacked'
 }
 if (-not (Test-Path -LiteralPath $buildDir -PathType Container)) {
-  throw "Build output not found at $buildDir. Run make electron-package first or set NUSASHELL_BUILD_DIR."
+  throw "Build output not found at $buildDir. Run make -C apps/electron package first or set NUSASHELL_BUILD_DIR."
 }
 if (-not (Test-Path -LiteralPath (Join-Path $buildDir 'nusashell-desktop.exe') -PathType Leaf)) {
   throw "Expected nusashell-desktop.exe inside $buildDir."

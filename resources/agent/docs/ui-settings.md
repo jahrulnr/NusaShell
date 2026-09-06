@@ -523,7 +523,7 @@ Configure a web-grounded answer provider for the web_answer tool. This is separa
 
 ## Appearance
 
-Choose a bundled interface font for this browser; the font applies immediately and is stored locally. Symbol and emoji coverage uses local fallbacks. Sidebar layout is also stored in this browser. Sound notifications save with the NusaShell instance and play when an agent turn completes or fails.
+Choose a bundled interface font for this browser; the font applies immediately and is stored locally. Symbol and emoji coverage uses local fallbacks. Sidebar layout is also stored in this browser. Sound notifications save with the NusaShell instance and play when an Agent room completes or fails.
 
 - **Appearance title** (`#settings-appearance-title`):
   - Section: Settings
@@ -547,36 +547,23 @@ Choose a bundled interface font for this browser; the font applies immediately a
 - **Sound notifications** (`#settings-sound-notifications`):
   - Section: Settings
   - Type: checkbox
-  - Notes: Play a sound when an agent turn completes, fails, or awaits an ask_question answer. Default on.
+  - Notes: Play a sound when a listed Agent room completes, fails, or awaits an ask_question answer. Background learning jobs stay silent. Default on.
 
 ## Connection
 
 Backend status, automatic reconnect toggle, and a Check connection button. The Go shell uses HTTP RPC for commands and WebSocket for live events.
 
-- **Connection title** (`#settings-connection-title`):
-  - Section: Settings
-  - Type: text
+- **`#settings-connection-title`** (missing map entry)
 
-- **Backend status orb** (`#settings-conn-fill`):
-  - Section: Settings
-  - Type: indicator
+- **`#settings-conn-fill`** (missing map entry)
 
-- **Backend status label** (`#settings-conn-label`):
-  - Section: Settings
-  - Type: text
+- **`#settings-conn-label`** (missing map entry)
 
-- **Reconnect automatically** (`#settings-auto-reconnect`):
-  - Section: Settings
-  - Type: checkbox
+- **`#settings-auto-reconnect`** (missing map entry)
 
-- **Check connection** (`#settings-check-connection-btn`):
-  - Section: Settings
-  - Type: button
-  - Action: Probes the backend.
+- **`#settings-check-connection-btn`** (missing map entry)
 
-- **Connection status** (`#settings-connection-status`):
-  - Section: Settings
-  - Type: status
+- **`#settings-connection-status`** (missing map entry)
 
 ## System
 

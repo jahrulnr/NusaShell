@@ -54,6 +54,42 @@ func TestListInstructionFilesGitHonorsGitignore(t *testing.T) {
 	}
 }
 
+// TestListInstructionFilesGitSymlinkedWorkspace reproduces the CI failure on
+// macOS/Windows: git --show-toplevel returns the real path while the
+// workspace is addressed through a symlink (/var → /private/var on macOS,
+// short names on Windows), which made the git path report an empty catalog
+// and skip the walk fallback. The listing must be identical either way.
+func TestListInstructionFilesGitSymlinkedWorkspace(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	base := t.TempDir()
+	fixture := filepath.Join(base, "real")
+	writeInstructionFile(t, filepath.Join(fixture, "AGENTS.md"), "# root\n")
+	writeInstructionFile(t, filepath.Join(fixture, "application", "AGENTS.md"), "# app\n")
+	writeInstructionFile(t, filepath.Join(fixture, "frontend", "AGENTS.md"), "# ui\n")
+	writeInstructionFile(t, filepath.Join(fixture, "node_modules", "pkg", "AGENTS.md"), "# noisy\n")
+	writeInstructionFile(t, filepath.Join(fixture, ".gitignore"), "node_modules/\nvendor/\n.experimental/\n")
+	run := exec.Command("git", "-C", fixture, "init", "--quiet")
+	gitNull := "/dev/null"
+	if runtime.GOOS == "windows" {
+		gitNull = "NUL"
+	}
+	run.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+gitNull)
+	if out, err := run.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(fixture, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	got := listInstructionFiles(link)
+	want := []string{"AGENTS.md", "application/AGENTS.md", "frontend/AGENTS.md"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("instruction files via symlinked workspace = %v, want %v", got, want)
+	}
+}
+
 func TestListInstructionFilesWalkSkipsNoisyDirsWithoutGit(t *testing.T) {
 	dir := instructionFixture(t)
 	got := listInstructionFiles(dir)

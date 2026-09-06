@@ -253,17 +253,28 @@ test('Markdown file previews style tables and keep wide columns scrollable', () 
     'Markdown preview cells must use the same readable column limit');
 });
 
-test('Live Thinking follows only while the thread-end marker is visible', () => {
-  assert.match(agentView, /agent-thread-end-marker/);
-  assert.match(agentView, /new IntersectionObserver/);
-  // The marker is a re-pin signal only: it must never unpin, because tool
-  // spam pushes it out of the viewport between follow-scrolls. Unpinning is
-  // decided by the direction-aware updateScrollPin on scroll events.
-  assert.match(agentView, /if \(\(entry\.isIntersecting \|\| isThreadAtBottom\(thread\)\) && !state\.followDetached\)/);
-  assert.match(agentView, /startAutoFollow\(thread, 'end-marker'\)/);
-  assert.doesNotMatch(agentView, /state\.pinned = entry\.isIntersecting/);
+test('Open Thinking growth does not detach follow from a geometry-only clamp', () => {
+  assert.match(agentView, /shouldDetachFollow\(state, thread/);
+  assert.match(agentView, /isNestedScrollerEvent\(event\.target, thread\)/);
+  assert.match(agentCSS, /\.agent-reasoning-content \{[^}]*overflow-anchor:\s*none;/s,
+    'growing Thinking must not become the thread overflow anchor');
+});
+
+test('Live tail follow sticks to content geometry, not a flex end-marker', () => {
+  assert.doesNotMatch(agentView, /agent-thread-end-marker/);
+  assert.doesNotMatch(agentCSS, /agent-thread-end-marker/);
+  assert.doesNotMatch(agentView, /IntersectionObserver/);
+  assert.match(agentView, /createThreadFollow/);
+  assert.match(agentView, /threadFollow\.attach\(thread\)/);
+  assert.match(agentView, /threadFollow\.nudge\(\)/);
+  assert.match(agentView, /threadFollow\.cancel\(\)/);
+  assert.match(agentCSS, /\.agent-thread \{[^}]*overflow-anchor:\s*none;/s,
+    'programmatic follow owns the scroller; browser overflow-anchor must not fight it');
+  assert.match(agentCSS, /\.agent-activity-status \{[^}]*overflow-anchor:\s*none;/s,
+    'activity status grows the last bubble and must not become the overflow anchor');
+  assert.match(agentView, /if \(bubble\.lastElementChild !== status\) bubble\.append\(status\)/);
+  assert.match(agentView, /if \(!rotate && run\.conversationId === state\.activeId\) scrollToBottom\(\)/);
   assert.match(agentView, /updateScrollPin\(state, thread, SCROLL_TOLERANCE/);
-  assert.match(agentView, /if \(!thread \|\| !state\.pinned \|\| state\.followDetached\) return/);
 });
 
 test('Agent follow treats gesture direction as authoritative and coalesces follow frames', () => {
@@ -277,7 +288,7 @@ test('Agent follow treats gesture direction as authoritative and coalesces follo
   assert.match(agentView, /addEventListener\('touchend'/);
   assert.match(agentView, /cancelScheduledFollow\(\)/);
   assert.match(agentView, /requestAnimationFrame/);
-  assert.match(agentView, /followFrames/);
+  assert.match(agentView, /createThreadFollow/);
 });
 
 test('Initial load retries after layout settles without forcing a reader back down', () => {
@@ -294,6 +305,7 @@ test('Turn completion samples the real scroll position before playing its sound'
     agentView.indexOf("on('agent.turn.error'"),
   );
   assert.match(doneHandler, /syncActiveThreadPin\(\);/);
+  assert.match(doneHandler, /shouldPlayAgentTurnSound\(/);
   assert.match(doneHandler, /playComplete\(/);
   assert.match(doneHandler, /refreshActiveConversation\(\{ preserveLiveNode:/);
 });
@@ -434,6 +446,8 @@ test('Turn completion preserves a connected live node instead of rerendering the
   assert.match(doneHandler, /refreshActiveConversation\(\{ preserveLiveNode: preservedLiveNode \}\)/);
   assert.match(refreshHandler, /preserveLiveNode/);
   assert.match(refreshHandler, /preserveLiveNode\?\.isConnected/);
+  assert.match(refreshHandler, /attachZoomButtons\(preserveLiveNode\)/);
+  assert.match(refreshHandler, /renderMermaidDiagrams\(preserveLiveNode\)/);
 });
 
 test('SSE round.done does not release the run before the WebSocket terminal event', () => {

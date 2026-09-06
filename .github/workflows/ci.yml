@@ -98,9 +98,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: apps/electron/package-lock.json
-      - run: node scripts/version.mjs check
-      - run: npm ci --prefix apps/electron
-      - run: npm --prefix apps/electron test
+      - run: make -C apps/electron test
 
   test-pets:
     name: Pets tests
@@ -172,14 +170,7 @@ jobs:
           cache-dependency-path: apps/electron/package-lock.json
       - name: Install Xvfb
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y xvfb
-      - name: Stage native Go backend for the wrapper smoke test
-        shell: bash
-        run: |
-          version="$(tr -d '\r\n' < VERSION)"
-          mkdir -p apps/electron/runtime
-          go build -buildvcs=false -ldflags "-X main.version=${version}" -o apps/electron/runtime/nusashell ./cmd/nusashell
-      - run: npm ci --prefix apps/electron
-      - run: npm --prefix apps/electron run test:ui
+      - run: make -C apps/electron ui-test
 
   test-backend:
     name: Backend tests (${{ matrix.os }})

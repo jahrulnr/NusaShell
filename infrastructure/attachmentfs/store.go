@@ -70,7 +70,7 @@ func (s *Store) WriteBytes(conversationID, name string, data []byte) (string, er
 	if conversationID == "" {
 		return "", fmt.Errorf("attachmentfs: conversation id is required")
 	}
-	if name == "" || strings.ContainsRune(name, filepath.Separator) || strings.Contains(name, "..") {
+	if name == "" || strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
 		return "", fmt.Errorf("attachmentfs: invalid name %q", name)
 	}
 	dir := filepath.Join(s.root, conversationID)
@@ -121,7 +121,7 @@ func (s *Store) ReadFile(absPath string) ([]byte, error) {
 // conversationID is checked against the same path-segment rules as
 // WriteBytes' name so a hostile id cannot escape the store root.
 func (s *Store) Remove(conversationID string) error {
-	if conversationID == "" || strings.ContainsRune(conversationID, filepath.Separator) || strings.Contains(conversationID, "..") || strings.ContainsRune(conversationID, 0) {
+	if conversationID == "" || strings.ContainsAny(conversationID, `/\`) || strings.Contains(conversationID, "..") || strings.ContainsRune(conversationID, 0) {
 		return fmt.Errorf("attachmentfs: invalid conversation id %q", conversationID)
 	}
 	dir := filepath.Join(s.root, conversationID)

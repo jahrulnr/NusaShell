@@ -13,6 +13,7 @@ import { initSettings, refresh as refreshSettings } from './views/settings.js';
 import { initLearning, refresh as refreshLearning } from './views/learning.js';
 import { initAutomation, refresh as refreshAutomation } from './views/automation.js';
 import { initTelemetry, refresh as refreshTelemetry } from './views/telemetry.js';
+import { initPets } from './pet-launcher.js';
 import { toast, dismissOpenDialogs } from './ui.js';
 import { bindShellShortcuts } from './shell-shortcuts.js';
 import { initMobileNav } from './mobile-nav.js';
@@ -218,6 +219,7 @@ async function boot() {
     initLearning(),
     initAutomation(),
     initTelemetry(),
+    initPets(),
   ]);
   // never swallow init failures silently: a dead view is a bug, not a state
   for (const r of results) {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -66,31 +67,45 @@ func listInstructionFilesGit(ws string) ([]string, bool) {
 	if top == "" {
 		return nil, false
 	}
-	out, err := gitCommand(ctx, top, "ls-files", "-z",
+	// The git toplevel can spell the same directory differently than the
+	// caller's path: macOS resolves /var → /private/var and Windows
+	// canonicalizes short names, so workspace membership is decided on
+	// resolved paths (EvalSymlinks both sides; case-insensitive on
+	// Windows).
+	root, err := filepath.EvalSymlinks(top)
+	if err != nil {
+		root = top
+	}
+	wsRoot, err := filepath.EvalSymlinks(ws)
+	if err != nil {
+		wsRoot = ws
+	}
+	out, err := gitCommand(ctx, root, "ls-files", "-z",
 		"--cached", "--others", "--exclude-standard", "--",
 		instructionFileName, "**/"+instructionFileName).Output()
 	if err != nil {
 		return nil, false
 	}
 	var files []string
+	total := 0
 	for _, rel := range strings.Split(string(out), "\x00") {
 		rel = strings.TrimSpace(rel)
 		if rel == "" {
 			continue
 		}
-		abs := filepath.Join(top, filepath.FromSlash(rel))
-		wsRel, err := filepath.Rel(ws, abs)
-		if err != nil {
-			continue
-		}
-		wsRel = filepath.ToSlash(wsRel)
-		if wsRel == ".." || strings.HasPrefix(wsRel, "../") {
-			continue
-		}
-		if filepath.Base(wsRel) != instructionFileName {
+		total++
+		abs := filepath.Join(root, filepath.FromSlash(rel))
+		wsRel := wsRelativeTo(wsRoot, abs)
+		if wsRel == "" || filepath.Base(wsRel) != instructionFileName {
 			continue
 		}
 		files = append(files, wsRel)
+	}
+	if total > 0 && len(files) == 0 {
+		// Every ls-files entry landed outside the workspace: a
+		// path-spelling mismatch must never masquerade as an empty
+		// catalog, so fall back to the walker.
+		return nil, false
 	}
 	return files, true
 }
@@ -99,6 +114,26 @@ func gitCommand(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	cmd.Stderr = io.Discard
 	return cmd
+}
+
+// wsRelativeTo returns the slash-separated path of abs relative to dir when
+// abs lies inside dir, and "" otherwise. Windows paths are compared
+// case-insensitively because filepath.Rel itself is case-sensitive and a
+// casing difference would fake a "../" escape.
+func wsRelativeTo(dir, abs string) string {
+	d, f := dir, abs
+	if runtime.GOOS == "windows" {
+		d = strings.ToLower(d)
+		f = strings.ToLower(f)
+	}
+	rel, err := filepath.Rel(d, f)
+	if err != nil {
+		return ""
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return filepath.ToSlash(rel)
 }
 
 func listInstructionFilesWalk(ws string) []string {

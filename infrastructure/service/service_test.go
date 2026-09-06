@@ -75,6 +75,37 @@ func TestStableBinaryPathMissingCurrent(t *testing.T) {
 	}
 }
 
+// TestStableBinaryPathResolvesSymlinkedRoot reproduces the CI failure on
+// macOS/Windows: the install root is addressed through a symlink (macOS
+// /var → /private/var), so EvalSymlinks(current) resolves to the real path
+// while the caller-supplied versions dir still contains the symlink; the
+// stable-path rewrite must fire anyway.
+func TestStableBinaryPathResolvesSymlinkedRoot(t *testing.T) {
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	versions := filepath.Join(real, "versions", "0.4.1")
+	current := filepath.Join(real, "current")
+	for _, dir := range []string{versions, current} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.RemoveAll(current); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(versions, current); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	execPath := filepath.Join(link, "versions", "0.4.1", "nusashell")
+	if got, want := StableBinaryPath(execPath), filepath.Join(link, "current", "nusashell"); got != want {
+		t.Fatalf("StableBinaryPath = %q, want %q", got, want)
+	}
+}
+
 func TestNewDispatchesByPlatform(t *testing.T) {
 	m := New(Options{BinaryPath: "/x", DataDir: "/d"})
 	if m == nil {

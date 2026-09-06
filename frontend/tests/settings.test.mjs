@@ -11,8 +11,9 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
     'settings-max-tool-rounds',
     'settings-max-parallel-tools',
     'settings-preferred-model',
-    'settings-auto-reconnect',
-    'settings-check-connection-btn',
+    'settings-pets-auto-start',
+    'settings-pet-action-btn',
+    'settings-pet-dot',
     'settings-data-dir',
     'settings-sidebar-compact',
     'settings-image-model',
@@ -22,6 +23,8 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
   }
   assert.match(settingsView, /rpc\('app\.info'/);
   assert.match(settingsView, /rpc\('ai\.models\.list'/);
+  assert.match(settingsView, /settings\.pets_status/);
+  assert.match(settingsView, /pets_auto_start/);
   assert.match(settingsView, /max_tool_rounds/);
   assert.match(settingsView, /max_parallel_tools/);
   assert.match(settingsView, /plugin_contract_mode/);
@@ -29,10 +32,15 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
   assert.match(settingsView, /delegateSelect\.getSelected/);
 });
 
-test('WebSocket reconnect is an explicit persisted preference', () => {
-  assert.match(rpc, /export function setAutoReconnect\(enabled\)/);
-  assert.match(rpc, /if \(!autoReconnect \|\| reconnectTimer/);
-  assert.match(rpc, /lsSet\('nusashell\.autoReconnect'/);
+test('WebSocket auto-reconnect is no longer exposed as a setting (every UI must reconnect)', () => {
+  // The auto-reconnect toggle was retired: every UI must auto-reconnect, so
+  // exposing a disable-toggle was friction without value. The settings view
+  // must not surface it.
+  assert.doesNotMatch(html, /id="settings-auto-reconnect"/);
+  assert.doesNotMatch(html, /id="settings-check-connection-btn"/);
+  assert.doesNotMatch(settingsView, /saveReconnectPreference/);
+  assert.doesNotMatch(settingsView, /setAutoReconnect/);
+  assert.doesNotMatch(settingsView, /autoReconnectEnabled/);
 });
 
 test('Learning review threshold and skill nudge interval are gone', () => {

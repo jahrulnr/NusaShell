@@ -72,6 +72,7 @@ type App struct {
 	ModelCatalog                ModelCataloger
 	TTSInstaller                TTSInstaller
 	STTInstaller                STTInstaller
+	PetsInstaller               PetsInstaller
 	DirectoryBrowser            DirectoryBrowser
 	// defaultWorkspace is the fallback workspace (wired from the host home
 	// dir) applied when a conversation has not picked one yet. It keeps
@@ -107,6 +108,15 @@ type App struct {
 	sttInstallActive bool
 	sttInstallCancel context.CancelFunc
 	sttInstallDoneCh chan struct{}
+
+	// petsInstallMu guards the single in-flight desktop pet install
+	// (settings.pets_install_start is single-flight).
+	petsInstallMu     sync.Mutex
+	petsInstallActive bool
+
+	// autostartOnce guards StartPetAutoLaunch so a test or boot path that
+	// calls it twice does not spawn two pet overlays.
+	autostartOnce sync.Once
 
 	// learningMu guards lazy init of learningSearcher and graphService.
 	learningMu       sync.RWMutex
@@ -262,6 +272,7 @@ type Deps struct {
 	ModelCatalog                ModelCataloger              // optional; nil = skip enrichment from models.dev
 	TTSInstaller                TTSInstaller                // optional; nil = one-click offline TTS install unavailable
 	STTInstaller                STTInstaller                // optional; nil = one-click offline STT install unavailable
+	PetsInstaller               PetsInstaller               // optional; nil = desktop pet unavailable (macOS / Windows builds)
 	DirectoryBrowser            DirectoryBrowser            // optional; nil = in-app workspace browser unavailable
 	DefaultWorkspace            string                      // fallback workspace (host home dir) when a conversation has none
 	RetrySleeper                RetrySleeper
@@ -328,6 +339,7 @@ func NewApp(deps Deps) *App {
 		ModelCatalog:                deps.ModelCatalog,
 		TTSInstaller:                deps.TTSInstaller,
 		STTInstaller:                deps.STTInstaller,
+		PetsInstaller:               deps.PetsInstaller,
 		AcpAgents:                   deps.AcpAgents,
 		Acp:                         deps.Acp,
 		AcpRunStorage:               deps.AcpRunStorage,

@@ -188,7 +188,11 @@ Model lists: `GET https://opencode.ai/zen/go/v1/models` (Go) and
 Chat hosts use the vanilla OpenAI Chat wire (`reasoning_content`), not
 OpenRouter `reasoning`. Thinking-mode models require `reasoning_content` on
 every assistant message that had thinking. Non-reasoning models on the same
-host do not get a forced `reasoning_content` placeholder. Prompt cache on Go uses the
+host do not get a forced `reasoning_content` placeholder. MiniMax on Chat
+sends `reasoning_split=true` so thinking arrives on `reasoning_content`
+instead of `<think>` tags in `content` ([MiniMax OpenAI API](https://platform.minimax.io/docs/api-reference/text-openai-api)).
+OpenRouter MiniMax already uses the `reasoning` object and does not get
+that field. Prompt cache on Go uses the
 `x-opencode-session` header (the conversation prompt-cache key). Cache TTL
 chips are `5m`, `1h`, or `off`. Console Go rejects
 `prompt_cache_options.ttl=30m`. Chat requests do not send that field or

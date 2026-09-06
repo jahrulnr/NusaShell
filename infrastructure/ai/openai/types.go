@@ -49,6 +49,7 @@ type chatRequest struct {
 	WebSearchOptions any      `json:"web_search_options,omitempty"`
 
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ReasoningSplit  *bool  `json:"reasoning_split,omitempty"`
 
 	ParallelToolCalls *bool `json:"parallel_tool_calls,omitempty"`
 	Seed              *int  `json:"seed,omitempty"`

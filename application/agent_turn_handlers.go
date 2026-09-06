@@ -468,7 +468,7 @@ func (a *App) recoverOrphanedTurn(run *TurnRun) {
 	}
 	a.log("error", "agent", "turn %s exited without terminal state, recovered conversation %s", run.ID, c.ID)
 	_ = repo.Save()
-	a.Bus.Emit(contracts.EventTurnError, contracts.TurnErrorEvent{
+	a.emitInteractiveTurnEvent(run, contracts.EventTurnError, contracts.TurnErrorEvent{
 		RunID:          run.ID,
 		ConversationID: run.ConversationID,
 		MessageID:      run.currentMessageID(),

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the local Electron wrapper produced by `make electron-package`.
+# Install the local Electron wrapper produced by `make -C apps/electron package`.
 # This is the checkout equivalent of the optional Electron part of install.sh.
 set -Eeuo pipefail
 

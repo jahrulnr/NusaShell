@@ -2,7 +2,9 @@ package application
 
 import (
 	"testing"
+	"time"
 
+	"nusashell/contracts"
 	"nusashell/domain"
 )
 
@@ -41,5 +43,33 @@ func TestFinalHeadlessAssistantMessageKeepsAnEmptyFinalRoundEmpty(t *testing.T) 
 	}
 	if message.ID != "assistant-2" || message.Content != "" {
 		t.Fatalf("final assistant message = %+v, want the empty final round", message)
+	}
+}
+
+func TestHeadlessTurnsDoNotBroadcastRoomCompletion(t *testing.T) {
+	bus := NewBus()
+	app := &App{Bus: bus}
+	_, events, unsubscribe := bus.Subscribe()
+	defer unsubscribe()
+
+	app.emitInteractiveTurnEvent(&TurnRun{Headless: true, ID: "run_learn"}, contracts.EventTurnDone, contracts.TurnDoneEvent{
+		RunID: "run_learn", ConversationID: "conv_learn",
+	})
+	select {
+	case event := <-events:
+		t.Fatalf("headless learning turn leaked %s to the UI bus", event.Type)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	app.emitInteractiveTurnEvent(&TurnRun{Headless: false, ID: "run_chat"}, contracts.EventTurnDone, contracts.TurnDoneEvent{
+		RunID: "run_chat", ConversationID: "conv_chat",
+	})
+	select {
+	case event := <-events:
+		if event.Type != contracts.EventTurnDone {
+			t.Fatalf("interactive turn event = %s, want %s", event.Type, contracts.EventTurnDone)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("interactive Agent rooms must still broadcast turn.done")
 	}
 }

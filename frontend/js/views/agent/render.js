@@ -2017,7 +2017,13 @@ export function setToolTerminalPresentation(card, presentation) {
     });
   }
   const request = card.querySelector('.agent-tool-request');
-  if (request && merged.request) request.textContent = String(merged.request);
+  // Standalone cards (ask_question, subagent, generate_*) reuse the contract
+  // request hook on their own copy. Overwriting that node with
+  // presentation.request would replace the human-facing text with the
+  // pretty-printed `name({...})` dump.
+  if (request && merged.request && card.classList.contains('agent-tool-event')) {
+    request.textContent = String(merged.request);
+  }
   const output = card.querySelector('.agent-tool-terminal-output');
   if (output) {
     // exec/MCP terminal panel: repaint the settled output in place.

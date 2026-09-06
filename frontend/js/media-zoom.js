@@ -286,6 +286,16 @@ export function openArtifactPopup({ srcDoc, title, width, height } = {}) {
 
 const ZOOM_BTN_FLAG = 'data-zoom-attached';
 
+// querySelectorAll('.mermaid-block') does not match the root, and the live
+// renderer often calls attachZoomButtons on the mermaid-block itself.
+function mermaidBlocksIn(container) {
+  if (!container || typeof container.querySelectorAll !== 'function') return [];
+  const blocks = [];
+  if (container.classList?.contains('mermaid-block')) blocks.push(container);
+  blocks.push(...container.querySelectorAll('.mermaid-block'));
+  return blocks;
+}
+
 // Zoom icon SVG (magnifier with plus).
 const ZOOM_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true">'
   + '<circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>'
@@ -310,12 +320,17 @@ function makeZoomButton(label, onClick) {
 // block (called by mermaid-render.js after SVG render, and by
 // attachZoomButtons for already-rendered blocks).
 export function attachMermaidZoomButton(block) {
-  if (!block || block.hasAttribute(ZOOM_BTN_FLAG)) return;
-  const svg = block.querySelector('svg');
-  if (!svg) return; // not rendered yet (placeholder or error fallback)
+  if (!block) return;
+  if (!block.querySelector('svg')) return; // not rendered yet (placeholder or error fallback)
+  // Skip only when a trigger is actually in the DOM. Concurrent mermaid.render
+  // replaces innerHTML (wiping the button) but leaves data-zoom-attached on
+  // the block, so a flag-only check would skip forever until a full remount.
+  if (block.querySelector(':scope > .media-zoom-trigger')) return;
   block.setAttribute(ZOOM_BTN_FLAG, '1');
   const btn = makeZoomButton('Zoom diagram', () => {
-    openZoomableMedia({ svgEl: svg, alt: 'Mermaid diagram', caption: 'Mermaid diagram' });
+    const liveSvg = block.querySelector('svg');
+    if (!liveSvg) return;
+    openZoomableMedia({ svgEl: liveSvg, alt: 'Mermaid diagram', caption: 'Mermaid diagram' });
   });
   block.append(btn);
 }
@@ -329,8 +344,8 @@ export function attachMermaidZoomButton(block) {
 export function attachZoomButtons(container) {
   if (!container || typeof container.querySelectorAll !== 'function') return;
 
-  // Mermaid blocks with rendered SVG.
-  for (const block of container.querySelectorAll('.mermaid-block')) {
+  // Mermaid blocks with rendered SVG (including when `container` is the block).
+  for (const block of mermaidBlocksIn(container)) {
     attachMermaidZoomButton(block);
   }
 

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, setToolTerminalStatus, setToolTerminalPresentation, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, renderToolAttachments, parseShowAudioOutput, parseShowVideoOutput, parseShowPDFOutput, STARTER_PROMPTS, reasoningDisclosure, renderCompactionStatus, renderAgentActivityStatus, setAgentActivityStatus, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, setThinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming, captureDisclosureState, restoreDisclosureState } from '../js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, decorateToolCard, setToolTerminalStatus, setToolTerminalPresentation, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, renderToolAttachments, parseShowAudioOutput, parseShowVideoOutput, parseShowPDFOutput, STARTER_PROMPTS, reasoningDisclosure, renderCompactionStatus, renderAgentActivityStatus, setAgentActivityStatus, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, setThinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming, captureDisclosureState, restoreDisclosureState } from '../js/views/agent/render.js';
+import { createAskCard } from '../js/views/ask-card.js';
 import { normalizeToolCall, registerToolContracts, toolContractFor, toolContractClass } from '../js/views/agent/tool-contracts.js';
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
@@ -479,6 +480,44 @@ test('built-in tool events isolate dressing classes so file_read does not share 
       'Target porting skills office: di mana hasil porting ditempatkan?',
       'malformed nested tool-call text is not shown as the question');
     assert.equal(normalizedAsk.querySelector('.agent-ask-header .agent-tool-elapsed')?.textContent, '1m 15s');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+// Live ask cards share decorateToolCard with timeline events, which marks
+// .agent-ask-question as .agent-tool-request. Round-stream presentation
+// patches then used to overwrite the human question with the pretty-printed
+// ask_question({...}) dump (conv_3dd010b8caea6bad).
+test('ask card question survives a live tool presentation.request patch', () => {
+  const dom = new JSDOM('<main></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const question = 'Kalau pet sudah terpasang, klik icon harus ngapain?';
+    const card = createAskCard('call_8d845119959a3067', {
+      question,
+      allow_free_text: true,
+      multi_select: false,
+      options: [
+        { id: 'spawn-binary', label: 'Spawn binary lewat RPC', default: true, icon: '🚀' },
+        { id: 'status-only', label: 'Hanya status, no-op', icon: '📍' },
+      ],
+    }, { runId: 'run_live' });
+    decorateToolCard(card, { name: 'ask_question', args: card._toolArgs, status: 'running' });
+    assert.ok(card.querySelector('.agent-ask-question.agent-tool-request'), 'ask question is the contract request hook');
+
+    setToolTerminalPresentation(card, {
+      action: 'Waiting for answer',
+      request: 'ask_question({\n  "allow_free_text": true,\n  "multi_select": false,\n  "question": "Kalau pet sudah terpasang, klik icon harus ngapain?"\n})',
+    });
+
+    const shown = card.querySelector('.agent-ask-question')?.textContent || '';
+    assert.match(shown, /Kalau pet sudah terpasang, klik icon harus ngapain\?/,
+      'human question stays visible');
+    assert.doesNotMatch(shown, /allow_free_text/,
+      'pretty-printed tool dump must not replace the question');
+    assert.ok(card.querySelector('.agent-ask-hint'), 'choice hint remains');
   } finally {
     globalThis.document = previousDocument;
   }

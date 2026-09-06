@@ -200,6 +200,30 @@ func TestBuildRequestRejectsOpaqueReasoningBlockHistory(t *testing.T) {
 	}
 }
 
+func TestBuildRequestSendsReasoningSplit(t *testing.T) {
+	provider := mustProvider(t)
+	wire, err := provider.buildRequest(&core.Request{
+		Model:    "minimax-m3",
+		Messages: []core.Message{core.UserText("hi")},
+		ProviderOptions: core.ProviderOptions{
+			ProviderOptionReasoningSplit: true,
+		},
+	}, false)
+	if err != nil {
+		t.Fatalf("buildRequest returned error: %v", err)
+	}
+	if wire.ReasoningSplit == nil || !*wire.ReasoningSplit {
+		t.Fatalf("reasoning_split = %v, want true", wire.ReasoningSplit)
+	}
+	data, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatalf("marshal wire: %v", err)
+	}
+	if !strings.Contains(string(data), `"reasoning_split":true`) {
+		t.Fatalf("wire JSON missing reasoning_split: %s", data)
+	}
+}
+
 func TestBuildRequestRejectsUnknownProviderOption(t *testing.T) {
 	provider := mustProvider(t)
 	_, err := provider.buildRequest(&core.Request{

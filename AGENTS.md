@@ -150,6 +150,7 @@ go test ./...
 go test -race ./...
 go vet ./...
 go build ./...
+node --test frontend/tests/*.test.mjs
 ```
 
 Do not weaken or delete tests merely to make a suite pass. Do not commit secrets, generated binaries, or production credentials. Keep changes small and focused; do not auto-commit or auto-push.
@@ -164,7 +165,7 @@ breaking change.
 core or embedded frontend must bump only `VERSION`; Electron-only fixes must
 bump only `apps/electron/VERSION`. If both products change, bump both
 version files independently and synchronize Electron metadata with
-`make electron-version-sync`.
+`make -C apps/electron version-sync`.
 - Documentation, unit-test-only, CI, and release-tooling changes do not need a
 product version bump. If path-based detection still schedules a publisher,
 an already-existing stream tag must be treated as a skipped release, not a

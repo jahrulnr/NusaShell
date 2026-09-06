@@ -17,5 +17,8 @@ func (a *App) dispatchSettings(method string, payload json.RawMessage) (any, *co
 		contracts.MethodSettingsSTTInstallStatus: noPayload(a.handleSTTSettingsInstallStatus),
 		contracts.MethodSettingsSTTInstallStart:  decodeReq(a.handleSTTSettingsInstallStart),
 		contracts.MethodSettingsSTTInstallCancel: noPayload(a.handleSTTSettingsInstallCancel),
+		contracts.MethodPetsStatus:               noPayload(a.handlePetsStatus),
+		contracts.MethodPetsInstallStart:         decodeReq(a.handlePetsInstallStart),
+		contracts.MethodPetsLaunch:               noPayload(a.handlePetsLaunch),
 	}, "settings")(method, payload)
 }

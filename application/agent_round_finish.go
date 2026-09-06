@@ -145,7 +145,7 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage,
 		}
 	}
 
-	a.Bus.Emit(contracts.EventTurnDone, contracts.TurnDoneEvent{
+	a.emitInteractiveTurnEvent(run, contracts.EventTurnDone, contracts.TurnDoneEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID, Model: model,
 		Usage: &contracts.UsageDTO{
 			InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,

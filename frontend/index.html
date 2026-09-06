@@ -107,6 +107,10 @@
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M12 4v10m0 0l-4-4m4 4l4-4M5 19h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span class="nav-label">Install app</span>
         </button>
+        <button class="sidebar-action" id="pet-btn" type="button" aria-label="Desktop pet" title="Desktop pet" hidden>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><circle cx="7" cy="13" r="2" stroke="currentColor" stroke-width="1.6"/><circle cx="17" cy="13" r="2" stroke="currentColor" stroke-width="1.6"/><path d="M9 13h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12 4c2 0 3 1.5 3 3 0 1.5-1 3-3 3s-3-1.5-3-3c0-1.5 1-3 3-3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          <span class="nav-label">Pet</span>
+        </button>
         <button class="sidebar-action" id="nav-settings-btn" type="button" aria-label="Settings" title="Settings">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M19 12a7 7 0 0 0-.2-1.6l1.2-1.1-1.7-2.9-1.6.7a7 7 0 0 0-2.8-1.6L13.7 4h-3.4l-.2 1.5a7 7 0 0 0-2.8 1.6l-1.6-.7L4 9.3l1.2 1.1A7 7 0 0 0 5 12c0 .6.1 1.1.2 1.6L4 14.7l1.7 2.9 1.6-.7a7 7 0 0 0 2.8 1.6l.2 1.5h3.4l.2-1.5a7 7 0 0 0 2.8-1.6l1.6.7 1.7-2.9-1.2-1.1c.1-.5.2-1 .2-1.6Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
           <span class="nav-label">Settings</span>
@@ -1082,24 +1086,37 @@
                 <span class="toggle-slider" aria-hidden="true"></span>
               </label>
               <label class="settings-toggle" for="settings-sound-notifications">
-                <span><strong>Sound notifications</strong><small>Play a sound when an agent turn completes or fails.</small></span>
+                <span><strong>Sound notifications</strong><small>Play a sound when an Agent room completes or fails.</small></span>
                 <input id="settings-sound-notifications" type="checkbox">
                 <span class="toggle-slider" aria-hidden="true"></span>
               </label>
             </section>
-            <section class="settings-card" aria-labelledby="settings-connection-title">
-              <div class="settings-card-title">Connection</div>
-              <h2 id="settings-connection-title" class="sr-only">Connection</h2>
-              <p class="settings-card-copy">The Go shell uses HTTP RPC for commands and WebSocket for live events.</p>
-              <div class="settings-row"><span>Backend status</span><span class="settings-connection"><span class="connection-orb" id="settings-conn-fill"></span><span id="settings-conn-label">Connecting…</span></span></div>
-              <label class="settings-toggle" for="settings-auto-reconnect">
-                <span><strong>Reconnect automatically</strong><small>Try again after the local backend or network is temporarily unavailable.</small></span>
-                <input id="settings-auto-reconnect" type="checkbox">
+            <section class="settings-card settings-pet-card" aria-labelledby="settings-pet-title">
+              <div class="settings-card-title">Desktop pet</div>
+              <h2 id="settings-pet-title" class="sr-only">Desktop pet</h2>
+              <p class="settings-card-copy">Spawn the desktop pet overlay as a background sub-process when the Go shell starts. The pet listens to agent turns and surfaces activity bubbles outside the browser. Linux only.</p>
+              <div class="settings-row">
+                <span>Pet status</span>
+                <span class="settings-pet-status">
+                  <span class="pet-action-dot" id="settings-pet-dot" aria-hidden="true"></span>
+                  <span id="settings-pet-label">Checking…</span>
+                </span>
+              </div>
+              <div class="settings-row" id="settings-pet-version-row" hidden>
+                <span>Version</span>
+                <span id="settings-pet-version">—</span>
+              </div>
+              <label class="settings-toggle" for="settings-pets-auto-start">
+                <span>
+                  <strong>Auto-start at boot</strong>
+                  <small>Spawn the pet overlay whenever the Go shell starts. Off by default — turn this on if you want the pet up before you open the browser.</small>
+                </span>
+                <input id="settings-pets-auto-start" type="checkbox">
                 <span class="toggle-slider" aria-hidden="true"></span>
               </label>
               <div class="settings-actions settings-inline-action">
-                <span class="settings-save-status" id="settings-connection-status" role="status" aria-live="polite"></span>
-                <button class="mini-btn" id="settings-check-connection-btn" type="button">Check connection</button>
+                <span class="settings-save-status" id="settings-pet-status" role="status" aria-live="polite"></span>
+                <button class="mini-btn" id="settings-pet-action-btn" type="button">Open pet launcher</button>
               </div>
             </section>
             <section class="settings-card settings-system-card" aria-labelledby="settings-system-title">
@@ -1261,6 +1278,39 @@ sudo cp build/bin/whisper-cli /usr/local/bin/</code></pre>
       <button class="mini-btn ghost" id="stt-install-stop" type="button" hidden>Stop</button>
       <button class="mini-btn ghost" id="stt-requirements-cancel" type="button">Cancel</button>
       <button class="mini-btn" id="stt-install-confirm" type="button">Install</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Desktop Pet Install Dialog ===== -->
+<div class="ui-dialog-overlay" id="pet-install-overlay" aria-hidden="true" hidden>
+  <div class="ui-dialog pet-install-dialog" role="dialog" aria-modal="true" aria-labelledby="pet-install-title" tabindex="-1">
+    <div class="ui-dialog-header">
+      <h2 id="pet-install-title">Install desktop pet</h2>
+      <button class="ui-dialog-close" id="pet-install-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="ui-dialog-body pet-install-body">
+      <p class="ui-dialog-message" id="pet-install-message">
+        The desktop pet runs as a separate overlay above the browser. It reacts to your
+        agent turns and surfaces activity bubbles outside the window. Linux only.
+      </p>
+      <ul class="pet-install-list">
+        <li>Window borderless + transparent (X11 Shape).</li>
+        <li>Reads agent events from <code>ws://&lt;host&gt;:&lt;port&gt;/ws</code>.</li>
+        <li>Auto-starts from <code>~/.local/bin/nusashell-pets</code> after install.</li>
+      </ul>
+      <div class="plugin-install-error" id="pet-install-error" role="alert" hidden></div>
+      <div class="pet-install-progress" id="pet-install-progress" hidden>
+        <div class="pet-install-phase" id="pet-install-phase">Preparing…</div>
+        <div class="pet-install-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="pet-install-bar-track">
+          <div class="pet-install-bar-fill" id="pet-install-bar"></div>
+        </div>
+        <div class="pet-install-bytes" id="pet-install-bytes"></div>
+      </div>
+    </div>
+    <div class="ui-dialog-actions">
+      <button class="mini-btn ghost" id="pet-install-cancel" type="button">Cancel</button>
+      <button class="mini-btn" id="pet-install-confirm" type="button">Install</button>
     </div>
   </div>
 </div>

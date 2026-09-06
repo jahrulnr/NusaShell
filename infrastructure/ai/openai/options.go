@@ -30,6 +30,11 @@ const (
 	ProviderOptionSeed                 = "seed"
 	ProviderOptionCompactionItems      = "compaction_items"
 	ProviderOptionContextManagement    = "context_management"
+	// ProviderOptionReasoningSplit is MiniMax Chat Completions extra_body:
+	// thinking is returned on reasoning_content / reasoning_details instead
+	// of <think> tags in content. Source:
+	// https://platform.minimax.io/docs/api-reference/text-openai-api
+	ProviderOptionReasoningSplit = "reasoning_split"
 	// ProviderOptionSessionID is transport-only for OpenRouter delegated
 	// requests. The OpenAI endpoint itself does not use this field.
 	ProviderOptionSessionID = "session_id"
@@ -61,6 +66,7 @@ var providerOptionKeys = map[string]struct{}{
 	ProviderOptionSeed:                 {},
 	ProviderOptionCompactionItems:      {},
 	ProviderOptionContextManagement:    {},
+	ProviderOptionReasoningSplit:       {},
 	ProviderOptionSessionID:            {},
 }
 
@@ -211,6 +217,12 @@ func applyProviderOptions(req *chatRequest, options map[string]any) error {
 				return err
 			}
 			req.Seed = &v
+		case ProviderOptionReasoningSplit:
+			v, err := optionBool(key, value)
+			if err != nil {
+				return err
+			}
+			req.ReasoningSplit = &v
 		}
 	}
 	return nil

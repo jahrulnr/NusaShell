@@ -199,9 +199,9 @@ Read, synchronize, and check them with:
 
 ```bash
 make go-version
-make electron-version
-make electron-version-sync
-make electron-version-check
+make -C apps/electron version
+make -C apps/electron version-sync
+make -C apps/electron version-check
 make release-index-check
 ```
 
@@ -210,11 +210,11 @@ make release-index-check
 Useful local packaging commands are:
 
 ```bash
-make go-release              # package the Go core for this Unix platform
-make go-release-manifest    # create release/go/latest.json
-make electron-package       # package the wrapper only; no Go binary included
-make electron-release-linux # create its standalone Linux tar payload
-make electron-release-manifest
+make go-release                    # package the Go core for this Unix platform
+make go-release-manifest           # create release/go/latest.json
+make -C apps/electron package      # package the wrapper only; no Go binary included
+make -C apps/electron release-linux
+make -C apps/electron release-manifest
 ```
 
 On a push to `master`, GitHub Actions first detects which product paths
@@ -241,18 +241,18 @@ find the latest Go and Electron releases even when their versions differ.
 ## Development from a checkout
 
 ```bash
-make go-dev                 # native Go server
-make electron-dev           # stage a dev backend and run the wrapper
-make electron-test          # wrapper policy/unit tests
-make electron-ui-test       # real Electron renderer smoke flow
-make electron-package       # wrapper-only unpacked package
-make electron-install-local # install that local wrapper package
-make electron-dist          # native Electron installer for this OS
+make go-dev                         # native Go server
+make -C apps/electron dev           # stage a dev backend and run the wrapper
+make -C apps/electron test          # wrapper policy/unit tests
+make -C apps/electron ui-test       # real Electron renderer smoke flow
+make -C apps/electron package       # wrapper-only unpacked package
+make -C apps/electron install-local # install that local wrapper package
+make -C apps/electron dist          # native Electron installer for this OS
 ```
 
-`electron-dev` and `electron-ui-test` stage an ignored current-platform Go
+`make -C apps/electron dev` and `ui-test` stage an ignored current-platform Go
 binary under `apps/electron/runtime/` solely for local development/testing.
-`electron-package` and `electron-dist` do not stage or package that binary.
+`package` and `dist` do not stage or package that binary.
 
 On Linux, Electron first tries the unprivileged user-namespace sandbox. If
 the host prevents it and `chrome-sandbox` is not `root:root` with mode `4755`,

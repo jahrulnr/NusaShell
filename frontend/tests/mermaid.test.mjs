@@ -154,3 +154,48 @@ test('mermaid renders per-delta when fence closes and stays idempotent under a t
     delete global.document;
   }
 });
+
+test('renderMermaidDiagrams renders when called on the mermaid-block itself', async () => {
+  const dom = makeDom();
+  dom.window.mermaid = {
+    initialize() {},
+    async parse() { return true; },
+    async render(id) { return { svg: `<svg data-mmd="${id}"><g>ok</g></svg>` }; },
+  };
+  try {
+    const c = document.createElement('div');
+    c.innerHTML = '<div class="mermaid-block" data-complete="true"><pre class="mermaid-src">flowchart TD\n A--&gt;B</pre></div>';
+    const block = c.querySelector('.mermaid-block');
+    await renderMermaidDiagrams(block);
+    assert.ok(block.querySelector('svg'), 'self-targeted mermaid block still renders');
+    assert.ok(block.querySelector('.media-zoom-trigger'), 'zoom trigger is attached after SVG render');
+  } finally {
+    delete global.window;
+    delete global.document;
+  }
+});
+
+test('renderMermaidDiagrams re-attaches zoom after a concurrent innerHTML replace', async () => {
+  const dom = makeDom();
+  let renders = 0;
+  dom.window.mermaid = {
+    initialize() {},
+    async parse() { return true; },
+    async render(id) {
+      renders += 1;
+      return { svg: `<svg data-mmd="${id}"><g>ok</g></svg>` };
+    },
+  };
+  try {
+    const c = document.createElement('div');
+    c.innerHTML = '<div class="mermaid-block" data-complete="true"><pre class="mermaid-src">flowchart TD\n A--&gt;B</pre></div>';
+    await Promise.all([renderMermaidDiagrams(c), renderMermaidDiagrams(c)]);
+    const block = c.querySelector('.mermaid-block');
+    assert.ok(block.querySelector('svg'), 'SVG present after concurrent renders');
+    assert.equal(block.querySelectorAll('.media-zoom-trigger').length, 1, 'exactly one zoom trigger survives the race');
+    assert.ok(renders >= 1);
+  } finally {
+    delete global.window;
+    delete global.document;
+  }
+});

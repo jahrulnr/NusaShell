@@ -359,6 +359,15 @@ type Settings struct {
 	// wait tick, so saving a new value applies immediately to running
 	// conversations. 0 = off (default), max 60.
 	SlowDown int `json:"slow_down,omitempty"`
+	// PetsAutoStart spawns the desktop pet overlay as a background
+	// sub-process during the Go server's own boot, so the pet comes up
+	// alongside the shell regardless of which browser tab is open.
+	// Linux only (the pet is a Linux binary); on macOS/Windows the
+	// setting is stored but inert. Default false — auto-start is opt-in
+	// because users may want to manage the pet manually or run it from a
+	// different launcher. The Settings card exposes this as a toggle;
+	// flipping it does not stop a pet the user launched by hand.
+	PetsAutoStart bool `json:"pets_auto_start,omitempty"`
 	// UserPrompt is custom instructions the user wants injected into every
 	// agent turn's system prompt. Placed after the cache-stable prefix
 	// (system.md + tools.md) but before per-conversation system messages,

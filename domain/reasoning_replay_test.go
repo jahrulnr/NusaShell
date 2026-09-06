@@ -50,3 +50,26 @@ func TestRequiresReasoningReplay(t *testing.T) {
 		})
 	}
 }
+
+func TestRequiresReasoningSplit(t *testing.T) {
+	tests := []struct {
+		name  string
+		model string
+		want  bool
+	}{
+		{"opencode minimax-m3", "minimax-m3", true},
+		{"openrouter minimax slug", "minimax/minimax-m3:free", true},
+		{"m2.7 family", "MiniMax-M2.7", true},
+		{"glm is not minimax", "glm-5.3-flash", false},
+		{"deepseek is not minimax", "deepseek-v4-pro", false},
+		{"empty", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RequiresReasoningSplit(tt.model)
+			if got != tt.want {
+				t.Errorf("RequiresReasoningSplit(%q) = %v, want %v", tt.model, got, tt.want)
+			}
+		})
+	}
+}

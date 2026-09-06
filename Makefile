@@ -1,15 +1,17 @@
 # NusaShell (Go) developer tooling.
 #
 # Gates follow the repository verification baseline:
-# gofmt, go test, go test -race, go vet, go build.
+# gofmt, go test, go test -race, go vet, go build, frontend tests.
+#
+# App-specific targets live next to the app:
+#   make -C apps/electron <target>
+#   make -C apps/pets <target>
 
 VERSION_FILE ?= VERSION
 NUSASHELL_VERSION := $(shell tr -d '\r\n' < "$(VERSION_FILE)")
-ELECTRON_VERSION_FILE ?= apps/electron/VERSION
-ELECTRON_VERSION := $(shell tr -d '\r\n' < "$(ELECTRON_VERSION_FILE)")
 GO_LDFLAGS ?= -X main.version=$(NUSASHELL_VERSION)
 
-.PHONY: all build test race vet fmt check verify-local hooks run go-dev install install-release test-frontend test-frontend-e2e scan-ui-docs scan-ui-docs-check gen-catalog gen-catalog-check go-version electron-version electron-version-sync electron-version-check electron-install electron-test electron-installer-test electron-ui-test electron-build-backend electron-dev electron-package electron-install-local electron-dist electron-release-linux electron-release-manifest go-release go-release-manifest release-index-check
+.PHONY: all build test race vet fmt check verify-local hooks run go-dev install install-release test-frontend test-frontend-e2e scan-ui-docs scan-ui-docs-check gen-catalog gen-catalog-check go-version installer-test go-release go-release-manifest release-index-check
 
 all: check
 
@@ -29,14 +31,22 @@ test:
 	fi; \
 	go test $$race ./...
 
-## test-frontend: syntax-check the native frontend modules (Node, dev-only).
+## test-frontend: syntax-check frontend modules and run the Node test suite
+## (jsdom unit tests plus the Go-backed e2e smoke in frontend/tests/).
 test-frontend:
+	@if ! command -v node >/dev/null 2>&1; then \
+		echo "test-frontend: Node.js is required" >&2; exit 1; \
+	fi
+	@if [ ! -d node_modules ]; then \
+		echo "test-frontend: frontend dependencies are missing; run npm ci first." >&2; exit 1; \
+	fi
 	@fail=0; for f in $$(find frontend/js -name '*.js'); do \
 		node --check "$$f" || fail=1; \
 	done; \
-	if [ "$$fail" -eq 1 ]; then echo "frontend: syntax check failed"; exit 1; fi; \
-	node --test scripts/agent-instructions.test.mjs; \
-	echo "frontend: syntax ok"
+	if [ "$$fail" -eq 1 ]; then echo "frontend: syntax check failed"; exit 1; fi
+	node --test scripts/agent-instructions.test.mjs
+	node --test frontend/tests/*.test.mjs
+	@echo "frontend: ok"
 
 ## test-frontend-e2e: one cross-layer UI smoke flow against a real Go server.
 test-frontend-e2e:
@@ -56,8 +66,8 @@ fmt:
 	find . -path './.git' -prune -o -path './.experimental' -prune -o -type f -name '*.go' -exec gofmt -l {} +
 	@echo "gofmt: done"
 
-## check: full verification baseline.
-check: fmt fmt-check test vet build
+## check: full verification baseline (Go gates + frontend tests).
+check: fmt fmt-check test vet build test-frontend
 
 ## verify-local: run native repository gates plus Windows/macOS compile checks.
 verify-local:
@@ -79,87 +89,19 @@ fmt-check:
 	@echo "gofmt: ok"
 
 ## run: build and start the development server (listens on NUSASHELL_PORT/9999).
-run: scan-ui-docs gen-catalog build
+run: scan-ui-docs build
 	./bin/nusashell
 
 ## go-dev: alias for the native Go development server.
 go-dev: run
 
-## electron-version: print the Electron wrapper release version.
-electron-version:
-	@node scripts/version.mjs read
-
 ## go-version: print the Go core release version.
 go-version:
 	@node scripts/version.mjs read-go
 
-## electron-version-sync: update apps/electron package and lock metadata.
-electron-version-sync:
-	@node scripts/version.mjs sync
-
-## electron-version-check: fail when Electron metadata differs from apps/electron/VERSION.
-electron-version-check:
-	@node scripts/version.mjs check
-
-## electron-install: install the pinned Electron wrapper dependencies.
-electron-install: electron-version-check
-	npm ci --prefix apps/electron
-
-## electron-test: run Electron wrapper unit tests without starting a GUI.
-electron-test: electron-install
-	npm --prefix apps/electron test
-
-## electron-installer-test: validate installer syntax and release metadata.
-electron-installer-test:
+## installer-test: validate installer syntax and shared release metadata.
+installer-test:
 	node --test scripts/version.test.mjs scripts/release-changes.test.mjs scripts/release-index.test.mjs scripts/release-manifest.test.mjs scripts/release-notes.test.mjs scripts/release-workflow.test.mjs scripts/install.test.mjs
-
-## electron-ui-test: launch the real Electron renderer and exercise web UI flows.
-electron-ui-test: electron-build-backend electron-install
-	npm --prefix apps/electron run test:ui
-
-## electron-build-backend: stage the current-platform Go backend for Electron
-## development and renderer tests. The staged binary is ignored and is never
-## copied into a release package.
-electron-build-backend:
-	mkdir -p apps/electron/runtime
-	go build -buildvcs=false -ldflags "$(GO_LDFLAGS)" -o ./apps/electron/runtime/nusashell ./cmd/nusashell
-
-## electron-dev: run the web UI inside Electron with disk-backed frontend assets.
-electron-dev: electron-build-backend electron-install
-	NUSASHELL_DEV=1 npm --prefix apps/electron run dev
-
-## electron-package: create an unpacked Electron wrapper directory.
-## The Go backend is intentionally not embedded; dev/UI targets stage it only
-## for the local process they launch.
-electron-package: electron-install
-	npm --prefix apps/electron run package:dir
-
-## electron-install-local: package and install Electron under the user profile.
-electron-install-local: electron-package
-	@case "$$(uname -s)" in \
-		MINGW*|MSYS*|CYGWIN*) powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-local.ps1;; \
-		*) bash scripts/install-local.sh;; \
-	esac
-
-## electron-dist: create native Electron wrapper artifacts for this platform.
-electron-dist: electron-install
-	npm --prefix apps/electron run dist
-
-## electron-release-linux: create the standalone Electron payload used by the
-## optional Electron part of install.sh on Linux.
-electron-release-linux: electron-package
-	@case "$$(uname -s)" in \
-		Linux) ;; \
-		*) echo "electron-release-linux must run on Linux" >&2; exit 1;; \
-	esac
-	@version="$$(tr -d '\r\n' < "$(ELECTRON_VERSION_FILE)")"; \
-	mkdir -p apps/electron/dist/release; \
-	tar -C apps/electron/dist/linux-unpacked -czf "$$(pwd)/apps/electron/dist/release/nusashell-electron-$${version}-linux-x64.tar.gz" .; \
-	sha256sum "apps/electron/dist/release/nusashell-electron-$${version}-linux-x64.tar.gz" > "apps/electron/dist/release/nusashell-electron-$${version}-linux-x64.tar.gz.sha256"
-
-## electron-release-manifest: index locally produced Electron payloads.
-electron-release-manifest: electron-version-check
-	node scripts/release-manifest.mjs "$(ELECTRON_VERSION)" apps/electron/dist/release apps/electron/dist/release/electron-latest.json electron
 
 ## go-release: package the Go core for the current Unix platform.
 ## GitHub Actions uses native runners for Windows/macOS packaging; this target

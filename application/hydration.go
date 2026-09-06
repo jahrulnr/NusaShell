@@ -111,6 +111,7 @@ func (b *HydrationBuilder) Build() HydrationResult {
 	}
 	appendSlot(b.readRuntimeContext())
 	appendSlot(b.readAgentsMD())
+	appendSlot(b.readFileList())
 	for _, slot := range b.readMemory() {
 		appendSlot(slot)
 	}
@@ -171,6 +172,40 @@ func (b *HydrationBuilder) readRuntimeContext() hydrationSlot {
 	}
 	content, _ := json.Marshal(ctx)
 	return hydrationSlot{name: "runtime_context", content: string(content)}
+}
+
+// hydrationFileListMaxBytes caps the workspace-listing hydration slot. The
+// file_list tool itself caps at fileListEntryLimit entries, but a large
+// workspace root (the default workspace is the host home directory) can
+// still produce a multi-thousand-entry listing; beyond this size the slot
+// is hidden and the agent calls file_list itself for targeted paths.
+const hydrationFileListMaxBytes = 8 << 10 // ~2k tokens
+
+// readFileList attaches the real file_list tool output for the workspace
+// root so the agent receives a one-level map of the project without having
+// to spend discovery tool calls. Same pattern as readAgentsMD: real tool,
+// real args, verbatim output. Fail-soft: no workspace, a failed listing, an
+// empty directory, or an oversized listing all hide the slot.
+func (b *HydrationBuilder) readFileList() hydrationSlot {
+	if b.source.Executor == nil {
+		return hydrationSlot{name: "file_list", content: ""}
+	}
+	ws := strings.TrimSpace(b.source.RuntimeContext.Workspace)
+	if ws == "" {
+		return hydrationSlot{name: "file_list", content: ""}
+	}
+	args := fmt.Sprintf(`{"path":%q}`, ws)
+	out, err := b.source.Executor.Execute(context.Background(), "file_list", []byte(args))
+	if err != nil {
+		return hydrationSlot{name: "file_list", content: ""}
+	}
+	// file_list returns yamlMD (bytes meta + listing lines). Hide the slot
+	// when the body is empty (no entries) or when the listing would crowd
+	// out higher-signal context.
+	if strings.TrimSpace(stripYAMLFrontmatter(out)) == "" || len(out) > hydrationFileListMaxBytes {
+		return hydrationSlot{name: "file_list", content: ""}
+	}
+	return hydrationSlot{name: "file_list", args: args, content: out}
 }
 
 // readAgentsMD loads the active workspace's AGENTS.md through the REAL

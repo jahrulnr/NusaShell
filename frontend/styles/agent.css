@@ -360,24 +360,18 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  overflow-anchor: none;
   padding: 22px 18px;
   display: flex;
   flex-direction: column;
   gap: 32px;
 }
+.agent-thread > * { overflow-anchor: none; }
 @media (max-width: 900px) {
   .agent-thread { padding-top: 52px; }
 }
 @media (max-width: 760px) {
   .agent-thread { padding: 52px 16px 16px; }
-}
-
-.agent-thread-end-marker {
-  flex: 0 0 1px;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
 }
 
 /* ============ Messages & bubbles ============ */
@@ -691,6 +685,7 @@
   max-height: 33em;
   overflow-y: auto;
   overflow-x: auto;
+  overflow-anchor: none;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
   margin: 0px 0px 0px 12px;
@@ -872,6 +867,7 @@
   min-height: 24px;
   margin: 2px 0 0;
   padding: 3px 2px 1px;
+  overflow-anchor: none;
   color: var(--text-faint);
   font: 11px/1.35 var(--font-mono);
 }

@@ -24,7 +24,7 @@ test('Electron loads the real web shell and preserves composer/workspace interac
     || join(electronRoot, 'runtime', process.platform === 'win32' ? 'nusashell.exe' : 'nusashell');
 
   assert.ok(existsSync(electronExecutable), `Electron binary missing: ${electronExecutable}`);
-  assert.ok(existsSync(backend), `Go backend missing: ${backend}; run make electron-build-backend`);
+  assert.ok(existsSync(backend), `Go backend missing: ${backend}; run make -C apps/electron build-backend`);
 
   const temporaryDirectory = await mkdtemp(join(tmpdir(), 'nusashell-electron-ui-'));
   const dataDirectory = join(temporaryDirectory, 'data');

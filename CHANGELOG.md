@@ -5,9 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.6] - 2026-09-05
+## [0.4.7] - 2026-09-06
 
 ### Added
+
+- **Hydration plants a one-level workspace map.** The initial-turn and
+  post-compaction hydration checkpoint now includes a real `file_list` call
+  against the workspace root right after the AGENTS.md `file_read`, so the
+  agent starts with the project layout instead of spending discovery tool
+  calls. The slot attaches the genuine tool output verbatim and follows the
+  existing fail-soft rules: hidden when there is no workspace, the listing
+  fails, the workspace root is empty, or the listing would exceed ~2k
+  tokens (e.g. a home-directory default workspace).
 
 - **`ask_question` plays a notification sound.** When an agent turn calls
   `ask_question` on the active conversation, the interactive question card
@@ -17,6 +26,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   notifications setting as the turn-complete / turn-error sounds. The
   frontend preloads it with the other announcement blips, and
   `TestSoundsEndpoint` now covers all three notification sounds.
+
+### Fixed
+
+- **Cross-platform path resolution in workspace git listing.** `git
+  rev-parse --show-toplevel` can spell the same repository differently
+  than the workspace path (macOS resolves `/var` → `/private/var`;
+  Windows canonicalizes short names), which made the git path report an
+  empty instruction-file catalog and skip the walk fallback. Both sides
+  are now `EvalSymlinks`-resolved, Windows paths compare
+  case-insensitively, and a mismatch falls back to the walker.
+- **`StableBinaryPath` fires through symlinked install roots.** The old
+  `current` symlink target was compared against a versions dir that could
+  still contain a symlink (`/var` → `/private/var`, Windows short names),
+  so service definitions kept pointing at versioned paths. Both sides are
+  resolved before the comparison.
+- **Attachment ids and names reject both separators.** `attachmentfs`
+  validated `conversationID`/`name` only against `filepath.Separator`,
+  so a forward-slash id (`a/b`) slipped past on Windows where `/` is also
+  a separator. `Remove` and `WriteBytes` now reject both `\` and `/`.
+- **Workspace list-dirs test uses a platform-absolute path.** The
+  `CoercesNilEntriesToEmpty` test hardcoded `/home/tuan`, which is not an
+  absolute path on Windows; it now uses `t.TempDir()`.
+
+## [0.4.6] - 2026-09-05
+
+### Added
 
 - **Provider Cache TTL can be turned off.** The provider detail chips include
   `off`, which skips prompt-cache markers for that provider even when

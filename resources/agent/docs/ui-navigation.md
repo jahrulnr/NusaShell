@@ -6,7 +6,7 @@ Global chrome surrounding every NusaShell view: the vertical sidebar owns identi
 
 ## Sidebar identity and utilities
 
-The vertical sidebar identifies NusaShell with its brand mark and wordmark, shows compact backend connection status, and keeps settings plus the install shortcut (visible only while the browser offers installation) with the navigation.
+The vertical sidebar identifies NusaShell with its brand mark and wordmark, shows compact backend connection status, and keeps settings plus the install shortcut (visible only while the browser offers installation) with the navigation. The desktop pet launcher sits above the Settings icon: it surfaces install/launch status via a coloured dot (green when installed, pulsing amber while an install is active, neutral on macOS/Windows where the pet is not supported) and opens a one-click install dialog when the binary is missing.
 
 - **Connection status text** (`#conn-status`):
   - Section: Sidebar
@@ -22,6 +22,12 @@ The vertical sidebar identifies NusaShell with its brand mark and wordmark, show
   - Section: Sidebar
   - Type: button
   - Notes: Visible only while the browser offers installation (beforeinstallprompt); triggers the native install flow and hides after install/dismissal.
+
+- **Desktop pet** (`#pet-btn`):
+  - Section: Sidebar
+  - Type: button
+  - Action: Single click when installed spawns the desktop pet overlay (settings.pets_launch). When not installed, opens a one-click install dialog backed by settings.pets_install_start.
+  - Notes: Hidden on macOS/Windows (pet is Linux-only). Sits above the Settings icon in .sidebar-actions.
 
 - **Settings shortcut** (`#nav-settings-btn`):
   - Section: Sidebar

@@ -1,14 +1,18 @@
-// Sound notifications for agent turn events.
+// Sound notifications for interactive Agent-room turn events.
 //
-// Plays a notification sound when an agent turn completes or fails, or when
-// an ask_question card is waiting for an answer, gated by the
-// SoundNotifications setting (default on). Sounds are served from
-// the embedded /sounds/ endpoint and are preloaded on first use so the
-// first turn-complete plays without a fetch delay.
+// Plays a notification sound when a listed Agent room completes or fails, or
+// when an ask_question card is waiting for an answer, gated by the
+// SoundNotifications setting (default on). Background learning jobs and
+// other headless turns stay silent: their ding is the same wav as a chat
+// completion and makes the user think the conversation they are watching
+// just finished.
+//
+// Sounds are served from the embedded /sounds/ endpoint and are preloaded
+// on first use so the first turn-complete plays without a fetch delay.
 //
 // Browser autoplay policy: Audio elements created after a user gesture
-// (clicking "send") are allowed to play. Since every agent turn is
-// triggered by a user action, playback is permitted.
+// (clicking "send") are allowed to play. Since every interactive agent
+// turn is triggered by a user action, playback is permitted.
 
 const SOUND_COMPLETE = '/sounds/notification.wav';
 const SOUND_ERROR = '/sounds/notification-error.wav';
@@ -32,6 +36,20 @@ function preload() {
   errorAudio.preload = 'auto';
   askAudio = new Audio(SOUND_ASK);
   askAudio.preload = 'auto';
+}
+
+// shouldPlayAgentTurnSound is the room gate for completion/error dings.
+// Only a visible Agent room (sidebar list) may play. Headless learning and
+// pipeline transcripts share the Agent-room wav, so they stay silent even
+// if they somehow appear in the list.
+export function shouldPlayAgentTurnSound(soundEnabled, details = {}) {
+  if (!soundEnabled) return false;
+  if (details.headless) return false;
+  const conversationId = details.conversationId;
+  if (!conversationId) return false;
+  const rooms = details.rooms;
+  if (!Array.isArray(rooms)) return false;
+  return rooms.some((room) => room && room.id === conversationId);
 }
 
 // playComplete plays the turn-complete notification. Silently no-ops when

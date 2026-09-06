@@ -101,6 +101,14 @@ const (
 	MethodSettingsSTTInstallStart  = "settings.stt_install_start"
 	MethodSettingsSTTInstallCancel = "settings.stt_install_cancel"
 
+	// Desktop pet launcher + one-click install (Linux only). status reports
+	// the installed binary path; install pulls from the pets release stream
+	// (mirrors scripts/install.sh::install_pets_linux); launch spawns the
+	// binary outside the browser window.
+	MethodPetsStatus       = "settings.pets_status"
+	MethodPetsInstallStart = "settings.pets_install_start"
+	MethodPetsLaunch       = "settings.pets_launch"
+
 	// ACP agents are spawn-only subagents (not user chat providers).
 	MethodAcpAgentsList           = "acp.agents.list"
 	MethodAcpAgentsSave           = "acp.agents.save"
@@ -162,6 +170,10 @@ const (
 	EventSTTInstallProgress = "stt.install.progress"
 	EventSTTInstallDone     = "stt.install.done"
 	EventSTTInstallError    = "stt.install.error"
+
+	EventPetsInstallProgress = "pets.install.progress"
+	EventPetsInstallDone     = "pets.install.done"
+	EventPetsInstallError    = "pets.install.error"
 
 	EventAcpRunStarted          = "acp.run.started"
 	EventAcpRunUpdated          = "acp.run.updated"
@@ -1416,6 +1428,57 @@ var OfflineSTTModelIDs = []string{
 	"ggml-small",
 	"ggml-large-v3-turbo-q5_0",
 	"ggml-large-v3-turbo",
+}
+
+// ---- desktop pet ----
+
+// PetsStatusResult is the wire answer for settings.pets_status. It mirrors
+// the in-binary probe used by apps/pets/internal/detect so the sidebar can
+// show whether the desktop pet is installed without booting the pet itself.
+// Supported is false on platforms where the pet cannot run (macOS/Windows).
+type PetsStatusResult struct {
+	Supported     bool   `json:"supported"`              // runtime platform supports pet (Linux only)
+	Installed     bool   `json:"installed"`              // nusashell-pets executable resolved
+	Path          string `json:"path,omitempty"`         // absolute path to resolved binary, if installed
+	AssetsPath    string `json:"assets_path,omitempty"`  // absolute path to assets/pets inside install root
+	Version       string `json:"version,omitempty"`      // installed version (best-effort, may be empty)
+	InstallRoot   string `json:"install_root,omitempty"` // active install root (env override or default)
+	Launcher      string `json:"launcher,omitempty"`     // ~/.local/bin/nusashell-pets if present
+	Running       bool   `json:"running"`                // currently running process detected
+	InstallActive bool   `json:"install_active"`         // an install is in flight
+}
+
+// PetsInstallStartRequest is the wire request for settings.pets_install_start.
+// Version is optional; empty resolves the latest published pet release.
+type PetsInstallStartRequest struct {
+	Version string `json:"version,omitempty"`
+}
+
+// PetsInstallProgressDTO rides the pets.install.* events. It carries
+// download/extract/activate phase transitions so the UI can render a
+// progress bar without polling.
+type PetsInstallProgressDTO struct {
+	Phase        string `json:"phase,omitempty"` // "resolve" | "download" | "verify" | "extract" | "activate" | "launcher"
+	BytesFetched int64  `json:"bytes_fetched,omitempty"`
+	BytesTotal   int64  `json:"bytes_total,omitempty"`
+	Message      string `json:"message,omitempty"`
+}
+
+// PetsInstallStartResult mirrors the TTSInstallStartResult shape so the
+// frontend single-flight contract is identical: Started=false means an
+// install is already running on the server.
+type PetsInstallStartResult struct {
+	Started bool   `json:"started"`
+	Running bool   `json:"running"`
+	Message string `json:"message,omitempty"`
+}
+
+// PetsLaunchResult is the wire answer for settings.pets_launch. It tells
+// the caller whether the spawn succeeded so the UI can toast an error.
+type PetsLaunchResult struct {
+	Launched bool   `json:"launched"`
+	Path     string `json:"path,omitempty"`
+	Message  string `json:"message,omitempty"`
 }
 
 // ---- learning ----

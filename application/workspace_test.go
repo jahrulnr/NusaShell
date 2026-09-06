@@ -147,15 +147,16 @@ func TestHandleWorkspaceListDirsNilBrowserUnavailable(t *testing.T) {
 }
 
 func TestHandleWorkspaceListDirsCoercesNilEntriesToEmpty(t *testing.T) {
+	path := t.TempDir()
 	app := &App{
 		Logs: &fakeLogStore{},
 		Bus:  NewBus(),
 		DirectoryBrowser: fakeDirBrowser{list: func(context.Context, string) (DirListing, error) {
-			return DirListing{Path: "/home/tuan", Parent: "/home"}, nil
+			return DirListing{Path: path}, nil
 		}},
 	}
 
-	resp, rpcErr := app.handleWorkspaceListDirs(contracts.WorkspaceListDirsRequest{Path: "/home/tuan"})
+	resp, rpcErr := app.handleWorkspaceListDirs(contracts.WorkspaceListDirsRequest{Path: path})
 	if rpcErr != nil {
 		t.Fatalf("list dirs: %v", rpcErr)
 	}

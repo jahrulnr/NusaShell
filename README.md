@@ -99,13 +99,13 @@ and native frontend. It does not duplicate the web UI or its interactions, and
 its release package never embeds the Go binary:
 
 ```bash
-make electron-dev       # build the local backend and launch Electron
-make electron-test      # run wrapper tests without a GUI
-make electron-ui-test   # launch Electron and test composer/workspace flows
-make electron-package   # create an unpacked app directory
-make electron-dist      # create a native installer for this OS
-make electron-install-local # install the unpacked app into the user profile
-make go-release         # package the standalone Go core for this Unix platform
+make -C apps/electron dev           # build the local backend and launch Electron
+make -C apps/electron test          # run wrapper tests without a GUI
+make -C apps/electron ui-test       # launch Electron and test composer/workspace flows
+make -C apps/electron package       # create an unpacked app directory
+make -C apps/electron dist          # create a native installer for this OS
+make -C apps/electron install-local # install the unpacked app into the user profile
+make go-release                     # package the standalone Go core for this Unix platform
 ```
 
 See [`docs/electron.md`](docs/electron.md) for the runtime boundary,
@@ -131,16 +131,16 @@ go test ./...            # ordinary Go test run
 go test -race ./...      # race-enabled test run
 go vet ./...             # static analysis
 go build ./...           # compile every package
-make check               # fmt-check + race test + vet + build
+make check               # fmt-check + race test + vet + build + frontend tests
 make verify-local        # full local gate + Windows/macOS compile checks
-make electron-test       # Electron wrapper unit tests
-make electron-ui-test    # real Electron renderer interaction smoke test
-make electron-dev        # run NusaShell in the Electron desktop shell
-make electron-installer-test # installer/version/manifest contract tests
+make -C apps/electron test    # Electron wrapper unit tests
+make -C apps/electron ui-test # real Electron renderer interaction smoke test
+make -C apps/electron dev     # run NusaShell in the Electron desktop shell
+make installer-test      # installer/version/manifest contract tests
 make go-release          # standalone Go core payload
 make go-release-manifest # standalone Go release manifest
 make go-version          # print the Go release version
-make electron-version    # print the Electron release version
+make -C apps/electron version # print the Electron release version
 make release-index-check # validate independent release pointers
 ```
 

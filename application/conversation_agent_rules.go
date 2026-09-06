@@ -132,7 +132,7 @@ func (p *conversationRules) rules() AgentRules {
 				p.a.sealRound(p.run, p.prevMsgID, p.prevRound, p.prevState, &contracts.RoundRef{RunID: p.run.ID, MessageID: p.currentMsgID, Round: p.round}, nil, "")
 			}
 			p.prevMsgID, p.prevRound, p.prevState = p.currentMsgID, p.round, "done"
-			p.a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
+			p.a.emitInteractiveTurnEvent(p.run, contracts.EventTurnStarted, contracts.TurnStartedEvent{
 				RunID: p.run.ID, ConversationID: p.run.ConversationID, MessageID: p.currentMsgID, Round: p.round,
 			})
 			return nil

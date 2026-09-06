@@ -101,6 +101,52 @@ export function updateScrollPin(state, thread, tolerance = 24, options = {}) {
   return state.pinned;
 }
 
+// shouldDetachFollow decides whether a scroll event is a real "read history"
+// gesture. Geometry-only upward movement is not enough: open Thinking and
+// markdown reparse can clamp scrollTop down a few pixels while the viewport
+// is still on the live tail, which used to cancel auto-follow.
+export function shouldDetachFollow(state, thread, options = {}) {
+  if (!thread) return false;
+  const intent = options.intent || '';
+  const geometryDirection = options.geometryDirection || '';
+  const tolerance = Number.isFinite(options.tolerance) ? options.tolerance : 24;
+  if (intent === 'up') return true;
+  if (geometryDirection !== 'up') return false;
+  if (isThreadAtBottom(thread, tolerance)) return false;
+  const previous = state?.pinGeom?.thread === thread ? state.pinGeom.scrollTop : null;
+  if (previous == null) return false;
+  return thread.scrollTop < previous - tolerance;
+}
+
+function elementOverflowY(node) {
+  if (!node || node.nodeType !== 1) return '';
+  try {
+    const style = node.ownerDocument?.defaultView?.getComputedStyle?.(node);
+    if (style?.overflowY) return style.overflowY;
+  } catch {}
+  return node.style?.overflowY || '';
+}
+
+// isNestedScrollerEvent reports wheel/touch that target an inner overflow
+// box (open Thinking, tool terminal, table). Those must not be treated as
+// thread follow-detach gestures; overscroll-behavior contains the movement
+// but the event still bubbles to #agent-thread.
+export function isNestedScrollerEvent(target, root) {
+  if (!target || !root) return false;
+  let node = target;
+  while (node && node !== root) {
+    if (node.nodeType === 1) {
+      const canScroll = Number(node.scrollHeight) > Number(node.clientHeight) + 1;
+      const overflowY = elementOverflowY(node);
+      if (canScroll && (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')) {
+        return true;
+      }
+    }
+    node = node.parentElement || node.parentNode;
+  }
+  return false;
+}
+
 // conversationTail is the snapshot window for a long thread: keep the last
 // user (or compaction) bubble, keep the complete trailing assistant run, and
 // leave only older complete turns to Load older. A trailing run can contain

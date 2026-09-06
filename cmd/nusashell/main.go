@@ -28,6 +28,7 @@ import (
 	"nusashell/infrastructure/jsonstore"
 	"nusashell/infrastructure/mcpclient"
 	"nusashell/infrastructure/memorystore"
+	"nusashell/infrastructure/petsinstall"
 	"nusashell/infrastructure/pluginfs"
 	"nusashell/infrastructure/plugininstall"
 	"nusashell/infrastructure/pluginruntime"
@@ -285,6 +286,7 @@ func run() error {
 		OfflineSynthesizer:          ai.NewOfflineSynthesizer(dataDir),
 		TTSInstaller:                ttsinstall.New(dataDir, ""),
 		STTInstaller:                sttinstall.New(dataDir, "", ""),
+		PetsInstaller:               petsinstall.NewAdapter(petsinstall.New(hostHomeDir())),
 		ImageModelListerFactory:     ai.NewImageModelListerFactory(),
 		SpeechModelListerFactory:    ai.NewSpeechModelListerFactory(),
 		VideoGeneratorFactory:       ai.NewVideoGeneratorFactory(),
@@ -360,6 +362,7 @@ func run() error {
 	app.StartLifecycle()
 	app.GoSafe("tools", func() { tools.RunOverflowCleanup(ctx) })
 	app.StartMCPAutostart(ctx)
+	app.StartPetAutoLaunch(ctx)
 	app.StartSettingsWatcher(ctx)
 	defer app.CloseLifecycle()
 	if autoSvc != nil {

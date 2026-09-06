@@ -34,22 +34,25 @@ available.
 
 ## Local commands
 
+Electron targets live in `apps/electron/Makefile`, the same split as
+`apps/pets/Makefile`. From the repository root:
+
 ```bash
-make electron-install          # install pinned wrapper dependencies
-make electron-test             # policy/helpers and packaging contract tests
-make electron-ui-test          # real renderer interaction smoke test
-make electron-dev              # stage a Go binary and launch Electron
-make electron-package          # wrapper-only unpacked package
-make electron-install-local    # install that local wrapper package
-make electron-dist             # native wrapper installer for this OS
-make electron-release-linux    # standalone Linux wrapper tar payload
-make electron-release-manifest # electron-latest.json for local payloads
+make -C apps/electron deps            # install pinned wrapper dependencies
+make -C apps/electron test            # policy/helpers and packaging contract tests
+make -C apps/electron ui-test         # real renderer interaction smoke test
+make -C apps/electron dev             # stage a Go binary and launch Electron
+make -C apps/electron package         # wrapper-only unpacked package
+make -C apps/electron install-local   # install that local wrapper package
+make -C apps/electron dist            # native wrapper installer for this OS
+make -C apps/electron release-linux   # standalone Linux wrapper tar payload
+make -C apps/electron release-manifest
 ```
 
-`electron-dev` enables `NUSASHELL_DEV=1`, so frontend edits are served from
+`dev` enables `NUSASHELL_DEV=1`, so frontend edits are served from
 disk. The ignored binary under `apps/electron/runtime/` is only for the dev
-and UI-test process. `electron-package` and `electron-dist` do not depend on
-`electron-build-backend` and do not include that file.
+and UI-test process. `package` and `dist` do not depend on
+`build-backend` and do not include that file.
 
 For an already-running loopback server:
 

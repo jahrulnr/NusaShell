@@ -83,3 +83,15 @@ func RequiresReasoningReplay(provider, model, interleavedField string) bool {
 // response decoder strips it from user-visible output. Mirrors OmniRoute's
 // NON_ANTHROPIC_THINKING_PLACEHOLDER.
 const ReasoningPlaceholder = "(Continue from the current context.)"
+
+// minimaxModelPattern matches MiniMax Chat Completions model ids, including
+// gateway slugs (minimax-m3, MiniMax-M2.7, minimax/minimax-m3:free).
+var minimaxModelPattern = regexp.MustCompile(`(?i)minimax`)
+
+// RequiresReasoningSplit reports whether a Chat Completions request should
+// send MiniMax's reasoning_split=true so thinking is returned on
+// reasoning_content / reasoning_details instead of <think> tags in content.
+// OpenRouter uses its own reasoning object and must not receive this field.
+func RequiresReasoningSplit(model string) bool {
+	return minimaxModelPattern.MatchString(strings.TrimSpace(model))
+}

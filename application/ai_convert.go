@@ -20,8 +20,8 @@ const defaultIdleTimeout = 60 * time.Second
 
 // ToCoreRequest translates an application ChatRequest into the shared
 // core.Request (Blocks-based model). Provider-specific semantics that have
-// no core field (prompt caching, learned strip params, reasoning replay)
-// are applied here, at the boundary.
+// no core field (prompt caching, learned strip params, reasoning replay,
+// MiniMax reasoning_split) are applied here, at the boundary.
 func ToCoreRequest(req ChatRequest, kind domain.ProviderKind, openRouter bool) *core.Request {
 	out := &core.Request{
 		Model:            req.Model,
@@ -89,6 +89,13 @@ func ToCoreRequest(req ChatRequest, kind domain.ProviderKind, openRouter bool) *
 	}
 	if req.ContextManagement != nil && kind == domain.ProviderResponses {
 		setProviderOption(out, "context_management", req.ContextManagement)
+	}
+	// MiniMax Chat Completions native format embeds thinking in <think>
+	// tags inside content unless reasoning_split is on. OpenRouter uses
+	// its reasoning object instead; Messages uses Anthropic thinking
+	// blocks. A learned 400 can strip the extra field on retry.
+	if kind == domain.ProviderChat && !openRouter && domain.RequiresReasoningSplit(req.Model) && !hasParam(req.StripParams, "reasoning_split") {
+		setProviderOption(out, "reasoning_split", true)
 	}
 	return out
 }

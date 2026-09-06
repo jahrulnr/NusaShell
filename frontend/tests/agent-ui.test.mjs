@@ -12,6 +12,8 @@ import {
   isThreadAtBottom,
   syncThreadPin,
   updateScrollPin,
+  shouldDetachFollow,
+  isNestedScrollerEvent,
 } from '../js/agent-ui.js';
 
 test('context usage uses the effective model window', () => {
@@ -60,7 +62,7 @@ test('terminal lifecycle can sync the pin from actual thread geometry', () => {
 test('updateScrollPin keeps the pin while content grows ahead of the follow scroll', () => {
   // Tool spam: content grows faster than the follow-scroll, so the bottom
   // distance is large even though the user never scrolled up. The pin must
-  // survive (the observer keeps the marker visible → follow continues).
+  // survive (ResizeObserver keeps sticking to the content end).
   const thread = { scrollHeight: 2000, scrollTop: 900, clientHeight: 500 };
   const state = { pinned: true };
   assert.equal(updateScrollPin(state, thread), true, 'growth alone never unpins');
@@ -107,6 +109,58 @@ test('updateScrollPin honours explicit user scroll intent before geometry settle
   assert.equal(updateScrollPin(state, thread, 24, { direction: 'down' }), false);
   thread.scrollTop = 2300;
   assert.equal(updateScrollPin(state, thread, 24, { direction: 'down' }), true);
+});
+
+test('shouldDetachFollow ignores a 1px geometry-up clamp while still at the tail', () => {
+  // Open Thinking / markdown reparse can shrink scrollHeight for a frame.
+  // The browser clamps scrollTop down, which looks like an upward scroll even
+  // though the reader never left the live tail.
+  const thread = { scrollHeight: 2000, scrollTop: 1476, clientHeight: 500 };
+  const state = { pinned: true, pinGeom: { thread, scrollTop: 1480 } };
+  assert.equal(isThreadAtBottom(thread, 24), true);
+  assert.equal(shouldDetachFollow(state, thread, {
+    intent: '',
+    geometryDirection: 'up',
+    tolerance: 24,
+  }), false, 'layout clamp at the tail must not detach follow');
+});
+
+test('shouldDetachFollow honours an explicit upward gesture immediately', () => {
+  const thread = { scrollHeight: 2000, scrollTop: 1476, clientHeight: 500 };
+  const state = { pinned: true, pinGeom: { thread, scrollTop: 1480 } };
+  assert.equal(shouldDetachFollow(state, thread, {
+    intent: 'up',
+    geometryDirection: 'up',
+    tolerance: 24,
+  }), true);
+});
+
+test('shouldDetachFollow detaches a scrollbar drag that actually left the tail', () => {
+  const thread = { scrollHeight: 2000, scrollTop: 900, clientHeight: 500 };
+  const state = { pinned: true, pinGeom: { thread, scrollTop: 1480 } };
+  assert.equal(shouldDetachFollow(state, thread, {
+    intent: '',
+    geometryDirection: 'up',
+    tolerance: 24,
+  }), true);
+});
+
+test('isNestedScrollerEvent ignores wheel/touch that target an inner Thinking scroller', () => {
+  const thread = { nodeType: 1 };
+  const inner = {
+    nodeType: 1,
+    parentElement: thread,
+    scrollHeight: 800,
+    clientHeight: 200,
+    style: { overflowY: 'auto' },
+    classList: { contains: (name) => name === 'agent-reasoning-content' },
+  };
+  const target = { nodeType: 1, parentElement: inner };
+  inner.parentElement = thread;
+  target.parentElement = inner;
+  assert.equal(isNestedScrollerEvent(target, thread), true);
+  assert.equal(isNestedScrollerEvent(inner, thread), true);
+  assert.equal(isNestedScrollerEvent(thread, thread), false);
 });
 
 test('updateScrollPin ignores geometry from a different thread element', () => {

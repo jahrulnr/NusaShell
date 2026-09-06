@@ -1,6 +1,6 @@
 // Settings workspace: native browser preferences plus the Go runtime controls.
 
-import { autoReconnectEnabled, on, rpc, setAutoReconnect } from '../rpc.js';
+import { on, rpc } from '../rpc.js';
 import { toast, createSelect, el } from '../ui.js';
 import { FONT_OPTIONS, readFontPreference, setFontPreference } from '../font-preferences.js';
 
@@ -30,8 +30,8 @@ export async function initSettings() {
     bound = true;
     document.getElementById('settings-save-btn').addEventListener('click', save);
     document.getElementById('settings-sidebar-compact').addEventListener('change', saveSidebarPreference);
-    document.getElementById('settings-auto-reconnect').addEventListener('change', saveReconnectPreference);
-    document.getElementById('settings-check-connection-btn').addEventListener('click', checkConnection);
+    document.getElementById('settings-pets-auto-start').addEventListener('change', savePetsAutoStart);
+    document.getElementById('settings-pet-action-btn').addEventListener('click', triggerPetAction);
     fontSelect = createSelect(document.getElementById('settings-font-family'), {
       data: FONT_OPTIONS.map((option) => ({
         text: `${option.label} — ${option.description}`,
@@ -259,12 +259,12 @@ export async function refresh() {
   }
 
   document.getElementById('settings-sidebar-compact').checked = localStorage.getItem('nusashell.sidebarMode') === 'icons';
-  document.getElementById('settings-auto-reconnect').checked = autoReconnectEnabled();
+  refreshPetCard();
 
   if (infoResult.status === 'fulfilled') {
     renderAppInfo(infoResult.value);
   } else {
-    setConnectionStatus('Could not reach the local backend.', true);
+    setPetStatus('Could not reach the local backend.', true);
   }
 }
 
@@ -897,22 +897,108 @@ function saveSidebarPreference(event) {
   window.nusashell?.setSidebarCompact(event.currentTarget.checked);
 }
 
-function saveReconnectPreference(event) {
-  setAutoReconnect(event.currentTarget.checked);
-  setConnectionStatus(event.currentTarget.checked ? 'Automatic reconnect is on.' : 'Automatic reconnect is off.');
+// ---- Desktop pet card ----
+//
+// The settings view's "Desktop pet" card mirrors the sidebar pet launcher:
+// status row (dot + installed/not/running label), an auto-start toggle
+// persisted via settings.set, and an action button that opens the
+// install dialog (when not installed) or spawns the binary (when
+// installed). The card's action button dispatches a cross-module event
+// the sidebar pet-launcher listens for, so both surfaces share the same
+// install dialog + launch RPC.
+
+const PET_STATUS_METHOD = 'settings.pets_status';
+
+async function refreshPetCard() {
+  const dot = document.getElementById('settings-pet-dot');
+  const label = document.getElementById('settings-pet-label');
+  const versionRow = document.getElementById('settings-pet-version-row');
+  const version = document.getElementById('settings-pet-version');
+  const actionBtn = document.getElementById('settings-pet-action-btn');
+  const autoStart = document.getElementById('settings-pets-auto-start');
+  const card = document.querySelector('.settings-pet-card');
+  if (!dot || !label || !actionBtn || !autoStart || !card) return;
+  let status = null;
+  try {
+    status = await rpc(PET_STATUS_METHOD, {});
+  } catch {
+    setPetStatus('Pet status unavailable.', true);
+    return;
+  }
+  try {
+    const settingsResp = await rpc('settings.get', {});
+    autoStart.checked = Boolean(settingsResp?.settings?.pets_auto_start);
+  } catch {
+    /* no-op */
+  }
+  card.classList.remove('is-installed', 'is-running', 'is-installing', 'is-error');
+  if (!status.supported) {
+    dot.className = 'pet-action-dot';
+    label.textContent = 'Unavailable on this platform';
+    versionRow.hidden = true;
+    actionBtn.disabled = true;
+    actionBtn.textContent = 'Unavailable';
+    setPetStatus('Desktop pet requires Linux.');
+    return;
+  }
+  if (status.install_active) {
+    dot.className = 'pet-action-dot is-installing';
+    card.classList.add('is-installing');
+    label.textContent = 'Install in progress…';
+    versionRow.hidden = !status.installed;
+    if (status.installed) version.textContent = status.version || '—';
+    actionBtn.disabled = true;
+    actionBtn.textContent = 'Install in progress…';
+    setPetStatus('');
+    return;
+  }
+  if (status.installed) {
+    dot.className = status.running ? 'pet-action-dot is-running' : 'pet-action-dot is-installed';
+    card.classList.add(status.running ? 'is-running' : 'is-installed');
+    label.textContent = status.running ? 'Running' : 'Installed';
+    versionRow.hidden = false;
+    version.textContent = status.version || '—';
+    actionBtn.disabled = false;
+    actionBtn.textContent = 'Launch pet';
+    setPetStatus('');
+    return;
+  }
+  dot.className = 'pet-action-dot';
+  label.textContent = 'Not installed';
+  versionRow.hidden = true;
+  actionBtn.disabled = false;
+  actionBtn.textContent = 'Install desktop pet';
+  setPetStatus('');
 }
 
-async function checkConnection() {
-  const button = document.getElementById('settings-check-connection-btn');
-  button.disabled = true;
+async function savePetsAutoStart(event) {
+  const toggle = event.currentTarget;
+  const desired = toggle.checked;
+  toggle.disabled = true;
   try {
-    await rpc('app.info', {}, { timeoutMs: 4000 });
-    setConnectionStatus('Your local agent responded.');
-  } catch {
-    setConnectionStatus('Sorry, it looks like your agent is offline.', true);
+    const settings = (await rpc('settings.get', {})).settings || {};
+    settings.pets_auto_start = desired;
+    await rpc('settings.set', { settings });
+    setPetStatus(desired ? 'Pet will start with the Go shell.' : 'Pet stays manual.');
+  } catch (err) {
+    toggle.checked = !desired;
+    setPetStatus('Failed to save: ' + (err.message || err), true);
   } finally {
-    button.disabled = false;
+    toggle.disabled = false;
   }
+}
+
+function triggerPetAction() {
+  // Reuse the sidebar pet-launcher's click handler so the install dialog
+  // and launch RPC stay in one place.
+  window.dispatchEvent(new CustomEvent('nusashell:open-pet-launcher'));
+}
+
+function setPetStatus(message, isError = false) {
+  const status = document.getElementById('settings-pet-status');
+  if (!status) return;
+  status.textContent = message || '';
+  status.style.color = isError ? 'var(--red)' : '';
 }
 
 function setStatus(message, isError = false) {
@@ -920,23 +1006,6 @@ function setStatus(message, isError = false) {
   status.textContent = message;
   status.style.color = isError ? 'var(--red)' : '';
 }
-
-function setConnectionStatus(message, isError = false) {
-  const status = document.getElementById('settings-connection-status');
-  status.textContent = message;
-  status.style.color = isError ? 'var(--red)' : '';
-}
-
-// ---- Offline STT one-click install ----
-//
-// Mirrors the TTS flow with a requirements checklist: the card button opens
-// the requirements dialog (settings.stt_install_status feeds the checklist,
-// the per-OS guide, and the model picker). Install kicks off
-// settings.stt_install_start; progress rides stt.install.* events with a
-// slow status poll as a reattach fallback. Download speed is computed from
-// the event byte deltas. On success the dialog closes, the view refreshes,
-// and the new model appears in both selects — read_media can use it
-// immediately (degradation ladder resolves per call).
 
 const sttInstallState = {
   running: false,

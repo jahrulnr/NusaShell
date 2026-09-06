@@ -1,5 +1,15 @@
 import { attachMermaidZoomButton } from './media-zoom.js';
 
+// querySelectorAll('.mermaid-block') does not match the root, and the live
+// renderer often calls renderMermaidDiagrams on the mermaid-block itself.
+function mermaidBlocksIn(container) {
+  if (!container || typeof container.querySelectorAll !== 'function') return [];
+  const blocks = [];
+  if (container.classList?.contains('mermaid-block')) blocks.push(container);
+  blocks.push(...container.querySelectorAll('.mermaid-block'));
+  return blocks;
+}
+
 // Mermaid diagram renderer for chat messages.
 //
 // Design constraints (from the chat streaming model):
@@ -76,7 +86,7 @@ export async function renderMermaidDiagrams(container) {
   // A pending block still has its `.mermaid-src` placeholder. Once rendered to
   // SVG the placeholder is gone, so it is skipped — this is what keeps repeated
   // calls (and live re-renders) from re-rendering an already-drawn diagram.
-  const blocks = [...container.querySelectorAll('.mermaid-block')].filter((b) => {
+  const blocks = mermaidBlocksIn(container).filter((b) => {
     // Skip incomplete blocks — the fence is still open (streaming delta
     // hasn't received the closing ``` yet). Rendering now would show a
     // misleading "invalid syntax" warning for source that is still growing.

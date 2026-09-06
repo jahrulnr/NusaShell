@@ -460,6 +460,44 @@ func TestToCoreRequestResponsesSendsPromptCacheOptions(t *testing.T) {
 	}
 }
 
+func TestToCoreRequestMiniMaxChatSendsReasoningSplit(t *testing.T) {
+	cr := ToCoreRequest(ChatRequest{Model: "minimax-m3"}, domain.ProviderChat, false)
+	if cr.ProviderOptions["reasoning_split"] != true {
+		t.Fatalf("MiniMax Chat reasoning_split = %#v, want true", cr.ProviderOptions["reasoning_split"])
+	}
+}
+
+func TestToCoreRequestNonMiniMaxChatOmitsReasoningSplit(t *testing.T) {
+	cr := ToCoreRequest(ChatRequest{Model: "glm-5.3-flash"}, domain.ProviderChat, false)
+	if _, ok := cr.ProviderOptions["reasoning_split"]; ok {
+		t.Fatalf("GLM Chat must not send reasoning_split, got %#v", cr.ProviderOptions)
+	}
+}
+
+func TestToCoreRequestOpenRouterMiniMaxOmitsReasoningSplit(t *testing.T) {
+	cr := ToCoreRequest(ChatRequest{Model: "minimax/minimax-m3:free"}, domain.ProviderChat, true)
+	if _, ok := cr.ProviderOptions["reasoning_split"]; ok {
+		t.Fatalf("OpenRouter MiniMax uses reasoning object, must not send reasoning_split: %#v", cr.ProviderOptions)
+	}
+}
+
+func TestToCoreRequestMiniMaxMessagesOmitsReasoningSplit(t *testing.T) {
+	cr := ToCoreRequest(ChatRequest{Model: "minimax-m3"}, domain.ProviderMessages, false)
+	if _, ok := cr.ProviderOptions["reasoning_split"]; ok {
+		t.Fatalf("Messages MiniMax uses thinking blocks, must not send reasoning_split: %#v", cr.ProviderOptions)
+	}
+}
+
+func TestToCoreRequestMiniMaxChatHonorsStripReasoningSplit(t *testing.T) {
+	cr := ToCoreRequest(ChatRequest{
+		Model:       "minimax-m3",
+		StripParams: []string{"reasoning_split"},
+	}, domain.ProviderChat, false)
+	if _, ok := cr.ProviderOptions["reasoning_split"]; ok {
+		t.Fatalf("stripped MiniMax Chat must omit reasoning_split, got %#v", cr.ProviderOptions)
+	}
+}
+
 func TestToCoreRequestChatSendsPromptCacheKey(t *testing.T) {
 	req := ChatRequest{
 		Model:         "gpt-5",

@@ -9,12 +9,13 @@
         {
           "heading": "Sidebar identity and utilities",
           "paragraphs": [
-            "The vertical sidebar identifies NusaShell with its brand mark and wordmark, shows compact backend connection status, and keeps settings plus the install shortcut (visible only while the browser offers installation) with the navigation."
+            "The vertical sidebar identifies NusaShell with its brand mark and wordmark, shows compact backend connection status, and keeps settings plus the install shortcut (visible only while the browser offers installation) with the navigation. The desktop pet launcher sits above the Settings icon: it surfaces install/launch status via a coloured dot (green when installed, pulsing amber while an install is active, neutral on macOS/Windows where the pet is not supported) and opens a one-click install dialog when the binary is missing."
           ],
           "controls": [
             "conn-status",
             "conn-fill",
             "pwa-install-btn",
+            "pet-btn",
             "nav-settings-btn"
           ]
         },
@@ -845,7 +846,7 @@
         {
           "heading": "Appearance",
           "paragraphs": [
-            "Choose a bundled interface font for this browser; the font applies immediately and is stored locally. Symbol and emoji coverage uses local fallbacks. Sidebar layout is also stored in this browser. Sound notifications save with the NusaShell instance and play when an agent turn completes or fails."
+            "Choose a bundled interface font for this browser; the font applies immediately and is stored locally. Symbol and emoji coverage uses local fallbacks. Sidebar layout is also stored in this browser. Sound notifications save with the NusaShell instance and play when an Agent room completes or fails."
           ],
           "controls": [
             "settings-appearance-title",
@@ -1842,7 +1843,7 @@
       "label": "Sound notifications",
       "section": "Settings",
       "type": "checkbox",
-      "notes": "Play a sound when an agent turn completes, fails, or awaits an ask_question answer. Default on."
+      "notes": "Play a sound when a listed Agent room completes, fails, or awaits an ask_question answer. Background learning jobs stay silent. Default on."
     },
     "settings-temperature": {
       "label": "Temperature",
@@ -1901,34 +1902,49 @@
       "type": "checkbox",
       "notes": "Browser-only preference."
     },
-    "settings-connection-title": {
-      "label": "Connection title",
+    "settings-pet-title": {
+      "label": "Desktop pet title",
       "section": "Settings",
       "type": "text"
     },
-    "settings-conn-fill": {
-      "label": "Backend status orb",
+    "settings-pet-dot": {
+      "label": "Pet status dot",
       "section": "Settings",
-      "type": "indicator"
+      "type": "indicator",
+      "notes": "Mirrors the sidebar pet-btn dot: green installed, pulsing amber installing, accent running, red error."
     },
-    "settings-conn-label": {
-      "label": "Backend status label",
+    "settings-pet-label": {
+      "label": "Pet status label",
+      "section": "Settings",
+      "type": "text",
+      "notes": "Reflects settings.pets_status — Not installed / Installed / Running / Install in progress… / Unavailable."
+    },
+    "settings-pet-version-row": {
+      "label": "Pet version row",
+      "section": "Settings",
+      "type": "row",
+      "notes": "Hidden when the pet is not installed; surfaces the installed release version otherwise."
+    },
+    "settings-pet-version": {
+      "label": "Pet version",
       "section": "Settings",
       "type": "text"
     },
-    "settings-auto-reconnect": {
-      "label": "Reconnect automatically",
+    "settings-pets-auto-start": {
+      "label": "Auto-start pet at boot",
       "section": "Settings",
-      "type": "checkbox"
+      "type": "checkbox",
+      "action": "Persists settings.pets_auto_start. On, the backend spawns nusashell-pets during its own start (Linux only). Off (default), the pet is only launched when the user clicks the sidebar icon or the card's action button.",
+      "notes": "Linux only. The toggle stays editable on macOS/Windows but has no effect at boot."
     },
-    "settings-check-connection-btn": {
-      "label": "Check connection",
+    "settings-pet-action-btn": {
+      "label": "Pet action button",
       "section": "Settings",
       "type": "button",
-      "action": "Probes the backend."
+      "action": "Routes through the sidebar pet-launcher module: 'Install desktop pet' opens the install dialog, 'Launch pet' spawns the binary, 'Unavailable' disables when the platform does not support the pet."
     },
-    "settings-connection-status": {
-      "label": "Connection status",
+    "settings-pet-status": {
+      "label": "Pet save status",
       "section": "Settings",
       "type": "status"
     },
@@ -2385,6 +2401,20 @@
       "section": "Sidebar",
       "type": "button",
       "notes": "Visible only while the browser offers installation (beforeinstallprompt); triggers the native install flow and hides after install/dismissal."
+    },
+    "pet-btn": {
+      "label": "Desktop pet",
+      "section": "Sidebar",
+      "type": "button",
+      "action": "Single click when installed spawns the desktop pet overlay (settings.pets_launch). When not installed, opens a one-click install dialog backed by settings.pets_install_start.",
+      "notes": "Hidden on macOS/Windows (pet is Linux-only). Sits above the Settings icon in .sidebar-actions.",
+      "selector": "#pet-btn"
+    },
+    "pet-install-overlay": {
+      "label": "Pet install dialog",
+      "section": "Sidebar",
+      "type": "modal",
+      "notes": "Shown when the user clicks the pet launcher with no binary on disk. Mirrors the offline TTS/STT install layout: description, bullet list, phase + indeterminate progress bar, error banner, Install/Cancel actions."
     },
     "tool-terminal-stop": {
       "label": "Tool terminal stop",

@@ -17,7 +17,11 @@ boot, missing files are copied from the embedded scaffolds in
 Existing files are never overwritten. Hydration runs the real `file_read`
 tool for each non-empty document. Empty files are omitted; `runtime_context`
 still carries `dataDir` and, when a workspace is set, `instructionFiles` (a
-gitignore-aware list of workspace-relative `AGENTS.md` paths). The `memory`
+gitignore-aware list of workspace-relative `AGENTS.md` paths). A workspace
+also adds one `file_list` hydration slot against the workspace root (real
+tool output, next to AGENTS.md) so the agent starts with a one-level project
+map instead of spending discovery calls; the slot is hidden when the
+listing fails, is empty, or exceeds ~2k tokens. The `memory`
 dispatcher stays read-only
 (`search`/`get`/`list`) over structured records. Typed learner `learn()`
 never writes the profile documents. A workspace `AGENTS.md` is repository

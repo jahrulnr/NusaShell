@@ -163,10 +163,24 @@ func StableBinaryPath(execPath string) string {
 	}
 	current := filepath.Join(filepath.Dir(filepath.Dir(dir)), "current")
 	resolved, err := filepath.EvalSymlinks(current)
-	if err != nil || resolved != dir {
+	// The caller's versions dir may itself be reached through a symlink
+	// (macOS /var → /private/var, Windows short names); resolve both sides
+	// before comparing so a spelling difference does not defeat the
+	// rewrite.
+	dirResolved, err := filepath.EvalSymlinks(dir)
+	if err != nil || !samePath(resolved, dirResolved) {
 		return execPath
 	}
 	return filepath.Join(current, filepath.Base(execPath))
+}
+
+// samePath reports whether two resolved paths refer to the same directory,
+// tolerating Windows' case-insensitive filesystems.
+func samePath(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 // checkBinary refuses installs that would supervise a missing program.

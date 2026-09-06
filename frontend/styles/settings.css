@@ -117,6 +117,44 @@
 .settings-header-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 .settings-save-status { min-width: 0; color: var(--text-faint); font: 10.5px var(--font-mono); }
 .settings-connection { display: flex; align-items: center; gap: 8px; color: var(--text-dim); font: 11px var(--font-mono); }
+
+/* Desktop pet sidebar launcher + one-click install */
+
+/* Pet action dot: small status pill that lives at the top-right corner of
+ * the sidebar button. Green when the pet is installed and not running,
+ * pulsing amber when an install is active, neutral when not supported. */
+.pet-action-dot {
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--border-soft);
+  flex: none;
+  transition: background 0.18s ease;
+}
+#pet-btn.is-installed .pet-action-dot { background: var(--green); }
+#pet-btn.is-running .pet-action-dot { background: var(--accent); box-shadow: 0 0 0 3px rgba(113, 189, 109, 0.18); }
+#pet-btn.is-installing .pet-action-dot { background: var(--amber, #d8a24a); animation: pet-dot-pulse 1.2s ease-in-out infinite; }
+#pet-btn.is-error .pet-action-dot { background: var(--red-bright, #e26d6d); }
+
+@keyframes pet-dot-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+/* Settings card row: dot + label sits inline at the end of the row. The
+ * state classes mirror the sidebar pet-btn ones so the same dot color
+ * logic covers both surfaces. */
+.settings-pet-status { display: inline-flex; align-items: center; gap: 8px; color: var(--text-dim); font: 11px var(--font-mono); }
+.settings-pet-status .pet-action-dot { margin-left: 0; }
+.is-installed .settings-pet-status .pet-action-dot,
+.settings-pet-status .pet-action-dot.is-installed { background: var(--green); }
+.is-running .settings-pet-status .pet-action-dot,
+.settings-pet-status .pet-action-dot.is-running { background: var(--accent); box-shadow: 0 0 0 3px rgba(113, 189, 109, 0.18); }
+.is-installing .settings-pet-status .pet-action-dot,
+.settings-pet-status .pet-action-dot.is-installing { background: var(--amber, #d8a24a); animation: pet-dot-pulse 1.2s ease-in-out infinite; }
+.is-error .settings-pet-status .pet-action-dot,
+.settings-pet-status .pet-action-dot.is-error { background: var(--red-bright, #e26d6d); }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border-soft); color: var(--text-dim); font-size: 12px; }
 .settings-definition-list { margin: 0; }
 .settings-definition-list > div { display: grid; grid-template-columns: minmax(90px, .4fr) minmax(0, 1fr); gap: 12px; padding: 10px 0; border-top: 1px solid var(--border-soft); font-size: 11px; }
@@ -280,6 +318,50 @@
   0% { transform: translateX(-100%); }
   50% { transform: translateX(20%); }
   100% { transform: translateX(100%); }
+}
+
+/* Pet install dialog mirrors the TTS install layout so the visual grammar
+ * stays consistent: header → description → checklist → progress → actions.
+ * The progress bar tracks the resolve → download → verify → extract →
+ * activate → launcher phases via the pets.install.* events. */
+.pet-install-dialog { width: min(34rem, calc(100vw - 2rem)); }
+.pet-install-body { display: flex; flex-direction: column; gap: 0.85rem; }
+.pet-install-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.pet-install-list code { font-size: 0.78rem; }
+.pet-install-progress { display: flex; flex-direction: column; gap: 0.4rem; }
+.pet-install-phase { font-size: 0.9rem; font-weight: 600; }
+.pet-install-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border-soft);
+  overflow: hidden;
+}
+.pet-install-bar-fill {
+  height: 8px;
+  width: 0%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+.pet-install-bar-track.indeterminate .pet-install-bar-fill {
+  width: 100%;
+  animation: pet-install-sweep 1.4s ease-in-out infinite;
+}
+@keyframes pet-install-sweep {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(20%); }
+  100% { transform: translateX(100%); }
+}
+.pet-install-bytes {
+  font-size: 0.78rem;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
 }
 
 .stt-install-bytes {
