@@ -62,6 +62,10 @@ func ServerCompactionContextManagement(model string) []map[string]any {
 	return serverCompactionContextManagement(model)
 }
 
+func ServerCompactionContextManagementForKind(model string, kind domain.ProviderKind) []map[string]any {
+	return serverCompactionContextManagementForKind(model, kind)
+}
+
 func (a *Service) RestartAnnouncement() domain.Message {
 	return a.restartAnnouncement()
 }

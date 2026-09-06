@@ -27,7 +27,7 @@ func TestNewProviderHTTPClientHasNoBodyTimeout(t *testing.T) {
 
 func TestNewFactoryBuildsAdapterForSupportedKinds(t *testing.T) {
 	f := NewFactory(&stubCreds{})
-	for _, kind := range []domain.ProviderKind{domain.ProviderMessages, domain.ProviderResponses, domain.ProviderChat} {
+	for _, kind := range []domain.ProviderKind{domain.ProviderMessages, domain.ProviderResponses, domain.ProviderChat, domain.ProviderCodex} {
 		adapter, err := f(nil, &domain.Provider{Kind: kind, BaseURL: "https://example.test/v1"}, "key")
 		if err != nil {
 			t.Fatalf("factory for %s returned error: %v", kind, err)

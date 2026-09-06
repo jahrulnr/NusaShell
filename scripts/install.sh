@@ -511,7 +511,7 @@ install_electron_unix() {
 [Desktop Entry]
 Type=Application
 Name=NusaShell Desktop
-Comment=NusaShell — local AI shell
+Comment=NusaShell - local AI shell
 Exec=$home_dir/.local/bin/nusashell-desktop
 Icon=$current/resources/nusashell.png
 Terminal=false
@@ -554,22 +554,9 @@ install_pets_linux() {
   activate_unix_version "$root" "$target" "$pets_version"
   prune_unix_versions "$versions" "$pets_version" "$previous"
 
-  mkdir -p "$home_dir/.local/bin" "$home_dir/.local/share/applications"
+  mkdir -p "$home_dir/.local/bin"
   printf '#!/usr/bin/env sh\nexec "%s/nusashell-pets" --assets "%s/assets/pets" "$@"\n' "$current" "$current" > "$home_dir/.local/bin/nusashell-pets"
   chmod 0755 "$home_dir/.local/bin/nusashell-pets"
-  icon="$current/resources/nusashell.png"
-  {
-    echo '[Desktop Entry]'
-    echo 'Type=Application'
-    echo 'Name=NusaShell Pets'
-    echo 'Comment=NusaShell desktop pet'
-    echo "Exec=$home_dir/.local/bin/nusashell-pets"
-    if [[ -f "$icon" ]]; then
-      echo "Icon=$icon"
-    fi
-    echo 'Terminal=false'
-    echo 'Categories=Utility;Game;'
-  } > "$home_dir/.local/share/applications/nusashell-pets.desktop"
   echo "Installed NusaShell desktop pet $pets_version. Run: nusashell-pets"
 }
 

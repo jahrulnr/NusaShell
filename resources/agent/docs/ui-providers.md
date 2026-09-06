@@ -1,12 +1,12 @@
 # Providers
 
-Configure persistent Anthropic, OpenAI, and OpenRouter cards, add unlimited custom OpenRouter-compatible providers by wire format (Messages, Responses, Chat), and manage spawn-only ACP subagent binaries. Provider API keys are optional and live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.
+Configure persistent Anthropic, OpenAI, OpenRouter, and Codex cards, add unlimited custom providers by wire format (Messages, Responses, Chat, Codex), and manage spawn-only ACP subagent binaries. Codex prefers Sign in with ChatGPT or Import from Codex CLI (optional token paste fallback); other provider keys are optional and live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.
 
 **How to open:** Click the Providers item in the left sidebar.
 
 ## Header
 
-View title plus Add custom provider (unlimited OpenRouter-compatible gateways) and Add ACP agent (spawn-only subprocesses).
+View title plus Add custom provider (unlimited compatible providers) and Add ACP agent (spawn-only subprocesses).
 
 - **Providers header actions** (`#providers-header-actions`):
   - Section: Providers
@@ -24,7 +24,7 @@ View title plus Add custom provider (unlimited OpenRouter-compatible gateways) a
 
 ## Chat providers
 
-The registry always shows persistent Anthropic, OpenAI, and OpenRouter cards, even before configuration. Anthropic uses the Anthropic Messages driver; OpenAI uses the OpenAI Responses driver; OpenRouter and custom providers use the OpenRouter driver. OpenRouter and custom forms expose Messages, Responses, and Chat API kinds. Selecting a card opens the detail pane for editing its base URL, optional API key, enabled state, prompt-cache TTL, importing models, and testing connectivity. These models appear in the Agent composer.
+The registry always shows persistent Anthropic, OpenAI, OpenRouter, and Codex cards, even before configuration. Anthropic uses the Anthropic Messages driver; OpenAI uses the OpenAI Responses driver; OpenRouter uses the OpenRouter driver; Codex uses the Codex driver with OAuth Sign in / Import from CLI as the primary auth paths. Custom forms expose Messages, Responses, Chat, and Codex API kinds. Selecting a card opens the detail pane for editing its base URL, credential, enabled state, prompt-cache TTL, importing models, and testing connectivity. These models appear in the Agent composer.
 
 - **Chat providers section** (`#provider-llm-section`):
   - Section: Providers
@@ -45,6 +45,40 @@ The registry always shows persistent Anthropic, OpenAI, and OpenRouter cards, ev
   - Type: chip-group
   - Action: Selects the prompt-cache duration sent to this provider when Settings prompt caching is on, or off to skip caching for this provider. Messages and OpenRouter chat offer 5m/1h/off; Responses and other Chat hosts offer 30m/off.
   - Notes: Buttons inside the provider detail pane (class provider-cache-ttl-chip). The last chip is off. Empty stored TTL still defaults to the first duration. The registry card shows the selected value only.
+
+## Codex accounts and runtime
+
+On the Codex detail pane, the ChatGPT Accounts card shows multi-account OAuth identity, plan, usage bars, Switch/Remove, Sign in with ChatGPT, Import from Codex CLI, and Refresh circuits. The Codex Runtime card shows managed CLI binary status and Download.
+
+- **Codex account list** (`#codex-account-list`):
+  - Section: Providers
+  - Type: list
+  - Notes: Rows from ai.codex.usage (or ai.codex.accounts.list fallback) with Switch/Remove actions.
+
+- **Import from Codex CLI** (`#codex-import-cli-btn`):
+  - Section: Providers
+  - Type: button
+  - Action: Imports ChatGPT auth from the local Codex CLI auth.json via ai.codex.import.
+
+- **Refresh Codex circuits** (`#codex-refresh-circuits-btn`):
+  - Section: Providers
+  - Type: button
+  - Action: Polls account usage circuits via ai.codex.refresh-circuits then reloads the accounts list.
+
+- **Sign in with ChatGPT** (`#codex-login-btn`):
+  - Section: Providers
+  - Type: button
+  - Action: Starts Codex OAuth PKCE login via ai.codex.login.
+
+- **Codex runtime status** (`#codex-runtime-status`):
+  - Section: Providers
+  - Type: text
+  - Notes: Shows installed version/path, downloading, or not-installed from ai.codex.runtime.status.
+
+- **Download Codex runtime** (`#codex-runtime-download-btn`):
+  - Section: Providers
+  - Type: button
+  - Action: Downloads the managed Codex CLI binary via ai.codex.runtime.download.
 
 ## ACP subagents
 

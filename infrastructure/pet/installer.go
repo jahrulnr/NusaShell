@@ -225,10 +225,6 @@ func (in *Installer) install(ctx context.Context, version string, report func(Pr
 	if err := writeLauncher(in.resolver); err != nil {
 		return fmt.Errorf("pet: launcher: %w", err)
 	}
-	if err := writeDesktopEntry(in.resolver, versionDir); err != nil {
-		// Desktop entry is best-effort; missing it does not break the binary.
-		report(Progress{Phase: PhaseLauncher, Message: "Desktop entry skipped: " + err.Error()})
-	}
 
 	report(Progress{Phase: PhaseVerify, Message: "Desktop pet ready"})
 	return nil
@@ -607,37 +603,6 @@ func writeLauncher(r *Resolver) error {
 	assets := filepath.Join(active, "assets/pets")
 	body := fmt.Sprintf("#!/usr/bin/env sh\nexec %q --assets %q \"$@\"\n", filepath.Join(active, "nusashell-pets"), assets)
 	return os.WriteFile(bin, []byte(body), 0o755)
-}
-
-// writeDesktopEntry mirrors scripts/install.sh. Errors here are non-fatal.
-func writeDesktopEntry(r *Resolver, versionDir string) error {
-	if r.Home == "" {
-		return fmt.Errorf("writeDesktopEntry: home unresolved")
-	}
-	dir := filepath.Join(r.Home, ".local/share/applications")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	installRoot := r.Env("NUSASHELL_PETS_INSTALL_ROOT")
-	if installRoot == "" {
-		installRoot = filepath.Join(r.Home, ".local/share/nusashell-pets")
-	}
-	icon := filepath.Join(installRoot, "current/resources/nusashell.png")
-	entry := filepath.Join(dir, "nusashell-pets.desktop")
-	launcher := r.PetsLauncher()
-	body := []string{
-		"[Desktop Entry]",
-		"Type=Application",
-		"Name=NusaShell Pets",
-		"Comment=NusaShell desktop pet",
-		"Exec=" + launcher,
-		"Terminal=false",
-		"Categories=Utility;Game;",
-	}
-	if _, err := os.Stat(icon); err == nil {
-		body = append(body, "Icon="+icon)
-	}
-	return os.WriteFile(entry, []byte(strings.Join(body, "\n")+"\n"), 0o644)
 }
 
 // semverRe matches the bash installer validator.

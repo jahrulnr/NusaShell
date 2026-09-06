@@ -110,6 +110,15 @@ func builtInProvider(id string) (*domain.Provider, bool) {
 			BaseURL: "https://openrouter.ai/api/v1",
 			Enabled: true,
 		}, true
+	case "codex":
+		return &domain.Provider{
+			ID:      id,
+			Driver:  domain.ProviderDriverCodex,
+			Kind:    domain.ProviderCodex,
+			Name:    "Codex",
+			BaseURL: "https://chatgpt.com/backend-api/codex",
+			Enabled: true,
+		}, true
 	default:
 		return nil, false
 	}
@@ -127,6 +136,10 @@ func validateProviderDriver(driver domain.ProviderDriver, kind domain.ProviderKi
 	case domain.ProviderDriverOpenAI:
 		if kind != domain.ProviderResponses {
 			return fmt.Errorf("openai driver only supports responses kind")
+		}
+	case domain.ProviderDriverCodex:
+		if kind != domain.ProviderCodex {
+			return fmt.Errorf("codex driver only supports codex kind")
 		}
 	}
 	return nil
@@ -150,8 +163,8 @@ func (s *Service) HandleSave(req contracts.ProviderSaveRequest) (any, *contracts
 	if kind == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind is required"}
 	}
-	if kind != domain.ProviderMessages && kind != domain.ProviderResponses && kind != domain.ProviderChat {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses, or chat"}
+	if !domain.ValidKind(kind) {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses, chat, or codex"}
 	}
 	baseURL := strings.TrimSpace(req.BaseURL)
 	driver := domain.ProviderDriver(strings.ToLower(strings.TrimSpace(req.Driver)))
@@ -252,17 +265,25 @@ func (s *Service) providerWithKey(id string) (*domain.Provider, string, *contrac
 }
 
 // handleProvidersTest probes connectivity only: it lists models via the
-// kind-appropriate /models endpoint (responses/chat → /models, messages →
-// /v1/models). No completion is sent, so the probe never costs tokens,
-// never depends on imported models, and never trips model-routing failures
-// on the upstream (a 502 on a specific model stays invisible here and only
-// surfaces when actually chatting).
+// kind-appropriate discovery path (responses/chat → GET /models, messages →
+// GET /v1/models, codex → Codex CLI app-server model/list). Kinds without
+// HasModelListing are rejected. No completion is sent, so the probe never
+// costs tokens, never depends on imported models, and never trips
+// model-routing failures on the upstream (a 502 on a specific model stays
+// invisible here and only surfaces when actually chatting).
 func (s *Service) HandleTest(req contracts.ProviderIDRequest) (any, *contracts.RPCError) {
 	p, key, rpcErr := s.providerWithKey(req.ID)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
+	if !p.KindCapabilities().HasModelListing {
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: "this provider kind does not support a connectivity probe"}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	if p.Kind == domain.ProviderCodex {
+		// First probe may download the managed Codex CLI binary.
+		ctx, cancel = context.WithTimeout(context.Background(), 90*time.Second)
+	}
 	defer cancel()
 	adapter, err := s.factory(ctx, p, key)
 	if err != nil {
@@ -275,10 +296,14 @@ func (s *Service) HandleTest(req contracts.ProviderIDRequest) (any, *contracts.R
 	start := clock.NewTime().Time()
 	models, err := lister.ListModels(ctx, key)
 	if err != nil {
-		s.warn("provider test failed: %s [%s, probe /models]: %v", p.Name, p.Kind, err)
+		probe := "GET /models"
+		if p.Kind == domain.ProviderCodex {
+			probe = "codex model/list"
+		}
+		s.warn("provider test failed: %s [%s, probe %s]: %v", p.Name, p.Kind, probe, err)
 		return nil, &contracts.RPCError{
 			Code:    contracts.CodeProvider,
-			Message: fmt.Sprintf("%s (probe: GET /models)", err.Error()),
+			Message: fmt.Sprintf("%s (probe: %s)", err.Error(), probe),
 		}
 	}
 	return map[string]any{

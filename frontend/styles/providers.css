@@ -126,12 +126,9 @@
 
 /* ============ Codex-specific UI ============ */
 .codex-cards-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 14px;
   margin-top: 14px;
 }
-.codex-cards-grid > .provider-models-card { margin-top: 0; }
+.codex-cards-grid > .provider-models-card { margin-top: 14px; }
 .codex-accounts-card, .codex-runtime-card { margin-top: 14px; }
 .codex-auth-buttons { display: flex; gap: 8px; }
 .codex-account-list { max-height: 280px; overflow: auto; }

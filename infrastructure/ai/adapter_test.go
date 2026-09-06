@@ -191,6 +191,22 @@ func TestAdapterKind(t *testing.T) {
 	}
 }
 
+func TestAdapterCodexProviderRouting(t *testing.T) {
+	a := &Adapter{
+		ProviderKind: domain.ProviderCodex,
+		Driver:       domain.ProviderDriverCodex,
+		BaseURL:      "https://chatgpt.com/backend-api/codex",
+		APIKey:       "access-token",
+	}
+	provider, err := a.providerFor()
+	if err != nil {
+		t.Fatalf("providerFor: %v", err)
+	}
+	if provider.Name() != "codex" {
+		t.Fatalf("provider name = %q, want codex", provider.Name())
+	}
+}
+
 func TestAdapterChatNoKeyOptional(t *testing.T) {
 	// A chat-kind adapter with no API key must construct fine on
 	// OpenAI-compatible hosts that need no auth (LM Studio, Ollama, vLLM,

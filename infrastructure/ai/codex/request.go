@@ -44,29 +44,3 @@ func NewResponsesAPIRequest(model string, input []ResponseItem) *ResponsesAPIReq
 		Stream: true,
 	}
 }
-
-// CompactionInput is the canonical request body of the legacy unary
-// POST /responses/compact endpoint (codex-api/src/endpoint/compact.rs). The
-// v2 flow does not use this DTO; it is modeled here for wire fidelity only.
-type CompactionInput struct {
-	Model             string            `json:"model"`
-	Input             []ResponseItem    `json:"input"`
-	Instructions      string            `json:"instructions,omitempty"`
-	Tools             []json.RawMessage `json:"tools,omitempty"`
-	ParallelToolCalls bool              `json:"parallel_tool_calls"`
-	Reasoning         *Reasoning        `json:"reasoning,omitempty"`
-	ServiceTier       string            `json:"service_tier,omitempty"`
-	PromptCacheKey    string            `json:"prompt_cache_key,omitempty"`
-	Text              *TextControls     `json:"text,omitempty"`
-}
-
-// LegacyCompactPath is the provider-relative path of the legacy unary
-// compaction endpoint.
-const LegacyCompactPath = "responses/compact"
-
-// CompactResponse is the unary JSON body returned by the legacy compaction
-// endpoint. The expected successful output is one or more compaction items
-// carrying opaque encrypted_content.
-type CompactResponse struct {
-	Output []ResponseItem `json:"output"`
-}

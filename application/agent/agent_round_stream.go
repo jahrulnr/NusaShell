@@ -309,7 +309,7 @@ func (a *Service) StreamTurnRoundOnce(run *TurnRun, adapter ProviderContext, con
 		ReasoningReplay:   caps.ReasoningReplay,
 		StripParams:       a.learnedParams.StripParams(run.ProviderID, model),
 		CompactionBlob:    conversation.CompactionBlob,
-		ContextManagement: serverCompactionContextManagement(model),
+		ContextManagement: serverCompactionContextManagementForKind(model, adapter.Kind),
 	}, func(delta string) {
 		content.WriteString(delta)
 		a.publishRoundDelta(run.ID, messageID, round, contracts.RoundDeltaText, "", "", delta)
@@ -327,11 +327,10 @@ func (a *Service) StreamTurnRoundOnce(run *TurnRun, adapter ProviderContext, con
 	for _, warning := range response.Warnings {
 		a.log("warn", "ai", "provider warning: %s", warning)
 	}
-	// Capture server-side compaction items from the response. When the
-	// server triggers compaction (context_management), it emits opaque
-	// compaction items in the output. Store them on the conversation so the
-	// next turn replays them as a prefix; the server then truncates context
-	// before the last compaction item automatically.
+	// Capture provider-side compaction items from the response. OpenAI
+	// Responses may emit them through context_management, while Codex emits
+	// them through its remote v2 stream. Store them on the conversation so
+	// the next turn can replay the opaque items as a prefix.
 	if len(response.CompactionItems) > 0 {
 		blob, marshalErr := json.Marshal(response.CompactionItems)
 		if marshalErr != nil {

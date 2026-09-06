@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -95,10 +96,15 @@ type MessageStep struct {
 }
 
 type Message struct {
-	ID             string
-	Role           MessageRole
-	Content        string // final text (mirrors last text step, for backward compat)
-	Reasoning      string // final reasoning (mirrors last reasoning step, for backward compat)
+	ID        string
+	Role      MessageRole
+	Content   string // final text (mirrors last text step, for backward compat)
+	Reasoning string // final reasoning (mirrors last reasoning step, for backward compat)
+	// ReasoningExtra holds opaque provider reasoning state for OpenAI-family
+	// Responses/Codex/compat replay (typically the reasoning item JSON that
+	// includes encrypted_content). Distinct from Conversation.CompactionBlob.
+	// UI text stays in Reasoning; never log or surface this blob.
+	ReasoningExtra json.RawMessage `json:"ReasoningExtra,omitempty"`
 	Steps          []MessageStep
 	Model          string
 	ProviderID     string // provider that served this turn; "" for legacy messages
@@ -131,12 +137,12 @@ type Conversation struct {
 	Messages      []Message
 	ChunkCount    int // number of archived pre-compaction chunks available for scroll-back
 	// CompactionBlob holds an opaque server-side compaction payload
-	// (OpenAI /responses/compact encrypted_content) that only the
-	// originating provider can read. When non-empty, the OpenAI Responses
-	// adapter passes it back as a prefix of the next request's input so the
-	// compacted context is replayed verbatim. Empty for providers that don't
-	// support server-side compaction (then Summary carries the client-side
-	// handover instead).
+	// (for example, encrypted_content from OpenAI Responses or Codex remote
+	// v2) that only the originating provider can read. When non-empty, the
+	// matching adapter places it in the next request's input as required by
+	// that provider so the compacted context is replayed verbatim. Empty for
+	// providers that don't support server-side compaction (then Summary carries
+	// the client-side handover instead).
 	CompactionBlob string
 	// EstimatedTokens is the last server-side *heuristic* context estimate for
 	// this conversation (system + messages + tool definitions, ~chars/4). It
@@ -667,6 +673,18 @@ func (c *Conversation) Compact(summary, handoverContent string, keepTokenBudget 
 	}
 
 	c.Messages = append([]Message{summaryMsg}, retained...)
+	c.Touch()
+}
+
+// CompactWithBlob starts a new compaction epoch using an opaque provider
+// checkpoint instead of a text handover message. The checkpoint is replayed
+// by the provider while the live transcript keeps only the recent contiguous
+// suffix. The caller persists the epoch through ConversationRepository.ResetTranscript.
+func (c *Conversation) CompactWithBlob(blob string, keepTokenBudget int) {
+	retained, _ := c.compactionRetention(keepTokenBudget)
+	c.Summary = ""
+	c.CompactionBlob = blob
+	c.Messages = retained
 	c.Touch()
 }
 

@@ -15,13 +15,12 @@
 //     and expects exactly one opaque compaction output item before
 //     response.completed, then rebuilds the retained history (ported from
 //     core/src/compact_remote_v2.rs and core/src/compact_remote_v2_attempt.rs).
-//     The legacy unary POST /responses/compact DTO is also modeled for wire
-//     fidelity, but only the v2 flow is driven here.
 //
-// Ported wire packages under infrastructure/ai/ stay structurally close to
-// upstream and import only infrastructure/ai/core, never application or
-// domain. HTTP transport, auth headers, and provider wiring are owned by the
-// adapter layer and are intentionally not part of this package.
+// The package also owns the thin core.Provider transport for this endpoint:
+// it converts core blocks to Responses items, applies Codex authentication
+// headers supplied by the caller, decodes the SSE stream, and exposes opaque
+// compaction items through core.Response. OAuth refresh and account routing
+// remain outside the package.
 //
 // Out of scope (by decision): image generation (t2i/i2i), audio content
 // estimation, multi-agent AgentMessage items, WebSocket transport fallback,

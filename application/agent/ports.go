@@ -206,4 +206,14 @@ type Deps struct {
 	DecorateRateLimit       func(providerID string, err error) error
 	RecordExperience        func(conv *domain.Conversation, headless bool)
 	MaybeAnnounceTaskMemory func(conversationID string, conversation *domain.Conversation)
+
+	// PrepareTurnAPIKey optionally remaps the credential used for this turn
+	// (e.g. sticky multi-account selection). A non-nil error fails the turn
+	// before the first provider request. Nil means use apiKey as-is.
+	PrepareTurnAPIKey func(conversationID string, provider *domain.Provider, apiKey string) (string, error)
+	// FailoverOnStreamError optionally switches credentials after a provider
+	// stream error. When retry is true the caller rebuilds the adapter with
+	// newAPIKey and retries the round. replacedErr, when non-nil, replaces
+	// the stream error shown to the user (e.g. all accounts limited).
+	FailoverOnStreamError func(ctx context.Context, conversationID string, provider *domain.Provider, apiKey string, streamErr error) (newAPIKey string, retry bool, replacedErr error)
 }

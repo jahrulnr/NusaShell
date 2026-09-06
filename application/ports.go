@@ -307,6 +307,110 @@ type DirListing struct {
 	Truncated bool
 }
 
+// ---- Codex ports ----
+
+// CodexRuntime manages the official Codex CLI binary as a NusaShell-managed
+// sidecar. The application layer uses this port to check runtime status and
+// trigger downloads without depending on runtime package details.
+type CodexRuntime interface {
+	// Status returns the current runtime binary status: installed path +
+	// version, or download progress/error if a download is in flight.
+	Status() CodexRuntimeStatus
+	// EnsureBinary returns the path to a usable Codex binary, downloading
+	// it if necessary. If force is true, a re-download is triggered even
+	// if a binary is already installed.
+	EnsureBinary(ctx context.Context, force bool) (string, error)
+}
+
+// CodexRuntimeStatus is the runtime status snapshot returned by Status().
+type CodexRuntimeStatus struct {
+	Installed     bool
+	Version       string
+	Path          string
+	Downloading   bool
+	DownloadError string
+}
+
+// CodexOAuth performs the Codex ChatGPT OAuth PKCE login flow. The
+// implementation opens a browser and blocks until the callback completes.
+type CodexOAuth interface {
+	Login(ctx context.Context) (CodexToken, error)
+	// ExtractProfile decodes a stored token JSON and returns the email
+	// and name. Used to enrich old tokens that lack email/name fields by
+	// decoding the JWT access_token claims.
+	ExtractProfile(tokenJSON string) (email, name string)
+}
+
+// CodexCLIAuthImporter reads the Codex CLI auth.json (~/.codex/auth.json)
+// and returns the token in NusaShell's CodexToken shape. Used by the
+// "Import from Codex CLI" flow so users who already logged in to the
+// official Codex CLI don't need to re-login in NusaShell.
+type CodexCLIAuthImporter interface {
+	// ImportFromCodexCLI reads the Codex CLI auth.json and returns the
+	// parsed token. Returns an error if the file is missing or invalid.
+	ImportFromCodexCLI(ctx context.Context) (CodexToken, error)
+}
+
+// CodexUsage fetches the ChatGPT rate-limit usage for a stored OAuth token.
+// The token JSON is the same string stored in CredentialStore.
+type CodexUsage interface {
+	FetchUsage(ctx context.Context, tokenJSON string) (CodexUsageResult, error)
+}
+
+// CodexContextWindowCache reads the Codex CLI's local model cache
+// (~/.codex/models_cache.json) to get the real context window that the
+// Codex app-server enforces at runtime. This is often smaller than the
+// model's documented ceiling (e.g. Luna: 272k cache vs 1.05M models.dev)
+// and smaller than the stale value stored in providers.json from a prior
+// catalog enrichment. Compaction uses this to avoid triggering too late.
+type CodexContextWindowCache interface {
+	// ContextWindow returns the Codex runtime context window for the
+	// given model ID (slug). Returns false if the cache is unavailable
+	// or the model is not listed.
+	ContextWindow(modelID string) (int, bool)
+}
+
+// CodexUsageResult is the parsed usage snapshot returned by the Codex
+// wham/usage endpoint.
+type CodexUsageResult struct {
+	Plan          string // "go", "plus", "pro", etc.
+	LimitReached  bool
+	PrimaryWindow *CodexUsageWindow
+	// WeeklyWindow is the secondary window, if any (e.g. for review models).
+	WeeklyWindow *CodexUsageWindow
+	// ResetCreditsAvailable is the number of rate-limit reset credits
+	// the user can spend to reset their usage window.
+	ResetCreditsAvailable int
+}
+
+// CodexUsageWindow is one rate-limit window (session or weekly).
+type CodexUsageWindow struct {
+	UsedPercent       int   // 0-100
+	ResetAt           int64 // unix seconds
+	ResetAfterSeconds int64
+}
+
+// CodexToken is the result of a successful OAuth login.
+type CodexToken struct {
+	AccessToken  string
+	RefreshToken string
+	AccountID    string
+	Email        string
+	Name         string
+	ExpiresAt    int64 // unix seconds, 0 = unknown
+}
+
+// CodexTokenJSON is the on-disk format for cached OAuth tokens, stored
+// in CredentialStore as a JSON string. Matches codex.TokenJSON.
+type CodexTokenJSON struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	AccountID    string `json:"account_id,omitempty"`
+	Email        string `json:"email,omitempty"`
+	Name         string `json:"name,omitempty"`
+	ExpiresAt    int64  `json:"expires_at,omitempty"`
+}
+
 // ---- AI provider port (owned by application/provider) ----
 
 type ToolDef = provider.ToolDef

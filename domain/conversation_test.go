@@ -167,6 +167,36 @@ func TestCompactSummaryIsUserRole(t *testing.T) {
 	}
 }
 
+func TestCompactWithBlobKeepsSuffixWithoutHandover(t *testing.T) {
+	c := &Conversation{
+		Messages: []Message{
+			{ID: "u1", Role: RoleUser, Content: strings.Repeat("old-", 100)},
+			{ID: "a1", Role: RoleAssistant, Content: strings.Repeat("old-answer-", 100)},
+			{ID: "u2", Role: RoleUser, Content: "latest question"},
+			{ID: "a2", Role: RoleAssistant, Content: "latest answer"},
+		},
+		Summary:        "stale text summary",
+		CompactionBlob: `[{"type":"compaction","encrypted_content":"OLD"}]`,
+	}
+
+	c.CompactWithBlob(`[{"type":"compaction","encrypted_content":"NEW"}]`, 100)
+
+	if c.Summary != "" {
+		t.Fatalf("summary = %q, want empty for opaque compaction", c.Summary)
+	}
+	if c.CompactionBlob != `[{"type":"compaction","encrypted_content":"NEW"}]` {
+		t.Fatalf("compaction blob = %q, want new checkpoint", c.CompactionBlob)
+	}
+	for _, m := range c.Messages {
+		if IsCompactionSummary(m.Content) {
+			t.Fatalf("opaque compaction added a text handover: %+v", m)
+		}
+	}
+	if len(c.Messages) == 0 || c.Messages[len(c.Messages)-1].ID != "a2" {
+		t.Fatalf("messages = %+v, want recent suffix ending at a2", c.Messages)
+	}
+}
+
 // TestCompactPreservesChronologicalOrderAndPutsSummaryFirst: Compact must
 // not regroup users then assistants (that scrambled the live transcript and
 // parked the handover after the in-flight turn). Retained messages stay in

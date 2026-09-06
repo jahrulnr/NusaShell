@@ -17,7 +17,12 @@ func (s *Service) HandleImport(req contracts.ProviderIDRequest) (any, *contracts
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	timeout := 30 * time.Second
+	if p.Kind == domain.ProviderCodex {
+		// First import may download the managed Codex CLI binary.
+		timeout = 90 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	models, err := s.importModelsForProvider(ctx, p, key)
 	if err != nil {
@@ -40,6 +45,9 @@ func (s *Service) HandleImport(req contracts.ProviderIDRequest) (any, *contracts
 // endpoint, and the gateway may be configured with any chat API kind
 // (chat, responses, or messages).
 func (s *Service) importModelsForProvider(ctx context.Context, p *domain.Provider, key string) ([]domain.Model, error) {
+	if !p.KindCapabilities().HasModelListing {
+		return nil, fmt.Errorf("provider kind %s does not support model import", p.Kind)
+	}
 	adapter, err := s.factory(ctx, p, key)
 	if err != nil {
 		return nil, err
@@ -65,8 +73,9 @@ func (s *Service) importModelsForProvider(ctx context.Context, p *domain.Provide
 	}
 	// Fetch embedding models from the separate /embeddings/models endpoint.
 	// This is provider-kind agnostic — works for chat, responses, and
-	// messages kinds. Skipped if no EmbeddingModelListerFactory is wired.
-	if s.embeddingListerFactory != nil {
+	// messages kinds. Skipped when the kind does not expose embeddings
+	// (e.g. Codex OAuth) or no EmbeddingModelListerFactory is wired.
+	if s.embeddingListerFactory != nil && p.KindCapabilities().HasEmbeddings {
 		embLister := s.embeddingListerFactory(p)
 		if embLister != nil {
 			embIDs, _ := embLister.ListEmbeddingModels(ctx, key)
@@ -244,6 +253,9 @@ func (s *Service) importModelsForProvider(ctx context.Context, p *domain.Provide
 			}
 		}
 	}
+	if p.Kind == domain.ProviderCodex {
+		models = seedCodexImageModels(models)
+	}
 	p.Models = models
 	p.UpdatedAt = clock.NewTime().Time()
 	if err := s.store.Save(p); err != nil {
@@ -251,6 +263,34 @@ func (s *Service) importModelsForProvider(ctx context.Context, p *domain.Provide
 	}
 	s.info("imported %d models from %s", len(models), p.Name)
 	return models, nil
+}
+
+// seedCodexImageModels adds the ChatGPT plan image models that Codex
+// model/list does not return. Official Codex imagegen always uses
+// gpt-image-2; gpt-image-1.5 is kept for transparent-background workflows.
+func seedCodexImageModels(models []domain.Model) []domain.Model {
+	seen := make(map[string]int, len(models))
+	for i, m := range models {
+		seen[m.ID] = i
+		if config.IsKnownImageModel(m.ID) {
+			models[i].Kind = domain.ModelKindImage
+		}
+	}
+	seeds := []domain.Model{
+		{ID: "gpt-image-2", DisplayName: "GPT Image 2", Kind: domain.ModelKindImage},
+		{ID: "gpt-image-1.5", DisplayName: "GPT Image 1.5", Kind: domain.ModelKindImage},
+	}
+	for _, seed := range seeds {
+		if i, ok := seen[seed.ID]; ok {
+			models[i].Kind = domain.ModelKindImage
+			if strings.TrimSpace(models[i].DisplayName) == "" {
+				models[i].DisplayName = seed.DisplayName
+			}
+			continue
+		}
+		models = append(models, seed)
+	}
+	return models
 }
 
 // isFreeTierModel reports whether a model ID denotes a free-tier variant.

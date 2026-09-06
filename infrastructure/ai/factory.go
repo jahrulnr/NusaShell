@@ -10,11 +10,16 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/embeddings"
 	"nusashell/infrastructure/ai/imagegen"
 	ttsclient "nusashell/infrastructure/ai/tts"
 	"nusashell/infrastructure/ai/videogen"
 )
+
+// codexInstallationID is a persistent UUID identifying this NusaShell
+// install for Codex backend routing.
+var codexInstallationID = codex.LoadOrGenerateInstallationID()
 
 // NewFactory returns a ProviderFactory closure that builds the single
 // provider Adapter for a stored provider config. For chat-kind providers:
@@ -28,26 +33,99 @@ import (
 //     OpenAI wire and reject OpenRouter-specific params — OpenCode Console
 //     Go 400s without `reasoning_content`; TokenRouter 400s on the
 //     OpenRouter `reasoning` object.
-//   - Codex providers (ProviderCodex) compose the codexauth and
-//     codexadapter packages. The active account's OAuth token JSON is
-//     read from the bare providerID key in CredentialStore; multi-account
-//     routing is the responsibility of the application layer (see
-//     application/codex_bridge.go).
-func NewFactory(_ application.CredentialStore) application.ProviderFactory {
+//   - Codex providers (ProviderCodex) use the Codex Responses transport.
+//     Stored OAuth JSON is refreshed when expired; AccountID and
+//     InstallationID headers are attached for ChatGPT multi-account routing.
+func NewFactory(creds application.CredentialStore) application.ProviderFactory {
 	return func(ctx context.Context, p *domain.Provider, apiKey string) (application.AIProvider, error) {
 		if !domain.ValidKind(p.Kind) {
 			return nil, &application.ErrUnsupportedProvider{Kind: string(p.Kind)}
 		}
 		client := newProviderHTTPClient()
 		driver := p.EffectiveDriver()
+		resolvedKey := apiKey
+		accountID := ""
+		installationID := ""
+		if p.Kind == domain.ProviderCodex {
+			tok, err := resolveCodexToken(ctx, p, apiKey, creds)
+			if err != nil {
+				return nil, err
+			}
+			resolvedKey = tok.AccessToken
+			accountID = tok.AccountID
+			installationID = codexInstallationID
+			client = withCodexCookieJar(client)
+		}
 		return &Adapter{
-			ProviderKind: p.Kind,
-			Driver:       driver,
-			OpenRouter:   domain.UsesOpenRouterWire(p.Kind, driver, p.BaseURL),
-			BaseURL:      p.BaseURL,
-			APIKey:       apiKey,
-			Client:       client,
+			ProviderKind:   p.Kind,
+			Driver:         driver,
+			OpenRouter:     domain.UsesOpenRouterWire(p.Kind, driver, p.BaseURL),
+			BaseURL:        p.BaseURL,
+			APIKey:         resolvedKey,
+			Client:         client,
+			AccountID:      accountID,
+			InstallationID: installationID,
 		}, nil
+	}
+}
+
+func resolveCodexToken(ctx context.Context, p *domain.Provider, storedJSON string, creds application.CredentialStore) (*codex.TokenJSON, error) {
+	if storedJSON == "" {
+		return &codex.TokenJSON{}, nil
+	}
+	tok, err := codex.UnmarshalToken(storedJSON)
+	if err != nil {
+		// Plain access-token paste (non-JSON) — use as-is without refresh.
+		trimmed := strings.TrimSpace(storedJSON)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "{") {
+			return &codex.TokenJSON{AccessToken: trimmed}, nil
+		}
+		kind := "codex"
+		if p != nil {
+			kind = string(p.Kind)
+		}
+		return nil, &application.ErrUnsupportedProvider{Kind: kind}
+	}
+	// Auto-refresh if the access token is expired or will expire within 5 min.
+	// The 5-min margin avoids mid-stream token expiry on long generations.
+	if tok.RefreshToken != "" && tok.IsExpired(5*time.Minute) {
+		refreshed, err := codex.Refresh(ctx, tok)
+		if err != nil {
+			// If refresh fails, fall back to the stored token — the API
+			// call will fail with a clear auth error rather than an opaque
+			// refresh error. The user can re-login from the UI.
+			return tok, nil
+		}
+		// Persist the refreshed token so subsequent turns don't refresh again.
+		// Write both the active provider key and the account-scoped key used
+		// by multi-account routing; otherwise failover keeps serving the
+		// expired token.
+		if creds != nil {
+			if newJSON, err := refreshed.Marshal(); err == nil {
+				providerID := ""
+				if p != nil {
+					providerID = p.ID
+				}
+				_ = application.PersistCodexToken(creds, providerID, refreshed.AccountID, newJSON)
+			}
+		}
+		return refreshed, nil
+	}
+	return tok, nil
+}
+
+// withCodexCookieJar returns a shallow copy of client with the shared
+// Cloudflare cookie jar attached. The transport is reused so connection
+// pooling is preserved. If the client already has a jar, it is left untouched.
+func withCodexCookieJar(client *http.Client) *http.Client {
+	if client == nil || client.Jar != nil {
+		return client
+	}
+	return &http.Client{
+		Transport:     client.Transport,
+		CheckRedirect: client.CheckRedirect,
+		Jar:           codex.SharedCloudflareCookieJar(),
+		Timeout:       client.Timeout,
 	}
 }
 

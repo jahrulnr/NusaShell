@@ -19,6 +19,7 @@ import (
 	"nusashell/frontend"
 	"nusashell/infrastructure/acpruntime"
 	"nusashell/infrastructure/ai"
+	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/modelcatalog"
 	"nusashell/infrastructure/attachmentfs"
 	"nusashell/infrastructure/automation"
@@ -321,6 +322,15 @@ func run() error {
 			slog.Info("pipelines discovered", "count", len(loaded))
 		}
 	}
+	// Wire Codex runtime + OAuth adapters (optional — nil-safe if unavailable).
+	if rt, err := codex.NewRuntimeAdapter(); err == nil {
+		app.CodexRuntime = rt
+	}
+	app.CodexOAuth = codex.NewOAuthAdapter()
+	app.CodexUsage = codex.NewUsageAdapter()
+	app.CodexContextWindowCache = codex.NewContextWindowCacheAdapter()
+	app.CodexCLIAuth = codex.NewCLIAuthImporterAdapter()
+	app.CodexRouter = application.NewCodexAccountRouter()
 
 	// Bridge plugin push notifications (MCP server→client) into the
 	// automation engine so when-triggered workflows react to events such as
@@ -357,6 +367,7 @@ func run() error {
 	// Request contexts derive from the signal context, so WebSocket
 	// handlers unblock as soon as shutdown begins.
 	httpServer.BaseContext = func(net.Listener) context.Context { return ctx }
+	app.StartCodexCircuitMonitor(ctx)
 	app.StartAutoModelImport(ctx)
 	app.StartAutoUpdateLoop(ctx, 0)
 	app.StartLifecycle()

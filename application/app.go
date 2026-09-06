@@ -85,6 +85,20 @@ type App struct {
 	STTInstaller                STTInstaller
 	PetsInstaller               PetsInstaller
 	DirectoryBrowser            DirectoryBrowser
+	// CodexRuntime manages the official Codex CLI binary (status/download).
+	// Nil is safe: Codex RPC handlers return an internal error until wired.
+	CodexRuntime CodexRuntime
+	// CodexOAuth performs ChatGPT OAuth PKCE login for Codex providers.
+	CodexOAuth CodexOAuth
+	// CodexUsage fetches ChatGPT rate-limit usage for stored OAuth tokens.
+	CodexUsage CodexUsage
+	// CodexContextWindowCache reads ~/.codex/models_cache.json for the
+	// runtime context window Codex enforces (used by compaction later).
+	CodexContextWindowCache CodexContextWindowCache
+	// CodexCLIAuth imports tokens from the Codex CLI auth.json.
+	CodexCLIAuth CodexCLIAuthImporter
+	// CodexRouter owns sticky multi-account routing and circuit breakers.
+	CodexRouter *CodexAccountRouter
 	// defaultWorkspace is the fallback workspace (wired from the host home
 	// dir) applied when a conversation has not picked one yet. It keeps
 	// workspace-gated tools such as memory_project usable before the user
@@ -456,6 +470,12 @@ type Deps struct {
 	PetsInstaller               PetsInstaller               // optional; nil = desktop pet unavailable (macOS / Windows builds)
 	DirectoryBrowser            DirectoryBrowser            // optional; nil = in-app workspace browser unavailable
 	DefaultWorkspace            string                      // fallback workspace (host home dir) when a conversation has none
+	CodexRuntime                CodexRuntime                // optional; nil = Codex runtime RPCs unavailable
+	CodexOAuth                  CodexOAuth                  // optional; nil = Codex OAuth login unavailable
+	CodexUsage                  CodexUsage                  // optional; nil = Codex usage/circuit RPCs unavailable
+	CodexContextWindowCache     CodexContextWindowCache     // optional; nil = skip Codex runtime context cache
+	CodexCLIAuth                CodexCLIAuthImporter        // optional; nil = Codex CLI import unavailable
+	CodexRouter                 *CodexAccountRouter         // optional; nil = no multi-account sticky/circuit state
 	RetrySleeper                RetrySleeper
 	AcpAgents                   AcpAgentStore
 	Acp                         AcpRuntime
@@ -523,6 +543,12 @@ func NewApp(deps Deps) *App {
 		TTSInstaller:                deps.TTSInstaller,
 		STTInstaller:                deps.STTInstaller,
 		PetsInstaller:               deps.PetsInstaller,
+		CodexRuntime:                deps.CodexRuntime,
+		CodexOAuth:                  deps.CodexOAuth,
+		CodexUsage:                  deps.CodexUsage,
+		CodexContextWindowCache:     deps.CodexContextWindowCache,
+		CodexCLIAuth:                deps.CodexCLIAuth,
+		CodexRouter:                 deps.CodexRouter,
 		AcpAgents:                   deps.AcpAgents,
 		Acp:                         deps.Acp,
 		AcpRunStorage:               deps.AcpRunStorage,
@@ -686,7 +712,7 @@ func (a *App) handleAppInfo() (any, *contracts.RPCError) {
 			Compaction:    settings.CompactionEnabled,
 			PromptCaching: settings.PromptCaching,
 			Automation:    a.Automation != nil,
-			Providers:     []string{"messages", "responses", "chat"},
+			Providers:     []string{"messages", "responses", "chat", "codex"},
 		},
 	}, nil
 }

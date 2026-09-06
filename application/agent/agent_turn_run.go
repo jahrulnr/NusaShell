@@ -99,6 +99,14 @@ func (a *Service) RunTurnChain(run *TurnRun, provider *domain.Provider, apiKey, 
 // is true only when the turn succeeded and the auto-continue policy says
 // the chain should continue.
 func (a *Service) RunSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities, autoContinueIndex int) (bool, string) {
+	if a.deps.PrepareTurnAPIKey != nil {
+		prepared, prepErr := a.deps.PrepareTurnAPIKey(run.ConversationID, provider, apiKey)
+		if prepErr != nil {
+			a.FailTurn(run, asstMsgID, prepErr)
+			return false, ""
+		}
+		apiKey = prepared
+	}
 
 	adapter, conversation, settings, err := a.initializeTurn(run, provider, apiKey, model)
 	if err != nil {
@@ -130,7 +138,7 @@ func (a *Service) RunSingleTurn(run *TurnRun, provider *domain.Provider, apiKey,
 	// rule set (conversation_agent_rules.go): proactive/emergency
 	// compaction, partial-stream continuation, steer/subagent drains,
 	// repeated-tool guard, and usage accounting all live in the rules.
-	pr := a.NewConversationRules(run, adapter, conversation, settings, provider, model, effort, asstMsgID, caps, toolDefs, maxTokens, promptCache, initialContinuation)
+	pr := a.NewConversationRules(run, adapter, conversation, settings, provider, model, effort, asstMsgID, caps, toolDefs, maxTokens, promptCache, initialContinuation, apiKey)
 	if _, runErr := (&AgentEngine{}).Run(run.Ctx, pr.Rules(), 0); runErr != nil {
 		if !pr.turnEnded {
 			a.FailTurn(run, pr.messageID(), runErr)

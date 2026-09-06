@@ -61,7 +61,7 @@ test('installers preserve the release manifest, checksum, and version activation
   assert.match(releaseInstaller, /Install desktop pet \(Linux only\)/);
   assert.match(releaseInstaller, /\.local\/share\/nusashell-pets/);
   assert.match(releaseInstaller, /nusashell-pets/);
-  assert.match(releaseInstaller, /nusashell-pets\.desktop/);
+  assert.doesNotMatch(releaseInstaller, /nusashell-pets\.desktop/);
   assert.doesNotMatch(windowsInstaller, /pets-latest\.json/);
   assert.doesNotMatch(windowsInstaller, /NUSASHELL_INSTALL_PETS/);
   assert.doesNotMatch(windowsInstaller, /nusashell-pets\.desktop/);
@@ -374,9 +374,7 @@ esac
   const launcher = await readFile(join(home, '.local', 'bin', 'nusashell-pets'), 'utf8');
   assert.match(launcher, /pets-program\/current\/nusashell-pets/);
   assert.match(launcher, /--assets ".*pets-program\/current\/assets\/pets"/);
-  const petsDesktop = await readFile(join(home, '.local', 'share', 'applications', 'nusashell-pets.desktop'), 'utf8');
-  assert.match(petsDesktop, /Exec=.*nusashell-pets/);
-  assert.match(petsDesktop, /Terminal=false/);
+  assert.equal(await fileExists(join(home, '.local', 'share', 'applications', 'nusashell-pets.desktop')), false);
 });
 
 test('release Linux installer can opt into the login service', async () => {

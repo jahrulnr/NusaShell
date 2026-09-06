@@ -15,12 +15,13 @@ type ToolDef struct {
 
 // ChatMessage is one turn in a ChatRequest.
 type ChatMessage struct {
-	Role        string // user | assistant | system | tool
-	Content     string
-	Reasoning   string              // assistant thinking text (persisted, not replayed)
-	ToolCalls   []domain.ToolCall   // assistant
-	ToolResult  *ToolResult         // tool
-	Attachments []domain.Attachment // user only
+	Role           string // user | assistant | system | tool
+	Content        string
+	Reasoning      string              // assistant thinking text (UI / plaintext)
+	ReasoningExtra json.RawMessage     `json:"ReasoningExtra,omitempty"` // opaque encrypted reasoning replay state
+	ToolCalls      []domain.ToolCall   // assistant
+	ToolResult     *ToolResult         // tool
+	Attachments    []domain.Attachment // user only
 }
 
 // ToolResult is the model-visible output of one tool call.
@@ -81,13 +82,18 @@ type ChatRequest struct {
 	// ToolChoice forces a specific tool when set (provider-native object).
 	// Compaction uses this to require summary() instead of a free-text reply.
 	ToolChoice any
-	// CompactionBlob carries opaque server-side compaction items
-	// (OpenAI Responses context_management encrypted_content) that must be
-	// replayed as a prefix of the next request's input. Set by the
-	// server-side compaction path; the OpenAI Responses adapter forwards it
-	// via the "compaction_items" provider option. Empty for the client-side
-	// path.
+	// CompactionBlob carries opaque provider compaction items
+	// (OpenAI Responses context_management or Codex remote v2 encrypted
+	// content) that must be replayed in the provider's required position in
+	// the next request's input. Set by a server-side compaction path;
+	// Responses and Codex adapters forward it via the "compaction_items"
+	// provider option. Empty for the client-side text-summary path.
 	CompactionBlob string
+	// RemoteCompaction requests a provider-specific remote compaction pass.
+	// The Codex adapter translates it into a final
+	// {"type":"compaction_trigger"} input item on a separate streaming
+	// /responses request.
+	RemoteCompaction bool
 	// ContextManagement carries server-side context management directives
 	// (OpenAI Responses context_management). When non-empty, the adapter
 	// forwards it to the wire request so the server can compact context
@@ -144,18 +150,23 @@ func (u ChatUsage) ContextTokens() int {
 
 // ChatResponse is the application-layer completion result.
 type ChatResponse struct {
-	Content    string
-	Reasoning  string
-	ToolCalls  []domain.ToolCall
-	Usage      ChatUsage
-	StopReason string
+	Content   string
+	Reasoning string
+	// ReasoningExtra carries opaque OpenAI-family reasoning item JSON
+	// (encrypted_content / provider Extra) from the completed core response.
+	// Empty when the provider did not return Extra. Distinct from CompactionItems.
+	ReasoningExtra json.RawMessage `json:"ReasoningExtra,omitempty"`
+	ToolCalls      []domain.ToolCall
+	Usage          ChatUsage
+	StopReason     string
 	// Warnings carries provider-level notices (dropped unsupported content
 	// blocks, malformed tool arguments, strict-tool omissions) that would
 	// otherwise be silently lost. Empty when the provider reported none.
 	Warnings []string
-	// CompactionItems carries opaque server-side compaction items (OpenAI
-	// Responses context_management). When non-empty, the application layer
-	// stores them on the conversation and replays them as a prefix on the
-	// next turn. Each entry is the raw JSON of a compaction output item.
+	// CompactionItems carries opaque server-side compaction items from OpenAI
+	// Responses context_management or Codex remote v2. When non-empty, the
+	// application layer stores them on the conversation and the matching
+	// adapter replays them in the provider's required position on the next
+	// turn. Each entry is the raw JSON of a compaction output item.
 	CompactionItems []json.RawMessage
 }

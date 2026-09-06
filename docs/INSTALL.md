@@ -270,8 +270,8 @@ and remove the relevant program paths:
 - Linux: `~/.local/share/nusashell`,
   `~/.local/share/nusashell-electron`, `~/.local/share/nusashell-pets`,
   `~/.local/bin/nusashell`, `~/.local/bin/nusashell-desktop`,
-  `~/.local/bin/nusashell-pets`, and the desktop entries
-  (`nusashell-desktop.desktop`, `nusashell-pets.desktop`).
+  `~/.local/bin/nusashell-pets`, and the Electron desktop entry
+  (`nusashell-desktop.desktop`).
 - macOS: `~/.local/share/nusashell`, `~/.local/bin/nusashell`, and
   `~/Applications/NusaShell Desktop.app`.
 - Windows: `%LOCALAPPDATA%\Programs\NusaShell` and

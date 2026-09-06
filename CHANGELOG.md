@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-07
+
+### Added
+
+- **Codex remote v2 compaction.** Codex providers now compact through a
+  dedicated streaming `/responses` request with a final
+  `compaction_trigger` item, preserve the opaque checkpoint, and rebuild the
+  conversation without a text-summary fallback.
+- **Codex OAuth, runtime, and multi-account.** Providers can sign in via
+  ChatGPT OAuth or import `~/.codex/auth.json`, manage multiple ChatGPT
+  accounts with sticky routing and 429 failover/circuit breakers, download
+  the managed Codex CLI binary, and refresh usage in the Providers UI.
+  Token refresh and `ChatGPT-Account-ID` / `x-codex-installation-id` headers
+  are wired into the Codex Responses transport (remote v2 compaction stays
+  the only compact path).
+- **Codex model import.** `Import models` / connectivity test use the Codex
+  CLI app-server `model/list` JSON-RPC path (managed runtime download when
+  needed) and seed ChatGPT plan image models (`gpt-image-2`, `gpt-image-1.5`).
+- **Encrypted reasoning replay.** OpenAI-family assistant turns persist
+  opaque `ReasoningExtra` (`encrypted_content` / wire Extra) alongside
+  visible thinking text and replay it on the next request so Responses /
+  Codex / OpenRouter OpenAI routes keep reasoning continuity. Distinct from
+  `CompactionBlob`.
+
+### Changed
+
+- **Desktop pet no longer writes a `.desktop` menu entry.** Pets install
+  still places `~/.local/bin/nusashell-pets` and is launched from the
+  NusaShell UI; it does not create `nusashell-pets.desktop`.
+
+### Fixed
+
+- **Todo and project memory see the active conversation again.** After the
+  agent package extract, `todo` and `memory_project` read a different Go
+  context key type than the turn loop wrote, so every call failed with
+  "requires a conversation context" / "requires an active workspace" even
+  when the room had both. Hydration still showed the workspace because it
+  reads the conversation directly. The root helpers now wrap
+  `application/tools` instead of duplicating `ctxKey`.
+- **Desktop pet icon is a single-instance toggle.** `settings.pets_launch`
+  spawns one subprocess when the overlay is idle and stops that process
+  when it is already running, so spam-clicking the sidebar icon cannot
+  open multiple pets.
+- **Desktop pet connects to the live Go listen address.** Spawn now passes
+  `NUSASHELL_HOST`, `NUSASHELL_PORT`, `NUSASHELL_WS_URL`, and `--ws-url`
+  from the running process, so a baked-in `config.json` `ws_url` (including
+  an older install still pointing at port 9999) no longer wins.
+
 ## [0.4.8] - 2026-09-06
 
 ### Fixed

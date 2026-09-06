@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -343,6 +344,99 @@ func TestToCoreRequestCopiesToolChoice(t *testing.T) {
 	}
 }
 
+// TestReasoningExtraReplayPreservesEncryptedContent proves OpenAI-family
+// encrypted reasoning state survives ChatMessage → core.ReasoningBlock so
+// Responses/Codex/compat adapters can echo Extra byte-for-byte.
+func TestReasoningExtraReplayPreservesEncryptedContent(t *testing.T) {
+	extra := json.RawMessage(`{"id":"rs_1","type":"reasoning","encrypted_content":"ENC-REASON","summary":[{"type":"summary_text","text":"think"}]}`)
+	cr := ToCoreRequest(ChatRequest{
+		Model: "gpt-5.6-sol",
+		Messages: []ChatMessage{
+			{Role: "user", Content: "hi"},
+			{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: extra},
+		},
+	}, domain.ProviderResponses, false)
+
+	var got *core.ReasoningBlock
+	for _, msg := range cr.Messages {
+		if msg.Role != core.RoleAssistant {
+			continue
+		}
+		for _, block := range msg.Blocks {
+			if rb, ok := block.(core.ReasoningBlock); ok {
+				got = &rb
+			}
+		}
+	}
+	if got == nil {
+		t.Fatal("expected ReasoningBlock on assistant message")
+	}
+	if got.Text != "think" {
+		t.Fatalf("Text = %q, want think", got.Text)
+	}
+	if string(got.Extra) != string(extra) {
+		t.Fatalf("Extra = %s, want %s", got.Extra, extra)
+	}
+}
+
+func TestReasoningExtraAloneCreatesReasoningBlock(t *testing.T) {
+	extra := json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC-ONLY"}`)
+	cr := ToCoreRequest(ChatRequest{
+		Model: "gpt-5.6-sol",
+		Messages: []ChatMessage{
+			{Role: "assistant", ReasoningExtra: extra},
+		},
+	}, domain.ProviderResponses, false)
+	rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+	if !ok {
+		t.Fatalf("blocks[0] = %#v, want ReasoningBlock", cr.Messages[0].Blocks[0])
+	}
+	if rb.Text != "" || string(rb.Extra) != string(extra) {
+		t.Fatalf("ReasoningBlock = %#v", rb)
+	}
+}
+
+func TestReasoningExtraAbsentLeavesExtraNil(t *testing.T) {
+	cr := ToCoreRequest(ChatRequest{
+		Model: "gpt-5.6-sol",
+		Messages: []ChatMessage{
+			{Role: "assistant", Content: "ok", Reasoning: "think"},
+		},
+	}, domain.ProviderResponses, false)
+	rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+	if !ok {
+		t.Fatalf("blocks[0] = %#v", cr.Messages[0].Blocks[0])
+	}
+	if len(rb.Extra) != 0 {
+		t.Fatalf("Extra = %s, want empty/nil when ReasoningExtra absent", rb.Extra)
+	}
+}
+
+func TestFromCoreResponseCarriesReasoningExtra(t *testing.T) {
+	extra := json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC-1"}`)
+	out := FromCoreResponse(&core.Response{
+		Blocks: []core.Block{
+			core.ReasoningBlock{Text: "think", Extra: extra},
+			core.TextBlock{Text: "answer"},
+		},
+	})
+	if out.Reasoning != "think" {
+		t.Fatalf("Reasoning = %q, want think", out.Reasoning)
+	}
+	if string(out.ReasoningExtra) != string(extra) {
+		t.Fatalf("ReasoningExtra = %s, want %s", out.ReasoningExtra, extra)
+	}
+}
+
+func TestFromCoreResponseOmitsEmptyReasoningExtra(t *testing.T) {
+	out := FromCoreResponse(&core.Response{
+		Blocks: []core.Block{core.ReasoningBlock{Text: "think"}},
+	})
+	if len(out.ReasoningExtra) != 0 {
+		t.Fatalf("ReasoningExtra = %s, want empty", out.ReasoningExtra)
+	}
+}
+
 func TestToCoreRequestSetsCompactionItemsForResponses(t *testing.T) {
 	cr := ToCoreRequest(ChatRequest{Model: "gpt-5.2", CompactionBlob: `[{"type":"compaction"}]`}, domain.ProviderResponses, false)
 	if got := cr.ProviderOptions["compaction_items"]; got != `[{"type":"compaction"}]` {
@@ -354,6 +448,37 @@ func TestToCoreRequestOmitsCompactionItemsForChatKind(t *testing.T) {
 	cr := ToCoreRequest(ChatRequest{Model: "gpt-4o", CompactionBlob: `[{"type":"compaction"}]`}, domain.ProviderChat, false)
 	if _, ok := cr.ProviderOptions["compaction_items"]; ok {
 		t.Fatal("compaction_items must not be set for chat kind")
+	}
+}
+
+func TestToCoreRequestCodexForwardsCompactionItemsNotContextManagement(t *testing.T) {
+	blob := `[{"type":"compaction","encrypted_content":"ENC-1"}]`
+	cr := ToCoreRequest(ChatRequest{
+		Model:          "gpt-5-codex",
+		CompactionBlob: blob,
+		ContextManagement: []map[string]any{
+			{"type": "compaction", "compact_threshold": 360000},
+		},
+	}, domain.ProviderCodex, false)
+	if got := cr.ProviderOptions["compaction_items"]; got != blob {
+		t.Fatalf("compaction_items = %#v, want %q", got, blob)
+	}
+	if _, ok := cr.ProviderOptions["context_management"]; ok {
+		t.Fatal("context_management must not be set for codex kind")
+	}
+}
+
+func TestToCoreRequestCodexSetsCompactionTrigger(t *testing.T) {
+	cr := ToCoreRequest(ChatRequest{
+		Model:            "gpt-5-codex",
+		RemoteCompaction: true,
+		ConversationID:   "conv_codex",
+	}, domain.ProviderCodex, false)
+	if got := cr.ProviderOptions["compaction_trigger"]; got != true {
+		t.Fatalf("compaction_trigger = %#v, want true", got)
+	}
+	if got := cr.ProviderOptions["session_id"]; got != "conv_codex" {
+		t.Fatalf("session_id = %#v, want conversation id", got)
 	}
 }
 

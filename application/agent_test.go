@@ -279,6 +279,21 @@ func TestResolveCompactionAdapter_overrideUsesSeparateModel(t *testing.T) {
 	}
 }
 
+func TestResolveCompactionAdapterCodexKeepsSameModel(t *testing.T) {
+	defaultProvider := &fakeVisionAdapter{description: "codex-default"}
+	defaultAdapter := ProviderContext{Provider: defaultProvider, Kind: domain.ProviderCodex}
+	app := &App{}
+	settings := domain.Settings{CompactionModel: "other-provider:cheap-model"}
+
+	gotAdapter, gotModel, gotWindow := app.resolveCompactionAdapter(context.Background(), defaultAdapter, "gpt-5-codex", 400000, settings)
+	if gotAdapter.Provider != defaultProvider {
+		t.Fatal("Codex compaction must keep the current adapter")
+	}
+	if gotModel != "gpt-5-codex" || gotWindow != 400000 {
+		t.Fatalf("Codex compaction = adapter=%v model=%q window=%d, want current model and window", gotAdapter.Provider, gotModel, gotWindow)
+	}
+}
+
 func TestResolveCompactionAdapter_overrideFallsBackOnResolveError(t *testing.T) {
 	// If the override model cannot be resolved, fall back to the default
 	// adapter+model so compaction still runs with the chat model.
@@ -1280,6 +1295,28 @@ func (a *recordingCompleteAdapter) Chat(_ context.Context, req *core.Request) (*
 		}, nil
 	}
 	return &core.Response{Blocks: []core.Block{core.TextBlock{Text: summary}}, FinishReason: core.FinishReasonStop}, nil
+}
+
+type codexCompactionProvider struct {
+	streamRequests []*core.Request
+	streamEvents   []core.Event
+	streamErr      error
+	chatCalls      int
+}
+
+func (p *codexCompactionProvider) Name() string { return "codex-test" }
+
+func (p *codexCompactionProvider) Chat(context.Context, *core.Request) (*core.Response, error) {
+	p.chatCalls++
+	return nil, errors.New("codex compaction must use streaming")
+}
+
+func (p *codexCompactionProvider) Stream(_ context.Context, req *core.Request) (core.Stream, error) {
+	p.streamRequests = append(p.streamRequests, req)
+	if p.streamErr != nil {
+		return nil, p.streamErr
+	}
+	return &stubStream{events: p.streamEvents}, nil
 }
 
 // coreMessageText extracts text content from a core.Message's TextBlocks.
@@ -2805,6 +2842,15 @@ func TestServerCompactionContextManagementIneligibleModel(t *testing.T) {
 	}
 }
 
+func TestServerCompactionContextManagementCodexKindIsDisabled(t *testing.T) {
+	if got := serverCompactionContextManagementForKind("gpt-5-codex", domain.ProviderCodex); got != nil {
+		t.Fatalf("Codex context management = %v, want nil; Codex uses remote v2 trigger", got)
+	}
+	if got := serverCompactionContextManagementForKind("gpt-5.2", domain.ProviderResponses); got == nil {
+		t.Fatal("Responses context management = nil, want eligible OpenAI directive")
+	}
+}
+
 func TestServerCompactionContextManagementFloorEnforced(t *testing.T) {
 	// Temporarily raise the floor to verify it clamps. The threshold is
 	// computed in the domain, so the floor must be mutated there.
@@ -2872,6 +2918,84 @@ func TestCompactConversationSkipsForServerSideEligibleModel(t *testing.T) {
 	defer adapter.mu.Unlock()
 	if len(adapter.requests) != 0 {
 		t.Fatalf("adapter requests = %d, want 0 (server-side eligible skips client-side)", len(adapter.requests))
+	}
+}
+
+func TestCompactConversationUsesCodexRemoteCompaction(t *testing.T) {
+	conv := &domain.Conversation{
+		ID: "c-codex-remote",
+		Messages: []domain.Message{
+			{ID: "u1", Role: domain.RoleUser, Content: strings.Repeat("old question ", 120), Status: domain.StatusDone},
+			{ID: "a1", Role: domain.RoleAssistant, Content: strings.Repeat("old answer ", 120), Status: domain.StatusDone},
+			{ID: "u2", Role: domain.RoleUser, Content: "keep this latest question", Status: domain.StatusDone},
+			{ID: "a2", Role: domain.RoleAssistant, Content: "keep this latest answer", Status: domain.StatusDone},
+		},
+	}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c-codex-remote": conv}}
+	provider := &codexCompactionProvider{
+		streamEvents: []core.Event{
+			core.ProviderEvent{
+				Name: "compaction",
+				Raw:  json.RawMessage(`{"type":"compaction","encrypted_content":"ENC-1"}`),
+			},
+			core.DoneEvent{FinishReason: core.FinishReasonStop, Provider: "codex", Model: "gpt-5-codex"},
+		},
+	}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	adapter := ProviderContext{Provider: provider, Kind: domain.ProviderCodex}
+
+	summary, err := app.compactConversation(context.Background(), adapter, conv, "gpt-5-codex", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial)
+	if err != nil {
+		t.Fatalf("compactConversation: %v", err)
+	}
+	if summary != "" {
+		t.Fatalf("summary = %q, want empty for opaque Codex checkpoint", summary)
+	}
+	if provider.chatCalls != 0 {
+		t.Fatalf("Chat calls = %d, want 0; Codex compaction must stream", provider.chatCalls)
+	}
+	if len(provider.streamRequests) != 1 {
+		t.Fatalf("Stream calls = %d, want 1", len(provider.streamRequests))
+	}
+	req := provider.streamRequests[0]
+	if got := req.ProviderOptions["compaction_trigger"]; got != true {
+		t.Fatalf("compaction_trigger = %#v, want true", got)
+	}
+	saved := store.convs[conv.ID]
+	if saved.CompactionBlob != `[{"type":"compaction","encrypted_content":"ENC-1"}]` {
+		t.Fatalf("CompactionBlob = %q, want opaque checkpoint", saved.CompactionBlob)
+	}
+	if saved.Summary != "" {
+		t.Fatalf("Summary = %q, want empty", saved.Summary)
+	}
+	for _, message := range saved.Messages {
+		if domain.IsCompactionSummary(message.Content) {
+			t.Fatalf("Codex compaction inserted a text handover: %+v", message)
+		}
+	}
+}
+
+func TestCompactConversationCodexFailureDoesNotFallbackToSummary(t *testing.T) {
+	conv := &domain.Conversation{
+		ID: "c-codex-error",
+		Messages: []domain.Message{
+			{ID: "u1", Role: domain.RoleUser, Content: "question", Status: domain.StatusDone},
+			{ID: "a1", Role: domain.RoleAssistant, Content: "answer", Status: domain.StatusDone},
+		},
+	}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c-codex-error": conv}}
+	provider := &codexCompactionProvider{streamErr: errors.New("remote compaction unavailable")}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	adapter := ProviderContext{Provider: provider, Kind: domain.ProviderCodex}
+
+	if _, err := app.compactConversation(context.Background(), adapter, conv, "gpt-5-codex", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial); err == nil {
+		t.Fatal("expected Codex remote compaction error")
+	}
+	if provider.chatCalls != 0 {
+		t.Fatalf("Chat calls = %d, want 0; failed Codex compaction must not fall back to summary", provider.chatCalls)
+	}
+	if conv.CompactionBlob != "" || conv.Summary != "" {
+		t.Fatalf("conversation changed after failed compaction: blob=%q summary=%q", conv.CompactionBlob, conv.Summary)
 	}
 }
 
@@ -5668,6 +5792,44 @@ func requestHasImageBlock(req *core.Request) bool {
 }
 
 // --- from agent_round_content_test.go ---
+
+func TestApplyStreamRoundPersistsReasoningExtra(t *testing.T) {
+	extra := json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC-PERSIST"}`)
+	msg := &domain.Message{ID: "a1", Role: domain.RoleAssistant}
+	applyStreamRound(msg, "gpt-5.6-sol", streamedTurnRound{
+		Content:   "answer",
+		Reasoning: "think",
+		Response:  ChatResponse{ReasoningExtra: extra},
+	})
+	if msg.Reasoning != "think" {
+		t.Fatalf("Reasoning = %q, want think (UI text unchanged)", msg.Reasoning)
+	}
+	if string(msg.ReasoningExtra) != string(extra) {
+		t.Fatalf("ReasoningExtra = %s, want %s", msg.ReasoningExtra, extra)
+	}
+}
+
+func TestChatMessagesForProviderReplaysReasoningExtra(t *testing.T) {
+	extra := json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC-REPLAY"}`)
+	conv := &domain.Conversation{Messages: []domain.Message{
+		{ID: "u1", Role: domain.RoleUser, Content: "hi", Status: domain.StatusDone},
+		{ID: "a1", Role: domain.RoleAssistant, Content: "ok", Reasoning: "think", ReasoningExtra: extra, Status: domain.StatusDone},
+	}}
+	msgs := chatMessages(conv, "", ModelCapabilities{})
+	var assistant *ChatMessage
+	for i := range msgs {
+		if msgs[i].Role == "assistant" {
+			assistant = &msgs[i]
+			break
+		}
+	}
+	if assistant == nil {
+		t.Fatal("expected assistant ChatMessage")
+	}
+	if string(assistant.ReasoningExtra) != string(extra) {
+		t.Fatalf("ReasoningExtra = %s, want %s", assistant.ReasoningExtra, extra)
+	}
+}
 
 func TestApplyStreamRoundDropsWhitespaceOnlyContent(t *testing.T) {
 	for _, raw := range []string{"\n\n", "\n\n\n\n", "  \n"} {

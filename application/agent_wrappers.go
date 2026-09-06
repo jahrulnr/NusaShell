@@ -173,6 +173,10 @@ func serverCompactionContextManagement(model string) []map[string]any {
 	return agent.ServerCompactionContextManagement(model)
 }
 
+func serverCompactionContextManagementForKind(model string, kind domain.ProviderKind) []map[string]any {
+	return agent.ServerCompactionContextManagementForKind(model, kind)
+}
+
 func AcpDelegationDescription(agents []*domain.AcpAgent) string {
 	return agent.AcpDelegationDescription(agents)
 }
@@ -264,6 +268,8 @@ func (a *App) agentDeps() agent.Deps {
 		DecorateRateLimit:       a.decorateRateLimitError,
 		RecordExperience:        a.recordExperience,
 		MaybeAnnounceTaskMemory: a.maybeAnnounceTaskMemory,
+		PrepareTurnAPIKey:       a.prepareCodexTurnAPIKey,
+		FailoverOnStreamError:   a.failoverCodexOnStreamError,
 	}
 }
 
@@ -407,7 +413,7 @@ func (a *App) interruptTurn(run *TurnRun, msgID string, round streamedTurnRound,
 	a.agentService().InterruptTurn(run, msgID, round, usage, contextTokens, model)
 }
 func (a *App) newConversationRules(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, settings domain.Settings, provider *domain.Provider, model, effort, asstMsgID string, caps ModelCapabilities, toolDefs []ToolDef, maxTokens int, promptCache *PromptCachePolicy, initialContinuation bool) *conversationRules {
-	return a.agentService().NewConversationRules(run, adapter, conversation, settings, provider, model, effort, asstMsgID, caps, toolDefs, maxTokens, promptCache, initialContinuation)
+	return a.agentService().NewConversationRules(run, adapter, conversation, settings, provider, model, effort, asstMsgID, caps, toolDefs, maxTokens, promptCache, initialContinuation, "")
 }
 func (a *App) conversationRulesForTest(run *TurnRun, adapter ProviderContext, conv *domain.Conversation, settings domain.Settings, provider *domain.Provider, model, currentMsgID string, round int) *conversationRules {
 	return a.agentService().ConversationRulesForTest(run, adapter, conv, settings, provider, model, currentMsgID, round)

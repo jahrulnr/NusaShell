@@ -18,6 +18,7 @@ func TestKindCapabilities(t *testing.T) {
 		{ProviderMessages, false, true, true, false, false, false, false, "anthropic", []string{"5m", "1h"}},
 		{ProviderResponses, false, true, true, true, true, false, true, "openai", []string{"30m"}},
 		{ProviderChat, false, true, true, true, true, true, true, "openai", []string{"5m", "1h", "30m"}},
+		{ProviderCodex, true, true, false, false, false, false, false, "openai", []string{"30m"}},
 	}
 	for _, tc := range tests {
 		t.Run(string(tc.kind), func(t *testing.T) {
@@ -81,13 +82,24 @@ func TestKindCapabilitiesUnknownKindDefaultsToChat(t *testing.T) {
 }
 
 func TestValidKind(t *testing.T) {
-	for _, k := range []ProviderKind{ProviderMessages, ProviderResponses, ProviderChat} {
+	for _, k := range []ProviderKind{ProviderMessages, ProviderResponses, ProviderChat, ProviderCodex} {
 		if !ValidKind(k) {
 			t.Errorf("ValidKind(%q) = false, want true", k)
 		}
 	}
 	if ValidKind("unknown") {
 		t.Error("ValidKind(\"unknown\") = true, want false")
+	}
+}
+
+func TestCodexSupportsRemoteCompaction(t *testing.T) {
+	if !CodexSupportsRemoteCompaction(ProviderCodex) {
+		t.Fatal("codex kind must support remote compaction")
+	}
+	for _, kind := range []ProviderKind{ProviderMessages, ProviderResponses, ProviderChat} {
+		if CodexSupportsRemoteCompaction(kind) {
+			t.Fatalf("provider kind %q unexpectedly supports Codex remote compaction", kind)
+		}
 	}
 }
 
@@ -100,6 +112,9 @@ func TestRequiresKey(t *testing.T) {
 	}
 	if RequiresKey(ProviderChat) {
 		t.Error("chat must not require a key")
+	}
+	if !RequiresKey(ProviderCodex) {
+		t.Error("codex must require an access token")
 	}
 }
 

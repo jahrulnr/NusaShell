@@ -375,6 +375,36 @@ func TestHandleProvidersSavePersistsCacheTTL(t *testing.T) {
 	}
 }
 
+func TestHandleProvidersSaveAcceptsCodexDriver(t *testing.T) {
+	app, providers, credentials := newSeedTestApp()
+
+	res, rpcErr := app.handleProvidersSave(contracts.ProviderSaveRequest{
+		Driver:  "codex",
+		Kind:    "codex",
+		Name:    "Codex",
+		BaseURL: "https://chatgpt.com/backend-api/codex",
+		APIKey:  "oauth-access-token",
+		Enabled: true,
+	})
+	if rpcErr != nil {
+		t.Fatalf("save Codex: %+v", rpcErr)
+	}
+	out := res.(contracts.ProvidersListResult)
+	if len(out.Providers) != 1 || out.Providers[0].Kind != "codex" || !out.Providers[0].Configured {
+		t.Fatalf("Codex result = %#v, want configured codex provider", out)
+	}
+	stored, err := providers.Get(out.Providers[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Driver != domain.ProviderDriverCodex || stored.Kind != domain.ProviderCodex {
+		t.Fatalf("stored Codex provider = %+v", stored)
+	}
+	if got, _, err := credentials.Get(stored.ID); err != nil || got != "oauth-access-token" {
+		t.Fatalf("stored Codex credential = %q, err=%v", got, err)
+	}
+}
+
 func TestHandleProvidersSaveRejectsInvalidCacheTTL(t *testing.T) {
 	app, _, _ := newSeedTestApp()
 	_, rpcErr := app.handleProvidersSave(contracts.ProviderSaveRequest{

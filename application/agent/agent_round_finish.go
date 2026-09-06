@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"encoding/json"
+
 	"nusashell/application/service/toolpresentation"
 	"nusashell/contracts"
 	"nusashell/domain"
@@ -57,6 +59,9 @@ func applyStreamRound(message *domain.Message, model string, round StreamedTurnR
 	if round.Reasoning != "" {
 		message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepReasoning, Content: round.Reasoning})
 		message.Reasoning = round.Reasoning
+	}
+	if len(round.Response.ReasoningExtra) > 0 {
+		message.ReasoningExtra = append(json.RawMessage(nil), round.Response.ReasoningExtra...)
 	}
 	if content := text.Persistable(round.Content); content != "" {
 		message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepText, Content: content})

@@ -127,6 +127,11 @@ func (s *Service) enrichProviderModelsAtRead(p *domain.Provider) {
 
 func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
 	models := p.Models
+	if p.Kind == domain.ProviderCodex {
+		// Display-time seed so ChatGPT plan image models appear even before
+		// a fresh import rewrites the persisted provider record.
+		models = seedCodexImageModels(append([]domain.Model(nil), models...))
+	}
 	var out []contracts.ModelDTO
 	routeSupport := p.EffectiveDriver() == domain.ProviderDriverOpenRouter || domain.IsOpenRouterHost(p.Kind, p.BaseURL)
 	for _, m := range models {

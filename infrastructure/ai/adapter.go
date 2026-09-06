@@ -16,6 +16,7 @@ import (
 	"nusashell/application"
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/anthropic"
+	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/core"
 	aiutil "nusashell/infrastructure/ai/internal"
 	"nusashell/infrastructure/ai/openai"
@@ -36,6 +37,10 @@ type Adapter struct {
 	BaseURL      string
 	APIKey       string
 	Client       *http.Client
+	// AccountID / InstallationID are Codex-only auth headers. Empty for
+	// other providers.
+	AccountID      string
+	InstallationID string
 }
 
 // Name returns the provider kind string for diagnostics.
@@ -70,15 +75,9 @@ func (a *Adapter) requestHeaders() func(http.Header, core.ProviderOptions) {
 	return nil
 }
 
-// providerFor builds the litellm provider for this adapter's kind.
-//
-// Codex wiring belongs at this explicit selection seam when its runtime
-// provider is introduced. The future adapter must implement core.Provider,
-// preserve the Responses-compatible request/stream contract, and pass the
-// opaque compaction_items and context_management values through
-// core.Request.ProviderOptions without decoding or silently falling back.
-// Its transport/auth boundary is the ChatGPT Codex backend
-// (https://chatgpt.com/backend-api/codex), not this wire-only package.
+// providerFor builds the provider for this adapter's kind. Codex remains a
+// separate driver even though its endpoint uses Responses-shaped items:
+// authentication headers and remote compaction semantics differ from OpenAI.
 func (a *Adapter) providerFor() (core.Provider, error) {
 	optional := strings.TrimSpace(a.APIKey) == ""
 	headers := a.requestHeaders()
@@ -103,6 +102,11 @@ func (a *Adapter) providerFor() (core.Provider, error) {
 			HTTPClient:     a.Client,
 			APIKeyOptional: optional,
 		}, string(a.ProviderKind))
+	case domain.ProviderDriverCodex:
+		if a.ProviderKind != domain.ProviderCodex {
+			return nil, &application.ErrUnsupportedProvider{Kind: string(a.ProviderKind)}
+		}
+		return a.newCodexProvider()
 	}
 	switch {
 	case a.ProviderKind == domain.ProviderMessages:
@@ -113,9 +117,21 @@ func (a *Adapter) providerFor() (core.Provider, error) {
 		return openrouter.New(openrouter.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional})
 	case a.ProviderKind == domain.ProviderChat:
 		return openai.New(openai.Config{API: openai.APIChat, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional, RequestHeaders: headers})
+	case a.ProviderKind == domain.ProviderCodex:
+		return a.newCodexProvider()
 	default:
 		return nil, &application.ErrUnsupportedProvider{Kind: string(a.ProviderKind)}
 	}
+}
+
+func (a *Adapter) newCodexProvider() (core.Provider, error) {
+	return codex.New(codex.Config{
+		APIKey:         a.APIKey,
+		BaseURL:        a.BaseURL,
+		HTTPClient:     a.Client,
+		AccountID:      a.AccountID,
+		InstallationID: a.InstallationID,
+	})
 }
 
 // Chat implements core.Provider.
@@ -139,6 +155,10 @@ func (a *Adapter) Stream(ctx context.Context, req *core.Request) (core.Stream, e
 // ListModels implements application.ModelLister.
 func (a *Adapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model, error) {
 	switch {
+	case a.ProviderKind == domain.ProviderCodex || a.Driver == domain.ProviderDriverCodex:
+		// Codex has no HTTP /models; discover via Codex CLI app-server
+		// JSON-RPC model/list (managed runtime download if needed).
+		return codex.ListModelsViaSubprocess(ctx)
 	case a.ProviderKind == domain.ProviderMessages && a.Driver != domain.ProviderDriverOpenRouter:
 		return listAnthropicModels(ctx, a.BaseURL, a.APIKey, a.Client)
 	default:

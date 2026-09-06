@@ -351,13 +351,13 @@
     },
     "providers": {
       "title": "Providers",
-      "purpose": "Configure persistent Anthropic, OpenAI, and OpenRouter cards, add unlimited custom OpenRouter-compatible providers by wire format (Messages, Responses, Chat), and manage spawn-only ACP subagent binaries. Provider API keys are optional and live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.",
+      "purpose": "Configure persistent Anthropic, OpenAI, OpenRouter, and Codex cards, add unlimited custom providers by wire format (Messages, Responses, Chat, Codex), and manage spawn-only ACP subagent binaries. Codex prefers Sign in with ChatGPT or Import from Codex CLI (optional token paste fallback); other provider keys are optional and live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.",
       "howToOpen": "Click the Providers item in the left sidebar.",
       "sections": [
         {
           "heading": "Header",
           "paragraphs": [
-            "View title plus Add custom provider (unlimited OpenRouter-compatible gateways) and Add ACP agent (spawn-only subprocesses)."
+            "View title plus Add custom provider (unlimited compatible providers) and Add ACP agent (spawn-only subprocesses)."
           ],
           "controls": [
             "providers-header-actions",
@@ -368,13 +368,27 @@
         {
           "heading": "Chat providers",
           "paragraphs": [
-            "The registry always shows persistent Anthropic, OpenAI, and OpenRouter cards, even before configuration. Anthropic uses the Anthropic Messages driver; OpenAI uses the OpenAI Responses driver; OpenRouter and custom providers use the OpenRouter driver. OpenRouter and custom forms expose Messages, Responses, and Chat API kinds. Selecting a card opens the detail pane for editing its base URL, optional API key, enabled state, prompt-cache TTL, importing models, and testing connectivity. These models appear in the Agent composer."
+            "The registry always shows persistent Anthropic, OpenAI, OpenRouter, and Codex cards, even before configuration. Anthropic uses the Anthropic Messages driver; OpenAI uses the OpenAI Responses driver; OpenRouter uses the OpenRouter driver; Codex uses the Codex driver with OAuth Sign in / Import from CLI as the primary auth paths. Custom forms expose Messages, Responses, Chat, and Codex API kinds. Selecting a card opens the detail pane for editing its base URL, credential, enabled state, prompt-cache TTL, importing models, and testing connectivity. These models appear in the Agent composer."
           ],
           "controls": [
             "provider-llm-section",
             "provider-registry",
             "provider-detail",
             "provider-cache-ttl"
+          ]
+        },
+        {
+          "heading": "Codex accounts and runtime",
+          "paragraphs": [
+            "On the Codex detail pane, the ChatGPT Accounts card shows multi-account OAuth identity, plan, usage bars, Switch/Remove, Sign in with ChatGPT, Import from Codex CLI, and Refresh circuits. The Codex Runtime card shows managed CLI binary status and Download."
+          ],
+          "controls": [
+            "codex-account-list",
+            "codex-import-cli-btn",
+            "codex-refresh-circuits-btn",
+            "codex-login-btn",
+            "codex-runtime-status",
+            "codex-runtime-download-btn"
           ]
         },
         {
@@ -1490,6 +1504,42 @@
       "action": "Selects the prompt-cache duration sent to this provider when Settings prompt caching is on, or off to skip caching for this provider. Messages and OpenRouter chat offer 5m/1h/off; Responses and other Chat hosts offer 30m/off.",
       "notes": "Buttons inside the provider detail pane (class provider-cache-ttl-chip). The last chip is off. Empty stored TTL still defaults to the first duration. The registry card shows the selected value only.",
       "selector": ".provider-cache-ttl-chip"
+    },
+    "codex-account-list": {
+      "label": "Codex account list",
+      "section": "Providers",
+      "type": "list",
+      "notes": "Rows from ai.codex.usage (or ai.codex.accounts.list fallback) with Switch/Remove actions."
+    },
+    "codex-import-cli-btn": {
+      "label": "Import from Codex CLI",
+      "section": "Providers",
+      "type": "button",
+      "action": "Imports ChatGPT auth from the local Codex CLI auth.json via ai.codex.import."
+    },
+    "codex-refresh-circuits-btn": {
+      "label": "Refresh Codex circuits",
+      "section": "Providers",
+      "type": "button",
+      "action": "Polls account usage circuits via ai.codex.refresh-circuits then reloads the accounts list."
+    },
+    "codex-login-btn": {
+      "label": "Sign in with ChatGPT",
+      "section": "Providers",
+      "type": "button",
+      "action": "Starts Codex OAuth PKCE login via ai.codex.login."
+    },
+    "codex-runtime-status": {
+      "label": "Codex runtime status",
+      "section": "Providers",
+      "type": "text",
+      "notes": "Shows installed version/path, downloading, or not-installed from ai.codex.runtime.status."
+    },
+    "codex-runtime-download-btn": {
+      "label": "Download Codex runtime",
+      "section": "Providers",
+      "type": "button",
+      "action": "Downloads the managed Codex CLI binary via ai.codex.runtime.download."
     },
     "learning-stat-memory": {
       "label": "Memory count",

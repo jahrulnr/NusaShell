@@ -7,7 +7,8 @@ import (
 
 // ProviderKind names the wire API shape, not a vendor: Messages (Anthropic
 // Messages API), Responses (OpenAI Responses API), Chat (any OpenAI-compatible
-// Chat Completions endpoint, including OpenRouter hosts).
+// Chat Completions endpoint, including OpenRouter hosts), or Codex (the
+// ChatGPT Codex Responses backend).
 type ProviderKind string
 
 const (
@@ -58,12 +59,12 @@ func ValidDriver(driver ProviderDriver) bool {
 // (image generation, TTS, STT, embeddings, video) and the requiresKey check
 // without scattering switch statements across the codebase.
 type KindCapabilities struct {
-	// RequiresKey is true when the provider kind needs a user-supplied API
-	// key. Every kind is optional: local and gateway hosts may run without
-	// auth, and official endpoints 401 if a key is actually required.
+	// RequiresKey is true when the provider kind needs a user-supplied
+	// credential. Local and gateway hosts may run without auth, while the
+	// Codex backend requires an OAuth access token.
 	RequiresKey bool
-	// HasModelListing is true when the provider kind exposes a GET /models
-	// (or /v1/models) endpoint for chat model discovery.
+	// HasModelListing is true when the provider kind can discover models —
+	// HTTP GET /models (or /v1/models), or Codex app-server model/list.
 	HasModelListing bool
 	// HasEmbeddings is true when the provider kind may expose an
 	// OpenAI-compatible /embeddings endpoint.
@@ -125,6 +126,12 @@ var kindCaps = map[ProviderKind]KindCapabilities{
 		PromptCacheStyle:         "openai",
 		CacheTTLs:                []string{"5m", "1h", "30m"},
 	},
+	ProviderCodex: {
+		RequiresKey:      true,
+		HasModelListing:  true,
+		PromptCacheStyle: "openai",
+		CacheTTLs:        []string{"30m"},
+	},
 }
 
 // KindCapabilities returns the protocol-level capabilities for this provider
@@ -140,10 +147,17 @@ func (p *Provider) KindCapabilities() KindCapabilities {
 // ValidKind reports whether kind is one of the known provider kinds.
 func ValidKind(kind ProviderKind) bool {
 	switch kind {
-	case ProviderMessages, ProviderResponses, ProviderChat:
+	case ProviderMessages, ProviderResponses, ProviderChat, ProviderCodex:
 		return true
 	}
 	return false
+}
+
+// CodexSupportsRemoteCompaction reports whether a provider kind uses the
+// ChatGPT Codex remote v2 compaction flow. Codex compaction is selected by
+// provider kind, not by a model ID that may also appear in OpenAI's catalog.
+func CodexSupportsRemoteCompaction(kind ProviderKind) bool {
+	return kind == ProviderCodex
 }
 
 // KindCaps is a package-level helper for callers that have a

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -184,13 +185,16 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 			out = append(out, ChatMessage{Role: "user", Content: content, Attachments: attachments})
 		case domain.RoleAssistant:
 			content := text.Visible(m.Content)
-			if m.ID == pendingMsgID && content == "" && m.Reasoning == "" && len(m.ToolCalls) == 0 {
+			if m.ID == pendingMsgID && content == "" && m.Reasoning == "" && len(m.ToolCalls) == 0 && len(m.ReasoningExtra) == 0 {
 				continue
 			}
-			if content == "" && m.Reasoning == "" && len(m.ToolCalls) == 0 {
+			if content == "" && m.Reasoning == "" && len(m.ToolCalls) == 0 && len(m.ReasoningExtra) == 0 {
 				continue
 			}
 			cm := ChatMessage{Role: "assistant", Content: content, Reasoning: m.Reasoning, ToolCalls: m.ToolCalls}
+			if len(m.ReasoningExtra) > 0 {
+				cm.ReasoningExtra = append(json.RawMessage(nil), m.ReasoningExtra...)
+			}
 			out = append(out, cm)
 			for _, tc := range m.ToolCalls {
 				// Summarize first (show/subagent get short summaries),

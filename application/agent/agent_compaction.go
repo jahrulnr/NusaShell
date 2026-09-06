@@ -21,7 +21,7 @@ func (a *Service) ResolveCompactionAdapter(ctx context.Context, defaultAdapter P
 	// during the normal stream call, not by a separate compaction model.
 	// Skip the compaction-model override when the chat model is server-side
 	// eligible so the compaction item stays valid for the same model.
-	if domain.OpenAISupportsServerCompaction(defaultModel) {
+	if domain.CodexSupportsRemoteCompaction(defaultAdapter.Kind) || domain.OpenAISupportsServerCompaction(defaultModel) {
 		return defaultAdapter, defaultModel, defaultWindow
 	}
 	provider, bareModel, apiKey, rpcErr := a.resolveModel(compModel)
@@ -158,13 +158,9 @@ func compactionSummaryEchoesAssistant(summary string, msgs []ChatMessage) bool {
 // previous pass, producing a progressively folded summary that preserves all
 // prior context. The most recent messages are kept intact.
 //
-// When the model is eligible for OpenAI-native compaction (gpt-5+) and the
-// adapter implements ServerCompactor, the call is delegated to the server-side
-// /responses/compact endpoint first. The opaque blob replaces the archived
-// prefix and the live suffix is kept intact (tool calls/reasoning preserved).
-// If that fails (e.g. 404/400 for accounts without the endpoint, network
-// error), the function falls back once to the client-side multi-pass
-// summarization below.
+// Codex remote v2 compaction is a separate streaming /responses request.
+// It is selected by provider kind, not by the model ID: Codex model IDs
+// also appear in the OpenAI server-compaction table.
 
 func (a *Service) CompactConversation(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, contextWindow int, settings domain.Settings, trigger domain.CompactionTrigger) (string, error) {
 	if len(c.Messages) <= 1 {
@@ -177,6 +173,10 @@ func (a *Service) CompactConversation(ctx context.Context, adapter ProviderConte
 	}
 	if effectiveKeepBudget < 1000 {
 		effectiveKeepBudget = 1000
+	}
+
+	if domain.CodexSupportsRemoteCompaction(adapter.Kind) {
+		return a.compactCodexConversation(ctx, adapter, c, model, effectiveKeepBudget)
 	}
 
 	// Server-side compaction (context_management) is handled by the server
@@ -272,7 +272,11 @@ func (a *Service) CompactConversation(ctx context.Context, adapter ProviderConte
 					continue
 				}
 				calls := capCompactionToolCalls(m.ToolCalls, toolCap)
-				msgs = append(msgs, ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: calls})
+				cm := ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: calls}
+				if len(m.ReasoningExtra) > 0 {
+					cm.ReasoningExtra = append(json.RawMessage(nil), m.ReasoningExtra...)
+				}
+				msgs = append(msgs, cm)
 				for _, tc := range calls {
 					msgs = append(msgs, ChatMessage{Role: "tool", ToolResult: &ToolResult{
 						ToolCallID: tc.ID, Name: tc.Name, Content: tooloutput.ProviderToolContent(tc.Name, tc.Output),
@@ -315,6 +319,37 @@ func (a *Service) CompactConversation(ctx context.Context, adapter ProviderConte
 		return "", err
 	}
 	return runningSummary, nil
+}
+
+func (a *Service) compactCodexConversation(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, keepBudget int) (string, error) {
+	messages := a.chatMessagesForProvider(c, "", ModelCapabilities{
+		Vision:   true,
+		Audio:    true,
+		Video:    true,
+		Document: true,
+	})
+	response, err := adapter.Stream(ctx, ChatRequest{
+		Model:            model,
+		Messages:         messages,
+		ConversationID:   c.ID,
+		CompactionBlob:   c.CompactionBlob,
+		RemoteCompaction: true,
+		ReasoningReplay:  true,
+	}, nil, nil)
+	if err != nil {
+		return "", fmt.Errorf("codex remote compaction: %w", err)
+	}
+	if len(response.CompactionItems) != 1 {
+		return "", fmt.Errorf("codex remote compaction returned %d compaction items, want exactly one", len(response.CompactionItems))
+	}
+	blob, err := json.Marshal(response.CompactionItems)
+	if err != nil {
+		return "", fmt.Errorf("marshal Codex compaction item: %w", err)
+	}
+	if err := a.PersistCodexCompactedConversation(c, string(blob), keepBudget); err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 // compactionAttachmentNote renders a short text note for message attachments
@@ -433,6 +468,62 @@ func (a *Service) PersistCompactedConversation(c *domain.Conversation, summary s
 	c.WorkspaceSwitchFrom = switchFrom
 	c.CompactionBlob = blob
 	c.Summary = epochSummary
+	for _, m := range tmp.Messages {
+		if err := repo.Add(m.Role, m); err != nil {
+			return err
+		}
+	}
+	return repo.Save()
+}
+
+// PersistCodexCompactedConversation persists a Codex opaque checkpoint as a
+// new transcript epoch. Unlike text compaction, this intentionally does not
+// add a user handover message: the provider-owned blob carries the archived
+// context and only the retained suffix belongs in the live transcript.
+func (a *Service) PersistCodexCompactedConversation(c *domain.Conversation, blob string, keepBudget int) error {
+	if c == nil {
+		return fmt.Errorf("conversation is required")
+	}
+	repo := bindConversation(a.Conversations, c)
+	tmp := cloneConversation(c)
+	tmp.Messages = domain.FilterHydrationDomainMessages(tmp.Messages)
+	toArchive := tmp.ArchiveMessages(keepBudget)
+	if len(toArchive) > 0 {
+		idx, err := a.Conversations.ArchiveChunk(c.ID, toArchive)
+		if err != nil {
+			a.log("warn", "agent", "failed to archive Codex compaction chunk for %s: %v", c.ID, err)
+		} else {
+			c.ChunkCount = idx + 1
+		}
+	}
+	tmp.CompactWithBlob(blob, keepBudget)
+	if hydrationMsgs := a.BuildHydration(tmp); len(hydrationMsgs) > 0 {
+		tmp = a.PersistHydration(tmp, hydrationMsgs)
+	}
+
+	chunkCount := c.ChunkCount
+	workspace := c.Workspace
+	model := c.Model
+	effort := c.Effort
+	origin := c.Origin
+	title := c.Title
+	status := c.Status
+	pending := c.PendingWorkspaceAnnouncement
+	switchFrom := c.WorkspaceSwitchFrom
+	compactionBlob := tmp.CompactionBlob
+	summary := tmp.Summary
+	repo.ResetTranscript()
+	c.ChunkCount = chunkCount
+	c.Workspace = workspace
+	c.Model = model
+	c.Effort = effort
+	c.Origin = origin
+	c.Title = title
+	c.Status = status
+	c.PendingWorkspaceAnnouncement = pending
+	c.WorkspaceSwitchFrom = switchFrom
+	c.CompactionBlob = compactionBlob
+	c.Summary = summary
 	for _, m := range tmp.Messages {
 		if err := repo.Add(m.Role, m); err != nil {
 			return err

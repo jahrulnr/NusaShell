@@ -84,11 +84,17 @@ func ToCoreRequest(req ChatRequest, kind domain.ProviderKind, openRouter bool) *
 			"allow_fallbacks": false,
 		})
 	}
-	if req.CompactionBlob != "" && kind == domain.ProviderResponses {
+	if req.CompactionBlob != "" && (kind == domain.ProviderResponses || kind == domain.ProviderCodex) {
 		setProviderOption(out, "compaction_items", req.CompactionBlob)
 	}
 	if req.ContextManagement != nil && kind == domain.ProviderResponses {
 		setProviderOption(out, "context_management", req.ContextManagement)
+	}
+	if req.RemoteCompaction && kind == domain.ProviderCodex {
+		setProviderOption(out, "compaction_trigger", true)
+	}
+	if kind == domain.ProviderCodex && strings.TrimSpace(req.ConversationID) != "" {
+		setProviderOption(out, "session_id", strings.TrimSpace(req.ConversationID))
 	}
 	// MiniMax Chat Completions native format embeds thinking in <think>
 	// tags inside content unless reasoning_split is on. OpenRouter uses
@@ -106,6 +112,9 @@ func FromCoreResponse(resp *core.Response) ChatResponse {
 		Content:    resp.Text(),
 		Reasoning:  resp.Reasoning(),
 		StopReason: string(resp.FinishReason),
+	}
+	if extra := reasoningExtraFromBlocks(resp.Blocks); len(extra) > 0 {
+		out.ReasoningExtra = extra
 	}
 	for _, call := range resp.ToolCalls() {
 		out.ToolCalls = append(out.ToolCalls, domain.ToolCall{
@@ -130,6 +139,20 @@ func FromCoreResponse(resp *core.Response) ChatResponse {
 		}
 	}
 	return out
+}
+
+// reasoningExtraFromBlocks returns the last non-empty ReasoningBlock.Extra
+// from a completed response (OpenAI-family encrypted_content replay state).
+func reasoningExtraFromBlocks(blocks []core.Block) json.RawMessage {
+	var extra json.RawMessage
+	for _, block := range blocks {
+		rb, ok := block.(core.ReasoningBlock)
+		if !ok || len(rb.Extra) == 0 {
+			continue
+		}
+		extra = append(json.RawMessage(nil), rb.Extra...)
+	}
+	return extra
 }
 
 func cacheControlFor(ttl string) *core.CacheControl {
@@ -158,6 +181,10 @@ func applyPromptCache(out *core.Request, req ChatRequest, kind domain.ProviderKi
 		}
 		if req.PromptCache.TTL == "30m" {
 			setProviderOption(out, "prompt_cache_options", map[string]any{"ttl": "30m"})
+		}
+	case domain.ProviderCodex:
+		if req.PromptCache.Key != "" {
+			setProviderOption(out, "prompt_cache_key", req.PromptCache.Key)
 		}
 	case domain.ProviderChat:
 		if req.PromptCache.Key != "" {
@@ -198,7 +225,8 @@ func chatMessageToCore(m ChatMessage, req ChatRequest) core.Message {
 		// message contains any thinking blocks, the first block must be
 		// `thinking` or `redacted_thinking`"). OpenAI Responses and compat
 		// providers don't care about block order — they route by type.
-		if m.Reasoning != "" {
+		hasExtra := len(m.ReasoningExtra) > 0
+		if m.Reasoning != "" || hasExtra {
 			// Always send reasoning we have from the persisted conversation.
 			// Testing against OpenRouter confirms non-reasoning models safely
 			// ignore the reasoning field, and reasoning models require it for
@@ -208,7 +236,15 @@ func chatMessageToCore(m ChatMessage, req ChatRequest) core.Message {
 			// have reasoning stored on the turns where they did think, and
 			// those turns replay correctly; turns without reasoning simply
 			// have nothing to send.
-			blocks = append(blocks, core.ReasoningBlock{Text: m.Reasoning})
+			//
+			// ReasoningExtra (encrypted_content / provider opaque JSON) is
+			// attached when present so OpenAI-family Responses/Codex/compat
+			// adapters can echo the prior reasoning item byte-for-byte.
+			rb := core.ReasoningBlock{Text: m.Reasoning}
+			if hasExtra {
+				rb.Extra = append(json.RawMessage(nil), m.ReasoningExtra...)
+			}
+			blocks = append(blocks, rb)
 		} else if req.ReasoningReplay {
 			// Models that require reasoning_content to be present on every
 			// assistant message (e.g. DeepSeek, GLM with interleaved_field=

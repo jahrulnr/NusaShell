@@ -2,7 +2,7 @@
 
 Providers are the LLM backends the agent chats through. A provider is
 defined by its **API wire format**, not by a vendor: **Messages**,
-**Responses**, or **Chat**.
+**Responses**, **Chat**, or the **Codex** backend.
 
 ## Drivers
 
@@ -16,15 +16,24 @@ selects the wire format:
 - The persistent **OpenRouter** card uses
   `infrastructure/ai/openrouter`; its editor supports `responses`, `chat`, and
   `messages`.
+- A **Codex** provider uses the ChatGPT Codex Responses endpoint with the
+  `codex` driver. Prefer **Sign in with ChatGPT** (OAuth PKCE) or **Import
+  from Codex CLI** on the Providers → Codex detail page. Pasting an OAuth
+  access token in the edit dialog is an optional fallback only. Tokens are
+  stored in the SQLite credential store under the provider ID and under
+  `{providerID}:account:{accountID}` for multi-account failover. The Codex
+  transport owns its required headers, Responses stream decoding, and remote
+  v2 compaction.
 - Every custom provider defaults to `infrastructure/ai/openrouter`; its
-  editor supports `responses`, `chat`, and `messages`. There is no
+  editor supports `responses`, `chat`, `messages`, and `codex`. There is no
   custom-provider count limit. For `chat` kind, host detection (below)
   routes genuine OpenRouter hosts to the OpenRouter implementation and all
   other hosts to the vanilla OpenAI Chat implementation.
 
-The three built-in cards remain visible before they are configured. Configure a
-card with its base URL and an optional key, then import models. OpenRouter and custom
-providers can each use a different API kind and base URL.
+The four built-in cards remain visible before they are configured. Configure a
+card with its base URL and credential, then import models when the provider
+supports model listing. OpenRouter and custom providers can each use a
+different API kind and base URL.
 
 **Host detection for `chat`:** only a genuine OpenRouter host
 (`*.openrouter.ai`) uses the OpenRouter chat implementation (OpenRouter wire
@@ -54,6 +63,14 @@ OpenRouter package for `messages` and `responses`.
   kind, including its provider options and attribution headers; all other
   `chat` hosts use the vanilla OpenAI Chat wire (see host detection above),
   including custom providers whose stored driver is `openrouter`.
+- `codex` — the ChatGPT Codex Responses wire format
+  (`/backend-api/codex/responses`); it uses OAuth access tokens (Sign in /
+  Import from CLI; optional paste fallback), Codex session headers, multi-
+  account failover with circuit breakers, and the remote v2 compaction flow.
+  **Import models** discovers the account-aware catalog via the Codex CLI
+  app-server `model/list` JSON-RPC method (NusaShell downloads the managed
+  Codex runtime binary when needed). ChatGPT plan image models (`gpt-image-2`,
+  `gpt-image-1.5`) are seeded after import because `model/list` omits them.
 
 ## Streaming completion and request-shape recovery
 
@@ -219,14 +236,40 @@ Chat      → https://gateway.example.com/v1     (→ /v1/chat/completions)
 
 ## API keys
 
-API keys are optional for every kind (`messages`, `responses`, and `chat`).
-Add and edit use the same rule: a blank key is stored as no credential, and
+API keys are optional for `messages`, `responses`, and `chat`. The Codex kind
+authenticates with ChatGPT OAuth: use **Sign in with ChatGPT** or **Import
+from Codex CLI** on the Providers → Codex detail page (primary paths). Pasting
+an OAuth access token in the provider edit dialog is an optional fallback
+only. For optional-key kinds, a blank key is stored as no credential and
 NusaShell still lists, tests, imports, and chats. Wire adapters skip
 `Authorization` / `x-api-key` when no key is present; the upstream decides
-(e.g. OpenCode, LM Studio, Ollama, Zen free tier). Official vendor endpoints
-return 401 if they actually require a key. When a key is present it is sent
-normally. Keys are stored in the SQLite credential store (`credentials.db`)
-inside the data directory, never in the JSON files.
+(e.g. OpenCode, LM Studio, Ollama, Zen free tier). When a key is present it
+is sent normally. Credentials are stored in the SQLite credential store
+(`credentials.db`) inside the data directory, never in the JSON files.
+
+### Codex accounts, usage, and runtime
+
+On the Codex provider detail page:
+
+- **ChatGPT Accounts** lists signed-in accounts with plan and session/weekly
+  usage bars. **Sign in with ChatGPT** runs OAuth PKCE (`ai.codex.login`).
+  **Import from Codex CLI** reads `~/.codex/auth.json` (`ai.codex.import`).
+  **Refresh** polls circuits (`ai.codex.refresh-circuits`) then reloads usage
+  (`ai.codex.usage`). Switch / Remove call `ai.codex.accounts.switch` and
+  `ai.codex.logout`. When usage is unavailable, the UI falls back to
+  `ai.codex.accounts.list` for identity-only rows.
+- **Codex Runtime** shows the managed official Codex CLI binary via
+  `ai.codex.runtime.status` / `ai.codex.runtime.download` (ACP and tooling;
+  chat compaction uses the remote v2 path, not a subprocess compact UI).
+
+```text
+# GOOD — primary auth paths on the Codex detail card
+Sign in with ChatGPT
+Import from Codex CLI
+
+# BAD — treating paste as the only way to configure Codex
+Edit → paste OAuth access token → Save  (fallback only)
+```
 
 ### Seeding keys from the environment (explicit)
 
@@ -411,6 +454,21 @@ window instead of generic provider errors. On Chat Completions they arrive
 as HTTP 429. Both paths surface a message naming the token numbers (limit,
 already-used, requested) instead of the requests-per-minute one.
 
+## Encrypted reasoning replay (Responses / Codex)
+
+OpenAI Responses, Codex, and some OpenRouter/compat OpenAI routes return
+opaque reasoning state (often `encrypted_content` inside a reasoning item)
+alongside the visible thinking summary. Wire adapters already request
+`include: ["reasoning.encrypted_content"]` and keep that JSON on
+`ReasoningBlock.Extra` for in-memory replay.
+
+NusaShell also persists that opaque payload on the assistant message as
+`ReasoningExtra` (omitted when empty) and reattaches it on the next turn so
+multi-turn ChatGPT/Codex/OpenRouter Responses-style models do not lose
+reasoning continuity. The UI continues to show only plaintext `Reasoning`.
+This is distinct from conversation-level `CompactionBlob`, which stores
+server-side compaction items, not per-message reasoning Extra.
+
 ## Server-side compaction (OpenAI Responses)
 
 For eligible OpenAI Responses models, NusaShell uses server-side compaction
@@ -456,6 +514,25 @@ Key behaviors:
 - **Token estimation:** `EstimateTokens` includes the `CompactionBlob`
   length so the context badge reflects the real request size after a
   server-side compaction.
+
+## Codex remote v2 compaction
+
+Codex compaction is a separate pre-turn streaming request, selected by
+provider kind. It is not OpenAI `context_management`.
+
+- **Request:** NusaShell sends a normal streaming `POST /responses` request
+  whose final input item is `{"type":"compaction_trigger"}`. For later turns,
+  Codex rebuilds its retained user-message history and appends the opaque
+  `CompactionBlob` item after that history.
+- **Result:** the stream must contain exactly one `compaction` output item.
+  Its encrypted content is stored unchanged in `CompactionBlob`, and the
+  conversation starts a new transcript epoch with only its recent suffix.
+- **Model:** Codex compaction uses the same provider and model as the active
+  turn. `settings.compaction_model` is not used for this path.
+- **Failure:** a failed or malformed remote compaction returns an error. It
+  does not fall back to the text `summary()` compaction path.
+- **Wire boundary:** Codex sends its own authentication and session headers
+  and does not receive OpenAI `context_management`.
 
 ## Upstream provider routing (OpenRouter)
 

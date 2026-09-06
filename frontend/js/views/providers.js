@@ -1,4 +1,4 @@
-// Providers workspace: Messages / Responses / Chat registries, credentials, models.
+// Providers workspace: Messages / Responses / Chat / Codex registries, credentials, models.
 
 import { rpc } from '../rpc.js';
 import { el, toast, dialog, confirmDialog } from '../ui.js';
@@ -10,19 +10,22 @@ const KIND_META = {
   messages: { label: 'Messages', mark: 'MS', cls: 'accent-anthropic', desc: 'Messages API format' },
   responses: { label: 'Responses', mark: 'RS', cls: 'accent-openai', desc: 'Responses API format' },
   chat: { label: 'Chat', mark: 'CH', cls: 'accent-compatible', desc: 'Chat Completions API format (incl. OpenRouter hosts)' },
+  codex: { label: 'Codex', mark: 'CX', cls: 'accent-codex', desc: 'ChatGPT Codex backend (OAuth, remote v2 compaction)' },
 };
-const KIND_META_FALLBACK = { label: 'Unknown', mark: '?', cls: 'accent-compatible', desc: 'Unsupported provider kind — delete and re-add as messages, responses, or chat.' };
+const KIND_META_FALLBACK = { label: 'Unknown', mark: '?', cls: 'accent-compatible', desc: 'Unsupported provider kind — delete and re-add as messages, responses, chat, or codex.' };
 
 const DRIVER_META = {
   anthropic: { label: 'Anthropic', mark: 'AN', cls: 'accent-anthropic', desc: 'Anthropic Messages API' },
   openai: { label: 'OpenAI', mark: 'OA', cls: 'accent-openai', desc: 'OpenAI Responses API' },
   openrouter: { label: 'OpenRouter', mark: 'OR', cls: 'accent-compatible', desc: 'OpenRouter-compatible API' },
+  codex: { label: 'Codex', mark: 'CX', cls: 'accent-codex', desc: 'ChatGPT Codex backend (OAuth, no API key needed)' },
 };
 
 const API_KIND_OPTIONS = [
   { value: 'responses', label: 'Responses' },
   { value: 'chat', label: 'Chat' },
   { value: 'messages', label: 'Messages' },
+  { value: 'codex', label: 'Codex' },
 ];
 
 export const BUILTIN_PROVIDERS = [
@@ -56,6 +59,18 @@ export const BUILTIN_PROVIDERS = [
     kind: 'chat',
     name: 'OpenRouter',
     base_url: 'https://openrouter.ai/api/v1',
+    enabled: true,
+    configured: false,
+    has_api_key: false,
+    models: [],
+    builtin: true,
+  },
+  {
+    id: 'codex',
+    driver: 'codex',
+    kind: 'codex',
+    name: 'Codex',
+    base_url: 'https://chatgpt.com/backend-api/codex',
     enabled: true,
     configured: false,
     has_api_key: false,
@@ -98,6 +113,7 @@ export function cacheTTLsFor(provider = {}) {
     ttls = [...provider.cache_ttls];
   } else if (provider.kind === 'messages') ttls = ['5m', '1h'];
   else if (provider.kind === 'responses') ttls = ['30m'];
+  else if (provider.kind === 'codex') ttls = ['30m'];
   else if (provider.driver === 'openrouter') ttls = ['5m', '1h'];
   else if (provider.kind === 'chat') ttls = ['30m'];
   if (!ttls.length) return ttls;
@@ -325,7 +341,14 @@ function renderDetail(p) {
       el('div', {}, el('dt', { text: 'Provider' }), el('dd', { text: DRIVER_META[p.driver]?.label || 'Automatic' })),
       el('div', {}, el('dt', { text: 'API kind' }), el('dd', { text: (KIND_META[p.kind] || KIND_META.chat).label })),
       el('div', {}, el('dt', { text: 'Base URL' }), el('dd', { text: p.base_url || '—' })),
-      el('div', {}, el('dt', { text: 'API key' }), el('dd', { text: p.has_api_key ? '••••••••' : '—' })),
+      el('div', {},
+        el('dt', { text: p.kind === 'codex' ? 'Auth' : 'API key' }),
+        el('dd', {
+          text: p.kind === 'codex'
+            ? (p.has_api_key ? 'ChatGPT OAuth ✓' : 'Not signed in')
+            : (p.has_api_key ? '••••••••' : '—'),
+        }),
+      ),
       el('div', {}, el('dt', { text: 'Status' }), el('dd', { text: p.enabled === false ? 'disabled' : 'enabled' })),
       ...(cacheTTLsFor(p).length
         ? [el('div', {},
@@ -341,6 +364,14 @@ function renderDetail(p) {
       p.builtin ? null : el('button', { class: 'mini-btn danger provider-delete', type: 'button', text: 'Delete' }),
     ),
   ));
+
+  // Codex-specific sections: unified accounts+usage card + runtime binary
+  if (p.kind === 'codex') {
+    detail.append(el('div', { class: 'codex-cards-grid' },
+      renderCodexAccounts(p),
+      renderCodexRuntime(p),
+    ));
+  }
 
   detail.append(el('div', { class: 'provider-models-card' },
     el('div', { class: 'provider-models-head' },
@@ -397,6 +428,246 @@ function renderDetail(p) {
   });
 }
 
+// ---- Codex-specific UI ----
+
+function renderCodexAccounts(p) {
+  const card = el('div', { class: 'provider-models-card codex-accounts-card', id: 'codex-accounts-card' },
+    el('div', { class: 'provider-models-head' },
+      el('div', {},
+        el('h2', { text: 'ChatGPT Accounts' }),
+        el('p', { text: 'Sign in or import from Codex CLI — account info, plan, and usage quota' }),
+      ),
+      el('div', { class: 'codex-auth-buttons' },
+        el('button', { class: 'mini-btn ghost', type: 'button', id: 'codex-import-cli-btn', text: 'Import from Codex CLI' }),
+        el('button', { class: 'mini-btn ghost', type: 'button', id: 'codex-refresh-circuits-btn', text: '\u21bb Refresh' }),
+        el('button', { class: 'mini-btn', type: 'button', id: 'codex-login-btn', text: 'Sign in with ChatGPT' }),
+      ),
+    ),
+    el('div', { class: 'codex-account-list', id: 'codex-account-list' },
+      el('div', { class: 'provider-model-empty', text: 'Loading accounts\u2026' }),
+    ),
+  );
+  const importBtn = card.querySelector('#codex-import-cli-btn');
+  const refreshBtn = card.querySelector('#codex-refresh-circuits-btn');
+  const loginBtn = card.querySelector('#codex-login-btn');
+  refreshBtn.addEventListener('click', async () => {
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = 'Refreshing\u2026';
+    try {
+      const res = await rpc('ai.codex.refresh-circuits', {});
+      toast(`Checked ${res.checked ?? 0} accounts`, 'success');
+      await refreshCodexAccounts(p.id);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = '\u21bb Refresh';
+    }
+  });
+  importBtn.addEventListener('click', async () => {
+    importBtn.disabled = true;
+    importBtn.textContent = 'Importing\u2026';
+    try {
+      const res = await rpc('ai.codex.import', { provider_id: p.id });
+      if (res.skipped) {
+        toast(`Account ${res.email || res.account_id} already imported`, 'info');
+      } else {
+        toast(`Imported ${res.email || res.account_id} from Codex CLI`, 'success');
+      }
+      await refreshCodexAccounts(p.id);
+      await refresh();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      importBtn.disabled = false;
+      importBtn.textContent = 'Import from Codex CLI';
+    }
+  });
+  loginBtn.addEventListener('click', async () => {
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Opening browser\u2026';
+    try {
+      await rpc('ai.codex.login', { provider_id: p.id });
+      toast('ChatGPT login successful', 'success');
+      await refreshCodexAccounts(p.id);
+      await refresh();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Sign in with ChatGPT';
+    }
+  });
+  setTimeout(() => refreshCodexAccounts(p.id), 0);
+  return card;
+}
+
+async function refreshCodexAccounts(providerId) {
+  const list = document.getElementById('codex-account-list');
+  if (!list) return;
+  try {
+    // Prefer the unified usage payload (identity + quota). Fall back to
+    // accounts.list when usage is unavailable so Switch/Remove still work.
+    let accounts = [];
+    try {
+      const res = await rpc('ai.codex.usage', { provider_id: providerId });
+      accounts = res.accounts ?? [];
+    } catch (usageErr) {
+      const res = await rpc('ai.codex.accounts.list', { provider_id: providerId });
+      accounts = (res.accounts ?? []).map((acc) => ({ ...acc, error: usageErr.message }));
+    }
+    if (!accounts.length) {
+      list.innerHTML = '';
+      list.append(el('div', { class: 'provider-model-empty', text: 'No accounts signed in. Click "Sign in with ChatGPT" or "Import from Codex CLI" to add one.' }));
+      return;
+    }
+    list.innerHTML = '';
+    for (const acc of accounts) {
+      const display = acc.email || acc.name || acc.account_id;
+      const secondary = (acc.email && acc.name) ? `${acc.name} \u00b7 ${acc.account_id}` : (acc.email ? acc.account_id : (acc.name ? acc.account_id : ''));
+      const planLabel = acc.plan ? acc.plan.charAt(0).toUpperCase() + acc.plan.slice(1) : (acc.error ? 'Error' : '\u2014');
+      const circuitUntil = acc.circuit_open
+        ? (acc.circuit_open_until ? new Date(acc.circuit_open_until * 1000).toLocaleString() : 'soon')
+        : '';
+
+      const usageParts = [];
+      if (acc.error) {
+        usageParts.push(el('span', { class: 'codex-account-usage-error', text: acc.error }));
+      } else if (acc.primary_window || acc.weekly_window) {
+        if (acc.primary_window) usageParts.push(renderUsageBar('Session', acc.primary_window));
+        if (acc.weekly_window) usageParts.push(renderUsageBar('Weekly', acc.weekly_window));
+      } else {
+        usageParts.push(el('span', { class: 'codex-account-usage-empty', text: 'No usage data' }));
+      }
+
+      list.append(el('div', { class: 'codex-account-item unified' },
+        el('div', { class: 'codex-account-info' },
+          el('span', { class: 'codex-account-id', text: display }),
+          ...(secondary ? [el('span', { class: 'codex-account-secondary', text: secondary })] : []),
+          el('span', { class: 'codex-account-meta' },
+            ...(acc.active ? [el('span', { class: 'codex-account-badge active', text: 'active' })] : []),
+            ...(acc.circuit_open ? [el('span', { class: 'codex-account-badge circuit-open', text: `limit \u00b7 resets ${circuitUntil}` })] : []),
+            ...(acc.limit_reached && !acc.circuit_open ? [el('span', { class: 'codex-account-badge circuit-open', text: 'limit reached' })] : []),
+          ),
+        ),
+        el('div', { class: 'codex-account-quota' },
+          el('span', { class: 'codex-account-plan', text: planLabel }),
+          ...usageParts,
+        ),
+        el('div', { class: 'codex-account-actions' },
+          ...(acc.active ? [] : [el('button', { class: 'mini-btn ghost', type: 'button', text: 'Switch', 'data-acc': acc.account_id, 'data-action': 'switch' })]),
+          el('button', { class: 'mini-btn danger', type: 'button', text: 'Remove', 'data-acc': acc.account_id, 'data-action': 'logout' }),
+        ),
+      ));
+    }
+    list.querySelectorAll('button').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const accId = e.currentTarget.dataset.acc;
+        const action = e.currentTarget.dataset.action;
+        if (action === 'switch') {
+          try {
+            await rpc('ai.codex.accounts.switch', { provider_id: providerId, account_id: accId });
+            toast('Switched account', 'success');
+            await refreshCodexAccounts(providerId);
+            await refresh();
+          } catch (err) { toast(err.message, 'error'); }
+        } else if (action === 'logout') {
+          const ok = await confirmDialog('Remove account', `Remove ChatGPT account ${accId}?`, 'Remove');
+          if (!ok) return;
+          try {
+            await rpc('ai.codex.logout', { provider_id: providerId, account_id: accId });
+            toast('Account removed', 'success');
+            await refreshCodexAccounts(providerId);
+            await refresh();
+          } catch (err) { toast(err.message, 'error'); }
+        }
+      });
+    });
+  } catch (err) {
+    list.innerHTML = '';
+    list.append(el('div', { class: 'provider-model-empty', text: `Error: ${err.message}` }));
+  }
+}
+
+export function renderUsageBar(label, win) {
+  const remaining = win.remaining_percent ?? (100 - win.used_percent);
+  const resetDate = win.reset_at ? new Date(win.reset_at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'unknown';
+  const barColor = win.used_percent >= 90 ? 'critical' : (win.used_percent >= 70 ? 'warning' : 'ok');
+  return el('div', { class: 'codex-usage-window' },
+    el('div', { class: 'codex-usage-window-head' },
+      el('span', { class: 'codex-usage-window-label', text: label }),
+      el('span', { class: 'codex-usage-window-pct', text: `${win.used_percent}%` }),
+    ),
+    el('div', { class: 'codex-usage-bar' },
+      el('div', { class: `codex-usage-bar-fill ${barColor}`, style: `width:${win.used_percent}%` }),
+    ),
+    el('div', { class: 'codex-usage-window-foot' },
+      el('span', { text: `${remaining}% left` }),
+      el('span', { class: 'codex-usage-reset', text: resetDate }),
+    ),
+  );
+}
+
+function renderCodexRuntime(_p) {
+  const card = el('div', { class: 'provider-models-card codex-runtime-card', id: 'codex-runtime-card' },
+    el('div', { class: 'provider-models-head' },
+      el('div', {},
+        el('h2', { text: 'Codex Runtime' }),
+        el('p', { text: 'Managed official Codex CLI binary (ACP and tooling)' }),
+      ),
+      el('button', { class: 'mini-btn', type: 'button', id: 'codex-runtime-download-btn', text: 'Download' }),
+    ),
+    el('div', { class: 'codex-runtime-status', id: 'codex-runtime-status' },
+      el('div', { class: 'provider-model-empty', text: 'Checking runtime status…' }),
+    ),
+  );
+  const dlBtn = card.querySelector('#codex-runtime-download-btn');
+  dlBtn.addEventListener('click', async () => {
+    dlBtn.disabled = true;
+    dlBtn.textContent = 'Downloading…';
+    try {
+      const res = await rpc('ai.codex.runtime.download', {});
+      toast(`Codex runtime v${res.version} downloaded`, 'success');
+      refreshCodexRuntime();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      dlBtn.disabled = false;
+      dlBtn.textContent = 'Download';
+    }
+  });
+  setTimeout(() => refreshCodexRuntime(), 0);
+  return card;
+}
+
+async function refreshCodexRuntime() {
+  const status = document.getElementById('codex-runtime-status');
+  if (!status) return;
+  try {
+    const res = await rpc('ai.codex.runtime.status', {});
+    status.innerHTML = '';
+    if (res.downloading) {
+      status.append(el('div', { class: 'codex-runtime-info downloading', text: 'Downloading…' }));
+      return;
+    }
+    if (res.download_error) {
+      status.append(el('div', { class: 'codex-runtime-info error', text: `Download failed: ${res.download_error}` }));
+      return;
+    }
+    if (res.installed) {
+      status.append(el('div', { class: 'codex-runtime-info installed' },
+        el('span', { text: `v${res.version}` }),
+        el('span', { class: 'codex-runtime-path', text: res.path }),
+      ));
+    } else {
+      status.append(el('div', { class: 'provider-model-empty', text: 'Not installed. Click "Download" to get the official Codex binary (~85 MB).' }));
+    }
+  } catch (err) {
+    status.innerHTML = '';
+    status.append(el('div', { class: 'provider-model-empty', text: `Error: ${err.message}` }));
+  }
+}
+
 function renderModels(p) {
   const models = p.models ?? [];
   if (!models.length) {
@@ -421,23 +692,29 @@ const KIND_DEFAULTS = {
   messages: 'https://api.anthropic.com',
   responses: 'https://api.openai.com/v1',
   chat: 'https://api.openai.com/v1',
+  codex: 'https://chatgpt.com/backend-api/codex',
 };
 
 async function addProvider(provider = null) {
   const driver = provider?.driver || 'openrouter';
   const selectableKind = !provider?.builtin || driver === 'openrouter';
-  const defaultKinds = { anthropic: 'messages', openai: 'responses', openrouter: 'chat' };
+  const defaultKinds = { anthropic: 'messages', openai: 'responses', openrouter: 'chat', codex: 'codex' };
   const initialKind = provider?.kind ?? defaultKinds[driver] ?? 'chat';
+  const isCodex = initialKind === 'codex' || provider?.kind === 'codex';
   let initialBaseURL = provider?.base_url;
   if (initialBaseURL === undefined && provider?.builtin) initialBaseURL = KIND_DEFAULTS[initialKind] ?? '';
   if (initialBaseURL === undefined) initialBaseURL = '';
   let message;
-  if (!provider) {
-    message = 'Custom providers use the OpenRouter-compatible provider driver. API keys are optional and stored in the local SQLite credential store.';
+  if (isCodex && provider?.builtin) {
+    message = 'Prefer Sign in with ChatGPT or Import from Codex CLI on the Codex detail page. Pasting an OAuth access token here is an optional fallback only.';
+  } else if (!provider) {
+    message = 'Custom providers use the selected API driver. For Codex, prefer Sign in / Import from CLI on the detail page; pasting a token is optional. Credentials are stored in the local SQLite credential store.';
   } else if (provider.builtin) {
     message = 'Update this built-in provider. OpenRouter-compatible cards can use any supported API kind. API keys are optional.';
+  } else if (isCodex) {
+    message = 'Update the Codex provider. Prefer Sign in / Import from CLI on the detail page; pasting an OAuth access token is an optional fallback.';
   } else {
-    message = 'Update the custom provider. It uses the OpenRouter-compatible provider driver. API keys are optional.';
+    message = 'Update the custom provider. Provider kinds may accept a blank key.';
   }
   const res = await dialog({
     title: provider ? 'Edit provider' : 'Add custom provider',
@@ -449,18 +726,37 @@ async function addProvider(provider = null) {
         value: initialKind,
         onChange: (kindInput, all) => {
           const urlInput = all.base_url;
+          const apiKeyInput = all.api_key;
           if (!urlInput) return;
           const current = urlInput.value.trim();
           const known = Object.values(KIND_DEFAULTS);
           if (current === '' || known.includes(current)) {
             urlInput.value = KIND_DEFAULTS[kindInput.value] ?? '';
           }
-          urlInput.placeholder = `API base URL — vendor endpoint or AI gateway (e.g. ${KIND_DEFAULTS[kindInput.value] ?? ''})`;
+          const isCod = kindInput.value === 'codex';
+          urlInput.placeholder = isCod
+            ? 'ChatGPT Codex backend URL'
+            : `API base URL — vendor endpoint or AI gateway (e.g. ${KIND_DEFAULTS[kindInput.value] ?? ''})`;
+          if (apiKeyInput) {
+            apiKeyInput.placeholder = isCod
+              ? (provider?.has_api_key ? 'leave blank to keep current credential' : 'optional fallback — prefer Sign in / Import from CLI')
+              : (provider?.has_api_key ? 'leave blank to keep current credential' : 'leave blank if the host needs no auth');
+          }
         },
       }] : []),
       { name: 'name', label: 'Name', value: provider?.name ?? '', placeholder: 'e.g. my provider' },
       { name: 'base_url', label: 'Base URL', value: initialBaseURL, placeholder: `API base URL — vendor endpoint or AI gateway (e.g. ${KIND_DEFAULTS[initialKind] ?? 'https://gateway.example/v1'})` },
-      { name: 'api_key', label: 'API key (optional)', type: 'password', value: '', placeholder: provider?.has_api_key ? 'leave blank to keep current key' : 'leave blank if the host needs no auth' },
+      {
+        name: 'api_key',
+        label: isCodex ? 'OAuth access token (optional fallback)' : 'API key (optional)',
+        type: 'password',
+        value: '',
+        placeholder: provider?.has_api_key
+          ? 'leave blank to keep current credential'
+          : isCodex
+            ? 'optional fallback — prefer Sign in / Import from CLI'
+            : 'leave blank if the host needs no auth',
+      },
     ],
     actions: [
       { label: 'Cancel', value: null },
@@ -469,13 +765,14 @@ async function addProvider(provider = null) {
   });
   if (res.value !== 'save') return;
   const kind = selectableKind ? res.fields.kind : initialKind;
+  const selectedDriver = kind === 'codex' ? 'codex' : driver;
   const { name, base_url, api_key } = res.fields;
   if (!name.trim()) { toast('Provider name is required', 'error'); return; }
   if (!base_url.trim()) { toast('Base URL is required', 'error'); return; }
   try {
     await rpc('ai.providers.save', {
       id: provider?.id || undefined,
-      driver,
+      driver: selectedDriver,
       kind,
       name: name.trim(),
       base_url: base_url.trim(),

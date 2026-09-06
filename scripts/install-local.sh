@@ -111,7 +111,7 @@ cat > "$home_dir/.local/share/applications/nusashell-desktop.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=NusaShell Desktop
-Comment=NusaShell — local AI shell
+Comment=NusaShell - local AI shell
 Exec=$bin_dir/nusashell-desktop
 Icon=$current/resources/nusashell.png
 Terminal=false

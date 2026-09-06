@@ -84,7 +84,7 @@ func TestOnAcpRunDoneQueuesWhileParentTurnActive(t *testing.T) {
 
 func TestOnAcpRunDoneInjectsImmediatelyWhenParentIdle(t *testing.T) {
 	conv := &domain.Conversation{
-		ID: "c1",
+		ID: "c1", Status: "idle",
 		Messages: []domain.Message{
 			{ID: "m1", Role: domain.RoleUser, Content: "delegate", Status: domain.StatusDone},
 			{
@@ -115,6 +115,193 @@ func TestOnAcpRunDoneInjectsImmediatelyWhenParentIdle(t *testing.T) {
 	if app.hasPendingRuns("c1") {
 		t.Fatal("idle completion must untrack the run")
 	}
+}
+
+func TestIdleSubagentCompletionStartsTurnAndResumesAutoContinue(t *testing.T) {
+	const conversationID = "c1"
+
+	adapter := &freshTurnStreamAdapter{}
+	settings := domain.DefaultSettings()
+	settings.CompactionEnabled = false
+	settings.MaxAutoContinues = 1
+	todos := &fakeTodoPort{
+		items: map[string][]domain.TodoItem{
+			conversationID: {{
+				ID:      "todo-1",
+				Content: "finish the delegated task",
+				Status:  domain.TodoInProgress,
+			}},
+		},
+	}
+	provider := &domain.Provider{
+		ID:      "p",
+		Name:    "test provider",
+		Kind:    domain.ProviderChat,
+		Enabled: true,
+		Models:  []domain.Model{{ID: "model", Context: 128000}},
+	}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{
+		conversationID: {
+			ID:     conversationID,
+			Model:  "model",
+			Status: "running",
+			Messages: []domain.Message{
+				{ID: "u1", Role: domain.RoleUser, Content: "delegate this", Status: domain.StatusDone},
+				{
+					ID:     "a1",
+					Role:   domain.RoleAssistant,
+					Status: domain.StatusDone,
+					ToolCalls: []domain.ToolCall{{
+						ID:     "call-subagent",
+						Name:   domain.SubagentToolName,
+						Status: domain.ToolRunning,
+						Output: "starting",
+						Args:   `{"prompt":"finish the delegated task"}`,
+					}},
+				},
+				{ID: "a2", Role: domain.RoleAssistant},
+			},
+		},
+	}}
+	app := &App{
+		Conversations: store,
+		Providers:     &fakeProviderStore{items: map[string]*domain.Provider{"p": provider}},
+		Credentials:   &memCreds{m: map[string]string{"p": "test-key"}},
+		Settings:      &fakeSettingsStore{settings: settings},
+		Factory: func(context.Context, *domain.Provider, string) (AIProvider, error) {
+			return adapter, nil
+		},
+		Toolbox:     &recordingToolbox{},
+		Todos:       todos,
+		Logs:        &fakeLogStore{},
+		Bus:         NewBus(),
+		runs:        map[string]*TurnRun{},
+		pendingRuns: map[string]map[string]string{},
+	}
+	app.trackPendingRun(conversationID, "run-subagent", domain.SubagentToolName)
+
+	_, events, unsubscribe := app.Bus.Subscribe()
+	defer unsubscribe()
+
+	parent := &TurnRun{
+		ID:             "parent-turn",
+		ConversationID: conversationID,
+		Ctx:            context.Background(),
+		Cancel:         func() {},
+	}
+	app.runTurn(parent, provider, "test-key", "model", "", "a2", false, ModelCapabilities{})
+
+	parentDone := waitForTurnDoneEvent(t, events, conversationID, parent.ID, string(domain.AutoContinueAwaitingBackground))
+	if parentDone.AutoContinue.ShouldContinue {
+		t.Fatal("parent turn must pause auto-continue while the subagent is pending")
+	}
+	if !app.hasPendingRuns(conversationID) {
+		t.Fatal("subagent must remain pending after the parent turn ends")
+	}
+	assertNoAutoContinueAnnouncement(t, store.convs[conversationID])
+
+	app.onAcpRunDone(&domain.AcpRun{
+		TaskState:        domain.TaskState[domain.AcpRunStatus]{ID: "run-subagent", Status: domain.AcpRunCompleted},
+		ConversationID:   conversationID,
+		ParentToolCallID: "call-subagent",
+		Transcript:       []domain.AcpTranscriptChunk{{Kind: "text", Text: "delegated work is complete"}},
+	})
+
+	waitForTurnDoneEvent(t, events, conversationID, "", string(domain.AutoContinueMaxReached))
+	deadline := time.Now().Add(2 * time.Second)
+	for app.activeRunForConversation(conversationID) != nil && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if app.activeRunForConversation(conversationID) != nil {
+		t.Fatal("background completion turn is still active")
+	}
+
+	if app.hasPendingRuns(conversationID) {
+		t.Fatal("completed subagent must be removed from pending runs")
+	}
+	assertCompletedSubagentAndContinuation(t, store.convs[conversationID])
+}
+
+func assertNoAutoContinueAnnouncement(t *testing.T, conversation *domain.Conversation) {
+	t.Helper()
+	for _, message := range conversation.Messages {
+		for _, call := range message.ToolCalls {
+			if call.Name == domain.AnnouncementToolName {
+				t.Fatal("parent turn must not append auto-continue before subagent completion")
+			}
+		}
+	}
+}
+
+func assertCompletedSubagentAndContinuation(t *testing.T, conversation *domain.Conversation) {
+	t.Helper()
+	if conversation.Status != "idle" {
+		t.Fatalf("conversation status = %q, want idle", conversation.Status)
+	}
+	if conversation.Messages[1].ToolCalls[0].Status != domain.ToolOK {
+		t.Fatalf("subagent tool status = %q, want ok", conversation.Messages[1].ToolCalls[0].Status)
+	}
+
+	var sawResult, sawAutoContinue bool
+	textReplies := 0
+	for _, message := range conversation.Messages {
+		if message.Content == "hello" {
+			textReplies++
+		}
+		for _, call := range message.ToolCalls {
+			switch call.Name {
+			case domain.SubagentResultToolName:
+				sawResult = true
+			case domain.AnnouncementToolName:
+				sawAutoContinue = true
+			}
+		}
+	}
+	if !sawResult {
+		t.Fatal("subagent completion must be injected into the parent transcript")
+	}
+	if !sawAutoContinue {
+		t.Fatal("auto-continue must resume after the completion turn when todos remain")
+	}
+	if textReplies < 3 {
+		t.Fatalf("text replies = %d, want parent plus completion and auto-continue turns", textReplies)
+	}
+}
+
+func waitForTurnDoneEvent(t *testing.T, events <-chan contracts.Event, conversationID, wantRunID, wantReason string) contracts.TurnDoneEvent {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case event := <-events:
+			payload, ok := decodeTurnDoneEvent(event)
+			if !ok || payload.ConversationID != conversationID || !matchesTurnDoneEvent(payload, wantRunID, wantReason) {
+				continue
+			}
+			return payload
+		case <-deadline:
+			t.Fatalf("timed out waiting for turn.done run=%q reason=%q", wantRunID, wantReason)
+			return contracts.TurnDoneEvent{}
+		}
+	}
+}
+
+func decodeTurnDoneEvent(event contracts.Event) (contracts.TurnDoneEvent, bool) {
+	if event.Type != contracts.EventTurnDone {
+		return contracts.TurnDoneEvent{}, false
+	}
+	var payload contracts.TurnDoneEvent
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return contracts.TurnDoneEvent{}, false
+	}
+	return payload, true
+}
+
+func matchesTurnDoneEvent(payload contracts.TurnDoneEvent, wantRunID, wantReason string) bool {
+	if wantRunID != "" && payload.RunID != wantRunID {
+		return false
+	}
+	return payload.AutoContinue != nil && payload.AutoContinue.Reason == wantReason
 }
 
 func TestRoundBoundaryPlacesSteerAfterBackgroundResults(t *testing.T) {

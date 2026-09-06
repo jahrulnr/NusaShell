@@ -28,6 +28,7 @@ type conversationRules struct {
 	toolDefs    []ToolDef
 	maxTokens   int
 	promptCache *PromptCachePolicy
+	apiKey      string
 
 	// Per-turn mutable state (mirrors the pre-engine locals).
 	round                  int
@@ -45,11 +46,11 @@ type conversationRules struct {
 	turnEnded              bool // interrupt/fail already emitted by a hook
 }
 
-func (a *Service) NewConversationRules(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, settings domain.Settings, provider *domain.Provider, model, effort, asstMsgID string, caps ModelCapabilities, toolDefs []ToolDef, maxTokens int, promptCache *PromptCachePolicy, initialContinuation bool) *conversationRules {
+func (a *Service) NewConversationRules(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, settings domain.Settings, provider *domain.Provider, model, effort, asstMsgID string, caps ModelCapabilities, toolDefs []ToolDef, maxTokens int, promptCache *PromptCachePolicy, initialContinuation bool, apiKey string) *conversationRules {
 	return &conversationRules{
 		svc: a, run: run, adapter: adapter, conv: conversation, settings: settings,
 		provider: provider, model: model, effort: effort, asstMsgID: asstMsgID, caps: caps,
-		toolDefs: toolDefs, maxTokens: maxTokens, promptCache: promptCache,
+		toolDefs: toolDefs, maxTokens: maxTokens, promptCache: promptCache, apiKey: apiKey,
 		currentMsgID: asstMsgID, continuation: initialContinuation,
 		continuedPartialStream: initialContinuation,
 		repeatedGuard:          &repeatedToolGuard{Limit: settings.RepeatedToolLimit},
@@ -62,12 +63,14 @@ func (p *conversationRules) Rules() AgentRules {
 			rr, err := p.svc.StreamTurnRound(p.run, p.adapter, p.conv, p.currentMsgID, p.model, p.effort, p.toolsForRound(), p.settings, p.continuation, p.maxTokens, p.promptCache, p.caps, p.round)
 			p.continuation = false
 			resp := ChatResponse{
-				Content:    rr.Content,
-				Reasoning:  rr.Reasoning,
-				ToolCalls:  rr.Response.ToolCalls,
-				Usage:      rr.Response.Usage,
-				StopReason: rr.Response.StopReason,
-				Warnings:   rr.Response.Warnings,
+				Content:         rr.Content,
+				Reasoning:       rr.Reasoning,
+				ReasoningExtra:  rr.Response.ReasoningExtra,
+				ToolCalls:       rr.Response.ToolCalls,
+				Usage:           rr.Response.Usage,
+				StopReason:      rr.Response.StopReason,
+				Warnings:        rr.Response.Warnings,
+				CompactionItems: rr.Response.CompactionItems,
 			}
 			p.totalUsage = mergeUsage(p.totalUsage, rr.Response.Usage)
 			if rr.Response.Usage.ContextTokens() > 0 {
@@ -146,6 +149,22 @@ func (p *conversationRules) Rules() AgentRules {
 			// Capture the raw error before decoration: decorateRateLimitError
 			// drops the domain.ProviderError type the overflow/TPM classifiers need.
 			rawStreamErr := err
+			if p.svc.deps.FailoverOnStreamError != nil {
+				newKey, retry, replaced := p.svc.deps.FailoverOnStreamError(p.run.Ctx, p.run.ConversationID, p.provider, p.apiKey, rawStreamErr)
+				if replaced != nil {
+					err = replaced
+					rawStreamErr = replaced
+				}
+				if retry && newKey != "" && p.svc.Factory != nil {
+					newAdapter, buildErr := p.svc.Factory(p.run.Ctx, p.provider, newKey)
+					if buildErr == nil {
+						p.adapter = NewProviderContext(p.provider, newAdapter)
+						p.apiKey = newKey
+						p.round--
+						return true
+					}
+				}
+			}
 			err = p.svc.DecorateRateLimitError(p.provider.ID, err)
 			if !p.continuedPartialStream && isRetryableProviderError(err) && len(p.lastRound.Response.ToolCalls) == 0 && (text.Visible(p.lastRound.Content) != "" || text.Visible(p.lastRound.Reasoning) != "") {
 				// A partial stream must never carry an unconfirmed tool call

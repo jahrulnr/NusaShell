@@ -67,6 +67,13 @@ func serverCompactionContextManagement(model string) []map[string]any {
 	}
 }
 
+func serverCompactionContextManagementForKind(model string, kind domain.ProviderKind) []map[string]any {
+	if domain.CodexSupportsRemoteCompaction(kind) {
+		return nil
+	}
+	return serverCompactionContextManagement(model)
+}
+
 // appendContinuationTool appends the synthetic announcement tool call (with
 // its result pre-filled) to the provider message list for a continuation
 // round after an interrupted response. Ephemeral: it exists only in this
@@ -97,6 +104,9 @@ func appendContinuationFromPartial(messages []ChatMessage, partial streamedTurnR
 	}
 	if partial.Reasoning != "" {
 		msg.Reasoning = partial.Reasoning
+	}
+	if len(partial.Response.ReasoningExtra) > 0 {
+		msg.ReasoningExtra = append(json.RawMessage(nil), partial.Response.ReasoningExtra...)
 	}
 	messages = append(messages, msg)
 	return appendContinuationTool(messages)
