@@ -2,6 +2,11 @@ package tools
 
 import "context"
 
+// Canonical tool-execution context keys. application.WithConversationID and
+// friends must wrap these helpers rather than declaring a second ctxKey;
+// Go compares context keys by type, and a duplicate type makes todo /
+// memory_project miss the conversation id and workspace the turn loop set.
+
 type ctxKey string
 
 const conversationIDKey ctxKey = "conversation_id"

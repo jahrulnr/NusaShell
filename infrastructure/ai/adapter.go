@@ -71,6 +71,14 @@ func (a *Adapter) requestHeaders() func(http.Header, core.ProviderOptions) {
 }
 
 // providerFor builds the litellm provider for this adapter's kind.
+//
+// Codex wiring belongs at this explicit selection seam when its runtime
+// provider is introduced. The future adapter must implement core.Provider,
+// preserve the Responses-compatible request/stream contract, and pass the
+// opaque compaction_items and context_management values through
+// core.Request.ProviderOptions without decoding or silently falling back.
+// Its transport/auth boundary is the ChatGPT Codex backend
+// (https://chatgpt.com/backend-api/codex), not this wire-only package.
 func (a *Adapter) providerFor() (core.Provider, error) {
 	optional := strings.TrimSpace(a.APIKey) == ""
 	headers := a.requestHeaders()

@@ -53,11 +53,12 @@ var (
 	shouldEmergencyCompact   = provider.ShouldEmergencyCompact
 	isPrematureStreamEnd     = provider.IsPrematureStreamEnd
 	buildPromptCachePolicy   = provider.BuildPromptCachePolicy
-	WithConversationID       = tools.WithConversationID
-	WithWorkspace            = tools.WithWorkspace
-	WithRunID                = tools.WithRunID
-	WithToolCallID           = tools.WithToolCallID
-	WorkspaceFromContext     = tools.WorkspaceFromContext
+	// Same functions application/context.go wraps; do not redeclare ctxKey.
+	WithConversationID   = tools.WithConversationID
+	WithWorkspace        = tools.WithWorkspace
+	WithRunID            = tools.WithRunID
+	WithToolCallID       = tools.WithToolCallID
+	WorkspaceFromContext = tools.WorkspaceFromContext
 )
 
 func isLearnerKind(kind AgentKind) bool {
