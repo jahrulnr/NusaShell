@@ -14,6 +14,11 @@ const (
 	ProviderMessages  ProviderKind = "messages"
 	ProviderResponses ProviderKind = "responses"
 	ProviderChat      ProviderKind = "chat"
+	// ProviderCodex is the ChatGPT Codex backend. It uses OAuth
+	// account tokens stored in CredentialStore (not a single API key)
+	// and serves the Responses API at https://chatgpt.com/backend-api/codex.
+	// The driver (ProviderDriverCodex) implements the runtime path.
+	ProviderCodex ProviderKind = "codex"
 )
 
 // ProviderDriver selects the implementation package behind a provider.
@@ -26,6 +31,11 @@ const (
 	ProviderDriverAnthropic  ProviderDriver = "anthropic"
 	ProviderDriverOpenAI     ProviderDriver = "openai"
 	ProviderDriverOpenRouter ProviderDriver = "openrouter"
+	// ProviderDriverCodex drives Codex providers. The Codex backend
+	// speaks the Responses API on the same wire format, but the
+	// transport, auth, account routing, and circuit breaker policy are
+	// distinct from a direct OpenAI driver, so it is a separate driver.
+	ProviderDriverCodex ProviderDriver = "codex"
 )
 
 // CacheTTLOff is the selectable prompt-cache value that disables caching
@@ -37,7 +47,7 @@ const CacheTTLOff = "off"
 // legacy host-detected routing for providers created before explicit drivers.
 func ValidDriver(driver ProviderDriver) bool {
 	switch driver {
-	case ProviderDriverAuto, ProviderDriverAnthropic, ProviderDriverOpenAI, ProviderDriverOpenRouter:
+	case ProviderDriverAuto, ProviderDriverAnthropic, ProviderDriverOpenAI, ProviderDriverOpenRouter, ProviderDriverCodex:
 		return true
 	}
 	return false
@@ -159,6 +169,8 @@ func CacheTTLsFor(kind ProviderKind, driver ProviderDriver) []string {
 		if driver == ProviderDriverOpenRouter {
 			return []string{"5m", "1h"}
 		}
+		return []string{"30m"}
+	case ProviderCodex:
 		return []string{"30m"}
 	default:
 		return append([]string(nil), KindCaps(kind).CacheTTLs...)

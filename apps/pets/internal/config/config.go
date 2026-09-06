@@ -8,6 +8,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -112,4 +113,27 @@ func Parse(data []byte) (*Config, error) {
 		}
 	}
 	return &c, nil
+}
+
+// ApplyEnv overlays the Go core listen address onto a loaded config.
+// NUSASHELL_WS_URL wins when set; otherwise NUSASHELL_HOST (default
+// 127.0.0.1) and NUSASHELL_PORT build ws://<host>:<port>/ws. Flag
+// --ws-url is applied by the caller after this so it still wins.
+func ApplyEnv(c *Config, getenv func(string) string) {
+	if c == nil || getenv == nil {
+		return
+	}
+	if v := strings.TrimSpace(getenv("NUSASHELL_WS_URL")); v != "" {
+		c.WSURL = v
+		return
+	}
+	port := strings.TrimSpace(getenv("NUSASHELL_PORT"))
+	if port == "" {
+		return
+	}
+	host := strings.TrimSpace(getenv("NUSASHELL_HOST"))
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
+		host = "127.0.0.1"
+	}
+	c.WSURL = "ws://" + net.JoinHostPort(host, port) + "/ws"
 }

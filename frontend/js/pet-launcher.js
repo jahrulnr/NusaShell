@@ -5,7 +5,7 @@
 //
 //   not-supported → button hidden entirely (macOS / Windows)
 //   not-installed → click opens the install dialog
-//   installed     → click calls settings.pets_launch to spawn the binary
+//   installed     → click toggles settings.pets_launch (spawn if idle, stop if running)
 //   installing    → click is a no-op; progress rides the Bus events
 //   error         → click re-opens the install dialog so the user can retry
 //
@@ -26,7 +26,7 @@ const PET_INSTALL_PROGRESS = 'pets.install.progress';
 const PET_INSTALL_DONE = 'pets.install.done';
 const PET_INSTALL_ERROR = 'pets.install.error';
 
-const state = { running: false, returnFocus: null };
+const state = { running: false, launchBusy: false, returnFocus: null };
 
 export async function initPets() {
   const btn = document.getElementById('pet-btn');
@@ -35,7 +35,7 @@ export async function initPets() {
   bindPetInstallDialog();
   window.addEventListener('nusashell:connection-status', refreshPetStatus);
   // The Settings card drives the same paths via this cross-module event.
-  // Clicking "Install" / "Launch pet" in the card dispatches
+  // Clicking "Install" / "Launch pet" / "Stop pet" in the card dispatches
   // nusashell:open-pet-launcher; we route it through onPetClick so the
   // sidebar dot + dialog stay in sync.
   window.addEventListener('nusashell:open-pet-launcher', onPetClick);
@@ -70,7 +70,9 @@ function applyStatus(btn, status) {
   btn.classList.toggle('is-error', false);
   if (status.installed) {
     const version = status.version ? ` · ${status.version}` : '';
-    btn.title = status.running ? 'Desktop pet is running' : `Desktop pet${version} · click to launch`;
+    btn.title = status.running
+      ? 'Desktop pet is running · click to stop'
+      : `Desktop pet${version} · click to launch`;
   } else {
     btn.title = 'Desktop pet not installed · click to install';
   }
@@ -99,17 +101,25 @@ async function onPetClick() {
     return;
   }
   if (status.installed) {
-    launchPet(status);
+    if (state.launchBusy) return;
+    state.launchBusy = true;
+    try {
+      await launchPet();
+    } finally {
+      state.launchBusy = false;
+    }
     return;
   }
   openPetInstallDialog();
 }
 
-async function launchPet(status) {
+async function launchPet() {
   try {
     const res = await rpc(PET_LAUNCH_METHOD, {});
-    if (res?.launched) {
-      toast(`Desktop pet launched.`, 'success', 2200);
+    if (res?.stopped) {
+      toast('Desktop pet stopped.', 'success', 2200);
+    } else if (res?.launched) {
+      toast('Desktop pet launched.', 'success', 2200);
     } else {
       btnErrorStyle();
       toast(res?.message ? `Pet launch failed: ${res.message}` : 'Pet launch failed.', 'error', 4500);

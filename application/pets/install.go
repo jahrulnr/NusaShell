@@ -61,6 +61,14 @@ func (s *Service) HandleLaunch() (any, *contracts.RPCError) {
 	if !status.Installed || status.Path == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "desktop pet is not installed"}
 	}
+	if status.Running {
+		if err := s.installer.Stop(); err != nil {
+			s.write("warn", "stop failed: %v", err)
+			return contracts.PetsLaunchResult{Message: err.Error()}, nil
+		}
+		s.write("info", "stopped desktop pet: %s", status.Path)
+		return contracts.PetsLaunchResult{Stopped: true, Path: status.Path}, nil
+	}
 	path, err := s.installer.Launch()
 	if err != nil {
 		s.write("warn", "launch failed: %v", err)

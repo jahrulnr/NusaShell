@@ -68,6 +68,14 @@ Konfigurasi minimal:
 }
 ```
 
+`ws_url` in the installed `config.json` is a fallback only. When the NusaShell
+Go core spawns the pet it injects `NUSASHELL_HOST`, `NUSASHELL_PORT`, and
+`NUSASHELL_WS_URL`, plus `--ws-url`, matching the process that is actually
+listening. The pet prefers `--ws-url`, then `NUSASHELL_WS_URL`, then
+`NUSASHELL_HOST`+`NUSASHELL_PORT` (`0.0.0.0`/`::` rewrite to `127.0.0.1`),
+then `config.json`. A wildcard Go bind is never passed through as a dial
+address.
+
 `spritesheet` relatif terhadap `--assets`; path absolut juga didukung. Atlas
 cell berukuran 192×208 dan tidak di-upscale. Flag `--image` tetap tersedia
 sebagai fallback legacy eksplisit untuk debugging, tetapi konfigurasi paket

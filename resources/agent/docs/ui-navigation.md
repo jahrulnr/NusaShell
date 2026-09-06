@@ -26,7 +26,7 @@ The vertical sidebar identifies NusaShell with its brand mark and wordmark, show
 - **Desktop pet** (`#pet-btn`):
   - Section: Sidebar
   - Type: button
-  - Action: Single click when installed spawns the desktop pet overlay (settings.pets_launch). When not installed, opens a one-click install dialog backed by settings.pets_install_start.
+  - Action: Single click when installed toggles the desktop pet overlay (settings.pets_launch spawns if idle, stops if running). When not installed, opens a one-click install dialog backed by settings.pets_install_start.
   - Notes: Hidden on macOS/Windows (pet is Linux-only). Sits above the Settings icon in .sidebar-actions.
 
 - **Settings shortcut** (`#nav-settings-btn`):

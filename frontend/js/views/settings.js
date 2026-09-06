@@ -902,8 +902,8 @@ function saveSidebarPreference(event) {
 // The settings view's "Desktop pet" card mirrors the sidebar pet launcher:
 // status row (dot + installed/not/running label), an auto-start toggle
 // persisted via settings.set, and an action button that opens the
-// install dialog (when not installed) or spawns the binary (when
-// installed). The card's action button dispatches a cross-module event
+// install dialog (when not installed) or toggles the binary (when
+// installed: launch if idle, stop if the overlay is showing). The card's action button dispatches a cross-module event
 // the sidebar pet-launcher listens for, so both surfaces share the same
 // install dialog + launch RPC.
 
@@ -959,7 +959,7 @@ async function refreshPetCard() {
     versionRow.hidden = false;
     version.textContent = status.version || '—';
     actionBtn.disabled = false;
-    actionBtn.textContent = 'Launch pet';
+    actionBtn.textContent = status.running ? 'Stop pet' : 'Launch pet';
     setPetStatus('');
     return;
   }

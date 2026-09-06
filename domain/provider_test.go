@@ -116,6 +116,8 @@ func TestCacheTTLsFor(t *testing.T) {
 		{ProviderChat, ProviderDriverOpenRouter, []string{"5m", "1h"}},
 		{ProviderChat, ProviderDriverAuto, []string{"30m"}},
 		{ProviderChat, ProviderDriverOpenAI, []string{"30m"}},
+		{ProviderCodex, ProviderDriverCodex, []string{"30m"}},
+		{ProviderCodex, ProviderDriverAuto, []string{"30m"}},
 	}
 	for _, tc := range tests {
 		got := CacheTTLsFor(tc.kind, tc.driver)

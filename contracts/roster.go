@@ -106,8 +106,8 @@ const (
 
 	// Desktop pet launcher + one-click install (Linux only). status reports
 	// the installed binary path; install pulls from the pets release stream
-	// (mirrors scripts/install.sh::install_pets_linux); launch spawns the
-	// binary outside the browser window.
+	// (mirrors scripts/install.sh::install_pets_linux); launch is a toggle:
+	// spawn when no pet process is running, stop that process when it is.
 	MethodPetsStatus       = "settings.pets_status"
 	MethodPetsInstallStart = "settings.pets_install_start"
 	MethodPetsLaunch       = "settings.pets_launch"
@@ -1480,10 +1480,12 @@ type PetsInstallStartResult struct {
 	Message string `json:"message,omitempty"`
 }
 
-// PetsLaunchResult is the wire answer for settings.pets_launch. It tells
-// the caller whether the spawn succeeded so the UI can toast an error.
+// PetsLaunchResult is the wire answer for settings.pets_launch. The RPC
+// toggles: Launched means a process was spawned, Stopped means a running
+// process was killed. Both false with Message is a spawn/stop failure.
 type PetsLaunchResult struct {
 	Launched bool   `json:"launched"`
+	Stopped  bool   `json:"stopped,omitempty"`
 	Path     string `json:"path,omitempty"`
 	Message  string `json:"message,omitempty"`
 }

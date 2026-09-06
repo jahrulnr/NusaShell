@@ -1,4 +1,4 @@
-package petsinstall
+package pet
 
 import (
 	"archive/tar"
@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"nusashell/infrastructure/nusatemp"
@@ -55,15 +56,19 @@ type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// Installer resolves the pets release stream, downloads the matched asset,
-// verifies its SHA-256, extracts into a versioned root, and activates the
-// "current" symlink. status.go owns the on-disk probe that backs the wire
-// status RPC.
+// Installer is the desktop-pet adapter: release install, process spawn/stop,
+// and backend URL injection. status.go owns the on-disk probe that backs
+// the wire status RPC.
 type Installer struct {
 	resolver     *Resolver
 	releaseBase  string
 	releaseIndex string
 	httpClient   HTTPClient
+
+	procMu      sync.Mutex
+	cmd         *exec.Cmd
+	backendHost string
+	backendPort string
 }
 
 // New builds a production installer rooted at the caller's home directory.
@@ -139,7 +144,14 @@ func (in *Installer) Status() StatusResult {
 			res.Launcher = launcher
 		}
 	}
-	res.Running = r.PetsRunning()
+	in.procMu.Lock()
+	tracked := in.trackedAliveLocked()
+	in.procMu.Unlock()
+	if res.Path != "" {
+		res.Running = tracked || len(r.petsPIDsMatching(res.Path)) > 0
+	} else {
+		res.Running = tracked || r.PetsRunning()
+	}
 	return res
 }
 
@@ -152,16 +164,16 @@ func (in *Installer) install(ctx context.Context, version string, report func(Pr
 		report = func(Progress) {}
 	}
 	if runtime.GOOS != "linux" {
-		return fmt.Errorf("petsinstall: desktop pet is Linux only")
+		return fmt.Errorf("pet: desktop pet is Linux only")
 	}
 	if in.resolver == nil {
-		return fmt.Errorf("petsinstall: resolver not configured")
+		return fmt.Errorf("pet: resolver not configured")
 	}
 
 	report(Progress{Phase: PhaseResolve, Message: "Resolving pets release stream"})
 	stream, err := in.resolveStream(ctx, version)
 	if err != nil {
-		return fmt.Errorf("petsinstall: resolve: %w", err)
+		return fmt.Errorf("pet: resolve: %w", err)
 	}
 
 	root := filepath.Join(in.resolver.Home, ".local/share/nusashell-pets")
@@ -170,7 +182,7 @@ func (in *Installer) install(ctx context.Context, version string, report func(Pr
 	}
 	versionDir := filepath.Join(root, "versions", stream.Version)
 	if err := os.MkdirAll(filepath.Dir(versionDir), 0o755); err != nil {
-		return fmt.Errorf("petsinstall: layout: %w", err)
+		return fmt.Errorf("pet: layout: %w", err)
 	}
 
 	// If the versioned root already has the binary + assets, skip every
@@ -180,38 +192,38 @@ func (in *Installer) install(ctx context.Context, version string, report func(Pr
 		report(Progress{Phase: PhaseResolve, Message: "Resolving pets release manifest"})
 		asset, err := in.resolveAsset(ctx, stream)
 		if err != nil {
-			return fmt.Errorf("petsinstall: resolve: %w", err)
+			return fmt.Errorf("pet: resolve: %w", err)
 		}
 
 		report(Progress{Phase: PhaseDownload, Message: "Downloading pets release " + stream.Version})
 		staging, err := in.download(ctx, asset)
 		if err != nil {
-			return fmt.Errorf("petsinstall: download: %w", err)
+			return fmt.Errorf("pet: download: %w", err)
 		}
 		defer os.RemoveAll(filepath.Dir(staging))
 
 		report(Progress{Phase: PhaseVerify, Message: "Verifying SHA-256"})
 		if err := verifySHA256(staging, asset.SHA256); err != nil {
-			return fmt.Errorf("petsinstall: verify: %w", err)
+			return fmt.Errorf("pet: verify: %w", err)
 		}
 
 		report(Progress{Phase: PhaseExtract, Message: "Extracting pets release"})
 		if err := os.MkdirAll(versionDir, 0o755); err != nil {
-			return fmt.Errorf("petsinstall: extract: %w", err)
+			return fmt.Errorf("pet: extract: %w", err)
 		}
 		if err := extractTarGz(staging, versionDir); err != nil {
-			return fmt.Errorf("petsinstall: extract: %w", err)
+			return fmt.Errorf("pet: extract: %w", err)
 		}
 	}
 
 	report(Progress{Phase: PhaseActivate, Message: "Activating " + stream.Version})
 	if err := activateVersion(root, stream.Version); err != nil {
-		return fmt.Errorf("petsinstall: activate: %w", err)
+		return fmt.Errorf("pet: activate: %w", err)
 	}
 
 	report(Progress{Phase: PhaseLauncher, Message: "Writing launcher"})
 	if err := writeLauncher(in.resolver); err != nil {
-		return fmt.Errorf("petsinstall: launcher: %w", err)
+		return fmt.Errorf("pet: launcher: %w", err)
 	}
 	if err := writeDesktopEntry(in.resolver, versionDir); err != nil {
 		// Desktop entry is best-effort; missing it does not break the binary.
@@ -222,27 +234,83 @@ func (in *Installer) install(ctx context.Context, version string, report func(Pr
 	return nil
 }
 
-// Launch spawns the resolved pet binary in the background. Returns the
-// absolute path it ran, or a non-nil error when the binary cannot be
-// resolved or spawned. The process is detached so the Go server can exit
-// without killing the pet.
+// Launch spawns the resolved pet binary in the background if one is not
+// already running for this install. Returns the absolute path it ran (or
+// would have run), or a non-nil error when the binary cannot be resolved
+// or spawned. Concurrent Launch calls share one process.
 func (in *Installer) Launch() (string, error) {
 	path, ok := in.resolver.PetsBinary()
 	if !ok {
-		return "", fmt.Errorf("petsinstall: binary not resolved")
+		return "", fmt.Errorf("pet: binary not resolved")
+	}
+	in.procMu.Lock()
+	defer in.procMu.Unlock()
+	if in.trackedAliveLocked() || len(in.resolver.petsPIDsMatching(path)) > 0 {
+		return path, nil
 	}
 	assets := in.resolver.PetsAssetsPath()
 	if assets == "" {
 		assets = filepath.Join(filepath.Dir(filepath.Dir(path)), "assets/pets")
 	}
-	cmd := exec.Command(path, "--assets", assets)
+	host, port := in.backendLocked()
+	cmd := exec.Command(path, petSpawnArgs(assets, host, port)...)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("petsinstall: spawn: %w", err)
+	if port != "" {
+		cmd.Env = petSpawnEnv(os.Environ(), host, port)
 	}
-	go func() { _ = cmd.Wait() }()
+	applyPetProcAttrs(cmd)
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("pet: spawn: %w", err)
+	}
+	in.cmd = cmd
+	go func(c *exec.Cmd) {
+		_ = c.Wait()
+		in.procMu.Lock()
+		if in.cmd == c {
+			in.cmd = nil
+		}
+		in.procMu.Unlock()
+	}(cmd)
 	return path, nil
+}
+
+// Stop terminates the tracked pet process and any other processes whose
+// cmdline matches this install's binary. It is idempotent: nothing running
+// is a successful no-op.
+func (in *Installer) Stop() error {
+	in.procMu.Lock()
+	defer in.procMu.Unlock()
+	path, _ := in.resolver.PetsBinary()
+	if in.cmd != nil {
+		killPetProcess(in.cmd, false)
+	}
+	for _, pid := range in.resolver.petsPIDsMatching(path) {
+		killPetPID(pid, false)
+	}
+	deadline := time.Now().Add(400 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if !in.trackedAliveLocked() && len(in.resolver.petsPIDsMatching(path)) == 0 {
+			in.cmd = nil
+			return nil
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if in.cmd != nil {
+		killPetProcess(in.cmd, true)
+	}
+	for _, pid := range in.resolver.petsPIDsMatching(path) {
+		killPetPID(pid, true)
+	}
+	in.cmd = nil
+	return nil
+}
+
+func (in *Installer) trackedAliveLocked() bool {
+	if in.cmd == nil || in.cmd.Process == nil {
+		return false
+	}
+	return petProcessAlive(in.cmd.Process.Pid)
 }
 
 // ---- release stream + asset resolution ----

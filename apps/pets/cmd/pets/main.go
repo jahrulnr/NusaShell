@@ -85,6 +85,7 @@ func start(c *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	config.ApplyEnv(cfg, os.Getenv)
 	if v := c.String("ws-url"); v != "" {
 		cfg.WSURL = v
 	}

@@ -25,6 +25,7 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
   assert.match(settingsView, /rpc\('ai\.models\.list'/);
   assert.match(settingsView, /settings\.pets_status/);
   assert.match(settingsView, /pets_auto_start/);
+  assert.match(settingsView, /Stop pet/);
   // settings.set is a flat pointer DTO, not a nested { settings } blob.
   // Wrapping GET's settings object silently drops pets_auto_start.
   assert.match(settingsView, /rpc\('settings\.set', \{ pets_auto_start: desired \}\)/);

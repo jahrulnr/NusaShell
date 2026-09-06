@@ -33,6 +33,10 @@ func (s *Service) AutoLaunch(_ context.Context) {
 		s.write("info", "auto-start skipped (binary not installed yet)")
 		return
 	}
+	if status.Running {
+		s.write("info", "auto-start skipped (already running)")
+		return
+	}
 	path, err := s.installer.Launch()
 	if err != nil {
 		s.write("warn", "auto-start launch failed: %v", err)

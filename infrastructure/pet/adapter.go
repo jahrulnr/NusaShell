@@ -1,4 +1,4 @@
-package petsinstall
+package pet
 
 import (
 	"context"
@@ -6,15 +6,14 @@ import (
 	"nusashell/contracts"
 )
 
-// Adapter satisfies application.PetsInstaller using the underlying
-// Installer + Resolver. Kept thin so the port contract is the only Go
-// boundary the application layer imports — the heavy machinery lives in
-// the unexported installer / status helpers.
+// Adapter satisfies application.PetsInstaller. This package owns the
+// desktop pet process: install the release, spawn/stop the overlay, and
+// pass this Go process's listen address into the child.
 type Adapter struct {
 	*Installer
 }
 
-// NewAdapter wraps an Installer into the application.PetsInstaller port.
+// NewAdapter wraps the pet adapter into the application.PetsInstaller port.
 // Use New or NewWithResolver to build the underlying Installer.
 func NewAdapter(in *Installer) *Adapter {
 	if in == nil {
@@ -31,6 +30,7 @@ var _ interface {
 	Status() contracts.PetsStatusResult
 	Install(ctx context.Context, version string, report func(contracts.PetsInstallProgressDTO)) error
 	Launch() (string, error)
+	Stop() error
 } = (*Adapter)(nil)
 
 // Status translates the installer snapshot into the wire DTO.
@@ -65,7 +65,9 @@ func (a *Adapter) Install(ctx context.Context, version string, report func(contr
 	})
 }
 
-// Launch spawns the resolved pet binary in the background. The path is
-// returned to the caller (the application layer passes it through to the
-// UI).
+// Launch spawns the resolved pet binary in the background when none is
+// running. Stop kills that process. The path is returned to the caller
+// (the application layer passes it through to the UI).
 func (a *Adapter) Launch() (string, error) { return a.Installer.Launch() }
+
+func (a *Adapter) Stop() error { return a.Installer.Stop() }

@@ -7,11 +7,12 @@ import (
 	"nusashell/domain"
 )
 
-// Installer is the port for the desktop pet release + launcher.
+// Installer is the port for desktop pet control: install, spawn, stop, and status.
 type Installer interface {
 	Status() contracts.PetsStatusResult
 	Install(ctx context.Context, version string, report func(contracts.PetsInstallProgressDTO)) error
 	Launch() (string, error)
+	Stop() error
 }
 
 // SettingsSource reads the pets_auto_start flag at boot.

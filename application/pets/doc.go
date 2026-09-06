@@ -1,4 +1,4 @@
-// Package pets owns the desktop pet surface: one-click pet
-// installer and auto-start subprocess spawning at shell startup. Electron
-// rendering stays in apps; this package only owns install and launch policy.
+// Package pets owns desktop pet policy: one-click install, single-instance
+// spawn/stop, auto-start, and toggling settings.pets_launch. The process
+// adapter is infrastructure/pet. Electron rendering stays in apps/pets.
 package pets

@@ -152,3 +152,60 @@ test('click on installed button calls settings.pets_launch', async () => {
     restore();
   }
 });
+
+test('spam click while launch in flight only sends one pets_launch', async () => {
+  const restore = setupDom();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let launchCount = 0;
+  const restoreFetch = stubFetch(async (url) => {
+    if (String(url).includes('pets_status')) {
+      return ok({ result: { supported: true, installed: true, path: '/opt/pets', running: false } });
+    }
+    launchCount += 1;
+    await gate;
+    return ok({ result: { launched: true, path: '/opt/pets' } });
+  });
+  try {
+    const { initPets } = await import('../js/pet-launcher.js');
+    await initPets();
+    await new Promise((r) => setTimeout(r, 30));
+    const btn = document.getElementById('pet-btn');
+    btn.click();
+    btn.click();
+    btn.click();
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(launchCount, 1, 'overlapping clicks must not spawn extra RPCs');
+    release();
+    await new Promise((r) => setTimeout(r, 40));
+  } finally {
+    if (release) release();
+    restoreFetch();
+    restore();
+  }
+});
+
+test('click while running still calls settings.pets_launch so the backend can stop', async () => {
+  const restore = setupDom();
+  const calls = [];
+  const restoreFetch = stubFetch(async (url) => {
+    calls.push(String(url));
+    if (String(url).includes('pets_status')) {
+      return ok({ result: { supported: true, installed: true, path: '/opt/pets', running: true } });
+    }
+    return ok({ result: { launched: false, stopped: true, path: '/opt/pets' } });
+  });
+  try {
+    const { initPets } = await import('../js/pet-launcher.js');
+    await initPets();
+    await new Promise((r) => setTimeout(r, 30));
+    const btn = document.getElementById('pet-btn');
+    assert.ok(btn.classList.contains('is-running'), 'running class set');
+    btn.click();
+    await new Promise((r) => setTimeout(r, 40));
+    assert.ok(calls.some((u) => u.includes('pets_launch')), 'stop still uses pets_launch');
+  } finally {
+    restoreFetch();
+    restore();
+  }
+});

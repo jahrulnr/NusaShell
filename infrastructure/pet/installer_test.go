@@ -1,4 +1,4 @@
-package petsinstall
+package pet
 
 import (
 	"archive/tar"
@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeHTTP returns canned responses keyed by URL. Anything not registered
@@ -406,5 +407,133 @@ func TestResolveAssetSkipsNonPayloadKeys(t *testing.T) {
 	}
 	if got.Name != "ok.tar.gz" {
 		t.Errorf("expected ok.tar.gz, got %q", got.Name)
+	}
+}
+
+func TestLaunchSingleFlightAndStop(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("pet process spawn is Linux-only")
+	}
+	home := t.TempDir()
+	bin := filepath.Join(home, ".local/share/nusashell-pets/current/nusashell-pets")
+	writeExec(t, bin, []byte("#!/bin/sh\nsleep 60\n"))
+	r := testResolver(home, "/proc")
+	in := NewWithResolver(r, "", "", nil)
+	t.Cleanup(func() { _ = in.Stop() })
+
+	const n = 8
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := in.Launch()
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("launch: %v", err)
+		}
+	}
+	pids := r.petsPIDsMatching(bin)
+	if len(pids) != 1 {
+		t.Fatalf("want exactly 1 pet process after spam launch, got %d %v", len(pids), pids)
+	}
+	if !in.Status().Running {
+		t.Fatal("status must report running after launch")
+	}
+
+	if err := in.Stop(); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(r.petsPIDsMatching(bin)) == 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n := len(r.petsPIDsMatching(bin)); n != 0 {
+		t.Fatalf("want 0 pet processes after stop, got %d", n)
+	}
+	if in.Status().Running {
+		t.Fatal("status must report not running after stop")
+	}
+}
+
+func TestLaunchAfterStopSpawnsAgain(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("pet process spawn is Linux-only")
+	}
+	home := t.TempDir()
+	bin := filepath.Join(home, ".local/share/nusashell-pets/current/nusashell-pets")
+	writeExec(t, bin, []byte("#!/bin/sh\nsleep 60\n"))
+	r := testResolver(home, "/proc")
+	in := NewWithResolver(r, "", "", nil)
+	t.Cleanup(func() { _ = in.Stop() })
+
+	if _, err := in.Launch(); err != nil {
+		t.Fatal(err)
+	}
+	if err := in.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && len(r.petsPIDsMatching(bin)) > 0 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := in.Launch(); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(r.petsPIDsMatching(bin)); n != 1 {
+		t.Fatalf("want 1 process after relaunch, got %d", n)
+	}
+}
+
+func TestLaunchInjectsBackendEnvAndWSURLFlag(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("pet process spawn is Linux-only")
+	}
+	home := t.TempDir()
+	bin := filepath.Join(home, ".local/share/nusashell-pets/current/nusashell-pets")
+	writeExec(t, bin, []byte("#!/bin/sh\nsleep 60\n"))
+	r := testResolver(home, "/proc")
+	in := NewWithResolver(r, "", "", nil)
+	in.SetBackend("0.0.0.0", "7777")
+	t.Cleanup(func() { _ = in.Stop() })
+
+	if _, err := in.Launch(); err != nil {
+		t.Fatal(err)
+	}
+	pids := r.petsPIDsMatching(bin)
+	if len(pids) != 1 {
+		t.Fatalf("want 1 process, got %d", len(pids))
+	}
+	pid := pids[0]
+	environ, err := os.ReadFile(filepath.Join("/proc", fmt.Sprintf("%d", pid), "environ"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := string(environ)
+	if !strings.Contains(env, "NUSASHELL_PORT=7777") {
+		t.Fatalf("child env missing NUSASHELL_PORT=7777: %q", env)
+	}
+	if !strings.Contains(env, "NUSASHELL_HOST=127.0.0.1") {
+		t.Fatalf("wildcard bind must rewrite host to loopback, env=%q", env)
+	}
+	if !strings.Contains(env, "NUSASHELL_WS_URL=ws://127.0.0.1:7777/ws") {
+		t.Fatalf("child env missing ws url, env=%q", env)
+	}
+	cmdline, err := os.ReadFile(filepath.Join("/proc", fmt.Sprintf("%d", pid), "cmdline"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.ReplaceAll(string(cmdline), "\x00", " ")
+	if !strings.Contains(args, "--ws-url") || !strings.Contains(args, "ws://127.0.0.1:7777/ws") {
+		t.Fatalf("child argv must pass --ws-url, got %q", args)
 	}
 }

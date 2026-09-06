@@ -20,9 +20,11 @@ type fakePetsInstaller struct {
 	status     contracts.PetsStatusResult
 	installs   []string
 	launches   []string
+	stops      int
 	failWith   error
 	block      chan struct{}
 	launchFail bool
+	stopFail   bool
 	launchPath string
 }
 
@@ -56,11 +58,29 @@ func (f *fakePetsInstaller) Install(ctx context.Context, version string, report 
 func (f *fakePetsInstaller) Launch() (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.status.Running {
+		if f.launchPath != "" {
+			return f.launchPath, nil
+		}
+		return f.status.Path, nil
+	}
 	f.launches = append(f.launches, "")
 	if f.launchFail {
 		return "", errors.New("spawn failed")
 	}
+	f.status.Running = true
 	return f.launchPath, nil
+}
+
+func (f *fakePetsInstaller) Stop() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stops++
+	if f.stopFail {
+		return errors.New("stop failed")
+	}
+	f.status.Running = false
+	return nil
 }
 
 func petsApp(inst *fakePetsInstaller) *App {
@@ -218,9 +238,70 @@ func TestPetsLaunchSuccess(t *testing.T) {
 		t.Fatalf("rpc error: %v", rpcErr)
 	}
 	res := out.(contracts.PetsLaunchResult)
-	if !res.Launched || res.Path != "/opt/pets/nusashell-pets" {
+	if !res.Launched || res.Stopped || res.Path != "/opt/pets/nusashell-pets" {
 		t.Errorf("launch success mismatch: %+v", res)
 	}
+}
+
+func TestPetsLaunchStopsWhenAlreadyRunning(t *testing.T) {
+	inst := &fakePetsInstaller{
+		status:     contracts.PetsStatusResult{Supported: true, Installed: true, Path: "/opt/pets/nusashell-pets", Running: true},
+		launchPath: "/opt/pets/nusashell-pets",
+	}
+	out, rpcErr := petsApp(inst).handlePetsLaunch()
+	if rpcErr != nil {
+		t.Fatalf("rpc error: %v", rpcErr)
+	}
+	res := out.(contracts.PetsLaunchResult)
+	if res.Launched || !res.Stopped || res.Path != "/opt/pets/nusashell-pets" {
+		t.Errorf("running pet must stop, got %+v", res)
+	}
+	if inst.launchCount() != 0 {
+		t.Errorf("Launch must not run while the pet is already up, got %d", inst.launchCount())
+	}
+	if inst.stopCount() != 1 {
+		t.Errorf("Stop must run once, got %d", inst.stopCount())
+	}
+	if inst.Status().Running {
+		t.Error("status must report not running after stop")
+	}
+}
+
+func TestPetsLaunchTogglesSpawnThenStop(t *testing.T) {
+	inst := &fakePetsInstaller{
+		status:     contracts.PetsStatusResult{Supported: true, Installed: true, Path: "/opt/pets/nusashell-pets"},
+		launchPath: "/opt/pets/nusashell-pets",
+	}
+	app := petsApp(inst)
+	first, rpcErr := app.handlePetsLaunch()
+	if rpcErr != nil {
+		t.Fatalf("first launch: %v", rpcErr)
+	}
+	if res := first.(contracts.PetsLaunchResult); !res.Launched || res.Stopped {
+		t.Fatalf("first click must spawn, got %+v", res)
+	}
+	second, rpcErr := app.handlePetsLaunch()
+	if rpcErr != nil {
+		t.Fatalf("second launch: %v", rpcErr)
+	}
+	if res := second.(contracts.PetsLaunchResult); res.Launched || !res.Stopped {
+		t.Fatalf("second click must stop, got %+v", res)
+	}
+	if inst.launchCount() != 1 || inst.stopCount() != 1 {
+		t.Errorf("want 1 launch and 1 stop, got launches=%d stops=%d", inst.launchCount(), inst.stopCount())
+	}
+}
+
+func (f *fakePetsInstaller) launchCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.launches)
+}
+
+func (f *fakePetsInstaller) stopCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stops
 }
 
 // guard: collectEvents is defined in tts_install_test.go and shared.
@@ -263,7 +344,15 @@ func (f *autostartFakeInstaller) Launch() (string, error) {
 	if f.err != nil {
 		return "", f.err
 	}
+	f.status.Running = true
 	return f.status.Path, nil
+}
+
+func (f *autostartFakeInstaller) Stop() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status.Running = false
+	return nil
 }
 
 func autostartApp(t *testing.T, inst *autostartFakeInstaller, settings domain.Settings) *App {

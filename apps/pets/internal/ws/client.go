@@ -1,5 +1,6 @@
 // Package ws implements the WebSocket client that connects the pet overlay to
-// the NusaShell backend (ws://127.0.0.1:10994/ws). It receives JSON state
+// the NusaShell backend. The URL comes from --ws-url, NUSASHELL_WS_URL /
+// NUSASHELL_HOST+NUSASHELL_PORT, or config.json. It receives JSON state
 // events and dispatches them to a handler. Reconnection uses exponential
 // backoff capped at MaxBackoff.
 //

@@ -1,9 +1,10 @@
-package petsinstall
+package pet
 
 import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -117,32 +118,53 @@ func (r *Resolver) PetsInstalledVersion() string {
 // Returns false when the procfs root is missing/empty (macOS, Windows, or
 // sandboxed tests).
 func (r *Resolver) PetsRunning() bool {
+	return len(r.PetsPIDs()) > 0
+}
+
+// PetsPIDs returns PIDs whose cmdline looks like a desktop pet process.
+func (r *Resolver) PetsPIDs() []int {
+	return r.petsPIDsMatching("")
+}
+
+func (r *Resolver) petsPIDsMatching(binary string) []int {
 	if r == nil || runtime.GOOS != "linux" || r.ProcRoot == "" {
-		return false
+		return nil
 	}
 	entries, err := os.ReadDir(r.ProcRoot)
 	if err != nil {
-		return false
+		return nil
 	}
+	var pids []int
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 {
 			continue
 		}
 		cmdline, err := os.ReadFile(filepath.Join(r.ProcRoot, entry.Name(), "cmdline"))
 		if err != nil {
 			continue
 		}
-		line := strings.TrimSuffix(string(cmdline), "\x00")
-		if !strings.Contains(line, "nusashell-pets") {
+		line := strings.ReplaceAll(string(cmdline), "\x00", " ")
+		line = strings.TrimSpace(line)
+		if !isPetCmdline(line, binary) {
 			continue
 		}
-		// Exclude installer/build processes whose argv mentions the pet name.
-		if strings.Contains(line, "nusashell-pets-install") || strings.Contains(line, "nusashell-pets-build") {
-			continue
-		}
-		return true
+		pids = append(pids, pid)
 	}
-	return false
+	return pids
+}
+
+func isPetCmdline(line, binary string) bool {
+	if strings.Contains(line, "nusashell-pets-install") || strings.Contains(line, "nusashell-pets-build") {
+		return false
+	}
+	if binary != "" {
+		return strings.Contains(line, binary)
+	}
+	return strings.Contains(line, "nusashell-pets")
 }
 
 // executable mirrors detect.Resolver.executable: a file exists AND has at

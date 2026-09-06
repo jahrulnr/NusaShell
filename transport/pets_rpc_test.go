@@ -29,8 +29,10 @@ type fakePetsInstaller struct {
 	status     contracts.PetsStatusResult
 	installs   []string
 	launches   int
+	stops      int
 	launchPath string
 	launchErr  error
+	stopErr    error
 	failWith   error
 	block      chan struct{}
 }
@@ -66,11 +68,26 @@ func (f *fakePetsInstaller) Install(ctx context.Context, version string, report 
 func (f *fakePetsInstaller) Launch() (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.status.Running {
+		return f.launchPath, nil
+	}
 	f.launches++
 	if f.launchErr != nil {
 		return "", f.launchErr
 	}
+	f.status.Running = true
 	return f.launchPath, nil
+}
+
+func (f *fakePetsInstaller) Stop() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stops++
+	if f.stopErr != nil {
+		return f.stopErr
+	}
+	f.status.Running = false
+	return nil
 }
 
 // rpcHelper wraps the real transport.Server so this test can drive /rpc
@@ -315,5 +332,34 @@ func TestRPCPetsLaunchSuccess(t *testing.T) {
 	}
 	if inst.launches != 1 {
 		t.Errorf("installer.Launch must be called once, got %d", inst.launches)
+	}
+}
+
+func TestRPCPetsLaunchStopsWhenRunning(t *testing.T) {
+	inst := &fakePetsInstaller{
+		status: contracts.PetsStatusResult{
+			Supported: true,
+			Installed: true,
+			Path:      "/opt/pets/nusashell-pets",
+			Running:   true,
+		},
+		launchPath: "/opt/pets/nusashell-pets",
+	}
+	helper := newRPCHelper(t, petsApp(inst))
+	res, err := helper.rpc(contracts.MethodPetsLaunch, map[string]any{})
+	if err != nil {
+		t.Fatalf("rpc: %v", err)
+	}
+	if res["launched"] != false {
+		t.Errorf("launched must be false on stop, got %v", res)
+	}
+	if res["stopped"] != true {
+		t.Errorf("stopped must be true, got %v", res)
+	}
+	if inst.launches != 0 {
+		t.Errorf("Launch must not run, got %d", inst.launches)
+	}
+	if inst.stops != 1 {
+		t.Errorf("Stop must run once, got %d", inst.stops)
 	}
 }

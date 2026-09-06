@@ -1947,7 +1947,7 @@
       "label": "Pet action button",
       "section": "Settings",
       "type": "button",
-      "action": "Routes through the sidebar pet-launcher module: 'Install desktop pet' opens the install dialog, 'Launch pet' spawns the binary, 'Unavailable' disables when the platform does not support the pet."
+      "action": "Routes through the sidebar pet-launcher module: 'Install desktop pet' opens the install dialog, 'Launch pet' spawns the binary, 'Stop pet' kills the running overlay, 'Unavailable' disables when the platform does not support the pet."
     },
     "settings-pet-status": {
       "label": "Pet save status",
@@ -2412,7 +2412,7 @@
       "label": "Desktop pet",
       "section": "Sidebar",
       "type": "button",
-      "action": "Single click when installed spawns the desktop pet overlay (settings.pets_launch). When not installed, opens a one-click install dialog backed by settings.pets_install_start.",
+      "action": "Single click when installed toggles the desktop pet overlay (settings.pets_launch spawns if idle, stops if running). When not installed, opens a one-click install dialog backed by settings.pets_install_start.",
       "notes": "Hidden on macOS/Windows (pet is Linux-only). Sits above the Settings icon in .sidebar-actions.",
       "selector": "#pet-btn"
     },

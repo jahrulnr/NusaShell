@@ -28,6 +28,11 @@ import (
 //     OpenAI wire and reject OpenRouter-specific params — OpenCode Console
 //     Go 400s without `reasoning_content`; TokenRouter 400s on the
 //     OpenRouter `reasoning` object.
+//   - Codex providers (ProviderCodex) compose the codexauth and
+//     codexadapter packages. The active account's OAuth token JSON is
+//     read from the bare providerID key in CredentialStore; multi-account
+//     routing is the responsibility of the application layer (see
+//     application/codex_bridge.go).
 func NewFactory(_ application.CredentialStore) application.ProviderFactory {
 	return func(ctx context.Context, p *domain.Provider, apiKey string) (application.AIProvider, error) {
 		if !domain.ValidKind(p.Kind) {

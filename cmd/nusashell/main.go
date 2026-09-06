@@ -28,7 +28,7 @@ import (
 	"nusashell/infrastructure/jsonstore"
 	"nusashell/infrastructure/mcpclient"
 	"nusashell/infrastructure/memorystore"
-	"nusashell/infrastructure/petsinstall"
+	"nusashell/infrastructure/pet"
 	"nusashell/infrastructure/pluginfs"
 	"nusashell/infrastructure/plugininstall"
 	"nusashell/infrastructure/pluginruntime"
@@ -286,7 +286,7 @@ func run() error {
 		OfflineSynthesizer:          ai.NewOfflineSynthesizer(dataDir),
 		TTSInstaller:                ttsinstall.New(dataDir, ""),
 		STTInstaller:                sttinstall.New(dataDir, "", ""),
-		PetsInstaller:               petsinstall.NewAdapter(petsinstall.New(hostHomeDir())),
+		PetsInstaller:               pet.NewAdapter(newPet(host, port)),
 		ImageModelListerFactory:     ai.NewImageModelListerFactory(),
 		SpeechModelListerFactory:    ai.NewSpeechModelListerFactory(),
 		VideoGeneratorFactory:       ai.NewVideoGeneratorFactory(),
@@ -413,6 +413,12 @@ func hostHomeDir() string {
 		return ""
 	}
 	return home
+}
+
+func newPet(host, port string) *pet.Installer {
+	in := pet.New(hostHomeDir())
+	in.SetBackend(host, port)
+	return in
 }
 
 func envOr(key, fallback string) string {

@@ -189,3 +189,42 @@ func TestLoadMissingFile(t *testing.T) {
 		t.Fatal("expected error for missing file")
 	}
 }
+
+func TestApplyEnvOverridesConfigURL(t *testing.T) {
+	t.Parallel()
+	cfg, err := Parse([]byte(`{"spritesheet":"s.webp","ws_url":"ws://127.0.0.1:9999/ws"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{}
+	getenv := func(k string) string { return env[k] }
+
+	ApplyEnv(cfg, getenv)
+	if cfg.WSURL != "ws://127.0.0.1:9999/ws" {
+		t.Fatalf("empty env must keep config url, got %q", cfg.WSURL)
+	}
+
+	env["NUSASHELL_PORT"] = "10994"
+	ApplyEnv(cfg, getenv)
+	if cfg.WSURL != "ws://127.0.0.1:10994/ws" {
+		t.Fatalf("port-only env = %q, want loopback 10994", cfg.WSURL)
+	}
+
+	env["NUSASHELL_HOST"] = "0.0.0.0"
+	ApplyEnv(cfg, getenv)
+	if cfg.WSURL != "ws://127.0.0.1:10994/ws" {
+		t.Fatalf("wildcard host must rewrite to loopback, got %q", cfg.WSURL)
+	}
+
+	env["NUSASHELL_HOST"] = "10.0.0.2"
+	ApplyEnv(cfg, getenv)
+	if cfg.WSURL != "ws://10.0.0.2:10994/ws" {
+		t.Fatalf("explicit host = %q", cfg.WSURL)
+	}
+
+	env["NUSASHELL_WS_URL"] = "ws://127.0.0.1:5555/ws"
+	ApplyEnv(cfg, getenv)
+	if cfg.WSURL != "ws://127.0.0.1:5555/ws" {
+		t.Fatalf("NUSASHELL_WS_URL must win, got %q", cfg.WSURL)
+	}
+}
