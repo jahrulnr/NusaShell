@@ -22,6 +22,10 @@ import (
 	"nusashell/infrastructure/nusatemp"
 )
 
+// launchSettle is how long Launch waits after Start before treating a dead
+// child as a failed spawn. Overridable in tests.
+var launchSettle = 250 * time.Millisecond
+
 // Default release stream coordinates. NUSASHELL_RELEASE_BASE /
 // NUSASHELL_RELEASE_INDEX override these via NewWithOverrides so tests can
 // point at a sandbox.
@@ -252,14 +256,33 @@ func (in *Installer) Launch() (string, error) {
 	cmd := exec.Command(path, petSpawnArgs(assets, host, port)...)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
+	env := os.Environ()
+	env = enrichGraphicalEnv(env, lookupSystemdUserEnv)
 	if port != "" {
-		cmd.Env = petSpawnEnv(os.Environ(), host, port)
+		env = petSpawnEnv(env, host, port)
 	}
+	cmd.Env = env
 	applyPetProcAttrs(cmd)
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("pet: spawn: %w", err)
 	}
 	in.cmd = cmd
+	// Pets die immediately when DISPLAY is missing (X11 required). Treat a
+	// quick exit as a failed launch so AutoLaunch can retry once the
+	// desktop session has published graphical environment variables.
+	settle := launchSettle
+	if settle <= 0 {
+		settle = 250 * time.Millisecond
+	}
+	timer := time.NewTimer(settle)
+	<-timer.C
+	if exited, waitErr := waitPetIfExited(cmd); exited {
+		in.cmd = nil
+		if waitErr != nil {
+			return "", fmt.Errorf("pet: exited immediately after spawn: %w", waitErr)
+		}
+		return "", fmt.Errorf("pet: exited immediately after spawn (DISPLAY may be unset)")
+	}
 	go func(c *exec.Cmd) {
 		_ = c.Wait()
 		in.procMu.Lock()

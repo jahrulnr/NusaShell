@@ -128,6 +128,20 @@ func TestElectronBinaryResolution(t *testing.T) {
 		}
 	})
 
+	t.Run("launcher preferred over versioned binary", func(t *testing.T) {
+		// The installer writes --no-sandbox (when needed) into the
+		// ~/.local/bin shim. Prefer that over the versioned payload so
+		// a click does not spawn a binary that dies with "No usable sandbox".
+		home := t.TempDir()
+		r := testResolver(home, nil)
+		writeExec(t, filepath.Join(home, ".local/share/nusashell-electron/current/nusashell-desktop"))
+		want := filepath.Join(home, ".local/bin/nusashell-desktop")
+		writeExec(t, want)
+		if got, ok := r.ElectronBinary(""); !ok || got != want {
+			t.Fatalf("launcher preferred: got %q ok=%v, want %q", got, ok, want)
+		}
+	})
+
 	t.Run("env install root", func(t *testing.T) {
 		home := t.TempDir()
 		root := filepath.Join(home, "electron-root")
@@ -151,6 +165,47 @@ func TestElectronBinaryResolution(t *testing.T) {
 			t.Fatal("ElectronBinary must not resolve when nothing is installed")
 		}
 	})
+}
+
+func TestElectronSpawnAddsNoSandboxWhenHelperDisabled(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	r := testResolver(home, nil)
+	bin := filepath.Join(home, ".local/share/nusashell-electron/current/nusashell-desktop")
+	writeExec(t, bin)
+	disabled := filepath.Join(filepath.Dir(bin), "chrome-sandbox.disabled")
+	if err := os.WriteFile(disabled, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := r.ElectronSpawn("")
+	if !ok {
+		t.Fatal("expected ElectronSpawn to resolve")
+	}
+	if spec.Path != bin {
+		t.Fatalf("path = %q, want %q", spec.Path, bin)
+	}
+	if len(spec.Args) != 1 || spec.Args[0] != "--no-sandbox" {
+		t.Fatalf("args = %#v, want [--no-sandbox]", spec.Args)
+	}
+}
+
+func TestElectronSpawnLauncherHasNoExtraArgs(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	r := testResolver(home, nil)
+	launcher := filepath.Join(home, ".local/bin/nusashell-desktop")
+	writeExec(t, launcher)
+	writeExec(t, filepath.Join(home, ".local/share/nusashell-electron/current/nusashell-desktop"))
+	if err := os.WriteFile(filepath.Join(home, ".local/share/nusashell-electron/current/chrome-sandbox.disabled"), []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := r.ElectronSpawn("")
+	if !ok || spec.Path != launcher {
+		t.Fatalf("got path=%q ok=%v, want launcher", spec.Path, ok)
+	}
+	if len(spec.Args) != 0 {
+		t.Fatalf("launcher must not receive extra args, got %#v", spec.Args)
+	}
 }
 
 func TestBackendAddrFromWebSocketURL(t *testing.T) {

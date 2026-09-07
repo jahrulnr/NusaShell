@@ -165,6 +165,13 @@ artwork regardless of the current working directory. Run it with:
 nusashell-pets
 ```
 
+The overlay is managed as a **subprocess of the Go core** (sidebar toggle /
+`settings.pets_auto_start`), not a separate systemd unit or `.desktop`
+autostart. Enable **Pets auto-start** in Settings so the core spawns the pet
+after login. Left-click prefers the Electron launcher at
+`~/.local/bin/nusashell-desktop` (includes `--no-sandbox` when the installer
+disabled Chromium's sandbox helper).
+
 The default runtime expects the NusaShell Go core on `ws://127.0.0.1:10994/ws`
 and an X11 (or XWayland) session. Native Wayland is rejected with a hint,
 because the always-on-top and shaped-input behavior needs X11 Shape.

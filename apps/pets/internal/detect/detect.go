@@ -79,17 +79,39 @@ func (r *Resolver) GoBinary() (string, bool) {
 	return "", false
 }
 
+// ElectronSpawnSpec is the executable and argv to open/focus the Electron
+// wrapper. Args may include install-time flags such as --no-sandbox.
+type ElectronSpawnSpec struct {
+	Path string
+	Args []string
+}
+
 // ElectronBinary resolves the Electron desktop wrapper binary. An explicitly
-// configured path wins when present and executable; otherwise the env
-// override install root, the default install location, and the user launcher
-// are checked in order. The second return value is false when the wrapper is
-// not installed.
+// configured path wins when present and executable; otherwise the user
+// launcher is preferred over the versioned install payload because the
+// installer writes the Chromium sandbox decision (--no-sandbox or not) into
+// ~/.local/bin/nusashell-desktop. The second return value is false when the
+// wrapper is not installed.
 func (r *Resolver) ElectronBinary(configured string) (string, bool) {
+	spec, ok := r.ElectronSpawn(configured)
+	return spec.Path, ok
+}
+
+// ElectronSpawn resolves how to launch the Electron wrapper. Prefer the
+// user launcher shim; when only the versioned binary is present and the
+// installer disabled chrome-sandbox, append --no-sandbox so a pet click
+// matches `nusashell-desktop` from a shell.
+func (r *Resolver) ElectronSpawn(configured string) (ElectronSpawnSpec, bool) {
 	if r == nil {
-		return "", false
+		return ElectronSpawnSpec{}, false
 	}
 	if r.executable(configured) {
-		return configured, true
+		return r.electronSpec(configured, true), true
+	}
+	launcher := filepath.Join(r.Home, ".local/bin/nusashell-desktop")
+	if r.executable(launcher) {
+		// Launcher already carries any --no-sandbox decision from install.
+		return ElectronSpawnSpec{Path: launcher}, true
 	}
 	roots := []string{
 		r.Env("NUSASHELL_ELECTRON_INSTALL_ROOT"),
@@ -104,13 +126,26 @@ func (r *Resolver) ElectronBinary(configured string) (string, bool) {
 			filepath.Join(root, "nusashell-desktop"),
 		} {
 			if r.executable(cand) {
-				return cand, true
+				return r.electronSpec(cand, true), true
 			}
 		}
 	}
-	launcher := filepath.Join(r.Home, ".local/bin/nusashell-desktop")
-	if r.executable(launcher) {
-		return launcher, true
+	return ElectronSpawnSpec{}, false
+}
+
+func (r *Resolver) electronSpec(bin string, allowNoSandbox bool) ElectronSpawnSpec {
+	spec := ElectronSpawnSpec{Path: bin}
+	if allowNoSandbox && r.electronNeedsNoSandbox(bin) {
+		spec.Args = []string{"--no-sandbox"}
 	}
-	return "", false
+	return spec
+}
+
+func (r *Resolver) electronNeedsNoSandbox(bin string) bool {
+	if bin == "" {
+		return false
+	}
+	disabled := filepath.Join(filepath.Dir(bin), "chrome-sandbox.disabled")
+	_, err := r.Stat(disabled)
+	return err == nil
 }

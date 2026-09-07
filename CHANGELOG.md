@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-09-07
+
+### Fixed
+
+- **Desktop pet click opens Electron on hosts without a Chromium sandbox.**
+  Pet spawn now prefers `~/.local/bin/nusashell-desktop` (installer shim with
+  `--no-sandbox` when needed) and, when only the versioned binary is present
+  beside `chrome-sandbox.disabled`, passes `--no-sandbox` itself. Spawning the
+  raw `current/nusashell-desktop` previously died with "No usable sandbox".
+- **Desktop pet auto-start survives the login DISPLAY race.** Go Launch
+  merges `DISPLAY`/`XAUTHORITY` from the systemd user manager when missing,
+  treats an immediate child exit as a failed spawn, and AutoLaunch retries
+  until the overlay stays up (still a Go subprocess — no pets systemd unit).
+
 ## [0.5.0] - 2026-09-07
 
 ### Added

@@ -120,9 +120,9 @@ func start(c *cli.Context) error {
 	} else {
 		log.Info("pets: go core not installed")
 	}
-	electronBin, electronInstalled := resolver.ElectronBinary(cfg.ElectronPath)
+	electronSpec, electronInstalled := resolver.ElectronSpawn(cfg.ElectronPath)
 	if electronInstalled {
-		log.Info("pets: electron installed", "bin", electronBin)
+		log.Info("pets: electron installed", "bin", electronSpec.Path, "args", electronSpec.Args)
 	} else {
 		log.Info("pets: electron not installed", "configured_path", cfg.ElectronPath)
 	}
@@ -390,16 +390,16 @@ func eventLoop(ctx context.Context, win *app.Window, ren *renderer.Renderer, cfg
 			GoRunning:       detect.GoRunning(cfg.WSURL, dialer.DialContext),
 			ElectronRunning: detect.ElectronRunning(detect.DefaultProcRoot),
 		}
-		electronBin, installed := resolver.ElectronBinary(cfg.ElectronPath)
+		spec, installed := resolver.ElectronSpawn(cfg.ElectronPath)
 		st.ElectronInstalled = installed
 		switch launcher.Choose(st) {
 		case launcher.ActionOpenElectron:
 			if installed {
-				if spawnErr := launcher.Spawn(electronBin); spawnErr == nil {
-					log.Info("pets: click opens electron", "path", electronBin, "already_running", st.ElectronRunning)
+				if spawnErr := launcher.Spawn(spec.Path, spec.Args...); spawnErr == nil {
+					log.Info("pets: click opens electron", "path", spec.Path, "args", spec.Args, "already_running", st.ElectronRunning)
 					return
 				} else {
-					log.Warn("pets: launch electron failed", "path", electronBin, "err", spawnErr)
+					log.Warn("pets: launch electron failed", "path", spec.Path, "args", spec.Args, "err", spawnErr)
 				}
 			}
 			// Fallback stays the web frontend when the backend is up.

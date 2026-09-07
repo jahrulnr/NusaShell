@@ -19,6 +19,20 @@ func petProcessAlive(pid int) bool {
 	return err == nil
 }
 
+// waitPetIfExited reaps the child with WNOHANG. kill(pid,0) stays true for
+// zombies, so a settle check must Wait4 to detect an immediate exit.
+func waitPetIfExited(cmd *exec.Cmd) (exited bool, waitErr error) {
+	if cmd == nil || cmd.Process == nil {
+		return true, nil
+	}
+	var status syscall.WaitStatus
+	wpid, err := syscall.Wait4(cmd.Process.Pid, &status, syscall.WNOHANG, nil)
+	if err != nil || wpid == 0 {
+		return false, nil
+	}
+	return true, nil
+}
+
 func killPetProcess(cmd *exec.Cmd, force bool) {
 	if cmd == nil || cmd.Process == nil {
 		return

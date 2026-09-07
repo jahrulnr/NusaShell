@@ -410,6 +410,35 @@ func TestResolveAssetSkipsNonPayloadKeys(t *testing.T) {
 	}
 }
 
+func TestLaunchFailsWhenChildExitsImmediately(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("pet process spawn is Linux-only")
+	}
+	prev := launchSettle
+	launchSettle = 50 * time.Millisecond
+	t.Cleanup(func() { launchSettle = prev })
+
+	home := t.TempDir()
+	bin := filepath.Join(home, ".local/share/nusashell-pets/current/nusashell-pets")
+	writeExec(t, bin, []byte("#!/bin/sh\nexit 1\n"))
+	r := testResolver(home, "/proc")
+	in := NewWithResolver(r, "", "", nil)
+	prevLookup := lookupSystemdUserEnv
+	lookupSystemdUserEnv = func() map[string]string { return nil }
+	t.Cleanup(func() { lookupSystemdUserEnv = prevLookup })
+
+	_, err := in.Launch()
+	if err == nil {
+		t.Fatal("Launch must fail when the child exits immediately")
+	}
+	if !strings.Contains(err.Error(), "exited immediately") {
+		t.Fatalf("error = %v, want exited immediately", err)
+	}
+	if in.Status().Running {
+		t.Fatal("status must not report running after failed launch")
+	}
+}
+
 func TestLaunchSingleFlightAndStop(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("pet process spawn is Linux-only")

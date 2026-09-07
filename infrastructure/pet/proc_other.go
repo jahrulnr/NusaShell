@@ -22,3 +22,8 @@ func killPetPID(pid int, force bool) {
 	_ = pid
 	_ = force
 }
+
+func waitPetIfExited(cmd *exec.Cmd) (bool, error) {
+	_ = cmd
+	return false, nil
+}
