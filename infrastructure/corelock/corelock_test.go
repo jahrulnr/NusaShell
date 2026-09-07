@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -46,8 +47,12 @@ func TestMetadataRoundTripIsAtomicAndPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("metadata mode = %o, want 600", info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		// Windows has no POSIX permission bits: chmod(0o600) only maps to the
+		// read-only attribute, so os.Stat reports 0666 for a writable file.
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("metadata mode = %o, want 600", info.Mode().Perm())
+		}
 	}
 	if err := RemoveMetadata(path); err != nil {
 		t.Fatal(err)
