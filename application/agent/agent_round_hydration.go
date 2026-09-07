@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"nusashell/application/provider"
 	"nusashell/domain"
 	"nusashell/pkg/nonce"
 	clock "nusashell/pkg/time"
@@ -112,34 +113,16 @@ func appendContinuationFromPartial(messages []ChatMessage, partial streamedTurnR
 	return appendContinuationTool(messages)
 }
 
-// estimateRequestTokens approximates provider tokens from the real request
-// payload: system + messages + tools JSON. ~4 chars/token with a surcharge
-// for non-ASCII (CJK-ish) characters, ~4 tokens per-message overhead, ~150
-// tokens per image attachment, plus a 5% safety buffer.
+// estimateRequestTokens keeps the old narrow test/helper API while routing it
+// through the provider boundary. Production turns use the full ChatRequest
+// estimator in application/provider so provider kind, reasoning replay, and
+// compaction items are included in the same calculation as the sent request.
 func estimateRequestTokens(system string, messages []ChatMessage, tools []ToolDef) int64 {
-	chars := int64(len(system))
-	totalOverhead := int64(domain.RequestTokenPerMessageOverhead * len(messages))
-	images := 0
-	raw, _ := json.Marshal(messages)
-	chars += int64(len(raw))
-	if len(tools) > 0 {
-		rawTools, _ := json.Marshal(tools)
-		chars += int64(len(rawTools))
-	}
-	// Non-ASCII cost more (CJK ≈ 1–2 tokens each): add ~1 token per non-ASCII
-	// rune so unicode-heavy threads are not undercounted.
-	for _, m := range messages {
-		if len(m.Attachments) > 0 {
-			for _, a := range m.Attachments {
-				if a.Type == "image" {
-					images++
-				}
-			}
-		}
-	}
-	chars += int64(images * domain.RequestTokenImageCost)
-	tokens := (chars + totalOverhead) / int64(domain.RequestTokenCharsPerToken)
-	return int64(float64(tokens) * domain.RequestTokenSafetyBuffer)
+	return provider.EstimateRequestTokens(provider.ChatRequest{
+		System:   system,
+		Messages: messages,
+		Tools:    tools,
+	}, domain.ProviderChat, false)
 }
 
 const (

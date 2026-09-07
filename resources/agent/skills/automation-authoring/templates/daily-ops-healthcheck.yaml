@@ -1,0 +1,45 @@
+# Scheduled non-AI daily operations health check. Commands are POSIX-oriented;
+# replace them for the target host. Failed checks remain visible while the
+# summary job still records that collection finished.
+version: 1
+name: replace-with-daily-healthcheck
+enabled: false
+trust: safe
+concurrency:
+  key: daily-healthcheck
+  policy: skip
+missed: skip_missed
+triggers:
+  - every:
+      cron: "0 8 * * 1-5"
+      timezone: Asia/Jakarta
+jobs:
+  system:
+    name: System snapshot
+    timeout: 5m
+    continue_on_error: true
+    steps:
+      - name: Capture basic system facts
+        run: |
+          set -eu
+          date -u
+          uname -a
+          uptime
+  workspace:
+    name: Workspace snapshot
+    timeout: 5m
+    continue_on_error: true
+    steps:
+      - name: Check workspace facts
+        run: |
+          set -eu
+          pwd
+          test -d .
+          df -h .
+  summary:
+    name: Healthcheck summary
+    needs: [system, workspace]
+    timeout: 2m
+    steps:
+      - name: Record completion
+        run: printf '%s\n' 'daily healthcheck finished; inspect job logs for failures'

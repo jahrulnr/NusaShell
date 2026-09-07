@@ -1,0 +1,20 @@
+# Minimal deterministic shell pipeline. Replace the command only after review.
+version: 1
+name: replace-with-workspace-check
+enabled: false
+trust: safe
+concurrency:
+  key: workspace-check
+  policy: skip
+triggers:
+  - manual: true
+jobs:
+  check:
+    name: Check workspace
+    timeout: 5m
+    steps:
+      - name: Verify the workspace is available
+        run: |
+          set -eu
+          test -d .
+          printf '%s\n' 'workspace check passed'

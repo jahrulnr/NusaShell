@@ -1,20 +1,18 @@
+# One-shot local alarm. Replace `at` with a future RFC3339 time and timezone.
 version: 1
-name: alarm-once
+name: replace-with-alarm-name
 enabled: false
-trust: trusted
-
+trust: safe
 triggers:
   - once:
-      # Replace this example with a future RFC3339 time in your timezone.
       at: "2026-12-31T07:00:00+07:00"
       timezone: Asia/Jakarta
-
+missed: skip_missed
 jobs:
   alarm:
-    name: Ring a local alarm
+    name: Local alarm
+    timeout: 1m
     steps:
-      - name: Ring terminal bell
-        shell: sh
+      - name: Emit a terminal bell and log message
         run: |
-          printf '\a'
-          printf '%s\n' 'ALARM: replace this text with your reminder'
+          printf '\a%s\n' 'NusaShell alarm: replace this message'

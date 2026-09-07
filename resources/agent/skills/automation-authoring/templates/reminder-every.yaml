@@ -1,19 +1,22 @@
+# Calendar reminder written to the run log. Use an agent/MCP step only after
+# discovering and authorizing the desired notification provider.
 version: 1
-name: reminder-every
+name: replace-with-reminder-name
 enabled: false
-trust: trusted
-
+trust: safe
+concurrency:
+  key: weekday-reminder
+  policy: skip
 triggers:
   - every:
-      # Weekdays at 09:00 in Jakarta; use interval: 24h for elapsed time.
       cron: "0 9 * * 1-5"
       timezone: Asia/Jakarta
-
+missed: skip_missed
 jobs:
   reminder:
-    name: Write a recurring reminder
+    name: Weekday reminder
+    timeout: 1m
     steps:
-      - name: Record reminder
-        shell: sh
+      - name: Write reminder
         run: |
-          printf '%s\n' "REMINDER: review today's priorities"
+          printf '%s\n' 'NusaShell reminder: replace this message'

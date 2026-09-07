@@ -481,11 +481,13 @@ Structural and dominant rejections are handled identically: the agent does
 **not** burn provider attempts on them — it bails to an **emergency
 compaction** (the transcript is summarized down to the compaction budget)
 and retries the round with the smaller context, the same safety net that
-fires on a context-window overflow 400. Image-heavy transcripts are
-routinely undercounted by the local chars/4 token estimate, which is why
-the provider's own `Limit`/`Used`/`Requested` numbers are trusted as proof
-of overflow even when the local estimate is far below the compaction
-trigger.
+fires on a context-window overflow 400. The live context badge uses a
+provider-visible preflight estimate: text is approximated by character
+density, provider replay items are adjusted for opaque encrypted content, and
+image, audio, and video data URLs are charged as modality units rather than
+as base64 text. It remains a heuristic until provider usage arrives, so the
+provider's own `Limit`/`Used`/`Requested` numbers are trusted as proof of
+overflow.
 
 A dominant rejection also teaches a durable rule: NusaShell derives a
 context-window cap from the provider's per-minute budget (half the budget
@@ -579,9 +581,11 @@ Key behaviors:
   compaction item is encrypted for the chat model and only that model can
   read it, so switching to a different model for compaction would
   invalidate it.
-- **Token estimation:** `EstimateTokens` includes the `CompactionBlob`
-  length so the context badge reflects the real request size after a
-  server-side compaction.
+- **Token estimation:** the backend preflight estimator includes the
+  provider-visible `CompactionBlob` items, with encrypted reasoning sized by
+  their model-visible approximation rather than their encoded byte length.
+  The context badge marks this value as provisional until provider usage is
+  returned.
 
 ## Codex remote v2 compaction
 

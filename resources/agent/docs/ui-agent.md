@@ -318,7 +318,7 @@ The message input with attachments, model picker, workspace selector, provider s
 - **Provider status / context usage** (`#agent-provider-status`):
   - Section: Agent
   - Type: text
-  - Notes: Shows the backend context usage as used/window (e.g. 32k/1M), or 'Context automatically compacting' while the active room is compacting. The number is the server source of truth: the live server-side estimate while a turn streams and the provider-measured context fill after it completes. The frontend never sums message bubbles.
+  - Notes: Shows backend context usage as used/window (e.g. 32k/1M), or 'Context automatically compacting' while the active room is compacting. A provider-measured fill from the last completed round is authoritative; before the provider responds, a provisional preflight estimate is marked with '~'. The preflight is calculated from provider-visible content and never counts inline media base64 as text. The frontend never sums message bubbles.
 
 - **Stop** (`#stop-btn`):
   - Section: Agent

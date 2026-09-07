@@ -21,6 +21,11 @@ test('context usage uses the effective model window', () => {
   assert.equal(formatContextUsage(1200000, 1000000), '1.2M/1M context');
 });
 
+test('provisional context usage is visibly marked until provider usage arrives', () => {
+  assert.equal(formatContextUsage(1234, 128000, true), '~1k/128k context');
+  assert.equal(formatContextUsage(1200000, 1000000, true), '~1.2M/1M context');
+});
+
 test('global max input tokens caps an advertised model context window', () => {
   // Model window (catalog) wins over the global cap — cap is only a
   // fallback for models not in the catalog.

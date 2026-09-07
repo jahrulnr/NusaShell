@@ -541,9 +541,10 @@ type RoundDoneFrame struct {
 	Error   string    `json:"error,omitempty"`
 }
 
-// ContextEstimateEvent carries a lightweight server-side estimate of the
-// actual request payload (system prompt + messages + tool definitions) so
-// the UI badge reflects the tokens really sent to the provider.
+// ContextEstimateEvent carries a provisional server-side preflight estimate of
+// the next provider request (system prompt + model-visible messages + tools).
+// It is not provider usage: the authoritative context fill arrives in
+// TurnDoneEvent.ContextTokens after a round completes.
 type ContextEstimateEvent struct {
 	RunID           string `json:"run_id"`
 	ConversationID  string `json:"conversation_id"`

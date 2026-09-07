@@ -167,12 +167,12 @@ func TestCompactSummaryIsUserRole(t *testing.T) {
 	}
 }
 
-func TestCompactWithBlobKeepsRealUserMessagesWithoutHandover(t *testing.T) {
+func TestCompactWithBlobKeepsChronologicalSuffixWithoutHandover(t *testing.T) {
 	c := &Conversation{
 		Messages: []Message{
 			{ID: "u1", Role: RoleUser, Content: strings.Repeat("old-", 100)},
 			{ID: "a1", Role: RoleAssistant, Content: strings.Repeat("old-answer-", 100)},
-			{ID: "u2", Role: RoleUser, Content: "latest question", Attachments: []Attachment{{Type: "text", Content: strings.Repeat("attachment", 1000)}}},
+			{ID: "u2", Role: RoleUser, Content: "latest question"},
 			{ID: "a2", Role: RoleAssistant, Content: "latest answer"},
 		},
 		Summary:        "stale text summary",
@@ -192,17 +192,60 @@ func TestCompactWithBlobKeepsRealUserMessagesWithoutHandover(t *testing.T) {
 			t.Fatalf("opaque compaction added a text handover: %+v", m)
 		}
 	}
-	if len(c.Messages) != 2 || c.Messages[0].ID != "u1" || c.Messages[1].ID != "u2" {
-		t.Fatalf("messages = %+v, want retained real user messages only", c.Messages)
+	if got, want := messageIDs(c.Messages), []string{"u2", "a2"}; !sameMessageIDs(got, want) {
+		t.Fatalf("retained ids = %v, want chronological suffix %v", got, want)
 	}
 	if c.CompactionPrefixMessages != 2 {
-		t.Fatalf("CompactionPrefixMessages = %d, want 2", c.CompactionPrefixMessages)
+		t.Fatalf("CompactionPrefixMessages = %d, want 2 retained transcript messages", c.CompactionPrefixMessages)
 	}
-	for _, m := range c.Messages {
-		if m.Role != RoleUser {
-			t.Fatalf("retained role = %q, want only user messages", m.Role)
+}
+
+func TestCompactWithBlobPreservesChronologicalRetainedSuffix(t *testing.T) {
+	c := &Conversation{
+		Messages: []Message{
+			{ID: "u-old", Role: RoleUser, Content: strings.Repeat("old question ", 100)},
+			{ID: "a-old", Role: RoleAssistant, Content: strings.Repeat("old answer ", 100)},
+			{ID: "u-new", Role: RoleUser, Content: "latest question"},
+			{ID: "a-new", Role: RoleAssistant, Content: "latest answer"},
+		},
+	}
+
+	archived := c.ArchiveBlobMessages(100)
+	c.CompactWithBlob(`[{"type":"compaction","encrypted_content":"NEW"}]`, 100)
+
+	ids := make([]string, 0, len(c.Messages))
+	for _, message := range c.Messages {
+		ids = append(ids, message.ID)
+	}
+	if got, want := ids, []string{"u-new", "a-new"}; !sameMessageIDs(got, want) {
+		t.Fatalf("retained ids = %v, want chronological suffix %v", got, want)
+	}
+	if got, want := messageIDs(archived), []string{"u-old", "a-old"}; !sameMessageIDs(got, want) {
+		t.Fatalf("archived ids = %v, want chronological prefix %v", got, want)
+	}
+	if c.CompactionPrefixMessages != len(c.Messages) {
+		t.Fatalf("CompactionPrefixMessages = %d, want %d retained transcript messages", c.CompactionPrefixMessages, len(c.Messages))
+	}
+}
+
+func messageIDs(messages []Message) []string {
+	ids := make([]string, 0, len(messages))
+	for _, message := range messages {
+		ids = append(ids, message.ID)
+	}
+	return ids
+}
+
+func sameMessageIDs(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
 		}
 	}
+	return true
 }
 
 // TestCompactPreservesChronologicalOrderAndPutsSummaryFirst: Compact must

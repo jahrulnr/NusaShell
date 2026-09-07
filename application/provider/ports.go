@@ -63,6 +63,12 @@ type VideoLister interface {
 // Logger records a structured application log line.
 type Logger func(level, source, format string, args ...any)
 
+// ModelAdjuster applies runtime model metadata corrections to the provider
+// clone used for a read. The application wires learned context caps and
+// manual overrides here so the model window shown by the frontend matches
+// the window used by the agent runtime.
+type ModelAdjuster func(*domain.Provider, *domain.Model)
+
 // Deps is the narrow wiring for New. Feature packages never receive *App.
 type Deps struct {
 	Store                  Store
@@ -75,6 +81,7 @@ type Deps struct {
 	VideoListerFactory     func(*domain.Provider) VideoLister
 	Log                    Logger
 	DataDir                string
+	AdjustModel            ModelAdjuster
 	OnConfigChanged        func()
 	OfflineTTS             func() []contracts.ModelDTO
 }
@@ -91,6 +98,7 @@ type Service struct {
 	videoListerFactory     func(*domain.Provider) VideoLister
 	log                    Logger
 	dataDir                string
+	adjustModel            ModelAdjuster
 	onConfigChanged        func()
 	offlineTTS             func() []contracts.ModelDTO
 }
@@ -108,6 +116,7 @@ func New(d Deps) *Service {
 		videoListerFactory:     d.VideoListerFactory,
 		log:                    d.Log,
 		dataDir:                d.DataDir,
+		adjustModel:            d.AdjustModel,
 		onConfigChanged:        d.OnConfigChanged,
 		offlineTTS:             d.OfflineTTS,
 	}

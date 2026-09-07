@@ -2,12 +2,13 @@
 
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 
-export function formatContextUsage(usedTokens, contextWindow) {
+export function formatContextUsage(usedTokens, contextWindow, estimated = false) {
   const used = Number.isFinite(usedTokens) && usedTokens > 0 ? usedTokens : 0;
+  const prefix = estimated && used > 0 ? '~' : '';
   if (Number.isFinite(contextWindow) && contextWindow > 0) {
-    return `${formatTokenCount(used)}/${formatTokenCount(contextWindow)} context`;
+    return `${prefix}${formatTokenCount(used)}/${formatTokenCount(contextWindow)} context`;
   }
-  return `${formatTokenCount(used)} ctx`;
+  return `${prefix}${formatTokenCount(used)} ctx`;
 }
 
 /**
@@ -23,14 +24,6 @@ export function effectiveContextWindow(modelWindow, globalMaxInputTokens) {
   const fallback = Number.isFinite(globalMaxInputTokens) && globalMaxInputTokens > 0 ? globalMaxInputTokens : 0;
   if (windowValue > 0) return windowValue;
   return fallback;
-}
-
-export function estimateContextTokens(messages = []) {
-  let chars = 0;
-  for (const message of messages) chars += estimateMessageChars(message);
-  // ~4 chars/token, +4 tokens per message, +5% safety buffer.
-  const tokens = chars / 4 + 4 * messages.length;
-  return Math.ceil(tokens * 1.05);
 }
 
 // initialWindowStart returns the index of the first active message to render

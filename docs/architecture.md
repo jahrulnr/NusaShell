@@ -169,9 +169,11 @@ onto the **same conversation ID** (todos, chunks, and the open room stay
 attached) via `ResetTranscript` then `Add`. `agent.compacted` is emitted.
 Client-side compaction summarizes history with a non-streaming request. Codex
 instead sends a separate streaming remote-v2 request ending in
-`compaction_trigger`, then persists the opaque checkpoint between its retained
-user prefix and every later user/assistant/tool item. OpenAI Responses may
-receive an opaque checkpoint during its normal stream.
+`compaction_trigger`, then starts a new epoch with a chronological retained
+transcript suffix. The Codex adapter filters that suffix into the provider's
+retained user prefix, places the opaque checkpoint after it, and preserves
+every later user/assistant/tool item in order. OpenAI Responses may receive an
+opaque checkpoint during its normal stream.
 
 The client-side summarization input is text-only and bounded: media/file attachments are
 replaced with a short note (compaction models are often not vision- or

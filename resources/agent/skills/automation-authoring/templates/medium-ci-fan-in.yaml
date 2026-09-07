@@ -1,0 +1,38 @@
+# Multi-job non-AI CI example. Replace commands for the target repository.
+# Independent checks fan out; summary starts only after both checks finish.
+version: 1
+name: replace-with-ci-checks
+enabled: false
+trust: safe
+concurrency:
+  key: repository-ci
+  policy: skip
+triggers:
+  - manual: true
+jobs:
+  backend:
+    name: Backend tests
+    timeout: 20m
+    steps:
+      - name: Run Go tests
+        run: |
+          set -eu
+          command -v go >/dev/null
+          go test ./...
+  frontend:
+    name: Frontend tests
+    timeout: 10m
+    steps:
+      - name: Run browser-facing tests
+        run: |
+          set -eu
+          command -v node >/dev/null
+          node --test frontend/tests/*.test.mjs
+  summary:
+    name: Summarize checks
+    needs: [backend, frontend]
+    if: 'backend.run_status == "success" && frontend.run_status == "success"'
+    timeout: 2m
+    steps:
+      - name: Record a successful fan-in
+        run: printf '%s\n' 'backend and frontend checks passed'

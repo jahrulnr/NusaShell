@@ -250,12 +250,35 @@ func (a *Service) StreamTurnRoundOnce(run *TurnRun, adapter ProviderContext, con
 	if a.learnedParams != nil && a.learnedParams.NeedsUserNudge(run.ProviderID, model) && needsUserMessageAtEnd(messages) {
 		messages = append(messages, ChatMessage{Role: "user", Content: userNudgeText})
 	}
-	// Publish a lightweight server-side context estimate (system + messages +
-	// tool definitions as actually sent) so the UI badge is not just a guess
-	// from the transcript alone — and remember it on the conversation so the
-	// idle badge shows the same number.
+	request := ChatRequest{
+		Model:                    model,
+		System:                   system,
+		Messages:                 messages,
+		Tools:                    tools,
+		PromptCaching:            settings.PromptCaching,
+		PromptCache:              promptCache,
+		MaxTokens:                maxTokens,
+		Effort:                   effort,
+		ReasoningSummary:         adapter.ReasoningSummary,
+		ProviderRoute:            conversation.ProviderRoute,
+		Temperature:              settings.Temperature,
+		TopP:                     settings.TopP,
+		TopK:                     settings.TopK,
+		FrequencyPenalty:         settings.FrequencyPenalty,
+		PresencePenalty:          settings.PresencePenalty,
+		ConversationID:           run.ConversationID,
+		ReasoningReplay:          caps.ReasoningReplay,
+		StripParams:              a.learnedParams.StripParams(run.ProviderID, model),
+		CompactionBlob:           conversation.CompactionBlob,
+		CompactionPrefixMessages: a.compactionPrefixMessageCount(conversation, caps),
+		ContextManagement:        serverCompactionContextManagementForKind(model, adapter.Kind),
+	}
+	// Publish a provisional server-side preflight estimate. It is calculated
+	// from the exact ChatRequest below, after provider-specific conversion, so
+	// internal application fields and inline media base64 do not inflate it.
+	// Provider-measured context usage is emitted only when the round completes.
 	if a.Bus != nil {
-		est := estimateRequestTokens(system, messages, tools)
+		est := provider.EstimateRequestTokens(request, adapter.Kind, adapter.OpenRouter)
 		a.Bus.Emit(contracts.EventContextEstimate, contracts.ContextEstimateEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID,
 			EstimatedTokens: est,
@@ -290,28 +313,7 @@ func (a *Service) StreamTurnRoundOnce(run *TurnRun, adapter ProviderContext, con
 		announcedToolCalls[key] = name
 		a.publishRoundActivity(run.ID, messageID, round, id, name, contracts.RoundActivityToolCall)
 	}
-	response, err := adapter.StreamWithToolActivity(run.Ctx, ChatRequest{
-		Model:                    model,
-		System:                   system,
-		Messages:                 messages,
-		Tools:                    tools,
-		PromptCaching:            settings.PromptCaching,
-		PromptCache:              promptCache,
-		MaxTokens:                maxTokens,
-		Effort:                   effort,
-		ProviderRoute:            conversation.ProviderRoute,
-		Temperature:              settings.Temperature,
-		TopP:                     settings.TopP,
-		TopK:                     settings.TopK,
-		FrequencyPenalty:         settings.FrequencyPenalty,
-		PresencePenalty:          settings.PresencePenalty,
-		ConversationID:           run.ConversationID,
-		ReasoningReplay:          caps.ReasoningReplay,
-		StripParams:              a.learnedParams.StripParams(run.ProviderID, model),
-		CompactionBlob:           conversation.CompactionBlob,
-		CompactionPrefixMessages: a.compactionPrefixMessageCount(conversation, caps),
-		ContextManagement:        serverCompactionContextManagementForKind(model, adapter.Kind),
-	}, func(delta string) {
+	response, err := adapter.StreamWithToolActivity(run.Ctx, request, func(delta string) {
 		content.WriteString(delta)
 		a.publishRoundDelta(run.ID, messageID, round, contracts.RoundDeltaText, "", "", delta)
 	}, func(delta string) {

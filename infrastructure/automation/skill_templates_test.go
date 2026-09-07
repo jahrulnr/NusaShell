@@ -1,6 +1,7 @@
 package automation
 
 import (
+	"io/fs"
 	"strings"
 	"testing"
 
@@ -65,5 +66,39 @@ func TestTelegramTemplateIncludesEventIdentity(t *testing.T) {
 	}
 	if strings.Contains(content, "unread_count") {
 		t.Error("telegram template must not depend on unread_count")
+	}
+}
+
+func TestAllBuiltinAutomationTemplatesParse(t *testing.T) {
+	entries, err := fs.ReadDir(resources.BuiltinSkillsFS, "agent/skills/automation-authoring/templates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+		seen++
+		name := entry.Name()
+		t.Run(name, func(t *testing.T) {
+			raw, err := resources.BuiltinSkillsFS.ReadFile("agent/skills/automation-authoring/templates/" + name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			workflow, err := ParseYAML(raw)
+			if err != nil {
+				t.Fatalf("parse %s: %v", name, err)
+			}
+			if result := domain.ValidateSyntax(workflow); result.Verdict() != "VALID" {
+				t.Fatalf("validate %s: %s (%+v)", name, result.Verdict(), result.Issues)
+			}
+			if workflow.Enabled {
+				t.Fatalf("template %s must be disabled", name)
+			}
+		})
+	}
+	if seen == 0 {
+		t.Fatal("no YAML templates found")
 	}
 }

@@ -149,6 +149,20 @@ test('creating a room resets the context badge before it is rendered', () => {
     'a new empty room must not retain the previous room context usage');
 });
 
+test('live preflight context estimates never replace the last measured provider fill', () => {
+  const eventStart = agentView.indexOf("on('agent.context.estimate'");
+  const eventEnd = agentView.indexOf("on('agent.provider.retry'", eventStart);
+  const eventBody = agentView.slice(eventStart, eventEnd);
+  assert.match(eventBody, /state\.contextEstimate = Number\(estimated_tokens\)/);
+  assert.doesNotMatch(eventBody, /state\.contextMeasured\s*=\s*Number\(estimated_tokens\)/);
+
+  const statusStart = agentView.indexOf('function updateComposerStatus()');
+  const statusEnd = agentView.indexOf('\nfunction seedContextUsage', statusStart);
+  const statusBody = agentView.slice(statusStart, statusEnd);
+  assert.match(statusBody, /formatContextUsage\(backendContextTokens\(\), windowSize, contextUsageIsEstimated\(\)\)/);
+  assert.match(statusBody, /Last context fill reported by the provider/);
+});
+
 test('Context usage stays visible in the narrow composer', () => {
   const providerStatus = agentCSS.slice(
     agentCSS.indexOf('.agent-provider-status {'),

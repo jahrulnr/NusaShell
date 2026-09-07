@@ -142,12 +142,15 @@ type Conversation struct {
 	// that provider so the compacted context is replayed verbatim. Empty for
 	// providers that don't support server-side compaction (then Summary carries
 	// the client-side handover instead).
-	CompactionBlob           string
+	CompactionBlob string
+	// CompactionPrefixMessages counts the chronological messages retained before
+	// the provider checkpoint. Adapters may translate this domain-message count
+	// into their wire-message count before inserting the checkpoint.
 	CompactionPrefixMessages int
-	// EstimatedTokens is the last server-side *heuristic* context estimate for
-	// this conversation (system + messages + tool definitions, ~chars/4). It
-	// is a provisional live number shown while a turn streams, before the
-	// provider reports real usage; it is a fallback for ContextTokens.
+	// EstimatedTokens is the last server-side *heuristic* preflight estimate for
+	// this conversation (provider-visible system/messages/tools plus modality
+	// costs). It is provisional while a turn streams, before the provider
+	// reports real usage; it is a fallback for ContextTokens.
 	EstimatedTokens int64
 	// ContextTokens is the authoritative provider-measured context fill after
 	// the last completed turn (last round's input + cached input + output).
@@ -677,11 +680,11 @@ func (c *Conversation) Compact(summary, handoverContent string, keepTokenBudget 
 }
 
 // CompactWithBlob starts a new compaction epoch using an opaque provider
-// checkpoint instead of a text handover message. Codex remote compaction
-// rebuilds its replacement history from real user messages, not the latest
-// contiguous transcript suffix: assistant/tool turns are already encoded in
-// the opaque checkpoint. The caller persists the epoch through
-// ConversationRepository.ResetTranscript.
+// checkpoint instead of a text handover message. The active transcript keeps
+// the latest contiguous suffix in chronological order for the UI and archive
+// boundary. The Codex adapter filters that prefix to the provider's retained
+// user-message history when it rebuilds the next request. The caller persists
+// the epoch through ConversationRepository.ResetTranscript.
 func (c *Conversation) CompactWithBlob(blob string, keepTokenBudget int) {
 	retained, _ := c.compactionBlobRetention(keepTokenBudget)
 	c.Summary = ""
@@ -709,34 +712,11 @@ func (c *Conversation) ArchiveBlobMessages(keepTokenBudget int) []Message {
 	return archived
 }
 
-// compactionBlobRetention mirrors Codex remote-v2 replacement history: keep
-// real user text turns from newest to oldest within the retained budget. The
-// opaque checkpoint carries all assistant and tool history, so retaining that
-// suffix would make the next request omit older user turns and duplicate work.
+// compactionBlobRetention selects the same chronological suffix as ordinary
+// compaction. Provider-specific Codex filtering belongs in the adapter; the
+// domain transcript must not regroup user messages ahead of assistant turns.
 func (c *Conversation) compactionBlobRetention(keepTokenBudget int) (retained []Message, retainedIndices map[int]bool) {
-	retainedIndices = make(map[int]bool)
-	if keepTokenBudget <= 0 {
-		return nil, retainedIndices
-	}
-	remaining := keepTokenBudget
-	for i := len(c.Messages) - 1; i >= 0 && remaining > 0; i-- {
-		m := c.Messages[i]
-		if m.Role != RoleUser || m.Content == "" || IsCompactionSummary(m.Content) {
-			continue
-		}
-		tokens := EstimateTokens(m.Content)
-		if tokens > remaining {
-			m = StripForRetention(m)
-			m.Content = truncateToTokenBudget(m.Content, remaining)
-		}
-		retained = append(retained, StripForRetention(m))
-		retainedIndices[i] = true
-		remaining -= tokens
-	}
-	for left, right := 0, len(retained)-1; left < right; left, right = left+1, right-1 {
-		retained[left], retained[right] = retained[right], retained[left]
-	}
-	return retained, retainedIndices
+	return c.compactionRetention(keepTokenBudget)
 }
 
 func truncateToTokenBudget(content string, tokens int) string {

@@ -3101,8 +3101,8 @@ func TestCompactConversationUsesCodexRemoteCompaction(t *testing.T) {
 	conv := &domain.Conversation{
 		ID: "c-codex-remote",
 		Messages: []domain.Message{
-			{ID: "u1", Role: domain.RoleUser, Content: strings.Repeat("old question ", 120), Status: domain.StatusDone},
-			{ID: "a1", Role: domain.RoleAssistant, Content: strings.Repeat("old answer ", 120), Status: domain.StatusDone},
+			{ID: "u1", Role: domain.RoleUser, Content: strings.Repeat("old question ", 30000), Status: domain.StatusDone},
+			{ID: "a1", Role: domain.RoleAssistant, Content: strings.Repeat("old answer ", 30000), Status: domain.StatusDone},
 			{ID: "u2", Role: domain.RoleUser, Content: "keep this latest question", Status: domain.StatusDone},
 			{ID: "a2", Role: domain.RoleAssistant, Content: "keep this latest answer", Status: domain.StatusDone},
 		},
@@ -3145,12 +3145,12 @@ func TestCompactConversationUsesCodexRemoteCompaction(t *testing.T) {
 		t.Fatalf("Summary = %q, want empty", saved.Summary)
 	}
 	if saved.CompactionPrefixMessages != 2 {
-		t.Fatalf("CompactionPrefixMessages = %d, want 2 retained user messages", saved.CompactionPrefixMessages)
+		t.Fatalf("CompactionPrefixMessages = %d, want 2 retained transcript messages", saved.CompactionPrefixMessages)
 	}
 	if len(saved.Messages) <= saved.CompactionPrefixMessages || !domain.IsHydrationMessage(saved.Messages[saved.CompactionPrefixMessages]) {
 		t.Fatalf("messages = %+v, want hydration after the persisted checkpoint boundary", saved.Messages)
 	}
-	retainedUsers := 0
+	retainedIDs := make([]string, 0, saved.CompactionPrefixMessages)
 	for _, message := range saved.Messages {
 		if domain.IsCompactionSummary(message.Content) {
 			t.Fatalf("Codex compaction inserted a text handover: %+v", message)
@@ -3158,16 +3158,13 @@ func TestCompactConversationUsesCodexRemoteCompaction(t *testing.T) {
 		if domain.IsHydrationMessage(message) {
 			continue
 		}
-		if message.Role != domain.RoleUser {
-			t.Fatalf("Codex active epoch retained %s message %q, want only real user messages", message.Role, message.ID)
-		}
-		retainedUsers++
+		retainedIDs = append(retainedIDs, message.ID)
 	}
-	if retainedUsers != 2 {
-		t.Fatalf("Codex active epoch retained %d real user messages, want 2", retainedUsers)
+	if len(retainedIDs) != 2 || retainedIDs[0] != "u2" || retainedIDs[1] != "a2" {
+		t.Fatalf("Codex active epoch ids = %v, want chronological suffix [u2 a2]", retainedIDs)
 	}
-	if len(store.archived) != 2 || store.archived[0].ID != "a1" || store.archived[1].ID != "a2" {
-		t.Fatalf("Codex archived messages = %+v, want assistant turns moved to the archive", store.archived)
+	if len(store.archived) != 2 || store.archived[0].ID != "u1" || store.archived[1].ID != "a1" {
+		t.Fatalf("Codex archived messages = %+v, want chronological prefix moved to the archive", store.archived)
 	}
 }
 

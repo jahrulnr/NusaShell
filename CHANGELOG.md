@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-09-08
+
+### Fixed
+
+- **Codex opaque compaction now preserves transcript order.** The active epoch
+  keeps its retained user, assistant, and tool messages in chronological order
+  after compaction, while the Codex provider adapter still builds the wire
+  prefix required by the upstream API. This prevents user messages from
+  stacking together after a compaction checkpoint.
+
 ## [0.6.0] - 2026-09-07
 
 ### Added

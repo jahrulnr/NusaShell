@@ -14,9 +14,10 @@ const (
 	// RequestTokenPerMessageOverhead is the per-message token overhead
 	// added to the char-based estimate (provider framing, role tags).
 	RequestTokenPerMessageOverhead = 4
-	// RequestTokenImageCost is the approximate token cost of one image
-	// attachment added on top of the char-based estimate.
-	RequestTokenImageCost = 150
+	// RequestTokenImageCost is the fallback modality cost for an image (and
+	// other non-text media) when its provider-specific resolution is unknown.
+	// It must never be applied to the base64 byte length.
+	RequestTokenImageCost = 1500
 	// RequestTokenSafetyBuffer is the multiplier applied to the final
 	// token estimate so the agent compacts before the real count reaches
 	// the limit.

@@ -35,6 +35,11 @@ func (s *Service) HandleModelsList() (any, *contracts.RPCError) {
 					p.Models[i].Kind = domain.ModelKindEmbedding
 				}
 			}
+			if s.adjustModel != nil {
+				for i := range p.Models {
+					s.adjustModel(p, &p.Models[i])
+				}
+			}
 			out = append(out, modelsDTO(p)...)
 		}
 	}

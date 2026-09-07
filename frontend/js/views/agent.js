@@ -4,7 +4,7 @@ import { rpc, on, emit } from '../rpc.js';
 import { el, fmtTime, toast, confirmDialog, debounce } from '../ui.js';
 import { renderMarkdown } from '../markdown.js';
 import { incrementalRender } from '../incremental-render.js';
-import { estimateContextTokens, formatContextUsage, effectiveContextWindow, previousWindowStart, conversationTail, isThreadAtBottom, updateScrollPin, shouldDetachFollow, isNestedScrollerEvent } from '../agent-ui.js';
+import { formatContextUsage, effectiveContextWindow, previousWindowStart, conversationTail, isThreadAtBottom, updateScrollPin, shouldDetachFollow, isNestedScrollerEvent } from '../agent-ui.js';
 import { createThreadFollow, stickThreadToBottom } from '../thread-follow.js';
 import { bindComposer, updateSendAvailability } from './agent/composer.js';
 import { bindModelPicker } from './agent/model-picker.js';
@@ -124,7 +124,8 @@ const state = {
   initialScroll: null,
   steerId: null, // id of the queued steer shown in the strip (per-room, saved/restored)
   steerDraft: '', // text of pending steer (per-room, saved/restored)
-  contextEstimate: 0, // backend context tokens for the active room (server SoT: live estimate during a turn, provider-measured after)
+  contextEstimate: 0, // provisional estimate for the current provider request
+  contextMeasured: 0, // last provider-reported context fill for the active room
   // Chunk-based lazy load: track how many pre-compaction chunks are available
   // (from the backend) and which chunk index to load next (descending from
   // ChunkCount-1 toward 0). loadedChunks prevents duplicate loads.
@@ -1149,6 +1150,7 @@ async function createConversation(title = '') {
     state.conversation = conversation;
     state.messages = [];
     state.contextEstimate = 0;
+    state.contextMeasured = 0;
     state.pinned = true;
     state.followDetached = false;
     state.pendingScrollIntent = '';
@@ -1268,6 +1270,7 @@ async function deleteConversation(id) {
       state.steerId = null;
       state.steerDraft = '';
       state.contextEstimate = 0;
+      state.contextMeasured = 0;
       state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, brief: '' };
       state.todoRenderToken++;
       clearSteerQueue();
@@ -1315,10 +1318,9 @@ async function openConversation(id) {
     console.warn('built-in tool contracts unavailable; using compatibility renderer', err);
   }
   if (token !== state.conversationLoadToken) return;
-  // Seed the context badge from the backend for this room (provider-measured
-  // fill preferred, else server heuristic). Resetting here prevents another
-  // room's number from leaking across a switch.
-  state.contextEstimate = Number(conversation?.context_tokens) || Number(conversation?.estimated_tokens) || 0;
+  // Seed the two distinct backend values for this room. A provider-measured
+  // snapshot is authoritative; estimated_tokens is only a preflight fallback.
+  seedContextUsage(conversation);
   // Window only the older prefix on open; the complete trailing assistant run
   // stays visible even when it contains many persisted tool rounds.
   applyConversationTail();
@@ -2896,18 +2898,13 @@ function bindEvents() {
     void openRoundStream(run);
   });
   on('agent.context.estimate', (payload) => {
-    // Use the server-side estimate of what is really sent (system + messages
-    // + tool definitions) instead of a transcript-only guess.
+    // This event is a preflight estimate of the next request, not provider
+    // usage. Keep it separate so a large estimate cannot overwrite the last
+    // measured context and make the live badge appear to overflow.
     const { conversation_id, estimated_tokens } = payload;
     if (conversation_id !== state.activeId) return;
     state.contextEstimate = Number(estimated_tokens) || 0;
-    const status = providerStatus();
-    if (!status) return;
-    if (!Number.isFinite(Number(estimated_tokens)) || Number(estimated_tokens) <= 0) return;
-    const chosen = models.find((model) => `${model.provider_id}:${model.id}` === state.model) || models.find((model) => model.id === state.model);
-    if (!chosen) return;
-    const windowSize = effectiveContextWindow(Number(chosen.context) || 0, Number(state.settings.max_input_tokens) || 0);
-    status.textContent = formatContextUsage(Number(estimated_tokens), windowSize);
+    updateComposerStatus();
   });
   on('agent.provider.retry', (payload) => {
     const { attempt, max_attempts, delay_ms, error, conversation_id } = payload;
@@ -3179,6 +3176,7 @@ function bindEvents() {
     // Adopt the authoritative provider-measured context fill for the badge
     // (source of truth), so idle reflects real usage instead of an estimate.
     if (conversation_id === state.activeId && Number(context_tokens) > 0) {
+      state.contextMeasured = Number(context_tokens);
       state.contextEstimate = Number(context_tokens);
     }
     // A final round.done can win the transport race and use the bounded SSE
@@ -3536,7 +3534,7 @@ async function applyLiveCompaction(conversationId, run, expectedRunId = '') {
     if (runForConversation(conversationId) !== run || (expectedRunId && run.runId !== expectedRunId)) return;
     state.conversation = conversation;
     state.messages = messages ?? [];
-    state.contextEstimate = Number(conversation?.context_tokens) || Number(conversation?.estimated_tokens) || 0;
+    seedContextUsage(conversation);
     applyConversationTail();
     state.chunkCount = conversation?.chunk_count ?? 0;
     state.nextChunkIndex = state.chunkCount - 1;
@@ -3587,7 +3585,7 @@ async function refreshActiveConversation({ preserveLiveNode = null } = {}) {
     state.messages = messages ?? [];
     // Re-sync the context badge with the backend source of truth (the turn
     // that just finished persisted the provider-measured context_tokens).
-    state.contextEstimate = Number(conversation?.context_tokens) || Number(conversation?.estimated_tokens) || 0;
+    seedContextUsage(conversation);
     // Re-window to the tail on refresh (a turn finished / compaction changed
     // the set). Render respects the pin so a user who scrolled up is not yanked.
     applyConversationTail();
@@ -3792,10 +3790,12 @@ function updateComposerStatus() {
     const chosen = models.find((model) => `${model.provider_id}:${model.id}` === state.model) || models.find((model) => model.id === state.model);
     if (chosen) {
       const windowSize = effectiveContextWindow(Number(chosen.context) || 0, Number(state.settings.max_input_tokens) || 0);
-      // Backend is the source of truth: state.contextEstimate holds the live
-      // server estimate (agent.context.estimate) during the turn and the
-      // provider-measured fill (agent.turn.done) after. Never sum UI bubbles.
-      status.textContent = formatContextUsage(backendContextTokens(), windowSize);
+      // The last provider snapshot is authoritative. A preflight estimate is
+      // shown only when no provider snapshot exists, and is visibly marked.
+      status.textContent = formatContextUsage(backendContextTokens(), windowSize, contextUsageIsEstimated());
+      status.title = contextUsageIsEstimated()
+        ? 'Preflight estimate; provider usage is confirmed after the response.'
+        : 'Last context fill reported by the provider.';
       return;
     }
     // No model selected — fall back to a neutral running label.
@@ -3818,19 +3818,39 @@ function updateComposerStatus() {
   const contextWindow = effectiveContextWindow(Number(chosen.context) || 0, Number(state.settings.max_input_tokens) || 0);
   // Idle: show the backend source of truth (provider-measured context_tokens,
   // falling back to the server heuristic), never a client bubble sum.
-  status.textContent = formatContextUsage(backendContextTokens(), contextWindow);
+  status.textContent = formatContextUsage(backendContextTokens(), contextWindow, contextUsageIsEstimated());
+  status.title = contextUsageIsEstimated()
+    ? 'Preflight estimate; provider usage is confirmed after the response.'
+    : 'Last context fill reported by the provider.';
+}
+
+function seedContextUsage(conversation) {
+  const measured = Number(conversation?.context_tokens);
+  const estimate = Number(conversation?.estimated_tokens);
+  state.contextMeasured = Number.isFinite(measured) && measured > 0 ? measured : 0;
+  state.contextEstimate = Number.isFinite(estimate) && estimate > 0
+    ? estimate
+    : state.contextMeasured;
+}
+
+function contextUsageIsEstimated() {
+  const measured = Number(state.contextMeasured);
+  if (Number.isFinite(measured) && measured > 0) return false;
+  const persisted = Number(state.conversation?.context_tokens);
+  return !(Number.isFinite(persisted) && persisted > 0);
 }
 
 // backendContextTokens returns the server's context-fill number for the active
-// room. It prefers the live/last value already tracked in state.contextEstimate
-// (seeded from the conversation on open and updated by server events), then the
-// persisted provider-measured context_tokens, then the server heuristic
-// estimate. The frontend never estimates context by summing message bubbles.
+// room. It prefers the last provider-measured snapshot, then the persisted
+// provider value, and only then the provisional server estimate. The frontend
+// never estimates context by summing message bubbles.
 function backendContextTokens() {
-  const live = Number(state.contextEstimate);
-  if (Number.isFinite(live) && live > 0) return live;
+  const measured = Number(state.contextMeasured);
+  if (Number.isFinite(measured) && measured > 0) return measured;
   const ctx = Number(state.conversation?.context_tokens);
   if (Number.isFinite(ctx) && ctx > 0) return ctx;
+  const live = Number(state.contextEstimate);
+  if (Number.isFinite(live) && live > 0) return live;
   const est = Number(state.conversation?.estimated_tokens);
   if (Number.isFinite(est) && est > 0) return est;
   return 0;

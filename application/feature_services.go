@@ -457,6 +457,7 @@ func (a *App) providerDeps() provider.Deps {
 		Catalog:     a.ModelCatalog,
 		Log:         a.log,
 		DataDir:     a.DataDir,
+		AdjustModel: a.applyModelOverrides,
 		OnConfigChanged: func() {
 			a.publishAnnouncementToAll(newAnnouncement(
 				"config_changed",
