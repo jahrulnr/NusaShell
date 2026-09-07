@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/core"
@@ -99,6 +100,18 @@ func TestReasoningReplayOffDoesNotInjectPlaceholder(t *testing.T) {
 				t.Fatalf("ReasoningReplay=false with empty reasoning must not inject any ReasoningBlock, got: %#v", block)
 			}
 		}
+	}
+}
+
+func TestStreamIdleTimeoutUsesCodexUpstreamWindowForRemoteCompaction(t *testing.T) {
+	if got := streamIdleTimeout(ChatRequest{RemoteCompaction: true}, domain.ProviderCodex); got != 5*time.Minute {
+		t.Fatalf("Codex remote compaction timeout = %s, want 5m", got)
+	}
+	if got := streamIdleTimeout(ChatRequest{RemoteCompaction: false}, domain.ProviderCodex); got != 60*time.Second {
+		t.Fatalf("ordinary Codex stream timeout = %s, want 1m", got)
+	}
+	if got := streamIdleTimeout(ChatRequest{RemoteCompaction: true}, domain.ProviderResponses); got != 60*time.Second {
+		t.Fatalf("non-Codex remote compaction timeout = %s, want 1m", got)
 	}
 }
 
@@ -396,6 +409,113 @@ func TestReasoningExtraAloneCreatesReasoningBlock(t *testing.T) {
 	}
 }
 
+// TestChatKindStripsCodexReasoningExtra keeps plaintext reasoning when a
+// Codex/Responses room is continued on OpenAI Chat (e.g. OpenCode DeepSeek).
+// Chat wire rejects Extra and would fail the turn before the request leaves.
+func TestChatKindStripsCodexReasoningExtra(t *testing.T) {
+	extra := json.RawMessage(`{"id":"rs_1","type":"reasoning","encrypted_content":"ENC-REASON","summary":[{"type":"summary_text","text":"think"}]}`)
+	cr := ToCoreRequest(ChatRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []ChatMessage{
+			{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: extra},
+		},
+	}, domain.ProviderChat, false)
+
+	rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+	if !ok {
+		t.Fatalf("blocks[0] = %#v, want ReasoningBlock with plaintext", cr.Messages[0].Blocks[0])
+	}
+	if rb.Text != "think" {
+		t.Fatalf("Text = %q, want think", rb.Text)
+	}
+	if len(rb.Extra) != 0 {
+		t.Fatalf("Extra = %s, want stripped for chat kind", rb.Extra)
+	}
+}
+
+func TestChatKindDropsExtraOnlyReasoningWithoutReplay(t *testing.T) {
+	extra := json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC-ONLY"}`)
+	cr := ToCoreRequest(ChatRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []ChatMessage{
+			{Role: "assistant", Content: "ok", ReasoningExtra: extra},
+		},
+	}, domain.ProviderChat, false)
+	for _, block := range cr.Messages[0].Blocks {
+		if _, ok := block.(core.ReasoningBlock); ok {
+			t.Fatalf("chat must not emit Extra-only ReasoningBlock, got %#v", block)
+		}
+	}
+}
+
+func TestMessagesKindStripsCodexReasoningExtra(t *testing.T) {
+	extra := json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC-REASON"}`)
+	cr := ToCoreRequest(ChatRequest{
+		Model: "claude-sonnet-4-6",
+		Messages: []ChatMessage{
+			{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: extra},
+		},
+	}, domain.ProviderMessages, false)
+	rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+	if !ok {
+		t.Fatalf("blocks[0] = %#v, want ReasoningBlock", cr.Messages[0].Blocks[0])
+	}
+	if rb.Text != "think" || len(rb.Extra) != 0 {
+		t.Fatalf("ReasoningBlock = %#v, want plaintext only", rb)
+	}
+}
+
+func TestOpenRouterChatKeepsArrayReasoningExtra(t *testing.T) {
+	extra := json.RawMessage(`[{"type":"reasoning.text","text":"step 1"}]`)
+	cr := ToCoreRequest(ChatRequest{
+		Model: "openrouter/free",
+		Messages: []ChatMessage{
+			{Role: "assistant", Content: "ok", Reasoning: "step 1", ReasoningExtra: extra},
+		},
+	}, domain.ProviderChat, true)
+	rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+	if !ok {
+		t.Fatalf("blocks[0] = %#v, want ReasoningBlock", cr.Messages[0].Blocks[0])
+	}
+	if string(rb.Extra) != string(extra) {
+		t.Fatalf("Extra = %s, want openrouter reasoning_details array kept", rb.Extra)
+	}
+}
+
+func TestOpenRouterChatStripsCodexObjectReasoningExtra(t *testing.T) {
+	extra := json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC-REASON"}`)
+	cr := ToCoreRequest(ChatRequest{
+		Model: "openrouter/free",
+		Messages: []ChatMessage{
+			{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: extra},
+		},
+	}, domain.ProviderChat, true)
+	rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+	if !ok {
+		t.Fatalf("blocks[0] = %#v, want ReasoningBlock", cr.Messages[0].Blocks[0])
+	}
+	if len(rb.Extra) != 0 {
+		t.Fatalf("Extra = %s, want Codex object stripped on OpenRouter chat", rb.Extra)
+	}
+}
+
+func TestCodexKindKeepsReasoningExtra(t *testing.T) {
+	extra := json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC-REASON"}`)
+	cr := ToCoreRequest(ChatRequest{
+		Model: "gpt-5.6-luna",
+		Messages: []ChatMessage{
+			{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: extra},
+		},
+	}, domain.ProviderCodex, false)
+	rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+	if !ok {
+		t.Fatalf("blocks[0] = %#v, want ReasoningBlock", cr.Messages[0].Blocks[0])
+	}
+	if string(rb.Extra) != string(extra) {
+		t.Fatalf("Extra = %s, want preserved for codex", rb.Extra)
+	}
+}
+
 func TestReasoningExtraAbsentLeavesExtraNil(t *testing.T) {
 	cr := ToCoreRequest(ChatRequest{
 		Model: "gpt-5.6-sol",
@@ -454,14 +574,19 @@ func TestToCoreRequestOmitsCompactionItemsForChatKind(t *testing.T) {
 func TestToCoreRequestCodexForwardsCompactionItemsNotContextManagement(t *testing.T) {
 	blob := `[{"type":"compaction","encrypted_content":"ENC-1"}]`
 	cr := ToCoreRequest(ChatRequest{
-		Model:          "gpt-5-codex",
-		CompactionBlob: blob,
+		Model:                    "gpt-5-codex",
+		System:                   "current instructions",
+		CompactionBlob:           blob,
+		CompactionPrefixMessages: 2,
 		ContextManagement: []map[string]any{
 			{"type": "compaction", "compact_threshold": 360000},
 		},
 	}, domain.ProviderCodex, false)
 	if got := cr.ProviderOptions["compaction_items"]; got != blob {
 		t.Fatalf("compaction_items = %#v, want %q", got, blob)
+	}
+	if got := cr.ProviderOptions["compaction_prefix_messages"]; got != 3 {
+		t.Fatalf("compaction_prefix_messages = %#v, want 3 including the prepended system message", got)
 	}
 	if _, ok := cr.ProviderOptions["context_management"]; ok {
 		t.Fatal("context_management must not be set for codex kind")
@@ -479,6 +604,30 @@ func TestToCoreRequestCodexSetsCompactionTrigger(t *testing.T) {
 	}
 	if got := cr.ProviderOptions["session_id"]; got != "conv_codex" {
 		t.Fatalf("session_id = %#v, want conversation id", got)
+	}
+}
+
+func TestToCoreRequestCodexForwardsReasoningSummary(t *testing.T) {
+	cr := ToCoreRequest(ChatRequest{Model: "gpt-5.6-terra", ReasoningSummary: "detailed"}, domain.ProviderCodex, false)
+	if got := cr.ProviderOptions["reasoning_summary"]; got != "detailed" {
+		t.Fatalf("reasoning_summary = %#v, want detailed", got)
+	}
+	nonCodex := ToCoreRequest(ChatRequest{Model: "gpt-5.6", ReasoningSummary: "detailed"}, domain.ProviderResponses, false)
+	if _, ok := nonCodex.ProviderOptions["reasoning_summary"]; ok {
+		t.Fatal("responses provider must not receive Codex reasoning_summary option")
+	}
+}
+
+func TestNewProviderContextCarriesCodexReasoningSummary(t *testing.T) {
+	pc := NewProviderContext(&domain.Provider{
+		ID:               "codex",
+		Kind:             domain.ProviderCodex,
+		ReasoningSummary: domain.ReasoningSummaryDetailed,
+	}, nil)
+
+	got := pc.withProviderOptions(ChatRequest{})
+	if got.ReasoningSummary != domain.ReasoningSummaryDetailed {
+		t.Fatalf("ReasoningSummary = %q, want detailed", got.ReasoningSummary)
 	}
 }
 

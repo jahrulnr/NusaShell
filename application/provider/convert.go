@@ -13,10 +13,24 @@ import (
 	"nusashell/infrastructure/ai/core"
 )
 
-// defaultIdleTimeout is the per-chunk stall window for SSE streams. Mirrors
-// aiutil.DefaultIdleTimeout — duplicated here to avoid an import cycle
-// (application → infrastructure/ai/internal → application).
-const defaultIdleTimeout = 60 * time.Second
+const (
+	// defaultIdleTimeout is the per-chunk stall window for ordinary SSE
+	// streams. Mirrors aiutil.DefaultIdleTimeout — duplicated here to avoid an
+	// import cycle (application → infrastructure/ai/internal → application).
+	defaultIdleTimeout = 60 * time.Second
+	// codexRemoteCompactionIdleTimeout mirrors Codex upstream's default
+	// stream_idle_timeout. Remote compaction can legitimately have a long
+	// first-token gap while the server processes a large retained history, so
+	// it must not inherit the interactive-turn 60-second watchdog.
+	codexRemoteCompactionIdleTimeout = 5 * time.Minute
+)
+
+func streamIdleTimeout(req ChatRequest, kind domain.ProviderKind) time.Duration {
+	if kind == domain.ProviderCodex && req.RemoteCompaction {
+		return codexRemoteCompactionIdleTimeout
+	}
+	return defaultIdleTimeout
+}
 
 // ToCoreRequest translates an application ChatRequest into the shared
 // core.Request (Blocks-based model). Provider-specific semantics that have
@@ -51,6 +65,9 @@ func ToCoreRequest(req ChatRequest, kind domain.ProviderKind, openRouter bool) *
 	if hasParam(req.StripParams, "reasoning_effort") {
 		out.Thinking = nil
 	}
+	if kind == domain.ProviderCodex && req.ReasoningSummary != "" {
+		setProviderOption(out, "reasoning_summary", req.ReasoningSummary)
+	}
 
 	if req.System != "" {
 		systemBlock := core.TextBlock{Text: req.System}
@@ -63,7 +80,7 @@ func ToCoreRequest(req ChatRequest, kind domain.ProviderKind, openRouter bool) *
 		out.Messages = append(out.Messages, core.Message{Role: core.RoleSystem, Blocks: []core.Block{systemBlock}})
 	}
 	for _, m := range req.Messages {
-		out.Messages = append(out.Messages, chatMessageToCore(m, req))
+		out.Messages = append(out.Messages, chatMessageToCore(m, req, kind, openRouter))
 	}
 	for _, t := range req.Tools {
 		tool, err := core.NewTool(t.Name, t.Description, t.InputSchema)
@@ -86,6 +103,13 @@ func ToCoreRequest(req ChatRequest, kind domain.ProviderKind, openRouter bool) *
 	}
 	if req.CompactionBlob != "" && (kind == domain.ProviderResponses || kind == domain.ProviderCodex) {
 		setProviderOption(out, "compaction_items", req.CompactionBlob)
+		if kind == domain.ProviderCodex {
+			prefixMessages := req.CompactionPrefixMessages
+			if strings.TrimSpace(req.System) != "" {
+				prefixMessages++
+			}
+			setProviderOption(out, "compaction_prefix_messages", prefixMessages)
+		}
 	}
 	if req.ContextManagement != nil && kind == domain.ProviderResponses {
 		setProviderOption(out, "context_management", req.ContextManagement)
@@ -128,6 +152,7 @@ func FromCoreResponse(resp *core.Response) ChatResponse {
 		OutputTokens: resp.Usage.OutputTokens,
 		CacheRead:    resp.Usage.CacheReadTokens,
 		CacheWrite:   resp.Usage.CacheWriteTokens,
+		TotalTokens:  resp.Usage.TotalTokens,
 	}
 	for _, w := range resp.Warnings {
 		out.Warnings = append(out.Warnings, fmt.Sprintf("%s: %s", w.Code, w.Message))
@@ -214,7 +239,33 @@ func thinkingFromEffort(effort string) *core.Thinking {
 	}
 }
 
-func chatMessageToCore(m ChatMessage, req ChatRequest) core.Message {
+// reasoningExtraForKind returns the opaque ReasoningExtra payload when the
+// target provider kind can replay it. Foreign encrypted Codex/Responses
+// items must not reach OpenAI Chat or Anthropic Messages history.
+func reasoningExtraForKind(extra json.RawMessage, kind domain.ProviderKind, openRouter bool) json.RawMessage {
+	if len(extra) == 0 {
+		return nil
+	}
+	switch kind {
+	case domain.ProviderResponses, domain.ProviderCodex:
+		return extra
+	case domain.ProviderChat:
+		if !openRouter {
+			return nil
+		}
+		// OpenRouter Chat replays reasoning_details as a JSON array. Codex
+		// encrypted items are objects and would fail openrouter putReasoning.
+		var details []any
+		if err := json.Unmarshal(extra, &details); err != nil {
+			return nil
+		}
+		return extra
+	default:
+		return nil
+	}
+}
+
+func chatMessageToCore(m ChatMessage, req ChatRequest, kind domain.ProviderKind, openRouter bool) core.Message {
 	switch m.Role {
 	case "user":
 		return core.Message{Role: core.RoleUser, Blocks: userBlocks(m)}
@@ -225,24 +276,24 @@ func chatMessageToCore(m ChatMessage, req ChatRequest) core.Message {
 		// message contains any thinking blocks, the first block must be
 		// `thinking` or `redacted_thinking`"). OpenAI Responses and compat
 		// providers don't care about block order — they route by type.
-		hasExtra := len(m.ReasoningExtra) > 0
+		extra := reasoningExtraForKind(m.ReasoningExtra, kind, openRouter)
+		hasExtra := len(extra) > 0
 		if m.Reasoning != "" || hasExtra {
-			// Always send reasoning we have from the persisted conversation.
-			// Testing against OpenRouter confirms non-reasoning models safely
-			// ignore the reasoning field, and reasoning models require it for
-			// context continuity. This uses the conversation store as the
-			// source of truth — no catalog whitelist or proactive learning
-			// needed. Models that intermittently think (task-dependent) will
-			// have reasoning stored on the turns where they did think, and
-			// those turns replay correctly; turns without reasoning simply
-			// have nothing to send.
+			// Always send plaintext reasoning we have from the persisted
+			// conversation. Testing against OpenRouter confirms non-reasoning
+			// models safely ignore the reasoning field, and reasoning models
+			// require it for context continuity. This uses the conversation
+			// store as the source of truth — no catalog whitelist or
+			// proactive learning needed.
 			//
-			// ReasoningExtra (encrypted_content / provider opaque JSON) is
-			// attached when present so OpenAI-family Responses/Codex/compat
-			// adapters can echo the prior reasoning item byte-for-byte.
+			// ReasoningExtra is attached only when the target kind can replay
+			// it. Codex/Responses echo encrypted reasoning items; OpenRouter
+			// Chat keeps array-shaped reasoning_details. OpenAI Chat and
+			// Anthropic Messages reject or ignore foreign Extra, so a
+			// Codex→Chat switch must strip it and keep plaintext only.
 			rb := core.ReasoningBlock{Text: m.Reasoning}
 			if hasExtra {
-				rb.Extra = append(json.RawMessage(nil), m.ReasoningExtra...)
+				rb.Extra = append(json.RawMessage(nil), extra...)
 			}
 			blocks = append(blocks, rb)
 		} else if req.ReasoningReplay {
@@ -361,24 +412,32 @@ func intPtrIf(cond bool, v int) *int {
 // interface methods (Complete/Stream) with thin wrappers that call
 // AIProvider.Chat/Stream + ToCoreRequest/FromCoreResponse/MapCoreError.
 type Context struct {
-	Provider   AIProvider
-	ProviderID string
-	Kind       domain.ProviderKind
-	Driver     domain.ProviderDriver
-	OpenRouter bool
-	BaseURL    string
+	Provider         AIProvider
+	ProviderID       string
+	Kind             domain.ProviderKind
+	Driver           domain.ProviderDriver
+	OpenRouter       bool
+	BaseURL          string
+	ReasoningSummary string
+}
+
+func (pc Context) withProviderOptions(req ChatRequest) ChatRequest {
+	if req.ReasoningSummary == "" {
+		req.ReasoningSummary = pc.ReasoningSummary
+	}
+	return req
 }
 
 // Complete calls provider.Chat with the converted request and returns the
 // converted response. Error mapping is applied so the retry loop keeps working.
 func (pc Context) Complete(ctx context.Context, req ChatRequest) (ChatResponse, error) {
-	return CompleteViaCore(ctx, pc.Provider, req, pc.Kind, pc.OpenRouter)
+	return CompleteViaCore(ctx, pc.Provider, pc.withProviderOptions(req), pc.Kind, pc.OpenRouter)
 }
 
 // Stream calls provider.Stream, sets up the idle watchdog, dispatches
 // content/reasoning deltas, and returns the converted response.
 func (pc Context) Stream(ctx context.Context, req ChatRequest, onDelta, onReasoning func(string)) (ChatResponse, error) {
-	return StreamViaCore(ctx, pc.Provider, req, pc.Kind, pc.OpenRouter, onDelta, onReasoning)
+	return StreamViaCore(ctx, pc.Provider, pc.withProviderOptions(req), pc.Kind, pc.OpenRouter, onDelta, onReasoning)
 }
 
 // ToolUseStart is a provider-side tool-call construction event. Re-exported
@@ -394,7 +453,7 @@ type ToolUseDelta = core.ToolUseDelta
 // executed. Other callers can keep using Stream when they only need answer
 // and reasoning deltas.
 func (pc Context) StreamWithToolActivity(ctx context.Context, req ChatRequest, onDelta, onReasoning func(string), onToolStart func(ToolUseStart), onToolDelta func(ToolUseDelta)) (ChatResponse, error) {
-	return StreamViaCoreWithToolActivity(ctx, pc.Provider, req, pc.Kind, pc.OpenRouter, onDelta, onReasoning, onToolStart, onToolDelta)
+	return StreamViaCoreWithToolActivity(ctx, pc.Provider, pc.withProviderOptions(req), pc.Kind, pc.OpenRouter, onDelta, onReasoning, onToolStart, onToolDelta)
 }
 
 // NewProviderContext builds a Context from a domain.Provider and an
@@ -403,12 +462,13 @@ func (pc Context) StreamWithToolActivity(ctx context.Context, req ChatRequest, o
 // import core.
 func NewProviderContext(p *domain.Provider, provider AIProvider) Context {
 	return Context{
-		Provider:   provider,
-		ProviderID: p.ID,
-		Kind:       p.Kind,
-		Driver:     p.EffectiveDriver(),
-		OpenRouter: domain.UsesOpenRouterWire(p.Kind, p.EffectiveDriver(), p.BaseURL),
-		BaseURL:    p.BaseURL,
+		Provider:         provider,
+		ProviderID:       p.ID,
+		Kind:             p.Kind,
+		Driver:           p.EffectiveDriver(),
+		OpenRouter:       domain.UsesOpenRouterWire(p.Kind, p.EffectiveDriver(), p.BaseURL),
+		BaseURL:          p.BaseURL,
+		ReasoningSummary: domain.NormalizeReasoningSummary(p.Kind, p.ReasoningSummary),
 	}
 }
 
@@ -478,7 +538,7 @@ func StreamViaCoreWithToolActivity(ctx context.Context, provider AIProvider, req
 		return ChatResponse{}, MapCoreError(err, kind)
 	}
 	defer stream.Close()
-	stream = core.WithStreamIdleWatchdog(stream, cancel, defaultIdleTimeout, string(kind))
+	stream = core.WithStreamIdleWatchdog(stream, cancel, streamIdleTimeout(req, kind), string(kind))
 
 	lr, err := core.HandleWith(stream, core.StreamHandler{
 		Content: func(text string) error {

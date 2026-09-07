@@ -9,6 +9,7 @@ func TestResolveServiceOptionsUsesFlagsAndEnv(t *testing.T) {
 	t.Setenv("NUSASHELL_HOST", "127.0.0.1")
 	t.Setenv("NUSASHELL_PORT", "8080")
 	t.Setenv("NUSASHELL_ALLOW_REMOTE", "1")
+	t.Setenv("PATH", "/home/test/.local/bin:/usr/local/bin")
 
 	opts, err := resolveServiceOptions("/opt/nusashell/current/nusashell")
 	if err != nil {
@@ -22,6 +23,9 @@ func TestResolveServiceOptionsUsesFlagsAndEnv(t *testing.T) {
 	}
 	if opts.Host != "127.0.0.1" || opts.Port != "8080" || !opts.AllowRemote {
 		t.Fatalf("overrides not propagated: %+v", opts)
+	}
+	if opts.Path != "/home/test/.local/bin:/usr/local/bin" {
+		t.Fatalf("PATH = %q", opts.Path)
 	}
 }
 

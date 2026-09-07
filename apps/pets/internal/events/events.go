@@ -26,6 +26,9 @@ func Decode(data []byte) (state.Event, bool, error) {
 	if env.Type == "" {
 		return state.Event{}, false, fmt.Errorf("events: envelope type is empty")
 	}
+	if strings.HasPrefix(env.Type, "agent.tool.") && payloadRunID(env.Payload) == "" {
+		return state.Event{}, false, nil
+	}
 
 	var next state.PetState
 	switch env.Type {
@@ -66,6 +69,16 @@ func Decode(data []byte) (state.Event, bool, error) {
 		ev.Title = "Retrying…"
 	}
 	return ev, true, nil
+}
+
+func payloadRunID(payload json.RawMessage) string {
+	var fields struct {
+		RunID string `json:"run_id"`
+	}
+	if len(payload) == 0 || json.Unmarshal(payload, &fields) != nil {
+		return ""
+	}
+	return fields.RunID
 }
 
 func payloadMessage(payload json.RawMessage) string {

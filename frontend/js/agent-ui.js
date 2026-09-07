@@ -74,15 +74,13 @@ export function syncThreadPin(state, thread) {
 // post-growth distance and mistook content growth for the user reading up.
 //
 // - pinned + still at (or near) the bottom → stay pinned.
-// - pinned + scrollTop moved up beyond the tolerance a follow-scroll can
-//   leave → released (user intent: read history).
+// - pinned + explicit upward wheel/touch/scrollbar input → released.
 // - released + user returned near the bottom → re-pinned.
 export function updateScrollPin(state, thread, tolerance = 24, options = {}) {
   if (!thread) return state.pinned;
   const scrollTop = thread.scrollTop;
   const distance = thread.scrollHeight - scrollTop - thread.clientHeight;
   const direction = typeof options === 'string' ? options : options.direction;
-  const previous = state.pinGeom;
   if (direction === 'up') {
     // A gesture is stronger evidence than a single geometry sample. Touchpad
     // and wheel events can move only a few pixels before the first scroll
@@ -90,10 +88,6 @@ export function updateScrollPin(state, thread, tolerance = 24, options = {}) {
     state.pinned = false;
   } else if (direction === 'down' && distance <= tolerance) {
     state.pinned = true;
-  } else if (previous && previous.thread === thread && scrollTop < previous.scrollTop - tolerance) {
-    // Upward movement beyond what a follow-scroll could produce: the user is
-    // scrolling up. Release the pin regardless of where the bottom now is.
-    state.pinned = false;
   } else if (distance <= tolerance) {
     state.pinned = true;
   }
@@ -108,14 +102,7 @@ export function updateScrollPin(state, thread, tolerance = 24, options = {}) {
 export function shouldDetachFollow(state, thread, options = {}) {
   if (!thread) return false;
   const intent = options.intent || '';
-  const geometryDirection = options.geometryDirection || '';
-  const tolerance = Number.isFinite(options.tolerance) ? options.tolerance : 24;
-  if (intent === 'up') return true;
-  if (geometryDirection !== 'up') return false;
-  if (isThreadAtBottom(thread, tolerance)) return false;
-  const previous = state?.pinGeom?.thread === thread ? state.pinGeom.scrollTop : null;
-  if (previous == null) return false;
-  return thread.scrollTop < previous - tolerance;
+  return intent === 'up';
 }
 
 function elementOverflowY(node) {

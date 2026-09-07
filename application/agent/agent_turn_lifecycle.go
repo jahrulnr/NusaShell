@@ -152,7 +152,7 @@ func (a *Service) discardQueuedSteer(run *TurnRun) {
 	if entry == nil {
 		return
 	}
-	a.Bus.Emit(contracts.EventSteerCancelled, contracts.SteerEvent{
+	a.EmitInteractiveTurnEvent(run, contracts.EventSteerCancelled, contracts.SteerEvent{
 		ConversationID: run.ConversationID, SteerID: entry.ID, Text: entry.Text, Status: "cancelled", Reason: contracts.SteerCancelReasonDiscarded,
 	})
 }
@@ -163,6 +163,7 @@ func mergeUsage(a, b ChatUsage) ChatUsage {
 		OutputTokens: a.OutputTokens + b.OutputTokens,
 		CacheRead:    a.CacheRead + b.CacheRead,
 		CacheWrite:   a.CacheWrite + b.CacheWrite,
+		TotalTokens:  a.TotalTokens + b.TotalTokens,
 	}
 }
 

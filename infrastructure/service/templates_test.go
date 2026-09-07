@@ -108,6 +108,30 @@ func TestWindowsTaskArtifactsGolden(t *testing.T) {
 	assertGolden(t, "nusashell-service.vbs.golden", WindowsHiddenLauncher(task))
 }
 
+func TestWindowsTaskScriptPropagatesCapturedPath(t *testing.T) {
+	opts := Options{
+		BinaryPath: `C:\Programs\NusaShell\current\nusashell.exe`,
+		DataDir:    `C:\Users\test\AppData\Roaming\nusashell`,
+		Path:       `C:\Users\test\bin;C:\Program Files\Go\bin`,
+	}
+	script := WindowsTaskScript(opts, ServiceEnv(opts))
+	if !strings.Contains(script, `set "PATH=C:\Users\test\bin;C:\Program Files\Go\bin"`) {
+		t.Fatalf("task script missing captured PATH:\n%s", script)
+	}
+}
+
+func TestWindowsTaskScriptEscapesPercentInCapturedPath(t *testing.T) {
+	opts := Options{
+		BinaryPath: `C:\nusashell.exe`,
+		DataDir:    `C:\data`,
+		Path:       `%USERPROFILE%\bin`,
+	}
+	script := WindowsTaskScript(opts, ServiceEnv(opts))
+	if !strings.Contains(script, `set "PATH=%%USERPROFILE%%\bin"`) {
+		t.Fatalf("task script must preserve literal percent signs in PATH:\n%s", script)
+	}
+}
+
 func TestWindowsTaskXMLScopesUser(t *testing.T) {
 	task := WindowsTask{Name: TaskName, User: `BOX\tester`, ScriptPath: `C:\s.cmd`, LauncherPath: `C:\l.vbs`}
 	xml := WindowsTaskXML(task)

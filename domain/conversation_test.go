@@ -167,12 +167,12 @@ func TestCompactSummaryIsUserRole(t *testing.T) {
 	}
 }
 
-func TestCompactWithBlobKeepsSuffixWithoutHandover(t *testing.T) {
+func TestCompactWithBlobKeepsRealUserMessagesWithoutHandover(t *testing.T) {
 	c := &Conversation{
 		Messages: []Message{
 			{ID: "u1", Role: RoleUser, Content: strings.Repeat("old-", 100)},
 			{ID: "a1", Role: RoleAssistant, Content: strings.Repeat("old-answer-", 100)},
-			{ID: "u2", Role: RoleUser, Content: "latest question"},
+			{ID: "u2", Role: RoleUser, Content: "latest question", Attachments: []Attachment{{Type: "text", Content: strings.Repeat("attachment", 1000)}}},
 			{ID: "a2", Role: RoleAssistant, Content: "latest answer"},
 		},
 		Summary:        "stale text summary",
@@ -192,8 +192,16 @@ func TestCompactWithBlobKeepsSuffixWithoutHandover(t *testing.T) {
 			t.Fatalf("opaque compaction added a text handover: %+v", m)
 		}
 	}
-	if len(c.Messages) == 0 || c.Messages[len(c.Messages)-1].ID != "a2" {
-		t.Fatalf("messages = %+v, want recent suffix ending at a2", c.Messages)
+	if len(c.Messages) != 2 || c.Messages[0].ID != "u1" || c.Messages[1].ID != "u2" {
+		t.Fatalf("messages = %+v, want retained real user messages only", c.Messages)
+	}
+	if c.CompactionPrefixMessages != 2 {
+		t.Fatalf("CompactionPrefixMessages = %d, want 2", c.CompactionPrefixMessages)
+	}
+	for _, m := range c.Messages {
+		if m.Role != RoleUser {
+			t.Fatalf("retained role = %q, want only user messages", m.Role)
+		}
 	}
 }
 

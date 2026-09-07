@@ -54,6 +54,27 @@ func TestExecCwd(t *testing.T) {
 	_ = os.Remove(dir) // keep linters calm about unused os import on some platforms
 }
 
+func TestExecInheritsProcessPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX PATH lookup")
+	}
+	binDir := t.TempDir()
+	binPath := filepath.Join(binDir, "nusashell-path-fixture")
+	if err := os.WriteFile(binPath, []byte("#!/bin/sh\nprintf 'path-fixture\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	tb := &Toolbox{}
+	out, err := tb.Execute(context.Background(), "exec", []byte(`{"command":"command -v nusashell-path-fixture"}`))
+	if err != nil {
+		t.Fatalf("exec PATH lookup: %v", err)
+	}
+	if !strings.Contains(out, binPath) {
+		t.Fatalf("exec did not inherit process PATH, output: %q", out)
+	}
+}
+
 func TestExecIdleTimeout(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix shell syntax")

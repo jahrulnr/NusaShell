@@ -108,7 +108,8 @@ const state = {
   settings: {},
   model: localStorage.getItem('nusashell.model') || '',
   effort: 'auto', // reasoning effort: "auto" (omit) or a level from the model's supported_efforts
-  providerRoute: localStorage.getItem('nusashell.provider_route') || '', // upstream provider pin on aggregators (OpenRouter); "" = auto
+  providerRoute: '', // per-room OpenRouter route or Codex account; "" = auto
+  scrollbarDragging: false,
   runs: new Map(), // run_id -> {messageEl, toolStripEl, toolJobs, conversationId, runId}
   completedLiveRuns: new Map(), // run_id -> { run, node } during terminal-event handoff
   pendingEvents: new Map(), // run_id -> events that won the start race
@@ -867,10 +868,11 @@ function applyConversationTail() {
   state.activeWindowStart = tail.prefixStart;
 }
 
-// Per-room state that survives conversation switches. When the user switches
-// away from a conversation, its per-room state is saved here. When they switch
-// back, it's restored. This prevents state from one room leaking into another.
+// Routing picker state is server-owned per conversation. The in-memory map is
+// only for UI state and must not restore a provider/account from another
+// backend snapshot.
 const savedRooms = new Map(); // conversationId -> { pinned, steerDraft, attachments, model }
+const providerRouteWrites = new Map(); // conversationId -> serialized backend write
 
 function scheduleFrame(thread, callback) {
   const view = thread?.ownerDocument?.defaultView;
@@ -995,9 +997,6 @@ export async function initAgent() {
   bindSubagents({ getActiveConversationId: () => state.activeId });
   bindEvents();
   bindScrollPin();
-  window.addEventListener('nusashell:preferred-model', (event) => {
-    selectModel(event.detail?.model || '');
-  });
   bindBackendAvailability();
   // A dead backend is covered by the full-window offline screen
   // (js/offline-screen.js); the agent view only loads data once connected.
@@ -1149,6 +1148,7 @@ async function createConversation(title = '') {
     state.activeId = conversation.id;
     state.conversation = conversation;
     state.messages = [];
+    state.contextEstimate = 0;
     state.pinned = true;
     state.followDetached = false;
     state.pendingScrollIntent = '';
@@ -1334,14 +1334,15 @@ async function openConversation(id) {
     const requestedModel = conversation.model || localStorage.getItem('nusashell.model') || '';
     state.model = models.length && requestedModel && !models.some((model) => `${model.provider_id}:${model.id}` === requestedModel) && !models.some((model) => model.id === requestedModel) ? '' : requestedModel;
     state.effort = conversation.effort || 'auto';
-    state.providerRoute = conversation.provider_route || localStorage.getItem('nusashell.provider_route') || '';
-    routePicker?.refresh();
   }
+  // Provider/account selection is persisted by the backend and is always
+  // applied after the UI-only room snapshot, even when one exists.
+  state.providerRoute = conversation.provider_route || '';
+  routePicker?.refresh();
   renderConversationList();
-  // A fresh browser load has no per-room scroll intent and should land on the
-  // latest messages. When a room was explicitly detached before switching
-  // away, preserve that intent instead of forcing the reader to the tail.
-  renderThread(windowedActiveMessages(), !hasSaved || state.pinned);
+  // A room switch is a new navigation action, so always show its latest
+  // messages. Reader position is only retained by in-place refreshes.
+  renderThread(windowedActiveMessages(), true);
   // Repair legacy Untitled rooms as soon as their persisted first user
   // message is available, not only after the next completed turn.
   void maybeAutoTitleConversation(id, { conversation, messages });
@@ -2034,7 +2035,6 @@ function saveRoomState(id) {
     attachments: state.attachments,
     model: state.model,
     effort: state.effort,
-    providerRoute: state.providerRoute,
   });
 }
 
@@ -2054,7 +2054,6 @@ function loadRoomState(id) {
     state.attachments = saved.attachments;
     state.model = saved.model;
     state.effort = saved.effort || 'auto';
-    state.providerRoute = saved.providerRoute || localStorage.getItem('nusashell.provider_route') || '';
     return true;
   }
   state.pinned = true;
@@ -2065,7 +2064,7 @@ function loadRoomState(id) {
   state.steerDraft = '';
   state.attachments = [];
   state.effort = 'auto';
-  state.providerRoute = localStorage.getItem('nusashell.provider_route') || '';
+  state.providerRoute = '';
   // Model will be set by openConversation from conversation.model
   return false;
 }
@@ -2422,10 +2421,16 @@ function bindScrollPin() {
     if (up) markUserScrollIntent(thread, 'up', 'keyboard');
     else if (down) markUserScrollIntent(thread, 'down', 'keyboard');
   };
+  const onPointerDown = (event) => {
+    if (event.button !== 0) return;
+    const rect = thread.getBoundingClientRect?.();
+    if (rect && event.clientX >= rect.right - 24) state.scrollbarDragging = true;
+  };
+  const onPointerUp = () => { state.scrollbarDragging = false; };
   const onScroll = () => {
     if (agentThread() !== thread) return;
     const geometryDirection = scrollDirectionFromGeometry(thread);
-    const intent = state.pendingScrollIntent;
+    const intent = state.pendingScrollIntent || (state.scrollbarDragging ? geometryDirection : '');
     state.pendingScrollIntent = '';
     if (state.suppressScrollTracking) {
       state.pinGeom = { thread, scrollTop: thread.scrollTop };
@@ -2452,7 +2457,7 @@ function bindScrollPin() {
       if (state.initialScroll) cancelInitialScroll();
     }
     const wasPinned = state.pinned;
-    updateScrollPin(state, thread, SCROLL_TOLERANCE, { direction });
+    updateScrollPin(state, thread, SCROLL_TOLERANCE, { direction: intent });
     if (direction !== 'up' && isThreadAtBottom(thread, SCROLL_TOLERANCE)) {
       state.followDetached = false;
       state.userScroll = '';
@@ -2474,6 +2479,8 @@ function bindScrollPin() {
   thread.addEventListener('touchend', onTouchEnd, { passive: true });
   thread.addEventListener('touchcancel', onTouchEnd, { passive: true });
   thread.addEventListener('keydown', onKeyDown);
+  thread.addEventListener('pointerdown', onPointerDown, { passive: true });
+  window.addEventListener('pointerup', onPointerUp, { passive: true });
   scrollBinding = {
     thread,
     dispose: () => {
@@ -2484,6 +2491,9 @@ function bindScrollPin() {
       thread.removeEventListener('touchend', onTouchEnd);
       thread.removeEventListener('touchcancel', onTouchEnd);
       thread.removeEventListener('keydown', onKeyDown);
+      thread.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
+      state.scrollbarDragging = false;
     },
   };
 }
@@ -3645,12 +3655,11 @@ async function refreshModels() {
   }
   if (state.model && models.length && !models.some((model) => `${model.provider_id}:${model.id}` === state.model) && !models.some((model) => model.id === state.model)) {
     state.model = '';
-    localStorage.removeItem('nusashell.model');
   }
   // A vanished model invalidates its route pin too.
   if (state.providerRoute && (!state.model || (models.length && !models.some((model) => `${model.provider_id}:${model.id}` === state.model) && !models.some((model) => model.id === state.model)))) {
     state.providerRoute = '';
-    localStorage.removeItem('nusashell.provider_route');
+    persistProviderRoute(state.activeId, '');
   }
   updateModelTrigger();
   routePicker?.refresh();
@@ -3668,8 +3677,9 @@ function updateModelTrigger() {
 }
 
 function selectModel(modelID) {
+  // The composer model belongs to the active room. Settings owns the global
+  // `nusashell.model` default used only when a room has no saved model.
   state.model = modelID;
-  localStorage.setItem('nusashell.model', modelID);
   // Clamp effort to the new model's supported efforts; reset to auto if unsupported.
   // Match by qualified ID (provider_id:model_id) or bare ID for backward compat.
   const chosen = models.find((m) => `${m.provider_id}:${m.id}` === modelID) || models.find((m) => m.id === modelID);
@@ -3685,16 +3695,37 @@ function selectModel(modelID) {
   // different set of upstreams), so switching models resets to auto.
   if (state.providerRoute) {
     state.providerRoute = '';
-    localStorage.removeItem('nusashell.provider_route');
+    persistProviderRoute(state.activeId, '');
   }
   updateModelTrigger();
   routePicker?.refresh();
 }
 
+function persistProviderRoute(conversationID, route) {
+  if (!conversationID) return;
+  const previous = providerRouteWrites.get(conversationID) || Promise.resolve();
+  const write = previous.catch(() => {}).then(async () => {
+    const result = await rpc('agent.conversations.set-provider', {
+      id: conversationID,
+      provider_route: route || undefined,
+    });
+    const savedRoute = result?.conversation?.provider_route || '';
+    const target = state.conversations.find((conversation) => conversation.id === conversationID);
+    if (target) target.provider_route = savedRoute;
+    if (state.activeId === conversationID && state.conversation?.id === conversationID) {
+      state.conversation.provider_route = savedRoute;
+    }
+  }).catch((error) => {
+    console.warn('provider route persistence failed:', error);
+    if (state.activeId === conversationID) toast(error.message || 'Provider selection could not be saved', 'error');
+  });
+  providerRouteWrites.set(conversationID, write);
+  void write;
+}
+
 function selectProviderRoute(route) {
   state.providerRoute = route || '';
-  if (route) localStorage.setItem('nusashell.provider_route', route);
-  else localStorage.removeItem('nusashell.provider_route');
+  persistProviderRoute(state.activeId, state.providerRoute);
   routePicker?.refresh();
   updateModelTrigger();
 }

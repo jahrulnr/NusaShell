@@ -139,6 +139,7 @@ func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
 			ID:               m.ID,
 			ProviderID:       p.ID,
 			ProviderName:     p.Name,
+			ProviderKind:     string(p.Kind),
 			DisplayName:      m.DisplayName,
 			Context:          m.Context,
 			MaxOutput:        m.MaxOutput,

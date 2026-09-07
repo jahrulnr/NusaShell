@@ -180,6 +180,38 @@ func TestClientReconnectsAfterDisconnect(t *testing.T) {
 	}
 }
 
+func TestClientNotifiesHandlerAfterEveryConnection(t *testing.T) {
+	t.Parallel()
+	conn1 := &fakeConn{err: io.EOF}
+	conn2 := &fakeConn{err: errClosed}
+	dialer := &fakeDialer{
+		results:  []dialResult{{conn: conn1}, {conn: conn2}},
+		terminal: errClosed,
+	}
+
+	var mu sync.Mutex
+	connected := 0
+	h := ConnectionHandler{
+		OnMessage: func([]byte) {},
+		OnConnect: func() {
+			mu.Lock()
+			connected++
+			mu.Unlock()
+		},
+	}
+	c := NewClient(dialer, "ws://x", h, quietLogger())
+	c.SetBackoff(Backoff{Base: time.Millisecond, Max: 5 * time.Millisecond, Factor: 2})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_ = c.Run(ctx)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if connected != 2 {
+		t.Fatalf("connected callbacks = %d, want 2", connected)
+	}
+}
+
 func TestClientReconnectsAfterDialFailure(t *testing.T) {
 	t.Parallel()
 	conn := &fakeConn{msgs: [][]byte{[]byte("ok")}, err: errClosed}

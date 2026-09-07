@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"nusashell/application/media"
 	"nusashell/application/service/generatedmedia"
 	"nusashell/domain"
 	"os"
@@ -100,7 +101,7 @@ func imageGenApp(t *testing.T, gen ImageGenerator, conv *domain.Conversation) *A
 		}},
 		Credentials: &memCreds{m: map[string]string{"img": "sk-test"}},
 		Attachments: &memAttachmentStore{root: t.TempDir()},
-		ImageGeneratorFactory: func(p *domain.Provider, apiKey string) (ImageGenerator, error) {
+		ImageGeneratorFactory: func(_ context.Context, _ *domain.Provider, _ string) (ImageGenerator, error) {
 			return gen, nil
 		},
 		Logs:         &fakeLogStore{},
@@ -150,8 +151,8 @@ func TestExecuteGenerateImageSavesWithoutPersistingDataURL(t *testing.T) {
 	if gen.got.Prompt != "a red boat" || gen.got.N != 1 {
 		t.Fatalf("request = %+v", gen.got)
 	}
-	if gen.got.TurnID != "tc_abc123" {
-		t.Fatalf("TurnID = %q, want tool-call id", gen.got.TurnID)
+	if gen.got.TurnID != "r1" {
+		t.Fatalf("TurnID = %q, want the run/turn id", gen.got.TurnID)
 	}
 	if len(atts) != 1 {
 		t.Fatalf("atts = %d", len(atts))
@@ -416,9 +417,145 @@ func TestPersistGeneratedImagesRejectsOversize(t *testing.T) {
 
 func TestFormatImageGenFailureRateLimit(t *testing.T) {
 	err := &domain.ProviderError{StatusCode: 429, RetryAfter: 2 * time.Minute, Err: fmt.Errorf("429")}
-	msg := formatImageGenFailure(err)
+	msg := formatImageGenFailure(err, domain.ProviderChat)
 	if !strings.Contains(msg, "rate-limited") || !strings.Contains(msg, "2m0s") {
 		t.Fatalf("msg = %q", msg)
+	}
+	if strings.Contains(msg, "Codex") {
+		t.Fatalf("chat kind must not get Codex-specific guidance: %q", msg)
+	}
+}
+
+func TestFormatImageGenFailureUsageLimit(t *testing.T) {
+	err := &domain.ProviderError{StatusCode: 429, Err: fmt.Errorf("image generation usage limit reached (resets at 2026-09-08T01:00:00Z)")}
+	msg := formatImageGenFailure(err, domain.ProviderCodex)
+	if !strings.Contains(msg, "usage limit reached") || !strings.Contains(msg, "resets at") {
+		t.Fatalf("msg = %q", msg)
+	}
+	if strings.Contains(msg, "rate-limited") {
+		t.Fatalf("usage-limit must not be reported as generic rate-limit: %q", msg)
+	}
+}
+
+func TestFormatImageGenFailureCodex403ExplainsEntitlement(t *testing.T) {
+	err := &domain.ProviderError{StatusCode: 403, Err: fmt.Errorf("image generation failed (HTTP 403): {\"detail\":\"Forbidden\"}")}
+	msg := formatImageGenFailure(err, domain.ProviderCodex)
+	if !strings.Contains(msg, "HTTP 403") || !strings.Contains(msg, "Free") {
+		t.Fatalf("msg = %q", msg)
+	}
+	// Non-Codex providers keep the generic wording.
+	msgChat := formatImageGenFailure(err, domain.ProviderChat)
+	if strings.Contains(msgChat, "Free") {
+		t.Fatalf("chat kind must not get Codex plan guidance: %q", msgChat)
+	}
+}
+
+// codexFailoverGen fails once with an image usage-limit 429, then succeeds.
+type codexFailoverGen struct {
+	hits int
+	png  []byte
+}
+
+func (g *codexFailoverGen) Generate(_ context.Context, _ ImageGenRequest) (*ImageGenResult, error) {
+	g.hits++
+	if g.hits == 1 {
+		return nil, &domain.ProviderError{StatusCode: 429, UsageLimitResetAt: time.Now().Add(time.Hour), Err: fmt.Errorf("image generation usage limit reached")}
+	}
+	return &ImageGenResult{Images: []GeneratedImage{{Bytes: g.png, MediaType: "image/png"}}, Provider: "codex", Model: "gpt-image-2"}, nil
+}
+
+func TestExecuteGenerateImageCodexFailoverSwitchesAccount(t *testing.T) {
+	png := png1x1(t)
+	gen := &codexFailoverGen{png: png}
+	var keys []string
+	provider := &domain.Provider{ID: "img", Kind: domain.ProviderCodex, Enabled: true, BaseURL: "https://chatgpt.com/backend-api/codex",
+		Models: []domain.Model{{ID: "gpt-image-2", Kind: domain.ModelKindImage, Vision: true}}}
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": {ID: "c1"}}},
+		Providers:     &fakeProviderStore{items: map[string]*domain.Provider{"img": provider}},
+		Credentials:   &memCreds{m: map[string]string{"img": "tok-default"}},
+		Attachments:   &memAttachmentStore{root: t.TempDir()},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+	}
+	app.mediaSvc = media.New(media.Deps{
+		ImageGen: func(_ context.Context, _ *domain.Provider, apiKey string) (ImageGenerator, error) {
+			keys = append(keys, apiKey)
+			return gen, nil
+		},
+		Resolve:      func(id string) (*domain.Provider, string, bool) { return provider, "tok-default", true },
+		ProviderName: func(id string) string { return id },
+		Attachments:  &memAttachmentStore{root: t.TempDir()},
+		PrepareCodexAPIKey: func(_ string, _ *domain.Provider, apiKey string) (string, error) {
+			return "tok-acc-a", nil
+		},
+		FailoverCodexAPIKey: func(_ context.Context, _ string, _ *domain.Provider, apiKey string, _ error) (string, bool, error) {
+			if apiKey == "tok-acc-a" {
+				return "tok-acc-b", true, nil
+			}
+			return "", false, nil
+		},
+		RetryDelay: func(error, int) (time.Duration, bool) { return 0, false },
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
+	_, atts, err := app.executeGenerateImage(run, domain.ToolCall{
+		ID: "tc1", Name: "generate_image", Args: `{"prompt":"a boat"}`,
+	}, domain.Settings{ImageProviderID: "img", ImageModelID: "gpt-image-2"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(atts) != 1 {
+		t.Fatalf("atts = %d", len(atts))
+	}
+	if len(keys) != 2 || keys[0] != "tok-acc-a" || keys[1] != "tok-acc-b" {
+		t.Fatalf("generator keys = %v, want [tok-acc-a tok-acc-b]", keys)
+	}
+	if gen.hits != 2 {
+		t.Fatalf("hits = %d, want one attempt per account", gen.hits)
+	}
+}
+
+func TestExecuteGenerateImageCodexPrepareFailureFailsFast(t *testing.T) {
+	gen := &scriptedImageGen{}
+	provider := &domain.Provider{ID: "img", Kind: domain.ProviderCodex, Enabled: true, BaseURL: "https://chatgpt.com/backend-api/codex"}
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": {ID: "c1"}}},
+		Providers:     &fakeProviderStore{items: map[string]*domain.Provider{"img": provider}},
+		Credentials:   &memCreds{m: map[string]string{"img": "tok-default"}},
+		Attachments:   &memAttachmentStore{root: t.TempDir()},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+	}
+	app.mediaSvc = media.New(media.Deps{
+		ImageGen: func(_ context.Context, _ *domain.Provider, _ string) (ImageGenerator, error) {
+			return gen, nil
+		},
+		Resolve:      func(id string) (*domain.Provider, string, bool) { return provider, "tok-default", true },
+		ProviderName: func(id string) string { return id },
+		Attachments:  &memAttachmentStore{root: t.TempDir()},
+		PrepareCodexAPIKey: func(_ string, _ *domain.Provider, _ string) (string, error) {
+			return "", fmt.Errorf("all Codex accounts are rate-limited")
+		},
+		RetryDelay: func(error, int) (time.Duration, bool) { return 0, false },
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
+	output, atts, err := app.executeGenerateImage(run, domain.ToolCall{
+		ID: "tc1", Name: "generate_image", Args: `{"prompt":"a boat"}`,
+	}, domain.Settings{ImageProviderID: "img", ImageModelID: "gpt-image-2"})
+	if err == nil || !strings.Contains(output, "all Codex accounts are rate-limited") {
+		t.Fatalf("output = %q err = %v", output, err)
+	}
+	if len(atts) != 0 {
+		t.Fatalf("atts = %d, want 0", len(atts))
+	}
+	if gen.hits != 0 {
+		t.Fatalf("generator must not be called when prepare fails, hits = %d", gen.hits)
 	}
 }
 

@@ -127,6 +127,21 @@ export function effectiveCacheTTL(provider = {}) {
   return ttls.find((ttl) => ttl !== 'off') || '';
 }
 
+export function reasoningSummariesFor(provider = {}) {
+  if (Array.isArray(provider.reasoning_summaries) && provider.reasoning_summaries.length) {
+    return [...provider.reasoning_summaries];
+  }
+  return [];
+}
+
+export function effectiveReasoningSummary(provider = {}) {
+  const summaries = reasoningSummariesFor(provider);
+  if (provider.reasoning_summary && summaries.includes(provider.reasoning_summary)) {
+    return provider.reasoning_summary;
+  }
+  return summaries.includes('auto') ? 'auto' : '';
+}
+
 function providerMeta(provider) {
   const kindMeta = KIND_META[provider.kind] || KIND_META_FALLBACK;
   if (!provider.builtin || !DRIVER_META[provider.driver]) return kindMeta;
@@ -270,6 +285,17 @@ async function saveProviderCacheTTL(provider, ttl) {
   }
 }
 
+async function saveProviderReasoningSummary(provider, summary) {
+  if (!summary || summary === effectiveReasoningSummary(provider)) return;
+  try {
+    await rpc('ai.providers.save', providerSaveFields(provider, { reasoning_summary: summary }));
+    toast(summary === 'none' ? 'Codex thinking summary hidden' : `Codex thinking summary ${summary}`, 'success');
+    await refresh();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
 async function toggleProvider(provider, event) {
   const toggle = event.currentTarget;
   toggle.disabled = true;
@@ -321,6 +347,33 @@ function renderCacheTTLPicks(p) {
   return picks;
 }
 
+function renderReasoningSummaryPicks(p) {
+  const summaries = reasoningSummariesFor(p);
+  const selected = effectiveReasoningSummary(p);
+  const labels = { auto: 'auto', concise: 'concise', detailed: 'detailed', none: 'none' };
+  const chips = summaries.map((summary) => el('button', {
+    class: `provider-cache-ttl-chip${summary === selected ? ' is-active' : ''}`,
+    type: 'button',
+    text: labels[summary] || summary,
+    dataset: { summary },
+    'aria-pressed': summary === selected ? 'true' : 'false',
+    title: summary === 'none'
+      ? 'Hide Codex thinking summaries'
+      : `Use ${summary} Codex thinking summaries`,
+  }));
+  const picks = el('dd', {
+    class: 'provider-cache-ttl-picks provider-reasoning-summary-picks',
+    id: 'provider-reasoning-summary',
+  }, ...chips);
+  picks.querySelectorAll('.provider-cache-ttl-chip').forEach((chip) => {
+    chip.addEventListener('click', (event) => {
+      event.stopPropagation();
+      saveProviderReasoningSummary(p, chip.dataset.summary);
+    });
+  });
+  return picks;
+}
+
 function renderDetail(p) {
   const meta = providerMeta(p);
   const detail = document.getElementById('provider-detail');
@@ -354,6 +407,12 @@ function renderDetail(p) {
         ? [el('div', {},
           el('dt', { text: 'Cache TTL' }),
           renderCacheTTLPicks(p),
+        )]
+        : []),
+      ...(reasoningSummariesFor(p).length
+        ? [el('div', {},
+          el('dt', { text: 'Thinking summary' }),
+          renderReasoningSummaryPicks(p),
         )]
         : []),
     ),

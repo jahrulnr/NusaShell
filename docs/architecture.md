@@ -164,13 +164,16 @@ content, reasoning, or tool-call fields.
 
 When the conversation's estimated tokens exceed the lesser of
 `settings.compaction_threshold` (default 0 = auto, which means 80% of the
-model's available input budget) and 80% of that budget, the provider
-summarizes the history non-streaming, the oldest messages are archived,
-and a new epoch is written onto the **same conversation ID** (todos,
-todos, chunks, and the open room stay attached) via `ResetTranscript`
-then `Add`. `agent.compacted` is emitted.
+model's available input budget) and 80% of that budget, a new epoch is written
+onto the **same conversation ID** (todos, chunks, and the open room stay
+attached) via `ResetTranscript` then `Add`. `agent.compacted` is emitted.
+Client-side compaction summarizes history with a non-streaming request. Codex
+instead sends a separate streaming remote-v2 request ending in
+`compaction_trigger`, then persists the opaque checkpoint between its retained
+user prefix and every later user/assistant/tool item. OpenAI Responses may
+receive an opaque checkpoint during its normal stream.
 
-The summarization input is text-only and bounded: media/file attachments are
+The client-side summarization input is text-only and bounded: media/file attachments are
 replaced with a short note (compaction models are often not vision- or
 audio-capable, and providers reject media outright — e.g. OpenRouter HTTP 404
 "No endpoints found that support image input"), and each tool call's args and

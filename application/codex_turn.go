@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"nusashell/domain"
@@ -18,6 +19,14 @@ func (a *App) prepareCodexTurnAPIKey(conversationID string, provider *domain.Pro
 	accounts := a.listCodexAccountIDs(provider.ID)
 	if len(accounts) == 0 {
 		return apiKey, nil
+	}
+	if accountID := a.selectedCodexAccount(conversationID); accountID != "" {
+		if token, has, err := a.Credentials.Get(accountKey(provider.ID, accountID)); err != nil {
+			return "", err
+		} else if has {
+			return token, nil
+		}
+		return "", fmt.Errorf("selected Codex account %q is no longer available", accountID)
 	}
 	pick := a.CodexRouter.PickAccountDetailed(conversationID, provider.ID, accounts)
 	if pick.AccountID != "" {
@@ -36,6 +45,11 @@ func (a *App) prepareCodexTurnAPIKey(conversationID string, provider *domain.Pro
 // circuit-open on 429 and switches to another account when available.
 func (a *App) failoverCodexOnStreamError(ctx context.Context, conversationID string, provider *domain.Provider, apiKey string, streamErr error) (string, bool, error) {
 	if a == nil || provider == nil || provider.Kind != domain.ProviderCodex || a.CodexRouter == nil || !isRateLimitError(streamErr) {
+		return "", false, nil
+	}
+	// An explicit composer selection is a strict room-level pin. Only Auto
+	// participates in quota/cooldown failover.
+	if a.selectedCodexAccount(conversationID) != "" {
 		return "", false, nil
 	}
 	currentAccount := a.CodexRouter.StickyAccount(conversationID)
@@ -64,6 +78,17 @@ func (a *App) failoverCodexOnStreamError(ctx context.Context, conversationID str
 		return "", false, allCodexAccountsLimitedError(pickResult.EarliestReset)
 	}
 	return "", false, nil
+}
+
+func (a *App) selectedCodexAccount(conversationID string) string {
+	if a == nil || a.Conversations == nil || conversationID == "" {
+		return ""
+	}
+	conversation, err := a.Conversations.Get(conversationID)
+	if err != nil || conversation == nil {
+		return ""
+	}
+	return strings.TrimSpace(conversation.ProviderRoute)
 }
 
 func allCodexAccountsLimitedError(reset time.Time) error {

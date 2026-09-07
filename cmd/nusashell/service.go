@@ -30,6 +30,8 @@ Options:
 Environment:
   NUSASHELL_DATA_DIR, NUSASHELL_HOST, NUSASHELL_PORT, and
   NUSASHELL_ALLOW_REMOTE are baked into the service at install time.
+  PATH is also captured from the process running service install; run
+  nusashell service install again after changing your shell environment.
 `
 
 // serviceCmd handles the `nusashell service <action>` dispatch. It is a
@@ -92,6 +94,7 @@ func resolveServiceOptions(binaryFlag string) (service.Options, error) {
 	return service.Options{
 		BinaryPath:  binary,
 		DataDir:     envOr("NUSASHELL_DATA_DIR", defaultDataDir()),
+		Path:        os.Getenv("PATH"),
 		Host:        os.Getenv("NUSASHELL_HOST"),
 		Port:        os.Getenv("NUSASHELL_PORT"),
 		AllowRemote: os.Getenv("NUSASHELL_ALLOW_REMOTE") == "1",

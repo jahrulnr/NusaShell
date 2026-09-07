@@ -2,9 +2,24 @@ package agent
 
 import (
 	"testing"
+	"time"
 
+	"nusashell/contracts"
 	"nusashell/domain"
 )
+
+type askEvent struct {
+	typ     string
+	payload any
+}
+
+type askEventEmitter struct {
+	events chan askEvent
+}
+
+func (e *askEventEmitter) Emit(typ string, payload any) {
+	e.events <- askEvent{typ: typ, payload: payload}
+}
 
 func TestAskQuestionService_PendingForConversation(t *testing.T) {
 	s := NewAskQuestionService()
@@ -148,5 +163,114 @@ func TestAskQuestionService_OnAsk(t *testing.T) {
 	}
 	if gotReq.Question != "Q?" {
 		t.Fatalf("callback got question=%q", gotReq.Question)
+	}
+}
+
+func TestHandleAskAnswerKeepsRunForAnsweredEvent(t *testing.T) {
+	asks := NewAskQuestionService()
+	resultCh, err := asks.Ask("run-1", "call-1", "conv-1", domain.AskQuestionRequest{
+		Question: "Q?",
+		Options:  []domain.AskQuestionOption{{ID: "a", Label: "A"}},
+	})
+	if err != nil {
+		t.Fatalf("Ask failed: %v", err)
+	}
+	emitter := &askEventEmitter{events: make(chan askEvent, 1)}
+	svc := New(Deps{
+		AskQuestions: asks,
+		Bus:          emitter,
+		Runs: map[string]*TurnRun{
+			"run-1": {ID: "run-1", ConversationID: "conv-1"},
+		},
+	})
+
+	// Hold the run registry while the handler starts. A handler that resolves
+	// the ask before capturing its run lets turn cleanup win this race and
+	// loses the answered event.
+	svc.runsMu.Lock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = svc.HandleAskAnswer(contracts.AskAnswerRequest{
+			RunID: "run-1", ToolCallID: "call-1", Via: "option", OptionIDs: []string{"a"},
+		})
+	}()
+	resolvedBeforeLookup := false
+	select {
+	case <-resultCh:
+		resolvedBeforeLookup = true
+		delete(svc.runs, "run-1")
+	case <-time.After(20 * time.Millisecond):
+	}
+	svc.runsMu.Unlock()
+	<-done
+	if !resolvedBeforeLookup {
+		<-resultCh
+	}
+
+	select {
+	case event := <-emitter.events:
+		if event.typ != contracts.EventAskAnswered {
+			t.Fatalf("event type = %q, want %q", event.typ, contracts.EventAskAnswered)
+		}
+		payload := event.payload.(contracts.AskAnsweredEvent)
+		if payload.ConversationID != "conv-1" {
+			t.Fatalf("conversation_id = %q, want conv-1", payload.ConversationID)
+		}
+	default:
+		t.Fatal("answered event was lost when the run finished concurrently")
+	}
+}
+
+func TestHandleAskCancelKeepsRunForCancelledEvent(t *testing.T) {
+	asks := NewAskQuestionService()
+	resultCh, err := asks.Ask("run-1", "call-1", "conv-1", domain.AskQuestionRequest{
+		Question: "Q?",
+		Options:  []domain.AskQuestionOption{{ID: "a", Label: "A"}},
+	})
+	if err != nil {
+		t.Fatalf("Ask failed: %v", err)
+	}
+	emitter := &askEventEmitter{events: make(chan askEvent, 1)}
+	svc := New(Deps{
+		AskQuestions: asks,
+		Bus:          emitter,
+		Runs: map[string]*TurnRun{
+			"run-1": {ID: "run-1", ConversationID: "conv-1"},
+		},
+	})
+
+	svc.runsMu.Lock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = svc.HandleAskCancel(contracts.AskCancelRequest{
+			RunID: "run-1", ToolCallID: "call-1", Reason: "cancelled",
+		})
+	}()
+	resolvedBeforeLookup := false
+	select {
+	case <-resultCh:
+		resolvedBeforeLookup = true
+		delete(svc.runs, "run-1")
+	case <-time.After(20 * time.Millisecond):
+	}
+	svc.runsMu.Unlock()
+	<-done
+	if !resolvedBeforeLookup {
+		<-resultCh
+	}
+
+	select {
+	case event := <-emitter.events:
+		if event.typ != contracts.EventAskCancelled {
+			t.Fatalf("event type = %q, want %q", event.typ, contracts.EventAskCancelled)
+		}
+		payload := event.payload.(contracts.AskCancelledEvent)
+		if payload.ConversationID != "conv-1" {
+			t.Fatalf("conversation_id = %q, want conv-1", payload.ConversationID)
+		}
+	default:
+		t.Fatal("cancelled event was lost when the run finished concurrently")
 	}
 }

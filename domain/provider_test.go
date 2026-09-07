@@ -209,6 +209,33 @@ func TestValidCacheTTL(t *testing.T) {
 	}
 }
 
+func TestCodexReasoningSummaries(t *testing.T) {
+	want := []string{"auto", "concise", "detailed", "none"}
+	got := ReasoningSummariesFor(ProviderCodex)
+	if len(got) != len(want) {
+		t.Fatalf("ReasoningSummariesFor(codex) = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ReasoningSummariesFor(codex)[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if got := ReasoningSummariesFor(ProviderResponses); got != nil {
+		t.Fatalf("ReasoningSummariesFor(responses) = %v, want nil", got)
+	}
+	for _, value := range append([]string{""}, want...) {
+		if !ValidReasoningSummary(ProviderCodex, value) {
+			t.Errorf("ValidReasoningSummary(codex, %q) = false", value)
+		}
+	}
+	if ValidReasoningSummary(ProviderCodex, "verbose") {
+		t.Fatal("unsupported Codex reasoning summary accepted")
+	}
+	if got := NormalizeReasoningSummary(ProviderCodex, ""); got != "auto" {
+		t.Fatalf("NormalizeReasoningSummary(codex, empty) = %q, want auto", got)
+	}
+}
+
 func TestProviderDrivers(t *testing.T) {
 	for _, driver := range []ProviderDriver{
 		ProviderDriverAuto,

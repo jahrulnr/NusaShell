@@ -23,7 +23,9 @@ selects the wire format:
   stored in the SQLite credential store under the provider ID and under
   `{providerID}:account:{accountID}` for multi-account failover. The Codex
   transport owns its required headers, Responses stream decoding, and remote
-  v2 compaction.
+  v2 compaction. That compaction stores the opaque checkpoint separately,
+  retains real user turns for the next request, and archives the replaced
+  assistant/tool transcript locally for room scroll-back.
 - Every custom provider defaults to `infrastructure/ai/openrouter`; its
   editor supports `responses`, `chat`, `messages`, and `codex`. There is no
   custom-provider count limit. For `chat` kind, host detection (below)
@@ -68,9 +70,28 @@ OpenRouter package for `messages` and `responses`.
   Import from CLI; optional paste fallback), Codex session headers, multi-
   account failover with circuit breakers, and the remote v2 compaction flow.
   **Import models** discovers the account-aware catalog via the Codex CLI
-  app-server `model/list` JSON-RPC method (NusaShell downloads the managed
-  Codex runtime binary when needed). ChatGPT plan image models (`gpt-image-2`,
+  app-server `model/list` JSON-RPC method using the OAuth account selected in
+  NusaShell—not whichever account happens to be active in `~/.codex/auth.json`
+  (NusaShell downloads the managed Codex runtime binary when needed).
+  Explicitly switching accounts also clears existing sticky conversation
+  bindings, so Retry and later turns use the selected account. ChatGPT plan
+  image models (`gpt-image-2`,
   `gpt-image-1.5`) are seeded after import because `model/list` omits them.
+  The same OAuth token and base URL also drive the Codex image backend used
+  by `generate_image` (`/images/generations` | `/images/edits`). Image
+  generation shares the multi-account router: the sticky account for the
+  conversation is picked per call, and a usage-limit 429 (with its
+  `resets_at`) or a 403 entitlement rejection opens that account's circuit
+  and fails over to the next available account (one attempt per account —
+  image calls are billable, so there is no blind retry). A 403 is reported
+  as a likely missing image entitlement (e.g. ChatGPT Free). The router
+  persists the last-used account per provider, so after a backend restart it
+  resumes from that account instead of blindly defaulting to the first
+  registered one. Tool results that carry media (e.g. `generate_image` or
+  `read_media` outputs) are split on the Codex wire: the
+  `function_call_output` stays text-only and the media is reinjected as the
+  next user message with `input_image` items — `core.ImageBlock` is never
+  serialized into a text-only tool output.
 
 ## Streaming completion and request-shape recovery
 
@@ -132,6 +153,22 @@ off for that provider only:
 Empty stored `cache_ttl` still means the first duration above. `off` is
 stored explicitly and applied on the next turn. Registry cards show the
 selected value, including `off`.
+
+## Codex thinking summary
+
+The **Thinking summary** chips on a Codex provider's detail pane control the
+`reasoning.summary` value sent on later Codex turns. The choice is stored per
+provider:
+
+- `auto` lets Codex choose the appropriate summary detail and is the default.
+- `concise` requests a shorter visible summary.
+- `detailed` requests a more verbose visible summary.
+- `none` suppresses the visible summary. It does not disable model reasoning
+  or encrypted reasoning replay.
+
+This option is available only for the `codex` kind. It controls how much
+thinking Codex exposes in the transcript; it does not guarantee that every
+turn produces a summary.
 
 ## Prompt-cache keys and sessions
 
@@ -261,6 +298,13 @@ On the Codex provider detail page:
 - **Codex Runtime** shows the managed official Codex CLI binary via
   `ai.codex.runtime.status` / `ai.codex.runtime.download` (ACP and tooling;
   chat compaction uses the remote v2 path, not a subprocess compact UI).
+- In the Agent composer, the routing control becomes an account picker for a
+  Codex model. **Auto** keeps the existing sticky quota/cooldown rotation.
+  Selecting an account strictly pins that room to the chosen credential; it
+  does not fail over to a different plan behind the user's choice. The
+  selection is persisted in the conversation backend, so room switches and
+  reloads cannot inherit another room's account. The provider detail page's
+  **Switch** action remains the default preference used by Auto.
 
 ```text
 # GOOD — primary auth paths on the Codex detail card
@@ -337,11 +381,18 @@ headers are not sent to other OpenAI-compatible hosts. Models tagged as image
 generators (`kind: image`, including `gpt-image-*` and `dall-e-*` even when
 `/models` omits a kind) appear in Settings → Image generation and back the
 `generate_image` tool. Image generation uses the
-dedicated OpenAI `/images/generations` (and `/images/edits`) endpoints or
+dedicated OpenAI `/images/generations` (and `/images/edits`) endpoints, the
+ChatGPT Codex images endpoints on the codex provider base URL
+(`.../codex/images/generations` and `.../codex/images/edits` — `gpt-image-2`
+and `gpt-image-1.5` are seeded into the codex model list and tagged i2i), or
 OpenRouter `POST /images` (JSON body, including `images[].image_url` data
-URLs for edits — not OpenAI multipart). Anthropic Messages is not an image
-backend; it can still orchestrate `generate_image` when a supported image
-provider is configured.
+URLs for edits — not OpenAI multipart). The Codex backend sends
+`background`/`quality`/`size` with `auto` defaults, always requests a single
+image (no `n`), sends the `x-codex-image-turn-id` turn-correlation header,
+and surfaces image-quota 429s (`error.type=usage_limit_reached`) as hard
+usage-limit failures instead of blind retries. Anthropic Messages is not an
+image backend; it can still orchestrate `generate_image` when a supported
+image provider is configured.
 
 ## Test connection
 
@@ -469,6 +520,23 @@ reasoning continuity. The UI continues to show only plaintext `Reasoning`.
 This is distinct from conversation-level `CompactionBlob`, which stores
 server-side compaction items, not per-message reasoning Extra.
 
+When the active provider kind cannot replay that opaque state, NusaShell
+strips `ReasoningExtra` from the assembled request and keeps plaintext
+`Reasoning` only:
+
+- **Chat (OpenAI / OpenCode zen):** never forwards Extra — Chat Completions
+  reject signed, redacted, or provider-extra reasoning blocks.
+- **Chat (OpenRouter aggregator):** keeps Extra only when it is a JSON
+  array (`reasoning_details`); Codex encrypted objects are stripped.
+- **Messages (Anthropic):** never forwards Extra (Anthropic uses
+  signature / redacted thinking, not Responses-style Extra).
+- **Responses / Codex:** forwards Extra unchanged for continuity.
+
+`CompactionBlob` is already kind-gated the same way (Responses/Codex only).
+A Codex room continued on DeepSeek Chat therefore replays the post-
+compaction transcript with plaintext thinking and does not send the
+encrypted checkpoint or per-message Extra.
+
 ## Server-side compaction (OpenAI Responses)
 
 For eligible OpenAI Responses models, NusaShell uses server-side compaction
@@ -521,16 +589,24 @@ Codex compaction is a separate pre-turn streaming request, selected by
 provider kind. It is not OpenAI `context_management`.
 
 - **Request:** NusaShell sends a normal streaming `POST /responses` request
-  whose final input item is `{"type":"compaction_trigger"}`. For later turns,
-  Codex rebuilds its retained user-message history and appends the opaque
-  `CompactionBlob` item after that history.
+  whose final input item is `{"type":"compaction_trigger"}`. The resulting
+  history records an explicit checkpoint boundary: retained user context is
+  before the opaque `CompactionBlob`, while later user, assistant, reasoning,
+  tool-call, and tool-result items remain after it in causal order.
 - **Result:** the stream must contain exactly one `compaction` output item.
   Its encrypted content is stored unchanged in `CompactionBlob`, and the
-  conversation starts a new transcript epoch with only its recent suffix.
+  conversation starts a new transcript epoch without losing the boundary
+  needed by later turns, tool rounds, reloads, or another compaction.
 - **Model:** Codex compaction uses the same provider and model as the active
   turn. `settings.compaction_model` is not used for this path.
-- **Failure:** a failed or malformed remote compaction returns an error. It
-  does not fall back to the text `summary()` compaction path.
+- **Failure and account routing:** remote compaction has no fallback to the text
+  `summary()` path. Before this separate request, NusaShell reselects the
+  conversation's non-circuit-open Codex account and rebuilds its adapter when
+  needed. A usage-limit 429 opens the failed account's circuit and retries
+  once on another available account. Transport failures use at most two
+  remote-v2 stream retries; a Codex remote-compaction stream may remain idle
+  for five minutes between SSE events, matching Codex upstream rather than the
+  one-minute interactive-stream watchdog.
 - **Wire boundary:** Codex sends its own authentication and session headers
   and does not receive OpenAI `context_management`.
 
@@ -580,9 +656,11 @@ the gateway (Auto).
   another provider. Auto (empty route) sends no provider object, so
   OpenRouter's load balancing applies.
 - **Persistence:** `provider_route` is stored on the conversation (like
-  `effort`) and sent in `agent.turns.start` / `agent.turns.retry`.
-  Switching models resets the route to Auto because slugs are
-  model-specific.
+  `effort`) and sent in `agent.turns.start` / `agent.turns.retry`. For Codex
+  it contains the selected account ID; for OpenRouter it contains the
+  upstream slug. The frontend keeps this state per room, never as a global
+  browser preference. Switching models resets it to Auto because both route
+  slugs and account applicability are model/provider-specific.
 - **Blocked upstreams:** account-level ignored providers still appear in
   the route list (the endpoints API is unaware of account privacy
   settings); pinning one yields a 404 the UI surfaces as a fetch hint.

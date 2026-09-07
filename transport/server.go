@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"nusashell/application"
 	"nusashell/contracts"
@@ -16,17 +17,36 @@ import (
 
 // Server wires the application service to all transports.
 type Server struct {
-	App    *application.App
-	Logger *slog.Logger
-	Static http.Handler
-	Dev    bool
-	mux    *http.ServeMux
+	App      *application.App
+	Logger   *slog.Logger
+	Static   http.Handler
+	Dev      bool
+	identity CoreIdentity
+	mux      *http.ServeMux
+}
+
+// CoreIdentity is the non-secret identity returned by the loopback health
+// endpoint. It helps clients distinguish NusaShell from another process that
+// happens to occupy the configured port.
+type CoreIdentity struct {
+	PID       int
+	Port      int
+	Version   string
+	Owner     string
+	StartedAt time.Time
 }
 
 // New builds a Server with all routes wired.
 func New(app *application.App, logger *slog.Logger, static http.Handler, dev bool) *Server {
+	return NewWithIdentity(app, logger, static, dev, CoreIdentity{})
+}
+
+// NewWithIdentity builds a Server and exposes its process identity through
+// GET /healthz. Existing callers may use New when identity is unavailable.
+func NewWithIdentity(app *application.App, logger *slog.Logger, static http.Handler, dev bool, identity CoreIdentity) *Server {
 	mux := http.NewServeMux()
-	s := &Server{App: app, Logger: logger, Static: static, Dev: dev, mux: mux}
+	s := &Server{App: app, Logger: logger, Static: static, Dev: dev, identity: identity, mux: mux}
+	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("POST /rpc/{method...}", s.handleRPC)
 	mux.HandleFunc("GET /ws", s.handleWS)
 	mux.HandleFunc("GET /stream", s.handleStream)
@@ -52,6 +72,28 @@ func (s *Server) Routes() http.Handler {
 		start := clock.NewTime().Time()
 		s.mux.ServeHTTP(w, r)
 		s.Logger.Debug("http", "method", r.Method, "path", r.URL.Path, "elapsed_ms", clock.NewTime().Since(start).Milliseconds())
+	})
+}
+
+// handleHealth returns a small identity response for local clients that need
+// to distinguish NusaShell from an unrelated process on the same port.
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, struct {
+		OK        bool      `json:"ok"`
+		Service   string    `json:"service"`
+		PID       int       `json:"pid,omitempty"`
+		Port      int       `json:"port,omitempty"`
+		Version   string    `json:"version,omitempty"`
+		Owner     string    `json:"owner,omitempty"`
+		StartedAt time.Time `json:"started_at,omitempty"`
+	}{
+		OK:        true,
+		Service:   "nusashell-core",
+		PID:       s.identity.PID,
+		Port:      s.identity.Port,
+		Version:   s.identity.Version,
+		Owner:     s.identity.Owner,
+		StartedAt: s.identity.StartedAt,
 	})
 }
 

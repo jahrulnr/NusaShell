@@ -549,13 +549,19 @@ func (a *Service) HandleAskAnswer(req contracts.AskAnswerRequest) (any, *contrac
 		OptionIDs: req.OptionIDs,
 		Text:      req.Text,
 	}
+	// Capture the run before resolving the ask. Resolution unblocks the turn,
+	// whose cleanup may immediately remove it from the registry.
+	run := a.runForID(req.RunID)
 	result, err := a.AskQuestions.Answer(req.RunID, req.ToolCallID, answer)
 	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
 	// Emit answered event so other UI surfaces can update.
-	convID := a.runConversationID(req.RunID)
-	a.Bus.Emit(contracts.EventAskAnswered, contracts.AskAnsweredEvent{
+	convID := ""
+	if run != nil {
+		convID = run.ConversationID
+	}
+	a.EmitInteractiveTurnEvent(run, contracts.EventAskAnswered, contracts.AskAnsweredEvent{
 		ConversationID: convID,
 		RunID:          req.RunID,
 		ToolCallID:     req.ToolCallID,
@@ -580,9 +586,14 @@ func (a *Service) HandleAskCancel(req contracts.AskCancelRequest) (any, *contrac
 	if req.RunID == "" || req.ToolCallID == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "run_id and tool_call_id are required"}
 	}
+	// Capture the run before cancellation unblocks the turn cleanup path.
+	run := a.runForID(req.RunID)
 	a.AskQuestions.Cancel(req.RunID, req.ToolCallID, req.Reason)
-	convID := a.runConversationID(req.RunID)
-	a.Bus.Emit(contracts.EventAskCancelled, contracts.AskCancelledEvent{
+	convID := ""
+	if run != nil {
+		convID = run.ConversationID
+	}
+	a.EmitInteractiveTurnEvent(run, contracts.EventAskCancelled, contracts.AskCancelledEvent{
 		ConversationID: convID,
 		RunID:          req.RunID,
 		ToolCallID:     req.ToolCallID,
@@ -594,12 +605,20 @@ func (a *Service) HandleAskCancel(req contracts.AskCancelRequest) (any, *contrac
 // runConversationID returns the conversation id for a run id, or "" if the
 // run is not found.
 func (a *Service) runConversationID(runID string) string {
+	run := a.runForID(runID)
+	if run == nil {
+		return ""
+	}
+	return run.ConversationID
+}
+
+func (a *Service) runForID(runID string) *TurnRun {
 	a.runsMu.Lock()
 	defer a.runsMu.Unlock()
 	if run, ok := a.runs[runID]; ok {
-		return run.ConversationID
+		return run
 	}
-	return ""
+	return nil
 }
 
 func (a *Service) HandleTurnsSteer(_ context.Context, req contracts.TurnSteerRequest) (any, *contracts.RPCError) {
@@ -620,7 +639,7 @@ func (a *Service) HandleTurnsSteer(_ context.Context, req contracts.TurnSteerReq
 	if !run.QueueSteer(entry) {
 		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "a steer is already queued for this turn"}
 	}
-	a.Bus.Emit(contracts.EventSteerQueued, contracts.SteerEvent{
+	a.EmitInteractiveTurnEvent(run, contracts.EventSteerQueued, contracts.SteerEvent{
 		ConversationID: req.ConversationID, SteerID: entry.ID, Text: text, Status: "queued",
 	})
 	a.log("info", "agent", "steer queued for %s: %s", req.ConversationID, entry.ID)
@@ -636,7 +655,7 @@ func (a *Service) HandleTurnsCancelSteer(req contracts.TurnCancelSteerRequest) (
 	if entry == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "no queued steer to cancel"}
 	}
-	a.Bus.Emit(contracts.EventSteerCancelled, contracts.SteerEvent{
+	a.EmitInteractiveTurnEvent(run, contracts.EventSteerCancelled, contracts.SteerEvent{
 		ConversationID: req.ConversationID, SteerID: entry.ID, Text: entry.Text, Status: "cancelled", Reason: contracts.SteerCancelReasonUser,
 	})
 	a.log("info", "agent", "steer cancelled for %s", req.ConversationID)

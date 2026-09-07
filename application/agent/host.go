@@ -51,6 +51,16 @@ func (a *Service) chatMessagesForProvider(c *domain.Conversation, pendingMsgID s
 	return chatMessages(c, pendingMsgID, caps)
 }
 
+func (a *Service) compactionPrefixMessageCount(c *domain.Conversation, caps ModelCapabilities) int {
+	if c == nil || c.CompactionPrefixMessages <= 0 {
+		return 0
+	}
+	count := min(c.CompactionPrefixMessages, len(c.Messages))
+	prefix := cloneConversation(c)
+	prefix.Messages = append([]domain.Message(nil), c.Messages[:count]...)
+	return len(a.chatMessagesForProvider(prefix, "", caps))
+}
+
 func (a *Service) enrichWithVisionDescriptions(ctx context.Context, conversation *domain.Conversation, pendingMsgID string, settings domain.Settings) *domain.Conversation {
 	if a != nil && a.deps.EnrichVision != nil {
 		return a.deps.EnrichVision(ctx, conversation, pendingMsgID, settings)

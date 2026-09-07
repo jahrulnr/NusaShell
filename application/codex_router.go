@@ -1,7 +1,10 @@
 package application
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -27,23 +30,45 @@ import (
 // accounts just like rate-limited ones, but the block duration is
 // typically hours instead of minutes.
 //
-// All state is in-memory and resets on restart. This is intentional:
-// the sticky mapping only matters within a session, and the provider
-// will re-inform us of rate limits if they persist.
+// Sticky bindings, cooldowns, and circuit state are in-memory and reset
+// on restart; the provider re-informs us if rate limits persist. The
+// last-used account per provider is persisted to disk so a fresh process
+// does not blindly default to the first registered account (which may be
+// the one that just exhausted its quota).
 type CodexAccountRouter struct {
 	mu          sync.Mutex
 	sticky      map[string]string    // conversationID → accountID
 	cooldown    map[string]time.Time // accountID → transient rate-limited until
 	circuitOpen map[string]time.Time // accountID → usage exhausted until
+	// lastUsed records the most recently picked account per provider.
+	// Persisted across restarts so a fresh process does not blindly start
+	// with the first registered account (which may be the one that just
+	// exhausted its quota).
+	lastUsed    map[string]string // providerID → accountID
+	persistPath string            // empty = state is not persisted
 }
 
-// NewCodexAccountRouter creates a ready-to-use router.
+// NewCodexAccountRouter creates a ready-to-use router without state
+// persistence (tests and in-memory-only usage).
 func NewCodexAccountRouter() *CodexAccountRouter {
 	return &CodexAccountRouter{
 		sticky:      map[string]string{},
 		cooldown:    map[string]time.Time{},
 		circuitOpen: map[string]time.Time{},
+		lastUsed:    map[string]string{},
 	}
+}
+
+// NewCodexAccountRouterWithState creates a router whose last-used mapping is
+// loaded from (and saved to) path. Missing or unreadable state files are not
+// an error — the router starts fresh.
+func NewCodexAccountRouterWithState(path string) *CodexAccountRouter {
+	r := NewCodexAccountRouter()
+	r.persistPath = path
+	if path != "" {
+		r.load()
+	}
+	return r
 }
 
 // PickAccountResult holds the result of an account pick, including
@@ -92,10 +117,19 @@ func (r *CodexAccountRouter) PickAccountDetailed(conversationID, providerID stri
 			return PickAccountResult{AccountID: sticky}
 		}
 	}
+	// No sticky (new conversation or fresh process): prefer the last-used
+	// account for this provider so a restart does not default to the first
+	// registered account, which may be the one that exhausted its quota.
+	if last, ok := r.lastUsed[providerID]; ok && availSet[last] && !r.isBlockedLocked(last, now) {
+		r.sticky[conversationID] = last
+		return PickAccountResult{AccountID: last}
+	}
 	// Pick first available that is not blocked
 	for _, acc := range available {
 		if !r.isBlockedLocked(acc, now) {
 			r.sticky[conversationID] = acc
+			r.lastUsed[providerID] = acc
+			r.persistLocked()
 			return PickAccountResult{AccountID: acc}
 		}
 	}
@@ -114,6 +148,22 @@ func (r *CodexAccountRouter) StickyAccount(conversationID string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.sticky[conversationID]
+}
+
+// PreferAccount applies an explicit account choice from the Providers UI.
+// Existing conversation bindings are cleared so Retry and later turns do not
+// silently keep using the account that was selected before the switch.
+func (r *CodexAccountRouter) PreferAccount(providerID, accountID string) {
+	if providerID == "" || accountID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	clear(r.sticky)
+	delete(r.cooldown, accountID)
+	delete(r.circuitOpen, accountID)
+	r.lastUsed[providerID] = accountID
+	r.persistLocked()
 }
 
 // MarkRateLimited marks an account as transiently rate-limited for the
@@ -250,6 +300,71 @@ func rateLimitCooldown(err error) time.Duration {
 		return upstream.RetryAfter
 	}
 	return domain.RetryAfterCutoff
+}
+
+// codexRouterState is the persisted shape of the router state file.
+type codexRouterState struct {
+	// LastUsed maps providerID → accountID (most recently picked account).
+	LastUsed map[string]string `json:"last_used,omitempty"`
+}
+
+// load reads a previously persisted router state. Missing or corrupt files
+// leave the router fresh; only the last-used mapping is restored — sticky
+// conversation bindings and in-flight cooldowns stay session-scoped.
+func (r *CodexAccountRouter) load() {
+	if r.persistPath == "" {
+		return
+	}
+	data, err := os.ReadFile(r.persistPath)
+	if err != nil {
+		return
+	}
+	var state codexRouterState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for providerID, accountID := range state.LastUsed {
+		if accountID != "" {
+			r.lastUsed[providerID] = accountID
+		}
+	}
+}
+
+// persistLocked writes the last-used mapping atomically. Caller must hold
+// r.mu. Failures are silent — the mapping is an optimization, not a safety
+// invariant; a lost write just means the next boot picks the first account.
+func (r *CodexAccountRouter) persistLocked() {
+	if r.persistPath == "" || len(r.lastUsed) == 0 {
+		return
+	}
+	dir := filepath.Dir(r.persistPath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	data, err := json.MarshalIndent(codexRouterState{LastUsed: r.lastUsed}, "", "  ")
+	if err != nil {
+		return
+	}
+	tmp, err := os.CreateTemp(dir, "codex-router-*.json")
+	if err != nil {
+		return
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		return
+	}
+	_ = os.Rename(tmpName, r.persistPath)
 }
 
 // retryAfterCutoff aliases the domain cutoff so Codex failover tests and

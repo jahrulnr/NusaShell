@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,10 +7,14 @@ import test from 'node:test';
 
 import {
   buildBackendEnvironment,
+  defaultCoreURL,
   electronDevArgs,
+  installCommand,
+  installDocsURL,
   isExternalHTTPURL,
   isSameOriginURL,
   normalizeLoopbackURL,
+  probeCoreURL,
   resolveBackendPath,
 } from '../src/runtime.cjs';
 
@@ -72,7 +77,60 @@ test('backend environment forces a loopback listener and clears remote access', 
   assert.equal(environment.NUSASHELL_PORT, '43210');
   assert.equal(environment.NUSASHELL_ALLOW_REMOTE, undefined);
   assert.equal(environment.NUSASHELL_DEV, undefined);
+  assert.equal(environment.NUSASHELL_SERVICE, undefined);
+  assert.equal(environment.NUSASHELL_WS_URL, undefined);
+  assert.equal(environment.NUSASHELL_CORE_OWNER, 'electron');
   assert.equal(environment.KEEP_ME, 'yes');
+});
+
+test('default core URL and install commands are platform-specific', () => {
+  assert.equal(defaultCoreURL().toString(), 'http://127.0.0.1:10994/');
+  assert.match(installCommand('linux'), /install\.sh/);
+  assert.match(installCommand('darwin'), /install\.sh/);
+  assert.match(installCommand('win32'), /install\.ps1/);
+  assert.match(installDocsURL(), /github\.com/);
+});
+
+test('core health probe accepts the new healthz identity', async () => {
+  const server = createServer((req, res) => {
+    assert.equal(req.url, '/healthz');
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ ok: true, service: 'nusashell-core', pid: 1 }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address();
+    const health = await probeCoreURL(`http://127.0.0.1:${address.port}/`);
+    assert.equal(health.service, 'nusashell-core');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('core health probe accepts the legacy app.info identity during upgrade', async () => {
+  const server = createServer((req, res) => {
+    if (req.url === '/healthz') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end('<!doctype html>');
+      return;
+    }
+    if (req.url === '/rpc/app/info') {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok: true, result: { name: 'NusaShell', version: 'old' } }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address();
+    const health = await probeCoreURL(`http://127.0.0.1:${address.port}/`);
+    assert.equal(health.legacy, true);
+    assert.equal(health.version, 'old');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test('resolveBackendPath prefers an explicit external binary', async () => {

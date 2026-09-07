@@ -46,6 +46,12 @@ The registry always shows persistent Anthropic, OpenAI, OpenRouter, and Codex ca
   - Action: Selects the prompt-cache duration sent to this provider when Settings prompt caching is on, or off to skip caching for this provider. Messages and OpenRouter chat offer 5m/1h/off; Responses and other Chat hosts offer 30m/off.
   - Notes: Buttons inside the provider detail pane (class provider-cache-ttl-chip). The last chip is off. Empty stored TTL still defaults to the first duration. The registry card shows the selected value only.
 
+- **Thinking summary** (`.provider-cache-ttl-chip`):
+  - Section: Providers
+  - Type: chip-group
+  - Action: Selects how verbose the visible Codex thinking summary should be: auto, concise, detailed, or none.
+  - Notes: Available only for Codex-kind providers. The selected value is stored per provider and applies on the next turn; none suppresses the visible summary without disabling model reasoning.
+
 ## Codex accounts and runtime
 
 On the Codex detail pane, the ChatGPT Accounts card shows multi-account OAuth identity, plan, usage bars, Switch/Remove, Sign in with ChatGPT, Import from Codex CLI, and Refresh circuits. The Codex Runtime card shows managed CLI binary status and Download.

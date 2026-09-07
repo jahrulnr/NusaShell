@@ -20,12 +20,12 @@ func TestDecodeMapsNusaShellLifecycleEvents(t *testing.T) {
 		},
 		{
 			name:  "tool started",
-			input: `{"type":"agent.tool.started","payload":{"name":"docs"}}`,
+			input: `{"type":"agent.tool.started","payload":{"run_id":"run-1","name":"docs"}}`,
 			want:  state.Event{State: state.StateReasoning, Title: "Executing…", Message: "docs(...)"},
 		},
 		{
 			name:  "tool completed",
-			input: `{"type":"agent.tool.completed","payload":{"name":"docs"}}`,
+			input: `{"type":"agent.tool.completed","payload":{"run_id":"run-1","name":"docs"}}`,
 			want:  state.Event{State: state.StateThinking},
 		},
 		{
@@ -93,6 +93,17 @@ func TestDecodeIgnoresUnrelatedEvents(t *testing.T) {
 	}
 	if ok || got != (state.Event{}) {
 		t.Fatalf("unrelated event = %+v, ok=%v", got, ok)
+	}
+}
+
+func TestDecodeIgnoresHistoricalToolCompletionWithoutActiveRun(t *testing.T) {
+	t.Parallel()
+	got, ok, err := Decode([]byte(`{"type":"agent.tool.completed","payload":{"run_id":"","conversation_id":"conv"}}`))
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if ok || got != (state.Event{}) {
+		t.Fatalf("historical completion = %+v, ok=%v", got, ok)
 	}
 }
 

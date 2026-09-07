@@ -97,6 +97,7 @@ test('installers preserve the release manifest, checksum, and version activation
 
 test('local Linux Electron installer activates a versioned wrapper without touching app data', async () => {
   if (process.platform !== 'linux') return;
+  const electronVersion = (await readFile(script('../apps/electron/VERSION'), 'utf8')).trim();
   const root = await mkdtemp(join(tmpdir(), 'nusashell-local-install-'));
   temporaryDirectories.push(root);
   const build = join(root, 'build');
@@ -120,14 +121,14 @@ test('local Linux Electron installer activates a versioned wrapper without touch
     },
   });
 
-  assert.equal(await realpath(join(installRoot, 'current')), join(installRoot, 'versions', '0.1.0'));
+  assert.equal(await realpath(join(installRoot, 'current')), join(installRoot, 'versions', electronVersion));
   const launcher = await readFile(join(home, '.local', 'bin', 'nusashell-desktop'), 'utf8');
   assert.equal(
     launcher.includes('--no-sandbox') || await fileExists(join(installRoot, 'current', 'chrome-sandbox.disabled')),
     true,
   );
   assert.equal((await readFile(join(home, '.local', 'share', 'applications', 'nusashell-desktop.desktop'), 'utf8')).includes('nusashell-desktop'), true);
-  assert.equal(await realpath(join(installRoot, 'current', 'nusashell-desktop')), join(installRoot, 'versions', '0.1.0', 'nusashell-desktop'));
+  assert.equal(await realpath(join(installRoot, 'current', 'nusashell-desktop')), join(installRoot, 'versions', electronVersion, 'nusashell-desktop'));
 });
 
 test('local Linux installer builds layout for Go and pets from checkout fixtures', async () => {

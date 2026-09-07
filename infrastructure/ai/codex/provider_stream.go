@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 
 	"nusashell/infrastructure/ai/core"
 )
@@ -19,6 +18,9 @@ type providerStream struct {
 	toolStarted map[string]bool
 	toolArgs    map[string]bool
 	toolSeen    bool
+
+	lastReasoningItemID       string
+	lastReasoningSummaryIndex *int
 }
 
 type compactionProviderStream struct {
@@ -158,12 +160,18 @@ func (s *providerStream) outputItemDone(item ResponseItem) (core.Event, error) {
 		}
 		return core.ProviderEvent{Name: "compaction", Raw: append(json.RawMessage(nil), raw...)}, nil
 	case ItemTypeReasoning:
+		// The visible reasoning text already streamed incrementally via
+		// response.reasoning_text.delta / response.reasoning_summary_text.delta
+		// events. Re-emitting the full summary here duplicated the whole
+		// thinking block in the UI and persisted transcript (the same text was
+		// appended again on output_item.done). The done item only contributes
+		// opaque Extra (encrypted_content / wire item) for replay, mirroring
+		// the OpenAI Responses path.
 		raw := item.Raw
 		if len(raw) == 0 {
 			raw, _ = json.Marshal(item)
 		}
 		return core.ReasoningDelta{
-			Text:      reasoningText(item),
 			Summary:   len(item.Summary) > 0,
 			Extra:     append(json.RawMessage(nil), raw...),
 			ExtraFull: true,
@@ -215,12 +223,18 @@ func (s *providerStream) other(event EventOther) (core.Event, error) {
 		return core.ContentDelta{Text: delta.Text, OutputIndex: delta.OutputIndex, ContentIndex: delta.ContentIndex}, nil
 	case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
 		var delta struct {
-			Text string `json:"delta"`
+			Text         string `json:"delta"`
+			ItemID       string `json:"item_id,omitempty"`
+			SummaryIndex *int   `json:"summary_index,omitempty"`
 		}
 		if err := json.Unmarshal(event.Raw, &delta); err != nil {
 			return nil, fmt.Errorf("codex: decode reasoning delta: %w", err)
 		}
-		return core.ReasoningDelta{Text: delta.Text, Summary: event.Type == "response.reasoning_summary_text.delta"}, nil
+		text := delta.Text
+		if event.Type == "response.reasoning_summary_text.delta" && text != "" && s.reasoningSummaryChanged(delta.ItemID, delta.SummaryIndex) {
+			text = "\n\n" + text
+		}
+		return core.ReasoningDelta{Text: text, Summary: event.Type == "response.reasoning_summary_text.delta"}, nil
 	case "response.function_call_arguments.delta":
 		var delta struct {
 			Text        string `json:"delta"`
@@ -287,21 +301,29 @@ func (s *providerStream) Close() error {
 	return s.raw.Close()
 }
 
+func (s *providerStream) reasoningSummaryChanged(itemID string, summaryIndex *int) bool {
+	changed := false
+	if itemID != "" && s.lastReasoningItemID != "" && itemID != s.lastReasoningItemID {
+		changed = true
+	}
+	if summaryIndex != nil && s.lastReasoningSummaryIndex != nil && *summaryIndex != *s.lastReasoningSummaryIndex {
+		changed = true
+	}
+	if itemID != "" {
+		s.lastReasoningItemID = itemID
+	}
+	if summaryIndex != nil {
+		index := *summaryIndex
+		s.lastReasoningSummaryIndex = &index
+	}
+	return changed
+}
+
 func responseItemToolID(item ResponseItem) string {
 	if item.CallID != "" {
 		return item.CallID
 	}
 	return item.ID
-}
-
-func reasoningText(item ResponseItem) string {
-	var parts []string
-	for _, summary := range item.Summary {
-		if strings.TrimSpace(summary.Text) != "" {
-			parts = append(parts, summary.Text)
-		}
-	}
-	return strings.Join(parts, "")
 }
 
 func codexUsage(usage *TokenUsage, model string) core.Usage {

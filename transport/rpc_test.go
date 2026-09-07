@@ -224,6 +224,39 @@ func TestConversationLifecycle(t *testing.T) {
 	}
 }
 
+func TestConversationProviderSetPersistsPerConversation(t *testing.T) {
+	h := newHarness(t, nil)
+	firstID := h.newConversation(t)
+	secondID := h.newConversation(t)
+
+	set := h.rpcOK(t, "agent.conversations.set-provider", map[string]any{"id": firstID, "provider_route": "account-plus"})
+	var result struct {
+		Conversation struct {
+			ID            string `json:"id"`
+			ProviderRoute string `json:"provider_route"`
+		} `json:"conversation"`
+	}
+	if err := json.Unmarshal(set.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Conversation.ID != firstID || result.Conversation.ProviderRoute != "account-plus" {
+		t.Fatalf("set provider = %+v", result.Conversation)
+	}
+
+	other := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": secondID})
+	var untouched struct {
+		Conversation struct {
+			ProviderRoute string `json:"provider_route"`
+		} `json:"conversation"`
+	}
+	if err := json.Unmarshal(other.Result, &untouched); err != nil {
+		t.Fatal(err)
+	}
+	if untouched.Conversation.ProviderRoute != "" {
+		t.Fatalf("provider route leaked into a different conversation: %q", untouched.Conversation.ProviderRoute)
+	}
+}
+
 func TestConversationWorkspaceSetPersistsPerConversation(t *testing.T) {
 	h := newHarness(t, nil)
 	firstID := h.newConversation(t)

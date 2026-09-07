@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,106 @@ import (
 
 	"nusashell/infrastructure/ai/core"
 )
+
+func TestBuildRequestUsesConfiguredReasoningSummary(t *testing.T) {
+	p := &Provider{}
+	wire, _, err := p.buildRequest(t.Context(), &core.Request{
+		Model:           "gpt-5.6-terra",
+		Messages:        []core.Message{{Role: core.RoleUser, Blocks: []core.Block{core.TextBlock{Text: "hello"}}}},
+		ProviderOptions: core.ProviderOptions{"reasoning_summary": "detailed"},
+	})
+	if err != nil {
+		t.Fatalf("buildResponsesRequest: %v", err)
+	}
+	if wire.Reasoning == nil || wire.Reasoning.Summary != "detailed" {
+		t.Fatalf("reasoning = %#v, want detailed summary", wire.Reasoning)
+	}
+}
+
+func TestBuildRequestRejectsInvalidReasoningSummary(t *testing.T) {
+	p := &Provider{}
+	_, _, err := p.buildRequest(t.Context(), &core.Request{
+		Model:           "gpt-5.6-terra",
+		Messages:        []core.Message{{Role: core.RoleUser, Blocks: []core.Block{core.TextBlock{Text: "hello"}}}},
+		ProviderOptions: core.ProviderOptions{"reasoning_summary": "verbose"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "reasoning_summary") {
+		t.Fatalf("error = %v, want reasoning_summary validation error", err)
+	}
+}
+
+func TestBuildRequestOmitsReasoningSummaryWhenConfiguredNone(t *testing.T) {
+	p := &Provider{}
+	wire, _, err := p.buildRequest(t.Context(), &core.Request{
+		Model:           "gpt-5.6-terra",
+		Messages:        []core.Message{{Role: core.RoleUser, Blocks: []core.Block{core.TextBlock{Text: "hello"}}}},
+		ProviderOptions: core.ProviderOptions{"reasoning_summary": "none"},
+	})
+	if err != nil {
+		t.Fatalf("buildRequest: %v", err)
+	}
+	if wire.Reasoning == nil || wire.Reasoning.Summary != "" {
+		t.Fatalf("reasoning = %#v, want reasoning with omitted summary", wire.Reasoning)
+	}
+}
+
+func TestRequestInputSplitsToolResultMediaIntoUserMessage(t *testing.T) {
+	png := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}
+	messages := []core.Message{
+		core.Assistant(core.ToolUseBlock{ID: "call_1", Name: "generate_image", Arguments: core.MustJSONRaw(map[string]any{"prompt": "x"})}),
+		core.ToolResult("call_1",
+			core.TextBlock{Text: "Image saved"},
+			core.ImageBlock{Data: png, MIME: "image/png"}),
+		core.User(core.TextBlock{Text: "lanjut"}),
+	}
+	_, input, err := requestInput(messages)
+	if err != nil {
+		t.Fatalf("requestInput: %v", err)
+	}
+	if len(input) != 4 {
+		t.Fatalf("input items = %d, want 4: %+v", len(input), input)
+	}
+	if input[0].Type != ItemTypeFunctionCall || input[1].Type != ItemTypeFunctionCallOutput {
+		t.Fatalf("first items = %s, %s; want function_call then function_call_output", input[0].Type, input[1].Type)
+	}
+	// function_call_output payload must stay plain text JSON ("Image saved").
+	if got := string(input[1].Output); got != `"Image saved"` {
+		t.Fatalf("tool output = %s, want JSON string of the text part", got)
+	}
+	// Media from the tool result is reinjected as a user message BEFORE the
+	// next real user text, mirroring the OpenAI Responses deferredMedia
+	// pattern — the tool output itself never carries an ImageBlock.
+	mediaMsg := input[2]
+	if mediaMsg.Type != ItemTypeMessage || mediaMsg.Role != RoleUser || len(mediaMsg.Content) != 1 {
+		t.Fatalf("media reinjection = %+v", mediaMsg)
+	}
+	wantURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
+	if mediaMsg.Content[0].Type != ContentInputImage || mediaMsg.Content[0].ImageURL != wantURL {
+		t.Fatalf("media item = %+v, want input_image %q", mediaMsg.Content[0], wantURL)
+	}
+	userMsg := input[3]
+	if userMsg.Type != ItemTypeMessage || userMsg.Role != RoleUser ||
+		len(userMsg.Content) != 1 || userMsg.Content[0].Text != "lanjut" {
+		t.Fatalf("following user message = %+v", userMsg)
+	}
+}
+
+func TestRequestInputToolResultWithoutTextKeepsEmptyOutput(t *testing.T) {
+	messages := []core.Message{
+		core.Assistant(core.ToolUseBlock{ID: "call_1", Name: "read_media", Arguments: core.MustJSONRaw(map[string]any{"file_path": "/tmp/a.png"})}),
+		core.ToolResult("call_1", core.ImageBlock{Data: []byte{1, 2, 3}, MIME: "image/png"}),
+	}
+	_, input, err := requestInput(messages)
+	if err != nil {
+		t.Fatalf("requestInput: %v", err)
+	}
+	if len(input) != 3 {
+		t.Fatalf("input items = %d, want 3 (call + output + media user msg): %+v", len(input), input)
+	}
+	if got := string(input[1].Output); got != `""` {
+		t.Fatalf("tool output = %s, want empty JSON string", got)
+	}
+}
 
 func TestProviderStreamCompactionTriggerAndOutput(t *testing.T) {
 	var requestBody ResponsesAPIRequest
@@ -111,7 +212,7 @@ func TestProviderStreamCompactionRequiresExactlyOneItem(t *testing.T) {
 	}
 }
 
-func TestProviderRebuildsHistoryAroundOpaqueCompactionItem(t *testing.T) {
+func TestProviderPreservesPostCompactionToolRoundInCausalOrder(t *testing.T) {
 	var requestBody ResponsesAPIRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -119,7 +220,14 @@ func TestProviderRebuildsHistoryAroundOpaqueCompactionItem(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}\n\n"))
+		_, _ = w.Write([]byte(strings.Join([]string{
+			"event: response.output_item.done",
+			`data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"ENC-2"}}`,
+			"",
+			"event: response.completed",
+			`data: {"type":"response.completed","response":{"id":"resp_1"}}`,
+			"",
+		}, "\n")))
 	}))
 	defer server.Close()
 
@@ -130,11 +238,15 @@ func TestProviderRebuildsHistoryAroundOpaqueCompactionItem(t *testing.T) {
 	stream, err := provider.Stream(t.Context(), &core.Request{
 		Model: "gpt-5-codex",
 		Messages: []core.Message{
-			{Role: core.RoleUser, Blocks: []core.Block{core.TextBlock{Text: "latest question"}}},
-			{Role: core.RoleAssistant, Blocks: []core.Block{core.TextBlock{Text: "old answer"}}},
+			core.User(core.TextBlock{Text: "retained question"}),
+			core.User(core.TextBlock{Text: "continue after compaction"}),
+			core.Assistant(core.ToolUseBlock{ID: "call_1", Name: "skill", Arguments: json.RawMessage(`{"query":"go"}`)}),
+			core.ToolResult("call_1", core.TextBlock{Text: "skill loaded"}),
 		},
 		ProviderOptions: core.ProviderOptions{
-			"compaction_items": `[{"type":"compaction","encrypted_content":"ENC-1"}]`,
+			"compaction_items":           `[{"type":"compaction","encrypted_content":"ENC-1"}]`,
+			"compaction_prefix_messages": 1,
+			"compaction_trigger":         true,
 		},
 	})
 	if err != nil {
@@ -144,11 +256,13 @@ func TestProviderRebuildsHistoryAroundOpaqueCompactionItem(t *testing.T) {
 	if _, err := core.Collect(stream); err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
-	if len(requestBody.Input) != 2 {
-		t.Fatalf("request input = %+v, want latest user plus compaction", requestBody.Input)
+	if len(requestBody.Input) != 6 {
+		t.Fatalf("request input = %+v, want retained user, checkpoint, user, call, output, and next compaction trigger", requestBody.Input)
 	}
-	if !requestBody.Input[0].IsUserMessage() || !requestBody.Input[1].IsCompaction() {
-		t.Fatalf("request input = %+v, want user then opaque compaction item", requestBody.Input)
+	if !requestBody.Input[0].IsUserMessage() || !requestBody.Input[1].IsCompaction() ||
+		!requestBody.Input[2].IsUserMessage() || requestBody.Input[3].Type != ItemTypeFunctionCall ||
+		requestBody.Input[4].Type != ItemTypeFunctionCallOutput || !requestBody.Input[5].IsCompactionTrigger() {
+		t.Fatalf("request input = %+v, want retained user -> checkpoint -> post-checkpoint tool round -> compaction trigger", requestBody.Input)
 	}
 }
 

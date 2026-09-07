@@ -149,7 +149,27 @@ func (s *Service) HandleDelete(req contracts.ConversationIDRequest) (any, *contr
 	return map[string]bool{"ok": true}, nil
 }
 
-// HandleSetWorkspace validates and persists a conversation workspace path.
+// HandleSetProvider persists the provider route or Codex account for one room.
+func (s *Service) HandleSetProvider(req contracts.ConversationSetProviderRequest) (any, *contracts.RPCError) {
+	if _, rpcErr := s.get(req.ID); rpcErr != nil {
+		return nil, rpcErr
+	}
+	if s.lockTurn != nil {
+		unlock := s.lockTurn(req.ID)
+		defer unlock()
+	}
+	c, rpcErr := s.get(req.ID)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	c.ProviderRoute = strings.TrimSpace(req.ProviderRoute)
+	c.Touch()
+	if err := Bind(s.store, c).Save(); err != nil {
+		return nil, rpcdispatch.Internal(err)
+	}
+	return contracts.ConversationGetResult{Conversation: ConvDTO(c)}, nil
+}
+
 func (s *Service) HandleSetWorkspace(req contracts.ConversationSetWorkspaceRequest) (any, *contracts.RPCError) {
 	// Validate the conversation and the candidate path before doing any
 	// filesystem work, and do not hold the turn lock during EnsureDir.

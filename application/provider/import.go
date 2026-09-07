@@ -277,12 +277,16 @@ func seedCodexImageModels(models []domain.Model) []domain.Model {
 		}
 	}
 	seeds := []domain.Model{
-		{ID: "gpt-image-2", DisplayName: "GPT Image 2", Kind: domain.ModelKindImage},
-		{ID: "gpt-image-1.5", DisplayName: "GPT Image 1.5", Kind: domain.ModelKindImage},
+		// gpt-image-2 / gpt-image-1.5 accept reference images for edit mode,
+		// so they are tagged Vision (i2i) — the media gate rejects edits on
+		// t2i-only models.
+		{ID: "gpt-image-2", DisplayName: "GPT Image 2", Kind: domain.ModelKindImage, Vision: true},
+		{ID: "gpt-image-1.5", DisplayName: "GPT Image 1.5", Kind: domain.ModelKindImage, Vision: true},
 	}
 	for _, seed := range seeds {
 		if i, ok := seen[seed.ID]; ok {
 			models[i].Kind = domain.ModelKindImage
+			models[i].Vision = true
 			if strings.TrimSpace(models[i].DisplayName) == "" {
 				models[i].DisplayName = seed.DisplayName
 			}

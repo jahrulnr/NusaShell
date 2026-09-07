@@ -130,3 +130,76 @@ test('models without route support keep the single-gateway title', async () => {
     cleanup(dom);
   }
 });
+
+test('Codex model uses the route control as a per-conversation account picker', async () => {
+  const dom = makeDom();
+  globalThis.fetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    assert.equal(body.method, 'ai.codex.accounts.list');
+    assert.deepEqual(body.payload, { provider_id: 'codex' });
+    return { ok: true, json: async () => ({ ok: true, result: { accounts: [
+      { account_id: 'free', email: 'free@example.test' },
+      { account_id: 'plus', email: 'plus@example.test' },
+    ] } }) };
+  };
+  let selectedAccount = '';
+  try {
+    const picker = bindRoutePicker({
+      getModels: () => [{ provider_id: 'codex', provider_kind: 'codex', id: 'gpt-5.6-sol' }],
+      getSelectedModel: () => 'codex:gpt-5.6-sol',
+      getSelectedRoute: () => selectedAccount,
+      selectRoute: (account) => { selectedAccount = account; },
+    });
+
+    await picker.refresh();
+    const trigger = document.getElementById('route-trigger');
+    assert.equal(trigger.title, 'Auto — pilih akun Codex');
+    trigger.click();
+    assert.match(document.getElementById('route-menu').textContent, /free@example\.test/);
+    const plus = [...document.querySelectorAll('.agent-model-choice')]
+      .find((button) => button.textContent.includes('plus@example.test'));
+    plus.click();
+    assert.equal(selectedAccount, 'plus');
+    assert.equal(document.getElementById('route-trigger-label').textContent, 'plus@example.test');
+  } finally {
+    cleanup(dom);
+  }
+});
+
+test('stale route responses cannot overwrite the currently selected Codex account', async () => {
+  const dom = makeDom();
+  const requests = [];
+  globalThis.fetch = (_url, options) => new Promise((resolve) => {
+    requests.push({ body: JSON.parse(options.body), resolve });
+  });
+  let selectedModel = 'openrouter:model-a';
+  try {
+    const picker = bindRoutePicker({
+      getModels: () => [
+        { provider_id: 'openrouter', id: 'model-a', route_support: true },
+        { provider_id: 'codex', provider_kind: 'codex', id: 'gpt-5.6-sol' },
+      ],
+      getSelectedModel: () => selectedModel,
+      getSelectedRoute: () => 'plus',
+      selectRoute: () => {},
+    });
+
+    const oldRefresh = picker.refresh();
+    selectedModel = 'codex:gpt-5.6-sol';
+    const currentRefresh = picker.refresh();
+
+    assert.equal(requests.length, 2);
+    requests[1].resolve({ ok: true, json: async () => ({ ok: true, result: { accounts: [
+      { account_id: 'plus', email: 'plus@example.test' },
+    ] } }) });
+    await currentRefresh;
+    assert.equal(document.getElementById('route-trigger-label').textContent, 'plus@example.test');
+
+    requests[0].resolve({ ok: true, json: async () => ({ ok: true, result: { routes: [] } }) });
+    await oldRefresh;
+    assert.equal(document.getElementById('route-trigger-label').textContent, 'plus@example.test');
+    assert.equal(document.getElementById('route-trigger').title, 'Akun Codex: plus@example.test');
+  } finally {
+    cleanup(dom);
+  }
+});

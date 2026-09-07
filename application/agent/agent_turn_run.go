@@ -174,7 +174,7 @@ func (a *Service) RunSingleTurn(run *TurnRun, provider *domain.Provider, apiKey,
 	}
 	// Emit an event so the UI can show "Continuing tasks… (N/M)" and insert
 	// the auto-continue announcement tool card into the transcript.
-	a.Bus.Emit(contracts.EventAutoContinue, contracts.AutoContinueEvent{
+	a.EmitInteractiveTurnEvent(run, contracts.EventAutoContinue, contracts.AutoContinueEvent{
 		ConversationID: run.ConversationID,
 		RunID:          run.ID,
 		Decision: contracts.AutoContinueDTO{
@@ -250,7 +250,7 @@ func (a *Service) ApplyQueuedSteer(run *TurnRun) (bool, error) {
 		run.RequeueSteer(entry)
 		return false, err
 	}
-	a.Bus.Emit(contracts.EventSteerApplied, contracts.SteerEvent{
+	a.EmitInteractiveTurnEvent(run, contracts.EventSteerApplied, contracts.SteerEvent{
 		ConversationID: run.ConversationID, SteerID: entry.ID, Text: entry.Text, Status: "applied",
 	})
 	a.log("info", "agent", "steer applied for %s: %s", run.ConversationID, entry.ID)

@@ -18,12 +18,16 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/codex"
 	aiutil "nusashell/infrastructure/ai/internal"
 )
 
 const (
 	backendOpenAI     = "openai"
 	backendOpenRouter = "openrouter"
+	// BackendCodex is the ChatGPT Codex image backend (POST
+	// images/generations and images/edits on the resolved provider base URL).
+	BackendCodex = "codex"
 )
 
 // Client talks to one image-generation HTTP backend.
@@ -31,15 +35,20 @@ type Client struct {
 	Backend string
 	BaseURL string
 	APIKey  string
-	HTTP    *http.Client
+	// AccountID is the ChatGPT account id sent as ChatGPT-Account-ID on the
+	// Codex backend. Empty skips the header.
+	AccountID string
+	HTTP      *http.Client
 }
 
 // NewFactory returns an ImageGeneratorFactory that routes OpenRouter hosts
-// to POST /images and OpenAI-compatible chat/responses providers to
-// /images/generations (or /images/edits when reference images are present).
+// to POST /images, OpenAI-compatible chat/responses providers to
+// /images/generations (or /images/edits when reference images are present),
+// and Codex providers (constructed by the composition root) to the
+// ChatGPT Codex images endpoints.
 func NewFactory() application.ImageGeneratorFactory {
 	client := newImageHTTPClient()
-	return func(p *domain.Provider, apiKey string) (application.ImageGenerator, error) {
+	return func(_ context.Context, p *domain.Provider, apiKey string) (application.ImageGenerator, error) {
 		if p == nil {
 			return nil, fmt.Errorf("image provider is required")
 		}
@@ -82,6 +91,8 @@ func (c *Client) Generate(ctx context.Context, req application.ImageGenRequest) 
 	switch c.Backend {
 	case backendOpenRouter:
 		return c.generateOpenRouter(ctx, req)
+	case BackendCodex:
+		return c.generateCodex(ctx, req)
 	default:
 		return c.generateOpenAI(ctx, req)
 	}
@@ -335,4 +346,177 @@ func (c *Client) generateOpenRouter(ctx context.Context, req application.ImageGe
 		return nil, err
 	}
 	return decodeImages(decoded, backendOpenRouter, req.Model)
+}
+
+// maxCodexImageB64 is the base64 length of 32 MiB — the Codex executor's
+// generated-image cap. Guarded before decoding so an oversized payload fails
+// fast without allocating the decoded bytes.
+const maxCodexImageB64 = 44_739_244 // 4 * ceil(32<<20 / 3)
+
+// generateCodex posts to the ChatGPT Codex images endpoints. The request
+// body mirrors the Codex DTOs (codex-api/src/images.rs): model, prompt,
+// background/quality/size with "auto" defaults, and images[] data URLs for
+// edit mode. n is intentionally omitted — the built-in Codex tool always
+// requests a single image (clamped here) and every call may be billable.
+func (c *Client) generateCodex(ctx context.Context, req application.ImageGenRequest) (*application.ImageGenResult, error) {
+	req.N = 1 // Codex requests one image; multi-image generation is not evidenced.
+
+	body := map[string]any{
+		"model":      req.Model,
+		"prompt":     req.Prompt,
+		"background": defaultOr(req.Background, "auto"),
+		"quality":    defaultOr(req.Quality, "auto"),
+		"size":       defaultOr(req.Size, "auto"),
+	}
+	path := "/images/generations"
+	if len(req.References) > 0 {
+		path = "/images/edits"
+		refs := make([]map[string]any, 0, len(req.References))
+		for _, ref := range req.References {
+			media := strings.TrimSpace(ref.MediaType)
+			if media == "" {
+				media = "image/png"
+			}
+			refs = append(refs, map[string]any{
+				"image_url": "data:" + media + ";base64," + base64.StdEncoding.EncodeToString(ref.Data),
+			})
+		}
+		body["images"] = refs
+	}
+	url := aiutil.JoinEndpoint(c.BaseURL, path)
+	headers := c.codexHeaders(req.TurnID)
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(body); err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &buf)
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("User-Agent", codex.CodexUserAgent)
+	for k, v := range headers {
+		httpReq.Header.Set(k, v)
+	}
+	resp, err := c.HTTP.Do(httpReq)
+	if err != nil {
+		return nil, &domain.ProviderError{Kind: domain.KindConnect, Temporary: true, Err: err}
+	}
+	defer resp.Body.Close()
+	// One valid response item holds up to 32 MiB of decoded bytes, whose
+	// base64 form is maxCodexImageB64 chars. A 4 MiB slack covers the JSON
+	// wrapper so any single valid image fits while a runaway body still
+	// fails fast without unbounded allocation.
+	limit := maxCodexImageB64 + 4<<20
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) == limit {
+		return nil, fmt.Errorf("codex image response too large")
+	}
+	if resp.StatusCode >= 400 {
+		return nil, mapCodexError(resp.StatusCode, raw)
+	}
+	var decoded imagesResponse
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil, fmt.Errorf("decode codex image response: %w", err)
+	}
+	for i, item := range decoded.Data {
+		if len(strings.TrimSpace(item.B64JSON)) > maxCodexImageB64 {
+			return nil, fmt.Errorf("generated image %d exceeds the 32 MiB executor limit", i+1)
+		}
+	}
+	return decodeImages(decoded, BackendCodex, req.Model)
+}
+
+func defaultOr(value, def string) string {
+	if v := strings.TrimSpace(value); v != "" {
+		return v
+	}
+	return def
+}
+
+// codexHeaders builds the Codex image request headers. A plain bearer token
+// alone is not enough — the real-test evidence required the originator and
+// x-codex-image-turn-id metadata (plus the account id when present) to pass
+// the 403 gate.
+func (c *Client) codexHeaders(turnID string) map[string]string {
+	h := map[string]string{
+		"originator": codex.DefaultOriginator,
+		"User-Agent": codex.CodexUserAgent,
+	}
+	if c.APIKey != "" {
+		h["Authorization"] = "Bearer " + c.APIKey
+	}
+	if c.AccountID != "" {
+		h["ChatGPT-Account-ID"] = c.AccountID
+	}
+	if turnID != "" {
+		h["x-codex-image-turn-id"] = turnID
+	}
+	return h
+}
+
+// mapCodexError converts a non-2xx Codex image response into a
+// domain.ProviderError. Image generation may be billable, so 429 responses
+// are surfaced as hard failures (RetryAfter=0) instead of a blind retry
+// loop; 5xx stay retriable for the caller's shared policy. No credential
+// value is ever copied into the error.
+func mapCodexError(status int, raw []byte) error {
+	msg := strings.TrimSpace(string(raw))
+	if len(msg) > 800 {
+		msg = msg[:800]
+	}
+	var parsed struct {
+		Error struct {
+			Type     string      `json:"type"`
+			Message  string      `json:"message"`
+			ResetsAt json.Number `json:"resets_at"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(raw, &parsed)
+	detail := strings.TrimSpace(parsed.Error.Message)
+	if detail == "" {
+		detail = msg
+	}
+	switch status {
+	case http.StatusTooManyRequests: // 429
+		if strings.Contains(parsed.Error.Type, "usage_limit_reached") {
+			resetAt := codexResetsAtTime(parsed.Error.ResetsAt)
+			msg := "image generation usage limit reached"
+			if !resetAt.IsZero() {
+				msg += fmt.Sprintf(" (resets at %s)", resetAt.Format(time.RFC3339))
+			}
+			return &domain.ProviderError{
+				StatusCode:        http.StatusTooManyRequests,
+				Err:               fmt.Errorf("%s", msg),
+				UsageLimitResetAt: resetAt,
+			}
+		}
+		return &domain.ProviderError{
+			StatusCode: http.StatusTooManyRequests,
+			Err:        fmt.Errorf("image generation rate limited: %s", detail),
+		}
+	default:
+		if status >= 500 {
+			return &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: status, Temporary: true, Err: fmt.Errorf("image generation failed (HTTP %d): %s", status, detail)}
+		}
+		return &domain.ProviderError{StatusCode: status, Err: fmt.Errorf("image generation failed (HTTP %d): %s", status, detail)}
+	}
+}
+
+// codexResetsAtTime parses the optional usage-limit resets_at unix
+// timestamp, returning the zero time when absent or invalid.
+func codexResetsAtTime(sec json.Number) time.Time {
+	if sec == "" {
+		return time.Time{}
+	}
+	n, err := sec.Int64()
+	if err != nil || n <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(n, 0)
 }

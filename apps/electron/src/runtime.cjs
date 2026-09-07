@@ -7,6 +7,11 @@ const net = require('node:net');
 const path = require('node:path');
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', '[::1]', 'localhost']);
+const DEFAULT_CORE_HOST = '127.0.0.1';
+const DEFAULT_CORE_PORT = 10994;
+const INSTALL_DOCS_URL = 'https://github.com/jahrulnr/NusaShell#installation';
+const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.sh';
+const INSTALL_SCRIPT_PS1_URL = 'https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.ps1';
 
 function normalizeLoopbackURL(rawValue) {
   const value = String(rawValue || '').trim();
@@ -32,6 +37,18 @@ function normalizeLoopbackURL(rawValue) {
   // The server root is the canonical entry point. Preserve an explicit path
   // for fixture/dev servers, but always give loadURL a stable trailing slash.
   if (!url.pathname) url.pathname = '/';
+  return url;
+}
+
+function defaultCoreURL() {
+  return normalizeLoopbackURL(`http://${DEFAULT_CORE_HOST}:${DEFAULT_CORE_PORT}/`);
+}
+
+function coreHealthURL(rawValue) {
+  const url = rawValue instanceof URL ? new URL(rawValue.toString()) : normalizeLoopbackURL(rawValue);
+  url.pathname = '/healthz';
+  url.search = '';
+  url.hash = '';
   return url;
 }
 
@@ -163,6 +180,17 @@ function resolveBackendPath({
   ], { platform, statSync });
 }
 
+function installCommand(platform = process.platform) {
+  if (platform === 'win32') {
+    return `& ([scriptblock]::Create((irm ${INSTALL_SCRIPT_PS1_URL}))) -InstallService -NoElectron -NoMcp`;
+  }
+  return `curl -fsSL ${INSTALL_SCRIPT_URL} | NUSASHELL_NON_INTERACTIVE=1 bash -s -- --install-service --no-electron --no-pets --no-mcp`;
+}
+
+function installDocsURL() {
+  return INSTALL_DOCS_URL;
+}
+
 function buildBackendEnvironment(baseEnvironment, port, packaged) {
   const environment = {
     ...baseEnvironment,
@@ -177,6 +205,12 @@ function buildBackendEnvironment(baseEnvironment, port, packaged) {
   // The wrapper owns the loopback boundary; never allow a child started by it
   // to widen the listener through an inherited remote-access override.
   delete environment.NUSASHELL_ALLOW_REMOTE;
+  // The child owns its lifecycle independently from the systemd service. Do
+  // not inherit service/pet routing markers or point the child back to the
+  // service's WebSocket endpoint.
+  delete environment.NUSASHELL_SERVICE;
+  delete environment.NUSASHELL_WS_URL;
+  environment.NUSASHELL_CORE_OWNER = 'electron';
   return environment;
 }
 
@@ -213,8 +247,110 @@ function probeURL(rawURL, timeoutMs = 1000) {
   });
 }
 
+function probeLegacyCoreURL(rawURL, timeoutMs = 1000) {
+  const url = rawURL instanceof URL ? new URL(rawURL.toString()) : normalizeLoopbackURL(rawURL);
+  url.pathname = '/rpc/app/info';
+  url.search = '';
+  url.hash = '';
+  const client = url.protocol === 'https:' ? https : http;
+  return new Promise((resolve, reject) => {
+    const request = client.request(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.once('end', () => {
+        if (response.statusCode < 200 || response.statusCode >= 400) {
+          reject(new Error(`NusaShell app.info returned HTTP ${response.statusCode}.`));
+          return;
+        }
+        try {
+          const envelope = JSON.parse(body);
+          const result = envelope?.result;
+          if (envelope?.ok !== true || result?.name !== 'NusaShell') {
+            reject(new Error('The port is not serving a NusaShell core.'));
+            return;
+          }
+          resolve({ ok: true, service: 'nusashell-core', version: result.version, legacy: true });
+        } catch {
+          reject(new Error('NusaShell app.info returned invalid JSON.'));
+        }
+      });
+    });
+    request.once('error', reject);
+    request.setTimeout(timeoutMs, () => {
+      request.destroy(new Error('NusaShell app.info probe timed out.'));
+    });
+    request.end(JSON.stringify({ payload: {} }));
+  });
+}
+
+async function probeCoreURL(rawURL, timeoutMs = 1000) {
+  const url = coreHealthURL(rawURL);
+  const client = url.protocol === 'https:' ? https : http;
+  return new Promise((resolve, reject) => {
+    const request = client.get(url, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.once('end', () => {
+        if (response.statusCode === 404) {
+          probeLegacyCoreURL(rawURL, timeoutMs).then(resolve, reject);
+          return;
+        }
+        if (response.statusCode < 200 || response.statusCode >= 400) {
+          reject(new Error(`NusaShell health returned HTTP ${response.statusCode}.`));
+          return;
+        }
+        let health;
+        try {
+          health = JSON.parse(body);
+        } catch {
+          probeLegacyCoreURL(rawURL, timeoutMs).then(resolve, reject);
+          return;
+        }
+        if (health?.service !== 'nusashell-core' || health?.ok !== true) {
+          probeLegacyCoreURL(rawURL, timeoutMs).then(resolve, reject);
+          return;
+        }
+        resolve(health);
+      });
+    });
+    request.once('error', reject);
+    request.setTimeout(timeoutMs, () => {
+      request.destroy(new Error('NusaShell health probe timed out.'));
+    });
+  });
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForCoreURL(rawURL, {
+  timeoutMs = 30000,
+  intervalMs = 100,
+  probeTimeoutMs = 1000,
+  isStopped = () => false,
+} = {}) {
+  const url = rawURL instanceof URL ? rawURL : normalizeLoopbackURL(rawURL);
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+
+  while (Date.now() < deadline) {
+    if (isStopped()) throw new Error('NusaShell backend exited before becoming ready.');
+    try {
+      await probeCoreURL(url, probeTimeoutMs);
+      return url;
+    } catch (error) {
+      lastError = error;
+    }
+    await delay(Math.min(intervalMs, Math.max(1, deadline - Date.now())));
+  }
+
+  throw new Error(`Timed out waiting for NusaShell core at ${url.origin}. ${lastError?.message || ''}`.trim());
 }
 
 async function waitForURL(rawURL, { timeoutMs = 30000, intervalMs = 100, probeTimeoutMs = 1000, isStopped = () => false } = {}) {
@@ -238,13 +374,18 @@ async function waitForURL(rawURL, { timeoutMs = 30000, intervalMs = 100, probeTi
 
 module.exports = {
   buildBackendEnvironment,
+  defaultCoreURL,
   electronDevArgs,
   firstExistingFile,
   getFreePort,
+  installCommand,
+  installDocsURL,
   isExternalHTTPURL,
   isSameOriginURL,
   normalizeLoopbackURL,
+  probeCoreURL,
   probeURL,
   resolveBackendPath,
+  waitForCoreURL,
   waitForURL,
 };

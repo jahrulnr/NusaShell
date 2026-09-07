@@ -18,6 +18,7 @@ const (
 	MethodConversationsRename       = "agent.conversations.rename"
 	MethodConversationsDelete       = "agent.conversations.delete"
 	MethodConversationsSetWorkspace = "agent.conversations.set-workspace"
+	MethodConversationsSetProvider  = "agent.conversations.set-provider"
 	MethodConversationsChunk        = "agent.conversations.chunk"
 	MethodWorkspaceListDirs         = "agent.workspace.list-dirs"
 	MethodTurnsStart                = "agent.turns.start"
@@ -347,7 +348,12 @@ type ConversationSetWorkspaceRequest struct {
 	Path string `json:"path"`
 }
 
-// ---- workspace browsing ----
+// ConversationSetProviderRequest persists the provider route or Codex account
+// selected for one conversation. An empty route restores automatic selection.
+type ConversationSetProviderRequest struct {
+	ID            string `json:"id"`
+	ProviderRoute string `json:"provider_route,omitempty"`
+}
 
 // WorkspaceListDirsRequest asks the host to list the subdirectories of a
 // folder for the in-app workspace picker. An empty path means the host
@@ -396,7 +402,7 @@ type TurnStartRequest struct {
 	Text           string          `json:"text"`
 	Model          string          `json:"model"`
 	Effort         string          `json:"effort,omitempty"`
-	ProviderRoute  string          `json:"provider_route,omitempty"`
+	ProviderRoute  string          `json:"provider_route,omitempty"` // OpenRouter upstream or Codex account; empty = auto
 	Attachments    []AttachmentDTO `json:"attachments,omitempty"`
 }
 
@@ -768,6 +774,7 @@ type ModelDTO struct {
 	ID               string   `json:"id"`
 	ProviderID       string   `json:"provider_id"`
 	ProviderName     string   `json:"provider_name"`
+	ProviderKind     string   `json:"provider_kind,omitempty"`
 	DisplayName      string   `json:"display_name,omitempty"`
 	Context          int      `json:"context,omitempty"`
 	MaxOutput        int      `json:"max_output,omitempty"`
@@ -813,6 +820,10 @@ type ProviderDTO struct {
 	// Empty in the store means the first advertised duration. "off" disables
 	// prompt caching for this provider.
 	CacheTTL string `json:"cache_ttl,omitempty"`
+	// ReasoningSummaries is the selectable Codex reasoning-summary enum.
+	ReasoningSummaries []string `json:"reasoning_summaries,omitempty"`
+	// ReasoningSummary is the selected visible reasoning-summary verbosity.
+	ReasoningSummary string `json:"reasoning_summary,omitempty"`
 }
 
 type ProvidersListResult struct {
@@ -831,6 +842,9 @@ type ProviderSaveRequest struct {
 	// preserves the stored value; invalid values are rejected. "off"
 	// disables prompt caching for this provider.
 	CacheTTL *string `json:"cache_ttl,omitempty"`
+	// ReasoningSummary is the selected Codex summary verbosity. Omitted on
+	// update preserves the stored value.
+	ReasoningSummary *string `json:"reasoning_summary,omitempty"`
 }
 
 type ProviderIDRequest struct {

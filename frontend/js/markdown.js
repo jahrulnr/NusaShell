@@ -148,8 +148,15 @@ function postProcessBlockHtml(block, html) {
   //    - Local file links (/path or file://): annotate with data-local-path and class for in-app preview.
   html = html.replace(/<a\s+href="(https?:\/\/[^"]+)"/g, '<a href="$1" target="_blank" rel="noopener"');
   html = html.replace(/<a\s+href="((?:\/|file:\/\/)[^"]+)"/g, (match, href) => {
-    const rawPath = href.startsWith('file://') ? decodeURIComponent(href.slice('file://'.length).replace(/^\/+/, '/')) : href;
-    const safeHref = href.startsWith('file://') ? resolveMediaUrl(href) : href;
+    const rawPath = href.startsWith('file://')
+      ? decodeURIComponent(href.slice('file://'.length).replace(/^\/+/, '/'))
+      : decodeURIComponent(href);
+    // Keep line information on data-local-path for the in-app preview, but
+    // the browser-facing href must address the actual file through the local
+    // proxy. A raw absolute filesystem path in href is both misleading on
+    // hover and cannot be served by the HTTP UI.
+    const filePath = rawPath.replace(/:\d+(?::\d+)?$/, '');
+    const safeHref = '/local-file?path=' + encodeURIComponent(filePath);
     return `<a href="${escapeHtml(safeHref)}" class="agent-local-link" data-local-path="${escapeHtml(rawPath)}"`;
   });
 

@@ -2,7 +2,16 @@
 
 The agent ships with a built-in toolbox plus one tool per MCP server tool.
 
-## Built-ins
+## Environment for `exec`
+
+The `exec` child inherits the environment of the NusaShell process. For the
+login service, `PATH` is captured when `nusashell service install` runs and is
+then passed to the child shell on Linux, macOS, and Windows. If a tool cannot
+find a user-managed binary after shell configuration changes, reinstall the
+service from the intended user shell to refresh that snapshot. NusaShell does
+not source `.bashrc`, `.zshrc`, Git Bash startup files, or PowerShell profiles
+automatically because their login/interactive semantics differ and they may
+execute arbitrary side effects.
 
 | Tool | Purpose |
 | --- | --- |
@@ -514,7 +523,9 @@ not MCP plugins — they work with zero configuration and no installed plugin.
   env vars). Settings → Web Search also picks a routing strategy: auto
   merges all sources, round-robin/random rotate one API-keyed provider
   per query, or a bare provider name pins the query to that source.
-  Returns ranked, deduplicated results with snippets.
+  Returns ranked, deduplicated results with snippets. Each search has an
+  independent bounded 60-second upstream deadline, so parallel searches do
+  not inherit searchwire's 10-second zero-config default.
 - **`web_fetch`**: fetches a URL and returns readable text. Supports HTML
   (nav/footer/aside/form stripped, `<pre>`/`<code>` preserved, links
   collected, `og:title`/`<h1>` title fallbacks), JSON (pretty-printed;
@@ -560,8 +571,8 @@ observed or sourced facts from assumptions and inferences.
 
 `generate_image` is a client-side function tool. The active chat model
 orchestrates; the image backend is the auxiliary model from Settings →
-Image generation (OpenAI Images or OpenRouter Image API). It is not
-listed until that setting is configured.
+Image generation (OpenAI Images, the Codex ChatGPT image API, or OpenRouter
+Image API). It is not listed until that setting is configured.
 
 The UI shows the print as soon as the tool completes. Do not embed the
 image again as Markdown, a data URL, or a file link.
@@ -582,7 +593,9 @@ Bad examples:
     generate_image(prompt="logo", referenced_image_paths=["logo.png"])  # relative path is rejected
 
 Pass absolute `file_path` values from earlier `generate_image` YAML output
-or from user attachments. `n` is clamped to 1–4. At most two
+or from user attachments. `n` is clamped to 1–4; the Codex backend always
+requests a single image and surfaces image-quota 429s as usage-limit
+failures (never auto-retried). At most two
 `generate_image` calls run at once per process.
 
 ## MCP tools

@@ -47,7 +47,7 @@ func TestRosterUniqueness(t *testing.T) {
 	methods := []string{
 		MethodAppInfo,
 		MethodConversationsList, MethodConversationsCreate, MethodConversationsGet,
-		MethodConversationsRename, MethodConversationsDelete, MethodConversationsSetWorkspace,
+		MethodConversationsRename, MethodConversationsDelete, MethodConversationsSetWorkspace, MethodConversationsSetProvider,
 		MethodConversationsChunk, MethodWorkspaceListDirs, MethodTurnsStart, MethodTurnsStop, MethodToolStop,
 		MethodTurnsRetry, MethodTurnsSteer, MethodTurnsCancelSteer, MethodTurnsActive,
 		MethodToolContracts,
@@ -199,6 +199,28 @@ func TestGoldenDTOs(t *testing.T) {
 		CachedModels:       []AcpModelDTO{{ID: "auto", Name: "auto", Tier: "unclassified"}},
 		UpdatedAt:          "2026-08-17T00:00:00Z",
 	})
+}
+
+func TestProviderReasoningSummaryJSONFields(t *testing.T) {
+	payload, err := json.Marshal(ProviderDTO{
+		ID: "codex", Kind: "codex", Name: "Codex", Enabled: true,
+		ReasoningSummaries: []string{"auto", "concise", "detailed", "none"},
+		ReasoningSummary:   "detailed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["reasoning_summary"] != "detailed" {
+		t.Fatalf("reasoning_summary = %#v, want detailed", got["reasoning_summary"])
+	}
+	options, ok := got["reasoning_summaries"].([]any)
+	if !ok || len(options) != 4 || options[3] != "none" {
+		t.Fatalf("reasoning_summaries = %#v, want four options ending in none", got["reasoning_summaries"])
+	}
 }
 
 func TestDecodePayload(t *testing.T) {

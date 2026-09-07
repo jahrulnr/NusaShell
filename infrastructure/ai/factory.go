@@ -130,12 +130,32 @@ func withCodexCookieJar(client *http.Client) *http.Client {
 }
 
 // NewImageGeneratorFactory returns an ImageGeneratorFactory for the
-// OpenAI-compatible images API. The Codex and Gemini image backends were
-// removed with their providers; only OpenAI/OpenRouter hosts remain.
+// OpenAI/OpenRouter images API plus the Codex ChatGPT plan image backend.
+// The Codex path resolves (and refreshes) the stored OAuth token, attaches
+// the shared Cloudflare cookie jar, and targets the provider base URL
+// (default https://chatgpt.com/backend-api/codex). OpenAI/OpenRouter hosts
+// are served by imagegen.NewFactory.
 func NewImageGeneratorFactory(creds application.CredentialStore) application.ImageGeneratorFactory {
 	openai := imagegen.NewFactory()
-	return func(p *domain.Provider, apiKey string) (application.ImageGenerator, error) {
-		return openai(p, apiKey)
+	return func(ctx context.Context, p *domain.Provider, apiKey string) (application.ImageGenerator, error) {
+		if p != nil && p.Kind == domain.ProviderCodex {
+			tok, err := resolveCodexToken(ctx, p, apiKey, creds)
+			if err != nil {
+				return nil, err
+			}
+			base := strings.TrimRight(p.BaseURL, "/")
+			if base == "" {
+				base = codex.DefaultBaseURL
+			}
+			return &imagegen.Client{
+				Backend:   imagegen.BackendCodex,
+				BaseURL:   base,
+				APIKey:    tok.AccessToken,
+				AccountID: tok.AccountID,
+				HTTP:      withCodexCookieJar(newProviderHTTPClient()),
+			}, nil
+		}
+		return openai(ctx, p, apiKey)
 	}
 }
 

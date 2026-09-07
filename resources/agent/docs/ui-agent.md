@@ -299,7 +299,7 @@ The message input with attachments, model picker, workspace selector, provider s
 - **Provider route trigger** (`#route-trigger`):
   - Section: Agent
   - Type: button
-  - Action: Toggles the upstream provider route menu (router icon = multi-provider, home icon = single upstream). Empty lists on a routing-capable model title the trigger 'No provider in this model' and stay non-interactive.
+  - Action: Toggles the per-conversation routing menu. OpenRouter models offer Auto or an upstream provider; Codex models offer Auto account rotation or a strict account selection. The choice is restored from the active room instead of leaking across room switches. Other single-provider models show a non-interactive home icon.
 
 - **Provider route menu** (`#route-menu`):
   - Section: Agent

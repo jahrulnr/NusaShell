@@ -1160,10 +1160,11 @@ func TestEmergencyCompactionSkippedWhenEstimateBelowTrigger(t *testing.T) {
 // calls) and whether any stream returned an overflow error (proactive
 // compaction should prevent the 400 that triggers emergency compaction).
 type midTurnCompactionAdapter struct {
-	mu         sync.Mutex
-	streams    int
-	completes  int
-	overflowed bool
+	mu            sync.Mutex
+	streams       int
+	completes     int
+	overflowed    bool
+	compactionErr error
 }
 
 func (a *midTurnCompactionAdapter) Name() string { return "mid-turn-compaction" }
@@ -1189,7 +1190,11 @@ func (a *midTurnCompactionAdapter) Stream(_ context.Context, _ *core.Request) (c
 func (a *midTurnCompactionAdapter) Chat(_ context.Context, _ *core.Request) (*core.Response, error) {
 	a.mu.Lock()
 	a.completes++
+	compactionErr := a.compactionErr
 	a.mu.Unlock()
+	if compactionErr != nil {
+		return nil, compactionErr
+	}
 	return &core.Response{Blocks: []core.Block{core.TextBlock{Text: validTestSummary}}, FinishReason: core.FinishReasonStop}, nil
 }
 
@@ -1261,11 +1266,68 @@ func TestMidTurnProactiveCompaction(t *testing.T) {
 	}
 }
 
+func TestMidTurnCompactionFailureStopsBeforeNextRound(t *testing.T) {
+	conv := &domain.Conversation{ID: "c1", Messages: []domain.Message{
+		{ID: "u0", Role: domain.RoleUser, Content: strings.Repeat("goal ", 100), Status: domain.StatusDone},
+		{ID: "m1", Role: domain.RoleAssistant},
+	}}
+	adapter := &midTurnCompactionAdapter{compactionErr: errors.New("read udp 127.0.0.1:51574->127.0.0.53:53: i/o timeout")}
+	toolbox := &largeOutputToolbox{output: strings.Repeat("tool result line of content. ", 500)}
+	settings := domain.DefaultSettings()
+	settings.CompactionEnabled = true
+	settings.CompactionThreshold = 0
+	settings.MaxInputTokens = 2000
+	settings.MaxOutputTokens = 256
+	settings.MaxToolRounds = 10
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		Toolbox:       toolbox,
+		Settings:      &fakeSettingsStore{settings: settings},
+		Factory: func(context.Context, *domain.Provider, string) (AIProvider, error) {
+			return adapter, nil
+		},
+		runs: map[string]*TurnRun{},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
+	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{})
+
+	adapter.mu.Lock()
+	streams := adapter.streams
+	adapter.mu.Unlock()
+	if streams != 1 {
+		t.Fatalf("streams = %d, want 1: failed compaction must stop the run before the next provider round", streams)
+	}
+	toolbox.mu.Lock()
+	toolCalls := len(toolbox.names)
+	toolbox.mu.Unlock()
+	if toolCalls != 1 {
+		t.Fatalf("tool calls = %d, want 1 from the completed first round only", toolCalls)
+	}
+	saved, err := app.Conversations.Get("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var userIDs []string
+	for _, message := range saved.Messages {
+		if message.Role == domain.RoleUser {
+			userIDs = append(userIDs, message.ID)
+		}
+	}
+	if len(userIDs) != 1 || userIDs[0] != "u0" {
+		t.Fatalf("user history after failed compaction = %v, want the unchanged ordered user history", userIDs)
+	}
+}
+
 type recordingCompleteAdapter struct {
 	mu                sync.Mutex
 	requests          []*core.Request
 	summaries         []string
 	toolCallSummaries []string // if set, return summary() tool call instead of Content
+	err               error
 }
 
 func (a *recordingCompleteAdapter) Name() string { return "recording-complete" }
@@ -1276,6 +1338,9 @@ func (a *recordingCompleteAdapter) Chat(_ context.Context, req *core.Request) (*
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.requests = append(a.requests, req)
+	if a.err != nil {
+		return nil, a.err
+	}
 	idx := len(a.requests) - 1
 	summary := "summary-pass"
 	if idx < len(a.summaries) {
@@ -2044,6 +2109,66 @@ func TestCompactionArchiveStripsHydration(t *testing.T) {
 	}
 }
 
+func TestPersistCompactedConversationPreservesTranscriptWhenArchiveFails(t *testing.T) {
+	messages := []domain.Message{
+		{ID: "u1", Role: domain.RoleUser, Content: strings.Repeat("old question ", 100), Status: domain.StatusDone},
+		{ID: "a1", Role: domain.RoleAssistant, Content: strings.Repeat("old answer ", 100), Status: domain.StatusDone},
+		{ID: "u2", Role: domain.RoleUser, Content: "latest question", Status: domain.StatusDone},
+	}
+	conv := &domain.Conversation{ID: "c-archive-fail", Messages: append([]domain.Message(nil), messages...)}
+	store := &fakeConvStore{
+		convs:      map[string]*domain.Conversation{conv.ID: conv},
+		archiveErr: errors.New("disk full"),
+	}
+	app := &App{Conversations: store, Bus: NewBus()}
+
+	err := app.persistCompactedConversation(conv, "summary", 1)
+	if err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("persistCompactedConversation error = %v, want archive failure", err)
+	}
+	if len(conv.Messages) != len(messages) {
+		t.Fatalf("messages = %d, want original %d", len(conv.Messages), len(messages))
+	}
+	for i := range messages {
+		if conv.Messages[i].ID != messages[i].ID {
+			t.Fatalf("message[%d] = %q, want %q", i, conv.Messages[i].ID, messages[i].ID)
+		}
+	}
+	if conv.CompactionBlob != "" || conv.Summary != "" {
+		t.Fatalf("compaction state changed after archive failure: blob=%q summary=%q", conv.CompactionBlob, conv.Summary)
+	}
+}
+
+func TestPersistCodexCompactedConversationPreservesTranscriptWhenArchiveFails(t *testing.T) {
+	messages := []domain.Message{
+		{ID: "u1", Role: domain.RoleUser, Content: "old question", Status: domain.StatusDone},
+		{ID: "a1", Role: domain.RoleAssistant, Content: strings.Repeat("old answer ", 100), Status: domain.StatusDone},
+		{ID: "u2", Role: domain.RoleUser, Content: "latest question", Status: domain.StatusDone},
+	}
+	conv := &domain.Conversation{ID: "c-codex-archive-fail", Messages: append([]domain.Message(nil), messages...)}
+	store := &fakeConvStore{
+		convs:      map[string]*domain.Conversation{conv.ID: conv},
+		archiveErr: errors.New("disk full"),
+	}
+	app := &App{Conversations: store, Bus: NewBus()}
+
+	err := app.agentService().PersistCodexCompactedConversation(conv, `[{"type":"compaction"}]`, 1)
+	if err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("PersistCodexCompactedConversation error = %v, want archive failure", err)
+	}
+	if len(conv.Messages) != len(messages) {
+		t.Fatalf("messages = %d, want original %d", len(conv.Messages), len(messages))
+	}
+	for i := range messages {
+		if conv.Messages[i].ID != messages[i].ID {
+			t.Fatalf("message[%d] = %q, want %q", i, conv.Messages[i].ID, messages[i].ID)
+		}
+	}
+	if conv.CompactionBlob != "" || conv.CompactionPrefixMessages != 0 {
+		t.Fatalf("Codex compaction state changed after archive failure: blob=%q prefix=%d", conv.CompactionBlob, conv.CompactionPrefixMessages)
+	}
+}
+
 func TestCompactionStripsToolOutputImageAttachments(t *testing.T) {
 	huge := "data:image/png;base64," + strings.Repeat("A", 8000)
 	body := strings.Repeat("please draw a harbor scene in detail ", 80)
@@ -2507,6 +2632,23 @@ func TestHeadlessTurnsDoNotBroadcastRoomCompletion(t *testing.T) {
 	}
 }
 
+func TestHeadlessTurnsDoNotBroadcastAgentActivity(t *testing.T) {
+	bus := NewBus()
+	app := &App{Bus: bus}
+	_, events, unsubscribe := bus.Subscribe()
+	defer unsubscribe()
+
+	app.agentService().EmitCompactionStarted(&TurnRun{
+		Headless: true,
+		ID:       "run_learn",
+	}, "conv_learn")
+	select {
+	case event := <-events:
+		t.Fatalf("headless learning activity leaked %s to the UI bus", event.Type)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 // --- from tpm_learning_test.go ---
 
 // tpmRejectionBody is the field-observed OpenAI Responses API rejection
@@ -2667,6 +2809,40 @@ func TestFriendlyRateLimitMessageShowsTPMAccounting(t *testing.T) {
 }
 
 // --- from mid_tool_compaction_test.go ---
+
+func TestMidToolCompactionFailureSkipsToolExecution(t *testing.T) {
+	body := strings.Repeat("abcdefghij", 40)
+	msgs := make([]domain.Message, 0, 42)
+	for i := 0; i < 40; i++ {
+		msgs = append(msgs, domain.Message{ID: fmt.Sprintf("u%d", i), Role: domain.RoleUser, Content: body, Status: domain.StatusDone})
+	}
+	const inFlightID = "msg-inflight-failure"
+	msgs = append(msgs, domain.Message{ID: inFlightID, Role: domain.RoleAssistant, Status: domain.StatusDone})
+	conv := &domain.Conversation{ID: "c-mid-tool-failure", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{conv.ID: conv}}
+	toolbox := &recordingToolbox{}
+	compactionErr := errors.New("read udp 127.0.0.1:51574->127.0.0.53:53: i/o timeout")
+	adapter := &recordingCompleteAdapter{err: compactionErr}
+	settings := domain.DefaultSettings()
+	settings.CompactionEnabled = true
+	app := &App{
+		Conversations: store,
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		Toolbox:       toolbox,
+	}
+	provider := &domain.Provider{Models: []domain.Model{{ID: "model", Context: 4000}}}
+	run := &TurnRun{ID: "run-mid-tool-failure", ConversationID: conv.ID, Ctx: context.Background()}
+	p := app.conversationRulesForTest(run, stubProviderContext(adapter), conv, settings, provider, "model", inFlightID, 2)
+	calls := []domain.ToolCall{{ID: "call-1", Name: "read_file", Args: `{ "path": "/tmp/x" }`}}
+	_, err := p.Rules().Execute(&RoundState{}, ChatResponse{ToolCalls: calls}, calls)
+	if err == nil || !strings.Contains(err.Error(), "i/o timeout") {
+		t.Fatalf("Execute error = %v, want compaction failure", err)
+	}
+	if len(toolbox.names) != 0 {
+		t.Fatalf("tools executed after compaction failure: %v", toolbox.names)
+	}
+}
 
 // TestMidToolCompactionRunsAtToolRequestBoundary covers the tool-spam edge
 // case: the model requests a tool round, the round is persisted, and the
@@ -2968,10 +3144,72 @@ func TestCompactConversationUsesCodexRemoteCompaction(t *testing.T) {
 	if saved.Summary != "" {
 		t.Fatalf("Summary = %q, want empty", saved.Summary)
 	}
+	if saved.CompactionPrefixMessages != 2 {
+		t.Fatalf("CompactionPrefixMessages = %d, want 2 retained user messages", saved.CompactionPrefixMessages)
+	}
+	if len(saved.Messages) <= saved.CompactionPrefixMessages || !domain.IsHydrationMessage(saved.Messages[saved.CompactionPrefixMessages]) {
+		t.Fatalf("messages = %+v, want hydration after the persisted checkpoint boundary", saved.Messages)
+	}
+	retainedUsers := 0
 	for _, message := range saved.Messages {
 		if domain.IsCompactionSummary(message.Content) {
 			t.Fatalf("Codex compaction inserted a text handover: %+v", message)
 		}
+		if domain.IsHydrationMessage(message) {
+			continue
+		}
+		if message.Role != domain.RoleUser {
+			t.Fatalf("Codex active epoch retained %s message %q, want only real user messages", message.Role, message.ID)
+		}
+		retainedUsers++
+	}
+	if retainedUsers != 2 {
+		t.Fatalf("Codex active epoch retained %d real user messages, want 2", retainedUsers)
+	}
+	if len(store.archived) != 2 || store.archived[0].ID != "a1" || store.archived[1].ID != "a2" {
+		t.Fatalf("Codex archived messages = %+v, want assistant turns moved to the archive", store.archived)
+	}
+}
+
+func TestCodexRemoteCompactionRebuildsAdapterAfterCircuitOpen(t *testing.T) {
+	conv := &domain.Conversation{ID: "c-codex-failover", Messages: []domain.Message{
+		{ID: "u1", Role: domain.RoleUser, Content: "old question", Status: domain.StatusDone},
+		{ID: "a1", Role: domain.RoleAssistant, Content: "old answer", Status: domain.StatusDone},
+	}}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{conv.ID: conv}}
+	old := &codexCompactionProvider{streamErr: errors.New("stale account must not be used")}
+	fresh := &codexCompactionProvider{streamEvents: []core.Event{
+		core.ProviderEvent{Name: "compaction", Raw: json.RawMessage(`{"type":"compaction","encrypted_content":"ENC-NEW"}`)},
+		core.DoneEvent{FinishReason: core.FinishReasonStop, Provider: "codex", Model: "gpt-5-codex"},
+	}}
+	codexProvider := &domain.Provider{ID: "codex", Kind: domain.ProviderCodex}
+	router := NewCodexAccountRouter()
+	router.MarkCircuitOpen("exhausted", time.Now().Add(time.Hour))
+	var factoryKey string
+	app := &App{
+		Conversations: store,
+		Providers:     &fakeProviderStore{items: map[string]*domain.Provider{"codex": codexProvider}},
+		Credentials:   &fakeVisionCredStore{creds: map[string]string{accountKey("codex", "exhausted"): "old", accountKey("codex", "fresh"): "new"}},
+		CodexRouter:   router,
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		Factory: func(_ context.Context, _ *domain.Provider, key string) (AIProvider, error) {
+			factoryKey = key
+			return fresh, nil
+		},
+	}
+	adapter := ProviderContext{Provider: old, ProviderID: "codex", Kind: domain.ProviderCodex}
+	if _, err := app.compactConversation(context.Background(), adapter, conv, "gpt-5-codex", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial); err != nil {
+		t.Fatalf("compactConversation: %v", err)
+	}
+	if factoryKey != "new" {
+		t.Fatalf("factory key = %q, want fresh account token", factoryKey)
+	}
+	if len(old.streamRequests) != 0 {
+		t.Fatalf("stale adapter stream calls = %d, want 0", len(old.streamRequests))
+	}
+	if len(fresh.streamRequests) != 1 {
+		t.Fatalf("fresh adapter stream calls = %d, want 1", len(fresh.streamRequests))
 	}
 }
 

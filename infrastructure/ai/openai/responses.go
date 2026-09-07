@@ -1256,6 +1256,11 @@ type responsesStream struct {
 	toolSeen     map[string]bool
 	toolIDs      map[string]string
 	lastSequence int
+	// Responses reasoning summaries are split into indexed parts. Keep the
+	// cursor so a new summary part becomes a visible paragraph boundary while
+	// chunks within one part remain byte-contiguous.
+	lastReasoningItemID       string
+	lastReasoningSummaryIndex *int
 }
 
 func newResponsesStream(resp *http.Response, model string) *responsesStream {
@@ -1397,8 +1402,10 @@ func (s *responsesStream) events(name string, raw json.RawMessage) ([]core.Event
 		return []core.Event{core.ReasoningDelta{Text: delta.Delta}}, nil
 	case "response.reasoning_summary_text.delta":
 		var delta struct {
-			Delta    string `json:"delta"`
-			Sequence int    `json:"sequence_number,omitempty"`
+			Delta        string `json:"delta"`
+			ItemID       string `json:"item_id,omitempty"`
+			SummaryIndex *int   `json:"summary_index,omitempty"`
+			Sequence     int    `json:"sequence_number,omitempty"`
 		}
 		if err := json.Unmarshal(raw, &delta); err != nil {
 			return nil, responsesStreamParseError("openai: parse responses reasoning summary delta", err)
@@ -1406,7 +1413,15 @@ func (s *responsesStream) events(name string, raw json.RawMessage) ([]core.Event
 		if !s.shouldEmit(delta.Sequence) {
 			return nil, nil
 		}
-		return []core.Event{core.ReasoningDelta{Text: delta.Delta, Summary: true}}, nil
+		text := delta.Delta
+		if text != "" && s.reasoningSummaryChanged(delta.ItemID, delta.SummaryIndex) {
+			// OpenAI Responses emits multiple summary parts as separate indexed
+			// streams. The delta text within one part must be concatenated as-is,
+			// but a new part needs a paragraph boundary or adjacent Markdown
+			// markers become `****` in the UI (and in the persisted transcript).
+			text = "\n\n" + text
+		}
+		return []core.Event{core.ReasoningDelta{Text: text, Summary: true}}, nil
 	case "response.output_item.added":
 		var item struct {
 			Item struct {
@@ -1622,6 +1637,24 @@ func (s *responsesStream) shouldEmit(sequence int) bool {
 	}
 	s.lastSequence = sequence
 	return true
+}
+
+func (s *responsesStream) reasoningSummaryChanged(itemID string, summaryIndex *int) bool {
+	changed := false
+	if itemID != "" && s.lastReasoningItemID != "" && itemID != s.lastReasoningItemID {
+		changed = true
+	}
+	if summaryIndex != nil && s.lastReasoningSummaryIndex != nil && *summaryIndex != *s.lastReasoningSummaryIndex {
+		changed = true
+	}
+	if itemID != "" {
+		s.lastReasoningItemID = itemID
+	}
+	if summaryIndex != nil {
+		index := *summaryIndex
+		s.lastReasoningSummaryIndex = &index
+	}
+	return changed
 }
 
 func (s *responsesStream) toolID(itemID string) string {

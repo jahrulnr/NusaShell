@@ -1,16 +1,21 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, dialog, shell } = require('electron');
+const { app, BrowserWindow, Menu, clipboard, dialog, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const { buildContextMenuTemplate } = require('./context-menu.cjs');
 
 const {
   buildBackendEnvironment,
-  getFreePort,
+  defaultCoreURL,
+  installCommand,
+  installDocsURL,
   isExternalHTTPURL,
   isSameOriginURL,
   normalizeLoopbackURL,
+  probeCoreURL,
   resolveBackendPath,
+  waitForCoreURL,
   waitForURL,
 } = require('./runtime.cjs');
 
@@ -60,7 +65,19 @@ if (!hasSingleInstanceLock) {
 }
 
 async function startApplication() {
-  applicationURL = await startBackendOrUseConfiguredURL();
+  while (true) {
+    try {
+      applicationURL = await startBackendOrUseConfiguredURL();
+      break;
+    } catch (error) {
+      if (error?.code === 'core_not_installed') {
+        if (await showCoreInstallDialog(error)) continue;
+        app.quit();
+        return;
+      }
+      throw error;
+    }
+  }
   configureWebContentsPolicy();
   mainWindow = createMainWindow(applicationURL);
 }
@@ -73,6 +90,16 @@ async function startBackendOrUseConfiguredURL() {
     return url;
   }
 
+  const defaultURL = defaultCoreURL();
+  try {
+    await probeCoreURL(defaultURL);
+    return defaultURL;
+  } catch {
+    // The service core is not ready. Electron may own a fallback core, but
+    // only when it was launched outside the service supervisor. When the
+    // parent is service-managed, wait for systemd to restart the owner rather
+    // than competing for the same data lock and default port.
+  }
   const backendPath = resolveBackendPath({
     explicitPath: process.env.NUSASHELL_ELECTRON_BACKEND,
     packaged: app.isPackaged,
@@ -80,17 +107,19 @@ async function startBackendOrUseConfiguredURL() {
     repositoryRoot,
   });
   if (!backendPath) {
-    throw new Error(
-      'NusaShell Go backend was not found. Install the NusaShell core release first, '
-      + 'or set NUSASHELL_ELECTRON_BACKEND to an external nusashell binary.',
+    const error = new Error(
+      'NusaShell Go core was not found. Install the NusaShell core release first.',
     );
+    error.code = 'core_not_installed';
+    throw error;
+  }
+  if (process.env.NUSASHELL_SERVICE === '1') {
+    return waitForCoreURL(defaultURL, { timeoutMs: STARTUP_TIMEOUT_MS });
   }
 
-  const port = await getFreePort();
-  const url = normalizeLoopbackURL(`http://127.0.0.1:${port}/`);
   const spawnOptions = {
     cwd: app.isPackaged ? path.dirname(backendPath) : repositoryRoot,
-    env: buildBackendEnvironment(process.env, port, app.isPackaged),
+    env: buildBackendEnvironment(process.env, 10994, app.isPackaged),
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   };
@@ -100,16 +129,18 @@ async function startBackendOrUseConfiguredURL() {
   if (process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(backendPath)) {
     spawnOptions.shell = true;
   }
+
   const child = spawn(backendPath, [], spawnOptions);
   backendProcess = child;
   attachBackendLogging(child);
   let backendLaunchError = null;
+  let backendReady = false;
   child.once('error', (error) => {
     backendLaunchError = error;
     if (!backendStopping) console.error('[nusashell] backend process error:', error);
   });
   child.once('exit', (code, signal) => {
-    if (backendStopping || applicationQuitting) return;
+    if (!backendReady || backendStopping || applicationQuitting) return;
     const reason = signal ? `signal ${signal}` : `exit code ${code}`;
     console.error(`[nusashell] backend stopped unexpectedly (${reason})`);
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -119,7 +150,7 @@ async function startBackendOrUseConfiguredURL() {
   });
 
   try {
-    await waitForURL(url, {
+    await waitForCoreURL(defaultURL, {
       timeoutMs: STARTUP_TIMEOUT_MS,
       isStopped: () => {
         if (backendLaunchError) throw backendLaunchError;
@@ -127,10 +158,46 @@ async function startBackendOrUseConfiguredURL() {
       },
     });
   } catch (error) {
-    stopBackend();
-    throw error;
+    // A systemd restart may have won the bind race. Prefer attaching to a
+    // valid core rather than treating EADDRINUSE as a fatal startup error.
+    try {
+      await waitForCoreURL(defaultURL, { timeoutMs: 3000 });
+      backendProcess = null;
+      return defaultURL;
+    } catch {
+      stopBackend();
+      throw error;
+    }
   }
-  return url;
+  backendReady = true;
+  return defaultURL;
+}
+
+async function showCoreInstallDialog(error) {
+  const command = installCommand(process.platform);
+  while (true) {
+    const result = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'NusaShell Core belum terinstall',
+      message: 'NusaShell Desktop membutuhkan NusaShell Core untuk berjalan.',
+      detail: `${error.message}\n\nJalankan command berikut di terminal:\n\n${command}`,
+      buttons: ['Copy command', 'Open installation docs', 'Retry', 'Quit'],
+      defaultId: 2,
+      cancelId: 3,
+      noLink: true,
+    });
+    if (result.response === 0) {
+      clipboard.writeText(command);
+      continue;
+    }
+    if (result.response === 1) {
+      shell.openExternal(installDocsURL()).catch((openError) => {
+        console.error('[nusashell] failed to open installation docs:', openError);
+      });
+      continue;
+    }
+    return result.response === 2;
+  }
 }
 
 function attachBackendLogging(child) {
@@ -206,6 +273,16 @@ function configureWebContentsPolicy() {
       if (isSameOriginURL(url, applicationURL)) return;
       event.preventDefault();
       openExternalURL(url);
+    });
+
+    contents.on('context-menu', (_event, params) => {
+      const ownerWindow = BrowserWindow.fromWebContents(contents);
+      if (!ownerWindow || ownerWindow.isDestroyed()) return;
+      const menu = Menu.buildFromTemplate(buildContextMenuTemplate({
+        isEditable: params.isEditable,
+        selectionText: params.selectionText,
+      }));
+      menu.popup({ window: ownerWindow });
     });
   });
 }

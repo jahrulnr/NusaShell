@@ -46,6 +46,7 @@ const (
 type Options struct {
 	BinaryPath  string
 	DataDir     string
+	Path        string // captured user PATH for child command execution
 	Host        string // optional NUSASHELL_HOST override
 	Port        string // optional NUSASHELL_PORT override
 	AllowRemote bool   // propagate NUSASHELL_ALLOW_REMOTE=1 (explicit consent)
@@ -119,8 +120,8 @@ func guardOutsideService(action string) error {
 }
 
 // ServiceEnv builds the environment carried by every service definition:
-// the supervised marker and the data directory are always present; host,
-// port, and remote consent are propagated only when explicitly set.
+// the supervised marker and data directory are always present; captured PATH,
+// host, port, and remote consent are propagated only when explicitly set.
 func ServiceEnv(opts Options) []string {
 	env, _ := ServiceEnvChecked(opts)
 	return env
@@ -132,6 +133,9 @@ func ServiceEnvChecked(opts Options) ([]string, error) {
 	pairs := [][2]string{
 		{ServiceEnvMarker, "1"},
 		{"NUSASHELL_DATA_DIR", opts.DataDir},
+	}
+	if opts.Path != "" {
+		pairs = append(pairs, [2]string{"PATH", opts.Path})
 	}
 	if opts.Host != "" {
 		pairs = append(pairs, [2]string{"NUSASHELL_HOST", opts.Host})

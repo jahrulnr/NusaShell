@@ -129,8 +129,14 @@ scope:
 Behavior shared across platforms:
 
 - The definition bakes in the current install (`current` symlink/junction
-  path) and `NUSASHELL_DATA_DIR`; `NUSASHELL_HOST`, `NUSASHELL_PORT`, and
+  path), `NUSASHELL_DATA_DIR`, and the `PATH` of the process that ran
+  `nusashell service install`; `NUSASHELL_HOST`, `NUSASHELL_PORT`, and
   `NUSASHELL_ALLOW_REMOTE` are inherited only when set at install time.
+  This lets `exec` find user-managed Go/Node installations without parsing
+  `.bashrc` or PowerShell profiles. Re-run `nusashell service install` after
+  changing PATH. The service intentionally does not copy the full process
+  environment, so provider keys and other secrets are not baked into the
+  service definition.
 - Restart is automatic (`Restart=always`, launchd `KeepAlive`, Windows
   restart-on-failure), and the definition always sets `NUSASHELL_SERVICE=1`
   so the supervised process can identify itself. Mutating `nusashell

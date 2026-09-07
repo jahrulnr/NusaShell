@@ -31,6 +31,47 @@ func TestPersistCodexTokenSkipsAccountKeyWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestHandleCodexAccountsSwitchUpdatesRouterPreference(t *testing.T) {
+	providers := &fakeProviderStore{items: map[string]*domain.Provider{
+		"codex": {ID: "codex", Kind: domain.ProviderCodex, Name: "Codex"},
+	}}
+	credentials := &memCreds{m: map[string]string{
+		accountKey("codex", "free"): `{"account_id":"free"}`,
+		accountKey("codex", "plus"): `{"account_id":"plus"}`,
+	}}
+	router := NewCodexAccountRouter()
+	router.PickAccount("conv", "codex", []string{"free", "plus"})
+	app := &App{Providers: providers, Credentials: credentials, CodexRouter: router, Logs: &fakeLogStore{}, Bus: NewBus()}
+
+	if _, rpcErr := app.handleCodexAccountsSwitch(contracts.CodexAccountsSwitchRequest{ProviderID: "codex", AccountID: "plus"}); rpcErr != nil {
+		t.Fatalf("switch account: %v", rpcErr)
+	}
+	if got := router.PickAccount("conv", "codex", []string{"free", "plus"}); got != "plus" {
+		t.Fatalf("conversation account after switch = %q, want plus", got)
+	}
+}
+
+func TestPrepareCodexTurnAPIKeyHonorsConversationAccountPin(t *testing.T) {
+	conversation := &domain.Conversation{ID: "room-plus", ProviderRoute: "plus"}
+	router := NewCodexAccountRouter()
+	router.PickAccount(conversation.ID, "codex", []string{"free", "plus"})
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{conversation.ID: conversation}},
+		Credentials: &fakeVisionCredStore{creds: map[string]string{
+			accountKey("codex", "free"): "free-token",
+			accountKey("codex", "plus"): "plus-token",
+		}},
+		CodexRouter: router,
+	}
+	got, err := app.prepareCodexTurnAPIKey(conversation.ID, &domain.Provider{ID: "codex", Kind: domain.ProviderCodex}, "fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "plus-token" {
+		t.Fatalf("token = %q, want selected Plus account", got)
+	}
+}
+
 func TestHandleProvidersDeleteRemovesAccountCredentials(t *testing.T) {
 	provs := &fakeProviderStore{items: map[string]*domain.Provider{
 		"prov": {ID: "prov", Kind: domain.ProviderCodex, Name: "Codex"},

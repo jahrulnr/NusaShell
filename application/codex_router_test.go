@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -257,5 +258,57 @@ func TestCodexAccountRouter_StickyCleanupWhenAccountDeleted(t *testing.T) {
 	// Sticky should now point to acc-b, not acc-a
 	if got := r.StickyAccount("conv-1"); got != "acc-b" {
 		t.Fatalf("sticky should be acc-b after cleanup, got %s", got)
+	}
+}
+
+func TestCodexAccountRouter_LastUsedPersistsAcrossRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "codex-router.json")
+
+	r := NewCodexAccountRouterWithState(path)
+	accountsA := []string{"acc-a", "acc-b"}
+	if got := r.PickAccount("conv-1", "prov-a", accountsA); got == "" {
+		t.Fatal("expected a pick")
+	}
+	accountsB := []string{"acc-y", "acc-x"}
+	if got := r.PickAccount("conv-2", "prov-b", accountsB); got == "" {
+		t.Fatal("expected a pick")
+	}
+
+	// Simulate a restart: fresh router loading the same state file. The new
+	// process must NOT default to the first registered account; it resumes
+	// from the last-used one per provider.
+	r2 := NewCodexAccountRouterWithState(path)
+	if got := r2.PickAccount("conv-3", "prov-a", accountsA); got != "acc-a" {
+		t.Fatalf("prov-a pick after restart = %q, want last-used acc-a", got)
+	}
+	if got := r2.PickAccount("conv-4", "prov-b", accountsB); got != "acc-y" {
+		t.Fatalf("prov-b pick after restart = %q, want last-used acc-y (first in that list)", got)
+	}
+}
+
+func TestCodexAccountRouter_LastUsedBlockedFallsThrough(t *testing.T) {
+	r := NewCodexAccountRouter()
+	accounts := []string{"acc-a", "acc-b"}
+	if got := r.PickAccount("conv-1", "prov-1", accounts); got != "acc-a" {
+		t.Fatalf("first pick = %q, want acc-a", got)
+	}
+	// Block the last-used account; a new conversation must fall through to
+	// the next available account instead of returning the blocked one.
+	r.MarkRateLimited("acc-a", time.Hour)
+	if got := r.PickAccount("conv-2", "prov-1", accounts); got != "acc-b" {
+		t.Fatalf("pick with blocked last-used = %q, want acc-b", got)
+	}
+}
+
+func TestCodexAccountRouterPreferAccountClearsStickyConversation(t *testing.T) {
+	r := NewCodexAccountRouter()
+	accounts := []string{"free", "plus"}
+	if got := r.PickAccount("conv-1", "codex", accounts); got != "free" {
+		t.Fatalf("initial account = %q, want free", got)
+	}
+
+	r.PreferAccount("codex", "plus")
+	if got := r.PickAccount("conv-1", "codex", accounts); got != "plus" {
+		t.Fatalf("account after explicit switch = %q, want plus", got)
 	}
 }

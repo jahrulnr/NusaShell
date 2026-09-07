@@ -44,6 +44,13 @@ const (
 // duration"; off is stored explicitly so existing providers stay cached.
 const CacheTTLOff = "off"
 
+const (
+	ReasoningSummaryAuto     = "auto"
+	ReasoningSummaryConcise  = "concise"
+	ReasoningSummaryDetailed = "detailed"
+	ReasoningSummaryNone     = "none"
+)
+
 // ValidDriver reports whether driver is supported. The empty driver keeps the
 // legacy host-detected routing for providers created before explicit drivers.
 func ValidDriver(driver ProviderDriver) bool {
@@ -240,6 +247,41 @@ func NormalizeCacheTTL(kind ProviderKind, driver ProviderDriver, ttl string) str
 	return allowed[0]
 }
 
+// ReasoningSummariesFor returns the reasoning-summary verbosity values the
+// provider can send. This control belongs to the Codex backend rather than
+// the generic Responses provider contract.
+func ReasoningSummariesFor(kind ProviderKind) []string {
+	if kind != ProviderCodex {
+		return nil
+	}
+	return []string{ReasoningSummaryAuto, ReasoningSummaryConcise, ReasoningSummaryDetailed, ReasoningSummaryNone}
+}
+
+// ValidReasoningSummary reports whether value can be persisted for kind.
+// Empty is valid and keeps existing providers on the Codex "auto" default.
+func ValidReasoningSummary(kind ProviderKind, value string) bool {
+	if value == "" {
+		return true
+	}
+	for _, allowed := range ReasoningSummariesFor(kind) {
+		if value == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// NormalizeReasoningSummary returns the effective Codex summary verbosity.
+func NormalizeReasoningSummary(kind ProviderKind, value string) string {
+	if kind != ProviderCodex {
+		return ""
+	}
+	if ValidReasoningSummary(kind, value) && value != "" {
+		return value
+	}
+	return ReasoningSummaryAuto
+}
+
 // ModelKind categorizes what a model produces, used to filter the model
 // picker so users don't accidentally select an image generator or TTS
 // model for chat. Detected from the models.dev catalog (modality + name
@@ -346,8 +388,11 @@ type Provider struct {
 	// ("5m", "1h", "30m", or CacheTTLOff). Empty means use the first value
 	// from CacheTTLsFor(kind, driver). CacheTTLOff disables prompt caching
 	// for this provider even when Settings prompt caching is on.
-	CacheTTL  string
-	UpdatedAt time.Time
+	CacheTTL string
+	// ReasoningSummary controls visible Codex reasoning-summary verbosity:
+	// auto, concise, detailed, or none. Empty keeps the auto default.
+	ReasoningSummary string
+	UpdatedAt        time.Time
 }
 
 // EffectiveDriver returns the explicit driver when present. The stable

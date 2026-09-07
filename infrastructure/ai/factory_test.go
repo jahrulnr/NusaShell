@@ -1,11 +1,14 @@
 package ai
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/embeddings"
+	"nusashell/infrastructure/ai/imagegen"
 )
 
 type stubCreds struct {
@@ -99,7 +102,7 @@ func TestNewFactoryUsesExplicitProviderDrivers(t *testing.T) {
 
 func TestNewImageGeneratorFactoryRoutesOpenAIChat(t *testing.T) {
 	f := NewImageGeneratorFactory(&stubCreds{})
-	gen, err := f(&domain.Provider{Kind: domain.ProviderChat, BaseURL: "https://api.openai.com/v1"}, "tok")
+	gen, err := f(context.Background(), &domain.Provider{Kind: domain.ProviderChat, BaseURL: "https://api.openai.com/v1"}, "tok")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,9 +113,61 @@ func TestNewImageGeneratorFactoryRoutesOpenAIChat(t *testing.T) {
 
 func TestNewImageGeneratorFactoryRejectsMessages(t *testing.T) {
 	f := NewImageGeneratorFactory(&stubCreds{})
-	_, err := f(&domain.Provider{Kind: domain.ProviderMessages, BaseURL: "https://api.anthropic.com"}, "key")
+	_, err := f(context.Background(), &domain.Provider{Kind: domain.ProviderMessages, BaseURL: "https://api.anthropic.com"}, "key")
 	if err == nil || !strings.Contains(err.Error(), "no image generation API") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNewImageGeneratorFactoryRoutesCodex(t *testing.T) {
+	// Far-future expiry: no refresh is attempted, so the factory performs no
+	// network I/O and returns the client with the resolved access token.
+	json, err := (&codex.TokenJSON{
+		AccessToken: "tok-1",
+		AccountID:   "acc-1",
+		ExpiresAt:   4102444800, // 2100-01-01
+	}).Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := NewImageGeneratorFactory(&stubCreds{})
+	gen, err := f(context.Background(), &domain.Provider{
+		Kind:    domain.ProviderCodex,
+		BaseURL: "https://chatgpt.com/backend-api/codex",
+	}, json)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, ok := gen.(*imagegen.Client)
+	if !ok {
+		t.Fatalf("generator = %T, want *imagegen.Client", gen)
+	}
+	if client.Backend != imagegen.BackendCodex {
+		t.Fatalf("backend = %q, want %q", client.Backend, imagegen.BackendCodex)
+	}
+	if client.APIKey != "tok-1" || client.AccountID != "acc-1" {
+		t.Fatalf("token = %q account = %q", client.APIKey, client.AccountID)
+	}
+	if client.BaseURL != "https://chatgpt.com/backend-api/codex" {
+		t.Fatalf("base url = %q", client.BaseURL)
+	}
+}
+
+func TestNewImageGeneratorFactoryCodexDefaultsBaseURL(t *testing.T) {
+	f := NewImageGeneratorFactory(&stubCreds{})
+	gen, err := f(context.Background(), &domain.Provider{Kind: domain.ProviderCodex}, "plain-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, ok := gen.(*imagegen.Client)
+	if !ok {
+		t.Fatalf("generator = %T, want *imagegen.Client", gen)
+	}
+	if client.BaseURL != codex.DefaultBaseURL {
+		t.Fatalf("base url = %q, want %q", client.BaseURL, codex.DefaultBaseURL)
+	}
+	if client.APIKey != "plain-token" {
+		t.Fatalf("api key = %q, want the plain pasted token", client.APIKey)
 	}
 }
 

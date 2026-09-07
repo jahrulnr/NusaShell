@@ -2,7 +2,9 @@ package imagegen
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -177,7 +179,7 @@ func TestGenerateHonorsCancel(t *testing.T) {
 func TestFactoryRejectsUnsupportedKind(t *testing.T) {
 	factory := NewFactory()
 	for _, kind := range []domain.ProviderKind{domain.ProviderMessages} {
-		_, err := factory(&domain.Provider{Kind: kind, BaseURL: "https://example.com"}, "key")
+		_, err := factory(context.Background(), &domain.Provider{Kind: kind, BaseURL: "https://example.com"}, "key")
 		if err == nil || !strings.Contains(err.Error(), "no image generation API") {
 			t.Fatalf("kind %s err = %v", kind, err)
 		}
@@ -186,7 +188,7 @@ func TestFactoryRejectsUnsupportedKind(t *testing.T) {
 
 func TestFactoryRoutesOpenRouterByHost(t *testing.T) {
 	factory := NewFactory()
-	gen, err := factory(&domain.Provider{Kind: domain.ProviderChat, BaseURL: "https://openrouter.ai/api/v1"}, "key")
+	gen, err := factory(context.Background(), &domain.Provider{Kind: domain.ProviderChat, BaseURL: "https://openrouter.ai/api/v1"}, "key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,5 +271,185 @@ func TestOpenAIRetriesAreCallerOwned(t *testing.T) {
 	}
 	if hits.Load() != 1 {
 		t.Fatalf("hits = %d, client must not retry internally", hits.Load())
+	}
+}
+
+func TestCodexGenerateSendsDTOBodyAndHeaders(t *testing.T) {
+	var gotPath, gotAuth, gotOrigin, gotTurn, gotAccount, gotUA string
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		gotOrigin = r.Header.Get("originator")
+		gotTurn = r.Header.Get("x-codex-image-turn-id")
+		gotAccount = r.Header.Get("ChatGPT-Account-ID")
+		gotUA = r.Header.Get("User-Agent")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"created": 1778832973,
+			"data":    []map[string]any{{"b64_json": png1x1B64}},
+			"usage":   map[string]any{"total_tokens": 2846},
+		})
+	}))
+	defer server.Close()
+
+	client := &Client{Backend: BackendCodex, BaseURL: server.URL + "/backend-api/codex", APIKey: "tok-1", AccountID: "acc-1", HTTP: server.Client()}
+	res, err := client.Generate(context.Background(), application.ImageGenRequest{
+		Model: "gpt-image-2", Prompt: "a red boat", N: 3, TurnID: "turn-1",
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if gotPath != "/backend-api/codex/images/generations" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotAuth != "Bearer tok-1" || gotOrigin != "codex_cli_rs" || gotTurn != "turn-1" || gotAccount != "acc-1" {
+		t.Fatalf("headers auth=%q origin=%q turn=%q account=%q", gotAuth, gotOrigin, gotTurn, gotAccount)
+	}
+	if gotUA == "" {
+		t.Fatal("user-agent must be set")
+	}
+	if gotBody["model"] != "gpt-image-2" || gotBody["prompt"] != "a red boat" {
+		t.Fatalf("body = %+v", gotBody)
+	}
+	// DTO defaults: auto for background/quality/size; n always omitted (single image).
+	if gotBody["background"] != "auto" || gotBody["quality"] != "auto" || gotBody["size"] != "auto" {
+		t.Fatalf("auto defaults = %+v", gotBody)
+	}
+	if _, ok := gotBody["n"]; ok {
+		t.Fatalf("n must be omitted for codex, got %+v", gotBody)
+	}
+	if res.Provider != BackendCodex || res.UsageTokens != 2846 {
+		t.Fatalf("result = %+v", res)
+	}
+	if len(res.Images) != 1 {
+		t.Fatalf("images = %d", len(res.Images))
+	}
+}
+
+func TestCodexEditSendsImagesDataURL(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/backend-api/codex/images/edits" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"b64_json": png1x1B64}}})
+	}))
+	defer server.Close()
+
+	client := &Client{Backend: BackendCodex, BaseURL: server.URL + "/backend-api/codex", HTTP: server.Client()}
+	_, err := client.Generate(context.Background(), application.ImageGenRequest{
+		Model: "gpt-image-2", Prompt: "add a hat",
+		References: []application.ImageReference{{MediaType: "image/png", Data: []byte("PNGDATA")}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	imgs, _ := gotBody["images"].([]any)
+	if len(imgs) != 1 {
+		t.Fatalf("images = %v", gotBody["images"])
+	}
+	ref, _ := imgs[0].(map[string]any)
+	url, _ := ref["image_url"].(string)
+	want := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("PNGDATA"))
+	if url != want {
+		t.Fatalf("image_url = %q, want %q", url, want)
+	}
+}
+
+func TestCodexUsageLimit429IsHardFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
+				"type": "usage_limit_reached", "message": "image limit reached", "resets_at": 1786150800, "plan_type": "plus",
+			},
+		})
+	}))
+	defer server.Close()
+	client := &Client{Backend: BackendCodex, BaseURL: server.URL, HTTP: server.Client()}
+	_, err := client.Generate(context.Background(), application.ImageGenRequest{Model: "gpt-image-2", Prompt: "x", N: 1})
+	var perr *domain.ProviderError
+	if !errors.As(err, &perr) {
+		t.Fatalf("err = %v, want *ProviderError", err)
+	}
+	if perr.StatusCode != 429 || perr.RetryAfter != 0 {
+		t.Fatalf("status = %d retry = %s, want 429 and no retry window", perr.StatusCode, perr.RetryAfter)
+	}
+	if !strings.Contains(perr.Error(), "usage limit reached") || !strings.Contains(perr.Error(), "resets at") {
+		t.Fatalf("err = %v", perr)
+	}
+	if want := time.Unix(1786150800, 0); !perr.UsageLimitResetAt.Equal(want) {
+		t.Fatalf("usage limit reset = %s, want %s", perr.UsageLimitResetAt, want)
+	}
+}
+
+func TestCodexGeneric429NoRetryWindow(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "slow down"}})
+	}))
+	defer server.Close()
+	client := &Client{Backend: BackendCodex, BaseURL: server.URL, HTTP: server.Client()}
+	_, err := client.Generate(context.Background(), application.ImageGenRequest{Model: "m", Prompt: "p", N: 1})
+	var perr *domain.ProviderError
+	if !errors.As(err, &perr) {
+		t.Fatalf("err = %v, want *ProviderError", err)
+	}
+	if perr.StatusCode != 429 || perr.RetryAfter != 0 {
+		t.Fatalf("status = %d retry = %s", perr.StatusCode, perr.RetryAfter)
+	}
+	if !strings.Contains(err.Error(), "rate limited") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCodex5xxIsRetriable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "overloaded", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	client := &Client{Backend: BackendCodex, BaseURL: server.URL, HTTP: server.Client()}
+	_, err := client.Generate(context.Background(), application.ImageGenRequest{Model: "m", Prompt: "p", N: 1})
+	var perr *domain.ProviderError
+	if !errors.As(err, &perr) {
+		t.Fatalf("err = %v, want *ProviderError", err)
+	}
+	if !perr.Temporary || perr.StatusCode != 503 {
+		t.Fatalf("perr = %+v, want retriable 503", perr)
+	}
+}
+
+func TestCodexRejectsOversizeBase64(t *testing.T) {
+	huge := strings.Repeat("A", maxCodexImageB64+1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"b64_json": huge}}})
+	}))
+	defer server.Close()
+	client := &Client{Backend: BackendCodex, BaseURL: server.URL, HTTP: server.Client()}
+	_, err := client.Generate(context.Background(), application.ImageGenRequest{Model: "m", Prompt: "p", N: 1})
+	if err == nil || !strings.Contains(err.Error(), "32 MiB") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCodexEmptyDataFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"created": 1})
+	}))
+	defer server.Close()
+	client := &Client{Backend: BackendCodex, BaseURL: server.URL, HTTP: server.Client()}
+	_, err := client.Generate(context.Background(), application.ImageGenRequest{Model: "m", Prompt: "p", N: 1})
+	if err == nil || !strings.Contains(err.Error(), "no images") {
+		t.Fatalf("err = %v", err)
 	}
 }

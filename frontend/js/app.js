@@ -1,6 +1,6 @@
 // NusaShell — application shell. Router + transport wiring.
 
-import { rpc, on, connectWS } from './rpc.js';
+import { rpc, connectWS } from './rpc.js';
 import { initHome, refresh as refreshHome } from './views/home.js';
 import { initAgent, refresh as refreshAgent } from './views/agent.js';
 import { initSkills, refresh as refreshSkills } from './views/skills.js';
@@ -183,20 +183,6 @@ async function boot() {
     onStatus: setConnection,
   });
 
-  // Error-level log lines stay in the Logs view. Toasting them here doubled
-  // the same failure with agent.turn.error / RPC catch toasts in one workflow.
-  on('learning.job.started', () => {
-    toast('Learning job started.', 'info', 3500);
-  });
-  on('learning.job.done', () => {
-    toast('Learning job finished.', 'success', 2500);
-  });
-  on('learning.job.error', () => {
-    toast('Learning job failed.', 'error', 4000);
-  });
-  on('experience.recorded', () => {
-    toast('Experience recorded.', 'info', 1800);
-  });
   try {
     const info = await rpc('app.info', {}, { timeoutMs: 4000 });
     document.title = `NusaShell ${info.version ?? ''}`.trim();

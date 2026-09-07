@@ -37,6 +37,29 @@ test('Agent uses the Electron workspace shell without unsupported Todo UI', () =
   assert.match(agentCSS, /@media \(max-width: 900px\)[\s\S]*?\.agent-conversations \{[\s\S]*?display: none;/, '900px hides the room list');
 });
 
+test('background learning updates stay silent outside the Learning view', () => {
+  assert.doesNotMatch(appShell, /on\('experience\.recorded',[\s\S]*?toast\(/);
+  assert.doesNotMatch(appShell, /on\('learning\.job\.(?:started|done|error)',[\s\S]*?toast\(/);
+});
+
+test('provider or Codex account selection is scoped to its conversation', () => {
+  assert.doesNotMatch(agentView, /localStorage\.(?:getItem|setItem|removeItem)\('nusashell\.provider_route'/);
+  assert.match(agentView, /getSelectedRoute: \(\) => state\.providerRoute/);
+  const openFn = agentView.slice(
+    agentView.indexOf('async function openConversation(id)'),
+    agentView.indexOf('function saveRoomState'),
+  );
+  assert.match(openFn, /const hasSaved = loadRoomState\(id\);[\s\S]*state\.providerRoute = conversation\.provider_route \|\| ''/);
+  assert.doesNotMatch(agentView, /providerRoute: state\.providerRoute,[\s\S]*\n\s*\}\);/);
+  assert.match(agentView, /agent\.conversations\.set-provider/);
+  const refreshModels = agentView.slice(
+    agentView.indexOf('async function refreshModels()'),
+    agentView.indexOf('function updateModelTrigger()'),
+  );
+  assert.match(refreshModels, /persistProviderRoute\(state\.activeId, ''\)/,
+    'a route invalidated by model refresh must also be cleared in backend state');
+});
+
 test('Agent tool transcripts start collapsed, cap output, and lazy-render reasoning', () => {
   // Settled tool events are compact <details> rows; only running work opens
   // automatically. Both the event output and exec/MCP terminal panel cap long
@@ -116,6 +139,14 @@ test('Room snapshots keep the complete trailing run; older complete turns remain
   assert.match(agentView, /complete trailing assistant run/);
   assert.doesNotMatch(agentView, /keepAllTrailing|hasOlderTurnRounds/);
   assert.match(agentView, /maybeAutoTitleConversation\(id, \{ conversation, messages \}\)/);
+});
+
+test('creating a room resets the context badge before it is rendered', () => {
+  const createStart = agentView.indexOf('async function createConversation');
+  const createEnd = agentView.indexOf('\nfunction renderConversationList', createStart);
+  const createBody = agentView.slice(createStart, createEnd);
+  assert.match(createBody, /state\.messages = \[\];[\s\S]*?state\.contextEstimate = 0;[\s\S]*?updateComposerStatus\(\);/,
+    'a new empty room must not retain the previous room context usage');
 });
 
 test('Context usage stays visible in the narrow composer', () => {
@@ -387,6 +418,15 @@ test('A new live round drops previous-round tool cards even when the room is hid
   );
   assert.match(hiddenRoundStart, /resetLiveRoundText\(run\);/);
   assert.match(hiddenRoundStart, /if \(conversation_id !== state\.activeId\)/);
+});
+
+test('Switching rooms always opens the latest message, including a room previously read above the tail', () => {
+  const openFn = agentView.slice(
+    agentView.indexOf('async function openConversation(id)'),
+    agentView.indexOf('async function restorePendingAsks'),
+  );
+  assert.match(openFn, /renderThread\(windowedActiveMessages\(\), true\)/,
+    'a room switch must start at the newest message, rather than restore a stale detached scroll position');
 });
 
 test('Switching rooms closes the hidden room stream so switch-back replays missed frames', () => {

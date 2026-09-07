@@ -12,6 +12,9 @@ import (
 type Call struct {
 	Ctx            context.Context
 	ConversationID string
+	// TurnID is the agent run/turn identifier. Backends that support turn
+	// correlation (Codex images) send it as x-codex-image-turn-id.
+	TurnID string
 }
 
 func (c Call) ctx() context.Context {
@@ -85,8 +88,9 @@ type ImageGenRequest struct {
 	Background string // auto | transparent | opaque
 	N          int
 	References []ImageReference
-	// TurnID is sent as a turn correlation header by image backends that
-	// support it (currently unused; reserved for future attribution).
+	// TurnID is the agent turn identifier. The Codex image backend sends it
+	// as the x-codex-image-turn-id turn-correlation header. Empty = header
+	// omitted (OpenAI/OpenRouter do not use it).
 	TurnID string
 }
 
@@ -105,17 +109,20 @@ type GeneratedImage struct {
 // ImageGenResult is the decoded response from an image backend.
 type ImageGenResult struct {
 	Images      []GeneratedImage
-	Provider    string // "openai" | "openrouter"
+	Provider    string // "openai" | "openrouter" | "codex"
 	Model       string
 	UsageTokens int
 	CostUSD     float64
 }
 
 // ImageGeneratorFactory builds an ImageGenerator for a configured provider.
+// ctx bounds token refresh and the HTTP call; media passes the turn context.
 // Returns an error when the provider kind has no image-generation API
 // (Anthropic Messages has none). OpenAI and OpenRouter hosts serve image
-// generation directly.
-type ImageGeneratorFactory func(p *domain.Provider, apiKey string) (ImageGenerator, error)
+// generation directly; the Codex ChatGPT plan image endpoints are routed by
+// the composition-root factory (infrastructure/ai/factory.go), which also
+// resolves and refreshes the OAuth token.
+type ImageGeneratorFactory func(ctx context.Context, p *domain.Provider, apiKey string) (ImageGenerator, error)
 
 // ---- speech synthesis ----
 
@@ -280,4 +287,15 @@ type Deps struct {
 	Go           GoFunc
 	RetryDelay   RetryDelay
 	WaitRetry    WaitRetry
+
+	// PrepareCodexAPIKey optionally remaps the credential used for an image
+	// generation call (sticky Codex multi-account selection). Nil = use
+	// apiKey as-is.
+	PrepareCodexAPIKey func(conversationID string, provider *domain.Provider, apiKey string) (string, error)
+	// FailoverCodexAPIKey optionally switches account after an image
+	// generation failure (usage-limit 429, plain 429, or 403 entitlement).
+	// retry=true means the caller rebuilds the generator with newAPIKey and
+	// calls Generate once more. replacedErr, when non-nil, replaces the
+	// error surfaced to the user (e.g. all accounts limited).
+	FailoverCodexAPIKey func(ctx context.Context, conversationID string, provider *domain.Provider, apiKey string, genErr error) (newAPIKey string, retry bool, replacedErr error)
 }

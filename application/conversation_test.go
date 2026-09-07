@@ -50,9 +50,10 @@ func (f *fakeLogStore) Clear() {}
 
 // fakeConvStore is a minimal in-memory ConversationStore for testing.
 type fakeConvStore struct {
-	convs    map[string]*domain.Conversation
-	archived []domain.Message
-	saveErr  error
+	convs      map[string]*domain.Conversation
+	archived   []domain.Message
+	archiveErr error
+	saveErr    error
 }
 
 func (f *fakeConvStore) List() []*domain.Conversation {
@@ -88,6 +89,9 @@ func (f *fakeConvStore) Delete(id string) error {
 }
 
 func (f *fakeConvStore) ArchiveChunk(id string, messages []domain.Message) (int, error) {
+	if f.archiveErr != nil {
+		return 0, f.archiveErr
+	}
 	f.archived = append(f.archived, messages...)
 	return 0, nil
 }
@@ -437,6 +441,41 @@ func TestHandleConversationsSetWorkspaceRejectsRelativePath(t *testing.T) {
 	})
 	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
 		t.Fatalf("want VALIDATION_ERROR for a relative workspace, got %+v", rpcErr)
+	}
+}
+
+func TestHandleConversationsSetProviderPersistsPerConversation(t *testing.T) {
+	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
+		"codex-room": {ID: "codex-room", Title: "Codex", ProviderRoute: "old"},
+		"other-room": {ID: "other-room", Title: "Other", ProviderRoute: "keep"},
+	}}
+	app := &App{Conversations: convStore, Logs: &fakeLogStore{}, Bus: NewBus()}
+
+	resp, rpcErr := app.handleConversationsSetProvider(contracts.ConversationSetProviderRequest{
+		ID: "codex-room", ProviderRoute: "account-plus",
+	})
+	if rpcErr != nil {
+		t.Fatalf("set provider: %v", rpcErr)
+	}
+	got, ok := resp.(contracts.ConversationGetResult)
+	if !ok || got.Conversation.ProviderRoute != "account-plus" {
+		t.Fatalf("response = %+v, want account-plus", resp)
+	}
+	saved, err := convStore.Get("codex-room")
+	if err != nil || saved.ProviderRoute != "account-plus" {
+		t.Fatalf("saved route = %q, err=%v", saved.ProviderRoute, err)
+	}
+	other, err := convStore.Get("other-room")
+	if err != nil || other.ProviderRoute != "keep" {
+		t.Fatalf("other room route leaked: %q, err=%v", other.ProviderRoute, err)
+	}
+
+	if _, rpcErr := app.handleConversationsSetProvider(contracts.ConversationSetProviderRequest{ID: "codex-room"}); rpcErr != nil {
+		t.Fatalf("clear provider: %v", rpcErr)
+	}
+	saved, _ = convStore.Get("codex-room")
+	if saved.ProviderRoute != "" {
+		t.Fatalf("cleared route = %q", saved.ProviderRoute)
 	}
 }
 

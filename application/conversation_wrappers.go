@@ -104,6 +104,10 @@ func (a *App) handleConversationsSetWorkspace(req contracts.ConversationSetWorks
 	return a.conversationService().HandleSetWorkspace(req)
 }
 
+func (a *App) handleConversationsSetProvider(req contracts.ConversationSetProviderRequest) (any, *contracts.RPCError) {
+	return a.conversationService().HandleSetProvider(req)
+}
+
 func (a *App) handleTodosGet(req contracts.TodosGetRequest) (any, *contracts.RPCError) {
 	return a.conversationService().HandleTodosGet(req)
 }

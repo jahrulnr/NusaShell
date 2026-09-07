@@ -38,9 +38,9 @@ test('GFM task list renders without native <input> controls', () => {
   assert.doesNotMatch(html, /<input/);
 });
 
-test('absolute path link renders as clickable <a> with data-local-path', () => {
+test('absolute path link uses the encoded local-file proxy while retaining its source path', () => {
   const html = renderMarkdown('[app.py](/abs/path/app.py:12)\n');
-  assert.match(html, /<a href="\/abs\/path\/app\.py:12" class="agent-local-link" data-local-path="\/abs\/path\/app\.py:12">app\.py<\/a>/);
+  assert.match(html, /<a href="\/local-file\?path=%2Fabs%2Fpath%2Fapp\.py" class="agent-local-link" data-local-path="\/abs\/path\/app\.py:12">app\.py<\/a>/);
 });
 
 test('file:// link renders as clickable <a> with decoded data-local-path', () => {
@@ -54,8 +54,8 @@ test('file:// link renders as clickable <a> with decoded data-local-path', () =>
 
 test('absolute path link with spaces in angle brackets', () => {
   const html = renderMarkdown('[My Report.md](</abs/path/My Project/My Report.md:3>)\n');
-  assert.match(html, /<a href="\/abs\/path\/My%20Project\/My%20Report\.md:3"/);
-  assert.match(html, /data-local-path="\/abs\/path\/My%20Project\/My%20Report\.md:3"/);
+  assert.match(html, /href="\/local-file\?path=%2Fabs%2Fpath%2FMy%20Project%2FMy%20Report\.md"/);
+  assert.match(html, /data-local-path="\/abs\/path\/My Project\/My Report\.md:3"/);
 });
 
 test('nested emphasis renders correctly', () => {

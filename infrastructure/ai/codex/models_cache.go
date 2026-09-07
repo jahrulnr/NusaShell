@@ -42,11 +42,14 @@ func loadCodexModelsCache() map[string]int {
 		if m.Slug == "" {
 			continue
 		}
-		// Use max_context_window if available (the user can raise it via
-		// config), otherwise the default context_window.
-		cw := m.MaxContextWindow
+		// Codex resolves the active runtime window as
+		// context_window.or(max_context_window). The max field only bounds
+		// an explicit Codex configuration override, so treating it as the
+		// active default delays compaction far beyond the window enforced by
+		// the upstream model.
+		cw := m.ContextWindow
 		if cw <= 0 {
-			cw = m.ContextWindow
+			cw = m.MaxContextWindow
 		}
 		if cw > 0 {
 			out[m.Slug] = cw

@@ -40,6 +40,29 @@ type HandlerFunc func(data []byte)
 
 func (f HandlerFunc) Handle(data []byte) { f(data) }
 
+// ConnectionHandler lets stateful consumers reconcile stale local state
+// after every successful dial before new server events arrive.
+type ConnectionHandler struct {
+	OnMessage func([]byte)
+	OnConnect func()
+}
+
+func (h ConnectionHandler) Handle(data []byte) {
+	if h.OnMessage != nil {
+		h.OnMessage(data)
+	}
+}
+
+func (h ConnectionHandler) Connected() {
+	if h.OnConnect != nil {
+		h.OnConnect()
+	}
+}
+
+type connectedHandler interface {
+	Connected()
+}
+
 // Backoff controls reconnect delay. Delay = Base * factor^attempt, capped at
 // Max, with jitter omitted for determinism in tests.
 type Backoff struct {
@@ -148,6 +171,9 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 		c.setConn(conn)
 		c.log.Info("ws: connected", "url", c.url)
+		if handler, ok := c.handler.(connectedHandler); ok {
+			handler.Connected()
+		}
 		attempt = 0
 		c.readLoop(runCtx, conn)
 		_ = conn.Close()

@@ -1,12 +1,13 @@
-// Route picker: selects the upstream provider that serves the chosen
-// model on aggregator gateways (OpenRouter). Always visible next to the
-// model picker; the icon communicates capability:
+// Routing picker: selects either the upstream serving an OpenRouter model or
+// the Codex account used by the active conversation. Always visible next to
+// the model picker; the icon communicates capability:
 //   - router icon + clickable menu = multi-provider model, "Auto" default
+//   - router icon + account menu = Codex auto-rotation or strict account pin
 //   - home icon + dashed border = no listed upstreams, non-interactive
 //     ("No provider in this model" when route_support is true)
-// The list is fetched on model selection (RPC ai.models.endpoints),
-// cached per (provider, model) in this session, and pinned routes are
-// stored by the caller in state + localStorage.
+// Rendering reads the current selection from the active-room state supplied by
+// the caller. Persistence belongs to the conversation backend, not browser
+// localStorage, so reloads and room switches cannot share an account pin.
 import { debounce, el } from '../../ui.js';
 import { rpc } from '../../rpc.js';
 
@@ -81,7 +82,8 @@ export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute,
   if (!trigger || !menu || !iconEl || !labelEl) return null;
 
   const sessionCache = new Map(); // `${provider_id}:${model_id}` -> routes
-  const state = { routes: null, loading: false, error: null };
+  const state = { routes: null, accounts: null, loading: false, error: null, mode: 'route' };
+  let refreshGeneration = 0;
 
   const closeMenu = () => {
     menu.hidden = true;
@@ -103,6 +105,8 @@ export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute,
   // Async only on the first fetch for a model (cache miss); afterwards it
   // resolves synchronously so switching models is instant.
   async function refresh() {
+    const generation = ++refreshGeneration;
+    const isCurrent = () => generation === refreshGeneration;
     const model = chosenModel();
     if (!model) {
       trigger.hidden = true;
@@ -110,6 +114,37 @@ export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute,
     }
     trigger.hidden = false;
     const route = getSelectedRoute() || '';
+    if (model.provider_kind === 'codex') {
+      state.mode = 'account';
+      const key = `codex-accounts:${model.provider_id}`;
+      let accounts;
+      let loadError = null;
+      if (sessionCache.has(key)) {
+        accounts = sessionCache.get(key);
+      } else {
+        state.loading = true;
+        setIcon('spinner');
+        try {
+          const res = await rpc('ai.codex.accounts.list', { provider_id: model.provider_id });
+          accounts = res?.accounts || [];
+          sessionCache.set(key, accounts);
+        } catch (error) {
+          accounts = [];
+          loadError = error?.message || 'fetch failed';
+        }
+      }
+      if (!isCurrent()) return;
+      state.accounts = accounts;
+      state.error = loadError;
+      state.loading = false;
+      const selected = state.accounts?.find((account) => account.account_id === route);
+      labelEl.textContent = selected?.email || selected?.name || route || 'Auto';
+      setIcon('router');
+      trigger.classList.remove('is-single');
+      trigger.title = route ? `Akun Codex: ${labelEl.textContent}` : 'Auto — pilih akun Codex';
+      return;
+    }
+    state.mode = 'route';
     if (!model.route_support) {
       // Direct provider / no routing concept: home icon, non-interactive.
       state.routes = null;
@@ -123,37 +158,35 @@ export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute,
     }
     trigger.classList.remove('is-single');
     const key = `${model.provider_id}:${model.id}`;
+    let routes;
+    let loadError = null;
     if (sessionCache.has(key)) {
-      state.routes = sessionCache.get(key);
-      state.loading = false;
-    } else if (!state.loading) {
+      routes = sessionCache.get(key);
+    } else {
       state.loading = true;
       state.routes = null;
-    }
-    if (state.loading && state.routes == null) setIcon('spinner');
-    labelEl.textContent = route || 'Auto';
-    if (state.loading && state.routes == null) {
+      setIcon('spinner');
       try {
         const res = await rpc('ai.models.endpoints', { provider_id: model.provider_id, model_id: model.id });
-        const routes = (res && res.routes) || [];
+        routes = (res && res.routes) || [];
         sessionCache.set(key, routes);
-        state.routes = routes;
-        state.loading = false;
-        state.error = null;
       } catch (error) {
         const message = (error && error.message) || 'fetch failed';
-        state.loading = false;
-        state.routes = [];
+        routes = [];
         if (isHTTPFailureMessage(message)) {
-          state.error = null;
           sessionCache.set(key, []);
         } else {
           console.warn('route picker:', error);
-          state.error = message;
+          loadError = message;
         }
       }
     }
-    const routes = state.routes || [];
+    if (!isCurrent()) return;
+    state.routes = routes;
+    state.loading = false;
+    state.error = loadError;
+    labelEl.textContent = route || 'Auto';
+    routes = state.routes || [];
     if (routes.length) {
       setIcon('router');
       trigger.classList.remove('is-single');
@@ -167,6 +200,33 @@ export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute,
 
   const renderMenu = () => {
     menu.innerHTML = '';
+    if (state.mode === 'account') {
+      const selected = getSelectedRoute() || '';
+      const list = el('div', { class: 'agent-model-list' });
+      const addAccount = (account, title, detail) => {
+        const row = el('div', { class: `agent-model-row${selected === account ? ' is-selected' : ''}` },
+          el('button', { class: 'agent-model-choice', type: 'button' },
+            el('span', { class: 'agent-model-name' },
+              el('span', { text: title }),
+              el('span', { class: 'agent-model-id', text: detail }),
+            ),
+          ),
+        );
+        row.querySelector('button').addEventListener('click', () => {
+          selectRoute(account);
+          closeMenu();
+          refresh();
+        });
+        list.append(row);
+      };
+      addAccount('', 'Auto', 'rotasi akun sesuai quota dan cooldown');
+      for (const account of state.accounts || []) {
+        addAccount(account.account_id, account.email || account.name || account.account_id,
+          account.circuit_open ? 'quota habis sementara' : account.account_id);
+      }
+      menu.append(list);
+      return;
+    }
     const routes = state.routes || [];
     const route = getSelectedRoute() || '';
     if (!routes.length) {
@@ -245,6 +305,14 @@ export function bindRoutePicker({ getModels, getSelectedModel, getSelectedRoute,
   };
 
   const openMenu = () => {
+    if (state.mode === 'account') {
+      renderMenu();
+      menu.hidden = false;
+      positionMenu(menu, trigger);
+      trigger.setAttribute('aria-expanded', 'true');
+      menu.querySelector('button')?.focus();
+      return;
+    }
     const routes = state.routes || [];
     const route = getSelectedRoute() || '';
     if (!routes.length && !route) return; // single-upstream: non-interactive

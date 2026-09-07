@@ -361,6 +361,9 @@ func (a *App) handleCodexAccountsSwitch(req contracts.CodexAccountsSwitchRequest
 	if err := a.Credentials.Set(req.ProviderID, tokenJSON); err != nil {
 		return nil, rpcInternal(err)
 	}
+	if a.CodexRouter != nil {
+		a.CodexRouter.PreferAccount(req.ProviderID, req.AccountID)
+	}
 	a.log("info", "ai", "codex switched to account %s", req.AccountID)
 	return map[string]bool{"ok": true}, nil
 }

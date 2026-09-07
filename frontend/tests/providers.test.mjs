@@ -7,6 +7,8 @@ import {
   BUILTIN_PROVIDERS,
   cacheTTLsFor,
   effectiveCacheTTL,
+  reasoningSummariesFor,
+  effectiveReasoningSummary,
   mergeProviderRegistry,
   renderUsageBar,
 } from '../js/views/providers.js';
@@ -67,6 +69,25 @@ test('cache TTL chips use sendable values and keep a selected default', () => {
   assert.equal(effectiveCacheTTL({ kind: 'messages', driver: 'anthropic', cache_ttl: '1h' }), '1h');
   assert.equal(effectiveCacheTTL({ kind: 'messages', driver: 'anthropic', cache_ttl: 'off' }), 'off');
   assert.equal(effectiveCacheTTL({ kind: 'responses', driver: 'openai' }), '30m');
+});
+
+test('Codex reasoning summary chips expose supported verbosity levels', () => {
+  assert.deepEqual(reasoningSummariesFor({ kind: 'codex' }), []);
+  assert.deepEqual(reasoningSummariesFor({
+    kind: 'codex',
+    reasoning_summaries: ['auto', 'concise', 'detailed', 'none'],
+  }), ['auto', 'concise', 'detailed', 'none']);
+  assert.deepEqual(reasoningSummariesFor({ kind: 'responses' }), []);
+  assert.equal(effectiveReasoningSummary({ kind: 'codex' }), '');
+  assert.equal(effectiveReasoningSummary({
+    kind: 'codex',
+    reasoning_summaries: ['auto', 'concise', 'detailed', 'none'],
+  }), 'auto');
+  assert.equal(effectiveReasoningSummary({
+    kind: 'codex',
+    reasoning_summaries: ['auto', 'concise', 'detailed', 'none'],
+    reasoning_summary: 'detailed',
+  }), 'detailed');
 });
 
 test('Codex detail wires OAuth, import, multi-account, usage, and runtime RPCs', () => {
@@ -151,6 +172,7 @@ test('Codex detail render shows accounts and runtime panels', async () => {
               enabled: true,
               configured: true,
               has_api_key: true,
+              reasoning_summaries: ['auto', 'concise', 'detailed', 'none'],
               models: [{ id: 'gpt-5.4' }],
             }],
           },
@@ -203,6 +225,13 @@ test('Codex detail render shows accounts and runtime panels', async () => {
     assert.ok(document.getElementById('codex-import-cli-btn'));
     assert.ok(document.getElementById('codex-refresh-circuits-btn'));
     assert.ok(document.getElementById('codex-runtime-download-btn'));
+    const summaryPicker = document.getElementById('provider-reasoning-summary');
+    assert.ok(summaryPicker, 'reasoning summary picker present');
+    assert.deepEqual(
+      [...summaryPicker.querySelectorAll('button')].map((button) => button.textContent),
+      ['auto', 'concise', 'detailed', 'none'],
+    );
+    assert.equal(summaryPicker.querySelector('[aria-pressed="true"]')?.textContent, 'auto');
     assert.match(document.getElementById('codex-account-list').textContent, /user@example\.com/);
     assert.match(document.getElementById('codex-runtime-status').textContent, /v0\.1\.0/);
     assert.ok(calls.includes('ai.codex.usage'));

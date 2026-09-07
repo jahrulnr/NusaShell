@@ -881,7 +881,6 @@ async function save() {
     });
     const model = preferredSelect.getSelected()?.[0] ?? '';
     localStorage.setItem('nusashell.model', model);
-    window.dispatchEvent(new CustomEvent('nusashell:preferred-model', { detail: { model } }));
     setStatus('Saved on this device.');
     diskSyncDirty = false;
     toast('Settings saved', 'success');

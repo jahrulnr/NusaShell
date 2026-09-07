@@ -228,10 +228,20 @@ Envelope event `{ "type": "...", "payload": { ... } }` dipetakan sebagai:
 | `agent.turn.done` | one-shot done, lalu idle |
 | `agent.turn.error` | one-shot error, lalu idle |
 
+Background learning and automation events do not drive pet activity. When the
+WebSocket reconnects, the pet resets to idle because the shared event stream
+does not replay a terminal event that may have been missed while disconnected.
+
 Implementasi transparansi memakai [SDL2 window lifecycle](https://wiki.libsdl.org/SDL2/SDL_CreateWindow)
 untuk window/rendering dan [X11 Shape Extension](https://www.x.org/releases/current/doc/libXext/shapelib.pdf)
 untuk bounding/input region. SDL's optional `SDL_CreateShapedWindow` tidak
-dipakai karena runtime SDL laptop dapat dibangun tanpa shaped-window driver.
+dipakai karena runtime SDL laptop dapat dibangun tanpa shaped-window driver dan
+API tersebut tidak mengatur stacking. Karena `_NET_WM_STATE_ABOVE` adalah
+stacking band, bukan jaminan menang atas window always-on-top lain, runtime juga
+mengirim X11 restack tanpa fokus saat tampil dan secara berkala. Ini menjaga pet
+tetap terlihat di atas window `ABOVE` yang aktif tanpa mencuri keyboard focus;
+tetap best-effort karena native Wayland tidak memiliki kontrak stacking yang
+sama.
 
 Shape window diperbarui ketika cell/frame berubah, sehingga area transparan
 tetap meneruskan event dan silhouette animasi tidak menjadi kotak hitam. Saat

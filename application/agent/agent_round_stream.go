@@ -50,9 +50,9 @@ func (a *Service) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey
 	summary, err := a.CompactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings, domain.CompactionTriggerInitial)
 	if err != nil {
 		a.log("warn", "agent", "compaction failed for %s: %v", conversation.ID, err)
-		a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: run.ID, ConversationID: conversation.ID, Error: err.Error()})
+		a.EmitInteractiveTurnEvent(run, contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: run.ID, ConversationID: conversation.ID, Error: err.Error()})
 	} else {
-		a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{RunID: run.ID, ConversationID: conversation.ID, Summary: summary})
+		a.EmitInteractiveTurnEvent(run, contracts.EventCompacted, contracts.CompactedEvent{RunID: run.ID, ConversationID: conversation.ID, Summary: summary})
 		a.log("info", "agent", "compacted conversation %s", conversation.ID)
 	}
 	refreshed, getErr := a.Conversations.Get(run.ConversationID)
@@ -194,7 +194,7 @@ func (a *Service) prepareStreamRetry(run *TurnRun, messageID string, retry int, 
 		retryEvt.Kind = string(upstream.Kind)
 		retryEvt.Status = upstream.StatusCode
 	}
-	a.Bus.Emit(contracts.EventProviderRetry, retryEvt)
+	a.EmitInteractiveTurnEvent(run, contracts.EventProviderRetry, retryEvt)
 	if a.RoundStreams != nil {
 		a.RoundStreams.Reset(run.ID, messageID)
 	}
@@ -291,25 +291,26 @@ func (a *Service) StreamTurnRoundOnce(run *TurnRun, adapter ProviderContext, con
 		a.publishRoundActivity(run.ID, messageID, round, id, name, contracts.RoundActivityToolCall)
 	}
 	response, err := adapter.StreamWithToolActivity(run.Ctx, ChatRequest{
-		Model:             model,
-		System:            system,
-		Messages:          messages,
-		Tools:             tools,
-		PromptCaching:     settings.PromptCaching,
-		PromptCache:       promptCache,
-		MaxTokens:         maxTokens,
-		Effort:            effort,
-		ProviderRoute:     conversation.ProviderRoute,
-		Temperature:       settings.Temperature,
-		TopP:              settings.TopP,
-		TopK:              settings.TopK,
-		FrequencyPenalty:  settings.FrequencyPenalty,
-		PresencePenalty:   settings.PresencePenalty,
-		ConversationID:    run.ConversationID,
-		ReasoningReplay:   caps.ReasoningReplay,
-		StripParams:       a.learnedParams.StripParams(run.ProviderID, model),
-		CompactionBlob:    conversation.CompactionBlob,
-		ContextManagement: serverCompactionContextManagementForKind(model, adapter.Kind),
+		Model:                    model,
+		System:                   system,
+		Messages:                 messages,
+		Tools:                    tools,
+		PromptCaching:            settings.PromptCaching,
+		PromptCache:              promptCache,
+		MaxTokens:                maxTokens,
+		Effort:                   effort,
+		ProviderRoute:            conversation.ProviderRoute,
+		Temperature:              settings.Temperature,
+		TopP:                     settings.TopP,
+		TopK:                     settings.TopK,
+		FrequencyPenalty:         settings.FrequencyPenalty,
+		PresencePenalty:          settings.PresencePenalty,
+		ConversationID:           run.ConversationID,
+		ReasoningReplay:          caps.ReasoningReplay,
+		StripParams:              a.learnedParams.StripParams(run.ProviderID, model),
+		CompactionBlob:           conversation.CompactionBlob,
+		CompactionPrefixMessages: a.compactionPrefixMessageCount(conversation, caps),
+		ContextManagement:        serverCompactionContextManagementForKind(model, adapter.Kind),
 	}, func(delta string) {
 		content.WriteString(delta)
 		a.publishRoundDelta(run.ID, messageID, round, contracts.RoundDeltaText, "", "", delta)

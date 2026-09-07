@@ -27,7 +27,7 @@ func (a *Service) ExecuteTurnTools(run *TurnRun, messageID string, toolCalls []d
 			if gerr == nil {
 				c := conversation.Conversation()
 				for _, toolCall := range toolCalls {
-					a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
+					a.EmitInteractiveTurnEvent(run, contracts.EventToolCompleted, contracts.ToolCompletedEvent{
 						RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
 						Name: toolCall.Name, Args: toolpresentation.ToolArgsRaw(toolCall.Args), Status: string(domain.ToolInterrupted), Output: "interrupted by user",
 						Presentation: toolpresentation.BuildToolPresentation(toolCall.Name, toolCall.Args, domain.ToolInterrupted, "interrupted by user"),
@@ -148,7 +148,7 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 		cancelTool()
 	}()
 
-	a.Bus.Emit(contracts.EventToolStarted, contracts.ToolStartedEvent{
+	a.EmitInteractiveTurnEvent(run, contracts.EventToolStarted, contracts.ToolStartedEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: toolpresentation.ToolArgsRaw(toolCall.Args),
 		Presentation: toolpresentation.BuildToolPresentation(toolCall.Name, toolCall.Args, domain.ToolRunning, ""),
 	})
@@ -265,7 +265,7 @@ func (a *Service) emitToolCompleted(run *TurnRun, toolCall domain.ToolCall, res 
 		Presentation: toolpresentation.BuildToolPresentation(toolCall.Name, toolCall.Args, res.Status, res.Output, res.Atts),
 	}
 	event.Attachments = toolpresentation.ToolAttachmentDTOs(res.Atts)
-	a.Bus.Emit(contracts.EventToolCompleted, event)
+	a.EmitInteractiveTurnEvent(run, contracts.EventToolCompleted, event)
 }
 
 // emitLearningMutationEvents publishes memory.updated and/or skill.updated

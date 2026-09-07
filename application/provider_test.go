@@ -375,6 +375,44 @@ func TestHandleProvidersSavePersistsCacheTTL(t *testing.T) {
 	}
 }
 
+func TestHandleProvidersSavePersistsCodexReasoningSummary(t *testing.T) {
+	app, providers, _ := newSeedTestApp()
+	res, rpcErr := app.handleProvidersSave(contracts.ProviderSaveRequest{
+		Driver: "codex", Kind: "codex", Name: "Codex",
+		BaseURL: "https://chatgpt.com/backend-api/codex", Enabled: true,
+		ReasoningSummary: strPtr("detailed"),
+	})
+	if rpcErr != nil {
+		t.Fatalf("save: %+v", rpcErr)
+	}
+	out := res.(contracts.ProvidersListResult)
+	if len(out.Providers) != 1 || out.Providers[0].ReasoningSummary != "detailed" {
+		t.Fatalf("provider DTO = %#v", out.Providers)
+	}
+	if got := out.Providers[0].ReasoningSummaries; len(got) != 4 || got[0] != "auto" || got[2] != "detailed" {
+		t.Fatalf("reasoning summaries = %v", got)
+	}
+	stored, err := providers.Get(out.Providers[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ReasoningSummary != "detailed" {
+		t.Fatalf("stored reasoning summary = %q, want detailed", stored.ReasoningSummary)
+	}
+}
+
+func TestHandleProvidersSaveRejectsInvalidCodexReasoningSummary(t *testing.T) {
+	app, _, _ := newSeedTestApp()
+	_, rpcErr := app.handleProvidersSave(contracts.ProviderSaveRequest{
+		Driver: "codex", Kind: "codex", Name: "Codex",
+		BaseURL: "https://chatgpt.com/backend-api/codex", Enabled: true,
+		ReasoningSummary: strPtr("verbose"),
+	})
+	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
+		t.Fatalf("invalid reasoning summary error = %#v", rpcErr)
+	}
+}
+
 func TestHandleProvidersSaveAcceptsCodexDriver(t *testing.T) {
 	app, providers, credentials := newSeedTestApp()
 

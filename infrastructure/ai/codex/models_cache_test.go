@@ -8,6 +8,24 @@ import (
 	"testing"
 )
 
+func TestWriteModelListAuthUsesSelectedNusaShellAccount(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeModelListAuth(dir, "selected-token", "plus-account"); err != nil {
+		t.Fatalf("writeModelListAuth: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "auth.json"))
+	if err != nil {
+		t.Fatalf("read auth.json: %v", err)
+	}
+	var auth codexCLIAuthFile
+	if err := json.Unmarshal(data, &auth); err != nil {
+		t.Fatalf("decode auth.json: %v", err)
+	}
+	if auth.Tokens.AccessToken != "selected-token" || auth.Tokens.AccountID != "plus-account" {
+		t.Fatalf("auth account = %q token=%q", auth.Tokens.AccountID, auth.Tokens.AccessToken)
+	}
+}
+
 func TestLoadCodexModelsCache(t *testing.T) {
 	dir := t.TempDir()
 	// os.UserHomeDir uses $HOME on Unix and %USERPROFILE% on Windows.
@@ -41,8 +59,8 @@ func TestLoadCodexModelsCache(t *testing.T) {
 	}
 
 	got := loadCodexModelsCache()
-	if got["gpt-5.6-luna"] != 872000 {
-		t.Fatalf("luna context = %d, want 872000 (max_context_window)", got["gpt-5.6-luna"])
+	if got["gpt-5.6-luna"] != 272000 {
+		t.Fatalf("luna context = %d, want 272000 (active context_window)", got["gpt-5.6-luna"])
 	}
 	if got["gpt-5.6-terra"] != 272000 {
 		t.Fatalf("terra context = %d, want 272000 (context_window fallback)", got["gpt-5.6-terra"])

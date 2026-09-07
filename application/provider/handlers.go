@@ -61,6 +61,10 @@ func (s *Service) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 	if len(ttls) > 0 {
 		dto.CacheTTL = domain.NormalizeCacheTTL(p.Kind, cacheDriver, p.CacheTTL)
 	}
+	dto.ReasoningSummaries = domain.ReasoningSummariesFor(p.Kind)
+	if len(dto.ReasoningSummaries) > 0 {
+		dto.ReasoningSummary = domain.NormalizeReasoningSummary(p.Kind, p.ReasoningSummary)
+	}
 	_, hasKey, _ := s.credentials.Get(p.ID)
 	dto.HasAPIKey = hasKey
 	dto.Configured = hasKey || !domain.RequiresKey(p.Kind)
@@ -69,6 +73,7 @@ func (s *Service) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 			ID:               m.ID,
 			ProviderID:       p.ID,
 			ProviderName:     p.Name,
+			ProviderKind:     string(p.Kind),
 			Context:          m.Context,
 			MaxOutput:        m.MaxOutput,
 			InputCost:        m.InputCost,
@@ -217,6 +222,15 @@ func (s *Service) HandleSave(req contracts.ProviderSaveRequest) (any, *contracts
 		p.CacheTTL = ttl
 	} else if !domain.ValidCacheTTL(kind, cacheDriver, p.CacheTTL) {
 		p.CacheTTL = ""
+	}
+	if req.ReasoningSummary != nil {
+		summary := strings.ToLower(strings.TrimSpace(*req.ReasoningSummary))
+		if !domain.ValidReasoningSummary(kind, summary) {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "reasoning_summary is not supported for this provider"}
+		}
+		p.ReasoningSummary = summary
+	} else if !domain.ValidReasoningSummary(kind, p.ReasoningSummary) {
+		p.ReasoningSummary = ""
 	}
 
 	if req.APIKey != "" {

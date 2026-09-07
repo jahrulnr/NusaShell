@@ -32,6 +32,11 @@ type ProviderError struct {
 	RetryAfter time.Duration
 	Temporary  bool
 	Err        error
+	// UsageLimitResetAt, when non-zero, is the provider-reported wall-clock
+	// reset for an exhausted usage limit (e.g. Codex image quota
+	// usage_limit_reached with resets_at). Failover logic uses it to open
+	// the account's circuit until the quota window resets.
+	UsageLimitResetAt time.Time
 }
 
 func (e *ProviderError) Error() string {

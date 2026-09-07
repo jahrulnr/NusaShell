@@ -18,7 +18,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `config/acp-agents.json` | ACP subagent configs (command/args/env; env values stored locally, keys only on the wire) | JSON |
 | `config/mcp-servers.json` | manual MCP server registry | JSON |
 | `conversations/*.json` | one file per agent conversation, including job transcripts. Each one carries a `type`: `conversation` (an interactive Agent room), `background` (a learning job's LLM run), or `automation` (a pipeline `agent:` step). Only `conversation` appears in `agent.conversations.list` and the Agent Rooms pane; the other two stay addressable by id through `agent.conversations.get` and the automation steer operation. Records written before `type` existed carry `Origin: pipeline`, which reads as `automation`. On load, a leftover `status: running` (process crash mid-turn) is converted to idle and in-flight assistant messages are marked interrupted. A turn that exits without a terminal state (panic recovered in-process) is also healed immediately: the `runTurn` defer resets the conversation to idle and emits a turn-error event, and `agent.turns.start` heals an orphaned running conversation with no active run before starting a new turn instead of returning 409. | JSON |
-| `conversations/*.chunks/` | archived conversation chunks (compaction). Hydration checkpoints (synthetic runtime snapshots) are stripped before archive and summarization; a fresh checkpoint is written in the same compaction Save (`ResetTranscript` then `Add`), including emergency overflow retries. The conversation ID stays the same so todos, attachments, chunks, and the open room stay attached. The checkpoint is always parked immediately after the epoch's first user message (never before it) so OpenAI and Claude see `system → user → hydration`. | JSON |
+| `conversations/*.chunks/` | archived conversation chunks (compaction). Hydration checkpoints (synthetic runtime snapshots) are stripped before archive and summarization; a fresh checkpoint is written in the same compaction Save (`ResetTranscript` then `Add`), including emergency overflow retries. The conversation ID stays the same so todos, attachments, chunks, and the open room stay attached. Text-summary compaction parks its checkpoint immediately after the epoch's first user message (never before it) so OpenAI and Claude see `system → user → hydration`. Codex remote-v2 compaction instead keeps its opaque server checkpoint and persisted prefix boundary in the conversation JSON, retains real user turns before that boundary, preserves later user/assistant/tool turns after it, and moves only replaced transcript items into this chunk directory. | JSON |
 | `conversations/todos.json` | per-conversation TODO checklists + planning briefs. Each non-empty brief is also mirrored to `conversations/<conv_id>/plan.md` (below) so the agent and ACP subagents can `file_read` it. | JSON |
 | `conversations/<conv_id>/plan.md` | mirrored todo brief (generated runtime artifact under the data directory, never the user workspace). Deleting it does not lose data: the JSON store is the source of truth and the next brief update rewrites it. The `todo` result returns this path as `plan_path`. | Markdown |
 | `conversations/artifacts.json` | per-conversation interactive artifacts (HTML/CSS/JS) | JSON |
@@ -68,7 +68,11 @@ The optional login service writes its platform definition outside the data
 directory: a systemd user unit at `~/.config/systemd/user/nusashell.service`
 (Linux), a LaunchAgent at `~/Library/LaunchAgents/id.nusashell.core.plist`
 (macOS), and a Scheduled Task named `NusaShell Core` plus a Startup-folder
-fallback entry (Windows). `nusashell service uninstall` removes all of them;
+fallback entry (Windows). Each definition carries only the explicit service
+configuration plus the captured `PATH`; it does not copy provider credentials
+or the rest of the interactive shell environment. Re-run `nusashell service
+install` to refresh PATH after changing shell configuration. `nusashell
+service uninstall` removes all of them;
 `nusashell service status` reports installed/loaded/running state and flags
 definition drift against the current install.
 

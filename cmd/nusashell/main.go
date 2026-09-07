@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"nusashell/infrastructure/attachmentfs"
 	"nusashell/infrastructure/automation"
 	"nusashell/infrastructure/config"
+	"nusashell/infrastructure/corelock"
 	"nusashell/infrastructure/dirbrowser"
 	"nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
@@ -143,6 +145,37 @@ func run() error {
 		return err
 	}
 	_ = os.Chmod(dataDir, 0o700)
+
+	coreOwner := os.Getenv("NUSASHELL_CORE_OWNER")
+	if coreOwner == "" {
+		if os.Getenv("NUSASHELL_SERVICE") == "1" {
+			coreOwner = "systemd"
+		} else {
+			coreOwner = "manual"
+		}
+	}
+	portNumber, _ := strconv.Atoi(port)
+	coreStartedAt := time.Now().UTC()
+	coreLock, err := corelock.Acquire(filepath.Join(dataDir, "run", "core.lock"))
+	if err != nil {
+		return fmt.Errorf("cannot start NusaShell core: %w", err)
+	}
+	coreMetadataPath := filepath.Join(dataDir, "run", "core.json")
+	if err := corelock.WriteMetadata(coreMetadataPath, corelock.Metadata{
+		PID:       os.Getpid(),
+		Port:      portNumber,
+		Version:   version,
+		Owner:     coreOwner,
+		StartedAt: coreStartedAt,
+	}); err != nil {
+		_ = coreLock.Release()
+		return err
+	}
+	defer func() {
+		_ = corelock.RemoveMetadata(coreMetadataPath)
+		_ = coreLock.Release()
+	}()
+
 	if n := application.RemoveOrphanJournalSidecars(dataDir); n > 0 {
 		logger.Info("removed leftover journal sidecars", "count", n)
 	}
@@ -330,7 +363,7 @@ func run() error {
 	app.CodexUsage = codex.NewUsageAdapter()
 	app.CodexContextWindowCache = codex.NewContextWindowCacheAdapter()
 	app.CodexCLIAuth = codex.NewCLIAuthImporterAdapter()
-	app.CodexRouter = application.NewCodexAccountRouter()
+	app.CodexRouter = application.NewCodexAccountRouterWithState(filepath.Join(dataDir, "config", "codex-router.json"))
 
 	// Bridge plugin push notifications (MCP server→client) into the
 	// automation engine so when-triggered workflows react to events such as
@@ -350,7 +383,14 @@ func run() error {
 			slog.Warn("mcp notification ingest failed", "server", serverID, "event", ev.Type, "error", err)
 		}
 	})
-	srv := transport.New(app, logger, transport.StaticHandler(frontend.FS, dev), dev)
+	identity := transport.CoreIdentity{
+		PID:       os.Getpid(),
+		Port:      portNumber,
+		Version:   version,
+		Owner:     coreOwner,
+		StartedAt: coreStartedAt,
+	}
+	srv := transport.NewWithIdentity(app, logger, transport.StaticHandler(frontend.FS, dev), dev, identity)
 	// Register plugin routes: serve plugin UI static files and route
 	// tool calls from plugin UIs to the plugin's MCP server.
 	if pluginStore != nil {

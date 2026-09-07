@@ -21,6 +21,7 @@ func (s *Service) Dispatch(method string, payload json.RawMessage) (any, *contra
 		contracts.MethodConversationsRename:       rpcdispatch.DecodeReq(s.HandleRename),
 		contracts.MethodConversationsDelete:       rpcdispatch.DecodeReq(s.HandleDelete),
 		contracts.MethodConversationsSetWorkspace: rpcdispatch.DecodeReq(s.HandleSetWorkspace),
+		contracts.MethodConversationsSetProvider:  rpcdispatch.DecodeReq(s.HandleSetProvider),
 		contracts.MethodWorkspaceListDirs:         rpcdispatch.DecodeReq(s.HandleWorkspaceListDirs),
 		contracts.MethodTodosGet:                  rpcdispatch.DecodeReq(s.HandleTodosGet),
 		contracts.MethodTodosDelete:               rpcdispatch.DecodeReq(s.HandleTodosDelete),

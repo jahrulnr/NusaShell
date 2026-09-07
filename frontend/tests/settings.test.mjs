@@ -4,6 +4,7 @@ import { test } from 'node:test';
 
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const settingsView = await readFile(new URL('../js/views/settings.js', import.meta.url), 'utf8');
+const agentView = await readFile(new URL('../js/views/agent.js', import.meta.url), 'utf8');
 const rpc = await readFile(new URL('../js/rpc.js', import.meta.url), 'utf8');
 
 test('Settings exposes the Go-supported Electron parity controls', () => {
@@ -35,6 +36,26 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
   assert.match(settingsView, /delegate_model/);
   assert.match(settingsView, /delegateSelect\.getSelected/);
 });
+
+test('Agent room model selection never overwrites the global Settings preference', () => {
+  const selectModel = agentView.slice(
+    agentView.indexOf('function selectModel(modelID)'),
+    agentView.indexOf('function selectProviderRoute(route)'),
+  );
+  const refreshModels = agentView.slice(
+    agentView.indexOf('async function refreshModels()'),
+    agentView.indexOf('function updateModelTrigger()'),
+  );
+  assert.doesNotMatch(selectModel, /localStorage\.(?:setItem|removeItem)\('nusashell\.model'/,
+    'Terra selected in a room must not replace Luna selected globally in Settings');
+  assert.doesNotMatch(refreshModels, /localStorage\.removeItem\('nusashell\.model'/,
+    'an unavailable room model must not erase the independent global preference');
+  assert.doesNotMatch(agentView, /nusashell:preferred-model/,
+    'saving a global default must not retarget the active room');
+  assert.match(settingsView, /localStorage\.setItem\('nusashell\.model', model\)/,
+    'Settings remains the sole writer of the global preferred model');
+});
+
 
 test('WebSocket auto-reconnect is no longer exposed as a setting (every UI must reconnect)', () => {
   // The auto-reconnect toggle was retired: every UI must auto-reconnect, so

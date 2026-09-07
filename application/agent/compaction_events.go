@@ -9,7 +9,7 @@ func (a *Service) EmitCompactionStarted(run *TurnRun, conversationID string) {
 	if a == nil || a.Bus == nil || run == nil || conversationID == "" {
 		return
 	}
-	a.Bus.Emit(contracts.EventCompacting, contracts.CompactingEvent{
+	a.EmitInteractiveTurnEvent(run, contracts.EventCompacting, contracts.CompactingEvent{
 		RunID:          run.ID,
 		ConversationID: conversationID,
 	})

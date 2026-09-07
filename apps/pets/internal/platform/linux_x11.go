@@ -125,6 +125,19 @@ package platform
 //     return 0;
 // }
 //
+// static int raise_window_uintptr(uintptr_t display_value, uintptr_t window_value) {
+//     Display *dpy = (Display *)(uintptr_t)display_value;
+//     Window win = (Window)window_value;
+//     if (dpy == NULL || win == 0) {
+//         return -1;
+//     }
+//     // XRaiseWindow changes stacking only. It does not activate or focus the
+//     // pet, which is important for a click-through desktop overlay.
+//     XRaiseWindow(dpy, win);
+//     XFlush(dpy);
+//     return 0;
+// }
+//
 // static void free_c_string(char *value) { free(value); }
 import "C"
 
@@ -215,6 +228,19 @@ func QueryPointer(display uintptr) (PointerState, error) {
 	default:
 		return PointerState{}, fmt.Errorf("platform: query X11 pointer failed")
 	}
+}
+
+// RaiseWindow requests a stacking raise without activating or focusing the pet.
+// X11 has no portable "above every ABOVE window" level, so the runtime uses
+// this as a best-effort restack heartbeat for competing always-on-top windows.
+func RaiseWindow(display, win uintptr) error {
+	if display == 0 || win == 0 {
+		return fmt.Errorf("platform: nil X11 display/window")
+	}
+	if result := C.raise_window_uintptr(C.uintptr_t(display), C.uintptr_t(win)); result != 0 {
+		return fmt.Errorf("platform: raise X11 window failed")
+	}
+	return nil
 }
 
 func boolInt(value bool) int {

@@ -14,24 +14,26 @@ var errDescribeUnwired = fmt.Errorf("media describe port is not wired")
 
 // Service owns media generation, ingestion, and TTS/STT install single-flight.
 type Service struct {
-	imageGen     ImageGeneratorFactory
-	speechSynth  SpeechSynthesizerFactory
-	offlineSynth OfflineSynthesizer
-	speechSTT    SpeechTranscriberFactory
-	offlineSTT   OfflineTranscriberFactory
-	videoGen     VideoGeneratorFactory
-	ttsInstaller TTSInstaller
-	sttInstaller STTInstaller
-	attachments  Attachments
-	resolveFn    Resolve
-	providerName ProviderName
-	describeFn   Describe
-	settings     Settings
-	log          Logger
-	bus          Bus
-	goFn         GoFunc
-	retryDelay   RetryDelay
-	waitRetry    WaitRetry
+	imageGen      ImageGeneratorFactory
+	prepareCodex  func(conversationID string, provider *domain.Provider, apiKey string) (string, error)
+	failoverCodex func(ctx context.Context, conversationID string, provider *domain.Provider, apiKey string, genErr error) (string, bool, error)
+	speechSynth   SpeechSynthesizerFactory
+	offlineSynth  OfflineSynthesizer
+	speechSTT     SpeechTranscriberFactory
+	offlineSTT    OfflineTranscriberFactory
+	videoGen      VideoGeneratorFactory
+	ttsInstaller  TTSInstaller
+	sttInstaller  STTInstaller
+	attachments   Attachments
+	resolveFn     Resolve
+	providerName  ProviderName
+	describeFn    Describe
+	settings      Settings
+	log           Logger
+	bus           Bus
+	goFn          GoFunc
+	retryDelay    RetryDelay
+	waitRetry     WaitRetry
 
 	imageGenSem chan struct{}
 
@@ -51,25 +53,27 @@ func New(d Deps) *Service {
 		goFn = func(_ string, fn func()) { go fn() }
 	}
 	return &Service{
-		imageGen:     d.ImageGen,
-		speechSynth:  d.SpeechSynth,
-		offlineSynth: d.OfflineSynth,
-		speechSTT:    d.SpeechSTT,
-		offlineSTT:   d.OfflineSTT,
-		videoGen:     d.VideoGen,
-		ttsInstaller: d.TTSInstaller,
-		sttInstaller: d.STTInstaller,
-		attachments:  d.Attachments,
-		resolveFn:    d.Resolve,
-		providerName: d.ProviderName,
-		describeFn:   d.Describe,
-		settings:     d.Settings,
-		log:          d.Log,
-		bus:          d.Bus,
-		goFn:         goFn,
-		retryDelay:   d.RetryDelay,
-		waitRetry:    d.WaitRetry,
-		imageGenSem:  make(chan struct{}, maxConcurrentImageGens),
+		imageGen:      d.ImageGen,
+		prepareCodex:  d.PrepareCodexAPIKey,
+		failoverCodex: d.FailoverCodexAPIKey,
+		speechSynth:   d.SpeechSynth,
+		offlineSynth:  d.OfflineSynth,
+		speechSTT:     d.SpeechSTT,
+		offlineSTT:    d.OfflineSTT,
+		videoGen:      d.VideoGen,
+		ttsInstaller:  d.TTSInstaller,
+		sttInstaller:  d.STTInstaller,
+		attachments:   d.Attachments,
+		resolveFn:     d.Resolve,
+		providerName:  d.ProviderName,
+		describeFn:    d.Describe,
+		settings:      d.Settings,
+		log:           d.Log,
+		bus:           d.Bus,
+		goFn:          goFn,
+		retryDelay:    d.RetryDelay,
+		waitRetry:     d.WaitRetry,
+		imageGenSem:   make(chan struct{}, maxConcurrentImageGens),
 	}
 }
 

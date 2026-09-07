@@ -187,11 +187,11 @@ func WindowsTaskScript(opts Options, env []string) string {
 	lines = append(lines, `cd /d `+quoteCmdScriptArg(opts.DataDir))
 	for _, pair := range env {
 		key, value, found := strings.Cut(pair, "=")
-		if !found || key == "PATH" || value == "" {
+		if !found || value == "" {
 			continue
 		}
 		assertNoCmdLineBreak(value, "task script environment")
-		lines = append(lines, `set "`+key+`=`+value+`"`)
+		lines = append(lines, `set "`+key+`=`+cmdEnvValue(value)+`"`)
 	}
 	assertNoCmdLineBreak(opts.BinaryPath, "task script binary")
 	logPath := windowsLogPath(opts.DataDir, "service.log")
@@ -208,6 +208,12 @@ func WindowsHiddenLauncher(task WindowsTask) string {
 		`CreateObject("WScript.Shell").Run ` + quoteVBSString(`"`+task.ScriptPath+`"`),
 	}
 	return strings.Join(lines, "\r\n") + "\r\n"
+}
+
+func cmdEnvValue(value string) string {
+	// Percent signs are expanded by cmd.exe while a batch file is parsed;
+	// double them so a captured PATH is restored byte-for-byte.
+	return strings.ReplaceAll(value, "%", "%%")
 }
 
 func quoteCmdScriptArg(value string) string {

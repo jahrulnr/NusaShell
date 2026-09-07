@@ -6,11 +6,17 @@ package tools
 import (
 	"os"
 	"strings"
+	"time"
 
 	"nusashell/application"
 
 	"github.com/jahrulnr/searchwire"
 )
+
+// searchwire defaults to 10s when Config.Timeout is zero. Web search/fetch
+// often traverse slow public endpoints, so NusaShell gives these calls a
+// longer bounded deadline without changing the separate web_answer timeout.
+const webSearchRequestTimeout = 60 * time.Second
 
 // SearchwireConfigFromProviders builds a searchwire.Config using API keys
 // from NusaShell's configured providers. When a provider's BaseURL matches a
@@ -20,7 +26,7 @@ import (
 // Brave is not a chat provider in NusaShell, so it still relies on the
 // BRAVE_SEARCH_API_KEY env var if the user wants the Brave answer provider.
 func SearchwireConfigFromProviders(providers application.ProviderStore, creds application.CredentialStore) searchwire.Config {
-	cfg := searchwire.Config{}
+	cfg := searchwire.Config{Timeout: webSearchRequestTimeout}
 	if providers == nil || creds == nil {
 		return cfg
 	}
@@ -68,7 +74,7 @@ const (
 // when a key resolves (stored or env); Brave stays registered by default
 // (public HTML results), matching zero-config searchwire.
 func SearchwireSearchConfig(creds application.CredentialStore) searchwire.Config {
-	cfg := searchwire.Config{}
+	cfg := searchwire.Config{Timeout: webSearchRequestTimeout}
 	keyOf := func(id string) string {
 		if creds == nil {
 			return ""

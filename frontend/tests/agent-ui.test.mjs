@@ -81,7 +81,7 @@ test('updateScrollPin releases on a real upward scroll and re-pins at the bottom
 
   // User scrolls up 100px — well beyond the follow-scroll slack.
   thread.scrollTop = 800;
-  assert.equal(updateScrollPin(state, thread), false);
+  assert.equal(updateScrollPin(state, thread, 24, { direction: 'up' }), false);
   // Content keeps growing while the user reads; stays released.
   thread.scrollHeight = 2400;
   assert.equal(updateScrollPin(state, thread), false);
@@ -135,14 +135,24 @@ test('shouldDetachFollow honours an explicit upward gesture immediately', () => 
   }), true);
 });
 
-test('shouldDetachFollow detaches a scrollbar drag that actually left the tail', () => {
+test('shouldDetachFollow detaches an explicit scrollbar drag that left the tail', () => {
   const thread = { scrollHeight: 2000, scrollTop: 900, clientHeight: 500 };
+  const state = { pinned: true, pinGeom: { thread, scrollTop: 1480 } };
+  assert.equal(shouldDetachFollow(state, thread, {
+    intent: 'up',
+    geometryDirection: 'up',
+    tolerance: 24,
+  }), true);
+});
+
+test('layout-driven scrollTop clamps never detach follow without user intent', () => {
+  const thread = { scrollHeight: 2600, scrollTop: 900, clientHeight: 500 };
   const state = { pinned: true, pinGeom: { thread, scrollTop: 1480 } };
   assert.equal(shouldDetachFollow(state, thread, {
     intent: '',
     geometryDirection: 'up',
     tolerance: 24,
-  }), true);
+  }), false);
 });
 
 test('isNestedScrollerEvent ignores wheel/touch that target an inner Thinking scroller', () => {

@@ -42,6 +42,9 @@ type ChatRequest struct {
 	PromptCaching bool
 	MaxTokens     int
 	Effort        string // reasoning effort: "auto" (omit) or a level from the model's SupportedEfforts
+	// ReasoningSummary controls Codex visible thinking verbosity: auto,
+	// concise, detailed, or none. Other provider kinds ignore it.
+	ReasoningSummary string
 	// ProviderRoute pins the upstream provider for this model on
 	// aggregator gateways (OpenRouter). Empty means auto/load-balanced;
 	// when set, the adapter sends provider.order=[route] with
@@ -88,7 +91,8 @@ type ChatRequest struct {
 	// the next request's input. Set by a server-side compaction path;
 	// Responses and Codex adapters forward it via the "compaction_items"
 	// provider option. Empty for the client-side text-summary path.
-	CompactionBlob string
+	CompactionBlob           string
+	CompactionPrefixMessages int
 	// RemoteCompaction requests a provider-specific remote compaction pass.
 	// The Codex adapter translates it into a final
 	// {"type":"compaction_trigger"} input item on a separate streaming
@@ -126,6 +130,10 @@ type ChatUsage struct {
 	OutputTokens int
 	CacheRead    int
 	CacheWrite   int
+	// TotalTokens is the provider-authoritative size of this round when the
+	// upstream reports it. It avoids reconstructing context from detail fields
+	// whose overlap differs across providers.
+	TotalTokens int
 }
 
 // ContextTokens is the authoritative context fill for a single
@@ -138,13 +146,14 @@ type ChatUsage struct {
 // summing InputTokens across rounds double counts the prompt and can exceed
 // the window.
 //
-// InputTokens is the UNCACHED input for all providers: each provider converter
-// (anthropic, openai, compat/openrouter) normalizes at the boundary —
-// OpenAI-style adapters subtract cached_tokens from prompt_tokens, Anthropic
-// reports input_tokens as uncached already. ContextTokens therefore sums
-// InputTokens + CacheRead + CacheWrite + OutputTokens uniformly — no
-// per-provider branching needed.
+// TotalTokens is preferred when reported because it is the provider's
+// authoritative total and avoids double-counting cache detail fields whose
+// overlap differs across APIs. The component sum remains the fallback for
+// providers that omit total_tokens.
 func (u ChatUsage) ContextTokens() int {
+	if u.TotalTokens > 0 {
+		return u.TotalTokens
+	}
 	return u.InputTokens + u.CacheRead + u.CacheWrite + u.OutputTokens
 }
 

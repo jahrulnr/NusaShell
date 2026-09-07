@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"nusashell/domain"
@@ -41,8 +42,8 @@ type modelListResponse struct {
 //
 // The model list is account-aware: some models may be gated by the user's
 // ChatGPT subscription tier (Plus, Pro, etc.). The subprocess uses the
-// user's Codex credentials from ~/.codex/auth.json.
-func ListModelsViaSubprocess(ctx context.Context) ([]domain.Model, error) {
+// selected NusaShell Codex account in an isolated temporary CODEX_HOME.
+func ListModelsViaSubprocess(ctx context.Context, accessToken, accountID string) ([]domain.Model, error) {
 	subCtx, cancel := context.WithTimeout(ctx, modelListTimeout)
 	defer cancel()
 
@@ -56,12 +57,17 @@ func ListModelsViaSubprocess(ctx context.Context) ([]domain.Model, error) {
 		return nil, fmt.Errorf("codex model list: create temp dir: %w", err)
 	}
 	defer os.RemoveAll(dir)
+	codexHome := filepath.Join(dir, "codex-home")
+	if err := writeModelListAuth(codexHome, accessToken, accountID); err != nil {
+		return nil, fmt.Errorf("codex model list: prepare selected account: %w", err)
+	}
 
 	cmd := exec.CommandContext(subCtx, binPath, "app-server",
 		"-c", "sandbox_mode=danger-full-access",
 		"-c", "approval_policy=never",
 	)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "CODEX_HOME="+codexHome)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("codex model list: stdin pipe: %w", err)
@@ -143,4 +149,21 @@ func ListModelsViaSubprocess(ctx context.Context) ([]domain.Model, error) {
 	}
 
 	return models, nil
+}
+
+func writeModelListAuth(codexHome, accessToken, accountID string) error {
+	if accessToken == "" {
+		return fmt.Errorf("access token is empty")
+	}
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		return err
+	}
+	auth := codexCLIAuthFile{AuthMode: "chatgpt"}
+	auth.Tokens.AccessToken = accessToken
+	auth.Tokens.AccountID = accountID
+	data, err := json.Marshal(auth)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(codexHome, "auth.json"), data, 0o600)
 }

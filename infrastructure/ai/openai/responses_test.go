@@ -861,7 +861,7 @@ func TestResponsesConvertsOutputBlocks(t *testing.T) {
 	if resp.FinishReason != core.FinishReasonToolCall {
 		t.Fatalf("finish = %q", resp.FinishReason)
 	}
-	if resp.Usage.InputTokens != 1 || resp.Usage.OutputTokens != 4 || resp.Usage.CacheReadTokens != 2 || resp.Usage.CacheWriteTokens != 5 || resp.Usage.ReasoningTokens != 1 {
+	if resp.Usage.InputTokens != 1 || resp.Usage.OutputTokens != 4 || resp.Usage.TotalTokens != 7 || resp.Usage.CacheReadTokens != 2 || resp.Usage.CacheWriteTokens != 5 || resp.Usage.ReasoningTokens != 1 {
 		t.Fatalf("usage = %+v", resp.Usage)
 	}
 }

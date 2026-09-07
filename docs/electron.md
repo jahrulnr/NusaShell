@@ -4,13 +4,26 @@ The Electron application lives under `apps/electron/`. It is a deliberately
 thin, cross-platform wrapper around the Go core and the existing web frontend:
 
 1. Electron resolves an externally installed `nusashell` executable.
-2. It starts that process on an ephemeral `127.0.0.1` port.
-3. It waits for the HTTP root to become ready.
+2. It connects to the service core on `127.0.0.1:10994` when available, or
+   starts an owned fallback core on that same port.
+3. It waits for the core health identity before loading the UI.
 4. A secure `BrowserWindow` loads that same web application.
-5. Electron stops the child process when the desktop app exits.
+5. Electron stops a backend child only when it owns one; an attached service
+   core is left running.
 
 The packaged wrapper does not contain `resources/runtime/nusashell`. The Go
-core is a separate release and must be installed first. The packaged runtime
+core is a separate release and must be installed first. On startup Electron
+first connects to the default core at `http://127.0.0.1:10994/` when its
+`/healthz` identity endpoint is available (with a legacy `app.info` fallback
+for older installed cores). If the default core is unavailable, an Electron
+process launched outside the service supervisor may spawn the installed Go
+binary, using the same default port. When Electron itself is launched from the
+service-owned pets process, it waits for the service owner instead of
+competing with it. The core's data-directory lock prevents a service core and
+an Electron child from owning the same state at once.
+
+If the core binary is missing, Electron shows an OS-specific installation
+command instead of silently running a shell pipeline. The packaged runtime
 looks in the user-local core layout and `PATH`; `NUSASHELL_ELECTRON_BACKEND`
 can point to an explicit absolute binary for custom installations.
 
@@ -30,7 +43,10 @@ browser mode while the Electron implementation is under review.
 The app menu is disabled with `Menu.setApplicationMenu(null)` and the window
 uses `autoHideMenuBar`, so Electron's default `File`/`Edit` bar is not shown.
 This only removes the application menu; normal OS window controls remain
-available.
+available. Each Electron web contents gets a browser-style context menu with
+native `undo`, `redo`, `cut`, `copy`, `paste`, and `selectAll` roles. Editable
+surfaces such as the composer enable editing actions, while read-only agent
+messages keep selection and copy available.
 
 ## Local commands
 

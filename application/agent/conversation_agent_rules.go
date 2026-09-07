@@ -113,7 +113,7 @@ func (p *conversationRules) Rules() AgentRules {
 					p.svc.EmitCompactionStarted(p.run, p.conv.ID)
 					summary, compErr := p.svc.CompactConversation(p.run.Ctx, compAdapter, p.conv, compModel, compWindow, p.settings, domain.CompactionTriggerProactive)
 					if compErr == nil {
-						p.svc.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Summary: summary})
+						p.svc.EmitInteractiveTurnEvent(p.run, contracts.EventCompacted, contracts.CompactedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Summary: summary})
 						refreshed, getErr := p.svc.Conversations.Get(p.run.ConversationID)
 						if getErr != nil {
 							return getErr
@@ -123,7 +123,11 @@ func (p *conversationRules) Rules() AgentRules {
 							p.run.ID, p.round, est, p.conv.EstimateTokens(), len(p.conv.Messages))
 					} else {
 						p.svc.log("warn", "agent", "mid-turn compaction failed for %s round %d: %v", p.run.ID, p.round, compErr)
-						p.svc.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Error: compErr.Error()})
+						p.svc.EmitInteractiveTurnEvent(p.run, contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Error: compErr.Error()})
+						// A round must not continue against the un-compacted
+						// transcript. Returning the error ends this run; a user
+						// retry re-enters compaction from the unchanged history.
+						return compErr
 					}
 				}
 			}
@@ -208,7 +212,7 @@ func (p *conversationRules) Rules() AgentRules {
 				p.svc.EmitCompactionStarted(p.run, p.conv.ID)
 				summary, compErr := p.svc.CompactConversation(p.run.Ctx, compAdapter, p.conv, compModel, compWindow, p.settings, domain.CompactionTriggerEmergency)
 				if compErr == nil {
-					p.svc.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Summary: summary})
+					p.svc.EmitInteractiveTurnEvent(p.run, contracts.EventCompacted, contracts.CompactedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Summary: summary})
 					refreshed, getErr := p.svc.Conversations.Get(p.run.ConversationID)
 					if getErr != nil {
 						p.svc.FailStreamTurn(p.run, p.currentMsgID, p.model, p.lastRound, getErr)
@@ -222,7 +226,7 @@ func (p *conversationRules) Rules() AgentRules {
 					return true
 				}
 				p.svc.log("warn", "agent", "emergency compaction failed for %s: %v", p.conv.ID, compErr)
-				p.svc.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Error: compErr.Error()})
+				p.svc.EmitInteractiveTurnEvent(p.run, contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Error: compErr.Error()})
 			}
 			p.svc.FailStreamTurn(p.run, p.currentMsgID, p.model, p.lastRound, err)
 			p.turnEnded = true
@@ -248,10 +252,11 @@ func (p *conversationRules) Rules() AgentRules {
 			// included, tool outputs not yet) already crosses the trigger,
 			// compact the prefix now so the summarizer never sees the tool
 			// result explosion. The in-flight round is preserved verbatim and
-			// its outputs are patched into the live tail below. Failures are
-			// logged and the tool round still proceeds — the proactive and
-			// emergency hooks remain as safety nets.
-			p.TryMidToolCompaction()
+			// its outputs are patched into the live tail below. A failed
+			// compaction aborts this round before any tool side effect runs.
+			if _, compErr := p.tryMidToolCompaction(); compErr != nil {
+				return nil, compErr
+			}
 			if err := p.svc.ExecuteTurnTools(p.run, p.currentMsgID, calls, p.caps, p.settings, p.round); err != nil {
 				if p.run.Ctx.Err() != nil {
 					p.svc.InterruptTurn(p.run, p.currentMsgID, rr, p.totalUsage, p.lastUsage.ContextTokens(), p.model)
@@ -335,20 +340,26 @@ func (p *conversationRules) totalUsageTokens() ChatUsage { return p.totalUsage }
 // for the next BeforeRound — means the summarizer never sees the tool-result
 // explosion, and the in-flight assistant message is preserved verbatim (see
 // domain.IsInFlightToolMessage) so the round's outputs are patched into the
-// live tail afterwards. Failures never block the tool round: the proactive
-// and emergency hooks remain as safety nets.
+// live tail afterwards. A failure aborts the current run: executing tools
+// against a transcript whose compaction was not applied would make a later
+// successful retry reorder or duplicate the active history.
 func (p *conversationRules) Conv() *domain.Conversation { return p.conv }
 func (p *conversationRules) CompactionAttempts() int    { return p.compactionAttempts }
 
 func (p *conversationRules) TryMidToolCompaction() bool {
+	compacted, _ := p.tryMidToolCompaction()
+	return compacted
+}
+
+func (p *conversationRules) tryMidToolCompaction() (bool, error) {
 	if !p.settings.CompactionEnabled || p.round <= 1 || p.compactionAttempts >= 3 {
-		return false
+		return false, nil
 	}
 	cw := p.svc.ResolveContextWindow(p.provider, p.model, p.settings)
 	trigger := domain.CompactionTriggerTokens(cw, domain.ResolveMaxOutput(p.provider, p.model, p.settings), p.settings)
 	est := p.conv.EstimateTokens()
 	if est <= trigger {
-		return false
+		return false, nil
 	}
 	p.compactionAttempts++
 	p.svc.log("info", "agent", "mid-tool compaction for %s round %d: est=%d trigger=%d window=%d",
@@ -358,16 +369,16 @@ func (p *conversationRules) TryMidToolCompaction() bool {
 	summary, compErr := p.svc.CompactConversation(p.run.Ctx, compAdapter, p.conv, compModel, compWindow, p.settings, domain.CompactionTriggerMidTool)
 	if compErr != nil {
 		p.svc.log("warn", "agent", "mid-tool compaction failed for %s round %d: %v", p.run.ID, p.round, compErr)
-		p.svc.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Error: compErr.Error()})
-		return false
+		p.svc.EmitInteractiveTurnEvent(p.run, contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Error: compErr.Error()})
+		return false, compErr
 	}
-	p.svc.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Summary: summary})
+	p.svc.EmitInteractiveTurnEvent(p.run, contracts.EventCompacted, contracts.CompactedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Summary: summary})
 	if refreshed, getErr := p.svc.Conversations.Get(p.run.ConversationID); getErr == nil {
 		p.conv = refreshed
 	}
 	p.svc.log("info", "agent", "mid-tool compaction done for %s round %d: before=%d after=%d (msgs=%d)",
 		p.run.ID, p.round, est, p.conv.EstimateTokens(), len(p.conv.Messages))
-	return true
+	return true, nil
 }
 
 // contextTokens is the last round's authoritative context fill.

@@ -46,7 +46,7 @@ func mediaCall(run *TurnRun) media.Call {
 	if run == nil {
 		return media.Call{}
 	}
-	return media.Call{Ctx: run.Ctx, ConversationID: run.ConversationID}
+	return media.Call{Ctx: run.Ctx, ConversationID: run.ConversationID, TurnID: run.ID}
 }
 
 func mediaCaps(caps ModelCapabilities) media.Caps {
@@ -139,6 +139,6 @@ func (a *App) persistGeneratedImages(conversationID, toolCallID string, result *
 	return a.mediaService().PersistGeneratedImages(conversationID, toolCallID, result)
 }
 
-func formatImageGenFailure(err error) string {
-	return media.FormatImageGenFailure(err)
+func formatImageGenFailure(err error, kind domain.ProviderKind) string {
+	return media.FormatImageGenFailure(err, kind)
 }

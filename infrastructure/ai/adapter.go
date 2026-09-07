@@ -158,7 +158,7 @@ func (a *Adapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model
 	case a.ProviderKind == domain.ProviderCodex || a.Driver == domain.ProviderDriverCodex:
 		// Codex has no HTTP /models; discover via Codex CLI app-server
 		// JSON-RPC model/list (managed runtime download if needed).
-		return codex.ListModelsViaSubprocess(ctx)
+		return codex.ListModelsViaSubprocess(ctx, a.APIKey, a.AccountID)
 	case a.ProviderKind == domain.ProviderMessages && a.Driver != domain.ProviderDriverOpenRouter:
 		return listAnthropicModels(ctx, a.BaseURL, a.APIKey, a.Client)
 	default:

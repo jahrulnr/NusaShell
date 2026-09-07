@@ -176,7 +176,7 @@ func (a *Service) CompactConversation(ctx context.Context, adapter ProviderConte
 	}
 
 	if domain.CodexSupportsRemoteCompaction(adapter.Kind) {
-		return a.compactCodexConversation(ctx, adapter, c, model, effectiveKeepBudget)
+		return a.compactCodexConversation(ctx, adapter, c, model, domain.CompactionKeepTokenBudget)
 	}
 
 	// Server-side compaction (context_management) is handled by the server
@@ -322,20 +322,44 @@ func (a *Service) CompactConversation(ctx context.Context, adapter ProviderConte
 }
 
 func (a *Service) compactCodexConversation(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, keepBudget int) (string, error) {
-	messages := a.chatMessagesForProvider(c, "", ModelCapabilities{
-		Vision:   true,
-		Audio:    true,
-		Video:    true,
-		Document: true,
-	})
-	response, err := adapter.Stream(ctx, ChatRequest{
-		Model:            model,
-		Messages:         messages,
-		ConversationID:   c.ID,
-		CompactionBlob:   c.CompactionBlob,
-		RemoteCompaction: true,
-		ReasoningReplay:  true,
-	}, nil, nil)
+	caps := ModelCapabilities{Vision: true, Audio: true, Video: true, Document: true}
+	messages := a.chatMessagesForProvider(c, "", caps)
+	request := func(active ProviderContext) (ChatResponse, error) {
+		return active.Stream(ctx, ChatRequest{
+			Model:                    model,
+			Messages:                 messages,
+			ConversationID:           c.ID,
+			CompactionBlob:           c.CompactionBlob,
+			CompactionPrefixMessages: a.compactionPrefixMessageCount(c, caps),
+			RemoteCompaction:         true,
+			ReasoningReplay:          true,
+		}, nil, nil)
+	}
+
+	// Re-select the account immediately before the separate remote-compaction
+	// request. The chat adapter was created before the prior round, so its
+	// token can have become circuit-open after a usage-limit response.
+	provider, apiKey, active, err := a.prepareCodexCompactionAdapter(ctx, adapter, c.ID)
+	if err != nil {
+		return "", err
+	}
+	response, err := request(active)
+	if err != nil && provider != nil && a.deps.FailoverOnStreamError != nil {
+		newKey, retry, replaced := a.deps.FailoverOnStreamError(ctx, c.ID, provider, apiKey, err)
+		if replaced != nil {
+			return "", replaced
+		}
+		if retry && newKey != "" {
+			if a.Factory == nil {
+				return "", fmt.Errorf("rebuild Codex compaction adapter after failover: provider factory unavailable")
+			}
+			rebuilt, buildErr := a.Factory(ctx, provider, newKey)
+			if buildErr != nil {
+				return "", fmt.Errorf("rebuild Codex compaction adapter after failover: %w", buildErr)
+			}
+			response, err = request(NewProviderContext(provider, rebuilt))
+		}
+	}
 	if err != nil {
 		return "", fmt.Errorf("codex remote compaction: %w", err)
 	}
@@ -350,6 +374,33 @@ func (a *Service) compactCodexConversation(ctx context.Context, adapter Provider
 		return "", err
 	}
 	return "", nil
+}
+
+// prepareCodexCompactionAdapter reuses the turn's adapter unless the account
+// router selects a fresh credential. It keeps a no-router/single-key Codex
+// provider on its existing adapter, rather than rebuilding it with an empty
+// key. The account is selected immediately before compaction because this is
+// a separate request from the preceding model stream.
+func (a *Service) prepareCodexCompactionAdapter(ctx context.Context, adapter ProviderContext, conversationID string) (*domain.Provider, string, ProviderContext, error) {
+	if a == nil || adapter.Kind != domain.ProviderCodex || a.Providers == nil || a.Factory == nil || a.deps.PrepareTurnAPIKey == nil {
+		return nil, "", adapter, nil
+	}
+	provider, err := a.Providers.Get(adapter.ProviderID)
+	if err != nil || provider == nil {
+		return nil, "", adapter, nil
+	}
+	apiKey, err := a.deps.PrepareTurnAPIKey(conversationID, provider, "")
+	if err != nil {
+		return provider, "", adapter, fmt.Errorf("select Codex account for remote compaction: %w", err)
+	}
+	if apiKey == "" {
+		return provider, "", adapter, nil
+	}
+	rebuilt, err := a.Factory(ctx, provider, apiKey)
+	if err != nil {
+		return provider, apiKey, adapter, fmt.Errorf("build Codex compaction adapter: %w", err)
+	}
+	return provider, apiKey, NewProviderContext(provider, rebuilt), nil
 }
 
 // compactionAttachmentNote renders a short text note for message attachments
@@ -434,10 +485,9 @@ func (a *Service) PersistCompactedConversation(c *domain.Conversation, summary s
 	if len(toArchive) > 0 {
 		idx, err := a.Conversations.ArchiveChunk(c.ID, toArchive)
 		if err != nil {
-			a.log("warn", "agent", "failed to archive chunk for %s: %v", c.ID, err)
-		} else {
-			c.ChunkCount = idx + 1
+			return fmt.Errorf("archive compaction chunk for %s: %w", c.ID, err)
 		}
+		c.ChunkCount = idx + 1
 	}
 	tmp.Summary = ""
 	handoverContent := resources.CompactedUserPrompt(summary)
@@ -487,18 +537,17 @@ func (a *Service) PersistCodexCompactedConversation(c *domain.Conversation, blob
 	repo := bindConversation(a.Conversations, c)
 	tmp := cloneConversation(c)
 	tmp.Messages = domain.FilterHydrationDomainMessages(tmp.Messages)
-	toArchive := tmp.ArchiveMessages(keepBudget)
+	toArchive := tmp.ArchiveBlobMessages(keepBudget)
 	if len(toArchive) > 0 {
 		idx, err := a.Conversations.ArchiveChunk(c.ID, toArchive)
 		if err != nil {
-			a.log("warn", "agent", "failed to archive Codex compaction chunk for %s: %v", c.ID, err)
-		} else {
-			c.ChunkCount = idx + 1
+			return fmt.Errorf("archive Codex compaction chunk for %s: %w", c.ID, err)
 		}
+		c.ChunkCount = idx + 1
 	}
 	tmp.CompactWithBlob(blob, keepBudget)
-	if hydrationMsgs := a.BuildHydration(tmp); len(hydrationMsgs) > 0 {
-		tmp = a.PersistHydration(tmp, hydrationMsgs)
+	if hydrationMsgs := buildHydrationDomainMessages(a.BuildHydration(tmp)); len(hydrationMsgs) > 0 {
+		tmp.Messages = append(tmp.Messages, hydrationMsgs...)
 	}
 
 	chunkCount := c.ChunkCount
@@ -511,6 +560,7 @@ func (a *Service) PersistCodexCompactedConversation(c *domain.Conversation, blob
 	pending := c.PendingWorkspaceAnnouncement
 	switchFrom := c.WorkspaceSwitchFrom
 	compactionBlob := tmp.CompactionBlob
+	compactionPrefixMessages := tmp.CompactionPrefixMessages
 	summary := tmp.Summary
 	repo.ResetTranscript()
 	c.ChunkCount = chunkCount
@@ -523,6 +573,7 @@ func (a *Service) PersistCodexCompactedConversation(c *domain.Conversation, blob
 	c.PendingWorkspaceAnnouncement = pending
 	c.WorkspaceSwitchFrom = switchFrom
 	c.CompactionBlob = compactionBlob
+	c.CompactionPrefixMessages = compactionPrefixMessages
 	c.Summary = summary
 	for _, m := range tmp.Messages {
 		if err := repo.Add(m.Role, m); err != nil {

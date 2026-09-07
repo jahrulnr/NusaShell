@@ -125,11 +125,10 @@ type Conversation struct {
 	UpdatedAt time.Time
 	Model     string
 	Effort    string // reasoning effort: "auto" (omit) or a level from the model's SupportedEfforts
-	// ProviderRoute pins the upstream provider for the selected model on
-	// aggregator gateways (OpenRouter). Empty means auto/load-balanced.
-	// This is a gateway-internal route, distinct from the NusaShell
-	// provider (which is the gateway itself), so it lives in its own
-	// field instead of being encoded into the model string.
+	// ProviderRoute stores the per-conversation target behind the selected
+	// provider: an OpenRouter upstream slug or a Codex account ID. Empty means
+	// automatic routing. It remains separate from the NusaShell provider and
+	// model IDs because changing either target must not change model identity.
 	ProviderRoute string
 	Status        string // idle | running
 	Summary       string // compaction summary, "" when never compacted
@@ -143,7 +142,8 @@ type Conversation struct {
 	// that provider so the compacted context is replayed verbatim. Empty for
 	// providers that don't support server-side compaction (then Summary carries
 	// the client-side handover instead).
-	CompactionBlob string
+	CompactionBlob           string
+	CompactionPrefixMessages int
 	// EstimatedTokens is the last server-side *heuristic* context estimate for
 	// this conversation (system + messages + tool definitions, ~chars/4). It
 	// is a provisional live number shown while a turn streams, before the
@@ -677,15 +677,80 @@ func (c *Conversation) Compact(summary, handoverContent string, keepTokenBudget 
 }
 
 // CompactWithBlob starts a new compaction epoch using an opaque provider
-// checkpoint instead of a text handover message. The checkpoint is replayed
-// by the provider while the live transcript keeps only the recent contiguous
-// suffix. The caller persists the epoch through ConversationRepository.ResetTranscript.
+// checkpoint instead of a text handover message. Codex remote compaction
+// rebuilds its replacement history from real user messages, not the latest
+// contiguous transcript suffix: assistant/tool turns are already encoded in
+// the opaque checkpoint. The caller persists the epoch through
+// ConversationRepository.ResetTranscript.
 func (c *Conversation) CompactWithBlob(blob string, keepTokenBudget int) {
-	retained, _ := c.compactionRetention(keepTokenBudget)
+	retained, _ := c.compactionBlobRetention(keepTokenBudget)
 	c.Summary = ""
 	c.CompactionBlob = blob
 	c.Messages = retained
+	c.CompactionPrefixMessages = len(retained)
 	c.Touch()
+}
+
+// ArchiveBlobMessages returns the pre-checkpoint messages that do not belong
+// in a blob-compacted epoch. It shares CompactWithBlob's retention policy so
+// assistant/tool messages removed from the active transcript remain available
+// in the archived chunk instead of being silently lost.
+func (c *Conversation) ArchiveBlobMessages(keepTokenBudget int) []Message {
+	_, retainedIndices := c.compactionBlobRetention(keepTokenBudget)
+	if len(retainedIndices) >= len(c.Messages) {
+		return nil
+	}
+	archived := make([]Message, 0, len(c.Messages)-len(retainedIndices))
+	for i, m := range c.Messages {
+		if !retainedIndices[i] {
+			archived = append(archived, m)
+		}
+	}
+	return archived
+}
+
+// compactionBlobRetention mirrors Codex remote-v2 replacement history: keep
+// real user text turns from newest to oldest within the retained budget. The
+// opaque checkpoint carries all assistant and tool history, so retaining that
+// suffix would make the next request omit older user turns and duplicate work.
+func (c *Conversation) compactionBlobRetention(keepTokenBudget int) (retained []Message, retainedIndices map[int]bool) {
+	retainedIndices = make(map[int]bool)
+	if keepTokenBudget <= 0 {
+		return nil, retainedIndices
+	}
+	remaining := keepTokenBudget
+	for i := len(c.Messages) - 1; i >= 0 && remaining > 0; i-- {
+		m := c.Messages[i]
+		if m.Role != RoleUser || m.Content == "" || IsCompactionSummary(m.Content) {
+			continue
+		}
+		tokens := EstimateTokens(m.Content)
+		if tokens > remaining {
+			m = StripForRetention(m)
+			m.Content = truncateToTokenBudget(m.Content, remaining)
+		}
+		retained = append(retained, StripForRetention(m))
+		retainedIndices[i] = true
+		remaining -= tokens
+	}
+	for left, right := 0, len(retained)-1; left < right; left, right = left+1, right-1 {
+		retained[left], retained[right] = retained[right], retained[left]
+	}
+	return retained, retainedIndices
+}
+
+func truncateToTokenBudget(content string, tokens int) string {
+	if tokens <= 0 {
+		return ""
+	}
+	limit := tokens * 4
+	if len(content) <= limit {
+		return content
+	}
+	for limit > 0 && !utf8.RuneStart(content[limit]) {
+		limit--
+	}
+	return content[:limit] + "… [truncated]"
 }
 
 // ArchiveMessages returns the messages that would be dropped by a compaction

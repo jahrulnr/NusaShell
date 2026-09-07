@@ -218,6 +218,9 @@ func start(c *cli.Context) error {
 	}
 	_ = ren.Render()
 	win.Show()
+	if err := platform.RaiseWindow(dpy, xwin); err != nil {
+		log.Warn("pets: initial X11 restack failed", "err", err)
+	}
 
 	available := availableStates(pack)
 	// The renderer sync happens inside eventLoop's applyState so the drag-run
@@ -231,7 +234,13 @@ func start(c *cli.Context) error {
 	stateEvents := make(chan state.Event, 32)
 	// WebSocket callbacks run on the network goroutine. They only decode and
 	// enqueue events; SDL and the state machine remain owned by the main loop.
-	handler := ws.HandlerFunc(func(data []byte) {
+	enqueueState := func(ev state.Event) {
+		select {
+		case stateEvents <- ev:
+		case <-ctx.Done():
+		}
+	}
+	handler := ws.ConnectionHandler{OnMessage: func(data []byte) {
 		ev, relevant, err := events.Decode(data)
 		if err != nil {
 			log.Warn("pets: parse event", "err", err, "raw", string(data))
@@ -240,11 +249,12 @@ func start(c *cli.Context) error {
 		if !relevant {
 			return
 		}
-		select {
-		case stateEvents <- ev:
-		case <-ctx.Done():
-		}
-	})
+		enqueueState(ev)
+	}, OnConnect: func() {
+		// The event stream has no replay. A terminal event may have been lost
+		// while disconnected, so never carry working/thinking across sessions.
+		enqueueState(state.Event{State: state.StateIdle})
+	}}
 
 	wsClient := ws.NewClient(ws.NewGorillaDialer(), cfg.WSURL, handler, log)
 	wsDone := make(chan struct{})
@@ -288,7 +298,7 @@ func start(c *cli.Context) error {
 	defer signal.Stop(sigCh)
 
 	return eventLoop(ctx, win, ren, cfg, resolver, machine, stateEvents, toggleClickThrough,
-		clickThrough, setInputMode, setBoundingShape, dpy, log)
+		clickThrough, setInputMode, setBoundingShape, dpy, xwin, log)
 }
 
 // eventLoop pumps SDL events, advances the animation on its own clock, and
@@ -302,7 +312,7 @@ func start(c *cli.Context) error {
 func eventLoop(ctx context.Context, win *app.Window, ren *renderer.Renderer, cfg *config.Config,
 	resolver *detect.Resolver, machine *state.Machine, stateEvents <-chan state.Event, toggleEvents <-chan struct{},
 	clickThrough bool, setInputMode func(bool) error, setBoundingShape func(*shape.Mask) error,
-	dpy uintptr, log *slog.Logger) error {
+	dpy, xwin uintptr, log *slog.Logger) error {
 	controller := interaction.NewController(5)
 	run := interaction.NewRunner(16)
 	const lookDeadzone = 16.0
@@ -310,6 +320,7 @@ func eventLoop(ctx context.Context, win *app.Window, ren *renderer.Renderer, cfg
 	runDir := 0            // settled drag-run direction: -1 left, 0 none, +1 right
 	runActive := false     // drag-run overlay currently rendered
 	var nextAnim time.Time // zero = render on the next loop iteration
+	var nextRestack time.Time
 	lastShapeKey := ""
 	lastDragX := int32(0)
 	activity := bubble.NewActivity(cfg.EventDelayDuration())
@@ -423,6 +434,15 @@ func eventLoop(ctx context.Context, win *app.Window, ren *renderer.Renderer, cfg
 
 	for {
 		now := time.Now()
+		// `_NET_WM_STATE_ABOVE` is a stacking band, not a strict priority.
+		// Re-raise periodically so another always-on-top window cannot leave
+		// the pet buried indefinitely. XRaiseWindow does not steal focus.
+		if nextRestack.IsZero() || !now.Before(nextRestack) {
+			if err := platform.RaiseWindow(dpy, xwin); err != nil {
+				log.Debug("pets: X11 restack failed", "err", err)
+			}
+			nextRestack = now.Add(250 * time.Millisecond)
+		}
 		for ev := sdl.PollEvent(); ev != nil; ev = sdl.PollEvent() {
 			switch e := ev.(type) {
 			case *sdl.QuitEvent:
@@ -516,6 +536,10 @@ func eventLoop(ctx context.Context, win *app.Window, ren *renderer.Renderer, cfg
 			nextAnim = now.Add(frameDelay)
 		}
 		wait := time.Until(nextAnim)
+		restackWait := time.Until(nextRestack)
+		if restackWait < wait {
+			wait = restackWait
+		}
 		if leftHeld {
 			pollInterval := interaction.PollInterval(currentDisplayRefreshRate(win))
 			if pollInterval < wait {

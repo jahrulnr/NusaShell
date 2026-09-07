@@ -5,10 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.1] - 2026-09-07
+## [0.6.0] - 2026-09-07
+
+### Added
+
+- **Codex reasoning-summary verbosity is configurable per provider.** The
+  Codex detail pane now offers `auto`, `concise`, `detailed`, and `none`.
+  NusaShell persists the choice and sends it as `reasoning.summary` on later
+  turns; `none` hides the visible summary without disabling model reasoning.
 
 ### Fixed
 
+- **Codex→Chat model switches no longer fail on opaque reasoning Extra.**
+  Persisted Codex/Responses `ReasoningExtra` is stripped when the active kind
+  cannot replay it (OpenAI Chat, Anthropic Messages, and non-array OpenRouter
+  Chat payloads). Plaintext `Reasoning` still goes to the next model, so rooms
+  like luna-codex → DeepSeek Chat continue instead of erroring with
+  `OpenAI Chat does not accept … provider-extra reasoning blocks`.
+- **Agent notifications, pet state, and transcript follow stay scoped and
+  stable.** Background experience/learning events update the Learning view
+  silently instead of producing global toasts or conversation sounds. Headless
+  tool/compaction/retry events no longer leak into the desktop pet, and the pet
+  resets stale activity after a WebSocket reconnect. Transcript auto-follow is
+  detached only by explicit user scrolling, so multi-tool layout changes and
+  Electron paint timing cannot masquerade as a scroll-up.
+- **Switching Codex accounts now affects existing conversations and model
+  discovery.** The explicit Providers selection clears stale sticky account
+  bindings, so Retry uses the chosen Plus/Free account, while `model/list`
+  runs with that NusaShell credential instead of an unrelated Codex CLI login.
+  The composer route control now offers Auto rotation or a strict Codex account
+  pin, and both Codex account pins and OpenRouter routes stay scoped to their
+  conversation when switching rooms.
+- **Codex thinking no longer duplicates streamed reasoning.** The Codex
+  provider re-emitted the full reasoning summary at
+  `response.output_item.done` after the same text had already streamed
+  incrementally via `response.reasoning_summary_text.delta` events. The
+  duplicate text was concatenated (with no separator) into the live Thinking
+  row and the persisted transcript, making GPT reasoning look glued and
+  repeated. The done item now only contributes opaque `Extra`
+  (`encrypted_content`) for replay, mirroring the OpenAI Responses path, with
+  a regression test (`TestReasoningSummaryNotDuplicatedAtItemDone`).
+- **OpenAI Responses/Codex reasoning summaries keep their part boundaries.** GPT
+  reasoning summary deltas now preserve `summary_index` / `item_id` so chunks
+  within one summary remain contiguous while separate summary parts receive a
+  paragraph separator. This prevents live and persisted text such as
+  `**Planning****Confirming**` from rendering as glued reasoning.
+- **Web search and page fetch allow slow sources more time.** Searchwire
+  configurations used by `web_search` and `web_fetch` now use a bounded 60s
+  HTTP timeout instead of searchwire's 10s default. The separately configured
+  `web_answer` path remains at its existing 120s timeout.
+- **Codex remote compaction survives long silent stretches and exhausted
+  accounts.** A Codex remote-v2 compaction stream now uses a five-minute idle
+  window between SSE events (matching Codex upstream) instead of the
+  one-minute interactive-turn watchdog, so large retained histories that take
+  longer than 60s to process no longer abort. The account is also re-selected
+  immediately before the separate compaction request: the router rebuilds the
+  adapter from a non-circuit-open account, and a usage-limit 429 opens that
+  account's circuit and retries once on another available account. The router
+  now persists the last-used account per provider (`config/codex-router.json`)
+  so a restart resumes from that account instead of defaulting to the first
+  registered one (which may be the exhausted one).
+- **Codex opaque compaction keeps a usable, causally ordered active epoch.**
+  `CompactWithBlob` no longer reuses the text-summary suffix policy, which
+  could leave an epoch of assistant/tool turns with no real user message
+  (observed with 9 assistants and 0 users). The blob epoch retains real user
+  turns within the keep budget and persists their checkpoint boundary; later
+  user messages, assistant reasoning, tool calls, and tool results remain
+  after the opaque checkpoint instead of being moved before it or dropped on
+  every continuation request. Replaced transcript items move into the
+  conversation's `*.chunks/` archive, while the room keeps the same ID so
+  scroll-back, todos, and attachments stay attached.
 - **Desktop pet click opens Electron on hosts without a Chromium sandbox.**
   Pet spawn now prefers `~/.local/bin/nusashell-desktop` (installer shim with
   `--no-sandbox` when needed) and, when only the versioned binary is present
