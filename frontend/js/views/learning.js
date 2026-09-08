@@ -2,7 +2,7 @@
 // Uses vis-network for graph rendering (vendored ESM standalone build).
 
 import { rpc, on, off } from '../rpc.js';
-import { el, debounce, createSelect, toast, fmtTime, confirmDialog } from '../ui.js';
+import { bindTablistKeyboard, el, debounce, createSelect, toast, fmtTime, confirmDialog } from '../ui.js';
 import { resolvedFontFamily } from '../font-preferences.js';
 // A learning job's LLM run is persisted as a background conversation, so the
 // log renders it with the Agent view's own transcript renderer. Reusing it
@@ -152,6 +152,7 @@ function initTabs() {
       }
     });
   }
+  bindTablistKeyboard(tabs[0]?.closest('[role="tablist"]'));
 }
 
 // A single debounced graph refresh coalesces bursts (a job that writes

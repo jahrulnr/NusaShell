@@ -50,6 +50,11 @@ The list shows the active tab. The detail pane renders job needs as a DAG, waiti
 
 - **`#automation-list-count`** (missing map entry)
 
+- **Automation tab panel** (`#automation-workspace`):
+  - Section: Automation
+  - Type: tabpanel
+  - Notes: Shared list and detail panel; its accessible label follows the active Workflows, Runs, Schedules, or Events tab.
+
 - **`#automation-detail`** (missing map entry)
 
 - **`#automation-detail-title`** (missing map entry)

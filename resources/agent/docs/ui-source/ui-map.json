@@ -574,6 +574,7 @@
             "automation-list",
             "automation-list-title",
             "automation-list-count",
+            "automation-workspace",
             "automation-detail",
             "automation-detail-title",
             "automation-detail-actions"
@@ -627,9 +628,17 @@
         {
           "heading": "Card groups",
           "paragraphs": [
-            "Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, periodic review interval, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system."
+            "A sticky Jump to rail moves directly between the seven settings groups and transfers keyboard focus to the destination heading. Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, periodic review interval, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system."
           ],
           "controls": [
+            "settings-section-nav",
+            "settings-jump-agent",
+            "settings-jump-context",
+            "settings-jump-memory",
+            "settings-jump-understand",
+            "settings-jump-generate",
+            "settings-jump-web",
+            "settings-jump-workspace",
             "settings-group-agent",
             "settings-group-context",
             "settings-group-memory",
@@ -1734,6 +1743,12 @@
       "type": "list",
       "notes": "Trajectory events; job entries may have done/error/skipped status badges. Failed entries show a concise automatic-processing message; raw provider diagnostics stay server-side."
     },
+    "automation-workspace": {
+      "label": "Automation tab panel",
+      "section": "Automation",
+      "type": "tabpanel",
+      "notes": "Shared list and detail panel; its accessible label follows the active Workflows, Runs, Schedules, or Events tab."
+    },
     "log-level-filter": {
       "label": "Level filter",
       "section": "Logs",
@@ -1761,6 +1776,54 @@
       "label": "Log tail",
       "section": "Logs",
       "type": "list"
+    },
+    "settings-section-nav": {
+      "label": "Settings section navigation",
+      "section": "Settings",
+      "type": "navigation",
+      "notes": "Sticky horizontal rail for jumping between the seven long-form settings groups."
+    },
+    "settings-jump-agent": {
+      "label": "Jump to Agent settings",
+      "section": "Settings",
+      "type": "button",
+      "action": "Scrolls to and focuses the Agent group heading."
+    },
+    "settings-jump-context": {
+      "label": "Jump to Context settings",
+      "section": "Settings",
+      "type": "button",
+      "action": "Scrolls to and focuses the Context group heading."
+    },
+    "settings-jump-memory": {
+      "label": "Jump to Memory & search settings",
+      "section": "Settings",
+      "type": "button",
+      "action": "Scrolls to and focuses the Memory & search group heading."
+    },
+    "settings-jump-understand": {
+      "label": "Jump to Media understanding settings",
+      "section": "Settings",
+      "type": "button",
+      "action": "Scrolls to and focuses the Media understanding group heading."
+    },
+    "settings-jump-generate": {
+      "label": "Jump to Media generation settings",
+      "section": "Settings",
+      "type": "button",
+      "action": "Scrolls to and focuses the Media generation group heading."
+    },
+    "settings-jump-web": {
+      "label": "Jump to Web settings",
+      "section": "Settings",
+      "type": "button",
+      "action": "Scrolls to and focuses the Web group heading."
+    },
+    "settings-jump-workspace": {
+      "label": "Jump to Workspace settings",
+      "section": "Settings",
+      "type": "button",
+      "action": "Scrolls to and focuses the Workspace group heading."
     },
     "settings-save-btn": {
       "label": "Save settings",

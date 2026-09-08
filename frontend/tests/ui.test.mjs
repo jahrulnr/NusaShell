@@ -2,19 +2,31 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { dialog, toast } from '../js/ui.js';
+import { bindTablistKeyboard, createSelect, dialog, toast } from '../js/ui.js';
 
 function withDom(html, fn) {
   const dom = new JSDOM(html, { pretendToBeVisual: true });
   const previousDocument = globalThis.document;
   const previousWindow = globalThis.window;
+  const previousMutationObserver = globalThis.MutationObserver;
+  const previousSelf = globalThis.self;
+  const previousRaf = globalThis.requestAnimationFrame;
+  const previousGetComputedStyle = globalThis.getComputedStyle;
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
+  globalThis.MutationObserver = dom.window.MutationObserver;
+  globalThis.self = dom.window;
+  globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
+  globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
   return Promise.resolve()
     .then(() => fn(dom.window))
     .finally(() => {
       globalThis.document = previousDocument;
       globalThis.window = previousWindow;
+      globalThis.MutationObserver = previousMutationObserver;
+      globalThis.self = previousSelf;
+      globalThis.requestAnimationFrame = previousRaf;
+      globalThis.getComputedStyle = previousGetComputedStyle;
       dom.window.close();
     });
 }
@@ -43,6 +55,77 @@ test('dialog dismisses on Escape and restores as cancelled', async () => {
     const result = await pending;
     assert.equal(result.value, null);
     assert.equal(document.querySelectorAll('.ui-dialog-overlay').length, 0);
+  });
+});
+
+test('styled select hides its body-level option portal from assistive technology while closed', async () => {
+  await withDom('<body><label for="route">Route</label><select id="route"></select></body>', async () => {
+    const instance = createSelect(document.getElementById('route'), {
+      data: [
+        { text: 'Automatic', value: 'auto' },
+        { text: 'Local', value: 'local' },
+      ],
+      value: 'auto',
+    });
+    const portal = document.querySelector('.ss-content');
+
+    assert.equal(portal?.parentElement, document.body, 'the floating menu is portalled to body');
+    assert.equal(portal?.getAttribute('aria-hidden'), 'true', 'closed options stay out of the accessibility tree');
+
+    instance.open();
+    await Promise.resolve();
+    assert.equal(portal?.getAttribute('aria-hidden'), 'false', 'opening exposes the option list');
+
+    instance.close();
+    await Promise.resolve();
+    assert.equal(portal?.getAttribute('aria-hidden'), 'true', 'closing hides the option list immediately');
+    instance.destroy();
+  });
+});
+
+test('tablist uses one tab stop and activates tabs with the arrow keys', async () => {
+  await withDom(`<body><div role="tablist">
+    <button role="tab" aria-selected="true">One</button>
+    <button role="tab" aria-selected="false">Two</button>
+    <button role="tab" aria-selected="false">Three</button>
+  </div></body>`, (window) => {
+    const tablist = document.querySelector('[role="tablist"]');
+    const tabs = [...tablist.querySelectorAll('[role="tab"]')];
+    tablist.addEventListener('click', (event) => {
+      if (!event.target.matches('[role="tab"]')) return;
+      tabs.forEach((tab) => tab.setAttribute('aria-selected', String(tab === event.target)));
+    });
+    bindTablistKeyboard(tablist);
+
+    assert.deepEqual(tabs.map((tab) => tab.tabIndex), [0, -1, -1]);
+    tabs[0].focus();
+    tabs[0].dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+
+    assert.equal(document.activeElement, tabs[1]);
+    assert.equal(tabs[1].getAttribute('aria-selected'), 'true');
+    assert.deepEqual(tabs.map((tab) => tab.tabIndex), [-1, 0, -1]);
+  });
+});
+
+test('tablist Home, End, and arrow navigation wrap across its tabs', async () => {
+  await withDom(`<body><div role="tablist">
+    <button role="tab" aria-selected="true">One</button>
+    <button role="tab" aria-selected="false">Two</button>
+    <button role="tab" aria-selected="false">Three</button>
+  </div></body>`, (window) => {
+    const tablist = document.querySelector('[role="tablist"]');
+    const tabs = [...tablist.querySelectorAll('[role="tab"]')];
+    bindTablistKeyboard(tablist);
+
+    tabs[0].focus();
+    tabs[0].dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    assert.equal(document.activeElement, tabs[2], 'ArrowLeft wraps to the last tab');
+
+    tabs[2].dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    assert.equal(document.activeElement, tabs[0]);
+
+    tabs[0].dispatchEvent(new window.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    assert.equal(document.activeElement, tabs[2]);
   });
 });
 

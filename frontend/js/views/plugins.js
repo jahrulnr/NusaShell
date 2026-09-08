@@ -2,7 +2,7 @@
 // plugins, including plugins that expose a browser UI.
 
 import { rpc } from '../rpc.js';
-import { el, toast, dialog, confirmDialog } from '../ui.js';
+import { bindTablistKeyboard, el, toast, dialog, confirmDialog } from '../ui.js';
 import { openPluginWindow as launchPluginWindow } from '../plugin-window.js';
 import { hasPluginUI, pluginKind, pluginRowMeta, canAutoUpdate, hasUpdate, hasContract } from './plugins-model.js';
 
@@ -518,6 +518,7 @@ function wireInstallDialog() {
   const overlay = document.getElementById('plugin-install-overlay');
   const tabs = overlay.querySelectorAll('.plugin-install-tab');
   tabs.forEach((tab) => tab.addEventListener('click', () => setInstallTab(tab.dataset.tab)));
+  bindTablistKeyboard(overlay.querySelector('.plugin-install-tabs'));
   document.getElementById('plugin-install-close')?.addEventListener('click', closeInstallDialog);
   document.getElementById('plugin-install-cancel')?.addEventListener('click', closeInstallDialog);
   document.getElementById('plugin-install-confirm')?.addEventListener('click', () => confirmInstall());

@@ -601,10 +601,10 @@
         <div class="view-body automation-body">
           <div class="automation-toolbar">
             <div class="tabs" id="automation-tabs" role="tablist" aria-label="Automation sections">
-              <button class="tab active" type="button" id="automation-tab-workflows" data-auto-tab="workflows" role="tab" aria-selected="true">Workflows</button>
-              <button class="tab" type="button" id="automation-tab-runs" data-auto-tab="runs" role="tab" aria-selected="false">Runs</button>
-              <button class="tab" type="button" id="automation-tab-schedules" data-auto-tab="schedules" role="tab" aria-selected="false">Schedules</button>
-              <button class="tab" type="button" id="automation-tab-events" data-auto-tab="events" role="tab" aria-selected="false">Events</button>
+              <button class="tab active" type="button" id="automation-tab-workflows" data-auto-tab="workflows" role="tab" aria-selected="true" aria-controls="automation-workspace">Workflows</button>
+              <button class="tab" type="button" id="automation-tab-runs" data-auto-tab="runs" role="tab" aria-selected="false" aria-controls="automation-workspace">Runs</button>
+              <button class="tab" type="button" id="automation-tab-schedules" data-auto-tab="schedules" role="tab" aria-selected="false" aria-controls="automation-workspace">Schedules</button>
+              <button class="tab" type="button" id="automation-tab-events" data-auto-tab="events" role="tab" aria-selected="false" aria-controls="automation-workspace">Events</button>
             </div>
             <div class="automation-toolbar-actions">
               <button class="mini-btn" id="automation-new-btn" type="button">New workflow</button>
@@ -614,7 +614,7 @@
             <span id="automation-blocked-text">A capability provider is disabled.</span>
             <button class="mini-btn" id="automation-enable-provider-btn" type="button">Enable provider</button>
           </div>
-          <div class="automation-workspace">
+          <div class="automation-workspace" id="automation-workspace" role="tabpanel" aria-labelledby="automation-tab-workflows">
             <div class="automation-list-pane">
               <div class="automation-pane-head">
                 <h2 id="automation-list-title">Workflows</h2>
@@ -741,8 +741,18 @@
           </div>
         </div>
         <div class="view-body settings-body">
+          <nav class="settings-section-nav" id="settings-section-nav" aria-label="Settings sections">
+            <span class="settings-section-nav-label">Jump to</span>
+            <button class="settings-section-link is-current" id="settings-jump-agent" type="button" data-settings-section="settings-group-agent" aria-controls="settings-group-agent" aria-current="location">Agent</button>
+            <button class="settings-section-link" id="settings-jump-context" type="button" data-settings-section="settings-group-context" aria-controls="settings-group-context">Context</button>
+            <button class="settings-section-link" id="settings-jump-memory" type="button" data-settings-section="settings-group-memory" aria-controls="settings-group-memory">Memory &amp; search</button>
+            <button class="settings-section-link" id="settings-jump-understand" type="button" data-settings-section="settings-group-understand" aria-controls="settings-group-understand">Understand media</button>
+            <button class="settings-section-link" id="settings-jump-generate" type="button" data-settings-section="settings-group-generate" aria-controls="settings-group-generate">Generate media</button>
+            <button class="settings-section-link" id="settings-jump-web" type="button" data-settings-section="settings-group-web" aria-controls="settings-group-web">Web</button>
+            <button class="settings-section-link" id="settings-jump-workspace" type="button" data-settings-section="settings-group-workspace" aria-controls="settings-group-workspace">Workspace</button>
+          </nav>
           <div class="settings-group" role="group" aria-labelledby="settings-group-agent">
-            <h2 class="settings-group-title" id="settings-group-agent">Agent</h2>
+            <h2 class="settings-group-title" id="settings-group-agent" tabindex="-1">Agent</h2>
             <section class="settings-card settings-runtime-card" aria-labelledby="settings-runtime-title">
               <div class="settings-card-title">Agent runtime</div>
               <h2 id="settings-runtime-title" class="sr-only">Agent runtime</h2>
@@ -827,7 +837,7 @@
             </section>
           </div>
           <div class="settings-group" role="group" aria-labelledby="settings-group-context">
-            <h2 class="settings-group-title" id="settings-group-context">Context</h2>
+            <h2 class="settings-group-title" id="settings-group-context" tabindex="-1">Context</h2>
             <section class="settings-card" aria-labelledby="settings-context-title">
               <div class="settings-card-title">Context compaction</div>
               <h2 id="settings-context-title" class="sr-only">Context compaction</h2>
@@ -867,7 +877,7 @@
             </section>
           </div>
           <div class="settings-group" role="group" aria-labelledby="settings-group-memory">
-            <h2 class="settings-group-title" id="settings-group-memory">Memory &amp; search</h2>
+            <h2 class="settings-group-title" id="settings-group-memory" tabindex="-1">Memory &amp; search</h2>
             <section class="settings-card settings-learning-card" aria-labelledby="settings-learning-title">
               <div class="settings-card-title">Learning</div>
               <h2 id="settings-learning-title" class="sr-only">Learning</h2>
@@ -905,7 +915,7 @@
             </section>
           </div>
           <div class="settings-group" role="group" aria-labelledby="settings-group-understand">
-            <h2 class="settings-group-title" id="settings-group-understand">Media understanding</h2>
+            <h2 class="settings-group-title" id="settings-group-understand" tabindex="-1">Media understanding</h2>
             <section class="settings-card settings-vision-card" aria-labelledby="settings-vision-title">
               <div class="settings-card-title">Vision fallback</div>
               <h2 id="settings-vision-title" class="sr-only">Vision fallback</h2>
@@ -964,7 +974,7 @@
             </section>
           </div>
           <div class="settings-group" role="group" aria-labelledby="settings-group-generate">
-            <h2 class="settings-group-title" id="settings-group-generate">Media generation</h2>
+            <h2 class="settings-group-title" id="settings-group-generate" tabindex="-1">Media generation</h2>
             <section class="settings-card settings-image-card" aria-labelledby="settings-image-title">
               <div class="settings-card-title">Image generation</div>
               <h2 id="settings-image-title" class="sr-only">Image generation</h2>
@@ -1004,7 +1014,7 @@
             </section>
           </div>
           <div class="settings-group" role="group" aria-labelledby="settings-group-web">
-            <h2 class="settings-group-title" id="settings-group-web">Web</h2>
+            <h2 class="settings-group-title" id="settings-group-web" tabindex="-1">Web</h2>
             <section class="settings-card settings-web-search-card" aria-labelledby="settings-web-search-title">
               <div class="settings-card-title">Web Search</div>
               <h2 id="settings-web-search-title" class="sr-only">Web Search</h2>
@@ -1063,7 +1073,7 @@
             </section>
           </div>
           <div class="settings-group" role="group" aria-labelledby="settings-group-workspace">
-            <h2 class="settings-group-title" id="settings-group-workspace">Workspace</h2>
+            <h2 class="settings-group-title" id="settings-group-workspace" tabindex="-1">Workspace</h2>
             <section class="settings-card" aria-labelledby="settings-appearance-title">
               <div class="settings-card-title">Appearance</div>
               <h2 id="settings-appearance-title" class="sr-only">Appearance</h2>
@@ -1241,20 +1251,20 @@
       <div class="stt-guide" id="stt-guide" hidden>
         <p>One or more requirements are missing. Follow the steps for your platform:</p>
         <div class="stt-guide-tabs" role="tablist" aria-label="Platforms">
-          <button class="mini-btn ghost stt-guide-tab active" type="button" role="tab" id="stt-guide-tab-linux" aria-selected="true">Linux</button>
-          <button class="mini-btn ghost stt-guide-tab" type="button" role="tab" id="stt-guide-tab-windows" aria-selected="false">Windows</button>
-          <button class="mini-btn ghost stt-guide-tab" type="button" role="tab" id="stt-guide-tab-macos" aria-selected="false">macOS</button>
+          <button class="mini-btn ghost stt-guide-tab active" type="button" role="tab" id="stt-guide-tab-linux" aria-selected="true" aria-controls="stt-guide-linux">Linux</button>
+          <button class="mini-btn ghost stt-guide-tab" type="button" role="tab" id="stt-guide-tab-windows" aria-selected="false" aria-controls="stt-guide-windows">Windows</button>
+          <button class="mini-btn ghost stt-guide-tab" type="button" role="tab" id="stt-guide-tab-macos" aria-selected="false" aria-controls="stt-guide-macos">macOS</button>
         </div>
-        <div class="stt-guide-panel" id="stt-guide-linux" role="tabpanel">
+        <div class="stt-guide-panel" id="stt-guide-linux" role="tabpanel" aria-labelledby="stt-guide-tab-linux">
           <p>Automatic install is available on Linux — just click Install below. Manual alternative:</p>
           <pre><code>git clone https://github.com/ggml-org/whisper.cpp
 cd whisper.cpp &#38;&#38; cmake -B build &#38;&#38; cmake --build build -j --config Release
 sudo cp build/bin/whisper-cli /usr/local/bin/</code></pre>
         </div>
-        <div class="stt-guide-panel" id="stt-guide-windows" role="tabpanel" hidden>
+        <div class="stt-guide-panel" id="stt-guide-windows" role="tabpanel" aria-labelledby="stt-guide-tab-windows" hidden>
           <p>Automatic install is available on Windows (downloads the official release zip). Manual alternative: download <code>whisper-bin-x64.zip</code> from the whisper.cpp GitHub releases, extract it, and add the folder to PATH.</p>
         </div>
-        <div class="stt-guide-panel" id="stt-guide-macos" role="tabpanel" hidden>
+        <div class="stt-guide-panel" id="stt-guide-macos" role="tabpanel" aria-labelledby="stt-guide-tab-macos" hidden>
           <p>On macOS there is no official CLI binary release — install the engine once via Homebrew, then let NusaShell install the model:</p>
           <pre><code>brew install whisper-cpp</code></pre>
           <p>Reopen this dialog afterwards — NusaShell will pick up <code>whisper-cli</code> from your PATH.</p>

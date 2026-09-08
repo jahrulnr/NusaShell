@@ -1,7 +1,7 @@
 // Settings workspace: native browser preferences plus the Go runtime controls.
 
 import { on, rpc } from '../rpc.js';
-import { toast, createSelect, el } from '../ui.js';
+import { bindTablistKeyboard, toast, createSelect, el } from '../ui.js';
 import { FONT_OPTIONS, readFontPreference, setFontPreference } from '../font-preferences.js';
 
 let bound = false;
@@ -25,9 +25,31 @@ let sttLanguageSelect;
 let fontSelect;
 let syncingFontPreference = false;
 
+export function bindSettingsSectionNavigation(doc = document) {
+  const nav = doc.getElementById('settings-section-nav');
+  if (!nav) return null;
+  const buttons = [...nav.querySelectorAll('[data-settings-section]')];
+  nav.addEventListener('click', (event) => {
+    const button = event.target.closest?.('[data-settings-section]');
+    if (!button || !buttons.includes(button)) return;
+    const heading = doc.getElementById(button.dataset.settingsSection);
+    if (!heading) return;
+    buttons.forEach((item) => {
+      const current = item === button;
+      item.classList.toggle('is-current', current);
+      if (current) item.setAttribute('aria-current', 'location');
+      else item.removeAttribute('aria-current');
+    });
+    heading.focus({ preventScroll: true });
+    heading.scrollIntoView({ behavior: 'auto', block: 'start' });
+  });
+  return {};
+}
+
 export async function initSettings() {
   if (!bound) {
     bound = true;
+    bindSettingsSectionNavigation();
     document.getElementById('settings-save-btn').addEventListener('click', save);
     document.getElementById('settings-sidebar-compact').addEventListener('change', saveSidebarPreference);
     document.getElementById('settings-pets-auto-start').addEventListener('change', savePetsAutoStart);
@@ -1024,6 +1046,7 @@ function bindSTTInstall() {
   for (const os of ['linux', 'windows', 'macos']) {
     document.getElementById(`stt-guide-tab-${os}`)?.addEventListener('click', () => setSTTGuideTab(os));
   }
+  bindTablistKeyboard(document.querySelector('.stt-guide-tabs'));
   on('stt.install.progress', (payload) => {
     if (!sttInstallState.running || !payload) return;
     renderSTTProgress(payload.phase, payload.bytes_fetched ?? 0, payload.bytes_total ?? 0, payload.message);

@@ -105,6 +105,15 @@ export function toast(message, kind = 'info', timeout = 4000) {
   return remove;
 }
 
+function setSelectPortalExpanded(selectEl, expanded) {
+  const trigger = selectEl?.nextElementSibling;
+  const listId = trigger?.getAttribute('aria-controls');
+  const portal = listId ? document.getElementById(listId)?.closest('.ss-content') : null;
+  if (!portal) return;
+  portal.setAttribute('aria-hidden', String(!expanded));
+  portal.toggleAttribute('inert', !expanded);
+}
+
 export function createSelect(selectEl, { data = [], value = '', placeholder = '', search = null, onChange } = {}) {
   const ss = new SlimSelect({
     select: selectEl,
@@ -121,8 +130,52 @@ export function createSelect(selectEl, { data = [], value = '', placeholder = ''
       },
     },
   });
+  const trigger = selectEl.nextElementSibling;
+  const syncPortal = () => setSelectPortalExpanded(selectEl, trigger?.getAttribute('aria-expanded') === 'true');
+  const observer = new MutationObserver(syncPortal);
+  if (trigger) observer.observe(trigger, { attributes: true, attributeFilter: ['aria-expanded'] });
+  const destroy = ss.destroy.bind(ss);
+  ss.destroy = () => {
+    observer.disconnect();
+    destroy();
+  };
+  syncPortal();
   if (value !== undefined && value !== '') ss.setSelected([value]);
   return ss;
+}
+
+export function bindTablistKeyboard(tablist) {
+  if (!tablist) return null;
+  const tabs = [...tablist.querySelectorAll('[role="tab"]')];
+  if (!tabs.length) return null;
+
+  const syncTabStops = (fallback = tabs[0]) => {
+    const selected = tabs.find((tab) => tab.getAttribute('aria-selected') === 'true') || fallback;
+    tabs.forEach((tab) => { tab.tabIndex = tab === selected ? 0 : -1; });
+  };
+  syncTabStops();
+
+  tablist.addEventListener('click', (event) => {
+    const tab = event.target.closest?.('[role="tab"]');
+    if (tab && tabs.includes(tab)) syncTabStops(tab);
+  });
+  tablist.addEventListener('keydown', (event) => {
+    const tab = event.target.closest?.('[role="tab"]');
+    const index = tabs.indexOf(tab);
+    if (index < 0) return;
+    let nextIndex;
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    const next = tabs[nextIndex];
+    next.click();
+    syncTabStops(next);
+    next.focus();
+  });
+  return { sync: syncTabStops };
 }
 
 // Open modal dialogs register a dismiss fn here so navigation (or any global
@@ -215,22 +268,15 @@ export function dialog({ title, message, fields = [], actions = [{ label: 'Cance
           return { text: opt.label, value: opt.value };
         });
         const selected = field.value ?? data[0]?.value ?? '';
-        const ss = new SlimSelect({
-          select: input,
+        const ss = createSelect(input, {
           data,
-          settings: {
-            showSearch: data.length > 7,
-            placeholderText: field.placeholder ?? '',
-            contentPosition: 'absolute',
-            closeOnSelect: true,
-          },
-          events: {
-            afterChange: () => {
-              if (typeof field.onChange === 'function') field.onChange(input, values);
-            },
+          value: selected,
+          placeholder: field.placeholder ?? '',
+          search: data.length > 7,
+          onChange: () => {
+            if (typeof field.onChange === 'function') field.onChange(input, values);
           },
         });
-        if (selected) ss.setSelected([selected]);
         slimInstances.push(ss);
         selectFields.push(field);
       }

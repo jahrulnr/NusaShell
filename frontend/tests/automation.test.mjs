@@ -37,3 +37,11 @@ test('Automation and Learning share a bounded segmented tab control', () => {
   assert.match(globalCSS, /\.tabs\s*\{[\s\S]*?width:\s*fit-content;[\s\S]*?padding:\s*3px;[\s\S]*?border:\s*1px solid var\(--border-soft\);/);
   assert.match(css, /\.automation-toolbar \.tabs\s*\{[\s\S]*?max-width:\s*100%;/);
 });
+
+test('Automation tabs expose and relabel their shared tab panel', () => {
+  for (const tab of ['workflows', 'runs', 'schedules', 'events']) {
+    assert.match(html, new RegExp(`id="automation-tab-${tab}"[^>]+aria-controls="automation-workspace"`));
+  }
+  assert.match(html, /id="automation-workspace"[^>]+role="tabpanel"[^>]+aria-labelledby="automation-tab-workflows"/);
+  assert.match(view, /setAttribute\('aria-labelledby', `automation-tab-\$\{tab\}`\)/);
+});

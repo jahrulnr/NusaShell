@@ -1,7 +1,7 @@
 // Automation workspace: workflows, runs, schedules, events.
 
 import { rpc, on } from '../rpc.js';
-import { el, toast, dialog, confirmDialog } from '../ui.js';
+import { bindTablistKeyboard, el, toast, dialog, confirmDialog } from '../ui.js';
 
 const state = {
   tab: 'workflows',
@@ -14,12 +14,14 @@ const state = {
 };
 
 export async function initAutomation() {
-  document.getElementById('automation-tabs').addEventListener('click', (e) => {
+  const tablist = document.getElementById('automation-tabs');
+  tablist.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-auto-tab]');
     if (!btn) return;
     setTab(btn.dataset.autoTab);
     refresh().catch((err) => toast(err.message || String(err), 'error'));
   });
+  bindTablistKeyboard(tablist);
   document.getElementById('automation-new-btn').addEventListener('click', () => createWizard());
   document.getElementById('automation-enable-provider-btn').addEventListener('click', enableBlockedProvider);
   on('automation.run.created', () => refresh().catch(() => {}));
@@ -59,6 +61,8 @@ function setTab(tab) {
     btn.classList.toggle('active', on);
     btn.setAttribute('aria-selected', String(on));
   });
+  document.getElementById('automation-workspace')
+    .setAttribute('aria-labelledby', `automation-tab-${tab}`);
   const titles = { workflows: 'Workflows', runs: 'Runs', schedules: 'Schedules', events: 'Events' };
   document.getElementById('automation-list-title').textContent = titles[tab];
   document.getElementById('automation-detail').innerHTML = '';

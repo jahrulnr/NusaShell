@@ -6,11 +6,17 @@ import { hasPluginUI, pluginKind, canAutoUpdate, hasUpdate, hasContract } from '
 
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const pluginsCSS = await readFile(new URL('../styles/plugins.css', import.meta.url), 'utf8');
+const view = await readFile(new URL('../js/views/plugins.js', import.meta.url), 'utf8');
 
 test('Plugins view uses the Electron catalog name and controls', () => {
   assert.match(html, /data-view="plugins"/);
   assert.match(html, /id="plugins-add-mcp"/);
   assert.match(html, /id="plugin-table"/);
+});
+
+test('Plugin install source tabs share the keyboard tablist behavior', () => {
+  assert.match(view, /bindTablistKeyboard/);
+  assert.match(view, /bindTablistKeyboard\(overlay\.querySelector\('\.plugin-install-tabs'\)\)/);
 });
 
 test('Plugins mobile layout gives the header and row metadata room to breathe', () => {

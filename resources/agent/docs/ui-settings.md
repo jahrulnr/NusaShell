@@ -19,7 +19,47 @@ View title and a Save settings button with a live status indicator.
 
 ## Card groups
 
-Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, periodic review interval, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system.
+A sticky Jump to rail moves directly between the seven settings groups and transfers keyboard focus to the destination heading. Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, periodic review interval, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system.
+
+- **Settings section navigation** (`#settings-section-nav`):
+  - Section: Settings
+  - Type: navigation
+  - Notes: Sticky horizontal rail for jumping between the seven long-form settings groups.
+
+- **Jump to Agent settings** (`#settings-jump-agent`):
+  - Section: Settings
+  - Type: button
+  - Action: Scrolls to and focuses the Agent group heading.
+
+- **Jump to Context settings** (`#settings-jump-context`):
+  - Section: Settings
+  - Type: button
+  - Action: Scrolls to and focuses the Context group heading.
+
+- **Jump to Memory & search settings** (`#settings-jump-memory`):
+  - Section: Settings
+  - Type: button
+  - Action: Scrolls to and focuses the Memory & search group heading.
+
+- **Jump to Media understanding settings** (`#settings-jump-understand`):
+  - Section: Settings
+  - Type: button
+  - Action: Scrolls to and focuses the Media understanding group heading.
+
+- **Jump to Media generation settings** (`#settings-jump-generate`):
+  - Section: Settings
+  - Type: button
+  - Action: Scrolls to and focuses the Media generation group heading.
+
+- **Jump to Web settings** (`#settings-jump-web`):
+  - Section: Settings
+  - Type: button
+  - Action: Scrolls to and focuses the Web group heading.
+
+- **Jump to Workspace settings** (`#settings-jump-workspace`):
+  - Section: Settings
+  - Type: button
+  - Action: Scrolls to and focuses the Workspace group heading.
 
 - **Agent group** (`#settings-group-agent`):
   - Section: Settings

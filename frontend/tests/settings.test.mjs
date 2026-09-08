@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { JSDOM } from 'jsdom';
+
+import { bindSettingsSectionNavigation } from '../js/views/settings.js';
 
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const settingsView = await readFile(new URL('../js/views/settings.js', import.meta.url), 'utf8');
@@ -116,4 +119,41 @@ test('Interface font picker is slim-enhanced and browser-local', () => {
   assert.match(settingsView, /setFontPreference/);
   assert.match(settingsView, /handleFontPreferenceChange/);
   assert.doesNotMatch(settingsView, /settings.set[sS]{0,500}font/i);
+});
+
+test('Settings exposes a compact section rail for its long-form groups', () => {
+  assert.match(html, /id="settings-section-nav"[^>]+aria-label="Settings sections"/);
+  for (const section of ['agent', 'context', 'memory', 'understand', 'generate', 'web', 'workspace']) {
+    assert.match(html, new RegExp(`id="settings-jump-${section}"[^>]+data-settings-section="settings-group-${section}"`));
+  }
+  assert.match(settingsView, /bindSettingsSectionNavigation/);
+});
+
+test('Settings section rail marks the destination and transfers focus to its heading', () => {
+  const dom = new JSDOM(`<body>
+    <nav id="settings-section-nav">
+      <button data-settings-section="settings-group-agent" aria-current="location">Agent</button>
+      <button data-settings-section="settings-group-web">Web</button>
+    </nav>
+    <h2 id="settings-group-agent" tabindex="-1">Agent</h2>
+    <h2 id="settings-group-web" tabindex="-1">Web</h2>
+  </body>`, { pretendToBeVisual: true });
+  let scrollOptions;
+  dom.window.document.getElementById('settings-group-web').scrollIntoView = (options) => { scrollOptions = options; };
+
+  bindSettingsSectionNavigation(dom.window.document);
+  dom.window.document.querySelector('[data-settings-section="settings-group-web"]')
+    .dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+
+  assert.equal(dom.window.document.activeElement?.id, 'settings-group-web');
+  assert.equal(dom.window.document.querySelector('[aria-current="location"]')?.textContent, 'Web');
+  assert.deepEqual(scrollOptions, { behavior: 'auto', block: 'start' });
+  dom.window.close();
+});
+
+test('Offline STT platform tabs expose keyboard navigation and owned panels', () => {
+  for (const os of ['linux', 'windows', 'macos']) {
+    assert.match(html, new RegExp(`id="stt-guide-tab-${os}"[^>]+aria-controls="stt-guide-${os}"`));
+  }
+  assert.match(settingsView, /bindTablistKeyboard\(document\.querySelector\('\.stt-guide-tabs'\)\)/);
 });
