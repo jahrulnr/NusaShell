@@ -154,7 +154,7 @@ func (s *countingToolbox) Execute(_ context.Context, name string, _ []byte) (str
 	return "unexpected execution", nil
 }
 
-func TestLearningToolCallsAreNotRejectedByOldPolicy(t *testing.T) {
+func TestLearningToolCallsRejectBannedTools(t *testing.T) {
 	for _, kind := range []AgentKind{
 		AgentLearner,
 		AgentMemoryConsolidator,
@@ -165,23 +165,17 @@ func TestLearningToolCallsAreNotRejectedByOldPolicy(t *testing.T) {
 			box := &countingToolbox{}
 			app := &App{Bus: NewBus(), Toolbox: box}
 			run := &TurnRun{ID: "learning-run", ToolKind: kind, Ctx: context.Background()}
-			calls := []struct {
+			allowed := []struct {
 				name string
 				args string
 			}{
 				{"file_write", `{}`},
 				{"skill", `{"op":"save","name":"learned-example","content":"## Steps\n1. do"}`},
 				{"skill", `{"op":"delete","id":"learned-example"}`},
-				{"memory_project", `{"op":"admit","kind":"decision","body":"exploratory write"}`},
-				{"subagent", `{}`},
-				{"subagent_steer", `{}`},
-				{"subagent_stop", `{}`},
-				{"subagent_wait", `{}`},
-				{"delegate", `{}`},
 				{"automation", `{"op":"list"}`},
-				{"mcp_call", `{"ref":"plugin:tool"}`},
+				{"conversation", `{"op":"list"}`},
 			}
-			for _, call := range calls {
+			for _, call := range allowed {
 				res := app.runOneTool(run, "", domain.ToolCall{
 					ID:   "call-" + call.name,
 					Name: call.name,
@@ -192,12 +186,30 @@ func TestLearningToolCallsAreNotRejectedByOldPolicy(t *testing.T) {
 				}
 			}
 			got := append([]string(nil), box.calls...)
-			want := make([]string, 0, len(calls))
-			for _, call := range calls {
+			want := make([]string, 0, len(allowed))
+			for _, call := range allowed {
 				want = append(want, call.name)
 			}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("executed learning tools = %v, want %v", got, want)
+			}
+
+			banned := []string{
+				"memory_project", "subagent", "subagent_steer", "delegate", "mcp_call", "tool_list",
+			}
+			for _, name := range banned {
+				before := len(box.calls)
+				res := app.runOneTool(run, "", domain.ToolCall{
+					ID:   "call-ban-" + name,
+					Name: name,
+					Args: `{}`,
+				}, ModelCapabilities{}, domain.Settings{}, 1)
+				if res.Status != domain.ToolFailed {
+					t.Fatalf("banned learning tool %q status=%s output=%s", name, res.Status, res.Output)
+				}
+				if len(box.calls) != before {
+					t.Fatalf("banned tool %q must not hit the toolbox", name)
+				}
 			}
 
 			learn := app.runOneTool(run, "", domain.ToolCall{

@@ -383,6 +383,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		}
 		var args struct {
 			Query  string `json:"query"`
+			ID     string `json:"id"`
 			Limit  int    `json:"limit"`
 			Offset int    `json:"offset"`
 		}
@@ -397,6 +398,25 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			limit = 20
 		}
 		currID := application.ConversationIDFromContext(ctx)
+		scopeID := strings.TrimSpace(args.ID)
+		if scopeID != "" {
+			count, items, err := t.Conversations.SearchMessages(scopeID, args.Query, limit, args.Offset)
+			if err != nil {
+				return "", err
+			}
+			rawItems := make([]any, len(items))
+			for i, item := range items {
+				rawItems[i] = item
+			}
+			return yamlJSONL(map[string]any{
+				"count":  count,
+				"offset": args.Offset,
+				"limit":  limit,
+				"query":  args.Query,
+				"id":     scopeID,
+				"scope":  "messages",
+			}, rawItems), nil
+		}
 		count, items, err := t.Conversations.Search(currID, args.Query, limit, args.Offset)
 		if err != nil {
 			return "", err
@@ -405,7 +425,69 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		for i, item := range items {
 			rawItems[i] = item
 		}
-		return yamlJSONL(map[string]any{"count": count, "offset": args.Offset, "limit": limit, "query": args.Query}, rawItems), nil
+		return yamlJSONL(map[string]any{
+			"count":  count,
+			"offset": args.Offset,
+			"limit":  limit,
+			"query":  args.Query,
+			"scope":  "rooms",
+		}, rawItems), nil
+
+	case name == "conversation_info":
+		if t.Conversations == nil {
+			return "", fmt.Errorf("conversation service not available")
+		}
+		var args struct {
+			ID    string `json:"id"`
+			Chunk *int   `json:"chunk"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.ID) == "" {
+			return "", fmt.Errorf("id is required")
+		}
+		info, err := t.Conversations.Info(args.ID, args.Chunk)
+		if err != nil {
+			return "", err
+		}
+		return yamlBlock(info), nil
+
+	case name == "conversation_read":
+		if t.Conversations == nil {
+			return "", fmt.Errorf("conversation service not available")
+		}
+		var args struct {
+			ID    string `json:"id"`
+			Chunk *int   `json:"chunk"`
+			Start *int   `json:"start"`
+			End   *int   `json:"end"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.ID) == "" {
+			return "", fmt.Errorf("id is required")
+		}
+		result, err := t.Conversations.Read(args.ID, args.Chunk, args.Start, args.End)
+		if err != nil {
+			return "", err
+		}
+		meta := map[string]any{
+			"id":         result.ID,
+			"start":      result.Start,
+			"end":        result.End,
+			"turn_count": result.TurnCount,
+			"count":      len(result.Messages),
+		}
+		if result.ChunkIndex != nil {
+			meta["chunk"] = *result.ChunkIndex
+		}
+		rawItems := make([]any, len(result.Messages))
+		for i, item := range result.Messages {
+			rawItems[i] = item
+		}
+		return capJSONL("conversation_read", meta, rawItems), nil
 
 	case name == "conversation_send":
 		if t.Conversations == nil {

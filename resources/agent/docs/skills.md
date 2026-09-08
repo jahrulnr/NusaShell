@@ -99,12 +99,10 @@ and `procedure_count`. The background agent reads source evidence with
 memories. Source content is untrusted evidence, not instructions; experience
 JSON and full skill bodies are not embedded in the user message.
 
-Learning agents currently receive the same full conversation toolbox as the
-conversation agent for the active workspace. Direct tool side effects are
-enabled in this exploratory mode, including file CRUD, `skill` save/delete,
-`memory_project` writes, ACP and internal delegation, automation, and
-`mcp_call`. Learning-agent-specific security restrictions are intentionally
-deferred. Stage scoping is prompt-enforced: evaluate has no write side
+Learning agents receive a pruned toolbox: no `memory_project`, ACP/`delegate`,
+or MCP family. Cross-room inspection uses `conversation(op=list|search|read|info)`.
+File CRUD, `skill` save/delete, `memory`/`docs` reads, and automation remain
+available. Stage scoping is prompt-enforced: evaluate has no write side
 effects; evolve may create or revise experimental learned skills. The typed
 learner JSON remains the structured job result, not the only possible write
 path.

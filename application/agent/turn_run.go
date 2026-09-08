@@ -22,7 +22,7 @@ type TurnRun struct {
 	// Headless marks unattended turns (pipeline agent steps). When true,
 	// the default AgentAutomation kind filters ACP subagent tools so
 	// permission prompts never stall a pipeline run. Background learning
-	// kinds intentionally opt into the full conversation toolbox.
+	// kinds use a pruned toolbox (no project memory, ACP/delegate, or MCP).
 	Headless bool
 	// ToolKind overrides the ToolFactory agent kind for this run (empty =
 	// default by Headless: conversation vs automation). Internal delegates

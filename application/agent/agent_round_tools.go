@@ -8,6 +8,7 @@ import (
 
 	"nusashell/application/service/mediaread"
 	"nusashell/application/service/toolpresentation"
+	"nusashell/application/tools"
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/domain/turndiff"
@@ -189,6 +190,14 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 	var output string
 	var outputAttachments []domain.Attachment
 	var err error
+	if isLearnerKind(run.ToolKind) && tools.IsLearnerBannedTool(toolCall.Name) {
+		res := ToolExecResult{
+			Status: domain.ToolFailed,
+			Output: fmt.Sprintf("error: tool %q is not available to the learner agent", toolCall.Name),
+		}
+		a.emitToolCompleted(run, toolCall, res)
+		return res
+	}
 	switch toolCall.Name {
 	case learnerResultToolName:
 		if !isLearnerKind(run.ToolKind) {

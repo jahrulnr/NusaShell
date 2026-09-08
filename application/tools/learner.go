@@ -2,8 +2,10 @@ package tools
 
 // LearnerResultToolName is the dedicated learner commit tool, analogous to
 // compaction's summary(): the typed catalog result lives in the tool-call
-// arguments (separate from reasoning and assistant text). The learner still
-// advertises the full conversation toolbox for inspection and profile writes.
+// arguments (separate from reasoning and assistant text). The learner
+// advertises a pruned toolbox (no project memory, ACP/delegate, or MCP) plus
+// conversation(op=list|search|read|info) for cross-room inspection; profile
+// writes still use file_*.
 const LearnerResultToolName = "learn"
 
 // LearnerResultTool is advertised only to learner agent kinds.

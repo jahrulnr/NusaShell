@@ -213,16 +213,28 @@ type ModelOverrideStore interface {
 	Save(r *domain.ModelOverrideRegistry) error
 }
 
-// ConversationMessenger enables inter-agent messaging between conversation rooms
-// via the `conversation` tool.
+// ConversationMessenger enables inter-agent messaging and transcript
+// inspection via the `conversation` tool.
 type ConversationMessenger interface {
 	List(currentConvID string, limit, offset int) (count int, items []ConversationSummaryDTO, err error)
 	Search(currentConvID, query string, limit, offset int) (count int, items []ConversationSummaryDTO, err error)
 	Send(currentConvID, targetConvID, content string) error
+	Info(id string, chunk *int) (ConversationInfoDTO, error)
+	Read(id string, chunk *int, start, end *int) (ConversationReadResult, error)
+	SearchMessages(id, query string, limit, offset int) (count int, items []ConversationMessageHitDTO, err error)
 }
 
 // ConversationSummaryDTO is the compact room card used by the conversation tool.
 type ConversationSummaryDTO = conversation.SummaryDTO
+
+// ConversationInfoDTO is conversation(op=info) metadata.
+type ConversationInfoDTO = conversation.InfoDTO
+
+// ConversationReadResult is conversation(op=read) meta + messages.
+type ConversationReadResult = conversation.ReadResult
+
+// ConversationMessageHitDTO is a scoped conversation(op=search) hit.
+type ConversationMessageHitDTO = conversation.MessageHitDTO
 
 // ConversationTodoPort is the per-conversation todo checklist store. The
 // model owns the list (full-replace via todo mode "new", add/replace/delete

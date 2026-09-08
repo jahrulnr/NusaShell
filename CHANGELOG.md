@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`conversation` inspect ops.** `info` and `read` join the existing
+  `list` / `search` / `send` dispatcher. `search` matches room id, title,
+  summary, or message text; with `id` it returns in-room message snippets.
+  `info` reports turn/chunk counts and a summary preview; `read` returns
+  visible user/assistant/tool messages by inclusive turn index (optional
+  archived `chunk`, default last 5 turns, overflow-capped).
+
 ### Changed
+
+- **Learner toolbox is pruned.** Background learner kinds no longer
+  advertise or execute `memory_project`, ACP/`delegate`, or the MCP family
+  (`mcp_*`, `tool_list`, `tool_schema`, `contract_read`). They keep file/
+  skill/memory/docs/automation tools plus `conversation` inspect ops and
+  `learn()`.
 
 - **Learner** introduces learner results with a "supersede" action without a target do not produce any operations. Additionally, it modifies the `OpsFromLearnerConsolidate` function to return nil when the supersedes field is empty, and updates the experience extraction logic to ignore compaction summaries in user messages.
 

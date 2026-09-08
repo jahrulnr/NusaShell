@@ -57,7 +57,8 @@ func headlessTurnTitle(kind AgentKind, prompt string) string {
 // marked Origin=pipeline so it stays out of agent.conversations.list while
 // remaining addressable for automation(op="steer"). AgentAutomation turns
 // filter ACP subagent tools so permission prompts never stall a pipeline run;
-// background learning kinds intentionally use the full conversation toolbox.
+// background learning kinds use a pruned toolbox (no project memory, ACP/
+// delegate, or MCP) plus learn() and conversation inspect ops.
 func (a *Service) RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error) {
 	return a.RunHeadlessTurnKind(ctx, prompt, model, trust, schema, AgentAutomation)
 }

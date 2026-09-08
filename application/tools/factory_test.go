@@ -112,7 +112,7 @@ func TestToolFactoryAutomationAgentOmitsACPTools(t *testing.T) {
 	}
 }
 
-func TestToolFactoryLearningAgentsKeepConversationToolsPlusLearn(t *testing.T) {
+func TestToolFactoryLearningAgentsPruneBannedToolsPlusLearn(t *testing.T) {
 	f := &ToolFactory{
 		Toolbox:     func() []ToolInfo { return factoryStubTools() },
 		Dispatchers: FilterDispatcherToolInfos,
@@ -131,23 +131,25 @@ func TestToolFactoryLearningAgentsKeepConversationToolsPlusLearn(t *testing.T) {
 		if !hasTool(got, LearnerResultToolName) {
 			t.Fatalf("%s missing %s in %v", kind, LearnerResultToolName, namesOf(got))
 		}
-		for _, want := range namesOf(conversation) {
+		if !hasTool(got, "conversation") {
+			t.Fatalf("%s missing conversation dispatcher in %v", kind, namesOf(got))
+		}
+		for _, banned := range []string{
+			"memory_project", "subagent", "subagent_steer", "subagent_stop", "subagent_wait",
+			"delegate", "mcp_list", "mcp_search", "mcp_call", "tool_list", "tool_schema",
+		} {
+			if hasTool(got, banned) {
+				t.Fatalf("%s must not advertise banned tool %q, got %v", kind, banned, namesOf(got))
+			}
+		}
+		for _, want := range []string{"file_read", "file_write", "file_patch", "skill", "memory", "docs", "exec", "automation"} {
 			if !hasTool(got, want) {
-				t.Fatalf("%s missing conversation tool %q in %v", kind, want, namesOf(got))
+				t.Fatalf("%s missing kept tool %q in %v", kind, want, namesOf(got))
 			}
 		}
 	}
-	for _, want := range []string{
-		"file_write", "file_patch", "file_mkdir", "file_delete", "file_move", "file_copy",
-		"skill", "memory_project", "subagent", "delegate", "automation", "mcp_call",
-	} {
-		if !hasTool(conversation, want) {
-			t.Fatalf("conversation fixture missing full-tool assertion %q in %v", want, namesOf(conversation))
-		}
-	}
-	learningNoWS := f.Get(AgentMemoryConsolidator, "")
-	conversationNoWS := f.Get(AgentConversation, "")
-	if hasTool(conversationNoWS, "memory_project") || hasTool(learningNoWS, "memory_project") {
+	learningNoWS := f.Get(AgentLearner, "")
+	if hasTool(learningNoWS, "memory_project") {
 		t.Fatal("memory_project must stay hidden without a workspace")
 	}
 	if !hasTool(learningNoWS, LearnerResultToolName) {

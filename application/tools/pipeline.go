@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"nusashell/domain"
 )
@@ -15,6 +16,31 @@ func IsACPTool(name string) bool {
 	default:
 		return false
 	}
+}
+
+// IsLearnerBannedTool reports tools the learner must neither advertise nor
+// execute: project memory, ACP/delegate, and the MCP family (including
+// discovery companions that only serve MCP).
+func IsLearnerBannedTool(name string) bool {
+	switch name {
+	case "memory_project", "delegate", "tool_list", "tool_schema", "contract_read":
+		return true
+	}
+	if IsACPTool(name) {
+		return true
+	}
+	return strings.HasPrefix(name, "mcp_")
+}
+
+// filterLearnerToolInfos removes tools banned from learner agent kinds.
+func filterLearnerToolInfos(defs []ToolInfo) []ToolInfo {
+	out := make([]ToolInfo, 0, len(defs))
+	for _, d := range defs {
+		if !IsLearnerBannedTool(d.Name) {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // FilteredToolbox wraps a ToolExecutor and hides matching tools from both

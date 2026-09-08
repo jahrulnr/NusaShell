@@ -146,6 +146,18 @@ func (a *App) SendConversationMessage(currentConvID, targetConvID, content strin
 	return a.conversationService().SendPeer(currentConvID, targetConvID, content)
 }
 
+func (a *App) ConversationInfo(id string, chunk *int) (ConversationInfoDTO, error) {
+	return a.conversationService().RoomInfo(id, chunk)
+}
+
+func (a *App) ConversationRead(id string, chunk *int, start, end *int) (ConversationReadResult, error) {
+	return a.conversationService().RoomRead(id, chunk, start, end)
+}
+
+func (a *App) ConversationSearchMessages(id, query string, limit, offset int) (int, []ConversationMessageHitDTO, error) {
+	return a.conversationService().SearchMessages(id, query, limit, offset)
+}
+
 func (a *App) List(currentConvID string, limit, offset int) (int, []ConversationSummaryDTO, error) {
 	return a.ListConversations(currentConvID, limit, offset)
 }
@@ -156,4 +168,16 @@ func (a *App) Search(currentConvID, query string, limit, offset int) (int, []Con
 
 func (a *App) Send(currentConvID, targetConvID, content string) error {
 	return a.SendConversationMessage(currentConvID, targetConvID, content)
+}
+
+func (a *App) Info(id string, chunk *int) (ConversationInfoDTO, error) {
+	return a.ConversationInfo(id, chunk)
+}
+
+func (a *App) Read(id string, chunk *int, start, end *int) (ConversationReadResult, error) {
+	return a.ConversationRead(id, chunk, start, end)
+}
+
+func (a *App) SearchMessages(id, query string, limit, offset int) (int, []ConversationMessageHitDTO, error) {
+	return a.ConversationSearchMessages(id, query, limit, offset)
 }

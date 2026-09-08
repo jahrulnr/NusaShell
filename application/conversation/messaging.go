@@ -15,6 +15,7 @@ type SummaryDTO struct {
 	Summary   string `json:"summary,omitempty"`
 	Status    string `json:"status,omitempty"`
 	UpdatedAt string `json:"updated_at"`
+	Match     string `json:"match,omitempty"` // title|id|summary|message
 }
 
 // ListRooms returns visible conversation rooms (excluding self and pipeline
@@ -71,8 +72,10 @@ func (s *Service) ListRooms(currentConvID string, limit, offset int) (int, []Sum
 	return total, dtos, nil
 }
 
-// SearchRooms searches visible conversation rooms by title or summary
-// (case-insensitive substring match), sorted by UpdatedAt descending.
+// SearchRooms searches visible conversation rooms by id, title, summary, or
+// visible user/assistant message text (case-insensitive substring), sorted by
+// UpdatedAt descending. Match names the highest-priority field that hit
+// (id > title > summary > message).
 func (s *Service) SearchRooms(currentConvID, query string, limit, offset int) (int, []SummaryDTO, error) {
 	if s.store == nil {
 		return 0, nil, fmt.Errorf("conversation store not available")
@@ -80,7 +83,11 @@ func (s *Service) SearchRooms(currentConvID, query string, limit, offset int) (i
 
 	q := strings.ToLower(strings.TrimSpace(query))
 	all := s.store.List()
-	matched := make([]*domain.Conversation, 0, len(all))
+	type hit struct {
+		c     *domain.Conversation
+		match string
+	}
+	matched := make([]hit, 0, len(all))
 	for _, c := range all {
 		if c == nil || c.HiddenFromRoomList() {
 			continue
@@ -88,18 +95,26 @@ func (s *Service) SearchRooms(currentConvID, query string, limit, offset int) (i
 		if currentConvID != "" && c.ID == currentConvID {
 			continue
 		}
+		match := ""
 		if q != "" {
-			titleMatch := strings.Contains(strings.ToLower(c.Title), q)
-			summaryMatch := strings.Contains(strings.ToLower(c.Summary), q)
-			if !titleMatch && !summaryMatch {
+			switch {
+			case strings.Contains(strings.ToLower(c.ID), q):
+				match = "id"
+			case strings.Contains(strings.ToLower(c.Title), q):
+				match = "title"
+			case strings.Contains(strings.ToLower(c.Summary), q):
+				match = "summary"
+			case messageTextMatch(c.Messages, q):
+				match = "message"
+			default:
 				continue
 			}
 		}
-		matched = append(matched, c)
+		matched = append(matched, hit{c: c, match: match})
 	}
 
 	sort.Slice(matched, func(i, j int) bool {
-		return matched[i].UpdatedAt.After(matched[j].UpdatedAt)
+		return matched[i].c.UpdatedAt.After(matched[j].c.UpdatedAt)
 	})
 
 	total := len(matched)
@@ -120,13 +135,14 @@ func (s *Service) SearchRooms(currentConvID, query string, limit, offset int) (i
 
 	paged := matched[offset:end]
 	dtos := make([]SummaryDTO, 0, len(paged))
-	for _, c := range paged {
+	for _, h := range paged {
 		dtos = append(dtos, SummaryDTO{
-			ID:        c.ID,
-			Title:     c.Title,
-			Summary:   c.Summary,
-			Status:    c.Status,
-			UpdatedAt: c.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			ID:        h.c.ID,
+			Title:     h.c.Title,
+			Summary:   h.c.Summary,
+			Status:    h.c.Status,
+			UpdatedAt: h.c.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			Match:     h.match,
 		})
 	}
 

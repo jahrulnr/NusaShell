@@ -51,7 +51,7 @@ execute arbitrary side effects.
 | `web_search` | search the web across Brave, Serper, Tavily, Startpage, Wikipedia, and GitHub (pool configurable in Settings → Web Search); returns ranked results with title, URL, and snippet. Oversized JSONL is truncated in-band (~32KiB) with `overflow_path` |
 | `web_fetch` | fetch a URL and return readable text; supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes` (extract cap, default 2MB); in-band body caps at ~32KiB with `overflow_path` / `next_offset_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
-| `conversation` | inter-agent room communication dispatcher; `op` selects: `list` (list visible rooms, newest first), `search` (search by title or summary), `send` (send message to another room) |
+| `conversation` | conversation rooms + transcripts dispatcher; `op` selects: `list` (visible rooms, newest first), `search` (rooms by id/title/summary/message, or in-room message snippets when `id` is set), `info` (metadata: turn_count, chunk_count, summary_preview), `read` (user/assistant/tool messages by inclusive turn index; optional archived `chunk`), `send` (peer message to another room) |
 | `automation` | durable automation dispatcher; pass `op` to run, wait, status, logs, cancel, steer, list, read, validate, create, enable, disable, or delete a workflow |
 | `automation_schedule` | durable schedule dispatcher; pass `op="once"` for an RFC3339 one-shot or `op="every"` for a cron/interval schedule |
 | `wait_until` | durable wait; the runner is not occupied |
@@ -64,9 +64,11 @@ execute arbitrary side effects.
 
 ### Learner `learn()` (background agent only)
 
-The conversation agent never sees this tool. The background learner keeps the
-full conversation toolbox and commits catalog records with `learn()`, the
-same way compaction commits a handoff with `summary()`.
+The conversation agent never sees this tool. The background learner advertises
+a pruned toolbox (no `memory_project`, ACP/`delegate`, or MCP family) plus
+`conversation(op=list|search|read|info)` for cross-room inspection, and
+commits catalog records with `learn()` the same way compaction commits a
+handoff with `summary()`.
 
 Good examples:
 
@@ -248,7 +250,33 @@ Ops per family:
   `archive {id}`, `lint {kind?}`, `audit`, `gate {reason?}`,
   `pattern_track {kind}`, `path {kind,create?}`, `script_path {name,create?}`.
   See `docs(op="read", id="memory-project")`.
-- `conversation`: `list {limit?,offset?}` (visible rooms sorted newest first), `search {query,limit?,offset?}` (search rooms by title or summary), `send {id,content}` (deliver message to another conversation room).
+- `conversation`: `list {limit?,offset?}` (visible rooms, newest first; excludes
+  self and hidden pipeline/background rooms); `search {query,id?,limit?,offset?}`
+  without `id` matches room id/title/summary/message text (`match` names the
+  hit); with `id` returns in-room message snippets only; `info {id,chunk?}`
+  metadata (`turn_count`, `chunk_count`, `summary_preview` — omit `chunk` for
+  the active transcript, `chunk=N` for a 0-based archive); `read
+  {id,chunk?,start?,end?}` visible user/assistant/tool messages by inclusive
+  0-based turn index (omit `start` and `end` for the last 5 turns; `start=0
+  end=0` is turn 0 only; long output uses `overflow_path`); `send {id,content}`
+  peer message to another visible room.
+
+Good conversation examples:
+
+    conversation(op="list", limit=10)
+    conversation(op="search", query="auth middleware")
+    conversation(op="search", id="conv_abc", query="prefer Go")
+    conversation(op="info", id="conv_abc")
+    conversation(op="read", id="conv_abc", start=0, end=2)
+    conversation(op="read", id="conv_abc", chunk=0, start=0, end=1)
+    conversation(op="send", id="conv_abc", content="Need your latest plan")
+
+Bad conversation examples:
+
+    conversation(op="search")  # query required
+    conversation(op="read")  # id required
+    conversation(op="info", chunk=0)  # id required even when reading a chunk
+    conversation_list()  # retired per-op name; unknown tool
 
 ## Workflow routing
 

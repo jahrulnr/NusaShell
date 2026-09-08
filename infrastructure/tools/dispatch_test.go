@@ -164,6 +164,9 @@ func TestAllAdvertisedFamilyOpsRoute(t *testing.T) {
 		{"automation_schedule", `{"op":"every","interval":"1h","yaml":"name: x"}`},
 		{"conversation", `{"op":"list"}`},
 		{"conversation", `{"op":"search","query":"backend"}`},
+		{"conversation", `{"op":"search","id":"conv_target","query":"backend"}`},
+		{"conversation", `{"op":"info","id":"conv_target"}`},
+		{"conversation", `{"op":"read","id":"conv_target"}`},
 		{"conversation", `{"op":"send","id":"conv_target","content":"hello"}`},
 	}
 	for _, tc := range cases {

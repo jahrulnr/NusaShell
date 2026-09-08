@@ -139,15 +139,23 @@ var dispatchFamilies = []dispatchFamily{
 	},
 	{
 		root:    "conversation",
-		members: []string{"list", "search", "send"},
+		members: []string{"list", "search", "read", "info", "send"},
 		def: ToolInfo{
-			Name:        "conversation",
-			Description: "Inter-agent room communication; \"op\" selects: list {limit?,offset?} list visible rooms (newest activity first); search {query,limit?,offset?} search rooms by title or summary; send {id,content} send a message to another conversation room.",
+			Name: "conversation",
+			Description: "Conversation rooms and transcripts; \"op\" selects: " +
+				"list {limit?,offset?} visible rooms (newest activity first, excludes self and hidden pipeline/background rooms); " +
+				"search {query,id?,limit?,offset?} without id: rooms matching id/title/summary/message text (match field names the hit); with id: message snippets inside that room only; " +
+				"info {id,chunk?} metadata (turn_count, chunk_count, summary_preview) — chunk omits active transcript, chunk=N is 0-based archive; " +
+				"read {id,chunk?,start?,end?} visible user/assistant/tool messages by inclusive turn index (0-based, oldest first; omit start and end for the last 5 turns; start=0 end=0 is turn 0 only); " +
+				"send {id,content} deliver a peer message to another visible room.",
 			InputSchema: objSchema(
-				pEnum("op", "Operation", "list", "search", "send"),
-				pStr("id", "Target conversation room ID (send)"),
+				pEnum("op", "Operation", "list", "search", "read", "info", "send"),
+				pStr("id", "Conversation id (search scope / read / info / send target)"),
 				pStr("content", "Message text to send (send)"),
-				pStr("query", "Search query for title or summary (search)"),
+				pStr("query", "Search query: room id/title/summary/message, or in-room message text when id is set (search)"),
+				pInt("chunk", "Optional 0-based archived pre-compaction chunk index (read/info). Omit for the active transcript."),
+				pInt("start", "Inclusive first turn index (read). Omit with end for the last 5 turns."),
+				pInt("end", "Inclusive last turn index (read). Omit with start to read a single turn."),
 				pInt("limit", "Max results (list/search default 20)"),
 				pInt("offset", "Pagination offset (list/search default 0)"),
 			),

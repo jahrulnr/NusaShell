@@ -41,6 +41,7 @@ var (
 	DispatcherToolInfos       = tools.DispatcherToolInfos
 	FilterDispatcherToolInfos = tools.FilterDispatcherToolInfos
 	IsACPTool                 = tools.IsACPTool
+	IsLearnerBannedTool       = tools.IsLearnerBannedTool
 	FilterACPTools            = tools.FilterACPTools
 	NewPipelineAgentRunner    = tools.NewPipelineAgentRunner
 	buildToolContract         = tools.BuildContract
