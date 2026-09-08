@@ -219,8 +219,8 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 			subagentDesc += "\n\n" + delegation
 		}
 		tools = append(tools,
-			application.ToolInfo{Name: "subagent", Description: subagentDesc, InputSchema: obj("object", props("prompt", str("Self-contained task brief"), "agent_id", str("Optional ACP agent id from Providers; omit to use the default enabled agent"), "workspace", str("Optional absolute workspace path (defaults to the conversation workspace)"), "mode_id", str("Optional ACP session mode id advertised by the agent"), "model_id", str("Optional ACP model id advertised by the agent"), "count", intSchema("Number of parallel spawns of the same brief (1-6, default 1)")), "prompt")},
-			application.ToolInfo{Name: "subagent_steer", Description: "Send an additional instruction to a live ACP subagent without cancelling it. Applied at the next prompt boundary.", InputSchema: obj("object", props("id", str("ACP run id from subagent"), "text", str("Steer instruction")), "id", "text")},
+			application.ToolInfo{Name: "subagent", Description: subagentDesc, InputSchema: obj("object", props("prompt", str("Self-contained task brief"), "title", str("Optional short label shown in the Agent dock/drawer (what this run is for)"), "agent_id", str("Optional ACP agent id from Providers; omit to use the default enabled agent"), "workspace", str("Optional absolute workspace path (defaults to the conversation workspace)"), "mode_id", str("Optional ACP session mode id advertised by the agent"), "model_id", str("Optional ACP model id advertised by the agent"), "count", intSchema("Number of parallel spawns of the same brief (1-6, default 1)")), "prompt")},
+			application.ToolInfo{Name: "subagent_steer", Description: "Redirect a live ACP subagent: cancel the in-flight session/prompt and send text as the next prompt on the same session (interrupt, not queue-until-idle). The run stays open until the steered prompt finishes or you stop it.", InputSchema: obj("object", props("id", str("ACP run id from subagent"), "text", str("Steer instruction")), "id", "text")},
 			application.ToolInfo{Name: "subagent_stop", Description: "Cancel a live ACP subagent run.", InputSchema: obj("object", props("id", str("ACP run id")), "id")},
 			application.ToolInfo{Name: "subagent_wait", Description: "Block this round until an async ACP subagent run is terminal. Use when the next tool in this same round needs the result first. Returns a persisted output_path and only the latest meaningful turn; read the path when full history is needed.", InputSchema: obj("object", props("id", str("ACP run id"), "timeout_ms", intSchema("Optional wait timeout in milliseconds")), "id")},
 		)
@@ -236,7 +236,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		tools = append(tools, application.ToolInfo{
 			Name:        "delegate",
 			Description: "Delegate a self-contained task to an internal NusaShell background agent: the same engine as this conversation, running headless in a hidden pipeline room with the standard toolbox (no subagent/delegate tools, no permission prompts). It does not receive this conversation's history — pass a compact brief with absolute paths. Always async: returns immediately with a run id; the tool call stays \"running\" until the delegate finishes, then a synthetic `delegate_result` tool call is injected at the next steer-style round boundary (or a new turn if idle) so you process it.",
-			InputSchema: obj("object", props("prompt", str("Self-contained task brief"), "workspace", str("Optional absolute workspace path (defaults to the conversation workspace)")), "prompt"),
+			InputSchema: obj("object", props("prompt", str("Self-contained task brief"), "title", str("Optional short label shown in the Agent dock/drawer (what this run is for)"), "workspace", str("Optional absolute workspace path (defaults to the conversation workspace)")), "prompt"),
 		})
 	}
 	if sw := t.webAnswerSearcher(); sw != nil && sw.CanAnswer() {

@@ -935,7 +935,7 @@ func TestHydrationIncludesPendingBackgroundRuns(t *testing.T) {
 	// internal delegate (carries an AcpRun with worker detail).
 	app.trackPendingRun("c1", "run-b", "subagent")
 	app.trackPendingRun("c1", "run-a", "delegate")
-	app.registerDelegateRun("run-a", "", "c1", "/ws", "", "glm-5-2")
+	app.registerDelegateRun("run-a", "", "c1", "/ws", "", "glm-5-2", "")
 
 	conv := &domain.Conversation{ID: "c1", Workspace: "/ws"}
 	msgs := app.buildHydration(conv)

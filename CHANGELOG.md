@@ -16,7 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   visible user/assistant/tool messages by inclusive turn index (optional
   archived `chunk`, default last 5 turns, overflow-capped).
 
+- **`subagent` / `delegate` optional `title`.** Short label (max 80 chars)
+  shown on Agent dock chips and the drawer so users can tell what each run
+  is for; falls back to the ACP/delegate agent name. Parallel `count` > 1
+  suffixes `(1)`, `(2)`, ….
+
 ### Changed
+
+- **`subagent_steer` interrupts the live ACP prompt.** While a child
+  `session/prompt` is in flight, steer sends `session/cancel` then
+  `session/prompt` with the new text on the same session (run stays open).
+  It no longer waits for the child to become idle before delivering the
+  instruction. `subagent_stop` still ends the run.
 
 - **Learner toolbox is pruned.** Background learner kinds no longer
   advertise or execute `memory_project`, ACP/`delegate`, or the MCP family

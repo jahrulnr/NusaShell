@@ -392,6 +392,7 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 		},
 		AgentID:              req.Agent.ID,
 		AgentName:            req.Agent.Name,
+		Title:                domain.NormalizeAcpRunTitle(req.Title),
 		ConversationID:       req.ConversationID,
 		ParentToolCallID:     req.ParentToolCallID,
 		SessionID:            sess.SessionID,
@@ -635,8 +636,8 @@ func (pc *pooledConn) WriteTextFile(ctx context.Context, params acpclient.WriteT
 // drivePrompt sends one prompt to the ACP session. The initial delegation is
 // already carried by AcpRun.Prompt, so only follow-up/steering prompts are
 // recorded as transcript chunks. Recording at dispatch time (rather than
-// when Steer queues text) avoids showing a prompt that was replaced before
-// the ACP session actually received it.
+// when Steer stores the replace text) avoids showing a prompt that was
+// replaced before the ACP session actually received it.
 func (lr *liveRun) drivePrompt(text string, recordPrompt bool) {
 	lr.mu.Lock()
 	if lr.closed {
@@ -664,7 +665,7 @@ func (lr *liveRun) drivePrompt(text string, recordPrompt bool) {
 
 	lr.mu.Lock()
 	lr.prompting = false
-	steer := lr.run.QueuedSteer
+	replace := strings.TrimSpace(lr.run.QueuedSteer)
 	lr.run.QueuedSteer = ""
 	if lr.closed {
 		lr.mu.Unlock()
@@ -681,18 +682,30 @@ func (lr *liveRun) drivePrompt(text string, recordPrompt bool) {
 		lr.conn.runtime.emitDone(run)
 		return
 	}
+	// Cancelled prompt: if Steer asked to replace the turn, keep the session
+	// alive and send the steer text as the next session/prompt. Otherwise the
+	// run ends (explicit Stop or external cancel).
 	if res.StopReason == "cancelled" {
+		if replace != "" {
+			lr.run.BeginRunning(clock.NewTime().Time())
+			lr.mu.Unlock()
+			lr.conn.runtime.emitUpdate(cloneRun(lr.run))
+			lr.drivePrompt(replace, true)
+			return
+		}
 		lr.finishLocked(domain.AcpRunCancelled, "", res.StopReason)
 		run := cloneRun(lr.run)
 		lr.mu.Unlock()
 		lr.conn.runtime.emitDone(run)
 		return
 	}
-	if steer != "" {
+	// Natural completion with a pending replace (Cancel raced the end of the
+	// turn): still deliver the steer as a follow-up prompt on the live session.
+	if replace != "" {
 		lr.run.BeginRunning(clock.NewTime().Time())
 		lr.mu.Unlock()
 		lr.conn.runtime.emitUpdate(cloneRun(lr.run))
-		lr.drivePrompt(steer, true)
+		lr.drivePrompt(replace, true)
 		return
 	}
 	lr.finishLocked(domain.AcpRunCompleted, "", res.StopReason)
@@ -723,6 +736,11 @@ func (lr *liveRun) finishLocked(status domain.AcpRunStatus, errMsg, stop string)
 	close(lr.done)
 }
 
+// Steer interrupts a live ACP run with a new instruction. While a
+// session/prompt is in flight it sends session/cancel, then replaces the
+// turn with session/prompt(text) on the same session (the run stays open).
+// When the session is already between prompts, it starts the new prompt
+// immediately. This is interrupt-and-redirect, not queue-until-idle.
 func (rt *Runtime) Steer(runID, text string) error {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -732,28 +750,31 @@ func (rt *Runtime) Steer(runID, text string) error {
 	if err != nil {
 		return err
 	}
-	startNow := false
 	lr.mu.Lock()
 	if !lr.run.Live() {
 		lr.mu.Unlock()
 		return fmt.Errorf("run is not active")
 	}
-	if lr.prompting {
-		lr.run.QueuedSteer = text
-		lr.run.UpdatedAt = clock.NewTime().Time()
-		snap := cloneRun(lr.run)
-		lr.mu.Unlock()
-		rt.emitUpdate(snap)
-		return nil
+	lr.run.QueuedSteer = text
+	lr.run.UpdatedAt = clock.NewTime().Time()
+	prompting := lr.prompting
+	sessionID := lr.run.SessionID
+	if !prompting {
+		lr.run.BeginRunning(clock.NewTime().Time())
 	}
-	lr.run.BeginRunning(clock.NewTime().Time())
-	startNow = true
 	snap := cloneRun(lr.run)
 	lr.mu.Unlock()
 	rt.emitUpdate(snap)
-	if startNow {
-		go lr.drivePrompt(text, true)
+	if prompting {
+		_ = lr.conn.conn.Cancel(sessionID)
+		return nil
 	}
+	// Not mid-prompt: QueuedSteer is consumed by drivePrompt after the
+	// (immediate) empty path — clear and send directly.
+	lr.mu.Lock()
+	lr.run.QueuedSteer = ""
+	lr.mu.Unlock()
+	go lr.drivePrompt(text, true)
 	return nil
 }
 

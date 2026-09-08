@@ -199,6 +199,7 @@ func runFromRecord(rec domain.AcpRunRecord) *domain.AcpRun {
 		},
 		AgentID:          rec.AgentID,
 		AgentName:        rec.AgentName,
+		Title:            rec.Title,
 		ConversationID:   rec.ConversationID,
 		ParentToolCallID: rec.ParentToolCallID,
 		Workspace:        rec.Workspace,

@@ -55,6 +55,7 @@ func (s *Service) SpawnSubagents(ctx context.Context, conversationID, toolCallID
 	}
 	var args struct {
 		Prompt    string `json:"prompt"`
+		Title     string `json:"title"`
 		AgentID   string `json:"agent_id"`
 		Workspace string `json:"workspace"`
 		ModeID    string `json:"mode_id"`
@@ -68,6 +69,7 @@ func (s *Service) SpawnSubagents(ctx context.Context, conversationID, toolCallID
 	if strings.TrimSpace(args.Prompt) == "" {
 		return "", fmt.Errorf("prompt is required")
 	}
+	title := domain.NormalizeAcpRunTitle(args.Title)
 	count := args.Count
 	if count <= 0 {
 		count = 1
@@ -121,11 +123,16 @@ func (s *Service) SpawnSubagents(ctx context.Context, conversationID, toolCallID
 
 	results := make([]domain.AcpSpawned, count)
 	for i := 0; i < count; i++ {
+		runTitle := title
+		if title != "" && count > 1 {
+			runTitle = fmt.Sprintf("%s (%d)", title, i+1)
+		}
 		run, err := s.deps.Runtime.Spawn(ctx, SpawnRequest{
 			Agent:            agent,
 			ConversationID:   conversationID,
 			ParentToolCallID: toolCallID,
 			Prompt:           prompt,
+			Title:            runTitle,
 			Workspace:        workspace,
 			ModeID:           args.ModeID,
 			ModelID:          args.ModelID,

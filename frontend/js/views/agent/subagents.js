@@ -254,16 +254,25 @@ function renderDock() {
   }
 }
 
+function runDisplayName(run) {
+  const title = typeof run?.title === 'string' ? run.title.trim() : '';
+  if (title) return title;
+  return run?.agent_name || 'ACP';
+}
+
+export { runDisplayName };
+
 function buildDockChip(run) {
+  const name = runDisplayName(run);
   const chip = el('button', {
     class: `acp-dock-chip is-${run.status}`,
     type: 'button',
     role: 'listitem',
     'data-run-id': run.id,
-    title: `${run.agent_name || 'ACP'} · ${statusLabel(run.status)}`,
+    title: `${name} · ${statusLabel(run.status)}`,
   },
     el('span', { class: 'acp-dock-chip-pulse', 'aria-hidden': 'true' }),
-    el('span', { class: 'acp-dock-chip-name', text: run.agent_name || 'ACP' }),
+    el('span', { class: 'acp-dock-chip-name', text: name }),
     el('span', { class: 'acp-dock-chip-status', text: statusLabel(run.status) }),
   );
   chip.addEventListener('click', () => openDrawer(run.id));
@@ -277,8 +286,11 @@ function buildDockChip(run) {
 }
 
 function updateDockChip(chip, run) {
+  const name = runDisplayName(run);
   chip.className = `acp-dock-chip is-${run.status}`;
-  chip.title = `${run.agent_name || 'ACP'} · ${statusLabel(run.status)}`;
+  chip.title = `${name} · ${statusLabel(run.status)}`;
+  const nameEl = chip.querySelector('.acp-dock-chip-name');
+  if (nameEl && nameEl.textContent !== name) nameEl.textContent = name;
   const status = chip.querySelector('.acp-dock-chip-status');
   if (status && status.textContent !== statusLabel(run.status)) {
     status.textContent = statusLabel(run.status);
@@ -334,7 +346,7 @@ function renderDrawer() {
   // hasn't hydrated yet, show a loading state instead of silently
   // switching to a different run.
   const selected = state.runs.get(state.drawerRunId) || (state.drawerRunId ? undefined : runs[0]);
-  document.getElementById('acp-drawer-title').textContent = selected ? (selected.agent_name || 'Subagent') : 'Subagents';
+  document.getElementById('acp-drawer-title').textContent = selected ? (runDisplayName(selected) || 'Subagent') : 'Subagents';
   document.getElementById('acp-drawer-subtitle').textContent = selected
     ? `${statusLabel(selected.status)} · ${shortPath(selected.workspace)}`
     : 'No subagents in this conversation';
@@ -422,7 +434,7 @@ function buildRunSidebarItem(run) {
 function updateRunSidebarItem(item, run, selectedId) {
   const live = LIVE.has(run.status);
   item.className = `agent-conversation-item is-${run.status}${run.id === selectedId ? ' is-active' : ''}${live ? ' is-running' : ''}`;
-  item.querySelector('.agent-conversation-title').textContent = run.agent_name || 'ACP';
+  item.querySelector('.agent-conversation-title').textContent = runDisplayName(run);
   const time = item.querySelector('.agent-conversation-time');
   time.textContent = `${statusLabel(run.status)} · ${shortPath(run.workspace)}`;
   if (live) {
@@ -445,7 +457,7 @@ function renderPopup() {
     if (state.popupRunId && !state.runLoadErrors.has(state.popupRunId)) void ensureRun(state.popupRunId);
     return;
   }
-  title.textContent = run.agent_name || 'Subagent';
+  title.textContent = runDisplayName(run) || 'Subagent';
   // Same run: patch in place so the popup transcript doesn't reset.
   const existing = body.querySelector(`.acp-run-panel[data-run-id="${run.id}"]`);
   if (!existing) {

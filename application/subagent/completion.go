@@ -55,6 +55,7 @@ func (s *Service) PersistRun(run *domain.AcpRun) string {
 		ID:               run.ID,
 		AgentID:          run.AgentID,
 		AgentName:        run.AgentName,
+		Title:            run.Title,
 		ConversationID:   run.ConversationID,
 		ParentToolCallID: run.ParentToolCallID,
 		Workspace:        run.Workspace,

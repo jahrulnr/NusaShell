@@ -91,6 +91,7 @@ type AcpRunDTO struct {
 	ID                   string                  `json:"id"`
 	AgentID              string                  `json:"agent_id"`
 	AgentName            string                  `json:"agent_name"`
+	Title                string                  `json:"title,omitempty"`
 	ConversationID       string                  `json:"conversation_id,omitempty"`
 	ParentToolCallID     string                  `json:"parent_tool_call_id,omitempty"`
 	SessionID            string                  `json:"session_id,omitempty"`

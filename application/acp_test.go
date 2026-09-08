@@ -945,7 +945,7 @@ func TestDelegateRunSurfaceUsesTheCompleteHeadlessTranscript(t *testing.T) {
 		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"conv_delegate": hidden}},
 		Bus:           NewBus(),
 	}
-	_, running := app.registerDelegateRun("run_delegate", "call_parent", "conv_parent", "/workspace", "Inspect and fix the file", "cheap:model")
+	_, running := app.registerDelegateRun("run_delegate", "call_parent", "conv_parent", "/workspace", "Inspect and fix the file", "cheap:model", "")
 	if running.Status != domain.AcpRunRunning {
 		t.Fatalf("registered delegate status = %q, want running", running.Status)
 	}

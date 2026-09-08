@@ -83,7 +83,36 @@ const (
 	MaxAcpTranscriptBytes = 256 * 1024
 	// MaxAcpPermissionPaths is how many paths to keep on a permission event.
 	MaxAcpPermissionPaths = 12
+	// MaxAcpRunTitleLen bounds optional subagent/delegate display titles.
+	MaxAcpRunTitleLen = 80
 )
+
+// NormalizeAcpRunTitle trims and bounds an optional subagent/delegate title.
+// Empty input returns "".
+func NormalizeAcpRunTitle(raw string) string {
+	title := strings.Join(strings.Fields(strings.TrimSpace(raw)), " ")
+	if title == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(title) <= MaxAcpRunTitleLen {
+		return title
+	}
+	return string([]rune(title)[:MaxAcpRunTitleLen])
+}
+
+// AcpRunLabel is the user-facing name for dock/drawer UI: optional Title, else AgentName.
+func AcpRunLabel(run *AcpRun) string {
+	if run == nil {
+		return ""
+	}
+	if title := strings.TrimSpace(run.Title); title != "" {
+		return title
+	}
+	if name := strings.TrimSpace(run.AgentName); name != "" {
+		return name
+	}
+	return "ACP"
+}
 
 // AcpAgent is a generic ACP subprocess configuration. Vendors are not
 // hardcoded: command + args + env is the whole identity. For remote
@@ -173,6 +202,7 @@ type AcpRun struct {
 	TaskState[AcpRunStatus]
 	AgentID              string
 	AgentName            string
+	Title                string // optional user-facing run label (dock/drawer)
 	ConversationID       string
 	ParentToolCallID     string
 	SessionID            string

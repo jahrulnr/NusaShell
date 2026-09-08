@@ -56,11 +56,11 @@ execute arbitrary side effects.
 | `automation_schedule` | durable schedule dispatcher; pass `op="once"` for an RFC3339 one-shot or `op="every"` for a cron/interval schedule |
 | `wait_until` | durable wait; the runner is not occupied |
 | `sleep` | pause 1–300 seconds; use for retry backoff or between polls of an async `automation` run |
-| `subagent` | spawn 1–6 ACP coding-agent sessions (only listed when at least one ACP agent is enabled in Providers; never listed for pipeline `agent:` steps) |
-| `subagent_steer` | queue an extra instruction on a live ACP run |
+| `subagent` | spawn 1–6 ACP coding-agent sessions (only listed when at least one ACP agent is enabled in Providers; never listed for pipeline `agent:` steps). Optional `title` is the short label shown in the Agent dock/drawer so the user can tell what each run is for (falls back to the ACP agent name) |
+| `subagent_steer` | interrupt a live ACP run: `session/cancel` then `session/prompt` on the same session |
 | `subagent_stop` | cancel a live ACP run (pending permissions fail closed) |
 | `subagent_wait` | wait for an async ACP run to finish |
-| `delegate` | spawn one internal NusaShell background agent: the same engine, headless, in a hidden pipeline room, with the standard toolbox (no `subagent`/`delegate`, no permission prompts). It does not receive this conversation's history — pass a compact brief with absolute paths. The model comes from Settings → Agent → Internal delegate model; empty inherits the parent conversation's active model. Always async: returns a run id immediately; the tool call stays `running` until the delegate finishes, then a synthetic `delegate_result` call carries only the terminal assistant output after all tool rounds. The same ACP-shaped dock/drawer/transcript UI is used for this run. Never listed for the delegate agent itself (no recursion) |
+| `delegate` | spawn one internal NusaShell background agent: the same engine, headless, in a hidden pipeline room, with the standard toolbox (no `subagent`/`delegate`, no permission prompts). It does not receive this conversation's history — pass a compact brief with absolute paths. Optional `title` is the short label shown in the Agent dock/drawer (falls back to the delegate agent name). The model comes from Settings → Agent → Internal delegate model; empty inherits the parent conversation's active model. Always async: returns a run id immediately; the tool call stays `running` until the delegate finishes, then a synthetic `delegate_result` call carries only the terminal assistant output after all tool rounds. The same ACP-shaped dock/drawer/transcript UI is used for this run. Never listed for the delegate agent itself (no recursion) |
 
 ### Learner `learn()` (background agent only)
 
@@ -489,7 +489,10 @@ Bad:
 ## ACP subagents
 
 `subagent` fans a self-contained brief out to 1–6 parallel ACP sessions
-(process-wide cap 8 live runs). Pass absolute paths. `workspace` overrides the
+(process-wide cap 8 live runs). Pass absolute paths. Optional `title` is a
+short user-facing label (max 80 chars) shown on dock chips and the drawer —
+prefer a task name over leaving the UI as the bare ACP agent name; with
+`count` > 1 the harness suffixes `(1)`, `(2)`, …. `workspace` overrides the
 conversation workspace for new spawns only — an already-running session keeps
 the directory it started with. The tool is always async: it returns run ids
 with `status: "starting"` immediately and the parent agent is free to
@@ -507,6 +510,14 @@ conversation under `conversations/<conversation_id>.acp/`. Permissions are auto-
 (orchestrator delegates authority). The user can peek the transcript
 from the Agent dock / drawer / popup. Unattended pipeline agents never
 see these tools.
+
+Good:
+
+    subagent(prompt="…", title="Refactor HTTP client")
+
+Bad:
+
+    subagent(prompt="…")  # dock shows only the ACP agent name; user cannot tell runs apart
 
 The configured preferred ACP mode is applied before the first prompt. If the
 ACP agent rejects that mode switch, spawning fails explicitly instead of
@@ -534,9 +545,12 @@ Bad:
 
     subagent_wait(id="acp_run_123", timeout_ms=120000)  # repeat this after a steer without re-evaluating the request
 
-`subagent_steer` and `subagent_stop` acknowledge the current run status.
-Their provider-facing results are bounded and omit intermediate transcript
-noise.
+`subagent_steer` cancels the in-flight ACP `session/prompt` and immediately
+sends `text` as the next prompt on the **same** session (the run stays open).
+It does not wait for the current turn to finish idle. Use `subagent_stop` to
+end the run entirely. `subagent_steer` and `subagent_stop` acknowledge the
+current run status; their provider-facing results are bounded and omit
+intermediate transcript noise.
 
 ## Native web research (searchwire)
 

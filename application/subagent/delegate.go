@@ -17,6 +17,7 @@ import (
 func (s *Service) SpawnDelegate(ctx context.Context, conversationID, toolCallID string, argsJSON []byte) (string, error) {
 	var args struct {
 		Prompt    string `json:"prompt"`
+		Title     string `json:"title"`
 		Workspace string `json:"workspace"`
 	}
 	if err := json.Unmarshal(argsJSON, &args); err != nil {
@@ -26,6 +27,7 @@ func (s *Service) SpawnDelegate(ctx context.Context, conversationID, toolCallID 
 	if prompt == "" {
 		return "", fmt.Errorf("prompt is required")
 	}
+	title := domain.NormalizeAcpRunTitle(args.Title)
 	workspace := strings.TrimSpace(args.Workspace)
 	if workspace == "" && conversationID != "" && s.deps.Conversations != nil {
 		if conv, err := s.deps.Conversations.Get(conversationID); err == nil {
@@ -42,7 +44,7 @@ func (s *Service) SpawnDelegate(ctx context.Context, conversationID, toolCallID 
 	}
 
 	runID := domain.NewID(domain.IDPrefixRun)
-	starting, running := s.RegisterDelegateRun(runID, toolCallID, conversationID, workspace, prompt, modelID)
+	starting, running := s.RegisterDelegateRun(runID, toolCallID, conversationID, workspace, prompt, modelID, title)
 	s.EmitRun(contracts.EventAcpRunStarted, starting)
 	s.EmitRun(contracts.EventAcpRunUpdated, running)
 
@@ -125,7 +127,7 @@ const (
 	internalDelegateAgentName = "NusaShell delegate"
 )
 
-func (s *Service) RegisterDelegateRun(runID, toolCallID, conversationID, workspace, prompt, modelID string) (*domain.AcpRun, *domain.AcpRun) {
+func (s *Service) RegisterDelegateRun(runID, toolCallID, conversationID, workspace, prompt, modelID, title string) (*domain.AcpRun, *domain.AcpRun) {
 	now := clock.NewTime().Time()
 	_, currentModel, ok := domain.SplitQualifiedModel(strings.TrimSpace(modelID))
 	if !ok {
@@ -139,6 +141,7 @@ func (s *Service) RegisterDelegateRun(runID, toolCallID, conversationID, workspa
 		},
 		AgentID:          internalDelegateAgentID,
 		AgentName:        internalDelegateAgentName,
+		Title:            domain.NormalizeAcpRunTitle(title),
 		ConversationID:   conversationID,
 		ParentToolCallID: toolCallID,
 		Workspace:        workspace,

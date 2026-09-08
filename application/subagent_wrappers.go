@@ -111,8 +111,8 @@ func (a *App) resolveDelegateModel(parentConvID string) (string, error) {
 	return a.subagentService().ResolveDelegateModel(parentConvID)
 }
 
-func (a *App) registerDelegateRun(runID, toolCallID, conversationID, workspace, prompt, modelID string) (*domain.AcpRun, *domain.AcpRun) {
-	return a.subagentService().RegisterDelegateRun(runID, toolCallID, conversationID, workspace, prompt, modelID)
+func (a *App) registerDelegateRun(runID, toolCallID, conversationID, workspace, prompt, modelID, title string) (*domain.AcpRun, *domain.AcpRun) {
+	return a.subagentService().RegisterDelegateRun(runID, toolCallID, conversationID, workspace, prompt, modelID, title)
 }
 
 func (a *App) finishDelegateRun(runID, runConversationID, output string, runErr error) *domain.AcpRun {

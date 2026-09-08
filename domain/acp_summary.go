@@ -269,6 +269,7 @@ type AcpSpawned struct {
 func FormatSpawnResult(results []AcpSpawned) string {
 	type item struct {
 		ID        string `yaml:"id,omitempty"`
+		Title     string `yaml:"title,omitempty"`
 		Status    string `yaml:"status"`
 		Workspace string `yaml:"workspace,omitempty"`
 		Summary   string `yaml:"summary,omitempty"`
@@ -281,7 +282,7 @@ func FormatSpawnResult(results []AcpSpawned) string {
 			out = append(out, item{Status: "failed", Error: r.Err.Error(), Async: true})
 			continue
 		}
-		it := item{ID: r.Run.ID, Status: string(r.Run.Status), Workspace: r.Run.Workspace, Async: true}
+		it := item{ID: r.Run.ID, Title: r.Run.Title, Status: string(r.Run.Status), Workspace: r.Run.Workspace, Async: true}
 		if !r.Run.Live() {
 			it.Summary = TranscriptSummary(r.Run)
 			it.Error = r.Run.Error

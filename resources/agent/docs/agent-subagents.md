@@ -37,6 +37,7 @@ Good example:
 
     delegate(prompt="Inspect /workspace/app.go, make the requested fix, run the
     focused tests, and report the changed files plus the test result.",
+             title="Fix app.go",
              workspace="/workspace")
 
 Bad example:
@@ -69,7 +70,8 @@ Good example:
     subagent(prompt="Refactor /home/user/proj/src/api/client.go: extract the
     HTTP client into /home/user/proj/src/api/http.go, keep the existing public
     interface, then run `go build ./...` and `go test ./...` to verify. Report
-    changed files and test results.")
+    changed files and test results.",
+             title="Refactor HTTP client")
 
 Bad example — vague, no paths, no verification:
 
@@ -78,6 +80,11 @@ Bad example — vague, no paths, no verification:
 Bad example — delegating work the parent can do in one tool call:
 
     subagent(prompt="list the files in /home/user/proj/src")
+
+Pass `title` whenever the user may have more than one live run: the Agent dock
+and drawer show that label instead of the bare ACP/delegate agent name so the
+user can tell what each run is for. With `count` > 1, titles are auto-suffixed
+`(1)`, `(2)`, ….
 
 A dock appears above the composer: chips for every live run (and recent
 finishes in this room), newest first — live delta updates never
@@ -95,10 +102,10 @@ when it spawns a subagent.
 
 The drawer and peek transcript use the same Agent conversation structure as
 the parent room. The initial delegation brief is shown as a user bubble, and
-each steering prompt that reaches the ACP session is recorded as another user
-bubble before the assistant rounds that follow it. Steering text is persisted
-with the terminal run, so it remains visible when the room is reopened after a
-backend restart.
+each steering prompt that reaches the ACP session (after an interrupt cancel)
+is recorded as another user bubble before the assistant rounds that follow it.
+Steering text is persisted with the terminal run, so it remains visible when
+the room is reopened after a backend restart.
 
 ## Async completion (tool injection)
 
@@ -150,15 +157,21 @@ turn. When all subagents complete, the chain resumes.
 A steer from the main composer is a real user message, not background runtime
 state. It is queued while the current provider or tool round is in flight and
 applied at the next safe boundary. `subagent_wait` is intentionally blocking,
-so a steer can wait for that call to return; this delay does not mean the
-message was dropped.
+so a composer steer can wait for that call to return; this delay does not mean
+the message was dropped.
 
 At a boundary, the parent applies finished background results and harness
-announcements first, then appends the queued steer, then starts one fresh
-assistant round. This ordering keeps the steer as the newest user instruction.
-After a steer is applied, re-evaluate the user's request before resuming the
-older plan. Do not call `subagent_wait` again merely because the previous plan
-was waiting if the steer changes the requested action.
+announcements first, then appends the queued composer steer, then starts one
+fresh assistant round. This ordering keeps the steer as the newest user
+instruction. After a steer is applied, re-evaluate the user's request before
+resuming the older plan. Do not call `subagent_wait` again merely because the
+previous plan was waiting if the steer changes the requested action.
+
+`subagent_steer` is different: it redirects a **child ACP run** by cancelling
+the in-flight `session/prompt` and sending the new text as the next prompt on
+the same ACP session (interrupt-and-replace). It does not queue until the
+child becomes idle. Prefer `subagent_steer` when the parent needs to change
+direction mid-work; use `subagent_stop` only to abandon the run.
 
 Good example, steer a child run when the user changes its direction:
 

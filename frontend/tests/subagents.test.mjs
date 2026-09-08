@@ -3,9 +3,16 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { sortRunsNewestFirst, syncTranscript } from '../js/views/agent/subagents.js';
+import { sortRunsNewestFirst, syncTranscript, runDisplayName } from '../js/views/agent/subagents.js';
 
 const acpCSS = await readFile(new URL('../styles/acp.css', import.meta.url), 'utf8');
+
+test('runDisplayName prefers title over agent_name', () => {
+  assert.equal(runDisplayName({ title: 'Inspect pets', agent_name: 'Codex' }), 'Inspect pets');
+  assert.equal(runDisplayName({ title: '  ', agent_name: 'Codex' }), 'Codex');
+  assert.equal(runDisplayName({ agent_name: 'Codex' }), 'Codex');
+  assert.equal(runDisplayName({}), 'ACP');
+});
 
 function makePanel() {
   const dom = new JSDOM('<!doctype html><html><body><div class="acp-run-panel"><div class="acp-run-meta"></div><div class="acp-transcript"></div></div></body></html>');

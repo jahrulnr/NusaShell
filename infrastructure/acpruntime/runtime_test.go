@@ -160,9 +160,8 @@ func TestSteerPersistsAsPromptTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Wait until the fake agent has accepted the first prompt. This keeps the
-	// steer on the runtime's queued-steer path instead of racing the initial
-	// drivePrompt goroutine.
+	// Wait until the fake agent has accepted the first prompt so Steer hits the
+	// in-flight cancel+replace path (not a race with the initial drivePrompt).
 	deadline := time.NewTimer(3 * time.Second)
 	defer deadline.Stop()
 	for {
@@ -182,12 +181,22 @@ func TestSteerPersistsAsPromptTranscript(t *testing.T) {
 	}
 
 initialUpdateSeen:
+	steeredAt := time.Now()
 	if err := rt.Steer(run.ID, "follow-up from parent"); err != nil {
 		t.Fatal(err)
 	}
 	finished, err := rt.Wait(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if finished.Status != domain.AcpRunCompleted {
+		t.Fatalf("status = %s, want completed after interrupt+prompt (got stop=%q err=%q)",
+			finished.Status, finished.StopReason, finished.Error)
+	}
+	// SLOW waits 2s unless cancelled. Interrupt+prompt must finish well under
+	// that full wait plus a second prompt, proving we did not queue until idle.
+	if elapsed := time.Since(steeredAt); elapsed > 1500*time.Millisecond {
+		t.Fatalf("steer took %v; expected cancel to interrupt the 2s SLOW prompt promptly", elapsed)
 	}
 	var found domain.AcpTranscriptChunk
 	for _, chunk := range finished.Transcript {

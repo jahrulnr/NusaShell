@@ -82,6 +82,7 @@ func runDTO(run *domain.AcpRun) contracts.AcpRunDTO {
 		ID:                   run.ID,
 		AgentID:              run.AgentID,
 		AgentName:            run.AgentName,
+		Title:                run.Title,
 		ConversationID:       run.ConversationID,
 		ParentToolCallID:     run.ParentToolCallID,
 		SessionID:            run.SessionID,

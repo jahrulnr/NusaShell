@@ -20,6 +20,7 @@ type SpawnRequest struct {
 	ConversationID   string
 	ParentToolCallID string
 	Prompt           string
+	Title            string
 	Workspace        string
 	ModeID           string
 	ModelID          string
