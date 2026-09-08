@@ -1,19 +1,12 @@
 package subagent
 
-import (
-	"sync"
-
-	"nusashell/domain"
-)
-
 // Service owns ACP subagent RPC, spawn, persist, and the internal delegate
-// run registry. Transcript injection that needs TurnRun stays on App via
-// DeliverRunDone / CompleteSubagent / CompleteDelegate.
+// runtime. Transcript injection that needs TurnRun stays on App via
+// DeliverRunDone / CompleteSubagent.
 type Service struct {
 	deps Deps
 
-	delegateRunsMu sync.RWMutex
-	delegateRuns   map[string]*domain.AcpRun
+	delegates *DelegateRuntime
 }
 
 // New builds a subagent Service from Deps.
@@ -23,10 +16,9 @@ func New(d Deps) *Service {
 		goFn = func(_ string, fn func()) { go fn() }
 	}
 	d.Go = goFn
-	return &Service{
-		deps:         d,
-		delegateRuns: map[string]*domain.AcpRun{},
-	}
+	svc := &Service{deps: d}
+	svc.delegates = newDelegateRuntime(svc)
+	return svc
 }
 
 func (s *Service) log(level, source, format string, args ...any) {

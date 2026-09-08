@@ -340,9 +340,6 @@ func (a *App) deliverRunDone(conversationID string, pending pendingRunDone) {
 func (a *App) completeSubagentRunLocked(conversationID, toolCallID string, status domain.ToolCallStatus, run *domain.AcpRun, outputPath string) error {
 	return a.agentService().CompleteSubagentRunLocked(conversationID, toolCallID, status, run, outputPath)
 }
-func (a *App) completeDelegateRunLocked(conversationID, runID, toolCallID string, status domain.ToolCallStatus, output, runConvID string) error {
-	return a.agentService().CompleteDelegateRunLocked(conversationID, runID, toolCallID, status, output, runConvID)
-}
 func (a *App) triggerBackgroundCompletionTurn(conversationID string) {
 	a.agentService().TriggerBackgroundCompletionTurn(conversationID)
 }

@@ -86,7 +86,7 @@ func TestAcpSpawnSteerStopViaTools(t *testing.T) {
 	payload, _ := json.Marshal(map[string]any{
 		"prompt": "hello nest", "async": true, "count": 2, "workspace": ws, "agent_id": id,
 	})
-	out, err := h.app.SpawnSubagents(ctx, payload)
+	out, err := h.app.Subagent(ctx, payload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestAcpSpawnSteerStopViaTools(t *testing.T) {
 	slowPayload, _ := json.Marshal(map[string]any{
 		"prompt": "SLOW nest", "async": true, "workspace": ws, "agent_id": id,
 	})
-	slow, err := h.app.SpawnSubagents(ctx, slowPayload)
+	slow, err := h.app.Subagent(ctx, slowPayload)
 	if err != nil {
 		t.Fatal(err)
 	}

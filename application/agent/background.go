@@ -98,61 +98,6 @@ func (a *Service) subagentResultMessage(run *domain.AcpRun, outputPath string, s
 	}
 }
 
-func (a *Service) CompleteDelegateRunLocked(conversationID, runID, toolCallID string, status domain.ToolCallStatus, output, runConvID string) error {
-	repo, err := a.loadRepo(conversationID)
-	if err != nil {
-		a.log("error", "delegate", "completeDelegateRun: conversation %s not found: %v", conversationID, err)
-		return err
-	}
-	conv := repo.Conversation()
-	toolArgs := toolpresentation.ToolCallArgsFromConversation(conv, toolCallID)
-	brief := domain.DelegateBriefResult(runID, status == domain.ToolOK)
-	if toolCallID != "" {
-		conv = a.UpdateToolResult(conv, "", toolCallID, status, brief, nil)
-	}
-	if err := repo.Add(domain.RoleAssistant, a.delegateResultMessage(runID, status, output, runConvID)); err != nil {
-		a.log("error", "delegate", "completeDelegateRun: add result failed: %v", err)
-		return err
-	}
-	if err := repo.Save(); err != nil {
-		a.log("error", "delegate", "completeDelegateRun: save failed: %v", err)
-		return err
-	}
-	parentRunID := ""
-	if parentRun := a.ActiveRunForConversation(conversationID); parentRun != nil {
-		parentRunID = parentRun.ID
-	}
-	if toolCallID != "" {
-		a.emitBus(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
-			RunID:          parentRunID,
-			ConversationID: conversationID,
-			ToolCallID:     toolCallID,
-			Name:           domain.DelegateToolName,
-			Status:         string(status),
-			Args:           toolpresentation.ToolArgsRaw(toolArgs),
-			Output:         brief,
-			Presentation:   toolpresentation.BuildToolPresentation(domain.DelegateToolName, toolArgs, status, brief),
-		})
-	}
-	return nil
-}
-
-func (a *Service) delegateResultMessage(runID string, status domain.ToolCallStatus, output, runConvID string) domain.Message {
-	return domain.Message{
-		ID:        domain.NewID(domain.IDPrefixMsg),
-		Role:      domain.RoleAssistant,
-		CreatedAt: clock.NewTime().Time(),
-		Status:    domain.StatusDone,
-		ToolCalls: []domain.ToolCall{{
-			ID:     domain.DelegateResultPrefix + nonce.Random(),
-			Name:   domain.DelegateResultToolName,
-			Args:   domain.DelegateResultArgs(runID, runConvID),
-			Status: status,
-			Output: output,
-		}},
-	}
-}
-
 func (a *Service) TriggerBackgroundCompletionTurn(conversationID string) {
 	a.startMu.Lock()
 	defer a.startMu.Unlock()

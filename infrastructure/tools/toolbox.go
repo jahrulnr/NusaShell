@@ -59,10 +59,7 @@ type Toolbox struct {
 		CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error)
 	}
 	Acp interface {
-		SpawnSubagents(ctx context.Context, argsJSON []byte) (string, error)
-		SteerAcpRun(ctx context.Context, argsJSON []byte) (string, error)
-		StopAcpRun(ctx context.Context, argsJSON []byte) (string, error)
-		WaitAcpRun(ctx context.Context, argsJSON []byte) (string, error)
+		Subagent(ctx context.Context, argsJSON []byte) (string, error)
 		EnabledAcpAgents() []*domain.AcpAgent
 	}
 	// Delegate spawns internal NusaShell background agents (the
@@ -191,6 +188,29 @@ func containsString(s []string, v string) bool {
 	return false
 }
 
+// mergeOp injects an op into a tool args payload for legacy per-verb
+// subagent names (subagent_steer/stop/wait) so they route through the
+// dispatcher. An existing op in the args wins; malformed args pass through.
+func mergeOp(argsJSON []byte, op string) []byte {
+	var args map[string]any
+	if len(argsJSON) > 0 {
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return argsJSON
+		}
+	}
+	if args == nil {
+		args = map[string]any{}
+	}
+	if _, ok := args["op"]; !ok {
+		args["op"] = op
+	}
+	merged, err := json.Marshal(args)
+	if err != nil {
+		return argsJSON
+	}
+	return merged
+}
+
 func (t *Toolbox) ListTools() []application.ToolInfo {
 	tools := []application.ToolInfo{
 		{Name: "todo", Description: "Manage the conversation task checklist. Modes: `new` (default, full-replace the list; empty items clears it; every item needs content), `add` (append new items; content required; existing ids are rejected), `replace` (update status/content of existing items only; omit content to keep the stored description; unknown ids are rejected), `delete` (remove items by id; status/content ignored). Prefer add/replace/delete after the list exists (saves tokens). The user can delete items from the UI — treat deleted items as gone and do not re-add them. The optional `brief` argument is a living markdown plan — required sections `## Objective` (user intent) and `## Done when` (acceptance criteria), plus optional `## Findings` and `## Approach` that grow as the task progresses — that survives compaction and is re-injected via hydration (the current checkpoint is reused until compaction, not re-injected each turn); update it as findings emerge and never drift from the Objective. The brief is mirrored to a plan file under the data directory — the result returns `plan_path` (absolute); `file_read` it to re-read the brief and hand it to subagents that need the plan. Set `clear_brief: true` to delete the brief and its plan file (items are untouched unless you also clear them); an empty `brief` alone never clears.", InputSchema: obj("object", props("items", arrObj("Todo items (max 50). new: full list. add: items to append. replace: items to update. delete: ids to remove.", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars). Required for new/add. Optional for replace (empty keeps stored text). Ignored for delete."), "status", strEnum("Item status; prefer exactly one in_progress at a time. Required for replace. Defaults to pending for new/add. Ignored for delete.", "pending", "in_progress", "completed")), "id"), "mode", strEnum("new (default, full list), add (append), replace (update existing), delete (remove by id)", "new", "add", "replace", "delete"), "brief", str("Living planning document. Required sections: `## Objective` (user intent in their words), `## Done when` (acceptance criteria); optional, grows over time: `## Findings` (paths, line numbers), `## Approach` (key steps). Max ~10000 tokens."), "clear_brief", obj("boolean", nil)), "items")},
@@ -213,16 +233,13 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Serper, Tavily, Startpage, Wikipedia, GitHub). Use when you need current or fresh information. Follow up with web_fetch on promising URLs for full page content. Oversized result lists are truncated in-band (~32KiB) with overflow_path pointing at the full JSONL in the platform temp dir; continue with file_read.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
 		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only. Extraction may read up to max_bytes (default 2MB); the in-band result is capped at ~32KiB. When truncated, overflow_path is an absolute temp file — continue with file_read using next_offset_bytes.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
 	}
-	if t.Acp != nil && len(t.Acp.EnabledAcpAgents()) > 0 {
-		subagentDesc := "Delegate subagent"
+	if t.Acp != nil && (len(t.Acp.EnabledAcpAgents()) > 0 || t.Delegate != nil) {
+		subagentDesc := "Delegate subagent — one tool for the whole subagent family. op=spawn (default) starts async subagent runs and returns immediately; the result is injected later. op=steer redirects a live run (ACP: interrupt-and-replace on the same session; internal delegate: queued for the next tool-round boundary). op=stop cancels a live run. op=wait blocks this round until a run is terminal. agent_id (spawn) selects the target: an ACP agent id from Providers, or the built-in internal delegate."
 		if delegation := application.AcpDelegationDescription(t.Acp.EnabledAcpAgents()); delegation != "" {
 			subagentDesc += "\n\n" + delegation
 		}
 		tools = append(tools,
-			application.ToolInfo{Name: "subagent", Description: subagentDesc, InputSchema: obj("object", props("prompt", str("Self-contained task brief"), "title", str("Optional short label shown in the Agent dock/drawer (what this run is for)"), "agent_id", str("Optional ACP agent id from Providers; omit to use the default enabled agent"), "workspace", str("Optional absolute workspace path (defaults to the conversation workspace)"), "mode_id", str("Optional ACP session mode id advertised by the agent"), "model_id", str("Optional ACP model id advertised by the agent"), "count", intSchema("Number of parallel spawns of the same brief (1-6, default 1)")), "prompt")},
-			application.ToolInfo{Name: "subagent_steer", Description: "Redirect a live ACP subagent: cancel the in-flight session/prompt and send text as the next prompt on the same session (interrupt, not queue-until-idle). The run stays open until the steered prompt finishes or you stop it.", InputSchema: obj("object", props("id", str("ACP run id from subagent"), "text", str("Steer instruction")), "id", "text")},
-			application.ToolInfo{Name: "subagent_stop", Description: "Cancel a live ACP subagent run.", InputSchema: obj("object", props("id", str("ACP run id")), "id")},
-			application.ToolInfo{Name: "subagent_wait", Description: "Block this round until an async ACP subagent run is terminal. Use when the next tool in this same round needs the result first. Returns a persisted output_path and only the latest meaningful turn; read the path when full history is needed.", InputSchema: obj("object", props("id", str("ACP run id"), "timeout_ms", intSchema("Optional wait timeout in milliseconds")), "id")},
+			application.ToolInfo{Name: "subagent", Description: subagentDesc, InputSchema: obj("object", props("op", strEnum("Action: spawn (default) starts async subagent runs; steer redirects a live run; stop cancels a live run; wait blocks this round until a run is terminal", "spawn", "steer", "stop", "wait"), "prompt", str("Self-contained task brief (spawn)"), "title", str("Optional short label shown in the Agent dock/drawer (what this run is for; spawn)"), "agent_id", str("Optional target (spawn): an ACP agent id from Providers, or \"internal\" to run the task on NusaShell's own engine headless in a hidden pipeline room (standard toolbox, no permission prompts, model from Settings → Internal delegate model; empty inherits this conversation's model). Omit to use the default enabled ACP agent, or the internal delegate when none is enabled"), "workspace", str("Optional absolute workspace path (defaults to the conversation workspace; spawn)"), "mode_id", str("Optional ACP session mode id advertised by the agent (spawn, ACP targets only)"), "model_id", str("Optional ACP model id advertised by the agent (spawn, ACP targets only)"), "count", intSchema("Number of parallel spawns of the same brief (spawn; 1-6, default 1)"), "id", str("Subagent run id (steer/stop/wait)"), "text", str("Steer instruction (steer)"), "timeout_ms", intSchema("Optional wait timeout in milliseconds (wait)")), "prompt")},
 		)
 	}
 	// MCP plugin tools are NOT advertised to the agent. The tool list must
@@ -232,13 +249,6 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 	// executes them only through mcp_call with a ref (<plugin-id>:<tool>) —
 	// mcp__<server>__<tool> names are not callable. MCP tools are available
 	// to pipeline workflow steps (capability resolution) and the Plugins UI.
-	if t.Delegate != nil {
-		tools = append(tools, application.ToolInfo{
-			Name:        "delegate",
-			Description: "Delegate a self-contained task to an internal NusaShell background agent: the same engine as this conversation, running headless in a hidden pipeline room with the standard toolbox (no subagent/delegate tools, no permission prompts). It does not receive this conversation's history — pass a compact brief with absolute paths. Always async: returns immediately with a run id; the tool call stays \"running\" until the delegate finishes, then a synthetic `delegate_result` tool call is injected at the next steer-style round boundary (or a new turn if idle) so you process it.",
-			InputSchema: obj("object", props("prompt", str("Self-contained task brief"), "title", str("Optional short label shown in the Agent dock/drawer (what this run is for)"), "workspace", str("Optional absolute workspace path (defaults to the conversation workspace)")), "prompt"),
-		})
-	}
 	if sw := t.webAnswerSearcher(); sw != nil && sw.CanAnswer() {
 		providers := sw.AvailableAnswerProviders()
 		providerList := strings.Join(providers, ", ")
@@ -1285,24 +1295,27 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		return t.Delegate.SpawnDelegate(ctx, argsJSON)
 	case name == "subagent":
 		if t.Acp == nil {
-			return "", fmt.Errorf("no ACP agents configured")
+			return "", fmt.Errorf("no subagent support configured")
 		}
-		return t.Acp.SpawnSubagents(ctx, argsJSON)
+		return t.Acp.Subagent(ctx, argsJSON)
+	// Legacy per-verb names route to the same dispatcher: steer/stop/wait
+	// map to their op, and the old `delegate` tool is spawn with
+	// agent_id=internal (SpawnDelegate forces it).
 	case name == "subagent_steer":
 		if t.Acp == nil {
-			return "", fmt.Errorf("no ACP agents configured")
+			return "", fmt.Errorf("no subagent support configured")
 		}
-		return t.Acp.SteerAcpRun(ctx, argsJSON)
+		return t.Acp.Subagent(ctx, mergeOp(argsJSON, "steer"))
 	case name == "subagent_stop":
 		if t.Acp == nil {
-			return "", fmt.Errorf("no ACP agents configured")
+			return "", fmt.Errorf("no subagent support configured")
 		}
-		return t.Acp.StopAcpRun(ctx, argsJSON)
+		return t.Acp.Subagent(ctx, mergeOp(argsJSON, "stop"))
 	case name == "subagent_wait":
 		if t.Acp == nil {
-			return "", fmt.Errorf("no ACP agents configured")
+			return "", fmt.Errorf("no subagent support configured")
 		}
-		return t.Acp.WaitAcpRun(ctx, argsJSON)
+		return t.Acp.Subagent(ctx, mergeOp(argsJSON, "wait"))
 	case name == "web_search":
 		var args struct {
 			Query string `json:"query"`

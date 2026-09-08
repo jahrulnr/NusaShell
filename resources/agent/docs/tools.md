@@ -56,16 +56,12 @@ execute arbitrary side effects.
 | `automation_schedule` | durable schedule dispatcher; pass `op="once"` for an RFC3339 one-shot or `op="every"` for a cron/interval schedule |
 | `wait_until` | durable wait; the runner is not occupied |
 | `sleep` | pause 1–300 seconds; use for retry backoff or between polls of an async `automation` run |
-| `subagent` | spawn 1–6 ACP coding-agent sessions (only listed when at least one ACP agent is enabled in Providers; never listed for pipeline `agent:` steps). Optional `title` is the short label shown in the Agent dock/drawer so the user can tell what each run is for (falls back to the ACP agent name) |
-| `subagent_steer` | interrupt a live ACP run: `session/cancel` then `session/prompt` on the same session |
-| `subagent_stop` | cancel a live ACP run (pending permissions fail closed) |
-| `subagent_wait` | wait for an async ACP run to finish |
-| `delegate` | spawn one internal NusaShell background agent: the same engine, headless, in a hidden pipeline room, with the standard toolbox (no `subagent`/`delegate`, no permission prompts). It does not receive this conversation's history — pass a compact brief with absolute paths. Optional `title` is the short label shown in the Agent dock/drawer (falls back to the delegate agent name). The model comes from Settings → Agent → Internal delegate model; empty inherits the parent conversation's active model. Always async: returns a run id immediately; the tool call stays `running` until the delegate finishes, then a synthetic `delegate_result` call carries only the terminal assistant output after all tool rounds. The same ACP-shaped dock/drawer/transcript UI is used for this run. Never listed for the delegate agent itself (no recursion) |
+| `subagent` | one tool for the whole subagent family (only listed when an ACP agent is enabled in Providers or internal delegation is available; never listed for pipeline `agent:` steps). `op` selects the action: `spawn` (default) starts 1–6 async subagent runs and returns run ids immediately; the tool call stays `running` until the run finishes, then a synthetic `subagent_result` call carries only the terminal assistant output after all tool rounds. `steer` redirects a live run (ACP: interrupt-and-replace on the same session; internal delegate: queued for the next tool-round boundary). `stop` cancels a live run (pending permissions fail closed). `wait` blocks this round until a run is terminal. For `spawn`, `agent_id` selects the target: an ACP agent id from Providers, or `internal` to run the task on NusaShell's own engine headless in a hidden pipeline room with the standard toolbox (no permission prompts; the model comes from Settings → Agent → Internal delegate model, empty inherits the parent conversation's active model). Omit `agent_id` to use the default enabled ACP agent, or the internal delegate when none is enabled. Optional `title` is the short label shown in the Agent dock/drawer so the user can tell what each run is for (falls back to the worker agent name). The same ACP-shaped dock/drawer/transcript UI is used for every run. Never listed for the delegate agent itself (no recursion) |
 
 ### Learner `learn()` (background agent only)
 
 The conversation agent never sees this tool. The background learner advertises
-a pruned toolbox (no `memory_project`, ACP/`delegate`, or MCP family) plus
+a pruned toolbox (no `memory_project`, subagent, or MCP family) plus
 `conversation(op=list|search|read|info)` for cross-room inspection, and
 commits catalog records with `learn()` the same way compaction commits a
 handoff with `summary()`.
@@ -207,20 +203,19 @@ offsets.
 
 The provider receives the current `Toolbox.ListTools` roster. `web_answer` is
 listed only when configured, `generate_image` is listed only when an image
-generation model is set in Settings, while `subagent`, `subagent_steer`,
-`subagent_stop`, and `subagent_wait` are listed only when an ACP agent is
-enabled. `delegate` is listed whenever the build supports internal
-delegation, and is filtered out of the delegate agent's own roster (no
-recursion).
+generation model is set in Settings, while `subagent` is listed when an ACP
+agent is enabled or internal delegation is available, and is filtered out of
+the delegate agent's own roster (no recursion).
 
 ### Dispatcher families
 
-`skill`, `memory`, `docs`, `memory_project`, and `conversation` are **dispatcher tools**: one
-advertised tool per family whose required `op` field selects the action.
+`skill`, `memory`, `docs`, `memory_project`, `conversation`, and `subagent`
+are **dispatcher tools**: one advertised tool per family whose `op` field
+selects the action (subagent defaults to `spawn`).
 Root+op is the SINGLE naming layer — the roster, execution routing, persisted
 history, hydration checkpoints, and internal callers all use exactly this
 form. There are no per-verb aliases: a call named like an old verb
-(`memory_save`, `docs_read`, …) is simply an unknown tool.
+(`memory_save`, `docs_read`, `subagent_steer`, …) is simply an unknown tool.
 
 Ops per family:
 

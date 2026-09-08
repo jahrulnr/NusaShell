@@ -67,7 +67,7 @@ func TestSpawnDelegateRegistersTitle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runs := svc.DelegateRunList("conv_1")
+	runs := svc.delegates.List("conv_1")
 	if len(runs) != 1 {
 		t.Fatalf("runs = %d", len(runs))
 	}

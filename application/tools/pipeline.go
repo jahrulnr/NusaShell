@@ -8,10 +8,11 @@ import (
 	"nusashell/domain"
 )
 
-// IsACPTool reports whether name is an ACP subagent tool.
+// IsACPTool reports whether name is a subagent-family tool. The legacy
+// `delegate` name is the same tool targeting the internal delegate.
 func IsACPTool(name string) bool {
 	switch name {
-	case "subagent", "subagent_steer", "subagent_stop", "subagent_wait":
+	case "subagent", "subagent_steer", "subagent_stop", "subagent_wait", "delegate":
 		return true
 	default:
 		return false

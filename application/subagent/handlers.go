@@ -167,7 +167,7 @@ func (s *Service) HandleRunsList(req contracts.AcpRunsListRequest) (any, *contra
 			out = append(out, runDTO(r))
 		}
 	}
-	for _, r := range s.DelegateRunList(req.ConversationID) {
+	for _, r := range s.delegates.List(req.ConversationID) {
 		if seen[r.ID] {
 			continue
 		}
@@ -219,7 +219,7 @@ func (s *Service) HandleRunsGet(req contracts.AcpRunIDRequest) (any, *contracts.
 			return runDTO(run), nil
 		}
 	}
-	if run, ok := s.DelegateRunSnapshot(req.ID); ok {
+	if run, ok := s.delegates.Get(req.ID); ok {
 		return runDTO(run), nil
 	}
 	// The runtime only owns live runs. Terminal runs survive in the per-room

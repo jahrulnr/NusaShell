@@ -484,46 +484,51 @@ func toolPresentationAction(name, args string, status domain.ToolCallStatus, raw
 		}
 	}
 	labels := map[string][3]string{
-		"exec":                      {"Running command", "Command completed", "Command failed"},
-		"file_list":                 {"Listing files", "Files listed", "File listing failed"},
-		"file_read":                 {"Reading file", "File read", "File read failed"},
-		"file_write":                {"Writing file", "File written", "File write failed"},
-		"file_patch":                {"Patching file", "File patched", "File patch failed"},
-		"file_mkdir":                {"Creating directory", "Directory created", "Directory creation failed"},
-		"file_delete":               {"Deleting path", "Path deleted", "Path deletion failed"},
-		"file_move":                 {"Moving path", "Path moved", "Path move failed"},
-		"file_copy":                 {"Copying path", "Path copied", "Path copy failed"},
-		"file_info":                 {"Inspecting path", "Path inspected", "Path inspection failed"},
-		"grep":                      {"Searching", "Search completed", "Search failed"},
-		"file_search":               {"Searching files", "Search completed", "Search failed"},
-		"find_file":                 {"Finding files", "Files found", "File search failed"},
-		"memory":                    {"Updating memory", "Memory updated", "Memory update failed"},
-		"skill":                     {"Loading skill", "Skill loaded", "Skill load failed"},
-		"docs":                      {"Reading docs", "Docs loaded", "Docs load failed"},
-		"mcp_call":                  {"Calling MCP tool", "MCP call completed", "MCP call failed"},
-		"mcp_list":                  {"Listing MCP servers", "MCP servers listed", "MCP list failed"},
-		"tool_list":                 {"Listing MCP tools", "MCP tools listed", "Tool list failed"},
-		"tool_schema":               {"Reading tool schema", "Tool schema loaded", "Tool schema failed"},
-		"mcp_search":                {"Searching MCP tools", "MCP search completed", "MCP search failed"},
-		"contract_read":             {"Reading plugin contract", "Plugin contract loaded", "Contract read failed"},
-		"mcp_install":               {"Installing plugin", "Plugin installed", "Plugin install failed"},
-		"mcp_register":              {"Registering plugin", "Plugin registered", "Plugin registration failed"},
-		"mcp_server_add":            {"Adding MCP server", "MCP server added", "MCP server add failed"},
-		"mcp_enable":                {"Connecting plugin", "Plugin connected", "Plugin connection failed"},
-		"mcp_disable":               {"Disconnecting plugin", "Plugin disconnected", "Plugin disconnect failed"},
-		"mcp_unregister":            {"Removing plugin", "Plugin removed", "Plugin removal failed"},
-		"web_search":                {"Searching the web", "Web search completed", "Web search failed"},
-		"web_fetch":                 {"Fetching page", "Page fetched", "Page fetch failed"},
-		"web_answer":                {"Preparing web answer", "Web answer ready", "Web answer failed"},
-		"generate_image":            {"Generating image", "Image generated", "Image generation failed"},
-		"generate_speech":           {"Generating speech", "Speech generated", "Speech generation failed"},
-		"generate_video":            {"Generating video", "Video generated", "Video generation failed"},
-		"generate_media":            {"Generating media", "Media generated", "Media generation failed"},
-		"read_media":                {"Reading media", "Media read", "Media read failed"},
-		"show":                      {"Preparing preview", "Preview ready", "Preview failed"},
-		"todo":                      {"Updating tasks", "Tasks updated", "Task update failed"},
-		"ask_question":              {"Waiting for answer", "Answer received", "Question failed"},
-		"subagent":                  {"Starting subagent", "Subagent completed", "Subagent failed"},
+		"exec":            {"Running command", "Command completed", "Command failed"},
+		"file_list":       {"Listing files", "Files listed", "File listing failed"},
+		"file_read":       {"Reading file", "File read", "File read failed"},
+		"file_write":      {"Writing file", "File written", "File write failed"},
+		"file_patch":      {"Patching file", "File patched", "File patch failed"},
+		"file_mkdir":      {"Creating directory", "Directory created", "Directory creation failed"},
+		"file_delete":     {"Deleting path", "Path deleted", "Path deletion failed"},
+		"file_move":       {"Moving path", "Path moved", "Path move failed"},
+		"file_copy":       {"Copying path", "Path copied", "Path copy failed"},
+		"file_info":       {"Inspecting path", "Path inspected", "Path inspection failed"},
+		"grep":            {"Searching", "Search completed", "Search failed"},
+		"file_search":     {"Searching files", "Search completed", "Search failed"},
+		"find_file":       {"Finding files", "Files found", "File search failed"},
+		"memory":          {"Updating memory", "Memory updated", "Memory update failed"},
+		"skill":           {"Loading skill", "Skill loaded", "Skill load failed"},
+		"docs":            {"Reading docs", "Docs loaded", "Docs load failed"},
+		"mcp_call":        {"Calling MCP tool", "MCP call completed", "MCP call failed"},
+		"mcp_list":        {"Listing MCP servers", "MCP servers listed", "MCP list failed"},
+		"tool_list":       {"Listing MCP tools", "MCP tools listed", "Tool list failed"},
+		"tool_schema":     {"Reading tool schema", "Tool schema loaded", "Tool schema failed"},
+		"mcp_search":      {"Searching MCP tools", "MCP search completed", "MCP search failed"},
+		"contract_read":   {"Reading plugin contract", "Plugin contract loaded", "Contract read failed"},
+		"mcp_install":     {"Installing plugin", "Plugin installed", "Plugin install failed"},
+		"mcp_register":    {"Registering plugin", "Plugin registered", "Plugin registration failed"},
+		"mcp_server_add":  {"Adding MCP server", "MCP server added", "MCP server add failed"},
+		"mcp_enable":      {"Connecting plugin", "Plugin connected", "Plugin connection failed"},
+		"mcp_disable":     {"Disconnecting plugin", "Plugin disconnected", "Plugin disconnect failed"},
+		"mcp_unregister":  {"Removing plugin", "Plugin removed", "Plugin removal failed"},
+		"web_search":      {"Searching the web", "Web search completed", "Web search failed"},
+		"web_fetch":       {"Fetching page", "Page fetched", "Page fetch failed"},
+		"web_answer":      {"Preparing web answer", "Web answer ready", "Web answer failed"},
+		"generate_image":  {"Generating image", "Image generated", "Image generation failed"},
+		"generate_speech": {"Generating speech", "Speech generated", "Speech generation failed"},
+		"generate_video":  {"Generating video", "Video generated", "Video generation failed"},
+		"generate_media":  {"Generating media", "Media generated", "Media generation failed"},
+		"read_media":      {"Reading media", "Media read", "Media read failed"},
+		"show":            {"Preparing preview", "Preview ready", "Preview failed"},
+		"todo":            {"Updating tasks", "Tasks updated", "Task update failed"},
+		"ask_question":    {"Waiting for answer", "Answer received", "Question failed"},
+		"subagent":        {"Starting subagent", "Subagent completed", "Subagent failed"},
+		"subagent.spawn":  {"Starting subagent", "Subagent completed", "Subagent failed"},
+		"subagent.steer":  {"Steering subagent", "Subagent steered", "Subagent steer failed"},
+		"subagent.stop":   {"Stopping subagent", "Subagent stopped", "Subagent stop failed"},
+		"subagent.wait":   {"Waiting for subagent", "Subagent result ready", "Subagent wait failed"},
+		// Legacy per-verb names stay for old transcripts.
 		"subagent_steer":            {"Steering subagent", "Subagent steered", "Subagent steer failed"},
 		"subagent_stop":             {"Stopping subagent", "Subagent stopped", "Subagent stop failed"},
 		"subagent_wait":             {"Waiting for subagent", "Subagent result ready", "Subagent wait failed"},
@@ -546,7 +551,7 @@ func toolPresentationAction(name, args string, status domain.ToolCallStatus, raw
 		"sleep":                     {"Pausing", "Pause finished", "Pause failed"},
 	}
 	key := name
-	if name == "automation" || name == "automation_schedule" {
+	if name == "automation" || name == "automation_schedule" || name == "subagent" {
 		if op := toolPresentationArg(args, "op"); op != "" {
 			key = name + "." + op
 		}
@@ -583,7 +588,7 @@ func toolPresentationSummary(name, args string, status domain.ToolCallStatus, me
 		return "Failed"
 	}
 	key := name
-	if name == "automation" || name == "automation_schedule" {
+	if name == "automation" || name == "automation_schedule" || name == "subagent" {
 		if op := toolPresentationArg(args, "op"); op != "" {
 			key = name + "." + op
 		}

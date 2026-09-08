@@ -618,10 +618,23 @@ function totalUsage(messages) {
 // visual cue for tool terminals (exec, grep, file_read) only, and
 // looks wrong around a media card or ask panel that already has its own
 // frame.
-export function isSubagentAuxiliaryTool(name) {
-  return name === 'subagent_wait'
-    || name === 'subagent_result'
-    || name === 'delegate_result';
+// isSubagentAuxiliaryTool reports provider-side bookkeeping that must not
+// mount its own transcript row: legacy per-verb names (subagent_wait,
+// subagent_result, delegate_result) and merged subagent calls whose op is
+// steer/stop/wait. Accepts a tool call object or (name, args).
+export function isSubagentAuxiliaryTool(nameOrToolCall, args) {
+  let name = nameOrToolCall;
+  let callArgs = args;
+  if (nameOrToolCall && typeof nameOrToolCall === 'object') {
+    name = nameOrToolCall.name;
+    callArgs = nameOrToolCall.args;
+  }
+  if (name === 'subagent_wait' || name === 'subagent_result' || name === 'delegate_result') return true;
+  if (name === 'subagent' || name === 'delegate') {
+    const op = (callArgs && callArgs.op) || 'spawn';
+    return op !== 'spawn';
+  }
+  return false;
 }
 
 export function isMediaGenerationTool(name) {
@@ -662,7 +675,7 @@ export function renderToolCallCard(toolCall) {
   // synthetic result call are provider bookkeeping for that same run; showing
   // them as extra terminal rows duplicates the card and adds no affordance.
   toolCall = normalizeToolCall(toolCall);
-  if (isSubagentAuxiliaryTool(toolCall.name)) return null;
+  if (isSubagentAuxiliaryTool(toolCall)) return null;
   const finish = (card) => decorateToolCard(card, toolCall);
   if (toolCall.name === 'ask_question') {
     // args arrives as a parsed object from the wire DTO (json.RawMessage);
@@ -1005,7 +1018,8 @@ export function renderSubagentCard(toolCall) {
     : extractSubagentRunIDs(toolCall.output || '');
   if (!runs.length && embeddedRunIDs.length) runs = embeddedRunIDs.map((id) => ({ id }));
 
-  const agentName = agentNameForId(args.agent_id) || (isDelegate ? 'NusaShell delegate' : 'Subagent');
+  const agentName = agentNameForId(args.agent_id)
+    || ((isDelegate || args.agent_id === 'internal') ? 'NusaShell delegate' : 'Subagent');
   const promptPreview = (args.prompt || '').split('\n')[0].slice(0, 120);
   // Single-run spawn results are flat in the UI: merge the run's fields
   // up so status/workspace/error reflect the actual spawn outcome (a
@@ -1101,7 +1115,7 @@ function extractBackgroundRunIDs(raw) {
 }
 
 function extractSubagentRunIDs(raw) {
-  return extractBackgroundRunIDs(raw).filter((id) => id.startsWith('acprun_'));
+  return extractBackgroundRunIDs(raw).filter((id) => id.startsWith('acprun_') || id.startsWith('run_'));
 }
 
 // parseSubagentResult splits a YAML frontmatter + markdown body tool

@@ -379,9 +379,9 @@ test('Live tool terminals carry their call ID into disclosure restoration', () =
 });
 
 test('ACP wait/result bookkeeping never mounts a duplicate live tool row', () => {
-  assert.match(agentRender, /isSubagentAuxiliaryTool\(toolCall\.name\)/);
-  assert.match(agentView, /if \(isSubagentAuxiliaryTool\(name\)\) \{[\s\S]*?return;/);
-  assert.match(agentView, /if \(isSubagentAuxiliaryTool\(frame\.name\)\) \{[\s\S]*?break;/);
+  assert.match(agentRender, /isSubagentAuxiliaryTool\(toolCall\)/);
+  assert.match(agentView, /if \(isSubagentAuxiliaryTool\(name, args\)\) \{[\s\S]*?return;/);
+  assert.match(agentView, /if \(isSubagentAuxiliaryTool\(frame\.name, frame\.args\)\) \{[\s\S]*?break;/);
 });
 
 test('Narrow windows ellipsize tool meta instead of overflowing the thread', () => {

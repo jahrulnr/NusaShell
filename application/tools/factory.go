@@ -90,23 +90,10 @@ func (f *ToolFactory) Get(kind AgentKind, workspace string) []ToolInfo {
 	case AgentAutomation:
 		return filterACPToolInfos(f.baseTools(workspace))
 	case AgentDelegate:
-		return filterDelegateToolInfos(filterACPToolInfos(f.baseTools(workspace)))
+		return filterACPToolInfos(f.baseTools(workspace))
 	default:
 		return f.baseTools(workspace)
 	}
-}
-
-// filterDelegateToolInfos removes the delegate tool itself so delegated
-// agents cannot spawn further delegates.
-func filterDelegateToolInfos(defs []ToolInfo) []ToolInfo {
-	out := make([]ToolInfo, 0, len(defs))
-	for _, d := range defs {
-		if d.Name == "delegate" {
-			continue
-		}
-		out = append(out, d)
-	}
-	return out
 }
 
 // baseTools assembles the shared toolbox + optional compatibility dispatcher

@@ -83,15 +83,18 @@ type TrackPending func(conversationID, runID, tool string)
 // this with deliverRunDone + pendingRunDone because that path needs TurnRun.
 type DeliverRunDone func(conversationID, runID string, complete func(cid string) error)
 
-// CompleteSubagent mutates the parent transcript under the turn lock.
+// CompleteSubagent mutates the parent transcript under the turn lock. It
+// is the single completion path for the subagent family: ACP runs and
+// internal delegate runs alike inject a synthetic subagent_result call.
 type CompleteSubagent func(conversationID, toolCallID string, status domain.ToolCallStatus, run *domain.AcpRun, outputPath string) error
-
-// CompleteDelegate mutates the parent transcript under the turn lock.
-type CompleteDelegate func(conversationID, runID, toolCallID string, status domain.ToolCallStatus, output, runConvID string) error
 
 // ResolveModel falls back to headless model resolution when no delegate
 // model is configured and the parent conversation has none.
 type ResolveModel func(parentConvID string) (string, error)
+
+// SteerHeadless queues a steer message on a running headless turn by
+// conversation id. App wires this to SteerHeadlessTurn.
+type SteerHeadless func(conversationID, text string) error
 
 // ObservedHeadlessTurn runs one unattended agent step and reports the hidden
 // conversation id as it is created. App wires AgentDelegate via
@@ -117,7 +120,7 @@ type Deps struct {
 	TrackPending     TrackPending
 	DeliverRunDone   DeliverRunDone
 	CompleteSubagent CompleteSubagent
-	CompleteDelegate CompleteDelegate
 	ResolveModel     ResolveModel
 	Headless         ObservedHeadlessTurn
+	SteerHeadless    SteerHeadless
 }

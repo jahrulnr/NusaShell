@@ -419,7 +419,6 @@ func (a *App) subagentDeps() subagent.Deps {
 			a.deliverRunDone(conversationID, pendingRunDone{RunID: runID, Complete: complete})
 		},
 		CompleteSubagent: a.completeSubagentRunLocked,
-		CompleteDelegate: a.completeDelegateRunLocked,
 		ResolveModel: func(string) (string, error) {
 			p, bare, _, err := a.resolveHeadlessModel("")
 			if err != nil {
@@ -430,6 +429,7 @@ func (a *App) subagentDeps() subagent.Deps {
 		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
 			return a.runHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, AgentDelegate, onUpdate)
 		},
+		SteerHeadless: a.SteerHeadlessTurn,
 	}
 	if a.Bus != nil {
 		d.Bus = a.Bus

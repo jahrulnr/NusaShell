@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"nusashell/application/subagent"
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/core"
 	"path/filepath"
@@ -931,11 +932,24 @@ func TestHydrationIncludesPendingBackgroundRuns(t *testing.T) {
 		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": {ID: "c1"}}},
 		pendingRuns:   map[string]map[string]string{},
 	}
+	// The internal delegate run stays live: the headless turn goroutine is
+	// never started, so the runtime keeps the run registered with its
+	// worker detail.
+	svc := subagent.New(subagent.Deps{
+		Go:           func(_ string, fn func()) {},
+		ResolveModel: func(string) (string, error) { return "glm-5-2", nil },
+		TrackPending: app.trackPendingRun,
+	})
+	app.subagentSvc = svc
+
 	// Two pending runs: an ACP subagent (details not tracked) and an
 	// internal delegate (carries an AcpRun with worker detail).
 	app.trackPendingRun("c1", "run-b", "subagent")
-	app.trackPendingRun("c1", "run-a", "delegate")
-	app.registerDelegateRun("run-a", "", "c1", "/ws", "", "glm-5-2", "")
+	out, err := svc.SpawnSubagents(context.Background(), "c1", "call_parent", []byte(`{"prompt":"inspect","agent_id":"internal","workspace":"/ws"}`))
+	if err != nil {
+		t.Fatalf("spawn internal delegate: %v", err)
+	}
+	runID := firstSpawnedRunID(t, out)
 
 	conv := &domain.Conversation{ID: "c1", Workspace: "/ws"}
 	msgs := app.buildHydration(conv)
@@ -950,14 +964,15 @@ func TestHydrationIncludesPendingBackgroundRuns(t *testing.T) {
 	if len(ctx.BackgroundRuns) != 2 {
 		t.Fatalf("backgroundRuns = %d, want 2 (%s)", len(ctx.BackgroundRuns), runtimeSlot.Content)
 	}
-	// Deterministic ID order.
-	if ctx.BackgroundRuns[0].ID != "run-a" || ctx.BackgroundRuns[1].ID != "run-b" {
+	// Deterministic ID order: '-' sorts before '_'.
+	if ctx.BackgroundRuns[0].ID != "run-b" || ctx.BackgroundRuns[1].ID != runID {
 		t.Fatalf("backgroundRuns not ID-sorted: %+v", ctx.BackgroundRuns)
 	}
-	if ctx.BackgroundRuns[0].Tool != "delegate" || ctx.BackgroundRuns[0].Model != "glm-5-2" {
-		t.Fatalf("delegate details missing: %+v", ctx.BackgroundRuns[0])
+	delegate := ctx.BackgroundRuns[1]
+	if delegate.Tool != "subagent" || delegate.Model != "glm-5-2" || delegate.Agent != "NusaShell delegate" || delegate.Workspace != "/ws" {
+		t.Fatalf("delegate details missing: %+v", delegate)
 	}
-	if ctx.BackgroundRuns[1].Tool != "subagent" {
+	if ctx.BackgroundRuns[0].Tool != "subagent" {
 		t.Fatalf("subagent tool missing: %+v", ctx.BackgroundRuns[1])
 	}
 }

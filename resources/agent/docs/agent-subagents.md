@@ -1,6 +1,6 @@
-# Subagents and internal delegates
+# Subagents
 
-ACP coding agents are spawn-only and always async. The user never chats
+Subagents are spawn-only and always async. The user never chats
 with them in the composer. When the parent agent calls `subagent`, the
 tool returns immediately with YAML frontmatter listing the spawned runs
 (`runs:` entries with `id` / `status` / `workspace`; `status: starting`)
@@ -8,11 +8,11 @@ and the tool call is marked `running` in the conversation. The parent
 agent is free to continue other work — it does not block on the
 subagent.
 
-## Internal delegate
+## Internal delegate target
 
-The internal delegate tool is a local NusaShell background agent. It uses the
-same AgentEngine and standard toolbox in a hidden pipeline conversation, but
-it is not an ACP subprocess and it cannot spawn another delegate or ACP
+`subagent(agent_id="internal")` runs the task on a local NusaShell background
+agent. It uses the same AgentEngine and standard toolbox in a hidden pipeline
+conversation, but it is not an ACP subprocess and it cannot spawn another
 subagent. It receives only the self-contained prompt and workspace supplied
 by the parent.
 
@@ -23,26 +23,28 @@ delegate has its own system prompt in
 resources/agent/prompts/delegate-agent.md because its role is to execute to
 completion, not to behave like the interactive parent or an Automation step.
 
-Delegate runs intentionally use the same ACP-shaped run events and DTOs as
-ACP runs. Therefore the Agent dock, run card, drawer, popup, transcript
+Internal delegate runs use the same ACP-shaped run events and DTOs as ACP
+runs. Therefore the Agent dock, run card, drawer, popup, transcript
 hydration, recent-run behavior, and scroll-follow behavior are identical for
-both families. The backend only differs in how the run is executed.
+both targets. The backend only differs in how the run is executed, and the
+`subagent` ops `steer` / `stop` / `wait` work on both.
 
 The delegate result must be the terminal assistant message from the hidden
 conversation, after all tool rounds have completed. An intermediate
 acknowledgement such as “I will inspect the file” is transcript content only;
-it must never become the delegate_result output returned to the parent.
+it must never become the subagent_result output returned to the parent.
 
 Good example:
 
-    delegate(prompt="Inspect /workspace/app.go, make the requested fix, run the
+    subagent(prompt="Inspect /workspace/app.go, make the requested fix, run the
     focused tests, and report the changed files plus the test result.",
              title="Fix app.go",
+             agent_id="internal",
              workspace="/workspace")
 
 Bad example:
 
-    delegate(prompt="Please look at this and tell me what you think.")
+    subagent(prompt="Please look at this and tell me what you think.", agent_id="internal")
 
 The bad brief does not define a concrete completion condition, so the
 delegate may spend its run acknowledging or planning without producing useful
@@ -82,7 +84,7 @@ Bad example — delegating work the parent can do in one tool call:
     subagent(prompt="list the files in /home/user/proj/src")
 
 Pass `title` whenever the user may have more than one live run: the Agent dock
-and drawer show that label instead of the bare ACP/delegate agent name so the
+and drawer show that label instead of the bare worker agent name so the
 user can tell what each run is for. With `count` > 1, titles are auto-suffixed
 `(1)`, `(2)`, ….
 
@@ -141,10 +143,10 @@ descriptions or tool hydration so the system prefix keeps its
 prompt-cache hits.
 
 Background/async runs are hydration-aware: the `runtime_context` hydration
-slot lists every active subagent/delegate run (ID + spawning tool + worker
+slot lists every active subagent run (ID + spawning tool + worker
 detail), so after a compaction the continuation agent still knows which
 background agents were spawned and are pending — and can correlate each
-`subagent_result`/`delegate_result` by run ID. Spawn calls and synthetic
+`subagent_result` by run ID. Spawn calls and synthetic
 result calls are also preserved verbatim through compaction (never stripped)
 so the handoff never loses the background-agent picture.
 
@@ -156,7 +158,7 @@ turn. When all subagents complete, the chain resumes.
 
 A steer from the main composer is a real user message, not background runtime
 state. It is queued while the current provider or tool round is in flight and
-applied at the next safe boundary. `subagent_wait` is intentionally blocking,
+applied at the next safe boundary. `subagent(op="wait")` is intentionally blocking,
 so a composer steer can wait for that call to return; this delay does not mean
 the message was dropped.
 
@@ -164,23 +166,25 @@ At a boundary, the parent applies finished background results and harness
 announcements first, then appends the queued composer steer, then starts one
 fresh assistant round. This ordering keeps the steer as the newest user
 instruction. After a steer is applied, re-evaluate the user's request before
-resuming the older plan. Do not call `subagent_wait` again merely because the
-previous plan was waiting if the steer changes the requested action.
+resuming the older plan. Do not call `subagent(op="wait")` again merely
+because the previous plan was waiting if the steer changes the requested
+action.
 
-`subagent_steer` is different: it redirects a **child ACP run** by cancelling
-the in-flight `session/prompt` and sending the new text as the next prompt on
-the same ACP session (interrupt-and-replace). It does not queue until the
-child becomes idle. Prefer `subagent_steer` when the parent needs to change
-direction mid-work; use `subagent_stop` only to abandon the run.
+`subagent(op="steer")` is different: it redirects a **child run** by
+cancelling the in-flight work and sending the new text as the next prompt.
+On an ACP session this is interrupt-and-replace (`session/cancel` then
+`session/prompt`); on an internal delegate the text is queued and applied at
+the next tool-round boundary. Prefer the `steer` op when the parent needs
+to change direction mid-work; use the `stop` op only to abandon the run.
 
 Good example, steer a child run when the user changes its direction:
 
-    subagent_steer(id="acp_run_123", text="Stop the framework comparison and inspect the existing desktop pet code instead.")
+    subagent(op="steer", id="acp_run_123", text="Stop the framework comparison and inspect the existing desktop pet code instead.")
 
 Bad example, continue the stale parent plan after a user steer:
 
-    subagent_wait(id="acp_run_123", timeout_ms=120000)
-    subagent_wait(id="acp_run_456", timeout_ms=120000)
+    subagent(op="wait", id="acp_run_123", timeout_ms=120000)
+    subagent(op="wait", id="acp_run_456", timeout_ms=120000)
 
 The bad sequence ignores the newly requested direction. First process the
 latest user steer, then wait only if that revised plan still needs a result.
@@ -188,11 +192,11 @@ latest user steer, then wait only if that revised plan still needs a result.
 ## Waiting for results
 
 `subagent` is always async. The harness injects `subagent_result` when
-the run finishes. Call `subagent_wait` only when the next action in
-this round cannot proceed without the result; to adjust a live run use
-`subagent_steer`, and to cancel it use `subagent_stop`.
+the run finishes. Call `subagent(op="wait")` only when the next action in
+this round cannot proceed without the result; to adjust a live run use the
+`steer` op, and to cancel it use the `stop` op.
 
-When `subagent_wait` reaches a terminal result, it persists the full run
+When the `wait` op reaches a terminal result, it persists the full run
 before returning. Its tool result contains only `status`, `id`, `workspace`,
 `output_path`, and the last meaningful text turn (or a compact
 failure/cancellation fallback). If no text was produced, the last thought may
@@ -201,22 +205,22 @@ without `output_path`. Read the path only when the full thought/tool
 transcript is needed. The Agent drawer receives live transcript events
 independently; the tool result never carries the full DTO.
 
-`subagent_steer` and `subagent_stop` persist compact tool results, not the
+The `steer` and `stop` ops persist compact tool results, not the
 full run DTO. Steer returns `status` / `id` / `workspace` plus
 `Steer accepted.` and does not include last-turn text. Stop returns the
-same bounded completion shape as `subagent_wait` (last meaningful turn,
+same bounded completion shape as `wait` (last meaningful turn,
 plus `output_path` when the cancelled run is persisted). The Agent drawer
 still receives live transcript events independently; read `output_path`
 only when the full thought/tool transcript is needed.
 
 Good example — wait with a bounded timeout:
 
-    subagent_wait(id="acp_run_123", timeout_ms=120000)
+    subagent(op="wait", id="acp_run_123", timeout_ms=120000)
 
 Bad example — polling in a sleep loop:
 
     sleep(seconds=5)  # repeat until the run finishes
-    subagent_wait(id="acp_run_123")  # first call already returned
+    subagent(op="wait", id="acp_run_123")  # first call already returned
 
 ## Workspace and permissions
 
@@ -238,6 +242,5 @@ mode.
 Stdio framing is newline-delimited JSON-RPC. Do not expect LSP
 `Content-Length` headers; the ACP spec rejects them as invalid JSON.
 
-Pipeline `agent:` steps never advertise `subagent` / `subagent_steer` /
-`subagent_stop` / `subagent_wait`. Those tools require an interactive
-context; unattended FireDue must not wait on them.
+Pipeline `agent:` steps never advertise `subagent`. The tool requires an
+interactive context; unattended FireDue must not wait on it.

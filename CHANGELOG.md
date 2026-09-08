@@ -29,6 +29,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It no longer waits for the child to become idle before delivering the
   instruction. `subagent_stop` still ends the run.
 
+- **`delegate` merged into `subagent`.** The separate `delegate` tool is
+  gone; internal NusaShell background runs are now `subagent` with
+  `agent_id: "internal"` (the legacy `delegate` name still executes as an
+  alias). Internal runs share the ACP-shaped run events, DTOs, dock/drawer/
+  popup/transcript UI, and a synthetic `delegate_result` completion call.
+  `acp.runs.steer` / `stop` / `wait` now resolve internal delegate runs too,
+  not only live ACP sessions.
+
+- **`subagent` family is one dispatcher tool.** `subagent_steer`,
+  `subagent_stop`, and `subagent_wait` are no longer advertised; the roster
+  lists a single `subagent` tool whose `op` selects the action (`spawn`
+  default, `steer`, `stop`, `wait`). Legacy per-verb names still execute as
+  aliases that inject their op, and old transcripts keep rendering. Tool
+  presentation and the frontend auxiliary-call filtering are op-aware.
+
 - **Learner toolbox is pruned.** Background learner kinds no longer
   advertise or execute `memory_project`, ACP/`delegate`, or the MCP family
   (`mcp_*`, `tool_list`, `tool_schema`, `contract_read`). They keep file/

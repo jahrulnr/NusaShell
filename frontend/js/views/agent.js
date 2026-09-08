@@ -652,7 +652,7 @@ function applyRoundDeltaFrame(run, frame) {
       if (frame.name) run.activityToolName = frame.name;
       run.thinkingLive = false;
       run.toolsStarted = true;
-      if (isSubagentAuxiliaryTool(frame.name)) {
+      if (isSubagentAuxiliaryTool(frame.name, frame.args)) {
         if (run.conversationId === state.activeId) syncRunLoadingIndicator(run);
         break;
       }
@@ -774,7 +774,7 @@ function ensureLiveToolJob(run, toolCallId, name, args, presentation) {
   // The delegation card is the single user-facing representation for ACP
   // runs. Wait/result calls only unblock or inform the provider and must not
   // create a second terminal row in the visible transcript.
-  if (isSubagentAuxiliaryTool(name)) return null;
+  if (isSubagentAuxiliaryTool(name, args)) return null;
   // ask_question is a standalone card created by agent.ask.pending /
   // restorePendingAsks. Round-stream tool frames must not mount a terminal
   // or patch presentation.request onto the human question.
@@ -2680,7 +2680,6 @@ async function loadOlderChunk() {
   state.loadingChunk = true;
   const chunkIndex = state.nextChunkIndex;
   const conversationId = state.activeId;
-  const token = state.conversationLoadToken;
   const thread = agentThread();
   // Save the scroll anchor so we can restore position after prepending.
   const prevHeight = thread?.scrollHeight ?? 0;
@@ -2690,7 +2689,7 @@ async function loadOlderChunk() {
   const prevRun = runForConversation(conversationId);
   try {
     const result = await rpc('agent.conversations.chunk', { id: conversationId, index: chunkIndex });
-    if (token !== state.conversationLoadToken || state.activeId !== conversationId) return;
+    if (state.conversationLoadToken !== state.conversationLoadToken || state.activeId !== conversationId) return;
     const chunkMsgs = result?.messages ?? [];
     if (!chunkMsgs.length) {
       // Empty chunk — treat as no more data.
@@ -2751,12 +2750,12 @@ async function loadOlderChunk() {
       }
     }
   } catch (err) {
-    if (token === state.conversationLoadToken && state.activeId === conversationId) {
+    if (state.conversationLoadToken === state.conversationLoadToken && state.activeId === conversationId) {
       // 404 / no more chunks — stop trying.
       state.nextChunkIndex = -1;
     }
   } finally {
-    if (token !== state.conversationLoadToken) {
+    if (state.conversationLoadToken !== state.conversationLoadToken) {
       return;
     }
     state.loadingChunk = false;
@@ -2983,7 +2982,7 @@ function bindEvents() {
         run.textBox = null;
       }
     }
-    if (isSubagentAuxiliaryTool(name)) {
+    if (isSubagentAuxiliaryTool(name, args)) {
       syncRunLoadingIndicator(run);
       return;
     }
@@ -3017,7 +3016,7 @@ function bindEvents() {
     // `subagent_wait` and the injected `subagent_result` are provider-side
     // bookkeeping for the already visible delegation card. They intentionally
     // have no separate transcript row.
-    if (isSubagentAuxiliaryTool(name)) {
+    if (isSubagentAuxiliaryTool(name, args)) {
       const job = run.toolJobs.get(tool_call_id);
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
       job?.remove?.();

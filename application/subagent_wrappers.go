@@ -17,11 +17,10 @@ type (
 
 // Leftovers that cannot move into application/subagent without importing
 // TurnRun / the conversation repository (agent step):
-//   deliverRunDone, completeSubagentRunLocked, completeDelegateRunLocked,
-//   subagentResultMessage, delegateResultMessage,
-//   triggerBackgroundCompletionTurn, resolveConversationProvider,
-//   pendingRunDone (turn_run.go). Service calls DeliverRunDone / Complete*
-//   injected from App.
+//   deliverRunDone, completeSubagentRunLocked,
+//   subagentResultMessage, triggerBackgroundCompletionTurn,
+//   resolveConversationProvider, pendingRunDone (turn_run.go).
+// Service calls DeliverRunDone / CompleteSubagent injected from App.
 
 func (a *App) handleAcpAgentsList() (any, *contracts.RPCError) {
 	return a.subagentService().HandleAgentsList()
@@ -83,20 +82,8 @@ func (a *App) waitAcpRun(parent context.Context, req contracts.AcpRunWaitRequest
 	return a.subagentService().WaitRun(parent, req)
 }
 
-func (a *App) SpawnSubagents(ctx context.Context, argsJSON []byte) (string, error) {
-	return a.subagentService().SpawnSubagents(ctx, ConversationIDFromContext(ctx), ToolCallIDFromContext(ctx), argsJSON)
-}
-
-func (a *App) SteerAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
-	return a.subagentService().SteerRun(argsJSON)
-}
-
-func (a *App) StopAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
-	return a.subagentService().StopRun(argsJSON)
-}
-
-func (a *App) WaitAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
-	return a.subagentService().WaitRunTool(ctx, argsJSON)
+func (a *App) Subagent(ctx context.Context, argsJSON []byte) (string, error) {
+	return a.subagentService().DispatchSubagent(ctx, ConversationIDFromContext(ctx), ToolCallIDFromContext(ctx), argsJSON)
 }
 
 func (a *App) EnabledAcpAgents() []*domain.AcpAgent {
@@ -107,16 +94,8 @@ func (a *App) SpawnDelegate(ctx context.Context, argsJSON []byte) (string, error
 	return a.subagentService().SpawnDelegate(ctx, ConversationIDFromContext(ctx), ToolCallIDFromContext(ctx), argsJSON)
 }
 
-func (a *App) resolveDelegateModel(parentConvID string) (string, error) {
-	return a.subagentService().ResolveDelegateModel(parentConvID)
-}
-
-func (a *App) registerDelegateRun(runID, toolCallID, conversationID, workspace, prompt, modelID, title string) (*domain.AcpRun, *domain.AcpRun) {
-	return a.subagentService().RegisterDelegateRun(runID, toolCallID, conversationID, workspace, prompt, modelID, title)
-}
-
-func (a *App) finishDelegateRun(runID, runConversationID, output string, runErr error) *domain.AcpRun {
-	return a.subagentService().FinishDelegateRun(runID, runConversationID, output, runErr)
+func (a *App) delegateRunSnapshot(runID string) (*domain.AcpRun, bool) {
+	return a.subagentService().DelegateRunSnapshot(runID)
 }
 
 func (a *App) persistAcpRun(run *domain.AcpRun) string {
@@ -129,12 +108,4 @@ func (a *App) emitAcpRun(event string, run *domain.AcpRun) {
 
 func (a *App) onAcpRunDone(run *domain.AcpRun) {
 	a.subagentService().OnRunDone(run)
-}
-
-func (a *App) delegateRunSnapshot(runID string) (*domain.AcpRun, bool) {
-	return a.subagentService().DelegateRunSnapshot(runID)
-}
-
-func (a *App) delegateRunList(conversationID string) []*domain.AcpRun {
-	return a.subagentService().DelegateRunList(conversationID)
 }

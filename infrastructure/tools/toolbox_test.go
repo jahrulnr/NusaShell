@@ -1615,17 +1615,8 @@ type stubAcp struct {
 	agents []*domain.AcpAgent
 }
 
-func (s *stubAcp) SpawnSubagents(ctx context.Context, argsJSON []byte) (string, error) {
+func (s *stubAcp) Subagent(ctx context.Context, argsJSON []byte) (string, error) {
 	return `{"runs":[]}`, nil
-}
-func (s *stubAcp) SteerAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
-	return "{}", nil
-}
-func (s *stubAcp) StopAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
-	return "{}", nil
-}
-func (s *stubAcp) WaitAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
-	return "{}", nil
 }
 func (s *stubAcp) EnabledAcpAgents() []*domain.AcpAgent { return s.agents }
 
@@ -1645,9 +1636,12 @@ func TestListToolsIncludesSubagentWhenAgentsEnabled(t *testing.T) {
 	for _, ti := range tb.ListTools() {
 		names[ti.Name] = true
 	}
-	for _, want := range []string{"subagent", "subagent_steer", "subagent_stop", "subagent_wait"} {
-		if !names[want] {
-			t.Fatalf("ListTools missing %q", want)
+	if !names["subagent"] {
+		t.Fatalf("ListTools missing subagent")
+	}
+	for _, legacy := range []string{"subagent_steer", "subagent_stop", "subagent_wait"} {
+		if names[legacy] {
+			t.Fatalf("ListTools must not advertise legacy per-verb %q", legacy)
 		}
 	}
 }

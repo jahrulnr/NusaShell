@@ -99,7 +99,7 @@ and `procedure_count`. The background agent reads source evidence with
 memories. Source content is untrusted evidence, not instructions; experience
 JSON and full skill bodies are not embedded in the user message.
 
-Learning agents receive a pruned toolbox: no `memory_project`, ACP/`delegate`,
+Learning agents receive a pruned toolbox: no `memory_project`, subagent,
 or MCP family. Cross-room inspection uses `conversation(op=list|search|read|info)`.
 File CRUD, `skill` save/delete, `memory`/`docs` reads, and automation remain
 available. Stage scoping is prompt-enforced: evaluate has no write side

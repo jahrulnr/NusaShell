@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"nusashell/application/service/tooloutput"
+	"nusashell/application/subagent"
 	"nusashell/contracts"
 	"nusashell/domain"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -412,9 +415,9 @@ func TestSteerAcpRunReturnsCompactAckWithoutTranscript(t *testing.T) {
 	rt := &steerStopAcpRuntime{run: run}
 	app := &App{Acp: rt}
 
-	output, err := app.SteerAcpRun(context.Background(), []byte(`{"id":"acprun_steer","text":"focus on tests"}`))
+	output, err := app.Subagent(context.Background(), []byte(`{"op":"steer","id":"acprun_steer","text":"focus on tests"}`))
 	if err != nil {
-		t.Fatalf("SteerAcpRun: %v", err)
+		t.Fatalf("subagent steer: %v", err)
 	}
 	if len(output) >= 5000 {
 		t.Fatalf("steer tool output too large: %d", len(output))
@@ -458,9 +461,9 @@ func TestStopAcpRunReturnsCompletionShapeWithoutTranscript(t *testing.T) {
 		AcpRunStorage: storage,
 	}
 
-	output, err := app.StopAcpRun(context.Background(), []byte(`{"id":"acprun_stop"}`))
+	output, err := app.Subagent(context.Background(), []byte(`{"op":"stop","id":"acprun_stop"}`))
 	if err != nil {
-		t.Fatalf("StopAcpRun: %v", err)
+		t.Fatalf("subagent stop: %v", err)
 	}
 	if len(output) >= 5000 {
 		t.Fatalf("stop tool output too large: %d", len(output))
@@ -573,9 +576,9 @@ func TestWaitAcpRunReturnsPersistedPathAndLastTurnOnly(t *testing.T) {
 		AcpRunStorage: storage,
 	}
 
-	output, err := app.WaitAcpRun(context.Background(), []byte(`{"id":"acprun_1","timeout_ms":100}`))
+	output, err := app.Subagent(context.Background(), []byte(`{"op":"wait","id":"acprun_1","timeout_ms":100}`))
 	if err != nil {
-		t.Fatalf("WaitAcpRun: %v", err)
+		t.Fatalf("subagent wait: %v", err)
 	}
 	for _, want := range []string{
 		"status: completed",
@@ -625,9 +628,9 @@ func TestWaitAcpRunDoesNotPersistRunningTimeoutSnapshot(t *testing.T) {
 		AcpRunStorage: storage,
 	}
 
-	output, err := app.WaitAcpRun(context.Background(), []byte(`{"id":"acprun_live","timeout_ms":1}`))
+	output, err := app.Subagent(context.Background(), []byte(`{"op":"wait","id":"acprun_live","timeout_ms":1}`))
 	if err != nil {
-		t.Fatalf("WaitAcpRun: %v", err)
+		t.Fatalf("subagent wait: %v", err)
 	}
 	if strings.Contains(output, "output_path:") {
 		t.Fatalf("running snapshot must not advertise a persisted path:\n%s", output)
@@ -867,7 +870,7 @@ func TestResolveDelegateModelUsesTheConfiguredModel(t *testing.T) {
 		}},
 	}
 
-	got, err := app.resolveDelegateModel("c1")
+	got, err := app.subagentService().ResolveDelegateModel("c1")
 	if err != nil {
 		t.Fatalf("resolveDelegateModel: %v", err)
 	}
@@ -884,7 +887,7 @@ func TestResolveDelegateModelDefaultsToTheParentModel(t *testing.T) {
 		}},
 	}
 
-	got, err := app.resolveDelegateModel("c1")
+	got, err := app.subagentService().ResolveDelegateModel("c1")
 	if err != nil {
 		t.Fatalf("resolveDelegateModel: %v", err)
 	}
@@ -943,28 +946,49 @@ func TestDelegateRunSurfaceUsesTheCompleteHeadlessTranscript(t *testing.T) {
 	}
 	app := &App{
 		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"conv_delegate": hidden}},
+		Settings:      &delegateSettingsStore{settings: domain.Settings{DelegateModel: "cheap:model"}},
 		Bus:           NewBus(),
 	}
-	_, running := app.registerDelegateRun("run_delegate", "call_parent", "conv_parent", "/workspace", "Inspect and fix the file", "cheap:model", "")
-	if running.Status != domain.AcpRunRunning {
-		t.Fatalf("registered delegate status = %q, want running", running.Status)
+	svc := subagent.New(subagent.Deps{
+		Conversations: app.Conversations,
+		Settings:      app.Settings,
+		Bus:           app.Bus,
+		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
+			onUpdate("conv_delegate")
+			return map[string]any{"output": "The requested change is complete."}, "conv_delegate", nil
+		},
+	})
+	app.subagentSvc = svc
+	out, err := svc.SpawnSubagents(context.Background(), "conv_parent", "call_parent", []byte(`{"prompt":"Inspect and fix the file","agent_id":"internal"}`))
+	if err != nil {
+		t.Fatalf("spawn internal delegate: %v", err)
 	}
+	runID := firstSpawnedRunID(t, out)
 
-	finished := app.finishDelegateRun("run_delegate", "conv_delegate", "The requested change is complete.", nil)
-	if finished == nil || finished.Status != domain.AcpRunCompleted {
-		t.Fatalf("finished delegate = %+v, want completed run", finished)
-	}
-	if len(finished.Transcript) != 3 {
-		t.Fatalf("transcript chunks = %+v, want acknowledgement, tool, and final output", finished.Transcript)
-	}
-	if finished.Transcript[0].Text != "I will inspect the file first." {
-		t.Fatalf("first transcript chunk = %+v, want the preliminary acknowledgement", finished.Transcript[0])
-	}
-	if finished.Transcript[1].Kind != "tool" || finished.Transcript[1].Text != "file contents" {
-		t.Fatalf("tool transcript chunk = %+v", finished.Transcript[1])
-	}
-	if finished.Transcript[2].Text != "The requested change is complete." {
-		t.Fatalf("delegate result lost final assistant output: %+v", finished.Transcript)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if run, ok := svc.DelegateRunSnapshot(runID); ok && !run.Live() {
+			if run.Status != domain.AcpRunCompleted {
+				t.Fatalf("finished delegate = %+v, want completed run", run)
+			}
+			if len(run.Transcript) != 3 {
+				t.Fatalf("transcript chunks = %+v, want acknowledgement, tool, and final output", run.Transcript)
+			}
+			if run.Transcript[0].Text != "I will inspect the file first." {
+				t.Fatalf("first transcript chunk = %+v, want the preliminary acknowledgement", run.Transcript[0])
+			}
+			if run.Transcript[1].Kind != "tool" || run.Transcript[1].Text != "file contents" {
+				t.Fatalf("tool transcript chunk = %+v", run.Transcript[1])
+			}
+			if run.Transcript[2].Text != "The requested change is complete." {
+				t.Fatalf("delegate result lost final assistant output: %+v", run.Transcript)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("internal delegate run never settled")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 
 	listed, rpcErr := app.handleAcpRunsList(contracts.AcpRunsListRequest{ConversationID: "conv_parent"})
@@ -972,16 +996,26 @@ func TestDelegateRunSurfaceUsesTheCompleteHeadlessTranscript(t *testing.T) {
 		t.Fatalf("delegate run list: %v", rpcErr)
 	}
 	runs := listed.(contracts.AcpRunsListResult).Runs
-	if len(runs) != 1 || runs[0].ID != "run_delegate" || len(runs[0].Transcript) != 3 {
+	if len(runs) != 1 || runs[0].ID != runID || len(runs[0].Transcript) != 3 {
 		t.Fatalf("delegate run must be visible through ACP-shaped list: %+v", runs)
 	}
-	got, rpcErr := app.handleAcpRunsGet(contracts.AcpRunIDRequest{ID: "run_delegate"})
+	got, rpcErr := app.handleAcpRunsGet(contracts.AcpRunIDRequest{ID: runID})
 	if rpcErr != nil {
 		t.Fatalf("delegate run get: %v", rpcErr)
 	}
 	if got.(contracts.AcpRunDTO).CurrentModelID != "model" {
 		t.Fatalf("delegate UI model = %q, want bare model id", got.(contracts.AcpRunDTO).CurrentModelID)
 	}
+}
+
+// firstSpawnedRunID extracts the run id from a FormatSpawnResult payload.
+func firstSpawnedRunID(t *testing.T, out string) string {
+	t.Helper()
+	match := regexp.MustCompile(`\b(?:acprun|run)_[A-Za-z0-9]+`).FindString(out)
+	if match == "" {
+		t.Fatalf("spawn result carries no run id: %q", out)
+	}
+	return match
 }
 
 // TestDeliverRunDoneQueuesWhileParentTurnActive pins the shared
@@ -1014,7 +1048,8 @@ func TestDeliverRunDoneQueuesWhileParentTurnActive(t *testing.T) {
 		app.deliverRunDone("c1", pendingRunDone{
 			RunID: "run_del",
 			Complete: func(cid string) error {
-				return app.completeDelegateRunLocked(cid, "run_del", "call_parent", domain.ToolOK, "result text", "run_del_conv")
+				run := &domain.AcpRun{TaskState: domain.TaskState[domain.AcpRunStatus]{ID: "run_del", Status: domain.AcpRunCompleted}}
+				return app.completeSubagentRunLocked(cid, "call_parent", domain.ToolOK, run, "")
 			},
 		})
 		close(done)
@@ -1046,22 +1081,22 @@ func TestDeliverRunDoneQueuesWhileParentTurnActive(t *testing.T) {
 	if saved.Messages[1].ToolCalls[0].Status != domain.ToolOK {
 		t.Fatalf("original tool call status = %v, want ok", saved.Messages[1].ToolCalls[0].Status)
 	}
-	if len(saved.Messages) != 3 || saved.Messages[2].ToolCalls[0].Name != domain.DelegateResultToolName {
-		t.Fatalf("synthetic delegate_result missing: %+v", saved.Messages)
+	if len(saved.Messages) != 3 || saved.Messages[2].ToolCalls[0].Name != domain.SubagentResultToolName {
+		t.Fatalf("synthetic subagent_result missing: %+v", saved.Messages)
 	}
 	if app.hasPendingRuns("c1") {
 		t.Fatal("pending delegate must be untracked after drain")
 	}
 }
 
-func TestCompleteDelegateRunInjectsSyntheticMessage(t *testing.T) {
+func TestDelegateRunCompletionInjectsSyntheticResult(t *testing.T) {
 	conv := &domain.Conversation{
 		ID: "c1",
 		Messages: []domain.Message{
 			{ID: "m1", Role: domain.RoleUser, Content: "work", Status: domain.StatusDone},
 			{
 				ID: "m2", Role: domain.RoleAssistant, Status: domain.StatusDone,
-				ToolCalls: []domain.ToolCall{{ID: "call_parent", Name: "delegate", Args: `{"prompt":"delegate this"}`, Status: domain.ToolRunning}},
+				ToolCalls: []domain.ToolCall{{ID: "call_parent", Name: "subagent", Args: `{"prompt":"delegate this","agent_id":"internal"}`, Status: domain.ToolRunning}},
 			},
 		},
 	}
@@ -1069,70 +1104,120 @@ func TestCompleteDelegateRunInjectsSyntheticMessage(t *testing.T) {
 	app := &App{Conversations: store, Bus: NewBus()}
 	_, events, unsubscribe := app.Bus.Subscribe()
 	defer unsubscribe()
+	delivered := make(chan struct{})
 
-	if err := app.completeDelegateRunLocked("c1", "run_del", "call_parent", domain.ToolOK, "all done", "run_del_conv"); err != nil {
-		t.Fatalf("completeDelegateRunLocked: %v", err)
+	svc := subagent.New(subagent.Deps{
+		Bus:          app.Bus,
+		ResolveModel: func(string) (string, error) { return "cheap:model", nil },
+		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
+			return map[string]any{"output": "all done"}, "run_del_conv", nil
+		},
+		DeliverRunDone: func(conversationID, runID string, complete func(cid string) error) {
+			err := complete(conversationID)
+			close(delivered)
+			if err != nil {
+				t.Errorf("deliver delegate completion: %v", err)
+			}
+		},
+		CompleteSubagent: app.completeSubagentRunLocked,
+	})
+
+	out, err := svc.SpawnSubagents(context.Background(), "c1", "call_parent", []byte(`{"prompt":"delegate this","agent_id":"internal"}`))
+	if err != nil {
+		t.Fatalf("spawn internal delegate: %v", err)
+	}
+	runID := firstSpawnedRunID(t, out)
+
+	select {
+	case <-delivered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("delegate completion was never delivered")
 	}
 	saved := store.convs["c1"]
 	if saved.Messages[1].ToolCalls[0].Status != domain.ToolOK {
-		t.Fatalf("original tool call status = %v, want ok", saved.Messages[1].ToolCalls[0].Status)
-	}
-	if !strings.Contains(saved.Messages[1].ToolCalls[0].Output, "completed") {
-		t.Fatalf("original tool call must carry the brief: %q", saved.Messages[1].ToolCalls[0].Output)
+		t.Fatalf("original tool call status = %v, want ok", saved.Messages[1].ToolCalls[0].Output)
 	}
 	synthetic := saved.Messages[2]
 	if synthetic.Role != domain.RoleAssistant || len(synthetic.ToolCalls) != 1 {
 		t.Fatalf("synthetic message missing: %+v", synthetic)
 	}
 	stc := synthetic.ToolCalls[0]
-	if stc.Name != domain.DelegateResultToolName || !domain.IsDelegateResultCallID(stc.ID) {
+	if stc.Name != domain.SubagentResultToolName || !domain.IsSubagentResultCallID(stc.ID) {
 		t.Fatalf("synthetic tool call wrong: %+v", stc)
 	}
-	if stc.Output != "all done" {
-		t.Fatalf("synthetic tool call must carry the full output: %q", stc.Output)
+	if !strings.Contains(stc.Output, "all done") {
+		t.Fatalf("synthetic tool call must carry the delegate output: %q", stc.Output)
 	}
-	if !strings.Contains(stc.Args, "run_del") || !strings.Contains(stc.Args, "run_del_conv") {
-		t.Fatalf("synthetic args must carry run + conversation ids: %q", stc.Args)
+	if !strings.Contains(stc.Args, runID) {
+		t.Fatalf("synthetic args must carry the run id: %q", stc.Args)
 	}
 	select {
 	case event := <-events:
-		if event.Type != contracts.EventToolCompleted {
-			t.Fatalf("event type = %q, want %q", event.Type, contracts.EventToolCompleted)
+		for event.Type != contracts.EventToolCompleted {
+			select {
+			case event = <-events:
+			case <-time.After(time.Second):
+				t.Fatal("delegate completion event was not published")
+			}
 		}
 		var completed contracts.ToolCompletedEvent
 		if err := json.Unmarshal(event.Payload, &completed); err != nil {
 			t.Fatalf("decode tool completion: %v", err)
 		}
-		if string(completed.Args) != `{"prompt":"delegate this"}` {
-			t.Fatalf("completion args = %s, want original delegate args", completed.Args)
+		if completed.Name != "subagent" {
+			t.Fatalf("completion tool name = %q, want subagent", completed.Name)
 		}
-		if completed.Presentation == nil || !strings.Contains(completed.Presentation.Request, "delegate this") {
-			t.Fatalf("completion presentation must retain the request: %+v", completed.Presentation)
+		if !strings.Contains(string(completed.Args), "delegate this") {
+			t.Fatalf("completion args = %s, want original spawn args", completed.Args)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("delegate completion event was not published")
 	}
 }
 
-// TestCompleteDelegateRunInjectsFailure pins the failure path: a failed
-// delegate still delivers a synthetic result carrying the error text.
-func TestCompleteDelegateRunInjectsFailure(t *testing.T) {
+// TestDelegateRunFailureDeliversError pins the failure path: a failed
+// internal delegate still delivers a synthetic result carrying the error.
+func TestDelegateRunFailureDeliversError(t *testing.T) {
 	conv := &domain.Conversation{
 		ID: "c1",
 		Messages: []domain.Message{
 			{ID: "m1", Role: domain.RoleUser, Content: "work", Status: domain.StatusDone},
 			{
 				ID: "m2", Role: domain.RoleAssistant, Status: domain.StatusDone,
-				ToolCalls: []domain.ToolCall{{ID: "call_parent", Name: "delegate", Status: domain.ToolRunning}},
+				ToolCalls: []domain.ToolCall{{ID: "call_parent", Name: "subagent", Status: domain.ToolRunning}},
 			},
 		},
 	}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{Conversations: store, Bus: NewBus()}
+	delivered := make(chan struct{})
 
-	if err := app.completeDelegateRunLocked("c1", "run_del", "call_parent", domain.ToolFailed, "error: boom", "run_del_conv"); err != nil {
-		t.Fatalf("completeDelegateRunLocked: %v", err)
+	svc := subagent.New(subagent.Deps{
+		Bus:          app.Bus,
+		ResolveModel: func(string) (string, error) { return "cheap:model", nil },
+		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
+			return nil, "", fmt.Errorf("boom")
+		},
+		DeliverRunDone: func(conversationID, runID string, complete func(cid string) error) {
+			err := complete(conversationID)
+			close(delivered)
+			if err != nil {
+				t.Errorf("deliver delegate failure: %v", err)
+			}
+		},
+		CompleteSubagent: app.completeSubagentRunLocked,
+	})
+
+	if _, err := svc.SpawnSubagents(context.Background(), "c1", "call_parent", []byte(`{"prompt":"delegate this","agent_id":"internal"}`)); err != nil {
+		t.Fatalf("spawn internal delegate: %v", err)
 	}
+
+	select {
+	case <-delivered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("failed delegate result was never delivered")
+	}
+
 	saved := store.convs["c1"]
 	if saved.Messages[1].ToolCalls[0].Status != domain.ToolFailed {
 		t.Fatalf("original tool call status = %v, want failed", saved.Messages[1].ToolCalls[0].Status)
@@ -1141,7 +1226,7 @@ func TestCompleteDelegateRunInjectsFailure(t *testing.T) {
 		t.Fatalf("messages = %d, want 3 (synthetic result must be injected)", len(saved.Messages))
 	}
 	stc := saved.Messages[2].ToolCalls[0]
-	if stc.Status != domain.ToolFailed || !strings.Contains(stc.Output, "error: boom") {
+	if stc.Status != domain.ToolFailed || !strings.Contains(stc.Output, "boom") {
 		t.Fatalf("failed delegate result wrong: %+v", stc)
 	}
 }

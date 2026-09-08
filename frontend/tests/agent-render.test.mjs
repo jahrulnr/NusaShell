@@ -260,6 +260,42 @@ test('subagent cards are the only transcript representation of ACP runs', () => 
   assert.equal(renderToolCallCard({ name: 'subagent_result', args: {}, status: 'ok', output: '' }), null);
 });
 
+test('merged subagent ops filter by op while spawn keeps the delegation card', () => {
+  const completion = 'Subagent run acprun_op123 completed. Full result delivered in the subagent_result tool call.';
+  const thread = renderTranscript([
+    { role: 'user', content: 'Delegate the op audit', created_at: '2026-08-30T00:00:00Z' },
+    {
+      role: 'assistant', created_at: '2026-08-30T00:00:01Z',
+      steps: [{ type: 'tool_calls', tool_calls: [
+        { id: 'spawn-1', name: 'subagent', args: { op: 'spawn', prompt: 'Inspect the CSS' }, status: 'ok', output: completion },
+        { id: 'steer-1', name: 'subagent', args: { op: 'steer', id: 'acprun_op123', text: 'focus' }, status: 'ok', output: '---\nstatus: running\nid: acprun_op123\n---\nSteer accepted.' },
+        { id: 'wait-1', name: 'subagent', args: { op: 'wait', id: 'acprun_op123' }, status: 'ok', output: '---\nstatus: completed\nid: acprun_op123\n---' },
+        { id: 'stop-1', name: 'subagent', args: { op: 'stop', id: 'acprun_op123' }, status: 'ok', output: '---\nstatus: cancelled\nid: acprun_op123\n---' },
+        { id: 'result-1', name: 'subagent_result', args: { id: 'acprun_op123' }, status: 'ok', output: '---\nstatus: completed\nid: acprun_op123\n---\nDone.' },
+      ] }],
+    },
+  ]);
+
+  assert.equal(thread.querySelectorAll('.agent-subagent-card').length, 1,
+    'only the spawn op renders the delegation card');
+  assert.equal(thread.querySelectorAll('.agent-tool-terminal').length, 0,
+    'steer/wait/stop ops must not mount terminal rows');
+  assert.equal(renderToolCallCard({ name: 'subagent', args: { op: 'steer' }, status: 'ok', output: '' }), null);
+  assert.equal(renderToolCallCard({ name: 'subagent', args: { op: 'stop' }, status: 'ok', output: '' }), null);
+  assert.equal(renderToolCallCard({ name: 'subagent', args: { op: 'wait' }, status: 'ok', output: '' }), null);
+  const dom = new JSDOM('<main id="thread"></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    assert.ok(renderToolCallCard({ name: 'subagent', args: { op: 'spawn', prompt: 'x' }, status: 'ok', output: completion }),
+      'spawn op keeps the delegation card');
+    assert.ok(renderToolCallCard({ name: 'subagent', args: { prompt: 'x' }, status: 'ok', output: completion }),
+      'missing op defaults to spawn');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
 test('internal delegate cards use the same run card and auxiliary filtering as ACP', () => {
   const completion = 'Delegate run run_internal123 completed. Full result delivered in the delegate_result tool call.';
   const thread = renderTranscript([
