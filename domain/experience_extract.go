@@ -69,7 +69,7 @@ func ExtractExperience(conv *Conversation, headless bool) Experience {
 		switch msg.Role {
 		case RoleUser:
 			text := strings.TrimSpace(msg.Content)
-			if text == "" {
+			if text == "" || IsCompactionSummary(text) {
 				continue
 			}
 			if msg.Steer {
@@ -145,7 +145,7 @@ func ExtractExperience(conv *Conversation, headless bool) Experience {
 func experienceTurnStart(messages []Message) int {
 	start := 0
 	for i, msg := range messages {
-		if msg.Role == RoleUser && !msg.Steer && strings.TrimSpace(msg.Content) != "" {
+		if msg.Role == RoleUser && !msg.Steer && strings.TrimSpace(msg.Content) != "" && !IsCompactionSummary(msg.Content) {
 			start = i
 		}
 	}

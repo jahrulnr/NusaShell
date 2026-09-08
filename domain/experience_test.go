@@ -182,6 +182,28 @@ func TestDecideLearningTrigger_StructuralWinsOverPeriodic(t *testing.T) {
 	}
 }
 
+func TestExtractExperienceIgnoresCompactionCheckpoint(t *testing.T) {
+	checkpoint := CompactionSummaryPrefix + "\n## Goal\nold goal"
+	conv := &Conversation{
+		ID:     "conv-1",
+		Status: "idle",
+		Messages: []Message{
+			{Role: RoleUser, Content: "continue the deployment"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{Name: "exec", Args: "deploy"}}},
+			{Role: RoleUser, Content: checkpoint},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{Name: "exec", Args: "verify"}}},
+		},
+	}
+
+	got := ExtractExperience(conv, false)
+	if got.Goal != "continue the deployment" {
+		t.Fatalf("goal=%q, want the real user goal", got.Goal)
+	}
+	if len(got.Actions) != 2 {
+		t.Fatalf("actions=%d, want both real tool calls", len(got.Actions))
+	}
+}
+
 func TestCountUnreviewedLearningProgress(t *testing.T) {
 	messages := []Message{
 		{Role: RoleUser, Content: "one"},

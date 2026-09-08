@@ -483,7 +483,10 @@ func OpsFromLearnerConsolidate(stage *learnerConsolidate, jobID, expID string) [
 		supersedes = ""
 	}
 	var ops []domain.LearningOperation
-	if action == "supersede" && supersedes != "" {
+	if action == "supersede" && supersedes == "" {
+		return nil
+	}
+	if action == "supersede" {
 		ops = append(ops, domain.LearningOperation{
 			ID:       domain.NewULID(domain.IDPrefixLearnOp),
 			Kind:     domain.OpMemoryContradict,

@@ -1598,6 +1598,18 @@ func TestParseLearnerResultSupersedeWithID(t *testing.T) {
 	}
 }
 
+func TestParseLearnerResultSupersedeWithoutIDDoesNotWrite(t *testing.T) {
+	text := `{"stage_reached":"consolidate","consolidate":{"action":"supersede","entry":{"type":"fact","content":"corrected fact","evidence":"user correction","supersedes":null}}}`
+	result := parseLearnerResult(text)
+	if result == nil || result.Consolidate == nil {
+		t.Fatalf("parse learner result: %+v", result)
+	}
+	ops := opsFromLearnerConsolidate(result.Consolidate, "job_sup_missing", "exp_sup_missing")
+	if len(ops) != 0 {
+		t.Fatalf("supersede without target must not write, got %+v", ops)
+	}
+}
+
 func TestParseLearnerResultNoOpWithoutEvidence(t *testing.T) {
 	text := `{"stage_reached":"consolidate","consolidate":{"action":"write","entry":{"type":"fact","content":"x","evidence":""}}}`
 	result := parseLearnerResult(text)
