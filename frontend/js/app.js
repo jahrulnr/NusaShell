@@ -128,7 +128,14 @@ function route() {
   // Re-fetch the target view's data so it never goes stale after
   // changes made elsewhere (plugin install/uninstall, MCP edits, etc).
   const refresher = viewRefresh[target];
-  if (refresher) refresher().catch((err) => console.warn(`refresh ${target}:`, err?.message || err));
+  if (refresher) {
+    refresher().catch((err) => {
+      // Dead-backend polls are covered by the offline screen; do not spam
+      // "Backend unreachable" on every hashchange while reconnecting.
+      if (err?.code === 'unavailable') return;
+      console.warn(`refresh ${target}:`, err?.message || err);
+    });
+  }
 }
 
 async function boot() {

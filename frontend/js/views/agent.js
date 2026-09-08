@@ -1032,7 +1032,9 @@ async function loadAgentData() {
     if (first) await openConversation(first.id);
     else updateComposerStatus();
   } catch (err) {
-    console.error('agent data load failed:', err);
+    if (err?.code !== 'unavailable') {
+      console.error('agent data load failed:', err);
+    }
   } finally {
     agentDataLoading = false;
   }
