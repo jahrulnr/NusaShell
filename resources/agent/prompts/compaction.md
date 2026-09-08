@@ -65,4 +65,4 @@ The handoff must be self-contained: another LLM should be able to read it withou
 
 Do not summarize every message mechanically. Compress the conversation around its current state and future continuation.
 
-Call the summary tool exactly once, passing the complete handoff checkpoint as the tool input.
+Call the summary tool exactly once with its `text` field set to the complete handoff checkpoint.

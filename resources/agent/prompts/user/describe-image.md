@@ -1,1 +1,1 @@
-Describe this image concisely. Focus on visible objects, design, color, text, people, settings, and any notable details. Keep it factual and under 400 words.
+Describe this image concisely. Focus on visible objects, layout or design, color, text, people, settings, and details relevant to the user's question. For a UI image, include concise strengths or issues when they are visible. Keep observations factual and under 400 words.

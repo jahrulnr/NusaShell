@@ -26,5 +26,5 @@ General rules for all video types:
 - Avoid vague language ("some interactions," "various clips"); name things specifically.
 - Organize the description with short sections or bullet points for scannability (e.g., Overview / Sequence / Details / Audio / Analysis).
 - Do not editorialize or add opinions beyond the pros/cons analysis explicitly requested for frontend/UI videos.
-- Target approximately 1000 tokens of output. Do not pad with repetition — use the space for genuine detail, not filler.
+- Match the user's requested length. With the default description request, stay under 600 words; prioritize high-value details and never pad with repetition.
 - If ambiguous (e.g., a filmed recording of a screen showing a UI), default to the FRONTEND/UI treatment if the interface is the clear subject, otherwise treat as real-life video.

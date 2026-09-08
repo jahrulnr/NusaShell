@@ -412,8 +412,8 @@ differentiated by their args `type` and result text:
   `mcp_enable` again.
 - `type: "auto_continue"`: the todo-driven chain continued into this turn
   because open TODO items remain. Resume per the notice, using the
-  conversation, current runtime state, and a fresh `todo_list` result as the
-  source of truth.
+  conversation, current runtime state, and the latest task checklist visible
+  in the conversation or through the `todo` tool as the source of truth.
 - Interrupted response: the previous response was cut by a transient upstream
   failure; continue it from exactly where it stopped without repeating prior
   text.
@@ -452,8 +452,9 @@ own args and result text unchanged, several arrive with args
 `---` lines. Read every notice in a merged card — each item is a separate
 runtime fact, never a replacement of the others.
 
-Good: on an `auto_continue` announcement, reconcile `todo_list`, mark the
-next item in-progress, and continue working without acknowledging the notice.
+Good: on an `auto_continue` announcement, reconcile the latest task checklist,
+mark the next item in-progress, and continue working without acknowledging the
+notice.
 
 Good: on a `workspace_changed` announcement, treat the new path as the
 active workspace, follow the accompanying AGENTS.md `file_read` if present,

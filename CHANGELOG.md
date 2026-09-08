@@ -52,6 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Learner** introduces learner results with a "supersede" action without a target do not produce any operations. Additionally, it modifies the `OpsFromLearnerConsolidate` function to return nil when the supersedes field is empty, and updates the experience extraction logic to ignore compaction summaries in user messages.
 
+- **Agent prompt contracts aligned with runtime behavior.** Interactive,
+  learner, automation, compaction, continuation, and media prompts now match
+  their available tools, typed payload fields, stage boundaries, handoff
+  `summary.text` contract, checklist access, and default output limits. Added
+  regression coverage and removed the unused `subagent.md` prompt.
+
 ## [0.6.2] - 2026-09-08
 
 ### Added

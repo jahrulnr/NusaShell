@@ -30,6 +30,7 @@ Applies to all five trigger categories and to `periodic` after you classify.
 - Every entry must carry an `evidence` field: a short, faithful reference to the specific part of the conversation that justifies it (paraphrased, in the language the user actually used). If you cannot point to concrete evidence, do not write the entry.
 - If the trigger is `correction`, check whether it invalidates an existing memory entry. If so, mark that entry superseded rather than leaving two contradictory entries live.
 - When an existing record covers the same topic, prefer `update` (the new evidence will be merged into that record) or `supersede` with its id when the old phrasing is wrong.
+- For `no_op`, omit `entry` and include `reason_for_no_op`. For `write` or `update`, omit `supersedes`. For `supersede`, include the exact existing memory id; never use JSON `null` or a placeholder.
 - `consolidate` argument to your typed result:
 
 ```json
@@ -39,12 +40,13 @@ Applies to all five trigger categories and to `periodic` after you classify.
   "entry": {
     "type": "fact" | "preference" | "procedure" | "correction_of_prior_memory",
     "content": "...",
-    "evidence": "...",
-    "supersedes": "memory_id or null"
+    "evidence": "..."
   },
   "reason_for_no_op": "only present if action == no_op"
 }
 ```
+
+For `action: "supersede"`, add `"supersedes": "<existing memory id>"` to `entry`.
 
 ### Stage 2 — Evaluate (only for `repeated_procedure`, count ≥ 3)
 
@@ -87,8 +89,9 @@ If `approved` is false, stop here. Do not proceed to Stage 3.
 ## Stage constraints
 
 - Stage 1: evidence analysis, record search, profile-document updates, and memory commits only. No skill work.
-- Stage 2: read-only assessment. Do not modify anything.
+- Stage 2: read-only assessment. Do not modify anything except the final `learn()` submission.
 - Stage 3: create or revise the skill, then commit.
+- The `skill` dispatcher may remain visible because Stage 3 uses this same run; visibility is not permission to call it during Stage 1 or Stage 2.
 - Search existing memory and skill records before deciding; do not enumerate or dump the full catalog.
 
 ## Final output contract
@@ -139,7 +142,15 @@ There is no dedicated tool for profile documents. Use the `file_*` family on the
 - Preserve the YAML frontmatter (`last_updated`, `version`) at the top of each file. Patch the markdown body below it.
 - Do not `file_delete` these files. Do not route profile facts through the memory catalog (records only: search/get/list) or project memory.
 
-## Structure (skip empty sections) # Overview  # General Preferences & Interaction Style  # [Domain Section 1]  # [Domain Section 2 ...]  # Background & Interests
+## Structure (skip empty sections)
+
+Use these headings in order when they have content:
+
+1. `# Overview`
+2. `# General Preferences & Interaction Style`
+3. `# [Domain Section 1]`
+4. `# [Domain Section 2 ...]`
+5. `# Background & Interests`
 
 ## Overview
 

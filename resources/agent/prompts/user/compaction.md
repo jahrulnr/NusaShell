@@ -11,4 +11,4 @@ Include:
 
 Be concise, structured, and focused on helping the next LLM seamlessly continue the work.
 
-Call the summary tool exactly once with the complete handover checkpoint.
+Call the summary tool exactly once with its `text` field set to the complete handover checkpoint.

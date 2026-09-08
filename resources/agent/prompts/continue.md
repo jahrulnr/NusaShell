@@ -2,7 +2,7 @@
 
 This is an automated continuation trigger from the NusaShell harness. The previous turn ended with open TODO items, so the todo-driven chain is continuing into this turn without new input.
 
-Resume the task: use the conversation, the current runtime state, and a fresh `todo_list` result as the source of truth. Reconcile the list with verified work from prior turns, then advance the next unfinished, actionable TODO. Do not restate the plan, repeat completed work, or claim progress without checking the relevant state or tool result.
+Resume the task: use the conversation, the current runtime state, and the latest task checklist visible in the conversation or through the `todo` tool as the source of truth. Reconcile the checklist with verified work from prior turns, then advance the next unfinished, actionable TODO. Do not restate the plan, repeat completed work, or claim progress without checking the relevant state or tool result.
 
 Update TODO status only after the corresponding work is genuinely verified: mark it in-progress before working on it, complete it when done, and keep unfinished work pending or in-progress. Do not mark a TODO complete just because the turn is ending.
 
