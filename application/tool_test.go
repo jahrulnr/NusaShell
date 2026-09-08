@@ -170,8 +170,8 @@ func TestLearningToolCallsRejectBannedTools(t *testing.T) {
 				args string
 			}{
 				{"file_write", `{}`},
-				{"skill", `{"op":"save","name":"learned-example","content":"## Steps\n1. do"}`},
-				{"skill", `{"op":"delete","id":"learned-example"}`},
+				{"skill", `{"op":"list"}`},
+				{"skill", `{"op":"search","query":"learned"}`},
 				{"automation", `{"op":"list"}`},
 				{"conversation", `{"op":"list"}`},
 			}
@@ -192,6 +192,15 @@ func TestLearningToolCallsRejectBannedTools(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("executed learning tools = %v, want %v", got, want)
+			}
+			for _, call := range []domain.ToolCall{
+				{Name: "skill", Args: `{"op":"save"}`},
+				{Name: "skill", Args: `{"op":"delete"}`},
+			} {
+				res := app.runOneTool(run, "", call, ModelCapabilities{}, domain.Settings{}, 1)
+				if res.Status != domain.ToolFailed {
+					t.Fatalf("learner skill mutation %s must fail, got %+v", call.Args, res)
+				}
 			}
 
 			banned := []string{

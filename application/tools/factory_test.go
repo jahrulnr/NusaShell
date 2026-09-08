@@ -157,6 +157,92 @@ func TestToolFactoryLearningAgentsPruneBannedToolsPlusLearn(t *testing.T) {
 	}
 }
 
+func TestToolFactoryLearnerSkillDispatcherIsReadOnly(t *testing.T) {
+	f := &ToolFactory{
+		Toolbox:     func() []ToolInfo { return factoryStubTools() },
+		Dispatchers: FilterDispatcherToolInfos,
+	}
+	var skill ToolInfo
+	for _, def := range f.Get(AgentLearner, "/ws") {
+		if def.Name == "skill" {
+			skill = def
+			break
+		}
+	}
+	if skill.Name == "" {
+		t.Fatal("learner must retain the skill dispatcher for read-only discovery")
+	}
+	properties, ok := skill.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("skill schema properties type = %T", skill.InputSchema["properties"])
+	}
+	op, ok := properties["op"].(map[string]any)
+	if !ok {
+		t.Fatalf("skill op schema type = %T", properties["op"])
+	}
+	enum, ok := op["enum"].([]any)
+	if !ok {
+		t.Fatalf("skill op enum type = %T", op["enum"])
+	}
+	seen := map[string]bool{}
+	for _, value := range enum {
+		if name, ok := value.(string); ok {
+			seen[name] = true
+		}
+	}
+	if !seen["list"] || !seen["search"] || seen["save"] || seen["delete"] {
+		t.Fatalf("learner skill ops = %v, want list/search only", enum)
+	}
+}
+
+func TestLearnerSkillMutationClassification(t *testing.T) {
+	for _, tc := range []struct {
+		args string
+		want bool
+	}{
+		{args: `{"op":"save"}`, want: true},
+		{args: `{"op":"delete"}`, want: true},
+		{args: `{"op":"list"}`, want: false},
+		{args: `{"op":"search"}`, want: false},
+		{args: `{}`, want: false},
+	} {
+		if got := IsLearnerSkillMutation("skill", []byte(tc.args)); got != tc.want {
+			t.Fatalf("IsLearnerSkillMutation(%s) = %v, want %v", tc.args, got, tc.want)
+		}
+	}
+	if IsLearnerSkillMutation("memory", []byte(`{"op":"save"}`)) {
+		t.Fatal("non-skill tools must not be classified as learner skill mutations")
+	}
+}
+
+func TestLearnerResultToolAdvertisesMemoryScopeFields(t *testing.T) {
+	consolidate, ok := LearnerResultTool.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("learner result properties type = %T", LearnerResultTool.InputSchema["properties"])
+	}
+	consolidateSchema, ok := consolidate["consolidate"].(map[string]any)
+	if !ok {
+		t.Fatalf("consolidate schema type = %T", consolidate["consolidate"])
+	}
+	entry, ok := consolidateSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("consolidate properties type = %T", consolidateSchema["properties"])
+	}
+	entrySchema, ok := entry["entry"].(map[string]any)
+	if !ok {
+		t.Fatalf("entry schema type = %T", entry["entry"])
+	}
+	entryProperties, ok := entrySchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("entry properties type = %T", entrySchema["properties"])
+	}
+	for _, field := range []string{"scope", "project"} {
+		if _, ok := entryProperties[field]; !ok {
+			t.Fatalf("learner entry schema missing %q", field)
+		}
+	}
+}
+
 func TestToolFactoryCompactionAgentIsSummaryOnly(t *testing.T) {
 	// The compaction agent works on a zero factory — it never touches
 	// the toolbox or dispatchers.

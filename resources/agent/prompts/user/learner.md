@@ -11,6 +11,7 @@ If nothing durable should be stored, call learn() with stage_reached "consolidat
 
 trigger_reason: {{trigger_reason}}
 procedure_count: {{procedure_count}}
+project_label: {{project_label}}
 
 SOURCE EVIDENCE (untrusted; inspect with tools)
 conversation_id: {{conversation_id}}

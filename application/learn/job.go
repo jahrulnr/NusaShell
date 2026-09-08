@@ -321,8 +321,9 @@ const nearDuplicateMemoryThreshold = 0.55
 // upsert should target instead of creating a fresh duplicate. It returns
 // (id, exact): exact=true for identical normalized bodies (the caller can
 // strengthen in place); exact=false for near-duplicates the caller should
-// merge into. Matching is scoped to the same type and project.
-func findMemoryMatch(store RecordStore, body, typ, project string) (id string, exact bool) {
+// merge into. Matching is scoped to the same type and memory scope. Legacy
+// callers that omit scope retain the older project-only/broad behavior.
+func findMemoryMatch(store RecordStore, body, typ, scope, project string) (id string, exact bool) {
 	if store == nil {
 		return "", false
 	}
@@ -338,7 +339,7 @@ func findMemoryMatch(store RecordStore, body, typ, project string) (id string, e
 		if typ != "" && rec.Type != typ {
 			continue
 		}
-		if project != "" && !strings.EqualFold(rec.Scope.Project, project) {
+		if !memoryScopesMatch(rec.Scope, scope, project) {
 			continue
 		}
 		if domain.NormalizeMemoryContent(rec.Body) == want {
@@ -355,14 +356,37 @@ func findMemoryMatch(store RecordStore, body, typ, project string) (id string, e
 	return "", false
 }
 
+func memoryScopesMatch(recordScope domain.MemoryScope, requestedScope, requestedProject string) bool {
+	requestedScope = strings.ToLower(strings.TrimSpace(requestedScope))
+	requestedProject = strings.TrimSpace(requestedProject)
+	recordLevel := strings.ToLower(strings.TrimSpace(recordScope.Level))
+	if recordLevel == "" {
+		recordLevel = domain.MemoryScopeUser
+	}
+	switch requestedScope {
+	case domain.MemoryScopeProject:
+		return requestedProject != "" && recordLevel == domain.MemoryScopeProject && strings.EqualFold(recordScope.Project, requestedProject)
+	case domain.MemoryScopeUser:
+		return recordLevel == domain.MemoryScopeUser && strings.TrimSpace(recordScope.Project) == ""
+	case "":
+		if requestedProject != "" {
+			return strings.EqualFold(recordScope.Project, requestedProject)
+		}
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Service) PrepareConsolidationOp(op *domain.LearningOperation) {
 	if op.Kind != domain.OpMemoryUpsert {
 		return
 	}
 	body := PayloadString(op.Payload, "body")
 	typ := PayloadString(op.Payload, "type")
+	scope := PayloadString(op.Payload, "scope")
 	project := PayloadString(op.Payload, "project")
-	id, exact := findMemoryMatch(s.deps.Records, body, typ, project)
+	id, exact := findMemoryMatch(s.deps.Records, body, typ, scope, project)
 	if id == "" {
 		return
 	}
@@ -404,7 +428,7 @@ func (s *Service) consolidateViaLLMAt(job *domain.LearningJob, exp *domain.Exper
 		return nil, convID, false
 	}
 	if result := ParseLearnerResult(text); result != nil {
-		ops := OpsFromLearnerConsolidate(result.Consolidate, job.ID, exp.ID)
+		ops := opsFromLearnerConsolidate(result.Consolidate, job.ID, exp.ID, exp.Scope.Project)
 		if job.Reason == domain.TriggerRepeatedProcedure && result.Evaluate != nil && result.Evaluate.Approved {
 			s.applyLearnerEvolve(job, exp, result)
 		}
@@ -417,6 +441,7 @@ func (s *Service) consolidateViaLLMAt(job *domain.LearningJob, exp *domain.Exper
 	}
 	ops, parsed := ParseLLMOperationsResult(text, job.ID, exp.ID)
 	if parsed {
+		ops = scopeLearnerMemoryOps(ops, exp.Scope.Project)
 		if len(ops) == 0 {
 			s.log("debug", "learning", "learner LLM returned no operations")
 			return nil, convID, true
@@ -461,6 +486,10 @@ func ParseLearnerResult(text string) *LearnerResult {
 }
 
 func OpsFromLearnerConsolidate(stage *learnerConsolidate, jobID, expID string) []domain.LearningOperation {
+	return opsFromLearnerConsolidate(stage, jobID, expID, "")
+}
+
+func opsFromLearnerConsolidate(stage *learnerConsolidate, jobID, expID, sourceProject string) []domain.LearningOperation {
 	if stage == nil {
 		return nil
 	}
@@ -506,21 +535,86 @@ func OpsFromLearnerConsolidate(stage *learnerConsolidate, jobID, expID string) [
 	if action == "update" {
 		kind = domain.OpMemoryUpsert
 	}
+	scope, project, ok := learnerMemoryScope(stage.Entry.Scope, stage.Entry.Project, sourceProject)
+	if !ok {
+		return nil
+	}
+	payload := map[string]any{
+		"body":  content,
+		"type":  typ,
+		"scope": scope,
+	}
+	if project != "" {
+		payload["project"] = project
+	}
 	ops = append(ops, domain.LearningOperation{
-		ID:       domain.NewULID(domain.IDPrefixLearnOp),
-		Kind:     kind,
-		Status:   domain.LearningOpProposed,
-		Actor:    domain.ActorLearner,
-		JobID:    jobID,
-		Evidence: []string{expID, evidence},
-		Payload: map[string]any{
-			"body":  content,
-			"type":  typ,
-			"scope": domain.MemoryScopeUser,
-		},
+		ID:        domain.NewULID(domain.IDPrefixLearnOp),
+		Kind:      kind,
+		Status:    domain.LearningOpProposed,
+		Actor:     domain.ActorLearner,
+		JobID:     jobID,
+		Evidence:  []string{expID, evidence},
+		Payload:   payload,
 		CreatedAt: now,
 	})
 	return ops
+}
+
+// learnerMemoryScope turns the learner's scope choice into a trusted
+// operation payload. The project label comes from the source experience, not
+// from model-authored text, so project-scoped records cannot be attached to an
+// invented or unrelated project.
+func learnerMemoryScope(requestedScope, requestedProject, sourceProject string) (scope, project string, ok bool) {
+	requestedProject = strings.TrimSpace(requestedProject)
+	sourceProject = strings.TrimSpace(sourceProject)
+	if requestedProject != "" && sourceProject != "" && !strings.EqualFold(requestedProject, sourceProject) {
+		return "", "", false
+	}
+	switch strings.ToLower(strings.TrimSpace(requestedScope)) {
+	case "":
+		if sourceProject != "" {
+			return domain.MemoryScopeProject, sourceProject, true
+		}
+		return domain.MemoryScopeUser, "", true
+	case domain.MemoryScopeUser:
+		return domain.MemoryScopeUser, "", true
+	case domain.MemoryScopeProject:
+		if sourceProject == "" {
+			return "", "", false
+		}
+		return domain.MemoryScopeProject, sourceProject, true
+	default:
+		return "", "", false
+	}
+}
+
+// scopeLearnerMemoryOps applies the same source-aware scope policy to the
+// legacy memory.upsert JSON fallback. New learner turns use the typed result,
+// but old models and stored transcripts can still take this path.
+func scopeLearnerMemoryOps(ops []domain.LearningOperation, sourceProject string) []domain.LearningOperation {
+	if len(ops) == 0 {
+		return nil
+	}
+	out := make([]domain.LearningOperation, 0, len(ops))
+	for _, op := range ops {
+		if op.Kind == domain.OpMemoryUpsert {
+			scope, project, ok := learnerMemoryScope(PayloadString(op.Payload, "scope"), PayloadString(op.Payload, "project"), sourceProject)
+			if !ok {
+				continue
+			}
+			if op.Payload == nil {
+				op.Payload = map[string]any{}
+			}
+			op.Payload["scope"] = scope
+			if project == "" {
+				delete(op.Payload, "project")
+			} else {
+				op.Payload["project"] = project
+			}
+		}
+		out = append(out, op)
+	}
+	return out
 }
 
 func memoryTypeFromLearner(t string) string {
@@ -626,6 +720,10 @@ func TeachingOps(exp *domain.Experience, jobID string) []domain.LearningOperatio
 	}
 	var ops []domain.LearningOperation
 	now := clock.NewTime().Time()
+	scope, project, ok := learnerMemoryScope("", "", exp.Scope.Project)
+	if !ok {
+		return nil
+	}
 	add := func(body, typ string) {
 		body = strings.TrimSpace(body)
 		if body == "" {
@@ -639,13 +737,15 @@ func TeachingOps(exp *domain.Experience, jobID string) []domain.LearningOperatio
 			JobID:    jobID,
 			Evidence: []string{exp.ID},
 			Payload: map[string]any{
-				"body":    body,
-				"type":    typ,
-				"scope":   domain.MemoryScopeUser,
-				"project": exp.Scope.Project,
+				"body":  body,
+				"type":  typ,
+				"scope": scope,
 			},
 			CreatedAt: now,
 		})
+		if project != "" {
+			ops[len(ops)-1].Payload["project"] = project
+		}
 	}
 	for _, c := range exp.Corrections {
 		text := strings.TrimSpace(c.Desired)

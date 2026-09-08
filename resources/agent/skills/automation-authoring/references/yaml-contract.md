@@ -115,8 +115,9 @@ current runtime has important limits:
 - `retry` describes job policy, but the current executor does not yet loop job
   attempts automatically. Do not use it as proof that an external write is
   retried safely.
-- `output_schema` is accepted but is not validated by the headless runner. The
-  current result is a text output map.
+- `output_schema` is validated against the final assistant content by the
+  headless runner. The current result is still a text output map with
+  `output`; schema properties are not transported as separate job outputs.
 - shell stdout is logged but is not automatically converted into structured
   job outputs. A later `if` can inspect outputs only when the step/capability
   actually returns them.

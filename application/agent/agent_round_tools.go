@@ -198,6 +198,14 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 		a.emitToolCompleted(run, toolCall, res)
 		return res
 	}
+	if isLearnerKind(run.ToolKind) && tools.IsLearnerSkillMutation(toolCall.Name, []byte(toolCall.Args)) {
+		res := ToolExecResult{
+			Status: domain.ToolFailed,
+			Output: "error: learner skill mutations are committed by learn() after Stage 3",
+		}
+		a.emitToolCompleted(run, toolCall, res)
+		return res
+	}
 	switch toolCall.Name {
 	case learnerResultToolName:
 		if !isLearnerKind(run.ToolKind) {

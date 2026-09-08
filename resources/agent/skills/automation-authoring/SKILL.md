@@ -147,7 +147,9 @@ For Telegram, GitHub, kanban, or any remote write:
 
 For multi-agent or multi-job handoff, use an explicit shared file only when the
 workspace is known to be shared and the path is safe, or keep the operation in
-one agent step. Do not assume `output_schema` validates or transports data.
+one agent step. The runner validates final content against `output_schema` when
+present, but still returns a text map with `output`; schema properties are not
+transported into later prompts automatically.
 
 ### 7. Validate, save, activate, and test
 

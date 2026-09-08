@@ -63,6 +63,8 @@ type learnerEntry struct {
 	Content    string `json:"content"`
 	Evidence   string `json:"evidence"`
 	Supersedes string `json:"supersedes"`
+	Scope      string `json:"scope"`
+	Project    string `json:"project"`
 }
 
 type learnerEvaluate struct {
@@ -282,6 +284,7 @@ func ParseLLMOperationsResult(text string, jobID string, expID string) ([]domain
 type LearningSource struct {
 	ConversationID   string
 	Path             string
+	Project          string
 	MessageStart     int
 	MessageEnd       int
 	BoundaryCaptured bool
@@ -289,14 +292,16 @@ type LearningSource struct {
 
 // learningSourceForExperience resolves the source conversation handoff for a
 // background learning turn. The source content stays in the persisted
-// conversation file; only its stable location and incremental message range
-// are put in the background user's short instruction.
+// conversation file; only its stable location, source project label, and
+// incremental message range are put in the background user's short
+// instruction.
 func (s *Service) LearningSourceForExperience(exp *domain.Experience) LearningSource {
 	if exp == nil {
 		return LearningSource{}
 	}
 	source := LearningSource{
 		ConversationID: strings.TrimSpace(exp.ConversationID),
+		Project:        strings.TrimSpace(exp.Scope.Project),
 	}
 	if source.ConversationID == "" || s == nil {
 		return source
@@ -382,13 +387,18 @@ func safeLearningConversationID(conversationID string) bool {
 // (see learnerSkillCreatorReference), so the model receives it as a tool
 // result without having to search for it.
 func (s *Service) BuildLearnerPacketAt(exp *domain.Experience, source LearningSource, reason string, procedureCount int) string {
-	return resources.RenderLearnerUserPrompt(
+	project := strings.TrimSpace(source.Project)
+	if project == "" && exp != nil {
+		project = strings.TrimSpace(exp.Scope.Project)
+	}
+	return resources.RenderLearnerUserPromptForProject(
 		reason,
 		procedureCount,
 		source.ConversationID,
 		source.Path,
 		source.MessageStart,
 		source.MessageEnd,
+		project,
 	)
 }
 

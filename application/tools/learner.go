@@ -4,8 +4,8 @@ package tools
 // compaction's summary(): the typed catalog result lives in the tool-call
 // arguments (separate from reasoning and assistant text). The learner
 // advertises a pruned toolbox (no project memory, ACP/delegate, or MCP) plus
-// conversation(op=list|search|read|info) for cross-room inspection; profile
-// writes still use file_*.
+// conversation(op=list|search|read|info) for cross-room inspection; skill is
+// read-only and profile writes still use file_*.
 const LearnerResultToolName = "learn"
 
 // LearnerResultTool is advertised only to learner agent kinds.
@@ -39,6 +39,15 @@ var LearnerResultTool = ToolInfo{
 							"content":    map[string]any{"type": "string"},
 							"evidence":   map[string]any{"type": "string"},
 							"supersedes": map[string]any{"type": "string", "description": "Existing memory id; omit when none."},
+							"scope": map[string]any{
+								"type":        "string",
+								"enum":        []any{"user", "project"},
+								"description": "Use user for cross-project knowledge; use project for facts tied to the source project.",
+							},
+							"project": map[string]any{
+								"type":        "string",
+								"description": "Exact source project label; include only when scope is project.",
+							},
 						},
 					},
 					"reason_for_no_op": map[string]any{"type": "string"},

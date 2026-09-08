@@ -20,7 +20,7 @@ and be running. `Blocked` means the current installation cannot run it now.
 | `wait_until` | Supported | Use for long pauses and restart-safe resume | Parks executor and resumes after due time |
 | `agent` step | Supported if agent/provider configured | Keep prompt bounded; use `${event.*}` only | Headless turn uses a new hidden automation conversation |
 | `${event.*}` in agent prompt | Supported | Use event identity and quote untrusted data as data | Missing values render empty; no shell/output interpolation |
-| `agent.output_schema` | Partial | Treat as documentation of desired shape; validate in prompt or a following script | Headless runner currently returns `{output: text}` and ignores schema |
+| `agent.output_schema` | Supported with text result | Emit content matching the schema; the runner validates the final content | Headless runner returns `{output: text}`; schema properties are not separate job outputs |
 | Job `retry` | Partial | Declare only for transient runner/timeout policy, but verify behavior | Parser/model exist; executor does not yet loop job attempts |
 | Agent provider retry | Supported internally | Do not confuse it with job retry or a new workflow run | Interactive provider retry policy is internal to headless turn |
 | `allow`/`skip`/`replace` concurrency | Supported with caveats | Pick by effect semantics and use a resource-scoped key | Replace cancels active run; skip drops new run |

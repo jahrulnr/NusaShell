@@ -64,12 +64,14 @@ The conversation agent never sees this tool. The background learner advertises
 a pruned toolbox (no `memory_project`, subagent, or MCP family) plus
 `conversation(op=list|search|read|info)` for cross-room inspection, and
 commits catalog records with `learn()` the same way compaction commits a
-handoff with `summary()`.
+handoff with `summary()`. Its `skill` dispatcher is read-only (`list` and
+`search`); `save` and `delete` are rejected, and approved Stage 3 skill
+changes are applied after the typed learner result.
 
 Good examples:
 
     learn(stage_reached="consolidate", consolidate={"action":"no_op","reason_for_no_op":"one-off factual question"})
-    learn(stage_reached="consolidate", consolidate={"action":"write","entry":{"type":"preference","content":"Prefers Go over Python for CLI tools because of static binaries","evidence":"pakai Go aja untuk CLI"}})
+    learn(stage_reached="consolidate", consolidate={"action":"write","entry":{"type":"preference","content":"Prefers Go over Python for CLI tools because of static binaries","evidence":"pakai Go aja untuk CLI","scope":"user"}})
 
 Bad examples:
 

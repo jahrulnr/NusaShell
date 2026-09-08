@@ -33,15 +33,50 @@ func IsLearnerBannedTool(name string) bool {
 	return strings.HasPrefix(name, "mcp_")
 }
 
+// IsLearnerSkillMutation reports the skill operations that a learner must not
+// execute directly. Learned skill writes are committed by the typed learn()
+// result after Stage 3 has passed the runtime validation path.
+func IsLearnerSkillMutation(name string, argsJSON []byte) bool {
+	if name != "skill" {
+		return false
+	}
+	switch OpArg(argsJSON) {
+	case "save", "delete":
+		return true
+	default:
+		return false
+	}
+}
+
 // filterLearnerToolInfos removes tools banned from learner agent kinds.
 func filterLearnerToolInfos(defs []ToolInfo) []ToolInfo {
 	out := make([]ToolInfo, 0, len(defs))
 	for _, d := range defs {
 		if !IsLearnerBannedTool(d.Name) {
+			if d.Name == "skill" {
+				d = learnerReadOnlySkillTool()
+			}
 			out = append(out, d)
 		}
 	}
 	return out
+}
+
+// learnerReadOnlySkillTool keeps skill discovery available while removing
+// write-shaped fields from the learner's provider-facing schema. The runtime
+// also rejects save/delete calls so a stale or hallucinated call cannot bypass
+// this advertised contract.
+func learnerReadOnlySkillTool() ToolInfo {
+	return ToolInfo{
+		Name:        "skill",
+		Description: `Read the skill catalog only; "op" selects: list {limit?,status?} or search {query,limit?,status?}. Read the selected SKILL.md with file_read before applying it. Skill writes are committed by the learner runtime after the final learn() result, not by this dispatcher.`,
+		InputSchema: objSchema(
+			pEnum("op", "Read-only operation", "list", "search"),
+			pStr("query", "Search query (op=search)"),
+			pInt("limit", "Max results (list default 100, search default 50)"),
+			pStr("status", "Optional status filter (list/search). Empty = routable trusted|validated only."),
+		),
+	}
 }
 
 // FilteredToolbox wraps a ToolExecutor and hides matching tools from both

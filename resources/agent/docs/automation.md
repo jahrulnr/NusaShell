@@ -608,9 +608,12 @@ An agent prompt should state:
 - exact MCP discovery sequence when a plugin is needed;
 - output format and honest failure behavior.
 
-`agent.output_schema` is accepted by YAML but is not validated by the current
-headless runner. The current result is a text output map. Do not assume a
-schema creates typed job outputs or transports them into another prompt.
+`agent.output_schema` is compiled and validated by the headless runner against
+the final assistant content. Valid JSON is checked as its decoded value;
+non-JSON content is checked as a string. A mismatch or invalid schema fails
+the agent step. The result is still a text output map with `output`; the schema
+does not create additional typed job outputs or automatically transport them
+into another prompt.
 
 For multi-stage handoff, use an explicit file only when the workspace is known
 to be shared and the path is safe, or keep both stages in one agent step. Do
@@ -867,7 +870,7 @@ external tool result confirms it.
 | `wait_until` | supported | durable time pause and resume |
 | headless `agent` | supported when provider configured | new hidden conversation per step/run |
 | `${event.*}` prompt rendering | supported | only event placeholders render; missing is empty |
-| `output_schema` | partial | accepted but not structurally validated |
+| `output_schema` | supported with text result | validated against final assistant content; schema properties are not separate job outputs |
 | job `retry` | partial | parsed policy, no automatic executor retry loop yet |
 | `allow`, `skip`, `replace` concurrency | supported with stated semantics | choose based on duplicate effect behavior |
 | `queue` concurrency | partial | new overlapping run is skipped, not durably queued |

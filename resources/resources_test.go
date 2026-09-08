@@ -59,6 +59,16 @@ func TestRenderLearnerUserPromptRepeatedProcedureCount(t *testing.T) {
 	}
 }
 
+func TestRenderLearnerUserPromptIncludesSourceProjectLabel(t *testing.T) {
+	got := RenderLearnerUserPromptForProject("explicit_teaching", 0, "c", "/p", 0, 2, "NusaShell")
+	if !strings.Contains(got, "project_label: NusaShell") {
+		t.Fatalf("missing source project label:\n%s", got)
+	}
+	if strings.Contains(got, "{{") {
+		t.Fatalf("unreplaced placeholder:\n%s", got)
+	}
+}
+
 func TestInteractivePromptKeepsPlanningInstructionsOperational(t *testing.T) {
 	prompt := SystemPrompt()
 	for _, stale := range []string{
@@ -88,10 +98,14 @@ func TestAutomationPromptMatchesAvailableWorkflowDispatchers(t *testing.T) {
 	for _, want := range []string{
 		"`automation` and `automation_schedule` dispatchers may also be available",
 		"Only perform workflow or schedule maintenance when the step explicitly requests it",
+		"headless runner validates the final assistant content",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("automation prompt missing capability boundary %q", want)
 		}
+	}
+	if strings.Contains(prompt, "Structured output validation is a future enhancement") {
+		t.Error("automation prompt still describes output_schema validation as future work")
 	}
 }
 
@@ -132,7 +146,10 @@ func TestLearnerPromptMatchesTypedResultAndProfileContracts(t *testing.T) {
 	for _, want := range []string{
 		"For `no_op`, omit `entry`",
 		"For `write` or `update`, omit `supersedes`",
-		"visibility is not permission to call it during Stage 1 or Stage 2",
+		"Choose the narrowest supported memory scope",
+		"copy the exact `project_label`",
+		"If `project_label` is empty, do not use project scope",
+		"The `skill` dispatcher is read-only for this agent",
 		"## Structure (skip empty sections)\n\nUse these headings in order",
 	} {
 		if !strings.Contains(prompt, want) {
@@ -153,6 +170,7 @@ func TestLearnerUserPromptUsesAvailableEvidenceAndSchemaFields(t *testing.T) {
 	for _, want := range []string{
 		"file_read",
 		"entry.evidence",
+		"project_label: {{project_label}}",
 		"do not invent fields",
 		"narrow the wording or exclude it",
 	} {

@@ -28,6 +28,7 @@ Applies to all five trigger categories and to `periodic` after you classify.
 - Never copy user messages verbatim into an entry: distil them into declarative statements that would still hold in a different conversation. Questions, rhetorical remarks, and one-off task instructions ("fix this before push", "update the changelog") are not durable memory.
 - Classify the entry as one of: `fact`, `preference`, `procedure`, `correction_of_prior_memory`.
 - Every entry must carry an `evidence` field: a short, faithful reference to the specific part of the conversation that justifies it (paraphrased, in the language the user actually used). If you cannot point to concrete evidence, do not write the entry.
+- Choose the narrowest supported memory scope. Use `user` only for knowledge that should apply across projects; use `project` for facts, preferences, or procedures tied to the source project. When using `project`, copy the exact `project_label` from the task metadata and never invent or rename it. If `project_label` is empty, do not use project scope: choose user only for cross-project knowledge or use `no_op`. Omit `project` for `user` scope.
 - If the trigger is `correction`, check whether it invalidates an existing memory entry. If so, mark that entry superseded rather than leaving two contradictory entries live.
 - When an existing record covers the same topic, prefer `update` (the new evidence will be merged into that record) or `supersede` with its id when the old phrasing is wrong.
 - For `no_op`, omit `entry` and include `reason_for_no_op`. For `write` or `update`, omit `supersedes`. For `supersede`, include the exact existing memory id; never use JSON `null` or a placeholder.
@@ -40,7 +41,9 @@ Applies to all five trigger categories and to `periodic` after you classify.
   "entry": {
     "type": "fact" | "preference" | "procedure" | "correction_of_prior_memory",
     "content": "...",
-    "evidence": "..."
+    "evidence": "...",
+    "scope": "user" | "project",
+    "project": "exact project_label, only when scope == project"
   },
   "reason_for_no_op": "only present if action == no_op"
 }
@@ -90,8 +93,8 @@ If `approved` is false, stop here. Do not proceed to Stage 3.
 
 - Stage 1: evidence analysis, record search, profile-document updates, and memory commits only. No skill work.
 - Stage 2: read-only assessment. Do not modify anything except the final `learn()` submission.
-- Stage 3: create or revise the skill, then commit.
-- The `skill` dispatcher may remain visible because Stage 3 uses this same run; visibility is not permission to call it during Stage 1 or Stage 2.
+- Stage 3: describe the approved skill in `evaluate`/`evolve`; after the final `learn()` result is accepted, the runtime creates or revises the experimental skill.
+- The `skill` dispatcher is read-only for this agent at every stage: `list` and `search` are allowed for discovery, but `save` and `delete` are rejected. Do not call `skill(op="save"|"delete")`.
 - Search existing memory and skill records before deciding; do not enumerate or dump the full catalog.
 
 ## Final output contract

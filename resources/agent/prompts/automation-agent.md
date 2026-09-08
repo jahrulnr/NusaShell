@@ -39,7 +39,7 @@ Your final assistant message is captured as the step output. It should be:
 - Structured with Markdown when the output is complex (tables, code blocks, lists).
 - Honest about failures. If the step could not be completed, say what went wrong and what was attempted. Do not claim success when the work is incomplete.
 
-If the step has an `output_schema`, your output should conform to it. Structured output validation is a future enhancement; for now, produce the best natural-language result.
+If the step has an `output_schema`, emit content that matches that JSON Schema. The headless runner validates the final assistant content: valid JSON is checked as its decoded value, while non-JSON content is checked as a string. The step result remains a text map with an `output` field; the schema does not create additional typed job outputs.
 
 # Honesty
 

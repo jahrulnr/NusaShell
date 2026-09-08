@@ -145,6 +145,7 @@ const (
 	learnerProcedureCount   = "{{procedure_count}}"
 	learnerConversationID   = "{{conversation_id}}"
 	learnerConversationFile = "{{conversation_file}}"
+	learnerProjectLabel     = "{{project_label}}"
 	learnerMessageStart     = "{{message_start}}"
 	learnerMessageEnd       = "{{message_end}}"
 )
@@ -188,11 +189,19 @@ func LearnerUserPrompt() string {
 
 // RenderLearnerUserPrompt fills user/learner.md placeholders for one learning turn.
 func RenderLearnerUserPrompt(triggerReason string, procedureCount int, conversationID, conversationFile string, messageStart, messageEnd int) string {
+	return RenderLearnerUserPromptForProject(triggerReason, procedureCount, conversationID, conversationFile, messageStart, messageEnd, "")
+}
+
+// RenderLearnerUserPromptForProject fills the learner user-role template and
+// includes the source experience's authoritative project label. The label is
+// evidence for scope selection, not a value the model may invent.
+func RenderLearnerUserPromptForProject(triggerReason string, procedureCount int, conversationID, conversationFile string, messageStart, messageEnd int, projectLabel string) string {
 	return strings.NewReplacer(
 		learnerTriggerReason, triggerReason,
 		learnerProcedureCount, strconv.Itoa(procedureCount),
 		learnerConversationID, conversationID,
 		learnerConversationFile, conversationFile,
+		learnerProjectLabel, projectLabel,
 		learnerMessageStart, strconv.Itoa(messageStart),
 		learnerMessageEnd, strconv.Itoa(messageEnd),
 	).Replace(UserPrompt("learner"))

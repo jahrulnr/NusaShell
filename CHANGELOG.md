@@ -47,8 +47,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Learner toolbox is pruned.** Background learner kinds no longer
   advertise or execute `memory_project`, ACP/`delegate`, or the MCP family
   (`mcp_*`, `tool_list`, `tool_schema`, `contract_read`). They keep file/
-  skill/memory/docs/automation tools plus `conversation` inspect ops and
-  `learn()`.
+  read-only skill discovery, memory/docs/automation tools plus
+  `conversation` inspect ops and `learn()`. Direct skill `save`/`delete` is
+  rejected; approved Stage 3 changes are applied from the typed result.
+
+- **Learner memory scope follows the source.** Typed and legacy learner
+  operations choose `user` or `project`, use the experience's authoritative
+  project label, and match existing records within the same scope. Project
+  facts no longer default into cross-project user memory.
+
+- **Automation output schemas are enforced.** Headless agent steps now
+  validate final assistant content against `output_schema` while preserving
+  the existing text `{output: ...}` result shape.
 
 - **Learner** introduces learner results with a "supersede" action without a target do not produce any operations. Additionally, it modifies the `OpsFromLearnerConsolidate` function to return nil when the supersedes field is empty, and updates the experience extraction logic to ignore compaction summaries in user messages.
 

@@ -142,7 +142,9 @@ func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model
 	if final.Status == domain.StatusError {
 		return nil, "", fmt.Errorf("headless turn failed: %s", final.Content)
 	}
-	_ = schema // structured output validation is a future enhancement
+	if err := validateHeadlessOutput(final.Content, schema); err != nil {
+		return nil, convID, err
+	}
 	return map[string]any{"output": final.Content}, convID, nil
 }
 
