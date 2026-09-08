@@ -68,7 +68,7 @@ func (a *Service) CompleteSubagentRunLocked(conversationID, toolCallID string, s
 		parentRunID = parentRun.ID
 	}
 	if toolCallID != "" {
-		a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
+		a.emitBus(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
 			RunID:          parentRunID,
 			ConversationID: conversationID,
 			ToolCallID:     toolCallID,
@@ -123,7 +123,7 @@ func (a *Service) CompleteDelegateRunLocked(conversationID, runID, toolCallID st
 		parentRunID = parentRun.ID
 	}
 	if toolCallID != "" {
-		a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
+		a.emitBus(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
 			RunID:          parentRunID,
 			ConversationID: conversationID,
 			ToolCallID:     toolCallID,

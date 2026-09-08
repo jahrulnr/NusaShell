@@ -24,7 +24,7 @@ func (a *Service) TrackTurnDiff(run *TurnRun, delta turndiff.Delta) {
 	if a.Bus == nil {
 		return
 	}
-	a.Bus.Emit(contracts.EventTurnDiff, contracts.TurnDiffEvent{
+	a.emitBus(contracts.EventTurnDiff, contracts.TurnDiffEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, UnifiedDiff: text,
 	})
 }
@@ -43,7 +43,7 @@ func (a *Service) EmitFinalTurnDiff(run *TurnRun) {
 	if !ok || unified == "" {
 		return
 	}
-	a.Bus.Emit(contracts.EventTurnDiff, contracts.TurnDiffEvent{
+	a.emitBus(contracts.EventTurnDiff, contracts.TurnDiffEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, UnifiedDiff: unified,
 	})
 }

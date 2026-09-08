@@ -78,6 +78,13 @@ type EventStore interface {
 	ListEvents(ctx context.Context, limit int) ([]*domain.Event, error)
 }
 
+// DeliveryRollback is an optional extension for event stores that can remove
+// a delivery claim when run creation fails before any work starts. Keeping it
+// separate preserves compatibility with external EventStore implementations.
+type DeliveryRollback interface {
+	DeleteDelivery(ctx context.Context, eventID, triggerID, workflowID string) error
+}
+
 // WaitStore persists wait_until / event-wait wakeups.
 type WaitStore interface {
 	Put(ctx context.Context, rec *domain.WaitRecord) error

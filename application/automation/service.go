@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -56,6 +57,12 @@ func (a *Automation) ValidateYAML(raw []byte) (domain.ValidationResult, *domain.
 }
 
 func (a *Automation) SaveWorkflow(ctx context.Context, w *domain.WorkflowDefinition) (*domain.WorkflowDefinition, domain.ValidationResult, error) {
+	if a == nil || a.Workflows == nil {
+		return w, domain.NewValidationResult(), fmt.Errorf("workflow store not configured")
+	}
+	if w == nil {
+		return nil, domain.NewValidationResult(), fmt.Errorf("workflow is empty")
+	}
 	if w.ID == "" {
 		w.ID = domain.NewID(domain.IDPrefixWF)
 	}
@@ -73,8 +80,21 @@ func (a *Automation) SaveWorkflow(ctx context.Context, w *domain.WorkflowDefinit
 	if err := a.Workflows.Put(ctx, w); err != nil {
 		return w, r, err
 	}
-	if w.Enabled && a.Sched != nil {
-		_ = a.Sched.EnableWorkflow(ctx, w)
+	if a.Sched != nil {
+		if w.Enabled {
+			if err := a.Sched.EnableWorkflow(ctx, w); err != nil {
+				// EnableWorkflow persists the enabled flag before registering
+				// schedules. If activation fails, fail closed and make the durable
+				// workflow state agree with the scheduler state.
+				w.Enabled = false
+				if rollbackErr := a.Workflows.Put(ctx, w); rollbackErr != nil {
+					return w, r, errors.Join(err, fmt.Errorf("disable rollback: %w", rollbackErr))
+				}
+				return w, r, fmt.Errorf("enable workflow: %w", err)
+			}
+		} else if err := a.Sched.DisableWorkflow(ctx, w); err != nil {
+			return w, r, fmt.Errorf("disable workflow: %w", err)
+		}
 	}
 	return w, r, nil
 }
@@ -282,18 +302,41 @@ func (a *Automation) ParseDefinition(src string) (*domain.WorkflowDefinition, er
 // is not activated. It is idempotent: running it twice does not duplicate
 // workflows or schedules. Call once on boot after wiring is complete.
 func (a *Automation) DiscoverPipelines(ctx context.Context) ([]*domain.WorkflowDefinition, error) {
+	if a == nil {
+		return nil, fmt.Errorf("automation service not configured")
+	}
 	if a.Pipelines == nil {
 		return nil, nil
+	}
+	if a.Workflows == nil {
+		return nil, fmt.Errorf("workflow store not configured")
 	}
 	defs, err := a.Pipelines.Discover()
 	if err != nil {
 		return nil, fmt.Errorf("discover pipelines: %w", err)
 	}
 	loaded := make([]*domain.WorkflowDefinition, 0, len(defs))
-	for _, w := range defs {
+	var failures []error
+	for i, w := range defs {
+		if w == nil {
+			failures = append(failures, fmt.Errorf("pipeline[%d]: workflow is empty", i))
+			continue
+		}
+		label := strings.TrimSpace(w.ID)
+		if label == "" {
+			label = strings.TrimSpace(w.Name)
+		}
+		if label == "" {
+			label = fmt.Sprintf("pipeline[%d]", i)
+		}
 		if reason := a.invalidReason(ctx, w); reason != "" {
 			w.Enabled = false
-			if err := a.Workflows.Put(ctx, w); err != nil {
+			if a.Sched != nil {
+				if err := a.Sched.DisableWorkflow(ctx, w); err != nil {
+					failures = append(failures, fmt.Errorf("disable pipeline %q: %w", label, err))
+				}
+			} else if err := a.Workflows.Put(ctx, w); err != nil {
+				failures = append(failures, fmt.Errorf("store pipeline %q: %w", label, err))
 				continue
 			}
 			loaded = append(loaded, w)
@@ -301,12 +344,22 @@ func (a *Automation) DiscoverPipelines(ctx context.Context) ([]*domain.WorkflowD
 		}
 		w.Enabled = true
 		if err := a.Workflows.Put(ctx, w); err != nil {
+			failures = append(failures, fmt.Errorf("store pipeline %q: %w", label, err))
 			continue
 		}
 		if a.Sched != nil {
-			_ = a.Sched.EnableWorkflow(ctx, w)
+			if err := a.Sched.EnableWorkflow(ctx, w); err != nil {
+				// Keep a discovered workflow visible, but never leave it
+				// durably enabled when its schedules were not registered.
+				w.Enabled = false
+				if rollbackErr := a.Workflows.Put(ctx, w); rollbackErr != nil {
+					failures = append(failures, fmt.Errorf("activate pipeline %q: %w (disable rollback: %v)", label, err, rollbackErr))
+				} else {
+					failures = append(failures, fmt.Errorf("activate pipeline %q: %w", label, err))
+				}
+			}
 		}
 		loaded = append(loaded, w)
 	}
-	return loaded, nil
+	return loaded, errors.Join(failures...)
 }

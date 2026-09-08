@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "delivery-123",
+  "type": "github.pull_request",
+  "occurred_at": "2026-09-08T10:00:00Z",
+  "subject": "owner/repo#42",
+  "attributes": {
+    "action": "opened"
+  },
+  "data": {
+    "head_sha": "abc123"
+  }
+}

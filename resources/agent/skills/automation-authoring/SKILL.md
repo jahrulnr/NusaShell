@@ -1,6 +1,6 @@
 ---
 name: automation-authoring
-description: Guides the NusaShell in-app agent to design, classify, validate, create, test, and safely operate precise YAML automations for schedules, alarms, Telegram events, GitHub PR review, kanban and daily ops workflows, including non-AI DAGs and guarded AI/MCP pipeline steps.
+description: Guides the NusaShell in-app agent to design, classify, validate, create, test, and safely operate precise YAML automations for schedules, alarms, generic MCP events, legacy Telegram messaging, GitHub PR review, kanban and daily ops workflows, including non-AI DAGs and guarded AI/MCP pipeline steps.
 metadata:
   version: "2"
 ---

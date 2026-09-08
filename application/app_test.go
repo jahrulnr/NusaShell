@@ -1,6 +1,8 @@
 package application
 
 import (
+	"io"
+	"log/slog"
 	"nusashell/contracts"
 	"nusashell/domain"
 	"sync/atomic"
@@ -63,6 +65,34 @@ func TestCloseDoesNotWaitForUntrackedGoSafe(t *testing.T) {
 		t.Fatal("Close blocked on a non-learning goroutine")
 	}
 	close(release)
+}
+
+// --- from bus_test.go ---
+
+type panicLogStore struct{}
+
+func (*panicLogStore) Append(*domain.LogEntry) {
+	panic("log store unavailable")
+}
+
+func (*panicLogStore) List(string, int) []*domain.LogEntry { return nil }
+func (*panicLogStore) Clear()                              {}
+
+func TestGoSafeSurvivesPanicInRecoveryLogging(t *testing.T) {
+	app := &App{
+		Logs:   &panicLogStore{},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	done := make(chan struct{})
+	app.goSafe("test", func() {
+		defer close(done)
+		panic("worker failed")
+	})
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("goSafe worker did not recover")
+	}
 }
 
 // --- from bus_test.go ---

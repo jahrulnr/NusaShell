@@ -14,7 +14,7 @@ func (a *Service) EmitInteractiveTurnEvent(run *TurnRun, typ string, payload any
 	if a == nil || a.Bus == nil || run == nil || run.Headless {
 		return
 	}
-	a.Bus.Emit(typ, payload)
+	a.emitBus(typ, payload)
 }
 
 func (a *Service) UpdateMessage(c *domain.Conversation, msgID string, fn func(*domain.Message)) {

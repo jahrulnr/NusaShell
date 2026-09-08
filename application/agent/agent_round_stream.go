@@ -279,7 +279,7 @@ func (a *Service) StreamTurnRoundOnce(run *TurnRun, adapter ProviderContext, con
 	// Provider-measured context usage is emitted only when the round completes.
 	if a.Bus != nil {
 		est := provider.EstimateRequestTokens(request, adapter.Kind, adapter.OpenRouter)
-		a.Bus.Emit(contracts.EventContextEstimate, contracts.ContextEstimateEvent{
+		a.emitBus(contracts.EventContextEstimate, contracts.ContextEstimateEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID,
 			EstimatedTokens: est,
 		})

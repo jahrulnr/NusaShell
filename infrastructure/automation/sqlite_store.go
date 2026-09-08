@@ -300,6 +300,11 @@ func (s *SQLite) RecordDelivery(ctx context.Context, eventID, triggerID, workflo
 	return n == 1, nil
 }
 
+func (s *SQLite) DeleteDelivery(ctx context.Context, eventID, triggerID, workflowID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM deliveries WHERE event_id=? AND trigger_id=? AND workflow_id=?`, eventID, triggerID, workflowID)
+	return err
+}
+
 func (s *SQLite) ListEvents(ctx context.Context, limit int) ([]*domain.Event, error) {
 	if limit <= 0 {
 		limit = 50

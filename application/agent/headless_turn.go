@@ -69,7 +69,14 @@ func (a *Service) RunHeadlessTurnKind(ctx context.Context, prompt, model string,
 	return a.RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, kind, nil)
 }
 
-func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind, onUpdate func(conversationID string)) (map[string]any, string, error) {
+func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind, onUpdate func(conversationID string)) (out map[string]any, convID string, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			out = nil
+			err = fmt.Errorf("headless turn panicked: %v", recovered)
+		}
+	}()
+
 	provider, bareModel, apiKey, err := a.ResolveHeadlessModel(model)
 	if err != nil {
 		return nil, "", err
@@ -98,7 +105,7 @@ func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model
 	if err := repo.Save(); err != nil {
 		return nil, "", fmt.Errorf("headless turn: save conversation: %w", err)
 	}
-	convID := repo.ID()
+	convID = repo.ID()
 
 	turnCtx, cancel := context.WithCancel(ctx)
 	run := &TurnRun{

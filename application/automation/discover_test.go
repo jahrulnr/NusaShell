@@ -2,7 +2,9 @@ package automation
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"nusashell/domain"
 )
@@ -74,6 +76,37 @@ func TestDiscoverPipelinesUpsertsAndEnables(t *testing.T) {
 	}
 	if !foundCron {
 		t.Fatal("nightly cron schedule not registered")
+	}
+}
+
+func TestDiscoverPipelinesReportsActivationFailure(t *testing.T) {
+	svc, _, clock := testAutomation(t, &fakeExec{})
+	sentinel := errors.New("schedule store unavailable")
+	failing := failingScheduleStore{ScheduleStore: svc.Schedules, err: sentinel}
+	svc.Schedules = failing
+	svc.Sched.Schedules = failing
+	at := clock.T.Add(time.Hour)
+	svc.Pipelines = &stubPipelineDiscoverer{defs: []*domain.WorkflowDefinition{{
+		ID:       "scheduled",
+		Name:     "scheduled",
+		Enabled:  true,
+		Triggers: []domain.Trigger{{ID: "once", Kind: domain.TriggerOnce, Family: domain.FamilyOnce, At: &at}},
+		Jobs:     []domain.Job{{ID: "job", Steps: []domain.Step{{ID: "step", Run: "echo"}}}},
+	}}}
+
+	loaded, err := svc.DiscoverPipelines(context.Background())
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("DiscoverPipelines error = %v, want %v", err, sentinel)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("expected failed activation to remain listed, got %d", len(loaded))
+	}
+	stored, getErr := svc.Workflows.Get(context.Background(), "scheduled")
+	if getErr != nil {
+		t.Fatalf("read workflow: %v", getErr)
+	}
+	if stored.Enabled {
+		t.Fatal("workflow with failed activation must be disabled")
 	}
 }
 

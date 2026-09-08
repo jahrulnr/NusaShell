@@ -7,6 +7,56 @@ import (
 	"nusashell/domain"
 )
 
+func TestParseYAMLRejectsUnknownFields(t *testing.T) {
+	_, err := ParseYAML([]byte(`
+name: x
+nmae: typo
+jobs:
+  build:
+    steps:
+      - run: echo
+`))
+	if err == nil {
+		t.Fatal("expected unknown root field to be rejected")
+	}
+}
+
+func TestParseYAMLRejectsMalformedTriggerTypes(t *testing.T) {
+	_, err := ParseYAML([]byte(`
+name: x
+triggers:
+  - when:
+      event: email.received
+      where: invalid
+jobs:
+  build:
+    steps:
+      - run: echo
+`))
+	if err == nil {
+		t.Fatal("expected malformed trigger field to be rejected")
+	}
+}
+
+func TestParseYAMLRejectsMultipleDocuments(t *testing.T) {
+	_, err := ParseYAML([]byte(`
+name: first
+jobs:
+  build:
+    steps:
+      - run: echo
+---
+name: second
+jobs:
+  build:
+    steps:
+      - run: echo
+`))
+	if err == nil {
+		t.Fatal("expected multiple YAML documents to be rejected")
+	}
+}
+
 func TestParseYAMLBasicDAG(t *testing.T) {
 	raw := []byte(`
 version: 1
@@ -106,6 +156,36 @@ jobs:
 	inspect := w.JobByID("inspect")
 	if inspect == nil || inspect.Steps[0].Uses != "email.read" || inspect.Steps[1].WaitUntil == nil {
 		t.Fatalf("steps = %+v", inspect)
+	}
+}
+
+func TestParseYAMLRejectsAmbiguousTriggerKind(t *testing.T) {
+	_, err := ParseYAML([]byte(`
+name: x
+triggers:
+  - once:
+      at: 2026-08-18T09:00:00Z
+    when:
+      event: email.received
+jobs:
+  build:
+    steps:
+      - run: echo
+`))
+	if err == nil {
+		t.Fatal("expected trigger with multiple kinds to be rejected")
+	}
+}
+
+func TestParseYAMLRejectsFalseManualTrigger(t *testing.T) {
+	for _, triggers := range []string{
+		"- manual: false",
+		"manual: false",
+	} {
+		raw := []byte("name: x\ntriggers:\n  " + triggers + "\njobs:\n  build:\n    steps:\n      - run: echo\n")
+		if _, err := ParseYAML(raw); err == nil {
+			t.Fatalf("triggers %q: expected manual:false to be rejected", triggers)
+		}
 	}
 }
 

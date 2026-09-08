@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Generic MCP business events.** MCP plugins can publish versioned
+  `notifications/nusashell/event` envelopes with stable `event_id`, event
+  `type`, optional timestamp, subject, attributes, and JSON data. NusaShell
+  validates the envelope, assigns the connected server as the source, and
+  normalizes it into a host-namespaced `domain.Event` identity for consumers
+  such as GitHub and trading automations.
+
+### Changed
+
+- **Legacy MCP messaging is compatibility-only.**
+  `notifications/message` remains accepted through an explicit deprecated
+  adapter for older messaging plugins, but it is no longer the generic
+  business-event envelope. Logging-shaped notifications are isolated from
+  event delivery; the Telegram MCP refactor remains a separate follow-up.
+
 ## [0.6.1] - 2026-09-08
 
 ### Fixed

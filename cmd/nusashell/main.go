@@ -348,6 +348,7 @@ func run() error {
 		app.Automation = svc
 		defer autoDB.Close()
 		tb.Automation = svc
+		svc.Exec.Go = func(source string, fn func()) { app.GoSafe(source, fn) }
 		svc.Exec.Agent = application.NewPipelineAgentRunner(tb, app)
 		if loaded, err := svc.DiscoverPipelines(context.Background()); err != nil {
 			slog.Warn("pipeline discovery failed", "error", err)
@@ -366,22 +367,12 @@ func run() error {
 	app.CodexRouter = application.NewCodexAccountRouterWithState(filepath.Join(dataDir, "config", "codex-router.json"))
 
 	// Bridge plugin push notifications (MCP server→client) into the
-	// automation engine so when-triggered workflows react to events such as
-	// an incoming Telegram message without polling. Registered before the
+	// automation engine so when-triggered workflows react to generic business
+	// events without polling. The deprecated messaging bridge remains handled
+	// by the adapter for older message plugins. Registered before the
 	// autostart pass so no plugin notification is missed.
 	mcpManager.SetNotificationHandler(func(serverID string, n mcp.JSONRPCNotification) {
-		if autoSvc == nil {
-			return
-		}
-		ev, ok := mcpclient.NotificationToEvent(serverID, n)
-		if !ok {
-			return
-		}
-		ictx, cancelEv := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancelEv()
-		if err := autoSvc.Sched.IngestEvent(ictx, ev); err != nil {
-			slog.Warn("mcp notification ingest failed", "server", serverID, "event", ev.Type, "error", err)
-		}
+		handleMCPNotification(app, autoSvc, serverID, n)
 	})
 	identity := transport.CoreIdentity{
 		PID:       os.Getpid(),
@@ -416,12 +407,16 @@ func run() error {
 	app.StartPetAutoLaunch(ctx)
 	app.StartSettingsWatcher(ctx)
 	defer app.CloseLifecycle()
-	if autoSvc != nil {
-		go func() {
+	if autoSvc != nil && autoSvc.Sched != nil && autoSvc.Sched.Exec != nil {
+		app.GoSafe("automation", func() {
 			// Heal runs orphaned by a previous process (crash/restart): their
 			// running jobs have no heartbeat and would stay "running" forever.
-			_ = autoSvc.Sched.Exec.RecoverStale(context.Background())
-			_ = autoSvc.Sched.FireDue(context.Background())
+			if err := autoSvc.Sched.Exec.RecoverStale(ctx); err != nil {
+				logger.Error("automation stale-run recovery failed", "error", err)
+			}
+			if err := autoSvc.Sched.FireDue(ctx); err != nil {
+				logger.Error("automation scheduler tick failed", "error", err)
+			}
 			ticker := time.NewTicker(15 * time.Second)
 			defer ticker.Stop()
 			for {
@@ -429,19 +424,29 @@ func run() error {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					_ = autoSvc.Sched.FireDue(context.Background())
+					if err := autoSvc.Sched.FireDue(ctx); err != nil {
+						logger.Error("automation scheduler tick failed", "error", err)
+					}
 				}
 			}
-		}()
+		})
 	}
 
-	go func() {
+	app.GoSafe("http-server", func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				// A server goroutine panic must initiate shutdown rather than
+				// leaving main blocked on a context that can never be cancelled.
+				stop()
+				logger.Error("server goroutine panicked", "panic", recovered)
+			}
+		}()
 		logger.Info("nusashell listening", "addr", httpServer.Addr, "data_dir", dataDir, "dev", dev, "version", version)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server failed", "error", err)
 			stop()
 		}
-	}()
+	})
 
 	<-ctx.Done()
 	logger.Info("shutting down")
@@ -449,6 +454,26 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return httpServer.Shutdown(shutdownCtx)
+}
+
+func handleMCPNotification(app *application.App, autoSvc *application.Automation, serverID string, n mcp.JSONRPCNotification) {
+	if app == nil || autoSvc == nil || autoSvc.Sched == nil {
+		return
+	}
+	ev, ok := mcpclient.NotificationToEvent(serverID, n)
+	if !ok {
+		return
+	}
+	// MCP invokes this callback on its connection read goroutine. Start the
+	// potentially blocking scheduler path elsewhere, and use the app-wide
+	// recovered goroutine boundary for malformed adapters or stores.
+	app.GoSafe("automation", func() {
+		ictx, cancelEv := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancelEv()
+		if err := autoSvc.Sched.IngestEvent(ictx, ev); err != nil {
+			slog.Warn("mcp notification ingest failed", "server", serverID, "event", ev.Type, "error", err)
+		}
+	})
 }
 
 func defaultDataDir() string {

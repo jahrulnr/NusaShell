@@ -1,7 +1,9 @@
 package automation
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -13,8 +15,17 @@ import (
 
 // ParseYAML decodes a NusaShell workflow/pipeline document.
 func ParseYAML(raw []byte) (*domain.WorkflowDefinition, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	decoder.KnownFields(true)
 	var doc yamlDoc
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
+	if err := decoder.Decode(&doc); err != nil {
+		return nil, fmt.Errorf("yaml: %w", err)
+	}
+	var extra yaml.Node
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("yaml: multiple documents are not supported")
+		}
 		return nil, fmt.Errorf("yaml: %w", err)
 	}
 	w := &domain.WorkflowDefinition{
@@ -50,13 +61,29 @@ func ParseYAML(raw []byte) (*domain.WorkflowDefinition, error) {
 	var triggers []yamlTrigger
 	switch doc.Triggers.Kind {
 	case yaml.SequenceNode:
-		_ = doc.Triggers.Decode(&triggers)
+		if err := decodeYAMLNodeKnownFields(doc.Triggers, &triggers); err != nil {
+			return nil, fmt.Errorf("triggers: %w", err)
+		}
 	case yaml.MappingNode:
 		var m yamlTriggerMap
-		_ = doc.Triggers.Decode(&m)
-		if m.Manual {
-			v := true
-			triggers = []yamlTrigger{{Manual: &v}}
+		if err := decodeYAMLNodeKnownFields(doc.Triggers, &m); err != nil {
+			return nil, fmt.Errorf("triggers: %w", err)
+		}
+		if m.Manual == nil {
+			return nil, fmt.Errorf("triggers: manual mapping must set manual: true")
+		}
+		if !*m.Manual {
+			return nil, fmt.Errorf("triggers.manual must be true")
+		}
+		v := true
+		triggers = []yamlTrigger{{Manual: &v}}
+	case yaml.ScalarNode:
+		if strings.TrimSpace(doc.Triggers.Value) != "" {
+			return nil, fmt.Errorf("triggers: expected a sequence or manual mapping")
+		}
+	default:
+		if doc.Triggers.Kind != 0 {
+			return nil, fmt.Errorf("triggers: expected a sequence or manual mapping")
 		}
 	}
 	for i, t := range triggers {
@@ -111,6 +138,18 @@ func ParseYAML(raw []byte) (*domain.WorkflowDefinition, error) {
 	return w, nil
 }
 
+// decodeYAMLNodeKnownFields applies the same strict field checking to a
+// nested node that was retained as yaml.Node for custom trigger syntax.
+func decodeYAMLNodeKnownFields(node yaml.Node, out any) error {
+	raw, err := yaml.Marshal(&node)
+	if err != nil {
+		return err
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	decoder.KnownFields(true)
+	return decoder.Decode(out)
+}
+
 type yamlDoc struct {
 	Version     int                `yaml:"version"`
 	Name        string             `yaml:"name"`
@@ -126,7 +165,7 @@ type yamlDoc struct {
 }
 
 type yamlTriggerMap struct {
-	Manual bool `yaml:"manual"`
+	Manual *bool `yaml:"manual"`
 }
 
 type yamlConcurrency struct {
@@ -215,6 +254,25 @@ type yamlAgent struct {
 
 func parseTrigger(t yamlTrigger, i int) (domain.Trigger, error) {
 	id := fmt.Sprintf("trg_%d", i+1)
+	kindCount := 0
+	if t.Once != nil {
+		kindCount++
+	}
+	if t.Every != nil {
+		kindCount++
+	}
+	if t.When != nil {
+		kindCount++
+	}
+	if t.Manual != nil {
+		kindCount++
+	}
+	if kindCount != 1 {
+		return domain.Trigger{}, fmt.Errorf("triggers[%d]: specify exactly one of once, every, when, or manual", i)
+	}
+	if t.Manual != nil && !*t.Manual {
+		return domain.Trigger{}, fmt.Errorf("triggers[%d].manual must be true", i)
+	}
 	debounce := t.Debounce
 	auto := domain.AutoStartPolicy(t.AutoStart)
 	if t.Once != nil {
@@ -386,7 +444,7 @@ func (n *yamlNeeds) UnmarshalYAML(value *yaml.Node) error {
 		Job       string `yaml:"job"`
 		Artifacts bool   `yaml:"artifacts"`
 	}
-	if err := value.Decode(&objs); err != nil {
+	if err := decodeYAMLNodeKnownFields(*value, &objs); err != nil {
 		return err
 	}
 	for _, o := range objs {

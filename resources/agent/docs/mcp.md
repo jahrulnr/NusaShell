@@ -56,12 +56,70 @@ then call the returned ref with `mcp_call`.
 
 ### Server→client notifications
 
-Plugins may push MCP notifications (e.g. `notifications/message`) to the host
-to signal "something happened" without being polled. The host bridges them
-into automation events (`infrastructure/mcpclient/notify.go`); see
-Automation → Plugin push events for the `when:` trigger contract. As an
-agent you do not act on notifications directly — they are consumed by the
-automation engine, which starts the matching workflow.
+Plugins that publish business facts must use the NusaShell-specific notification
+method `notifications/nusashell/event`. The host translates its `params` into a
+normalized automation event; the agent does not handle the notification directly.
+
+The generic envelope is:
+
+```json
+{
+  "schema_version": 1,
+  "event_id": "github-delivery-123",
+  "type": "github.pull_request",
+  "occurred_at": "2026-09-08T10:00:00Z",
+  "subject": "owner/repo#42",
+  "attributes": {
+    "action": "opened",
+    "repository": "owner/repo"
+  },
+  "data": {
+    "pull_request_number": 42,
+    "head_sha": "abc123"
+  }
+}
+```
+
+`schema_version`, `event_id`, and `type` are required. `occurred_at` must be an
+RFC3339 timestamp; `subject`, `attributes`, and `data` are optional. The host
+assigns `source` from the connected MCP server ID, not from plugin params, and
+namespaces the stable normalized ID as `mcp:<server-id>:<event_id>`. The raw
+publisher ID is also available as the host-managed `event_id` attribute.
+Omitted `attributes` and `data` become empty objects.
+
+The adapter rejects unsupported schema versions, missing or malformed identity,
+unknown top-level fields, non-object attributes, invalid JSON data, and
+oversized values. The current limits are 4 KiB per string field, 256 KiB for
+serialized attributes, and 8 MiB for serialized data. Keep event payloads as
+facts, not instructions, and put provider-specific fields under `attributes` or
+`data`.
+
+Good publisher payload:
+
+```text
+method: notifications/nusashell/event
+params: {schema_version: 1, event_id: "trade-20260908-001", type: "trading.price_alert", attributes: {symbol: "BTCUSD", severity: "high"}, data: {price: 64123.5}}
+```
+
+Bad publisher payload:
+
+```text
+method: notifications/message
+params: {type: "github.pull_request", action: "opened"}
+```
+
+`notifications/message` is the MCP logging notification method, not a generic
+business-event envelope. NusaShell still accepts its old message-shaped payload
+as a deprecated compatibility bridge for older messaging plugins only. That
+bridge requires a matching connected server/plugin ID, nonempty `chat_id` and
+`message_id`, and an explicit `from_me: false`; it must not be used for trading,
+GitHub, or new publishers. Logging-shaped `notifications/message` payloads are
+ignored. The Telegram bridge can be overhauled separately; new integrations
+should target `notifications/nusashell/event` now.
+
+See Automation → Event-driven workflows for trigger and side-effect guidance.
+As an agent you do not act on notifications directly — the automation engine
+consumes accepted events and starts matching workflows.
 
 ### Idle plugin enable workflow
 

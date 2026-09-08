@@ -210,17 +210,28 @@ func (a *App) goSafe(source string, fn func()) {
 	}
 	go func() {
 		defer func() {
-			if tracked {
-				a.goSafeWG.Done()
-			}
+			defer func() {
+				if tracked {
+					a.goSafeWG.Done()
+				}
+			}()
 			if r := recover(); r != nil {
 				stack := debug.Stack()
-				a.log("error", source, "goroutine panic recovered: %v\n%s", r, stack)
-				logger := a.Logger
-				if logger == nil {
-					logger = slog.Default()
+				// Recovery diagnostics must not introduce a second panic. A
+				// failing log store or event bus is an observability failure,
+				// not a reason to lose the process-level containment guarantee.
+				func() {
+					defer func() { _ = recover() }()
+					a.log("error", source, "goroutine panic recovered: %v\n%s", r, stack)
+				}()
+				logger := slog.Default()
+				if a != nil && a.Logger != nil {
+					logger = a.Logger
 				}
-				logger.Error("goroutine panic recovered", "source", source, "panic", r, "stack", string(stack))
+				func() {
+					defer func() { _ = recover() }()
+					logger.Error("goroutine panic recovered", "source", source, "panic", r, "stack", string(stack))
+				}()
 			}
 		}()
 		fn()

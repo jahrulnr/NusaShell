@@ -95,14 +95,26 @@ func New(d Deps) *Service {
 }
 
 func (a *Service) log(level, source, format string, args ...any) {
+	defer func() { _ = recover() }()
 	if a != nil && a.deps.Log != nil {
 		a.deps.Log(level, source, format, args...)
 	}
 }
 
+func (a *Service) emitBus(typ string, payload any) {
+	if a == nil || a.Bus == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	a.Bus.Emit(typ, payload)
+}
+
 func (a *Service) goSafe(name string, fn func()) {
 	if a == nil || a.deps.Go == nil {
-		go fn()
+		go func() {
+			defer func() { _ = recover() }()
+			fn()
+		}()
 		return
 	}
 	a.deps.Go(name, fn)

@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -33,6 +34,7 @@ type ExecutionScheduler struct {
 	Clock    Clock
 	MaxJobs  int
 	Notifier RunNotifier
+	Go       func(source string, fn func())
 
 	mu          sync.Mutex
 	cancels     map[string]context.CancelFunc
@@ -56,14 +58,56 @@ func (s *ExecutionScheduler) now() time.Time {
 	return clock.NewTime(s.Clock.Now()).Time()
 }
 
+// goSafe dispatches detached scheduler work through the application lifecycle
+// boundary when the composition root provides one. The local fallback keeps
+// package-level tests and partial wiring panic-contained as well.
+func (s *ExecutionScheduler) goSafe(source string, fn func()) {
+	if s != nil && s.Go != nil {
+		s.Go(source, fn)
+		return
+	}
+	go func() {
+		defer func() { _ = recover() }()
+		fn()
+	}()
+}
+
+type runStartFailure struct {
+	created bool
+	err     error
+}
+
+func (e *runStartFailure) Error() string {
+	if e == nil || e.err == nil {
+		return "workflow run start failed"
+	}
+	return e.err.Error()
+}
+
+func (e *runStartFailure) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
 // StartRun persists a snapshot and begins scheduling.
 func (s *ExecutionScheduler) StartRun(ctx context.Context, run *domain.WorkflowRun) error {
+	if s == nil || s.Runs == nil {
+		return fmt.Errorf("run store not configured")
+	}
+	if run == nil {
+		return fmt.Errorf("workflow run is empty")
+	}
 	run.StartRun(s.now())
 	if err := s.Runs.Create(ctx, run); err != nil {
-		return err
+		return fmt.Errorf("create workflow run: %w", &runStartFailure{err: err})
 	}
 	s.emit(contracts.EventAutomationRunCreated, map[string]any{"run_id": run.ID, "workflow_id": run.WorkflowID, "status": run.Status})
-	return s.Tick(ctx, run.ID)
+	if err := s.Tick(ctx, run.ID); err != nil {
+		return fmt.Errorf("schedule workflow run: %w", &runStartFailure{created: true, err: err})
+	}
+	return nil
 }
 
 // StartRunAsync persists a snapshot, then begins scheduling in a background
@@ -72,17 +116,84 @@ func (s *ExecutionScheduler) StartRun(ctx context.Context, run *domain.WorkflowR
 // Cancel still works: it sets terminal status, which the Tick loop observes
 // on its next iteration.
 func (s *ExecutionScheduler) StartRunAsync(ctx context.Context, run *domain.WorkflowRun) error {
+	if s == nil || s.Runs == nil {
+		return fmt.Errorf("run store not configured")
+	}
+	if run == nil {
+		return fmt.Errorf("workflow run is empty")
+	}
 	run.StartRun(s.now())
 	if err := s.Runs.Create(ctx, run); err != nil {
-		return err
+		return fmt.Errorf("create workflow run: %w", &runStartFailure{err: err})
 	}
 	s.emit(contracts.EventAutomationRunCreated, map[string]any{"run_id": run.ID, "workflow_id": run.WorkflowID, "status": run.Status})
-	go func() { _ = s.Tick(context.Background(), run.ID) }()
+	s.goSafe("automation-run", func() { s.runTickAsync(run.ID) })
 	return nil
+}
+
+// runTickAsync is the recovery boundary for the detached scheduler worker.
+// A panic here cannot be handled by runJob because it may happen while
+// loading the run or evaluating scheduler state. Preserve a durable terminal
+// state when possible, and never allow failure reporting to panic recursively.
+func (s *ExecutionScheduler) runTickAsync(runID string) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			reason := fmt.Sprintf("automation run %q scheduler panicked: %v", runID, recovered)
+			s.recordAsyncFailure(runID, reason)
+		}
+	}()
+	if err := s.Tick(context.Background(), runID); err != nil {
+		// A background error is otherwise invisible because there is no caller
+		// to receive it. Keep the run observable by recording a terminal
+		// failure, while preserving the original diagnostic in the lifecycle
+		// event so operators can choose an explicit rerun/manual recovery.
+		s.recordAsyncFailure(runID, fmt.Sprintf("background scheduler: %v", err))
+	}
+}
+
+func (s *ExecutionScheduler) recordAsyncFailure(runID, reason string) {
+	defer func() { _ = recover() }()
+	if s == nil || s.Runs == nil {
+		return
+	}
+	run, err := s.Runs.Get(context.Background(), runID)
+	if err != nil {
+		s.emit(contracts.EventAutomationRunFailed, map[string]any{
+			"run_id": runID, "error": fmt.Sprintf("%s; failed to load run: %v", reason, err),
+		})
+		return
+	}
+	if run == nil {
+		s.emit(contracts.EventAutomationRunFailed, map[string]any{
+			"run_id": runID, "error": reason + "; run store returned an empty run",
+		})
+		return
+	}
+	if run.Status.IsTerminal() {
+		return
+	}
+	failedAt := s.now()
+	run.FailDAG(failedAt)
+	for i := range run.Jobs {
+		if !run.Jobs[i].Status.IsTerminal() {
+			run.Jobs[i].Fail(reason, failedAt)
+		}
+	}
+	if err := s.persist(context.Background(), run); err != nil {
+		reason = fmt.Sprintf("%s; failed to persist terminal state: %v", reason, err)
+	}
+	s.emit(contracts.EventAutomationRunFailed, map[string]any{"run_id": runID, "error": reason})
+	s.notifyWebhook(context.Background(), run)
 }
 
 // Tick re-evaluates one run.
 func (s *ExecutionScheduler) Tick(ctx context.Context, runID string) error {
+	if s == nil || s.Runs == nil {
+		return fmt.Errorf("run store not configured")
+	}
+	if strings.TrimSpace(runID) == "" {
+		return fmt.Errorf("run ID is required")
+	}
 	run, err := s.Runs.Get(ctx, runID)
 	if err != nil {
 		return err
@@ -113,7 +224,9 @@ func (s *ExecutionScheduler) Tick(ctx context.Context, runID string) error {
 		dag, issues := domain.BuildDAG(run.Definition.Jobs)
 		if len(issues) > 0 {
 			run.FailDAG(s.now())
-			_ = s.persist(ctx, run)
+			if persistErr := s.persist(ctx, run); persistErr != nil {
+				return errors.Join(fmt.Errorf("%s", issues[0].Message), fmt.Errorf("persist failed run state: %w", persistErr))
+			}
 			s.emit(contracts.EventAutomationRunFailed, map[string]any{"run_id": run.ID, "error": issues[0].Message})
 			s.notifyWebhook(ctx, run)
 			return fmt.Errorf("%s", issues[0].Message)
@@ -143,26 +256,62 @@ func (s *ExecutionScheduler) Tick(ctx context.Context, runID string) error {
 		}
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, n)
+		jobErrors := make(chan error, len(claimed))
 		for _, jobID := range claimed {
 			jobID := jobID
 			wg.Add(1)
 			sem <- struct{}{}
-			go func() {
+			s.goSafe("automation-job", func() {
 				defer wg.Done()
 				defer func() { <-sem }()
-				_ = s.runJob(ctx, runID, jobID)
-			}()
+				if err := s.runJob(ctx, runID, jobID); err != nil {
+					jobErrors <- fmt.Errorf("job %q: %w", jobID, err)
+				}
+			})
 		}
 		wg.Wait()
+		close(jobErrors)
+		var failures []error
+		for err := range jobErrors {
+			failures = append(failures, err)
+		}
+		if len(failures) > 0 {
+			return errors.Join(failures...)
+		}
 	}
 }
 
-func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) error {
-	run, err := s.Runs.Get(ctx, runID)
+func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) (err error) {
+	var run *domain.WorkflowRun
+	var jr *domain.JobRun
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			reason := fmt.Sprintf("automation job %q panicked: %v", jobID, recovered)
+			err = fmt.Errorf("%s", reason)
+			if run == nil || jr == nil {
+				return
+			}
+			// Failure handling uses the same persistence/event path as ordinary
+			// step errors. Keep a second guard here because a broken store or
+			// emitter must not turn recovery itself back into a process panic.
+			func() {
+				defer func() {
+					if failurePanic := recover(); failurePanic != nil {
+						err = fmt.Errorf("%s; recording panic failure also panicked: %v", err, failurePanic)
+					}
+				}()
+				if failErr := s.failJob(ctx, run, jr, reason); failErr != nil {
+					err = fmt.Errorf("%s; failed to persist panic status: %w", err, failErr)
+				}
+			}()
+		}
+	}()
+
+	run, err = s.Runs.Get(ctx, runID)
 	if err != nil {
 		return err
 	}
-	jr := run.JobRunByID(jobID)
+	jr = run.JobRunByID(jobID)
 	job := run.Definition.JobByID(jobID)
 	if jr == nil || job == nil {
 		return fmt.Errorf("unknown job %s", jobID)
@@ -208,7 +357,20 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 	if err != nil {
 		return s.failJob(ctx, run, jr, err.Error())
 	}
-	defer func() { _ = s.Exec.Cleanup(context.Background(), CleanupRequest{Workspace: ws}) }()
+	defer func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				s.emit("automation.job-cleanup.failed", map[string]any{
+					"run_id": run.ID, "job_id": jr.JobID, "error": fmt.Sprintf("cleanup panicked: %v", recovered),
+				})
+			}
+		}()
+		if err := s.Exec.Cleanup(context.Background(), CleanupRequest{Workspace: ws}); err != nil {
+			s.emit("automation.job-cleanup.failed", map[string]any{
+				"run_id": run.ID, "job_id": jr.JobID, "error": err.Error(),
+			})
+		}
+	}()
 
 	outputs := map[string]any{}
 	for i := range job.Steps {
@@ -223,7 +385,9 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 			}
 		}
 		sr.BeginRunning(s.now())
-		_ = s.persist(ctx, run)
+		if err := s.persist(ctx, run); err != nil {
+			return err
+		}
 		s.emit(contracts.EventAutomationStepStarted, map[string]any{"run_id": run.ID, "job_id": jobID, "step_id": sr.ID})
 
 		var result StepResult
@@ -258,7 +422,11 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 				Run: run, Job: *job, JobRun: jr, Step: step, StepRun: sr, Workspace: ws, Env: envMap,
 				OnOutput: func(chunk domain.LogChunk) {
 					if s.Logs != nil {
-						_ = s.Logs.Append(context.Background(), chunk)
+						if err := s.Logs.Append(context.Background(), chunk); err != nil {
+							s.emit("automation.step-log.failed", map[string]any{
+								"run_id": run.ID, "job_id": jr.JobID, "step_id": sr.StepID, "error": err.Error(),
+							})
+						}
 					}
 					s.emit(contracts.EventAutomationStepOutput, chunk)
 				},
@@ -282,7 +450,9 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 		for k, v := range result.Outputs {
 			outputs[k] = v
 		}
-		_ = s.persist(ctx, run)
+		if err := s.persist(ctx, run); err != nil {
+			return err
+		}
 		s.emit(contracts.EventAutomationStepCompleted, map[string]any{"run_id": run.ID, "job_id": jobID, "step_id": sr.ID})
 	}
 	jr.Succeed(outputs, s.now())
@@ -298,10 +468,12 @@ func (s *ExecutionScheduler) parkWait(ctx context.Context, run *domain.WorkflowR
 	jr.ParkWait()
 	run.ParkWait(*step.WaitUntil)
 	if s.Waits != nil {
-		_ = s.Waits.Put(ctx, &domain.WaitRecord{
+		if err := s.Waits.Put(ctx, &domain.WaitRecord{
 			ID: domain.NewID(domain.IDPrefixWait), WorkflowRunID: run.ID, JobID: jr.JobID, StepID: sr.StepID,
 			WakeAt: step.WaitUntil, Status: domain.SchedulePending,
-		})
+		}); err != nil {
+			return fmt.Errorf("persist wait: %w", err)
+		}
 	}
 	if err := s.persist(ctx, run); err != nil {
 		return err
@@ -322,7 +494,7 @@ func (s *ExecutionScheduler) runUses(ctx context.Context, run *domain.WorkflowRu
 		}
 	}
 	binding, err := s.Caps.Resolve(ctx, step.Uses, policy)
-	if err != nil && binding.Status == domain.CapMissing {
+	if err != nil {
 		return StepResult{Error: err.Error()}, err
 	}
 	binding, err = s.Caps.EnsureAvailable(ctx, binding, policy)
@@ -333,19 +505,30 @@ func (s *ExecutionScheduler) runUses(ctx context.Context, run *domain.WorkflowRu
 	if avail == domain.AvailBlocked || avail == domain.AvailError {
 		reason := fmt.Sprintf("Required capability %q is provided by %s (%s). status=%s", binding.Capability, binding.ProviderID, binding.Kind, binding.Status)
 		run.ParkBlocked(reason)
-		_ = s.persist(ctx, run)
+		if err := s.persist(ctx, run); err != nil {
+			failure := errors.Join(fmt.Errorf("%s", reason), fmt.Errorf("persist blocked run state: %w", err))
+			return StepResult{Error: failure.Error()}, failure
+		}
 		s.emit(contracts.EventAutomationRunBlocked, map[string]any{
 			"run_id": run.ID, "capability": binding.Capability, "provider": binding.ProviderID, "status": binding.Status, "reason": binding.Reason,
 		})
 		return StepResult{Error: run.BlockedReason}, fmt.Errorf("%s", run.BlockedReason)
 	}
-	raw, _ := json.Marshal(step.With)
+	raw, err := json.Marshal(step.With)
+	if err != nil {
+		return StepResult{Error: fmt.Sprintf("encode capability arguments: %v", err)}, err
+	}
 	out, err := s.Caps.Execute(ctx, binding, raw)
 	if err != nil {
 		return StepResult{Error: err.Error()}, err
 	}
+	if strings.TrimSpace(string(out)) == "" {
+		return StepResult{ExitCode: 0}, nil
+	}
 	var outputs map[string]any
-	_ = json.Unmarshal(out, &outputs)
+	if err := json.Unmarshal([]byte(out), &outputs); err != nil {
+		return StepResult{Error: fmt.Sprintf("decode capability output: %v", err)}, err
+	}
 	return StepResult{ExitCode: 0, Outputs: outputs}, nil
 }
 
@@ -375,6 +558,9 @@ func (s *ExecutionScheduler) failJob(ctx context.Context, run *domain.WorkflowRu
 func (s *ExecutionScheduler) maybeFinalize(ctx context.Context, run *domain.WorkflowRun) error {
 	sum := run.Summary()
 	run.Finalize(s.now(), sum)
+	if err := s.persist(ctx, run); err != nil {
+		return err
+	}
 	if run.Status == domain.StatusFailed {
 		s.emit(contracts.EventAutomationRunFailed, map[string]any{"run_id": run.ID})
 	} else if run.Status == domain.StatusSuccess {
@@ -383,27 +569,44 @@ func (s *ExecutionScheduler) maybeFinalize(ctx context.Context, run *domain.Work
 	if run.Status.IsTerminal() {
 		s.notifyWebhook(ctx, run)
 	}
-	return s.persist(ctx, run)
+	return nil
 }
 
 // notifyWebhook fires the workflow webhook (if configured) in a
 // fire-and-forget goroutine. Errors are logged but never block the run.
 func (s *ExecutionScheduler) notifyWebhook(ctx context.Context, run *domain.WorkflowRun) {
-	if s.Notifier == nil || strings.TrimSpace(run.Definition.WebhookURL) == "" {
+	if s == nil || run == nil || s.Notifier == nil || strings.TrimSpace(run.Definition.WebhookURL) == "" {
 		return
 	}
 	url := run.Definition.WebhookURL
-	go func() {
+	runID := run.ID
+	s.goSafe("automation-webhook", func() {
 		notifyCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				// A notifier or event emitter is an external boundary. Do not
+				// let its panic escape the fire-and-forget goroutine; the event
+				// is best effort and the run is already terminal.
+				func() {
+					defer func() { _ = recover() }()
+					s.emit("automation.webhook.failed", map[string]any{
+						"run_id": runID, "url": url, "error": fmt.Sprintf("webhook callback panicked: %v", recovered),
+					})
+				}()
+			}
+		}()
 		if err := s.Notifier.NotifyRunCompleted(notifyCtx, url, run); err != nil {
-			s.emit("automation.webhook.failed", map[string]any{"run_id": run.ID, "url": url, "error": err.Error()})
+			s.emit("automation.webhook.failed", map[string]any{"run_id": runID, "url": url, "error": err.Error()})
 		}
-	}()
+	})
 	_ = ctx
 }
 
 func (s *ExecutionScheduler) Cancel(ctx context.Context, runID string) error {
+	if s == nil || s.Runs == nil {
+		return fmt.Errorf("run store not configured")
+	}
 	run, err := s.Runs.Get(ctx, runID)
 	if err != nil {
 		return err
@@ -419,19 +622,25 @@ func (s *ExecutionScheduler) Cancel(ctx context.Context, runID string) error {
 	}
 	s.mu.Unlock()
 	run.Cancel(s.now())
-	_ = s.persist(ctx, run)
+	if err := s.persist(ctx, run); err != nil {
+		return fmt.Errorf("persist cancelled run %q: %w", runID, err)
+	}
 	s.emit(contracts.EventAutomationRunCancelled, map[string]any{"run_id": run.ID})
 	return nil
 }
 
 func (s *ExecutionScheduler) RecoverStale(ctx context.Context) error {
+	if s == nil || s.Runs == nil {
+		return fmt.Errorf("run store not configured")
+	}
 	runs, err := s.Runs.List(ctx, RunFilter{})
 	if err != nil {
 		return err
 	}
 	now := s.now()
+	var failures []error
 	for _, run := range runs {
-		if run.Status != domain.StatusRunning {
+		if run == nil || run.Status != domain.StatusRunning {
 			continue
 		}
 		changed := false
@@ -444,27 +653,41 @@ func (s *ExecutionScheduler) RecoverStale(ctx context.Context) error {
 			}
 		}
 		if changed {
-			_ = s.persist(ctx, run)
+			if err := s.persist(ctx, run); err != nil {
+				failures = append(failures, fmt.Errorf("persist stale run %q: %w", run.ID, err))
+			}
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func (s *ExecutionScheduler) persist(ctx context.Context, run *domain.WorkflowRun) error {
-	s.lockRun(run.ID).Lock()
-	defer s.lockRun(run.ID).Unlock()
-	cur, err := s.Runs.Get(ctx, run.ID)
-	if err == nil {
-		domain.MergeRun(cur, run)
-		run = cur
+	if s == nil || s.Runs == nil {
+		return fmt.Errorf("run store not configured")
 	}
-	return s.Runs.Update(ctx, run)
+	if run == nil || strings.TrimSpace(run.ID) == "" {
+		return fmt.Errorf("workflow run is empty")
+	}
+	runMu := s.lockRun(run.ID)
+	runMu.Lock()
+	defer runMu.Unlock()
+	cur, err := s.Runs.Get(ctx, run.ID)
+	if err != nil {
+		return fmt.Errorf("read run %q before update: %w", run.ID, err)
+	}
+	if cur == nil {
+		return fmt.Errorf("read run %q before update: empty result", run.ID)
+	}
+	domain.MergeRun(cur, run)
+	return s.Runs.Update(ctx, cur)
 }
 
 func (s *ExecutionScheduler) emit(typ string, v any) {
-	if s.Bus != nil {
-		s.Bus.Emit(typ, v)
+	if s == nil || s.Bus == nil {
+		return
 	}
+	defer func() { _ = recover() }()
+	s.Bus.Emit(typ, v)
 }
 
 func NewWorkflowRun(def domain.WorkflowDefinition, requestedBy string) *domain.WorkflowRun {

@@ -9,7 +9,7 @@ and be running. `Blocked` means the current installation cannot run it now.
 | Area | Status | Authoring rule | Evidence / caveat |
 | --- | --- | --- | --- |
 | `manual`, `once`, `every` triggers | Supported | Use the matching family and explicit time zone for calendar schedules | YAML loader + scheduler |
-| `when` event trigger and `where` | Supported / integration-dependent | Match exact event type and publisher fields; filter early | Scheduler ingests pushed events; generic publishers are required |
+| `when` event trigger and `where` | Supported / integration-dependent | Match exact event type and publisher fields; generic MCP publishers use `notifications/nusashell/event` | Scheduler ingests pushed events; generic publishers are required |
 | Event delivery deduplication | Supported | Keep event ID stable; still make remote effects idempotent | Key is event ID + trigger ID + workflow ID |
 | Debounce | Supported | Use for bursts, not as a queue | Per workflow + trigger last-fire timestamp |
 | Sequential steps | Supported | Keep a job's steps ordered and small | Executor runs steps in order |

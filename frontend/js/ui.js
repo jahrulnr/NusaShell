@@ -62,6 +62,7 @@ export function toast(message, kind = 'info', timeout = 4000) {
   }
 
   const container = document.getElementById('toast-container');
+  if (!container) return () => {};
   const dismiss = el('button', { class: 'toast-dismiss', text: '×', title: 'Dismiss', 'aria-label': 'Dismiss' });
   const node = el('div', { class: `toast toast-${kind}`, role: 'status' },
     el('span', { class: 'toast-message', text: message }),

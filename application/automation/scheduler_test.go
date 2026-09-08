@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -46,6 +47,19 @@ type nopEmitter struct{}
 func (nopEmitter) Emit(string, any) {}
 
 type stubCaps struct{}
+
+type failingEventCaps struct {
+	stubCaps
+	err error
+}
+
+func (c failingEventCaps) Resolve(_ context.Context, name string, _ domain.AutoStartPolicy) (domain.CapabilityBinding, error) {
+	return domain.CapabilityBinding{Capability: name, Kind: domain.CapabilityMCP, Status: domain.CapNotRunning}, nil
+}
+
+func (c failingEventCaps) EnsureAvailable(_ context.Context, b domain.CapabilityBinding, _ domain.AutoStartPolicy) (domain.CapabilityBinding, error) {
+	return b, c.err
+}
 
 func (stubCaps) Resolve(_ context.Context, name string, _ domain.AutoStartPolicy) (domain.CapabilityBinding, error) {
 	return domain.CapabilityBinding{Capability: name, Status: domain.CapMissing}, fmt.Errorf("unknown capability %q", name)
@@ -216,6 +230,141 @@ func TestOnceTriggerFires(t *testing.T) {
 	}
 }
 
+type failingEventStore struct {
+	EventStore
+	err error
+}
+
+func (s failingEventStore) PutEvent(context.Context, *domain.Event) error {
+	return s.err
+}
+
+func TestIngestEventRejectsMissingType(t *testing.T) {
+	svc, _, _ := testAutomation(t, &fakeExec{})
+	if err := svc.Sched.IngestEvent(context.Background(), domain.Event{ID: "missing-type"}); err == nil {
+		t.Fatal("expected missing event type to be rejected")
+	}
+}
+
+func TestIngestEventRequiresEventStore(t *testing.T) {
+	svc, _, _ := testAutomation(t, &fakeExec{})
+	svc.Sched.Events = nil
+	if err := svc.Sched.IngestEvent(context.Background(), domain.Event{ID: "e1", Type: "tick"}); err == nil {
+		t.Fatal("expected event store requirement")
+	}
+}
+
+func TestIngestEventPropagatesEventPersistenceFailure(t *testing.T) {
+	svc, _, _ := testAutomation(t, &fakeExec{})
+	svc.Sched.Events = failingEventStore{EventStore: svc.Sched.Events, err: fmt.Errorf("event store unavailable")}
+	if err := svc.Sched.IngestEvent(context.Background(), domain.Event{ID: "e1", Type: "tick"}); err == nil {
+		t.Fatal("expected event persistence failure")
+	}
+}
+
+func TestEnableWorkflowPropagatesEventProviderFailure(t *testing.T) {
+	svc, _, _ := testAutomation(t, &fakeExec{})
+	sentinel := errors.New("provider start failed")
+	svc.Sched.Caps = failingEventCaps{err: sentinel}
+	w := &domain.WorkflowDefinition{
+		ID:       "events",
+		Name:     "events",
+		Enabled:  true,
+		Triggers: []domain.Trigger{{ID: "message", Kind: domain.TriggerEvent, Event: "telegram.message"}},
+		Jobs:     []domain.Job{{ID: "job", Steps: []domain.Step{{ID: "step", Run: "echo"}}}},
+	}
+
+	err := svc.Sched.EnableWorkflow(context.Background(), w)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("EnableWorkflow error = %v, want %v", err, sentinel)
+	}
+	stored, getErr := svc.Workflows.Get(context.Background(), w.ID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if stored.Enabled {
+		t.Fatal("workflow must be disabled after event provider activation failure")
+	}
+}
+
+func TestFireDuePropagatesRescheduleFailure(t *testing.T) {
+	svc, _, clock := testAutomation(t, &fakeExec{})
+	base := svc.Schedules
+	sentinel := errors.New("schedule update unavailable")
+	svc.Sched.Schedules = failingScheduleStore{ScheduleStore: base, err: sentinel}
+	at := clock.T.Add(-time.Minute)
+	w := &domain.WorkflowDefinition{
+		ID:       "interval",
+		Name:     "interval",
+		Enabled:  true,
+		Triggers: []domain.Trigger{{ID: "every", Kind: domain.TriggerInterval, Family: domain.FamilyEvery, Interval: time.Hour}},
+		Jobs:     []domain.Job{{ID: "job", Steps: []domain.Step{{ID: "step", Run: "echo"}}}},
+	}
+	if err := svc.Workflows.Put(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	if err := base.Put(context.Background(), &domain.ScheduleRecord{
+		ID: "every", WorkflowID: w.ID, TriggerID: "every", Kind: domain.TriggerInterval,
+		RunAt: at, NextRunAt: at, Status: domain.SchedulePending, CreatedAt: at,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := svc.Sched.FireDue(context.Background())
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("FireDue error = %v, want %v", err, sentinel)
+	}
+	stored, getErr := base.List(context.Background())
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if len(stored) != 1 || stored[0].Status != domain.ScheduleFired {
+		t.Fatalf("claimed schedule = %+v, want fired after failed reschedule", stored)
+	}
+}
+
+func TestDisableWorkflowCancelsPendingSchedules(t *testing.T) {
+	svc, _, clock := testAutomation(t, &fakeExec{})
+	at := clock.T.Add(time.Hour)
+	w := &domain.WorkflowDefinition{
+		ID:       "disable-me",
+		Name:     "disable-me",
+		Triggers: []domain.Trigger{{ID: "once", Kind: domain.TriggerOnce, Family: domain.FamilyOnce, At: &at}},
+		Jobs:     []domain.Job{{ID: "job", Steps: []domain.Step{{ID: "step", Run: "echo"}}}},
+	}
+	if err := svc.Sched.EnableWorkflow(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Sched.DisableWorkflow(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := svc.Workflows.Get(context.Background(), w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Enabled {
+		t.Fatal("disabled workflow remained enabled")
+	}
+	schedules, err := svc.Schedules.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schedules) != 1 || schedules[0].Status != domain.ScheduleCancelled {
+		t.Fatalf("schedules = %+v, want one cancelled schedule", schedules)
+	}
+	clock.Advance(2 * time.Hour)
+	if err := svc.Sched.FireDue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := svc.Runs.List(context.Background(), RunFilter{WorkflowID: w.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("disabled workflow started %d runs", len(runs))
+	}
+}
+
 func TestEventIdempotentDelivery(t *testing.T) {
 	fx := &fakeExec{}
 	svc, _, _ := testAutomation(t, fx)
@@ -235,6 +384,39 @@ func TestEventIdempotentDelivery(t *testing.T) {
 	runs, _ := svc.Runs.List(context.Background(), RunFilter{WorkflowID: "mail"})
 	if len(runs) != 1 {
 		t.Fatalf("duplicate delivery created %d runs", len(runs))
+	}
+}
+
+type failingCreateRunStore struct {
+	PipelineRunStore
+	err error
+}
+
+func (s failingCreateRunStore) Create(context.Context, *domain.WorkflowRun) error {
+	return s.err
+}
+
+func TestIngestEventRollsBackDeliveryWhenRunStartFails(t *testing.T) {
+	svc, mem, _ := testAutomation(t, &fakeExec{})
+	sentinel := errors.New("run store unavailable")
+	svc.Exec.Runs = failingCreateRunStore{PipelineRunStore: svc.Exec.Runs, err: sentinel}
+	w := &domain.WorkflowDefinition{
+		ID:       "mail-rollback",
+		Name:     "mail-rollback",
+		Enabled:  true,
+		Triggers: []domain.Trigger{{ID: "message", Kind: domain.TriggerEvent, Event: "email.received"}},
+		Jobs:     []domain.Job{{ID: "job", Steps: []domain.Step{{ID: "step", Run: "echo"}}}},
+	}
+	if err := svc.Workflows.Put(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+
+	err := svc.Sched.IngestEvent(context.Background(), domain.Event{ID: "e-rollback", Type: "email.received"})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("IngestEvent error = %v, want %v", err, sentinel)
+	}
+	if len(mem.Deliveries) != 0 {
+		t.Fatalf("delivery claim was not rolled back: %v", mem.Deliveries)
 	}
 }
 

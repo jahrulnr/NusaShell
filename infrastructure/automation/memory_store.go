@@ -201,6 +201,13 @@ func (s *MemoryStore) RecordDelivery(_ context.Context, eventID, triggerID, work
 	return true, nil
 }
 
+func (s *MemoryStore) DeleteDelivery(_ context.Context, eventID, triggerID, workflowID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.Deliveries, domain.DeliveryKey(eventID, triggerID, workflowID))
+	return nil
+}
+
 func (s *MemoryStore) ListEvents(_ context.Context, limit int) ([]*domain.Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

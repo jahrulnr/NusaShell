@@ -46,6 +46,13 @@ test('dialog dismisses on Escape and restores as cancelled', async () => {
   });
 });
 
+test('toast is safe before the shell mounts', async () => {
+  await withDom('<body></body>', () => {
+    assert.doesNotThrow(() => toast('Installed', 'success'));
+    assert.equal(document.querySelectorAll('.toast').length, 0);
+  });
+});
+
 test('toast coalesces the same kind and message instead of stacking', async () => {
   await withDom('<body><div id="toast-container" class="toast-container"></div></body>', async (window) => {
     window.requestAnimationFrame = (fn) => { fn(0); return 1; };

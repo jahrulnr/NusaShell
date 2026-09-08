@@ -2,8 +2,10 @@ package automation
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"nusashell/domain"
 )
@@ -49,6 +51,75 @@ func TestEnableWorkflowRejectsInvalidSyntax(t *testing.T) {
 	got, err := svc.Workflows.Get(context.Background(), "broken")
 	if err == nil && got.Enabled {
 		t.Fatal("invalid workflow must not be persisted as enabled")
+	}
+}
+
+type failingScheduleStore struct {
+	ScheduleStore
+	err error
+}
+
+func (s failingScheduleStore) Put(context.Context, *domain.ScheduleRecord) error {
+	return s.err
+}
+
+func TestEnableWorkflowRollsBackWhenScheduleRegistrationFails(t *testing.T) {
+	svc, _, clock := testAutomation(t, &fakeExec{})
+	sentinel := errors.New("schedule store unavailable")
+	failing := failingScheduleStore{ScheduleStore: svc.Schedules, err: sentinel}
+	svc.Sched.Schedules = failing
+	at := clock.T.Add(time.Hour)
+	w := &domain.WorkflowDefinition{
+		ID:       "scheduled",
+		Name:     "scheduled",
+		Triggers: []domain.Trigger{{ID: "once", Kind: domain.TriggerOnce, Family: domain.FamilyOnce, At: &at}},
+		Jobs:     []domain.Job{{ID: "job", Steps: []domain.Step{{ID: "step", Run: "echo"}}}},
+	}
+
+	err := svc.Sched.EnableWorkflow(context.Background(), w)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("EnableWorkflow error = %v, want %v", err, sentinel)
+	}
+	if w.Enabled {
+		t.Fatal("workflow should be disabled after activation failure")
+	}
+	stored, getErr := svc.Workflows.Get(context.Background(), w.ID)
+	if getErr != nil {
+		t.Fatalf("read rolled-back workflow: %v", getErr)
+	}
+	if stored.Enabled {
+		t.Fatal("persisted workflow should be disabled after activation failure")
+	}
+}
+
+func TestSaveWorkflowRollsBackWhenActivationFails(t *testing.T) {
+	svc, _, clock := testAutomation(t, &fakeExec{})
+	sentinel := errors.New("schedule store unavailable")
+	failing := failingScheduleStore{ScheduleStore: svc.Schedules, err: sentinel}
+	svc.Schedules = failing
+	svc.Sched.Schedules = failing
+	at := clock.T.Add(time.Hour)
+	w := &domain.WorkflowDefinition{
+		ID:       "scheduled",
+		Name:     "scheduled",
+		Enabled:  true,
+		Triggers: []domain.Trigger{{ID: "once", Kind: domain.TriggerOnce, Family: domain.FamilyOnce, At: &at}},
+		Jobs:     []domain.Job{{ID: "job", Steps: []domain.Step{{ID: "step", Run: "echo"}}}},
+	}
+
+	got, _, err := svc.SaveWorkflow(context.Background(), w)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("SaveWorkflow error = %v, want %v", err, sentinel)
+	}
+	if got.Enabled {
+		t.Fatal("returned workflow must be disabled after activation failure")
+	}
+	stored, getErr := svc.Workflows.Get(context.Background(), w.ID)
+	if getErr != nil {
+		t.Fatalf("read rolled-back workflow: %v", getErr)
+	}
+	if stored.Enabled {
+		t.Fatal("persisted workflow must be disabled after activation failure")
 	}
 }
 

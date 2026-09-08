@@ -2050,8 +2050,7 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 		if name == "automation_enable" {
 			err = a.Sched.EnableWorkflow(ctx, w)
 		} else {
-			w.Enabled = false
-			err = a.Workflows.Put(ctx, w)
+			err = a.Sched.DisableWorkflow(ctx, w)
 		}
 		return encode(map[string]any{"id": w.ID, "enabled": w.Enabled}, err)
 	case "automation_delete":

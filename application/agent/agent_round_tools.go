@@ -54,12 +54,13 @@ func (a *Service) ExecuteTurnTools(run *TurnRun, messageID string, toolCalls []d
 	sem := make(chan struct{}, limit)
 	for i := range toolCalls {
 		wg.Add(1)
-		go func(i int) {
+		index := i
+		a.goSafe("agent-tool", func() {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results[i] = a.RunOneTool(run, messageID, toolCalls[i], caps, settings, round)
-		}(i)
+			results[index] = a.RunOneTool(run, messageID, toolCalls[index], caps, settings, round)
+		})
 	}
 	wg.Wait()
 
@@ -84,7 +85,7 @@ func (a *Service) ExecuteTurnTools(run *TurnRun, messageID string, toolCalls []d
 				dtos = append(dtos, contracts.TodoItemDTO{ID: item.ID, Content: item.Content, Status: string(item.Status)})
 			}
 			summary := domain.SummarizeTodos(items)
-			a.Bus.Emit(contracts.EventTodoUpdated, contracts.TodoUpdatedEvent{
+			a.emitBus(contracts.EventTodoUpdated, contracts.TodoUpdatedEvent{
 				ConversationID: run.ConversationID,
 				Items:          dtos,
 				Summary:        contracts.TodoSummaryDTO{Total: summary.Total, Pending: summary.Pending, InProgress: summary.InProgress, Completed: summary.Completed},
@@ -136,10 +137,33 @@ func (a *Service) ExecuteTurnTools(run *TurnRun, messageID string, toolCalls []d
 // runOneTool executes a single tool call and returns its result. It emits the
 // tool-started and tool-completed events and never writes to the conversation
 // store, so it is safe to run concurrently for the tool calls of one round.
-func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.ToolCall, caps ModelCapabilities, settings domain.Settings, round int) ToolExecResult {
-	baseCtx := run.Ctx
-	if baseCtx == nil {
-		baseCtx = context.Background()
+func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.ToolCall, caps ModelCapabilities, settings domain.Settings, round int) (result ToolExecResult) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result = ToolExecResult{
+				Status: domain.ToolFailed,
+				Output: "error: " + truncateToolError(fmt.Sprintf("tool %q panicked: %v", toolCall.Name, recovered)),
+			}
+			// A faulty event subscriber must not turn a contained tool panic
+			// back into a process panic. The failed result is still returned to
+			// the turn goroutine for normal persistence.
+			func() {
+				defer func() { _ = recover() }()
+				a.emitToolCompleted(run, toolCall, result)
+			}()
+		}
+	}()
+
+	if a == nil {
+		return ToolExecResult{Status: domain.ToolFailed, Output: "error: agent service is not configured"}
+	}
+	if run == nil {
+		return ToolExecResult{Status: domain.ToolFailed, Output: "error: turn run is empty"}
+	}
+
+	var baseCtx context.Context = context.Background()
+	if run.Ctx != nil {
+		baseCtx = run.Ctx
 	}
 	toolCtx, cancelTool := context.WithCancel(baseCtx)
 	run.RegisterToolCancel(toolCall.ID, cancelTool)
@@ -280,12 +304,12 @@ func (a *Service) emitLearningMutationEvents(toolName string, status domain.Tool
 	// Learning UI panes in real time.
 	switch toolName {
 	case "memory":
-		a.Bus.Emit(contracts.EventMemoryUpdated, map[string]any{
+		a.emitBus(contracts.EventMemoryUpdated, map[string]any{
 			"source": "tool",
 			"tool":   toolName,
 		})
 	case "skill":
-		a.Bus.Emit(contracts.EventSkillUpdated, map[string]any{
+		a.emitBus(contracts.EventSkillUpdated, map[string]any{
 			"source": "tool",
 			"tool":   toolName,
 		})

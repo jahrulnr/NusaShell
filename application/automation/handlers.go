@@ -249,8 +249,9 @@ func (a *Automation) Dispatch(ctx context.Context, method string, payload json.R
 				return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
 			}
 		} else {
-			w.Enabled = false
-			_ = auto.Workflows.Put(ctx, w)
+			if err := auto.Sched.DisableWorkflow(ctx, w); err != nil {
+				return nil, rpcdispatch.Internal(err)
+			}
 		}
 		avail, reason := auto.AvailabilityOf(ctx, w)
 		return workflowDTO(w, avail, reason), nil

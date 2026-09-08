@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -33,26 +34,77 @@ func (s *AutomationScheduler) now() time.Time {
 	return clock.NewTime(s.Clock.Now()).Time()
 }
 
+func (s *AutomationScheduler) emit(typ string, value any) {
+	if s == nil || s.Bus == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	s.Bus.Emit(typ, value)
+}
+
 // EnableWorkflow persists schedules/subscriptions for an enabled workflow.
 func (s *AutomationScheduler) EnableWorkflow(ctx context.Context, w *domain.WorkflowDefinition) error {
+	if s == nil {
+		return fmt.Errorf("automation scheduler not configured")
+	}
+	if w == nil {
+		return fmt.Errorf("workflow is empty")
+	}
+	if s.Workflows == nil {
+		return fmt.Errorf("workflow store not configured")
+	}
 	if reason := s.invalidReason(ctx, w); reason != "" {
 		return fmt.Errorf("invalid workflow: %s", reason)
 	}
 	w.Enabled = true
 	if err := s.Workflows.Put(ctx, w); err != nil {
+		w.Enabled = false
 		return err
 	}
+	activationFailure := func(err error) error {
+		w.Enabled = false
+		failures := []error{err}
+		if s.Schedules != nil {
+			if cleanupErr := s.cancelWorkflowSchedules(ctx, w.ID); cleanupErr != nil {
+				failures = append(failures, fmt.Errorf("cancel partial schedules: %w", cleanupErr))
+			}
+		}
+		if rollbackErr := s.Workflows.Put(ctx, w); rollbackErr != nil {
+			failures = append(failures, fmt.Errorf("disable rollback: %w", rollbackErr))
+		}
+		return errors.Join(failures...)
+	}
 	now := s.now()
+	if s.Schedules != nil {
+		if err := s.cancelWorkflowSchedules(ctx, w.ID); err != nil {
+			return activationFailure(fmt.Errorf("reset schedules for workflow %q: %w", w.ID, err))
+		}
+	}
 	for i, t := range w.Triggers {
 		if t.Kind == domain.TriggerEvent {
 			if s.Caps != nil && t.Event != "" {
 				binding, err := s.Caps.Resolve(ctx, t.Event, t.AutoStart)
-				if err == nil || binding.Status != domain.CapMissing {
-					binding, _ = s.Caps.EnsureAvailable(ctx, binding, t.AutoStart)
-					avail := domain.MapAvailability(binding.Status, domain.AllowsAutoStart(binding.Status, t.AutoStart, true))
-					if avail == domain.AvailBlocked {
-						return s.blockWorkflow(ctx, w, binding)
+				if err != nil {
+					// A generic event publisher may not be represented by a
+					// capability. Only that expected absence is optional; a
+					// registry/storage failure must not activate blindly.
+					if binding.Status == domain.CapMissing {
+						continue
 					}
+					return activationFailure(fmt.Errorf("resolve event capability %q: %w", t.Event, err))
+				}
+				binding, err = s.Caps.EnsureAvailable(ctx, binding, t.AutoStart)
+				if err != nil {
+					return activationFailure(fmt.Errorf("ensure event capability %q: %w", t.Event, err))
+				}
+				avail := domain.MapAvailability(binding.Status, domain.AllowsAutoStart(binding.Status, t.AutoStart, true))
+				switch avail {
+				case domain.AvailBlocked:
+					if err := s.blockWorkflow(ctx, w, binding); err != nil {
+						return activationFailure(err)
+					}
+				case domain.AvailError:
+					return activationFailure(fmt.Errorf("event capability %q is unavailable: %s", t.Event, binding.Reason))
 				}
 			}
 			continue
@@ -60,9 +112,12 @@ func (s *AutomationScheduler) EnableWorkflow(ctx context.Context, w *domain.Work
 		if t.Kind == domain.TriggerManual {
 			continue
 		}
+		if s.Schedules == nil {
+			return activationFailure(fmt.Errorf("schedule store not configured"))
+		}
 		next, err := domain.NextFire(t, now, nil, w.Missed)
 		if err != nil {
-			return err
+			return activationFailure(err)
 		}
 		if next == nil {
 			continue
@@ -77,7 +132,48 @@ func (s *AutomationScheduler) EnableWorkflow(ctx context.Context, w *domain.Work
 			Status: domain.SchedulePending, CreatedAt: now,
 		}
 		if err := s.Schedules.Put(ctx, rec); err != nil {
-			return err
+			return activationFailure(fmt.Errorf("register schedule %q: %w", id, err))
+		}
+	}
+	return nil
+}
+
+// DisableWorkflow persists a disabled workflow and retires its pending
+// schedules so a later re-enable cannot replay an obsolete definition.
+func (s *AutomationScheduler) DisableWorkflow(ctx context.Context, w *domain.WorkflowDefinition) error {
+	if s == nil {
+		return fmt.Errorf("automation scheduler not configured")
+	}
+	if w == nil {
+		return fmt.Errorf("workflow is empty")
+	}
+	if s.Workflows == nil {
+		return fmt.Errorf("workflow store not configured")
+	}
+	w.Enabled = false
+	if err := s.Workflows.Put(ctx, w); err != nil {
+		return err
+	}
+	if s.Schedules != nil {
+		if err := s.cancelWorkflowSchedules(ctx, w.ID); err != nil {
+			return fmt.Errorf("reset schedules for disabled workflow %q: %w", w.ID, err)
+		}
+	}
+	return nil
+}
+
+func (s *AutomationScheduler) cancelWorkflowSchedules(ctx context.Context, workflowID string) error {
+	records, err := s.Schedules.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, rec := range records {
+		if rec == nil || rec.WorkflowID != workflowID || rec.Status != domain.SchedulePending {
+			continue
+		}
+		rec.Status = domain.ScheduleCancelled
+		if err := s.Schedules.Put(ctx, rec); err != nil {
+			return fmt.Errorf("cancel schedule %q: %w", rec.ID, err)
 		}
 	}
 	return nil
@@ -98,9 +194,14 @@ func (s *AutomationScheduler) invalidReason(ctx context.Context, w *domain.Workf
 }
 
 func (s *AutomationScheduler) blockWorkflow(ctx context.Context, w *domain.WorkflowDefinition, b domain.CapabilityBinding) error {
-	_ = s.Workflows.Put(ctx, w)
+	if s == nil || s.Workflows == nil {
+		return fmt.Errorf("workflow store not configured")
+	}
+	if err := s.Workflows.Put(ctx, w); err != nil {
+		return fmt.Errorf("persist blocked workflow %q: %w", w.ID, err)
+	}
 	if s.Bus != nil {
-		s.Bus.Emit(contracts.EventAutomationRunBlocked, map[string]any{
+		s.emit(contracts.EventAutomationRunBlocked, map[string]any{
 			"workflow_id": w.ID, "capability": b.Capability, "provider": b.ProviderID, "status": b.Status, "reason": b.Reason,
 		})
 	}
@@ -109,8 +210,11 @@ func (s *AutomationScheduler) blockWorkflow(ctx context.Context, w *domain.Workf
 
 // FireDue claims due schedules and starts runs.
 func (s *AutomationScheduler) FireDue(ctx context.Context) error {
-	if s.Schedules == nil {
+	if s == nil || s.Schedules == nil {
 		return nil
+	}
+	if s.Workflows == nil {
+		return fmt.Errorf("workflow store not configured")
 	}
 	now := s.now()
 	due, err := s.Schedules.Due(ctx, now, 32)
@@ -118,12 +222,21 @@ func (s *AutomationScheduler) FireDue(ctx context.Context) error {
 		return err
 	}
 	for _, rec := range due {
+		if rec == nil {
+			continue
+		}
 		claimed, err := s.Schedules.Claim(ctx, rec.ID, now)
-		if err != nil || claimed == nil {
+		if err != nil {
+			return fmt.Errorf("claim schedule %q: %w", rec.ID, err)
+		}
+		if claimed == nil {
 			continue
 		}
 		w, err := s.Workflows.Get(ctx, rec.WorkflowID)
-		if err != nil || !w.Enabled {
+		if err != nil {
+			return fmt.Errorf("load workflow %q for schedule %q: %w", rec.WorkflowID, rec.ID, err)
+		}
+		if w == nil || !w.Enabled {
 			continue
 		}
 		if err := s.startFromTrigger(ctx, w, rec.TriggerID, "", nil); err != nil {
@@ -131,7 +244,7 @@ func (s *AutomationScheduler) FireDue(ctx context.Context) error {
 		}
 		var trig domain.Trigger
 		for _, t := range w.Triggers {
-			if t.ID == rec.TriggerID || rec.TriggerID == t.ID {
+			if t.ID == rec.TriggerID {
 				trig = t
 				break
 			}
@@ -144,19 +257,24 @@ func (s *AutomationScheduler) FireDue(ctx context.Context) error {
 		}
 		last := rec.NextRunAt
 		next, err := domain.NextFire(trig, now, &last, w.Missed)
-		if err != nil || next == nil {
+		if err != nil {
+			return fmt.Errorf("reschedule %q: %w", rec.ID, err)
+		}
+		if next == nil {
 			continue
 		}
 		rec.Status = domain.SchedulePending
 		rec.FiredAt = nil
 		rec.NextRunAt = *next
-		_ = s.Schedules.Put(ctx, rec)
+		if err := s.Schedules.Put(ctx, rec); err != nil {
+			return fmt.Errorf("reschedule %q: %w", rec.ID, err)
+		}
 	}
 	return s.resumeWaits(ctx)
 }
 
 func (s *AutomationScheduler) resumeWaits(ctx context.Context) error {
-	if s.Waits == nil || s.Exec == nil {
+	if s == nil || s.Waits == nil || s.Exec == nil {
 		return nil
 	}
 	due, err := s.Waits.Due(ctx, s.now(), 32)
@@ -164,28 +282,46 @@ func (s *AutomationScheduler) resumeWaits(ctx context.Context) error {
 		return err
 	}
 	for _, w := range due {
-		claimed, err := s.Waits.Claim(ctx, w.ID)
-		if err != nil || claimed == nil {
+		if w == nil {
 			continue
 		}
-		_ = s.Exec.Tick(ctx, claimed.WorkflowRunID)
+		claimed, err := s.Waits.Claim(ctx, w.ID)
+		if err != nil {
+			return fmt.Errorf("claim wait %q: %w", w.ID, err)
+		}
+		if claimed == nil {
+			continue
+		}
+		if err := s.Exec.Tick(ctx, claimed.WorkflowRunID); err != nil {
+			return fmt.Errorf("resume run %q: %w", claimed.WorkflowRunID, err)
+		}
 	}
 	return nil
 }
 
 // IngestEvent matches when-triggers and creates at-most-one run per delivery key.
 func (s *AutomationScheduler) IngestEvent(ctx context.Context, ev domain.Event) error {
+	if s == nil {
+		return fmt.Errorf("automation scheduler not configured")
+	}
+	ev.Type = strings.TrimSpace(ev.Type)
+	if ev.Type == "" {
+		return fmt.Errorf("event type is required")
+	}
+	if s.Events == nil {
+		return fmt.Errorf("event store not configured")
+	}
 	if ev.ID == "" {
 		ev.ID = domain.NewID(domain.IDPrefixEvt)
 	}
 	if ev.Time.IsZero() {
 		ev.Time = s.now()
 	}
-	if s.Events != nil {
-		_ = s.Events.PutEvent(ctx, &ev)
+	if err := s.Events.PutEvent(ctx, &ev); err != nil {
+		return fmt.Errorf("persist event: %w", err)
 	}
 	if s.Bus != nil {
-		s.Bus.Emit(contracts.EventAutomationEvent, ev)
+		s.emit(contracts.EventAutomationEvent, ev)
 	}
 	if s.Workflows == nil {
 		return nil
@@ -195,6 +331,9 @@ func (s *AutomationScheduler) IngestEvent(ctx context.Context, ev domain.Event) 
 		return err
 	}
 	for _, w := range list {
+		if w == nil {
+			return fmt.Errorf("workflow store returned an empty workflow")
+		}
 		if !w.Enabled {
 			continue
 		}
@@ -206,46 +345,69 @@ func (s *AutomationScheduler) IngestEvent(ctx context.Context, ev domain.Event) 
 				continue
 			}
 			if t.Debounce > 0 && s.Debounce != nil {
-				last, ok, _ := s.Debounce.Last(ctx, w.ID, t.ID)
+				last, ok, err := s.Debounce.Last(ctx, w.ID, t.ID)
+				if err != nil {
+					return fmt.Errorf("read debounce for workflow %q trigger %q: %w", w.ID, t.ID, err)
+				}
 				if ok && s.now().Sub(last) < t.Debounce {
 					continue
 				}
 			}
 			if s.Caps != nil {
-				binding, _ := s.Caps.Resolve(ctx, t.Event, t.AutoStart)
+				binding, resolveErr := s.Caps.Resolve(ctx, t.Event, t.AutoStart)
 				// RPC ingest already produced the event; a missing source
 				// provider must not drop it. Disabled providers still block.
+				if resolveErr != nil && binding.Status != domain.CapMissing {
+					return fmt.Errorf("resolve event capability %q: %w", t.Event, resolveErr)
+				}
 				if binding.Status == domain.CapDisabled {
-					_ = s.blockWorkflow(ctx, w, binding)
+					if err := s.blockWorkflow(ctx, w, binding); err != nil {
+						return err
+					}
 					continue
 				}
 			}
-			created := true
-			if s.Events != nil {
-				var err error
-				created, err = s.Events.RecordDelivery(ctx, ev.ID, t.ID, w.ID, "", s.now())
-				if err != nil {
-					return err
-				}
+			created, err := s.Events.RecordDelivery(ctx, ev.ID, t.ID, w.ID, "", s.now())
+			if err != nil {
+				return fmt.Errorf("record delivery for workflow %q trigger %q: %w", w.ID, t.ID, err)
 			}
 			if !created {
 				continue
 			}
 			if err := s.startFromTrigger(ctx, w, t.ID, ev.ID, &ev); err != nil {
+				var startFailure *runStartFailure
+				if errors.As(err, &startFailure) && !startFailure.created {
+					if rollback, ok := s.Events.(DeliveryRollback); ok {
+						if rollbackErr := rollback.DeleteDelivery(ctx, ev.ID, t.ID, w.ID); rollbackErr != nil {
+							return errors.Join(err, fmt.Errorf("rollback delivery for workflow %q trigger %q: %w", w.ID, t.ID, rollbackErr))
+						}
+					}
+				}
 				return err
 			}
 			if s.Debounce != nil {
-				_ = s.Debounce.Touch(ctx, w.ID, t.ID, s.now())
+				if err := s.Debounce.Touch(ctx, w.ID, t.ID, s.now()); err != nil {
+					return fmt.Errorf("write debounce for workflow %q trigger %q: %w", w.ID, t.ID, err)
+				}
 			}
 		}
 	}
 	if s.Waits != nil {
-		waiting, _ := s.Waits.WaitingForEvent(ctx, ev.Type)
+		waiting, err := s.Waits.WaitingForEvent(ctx, ev.Type)
+		if err != nil {
+			return fmt.Errorf("find waits for event %q: %w", ev.Type, err)
+		}
 		for _, rec := range waiting {
-			if domain.MatchWhere(ev, rec.Where) {
-				claimed, _ := s.Waits.Claim(ctx, rec.ID)
-				if claimed != nil && s.Exec != nil {
-					_ = s.Exec.Tick(ctx, claimed.WorkflowRunID)
+			if rec == nil || !domain.MatchWhere(ev, rec.Where) {
+				continue
+			}
+			claimed, err := s.Waits.Claim(ctx, rec.ID)
+			if err != nil {
+				return fmt.Errorf("claim event wait %q: %w", rec.ID, err)
+			}
+			if claimed != nil && s.Exec != nil {
+				if err := s.Exec.Tick(ctx, claimed.WorkflowRunID); err != nil {
+					return fmt.Errorf("resume event wait run %q: %w", claimed.WorkflowRunID, err)
 				}
 			}
 		}
@@ -254,6 +416,15 @@ func (s *AutomationScheduler) IngestEvent(ctx context.Context, ev domain.Event) 
 }
 
 func (s *AutomationScheduler) startFromTrigger(ctx context.Context, w *domain.WorkflowDefinition, triggerID, eventID string, ev *domain.Event) error {
+	if s == nil {
+		return &runStartFailure{err: fmt.Errorf("automation scheduler not configured")}
+	}
+	if w == nil {
+		return &runStartFailure{err: fmt.Errorf("workflow is empty")}
+	}
+	if s.Exec == nil {
+		return &runStartFailure{err: fmt.Errorf("execution scheduler not configured")}
+	}
 	if s.Caps != nil {
 		for _, j := range w.Jobs {
 			for _, step := range j.Steps {
@@ -262,16 +433,24 @@ func (s *AutomationScheduler) startFromTrigger(ctx context.Context, w *domain.Wo
 					continue
 				}
 				b, err := s.Caps.Resolve(ctx, name, domain.DefaultAutoStart)
-				if err != nil && b.Status == domain.CapMissing {
-					return nil
+				if err != nil {
+					return &runStartFailure{err: fmt.Errorf("resolve capability %q: %w", name, err)}
 				}
 				if b.Kind == domain.CapabilityMCP {
-					b, _ = s.Caps.EnsureAvailable(ctx, b, domain.DefaultAutoStart)
+					b, err = s.Caps.EnsureAvailable(ctx, b, domain.DefaultAutoStart)
+					if err != nil {
+						return &runStartFailure{err: fmt.Errorf("ensure capability %q: %w", name, err)}
+					}
 				}
 				avail := domain.MapAvailability(b.Status, domain.AllowsAutoStart(b.Status, domain.DefaultAutoStart, true))
-				if avail == domain.AvailBlocked {
-					_ = s.blockWorkflow(ctx, w, b)
+				switch avail {
+				case domain.AvailBlocked:
+					if err := s.blockWorkflow(ctx, w, b); err != nil {
+						return &runStartFailure{err: err}
+					}
 					return nil
+				case domain.AvailError:
+					return &runStartFailure{err: fmt.Errorf("capability %q is unavailable: %s", name, b.Reason)}
 				}
 			}
 		}
@@ -282,16 +461,21 @@ func (s *AutomationScheduler) startFromTrigger(ctx context.Context, w *domain.Wo
 	}
 	policy := w.Concurrency.Normalized().Policy
 	if s.Locks != nil && policy != domain.ConcurrencyAllow {
-		active, ok, _ := s.Locks.Active(ctx, key)
+		active, ok, err := s.Locks.Active(ctx, key)
+		if err != nil {
+			return &runStartFailure{err: fmt.Errorf("inspect concurrency lock %q: %w", key, err)}
+		}
 		if ok {
 			switch policy {
 			case domain.ConcurrencySkip:
 				return nil
 			case domain.ConcurrencyReplace:
-				if s.Exec != nil {
-					_ = s.Exec.Cancel(ctx, active)
+				if err := s.Exec.Cancel(ctx, active); err != nil {
+					return &runStartFailure{err: fmt.Errorf("cancel active run %q: %w", active, err)}
 				}
-				_ = s.Locks.Release(ctx, key, active)
+				if err := s.Locks.Release(ctx, key, active); err != nil {
+					return &runStartFailure{err: fmt.Errorf("release concurrency lock %q: %w", key, err)}
+				}
 			case domain.ConcurrencyQueue:
 				// leave the previous lock; skip starting a second run
 				return nil
@@ -305,17 +489,36 @@ func (s *AutomationScheduler) startFromTrigger(ctx context.Context, w *domain.Wo
 		run.Event = ev
 		run.RequestedBy = "event"
 	}
+	lockHeld := false
 	if s.Locks != nil && policy != domain.ConcurrencyAllow {
-		_ = s.Locks.Acquire(ctx, key, run.ID)
+		if err := s.Locks.Acquire(ctx, key, run.ID); err != nil {
+			return &runStartFailure{err: fmt.Errorf("acquire concurrency lock %q: %w", key, err)}
+		}
+		lockHeld = true
 	}
-	if s.Exec == nil {
-		return fmt.Errorf("execution scheduler not configured")
+	var startErr error
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				startErr = &runStartFailure{created: true, err: fmt.Errorf("start workflow run panicked: %v", recovered)}
+			}
+		}()
+		startErr = s.Exec.StartRun(ctx, run)
+	}()
+	if !lockHeld {
+		return startErr
 	}
-	err := s.Exec.StartRun(ctx, run)
-	if s.Locks != nil && policy != domain.ConcurrencyAllow {
-		_ = s.Locks.Release(ctx, key, run.ID)
+	releaseErr := s.Locks.Release(ctx, key, run.ID)
+	if startErr != nil && releaseErr != nil {
+		return errors.Join(startErr, fmt.Errorf("release concurrency lock %q: %w", key, releaseErr))
 	}
-	return err
+	if startErr != nil {
+		return startErr
+	}
+	if releaseErr != nil {
+		return fmt.Errorf("release concurrency lock %q: %w", key, releaseErr)
+	}
+	return nil
 }
 
 func (s *AutomationScheduler) Validate(ctx context.Context, w *domain.WorkflowDefinition) domain.ValidationResult {
