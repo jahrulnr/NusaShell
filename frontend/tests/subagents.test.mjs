@@ -3,9 +3,17 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { sortRunsNewestFirst, syncTranscript, runDisplayName } from '../js/views/agent/subagents.js';
+import {
+  sortRunsNewestFirst,
+  syncTranscript,
+  runDisplayName,
+  getSubagentFollow,
+  applySubagentFollowIntent,
+  resetSubagentFollowForTests,
+} from '../js/views/agent/subagents.js';
 
 const acpCSS = await readFile(new URL('../styles/acp.css', import.meta.url), 'utf8');
+const subagentsView = await readFile(new URL('../js/views/agent/subagents.js', import.meta.url), 'utf8');
 
 test('runDisplayName prefers title over agent_name', () => {
   assert.equal(runDisplayName({ title: 'Inspect pets', agent_name: 'Codex' }), 'Inspect pets');
@@ -162,4 +170,39 @@ test('ACP prompt styling is bounded and scoped away from the main user bubble', 
   assert.match(acpCSS, /\.acp-transcript \.acp-prompt-message \{[^}]*align-self:\s*stretch;/s);
   assert.match(acpCSS, /\.acp-transcript \.acp-prompt-message \.agent-bubble \{[^}]*max-height:\s*min\(/s);
   assert.match(acpCSS, /\.acp-transcript \.acp-prompt-message \.agent-bubble \{[^}]*overflow-y:\s*auto;/s);
+});
+
+test('subagent follow pin is per run id, independent across rooms', () => {
+  resetSubagentFollowForTests();
+  getSubagentFollow('run-a').pinned = false;
+  assert.equal(getSubagentFollow('run-a').pinned, false);
+  assert.equal(getSubagentFollow('run-b').pinned, true, 'other run stays pinned');
+});
+
+test('subagent upward scroll intent unpins only that run', () => {
+  resetSubagentFollowForTests();
+  const scroller = {
+    scrollTop: 0,
+    scrollHeight: 2000,
+    clientHeight: 400,
+  };
+  applySubagentFollowIntent('run-a', scroller, 'up');
+  assert.equal(getSubagentFollow('run-a').pinned, false);
+  assert.equal(getSubagentFollow('run-b').pinned, true);
+  // Returning to the bottom re-arms that run only.
+  scroller.scrollTop = 1600;
+  applySubagentFollowIntent('run-a', scroller, 'down');
+  assert.equal(getSubagentFollow('run-a').pinned, true);
+  assert.equal(getSubagentFollow('run-b').pinned, true);
+});
+
+test('subagent follow store is keyed by run id, not a shared scroller WeakMap', () => {
+  assert.match(subagentsView, /followByRunId\s*=\s*new Map/);
+  assert.doesNotMatch(subagentsView, /followStates\s*=\s*new WeakMap/);
+  assert.match(subagentsView, /applySubagentFollowIntent\(/);
+  assert.match(subagentsView, /getSubagentFollow\(runId\)/);
+  // Direction-aware unpin (wheel) — geometry-only scroll cannot detach.
+  assert.match(subagentsView, /addEventListener\('wheel'/);
+  assert.match(subagentsView, /applySubagentFollowIntent\(runId, scroller, dir\)/);
+  assert.match(subagentsView, /updateScrollPin\(getSubagentFollow\(runId\), scroller, 24, \{ direction \}\)/);
 });

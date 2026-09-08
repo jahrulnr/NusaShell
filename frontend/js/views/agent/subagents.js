@@ -2,7 +2,7 @@
 
 import { rpc, on } from '../../rpc.js';
 import { el, fmtTime } from '../../ui.js';
-import { updateScrollPin } from '../../agent-ui.js';
+import { updateScrollPin, isNestedScrollerEvent } from '../../agent-ui.js';
 import { renderMarkdown } from '../../markdown.js';
 import { incrementalRender } from '../../incremental-render.js';
 import { highlightCode } from '../../highlight-render.js';
@@ -21,6 +21,11 @@ const state = {
   runLoadErrors: new Map(),
   bound: false,
 };
+
+// Per-run follow pins for ACP transcripts. Independent from the parent Agent
+// conversation pin (state.pinned / savedRooms) and from other subagent runs.
+const followByRunId = new Map();
+const boundFollowScrollers = new WeakSet();
 
 // Agent name cache: agent_id → name. Hydrated lazily from acp.agents.list
 // so delegation cards can show "Devin" instead of "acp_4aa7732594cbfd1d".
@@ -162,6 +167,7 @@ function pruneRuns() {
     const ended = Date.parse(run.ended_at || run.updated_at || '') || 0;
     if (!ended || now - ended > RECENT_MS) {
       state.runs.delete(id);
+      followByRunId.delete(id);
     }
   }
 }
@@ -493,20 +499,25 @@ function buildRunPanel(run) {
   return panel;
 }
 
-// A freshly opened panel always starts pinned to the live tail; the user can
-// scroll up from there (which releases the follow via updateScrollPin).
+// A freshly opened panel scrolls to the live tail only when that run's own
+// follow pin is still armed. Pin state is per runId (like Agent rooms), not
+// shared across the drawer scroller — switching subagent rooms must not
+// inherit another run's detached/follow lock, and must not touch the parent
+// conversation's pin.
 function mountRunPanel(container, run) {
   const panel = buildRunPanel(run);
   container.replaceChildren(panel);
   bindTranscriptFollow(panel);
   const scroller = transcriptScroller(panel);
-  if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  if (scroller && getSubagentFollow(run.id).pinned) {
+    scroller.scrollTop = scroller.scrollHeight;
+  }
   return panel;
 }
 
 // patchRunPanel updates a live panel in place: status pill + model pill +
 // error, then patches the transcript in place. Auto-follows the bottom only
-// when the user is already there — reading earlier output is never interrupted.
+// when that run's pin is armed — reading earlier output is never interrupted.
 function patchRunPanel(panel, run) {
   const pill = panel.querySelector('.acp-status-pill');
   if (pill) {
@@ -528,35 +539,67 @@ function patchRunPanel(panel, run) {
   syncTranscriptWithFollow(panel, run.transcript || [], run.prompt, run.started_at);
 }
 
-// Transcript follow state lives on the scrolling element (drawer content or
-// popup), keyed by WeakMap so panels can come and go. The decision is
-// direction-aware (updateScrollPin): only a real upward user scroll releases
-// the follow. Measuring the bottom distance before a patch — the old
-// approach — read post-growth geometry and silently killed the follow while
-// a subagent streamed tool output.
-const followStates = new WeakMap();
+// Per-run follow helpers. Keyed by runId — not by the shared
+// .acp-run-content / .acp-popup scroller — so room switches keep each run's
+// own follow/detach preference and never touch the parent conversation pin.
+export function getSubagentFollow(runId) {
+  if (!runId) return { pinned: true };
+  let follow = followByRunId.get(runId);
+  if (!follow) {
+    follow = { pinned: true };
+    followByRunId.set(runId, follow);
+  }
+  return follow;
+}
+
+export function applySubagentFollowIntent(runId, scroller, direction) {
+  if (!runId || !scroller) return getSubagentFollow(runId).pinned;
+  return updateScrollPin(getSubagentFollow(runId), scroller, 24, { direction });
+}
+
+export function resetSubagentFollowForTests() {
+  followByRunId.clear();
+}
 
 function transcriptScroller(panel) {
   return panel?.querySelector('.acp-transcript')?.closest('.acp-run-content, .acp-popup') || null;
 }
 
+function runIdFromScroller(scroller) {
+  return scroller?.querySelector?.('.acp-run-panel')?.dataset?.runId || '';
+}
+
 function bindTranscriptFollow(panel) {
   const scroller = transcriptScroller(panel);
-  if (!scroller || followStates.has(scroller)) return;
-  const follow = { pinned: true };
-  followStates.set(scroller, follow);
+  if (!scroller || boundFollowScrollers.has(scroller)) return;
+  boundFollowScrollers.add(scroller);
+  // Resolve the active runId on each gesture so one drawer/popup scroller can
+  // host many rooms without sharing a single pin object.
+  scroller.addEventListener('wheel', (event) => {
+    if (isNestedScrollerEvent(event.target, scroller)) return;
+    const runId = runIdFromScroller(scroller);
+    if (!runId) return;
+    let dir = '';
+    if (event.deltaY < 0) dir = 'up';
+    else if (event.deltaY > 0) dir = 'down';
+    if (!dir) return;
+    applySubagentFollowIntent(runId, scroller, dir);
+  }, { passive: true });
   scroller.addEventListener('scroll', () => {
-    updateScrollPin(follow, scroller);
+    const runId = runIdFromScroller(scroller);
+    if (!runId) return;
+    // No direction: only re-pin when geometry says we are at the bottom.
+    // Detach requires an explicit upward wheel intent above.
+    updateScrollPin(getSubagentFollow(runId), scroller);
   }, { passive: true });
 }
 
-// followTranscriptBottom scrolls the transcript to its newest output unless
-// the user has scrolled up to read. Scrolling back to the bottom re-arms it.
+// followTranscript scrolls to the newest output for this panel's run only.
 function followTranscript(panel) {
   const scroller = transcriptScroller(panel);
-  if (!scroller) return;
-  const follow = followStates.get(scroller);
-  if (follow && !follow.pinned) return;
+  const runId = panel?.dataset?.runId || '';
+  if (!scroller || !runId) return;
+  if (!getSubagentFollow(runId).pinned) return;
   scroller.scrollTop = scroller.scrollHeight;
 }
 
