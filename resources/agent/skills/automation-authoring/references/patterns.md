@@ -96,12 +96,13 @@ retry and prefer an update that is safe to repeat.
 
 Choose `allow` only when overlapping effects are harmless. Use `skip` when a
 new event is disposable while work is active. Use `replace` when only the
-latest state matters and cancellation is safe. Treat `queue` as a current
-single-active-run guard, not a durable FIFO queue, until runtime support is
-completed.
+latest state matters and cancellation is safe. Use `queue` when bursts for the
+same resource must wait FIFO (process-local, bounded; not durable across
+restart).
 
-Use a key that scopes the resource, for example `github:repo:pr:123`, not just
-`review`, if two resources may be processed independently.
+Use a key that scopes the resource — preferably an `${event.*}` template such
+as `tg-${event.chat_id}` or `github:${event.repo}:${event.pr}` — so two
+resources may run independently.
 
 ## 7. Wait and resume
 

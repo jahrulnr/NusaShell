@@ -23,8 +23,8 @@ and be running. `Blocked` means the current installation cannot run it now.
 | `agent.output_schema` | Supported with text result | Emit content matching the schema; the runner validates the final content | Headless runner returns `{output: text}`; schema properties are not separate job outputs |
 | Job `retry` | Partial | Declare only for transient runner/timeout policy, but verify behavior | Parser/model exist; executor does not yet loop job attempts |
 | Agent provider retry | Supported internally | Do not confuse it with job retry or a new workflow run | Interactive provider retry policy is internal to headless turn |
-| `allow`/`skip`/`replace` concurrency | Supported with caveats | Pick by effect semantics and use a resource-scoped key | Replace cancels active run; skip drops new run |
-| `queue` concurrency | Partial | Do not rely on it for durable FIFO/backlog | Current scheduler keeps the lock and skips the new run |
+| `allow`/`skip`/`replace` concurrency | Supported | Pick by effect semantics; key may use `${event.*}` | Replace cancels active run of that key; skip drops new run |
+| `queue` concurrency | Supported (process-local) | Use for FIFO bursts on one resource; not durable across restart | Bounded waiters per rendered key; overflow skips the new run |
 | Missed schedule policy | Supported at scheduler contract level | Choose deliberately for once/every workloads | Exact catch-up behavior depends on policy and schedule state |
 | Webhook completion summary | Supported | Use bounded endpoint; never put secrets in URL | Delivery failures become events and do not block the run |
 | Logs/status/wait/steer | Supported | One async run + one wait; logs/status for diagnosis | `steer` only while an agent step is running |

@@ -122,6 +122,34 @@ func (r *WorkflowRun) Finalize(now time.Time, sum RunSummary) {
 	}
 }
 
+// SkipRun marks the run and every non-terminal job/step as skipped with a
+// reason. Used when a concurrency queue overflows or a waiter times out /
+// is cancelled before work starts. Terminal runs are left untouched.
+func (r *WorkflowRun) SkipRun(now time.Time, reason string) {
+	if r == nil || r.Status.IsTerminal() {
+		return
+	}
+	r.Status = StatusSkipped
+	r.Error = reason
+	r.FinishedAt = now
+	for i := range r.Jobs {
+		if r.Jobs[i].Status.IsTerminal() {
+			continue
+		}
+		r.Jobs[i].Status = StatusSkipped
+		r.Jobs[i].Error = reason
+		r.Jobs[i].FinishedAt = now
+		for j := range r.Jobs[i].Steps {
+			if r.Jobs[i].Steps[j].Status.IsTerminal() {
+				continue
+			}
+			r.Jobs[i].Steps[j].Status = StatusSkipped
+			r.Jobs[i].Steps[j].Error = reason
+			r.Jobs[i].Steps[j].FinishedAt = now
+		}
+	}
+}
+
 // Cancel transitions the run to cancelled, cancels all active jobs, and
 // stamps FinishedAt. Terminal runs are not re-cancelled.
 func (r *WorkflowRun) Cancel(now time.Time) {

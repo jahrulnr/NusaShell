@@ -96,3 +96,26 @@ func sanitizeConversationKey(raw string) string {
 	}
 	return clean
 }
+
+// ResolveConcurrencyKey renders concurrency.key with the same ${event.<key>}
+// syntax and sanitization as RenderConversationKey. An empty key, or a
+// template whose placeholders resolve empty, falls back to workflowID so
+// skip/replace/queue stay scoped to the workflow when no resource identity
+// is available. A static key without placeholders behaves as today.
+func ResolveConcurrencyKey(keyTemplate, workflowID string, ev *Event) string {
+	if rendered := RenderConversationKey(keyTemplate, ev); rendered != "" {
+		return rendered
+	}
+	if workflowID != "" {
+		return workflowID
+	}
+	return "workflow"
+}
+
+// ConversationTemplateIsPerResource reports whether a reuse conversation
+// template interpolates event fields (per chat/board/repo identity). A
+// static or empty template is workflow-scoped (one conversation for the
+// whole workflow).
+func ConversationTemplateIsPerResource(template string) bool {
+	return strings.Contains(template, "${event.")
+}

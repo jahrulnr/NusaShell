@@ -14,7 +14,7 @@ name: required workflow name
 enabled: false
 trust: safe # safe | trusted | privileged
 concurrency:
-  key: optional lock key
+  key: tg-${event.chat_id} # optional ${event.*} template; empty → workflow id
   policy: allow # allow | queue | replace | skip
 missed: skip_missed # skip_missed | run_once_after_restart | catch_up_all
 defaults:
@@ -139,11 +139,12 @@ Useful paths include:
 
 ## Concurrency and missed schedules
 
-`allow` permits overlaps. `skip` drops a new run while the lock is active.
-`replace` cancels the active run before starting the new one. `queue` currently
-keeps the existing lock and does not create a durable waiting backlog, so use it
-only when that behavior is acceptable. A static key scopes the whole workflow;
-the current YAML contract does not interpolate event fields into lock keys.
+`allow` permits overlaps. `skip` drops a new run while the lock is active for
+the same rendered key. `replace` cancels that active run before starting the
+new one. `queue` waits FIFO (process-local, cap 10 per key) until the active
+run finishes; overflow skips the new run. `concurrency.key` may be static or
+an `${event.*}` template (empty → workflow id). Distinct rendered keys never
+block each other.
 
 `missed` controls scheduled work encountered after downtime. Choose
 `skip_missed`, `run_once_after_restart`, or `catch_up_all` only after deciding

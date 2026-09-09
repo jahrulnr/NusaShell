@@ -54,9 +54,10 @@ func (r *recordingAgentRunner) RunAgentStep(ctx context.Context, prompt, model s
 
 func reuseWorkflow() *domain.WorkflowDefinition {
 	return &domain.WorkflowDefinition{
-		ID:   "reuse-wf",
-		Name: "Reuse wf",
-		Jobs: []domain.Job{{ID: "reply", Steps: []domain.Step{{ID: "agent-reply", Agent: &domain.AgentStep{Prompt: "work", Reuse: true, Conversation: "shared"}}}}},
+		ID:          "reuse-wf",
+		Name:        "Reuse wf",
+		Concurrency: domain.Concurrency{Policy: domain.ConcurrencyQueue},
+		Jobs:        []domain.Job{{ID: "reply", Steps: []domain.Step{{ID: "agent-reply", Agent: &domain.AgentStep{Prompt: "work", Reuse: true, Conversation: "shared"}}}}},
 	}
 }
 
@@ -121,55 +122,89 @@ func TestAgentStepFreshByDefault(t *testing.T) {
 	}
 }
 
-// busyAgentRunner signals entry on started, then blocks until block closes.
+// busyAgentRunner signals entry on started (once), then blocks until block closes.
 type busyAgentRunner struct {
 	started chan struct{}
 	block   chan struct{}
+	once    sync.Once
 }
 
-func (b busyAgentRunner) RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error) {
-	close(b.started)
-	<-b.block
+func (b *busyAgentRunner) RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error) {
+	b.once.Do(func() { close(b.started) })
+	_ = blockOrCtx(ctx, b.block)
 	return map[string]any{"output": "done"}, "conv-busy", nil
 }
 
-func TestReuseBusyConversationFailsSecondRun(t *testing.T) {
+func blockOrCtx(ctx context.Context, block <-chan struct{}) error {
+	select {
+	case <-block:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestReuseQueueDoesNotBusyFail(t *testing.T) {
+	// reuse + queue: overlapping same-key events wait then resume; the
+	// executor must not fail the second run with a conversation-busy error.
 	svc, _, _ := testAutomation(t, &fakeExec{})
 	started := make(chan struct{})
 	block := make(chan struct{})
-	svc.Exec.Agent = busyAgentRunner{started: started, block: block}
+	svc.Exec.Agent = &busyAgentRunner{started: started, block: block}
 	svc.Exec.Convs = newMemConversationKeyStore()
 	wf := reuseWorkflow()
-	run1 := NewWorkflowRun(*wf, "event")
-	if err := svc.Exec.Runs.Create(context.Background(), run1); err != nil {
+	wf.Enabled = true
+	wf.Triggers = []domain.Trigger{{ID: "t1", Kind: domain.TriggerEvent, Event: "chat.message"}}
+	wf.Concurrency = domain.Concurrency{Key: "tg-${event.chat_id}", Policy: domain.ConcurrencyQueue}
+	wf.Jobs[0].Steps[0].Agent.Conversation = "tg-${event.chat_id}"
+	if err := svc.Workflows.Put(context.Background(), wf); err != nil {
 		t.Fatal(err)
 	}
-	done1 := make(chan error, 1)
-	go func() { done1 <- svc.Exec.runJob(context.Background(), run1.ID, "reply") }()
+	ev1 := domain.Event{ID: "e1", Type: "chat.message", Attributes: map[string]any{"chat_id": "A"}}
+	if err := svc.Sched.IngestEvent(context.Background(), ev1); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case <-started:
 	case <-time.After(5 * time.Second):
 		t.Fatal("first run did not reach the agent step")
 	}
-	run2 := NewWorkflowRun(*wf, "event")
-	if err := svc.Exec.Runs.Create(context.Background(), run2); err != nil {
+	ev2 := domain.Event{ID: "e2", Type: "chat.message", Attributes: map[string]any{"chat_id": "A"}}
+	if err := svc.Sched.IngestEvent(context.Background(), ev2); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Exec.runJob(context.Background(), run2.ID, "reply"); err != nil {
-		t.Fatalf("runJob2 returned %v (want persisted busy failure)", err)
+	deadline := time.Now().Add(2 * time.Second)
+	var queued *domain.WorkflowRun
+	for time.Now().Before(deadline) {
+		runs, _ := svc.Runs.List(context.Background(), RunFilter{WorkflowID: wf.ID})
+		for _, r := range runs {
+			if r.EventID == "e2" {
+				queued = r
+				break
+			}
+		}
+		if queued != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	got2, err := svc.Exec.Runs.Get(context.Background(), run2.ID)
-	if err != nil {
-		t.Fatal(err)
+	if queued == nil {
+		t.Fatal("second event must create a queued run")
 	}
-	job2 := got2.JobRunByID("reply")
-	if job2 == nil || job2.Status != domain.StatusFailed || !strings.Contains(job2.Error, "busy") {
-		t.Fatalf("overlapping reuse run must fail busy, job=%+v", job2)
+	if queued.Status == domain.StatusFailed && strings.Contains(queued.Error, "busy") {
+		t.Fatalf("reuse+queue must not busy-fail, got %+v", queued)
 	}
 	close(block)
-	select {
-	case <-done1:
-	case <-time.After(5 * time.Second):
-		t.Fatal("first run did not finish after unblock")
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		got, err := svc.Runs.Get(context.Background(), queued.ID)
+		if err == nil && got.Status.IsTerminal() {
+			if got.Status == domain.StatusFailed && strings.Contains(got.Error, "busy") {
+				t.Fatalf("queued reuse run failed busy: %+v", got)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
+	t.Fatal("queued reuse run did not finish after first run released")
 }

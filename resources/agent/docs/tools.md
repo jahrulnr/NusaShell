@@ -38,7 +38,7 @@ execute arbitrary side effects.
 | `tool_list` | list ALL tools of a running MCP server (no query); accepts plugin id only; returns compact entries (ref, name, server, description) without parameter schemas — load the full schema with `tool_schema` when needed; call after `mcp_enable` to discover tools |
 | `tool_schema` | load one MCP tool's full definition as a single JSONL line (name, description, parameters with type/properties/required); accepts plugin id only; this is the only tool that serves schemas — mcp_search and tool_list stay schema-free |
 | `mcp_search` | universal MCP tool discovery — search running MCP servers by name or description (token match, ranked); returns compact matches (`ref` `<plugin-id>:<tool>`, name, description) without inlining parameter schemas so large catalogs stay token-cheap; call `tool_schema` for exact argument fields when needed; always prefer `mcp_search` + `mcp_call` over guessing tool names |
-| `mcp_call` | the only MCP tool execution path — run a tool by `ref` (from `mcp_search` or `tool_list`; format `<plugin-id>:<tool>`) with `arguments_json` (a JSON-encoded string of the arguments matching the tool's parameters schema, or a JSON object directly; optional — defaults to `{}` for parameterless tools); returns a `STALE_TOOL_REF` error if the server was disabled/restarted since discovery (re-search and retry) |
+| `mcp_call` | the only MCP tool execution path — run a tool by `ref` (from `mcp_search` or `tool_list`; format `<plugin-id>:<tool>`) with `arguments_json` (a JSON object matching the tool's parameters schema; optional — defaults to `{}` for parameterless tools; the legacy escaped-string form is still accepted); returns a `STALE_TOOL_REF` error if the server was disabled/restarted since discovery (re-search and retry), or `MISSING_ARGS` naming the required fields when arguments arrive empty for a tool that declares them |
 | `contract_read` | read the usage contract declared by a plugin (`id=<plugin-id>` or `id=all`); marks the contract as read for the current conversation so `mcp_call` can proceed in `require` mode. Advisory by default (`plugin_contract_mode` defaults to `hint`); enforcement is only active when the setting is set to `require`. Call this before using any plugin that declares a `contract.entry` in its manifest |
 | `mcp_register` | copy a plugin from an absolute staging folder outside the installed plugins root; check inventory and ask before replacing an existing id |
 | `mcp_enable` | connect an installed plugin so its tools become available; returns only status + tool count — follow with `tool_list` or `mcp_search` to discover tools; returns `already_enabled` if already connected (no reconnect) |
@@ -391,12 +391,15 @@ via the universal `mcp_search` + `mcp_call` pair, which works on every
 provider; `mcp__<server>__<tool>` names are not callable:
 
 1. `mcp_search(query="read file")` → returns `{"ref":"nusashell.files:read","name":"read","server":"nusashell.files","description":"Read a text file..."}` — compact, no inline schema
-2. `mcp_call(ref="nusashell.files:read", arguments_json="{\"path\":\"/etc/hosts\"}")` → executes the tool
+2. `mcp_call(ref="nusashell.files:read", arguments_json={"path": "/etc/hosts"})` → executes the tool
 
 `tool_list` and `tool_schema` return the same `ref`-shaped definitions for
 inspection and exact schema lookups.
 If `mcp_call` returns `STALE_TOOL_REF`, the server was disabled or restarted
-since the search; run `mcp_search` again and retry.
+since the search; run `mcp_search` again and retry. If it returns
+`MISSING_ARGS`, the tool's schema declares required fields but the call
+arrived with empty arguments — load `tool_schema`, then retry with the
+required fields as a JSON object.
 When at least one ACP agent is enabled, the interactive toolbox also advertises
 `subagent`, `subagent_steer`, `subagent_stop`, and `subagent_wait`. ACP agents
 do not receive this conversation, NusaShell MCP plugins, or shell meta-tools.
@@ -664,6 +667,6 @@ Bad examples:
 
     mcp__files__read_file({path: "a.txt"})       # not in tools[], not callable
 
-    mcp_call(ref="nusashell.files:read", arguments_json="{}")  # empty payload — the tool requires path
+    mcp_call(ref="nusashell.files:read", arguments_json={})  # empty payload — triggers MISSING_ARGS: the tool requires path
 
     tool_list()                                   # called every round to re-check

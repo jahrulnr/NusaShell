@@ -49,3 +49,28 @@ func TestAgentStepConversationFields(t *testing.T) {
 		t.Fatalf("AgentStep zero value must default to fresh conversations: %+v", zero)
 	}
 }
+
+func TestResolveConcurrencyKey(t *testing.T) {
+	ev := &Event{Attributes: map[string]any{"chat_id": "A"}}
+	if got := ResolveConcurrencyKey("tg-${event.chat_id}", "wf", ev); got != "tg-A" {
+		t.Fatalf("rendered key = %q, want tg-A", got)
+	}
+	if got := ResolveConcurrencyKey("", "wf", ev); got != "wf" {
+		t.Fatalf("empty key fallback = %q, want wf", got)
+	}
+	if got := ResolveConcurrencyKey("tg-${event.missing}", "wf", ev); got != "wf" {
+		t.Fatalf("empty render fallback = %q, want wf", got)
+	}
+	if got := ResolveConcurrencyKey("static-mon", "wf", nil); got != "static-mon" {
+		t.Fatalf("static key = %q, want static-mon", got)
+	}
+}
+
+func TestConversationTemplateIsPerResource(t *testing.T) {
+	if !ConversationTemplateIsPerResource("tg-${event.chat_id}") {
+		t.Fatal("event template must be per-resource")
+	}
+	if ConversationTemplateIsPerResource("shared") || ConversationTemplateIsPerResource("") {
+		t.Fatal("static/empty templates are workflow-scoped")
+	}
+}

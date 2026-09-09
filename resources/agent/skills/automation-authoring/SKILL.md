@@ -104,8 +104,9 @@ replaces the top-level `name` and preserves the template's disabled state.
   `wait_until` for a known future time, not shell `sleep`.
 - Choose concurrency deliberately. `allow` is safe only for independent
   effects; `skip` drops a new overlapping run; `replace` cancels the active
-  run. Current `queue` is not a durable FIFO queue, so do not rely on it for
-  backlog processing.
+  run for that rendered key; `queue` waits FIFO (process-local, bounded) for
+  the same rendered key. Prefer `key: resource-${event.id}` so distinct
+  resources never block each other.
 
 ### 5. Resolve capabilities and MCP actions
 
@@ -119,7 +120,7 @@ mcp_enable(id="<stopped-plugin>")
 mcp_search(query="<read or action intent>", server="<plugin-id>")
 tool_schema(server="<plugin-id>", tool="<bare-tool-name>")
 contract_read(id="<plugin-id>")
-mcp_call(ref="<exact-ref-from-search>", arguments_json="{...}")
+mcp_call(ref="<exact-ref-from-search>", arguments_json={...})
 ```
 
 Call `mcp_enable` only when the provider is stopped and the user wants the

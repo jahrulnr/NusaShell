@@ -216,3 +216,33 @@ func TestCanTransition(t *testing.T) {
 		t.Fatal("running -> waiting for wait_until")
 	}
 }
+
+func TestValidateReuseConcurrency(t *testing.T) {
+	base := func(policy ConcurrencyPolicy, conversation string) *WorkflowDefinition {
+		return &WorkflowDefinition{
+			Name:        "reuse-check",
+			Concurrency: Concurrency{Policy: policy},
+			Jobs: []Job{{ID: "j", Steps: []Step{{ID: "s", Agent: &AgentStep{
+				Prompt: "p", Reuse: true, Conversation: conversation,
+			}}}}},
+		}
+	}
+	if r := ValidateSyntax(base(ConcurrencyAllow, "tg-${event.chat_id}")); r.Verdict() != "INVALID" {
+		t.Fatalf("reuse+per-resource+allow must be INVALID, got %+v", r.Issues)
+	}
+	if r := ValidateSyntax(base(ConcurrencyQueue, "tg-${event.chat_id}")); r.Verdict() == "INVALID" {
+		t.Fatalf("reuse+per-resource+queue must be VALID, got %+v", r.Issues)
+	}
+	if r := ValidateSyntax(base(ConcurrencyReplace, "tg-${event.chat_id}")); r.Verdict() == "INVALID" {
+		t.Fatalf("reuse+per-resource+replace must be VALID, got %+v", r.Issues)
+	}
+	if r := ValidateSyntax(base(ConcurrencyAllow, "")); r.Verdict() != "INVALID" {
+		t.Fatalf("reuse+workflow-scoped+allow must be INVALID, got %+v", r.Issues)
+	}
+	if r := ValidateSyntax(base(ConcurrencyReplace, "shared")); r.Verdict() != "INVALID" {
+		t.Fatalf("reuse+workflow-scoped+replace must be INVALID, got %+v", r.Issues)
+	}
+	if r := ValidateSyntax(base(ConcurrencySkip, "")); r.Verdict() == "INVALID" {
+		t.Fatalf("reuse+workflow-scoped+skip must be VALID, got %+v", r.Issues)
+	}
+}

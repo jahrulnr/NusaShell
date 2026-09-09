@@ -444,13 +444,25 @@ func TestConcurrencySkip(t *testing.T) {
 		Jobs:        []domain.Job{{ID: "j", Steps: []domain.Step{{ID: "s", Run: "echo"}}}},
 	}
 	_ = svc.Workflows.Put(context.Background(), w)
-	svc.LocksAcquireForTest(w.Concurrency.Key, "run_existing")
+	existing := NewWorkflowRun(*w, "test")
+	existing.Status = domain.StatusRunning
+	if err := svc.Exec.Runs.Create(context.Background(), existing); err != nil {
+		t.Fatal(err)
+	}
+	svc.LocksAcquireForTest(w.Concurrency.Key, existing.ID)
+	svc.Exec.trackConcurrencyLock(existing.ID, w.Concurrency.Key, svc.Sched.Locks)
 	if err := svc.Sched.IngestEvent(context.Background(), domain.Event{ID: "e2", Type: "tick"}); err != nil {
 		t.Fatal(err)
 	}
 	runs, _ := svc.Runs.List(context.Background(), RunFilter{WorkflowID: "mon"})
-	if len(runs) != 0 {
-		t.Fatalf("skip should not start a run, got %d", len(runs))
+	started := 0
+	for _, r := range runs {
+		if r.ID != existing.ID {
+			started++
+		}
+	}
+	if started != 0 {
+		t.Fatalf("skip should not start a run, got %d new runs", started)
 	}
 }
 

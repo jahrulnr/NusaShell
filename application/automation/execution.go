@@ -41,7 +41,11 @@ type ExecutionScheduler struct {
 	cancels     map[string]context.CancelFunc
 	cancelOwner map[string]string
 	runMu       sync.Map
-	convMu      sync.Map // conversation key -> chan struct{} (reuse guard)
+
+	// Identity-scoped concurrency (see concurrency.go).
+	lockMu     sync.Mutex
+	heldLocks  map[string]concurrencyHeld      // runID -> held key
+	queueByKey map[string][]*concurrencyWaiter // rendered key -> FIFO waiters
 }
 
 func NewExecutionScheduler() *ExecutionScheduler {
@@ -72,23 +76,6 @@ func (s *ExecutionScheduler) goSafe(source string, fn func()) {
 		defer func() { _ = recover() }()
 		fn()
 	}()
-}
-
-// tryLockConversationKey serializes agent steps that reuse the same
-// conversation key across overlapping runs inside this process. Overlapping
-// writes to one transcript would corrupt the agent's memory, so the second
-// run fails its step with a visible "busy" error instead of interleaving.
-// The guard is process-local; cross-process overlap is prevented by the
-// workflow-level concurrency lock the scheduler already enforces.
-func (s *ExecutionScheduler) tryLockConversationKey(key string) (func(), bool) {
-	value, _ := s.convMu.LoadOrStore(key, make(chan struct{}, 1))
-	ch := value.(chan struct{})
-	select {
-	case ch <- struct{}{}:
-		return func() { <-ch }, true
-	default:
-		return nil, false
-	}
 }
 
 type runStartFailure struct {
@@ -203,6 +190,7 @@ func (s *ExecutionScheduler) recordAsyncFailure(runID, reason string) {
 	}
 	s.emit(contracts.EventAutomationRunFailed, map[string]any{"run_id": runID, "error": reason})
 	s.notifyWebhook(context.Background(), run)
+	s.releaseConcurrencyLock(context.Background(), runID)
 }
 
 // Tick re-evaluates one run.
@@ -423,7 +411,6 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) (e
 			prompt := domain.RenderAgentPrompt(step.Agent.Prompt, run.Event)
 			convKey := ""
 			conversationID := ""
-			releaseConv := func() {}
 			if step.Agent.Reuse {
 				convKey = run.WorkflowID
 				if step.Agent.Conversation != "" {
@@ -431,13 +418,9 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) (e
 						convKey = rendered
 					}
 				}
-				if release, ok := s.tryLockConversationKey(run.WorkflowID + "\x00" + convKey); !ok {
-					result, err = StepResult{Error: fmt.Sprintf("conversation key %q is busy (another run is using it); retry after it finishes", convKey)}, fmt.Errorf("conversation key %q is busy", convKey)
-					break
-				} else {
-					releaseConv = release
-				}
-				defer releaseConv()
+				// Same-key serialization is owned by concurrency.policy
+				// (skip/queue/replace) via startUnderConcurrency — not a
+				// second busy-fail guard here.
 				if s.Convs != nil {
 					if existing, ok, cerr := s.Convs.GetConversation(context.WithoutCancel(jobCtx), run.WorkflowID, convKey); cerr == nil && ok {
 						conversationID = existing
@@ -670,6 +653,7 @@ func (s *ExecutionScheduler) maybeFinalize(ctx context.Context, run *domain.Work
 	}
 	if run.Status.IsTerminal() {
 		s.notifyWebhook(ctx, run)
+		s.releaseConcurrencyLock(ctx, run.ID)
 	}
 	return nil
 }
@@ -713,6 +697,7 @@ func (s *ExecutionScheduler) Cancel(ctx context.Context, runID string) error {
 	if err != nil {
 		return err
 	}
+	s.abandonQueuedRun(runID)
 	s.mu.Lock()
 	for id, cancel := range s.cancels {
 		if s.cancelOwner[id] != runID {
@@ -728,6 +713,7 @@ func (s *ExecutionScheduler) Cancel(ctx context.Context, runID string) error {
 		return fmt.Errorf("persist cancelled run %q: %w", runID, err)
 	}
 	s.emit(contracts.EventAutomationRunCancelled, map[string]any{"run_id": run.ID})
+	s.releaseConcurrencyLock(ctx, runID)
 	return nil
 }
 

@@ -466,33 +466,8 @@ func (s *AutomationScheduler) startFromTrigger(ctx context.Context, w *domain.Wo
 			}
 		}
 	}
-	key := w.Concurrency.Normalized().Key
-	if key == "" {
-		key = w.ID
-	}
+	key := domain.ResolveConcurrencyKey(w.Concurrency.Normalized().Key, w.ID, ev)
 	policy := w.Concurrency.Normalized().Policy
-	if s.Locks != nil && policy != domain.ConcurrencyAllow {
-		active, ok, err := s.Locks.Active(ctx, key)
-		if err != nil {
-			return &runStartFailure{err: fmt.Errorf("inspect concurrency lock %q: %w", key, err)}
-		}
-		if ok {
-			switch policy {
-			case domain.ConcurrencySkip:
-				return nil
-			case domain.ConcurrencyReplace:
-				if err := s.Exec.Cancel(ctx, active); err != nil {
-					return &runStartFailure{err: fmt.Errorf("cancel active run %q: %w", active, err)}
-				}
-				if err := s.Locks.Release(ctx, key, active); err != nil {
-					return &runStartFailure{err: fmt.Errorf("release concurrency lock %q: %w", key, err)}
-				}
-			case domain.ConcurrencyQueue:
-				// leave the previous lock; skip starting a second run
-				return nil
-			}
-		}
-	}
 	run := NewWorkflowRun(*w, "schedule")
 	run.TriggerID = triggerID
 	run.EventID = eventID
@@ -500,41 +475,11 @@ func (s *AutomationScheduler) startFromTrigger(ctx context.Context, w *domain.Wo
 		run.Event = ev
 		run.RequestedBy = "event"
 	}
-	lockHeld := false
-	if s.Locks != nil && policy != domain.ConcurrencyAllow {
-		if err := s.Locks.Acquire(ctx, key, run.ID); err != nil {
-			return &runStartFailure{err: fmt.Errorf("acquire concurrency lock %q: %w", key, err)}
-		}
-		lockHeld = true
-	}
-	var startErr error
-	func() {
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				startErr = &runStartFailure{created: true, err: fmt.Errorf("start workflow run panicked: %v", recovered)}
-			}
-		}()
-		// Event-triggered runs must never execute inside the caller's context
-		// (the MCP notification path bounds IngestEvent with a short timeout).
-		// StartRunAsync persists the run and ticks it on a detached background
-		// context, so a long job such as an agent step survives the ingest
-		// call instead of being cancelled ~10s in by the caller's deadline.
-		startErr = s.Exec.StartRunAsync(context.WithoutCancel(ctx), run)
-	}()
-	if !lockHeld {
-		return startErr
-	}
-	releaseErr := s.Locks.Release(ctx, key, run.ID)
-	if startErr != nil && releaseErr != nil {
-		return errors.Join(startErr, fmt.Errorf("release concurrency lock %q: %w", key, releaseErr))
-	}
-	if startErr != nil {
-		return startErr
-	}
-	if releaseErr != nil {
-		return fmt.Errorf("release concurrency lock %q: %w", key, releaseErr)
-	}
-	return nil
+	// Event-triggered runs must never execute inside the caller's context
+	// (the MCP notification path bounds IngestEvent with a short timeout).
+	// startUnderConcurrency / StartRunAsync persist the run and tick on a
+	// detached background context so a long job survives the ingest call.
+	return s.Exec.startUnderConcurrency(context.WithoutCancel(ctx), run, key, policy, s.Locks)
 }
 
 func (s *AutomationScheduler) Validate(ctx context.Context, w *domain.WorkflowDefinition) domain.ValidationResult {

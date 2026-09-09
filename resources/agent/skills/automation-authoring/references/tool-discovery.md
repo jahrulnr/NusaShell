@@ -31,7 +31,7 @@ state, not a reason to invent a fake capability.
 4. If `mcp_list` marks the plugin with a usage contract, call
    `contract_read(id="<plugin-id>")` before the first action when the current
    contract mode requires it.
-5. Call `mcp_call(ref="<exact-ref>", arguments_json="{...}")` with the exact
+5. Call `mcp_call(ref="<exact-ref>", arguments_json={...})` with the exact
    returned ref and JSON object.
 6. Inspect the result. Retry only a transient, idempotent operation. Never
    claim a message, review, card change, or deployment from an unobserved or
@@ -42,14 +42,14 @@ Good:
 ```text
 mcp_search(query="send Telegram message", server="nusashell.telegram")
 tool_schema(server="nusashell.telegram", tool="<returned-bare-name>")
-mcp_call(ref="nusashell.telegram:<returned-bare-name>", arguments_json="<schema-valid JSON>")
+mcp_call(ref="nusashell.telegram:<returned-bare-name>", arguments_json={<schema-valid JSON object>})
 ```
 
 Bad:
 
 ```text
-mcp_call(ref="nusashell.telegram:send_message", arguments_json="<guessed fields>")
-mcp_call(ref="mcp__github__create_review", arguments_json="{...}")
+mcp_call(ref="nusashell.telegram:send_message", arguments_json={guessed fields})
+mcp_call(ref="mcp__github__create_review", arguments_json={...})
 ```
 
 The second example uses an invented route and may target the wrong API. A

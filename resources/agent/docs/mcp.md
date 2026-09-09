@@ -132,7 +132,14 @@ Good example:
     mcp_enable(id="nusashell.files")                 # → {"status":"enabled","tools":3} (status + count only)
     mcp_search(query="read file")                    # → {"ref":"nusashell.files:read","name":"read","server":"nusashell.files","description":"Read a text file..."} (JSONL)
     tool_schema(server="nusashell.files", tool="read")  # full input schema
-    mcp_call(ref="nusashell.files:read", arguments_json="{\"path\": \"/home/user/a.txt\"}")  # executes the tool
+    mcp_call(ref="nusashell.files:read", arguments_json={"path": "/home/user/a.txt"})  # executes the tool
+
+`arguments_json` is a JSON **object** matching the tool's parameters schema
+(canonical form). Omit it for parameterless tools; the legacy escaped-string
+form from older versions is still accepted for compatibility. If a tool
+declares required fields and the call arrives with empty arguments, the
+runtime rejects it with `MISSING_ARGS: <ref> requires [<fields>]; load
+tool_schema and retry with arguments_json as a JSON object`.
 
 `mcp_enable` returns only status + tool count — it does NOT dump tool
 definitions. After `mcp_enable`, call `mcp_search` or `tool_list` to discover
@@ -161,7 +168,7 @@ Bad example — writing the tool call as text instead of using `mcp_call`:
     {"path":"/home/user/a.txt"}
 
     # RIGHT — use mcp_call with the ref from mcp_search:
-    mcp_call(ref="nusashell.files:read", arguments_json="{\"path\": \"/home/user/a.txt\"}")
+    mcp_call(ref="nusashell.files:read", arguments_json={"path": "/home/user/a.txt"})
 
 The Plugins view is the single catalog for all plugins: manual MCP
 servers, MCP-only plugins, and MCP + UI plugins. Select an entry to test,

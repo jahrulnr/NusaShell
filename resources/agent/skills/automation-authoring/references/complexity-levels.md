@@ -46,8 +46,8 @@ Start simple and promote only when a concrete failure or requirement demands it:
   business outcome.
 
 Do not use `every` to imitate an event source. Do not add an agent merely to
-format deterministic text. Do not add `queue` expecting a durable backlog in
-the current runtime; see `capability-matrix.md`.
+format deterministic text. Prefer `queue` for ordered bursts on one rendered
+concurrency key; it is process-local and bounded — see `capability-matrix.md`.
 
 ## Level acceptance checklist
 

@@ -43,6 +43,7 @@ func ValidateSyntax(w *WorkflowDefinition) ValidationResult {
 	for i, j := range w.Jobs {
 		validateJob(&r, i, j)
 	}
+	validateReuseConcurrency(&r, w)
 	if len(w.Jobs) > 0 {
 		_, dagIssues := BuildDAG(w.Jobs)
 		for _, issue := range dagIssues {
@@ -50,6 +51,45 @@ func ValidateSyntax(w *WorkflowDefinition) ValidationResult {
 		}
 	}
 	return r
+}
+
+// validateReuseConcurrency enforces that a reused agent transcript is never
+// written by two parallel turns. Per-resource conversation templates reject
+// allow/parallel; workflow-scoped reuse (empty or static conversation) must
+// use skip or queue.
+func validateReuseConcurrency(r *ValidationResult, w *WorkflowDefinition) {
+	if w == nil || r == nil {
+		return
+	}
+	policy := w.Concurrency.Normalized().Policy
+	for _, j := range w.Jobs {
+		for si, s := range j.Steps {
+			if s.Agent == nil || !s.Agent.Reuse {
+				continue
+			}
+			path := fmt.Sprintf("jobs.%s.steps[%d].agent", j.ID, si)
+			if j.ID == "" {
+				path = fmt.Sprintf("jobs[].steps[%d].agent", si)
+			}
+			perResource := ConversationTemplateIsPerResource(s.Agent.Conversation)
+			switch {
+			case perResource && policy == ConcurrencyAllow:
+				r.Add(ValidationIssue{
+					Path:    path + ".reuse",
+					Code:    "reuse_parallel_forbidden",
+					Message: "reuse:true with a per-resource conversation template cannot use concurrency.policy allow (parallel writes would corrupt one transcript); use queue, skip, or replace",
+					Level:   ValidationSyntax,
+				})
+			case !perResource && policy != ConcurrencySkip && policy != ConcurrencyQueue:
+				r.Add(ValidationIssue{
+					Path:    path + ".reuse",
+					Code:    "reuse_requires_serialize",
+					Message: "reuse:true with a workflow-scoped conversation (empty or static) requires concurrency.policy skip or queue",
+					Level:   ValidationSyntax,
+				})
+			}
+		}
+	}
 }
 
 func validateTrigger(r *ValidationResult, i int, t Trigger) {

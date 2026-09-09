@@ -116,8 +116,9 @@ Promote only for a concrete reason:
 - advanced to separate workflows when outcomes, owners, or credentials differ.
 
 Do not add an agent merely to format deterministic text. Do not use `every` to
-poll a source that can publish a `when` event. Do not use `queue` as if it were
-a durable FIFO backlog in the current runtime.
+poll a source that can publish a `when` event. Prefer `queue` when overlapping
+events for the same rendered concurrency key must wait in order; the queue is
+process-local and bounded (not durable across restart).
 
 ### 3.1 Practical simple example
 
@@ -272,7 +273,7 @@ name: workflow name
 enabled: false
 trust: safe
 concurrency:
-  key: stable static lock key
+  key: tg-${event.chat_id}   # optional ${event.*} template; empty → workflow id
   policy: allow # allow | queue | replace | skip
 missed: skip_missed # skip_missed | run_once_after_restart | catch_up_all
 defaults:
@@ -373,11 +374,32 @@ monitor that remembers what it reported, a reviewer chained across PR
 updates).
 
 ```yaml
-- agent:
-    prompt: "You are this chat's assistant. Reply using the history below."
-    model: "provider:model"              # optional pin
-    reuse: true                          # default false
-    conversation: "tg-${event.chat_id}"  # identity template; empty = one conversation for the whole workflow
+# Chat: one conversation per Telegram chat, FIFO when bursts overlap
+concurrency:
+  key: tg-${event.chat_id}
+  policy: queue
+jobs:
+  reply:
+    steps:
+      - agent:
+          prompt: "You are this chat's assistant. Reply using the history below."
+          model: "provider:model"              # optional pin
+          reuse: true                          # default false
+          conversation: "tg-${event.chat_id}"  # identity template; empty = one conversation for the whole workflow
+```
+
+```yaml
+# Monitoring: independent hosts may run in parallel (distinct keys)
+concurrency:
+  key: host-${event.host}
+  policy: allow
+jobs:
+  check:
+    steps:
+      - run: |
+          set -eu
+          printf '%s\n' "check ${NUSASHELL_RUN_ID}"
+      # reuse:true is invalid here with policy allow when conversation is per-resource
 ```
 
 Rules:
@@ -390,10 +412,14 @@ Rules:
   configured, falling back to the first enabled provider's first model.
 - Key → conversation mappings are persisted, so the memory survives app
   restarts.
-- `reuse: true` serializes same-key steps inside the process: an overlapping
-  run for the same key fails with a visible "busy" error instead of
-  interleaving into the same transcript. For per-resource keys also use
-  `concurrency.policy: skip` (or `allow` when the resources differ).
+- A single reused transcript must not be written by two parallel turns:
+  - `reuse: true` with a per-resource conversation template (`${event.*}`)
+    cannot use `concurrency.policy: allow` — use `queue`, `skip`, or `replace`.
+  - `reuse: true` with an empty/static conversation (one transcript for the
+    whole workflow) requires `skip` or `queue`.
+  - Prefer matching `concurrency.key` to the conversation identity so the
+    same rendered key serializes both the run and the transcript. Queue is
+    the single wait mechanism; there is no separate busy-fail guard.
 - Reused conversations grow; the engine's compaction applies to them like any
   other conversation.
 
@@ -677,19 +703,31 @@ the exact target and send at most once when a duplicate message would be harmful
 
 ### Concurrency
 
-`concurrency` is a workflow lock with a static key:
+`concurrency` is an identity-scoped lock. `concurrency.key` may be a static
+string or an `${event.<key>}` template (same sanitization as conversation
+reuse keys). It is rendered per event at delivery time; empty key or empty
+render falls back to the workflow ID. Runs with **different** rendered keys
+never block each other.
 
-| Policy | Current behavior | Choose it when |
+| Policy | Behavior per rendered key | Choose it when |
 | --- | --- | --- |
-| `allow` | overlapping runs are allowed | effects are independent |
+| `allow` | overlapping runs are allowed | effects are independent (and never with `reuse: true` on a shared transcript) |
 | `skip` | new overlapping run is dropped | latest event is disposable while work is active |
-| `replace` | active run is cancelled, then new run starts | only latest state matters and cancellation is safe |
-| `queue` | current scheduler keeps the lock and skips the new run | only when losing the new run is acceptable; not a durable queue |
+| `replace` | active run for that key is cancelled, then new run starts | only latest state matters and cancellation is safe |
+| `queue` | new run waits FIFO until the active run finishes (process-local) | bursts for the same resource must not be lost |
 
-Use a key scoped to the real resource, not a generic word such as `review`,
-when multiple resources can be processed. The current YAML contract does not
-interpolate event fields into lock keys, so use a static safe scope or separate
-workflow definitions.
+**Queue details:** waiters are in-memory, FIFO, capped at 10 per rendered key.
+Wait timeout is the largest job `timeout` on the workflow, else 30 minutes
+(also cancelled if the waiting run is cancelled). Overflow drops the **new**
+run with status `skipped` and reason `automation.queue.overflow`. A waiter
+whose wait ends by timeout/cancel is finalized as `skipped` with
+`automation.queue.wait_timeout` / `automation.queue.wait_cancelled` — never
+left `running`. Restart drops in-memory waiters; durable lock rows for
+terminal/missing runs are self-healed on the next start.
+
+**Layer ownership:** the scheduler renders the key and starts or enqueues; the
+execution scheduler holds the lock for the active run of that key and owns the
+FIFO waiters. Skip/replace use the same rendered key as queue.
 
 ### Retry
 
@@ -907,12 +945,12 @@ external tool result confirms it.
 | local `run` shell | supported | commands execute on the local/default executor |
 | `uses` capability | supported when resolved | validate exact binding and provider state |
 | `wait_until` | supported | durable time pause and resume |
-| headless `agent` | supported when provider configured | new hidden conversation per step/run |
+| headless `agent` | supported when provider configured | fresh conversation per step unless `reuse: true` |
 | `${event.*}` prompt rendering | supported | only event placeholders render; missing is empty |
 | `output_schema` | supported with text result | validated against final assistant content; schema properties are not separate job outputs |
 | job `retry` | partial | parsed policy, no automatic executor retry loop yet |
-| `allow`, `skip`, `replace` concurrency | supported with stated semantics | choose based on duplicate effect behavior |
-| `queue` concurrency | partial | new overlapping run is skipped, not durably queued |
+| `allow`, `skip`, `replace` concurrency | supported with stated semantics | key may be `${event.*}`; choose based on duplicate effect behavior |
+| `queue` concurrency | supported (process-local FIFO) | bounded waiters per rendered key; not durable across restart |
 | artifacts/cache | partial | models/ports exist, current storage/execution incomplete |
 | `runs_on`/remote runner | partial | do not infer remote capacity from the field |
 | webhook summary, logs/status/wait/steer | supported | inspect evidence with bounded calls |
