@@ -51,6 +51,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It no longer waits for the child to become idle before delivering the
   instruction. `subagent_stop` still ends the run.
 
+- **`mcp_call` accepts `arguments_json` as a JSON object.** The advertised
+  schema now types `arguments_json` as a free-form object (canonical MCP
+  form) so agents no longer hand-double-encode JSON inside tool arguments;
+  the legacy escaped-string form remains accepted for older transcripts.
+  A new `MISSING_ARGS` guard rejects empty arguments against tools whose
+  input schema declares required fields, naming the missing fields instead
+  of forwarding `{}` to the server (the weak-model empty-args regression is
+  covered by `TestMcpCallEmptyArgsAgainstRequiredSchemaFails`, and
+  `TestMcpCallSchemaAdvertisesObjectArgumentsJSON` pins the schema). Docs
+  corpus and automation-authoring skill examples updated to the object form.
+
 - **`delegate` merged into `subagent`.** The separate `delegate` tool is
   gone; internal NusaShell background runs are now `subagent` with
   `agent_id: "internal"` (the legacy `delegate` name still executes as an
