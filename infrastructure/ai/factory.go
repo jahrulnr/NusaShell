@@ -30,6 +30,9 @@ var codexRefreshMu = make(chan struct{}, 1)
 //     (reasoning object, reasoning_details, cache_retention, provider
 //     routing, attribution headers). The stored BaseURL remains the target,
 //     which lets custom gateways reuse the OpenRouter profile.
+//   - OpenCode Console Go is a protocol exception. It keeps the vanilla
+//     OpenAI Chat adapter so replayed thinking history uses
+//     reasoning_content, even when the stored driver is OpenRouter.
 //   - Providers without that profile use the vanilla OpenAI Chat adapter.
 //     Automatic routing is intentionally exclusive: a request is not retried
 //     through another API kind or wire profile when the selected gateway

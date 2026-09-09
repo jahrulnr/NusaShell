@@ -67,7 +67,7 @@ func TestNewFactoryUsesExplicitProviderDrivers(t *testing.T) {
 		{name: "openai responses", driver: domain.ProviderDriverOpenAI, kind: domain.ProviderResponses, key: "key", want: "openai"},
 		{name: "custom openrouter chat uses OpenRouter profile", driver: domain.ProviderDriverOpenRouter, kind: domain.ProviderChat, want: "openrouter"},
 		{name: "openrouter chat on openrouter.ai", driver: domain.ProviderDriverOpenRouter, kind: domain.ProviderChat, baseURL: "https://openrouter.ai/api/v1", want: "openrouter"},
-		{name: "custom opencode uses OpenRouter profile", driver: domain.ProviderDriverOpenRouter, kind: domain.ProviderChat, baseURL: "https://opencode.ai/zen/go/v1", want: "openrouter"},
+		{name: "custom opencode keeps vanilla Chat wire", driver: domain.ProviderDriverOpenRouter, kind: domain.ProviderChat, baseURL: "https://opencode.ai/zen/go/v1", want: "openai"},
 		{name: "openrouter responses", driver: domain.ProviderDriverOpenRouter, kind: domain.ProviderResponses, key: "key", want: "openrouter"},
 		{name: "openrouter messages", driver: domain.ProviderDriverOpenRouter, kind: domain.ProviderMessages, key: "key", want: "openrouter"},
 	}

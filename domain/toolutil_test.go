@@ -16,7 +16,8 @@ func TestIsOpenRouterHost(t *testing.T) {
 
 		// URL-only detection remains false for custom gateways. Explicit
 		// OpenRouter drivers use the compatibility/profile path through
-		// UsesOpenRouterWire, which is tested separately below.
+		// UsesOpenRouterWire, except for protocol-specific host overrides such
+		// as OpenCode, which is tested separately below.
 		{name: "tokenrouter", kind: ProviderChat, baseURL: "https://api.tokenrouter.com/v1", want: false},
 		{name: "9router localhost", kind: ProviderChat, baseURL: "http://localhost:20128/v1", want: false},
 		{name: "opencode zen", kind: ProviderChat, baseURL: "https://opencode.ai/zen/v1", want: false},
@@ -59,22 +60,22 @@ func TestUsesOpenRouterWire(t *testing.T) {
 			baseURL: "https://openrouter.ai/api/v1",
 			want:    true,
 		},
-		// Custom providers default to the OpenRouter compatibility/profile path,
-		// even when their gateway is not hosted at openrouter.ai. The custom
-		// gateway remains the target; OpenRouter supplies the request profile.
+		// OpenCode Console Go is a protocol exception: its thinking-mode
+		// replay requires vanilla Chat's reasoning_content field even when
+		// the stored driver is OpenRouter. Its cache enum is tested below.
 		{
-			name:    "opencode zen go with custom openrouter driver",
+			name:    "opencode zen go with custom openrouter driver stays vanilla",
 			kind:    ProviderChat,
 			driver:  ProviderDriverOpenRouter,
 			baseURL: "https://opencode.ai/zen/go/v1",
-			want:    true,
+			want:    false,
 		},
 		{
-			name:    "opencode zen with custom openrouter driver",
+			name:    "opencode zen with custom openrouter driver stays vanilla",
 			kind:    ProviderChat,
 			driver:  ProviderDriverOpenRouter,
 			baseURL: "https://opencode.ai/zen/v1",
-			want:    true,
+			want:    false,
 		},
 		{
 			name:    "tokenrouter with custom openrouter driver",

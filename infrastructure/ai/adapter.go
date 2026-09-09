@@ -27,7 +27,9 @@ import (
 // provider-specific adapter is selected per call by Driver and Kind.
 // A Chat adapter with OpenRouter=true uses the OpenRouter compatibility
 // profile against BaseURL, including for custom gateways; false keeps the
-// vanilla OpenAI Chat wire.
+// vanilla OpenAI Chat wire. The factory intentionally sets false for OpenCode
+// Console Go because its thinking-mode replay requires reasoning_content,
+// while its cache policy remains OpenRouter-compatible.
 //
 // Conversion between application.ChatRequest/ChatResponse and
 // core.Request/Response is handled in application/provider.

@@ -59,6 +59,12 @@
       "url": "https://openrouter.ai/docs/guides/overview/multimodal/videos",
       "title": "OpenRouter Video Inputs",
       "quotes": []
+    },
+    {
+      "id": 11,
+      "url": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens",
+      "title": "OpenRouter Reasoning Tokens",
+      "quotes": []
     }
   ]
 }

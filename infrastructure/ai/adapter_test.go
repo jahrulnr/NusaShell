@@ -16,6 +16,12 @@ import (
 	"nusashell/infrastructure/ai/openrouter"
 )
 
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestToCoreRequestSystemAndMessages(t *testing.T) {
 	req := application.ChatRequest{
 		Model: "m", MaxTokens: 64, System: "sys",
@@ -212,8 +218,9 @@ func TestAdapterChatNoKeyOptional(t *testing.T) {
 	// A custom chat provider uses the OpenRouter compatibility/profile path,
 	// even when its gateway is not hosted at openrouter.ai. No API key is
 	// still allowed for local and gateway hosts that permit unauthenticated
-	// requests.
-	a := &Adapter{ProviderKind: domain.ProviderChat, OpenRouter: true, BaseURL: "https://opencode.ai/zen/v1"}
+	// requests. OpenCode is intentionally tested separately as a vanilla Chat
+	// wire exception.
+	a := &Adapter{ProviderKind: domain.ProviderChat, OpenRouter: true, BaseURL: "https://api.tokenrouter.com/v1"}
 	p, err := a.providerFor()
 	if err != nil {
 		t.Fatalf("providerFor without key: %v", err)
@@ -272,12 +279,13 @@ func TestAdapterRouting(t *testing.T) {
 		t.Fatalf("tokenrouter adapter name = %q, want openrouter", p.Name())
 	}
 
-	// Custom providers default to Driver=openrouter and the factory marks
-	// their chat wire as OpenRouter-compatible, regardless of host name.
+	// OpenCode is a protocol exception: the stored OpenRouter driver still
+	// uses vanilla OpenAI Chat so reasoning history is sent as
+	// reasoning_content, which Console Go requires.
 	a = &Adapter{
 		ProviderKind: domain.ProviderChat,
 		Driver:       domain.ProviderDriverOpenRouter,
-		OpenRouter:   true,
+		OpenRouter:   false,
 		BaseURL:      "https://opencode.ai/zen/go/v1",
 		APIKey:       "k",
 	}
@@ -285,8 +293,8 @@ func TestAdapterRouting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("opencode providerFor: %v", err)
 	}
-	if p.Name() != "openrouter" {
-		t.Fatalf("opencode+openrouter-driver adapter name = %q, want openrouter", p.Name())
+	if p.Name() != "openai" {
+		t.Fatalf("opencode+openrouter-driver adapter name = %q, want openai", p.Name())
 	}
 
 	// Chat-kind with api.openai.com stays on the vanilla OpenAI chat adapter.
@@ -297,6 +305,68 @@ func TestAdapterRouting(t *testing.T) {
 	}
 	if p.Name() != "openai" {
 		t.Fatalf("openai direct adapter name = %q, want openai", p.Name())
+	}
+}
+
+func TestOpenCodeExplicitOpenRouterDriverUsesReasoningContentWire(t *testing.T) {
+	var body map[string]any
+	var requestPath string
+	var decodeErr error
+	client := &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		requestPath = req.URL.Path
+		decodeErr = json.NewDecoder(req.Body).Decode(&body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"model":"deepseek-chat","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)),
+			Request:    req,
+		}, nil
+	})}
+	baseURL := "https://opencode.ai/zen/go/v1"
+	a := &Adapter{
+		ProviderKind: domain.ProviderChat,
+		Driver:       domain.ProviderDriverOpenRouter,
+		OpenRouter:   domain.UsesOpenRouterWire(domain.ProviderChat, domain.ProviderDriverOpenRouter, baseURL),
+		BaseURL:      baseURL,
+		APIKey:       "k",
+		Client:       client,
+	}
+	if a.OpenRouter {
+		t.Fatal("OpenCode Chat must select the vanilla wire even when the stored driver is OpenRouter")
+	}
+	_, err := a.Chat(context.Background(), &core.Request{
+		Model:    "deepseek-chat",
+		Thinking: &core.Thinking{Mode: core.ThinkingEnabled, Effort: "medium"},
+		Messages: []core.Message{
+			core.UserText("continue"),
+			core.Assistant(core.ReasoningBlock{Text: "prior reasoning"}),
+			core.UserText("next"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenCode Chat: %v", err)
+	}
+	if requestPath != "/zen/go/v1/chat/completions" {
+		t.Fatalf("request path = %q, want /zen/go/v1/chat/completions", requestPath)
+	}
+	if decodeErr != nil {
+		t.Fatalf("request JSON: %v", decodeErr)
+	}
+	messages, ok := body["messages"].([]any)
+	if !ok || len(messages) != 3 {
+		t.Fatalf("messages = %#v, want three Chat messages", body["messages"])
+	}
+	assistant, ok := messages[1].(map[string]any)
+	if !ok {
+		t.Fatalf("assistant message = %#v, want object", messages[1])
+	}
+	if got := assistant["reasoning_content"]; got != "prior reasoning" {
+		t.Fatalf("assistant reasoning_content = %#v, want prior reasoning", got)
+	}
+	for _, field := range []string{"reasoning", "reasoning_details"} {
+		if _, exists := assistant[field]; exists {
+			t.Fatalf("assistant must not send OpenRouter %s field: %#v", field, assistant)
+		}
 	}
 }
 

@@ -5417,8 +5417,9 @@ func TestBuildPromptCachePolicyTTLFromProvider(t *testing.T) {
 		t.Fatalf("off TTL must skip prompt cache, got %+v", policy)
 	}
 
-	// OpenCode Console Go validates cache TTL as 5m|1h. Custom OpenCode now
-	// uses the OpenRouter profile, so the cache enum and Chat wire agree.
+	// OpenCode Console Go validates cache TTL as 5m|1h. Its Chat wire stays
+	// vanilla for reasoning_content replay, so the cache enum intentionally
+	// remains OpenRouter-compatible instead of matching the wire serializer.
 	opencode := &domain.Provider{
 		ID: "prov_oc", Driver: domain.ProviderDriverOpenRouter, Kind: domain.ProviderChat,
 		BaseURL: "https://opencode.ai/zen/go/v1", CacheTTL: "1h",

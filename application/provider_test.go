@@ -2058,7 +2058,7 @@ func TestToCoreRequestDirectVanillaChatNeverPutsTTLOnSystemBreakpoint(t *testing
 	}
 }
 
-func TestNewProviderContextCustomOpenCodeUsesOpenRouterProfile(t *testing.T) {
+func TestNewProviderContextCustomOpenCodeKeepsVanillaChatWire(t *testing.T) {
 	p := &domain.Provider{
 		ID:      "prov_b9587aa5f937c4f2",
 		Driver:  domain.ProviderDriverOpenRouter,
@@ -2066,8 +2066,8 @@ func TestNewProviderContextCustomOpenCodeUsesOpenRouterProfile(t *testing.T) {
 		BaseURL: "https://opencode.ai/zen/go/v1",
 	}
 	pc := NewProviderContext(p, nil)
-	if !pc.OpenRouter {
-		t.Fatal("custom OpenCode zen/go must convert requests with the OpenRouter profile")
+	if pc.OpenRouter {
+		t.Fatal("custom OpenCode zen/go must convert Chat requests with the vanilla OpenAI wire")
 	}
 	if pc.Driver != domain.ProviderDriverOpenRouter {
 		t.Fatalf("Driver = %q, want stored openrouter, OpenRouter=%v", pc.Driver, pc.OpenRouter)

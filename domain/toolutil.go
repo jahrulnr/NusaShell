@@ -175,22 +175,33 @@ func IsOpenCodeHost(baseURL string) bool {
 // OpenRouter-compatible request format (reasoning object, reasoning_details,
 // cache_retention, provider.order).
 //
-// Chat providers with an explicit OpenRouter driver use that profile even
-// when BaseURL points at a custom gateway. The gateway URL remains the target;
-// the profile supplies the compatibility shape. Automatic Chat routing still
-// recognizes genuine openrouter.ai hosts. Non-chat kinds follow the explicit
-// driver because their selected API kind remains exclusive.
+// Chat providers with an explicit OpenRouter driver use that profile against
+// custom gateways, and automatic Chat routing recognizes genuine
+// openrouter.ai hosts. OpenCode Console Go is the protocol exception: its
+// thinking-mode replay requires the vanilla Chat `reasoning_content` field,
+// so it stays on the OpenAI Chat wire even when its stored driver is
+// OpenRouter. Non-chat kinds follow the explicit driver because their selected
+// API kind remains exclusive.
 func UsesOpenRouterWire(kind ProviderKind, driver ProviderDriver, baseURL string) bool {
 	if kind == ProviderChat {
+		if IsOpenCodeHost(baseURL) {
+			return false
+		}
 		return driver == ProviderDriverOpenRouter || IsOpenRouterHost(kind, baseURL)
 	}
 	return driver == ProviderDriverOpenRouter || isOpenRouterBaseURL(baseURL)
 }
 
 // WireCacheDriver returns the driver whose prompt-cache TTL enum matches the
-// selected wire profile. OpenRouter-profile Chat, including custom gateways,
-// uses cache_control's 5m/1h enum; vanilla Chat uses OpenAI's 30m enum.
+// selected provider policy. OpenCode uses vanilla Chat serialization for
+// reasoning_content, but Console Go still validates its cache enum as 5m/1h,
+// so its cache policy keeps the OpenRouter driver marker. Other OpenRouter-
+// profile Chat providers, including custom gateways, use the same enum;
+// vanilla Chat providers use OpenAI's 30m enum.
 func WireCacheDriver(kind ProviderKind, driver ProviderDriver, baseURL string) ProviderDriver {
+	if kind == ProviderChat && IsOpenCodeHost(baseURL) {
+		return ProviderDriverOpenRouter
+	}
 	if kind == ProviderChat && !UsesOpenRouterWire(kind, driver, baseURL) {
 		return ProviderDriverAuto
 	}

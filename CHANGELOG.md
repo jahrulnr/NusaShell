@@ -30,10 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Custom provider OpenRouter compatibility.** Custom providers configured with
   the OpenRouter driver now use the OpenRouter-compatible profile even when
-  their Base URL points to a custom gateway. Built-in Anthropic, OpenAI,
-  OpenRouter, and Codex routes remain unchanged; API-kind routing stays
-  exclusive, and video attachments use endpoint-specific `video_url` /
-  `input_video` mappings without automatic cross-kind fallback.
+  their Base URL points to a custom gateway, except OpenCode Console Go, which
+  keeps vanilla Chat for its `reasoning_content` replay contract. Built-in
+  Anthropic, OpenAI, OpenRouter, and Codex routes remain unchanged; API-kind
+  routing stays exclusive, and video attachments use endpoint-specific
+  `video_url` / `input_video` mappings without automatic cross-kind fallback.
 
 - **Learning stays bounded over long-running installations.** The Learning
   log now reads and renders stable 50-event cursor pages instead of loading
@@ -90,6 +91,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   regression coverage and removed the unused `subagent.md` prompt.
 
 ### Fixed
+
+- **OpenCode Console Go reasoning replay.** OpenCode Chat keeps the vanilla
+  OpenAI-compatible wire even when its stored driver is OpenRouter, so DeepSeek
+  thinking history is sent as `reasoning_content` instead of OpenRouter's
+  `reasoning` fields. OpenCode still keeps its 5m/1h cache enum and session
+  header behavior.
 
 - **Turn completion notification ordering.** The completion sound now waits
   until the final assistant turn is visible, including the WebSocket-before-
