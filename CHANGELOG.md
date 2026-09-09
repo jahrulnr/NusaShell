@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Codex-first `web_search`.** When the active chat provider is Codex,
+  `web_search` tries Codex standalone web search first and falls back to the
+  existing searchwire sources when Codex search is unavailable or fails.
+  Other providers keep using searchwire directly.
+
 - **`conversation` inspect ops.** `info` and `read` join the existing
   `list` / `search` / `send` dispatcher. `search` matches room id, title,
   summary, or message text; with `id` it returns in-room message snippets.
@@ -67,6 +72,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their available tools, typed payload fields, stage boundaries, handoff
   `summary.text` contract, checklist access, and default output limits. Added
   regression coverage and removed the unused `subagent.md` prompt.
+
+### Fixed
+
+- **Learner streaming timeout and failure reporting.** Background learner
+  turns no longer impose a fixed 90-second wall-clock deadline, allowing
+  long-running SSE turns to rely on per-chunk idle timeouts. Provider failures
+  now persist as `LearningJobError` and leave the learning cursor unchanged
+  instead of being reported as completed fallback work.
 
 ## [0.6.2] - 2026-09-08
 

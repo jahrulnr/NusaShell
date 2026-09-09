@@ -277,6 +277,7 @@ func run() error {
 		PluginInstaller:        pluginInstaller,
 		Todos:                  todoStore,
 		Searcher:               searcher,
+		Providers:              providerStore,
 		Settings:               &jsonstore.Settings{S: store},
 		Credentials:            credentials,
 		AskQuestions:           askService,
@@ -313,6 +314,7 @@ func run() error {
 		Toolbox:                     tb,
 		MCPToolbox:                  mcpManager,
 		Factory:                     ai.NewFactory(credentials),
+		CodexSearchFactory:          ai.NewCodexSearchFactory(credentials),
 		ImageGeneratorFactory:       ai.NewImageGeneratorFactory(credentials),
 		SpeechTranscriberFactory:    ai.NewSpeechTranscriberFactory(),
 		OfflineTranscriberFactory:   ai.NewOfflineTranscriberFactory(&jsonstore.Settings{S: store}, dataDir),
@@ -337,6 +339,7 @@ func run() error {
 	})
 	tb.Acp = app
 	tb.Delegate = app
+	tb.CodexSearch = app
 	tb.Steerer = app
 	tb.SkillSearcher = app
 	tb.Conversations = app

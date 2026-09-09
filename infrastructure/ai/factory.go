@@ -21,6 +21,8 @@ import (
 // install for Codex backend routing.
 var codexInstallationID = codex.LoadOrGenerateInstallationID()
 
+var codexRefreshMu = make(chan struct{}, 1)
+
 // NewFactory returns a ProviderFactory closure that builds the single
 // provider Adapter for a stored provider config. For chat-kind providers:
 //   - Genuine OpenRouter hosts (openrouter.ai) use the OpenRouter adapter
@@ -89,6 +91,19 @@ func resolveCodexToken(ctx context.Context, p *domain.Provider, storedJSON strin
 	// Auto-refresh if the access token is expired or will expire within 5 min.
 	// The 5-min margin avoids mid-stream token expiry on long generations.
 	if tok.RefreshToken != "" && tok.IsExpired(5*time.Minute) {
+		select {
+		case codexRefreshMu <- struct{}{}:
+			defer func() { <-codexRefreshMu }()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		if creds != nil && p != nil && p.ID != "" {
+			if latestJSON, has, _ := creds.Get(p.ID); has && latestJSON != storedJSON {
+				if latest, parseErr := codex.UnmarshalToken(latestJSON); parseErr == nil && latest.AccountID == tok.AccountID && latest.AccountID != "" && !latest.IsExpired(5*time.Minute) {
+					return latest, nil
+				}
+			}
+		}
 		refreshed, err := codex.Refresh(ctx, tok)
 		if err != nil {
 			// If refresh fails, fall back to the stored token — the API

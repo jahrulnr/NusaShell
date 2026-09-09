@@ -99,6 +99,7 @@ func (a *Service) RunTurnChain(run *TurnRun, provider *domain.Provider, apiKey, 
 // is true only when the turn succeeded and the auto-continue policy says
 // the chain should continue.
 func (a *Service) RunSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities, autoContinueIndex int) (bool, string) {
+	run.Model = model
 	if a.deps.PrepareTurnAPIKey != nil {
 		prepared, prepErr := a.deps.PrepareTurnAPIKey(run.ConversationID, provider, apiKey)
 		if prepErr != nil {

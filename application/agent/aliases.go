@@ -58,6 +58,8 @@ var (
 	WithWorkspace        = tools.WithWorkspace
 	WithRunID            = tools.WithRunID
 	WithToolCallID       = tools.WithToolCallID
+	WithProviderID       = tools.WithProviderID
+	WithModel            = tools.WithModel
 	WorkspaceFromContext = tools.WorkspaceFromContext
 )
 

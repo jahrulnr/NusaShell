@@ -511,7 +511,7 @@ Pick the model used by the generate_speech tool (text-to-speech). Online models 
 
 ## Web Search
 
-Provider strategy for the web_search tool: auto merges all searchwire sources (default), round robin rotates one API-keyed provider (Brave, Serper, Tavily) per query, random picks one at random, and a bare source name pins every query to that source. Per-provider API keys are write-only, stored in the credential store; each input falls back to its standard environment variable (BRAVE_SEARCH_API_KEY, SERPER_API_KEY, TAVILY_API_KEY) when left blank.
+Provider strategy for the web_search tool: with an active Codex chat provider, Codex search is tried first and searchwire is the fallback; otherwise auto merges all searchwire sources (default), round robin rotates one API-keyed provider (Brave, Serper, Tavily) per query, random picks one at random, and a bare source name pins every query to that source. Per-provider API keys are write-only, stored in the credential store; each input falls back to its standard environment variable (BRAVE_SEARCH_API_KEY, SERPER_API_KEY, TAVILY_API_KEY) when left blank.
 
 - **Web Search title** (`#settings-web-search-title`):
   - Section: Settings

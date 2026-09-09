@@ -29,6 +29,8 @@ import (
 
 func ptrBool(v bool) *bool { return &v }
 
+type searchwireSearchFunc func(context.Context, *searchwire.Searcher, string, searchwire.SearchOptions) (*searchwire.Response, error)
+
 type Toolbox struct {
 	Skills          application.SkillStore
 	SkillSearcher   application.SkillSearcher // optional; nil = substring fallback
@@ -43,8 +45,10 @@ type Toolbox struct {
 	Todos           application.ConversationTodoPort
 	Conversations   application.ConversationMessenger
 	Searcher        *searchwire.Searcher // startup searcher for web_fetch + web_search fallback when settings are unavailable
+	Providers       application.ProviderStore
 	Settings        application.SettingsStore
 	Credentials     application.CredentialStore
+	CodexSearch     application.CodexSearchExecutor
 	AskQuestions    *application.AskQuestionService
 	Automation      *application.Automation
 	// SpeechOfflineAvailable flips the generate_speech tool on when the local
@@ -78,6 +82,9 @@ type Toolbox struct {
 	// strategy (Settings → Web Search). Atomic so concurrent tool calls
 	// rotate without coordination.
 	webSearchRR atomic.Uint64
+	// searchwireSearch is an unexported seam for deterministic search tests.
+	// Production calls use Searcher.SearchWithOptions directly.
+	searchwireSearch searchwireSearchFunc
 }
 
 // webAnswerSearcher builds a searchwire.Searcher on-demand from the web
@@ -230,7 +237,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "mcp_install", Description: "Install an MCP plugin from the curated catalog or a GitHub repository (owner/repo or URL). After install, call mcp_enable with the resulting plugin id to connect and load its tools.", InputSchema: obj("object", props("source", strEnum("Install source", "catalog", "github"), "id", str("Catalog plugin id (required when source=catalog)"), "url", str("GitHub repo URL or owner/repo shorthand (required when source=github)"), "subdir", str("Optional subdirectory inside a monorepo (github)"), "ref", str("Optional branch or tag to pin (github)")), "source")},
 		{Name: "mcp_server_add", Description: "Register a manual MCP server (no manifest needed). Transports: stdio (command/args/env, e.g. npx servers), sse, or http (Streamable HTTP) with url and optional headers for remote servers. Use for generic MCP servers; use mcp_register for NusaShell plugin folders. After adding, call mcp_enable with the server id to connect and load its tools.", InputSchema: obj("object", props("name", str("Human-readable server name"), "transport", strEnum("Transport kind", "stdio", "sse", "http"), "command", str("Command to launch the server (stdio transport, e.g. npx, node, python)"), "url", str("Server URL (required for sse/http transports, e.g. https://host/mcp)"), "args", arr("Arguments for the stdio command (e.g. -y @modelcontextprotocol/server-github)"), "env", obj("object", props("additional", str("KEY=VALUE entries for the stdio process")), "additional"), "headers", obj("object", props("additional", str("HTTP headers for sse/http transports, e.g. Authorization: Bearer <token>")), "additional"), "id", str("Optional stable id (default auto-generated)")), "name")},
 		{Name: "read_media", Description: "Load a media file (image, audio, video, or PDF document) from disk into your context. The media type is auto-detected from binary magic bytes — no need to specify whether it is an image, audio, video, or PDF. When your active model supports the kind natively, the file attaches to your context directly. For non-capable models, a fallback model transcribes/describes the content and returns the text, or a placeholder note with the file path for documents.", InputSchema: obj("object", props("file_path", str("Absolute path of the media file on disk"), "question", str("Optional question about the media content")), "file_path")},
-		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Serper, Tavily, Startpage, Wikipedia, GitHub). Use when you need current or fresh information. Follow up with web_fetch on promising URLs for full page content. Oversized result lists are truncated in-band (~32KiB) with overflow_path pointing at the full JSONL in the platform temp dir; continue with file_read.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
+		{Name: "web_search", Description: "Search the web for fresh information. With an active Codex chat provider, Codex search is tried first and searchwire is the fallback; other providers use searchwire across Brave, Serper, Tavily, Startpage, Wikipedia, and GitHub. Returns ranked results with title, URL, and snippet. Follow up with web_fetch on promising URLs for full page content. Oversized result lists are truncated in-band (~32KiB) with overflow_path pointing at the full JSONL in the platform temp dir; continue with file_read.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
 		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only. Extraction may read up to max_bytes (default 2MB); the in-band result is capped at ~32KiB. When truncated, overflow_path is an absolute temp file — continue with file_read using next_offset_bytes.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
 	}
 	if t.Acp != nil && (len(t.Acp.EnabledAcpAgents()) > 0 || t.Delegate != nil) {
@@ -1331,6 +1338,19 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if limit <= 0 {
 			limit = 10
 		}
+		codexFallback := false
+		codexCtx, cancelCodex := context.WithTimeout(ctx, webSearchRequestTimeout)
+		codexResponse, codexAttempted, codexErr := t.codexWebSearch(codexCtx, args.Query, limit)
+		cancelCodex()
+		if codexAttempted {
+			if codexErr == nil {
+				return formatCodexWebSearch(codexResponse, limit), nil
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return "", ctxErr
+			}
+			codexFallback = true
+		}
 		// A fresh searcher per call keeps the provider API keys and the
 		// strategy from Settings live without a restart. The startup
 		// searcher remains the fallback when settings are unavailable.
@@ -1346,11 +1366,20 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			strategy = t.Settings.Get().WebSearchStrategy
 		}
 		opts := searchwire.SearchOptions{
-			Limit:   args.Limit,
+			Limit:   limit,
 			Sources: t.webSearchSources(strategy, searcher),
 		}
-		resp, err := searcher.SearchWithOptions(ctx, args.Query, opts)
+		var resp *searchwire.Response
+		var err error
+		if t.searchwireSearch != nil {
+			resp, err = t.searchwireSearch(ctx, searcher, args.Query, opts)
+		} else {
+			resp, err = searcher.SearchWithOptions(ctx, args.Query, opts)
+		}
 		if err != nil {
+			if codexErr != nil {
+				return "", fmt.Errorf("Codex search failed: %v; searchwire fallback failed: %w", codexErr, err)
+			}
 			return "", fmt.Errorf("search failed: %w", err)
 		}
 		if limit > len(resp.Results) {
@@ -1366,6 +1395,12 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		if len(opts.Sources) == 1 {
 			meta["provider"] = opts.Sources[0]
+		}
+		if codexFallback {
+			meta["fallback_from"] = "codex"
+			if _, ok := meta["provider"]; !ok {
+				meta["provider"] = "searchwire"
+			}
 		}
 		if len(resp.Errors) > 0 {
 			var errs []any

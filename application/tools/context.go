@@ -13,6 +13,8 @@ const conversationIDKey ctxKey = "conversation_id"
 const runIDKey ctxKey = "run_id"
 const toolCallIDKey ctxKey = "tool_call_id"
 const workspaceKey ctxKey = "workspace"
+const providerIDKey ctxKey = "provider_id"
+const modelKey ctxKey = "model"
 
 // WithConversationID returns a new context that carries the conversation id
 // so conversation-scoped tools (todo) can access it.
@@ -67,6 +69,33 @@ func WithWorkspace(ctx context.Context, workspace string) context.Context {
 // WorkspaceFromContext returns the workspace path stored in ctx, or "".
 func WorkspaceFromContext(ctx context.Context) string {
 	if v, ok := ctx.Value(workspaceKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// WithProviderID returns a context carrying the provider selected for the
+// active agent turn.
+func WithProviderID(ctx context.Context, providerID string) context.Context {
+	return context.WithValue(ctx, providerIDKey, providerID)
+}
+
+// ProviderIDFromContext returns the provider selected for the active turn.
+func ProviderIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(providerIDKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// WithModel returns a context carrying the model selected for the active turn.
+func WithModel(ctx context.Context, model string) context.Context {
+	return context.WithValue(ctx, modelKey, model)
+}
+
+// ModelFromContext returns the model selected for the active turn.
+func ModelFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(modelKey).(string); ok {
 		return v
 	}
 	return ""

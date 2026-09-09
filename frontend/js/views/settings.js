@@ -141,9 +141,9 @@ export async function initSettings() {
       ],
     });
     webSearchStrategySelect = createSelect(document.getElementById('settings-web-search-strategy'), {
-      placeholder: 'Auto — merge all sources (default)',
+      placeholder: 'Auto — merge all sources (Codex first when active)',
       data: [
-        { text: 'Auto — merge all sources (default)', value: '', placeholder: true },
+        { text: 'Auto — merge all sources (Codex first when active)', value: '', placeholder: true },
         { text: 'Round robin — rotate API providers per query', value: 'round_robin' },
         { text: 'Random — pick one API provider per query', value: 'random' },
         { text: 'Brave only', value: 'brave' },

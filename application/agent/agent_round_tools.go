@@ -241,6 +241,8 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 		toolCtx = WithWorkspace(toolCtx, run.Workspace)
 		toolCtx = WithRunID(toolCtx, run.ID)
 		toolCtx = WithToolCallID(toolCtx, toolCall.ID)
+		toolCtx = WithProviderID(toolCtx, run.ProviderID)
+		toolCtx = WithModel(toolCtx, run.Model)
 		toolCtx, deltaCap := turndiff.WithCapture(toolCtx)
 		toolPresentation := toolpresentation.BuildToolPresentation(toolCall.Name, toolCall.Args, domain.ToolRunning, "")
 		executeTool := func() error {

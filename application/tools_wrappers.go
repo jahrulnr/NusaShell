@@ -11,6 +11,12 @@ import (
 type (
 	ToolInfo            = tools.ToolInfo
 	ToolExecutor        = tools.ToolExecutor
+	CodexSearchRequest  = tools.CodexSearchRequest
+	CodexSearchResult   = tools.CodexSearchResult
+	CodexSearchResponse = tools.CodexSearchResponse
+	CodexSearchBackend  = tools.CodexSearchBackend
+	CodexSearchFactory  = tools.CodexSearchFactory
+	CodexSearchExecutor = tools.CodexSearchExecutor
 	ToolFactory         = tools.ToolFactory
 	AgentKind           = tools.AgentKind
 	FilteredToolbox     = tools.FilteredToolbox

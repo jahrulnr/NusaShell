@@ -19,6 +19,9 @@ type TurnRun struct {
 	// ProviderID is the resolved provider for this turn, used by the
 	// dynamic 400-learning classifier to key learned param rules.
 	ProviderID string
+	// Model is the resolved model for this turn. Tool backends use it to
+	// preserve provider-specific request context without reading the store.
+	Model string
 	// Headless marks unattended turns (pipeline agent steps). When true,
 	// the default AgentAutomation kind filters ACP subagent tools so
 	// permission prompts never stall a pipeline run. Background learning

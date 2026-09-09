@@ -48,7 +48,7 @@ execute arbitrary side effects.
 | `mcp_server_add` | register a manual MCP server from command, arguments, and environment entries |
 | `read_media` | load any media file (image, audio, video, or PDF document) from disk by absolute path into the model's context — the media kind is auto-detected from binary magic bytes, no need to specify image/audio/video/pdf. Any path works, not just conversation attachments. Vision/audio/video-capable models see/hear it directly; document-capable models receive the PDF natively (Anthropic `document`, OpenAI `input_file`); non-capable models get a text description/transcript via the configured fallback (vision fallback, cloud STT + offline whisper for audio, video fallback) or a placeholder note with the file path (document) |
 | `generate_media` | generate media from a prompt and save it for the user: media_type=image (PNG/JPEG/WebP; referenced_image_paths enables image-to-image editing), speech (mp3/wav/opus via OpenAI-compatible /audio/speech or offline piper), or video (async /videos API; duration/resolution minimums reported verbatim on rejection; referenced_image_paths enables image-to-video — first image becomes the first frame, additional images are style references). Only listed when at least one mode is configured; unconfigured modes are rejected with guidance. Speech routing: an explicitly picked offline piper voice (Settings → Speech generation, provider "piper", appears once installed via one-click install under `<data>/models/tts/`) wins, then the configured online model, then offline piper as automatic fallback — the fallback is live as soon as the engine is installed, no enable/disable flag involved |
-| `web_search` | search the web across Brave, Serper, Tavily, Startpage, Wikipedia, and GitHub (pool configurable in Settings → Web Search); returns ranked results with title, URL, and snippet. Oversized JSONL is truncated in-band (~32KiB) with `overflow_path` |
+| `web_search` | search the web; with an active Codex chat provider, Codex search is tried first and searchwire is the fallback; other providers use searchwire across Brave, Serper, Tavily, Startpage, Wikipedia, and GitHub. Returns ranked results with title, URL, and snippet. Oversized JSONL is truncated in-band (~32KiB) with `overflow_path` |
 | `web_fetch` | fetch a URL and return readable text; supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes` (extract cap, default 2MB); in-band body caps at ~32KiB with `overflow_path` / `next_offset_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
 | `conversation` | conversation rooms + transcripts dispatcher; `op` selects: `list` (visible rooms, newest first), `search` (rooms by id/title/summary/message, or in-room message snippets when `id` is set), `info` (metadata: turn_count, chunk_count, summary_preview), `read` (user/assistant/tool messages by inclusive turn index; optional archived `chunk`), `send` (peer message to another room) |
@@ -550,22 +550,24 @@ end the run entirely. `subagent_steer` and `subagent_stop` acknowledge the
 current run status; their provider-facing results are bounded and omit
 intermediate transcript noise.
 
-## Native web research (searchwire)
+## Native web research
 
-NusaShell ships with built-in web research tools powered by
-[searchwire](https://github.com/jahrulnr/searchwire). These are native tools,
-not MCP plugins — they work with zero configuration and no installed plugin.
+NusaShell ships with built-in web research tools. These are native tools, not
+MCP plugins — they work with zero configuration and no installed plugin. The
+Codex chat provider tries its standalone search backend first and falls back to
+searchwire; other providers use searchwire directly.
 
-- **`web_search`**: metasearch across Brave, Serper, Tavily, Startpage,
-  Wikipedia, and GitHub. No API key required for the default path (HTML
-  scraping + public APIs); Serper/Tavily register when their API key is
-  set (Settings → Web Search, or the `SERPER_API_KEY`/`TAVILY_API_KEY`
-  env vars). Settings → Web Search also picks a routing strategy: auto
-  merges all sources, round-robin/random rotate one API-keyed provider
-  per query, or a bare provider name pins the query to that source.
-  Returns ranked, deduplicated results with snippets. Each search has an
-  independent bounded 60-second upstream deadline, so parallel searches do
-  not inherit searchwire's 10-second zero-config default.
+- **`web_search`**: searches the web through the active backend. With an
+  active Codex chat provider, Codex standalone search is tried first and
+  searchwire is used automatically when Codex search is unavailable or
+  fails. Other providers use searchwire across Brave, Serper, Tavily,
+  Startpage, Wikipedia, and GitHub. No API key is required for searchwire's
+  default path (HTML scraping + public APIs); Serper/Tavily register when
+  their API key is set (Settings → Web Search, or the
+  `SERPER_API_KEY`/`TAVILY_API_KEY` env vars). Settings → Web Search still
+  controls searchwire routing when that fallback is used. Results are normalized
+  to ranked title, URL, and snippet records. Each upstream search has an
+  independent bounded 60-second deadline.
 - **`web_fetch`**: fetches a URL and returns readable text. Supports HTML
   (nav/footer/aside/form stripped, `<pre>`/`<code>` preserved, links
   collected, `og:title`/`<h1>` title fallbacks), JSON (pretty-printed;

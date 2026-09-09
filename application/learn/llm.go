@@ -6,17 +6,11 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"nusashell/domain"
 	clock "nusashell/pkg/time"
 	"nusashell/resources"
 )
-
-// learningCallTimeout is the max wall-clock time for a single background
-// learning LLM call. Background jobs are fire-and-forget; a hung provider
-// must not leak a goroutine forever.
-const learningCallTimeout = 90 * time.Second
 
 // llmProposedOp is the JSON shape the LLM returns for each typed operation.
 // It maps directly to domain.LearningOperation after validation.
@@ -130,8 +124,6 @@ func (s *Service) runLearningTurn(ctx context.Context, model, prompt string) (st
 	if s.deps.Headless == nil {
 		return "", "", fmt.Errorf("no learning model available")
 	}
-	ctx, cancel := context.WithTimeout(ctx, learningCallTimeout)
-	defer cancel()
 	out, convID, err := s.deps.Headless.RunHeadlessTurn(ctx, prompt, model, domain.TrustTrusted, nil)
 	if err != nil {
 		return "", convID, err

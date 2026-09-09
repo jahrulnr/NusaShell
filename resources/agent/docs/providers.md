@@ -87,8 +87,12 @@ OpenRouter package for `messages` and `responses`.
   as a likely missing image entitlement (e.g. ChatGPT Free). The router
   persists the last-used account per provider, so after a backend restart it
   resumes from that account instead of blindly defaulting to the first
-  registered one. Tool results that carry media (e.g. `generate_image` or
-  `read_media` outputs) are split on the Codex wire: the
+  registered one. When the active chat provider is Codex, `web_search`
+  tries the Codex standalone `/alpha/search` backend first and falls back to
+  searchwire when the Codex search is unavailable or fails. Results are
+  normalized to the normal `web_search` shape; access to the standalone
+  endpoint remains dependent on the authenticated Codex backend/account.
+  Tool results that carry media (e.g. `generate_image` or `read_media` outputs) are split on the Codex wire: the
   `function_call_output` stays text-only and the media is reinjected as the
   next user message with `input_image` items — `core.ImageBlock` is never
   serialized into a text-only tool output.

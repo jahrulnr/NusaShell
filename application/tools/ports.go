@@ -19,6 +19,47 @@ type ToolExecutor interface {
 	Execute(ctx context.Context, name string, argsJSON []byte) (string, error)
 }
 
+// CodexSearchRequest is the application-facing query sent to the Codex
+// standalone web-search backend.
+type CodexSearchRequest struct {
+	ProviderID     string
+	AccountID      string
+	ConversationID string
+	Model          string
+	Query          string
+	Limit          int
+}
+
+// CodexSearchResult is a normalized structured result returned by Codex.
+type CodexSearchResult struct {
+	Title   string
+	URL     string
+	Snippet string
+}
+
+// CodexSearchResponse is the provider-neutral subset needed by web_search.
+type CodexSearchResponse struct {
+	Summary string
+	Results []CodexSearchResult
+}
+
+// CodexSearchBackend is a provider-bound Codex web-search client. The
+// implementation owns Codex wire/auth details; callers only provide the
+// active turn identity and query.
+type CodexSearchBackend interface {
+	Search(ctx context.Context, request CodexSearchRequest) (CodexSearchResponse, error)
+}
+
+// CodexSearchFactory creates a Codex search backend using the credential
+// selected for the active turn. Implementations must not log the credential.
+type CodexSearchFactory func(context.Context, *domain.Provider, string) (CodexSearchBackend, error)
+
+// CodexSearchExecutor is the application boundary used by Toolbox to resolve
+// the active Codex account and invoke its provider-bound search backend.
+type CodexSearchExecutor interface {
+	SearchCodexWeb(context.Context, CodexSearchRequest) (CodexSearchResponse, error)
+}
+
 // DocsSource is the documentation corpus the docs.* RPC and docs dispatcher
 // tool read. Infrastructure/docs.Source implements this.
 type DocsSource interface {

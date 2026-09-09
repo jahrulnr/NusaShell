@@ -69,6 +69,7 @@ type App struct {
 	Toolbox                     ToolExecutor
 	MCPToolbox                  MCPToolbox
 	Factory                     ProviderFactory
+	CodexSearchFactory          CodexSearchFactory
 	ImageGeneratorFactory       ImageGeneratorFactory
 	SpeechTranscriberFactory    SpeechTranscriberFactory
 	OfflineTranscriberFactory   OfflineTranscriberFactory
@@ -464,6 +465,7 @@ type Deps struct {
 	Toolbox                     ToolExecutor
 	MCPToolbox                  MCPToolbox
 	Factory                     ProviderFactory
+	CodexSearchFactory          CodexSearchFactory          // optional; nil = Codex web search unavailable
 	ImageGeneratorFactory       ImageGeneratorFactory       // optional; nil = generate_image unavailable
 	SpeechTranscriberFactory    SpeechTranscriberFactory    // optional; nil = STT routing unavailable
 	OfflineTranscriberFactory   OfflineTranscriberFactory   // optional; nil = local/offline STT disabled (doc §15: not fatal)
@@ -536,6 +538,7 @@ func NewApp(deps Deps) *App {
 		MCPToolbox:                  deps.MCPToolbox,
 		announcementLocks:           map[string]*sync.Mutex{},
 		Factory:                     deps.Factory,
+		CodexSearchFactory:          deps.CodexSearchFactory,
 		ImageGeneratorFactory:       deps.ImageGeneratorFactory,
 		SpeechTranscriberFactory:    deps.SpeechTranscriberFactory,
 		OfflineTranscriberFactory:   deps.OfflineTranscriberFactory,

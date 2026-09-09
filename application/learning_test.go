@@ -556,7 +556,7 @@ func TestRunLearningJobDoesNotAdvanceCursorOnLearningFailure(t *testing.T) {
 		turnErr    error
 		wantStatus string
 	}{
-		{name: "provider failure", response: "", turnErr: errStubLearningTurn, wantStatus: domain.LearningJobDone},
+		{name: "provider failure", response: "", turnErr: errStubLearningTurn, wantStatus: domain.LearningJobError},
 		{name: "parse failure", response: "not json", wantStatus: domain.LearningJobDone},
 		{
 			name:       "applied operation failure",
@@ -1044,8 +1044,8 @@ func TestConsolidateJobReturnsLLMConversationID(t *testing.T) {
 	}
 }
 
-// A failed learning turn must still yield the transcript id: a job that
-// produced nothing is precisely the case a user wants to inspect.
+// A failed learning turn must still yield the transcript id and fail the job:
+// a provider error is precisely the case a user wants to inspect.
 func TestConsolidateJobKeepsConversationIDWhenTurnFails(t *testing.T) {
 	exp := &domain.Experience{
 		ID:      "exp_llm_x",
@@ -1060,8 +1060,8 @@ func TestConsolidateJobKeepsConversationIDWhenTurnFails(t *testing.T) {
 		},
 	}
 	_, convID, err := app.consolidateJob(&domain.LearningJob{ID: "job_llm_x", ExperienceID: "exp_llm_x", Kind: domain.LearningJobConsolidate})
-	if err != nil {
-		t.Fatalf("a failed turn must fall back, not fail the job: %v", err)
+	if err == nil {
+		t.Fatal("a failed turn must fail the job")
 	}
 	if convID != "conv_llm_err" {
 		t.Fatalf("conversation id = %q, want conv_llm_err", convID)

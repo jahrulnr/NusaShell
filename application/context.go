@@ -58,3 +58,25 @@ func WithWorkspace(ctx context.Context, workspace string) context.Context {
 func WorkspaceFromContext(ctx context.Context) string {
 	return tools.WorkspaceFromContext(ctx)
 }
+
+// WithProviderID returns a new context carrying the provider selected for the
+// active agent turn.
+func WithProviderID(ctx context.Context, providerID string) context.Context {
+	return tools.WithProviderID(ctx, providerID)
+}
+
+// ProviderIDFromContext returns the provider selected for the active turn.
+func ProviderIDFromContext(ctx context.Context) string {
+	return tools.ProviderIDFromContext(ctx)
+}
+
+// WithModel returns a new context carrying the model selected for the active
+// agent turn.
+func WithModel(ctx context.Context, model string) context.Context {
+	return tools.WithModel(ctx, model)
+}
+
+// ModelFromContext returns the model selected for the active turn.
+func ModelFromContext(ctx context.Context) string {
+	return tools.ModelFromContext(ctx)
+}

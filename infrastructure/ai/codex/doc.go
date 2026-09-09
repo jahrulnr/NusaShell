@@ -1,5 +1,6 @@
 // Package codex is a Go port of the Codex (codex-rs) wire contract for the
-// ChatGPT backend `/responses` API, focused on three concerns:
+// ChatGPT backend `/responses` and standalone `alpha/search` APIs, focused on
+// four concerns:
 //
 //   - Context calculation: coarse context-token accounting over ResponseItem
 //     history plus the token_limit_reached decision used to trigger
@@ -15,8 +16,12 @@
 //     and expects exactly one opaque compaction output item before
 //     response.completed, then rebuilds the retained history (ported from
 //     core/src/compact_remote_v2.rs and core/src/compact_remote_v2_attempt.rs).
+//   - Standalone web search: a bounded query-only POST /alpha/search client
+//     whose auth, account selection, and cookie jar are supplied by the outer
+//     application adapter.
 //
-// The package also owns the thin core.Provider transport for this endpoint:
+// The package also owns the thin core.Provider transport for the Responses
+// endpoint:
 // it converts core blocks to Responses items, applies Codex authentication
 // headers supplied by the caller, decodes the SSE stream, and exposes opaque
 // compaction items through core.Response. OAuth refresh and account routing

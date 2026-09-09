@@ -258,11 +258,14 @@ func (s *Service) consolidateJobAt(job *domain.LearningJob, source *LearningSour
 
 	// Try the LLM-backed consolidator first (RFC section 14, 18-19). When a
 	// learning model is available, the consolidator receives a short source
-	// handoff and returns typed operations. If the LLM
-	// path fails or no provider is configured, fall back to the
-	// deterministic rule-based extraction (teachingOps) so the job still
-	// produces output in offline/no-provider setups.
-	ops, convID, sourceReviewed := s.consolidateViaLLMAt(job, exp, sourceValue)
+	// handoff and returns typed operations. A configured turn failure is
+	// returned to the job so it can persist an error status. When no turn is
+	// wired, or the response cannot be parsed, fall back to the deterministic
+	// rule-based extraction (teachingOps) for offline/no-provider setups.
+	ops, convID, sourceReviewed, llmErr := s.consolidateViaLLMAt(job, exp, sourceValue)
+	if llmErr != nil {
+		return nil, convID, llmErr, false
+	}
 	if !sourceReviewed {
 		ops = consolidationOpsOrFallback(ops, exp, job.ID)
 	}
@@ -408,24 +411,25 @@ func (s *Service) PrepareConsolidationOp(op *domain.LearningOperation) {
 //
 // The conversation id comes back even when ops is empty: "the model saw the
 // source handoff and decided nothing was durable" and "the model was unreachable"
-// are different answers, and only the transcript tells them apart. The
-// caller falls back to deterministic extraction when this returns no ops.
-// Typed catalog results prefer the learn() tool-call arguments; assistant
-// text is a fallback.
+// are different answers, and only the transcript tells them apart. A configured
+// turn error is returned separately so the job can persist an error status;
+// callers may still use the deterministic fallback when no turn is wired or
+// the response cannot be parsed. Typed catalog results prefer the learn() tool-call
+// arguments; assistant text is a fallback.
 func (s *Service) ConsolidateViaLLM(job *domain.LearningJob, exp *domain.Experience) ([]domain.LearningOperation, string) {
-	ops, convID, _ := s.consolidateViaLLMAt(job, exp, s.LearningSourceForExperience(exp))
+	ops, convID, _, _ := s.consolidateViaLLMAt(job, exp, s.LearningSourceForExperience(exp))
 	return ops, convID
 }
 
-func (s *Service) consolidateViaLLMAt(job *domain.LearningJob, exp *domain.Experience, source LearningSource) ([]domain.LearningOperation, string, bool) {
-	if strings.TrimSpace(resources.LearnerPrompt()) == "" {
-		return nil, "", false
+func (s *Service) consolidateViaLLMAt(job *domain.LearningJob, exp *domain.Experience, source LearningSource) ([]domain.LearningOperation, string, bool, error) {
+	if strings.TrimSpace(resources.LearnerPrompt()) == "" || !s.learningTurnAvailable() {
+		return nil, "", false, nil
 	}
 	prompt := s.BuildLearnerPacketAt(exp, source, job.Reason, procedureCountForJob(s, exp, job))
 	text, convID, err := s.doLearningTurn(s.workspaceCtx(exp), s.learningModelID(), prompt)
 	if err != nil {
-		s.log("debug", "learning", "learner LLM call failed, using deterministic fallback: %v", err)
-		return nil, convID, false
+		s.log("debug", "learning", "learner LLM call failed: %v", err)
+		return nil, convID, false, err
 	}
 	if result := ParseLearnerResult(text); result != nil {
 		ops := opsFromLearnerConsolidate(result.Consolidate, job.ID, exp.ID, exp.Scope.Project)
@@ -434,23 +438,23 @@ func (s *Service) consolidateViaLLMAt(job *domain.LearningJob, exp *domain.Exper
 		}
 		if len(ops) == 0 {
 			s.log("debug", "learning", "learner LLM returned no operations")
-			return nil, convID, true
+			return nil, convID, true, nil
 		}
 		s.log("info", "learning", "learner LLM returned %d operations", len(ops))
-		return ops, convID, true
+		return ops, convID, true, nil
 	}
 	ops, parsed := ParseLLMOperationsResult(text, job.ID, exp.ID)
 	if parsed {
 		ops = scopeLearnerMemoryOps(ops, exp.Scope.Project)
 		if len(ops) == 0 {
 			s.log("debug", "learning", "learner LLM returned no operations")
-			return nil, convID, true
+			return nil, convID, true, nil
 		}
 		s.log("info", "learning", "learner LLM returned %d operations", len(ops))
-		return ops, convID, true
+		return ops, convID, true, nil
 	}
 	s.log("debug", "learning", "learner LLM response could not be parsed")
-	return nil, convID, false
+	return nil, convID, false, nil
 }
 
 func procedureCountForJob(s *Service, exp *domain.Experience, job *domain.LearningJob) int {
