@@ -4,11 +4,13 @@ version: 1
 name: replace-with-telegram-reply-name
 enabled: false
 trust: trusted
-# Each delivery has its own event identity; do not drop a valid message merely
-# because another chat or message is still being handled.
+# One conversation per chat + queue: concurrent inbound messages for the SAME
+# chat wait FIFO (never overlap), while different chats never block each other.
+# Change policy to allow/skip/replace when the workflow's semantics differ;
+# reuse:true with a per-resource conversation template is INVALID with allow.
 concurrency:
-  key: telegram-reply
-  policy: allow
+  key: "tg-${event.chat_id}"
+  policy: queue
 triggers:
   - when:
       event: telegram.message
@@ -22,6 +24,10 @@ jobs:
     steps:
       - name: Verify and reply
         agent:
+          # reuse keeps one conversation per chat across runs so the agent
+          # remembers earlier exchanges; set reuse:false for one-shot replies.
+          reuse: true
+          conversation: "tg-${event.chat_id}"
           prompt: |
             You handle exactly one inbound Telegram message.
 
