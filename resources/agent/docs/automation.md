@@ -363,6 +363,38 @@ Each step should contain exactly one of:
 | `wait_until` | durable pause until RFC3339 time | use for long waits, never a long shell sleep |
 | `agent` | full headless NusaShell turn | bound role, untrusted-input rule, read/write scope, success output |
 
+### 5.2.1 Agent step conversation reuse
+
+An agent step normally starts a **fresh hidden conversation on every run**
+(one-shot). Set `reuse: true` to keep **one conversation per identity across
+runs** — the agent then sees the transcript of its earlier runs, which fits
+steady-state workflows where memory matters (chat assistant per chat, a
+monitor that remembers what it reported, a reviewer chained across PR
+updates).
+
+```yaml
+- agent:
+    prompt: "You are this chat's assistant. Reply using the history below."
+    model: "provider:model"              # optional pin
+    reuse: true                          # default false
+    conversation: "tg-${event.chat_id}"  # identity template; empty = one conversation for the whole workflow
+```
+
+Rules:
+
+- The conversation template uses the same `${event.<key>}` syntax as prompts
+  and is sanitized into a safe key (`[A-Za-z0-9._:-]`, capped length). If any
+  placeholder resolves empty the key falls back to the workflow ID — never a
+  partial prefix.
+- Key → conversation mappings are persisted, so the memory survives app
+  restarts.
+- `reuse: true` serializes same-key steps inside the process: an overlapping
+  run for the same key fails with a visible "busy" error instead of
+  interleaving into the same transcript. For per-resource keys also use
+  `concurrency.policy: skip` (or `allow` when the resources differ).
+- Reused conversations grow; the engine's compaction applies to them like any
+  other conversation.
+
 Steps in one job remain sequential. Independent jobs can run in parallel. A
 job condition is evaluated against the event and completed job status/output.
 

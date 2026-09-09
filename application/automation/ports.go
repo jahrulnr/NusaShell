@@ -201,15 +201,27 @@ type MCPToolCaller interface {
 
 // AgentStepRunner executes an agent: prompt step. Nil means the step fails.
 // Returns the step outputs and the headless conversation ID (for steer).
+// conversationID, when non-empty, resumes that existing automation
+// conversation instead of starting a fresh transcript (agent-step reuse).
 type AgentStepRunner interface {
-	RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error)
+	RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error)
+}
+
+// ConversationKeyStore persists the mapping from a workflow-scoped rendered
+// conversation key (agent step reuse) to the hidden automation conversation
+// ID that holds the agent's memory. Survives restarts.
+type ConversationKeyStore interface {
+	GetConversation(ctx context.Context, workflowID, key string) (string, bool, error)
+	SetConversation(ctx context.Context, workflowID, key, conversationID string) error
 }
 
 // HeadlessTurnRunner executes a full agent turn synchronously (no streaming
 // UI) and returns the final assistant text as {"output": text} plus the
 // conversation ID. The conversation ID lets callers steer the running turn.
+// conversationID, when non-empty, resumes that existing automation
+// conversation instead of starting a fresh transcript (agent-step reuse).
 type HeadlessTurnRunner interface {
-	RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error)
+	RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error)
 	SteerHeadlessTurn(conversationID, text string) error
 }
 

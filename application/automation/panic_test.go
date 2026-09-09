@@ -12,7 +12,7 @@ import (
 
 type panicAgentStepRunner struct{}
 
-func (panicAgentStepRunner) RunAgentStep(context.Context, string, string, domain.TrustLevel, map[string]any) (map[string]any, string, error) {
+func (panicAgentStepRunner) RunAgentStep(context.Context, string, string, domain.TrustLevel, map[string]any, string) (map[string]any, string, error) {
 	panic("simulated Telegram adapter panic")
 }
 

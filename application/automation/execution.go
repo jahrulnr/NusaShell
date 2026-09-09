@@ -28,6 +28,7 @@ type ExecutionScheduler struct {
 	Exec     JobExecutor
 	Caps     CapabilityResolver
 	Agent    AgentStepRunner
+	Convs    ConversationKeyStore
 	Runners  RunnerRegistry
 	Waits    WaitStore
 	Bus      Emitter
@@ -40,6 +41,7 @@ type ExecutionScheduler struct {
 	cancels     map[string]context.CancelFunc
 	cancelOwner map[string]string
 	runMu       sync.Map
+	convMu      sync.Map // conversation key -> chan struct{} (reuse guard)
 }
 
 func NewExecutionScheduler() *ExecutionScheduler {
@@ -70,6 +72,23 @@ func (s *ExecutionScheduler) goSafe(source string, fn func()) {
 		defer func() { _ = recover() }()
 		fn()
 	}()
+}
+
+// tryLockConversationKey serializes agent steps that reuse the same
+// conversation key across overlapping runs inside this process. Overlapping
+// writes to one transcript would corrupt the agent's memory, so the second
+// run fails its step with a visible "busy" error instead of interleaving.
+// The guard is process-local; cross-process overlap is prevented by the
+// workflow-level concurrency lock the scheduler already enforces.
+func (s *ExecutionScheduler) tryLockConversationKey(key string) (func(), bool) {
+	value, _ := s.convMu.LoadOrStore(key, make(chan struct{}, 1))
+	ch := value.(chan struct{})
+	select {
+	case ch <- struct{}{}:
+		return func() { <-ch }, true
+	default:
+		return nil, false
+	}
 }
 
 type runStartFailure struct {
@@ -402,6 +421,29 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) (e
 				break
 			}
 			prompt := domain.RenderAgentPrompt(step.Agent.Prompt, run.Event)
+			convKey := ""
+			conversationID := ""
+			releaseConv := func() {}
+			if step.Agent.Reuse {
+				convKey = run.WorkflowID
+				if step.Agent.Conversation != "" {
+					if rendered := domain.RenderConversationKey(step.Agent.Conversation, run.Event); rendered != "" {
+						convKey = rendered
+					}
+				}
+				if release, ok := s.tryLockConversationKey(run.WorkflowID + "\x00" + convKey); !ok {
+					result, err = StepResult{Error: fmt.Sprintf("conversation key %q is busy (another run is using it); retry after it finishes", convKey)}, fmt.Errorf("conversation key %q is busy", convKey)
+					break
+				} else {
+					releaseConv = release
+				}
+				defer releaseConv()
+				if s.Convs != nil {
+					if existing, ok, cerr := s.Convs.GetConversation(context.WithoutCancel(jobCtx), run.WorkflowID, convKey); cerr == nil && ok {
+						conversationID = existing
+					}
+				}
+			}
 			type agentOutcome struct {
 				out    map[string]any
 				convID string
@@ -416,8 +458,18 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) (e
 					}
 					agentDone <- outcome
 				}()
-				outcome.out, outcome.convID, outcome.err = s.Agent.RunAgentStep(jobCtx, prompt, step.Agent.Model, run.Definition.Trust, step.Agent.OutputSchema)
+				outcome.out, outcome.convID, outcome.err = s.Agent.RunAgentStep(jobCtx, prompt, step.Agent.Model, run.Definition.Trust, step.Agent.OutputSchema, conversationID)
 			}()
+			recordConversation := func(convID string) {
+				if convID == "" || convKey == "" || conversationID != "" || s.Convs == nil {
+					return
+				}
+				if serr := s.Convs.SetConversation(context.WithoutCancel(jobCtx), run.WorkflowID, convKey, convID); serr != nil {
+					s.emit("automation.step-conversation-map.failed", map[string]any{
+						"run_id": run.ID, "job_id": jobID, "step_id": sr.ID, "error": serr.Error(),
+					})
+				}
+			}
 			select {
 			case o := <-agentDone:
 				if o.err != nil {
@@ -429,10 +481,12 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) (e
 					if strings.HasPrefix(o.err.Error(), "agent step panicked: ") {
 						panic(o.err)
 					}
+					recordConversation(o.convID)
 					result, err = StepResult{Error: o.err.Error()}, o.err
 					break
 				}
 				sr.ConversationID = o.convID
+				recordConversation(o.convID)
 				result, err = StepResult{ExitCode: 0, Outputs: o.out}, nil
 			case <-jobCtx.Done():
 				// Never leave the run eternally "running": when the job

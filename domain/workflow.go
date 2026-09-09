@@ -139,6 +139,15 @@ type AgentStep struct {
 	// Model is an optional "provider_id:model_id" or bare model ID. When
 	// empty, the first enabled provider's first model is used.
 	Model string
+	// Reuse keeps one agent conversation across workflow runs instead of
+	// starting a fresh hidden conversation for every step. false (default)
+	// preserves the one-shot behavior: every run starts a new transcript.
+	Reuse bool
+	// Conversation is an optional ${event.<key>} template naming the reused
+	// conversation (rendered and sanitized via RenderConversationKey). When
+	// Reuse is true and this is empty, the workflow ID is the key (one
+	// conversation for the whole workflow). Ignored when Reuse is false.
+	Conversation string
 }
 
 // JobByID returns the job with the given id, or nil.

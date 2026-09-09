@@ -14,7 +14,7 @@ import (
 // "running" forever because the executor waited on the step unconditionally.
 type wedgedAgentStepRunner struct{}
 
-func (wedgedAgentStepRunner) RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error) {
+func (wedgedAgentStepRunner) RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error) {
 	select {}
 }
 

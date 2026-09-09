@@ -90,6 +90,8 @@ type DocFull struct {
 // HeadlessTurnRunner is the consumer-side port PipelineAgentRunner uses to
 // run an unattended agent step. Narrower than automation.HeadlessTurnRunner
 // (no Steer): tools must not import automation. *App still satisfies both.
+// conversationID, when non-empty, resumes that existing automation
+// conversation instead of starting a fresh transcript (agent-step reuse).
 type HeadlessTurnRunner interface {
-	RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error)
+	RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error)
 }

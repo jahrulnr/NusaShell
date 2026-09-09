@@ -60,17 +60,25 @@ func headlessTurnTitle(kind AgentKind, prompt string) string {
 // background learning kinds use a pruned toolbox (no project memory, ACP/
 // delegate, or MCP) plus learn() and conversation inspect ops.
 func (a *Service) RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error) {
-	return a.RunHeadlessTurnKind(ctx, prompt, model, trust, schema, AgentAutomation)
+	return a.RunHeadlessTurnIn(ctx, prompt, model, trust, schema, "")
+}
+
+// RunHeadlessTurnIn is RunHeadlessTurn with an optional conversation to
+// resume: when conversationID is non-empty, the prompt is appended to that
+// existing automation conversation instead of starting a fresh transcript,
+// so a reused agent step keeps the memory of its earlier runs.
+func (a *Service) RunHeadlessTurnIn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error) {
+	return a.RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, AgentAutomation, conversationID, nil)
 }
 
 // runHeadlessTurnKind is RunHeadlessTurn parameterized by the agent kind:
 // pipeline steps use AgentAutomation, internal delegates use AgentDelegate
 // (which also removes the delegate tool itself to prevent recursion).
 func (a *Service) RunHeadlessTurnKind(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind) (map[string]any, string, error) {
-	return a.RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, kind, nil)
+	return a.RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, kind, "", nil)
 }
 
-func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind, onUpdate func(conversationID string)) (out map[string]any, convID string, err error) {
+func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind, conversationID string, onUpdate func(conversationID string)) (out map[string]any, convID string, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			out = nil
@@ -84,8 +92,23 @@ func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model
 	}
 
 	repo := NewConversation(a.Conversations, headlessTurnTitle(kind, prompt))
+	if conversationID != "" {
+		existing, getErr := a.Conversations.Get(conversationID)
+		if getErr != nil || existing == nil {
+			return nil, "", fmt.Errorf("headless turn reuse: conversation %s not found", conversationID)
+		}
+		if existing.Type != domain.ConversationTypeAutomation {
+			return nil, "", fmt.Errorf("headless turn reuse: conversation %s is not an automation conversation", conversationID)
+		}
+		if existing.Status == "running" {
+			return nil, "", fmt.Errorf("headless turn reuse: conversation %s is busy", conversationID)
+		}
+		repo = bindConversation(a.Conversations, existing)
+	}
 	conv := repo.Conversation()
-	conv.Type = headlessConversationType(kind)
+	if conversationID == "" {
+		conv.Type = headlessConversationType(kind)
+	}
 	conv.Workspace = headlessWorkspace(WorkspaceFromContext(ctx), kind, a.DataDir)
 	conv.Model = provider.ID + ":" + bareModel
 	conv.Status = "running"

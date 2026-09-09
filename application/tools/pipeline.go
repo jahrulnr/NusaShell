@@ -168,7 +168,7 @@ func NewPipelineAgentRunner(inner ToolExecutor, turns HeadlessTurnRunner) *Pipel
 	return &PipelineAgentRunner{Tools: FilterPipelineTools(inner), Turns: turns}
 }
 
-func (r *PipelineAgentRunner) RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error) {
+func (r *PipelineAgentRunner) RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error) {
 	if r == nil || r.Tools == nil {
 		return nil, "", fmt.Errorf("agent steps are not configured")
 	}
@@ -180,7 +180,7 @@ func (r *PipelineAgentRunner) RunAgentStep(ctx context.Context, prompt, model st
 	if r.Turns == nil {
 		return nil, "", fmt.Errorf("agent steps are not configured")
 	}
-	return r.Turns.RunHeadlessTurn(ctx, prompt, model, trust, schema)
+	return r.Turns.RunHeadlessTurn(ctx, prompt, model, trust, schema, conversationID)
 }
 
 // filterHeadlessToolInfos removes pipeline-banned tools (ACP subagent tools

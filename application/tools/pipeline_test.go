@@ -110,7 +110,7 @@ func TestFilteredToolboxExecuteStreamedFallback(t *testing.T) {
 func TestPipelineAgentRunnerDoesNotLeakACP(t *testing.T) {
 	inner := &listingToolbox{names: []string{"subagent", "automation"}}
 	runner := NewPipelineAgentRunner(inner, nil)
-	_, _, err := runner.RunAgentStep(context.Background(), "do work", "", domain.TrustSafe, nil)
+	_, _, err := runner.RunAgentStep(context.Background(), "do work", "", domain.TrustSafe, nil, "")
 	if err == nil || !strings.Contains(err.Error(), "agent steps are not configured") {
 		t.Fatalf("want not-configured after hiding ACP, got %v", err)
 	}

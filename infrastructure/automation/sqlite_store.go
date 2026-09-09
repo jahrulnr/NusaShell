@@ -50,6 +50,7 @@ func OpenSQLite(path string) (*SQLite, error) {
 		CREATE TABLE IF NOT EXISTS logs (job_id TEXT, seq INTEGER, json TEXT NOT NULL, PRIMARY KEY(job_id, seq));
 		CREATE TABLE IF NOT EXISTS locks (key TEXT PRIMARY KEY, run_id TEXT NOT NULL);
 		CREATE TABLE IF NOT EXISTS debounce (id TEXT PRIMARY KEY, at TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS agent_conversations (key TEXT PRIMARY KEY, workflow_id TEXT NOT NULL, conv_id TEXT NOT NULL, updated_at TEXT NOT NULL);
 		CREATE TABLE IF NOT EXISTS provider_state (provider_id TEXT PRIMARY KEY, disabled INTEGER NOT NULL);
 		CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_sched_due ON schedules(status, next_run_at);
@@ -73,6 +74,29 @@ func OpenSQLite(path string) (*SQLite, error) {
 }
 
 func (s *SQLite) Close() error { return s.db.Close() }
+
+// GetConversation returns the automation conversation ID recorded for a
+// workflow's rendered conversation key, if any (agent-step reuse).
+func (s *SQLite) GetConversation(ctx context.Context, workflowID, key string) (string, bool, error) {
+	var convID string
+	err := s.db.QueryRowContext(ctx, `SELECT conv_id FROM agent_conversations WHERE key=? AND workflow_id=?`, key, workflowID).Scan(&convID)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return convID, true, nil
+}
+
+// SetConversation records (or replaces) the automation conversation ID for a
+// workflow's rendered conversation key (agent-step reuse).
+func (s *SQLite) SetConversation(ctx context.Context, workflowID, key, conversationID string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO agent_conversations(key,workflow_id,conv_id,updated_at) VALUES(?,?,?,?)
+		ON CONFLICT(key) DO UPDATE SET conv_id=excluded.conv_id, updated_at=excluded.updated_at`,
+		key, workflowID, conversationID, clock.NewTime().Time().Format(time.RFC3339))
+	return err
+}
 
 func (s *SQLite) Put(ctx context.Context, w *domain.WorkflowDefinition) error {
 	b, _ := json.Marshal(w)

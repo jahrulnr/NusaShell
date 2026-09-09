@@ -250,6 +250,8 @@ type yamlAgent struct {
 	Prompt       string         `yaml:"prompt"`
 	OutputSchema map[string]any `yaml:"output_schema"`
 	Model        string         `yaml:"model"`
+	Reuse        bool           `yaml:"reuse"`
+	Conversation string         `yaml:"conversation"`
 }
 
 func parseTrigger(t yamlTrigger, i int) (domain.Trigger, error) {
@@ -393,7 +395,7 @@ func parseStep(s yamlStep) (domain.Step, error) {
 		step.WaitUntil = &tm
 	}
 	if s.Agent != nil {
-		step.Agent = &domain.AgentStep{Prompt: s.Agent.Prompt, OutputSchema: s.Agent.OutputSchema, Model: s.Agent.Model}
+		step.Agent = &domain.AgentStep{Prompt: s.Agent.Prompt, OutputSchema: s.Agent.OutputSchema, Model: s.Agent.Model, Reuse: s.Agent.Reuse, Conversation: s.Agent.Conversation}
 	}
 	if s.Timeout != "" {
 		d, err := duration.Parse(s.Timeout)

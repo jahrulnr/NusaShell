@@ -21,6 +21,7 @@ func BuildAutomation(dataDir string, bus *application.Bus, plugins application.P
 	es := application.NewExecutionScheduler()
 	es.Runs = RunSQL{store}
 	es.Logs = LogSQL{store}
+	es.Convs = RunSQL{store}
 	es.Exec = &LocalExecutor{Root: filepath.Join(dataDir, "automation", "runs")}
 	es.Caps = caps
 	es.Waits = WaitSQL{store}

@@ -794,19 +794,19 @@ func TestMcpCallInvalidArgumentsJSON(t *testing.T) {
 	}
 }
 
-// TestMcpCallSchemaAdvertisesArgumentsJSON is a regression test for
-// conv_f159e2e234a900e4 + conv_cefd2640b3b2f3a4 + conv_42ac5a9a2b274518:
-// dynamic MCP tool arguments must travel in a statically representable
-// string field. The original schema wrapped args in a required "additional"
-// string; the open-object variant (additionalProperties:true, no fixed
-// properties) made Luna emit arguments:{} every round because function-call
-// generation has no affordance for properties absent from the schema. The
-// schema keeps arguments_json as a string field (not an open object) so
-// function-call generation always produces a predictable payload. It is no
-// longer required — omitting it defaults to {} — but the property type is
-// string to maintain provider compatibility (avoiding the open-object bug
-// that made Luna emit arguments:{} every round).
-func TestMcpCallSchemaAdvertisesArgumentsJSON(t *testing.T) {
+// TestMcpCallSchemaAdvertisesObjectArgumentsJSON locks the canonical
+// advertised shape of mcp_call arguments. History:
+// conv_f159e2e234a900e4 + conv_cefd2640b3b2f3a4 + conv_42ac5a9a2b274518
+// originally forced a string field because an open-object variant
+// (additionalProperties:true, no fixed properties) made the weak local
+// model Luna emit arguments:{} every round — function-call generation had
+// no affordance for properties absent from the schema. The current shape
+// advertises arguments_json as an object (canonical form matching the MCP
+// spec) so strong models do not have to hand-double-encode JSON; the
+// empty-{} regression is covered by the MISSING_ARGS guard
+// (TestMcpCallEmptyArgsAgainstRequiredSchemaFails), and the execution
+// handler still accepts the legacy escaped-string form for old transcripts.
+func TestMcpCallSchemaAdvertisesObjectArgumentsJSON(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
 	var def *application.ToolInfo
 	for _, ti := range tb.ListTools() {
@@ -823,8 +823,11 @@ func TestMcpCallSchemaAdvertisesArgumentsJSON(t *testing.T) {
 	if !ok {
 		t.Fatalf("arguments_json schema missing or wrong type: %#v", props)
 	}
-	if argsSchema["type"] != "string" {
-		t.Errorf("arguments_json.type = %v, want string", argsSchema["type"])
+	if argsSchema["type"] != "object" {
+		t.Errorf("arguments_json.type = %v, want object", argsSchema["type"])
+	}
+	if _, hasAdditional := argsSchema["additionalProperties"]; hasAdditional {
+		t.Errorf("arguments_json must not set additionalProperties (strict-mode risk), got %#v", argsSchema)
 	}
 	if _, hasObjectArgs := props["arguments"]; hasObjectArgs {
 		t.Errorf("mcp_call must not advertise an object 'arguments' field, got %#v", props)
@@ -851,6 +854,52 @@ func TestMcpCallSchemaAdvertisesArgumentsJSON(t *testing.T) {
 	}
 	if !hasRef {
 		t.Errorf("required must include ref, got %v", reqAny)
+	}
+}
+
+// TestMcpCallEmptyArgsAgainstRequiredSchemaFails is the guard for the
+// documented weak-model regression (arguments_json resolved to {} when the
+// schema offers no fixed properties): an empty arguments object against a
+// tool whose input schema declares required fields must fail loud with
+// MISSING_ARGS naming the missing fields instead of forwarding {} to the
+// server for an opaque error. Parameterless tools (no required fields)
+// still succeed with empty args.
+func TestMcpCallEmptyArgsAgainstRequiredSchemaFails(t *testing.T) {
+	mcp := &stubMCP{
+		tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv1": {{Name: "read", Description: "Read a file", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)}},
+		},
+	}
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		mcp,
+	)
+	// Object form with an empty object must hit the guard.
+	if _, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:read","arguments_json":{}}`)); err == nil {
+		t.Fatal("expected MISSING_ARGS error for empty object arguments against a required schema")
+	} else if !strings.Contains(err.Error(), "MISSING_ARGS") || !strings.Contains(err.Error(), "path") {
+		t.Errorf("expected MISSING_ARGS error naming path, got: %v", err)
+	}
+	// Omitted arguments_json hits the same guard.
+	if _, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:read"}`)); err == nil {
+		t.Fatal("expected MISSING_ARGS error for omitted arguments_json against a required schema")
+	} else if !strings.Contains(err.Error(), "MISSING_ARGS") {
+		t.Errorf("expected MISSING_ARGS error, got: %v", err)
+	}
+	// Legacy escaped-string empty object hits the same guard.
+	if _, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:read","arguments_json":"{}"}`)); err == nil {
+		t.Fatal("expected MISSING_ARGS error for escaped empty object against a required schema")
+	} else if !strings.Contains(err.Error(), "MISSING_ARGS") {
+		t.Errorf("expected MISSING_ARGS error, got: %v", err)
+	}
+	// Supplying the required field succeeds and reaches the server.
+	if _, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:read","arguments_json":{"path":"/x"}}`)); err != nil {
+		t.Fatalf("expected success with path supplied, got: %v", err)
+	}
+	if mcp.lastArgs["path"] != "/x" {
+		t.Errorf("expected path=/x passed through, got %v", mcp.lastArgs)
 	}
 }
 

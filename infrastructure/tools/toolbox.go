@@ -228,7 +228,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "tool_list", Description: "List tools from a running MCP server. Accepts the plugin id (e.g. \"nusashell.terminal\"). When omitted, lists tools across all running MCP servers. Returns compact entries (ref, name, server, description) without parameter schemas — load the exact schema with tool_schema before first use of an unfamiliar tool.", InputSchema: obj("object", props("server", str("Plugin id; when omitted, lists all running servers")))},
 		{Name: "tool_schema", Description: "Load one MCP tool's input schema by plugin id and tool name. The tool name is the bare tool name (e.g. \"exec\"). Returns the schema as readable JSON — the only place schemas are served; mcp_search and tool_list stay schema-free so large catalogs remain token-cheap.", InputSchema: obj("object", props("server", str("Plugin id (e.g. nusashell.terminal)"), "tool", str("Bare tool name within the server (e.g. \"exec\")")), "server", "tool")},
 		{Name: "mcp_search", Description: "Search running MCP servers' tools by name or description (case-insensitive token match — any term matches). When server is omitted, searches across ALL running servers. Returns compact matches (ref, name, description, ranked) without inlining parameter schemas — call tool_schema for exact argument fields when needed. This is the universal MCP discovery path on every provider — use mcp_search + mcp_call instead of guessing tool names.", InputSchema: obj("object", props("server", str("Optional: plugin id; when omitted, searches all running servers"), "query", str("Search query"), "limit", intSchema("Max results, default 20")), "query")},
-		{Name: "mcp_call", Description: "Execute an MCP tool by ref. Get the ref from mcp_search or tool_list (format <plugin-id>:<tool>, e.g. nusashell.files:read). Pass `arguments_json` as a JSON-encoded string matching the tool's parameters schema — the exact object the tool expects, e.g. {\"path\":\"/etc/hosts\"}. Omit `arguments_json` entirely for parameterless tools (defaults to {}). The ref binds to a specific running server + tool; if it was disabled or restarted since discovery, you get a STALE_TOOL_REF error — search again. Plugins that declare a usage contract (contract flag in mcp_list) must be read first via contract_read when required by the plugin_contract_mode setting. This is the only MCP execution path — mcp__<server>__<tool> names are not callable.", InputSchema: obj("object", props("ref", str("Tool ref from mcp_search / tool_list results (e.g. nusashell.files:read)"), "arguments_json", str("JSON-encoded tool arguments matching the parameters schema (e.g. {\"path\":\"/etc/hosts\"}). Optional; defaults to {} — omit entirely for parameterless tools. Load the exact schema with tool_schema if unsure.")), "ref")},
+		{Name: "mcp_call", Description: "Execute an MCP tool by ref. Get the ref from mcp_search or tool_list (format <plugin-id>:<tool>, e.g. nusashell.files:read). Pass `arguments_json` as a JSON object matching the tool's parameters schema — the exact arguments the tool expects, e.g. {\"path\":\"/etc/hosts\"}. Omit `arguments_json` entirely for parameterless tools (defaults to {}). The ref binds to a specific running server + tool; if it was disabled or restarted since discovery, you get a STALE_TOOL_REF error — search again. Plugins that declare a usage contract (contract flag in mcp_list) must be read first via contract_read when required by the plugin_contract_mode setting. This is the only MCP execution path — mcp__<server>__<tool> names are not callable.", InputSchema: obj("object", props("ref", str("Tool ref from mcp_search / tool_list results (e.g. nusashell.files:read)"), "arguments_json", freeObj("Tool arguments as a JSON object matching the parameters schema (e.g. {\"path\":\"/etc/hosts\"}). Optional; defaults to {} — omit entirely for parameterless tools. Load the exact schema with tool_schema if unsure.")), "ref")},
 		{Name: "contract_read", Description: "Read a plugin's usage contract (best-practice rules plus state & side-effect disclosure) declared in its manifest before working with that plugin's tools. Pass id=<plugin-id>, or id=all to read every contract-declaring plugin at once. Advisory by default (plugin_contract_mode defaults to hint); enforcement is only active when the setting is set to require.", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files) or 'all'")), "id")},
 		{Name: "mcp_register", Description: "Copy a new MCP plugin from an absolute staging folder into the installed plugin store, or replace an existing plugin with the same id. The source must contain manifest.json and must stay outside the installed plugins root. Check mcp_list and ask the user before replacing an existing id; then call mcp_enable.", InputSchema: obj("object", props("source", str("Absolute staging path to the plugin folder containing manifest.json")), "source")},
 		{Name: "mcp_enable", Description: "Start/connect an MCP plugin so its tools become available. Returns only status + tool count — use tool_list or mcp_search to discover the tools. If already connected, returns already_enabled without reconnecting. The plugin must be registered first (mcp_register or the Plugins view).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files)")), "id")},
@@ -1266,15 +1266,27 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if !connected {
 			return "", fmt.Errorf("STALE_TOOL_REF: plugin %q is not running; call mcp_search again", plugin.Manifest.ID)
 		}
-		toolExists := false
-		for _, tool := range tools {
-			if tool.Name == toolName {
-				toolExists = true
+		var target *contracts.MCPToolDTO
+		for i := range tools {
+			if tools[i].Name == toolName {
+				target = &tools[i]
 				break
 			}
 		}
-		if !toolExists {
+		if target == nil {
 			return "", fmt.Errorf("STALE_TOOL_REF: tool %q not found on plugin %q; call mcp_search again", toolName, plugin.Manifest.ID)
+		}
+		// Missing-args guard: an empty arguments payload against a tool whose
+		// input schema declares required properties means the caller (or a
+		// weak function-calling model that resolved the free-form object to
+		// {}) sent no arguments. Fail loud with the missing field names so
+		// the agent can load tool_schema and retry — forwarding {} to the
+		// server would surface only an opaque downstream error. Parameterless
+		// tools (no required fields) still proceed with empty args.
+		if len(toolArgs) == 0 && len(target.InputSchema) > 0 {
+			if missing := requiredSchemaFields(target.InputSchema); len(missing) > 0 {
+				return "", fmt.Errorf("MISSING_ARGS: %s requires [%s]; load tool_schema and retry with arguments_json as a JSON object", args.Ref, strings.Join(missing, ", "))
+			}
 		}
 		// Usage-contract gate: plugins declaring contract.entry are subject
 		// to plugin_contract_mode (off/hint/require). Runs last so ref and
@@ -1924,6 +1936,28 @@ func obj(typ string, properties map[string]any, required ...string) map[string]a
 		m["required"] = required
 	}
 	return m
+}
+
+// freeObj builds a free-form object schema with a description and an empty
+// properties map (Bedrock rejects object schemas without a "properties"
+// key). It deliberately sets no additionalProperties key: true would
+// recreate the open-object function-calling trap that made weak models emit
+// {}, false would block strict-mode adoption later. Empty-argument
+// regressions are caught by the mcp_call MISSING_ARGS guard instead.
+func freeObj(desc string) map[string]any {
+	return map[string]any{"type": "object", "description": desc, "properties": map[string]any{}}
+}
+
+// requiredSchemaFields returns the field names a tool's input schema marks
+// as required, or nil when the schema is absent, invalid, or declares none.
+func requiredSchemaFields(schema json.RawMessage) []string {
+	var s struct {
+		Required []string `json:"required"`
+	}
+	if len(schema) == 0 || json.Unmarshal(schema, &s) != nil || len(s.Required) == 0 {
+		return nil
+	}
+	return s.Required
 }
 
 func props(entries ...any) map[string]any {
