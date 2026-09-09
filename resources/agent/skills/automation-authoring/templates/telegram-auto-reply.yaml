@@ -6,6 +6,9 @@ enabled: false
 trust: trusted
 # Optional: stream agent lifecycle into the chat as progress placeholders.
 # notify: {plugin: nusashell.telegram, detail: tools, chat_id: "${event.chat_id}"}
+# Deliver-by-system mode: set detail: text (or all) and strip send_message
+# instructions from the prompt — the agent only produces output, the transport
+# delivers it (the agent must NOT call send_message in that mode).
 # One conversation per chat + queue: concurrent inbound messages for the SAME
 # chat wait FIFO (never overlap), while different chats never block each other.
 # Change policy to allow/skip/replace when the workflow's semantics differ;
