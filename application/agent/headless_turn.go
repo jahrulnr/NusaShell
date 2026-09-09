@@ -164,31 +164,31 @@ func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model
 	finalMessageID := run.CurrentMessageID()
 	saved, err := a.Conversations.Get(convID)
 	if err != nil || saved == nil {
-		a.emitRunStepPost(run, AgentStatusError, "read conversation failed")
+		a.emitRunStepPost(run, AgentStatusError, "read conversation failed", "")
 		return nil, "", fmt.Errorf("headless turn: read conversation: %w", err)
 	}
 	final, found := finalHeadlessAssistantMessage(saved.Messages, finalMessageID)
 	if !found {
-		a.emitRunStepPost(run, AgentStatusError, "final assistant message not found")
+		a.emitRunStepPost(run, AgentStatusError, "final assistant message not found", "")
 		return nil, "", fmt.Errorf("headless turn: final assistant message %s not found", finalMessageID)
 	}
 	if final.Status == domain.StatusError {
 		err := fmt.Errorf("headless turn failed: %s", final.Content)
-		a.emitRunStepPost(run, AgentStatusError, final.Content)
+		a.emitRunStepPost(run, AgentStatusError, final.Content, "")
 		a.log("error", "agent", "headless turn failed: run=%s conv=%s: %v", run.ID, convID, err)
 		return nil, "", err
 	}
 	if final.Status == domain.StatusInterrupted {
 		err := fmt.Errorf("headless turn interrupted before producing output (run=%s conv=%s)", run.ID, convID)
-		a.emitRunStepPost(run, AgentStatusError, err.Error())
+		a.emitRunStepPost(run, AgentStatusError, err.Error(), "")
 		a.log("warn", "agent", "%v", err)
 		return nil, convID, err
 	}
 	if err := validateHeadlessOutput(final.Content, schema); err != nil {
-		a.emitRunStepPost(run, AgentStatusError, err.Error())
+		a.emitRunStepPost(run, AgentStatusError, err.Error(), "")
 		return nil, convID, err
 	}
-	a.emitRunStepPost(run, AgentStatusOK, "")
+	a.emitRunStepPost(run, AgentStatusOK, "", final.Content)
 	return map[string]any{"output": final.Content}, convID, nil
 }
 

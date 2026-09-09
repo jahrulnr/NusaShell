@@ -171,17 +171,29 @@ func (n *NotifyProgressSink) OnStepEvent(ctx context.Context, ev StepLifecycleEv
 	switch ev.Kind {
 	case StepKindStep:
 		if ev.Phase == StepPhasePre {
-			_, err := n.deliverOpen(ctx, ev, "step_start", StepStatusRunning, "")
-			return err
+			// No placeholder for the step itself — tool progress and the
+			// final reply are the only chat-visible items.
+			return nil
 		}
 		if ev.Phase == StepPhasePost {
-			status := ev.Status
-			if status == "" {
-				status = StepStatusOK
+			// Deliver exactly ONE final message: the agent's final output
+			// (or a bounded error note). Intermediate per-round text events
+			// are never forwarded — they leak working-note narration.
+			detail := ev.Detail
+			eventType := "step_ended"
+			if status := ev.Status; status == StepStatusError || ev.Error != "" {
+				detail = ev.Error
+				if detail == "" {
+					detail = ev.Status
+				}
 			}
-			err := n.deliverEdit(ctx, ev, n.lastMessageID(ev.AgentRunID), "step_end", status, truncateNotify(ev.Error))
+			if detail != "" && ev.Notify.NormalizedDetail() != domain.NotifyDetailNone {
+				if _, err := n.deliverOpen(ctx, ev, eventType, ev.Status, truncateNotify(detail)); err != nil {
+					return err
+				}
+			}
 			n.clearRun(ev.AgentRunID)
-			return err
+			return nil
 		}
 	case StepKindToolCall:
 		if !notifyWants(detail, ev.Kind) {
@@ -193,11 +205,15 @@ func (n *NotifyProgressSink) OnStepEvent(ctx context.Context, ev StepLifecycleEv
 		if ev.Phase == StepPhasePost {
 			return n.editToolProgress(ctx, ev)
 		}
-	case StepKindReasoning, StepKindText:
+	case StepKindReasoning:
 		if !notifyWants(detail, ev.Kind) {
 			return nil
 		}
 		return n.sendContentProgress(ctx, ev)
+	case StepKindText:
+		// Intermediate per-round text is dropped: the final reply is
+		// delivered once from the step-end event.
+		return nil
 	}
 	return nil
 }

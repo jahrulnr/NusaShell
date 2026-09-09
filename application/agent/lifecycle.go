@@ -130,7 +130,7 @@ func (a *Service) emitRunStepPre(run *TurnRun) {
 }
 
 // emitRunStepPost fires step+run post at the headless turn boundary.
-func (a *Service) emitRunStepPost(run *TurnRun, status, errMsg string) {
+func (a *Service) emitRunStepPost(run *TurnRun, status, errMsg, finalDetail string) {
 	st := AgentStatusOK
 	if status == "error" || status == AgentStatusError {
 		st = AgentStatusError
@@ -138,6 +138,7 @@ func (a *Service) emitRunStepPost(run *TurnRun, status, errMsg string) {
 	errDetail := truncateLifecycle(errMsg)
 	a.emitHeadlessEvent(run, AgentLifecycleEvent{
 		Kind: AgentEventStep, Phase: AgentPhasePost, Status: st, Error: errDetail,
+		Detail: truncateLifecycle(finalDetail),
 	})
 	a.emitHeadlessEvent(run, AgentLifecycleEvent{
 		Kind: AgentEventRun, Phase: AgentPhasePost, Status: st, Error: errDetail,

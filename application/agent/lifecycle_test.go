@@ -115,7 +115,7 @@ func TestLifecycleSimulatedTurnEmitsPrePostPairs(t *testing.T) {
 	svc.emitToolCallPre(run, 1, domainToolCallRef{ID: "call_b", Name: "exec", Args: `{"cmd":"ls"}`})
 	svc.emitToolCallPost(run, 1, domainToolCallRef{ID: "call_a", Name: "file_read"}, AgentStatusOK, "file contents")
 	svc.emitToolCallPost(run, 1, domainToolCallRef{ID: "call_b", Name: "exec"}, AgentStatusError, "boom")
-	svc.emitRunStepPost(run, AgentStatusOK, "")
+	svc.emitRunStepPost(run, AgentStatusOK, "", "final output")
 
 	obs.mu.Lock()
 	defer obs.mu.Unlock()

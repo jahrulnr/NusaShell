@@ -160,8 +160,8 @@ func TestNotifyProgressSinkSkipsMissingChatID(t *testing.T) {
 	bus := &recordingBus{}
 	sink := NewNotifyProgressSink(caller, bus)
 	ev := StepLifecycleEvent{
-		Kind: StepKindStep, Phase: StepPhasePre, RunID: "r", StepID: "s",
-		Notify: &domain.NotifyConfig{Plugin: "nusashell.telegram", Detail: domain.NotifyDetailNone},
+		Kind: StepKindToolCall, Phase: StepPhasePre, RunID: "r", StepID: "s",
+		Notify: &domain.NotifyConfig{Plugin: "nusashell.telegram", Detail: domain.NotifyDetailTools},
 	}
 	_ = sink.OnStepEvent(context.Background(), ev)
 	caller.mu.Lock()
