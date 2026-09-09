@@ -267,3 +267,35 @@ func TestExecuteTurnToolsEmitsToolCallPairsWithCallIDs(t *testing.T) {
 type staticSettings struct{}
 
 func (staticSettings) Get() domain.Settings { return domain.Settings{MaxParallelTools: 2} }
+
+func TestLifecycleEmitsReasoningAndTextPerRound(t *testing.T) {
+	store := &lifecycleConvStore{byID: map[string]*domain.Conversation{}}
+	svc := New(Deps{Conversations: store})
+	obs := &recordingObserver{}
+	svc.RegisterAgentObserver(obs)
+
+	run := &TurnRun{
+		ID: "run_rt", ConversationID: "conv_rt",
+		Headless: true, ToolKind: tools.AgentAutomation,
+		Ctx: context.Background(),
+	}
+	svc.emitRoundContentObservers(run, 2, " deep thought ", "partial text")
+
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+	var reasoning, text AgentLifecycleEvent
+	for _, e := range obs.events {
+		switch e.Kind {
+		case AgentEventReasoning:
+			reasoning = e
+		case AgentEventText:
+			text = e
+		}
+	}
+	if reasoning.Kind != AgentEventReasoning || reasoning.Round != 2 || reasoning.Phase != AgentPhasePost || reasoning.Detail != "deep thought" {
+		t.Fatalf("reasoning event missing/wrong: %+v", reasoning)
+	}
+	if text.Kind != AgentEventText || text.Detail != "partial text" {
+		t.Fatalf("text event missing/wrong: %+v", text)
+	}
+}
