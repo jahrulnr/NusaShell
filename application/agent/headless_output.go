@@ -31,6 +31,15 @@ func validateHeadlessOutput(content string, schema map[string]any) error {
 	instance := any(content)
 	var decoded any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(content)), &decoded); err == nil {
+		// Models sometimes double-encode structured output as a JSON string
+		// that contains the object (e.g. `"{\"reply\":\"hai\"}"`). Unwrap one
+		// level so a structured schema sees the object, not a scalar string.
+		if s, ok := decoded.(string); ok {
+			var nested any
+			if err := json.Unmarshal([]byte(s), &nested); err == nil {
+				decoded = nested
+			}
+		}
 		instance = decoded
 	}
 	if err := compiled.Validate(instance); err != nil {

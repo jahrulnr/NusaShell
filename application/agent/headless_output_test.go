@@ -49,3 +49,20 @@ func TestValidateHeadlessOutputRejectsInvalidSchema(t *testing.T) {
 		t.Fatalf("invalid schema error = %v, want invalid-schema diagnostic", err)
 	}
 }
+
+func TestValidateHeadlessOutputAcceptsDoubleEncodedReply(t *testing.T) {
+	schema := map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"reply": map[string]any{"type": "string"}},
+		"required":   []any{"reply"},
+	}
+	if err := validateHeadlessOutput(`"{\"reply\":\"hai\"}"`, schema); err != nil {
+		t.Fatalf("double-encoded JSON string should validate: %v", err)
+	}
+	if err := validateHeadlessOutput(`{"reply":"hai"}`, schema); err != nil {
+		t.Fatalf("plain object should validate: %v", err)
+	}
+	if err := validateHeadlessOutput(`plain text`, schema); err == nil {
+		t.Fatal("non-JSON plain text must fail a structured schema")
+	}
+}
