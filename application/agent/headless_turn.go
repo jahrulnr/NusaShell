@@ -227,9 +227,19 @@ func (a *Service) SteerHeadlessTurn(conversationID, text string) error {
 }
 
 // resolveHeadlessModel picks the provider + model for a headless turn. When
-// modelID is empty, the first enabled provider with at least one model is
-// used. Returns an error when no enabled provider is available.
+// modelID is empty, the Settings "Internal delegate model" (delegate_model)
+// is used when configured; otherwise the first enabled provider with at least
+// one model is used. Returns an error when no usable provider is available.
 func (a *Service) ResolveHeadlessModel(modelID string) (*domain.Provider, string, string, error) {
+	if strings.TrimSpace(modelID) == "" && a.Settings != nil {
+		if configured := strings.TrimSpace(a.Settings.Get().DelegateModel); configured != "" {
+			p, bare, key, rpcErr := a.resolveModel(configured)
+			if rpcErr != nil {
+				return nil, "", "", fmt.Errorf("%s", rpcErr.Message)
+			}
+			return p, bare, key, nil
+		}
+	}
 	if strings.TrimSpace(modelID) != "" {
 		p, bare, key, rpcErr := a.resolveModel(modelID)
 		if rpcErr != nil {

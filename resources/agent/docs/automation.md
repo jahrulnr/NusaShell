@@ -386,6 +386,8 @@ Rules:
   and is sanitized into a safe key (`[A-Za-z0-9._:-]`, capped length). If any
   placeholder resolves empty the key falls back to the workflow ID — never a
   partial prefix.
+- `model` left empty uses the Settings **Internal delegate model** when
+  configured, falling back to the first enabled provider's first model.
 - Key → conversation mappings are persisted, so the memory survives app
   restarts.
 - `reuse: true` serializes same-key steps inside the process: an overlapping

@@ -137,7 +137,8 @@ type AgentStep struct {
 	Prompt       string
 	OutputSchema map[string]any
 	// Model is an optional "provider_id:model_id" or bare model ID. When
-	// empty, the first enabled provider's first model is used.
+	// empty, the Settings "Internal delegate model" is used; if that is also
+	// unset, the first enabled provider's first model is used.
 	Model string
 	// Reuse keeps one agent conversation across workflow runs instead of
 	// starting a fresh hidden conversation for every step. false (default)
