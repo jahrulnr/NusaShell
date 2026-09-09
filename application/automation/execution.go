@@ -402,13 +402,61 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) (e
 				break
 			}
 			prompt := domain.RenderAgentPrompt(step.Agent.Prompt, run.Event)
-			out, convID, agentErr := s.Agent.RunAgentStep(jobCtx, prompt, step.Agent.Model, run.Definition.Trust, step.Agent.OutputSchema)
-			if agentErr != nil {
-				result, err = StepResult{Error: agentErr.Error()}, agentErr
-				break
+			type agentOutcome struct {
+				out    map[string]any
+				convID string
+				err    error
 			}
-			sr.ConversationID = convID
-			result, err = StepResult{ExitCode: 0, Outputs: out}, nil
+			agentDone := make(chan agentOutcome, 1)
+			go func() {
+				outcome := agentOutcome{}
+				defer func() {
+					if r := recover(); r != nil {
+						outcome.err = fmt.Errorf("agent step panicked: %v", r)
+					}
+					agentDone <- outcome
+				}()
+				outcome.out, outcome.convID, outcome.err = s.Agent.RunAgentStep(jobCtx, prompt, step.Agent.Model, run.Definition.Trust, step.Agent.OutputSchema)
+			}()
+			select {
+			case o := <-agentDone:
+				if o.err != nil {
+					// Preserve the pre-watchdog contract: a panicking agent
+					// runner surfaces through runJob's own panic recovery so
+					// the run is failed with the diagnostic and the error is
+					// returned to the caller. Ordinary agent-step errors keep
+					// flowing through the step finalize path below.
+					if strings.HasPrefix(o.err.Error(), "agent step panicked: ") {
+						panic(o.err)
+					}
+					result, err = StepResult{Error: o.err.Error()}, o.err
+					break
+				}
+				sr.ConversationID = o.convID
+				result, err = StepResult{ExitCode: 0, Outputs: o.out}, nil
+			case <-jobCtx.Done():
+				// Never leave the run eternally "running": when the job
+				// context ends (cancel, timeout, shutdown) while the agent
+				// turn has not returned, finalize the step and job with a
+				// visible reason. The worker goroutine may still finish
+				// later; its send is buffered so it cannot block, and the
+				// terminal-state guards make any late write a no-op. The
+				// terminal persist uses a detached context because the
+				// cancelled context would reject the write.
+				reason := "agent step did not finish before its context ended"
+				if cause := jobCtx.Err(); cause != nil {
+					reason = fmt.Sprintf("agent step interrupted: %v", cause)
+				}
+				detached := context.WithoutCancel(jobCtx)
+				sr.Fail(1, reason, s.now())
+				s.emit("automation.step.interrupted", map[string]any{
+					"run_id": run.ID, "job_id": jobID, "step_id": sr.ID, "reason": reason,
+				})
+				if ferr := s.failJob(detached, run, jr, reason); ferr != nil {
+					return fmt.Errorf("%s; persist failed state: %w", reason, ferr)
+				}
+				return nil
+			}
 		default:
 			envMap := domain.MergeEnv(run.Definition.Env, job.Env, step.Env)
 			envMap["NUSASHELL"] = "true"

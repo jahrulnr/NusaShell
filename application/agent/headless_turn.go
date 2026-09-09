@@ -128,7 +128,9 @@ func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
 
+	a.log("info", "agent", "headless turn started: run=%s conv=%s model=%s", run.ID, convID, provider.ID+":"+bareModel)
 	a.RunTurn(run, provider, apiKey, bareModel, "", asstMsgID, false, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides))
+	a.log("info", "agent", "headless turn finished: run=%s conv=%s", run.ID, convID)
 
 	finalMessageID := run.CurrentMessageID()
 	saved, err := a.Conversations.Get(convID)
@@ -140,7 +142,18 @@ func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model
 		return nil, "", fmt.Errorf("headless turn: final assistant message %s not found", finalMessageID)
 	}
 	if final.Status == domain.StatusError {
-		return nil, "", fmt.Errorf("headless turn failed: %s", final.Content)
+		err := fmt.Errorf("headless turn failed: %s", final.Content)
+		a.log("error", "agent", "headless turn failed: run=%s conv=%s: %v", run.ID, convID, err)
+		return nil, "", err
+	}
+	if final.Status == domain.StatusInterrupted {
+		// An interrupted/cancelled turn must never surface as a successful
+		// empty reply: the automation executor needs the failure so the run
+		// is finalized with a visible error instead of "succeeding" without
+		// doing the work or hanging in a running state.
+		err := fmt.Errorf("headless turn interrupted before producing output (run=%s conv=%s)", run.ID, convID)
+		a.log("warn", "agent", "%v", err)
+		return nil, convID, err
 	}
 	if err := validateHeadlessOutput(final.Content, schema); err != nil {
 		return nil, convID, err
