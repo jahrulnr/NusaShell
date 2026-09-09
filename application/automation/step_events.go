@@ -207,9 +207,11 @@ func notifyWants(detail domain.NotifyDetail, kind string) bool {
 	case domain.NotifyDetailNone:
 		return false
 	case domain.NotifyDetailTools:
-		return kind == StepKindToolCall || kind == StepKindReasoning || kind == StepKindText
+		// Tool progress only — reasoning and assistant text stay hidden.
+		return kind == StepKindToolCall
 	case domain.NotifyDetailText:
-		return kind == StepKindReasoning || kind == StepKindText
+		// Tool progress plus assistant text; reasoning stays hidden.
+		return kind == StepKindToolCall || kind == StepKindText
 	case domain.NotifyDetailAll:
 		return true
 	default:

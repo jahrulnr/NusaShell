@@ -256,3 +256,36 @@ func TestNotifyDetailFilterStillHonored(t *testing.T) {
 		t.Fatalf("detail=none should skip tool events, got %d", n)
 	}
 }
+
+func TestNotifyDetailLevelsFilterKinds(t *testing.T) {
+	cases := []struct {
+		name   string
+		detail domain.NotifyDetail
+		kind   string
+		want   int // expected MCP calls
+	}{
+		{"tools skips reasoning", domain.NotifyDetailTools, StepKindReasoning, 0},
+		{"tools skips text", domain.NotifyDetailTools, StepKindText, 0},
+		{"tools keeps tool calls", domain.NotifyDetailTools, StepKindToolCall, 1},
+		{"text skips reasoning", domain.NotifyDetailText, StepKindReasoning, 0},
+		{"text keeps tool calls", domain.NotifyDetailText, StepKindToolCall, 1},
+		{"all keeps reasoning", domain.NotifyDetailAll, StepKindReasoning, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			caller := &recordingMCPCaller{}
+			sink := NewNotifyProgressSink(caller, &recordingBus{})
+			base := StepLifecycleEvent{
+				AgentRunID: "a", RunID: "r", StepID: "s", CallID: "c",
+				Notify: &domain.NotifyConfig{Plugin: "tg", Detail: tc.detail, ChatID: "1"},
+			}
+			_ = sink.OnStepEvent(context.Background(), withEvent(base, tc.kind, StepPhasePost, StepStatusOK, "d"))
+			caller.mu.Lock()
+			n := len(caller.calls)
+			caller.mu.Unlock()
+			if n != tc.want {
+				t.Fatalf("detail=%s kind=%s calls=%d, want %d", tc.detail, tc.kind, n, tc.want)
+			}
+		})
+	}
+}
