@@ -29,14 +29,14 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `plugins/<id>/` | plugins (manual MCP servers and installed plugins): `manifest.json` + optional `ui/` + optional `skills/` (mounted read-only as `plugin:<id>` skills) | JSON + files |
 | `memory/user.md` | always-injected user profile (~4k token cap; first boot copies `resources/templates/user.md` when missing; agents write via `file_*`; Learning → About You) | Markdown |
 | `memory/soul.md` | always-injected agent document (~1k token cap; first boot copies `resources/templates/soul.md` when missing; agents write via `file_*`; Learning → About Agent) | Markdown |
-| `growth/experiences.jsonl` | experience events recorded at finishTurn | JSONL |
-| `growth/memories.jsonl` | structured MemoryRecord catalog (learner writes; humans retire) | JSONL |
-| `growth/jobs.jsonl` | learning jobs (`learner`, plus legacy `consolidate` / `evolve_skill` / `evaluate` / `retire_stale`). Finished jobs carry `llm_conversation_id` pointing at the persisted LLM transcript | JSONL |
-| `growth/operations.jsonl` | typed learning-operation audit | JSONL |
+| `growth/experiences.jsonl` | experience events recorded at finishTurn; unreferenced entries are retained 180 days (active-job sources are preserved) | JSONL |
+| `growth/memories.jsonl` | structured MemoryRecord catalog (learner writes; humans retire); live records are capped at 500, retired/superseded audit rows are retained 30 days | JSONL |
+| `growth/jobs.jsonl` | learning jobs (`learner`, plus legacy `consolidate` / `evolve_skill` / `evaluate` / `retire_stale`). Finished jobs carry `llm_conversation_id`; terminal rows and their background transcripts are retained 90 days | JSONL |
+| `growth/operations.jsonl` | typed learning-operation audit; terminal operations are retained 90 days | JSONL |
 | `memory_project/{key}/` | per-workspace project memory (`index.md`, `guardrails.md`, … plus `archive/` and `scripts/`). Default base; override with Settings → Project memory (`project_memory_base`, for example `~/.memory`) | Markdown |
 | `learning/edges.jsonl` | learning edges: content/embedding and metadata `related` links, plus `used_with` links for nodes observed together in one agent turn; stale endpoints are pruned during graph rebuild | JSONL |
 | `learning/embeddings.jsonl` | embedding cache for memory/skill entries | JSONL |
-| `learning/trajectory.jsonl` | learning trajectory log (one event per line). Job entries carry `job_id`, `status`, the applied `mutations`, and `llm_conversation_id` pointing at the persisted LLM transcript | JSONL |
+| `learning/trajectory.jsonl` | learning trajectory log (one event per line), read by the UI in cursor-based 50-event pages and retained 90 days. Job entries carry `job_id`, `status`, the applied `mutations`, and `llm_conversation_id` | JSONL |
 | `learning/provider_params.json` | auto-learned provider/model params (context caps, disabled modalities, and request-shape constraints from 400 errors) | JSON |
 | `learning/model_overrides.json` | manual model-metadata overrides (win over catalog + learned) | JSON |
 | `attachments/<conv_id>/` | user image/file attachments and generated images (`gen-<toolCallID>.<ext>`) | files |

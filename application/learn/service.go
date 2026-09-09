@@ -14,6 +14,7 @@ type Service struct {
 	deps Deps
 
 	mu        sync.RWMutex
+	recordMu  sync.Mutex
 	searcher  *LearningSearcher
 	graphSvc  *LearningGraphService
 	builder   *EdgeBuilder

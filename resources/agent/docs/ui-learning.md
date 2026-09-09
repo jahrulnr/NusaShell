@@ -177,7 +177,7 @@ Force-directed graph (vis-network) of skills, memory records, and their edges. R
 
 ## Learning log
 
-Learning-job activity feed from the trajectory log (experience extraction, consolidation, skill jobs, edge building, decay, prune), newest first. Job entries show a status badge (done or error); failures use a concise automatic-processing message rather than exposing a verbose provider body. Each entry has a compact Source <title> line, saved outcomes (kind + snippet) or an explicit Nothing to save. line, and per-type extras. A running indicator appears at the top while a learning job is in-flight. Refresh reloads the feed.
+Learning-job activity feed from the trajectory log (experience extraction, consolidation, skill jobs, edge building, decay, prune), newest first. The feed reads one bounded 50-event page at a time instead of loading the full history; Previous and Next use stable cursors, while Refresh returns to the newest page. Job entries show a status badge (done or error); failures use a concise automatic-processing message rather than exposing a verbose provider body. Each entry has a compact Source <title> line, saved outcomes (kind + snippet) or an explicit Nothing to save. line, and per-type extras. A running indicator appears at the top while a learning job is in-flight.
 
 - **Learning log count** (`#learning-log-count`):
   - Section: Learning
@@ -186,9 +186,23 @@ Learning-job activity feed from the trajectory log (experience extraction, conso
 - **Refresh learning log** (`#learning-log-refresh`):
   - Section: Learning
   - Type: button
-  - Action: Reloads the learning-job trajectory feed.
+  - Action: Reloads the newest bounded page of the learning-job trajectory feed.
 
 - **Learning log** (`#learning-log`):
   - Section: Learning
   - Type: list
-  - Notes: Trajectory events; job entries may have done/error/skipped status badges. Failed entries show a concise automatic-processing message; raw provider diagnostics stay server-side.
+  - Notes: Bounded 50-event trajectory page; job entries may have done/error/skipped status badges. Failed entries show a concise automatic-processing message; raw provider diagnostics stay server-side.
+
+- **Previous learning log page** (`#learning-log-prev`):
+  - Section: Learning
+  - Type: button
+  - Action: Returns to the preceding newer 50-event page.
+
+- **Learning log page number** (`#learning-log-page`):
+  - Section: Learning
+  - Type: status
+
+- **Next learning log page** (`#learning-log-next`):
+  - Section: Learning
+  - Type: button
+  - Action: Loads the next older 50-event page with the trajectory cursor.

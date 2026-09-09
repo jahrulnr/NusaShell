@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Learning stays bounded over long-running installations.** The Learning
+  log now reads and renders stable 50-event cursor pages instead of loading
+  the full trajectory and every conversation title. Balanced daily/startup
+  housekeeping retains terminal jobs, operations, trajectory events, and
+  their learner transcripts for 90 days; unreferenced experiences for 180
+  days; and retired/superseded memory audit rows for 30 days. Active work and
+  retrievable memories are preserved. Concurrent triggers for a conversation
+  coalesce while its learner job is queued or running.
+
 - **`subagent_steer` interrupts the live ACP prompt.** While a child
   `session/prompt` is in flight, steer sends `session/cancel` then
   `session/prompt` with the new text on the same session (run stays open).
@@ -74,6 +83,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   regression coverage and removed the unused `subagent.md` prompt.
 
 ### Fixed
+
+- **Turn completion notification ordering.** The completion sound now waits
+  until the final assistant turn is visible, including the WebSocket-before-
+  SSE race and snapshot-refresh fallback, instead of announcing completion
+  several seconds before the transcript catches up.
+
+- **Memory lifecycle capacity.** Retired/superseded audit rows no longer count
+  against the 500 live-record limit and crowd out retrievable memory.
 
 - **Learner streaming timeout and failure reporting.** Background learner
   turns no longer impose a fixed 90-second wall-clock deadline, allowing

@@ -11,6 +11,7 @@
 package learn
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -152,44 +153,92 @@ func trajectoryFileName(dataDir string) string {
 	return filepath.Join(dataDir, "learning", "trajectory.jsonl")
 }
 
-// ReadTrajectory loads learning events from the trajectory log, newest
-// first. Events that are pure UI query noise (search, graph_load) are
-// excluded so the log surfaces learning-layer activity. Returns an empty
-// slice when the file is missing or unreadable — the log view must never
-// fail because the debug log is absent.
-func ReadTrajectory(dataDir string, limit int) []TrajectoryEvent {
+// ReadTrajectoryPage reads one bounded page of learning events, newest first.
+// Cursor is the exclusive byte offset returned by the previous page; zero
+// starts from the file's current end. Reading backwards keeps the common
+// first-page path proportional to the requested page instead of loading years
+// of history. Since offsets point before the oldest returned line, appends do
+// not shift an in-progress pagination snapshot.
+func ReadTrajectoryPage(dataDir string, limit int, cursor int64) ([]TrajectoryEvent, int64, bool) {
 	if limit <= 0 {
 		limit = 100
 	}
 	if limit > 500 {
 		limit = 500
 	}
-	b, err := os.ReadFile(trajectoryFileName(dataDir))
+	f, err := os.Open(trajectoryFileName(dataDir))
 	if err != nil {
-		return nil
+		return nil, 0, false
 	}
-	var events []TrajectoryEvent
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return nil, 0, false
+	}
+	end := cursor
+	if end <= 0 || end > info.Size() {
+		end = info.Size()
+	}
+
+	const chunkSize int64 = 32 * 1024
+	var carry []byte
+	events := make([]TrajectoryEvent, 0, limit)
+	var oldestOffset int64
+	for end > 0 {
+		start := end - chunkSize
+		if start < 0 {
+			start = 0
 		}
-		var e TrajectoryEvent
-		if json.Unmarshal([]byte(line), &e) != nil {
-			continue
+		chunk := make([]byte, end-start)
+		if _, err := f.ReadAt(chunk, start); err != nil {
+			return events, 0, false
 		}
-		switch e.Type {
-		case "search", "graph_load":
-			continue // UI query noise, not learning-layer activity
+		combined := append(chunk, carry...)
+		parts := bytes.Split(combined, []byte{'\n'})
+		offsets := make([]int64, len(parts))
+		offset := start
+		for i, part := range parts {
+			offsets[i] = offset
+			offset += int64(len(part) + 1)
 		}
-		events = append(events, e)
+
+		firstComplete := 1
+		if start == 0 {
+			firstComplete = 0
+		}
+		for i := len(parts) - 1; i >= firstComplete; i-- {
+			line := bytes.TrimSpace(parts[i])
+			if len(line) == 0 {
+				continue
+			}
+			var event TrajectoryEvent
+			if json.Unmarshal(line, &event) != nil || trajectoryEventIsNoise(event.Type) {
+				continue
+			}
+			if len(events) == limit {
+				return events, oldestOffset, true
+			}
+			events = append(events, event)
+			oldestOffset = offsets[i]
+		}
+		carry = append(carry[:0], parts[0]...)
+		end = start
 	}
-	// Reverse so the newest event is first.
-	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
-		events[i], events[j] = events[j], events[i]
+	return events, 0, false
+}
+
+func trajectoryEventIsNoise(eventType string) bool {
+	switch eventType {
+	case "search", "graph_load":
+		return true
+	default:
+		return false
 	}
-	if len(events) > limit {
-		events = events[:limit]
-	}
+}
+
+// ReadTrajectory loads learning events from the trajectory log, newest
+// first. It is kept for callers that only need the newest bounded slice.
+func ReadTrajectory(dataDir string, limit int) []TrajectoryEvent {
+	events, _, _ := ReadTrajectoryPage(dataDir, limit, 0)
 	return events
 }

@@ -1,6 +1,7 @@
 package learn
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,6 +44,100 @@ func TestTrajectoryRecorderWritesEvents(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], `"type":"review"`) {
 		t.Errorf("line 1 missing type=review: %s", lines[1])
+	}
+}
+
+func TestReadTrajectoryPageIsStableAcrossAppends(t *testing.T) {
+	dir := t.TempDir()
+	r := NewTrajectoryRecorder(dir)
+	if r == nil {
+		t.Fatal("expected non-nil recorder")
+	}
+	for _, typ := range []string{"job_1", "search", "job_2", "graph_load", "job_3", "job_4", "job_5"} {
+		r.Record(typ, map[string]interface{}{"name": typ})
+	}
+
+	first, cursor, more := ReadTrajectoryPage(dir, 2, 0)
+	if len(first) != 2 || first[0].Type != "job_5" || first[1].Type != "job_4" {
+		t.Fatalf("first page = %#v", first)
+	}
+	if cursor <= 0 || !more {
+		t.Fatalf("first page cursor=%d more=%v", cursor, more)
+	}
+
+	// A newer append must not shift the cursor into a duplicate or skip an
+	// older event while the user is paging through a snapshot.
+	r.Record("job_6", map[string]interface{}{"name": "job_6"})
+	second, next, more := ReadTrajectoryPage(dir, 2, cursor)
+	if len(second) != 2 || second[0].Type != "job_3" || second[1].Type != "job_2" {
+		t.Fatalf("second page = %#v", second)
+	}
+	if next <= 0 || !more {
+		t.Fatalf("second page cursor=%d more=%v", next, more)
+	}
+	third, next, more := ReadTrajectoryPage(dir, 2, next)
+	if len(third) != 1 || third[0].Type != "job_1" || next != 0 || more {
+		t.Fatalf("third page=%#v cursor=%d more=%v", third, next, more)
+	}
+	_ = r.Close()
+}
+
+func TestReadTrajectoryPageAcrossChunkBoundaries(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "learning", "trajectory.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	const eventCount = 45
+	var content strings.Builder
+	for i := 0; i < eventCount; i++ {
+		event := TrajectoryEvent{
+			Type: "large_event",
+			Detail: map[string]interface{}{
+				"index":   i,
+				"padding": strings.Repeat("x", 3000),
+			},
+		}
+		line, err := json.Marshal(event)
+		if err != nil {
+			t.Fatalf("Marshal event %d: %v", i, err)
+		}
+		content.Write(line)
+		content.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, []byte(content.String()), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var got []int
+	cursor := int64(0)
+	for {
+		page, next, more := ReadTrajectoryPage(dir, 7, cursor)
+		for _, event := range page {
+			index, ok := event.Detail["index"].(float64)
+			if !ok {
+				t.Fatalf("event index type = %T", event.Detail["index"])
+			}
+			got = append(got, int(index))
+		}
+		if !more {
+			break
+		}
+		if next <= 0 || next == cursor {
+			t.Fatalf("cursor did not advance backward: current=%d next=%d", cursor, next)
+		}
+		cursor = next
+	}
+
+	if len(got) != eventCount {
+		t.Fatalf("got %d events, want %d", len(got), eventCount)
+	}
+	for i, index := range got {
+		want := eventCount - 1 - i
+		if index != want {
+			t.Fatalf("event %d index=%d, want %d", i, index, want)
+		}
 	}
 }
 

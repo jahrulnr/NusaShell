@@ -23,6 +23,12 @@ type JobStore interface {
 	Delete(id string) error
 }
 
+// OperationStore persists the accepted/rejected operation audit trail.
+type OperationStore interface {
+	List() []*domain.LearningOperation
+	Delete(id string) error
+}
+
 // EdgeStore persists bitemporal edges between learning nodes.
 type EdgeStore interface {
 	List() []*domain.LearningEdge
@@ -174,6 +180,7 @@ type Deps struct {
 	Experiences         ExperienceStore
 	Records             RecordStore
 	Jobs                JobStore
+	Operations          OperationStore
 	Edges               EdgeStore
 	Skills              SkillCatalog
 	User                DocumentStore

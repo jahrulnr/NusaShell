@@ -373,7 +373,10 @@ func (a *App) StartLifecycle() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.lifecycleCancel = cancel
-	a.goSafe("learning", func() { a.lifecycle.Run(ctx) })
+	a.goSafe("learning", func() {
+		a.lifecycle.PruneOnce()
+		a.lifecycle.Run(ctx)
+	})
 	a.log("info", "learning", "lifecycle manager started (decay=%s prune=%s)", domain.DefaultLifecycleConfig().DecayInterval, domain.DefaultLifecycleConfig().PruneInterval)
 }
 
@@ -634,6 +637,11 @@ func NewApp(deps Deps) *App {
 	if deps.MemoryRecords != nil {
 		app.lifecycle = NewLifecycleManager(deps.MemoryRecords, deps.Skills, domain.DefaultLifecycleConfig())
 		app.lifecycle.SetLogger(app.log)
+		app.lifecycle.SetHousekeeping(func() {
+			if service := app.learnService(); service != nil {
+				service.PruneGrowthOnce()
+			}
+		})
 	}
 	// Reconcile learning jobs abandoned by a previous instance's restart:
 	// stale "running"/"queued" rows become error so the UI shows the truth

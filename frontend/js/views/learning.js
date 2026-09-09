@@ -11,6 +11,8 @@ import { resolvedFontFamily } from '../font-preferences.js';
 import { renderConversation } from './agent/render.js';
 import { DataSet, Network } from '../../vendor/vis-network/vis-network.esm.min.js';
 
+const LEARNING_LOG_PAGE_SIZE = 50;
+
 const state = {
   results: [],
   network: null,
@@ -20,6 +22,10 @@ const state = {
   edgeCount: 0,
   logEntries: [],
   logLoaded: false,
+  logCursors: [0],
+  logPage: 0,
+  logHasMore: false,
+  logLoadToken: 0,
   runningJobs: 0,
   catalogLoaded: false,
   experiences: [],
@@ -78,6 +84,8 @@ export async function initLearning() {
   const fitBtn = document.getElementById('learning-graph-fit');
   const graphDeleteBtn = document.getElementById('learning-graph-delete');
   const logRefreshBtn = document.getElementById('learning-log-refresh');
+  const prevBtn = document.getElementById('learning-log-prev');
+  const nextBtn = document.getElementById('learning-log-next');
 
   input.addEventListener('input', debounce(() => doSearch(), 200));
   input.addEventListener('keydown', (e) => {
@@ -102,6 +110,13 @@ export async function initLearning() {
     fitGraphToView(state.network, state.nodes, 300);
   });
   logRefreshBtn.addEventListener('click', () => loadLog());
+  prevBtn.addEventListener('click', () => {
+    if (state.logPage > 0) loadLog({ page: state.logPage - 1, cursor: state.logCursors[state.logPage - 1] });
+  });
+  nextBtn.addEventListener('click', () => {
+    const cursor = state.logCursors[state.logPage + 1];
+    if (state.logHasMore && cursor) loadLog({ page: state.logPage + 1, cursor });
+  });
   if (graphDeleteBtn) {
     graphDeleteBtn.addEventListener('click', () => { void deleteSelectedGraphNode(); });
   }
@@ -683,28 +698,47 @@ async function deleteLogEntry(jobId) {
   }
 }
 
-async function loadLog() {
+async function loadLog({ page = 0, cursor = 0 } = {}) {
   const logEl = document.getElementById('learning-log');
   if (!logEl) return;
   const countEl = document.getElementById('learning-log-count');
+  const pageEl = document.getElementById('learning-log-page');
+  const prevBtn = document.getElementById('learning-log-prev');
+  const nextBtn = document.getElementById('learning-log-next');
+  const token = ++state.logLoadToken;
   state.logLoaded = true;
+  prevBtn.disabled = true;
+  nextBtn.disabled = true;
   logEl.innerHTML = '';
   logEl.appendChild(el('div', { class: 'learning-empty' }, [
     el('strong', { text: 'Loading…' }),
-    el('span', { text: 'Reading the autolearn trajectory.' }),
+    el('span', { text: 'Reading one page of the autolearn trajectory.' }),
   ]));
   try {
-    const res = await rpc('learning.log', { limit: 200 });
+    const res = await rpc('learning.log', { limit: LEARNING_LOG_PAGE_SIZE, cursor });
+    if (token !== state.logLoadToken) return;
     state.logEntries = res.entries || [];
+    state.logPage = page;
+    state.logHasMore = Boolean(res.has_more && res.next_cursor);
+    state.logCursors[page] = cursor;
+    state.logCursors.length = page + 1;
+    if (state.logHasMore) state.logCursors[state.logPage + 1] = res.next_cursor;
     renderLog();
-    countEl.textContent = `${state.logEntries.length} event${state.logEntries.length === 1 ? '' : 's'}`;
+    countEl.textContent = `${state.logEntries.length} event${state.logEntries.length === 1 ? '' : 's'} on this page`;
+    pageEl.textContent = `Page ${state.logPage + 1}`;
+    prevBtn.disabled = state.logPage === 0;
+    nextBtn.disabled = !state.logHasMore;
   } catch (e) {
+    if (token !== state.logLoadToken) return;
     logEl.innerHTML = '';
     logEl.appendChild(el('div', { class: 'learning-empty' }, [
       el('strong', { text: 'Log unavailable' }),
       el('span', { text: e.message || 'Unknown error' }),
     ]));
     countEl.textContent = '0 events';
+    pageEl.textContent = `Page ${page + 1}`;
+    prevBtn.disabled = page === 0;
+    nextBtn.disabled = true;
   }
 }
 

@@ -43,6 +43,33 @@ func TestGrowthExperienceRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGrowthBulkDeleteRewritesCatalogOnceAndPersists(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	experiences := &Experiences{S: st}
+	for _, id := range []string{"exp_keep", "exp_drop_a", "exp_drop_b"} {
+		if err := experiences.Save(&domain.Experience{ID: id, Timestamp: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := experiences.DeleteMany([]string{"exp_drop_a", "exp_drop_b"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := experiences.List(); len(got) != 1 || got[0].ID != "exp_keep" {
+		t.Fatalf("after bulk delete: %+v", got)
+	}
+	reopened, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := (&Experiences{S: reopened}).List(); len(got) != 1 || got[0].ID != "exp_keep" {
+		t.Fatalf("after reopen: %+v", got)
+	}
+}
+
 func TestGrowthMemoryRecordUpsertAndRetire(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)

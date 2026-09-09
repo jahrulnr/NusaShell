@@ -16,15 +16,20 @@ func (s *Service) DeleteLearningJob(jobID string) {
 		return
 	}
 	var transcriptIDs []string
+	if s.deps.Jobs != nil {
+		if job, err := s.deps.Jobs.Get(jobID); err == nil && job != nil && safeLearningConversationID(job.LLMConversationID) {
+			transcriptIDs = append(transcriptIDs, job.LLMConversationID)
+		}
+	}
 	if s.deps.Trajectory != nil {
-		transcriptIDs = s.deps.Trajectory.DeleteEvents(func(ev TrajectoryEvent) bool {
+		transcriptIDs = append(transcriptIDs, s.deps.Trajectory.DeleteEvents(func(ev TrajectoryEvent) bool {
 			return DetailString(ev.Detail, "job_id") == jobID
-		})
+		})...)
 	}
 	if s.deps.Jobs != nil {
 		_ = s.deps.Jobs.Delete(jobID)
 	}
-	for _, convID := range transcriptIDs {
+	for _, convID := range uniqueStrings(transcriptIDs) {
 		if !strings.HasPrefix(convID, "conv_") || !safeLearningConversationID(convID) {
 			continue
 		}

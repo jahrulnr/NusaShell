@@ -532,6 +532,43 @@ function appendTurnDoneMetadata(run, payload) {
   void renderMermaidDiagrams(node); void highlightCode(node); attachZoomButtons(node);
 }
 
+function notifyTurnCompletion(payload) {
+  const conversationId = payload?.conversation_id || '';
+  const error = payload?.error || '';
+  const isAgentRoom = conversationId === state.activeId
+    || state.conversations.some((c) => c.id === conversationId);
+  if (shouldPlayAgentTurnSound(state.settings?.sound_notifications !== false, {
+    conversationId,
+    rooms: state.conversations,
+    headless: payload?.headless,
+  })) {
+    if (error) {
+      toast(error, 'error');
+      playError(true);
+    } else {
+      playComplete(true);
+    }
+  } else if (isAgentRoom && error) {
+    toast(error, 'error');
+  }
+}
+
+function settleTurnCompletion(payload, { preserveLiveNode = null, refresh = false } = {}) {
+  // A connected live node already contains the ordered SSE tail, so the
+  // answer is visible now and the authoritative refresh can stay in the
+  // background. Snapshot fallback has no complete node to preserve: wait for
+  // its repaint before notifying, otherwise the ding can precede the answer
+  // by the full RPC/fallback delay.
+  if (!refresh || preserveLiveNode?.isConnected) {
+    if (refresh) void refreshActiveConversation({ preserveLiveNode });
+    notifyTurnCompletion(payload);
+    return;
+  }
+  void refreshActiveConversation({ preserveLiveNode }).finally(() => {
+    notifyTurnCompletion(payload);
+  });
+}
+
 function finalizeLiveTurn(run, payload, { streamConfirmed = false } = {}) {
   if (!run || run.turnDoneFinalized) return false;
   run.turnDoneFinalized = true;
@@ -557,9 +594,8 @@ function finalizeLiveTurn(run, payload, { streamConfirmed = false } = {}) {
   const willAutoContinue = Boolean(payload?.auto_continue?.should_continue);
   endTurn(run.runId, willAutoContinue);
   state.completedLiveRuns.delete(run.runId);
-  if (run.conversationId === state.activeId && !willAutoContinue) {
-    void refreshActiveConversation({ preserveLiveNode: preservedLiveNode });
-  }
+  const refresh = run.conversationId === state.activeId && !willAutoContinue;
+  settleTurnCompletion(payload, { preserveLiveNode: preservedLiveNode, refresh });
   return true;
 }
 
@@ -3224,25 +3260,14 @@ function bindEvents() {
       appendTurnDoneMetadata(run, payload);
       endTurn(run_id, willAutoContinue);
     }
+    if (!awaitRoundTerminal) {
+      settleTurnCompletion(payload, {
+        preserveLiveNode: preservedLiveNode,
+        refresh: conversation_id === state.activeId && !willAutoContinue,
+      });
+    }
     const isAgentRoom = conversation_id === state.activeId
       || state.conversations.some((c) => c.id === conversation_id);
-    if (shouldPlayAgentTurnSound(state.settings?.sound_notifications !== false, {
-      conversationId: conversation_id,
-      rooms: state.conversations,
-      headless: payload.headless,
-    })) {
-      if (error) {
-        toast(error, 'error');
-        playError(true);
-      } else {
-        playComplete(true);
-      }
-    } else if (isAgentRoom && error) {
-      toast(error, 'error');
-    }
-    if (conversation_id === state.activeId && !willAutoContinue && !awaitRoundTerminal) {
-      void refreshActiveConversation({ preserveLiveNode: preservedLiveNode });
-    }
     void maybeAutoTitleConversation(conversation_id).finally(() => {
       if (!isAgentRoom) return;
       void refreshConversations().catch(() => {

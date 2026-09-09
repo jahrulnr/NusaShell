@@ -37,6 +37,12 @@ func (s *Service) RecordExperience(conv *domain.Conversation, headless bool) {
 	if !trig.Enqueue {
 		return
 	}
+	s.recordMu.Lock()
+	defer s.recordMu.Unlock()
+	if s.hasActiveLearningJob(conv.ID) {
+		s.log("debug", "learning", "learner trigger coalesced: reason=%s conv=%s", trig.Reason, conv.ID)
+		return
+	}
 	now := clock.NewTime().Time()
 	job := &domain.LearningJob{
 		ID:           domain.NewULID(domain.IDPrefixLearnJob),
@@ -54,6 +60,22 @@ func (s *Service) RecordExperience(conv *domain.Conversation, headless bool) {
 	s.log("info", "learning", "job queued: id=%s kind=%s reason=%s conv=%s", job.ID, job.Kind, job.Reason, conv.ID)
 	jobID := job.ID
 	s.goSafe("learning", func() { s.RunLearningJob(jobID) })
+}
+
+func (s *Service) hasActiveLearningJob(conversationID string) bool {
+	if s == nil || s.deps.Jobs == nil || s.deps.Experiences == nil {
+		return false
+	}
+	for _, job := range s.deps.Jobs.List() {
+		if job == nil || (job.Status != domain.LearningJobQueued && job.Status != domain.LearningJobRunning) {
+			continue
+		}
+		experience, err := s.deps.Experiences.Get(job.ExperienceID)
+		if err == nil && experience != nil && experience.ConversationID == conversationID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) LearnerNudgeInterval() int {

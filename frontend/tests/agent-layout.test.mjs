@@ -344,15 +344,27 @@ test('Initial load retries after layout settles without forcing a reader back do
   assert.doesNotMatch(agentView, /thread\?\.scrollTo\(\{ top: thread\.scrollHeight, behavior: 'smooth' \}\)/);
 });
 
-test('Turn completion samples the real scroll position before playing its sound', () => {
+test('Turn completion samples the real scroll position and notifies only after the final turn is visible', () => {
   const doneHandler = agentView.slice(
     agentView.indexOf("on('agent.turn.done'"),
     agentView.indexOf("on('agent.turn.error'"),
   );
+  const finalizer = agentView.slice(
+    agentView.indexOf('function finalizeLiveTurn'),
+    agentView.indexOf('function scheduleRoundDoneFallback'),
+  );
+  const settle = agentView.slice(
+    agentView.indexOf('function settleTurnCompletion'),
+    agentView.indexOf('function finalizeLiveTurn'),
+  );
   assert.match(doneHandler, /syncActiveThreadPin\(\);/);
-  assert.match(doneHandler, /shouldPlayAgentTurnSound\(/);
-  assert.match(doneHandler, /playComplete\(/);
-  assert.match(doneHandler, /refreshActiveConversation\(\{ preserveLiveNode:/);
+  assert.match(doneHandler, /settleTurnCompletion/);
+  assert.doesNotMatch(doneHandler, /playComplete\(/,
+    'the WebSocket terminal must not ding before the SSE tail or snapshot is painted');
+  assert.match(finalizer, /settleTurnCompletion/,
+    'the ordered SSE terminal must own final notification delivery');
+  assert.match(settle, /refreshActiveConversation[\s\S]*\.finally\([\s\S]*notifyTurnCompletion/,
+    'snapshot fallback must finish painting before the completion notification');
 });
 
 test('Transcript refresh restores user-controlled Thinking and tool disclosure state', () => {
@@ -496,8 +508,13 @@ test('Turn completion preserves a connected live node instead of rerendering the
     agentView.indexOf("on('agent.turn.error'"),
   );
   const refreshHandler = agentView.slice(agentView.indexOf('async function refreshActiveConversation'));
+  const settleHandler = agentView.slice(
+    agentView.indexOf('function settleTurnCompletion'),
+    agentView.indexOf('function finalizeLiveTurn'),
+  );
   assert.match(doneHandler, /preservedLiveNode/);
-  assert.match(doneHandler, /refreshActiveConversation\(\{ preserveLiveNode: preservedLiveNode \}\)/);
+  assert.match(doneHandler, /settleTurnCompletion\(payload/);
+  assert.match(settleHandler, /refreshActiveConversation\(\{ preserveLiveNode \}\)/);
   assert.match(refreshHandler, /preserveLiveNode/);
   assert.match(refreshHandler, /preserveLiveNode\?\.isConnected/);
   assert.match(refreshHandler, /attachZoomButtons\(preserveLiveNode\)/);

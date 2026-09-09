@@ -139,24 +139,28 @@ instruction that was sent, every source-inspection/tool round, and the final
 answer. The job's Learning log entry carries that conversation's id (`llm_conversation_id`) and its **View
 LLM log** button opens it.
 
-That transcript is the only record of *why* a job saved what it saved, so it
-is kept even when the call failed or decided nothing was durable. The same
-id is stored on the job row (`growth/jobs.jsonl`) so the audit trail is not
-only in the trajectory feed. The typed catalog commit is the `learn()` tool
-call in that transcript, not the final assistant text. Do not confuse the
-job's `llm_conversation_id` with the entry's `conversation_id`, which is the
-user conversation the job learned from.
+That transcript is the audit record of *why* a job saved what it saved. It is
+kept with completed/error job history for 90 days, even when the call failed
+or decided nothing was durable, then removed by balanced housekeeping together
+with the terminal job row. Queued/running jobs and their transcripts are never
+age-pruned. The same id is stored on the job row (`growth/jobs.jsonl`) so the
+audit trail does not depend only on the trajectory feed. The typed catalog
+commit is the `learn()` tool call in that transcript, not the final assistant
+text. Do not confuse the job's `llm_conversation_id` with the entry's
+`conversation_id`, which is the user conversation the job learned from.
 
 Learning turns hydrate against the NusaShell data directory (`{dataDir}`),
 not the source conversation's workspace: the checkpoint carries
-`runtime_context` (OS + dataDir), the profile documents (`user.md` /
-`soul.md`, needed when the learner updates a profile-shaped fact), the
-bundled `skill-creator` SKILL.md as a direct `file_read` slot (the
-skill-authoring reference for Stages 2-3 — resolved from the live skill
+`runtime_context` (OS + dataDir), read-only profile context (`user.md` /
+`soul.md`), the bundled `skill-creator` SKILL.md as a direct `file_read` slot
+(the skill-authoring reference for Stages 2-3, resolved from the live skill
 store with the embedded bundle as the guaranteed fallback), and a
-data-directory listing. The user project's AGENTS.md and file tree are not
-injected into learning jobs. The learner is never expected to discover any
-of this on its own: instruction is context, not a scavenger hunt.
+data-directory listing. The learner consolidates into the typed memory catalog
+and learned skills through `learn()`; it does not silently rewrite the
+human/interactive-agent managed user.md or soul.md documents. The user
+project's AGENTS.md and file tree are not injected into learning jobs. The
+learner is never expected to discover any of this on its own: instruction is
+context, not a scavenger hunt.
 
 ## Agent tools
 
@@ -242,9 +246,22 @@ Learning keeps **About You** / **About Agent** editors
 (`memory.user.update` / `memory.agent.update`). Structured records render
 below those editors. Humans may **delete** a record (`memory.delete`):
 the row, its graph edges, and its retrieval presence are removed for good.
-They do not edit or promote records. The internal lifecycle still retires
-weak records (`retired`/`superseded` stay on disk for audit), but a
-user delete is a delete.
+They do not edit or promote records. The internal lifecycle retires weak live
+records without counting already-retired rows against the 500-record live
+capacity. Retired/superseded rows remain available for a 30-day audit window,
+then are physically deleted so the catalog stays bounded. A user delete is
+immediate.
+
+## Balanced housekeeping
+
+At startup and on the daily prune tick, NusaShell also removes auxiliary
+learning history that is no longer operationally useful: trajectory events
+and terminal jobs/operations older than 90 days, unreferenced experiences
+older than 180 days, and the background transcripts belonging to expired
+jobs. Queued/running jobs, their source experiences, retrievable memory
+records, user.md, soul.md, and project memory are not age-pruned. New learner
+triggers for a conversation are coalesced while that conversation already has
+a queued or running learning job.
 
 ## Graph and search
 

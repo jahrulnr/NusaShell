@@ -2131,6 +2131,31 @@ func TestReadTrajectoryNewestFirstAndFiltersNoise(t *testing.T) {
 	}
 }
 
+func TestHandleLearningLogReturnsCursorPages(t *testing.T) {
+	dir := t.TempDir()
+	writeTrajectory(t, dir, []string{
+		`{"ts":"2026-08-19T08:00:00Z","type":"job","detail":{"job_id":"job_1"}}`,
+		`{"ts":"2026-08-19T09:00:00Z","type":"job","detail":{"job_id":"job_2"}}`,
+	})
+	app := &App{DataDir: dir}
+	res, rpcErr := app.handleLearningLog(contracts.LearningLogRequest{Limit: 1})
+	if rpcErr != nil {
+		t.Fatalf("first page: %v", rpcErr)
+	}
+	first := res.(contracts.LearningLogResult)
+	if len(first.Entries) != 1 || !first.HasMore || first.NextCursor <= 0 {
+		t.Fatalf("first page = %+v", first)
+	}
+	res, rpcErr = app.handleLearningLog(contracts.LearningLogRequest{Limit: 1, Cursor: first.NextCursor})
+	if rpcErr != nil {
+		t.Fatalf("second page: %v", rpcErr)
+	}
+	second := res.(contracts.LearningLogResult)
+	if len(second.Entries) != 1 || second.HasMore || second.NextCursor != 0 {
+		t.Fatalf("second page = %+v", second)
+	}
+}
+
 func TestReadTrajectoryMissingFile(t *testing.T) {
 	events := ReadTrajectory(t.TempDir(), 10)
 	if events != nil {
@@ -2881,6 +2906,32 @@ func TestPruneOnceRetiresWeakRecords(t *testing.T) {
 	}
 	if live != 1 || survivor != "new1" {
 		t.Fatalf("live=%d survivor=%q, want 1/new1: %+v", live, survivor, mem.List())
+	}
+}
+
+func TestPruneOnceIgnoresRetiredRecordsForCapacityAndDeletesExpiredAuditRows(t *testing.T) {
+	now := time.Now()
+	mem := &fakeMemoryRecordStore{items: []*domain.MemoryRecord{
+		{ID: "live_a", Status: domain.MemoryStatusLearned, Utility: 1, LastConfirmed: now},
+		{ID: "live_b", Status: domain.MemoryStatusLearned, Utility: 1, LastConfirmed: now},
+		{ID: "retired_recent", Status: domain.MemoryStatusRetired, UpdatedAt: now.Add(-10 * 24 * time.Hour)},
+		{ID: "retired_expired", Status: domain.MemoryStatusRetired, UpdatedAt: now.Add(-31 * 24 * time.Hour)},
+	}}
+	cfg := domain.DefaultLifecycleConfig()
+	cfg.MaxMemory = 2
+	cfg.PruneThreshold = -1
+	m := NewLifecycleManager(mem, &fakeSkillStore{}, cfg)
+	m.PruneOnce()
+
+	ids := map[string]bool{}
+	for _, rec := range mem.List() {
+		ids[rec.ID] = true
+	}
+	if !ids["live_a"] || !ids["live_b"] {
+		t.Fatalf("retired rows counted against live capacity: %+v", ids)
+	}
+	if ids["retired_expired"] || !ids["retired_recent"] {
+		t.Fatalf("retired retention not enforced: %+v", ids)
 	}
 }
 

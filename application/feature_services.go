@@ -313,6 +313,7 @@ func (a *App) learnDeps() learn.Deps {
 		Experiences:     a.Experiences,
 		Records:         a.MemoryRecords,
 		Jobs:            a.LearningJobs,
+		Operations:      a.LearningOps,
 		Edges:           a.LearningEdges,
 		Skills:          a.Skills,
 		User:            a.User,

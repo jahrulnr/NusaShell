@@ -16,6 +16,7 @@ type RecordStore interface {
 type OpStore interface {
 	List() []*domain.LearningOperation
 	Save(op *domain.LearningOperation) error
+	Delete(id string) error
 }
 
 // DocumentStore is the handler-side view of user.md / soul.md.

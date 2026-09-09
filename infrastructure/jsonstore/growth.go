@@ -71,6 +71,33 @@ func upsertJSONL[T any](s *Store, items *[]*T, v *T, idOf func(*T) string, path 
 	return s.writeJSONL(path, cur)
 }
 
+func deleteManyJSONL[T any](s *Store, items *[]*T, ids []string, idOf func(*T) string, path string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	remove := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		remove[id] = struct{}{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current := *items
+	next := make([]*T, 0, len(current))
+	for _, item := range current {
+		if _, found := remove[idOf(item)]; !found {
+			next = append(next, item)
+		}
+	}
+	if len(next) == len(current) {
+		return nil
+	}
+	if err := s.writeJSONL(path, next); err != nil {
+		return err
+	}
+	*items = next
+	return nil
+}
+
 // Experiences adapter.
 
 type Experiences struct{ S *Store }
@@ -111,6 +138,10 @@ func (e *Experiences) Delete(id string) error {
 	return nil
 }
 
+func (e *Experiences) DeleteMany(ids []string) error {
+	return deleteManyJSONL(e.S, &e.S.experiences, ids, func(x *domain.Experience) string { return x.ID }, growthExperiencesFile)
+}
+
 // MemoryRecords adapter.
 
 type MemoryRecords struct{ S *Store }
@@ -139,6 +170,10 @@ func (m *MemoryRecords) Delete(id string) error {
 	}
 	m.S.memoryRecords = next
 	return nil
+}
+
+func (m *MemoryRecords) DeleteMany(ids []string) error {
+	return deleteManyJSONL(m.S, &m.S.memoryRecords, ids, func(x *domain.MemoryRecord) string { return x.ID }, growthMemoriesFile)
 }
 
 // LearningJobs adapter.
@@ -171,6 +206,10 @@ func (j *LearningJobs) Delete(id string) error {
 	return nil
 }
 
+func (j *LearningJobs) DeleteMany(ids []string) error {
+	return deleteManyJSONL(j.S, &j.S.learningJobs, ids, func(x *domain.LearningJob) string { return x.ID }, growthJobsFile)
+}
+
 // LearningOps adapter.
 
 type LearningOps struct{ S *Store }
@@ -184,4 +223,12 @@ func (o *LearningOps) Save(v *domain.LearningOperation) error {
 		return fmt.Errorf("operation id required")
 	}
 	return upsertJSONL(o.S, &o.S.learningOps, v, func(x *domain.LearningOperation) string { return x.ID }, growthOpsFile)
+}
+
+func (o *LearningOps) Delete(id string) error {
+	return o.DeleteMany([]string{id})
+}
+
+func (o *LearningOps) DeleteMany(ids []string) error {
+	return deleteManyJSONL(o.S, &o.S.learningOps, ids, func(x *domain.LearningOperation) string { return x.ID }, growthOpsFile)
 }

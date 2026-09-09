@@ -1700,7 +1700,8 @@ type LearningGraphEdge struct {
 // ---- learning log (autolearn trajectory) ----
 
 type LearningLogRequest struct {
-	Limit int `json:"limit,omitempty"` // default 100, max 500
+	Limit  int   `json:"limit,omitempty"`  // default 100, max 500
+	Cursor int64 `json:"cursor,omitempty"` // exclusive byte offset; zero starts at the current end
 }
 
 type LearningLogMutationDTO struct {
@@ -1726,7 +1727,9 @@ type LearningLogEntryDTO struct {
 }
 
 type LearningLogResult struct {
-	Entries []LearningLogEntryDTO `json:"entries"`
+	Entries    []LearningLogEntryDTO `json:"entries"`
+	NextCursor int64                 `json:"next_cursor,omitempty"`
+	HasMore    bool                  `json:"has_more"`
 }
 
 // LearningLogDeleteRequest removes one learning log entry by its job id:

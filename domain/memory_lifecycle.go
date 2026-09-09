@@ -14,21 +14,23 @@ const MaxMemoryEntries = 500
 
 // LifecycleConfig controls the decay and prune cycle for learning memory.
 type LifecycleConfig struct {
-	DecayInterval  time.Duration // default 1h
-	PruneInterval  time.Duration // default 24h
-	DecayHalfLife  float64       // hours, default 168 (1 week)
-	PruneThreshold float64       // default 0.05
-	MaxMemory      int           // default 500 — hard capacity limit
+	DecayInterval    time.Duration // default 1h
+	PruneInterval    time.Duration // default 24h
+	DecayHalfLife    float64       // hours, default 168 (1 week)
+	PruneThreshold   float64       // default 0.05
+	MaxMemory        int           // default 500, hard live-record capacity
+	RetiredRetention time.Duration // default 30d before physical deletion
 }
 
 // DefaultLifecycleConfig returns sensible defaults for a personal shell.
 func DefaultLifecycleConfig() LifecycleConfig {
 	return LifecycleConfig{
-		DecayInterval:  1 * time.Hour,
-		PruneInterval:  24 * time.Hour,
-		DecayHalfLife:  168, // 1 week
-		PruneThreshold: 0.05,
-		MaxMemory:      MaxMemoryEntries,
+		DecayInterval:    1 * time.Hour,
+		PruneInterval:    24 * time.Hour,
+		DecayHalfLife:    168, // 1 week
+		PruneThreshold:   0.05,
+		MaxMemory:        MaxMemoryEntries,
+		RetiredRetention: 30 * 24 * time.Hour,
 	}
 }
 

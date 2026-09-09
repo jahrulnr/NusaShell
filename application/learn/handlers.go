@@ -298,15 +298,24 @@ func userNodeLabel(content string) string {
 // snippet). Events that are pure UI query noise (search, graph_load) are
 // excluded.
 func (s *Service) HandleLearningLog(req contracts.LearningLogRequest) (any, *contracts.RPCError) {
-	events := ReadTrajectory(s.deps.DataDir, req.Limit)
+	events, nextCursor, hasMore := ReadTrajectoryPage(s.deps.DataDir, req.Limit, req.Cursor)
 
-	// Conversation title lookup for review events. Build once from the
-	// store (conversation counts are small) rather than per event.
+	// Resolve only the conversations referenced by this bounded page. Loading
+	// every conversation made a small log request progressively slower as the
+	// user's unrelated conversation history grew.
 	titles := map[string]string{}
 	if s.deps.Conversations != nil {
-		for _, c := range s.deps.Conversations.List() {
-			if c.Title != "" {
-				titles[c.ID] = c.Title
+		for _, event := range events {
+			convID, _ := event.Detail["conversation"].(string)
+			if convID == "" {
+				continue
+			}
+			if _, seen := titles[convID]; seen {
+				continue
+			}
+			titles[convID] = ""
+			if conversation, err := s.deps.Conversations.Get(convID); err == nil && conversation != nil {
+				titles[convID] = conversation.Title
 			}
 		}
 	}
@@ -381,7 +390,7 @@ func (s *Service) HandleLearningLog(req contracts.LearningLogRequest) (any, *con
 		}
 		out = append(out, entry)
 	}
-	return contracts.LearningLogResult{Entries: out}, nil
+	return contracts.LearningLogResult{Entries: out, NextCursor: nextCursor, HasMore: hasMore}, nil
 }
 
 func (s *Service) HandleLearningJobsList() (any, *contracts.RPCError) {
