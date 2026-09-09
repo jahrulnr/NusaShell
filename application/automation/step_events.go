@@ -466,18 +466,38 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// extractReplyText prefers a structured final output: when the agent emits
-// {"reply": "..."} (output_schema JSON), only the reply text is delivered;
-// anything else (working narrative, empty) falls back to the raw detail.
+// extractReplyText renders the agent's final output whatever the model
+// produced (LLMs are unpredictable): object JSON {-reply-}, double-encoded
+// JSON string, fenced json block, or plain text. It always returns a
+// deliverable string for sendable final output — nothing is rejected on
+// shape, and the empty string only means an empty model output.
 func extractReplyText(detail string) string {
-	if detail == "" || detail[0] != '{' {
-		return detail
+	s := strings.TrimSpace(detail)
+	if s == "" {
+		return ""
 	}
+	// Unwrap one level of JSON string (double-encoded output).
+	if strings.HasPrefix(s, "\"") {
+		var inner string
+		if err := json.Unmarshal([]byte(s), &inner); err == nil {
+			return extractReplyText(inner)
+		}
+	}
+	// Strip a markdown/json fence if present.
+	body := s
+	if strings.HasPrefix(s, "```") {
+		body = strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(s, "```"), "```"))
+		if idx := strings.IndexByte(body, '\n'); idx >= 0 && strings.Contains(body[:idx], "json") {
+			body = body[idx+1:]
+		}
+	}
+	// Structured reply object.
 	var structured struct {
 		Reply string `json:"reply"`
 	}
-	if err := json.Unmarshal([]byte(detail), &structured); err == nil && strings.TrimSpace(structured.Reply) != "" {
-		return structured.Reply
+	if json.Unmarshal([]byte(body), &structured) == nil && strings.TrimSpace(structured.Reply) != "" {
+		return strings.TrimSpace(structured.Reply)
 	}
-	return detail
+	// Plain text: deliver as-is (fence already stripped).
+	return body
 }

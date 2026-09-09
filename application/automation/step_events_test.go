@@ -289,3 +289,18 @@ func TestNotifyDetailLevelsFilterKinds(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractReplyTextToleratesAnyModelOutput(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`{"reply":"hai"}`, "hai"},
+		{`"{\"reply\":\"hai\"}"`, "hai"},
+		{"```json\n{\"reply\":\"hai\"}\n```", "hai"},
+		{"hai tuan, siap!", "hai tuan, siap!"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := extractReplyText(tc.in); got != tc.want {
+			t.Fatalf("extractReplyText(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
