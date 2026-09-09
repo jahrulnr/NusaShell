@@ -23,9 +23,21 @@ defaults:
 env:
   KEY: value
 webhook_url: https://example.invalid/hook
+notify:
+  plugin: nusashell.telegram   # optional; trusted|privileged only
+  detail: tools                # none | tools | text | all (default tools)
+  chat_id: "${event.chat_id}"  # optional template; unresolved → skip
 triggers: []
 jobs: {}
 ```
+
+`notify:` streams agent-step lifecycle (observer events: run/step/tool_call
+pre+post via CallID, reasoning/text per round) to a plugin's host-internal
+progress tool (`internal_send_progress`, fallback `admin.send_progress`).
+Sinks are side-effect only, async best-effort, and never block or fail the
+run; unresolved `chat_id` skips with `automation.notify.skipped`. Plugin
+tools named `internal_*` or `admin.*` are hidden from all agent tool
+listings and cannot be invoked by agents.
 
 `name`, `jobs`, and a valid trigger/step shape are required by syntax
 validation. Each trigger item must choose exactly one of `once`, `every`,

@@ -223,6 +223,34 @@ The bad sequence activates an unreviewed workflow, blocks the conversation
 without an explicit test request, polls instead of subscribing to an event,
 and omits the required diagnosis context.
 
+## Agent observers, notify, and internal tools
+
+Agent steps emit **side-effect observer events** from the turn loop (per-event
+registry, FIFO): `run`/`step`/`tool_call` pre+post pairs (tool calls carry a
+`CallID`), plus `reasoning`/`text` once per round. Observers can only observe —
+no veto or argument rewriting (control/middleware hooks are a separate future
+mechanism). A slow observer never blocks or fails the run.
+
+`notify:` streams that lifecycle into a chat via a host-internal MCP tool:
+
+```yaml
+trust: trusted # notify requires trust: trusted|privileged
+notify:
+  plugin: nusashell.telegram   # target plugin
+  detail: tools                # none | tools | text | all (default tools)
+  chat_id: "${event.chat_id}"  # optional template; unresolved → skip (automation.notify.skipped)
+```
+
+- The observer calls `internal_send_progress` (fallback `admin.send_progress`)
+  on the plugin: tool pre opens a placeholder message, tool post edits it,
+  step post finalizes — at most one MCP call per tool round, best-effort.
+- Do not rely on a notification in workflow logic; it is observability only.
+
+**Internal MCP tools**: plugin tools named `internal_*` or `admin.*` are
+host-internal — they do NOT appear in the agent's `tool_list`/`mcp_search`
+and agents cannot call them. Never instruct an agent to call them (e.g. do
+not tell the model to use `internal_send_progress`).
+
 ## Output contract
 
 Always state:

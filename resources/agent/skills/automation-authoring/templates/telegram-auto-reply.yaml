@@ -4,6 +4,8 @@ version: 1
 name: replace-with-telegram-reply-name
 enabled: false
 trust: trusted
+# Optional: stream agent lifecycle into the chat as progress placeholders.
+# notify: {plugin: nusashell.telegram, detail: tools, chat_id: "${event.chat_id}"}
 # One conversation per chat + queue: concurrent inbound messages for the SAME
 # chat wait FIFO (never overlap), while different chats never block each other.
 # Change policy to allow/skip/replace when the workflow's semantics differ;
