@@ -529,7 +529,7 @@ must be logged in and running. The agent must use:
 mcp_list()
 mcp_search(query="read Telegram message by exact chat and message identity", server="nusashell.telegram")
 tool_schema(server="nusashell.telegram", tool="<returned name>")
-mcp_call(ref="<returned ref>", arguments_json="<schema-valid object>")
+mcp_call(ref="<returned ref>", arguments_json={<schema-valid object>})
 ```
 
 ### 6.3 GitHub PR review
@@ -675,6 +675,11 @@ an actionable retry policy.
 resumes after the due time, including after restart. Completed steps are not
 re-run when the workflow resumes. Use one durable wait rather than holding a
 shell process open.
+
+Event-triggered runs start asynchronously on a detached context: the event
+ingest path only persists the event and starts the run, so job execution
+(including long agent steps) is never bounded by the ingest caller's context
+or timeout. The same applies to event-waited runs resumed by a matching event.
 
 For an asynchronous run, the normal lifecycle is:
 
@@ -843,14 +848,14 @@ mcp_enable(id="<stopped provider, only after authorization>")
 mcp_search(query="<intent>", server="<provider>")
 tool_schema(server="<provider>", tool="<returned bare tool>")
 contract_read(id="<provider>")
-mcp_call(ref="<exact returned provider:tool ref>", arguments_json="<schema-valid JSON>")
+mcp_call(ref="<exact returned provider:tool ref>", arguments_json={<schema-valid JSON object>})
 ```
 
 Bad MCP sequence:
 
 ```text
-mcp_call(ref="nusashell.telegram:send_message", arguments_json="<guessed fields>")
-mcp_call(ref="mcp__github__create_review", arguments_json="{...}")
+mcp_call(ref="nusashell.telegram:send_message", arguments_json={guessed fields})
+mcp_call(ref="mcp__github__create_review", arguments_json={...})
 ```
 
 The bad calls guess a name/schema and bypass live discovery. A successful

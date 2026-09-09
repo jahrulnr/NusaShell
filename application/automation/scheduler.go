@@ -406,9 +406,20 @@ func (s *AutomationScheduler) IngestEvent(ctx context.Context, ev domain.Event) 
 				return fmt.Errorf("claim event wait %q: %w", rec.ID, err)
 			}
 			if claimed != nil && s.Exec != nil {
-				if err := s.Exec.Tick(ctx, claimed.WorkflowRunID); err != nil {
-					return fmt.Errorf("resume event wait run %q: %w", claimed.WorkflowRunID, err)
-				}
+				// Resume asynchronously too: the resume may run long agent
+				// steps and must not be bounded by the ingest caller's ctx.
+				go func(workflowRunID string) {
+					defer func() {
+						if recovered := recover(); recovered != nil {
+							s.emit("automation.wait-resume.failed", map[string]any{
+								"run_id": workflowRunID, "error": fmt.Sprintf("resume panicked: %v", recovered),
+							})
+						}
+					}()
+					if err := s.Exec.Tick(context.Background(), workflowRunID); err != nil {
+						s.emit("automation.wait-resume.failed", map[string]any{"run_id": workflowRunID, "error": err.Error()})
+					}
+				}(claimed.WorkflowRunID)
 			}
 		}
 	}
@@ -503,7 +514,12 @@ func (s *AutomationScheduler) startFromTrigger(ctx context.Context, w *domain.Wo
 				startErr = &runStartFailure{created: true, err: fmt.Errorf("start workflow run panicked: %v", recovered)}
 			}
 		}()
-		startErr = s.Exec.StartRun(ctx, run)
+		// Event-triggered runs must never execute inside the caller's context
+		// (the MCP notification path bounds IngestEvent with a short timeout).
+		// StartRunAsync persists the run and ticks it on a detached background
+		// context, so a long job such as an agent step survives the ingest
+		// call instead of being cancelled ~10s in by the caller's deadline.
+		startErr = s.Exec.StartRunAsync(context.WithoutCancel(ctx), run)
 	}()
 	if !lockHeld {
 		return startErr
