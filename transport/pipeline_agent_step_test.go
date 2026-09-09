@@ -24,7 +24,7 @@ func TestPipelineAgentStepRunsHeadlessTurn(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	out, _, err := h.app.RunHeadlessTurn(ctx, "lint all files in the workspace", "", domain.TrustSafe, nil)
+	out, _, err := h.app.RunHeadlessTurn(ctx, "lint all files in the workspace", "", domain.TrustSafe, nil, "")
 	if err != nil {
 		t.Fatalf("RunHeadlessTurn: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestPipelineAgentStepRespectsModelField(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	out, _, err := h.app.RunHeadlessTurn(ctx, "run checks", "", domain.TrustSafe, nil)
+	out, _, err := h.app.RunHeadlessTurn(ctx, "run checks", "", domain.TrustSafe, nil, "")
 	if err != nil {
 		t.Fatalf("RunHeadlessTurn: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestPipelineAgentStepFailsWithoutProvider(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, _, err := h.app.RunHeadlessTurn(ctx, "do work", "", domain.TrustSafe, nil)
+	_, _, err := h.app.RunHeadlessTurn(ctx, "do work", "", domain.TrustSafe, nil, "")
 	if err == nil || !strings.Contains(err.Error(), "no enabled provider") {
 		t.Fatalf("want no-enabled-provider error, got %v", err)
 	}
@@ -96,7 +96,7 @@ func TestPipelineAgentStepDoesNotAppearInRoomList(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, convID, err := h.app.RunHeadlessTurn(ctx, "lint the workspace", "", domain.TrustSafe, nil)
+	_, convID, err := h.app.RunHeadlessTurn(ctx, "lint the workspace", "", domain.TrustSafe, nil, "")
 	if err != nil {
 		t.Fatalf("RunHeadlessTurn: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestPipelineAgentStepRendersEventPlaceholders(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	out, convID, err := h.app.RunHeadlessTurn(ctx, rendered, "", domain.TrustSafe, nil)
+	out, convID, err := h.app.RunHeadlessTurn(ctx, rendered, "", domain.TrustSafe, nil, "")
 	if err != nil {
 		t.Fatalf("RunHeadlessTurn: %v", err)
 	}
