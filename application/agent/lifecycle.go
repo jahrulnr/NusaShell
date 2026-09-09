@@ -173,6 +173,9 @@ func (a *Service) emitToolCallPost(run *TurnRun, round int, call domainToolCallR
 
 // emitRoundContentObservers emits reasoning and text once per round (post)
 // from the completed provider response — not from mid-stream deltas.
+// Thinking / reasoning blocks fold into AgentEventReasoning via the plaintext
+// Reasoning string (core.Response.Reasoning()); opaque ReasoningExtra is not
+// observer-visible and must not get a separate "thinking" kind.
 func (a *Service) emitRoundContentObservers(run *TurnRun, round int, reasoning, content string) {
 	if r := strings.TrimSpace(reasoning); r != "" {
 		a.emitHeadlessEvent(run, AgentLifecycleEvent{
