@@ -211,6 +211,12 @@ func (s *ExecutionScheduler) Tick(ctx context.Context, runID string) error {
 	if run.Status.IsTerminal() {
 		return nil
 	}
+	if s.isQueuedRun(runID) {
+		// Queued runs are parked behind a busy key; only the queue wake-up
+		// path may start them. A periodic/detached Tick must not steal the
+		// job while the lock is held elsewhere.
+		return nil
+	}
 	if run.Status == domain.StatusWaiting {
 		if run.WakeAt != nil && s.now().Before(*run.WakeAt) {
 			return nil

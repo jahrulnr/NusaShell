@@ -248,7 +248,11 @@ func (s *ExecutionScheduler) enqueueRun(ctx context.Context, run *domain.Workflo
 	s.enqueueWaiterLocked(key, waiter)
 	s.lockMu.Unlock()
 
-	run.StartRun(s.now())
+	// A queued run is NOT running: storing it as running lets periodic
+	// Tick passes start its jobs without holding the key. Mark it queued.
+	now := s.now()
+	run.StartRun(now)
+	run.Status = domain.StatusQueued
 	if err := s.Runs.Create(ctx, run); err != nil {
 		s.lockMu.Lock()
 		s.removeWaiterLocked(key, run.ID)
@@ -317,6 +321,20 @@ func (s *ExecutionScheduler) finalizeSkippedRun(ctx context.Context, run *domain
 		"run_id": run.ID, "workflow_id": run.WorkflowID, "reason": reason,
 	})
 	return nil
+}
+
+// isQueuedRun reports whether runID is still waiting in an in-memory queue.
+func (s *ExecutionScheduler) isQueuedRun(runID string) bool {
+	s.lockMu.Lock()
+	defer s.lockMu.Unlock()
+	for _, q := range s.queueByKey {
+		for _, w := range q {
+			if w.runID == runID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // abandonQueuedRun cancels an in-memory queue waiter for runID (used by
