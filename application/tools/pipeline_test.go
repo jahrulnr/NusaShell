@@ -110,7 +110,7 @@ func TestFilteredToolboxExecuteStreamedFallback(t *testing.T) {
 func TestPipelineAgentRunnerDoesNotLeakACP(t *testing.T) {
 	inner := &listingToolbox{names: []string{"subagent", "automation"}}
 	runner := NewPipelineAgentRunner(inner, nil)
-	_, _, err := runner.RunAgentStep(context.Background(), "do work", "", domain.TrustSafe, nil, "")
+	_, _, err := runner.RunAgentStep(context.Background(), "do work", "", domain.TrustSafe, nil, "", nil)
 	if err == nil || !strings.Contains(err.Error(), "agent steps are not configured") {
 		t.Fatalf("want not-configured after hiding ACP, got %v", err)
 	}
@@ -129,5 +129,21 @@ func TestInteractiveToolboxKeepsACPTools(t *testing.T) {
 	}
 	if !names["subagent"] {
 		t.Fatal("interactive agent must still see subagent when ACP is enabled")
+	}
+}
+
+func TestFilterPipelineToolsHidesInternalAndAskQuestion(t *testing.T) {
+	inner := &listingToolbox{names: []string{"exec", "ask_question", "internal_send_progress", "admin.send_progress", "subagent"}}
+	filtered := FilterPipelineTools(inner)
+	for _, ti := range filtered.ListTools() {
+		if IsPipelineBannedTool(ti.Name) {
+			t.Fatalf("pipeline listed banned tool %q", ti.Name)
+		}
+	}
+	if _, err := filtered.Execute(context.Background(), "internal_send_progress", nil); err == nil {
+		t.Fatal("expected deny for internal tool")
+	}
+	if _, err := filtered.Execute(context.Background(), "admin.send_progress", nil); err == nil {
+		t.Fatal("expected deny for admin tool")
 	}
 }

@@ -177,6 +177,7 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: toolpresentation.ToolArgsRaw(toolCall.Args),
 		Presentation: toolpresentation.BuildToolPresentation(toolCall.Name, toolCall.Args, domain.ToolRunning, ""),
 	})
+	a.notifyLifecycleToolStart(run.ID, round, toolCall.Name, toolCall.Args)
 	a.log("info", "tools", "tool call: %s", toolCall.Name)
 
 	// If the turn was already cancelled, do not start the tool — mark it
@@ -298,6 +299,11 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 	}
 	a.emitToolCompleted(run, toolCall, res)
 	a.emitLearningMutationEvents(toolCall.Name, status)
+	statusStr := "ok"
+	if status == domain.ToolFailed || status == domain.ToolInterrupted {
+		statusStr = "error"
+	}
+	a.notifyLifecycleToolEnd(run, round, toolCall.Name, statusStr, output)
 	return res
 }
 

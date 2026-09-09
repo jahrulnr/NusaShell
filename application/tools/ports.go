@@ -92,6 +92,9 @@ type DocFull struct {
 // (no Steer): tools must not import automation. *App still satisfies both.
 // conversationID, when non-empty, resumes that existing automation
 // conversation instead of starting a fresh transcript (agent-step reuse).
+// onUpdate, when non-nil, is called with the conversation ID as soon as the
+// turn is registered (and again at safe round boundaries) so callers can
+// steer while StatusRunning.
 type HeadlessTurnRunner interface {
-	RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error)
+	RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string, onUpdate func(conversationID string)) (map[string]any, string, error)
 }

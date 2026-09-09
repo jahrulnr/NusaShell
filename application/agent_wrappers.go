@@ -42,6 +42,8 @@ type (
 	toolExecResult         = agent.ToolExecResult
 	conversationRules      = agent.ConversationRules
 	repeatedToolGuard      = agent.RepeatedToolGuard
+	AgentLifecycleEvent    = agent.AgentLifecycleEvent
+	AgentLifecycleListener = agent.AgentLifecycleListener
 )
 
 var (
@@ -208,6 +210,12 @@ func (a *App) agentService() *agent.Service {
 	return a.agentSvc
 }
 
+// AddAgentLifecycleListener registers a headless automation lifecycle listener
+// on the shared agent service.
+func (a *App) AddAgentLifecycleListener(fn AgentLifecycleListener) {
+	a.agentService().AddAgentLifecycleListener(fn)
+}
+
 func (a *App) agentDeps() agent.Deps {
 	if a.runs == nil {
 		a.runs = map[string]*TurnRun{}
@@ -316,8 +324,8 @@ func (a *App) publishAnnouncementToAll(ev Announcement, skipConvID string) {
 func (a *App) drainAnnouncements(run *TurnRun) (bool, error) {
 	return a.agentService().DrainAnnouncements(run)
 }
-func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error) {
-	return a.agentService().RunHeadlessTurnIn(ctx, prompt, model, trust, schema, conversationID)
+func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string, onUpdate func(conversationID string)) (map[string]any, string, error) {
+	return a.agentService().RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, AgentAutomation, conversationID, onUpdate)
 }
 func (a *App) RunHeadlessTurnIn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error) {
 	return a.agentService().RunHeadlessTurnIn(ctx, prompt, model, trust, schema, conversationID)

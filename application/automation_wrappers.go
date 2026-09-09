@@ -40,6 +40,9 @@ type (
 	MCPToolCaller       = automation.MCPToolCaller
 	AgentStepRunner     = automation.AgentStepRunner
 	HeadlessTurnRunner  = automation.HeadlessTurnRunner
+	StepEventSink       = automation.StepEventSink
+	StepLifecycleEvent  = automation.StepLifecycleEvent
+	NotifyProgressSink  = automation.NotifyProgressSink
 	DebounceStore       = automation.DebounceStore
 	ProviderStateStore  = automation.ProviderStateStore
 	RunNotifier         = automation.RunNotifier
@@ -58,6 +61,7 @@ var (
 	NewAutomationStore    = automation.NewAutomationStore
 	NewExecutionScheduler = automation.NewExecutionScheduler
 	NewWorkflowRun        = automation.NewWorkflowRun
+	NewNotifyProgressSink = automation.NewNotifyProgressSink
 )
 
 func (a *App) handleAutomation(ctx context.Context, method string, payload json.RawMessage) (any, *contracts.RPCError) {

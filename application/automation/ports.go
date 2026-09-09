@@ -203,8 +203,10 @@ type MCPToolCaller interface {
 // Returns the step outputs and the headless conversation ID (for steer).
 // conversationID, when non-empty, resumes that existing automation
 // conversation instead of starting a fresh transcript (agent-step reuse).
+// onUpdate is invoked with the conversation ID while the step is running so
+// automation(op=steer) can target it before RunAgentStep returns.
 type AgentStepRunner interface {
-	RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error)
+	RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string, onUpdate func(conversationID string)) (map[string]any, string, error)
 }
 
 // ConversationKeyStore persists the mapping from a workflow-scoped rendered
@@ -221,7 +223,7 @@ type ConversationKeyStore interface {
 // conversationID, when non-empty, resumes that existing automation
 // conversation instead of starting a fresh transcript (agent-step reuse).
 type HeadlessTurnRunner interface {
-	RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error)
+	RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string, onUpdate func(conversationID string)) (map[string]any, string, error)
 	SteerHeadlessTurn(conversationID, text string) error
 }
 

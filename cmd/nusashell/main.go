@@ -196,6 +196,7 @@ func run() error {
 	}
 
 	mcpManager := mcpclient.NewManager()
+	agentMCP := application.NewFilteringMCP(mcpManager)
 	bus := application.NewBus()
 	askService := application.NewAskQuestionService()
 	// The todo store mirrors each conversation's planning brief to a
@@ -281,7 +282,7 @@ func run() error {
 		Settings:               &jsonstore.Settings{S: store},
 		Credentials:            credentials,
 		AskQuestions:           askService,
-		MCP:                    mcpManager,
+		MCP:                    agentMCP,
 		Contracts:              tools.NewFileContractReader(),
 		SpeechOfflineAvailable: ai.OfflineSpeechAvailable(dataDir),
 	}
@@ -312,7 +313,7 @@ func run() error {
 		Bus:                         bus,
 		AskQuestions:                askService,
 		Toolbox:                     tb,
-		MCPToolbox:                  mcpManager,
+		MCPToolbox:                  agentMCP,
 		Factory:                     ai.NewFactory(credentials),
 		CodexSearchFactory:          ai.NewCodexSearchFactory(credentials),
 		ImageGeneratorFactory:       ai.NewImageGeneratorFactory(credentials),
@@ -344,7 +345,7 @@ func run() error {
 	tb.SkillSearcher = app
 	tb.Conversations = app
 	var autoSvc *application.Automation
-	if svc, autoDB, err := automation.BuildAutomation(dataDir, bus, pluginStore, mcpManager, mcpManager); err != nil {
+	if svc, autoDB, err := automation.BuildAutomation(dataDir, bus, pluginStore, agentMCP, mcpManager); err != nil {
 		slog.Warn("automation store init failed", "error", err)
 	} else {
 		autoSvc = svc
@@ -353,6 +354,20 @@ func run() error {
 		tb.Automation = svc
 		svc.Exec.Go = func(source string, fn func()) { app.GoSafe(source, fn) }
 		svc.Exec.Agent = application.NewPipelineAgentRunner(tb, app)
+		notifySink := application.NewNotifyProgressSink(mcpManager, bus)
+		svc.Exec.AddStepEventSink(notifySink)
+		app.AddAgentLifecycleListener(func(ev application.AgentLifecycleEvent) {
+			svc.Exec.ForwardAgentLifecycle(application.StepLifecycleEvent{
+				Type:           ev.Type,
+				ConversationID: ev.ConversationID,
+				AgentRunID:     ev.RunID,
+				Round:          ev.Round,
+				ToolName:       ev.ToolName,
+				Status:         ev.Status,
+				Detail:         ev.Detail,
+				Error:          ev.Error,
+			})
+		})
 		if loaded, err := svc.DiscoverPipelines(context.Background()); err != nil {
 			slog.Warn("pipeline discovery failed", "error", err)
 		} else if len(loaded) > 0 {

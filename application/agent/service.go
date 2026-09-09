@@ -46,6 +46,10 @@ type Service struct {
 	pendingRuns         map[string]map[string]string
 	announcementLocksMu sync.Mutex
 	announcementLocks   map[string]*sync.Mutex
+
+	lifecycleMu        sync.Mutex
+	lifecycleListeners []AgentLifecycleListener
+	lifecycleGate      lifecycleRoundGate
 }
 
 // New builds an agent Service from Deps. Runs / RoundStreams / AskQuestions

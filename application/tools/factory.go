@@ -74,6 +74,8 @@ type ToolFactory struct {
 }
 
 // Get returns the tool definitions advertised to the agent kind.
+// Host-internal tools (internal_*, admin.*) are stripped for every kind
+// so no agent personality can discover or call them via the factory list.
 func (f *ToolFactory) Get(kind AgentKind, workspace string) []ToolInfo {
 	if kind == AgentCompaction {
 		// The compaction agent advertises exactly one tool and never
@@ -84,16 +86,18 @@ func (f *ToolFactory) Get(kind AgentKind, workspace string) []ToolInfo {
 	if f == nil || f.Toolbox == nil {
 		return nil
 	}
+	var defs []ToolInfo
 	switch kind {
 	case AgentLearner, AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator:
-		return WithLearnerResultTool(filterLearnerToolInfos(f.baseTools(workspace)))
+		defs = WithLearnerResultTool(filterLearnerToolInfos(f.baseTools(workspace)))
 	case AgentAutomation:
-		return filterHeadlessToolInfos(f.baseTools(workspace))
+		defs = filterHeadlessToolInfos(f.baseTools(workspace))
 	case AgentDelegate:
-		return filterHeadlessToolInfos(f.baseTools(workspace))
+		defs = filterHeadlessToolInfos(f.baseTools(workspace))
 	default:
-		return f.baseTools(workspace)
+		defs = f.baseTools(workspace)
 	}
+	return FilterInternalTools(defs)
 }
 
 // baseTools assembles the shared toolbox + optional compatibility dispatcher

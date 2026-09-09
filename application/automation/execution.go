@@ -46,6 +46,9 @@ type ExecutionScheduler struct {
 	lockMu     sync.Mutex
 	heldLocks  map[string]concurrencyHeld      // runID -> held key
 	queueByKey map[string][]*concurrencyWaiter // rendered key -> FIFO waiters
+
+	stepSinks    []StepEventSink
+	activeByConv *sync.Map // conversationID -> *activeAgentStep
 }
 
 func NewExecutionScheduler() *ExecutionScheduler {
@@ -432,17 +435,6 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) (e
 				convID string
 				err    error
 			}
-			agentDone := make(chan agentOutcome, 1)
-			go func() {
-				outcome := agentOutcome{}
-				defer func() {
-					if r := recover(); r != nil {
-						outcome.err = fmt.Errorf("agent step panicked: %v", r)
-					}
-					agentDone <- outcome
-				}()
-				outcome.out, outcome.convID, outcome.err = s.Agent.RunAgentStep(jobCtx, prompt, step.Agent.Model, run.Definition.Trust, step.Agent.OutputSchema, conversationID)
-			}()
 			recordConversation := func(convID string) {
 				if convID == "" || convKey == "" || conversationID != "" || s.Convs == nil {
 					return
@@ -453,6 +445,38 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) (e
 					})
 				}
 			}
+			agentDone := make(chan agentOutcome, 1)
+			go func() {
+				outcome := agentOutcome{}
+				defer func() {
+					if r := recover(); r != nil {
+						outcome.err = fmt.Errorf("agent step panicked: %v", r)
+					}
+					agentDone <- outcome
+				}()
+				onUpdate := func(id string) {
+					if id == "" {
+						return
+					}
+					// Persist ConversationID while StatusRunning so
+					// automation(op=steer) can target the live turn.
+					mu := s.lockRun(run.ID)
+					mu.Lock()
+					sr.ConversationID = id
+					mu.Unlock()
+					if err := s.persist(context.WithoutCancel(jobCtx), run); err != nil {
+						s.emit("automation.step-conversation.persist-failed", map[string]any{
+							"run_id": run.ID, "job_id": jobID, "step_id": sr.ID, "error": err.Error(),
+						})
+					}
+					recordConversation(id)
+					s.bindActiveAgentStep(id, run, jobID, sr.ID)
+				}
+				outcome.out, outcome.convID, outcome.err = s.Agent.RunAgentStep(jobCtx, prompt, step.Agent.Model, run.Definition.Trust, step.Agent.OutputSchema, conversationID, onUpdate)
+				if outcome.convID != "" {
+					s.unbindActiveAgentStep(outcome.convID)
+				}
+			}()
 			select {
 			case o := <-agentDone:
 				if o.err != nil {

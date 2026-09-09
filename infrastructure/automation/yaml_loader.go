@@ -37,6 +37,13 @@ func ParseYAML(raw []byte) (*domain.WorkflowDefinition, error) {
 		WebhookURL: strings.TrimSpace(doc.WebhookURL),
 		Source:     domain.WorkflowSource{Kind: "file"},
 	}
+	if doc.Notify != nil {
+		w.Notify = &domain.NotifyConfig{
+			Plugin: strings.TrimSpace(doc.Notify.Plugin),
+			Detail: domain.NotifyDetail(strings.TrimSpace(doc.Notify.Detail)),
+			ChatID: strings.TrimSpace(doc.Notify.ChatID),
+		}
+	}
 	if doc.Enabled != nil {
 		w.Enabled = *doc.Enabled
 	}
@@ -161,7 +168,14 @@ type yamlDoc struct {
 	Defaults    yamlDefaults       `yaml:"defaults"`
 	Env         map[string]string  `yaml:"env"`
 	WebhookURL  string             `yaml:"webhook_url"`
+	Notify      *yamlNotify        `yaml:"notify"`
 	Jobs        map[string]yamlJob `yaml:"jobs"`
+}
+
+type yamlNotify struct {
+	Plugin string `yaml:"plugin"`
+	Detail string `yaml:"detail"`
+	ChatID string `yaml:"chat_id"`
 }
 
 type yamlTriggerMap struct {

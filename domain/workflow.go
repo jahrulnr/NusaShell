@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // WorkflowDefinition is the canonical automation/pipeline document.
 // PipelineDefinition is a compatibility alias used by Automation-oriented APIs.
@@ -18,8 +21,58 @@ type WorkflowDefinition struct {
 	Jobs        []Job
 	Source      WorkflowSource
 	WebhookURL  string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// Notify optionally forwards headless agent-step lifecycle to an MCP
+	// plugin (host-side; the agent never calls send_message itself). Nil or
+	// empty Plugin means disabled. Allowed only on trusted/privileged workflows.
+	Notify    *NotifyConfig
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// NotifyDetail controls how much of an agent step's lifecycle is forwarded.
+type NotifyDetail string
+
+const (
+	// NotifyDetailNone forwards only step start/end.
+	NotifyDetailNone NotifyDetail = "none"
+	// NotifyDetailTools forwards step boundaries plus one progress call per
+	// tool-call round (default).
+	NotifyDetailTools NotifyDetail = "tools"
+	// NotifyDetailText forwards step boundaries plus throttled text/reasoning.
+	NotifyDetailText NotifyDetail = "text"
+	// NotifyDetailAll forwards tools and text/reasoning detail.
+	NotifyDetailAll NotifyDetail = "all"
+)
+
+// NotifyConfig is the top-level `notify:` block on a workflow definition.
+type NotifyConfig struct {
+	// Plugin is the MCP plugin id that receives progress (e.g. nusashell.telegram).
+	Plugin string
+	// Detail selects the event detail level. Empty means tools.
+	Detail NotifyDetail
+	// ChatID is an optional ${event.*} template for the delivery target.
+	// When empty or unresolved, the forwarder skips delivery.
+	ChatID string
+}
+
+// NormalizedDetail returns the effective notify detail (default tools).
+func (n *NotifyConfig) NormalizedDetail() NotifyDetail {
+	if n == nil {
+		return NotifyDetailTools
+	}
+	switch n.Detail {
+	case NotifyDetailNone, NotifyDetailTools, NotifyDetailText, NotifyDetailAll:
+		return n.Detail
+	case "":
+		return NotifyDetailTools
+	default:
+		return n.Detail
+	}
+}
+
+// Enabled reports whether notify is configured with a plugin target.
+func (n *NotifyConfig) Enabled() bool {
+	return n != nil && strings.TrimSpace(n.Plugin) != ""
 }
 
 // PipelineDefinition is the Automation-facing name for a workflow.

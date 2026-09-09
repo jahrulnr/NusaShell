@@ -246,3 +246,42 @@ func TestValidateReuseConcurrency(t *testing.T) {
 		t.Fatalf("reuse+workflow-scoped+skip must be VALID, got %+v", r.Issues)
 	}
 }
+
+func TestValidateNotify(t *testing.T) {
+	ok := &WorkflowDefinition{
+		Name:   "n",
+		Trust:  TrustTrusted,
+		Notify: &NotifyConfig{Plugin: "nusashell.telegram", Detail: NotifyDetailTools, ChatID: "${event.chat_id}"},
+		Jobs:   []Job{{ID: "j", Steps: []Step{{Run: "echo"}}}},
+	}
+	if r := ValidateSyntax(ok); r.Verdict() == "INVALID" {
+		t.Fatalf("trusted notify must be VALID: %+v", r.Issues)
+	}
+	untrusted := &WorkflowDefinition{
+		Name:   "n",
+		Trust:  TrustSafe,
+		Notify: &NotifyConfig{Plugin: "nusashell.telegram"},
+		Jobs:   []Job{{ID: "j", Steps: []Step{{Run: "echo"}}}},
+	}
+	if r := ValidateSyntax(untrusted); r.Verdict() != "INVALID" {
+		t.Fatalf("notify on safe trust must be INVALID")
+	}
+	badDetail := &WorkflowDefinition{
+		Name:   "n",
+		Trust:  TrustTrusted,
+		Notify: &NotifyConfig{Plugin: "tg", Detail: "loud"},
+		Jobs:   []Job{{ID: "j", Steps: []Step{{Run: "echo"}}}},
+	}
+	if r := ValidateSyntax(badDetail); r.Verdict() != "INVALID" {
+		t.Fatalf("unknown notify.detail must be INVALID")
+	}
+	missingPlugin := &WorkflowDefinition{
+		Name:   "n",
+		Trust:  TrustTrusted,
+		Notify: &NotifyConfig{},
+		Jobs:   []Job{{ID: "j", Steps: []Step{{Run: "echo"}}}},
+	}
+	if r := ValidateSyntax(missingPlugin); r.Verdict() != "INVALID" {
+		t.Fatalf("notify without plugin must be INVALID")
+	}
+}

@@ -41,7 +41,7 @@ type recordingAgentRunner struct {
 	calls []string
 }
 
-func (r *recordingAgentRunner) RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error) {
+func (r *recordingAgentRunner) RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string, onUpdate func(string)) (map[string]any, string, error) {
 	r.mu.Lock()
 	r.calls = append(r.calls, conversationID)
 	created := "conv-fresh"
@@ -129,7 +129,7 @@ type busyAgentRunner struct {
 	once    sync.Once
 }
 
-func (b *busyAgentRunner) RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error) {
+func (b *busyAgentRunner) RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string, onUpdate func(string)) (map[string]any, string, error) {
 	b.once.Do(func() { close(b.started) })
 	_ = blockOrCtx(ctx, b.block)
 	return map[string]any{"output": "done"}, "conv-busy", nil

@@ -400,6 +400,16 @@ since the search; run `mcp_search` again and retry. If it returns
 `MISSING_ARGS`, the tool's schema declares required fields but the call
 arrived with empty arguments — load `tool_schema`, then retry with the
 required fields as a JSON object.
+
+### Host-internal MCP tools
+
+MCP has no hidden-tool concept. NusaShell applies a host-side policy: plugin
+tools whose name starts with `internal_` or `admin.` are host-internal. They
+are omitted from every agent's advertised lists (`tool_list`, `mcp_search`,
+factory `Get` for conversation/automation/delegate/learner) and cannot be
+executed by agents. The host may still call them via the MCPToolCaller path
+(for example automation `notify:` progress forwarding).
+
 When at least one ACP agent is enabled, the interactive toolbox also advertises
 `subagent`, `subagent_steer`, `subagent_stop`, and `subagent_wait`. ACP agents
 do not receive this conversation, NusaShell MCP plugins, or shell meta-tools.

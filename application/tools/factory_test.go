@@ -34,6 +34,8 @@ func factoryStubTools() []ToolInfo {
 		{Name: "subagent_wait"},
 		{Name: "delegate"},
 		{Name: "automation"},
+		{Name: "internal_send_progress"},
+		{Name: "admin.send_progress"},
 	}
 }
 
@@ -110,8 +112,24 @@ func TestToolFactoryAutomationAgentOmitsACPTools(t *testing.T) {
 	if hasTool(defs, "ask_question") {
 		t.Fatalf("automation agent must not see human-in-the-loop ask_question, got %v", namesOf(defs))
 	}
+	if hasTool(defs, "internal_send_progress") || hasTool(defs, "admin.send_progress") {
+		t.Fatalf("automation agent must not see host-internal tools, got %v", namesOf(defs))
+	}
 	if !hasTool(defs, "automation") || !hasTool(defs, "exec") {
 		t.Fatalf("automation agent must keep automation/exec tools, got %v", namesOf(defs))
+	}
+}
+
+func TestToolFactoryAllKindsHideInternalTools(t *testing.T) {
+	f := &ToolFactory{
+		Toolbox:     func() []ToolInfo { return factoryStubTools() },
+		Dispatchers: FilterDispatcherToolInfos,
+	}
+	for _, kind := range []AgentKind{AgentConversation, AgentAutomation, AgentDelegate, AgentLearner} {
+		defs := f.Get(kind, "/ws")
+		if hasTool(defs, "internal_send_progress") || hasTool(defs, "admin.send_progress") {
+			t.Fatalf("%s must not advertise host-internal tools, got %v", kind, namesOf(defs))
+		}
 	}
 }
 

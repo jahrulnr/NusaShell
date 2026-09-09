@@ -44,6 +44,7 @@ func ValidateSyntax(w *WorkflowDefinition) ValidationResult {
 		validateJob(&r, i, j)
 	}
 	validateReuseConcurrency(&r, w)
+	validateNotify(&r, w)
 	if len(w.Jobs) > 0 {
 		_, dagIssues := BuildDAG(w.Jobs)
 		for _, issue := range dagIssues {
@@ -89,6 +90,36 @@ func validateReuseConcurrency(r *ValidationResult, w *WorkflowDefinition) {
 				})
 			}
 		}
+	}
+}
+
+// validateNotify enforces notify: grammar and trust gate. Notify is a
+// host-side progress forwarder and is only allowed on trusted/privileged
+// workflows (it can invoke MCP plugins with side effects).
+func validateNotify(r *ValidationResult, w *WorkflowDefinition) {
+	if w == nil || r == nil || w.Notify == nil {
+		return
+	}
+	n := w.Notify
+	if strings.TrimSpace(n.Plugin) == "" {
+		r.Add(ValidationIssue{Path: "notify.plugin", Code: "missing_notify_plugin", Message: "notify.plugin is required when notify is set", Level: ValidationSyntax})
+	}
+	switch n.Detail {
+	case "", NotifyDetailNone, NotifyDetailTools, NotifyDetailText, NotifyDetailAll:
+	default:
+		r.Add(ValidationIssue{Path: "notify.detail", Code: "invalid_notify_detail", Message: "notify.detail must be none, tools, text, or all", Level: ValidationSyntax})
+	}
+	trust := w.Trust
+	if trust == "" {
+		trust = TrustSafe
+	}
+	if trust != TrustTrusted && trust != TrustPrivileged {
+		r.Add(ValidationIssue{
+			Path:    "notify",
+			Code:    "notify_requires_trust",
+			Message: "notify is only allowed on trusted or privileged workflows",
+			Level:   ValidationSyntax,
+		})
 	}
 }
 

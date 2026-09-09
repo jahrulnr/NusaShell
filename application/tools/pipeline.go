@@ -25,13 +25,16 @@ func IsACPTool(name string) bool {
 // a human answers in the Agent UI. No operator is at the dock for a headless
 // turn, so exposing any of them stalls the run until its context is cancelled.
 func IsPipelineBannedTool(name string) bool {
-	return IsACPTool(name) || name == "ask_question"
+	return IsACPTool(name) || name == "ask_question" || IsInternalToolName(name)
 }
 
 // IsLearnerBannedTool reports tools the learner must neither advertise nor
-// execute: project memory, ACP/delegate, and the MCP family (including
-// discovery companions that only serve MCP).
+// execute: project memory, ACP/delegate, host-internal tools, and the MCP
+// family (including discovery companions that only serve MCP).
 func IsLearnerBannedTool(name string) bool {
+	if IsInternalToolName(name) {
+		return true
+	}
 	switch name {
 	case "memory_project", "delegate", "tool_list", "tool_schema", "contract_read":
 		return true
@@ -108,6 +111,13 @@ func FilterPipelineTools(inner ToolExecutor) *FilteredToolbox {
 	return &FilteredToolbox{Inner: inner, Hide: IsPipelineBannedTool}
 }
 
+// FilterInternalToolsExec hides host-internal tool names from ListTools and
+// Execute. Use when wrapping a toolbox that may expose MCP plugin tools by
+// bare name (or any executor that can surface internal_* / admin.* tools).
+func FilterInternalToolsExec(inner ToolExecutor) *FilteredToolbox {
+	return &FilteredToolbox{Inner: inner, Hide: IsInternalToolName}
+}
+
 func (f *FilteredToolbox) ListTools() []ToolInfo {
 	if f == nil || f.Inner == nil {
 		return nil
@@ -168,7 +178,7 @@ func NewPipelineAgentRunner(inner ToolExecutor, turns HeadlessTurnRunner) *Pipel
 	return &PipelineAgentRunner{Tools: FilterPipelineTools(inner), Turns: turns}
 }
 
-func (r *PipelineAgentRunner) RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error) {
+func (r *PipelineAgentRunner) RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string, onUpdate func(conversationID string)) (map[string]any, string, error) {
 	if r == nil || r.Tools == nil {
 		return nil, "", fmt.Errorf("agent steps are not configured")
 	}
@@ -180,7 +190,7 @@ func (r *PipelineAgentRunner) RunAgentStep(ctx context.Context, prompt, model st
 	if r.Turns == nil {
 		return nil, "", fmt.Errorf("agent steps are not configured")
 	}
-	return r.Turns.RunHeadlessTurn(ctx, prompt, model, trust, schema, conversationID)
+	return r.Turns.RunHeadlessTurn(ctx, prompt, model, trust, schema, conversationID, onUpdate)
 }
 
 // filterHeadlessToolInfos removes pipeline-banned tools (ACP subagent tools

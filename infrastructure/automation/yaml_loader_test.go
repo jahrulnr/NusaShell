@@ -230,3 +230,39 @@ jobs:
 		t.Fatalf("%+v", n)
 	}
 }
+
+func TestParseYAMLNotify(t *testing.T) {
+	w, err := ParseYAML([]byte(`
+name: notify-demo
+trust: trusted
+notify:
+  plugin: nusashell.telegram
+  detail: all
+  chat_id: "${event.chat_id}"
+jobs:
+  j:
+    steps:
+      - run: echo hi
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Notify == nil || w.Notify.Plugin != "nusashell.telegram" {
+		t.Fatalf("notify = %+v", w.Notify)
+	}
+	if w.Notify.Detail != domain.NotifyDetailAll || w.Notify.ChatID != "${event.chat_id}" {
+		t.Fatalf("notify fields = %+v", w.Notify)
+	}
+	if _, err := ParseYAML([]byte(`
+name: bad
+notify:
+  plugin: tg
+  unknown_key: x
+jobs:
+  j:
+    steps:
+      - run: echo
+`)); err == nil {
+		t.Fatal("expected unknown notify key to be rejected")
+	}
+}

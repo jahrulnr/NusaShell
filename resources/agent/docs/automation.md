@@ -844,11 +844,33 @@ Report the name, ID, level, trigger, validation verdict, enabled state, blocked
 provider, run ID, final status, and external evidence. If no message/review/
 card change was observed, say that no delivery or mutation was claimed.
 
-## 11. Webhooks, logs, and recovery
+## 11. Webhooks, notify progress, logs, and recovery
 
 `webhook_url` receives a bounded completion/failure JSON summary with a
 10-second timeout. A webhook delivery failure becomes an automation event and
 does not block the run. Do not place bearer tokens or secrets in the URL.
+
+### Host-side `notify:` progress (trusted workflows)
+
+Optional top-level `notify:` forwards headless agent-step lifecycle to an MCP
+plugin without the agent calling `send_message` itself:
+
+```yaml
+trust: trusted
+notify:
+  plugin: nusashell.telegram          # required MCP plugin id
+  detail: tools                       # none | tools (default) | text | all
+  chat_id: "${event.chat_id}"         # optional; empty/unresolved → skip delivery
+```
+
+- Allowed only when `trust` is `trusted` or `privileged`.
+- The host calls `internal_send_progress` (fallback `admin.send_progress`) on
+  the plugin with a bounded payload `{chat_id, event_type, status, title,
+  detail?, message_id?}`.
+- Throttle: at most one MCP progress call per tool-call round (reasoning and
+  text from that round are batched into `detail`).
+- Missing `chat_id` emits `automation.notify.skipped` and does not fail the run.
+- Unknown YAML keys under `notify:` are rejected.
 
 When a run fails:
 
