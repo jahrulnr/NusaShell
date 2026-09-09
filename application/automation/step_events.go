@@ -188,7 +188,7 @@ func (n *NotifyProgressSink) OnStepEvent(ctx context.Context, ev StepLifecycleEv
 				}
 			}
 			if detail != "" && ev.Notify.NormalizedDetail() != domain.NotifyDetailNone {
-				if _, err := n.deliverOpen(ctx, ev, eventType, ev.Status, truncateNotify(extractReplyText(detail))); err != nil {
+				if _, err := n.deliverOpen(ctx, ev, eventType, ev.Status, extractReplyText(detail)); err != nil {
 					return err
 				}
 			}
