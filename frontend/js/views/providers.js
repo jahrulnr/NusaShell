@@ -9,7 +9,7 @@ let detailId = null;
 const KIND_META = {
   messages: { label: 'Messages', mark: 'MS', cls: 'accent-anthropic', desc: 'Messages API format' },
   responses: { label: 'Responses', mark: 'RS', cls: 'accent-openai', desc: 'Responses API format' },
-  chat: { label: 'Chat', mark: 'CH', cls: 'accent-compatible', desc: 'Chat Completions API format (incl. OpenRouter hosts)' },
+  chat: { label: 'Chat', mark: 'CH', cls: 'accent-compatible', desc: 'Chat Completions API format (custom providers use the OpenRouter profile)' },
   codex: { label: 'Codex', mark: 'CX', cls: 'accent-codex', desc: 'ChatGPT Codex backend (OAuth, remote v2 compaction)' },
 };
 const KIND_META_FALLBACK = { label: 'Unknown', mark: '?', cls: 'accent-compatible', desc: 'Unsupported provider kind — delete and re-add as messages, responses, chat, or codex.' };
@@ -767,7 +767,7 @@ async function addProvider(provider = null) {
   if (isCodex && provider?.builtin) {
     message = 'Prefer Sign in with ChatGPT or Import from Codex CLI on the Codex detail page. Pasting an OAuth access token here is an optional fallback only.';
   } else if (!provider) {
-    message = 'Custom providers use the selected API driver. For Codex, prefer Sign in / Import from CLI on the detail page; pasting a token is optional. Credentials are stored in the local SQLite credential store.';
+    message = 'Custom Chat, Responses, and Messages providers use the OpenRouter compatibility/profile parent by default. For Codex, prefer Sign in / Import from CLI on the detail page; pasting a token is optional. Credentials are stored in the local SQLite credential store.';
   } else if (provider.builtin) {
     message = 'Update this built-in provider. OpenRouter-compatible cards can use any supported API kind. API keys are optional.';
   } else if (isCodex) {

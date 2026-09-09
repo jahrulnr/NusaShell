@@ -144,12 +144,9 @@ func DataURLBase64(dataURL string) string {
 }
 
 // isOpenRouterBaseURL reports whether baseURL points at a genuine OpenRouter
-// host (openrouter.ai). Only its own hosts speak the OpenRouter wire format
-// (reasoning object, reasoning_details, cache_retention, provider routing).
-// OpenAI-compatible aggregators (TokenRouter, 9Router, OpenCode, one-api,
-// LiteLLM, local endpoints) implement the vanilla OpenAI Chat wire and
-// reject OpenRouter-specific params — e.g. TokenRouter returns HTTP 400
-// "Unknown parameter: 'reasoning'" for the OpenRouter reasoning object.
+// host. It is useful for legacy/automatic routing. Explicit OpenRouter-driver
+// providers may use the same compatibility/profile wire against a custom
+// gateway, so callers should use UsesOpenRouterWire for the final decision.
 func isOpenRouterBaseURL(baseURL string) bool {
 	u, err := url.Parse(baseURL)
 	if err != nil {
@@ -175,32 +172,25 @@ func IsOpenCodeHost(baseURL string) bool {
 }
 
 // UsesOpenRouterWire reports whether this provider should speak the
-// OpenRouter request format (reasoning object, reasoning_details,
+// OpenRouter-compatible request format (reasoning object, reasoning_details,
 // cache_retention, provider.order).
 //
-// Chat kind: only genuine openrouter.ai hosts. Custom providers default
-// to Driver=openrouter, which previously forced this wire onto OpenCode
-// and TokenRouter and 400'd (missing reasoning_content / unknown
-// parameter: reasoning). Non-chat kinds still follow the explicit driver
-// because OpenRouter messages/responses have no vanilla-chat equivalent.
+// Chat providers with an explicit OpenRouter driver use that profile even
+// when BaseURL points at a custom gateway. The gateway URL remains the target;
+// the profile supplies the compatibility shape. Automatic Chat routing still
+// recognizes genuine openrouter.ai hosts. Non-chat kinds follow the explicit
+// driver because their selected API kind remains exclusive.
 func UsesOpenRouterWire(kind ProviderKind, driver ProviderDriver, baseURL string) bool {
 	if kind == ProviderChat {
-		return IsOpenRouterHost(kind, baseURL)
+		return driver == ProviderDriverOpenRouter || IsOpenRouterHost(kind, baseURL)
 	}
 	return driver == ProviderDriverOpenRouter || isOpenRouterBaseURL(baseURL)
 }
 
-// WireCacheDriver returns the driver whose prompt-cache TTL enum matches
-// what the host will accept. This is independent of UsesOpenRouterWire:
-//
-//   - Genuine OpenRouter chat: cache_control 5m/1h
-//   - OpenCode Zen/Go: Console Go validates TTL as 5m|1h (HTTP 422 on 30m)
-//     even though the message wire is vanilla Chat (reasoning_content)
-//   - Other Chat hosts: OpenAI prompt_cache_options 30m
+// WireCacheDriver returns the driver whose prompt-cache TTL enum matches the
+// selected wire profile. OpenRouter-profile Chat, including custom gateways,
+// uses cache_control's 5m/1h enum; vanilla Chat uses OpenAI's 30m enum.
 func WireCacheDriver(kind ProviderKind, driver ProviderDriver, baseURL string) ProviderDriver {
-	if kind == ProviderChat && IsOpenCodeHost(baseURL) {
-		return ProviderDriverOpenRouter
-	}
 	if kind == ProviderChat && !UsesOpenRouterWire(kind, driver, baseURL) {
 		return ProviderDriverAuto
 	}
@@ -208,9 +198,9 @@ func WireCacheDriver(kind ProviderKind, driver ProviderDriver, baseURL string) P
 }
 
 // IsOpenRouterHost reports whether a chat-kind provider with the given base
-// URL should use the OpenRouter wire format (extra headers, reasoning object,
-// reasoning_details, cache_retention). Only genuine OpenRouter hosts qualify;
-// every other chat-kind host gets the vanilla OpenAI Chat wire format.
+// URL matches a genuine OpenRouter host. This is URL-only detection used by
+// automatic/legacy routing; UsesOpenRouterWire also honors an explicit
+// OpenRouter driver for custom gateways.
 func IsOpenRouterHost(kind ProviderKind, baseURL string) bool {
 	return kind == ProviderChat && isOpenRouterBaseURL(baseURL)
 }

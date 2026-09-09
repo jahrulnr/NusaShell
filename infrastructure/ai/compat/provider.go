@@ -189,6 +189,9 @@ func (p *Provider) setHeaders(ctx context.Context, httpReq *http.Request, req *c
 	if p.spec.Headers.Request != nil && req != nil {
 		p.spec.Headers.Request(httpReq.Header, req)
 	}
+	if p.cfg.RequestHeaders != nil && req != nil {
+		p.cfg.RequestHeaders(httpReq.Header, req.ProviderOptions)
+	}
 	if stream {
 		httpReq.Header.Set("Accept", "text/event-stream")
 		for k, v := range p.spec.Headers.Stream {

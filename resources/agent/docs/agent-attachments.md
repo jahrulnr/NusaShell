@@ -5,7 +5,8 @@ checks whether the active chat model supports image input using the `Vision`
 capability flag from the model catalog (models.dev / OpenRouter).
 
 - **Vision-capable model:** images are sent directly to the model as
-  `image_url` (Chat Completions) or `image` (Messages) content blocks.
+  `image_url` (Chat Completions, including the OpenRouter profile) or `image`
+  (Messages) content blocks. OpenRouter-profile Responses uses `input_image`.
 - **Non-vision model:** images are stripped from the conversation history
   before sending to the provider. A text placeholder is appended to the
   user message that shows the absolute file path(s) of the stripped image(s)
@@ -85,12 +86,14 @@ Bad examples:
   absolute file path only (text), and the image is carried as a tool result
   attachment. Native providers (Anthropic Messages) serialize the image
   block inside the tool result directly. Chat-compat providers
-  (OpenRouter, OpenAI-compat) and the native OpenAI Chat and Responses
+  (OpenRouter Chat, OpenAI-compat) and the native OpenAI Chat and Responses
   providers cannot carry image/audio/video blocks inside tool results, so
   the provider serialization strips the media from the tool message and
-  reinjects it as a follow-up user message with an `image_url` /
-  `input_audio` / `video_url` block, so the model still sees the pixels
-  in the next round.
+  reinjects it as a follow-up user message. Chat wire formats, including
+  custom providers using the OpenRouter profile, use an `image_url` /
+  `input_audio` / `video_url` block. OpenRouter-profile Responses uses
+  `input_image` / `input_audio` / `input_video` blocks, so the model still
+  sees the media in the next round.
 - **Non-vision model + fallback configured:** the image is described using
   the vision fallback model and the text description is returned as the
   tool result.
@@ -131,15 +134,18 @@ the upstream API expects for that modality:
 |---|---|---|---|
 | Image | `image_url` | `input_image` | `image` source |
 | Audio | `input_audio` (base64 + format) | `input_audio` (base64 + format) | `image` source (no native audio) |
-| Video | `video_url` | `video_url` | `image` source (no native video) |
+| Video | `video_url` (including custom providers using the OpenRouter profile) | `input_video` with a flat `video_url` string on the OpenRouter profile; direct OpenAI Responses keeps its native `video_url` object | Not supported by current Messages adapters; OpenRouter Messages rejects before sending |
 | Document (PDF) | text placeholder (no native part) | `input_file` (base64) | `document` source (base64) |
 
 Audio and video MUST NOT be sent as `image_url`/`input_image`. Providers
 like Nvidia NIM and Stealth reject `data:audio/...` or `data:video/...`
 URLs in the image slot with HTTP 400 ("Failed to load image" or generic
 "Provider returned error") because they attempt image decoding on a
-non-image payload. OpenRouter documents `video_url` as the dedicated
-content type for video input on both Chat Completions and Responses.
+non-image payload. Custom providers use the OpenRouter profile by default, so
+Chat video is `video_url` and OpenRouter-profile Responses video is
+`input_video` with a flat URL. OpenRouter Messages has no video content part
+and rejects it before making a request; NusaShell does not silently retry the
+same attachment through another API kind.
 
 **OpenAI does not support video input natively.** The OpenAI FAQ states
 "No it can not handle videos. It currently supports processing static

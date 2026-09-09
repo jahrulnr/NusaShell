@@ -244,7 +244,7 @@ type responsesContentItem struct {
 	ImageURL              string                 `json:"image_url,omitempty"`
 	Detail                string                 `json:"detail,omitempty"`
 	InputAudio            *responsesInputAudio   `json:"input_audio,omitempty"`
-	VideoURL              *responsesVideoURL     `json:"video_url,omitempty"`
+	VideoURL              any                    `json:"video_url,omitempty"`
 	PromptCacheBreakpoint *promptCacheBreakpoint `json:"prompt_cache_breakpoint,omitempty"`
 	Annotations           []map[string]any       `json:"annotations,omitempty"`
 	Logprobs              []map[string]any       `json:"logprobs,omitempty"`
@@ -495,7 +495,7 @@ func (p *Provider) buildResponsesRequest(req *ResponsesRequest, stream bool) (*r
 			if text, ok := responsesInputString(messages); ok {
 				out.Input = text
 			} else {
-				items, err := responsesInputItems(messages)
+				items, err := responsesInputItemsWithVideoInputType(messages, p.cfg.ResponsesVideoInputType)
 				if err != nil {
 					return nil, err
 				}
@@ -801,6 +801,10 @@ func responsesInputString(messages []core.Message) (string, bool) {
 }
 
 func responsesInputItems(messages []core.Message) ([]responsesInputItem, error) {
+	return responsesInputItemsWithVideoInputType(messages, "")
+}
+
+func responsesInputItemsWithVideoInputType(messages []core.Message, videoInputType string) ([]responsesInputItem, error) {
 	items := make([]responsesInputItem, 0, len(messages))
 	var deferredMedia []responsesContentItem
 	flushDeferredMedia := func() {
@@ -818,7 +822,7 @@ func responsesInputItems(messages []core.Message) ([]responsesInputItem, error) 
 			// is emitted. Otherwise the provider sees a user message between
 			// tool results and rejects the request as incomplete.
 			flushDeferredMedia()
-			content, err := responsesContent(msg.Blocks, "input_text")
+			content, err := responsesContentWithVideoInputType(msg.Blocks, "input_text", videoInputType)
 			if err != nil {
 				return nil, fmt.Errorf("openai: responses messages[%d]: %w", i, err)
 			}
@@ -834,7 +838,7 @@ func responsesInputItems(messages []core.Message) ([]responsesInputItem, error) 
 			for _, block := range msg.Blocks {
 				switch b := block.(type) {
 				case core.TextBlock, core.ImageBlock:
-					content, err := responsesContent([]core.Block{block}, "output_text")
+					content, err := responsesContentWithVideoInputType([]core.Block{block}, "output_text", videoInputType)
 					if err != nil {
 						return nil, fmt.Errorf("openai: responses messages[%d]: %w", i, err)
 					}
@@ -873,7 +877,7 @@ func responsesInputItems(messages []core.Message) ([]responsesInputItem, error) 
 				if result.Cache != nil {
 					return nil, fmt.Errorf("openai: responses messages[%d]: cache breakpoints are not supported on tool result blocks", i)
 				}
-				output, media, err := responsesToolResultTextAndMedia(result.Content)
+				output, media, err := responsesToolResultTextAndMediaWithVideoInputType(result.Content, videoInputType)
 				if err != nil {
 					return nil, fmt.Errorf("tool result %q: %w", result.ToolUseID, err)
 				}
@@ -899,6 +903,10 @@ func responsesInputItems(messages []core.Message) ([]responsesInputItem, error) 
 }
 
 func responsesContent(blocks []core.Block, textType string) ([]responsesContentItem, error) {
+	return responsesContentWithVideoInputType(blocks, textType, "")
+}
+
+func responsesContentWithVideoInputType(blocks []core.Block, textType, videoInputType string) ([]responsesContentItem, error) {
 	items := make([]responsesContentItem, 0, len(blocks))
 	for _, block := range blocks {
 		switch b := block.(type) {
@@ -928,10 +936,11 @@ func responsesContent(blocks []core.Block, textType string) ([]responsesContentI
 		case core.AudioBlock:
 			items = append(items, responsesContentItem{Type: "input_audio", InputAudio: &responsesInputAudio{Data: base64.StdEncoding.EncodeToString(b.Data), Format: audioFormat(b)}})
 		case core.VideoBlock:
-			if b.URL == "" {
-				return nil, fmt.Errorf("OpenAI Responses video blocks require a URL or data URL")
+			part, err := responsesVideoContentItem(b, videoInputType)
+			if err != nil {
+				return nil, err
 			}
-			items = append(items, responsesContentItem{Type: "video_url", VideoURL: &responsesVideoURL{URL: b.URL}})
+			items = append(items, part)
 		case core.ToolUseBlock:
 			continue
 		case core.ReasoningBlock:
@@ -941,6 +950,20 @@ func responsesContent(blocks []core.Block, textType string) ([]responsesContentI
 		}
 	}
 	return items, nil
+}
+
+func responsesVideoContentItem(block core.VideoBlock, videoInputType string) (responsesContentItem, error) {
+	if block.URL == "" {
+		return responsesContentItem{}, fmt.Errorf("OpenAI Responses video blocks require a URL or data URL")
+	}
+	switch videoInputType {
+	case "", "video_url":
+		return responsesContentItem{Type: "video_url", VideoURL: &responsesVideoURL{URL: block.URL}}, nil
+	case "input_video":
+		return responsesContentItem{Type: "input_video", VideoURL: block.URL}, nil
+	default:
+		return responsesContentItem{}, fmt.Errorf("OpenAI Responses unsupported video input type %q", videoInputType)
+	}
 }
 
 func responsesReasoningInputItem(block core.ReasoningBlock) (responsesInputItem, error) {
@@ -991,6 +1014,10 @@ func textOnlyBlocks(blocks []core.Block) (string, error) {
 // responsesContentItem parts for the caller to reinject as a follow-up user
 // message. Mirrors the compat provider's textAndMedia pattern.
 func responsesToolResultTextAndMedia(blocks []core.Block) (string, []responsesContentItem, error) {
+	return responsesToolResultTextAndMediaWithVideoInputType(blocks, "")
+}
+
+func responsesToolResultTextAndMediaWithVideoInputType(blocks []core.Block, videoInputType string) (string, []responsesContentItem, error) {
 	var text strings.Builder
 	var media []responsesContentItem
 	for _, block := range blocks {
@@ -1012,10 +1039,11 @@ func responsesToolResultTextAndMedia(blocks []core.Block) (string, []responsesCo
 		case core.AudioBlock:
 			media = append(media, responsesContentItem{Type: "input_audio", InputAudio: &responsesInputAudio{Data: base64.StdEncoding.EncodeToString(b.Data), Format: audioFormat(b)}})
 		case core.VideoBlock:
-			if b.URL == "" {
-				return "", nil, fmt.Errorf("OpenAI Responses video blocks require a URL or data URL")
+			part, err := responsesVideoContentItem(b, videoInputType)
+			if err != nil {
+				return "", nil, err
 			}
-			media = append(media, responsesContentItem{Type: "video_url", VideoURL: &responsesVideoURL{URL: b.URL}})
+			media = append(media, part)
 		default:
 			return "", nil, fmt.Errorf("unsupported tool result content block %T", block)
 		}

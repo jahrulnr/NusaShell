@@ -14,8 +14,9 @@ func TestIsOpenRouterHost(t *testing.T) {
 		{name: "openrouter api subdomain", kind: ProviderChat, baseURL: "https://api.openrouter.ai/api/v1", want: true},
 		{name: "openrouter bare host", kind: ProviderChat, baseURL: "http://openrouter.ai", want: true},
 
-		// OpenAI-compatible aggregators do NOT speak the OpenRouter wire
-		// format; they get the vanilla OpenAI Chat wire.
+		// URL-only detection remains false for custom gateways. Explicit
+		// OpenRouter drivers use the compatibility/profile path through
+		// UsesOpenRouterWire, which is tested separately below.
 		{name: "tokenrouter", kind: ProviderChat, baseURL: "https://api.tokenrouter.com/v1", want: false},
 		{name: "9router localhost", kind: ProviderChat, baseURL: "http://localhost:20128/v1", want: false},
 		{name: "opencode zen", kind: ProviderChat, baseURL: "https://opencode.ai/zen/v1", want: false},
@@ -58,37 +59,36 @@ func TestUsesOpenRouterWire(t *testing.T) {
 			baseURL: "https://openrouter.ai/api/v1",
 			want:    true,
 		},
-		// Custom providers default to the openrouter driver. That must not
-		// force the OpenRouter wire onto OpenAI-compatible aggregators —
-		// OpenCode Console Go 400s when assistant history is sent as
-		// `reasoning` instead of `reasoning_content`.
+		// Custom providers default to the OpenRouter compatibility/profile path,
+		// even when their gateway is not hosted at openrouter.ai. The custom
+		// gateway remains the target; OpenRouter supplies the request profile.
 		{
-			name:    "opencode zen go with default openrouter driver",
+			name:    "opencode zen go with custom openrouter driver",
 			kind:    ProviderChat,
 			driver:  ProviderDriverOpenRouter,
 			baseURL: "https://opencode.ai/zen/go/v1",
-			want:    false,
+			want:    true,
 		},
 		{
-			name:    "opencode zen with default openrouter driver",
+			name:    "opencode zen with custom openrouter driver",
 			kind:    ProviderChat,
 			driver:  ProviderDriverOpenRouter,
 			baseURL: "https://opencode.ai/zen/v1",
-			want:    false,
+			want:    true,
 		},
 		{
-			name:    "tokenrouter with default openrouter driver",
+			name:    "tokenrouter with custom openrouter driver",
 			kind:    ProviderChat,
 			driver:  ProviderDriverOpenRouter,
 			baseURL: "https://api.tokenrouter.com/v1",
-			want:    false,
+			want:    true,
 		},
 		{
-			name:    "custom chat host with default openrouter driver",
+			name:    "custom chat host with openrouter profile",
 			kind:    ProviderChat,
 			driver:  ProviderDriverOpenRouter,
 			baseURL: "https://example.test/v1",
-			want:    false,
+			want:    true,
 		},
 		{
 			name:    "openrouter driver still selects openrouter for responses",
@@ -139,11 +139,11 @@ func TestWireCacheDriver(t *testing.T) {
 			want:    ProviderDriverOpenRouter,
 		},
 		{
-			name:    "tokenrouter uses vanilla chat cache enum",
+			name:    "custom tokenrouter uses openrouter-profile cache enum",
 			kind:    ProviderChat,
 			driver:  ProviderDriverOpenRouter,
 			baseURL: "https://api.tokenrouter.com/v1",
-			want:    ProviderDriverAuto,
+			want:    ProviderDriverOpenRouter,
 		},
 		{
 			name:    "messages openrouter driver unchanged",

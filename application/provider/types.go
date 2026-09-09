@@ -112,10 +112,10 @@ type PromptCachePolicy struct {
 	// the provider supports it.
 	Mode string
 	// TTL is the provider cache duration: "5m", "1h", or "30m".
-	// Anthropic and genuine OpenRouter hosts use cache_control 5m/1h;
-	// OpenAI Responses and vanilla OpenAI Chat (including OpenCode) send
-	// 30m as prompt_cache_options.ttl. The stored driver is not enough:
-	// custom providers default to openrouter but still speak Chat.
+	// Anthropic Messages and OpenRouter-profile Chat use cache_control
+	// 5m/1h; OpenAI Responses and direct/automatic vanilla Chat use 30m as
+	// prompt_cache_options.ttl. Custom providers default to the OpenRouter
+	// profile, so their selected driver controls this enum.
 	TTL string
 	// Key is a stable routing key sent as prompt_cache_key where the selected
 	// wire supports it. NusaShell keeps it at 32 ASCII characters and uses a

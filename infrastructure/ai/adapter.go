@@ -25,7 +25,9 @@ import (
 
 // Adapter implements core.Provider for every supported provider kind. The
 // provider-specific adapter is selected per call by Driver and Kind.
-// Providers without an explicit Driver retain host-detected routing.
+// A Chat adapter with OpenRouter=true uses the OpenRouter compatibility
+// profile against BaseURL, including for custom gateways; false keeps the
+// vanilla OpenAI Chat wire.
 //
 // Conversion between application.ChatRequest/ChatResponse and
 // core.Request/Response is handled in application/provider.
@@ -100,6 +102,7 @@ func (a *Adapter) providerFor() (core.Provider, error) {
 			APIKey:         a.APIKey,
 			BaseURL:        a.BaseURL,
 			HTTPClient:     a.Client,
+			RequestHeaders: headers,
 			APIKeyOptional: optional,
 		}, string(a.ProviderKind))
 	case domain.ProviderDriverCodex:
@@ -114,7 +117,7 @@ func (a *Adapter) providerFor() (core.Provider, error) {
 	case a.ProviderKind == domain.ProviderResponses:
 		return openai.New(openai.Config{API: openai.APIResponses, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional, RequestHeaders: headers})
 	case a.ProviderKind == domain.ProviderChat && a.OpenRouter:
-		return openrouter.New(openrouter.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional})
+		return openrouter.New(openrouter.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional, RequestHeaders: headers})
 	case a.ProviderKind == domain.ProviderChat:
 		return openai.New(openai.Config{API: openai.APIChat, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional, RequestHeaders: headers})
 	case a.ProviderKind == domain.ProviderCodex:

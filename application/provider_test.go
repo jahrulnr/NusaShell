@@ -2032,12 +2032,10 @@ func TestToCoreRequestMessagesCacheControlUsesTTL(t *testing.T) {
 	}
 }
 
-// TestToCoreRequestVanillaChatNeverPutsTTLOnSystemBreakpoint is the
-// OpenCode Console Go failure: after host detection routes chat to the
-// OpenAI adapter, a 5m/1h TTL leftover from the openrouter driver must
-// not land on messages[0] as cache_control (the Chat adapter errors
-// "cache breakpoint TTL must be set with prompt_cache_options.ttl").
-func TestToCoreRequestVanillaChatNeverPutsTTLOnSystemBreakpoint(t *testing.T) {
+// TestToCoreRequestDirectVanillaChatNeverPutsTTLOnSystemBreakpoint verifies
+// the direct OpenAI Chat conversion path. A 5m/1h TTL is not represented as
+// cache_control there, and the incompatible direct-Chat TTL option is omitted.
+func TestToCoreRequestDirectVanillaChatNeverPutsTTLOnSystemBreakpoint(t *testing.T) {
 	req := ChatRequest{
 		Model:         "deepseek-v4-flash",
 		System:        "you are helpful",
@@ -2050,7 +2048,7 @@ func TestToCoreRequestVanillaChatNeverPutsTTLOnSystemBreakpoint(t *testing.T) {
 		t.Fatalf("system block = %#v", cr.Messages[0].Blocks)
 	}
 	if tb.Cache != nil {
-		t.Fatalf("vanilla chat system cache = %#v, want nil (OpenCode Chat has no cache_control breakpoint)", tb.Cache)
+		t.Fatalf("vanilla chat system cache = %#v, want nil (direct Chat has no cache_control breakpoint)", tb.Cache)
 	}
 	if cr.ProviderOptions["prompt_cache_options"] != nil {
 		t.Fatalf("vanilla chat must not send prompt_cache_options for 1h TTL (Console Go only accepts 5m|1h on cache_control, OpenAI Chat only accepts 30m): %#v", cr.ProviderOptions["prompt_cache_options"])
@@ -2060,7 +2058,7 @@ func TestToCoreRequestVanillaChatNeverPutsTTLOnSystemBreakpoint(t *testing.T) {
 	}
 }
 
-func TestNewProviderContextOpenCodeIsNotOpenRouter(t *testing.T) {
+func TestNewProviderContextCustomOpenCodeUsesOpenRouterProfile(t *testing.T) {
 	p := &domain.Provider{
 		ID:      "prov_b9587aa5f937c4f2",
 		Driver:  domain.ProviderDriverOpenRouter,
@@ -2068,11 +2066,11 @@ func TestNewProviderContextOpenCodeIsNotOpenRouter(t *testing.T) {
 		BaseURL: "https://opencode.ai/zen/go/v1",
 	}
 	pc := NewProviderContext(p, nil)
-	if pc.OpenRouter {
-		t.Fatal("OpenCode zen/go must not convert requests as OpenRouter wire")
+	if !pc.OpenRouter {
+		t.Fatal("custom OpenCode zen/go must convert requests with the OpenRouter profile")
 	}
 	if pc.Driver != domain.ProviderDriverOpenRouter {
-		t.Fatalf("Driver = %q, want stored openrouter (cache TTL enum), OpenRouter=%v", pc.Driver, pc.OpenRouter)
+		t.Fatalf("Driver = %q, want stored openrouter, OpenRouter=%v", pc.Driver, pc.OpenRouter)
 	}
 	if pc.BaseURL != p.BaseURL {
 		t.Fatalf("BaseURL = %q, want %q", pc.BaseURL, p.BaseURL)

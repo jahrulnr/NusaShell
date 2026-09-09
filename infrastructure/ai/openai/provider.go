@@ -49,6 +49,11 @@ type Config struct {
 	// prompt cache params and content breakpoints. The official endpoint is
 	// enabled automatically; custom endpoints require this opt-in.
 	PromptCacheParams bool
+
+	// ResponsesVideoInputType selects the Responses content-part encoding for
+	// video inputs. The default is OpenAI's existing video_url object shape;
+	// OpenRouter sets this to input_video with a flat video_url string.
+	ResponsesVideoInputType string
 }
 
 type HTTPClient interface {

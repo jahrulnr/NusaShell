@@ -356,11 +356,10 @@ func IsOpenRouterURL(baseUrl string) bool {
 }
 
 // IsOpenAIDirectURL reports whether baseUrl points at a direct OpenAI API
-// host (api.openai.com), which stays on the vanilla OpenAI chat adapter.
-// Genuine OpenRouter hosts (openrouter.ai) use the OpenRouter adapter;
-// every other chat-kind host (aggregators like TokenRouter/9Router/OpenCode,
-// local endpoints) also uses the vanilla OpenAI chat adapter — aggregators
-// implement the OpenAI wire and reject OpenRouter-specific params.
+// host (api.openai.com). This URL-only helper identifies the native OpenAI
+// host; custom-provider routing is selected by the stored driver/profile in
+// the composition layer rather than by assuming every non-OpenRouter host is
+// vanilla Chat.
 func IsOpenAIDirectURL(baseUrl string) bool {
 	u, err := neturl.Parse(baseUrl)
 	if err != nil {

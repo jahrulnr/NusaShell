@@ -37,9 +37,8 @@ func BuildPromptCachePolicy(settings domain.Settings, p *domain.Provider, model,
 
 // BuildPromptCachePolicyForContext preserves the provider identity needed for
 // a stable key after a provider has been reduced to Context. Pass the stored
-// driver and BaseURL through so WireCacheDriver can split OpenCode (5m/1h)
-// from vanilla Chat (30m) without reconstructing driver from the OpenRouter
-// message-wire flag.
+// driver and BaseURL through so WireCacheDriver selects the same cache enum
+// as the OpenRouter compatibility/profile or vanilla Chat wire.
 func BuildPromptCachePolicyForContext(settings domain.Settings, adapter Context, model, conversationID, prefix string) *PromptCachePolicy {
 	provider := &domain.Provider{ID: adapter.ProviderID, Kind: adapter.Kind, Driver: adapter.Driver, BaseURL: adapter.BaseURL}
 	return BuildPromptCachePolicy(settings, provider, model, conversationID, prefix)

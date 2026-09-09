@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -12,7 +13,7 @@ import (
 	"nusashell/application"
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/core"
-	"nusashell/infrastructure/ai/openai"
+	"nusashell/infrastructure/ai/openrouter"
 )
 
 func TestToCoreRequestSystemAndMessages(t *testing.T) {
@@ -208,26 +209,26 @@ func TestAdapterCodexProviderRouting(t *testing.T) {
 }
 
 func TestAdapterChatNoKeyOptional(t *testing.T) {
-	// A chat-kind adapter with no API key must construct fine on
-	// OpenAI-compatible hosts that need no auth (LM Studio, Ollama, vLLM,
-	// OpenCode/Zen free tier); the vanilla OpenAI Chat adapter is used and
-	// skips the Authorization header when no key is present.
-	a := &Adapter{ProviderKind: domain.ProviderChat, OpenRouter: false, BaseURL: "https://opencode.ai/zen/v1"}
+	// A custom chat provider uses the OpenRouter compatibility/profile path,
+	// even when its gateway is not hosted at openrouter.ai. No API key is
+	// still allowed for local and gateway hosts that permit unauthenticated
+	// requests.
+	a := &Adapter{ProviderKind: domain.ProviderChat, OpenRouter: true, BaseURL: "https://opencode.ai/zen/v1"}
 	p, err := a.providerFor()
 	if err != nil {
 		t.Fatalf("providerFor without key: %v", err)
 	}
-	if p.Name() != "openai" {
-		t.Fatalf("adapter name = %q, want openai", p.Name())
+	if p.Name() != "openrouter" {
+		t.Fatalf("adapter name = %q, want openrouter", p.Name())
 	}
 
-	// The openai provider must not reject keyless construction when
-	// APIKeyOptional is set.
-	if _, err := openai.New(openai.Config{BaseURL: "https://opencode.ai/zen/v1", APIKeyOptional: true}); err != nil {
-		t.Fatalf("openai.New with APIKeyOptional: %v", err)
+	// The OpenRouter compatibility provider must not reject keyless
+	// construction when APIKeyOptional is set.
+	if _, err := openrouter.New(openrouter.Config{BaseURL: "https://opencode.ai/zen/v1", APIKeyOptional: true}); err != nil {
+		t.Fatalf("openrouter.New with APIKeyOptional: %v", err)
 	}
-	if _, err := openai.New(openai.Config{BaseURL: "https://opencode.ai/zen/v1"}); err == nil {
-		t.Fatal("openai.New without APIKeyOptional must still require a key")
+	if _, err := openrouter.New(openrouter.Config{BaseURL: "https://opencode.ai/zen/v1"}); err == nil {
+		t.Fatal("openrouter.New without APIKeyOptional must still require a key")
 	}
 }
 
@@ -259,28 +260,24 @@ func TestAdapterRouting(t *testing.T) {
 		t.Fatalf("adapter name = %q, want openrouter", p.Name())
 	}
 
-	// OpenAI-compatible aggregator (TokenRouter) → vanilla OpenAI Chat
-	// adapter (wire: reasoning_effort). The OpenRouter flag is only set by
-	// the factory for genuine OpenRouter hosts; even if it were set for an
-	// aggregator, the provider stays on the vanilla wire.
-	a = &Adapter{ProviderKind: domain.ProviderChat, OpenRouter: false, BaseURL: "https://api.tokenrouter.com/v1", APIKey: "k"}
+	// Custom OpenAI-compatible aggregators also use the OpenRouter
+	// compatibility/profile adapter. The target URL remains the custom
+	// gateway, so it can accept the OpenRouter-compatible request shape.
+	a = &Adapter{ProviderKind: domain.ProviderChat, OpenRouter: true, BaseURL: "https://api.tokenrouter.com/v1", APIKey: "k"}
 	p, err = a.providerFor()
 	if err != nil {
 		t.Fatalf("providerFor: %v", err)
 	}
-	if p.Name() != "openai" {
-		t.Fatalf("tokenrouter adapter name = %q, want openai", p.Name())
+	if p.Name() != "openrouter" {
+		t.Fatalf("tokenrouter adapter name = %q, want openrouter", p.Name())
 	}
 
-	// Custom providers default to Driver=openrouter. When the factory has
-	// already decided OpenRouter=false (OpenCode / TokenRouter host),
-	// providerFor must still build the vanilla Chat adapter — the Driver
-	// switch used to take openrouter.NewForAPI first and send `reasoning`
-	// instead of `reasoning_content`.
+	// Custom providers default to Driver=openrouter and the factory marks
+	// their chat wire as OpenRouter-compatible, regardless of host name.
 	a = &Adapter{
 		ProviderKind: domain.ProviderChat,
 		Driver:       domain.ProviderDriverOpenRouter,
-		OpenRouter:   false,
+		OpenRouter:   true,
 		BaseURL:      "https://opencode.ai/zen/go/v1",
 		APIKey:       "k",
 	}
@@ -288,8 +285,8 @@ func TestAdapterRouting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("opencode providerFor: %v", err)
 	}
-	if p.Name() != "openai" {
-		t.Fatalf("opencode+openrouter-driver adapter name = %q, want openai", p.Name())
+	if p.Name() != "openrouter" {
+		t.Fatalf("opencode+openrouter-driver adapter name = %q, want openrouter", p.Name())
 	}
 
 	// Chat-kind with api.openai.com stays on the vanilla OpenAI chat adapter.
@@ -300,6 +297,69 @@ func TestAdapterRouting(t *testing.T) {
 	}
 	if p.Name() != "openai" {
 		t.Fatalf("openai direct adapter name = %q, want openai", p.Name())
+	}
+}
+
+func TestNewFactoryCustomChatUsesOpenRouterVideoMapping(t *testing.T) {
+	var rawBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"model":"custom-video","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+
+	factory := NewFactory(&stubCreds{})
+	provider, err := factory(context.Background(), &domain.Provider{
+		ID:      "prov_custom_video",
+		Driver:  domain.ProviderDriverOpenRouter,
+		Kind:    domain.ProviderChat,
+		BaseURL: srv.URL + "/v1",
+	}, "key")
+	if err != nil {
+		t.Fatalf("factory: %v", err)
+	}
+	adapter, ok := provider.(*Adapter)
+	if !ok {
+		t.Fatalf("provider = %T, want *Adapter", provider)
+	}
+	_, err = adapter.Chat(context.Background(), &core.Request{
+		Model: "custom-video",
+		Messages: []core.Message{core.User(
+			core.Text("inspect this video"),
+			core.VideoBlock{URL: "data:video/mp4;base64,AAAA"},
+		)},
+	})
+	if err != nil {
+		t.Fatalf("custom Chat: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		t.Fatalf("request JSON: %v", err)
+	}
+	messages, ok := body["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages = %#v, want one custom Chat message", body["messages"])
+	}
+	message, ok := messages[0].(map[string]any)
+	if !ok {
+		t.Fatalf("message = %#v, want object", messages[0])
+	}
+	content, ok := message["content"].([]any)
+	if !ok {
+		t.Fatalf("message content = %#v, want parts", message["content"])
+	}
+	if len(content) != 2 {
+		t.Fatalf("content = %#v, want text and video parts", content)
+	}
+	video, ok := content[1].(map[string]any)
+	if !ok || video["type"] != "video_url" {
+		t.Fatalf("video part = %#v, want OpenRouter video_url", content[1])
+	}
+	videoURL, ok := video["video_url"].(map[string]any)
+	if !ok || videoURL["url"] != "data:video/mp4;base64,AAAA" {
+		t.Fatalf("video_url = %#v, want nested data URL", video["video_url"])
 	}
 }
 
@@ -337,17 +397,17 @@ func TestAdapterOpenCodeChatSendsSessionHeader(t *testing.T) {
 		APIKey:       "k",
 		Client:       srv.Client(),
 	}
-	// Point the Chat adapter at the test server while keeping an OpenCode
-	// BaseURL so requestHeaders still attaches x-opencode-session.
-	p, err := openai.New(openai.Config{
-		API:            openai.APIChat,
+	// Point the OpenRouter Chat adapter at the test server while keeping an
+	// OpenCode BaseURL on the adapter so requestHeaders attaches
+	// x-opencode-session.
+	p, err := openrouter.New(openrouter.Config{
 		APIKey:         "k",
 		BaseURL:        srv.URL + "/v1",
 		HTTPClient:     srv.Client(),
 		RequestHeaders: a.requestHeaders(),
 	})
 	if err != nil {
-		t.Fatalf("openai.New: %v", err)
+		t.Fatalf("openrouter.New: %v", err)
 	}
 	_, err = p.Chat(context.Background(), &core.Request{
 		Model:           "deepseek-v4-flash",
@@ -558,12 +618,13 @@ func TestAdapterListModelEndpoints(t *testing.T) {
 		t.Fatalf("direct routes = %+v, want empty", routes)
 	}
 
-	// Custom providers default to Driver=openrouter. Without a genuine
-	// OpenRouter host (OpenRouter=false) that must not hit /endpoints.
+	// Custom providers use the OpenRouter profile, so endpoint discovery is
+	// available when the selected driver/profile is OpenRouter even on a
+	// non-openrouter host.
 	tagged := &Adapter{
 		ProviderKind: domain.ProviderChat,
 		Driver:       domain.ProviderDriverOpenRouter,
-		OpenRouter:   false,
+		OpenRouter:   true,
 		BaseURL:      srv.URL,
 		Client:       srv.Client(),
 	}
@@ -571,8 +632,8 @@ func TestAdapterListModelEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tagged ListModelEndpoints: %v", err)
 	}
-	if len(routes) != 0 {
-		t.Fatalf("tagged routes = %+v, want empty", routes)
+	if len(routes) != 3 {
+		t.Fatalf("tagged routes = %+v, want custom OpenRouter-profile routes", routes)
 	}
 }
 

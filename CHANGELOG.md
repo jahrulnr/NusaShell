@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Custom provider OpenRouter compatibility.** Custom providers configured with
+  the OpenRouter driver now use the OpenRouter-compatible profile even when
+  their Base URL points to a custom gateway. Built-in Anthropic, OpenAI,
+  OpenRouter, and Codex routes remain unchanged; API-kind routing stays
+  exclusive, and video attachments use endpoint-specific `video_url` /
+  `input_video` mappings without automatic cross-kind fallback.
+
 - **Learning stays bounded over long-running installations.** The Learning
   log now reads and renders stable 50-event cursor pages instead of loading
   the full trajectory and every conversation title. Balanced daily/startup

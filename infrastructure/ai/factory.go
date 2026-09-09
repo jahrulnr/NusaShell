@@ -25,16 +25,15 @@ var codexRefreshMu = make(chan struct{}, 1)
 
 // NewFactory returns a ProviderFactory closure that builds the single
 // provider Adapter for a stored provider config. For chat-kind providers:
-//   - Genuine OpenRouter hosts (openrouter.ai) use the OpenRouter adapter
-//     (OpenRouter wire: reasoning object, reasoning_details, cache_retention,
-//     provider routing, attribution headers).
-//   - Every other chat-kind host (direct OpenAI, OpenAI-compatible
-//     aggregators like TokenRouter/9Router/OpenCode, local endpoints) uses
-//     the vanilla OpenAI Chat adapter, even when the stored driver is
-//     openrouter (the custom-provider default). Aggregators implement the
-//     OpenAI wire and reject OpenRouter-specific params — OpenCode Console
-//     Go 400s without `reasoning_content`; TokenRouter 400s on the
-//     OpenRouter `reasoning` object.
+//   - Genuine OpenRouter hosts (openrouter.ai) and providers with the explicit
+//     OpenRouter driver use the OpenRouter compatibility/profile adapter
+//     (reasoning object, reasoning_details, cache_retention, provider
+//     routing, attribution headers). The stored BaseURL remains the target,
+//     which lets custom gateways reuse the OpenRouter profile.
+//   - Providers without that profile use the vanilla OpenAI Chat adapter.
+//     Automatic routing is intentionally exclusive: a request is not retried
+//     through another API kind or wire profile when the selected gateway
+//     rejects its shape.
 //   - Codex providers (ProviderCodex) use the Codex Responses transport.
 //     Stored OAuth JSON is refreshed when expired; AccountID and
 //     InstallationID headers are attached for ChatGPT multi-account routing.

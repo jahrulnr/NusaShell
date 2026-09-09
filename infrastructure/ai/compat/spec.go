@@ -18,6 +18,12 @@ type Config struct {
 	UserAgent  string
 	Headers    map[string]string
 
+	// RequestHeaders adds per-request transport headers derived from provider
+	// options. Wire-specific HeaderSpec.Request hooks still receive the full
+	// request; this hook lets a caller preserve gateway-specific headers while
+	// using a compatibility provider profile.
+	RequestHeaders func(http.Header, core.ProviderOptions)
+
 	// APIKeyOptional relaxes the APIKeyRequired auth check: a provider with
 	// no key is allowed through and sends no Authorization header, letting
 	// the upstream decide (e.g. OpenCode/Zen free tier). When a key is

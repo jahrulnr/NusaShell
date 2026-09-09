@@ -201,6 +201,157 @@ func TestDelegatedAPIsSendSessionIDAsOpenRouterHeader(t *testing.T) {
 	}
 }
 
+func TestDelegatedResponsesUseOpenRouterInputVideo(t *testing.T) {
+	var body map[string]any
+	provider, err := NewForAPI(compat.Config{
+		APIKey:  "key",
+		BaseURL: "https://openrouter.test",
+		HTTPClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path != "/v1/responses" {
+				t.Errorf("request path = %q, want /v1/responses", req.URL.Path)
+			}
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"model":"openai/gpt-5.6","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}, APIResponses)
+	if err != nil {
+		t.Fatalf("NewForAPI: %v", err)
+	}
+
+	_, err = provider.Chat(context.Background(), &core.Request{
+		Model: "openai/gpt-5.6",
+		Messages: []core.Message{
+			core.User(
+				core.Text("inspect these videos"),
+				core.VideoBlock{URL: "data:video/mp4;base64,AAAA"},
+			),
+			core.Assistant(core.ToolUseBlock{ID: "call_1", Name: "read_media", Arguments: core.MustJSONRaw(map[string]any{})}),
+			core.ToolResult("call_1", core.Text("video loaded"), core.VideoBlock{URL: "https://example.test/clip.mp4"}),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	items, ok := body["input"].([]any)
+	if !ok {
+		t.Fatalf("input = %#v, want array", body["input"])
+	}
+	videoCount := 0
+	for _, rawItem := range items {
+		item, ok := rawItem.(map[string]any)
+		if !ok {
+			t.Fatalf("input item = %#v, want object", rawItem)
+		}
+		content, ok := item["content"].([]any)
+		if !ok {
+			continue
+		}
+		for _, rawPart := range content {
+			part, ok := rawPart.(map[string]any)
+			if !ok || part["type"] != "input_video" {
+				if ok && part["type"] == "video_url" {
+					t.Fatalf("Responses video part uses Chat type: %#v", part)
+				}
+				continue
+			}
+			url, ok := part["video_url"].(string)
+			if !ok || url == "" {
+				t.Fatalf("input_video video_url = %#v, want non-empty string", part["video_url"])
+			}
+			videoCount++
+		}
+	}
+	if videoCount != 2 {
+		t.Fatalf("found %d input_video parts, want 2: %#v", videoCount, body["input"])
+	}
+}
+
+func TestMessagesRejectVideoInputBeforeRequest(t *testing.T) {
+	requestCount := 0
+	provider, err := NewForAPI(compat.Config{
+		APIKey:  "key",
+		BaseURL: "https://openrouter.test",
+		HTTPClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requestCount++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}, APIMessages)
+	if err != nil {
+		t.Fatalf("NewForAPI: %v", err)
+	}
+
+	request := &core.Request{
+		Model:     "anthropic/claude-sonnet-4",
+		MaxTokens: func() *int { v := 128; return &v }(),
+		Messages:  []core.Message{core.User(core.Text("inspect"), core.VideoBlock{URL: "data:video/mp4;base64,AAAA"})},
+	}
+	_, err = provider.Chat(context.Background(), request)
+	if err == nil || !core.IsValidationError(err) || !strings.Contains(strings.ToLower(err.Error()), "does not support video") {
+		t.Fatalf("expected OpenRouter Messages video rejection, got %v", err)
+	}
+	_, err = provider.Stream(context.Background(), request)
+	if err == nil || !core.IsValidationError(err) || !strings.Contains(strings.ToLower(err.Error()), "does not support video") {
+		t.Fatalf("expected OpenRouter Messages stream video rejection, got %v", err)
+	}
+	if requestCount != 0 {
+		t.Fatalf("Messages request count = %d, want 0", requestCount)
+	}
+}
+
+func TestVideoBlockMapsToChatVideoURL(t *testing.T) {
+	body := captureBody(t, nil, nil, &core.Request{
+		Model: "openai/gpt-4o",
+		Messages: []core.Message{core.User(
+			core.Text("inspect this"),
+			core.VideoBlock{URL: "data:video/mp4;base64,AAAA"},
+		)},
+	})
+	content := body["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("content = %#v, want text and video parts", content)
+	}
+	video, _ := content[1].(map[string]any)
+	if video["type"] != "video_url" {
+		t.Fatalf("video type = %v, want video_url", video["type"])
+	}
+	videoURL, _ := video["video_url"].(map[string]any)
+	if videoURL["url"] != "data:video/mp4;base64,AAAA" {
+		t.Fatalf("video_url = %#v", videoURL)
+	}
+}
+
+func TestToolResultVideoReinjectsAsUserMessage(t *testing.T) {
+	body := captureBody(t, nil, nil, &core.Request{
+		Model: "openai/gpt-4o",
+		Messages: []core.Message{
+			core.UserText("read this video"),
+			core.Assistant(core.ToolUseBlock{ID: "call_1", Name: "read_media", Arguments: core.MustJSONRaw(map[string]any{})}),
+			core.ToolResult("call_1", core.Text("/tmp/clip.mp4"), core.VideoBlock{URL: "https://example.test/clip.mp4"}),
+		},
+	})
+	msgs := body["messages"].([]any)
+	if len(msgs) != 4 {
+		t.Fatalf("got %d messages, want 4: %#v", len(msgs), msgs)
+	}
+	reinject := msgs[3].(map[string]any)
+	parts := reinject["content"].([]any)
+	video := parts[0].(map[string]any)
+	if video["type"] != "video_url" {
+		t.Fatalf("reinject type = %v, want video_url", video["type"])
+	}
+}
+
 func TestBlockCacheValidation(t *testing.T) {
 	_, _, _, err := mapBlocks([]core.Block{
 		core.TextBlock{

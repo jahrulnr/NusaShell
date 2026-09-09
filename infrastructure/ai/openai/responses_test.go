@@ -493,6 +493,53 @@ func TestResponsesInputImageWireIsFlatURL(t *testing.T) {
 	}
 }
 
+func TestResponsesVideoWireUsesConfiguredInputVideo(t *testing.T) {
+	items, err := responsesContentWithVideoInputType([]core.Block{
+		core.VideoBlock{URL: "data:video/mp4;base64,AAAA"},
+	}, "input_text", "input_video")
+	if err != nil {
+		t.Fatalf("responsesContentWithVideoInputType: %v", err)
+	}
+	data, err := json.Marshal(items)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var parts []map[string]any
+	if err := json.Unmarshal(data, &parts); err != nil {
+		t.Fatalf("unmarshal parts: %v", err)
+	}
+	if got := parts[0]["type"]; got != "input_video" {
+		t.Fatalf("video type = %v, want input_video", got)
+	}
+	if got := parts[0]["video_url"]; got != "data:video/mp4;base64,AAAA" {
+		t.Fatalf("video_url = %#v, want flat string", got)
+	}
+}
+
+func TestResponsesVideoWireDefaultsToVideoURLObject(t *testing.T) {
+	items, err := responsesContent([]core.Block{
+		core.VideoBlock{URL: "https://example.test/clip.mp4"},
+	}, "input_text")
+	if err != nil {
+		t.Fatalf("responsesContent: %v", err)
+	}
+	data, err := json.Marshal(items)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var parts []map[string]any
+	if err := json.Unmarshal(data, &parts); err != nil {
+		t.Fatalf("unmarshal parts: %v", err)
+	}
+	if got := parts[0]["type"]; got != "video_url" {
+		t.Fatalf("video type = %v, want video_url", got)
+	}
+	videoURL, ok := parts[0]["video_url"].(map[string]any)
+	if !ok || videoURL["url"] != "https://example.test/clip.mp4" {
+		t.Fatalf("video_url = %#v, want nested URL object", parts[0]["video_url"])
+	}
+}
+
 // TestResponsesOutputImageParsesFlatURL proves the response side accepts the
 // flat image_url string the Responses API returns for output/screenshot
 // images and maps it back to an ImageBlock.

@@ -1,6 +1,7 @@
 package openrouter
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -87,9 +88,10 @@ func New(cfg Config) (*compat.Provider, error) {
 }
 
 // NewForAPI builds the OpenRouter driver for the selected wire API. Chat uses
-// OpenRouter's native compatibility provider; messages and responses delegate
+// OpenRouter's native compatibility provider; Responses and Messages delegate
 // to the corresponding wire-format implementations while retaining the
-// OpenRouter attribution headers.
+// OpenRouter attribution headers. Messages rejects video inputs because that
+// OpenRouter endpoint has no video content part.
 func NewForAPI(cfg Config, api string) (core.Provider, error) {
 	switch strings.ToLower(strings.TrimSpace(api)) {
 	case "", APIChat:
@@ -100,17 +102,18 @@ func NewForAPI(cfg Config, api string) (core.Provider, error) {
 			cfgBaseURL = defaultBaseURL
 		}
 		provider, err := openai.New(openai.Config{
-			API:            openai.APIResponses,
-			APIKey:         cfg.APIKey,
-			APIKeyFunc:     cfg.APIKeyFunc,
-			BaseURL:        cfgBaseURL,
-			HTTPClient:     cfg.HTTPClient,
-			Transport:      cfg.Transport,
-			Retry:          cfg.Retry,
-			UserAgent:      cfg.UserAgent,
-			Headers:        openRouterHeaders(cfg.Headers),
-			RequestHeaders: mapSessionHeader,
-			APIKeyOptional: cfg.APIKeyOptional,
+			API:                     openai.APIResponses,
+			APIKey:                  cfg.APIKey,
+			APIKeyFunc:              cfg.APIKeyFunc,
+			BaseURL:                 cfgBaseURL,
+			HTTPClient:              cfg.HTTPClient,
+			Transport:               cfg.Transport,
+			Retry:                   cfg.Retry,
+			UserAgent:               cfg.UserAgent,
+			Headers:                 openRouterHeaders(cfg.Headers),
+			RequestHeaders:          composeRequestHeaders(mapSessionHeader, cfg.RequestHeaders),
+			APIKeyOptional:          cfg.APIKeyOptional,
+			ResponsesVideoInputType: "input_video",
 		})
 		if err != nil {
 			return nil, err
@@ -130,13 +133,13 @@ func NewForAPI(cfg Config, api string) (core.Provider, error) {
 			Retry:          cfg.Retry,
 			UserAgent:      cfg.UserAgent,
 			Headers:        openRouterHeaders(cfg.Headers),
-			RequestHeaders: mapSessionHeader,
+			RequestHeaders: composeRequestHeaders(mapSessionHeader, cfg.RequestHeaders),
 			APIKeyOptional: cfg.APIKeyOptional,
 		})
 		if err != nil {
 			return nil, err
 		}
-		return namedProvider{Provider: provider, name: "openrouter"}, nil
+		return namedProvider{Provider: provider, name: "openrouter", rejectVideo: true}, nil
 	default:
 		return nil, fmt.Errorf("openrouter: api must be messages, responses, or chat, got %q", api)
 	}
@@ -144,11 +147,58 @@ func NewForAPI(cfg Config, api string) (core.Provider, error) {
 
 type namedProvider struct {
 	core.Provider
-	name string
+	name        string
+	rejectVideo bool
 }
 
 func (p namedProvider) Name() string {
 	return p.name
+}
+
+func (p namedProvider) Chat(ctx context.Context, req *core.Request) (*core.Response, error) {
+	if p.rejectVideo && requestContainsVideo(req) {
+		return nil, unsupportedMessagesVideoError()
+	}
+	return p.Provider.Chat(ctx, req)
+}
+
+func (p namedProvider) Stream(ctx context.Context, req *core.Request) (core.Stream, error) {
+	if p.rejectVideo && requestContainsVideo(req) {
+		return nil, unsupportedMessagesVideoError()
+	}
+	return p.Provider.Stream(ctx, req)
+}
+
+func unsupportedMessagesVideoError() error {
+	return core.NewValidationError("openrouter", "Messages API does not support video inputs; use Chat Completions or Responses API")
+}
+
+func requestContainsVideo(req *core.Request) bool {
+	if req == nil {
+		return false
+	}
+	for _, message := range req.Messages {
+		for _, block := range message.Blocks {
+			if blockContainsVideo(block) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func blockContainsVideo(block core.Block) bool {
+	switch b := block.(type) {
+	case core.VideoBlock:
+		return true
+	case core.ToolResultBlock:
+		for _, nested := range b.Content {
+			if blockContainsVideo(nested) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func openRouterHeaders(headers map[string]string) map[string]string {
@@ -188,6 +238,23 @@ func mapSessionHeader(headers http.Header, options core.ProviderOptions) {
 	sessionID, ok := options[ProviderOptionSessionID].(string)
 	if ok && strings.TrimSpace(sessionID) != "" {
 		headers.Set("x-session-id", sessionID)
+	}
+}
+
+func composeRequestHeaders(mappers ...func(http.Header, core.ProviderOptions)) func(http.Header, core.ProviderOptions) {
+	var active []func(http.Header, core.ProviderOptions)
+	for _, mapper := range mappers {
+		if mapper != nil {
+			active = append(active, mapper)
+		}
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	return func(headers http.Header, options core.ProviderOptions) {
+		for _, mapper := range active {
+			mapper(headers, options)
+		}
 	}
 }
 
@@ -418,6 +485,22 @@ func mapBlocks(blocks []core.Block) (any, []map[string]any, map[string]any, erro
 				part["cache_control"] = cache
 			}
 			parts = append(parts, part)
+		case core.VideoBlock:
+			if b.URL == "" {
+				return nil, nil, nil, fmt.Errorf("openrouter video blocks require URL or data URL")
+			}
+			part := map[string]any{
+				"type":      "video_url",
+				"video_url": map[string]any{"url": b.URL},
+			}
+			if b.Cache != nil {
+				cache, err := mapCache(b.Cache)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				part["cache_control"] = cache
+			}
+			parts = append(parts, part)
 		case core.ToolUseBlock:
 			tools = append(tools, map[string]any{
 				"id":   b.ID,
@@ -496,10 +579,11 @@ func mapCache(cache *core.CacheControl) (map[string]any, error) {
 }
 
 // textAndMedia splits a tool result's content blocks into the text portion
-// (which chat-compat tool results can carry) and the image blocks, which the
-// caller reinjects as a follow-up user message so a vision-capable model
-// still sees the image in the next round. Audio and video blocks are not
-// supported in OpenRouter user messages and surface an error.
+// (which chat-compat tool results can carry) and the media blocks, which the
+// caller reinjects as a follow-up user message so a multimodal model still
+// sees the media in the next round. OpenRouter supports image_url and video_url
+// content parts on its Chat Completions endpoint; audio remains unsupported by
+// this adapter's tool-result path.
 func textAndMedia(blocks []core.Block) (string, []map[string]any, error) {
 	var text strings.Builder
 	var media []map[string]any
@@ -519,8 +603,16 @@ func textAndMedia(blocks []core.Block) (string, []map[string]any, error) {
 				image["detail"] = b.Detail
 			}
 			media = append(media, map[string]any{"type": "image_url", "image_url": image})
+		case core.VideoBlock:
+			if b.URL == "" {
+				return "", nil, fmt.Errorf("openrouter tool result video blocks require URL or data URL")
+			}
+			media = append(media, map[string]any{
+				"type":      "video_url",
+				"video_url": map[string]any{"url": b.URL},
+			})
 		default:
-			return "", nil, fmt.Errorf("OpenRouter tool results only support text or image content, got %T", block)
+			return "", nil, fmt.Errorf("OpenRouter tool results only support text, image, or video content, got %T", block)
 		}
 	}
 	return text.String(), media, nil
