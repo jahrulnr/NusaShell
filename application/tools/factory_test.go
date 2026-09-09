@@ -107,6 +107,9 @@ func TestToolFactoryAutomationAgentOmitsACPTools(t *testing.T) {
 	if hasTool(defs, "subagent") {
 		t.Fatalf("automation agent must not see subagent, got %v", namesOf(defs))
 	}
+	if hasTool(defs, "ask_question") {
+		t.Fatalf("automation agent must not see human-in-the-loop ask_question, got %v", namesOf(defs))
+	}
 	if !hasTool(defs, "automation") || !hasTool(defs, "exec") {
 		t.Fatalf("automation agent must keep automation/exec tools, got %v", namesOf(defs))
 	}

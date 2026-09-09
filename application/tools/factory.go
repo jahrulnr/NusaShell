@@ -88,9 +88,9 @@ func (f *ToolFactory) Get(kind AgentKind, workspace string) []ToolInfo {
 	case AgentLearner, AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator:
 		return WithLearnerResultTool(filterLearnerToolInfos(f.baseTools(workspace)))
 	case AgentAutomation:
-		return filterACPToolInfos(f.baseTools(workspace))
+		return filterHeadlessToolInfos(f.baseTools(workspace))
 	case AgentDelegate:
-		return filterACPToolInfos(f.baseTools(workspace))
+		return filterHeadlessToolInfos(f.baseTools(workspace))
 	default:
 		return f.baseTools(workspace)
 	}

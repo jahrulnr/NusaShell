@@ -19,6 +19,15 @@ func IsACPTool(name string) bool {
 	}
 }
 
+// IsPipelineBannedTool reports tool names that must never reach unattended
+// headless turns (pipeline agent steps and internal delegates): ACP subagent
+// tools surface interactive permission prompts, and ask_question blocks until
+// a human answers in the Agent UI. No operator is at the dock for a headless
+// turn, so exposing any of them stalls the run until its context is cancelled.
+func IsPipelineBannedTool(name string) bool {
+	return IsACPTool(name) || name == "ask_question"
+}
+
 // IsLearnerBannedTool reports tools the learner must neither advertise nor
 // execute: project memory, ACP/delegate, and the MCP family (including
 // discovery companions that only serve MCP).
@@ -92,6 +101,13 @@ func FilterACPTools(inner ToolExecutor) *FilteredToolbox {
 	return &FilteredToolbox{Inner: inner, Hide: IsACPTool}
 }
 
+// FilterPipelineTools hides everything unattended turns must not call
+// (ACP tools and human-in-the-loop barrier tools such as ask_question) from
+// inner. Used by pipeline agent steps and internal delegates.
+func FilterPipelineTools(inner ToolExecutor) *FilteredToolbox {
+	return &FilteredToolbox{Inner: inner, Hide: IsPipelineBannedTool}
+}
+
 func (f *FilteredToolbox) ListTools() []ToolInfo {
 	if f == nil || f.Inner == nil {
 		return nil
@@ -149,7 +165,7 @@ type PipelineAgentRunner struct {
 // RunAgentStep returning "not configured" (stub behavior for tests that
 // only check ACP filtering).
 func NewPipelineAgentRunner(inner ToolExecutor, turns HeadlessTurnRunner) *PipelineAgentRunner {
-	return &PipelineAgentRunner{Tools: FilterACPTools(inner), Turns: turns}
+	return &PipelineAgentRunner{Tools: FilterPipelineTools(inner), Turns: turns}
 }
 
 func (r *PipelineAgentRunner) RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error) {
@@ -157,8 +173,8 @@ func (r *PipelineAgentRunner) RunAgentStep(ctx context.Context, prompt, model st
 		return nil, "", fmt.Errorf("agent steps are not configured")
 	}
 	for _, t := range r.Tools.ListTools() {
-		if IsACPTool(t.Name) {
-			return nil, "", fmt.Errorf("internal: ACP tool %q must not be visible to pipeline agents", t.Name)
+		if IsPipelineBannedTool(t.Name) {
+			return nil, "", fmt.Errorf("internal: pipeline-banned tool %q must not be visible to pipeline agents", t.Name)
 		}
 	}
 	if r.Turns == nil {
@@ -167,12 +183,14 @@ func (r *PipelineAgentRunner) RunAgentStep(ctx context.Context, prompt, model st
 	return r.Turns.RunHeadlessTurn(ctx, prompt, model, trust, schema)
 }
 
-// filterACPToolInfos removes ACP subagent tools from a ToolInfo slice. Used by
-// headless turns to ensure pipeline agent steps never see subagent tools.
-func filterACPToolInfos(defs []ToolInfo) []ToolInfo {
+// filterHeadlessToolInfos removes pipeline-banned tools (ACP subagent tools
+// and human-in-the-loop barrier tools such as ask_question) from a ToolInfo
+// slice. Used by headless turns so unattended agents never see tools that
+// require an interactive operator at the dock.
+func filterHeadlessToolInfos(defs []ToolInfo) []ToolInfo {
 	out := make([]ToolInfo, 0, len(defs))
 	for _, d := range defs {
-		if !IsACPTool(d.Name) {
+		if !IsPipelineBannedTool(d.Name) {
 			out = append(out, d)
 		}
 	}
