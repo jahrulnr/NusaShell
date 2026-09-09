@@ -188,7 +188,7 @@ func (n *NotifyProgressSink) OnStepEvent(ctx context.Context, ev StepLifecycleEv
 				}
 			}
 			if detail != "" && ev.Notify.NormalizedDetail() != domain.NotifyDetailNone {
-				if _, err := n.deliverOpen(ctx, ev, eventType, ev.Status, truncateNotify(detail)); err != nil {
+				if _, err := n.deliverOpen(ctx, ev, eventType, ev.Status, truncateNotify(extractReplyText(detail))); err != nil {
 					return err
 				}
 			}
@@ -313,7 +313,7 @@ func (n *NotifyProgressSink) callProgress(ctx context.Context, ev StepLifecycleE
 		"chat_id":    chatID,
 		"event_type": eventType,
 		"status":     status,
-		"title":      truncateNotify(firstNonEmpty(ev.ToolName, eventType, ev.StepID)),
+		"title":      truncateNotify(ev.ToolName),
 		"detail":     detail,
 	}
 	if messageID != "" {
@@ -464,4 +464,20 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// extractReplyText prefers a structured final output: when the agent emits
+// {"reply": "..."} (output_schema JSON), only the reply text is delivered;
+// anything else (working narrative, empty) falls back to the raw detail.
+func extractReplyText(detail string) string {
+	if detail == "" || detail[0] != '{' {
+		return detail
+	}
+	var structured struct {
+		Reply string `json:"reply"`
+	}
+	if err := json.Unmarshal([]byte(detail), &structured); err == nil && strings.TrimSpace(structured.Reply) != "" {
+		return structured.Reply
+	}
+	return detail
 }
