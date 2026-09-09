@@ -83,6 +83,11 @@ func (p *conversationRules) Rules() AgentRules {
 				p.svc.log("warn", "agent", "turn %s requested a tool after reaching the %d-round limit", p.run.ID, p.settings.MaxToolRounds)
 				resp.ToolCalls = nil
 			}
+			if err == nil {
+				// Observer content events at the stream boundary (before
+				// Execute): one reasoning + one text per round, post-phase.
+				p.svc.emitRoundContentObservers(p.run, p.round, resp.Reasoning, resp.Content)
+			}
 			return resp, err
 		},
 		// BuildRequest is nil: conversation assembles its request inside

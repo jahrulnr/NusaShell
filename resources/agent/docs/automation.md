@@ -863,13 +863,32 @@ notify:
   chat_id: "${event.chat_id}"         # optional; empty/unresolved → skip delivery
 ```
 
+#### Agent observers
+
+Headless agent turns dispatch lifecycle events through a single **observer
+registry** on the agent service (`RegisterAgentObserver`). Observers are:
+
+- **per-event** — kinds `run`, `step`, `tool_call`, `reasoning`, `text` with
+  phases `pre` / `post` (reasoning and text are post-only);
+- **FIFO** — registration order is invocation order;
+- **side-effect only** — observers cannot veto or reshape the turn. Control /
+  middleware hooks (OpenClaw's second class) are a future, separate mechanism.
+
+`notify:` is one such observer: the host maps those events onto MCP progress
+calls. It does not run on the critical stream path (delivery is detached and
+best-effort).
+
 - Allowed only when `trust` is `trusted` or `privileged`.
 - The host calls `internal_send_progress` (fallback `admin.send_progress`) on
   the plugin with a bounded payload `{chat_id, event_type, status, title,
   detail?, message_id?}`.
-- Throttle: at most one MCP progress call per tool-call round (reasoning and
-  text from that round are batched into `detail`).
+- `tool_call` **pre** opens a progress message and stores the returned
+  `message_id` keyed by tool CallID; **post** edits that same message (edit
+  failure opens a new message). Reasoning is at most one message per round;
+  `step` post clears the per-run message map.
 - Missing `chat_id` emits `automation.notify.skipped` and does not fail the run.
+- Observer / MCP errors emit `automation.notify.failed` and never block or fail
+  the workflow run.
 - Unknown YAML keys under `notify:` are rejected.
 
 When a run fails:

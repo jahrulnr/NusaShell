@@ -47,9 +47,8 @@ type Service struct {
 	announcementLocksMu sync.Mutex
 	announcementLocks   map[string]*sync.Mutex
 
-	lifecycleMu        sync.Mutex
-	lifecycleListeners []AgentLifecycleListener
-	lifecycleGate      lifecycleRoundGate
+	lifecycleMu sync.Mutex
+	observers   []AgentObserver
 }
 
 // New builds an agent Service from Deps. Runs / RoundStreams / AskQuestions

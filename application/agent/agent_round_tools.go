@@ -46,6 +46,14 @@ func (a *Service) ExecuteTurnTools(run *TurnRun, messageID string, toolCalls []d
 	// so each backing store's own lock is sufficient and there are no
 	// read-modify-write races on the conversation snapshot. Results are kept in
 	// tool-call order for deterministic persistence in phase 2.
+	//
+	// Observer tool_call pre/post are emitted at this Execute boundary (not
+	// from mid-tool stream deltas) so CallIDs pair correctly under parallelism.
+	for _, toolCall := range toolCalls {
+		a.emitToolCallPre(run, round, domainToolCallRef{
+			ID: toolCall.ID, Name: toolCall.Name, Args: toolCall.Args,
+		})
+	}
 	results := make([]ToolExecResult, len(toolCalls))
 	var wg sync.WaitGroup
 	limit := settings.MaxParallelTools
@@ -64,6 +72,15 @@ func (a *Service) ExecuteTurnTools(run *TurnRun, messageID string, toolCalls []d
 		})
 	}
 	wg.Wait()
+	for i := range toolCalls {
+		statusStr := AgentStatusOK
+		if results[i].Status == domain.ToolFailed || results[i].Status == domain.ToolInterrupted {
+			statusStr = AgentStatusError
+		}
+		a.emitToolCallPost(run, round, domainToolCallRef{
+			ID: toolCalls[i].ID, Name: toolCalls[i].Name, Args: toolCalls[i].Args,
+		}, statusStr, results[i].Output)
+	}
 
 	// Phase 2: persist results in tool-call order and emit todo updates. This
 	// runs on the single turn goroutine, so conversation snapshot writes never
@@ -177,7 +194,6 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: toolpresentation.ToolArgsRaw(toolCall.Args),
 		Presentation: toolpresentation.BuildToolPresentation(toolCall.Name, toolCall.Args, domain.ToolRunning, ""),
 	})
-	a.notifyLifecycleToolStart(run.ID, round, toolCall.Name, toolCall.Args)
 	a.log("info", "tools", "tool call: %s", toolCall.Name)
 
 	// If the turn was already cancelled, do not start the tool — mark it
@@ -299,11 +315,6 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 	}
 	a.emitToolCompleted(run, toolCall, res)
 	a.emitLearningMutationEvents(toolCall.Name, status)
-	statusStr := "ok"
-	if status == domain.ToolFailed || status == domain.ToolInterrupted {
-		statusStr = "error"
-	}
-	a.notifyLifecycleToolEnd(run, round, toolCall.Name, statusStr, output)
 	return res
 }
 

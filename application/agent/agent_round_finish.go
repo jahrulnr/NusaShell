@@ -78,7 +78,8 @@ func (a *Service) publishRoundDelta(runID, messageID string, round int, kind, to
 	if a.RoundStreams != nil {
 		a.RoundStreams.Publish(runID, messageID, round, kind, toolCallID, name, text)
 	}
-	a.notifyLifecycleDelta(runID, messageID, round, kind, toolCallID, name, text)
+	// Reasoning/text observer events are emitted once per round at the
+	// AfterRound boundary (emitRoundContentObservers), not from live deltas.
 }
 
 func (a *Service) publishRoundActivity(runID, messageID string, round int, toolCallID, name, activity string) {
@@ -91,8 +92,6 @@ func (a *Service) publishRoundToolStart(runID, messageID string, round int, tool
 	if a.RoundStreams != nil {
 		a.RoundStreams.PublishWithArgsAndPresentation(runID, messageID, round, contracts.RoundDeltaTool, toolCallID, name, "", toolpresentation.ToolArgsRaw(args), presentation)
 	}
-	// Lifecycle tool_start is emitted once from RunOneTool (covers streamed
-	// and non-streamed execution) so we do not double-fire here.
 }
 
 // toolExecResult is one tool's outcome from the concurrent execution phase,

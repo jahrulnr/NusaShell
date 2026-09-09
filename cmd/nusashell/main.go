@@ -356,18 +356,20 @@ func run() error {
 		svc.Exec.Agent = application.NewPipelineAgentRunner(tb, app)
 		notifySink := application.NewNotifyProgressSink(mcpManager, bus)
 		svc.Exec.AddStepEventSink(notifySink)
-		app.AddAgentLifecycleListener(func(ev application.AgentLifecycleEvent) {
+		app.RegisterAgentObserver(application.AgentObserverFunc(func(_ context.Context, ev application.AgentLifecycleEvent) {
 			svc.Exec.ForwardAgentLifecycle(application.StepLifecycleEvent{
-				Type:           ev.Type,
+				Kind:           ev.Kind,
+				Phase:          ev.Phase,
 				ConversationID: ev.ConversationID,
 				AgentRunID:     ev.RunID,
 				Round:          ev.Round,
+				CallID:         ev.CallID,
 				ToolName:       ev.ToolName,
 				Status:         ev.Status,
 				Detail:         ev.Detail,
 				Error:          ev.Error,
 			})
-		})
+		}))
 		if loaded, err := svc.DiscoverPipelines(context.Background()); err != nil {
 			slog.Warn("pipeline discovery failed", "error", err)
 		} else if len(loaded) > 0 {

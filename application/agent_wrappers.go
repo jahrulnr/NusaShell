@@ -43,7 +43,8 @@ type (
 	conversationRules      = agent.ConversationRules
 	repeatedToolGuard      = agent.RepeatedToolGuard
 	AgentLifecycleEvent    = agent.AgentLifecycleEvent
-	AgentLifecycleListener = agent.AgentLifecycleListener
+	AgentObserver          = agent.AgentObserver
+	AgentObserverFunc      = agent.AgentObserverFunc
 )
 
 var (
@@ -210,10 +211,10 @@ func (a *App) agentService() *agent.Service {
 	return a.agentSvc
 }
 
-// AddAgentLifecycleListener registers a headless automation lifecycle listener
-// on the shared agent service.
-func (a *App) AddAgentLifecycleListener(fn AgentLifecycleListener) {
-	a.agentService().AddAgentLifecycleListener(fn)
+// RegisterAgentObserver registers a headless automation lifecycle observer
+// on the shared agent service (FIFO, side-effect only).
+func (a *App) RegisterAgentObserver(o AgentObserver) {
+	a.agentService().RegisterAgentObserver(o)
 }
 
 func (a *App) agentDeps() agent.Deps {
