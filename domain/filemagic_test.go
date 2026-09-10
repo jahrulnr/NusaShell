@@ -97,6 +97,51 @@ func TestSniffMagicVideoFormats(t *testing.T) {
 	}
 }
 
+// TestSniffMagicISOBMFFImageBrands covers the AVIF/HEIC image brands that
+// share the ISO-BMFF "ftyp" box with MP4 video/audio. Previously every
+// unrecognized brand fell through to video/mp4, so AVIF/HEIC images were
+// misdetected as video (which also misled the local-file preview
+// Content-Type). The image brands must now resolve to image/avif or
+// image/heic with kind "image", while plain MP4/M4A brands keep their
+// existing video/audio classification.
+func TestSniffMagicISOBMFFImageBrands(t *testing.T) {
+	cases := []struct {
+		name     string
+		brand    string
+		wantType string
+		wantKind string
+	}{
+		// AVIF image brands.
+		{"AVIF", "avif", "image/avif", "image"},
+		{"AVIF sequence", "avis", "image/avif", "image"},
+		// HEIC/HEIF image brands.
+		{"HEIC", "heic", "image/heic", "image"},
+		{"HEIX", "heix", "image/heic", "image"},
+		{"HEVC", "hevc", "image/heic", "image"},
+		{"HEVX", "hevx", "image/heic", "image"},
+		{"HEIF mif1", "mif1", "image/heic", "image"},
+		{"HEIF msf1", "msf1", "image/heic", "image"},
+		// Regression: plain MP4 brands must still be video/mp4.
+		{"MP4 isom regression", "isom", "video/mp4", "video"},
+		{"MP4 mp42 regression", "mp42", "video/mp4", "video"},
+		// Regression: M4A must still be audio/mp4.
+		{"M4A regression", "M4A ", "audio/mp4", "audio"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			prefix := "\x00\x00\x00\x20ftyp" + c.brand
+			data := []byte(prefix + strings.Repeat("\x00", 64))
+			gotType, gotKind := SniffMagic(data)
+			if gotType != c.wantType {
+				t.Errorf("SniffMagic(brand %q) type = %q, want %q", c.brand, gotType, c.wantType)
+			}
+			if gotKind != c.wantKind {
+				t.Errorf("SniffMagic(brand %q) kind = %q, want %q", c.brand, gotKind, c.wantKind)
+			}
+		})
+	}
+}
+
 func TestSniffMagicUnknownOrEmpty(t *testing.T) {
 	cases := []struct {
 		name string

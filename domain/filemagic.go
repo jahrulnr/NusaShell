@@ -89,12 +89,14 @@ func SniffMagic(data []byte) (mediaType string, kind string) {
 		return "", ""
 	}
 
-	// ── ISO BMFF (MP4 video/audio, MOV video, M4A audio) ───────────
+	// ── ISO BMFF (MP4 video/audio, MOV video, M4A audio, AVIF/HEIC image) ───────────
 	//
 	// Structure: 4-byte box size + "ftyp" + 4-byte major brand.
 	// The major brand at offset 8-11 discriminates:
 	//   "M4A " / "M4V " → audio/mp4
 	//   "qt  "          → video/quicktime
+	//   "avif" / "avis" → image/avif
+	//   "heic" / "heix" / "hevc" / "hevx" / "mif1" / "msf1" → image/heic
 	//   "isom", "mp42", "iso2", "avc1", "iso5", "iso6", "mp41" → video/mp4
 	//
 	// We accept any "ftyp" box as MP4-family and refine by brand.
@@ -106,6 +108,10 @@ func SniffMagic(data []byte) (mediaType string, kind string) {
 			return "audio/mp4", "audio"
 		case "qt  ":
 			return "video/quicktime", "video"
+		case "avif", "avis":
+			return "image/avif", "image"
+		case "heic", "heix", "hevc", "hevx", "mif1", "msf1":
+			return "image/heic", "image"
 		case "isom", "iso2", "iso3", "iso4", "iso5", "iso6", "iso7", "iso8", "iso9",
 			"mp41", "mp42", "avc1", "f4v ", "dash":
 			return "video/mp4", "video"
