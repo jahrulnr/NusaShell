@@ -2,7 +2,7 @@
 
 Providers are the LLM backends the agent chats through. A provider is
 defined by its **API wire format**, not by a vendor: **Messages**,
-**Responses**, **Chat**, or the **Codex** backend.
+**Responses**, **Chat**, **Gemini**, or the **Codex** backend.
 
 ## Drivers
 
@@ -16,6 +16,11 @@ selects the wire format:
 - The persistent **OpenRouter** card uses
   `infrastructure/ai/openrouter`; its editor supports `responses`, `chat`, and
   `messages`.
+- The persistent **Gemini** card uses
+  `infrastructure/ai/gemini` with `gemini`: Google AI Studio's
+  `generateContent` / `streamGenerateContent` wire
+  (`https://generativelanguage.googleapis.com`, `x-goog-api-key` auth). It
+  requires an AI Studio API key and lists models through `GET /v1beta/models`.
 - A **Codex** provider uses the ChatGPT Codex Responses endpoint with the
   `codex` driver. Prefer **Sign in with ChatGPT** (OAuth PKCE) or **Import
   from Codex CLI** on the Providers → Codex detail page. Pasting an OAuth
@@ -28,7 +33,8 @@ selects the wire format:
   assistant/tool transcript locally for room scroll-back.
 - Custom `messages`, `responses`, and `chat` providers default to
   `infrastructure/ai/openrouter`; custom `codex` entries use the Codex
-  transport. The editor supports all four kinds. There is no custom-provider
+  transport and custom `gemini` entries use the Gemini wire. The editor
+  supports all five kinds. There is no custom-provider
   count limit. The OpenRouter implementation is used as the
   compatibility/profile parent against the custom Base URL, including when
   that URL is not hosted at `openrouter.ai`. This keeps the endpoint-specific
@@ -37,12 +43,13 @@ selects the wire format:
   rejection for video on delegated Messages). A custom record with an
   explicit direct driver still opts into that driver's wire behavior.
 
-The four built-in cards remain visible before they are configured. Configure a
+The built-in cards remain visible before they are configured. Configure a
 card with its base URL and credential, then import models when the provider
-supports model listing. The built-in Anthropic, OpenAI, OpenRouter, and Codex
-cards keep their existing direct/native adapter paths; custom providers use
-the OpenRouter compatibility/profile parent by default. OpenRouter and custom
-providers can each use a different API kind and base URL.
+supports model listing. The built-in Anthropic, OpenAI, OpenRouter, Gemini,
+and Codex cards keep their existing direct/native adapter paths; custom
+providers use the OpenRouter compatibility/profile parent by default.
+OpenRouter, Gemini, and custom providers can each use a different API kind
+and base URL.
 
 **Chat routing:** a genuine OpenRouter host (`*.openrouter.ai`) is detected
 for legacy/automatic Chat routing. A provider whose selected driver is
@@ -66,6 +73,16 @@ Messages.
   custom Base URL remains the destination, and the gateway must accept that
   profile. Direct/automatic Chat providers can still use the vanilla OpenAI
   Chat wire (`reasoning_effort`, `reasoning_content`, `max_tokens`).
+- `gemini` — Google's `generateContent` wire format
+  (`POST /v1beta/models/{model}:generateContent`, `:streamGenerateContent`
+  with `alt=sse`). Messages become `contents` parts with an optional
+  `systemInstruction`; tools become `functionDeclarations` with an
+  OpenAPI-subset schema; structured output uses `responseMimeType` +
+  `responseSchema`; thinking uses `thinkingConfig` (`thinkingBudget` on
+  Gemini 2.x, `thinkingLevel` on Gemini 3). Function calls carry a
+  `thoughtSignature` that must be replayed with the call on the next turn.
+  Prompt caching is implicit server-side (reported as
+  `cachedContentTokenCount`), so there is no cache TTL chip.
 - `codex` — the ChatGPT Codex Responses wire format
   (`/backend-api/codex/responses`); it uses OAuth access tokens (Sign in /
   Import from CLI; optional paste fallback), Codex session headers, multi-
@@ -153,6 +170,9 @@ off for that provider only:
   is rejected locally.
 - `off` skips prompt-cache markers for this provider even when the Settings
   switch is on.
+- `gemini` shows no chips: caching is implicit server-side and there is no
+  cache key, block, or TTL on the wire. Cached tokens still appear in usage
+  (`cachedContentTokenCount` → cache read).
 
 Empty stored `cache_ttl` still means the first duration above. `off` is
 stored explicitly and applied on the next turn. Registry cards show the
@@ -273,9 +293,98 @@ Responses → https://gateway.example.com/v1     (→ /v1/responses)
 Chat      → https://gateway.example.com/v1     (→ /v1/chat/completions)
 ```
 
+## Gemini (AI Studio)
+
+The Gemini card talks to Google AI Studio with the native Generative Language
+wire. Configure it with a Google AI Studio API key; the key is sent as
+`x-goog-api-key` (never in the query string, so it cannot leak through
+request logs). The default base URL is
+`https://generativelanguage.googleapis.com`; a version segment (`/v1beta`) is
+appended when the configured base carries none, and a base that already
+carries one is used verbatim so Gemini-compatible gateways keep working.
+
+```text
+# GOOD — operations used by the wire
+POST {base}/v1beta/models/gemini-2.5-flash:generateContent
+POST {base}/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse
+GET  {base}/v1beta/models?pageSize=200
+
+# BAD — the Gemini wire is not the OpenAI shape
+POST {base}/v1beta/openai/chat/completions   (use a `chat` kind provider instead)
+```
+
+Model IDs may be written as `gemini-2.5-flash`, `models/gemini-2.5-flash`, or
+`gemini/gemini-2.5-flash`; the prefix is stripped because the operation path
+already carries the `models` collection. **Import models** lists
+`GET /v1beta/models` (paginated through `nextPageToken`, capped at ten pages)
+and keeps only entries whose `supportedGenerationMethods` include
+`generateContent` **and** whose model ID is not an image, TTS, or embedding
+variant (e.g. `gemini-3.1-flash-lite-image`), so embedding, image, TTS, and
+media-only models never reach the chat picker.
+
+**Thinking.** `thinkingConfig` is filled from the composer's effort control:
+
+- Gemini 2.x and older take a token budget: `minimal` 1–512 (model specific),
+  `low` 1024, `medium` 2048, `high` 4096.
+- Gemini 3 takes a level instead, with per-model support (source:
+  ai.google.dev/gemini-api/docs/thinking):
+  - `gemini-3.8-flash`, `gemini-3.7-flash`: `low`, `medium`, `high`
+  - `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`,
+    `gemini-3.1-flash-lite`, `gemini-3-flash-preview`: `minimal`, `low`,
+    `medium`, `high`
+  - `gemini-3.1-pro-preview`: `low`, `medium`, `high`
+  - `gemini-3-pro-preview`: `low`, `high`
+  - `gemini-3.1-flash-lite-image`: `minimal`, `high`
+  - Unknown/new Gemini 3 models default to `low`, `medium`, `high` (minimal is
+    never assumed valid).
+  A requested level that the model does not support is clamped to the nearest
+  supported level (the higher one wins on a tie) and reported as a
+  `gemini.thinking_level_clamped` warning. A requested budget is replaced by
+  the matching level and reported as a `gemini.thinking_budget_unsupported`
+  warning.
+- `none` disables thinking with a zero budget on 2.x. Gemini 3 cannot fully
+  disable thinking, so the lowest supported level for the model is used with
+  `includeThoughts: false`.
+
+`includeThoughts` is on for enabled thinking, which is what surfaces the
+reasoning stream in the transcript. Reasoning tokens are billed through
+`usageMetadata.thoughtsTokenCount`.
+
+**Thought signatures.** Gemini signs tool calls (and sometimes text parts) and
+returns `thoughtSignature`. NusaShell persists a tool call's signature with
+that call (`ToolCall.Opaque`) and replays it on the next turn; a text part's
+signature is replayed as opaque reasoning state. Gemini 3 rejects a replayed
+`functionCall` part without a signature, so `gemini-3*` history that has none
+for a batch (for example a conversation migrated from another provider) is
+backfilled with Google's documented placeholder sentinel. Dropping signatures
+degrades or breaks multi-turn reasoning, so do not strip them when editing the
+conversation backend.
+
+**Tools and structured output.** Tool schemas are converted to the OpenAPI
+subset Gemini accepts: upper-case types, `items` forced on arrays,
+`additionalProperties`/`$schema`/`strict` and other unsupported keywords
+dropped, empty `enum` values removed, and `propertyOrdering` added for
+`response_format` schemas. `tool_choice` maps onto
+`functionToolConfig.functionCallingConfig.mode` (`AUTO`/`ANY`/`NONE`), with
+`allowedFunctionNames` for a named tool. Multimodal tool results are nested
+inside `functionResponse.parts`. `presence_penalty` and `frequency_penalty`
+are dropped on Gemini 3, which rejects them.
+
+**Media.** Bytes you already hold (attachments, `read_media` output) are sent
+as `inlineData`; Files API URIs, `gs://` URIs, and public media URLs pass
+through as `fileData`. Audio input uses `inlineData` with the normalized
+`audio/*` type.
+
+The `gemini` kind intentionally has **no** chat TTL chip, embedding endpoint,
+image endpoint, TTS, or video endpoint: those capabilities come from the
+OpenAI-compatible kinds. `Test connection` on a Gemini card lists
+`GET /v1beta/models`, so the probe costs nothing.
+
 ## API keys
 
-API keys are optional for `messages`, `responses`, and `chat`. The Codex kind
+API keys are optional for `messages`, `responses`, and `chat`; the `gemini`
+kind requires a Google AI Studio key (there is no anonymous keyless tier on
+the Generative Language API). The Codex kind
 authenticates with ChatGPT OAuth: use **Sign in with ChatGPT** or **Import
 from Codex CLI** on the Providers → Codex detail page (primary paths). Pasting
 an OAuth access token in the provider edit dialog is an optional fallback
@@ -344,7 +453,8 @@ models** (or wait for the periodic auto-import) to populate the model list.
 ## Models
 
 After saving a provider, use **Import models** to fetch its model list
-(`GET /models`). OpenRouter also exposes `GET /images/models`; those ids
+(`GET /models`; the `gemini` kind reads `GET /v1beta/models`). OpenRouter also
+exposes `GET /images/models`; those ids
 are merged and tagged `kind: image`. The agent only offers imported models.
 Messages providers bundle Claude model metadata (context window, pricing);
 imported models keep the provider's own ids. If a chat request is rejected
@@ -399,7 +509,8 @@ image provider is configured.
 ## Test connection
 
 **Test connection** probes connectivity only: it lists models with
-`GET /models` (responses/chat) or `GET /v1/models` (messages) and
+`GET /models` (responses/chat), `GET /v1/models` (messages), or
+`GET /v1beta/models` (gemini) and
 reports latency and the model count. No completion is sent, so the probe
 never costs tokens, works before importing models, and does not trip
 model-routing failures on the upstream — a broken model only surfaces when

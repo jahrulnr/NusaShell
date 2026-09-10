@@ -18,6 +18,7 @@ func TestKindCapabilities(t *testing.T) {
 		{ProviderMessages, false, true, true, false, false, false, false, "anthropic", []string{"5m", "1h"}},
 		{ProviderResponses, false, true, true, true, true, false, true, "openai", []string{"30m"}},
 		{ProviderChat, false, true, true, true, true, true, true, "openai", []string{"5m", "1h", "30m"}},
+		{ProviderGemini, true, true, false, false, false, false, false, "", nil},
 		{ProviderCodex, true, true, false, false, false, false, false, "openai", []string{"30m"}},
 	}
 	for _, tc := range tests {
@@ -82,7 +83,7 @@ func TestKindCapabilitiesUnknownKindDefaultsToChat(t *testing.T) {
 }
 
 func TestValidKind(t *testing.T) {
-	for _, k := range []ProviderKind{ProviderMessages, ProviderResponses, ProviderChat, ProviderCodex} {
+	for _, k := range []ProviderKind{ProviderMessages, ProviderResponses, ProviderChat, ProviderGemini, ProviderCodex} {
 		if !ValidKind(k) {
 			t.Errorf("ValidKind(%q) = false, want true", k)
 		}
@@ -116,6 +117,9 @@ func TestRequiresKey(t *testing.T) {
 	if !RequiresKey(ProviderCodex) {
 		t.Error("codex must require an access token")
 	}
+	if !RequiresKey(ProviderGemini) {
+		t.Error("gemini must require an API key")
+	}
 }
 
 func TestCacheTTLsFor(t *testing.T) {
@@ -133,6 +137,8 @@ func TestCacheTTLsFor(t *testing.T) {
 		{ProviderChat, ProviderDriverOpenAI, []string{"30m"}},
 		{ProviderCodex, ProviderDriverCodex, []string{"30m"}},
 		{ProviderCodex, ProviderDriverAuto, []string{"30m"}},
+		{ProviderGemini, ProviderDriverGemini, nil},
+		{ProviderGemini, ProviderDriverAuto, nil},
 	}
 	for _, tc := range tests {
 		got := CacheTTLsFor(tc.kind, tc.driver)
@@ -242,6 +248,7 @@ func TestProviderDrivers(t *testing.T) {
 		ProviderDriverAnthropic,
 		ProviderDriverOpenAI,
 		ProviderDriverOpenRouter,
+		ProviderDriverGemini,
 	} {
 		if !ValidDriver(driver) {
 			t.Errorf("ValidDriver(%q) = false", driver)
@@ -258,6 +265,7 @@ func TestProviderDrivers(t *testing.T) {
 		{id: "anthropic", want: ProviderDriverAnthropic},
 		{id: "openai", want: ProviderDriverOpenAI},
 		{id: "openrouter", want: ProviderDriverOpenRouter},
+		{id: "gemini", want: ProviderDriverGemini},
 		{id: "custom", want: ProviderDriverAuto},
 	}
 	for _, tc := range tests {

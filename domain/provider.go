@@ -7,7 +7,8 @@ import (
 
 // ProviderKind names the wire API shape, not a vendor: Messages (Anthropic
 // Messages API), Responses (OpenAI Responses API), Chat (any OpenAI-compatible
-// Chat Completions endpoint, including OpenRouter hosts), or Codex (the
+// Chat Completions endpoint, including OpenRouter hosts), Gemini (Google
+// generateContent, including Gemini-compatible gateways), or Codex (the
 // ChatGPT Codex Responses backend).
 type ProviderKind string
 
@@ -15,6 +16,10 @@ const (
 	ProviderMessages  ProviderKind = "messages"
 	ProviderResponses ProviderKind = "responses"
 	ProviderChat      ProviderKind = "chat"
+	// ProviderGemini is the Google Gemini API surface (generateContent /
+	// streamGenerateContent) served by Google AI Studio and by Gemini-compatible
+	// gateways. The driver (ProviderDriverGemini) implements the runtime path.
+	ProviderGemini ProviderKind = "gemini"
 	// ProviderCodex is the ChatGPT Codex backend. It uses OAuth
 	// account tokens stored in CredentialStore (not a single API key)
 	// and serves the Responses API at https://chatgpt.com/backend-api/codex.
@@ -32,6 +37,11 @@ const (
 	ProviderDriverAnthropic  ProviderDriver = "anthropic"
 	ProviderDriverOpenAI     ProviderDriver = "openai"
 	ProviderDriverOpenRouter ProviderDriver = "openrouter"
+	// ProviderDriverGemini drives Gemini providers speaking generateContent.
+	// It is a separate driver because the wire format, auth header, and
+	// thinking/tool-call semantics differ from every OpenAI- or
+	// Anthropic-shaped API.
+	ProviderDriverGemini ProviderDriver = "gemini"
 	// ProviderDriverCodex drives Codex providers. The Codex backend
 	// speaks the Responses API on the same wire format, but the
 	// transport, auth, account routing, and circuit breaker policy are
@@ -55,7 +65,7 @@ const (
 // legacy host-detected routing for providers created before explicit drivers.
 func ValidDriver(driver ProviderDriver) bool {
 	switch driver {
-	case ProviderDriverAuto, ProviderDriverAnthropic, ProviderDriverOpenAI, ProviderDriverOpenRouter, ProviderDriverCodex:
+	case ProviderDriverAuto, ProviderDriverAnthropic, ProviderDriverOpenAI, ProviderDriverOpenRouter, ProviderDriverGemini, ProviderDriverCodex:
 		return true
 	}
 	return false
@@ -133,6 +143,16 @@ var kindCaps = map[ProviderKind]KindCapabilities{
 		PromptCacheStyle:         "openai",
 		CacheTTLs:                []string{"5m", "1h", "30m"},
 	},
+	ProviderGemini: {
+		RequiresKey:      true,
+		HasModelListing:  true,
+		PromptCacheStyle: "",
+		// Prompt caching on the Gemini API is implicit: Google caches repeated
+		// prefixes server-side without a request opt-in, and
+		// usageMetadata.cachedContentTokenCount reports the saving. There is
+		// no cache block or TTL to select, so CacheTTLs stays empty and the
+		// provider never sends cache options.
+	},
 	ProviderCodex: {
 		RequiresKey:      true,
 		HasModelListing:  true,
@@ -154,7 +174,7 @@ func (p *Provider) KindCapabilities() KindCapabilities {
 // ValidKind reports whether kind is one of the known provider kinds.
 func ValidKind(kind ProviderKind) bool {
 	switch kind {
-	case ProviderMessages, ProviderResponses, ProviderChat, ProviderCodex:
+	case ProviderMessages, ProviderResponses, ProviderChat, ProviderGemini, ProviderCodex:
 		return true
 	}
 	return false
@@ -412,6 +432,8 @@ func (p *Provider) EffectiveDriver() ProviderDriver {
 		return ProviderDriverOpenAI
 	case "openrouter":
 		return ProviderDriverOpenRouter
+	case "gemini":
+		return ProviderDriverGemini
 	default:
 		return ProviderDriverAuto
 	}

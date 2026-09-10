@@ -1,0 +1,30 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Hello"
+        },
+        {
+          "text": "Again"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "text": "Hi there"
+        }
+      ],
+      "role": "model"
+    }
+  ],
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "You are helpful."
+      }
+    ]
+  }
+}

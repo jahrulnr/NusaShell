@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/gemini"
 	aiutil "nusashell/infrastructure/ai/internal"
 )
 
@@ -170,6 +171,40 @@ func routeSlugFallback(name string) string {
 	s := strings.ToLower(strings.TrimSpace(name))
 	s = strings.ReplaceAll(s, " ", "-")
 	return s
+}
+
+// listGeminiModels fetches the Generative Language model catalog
+// (GET /v1beta/models) that the Gemini wire serves. Chat-capable entries carry
+// the token limits the model picker shows; embedding and media-only entries are
+// filtered out by the provider.
+func listGeminiModels(ctx context.Context, baseURL, apiKey string, client *http.Client) ([]domain.Model, error) {
+	provider, err := gemini.New(gemini.Config{
+		APIKey:         apiKey,
+		BaseURL:        baseURL,
+		HTTPClient:     client,
+		APIKeyOptional: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	infos, err := provider.ListModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	models := make([]domain.Model, 0, len(infos))
+	for _, info := range infos {
+		if info.ID == "" {
+			continue
+		}
+		models = append(models, domain.Model{
+			ID:          info.ID,
+			DisplayName: info.Name,
+			Context:     info.InputTokenLimit,
+			MaxOutput:   info.OutputTokenLimit,
+			Description: info.Description,
+		})
+	}
+	return models, nil
 }
 
 // listAnthropicModels fetches the Anthropic model catalog

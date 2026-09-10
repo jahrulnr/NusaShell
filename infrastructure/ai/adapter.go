@@ -1,7 +1,7 @@
 // Package ai is the composition root for AI provider adapters. It wires
-// the ported litellm provider subpackages (anthropic, openai, openrouter)
-// into core.Provider via a single Adapter that switches on the provider
-// kind.
+// the ported litellm provider subpackages (anthropic, openai, openrouter,
+// gemini) into core.Provider via a single Adapter that switches on the
+// provider kind.
 //
 // The litellm providers speak the shared core.Request/Response model
 // (Blocks-based). Boundary translation (application.ChatRequest ←>
@@ -18,6 +18,7 @@ import (
 	"nusashell/infrastructure/ai/anthropic"
 	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/core"
+	"nusashell/infrastructure/ai/gemini"
 	aiutil "nusashell/infrastructure/ai/internal"
 	"nusashell/infrastructure/ai/openai"
 	"nusashell/infrastructure/ai/openrouter"
@@ -118,6 +119,8 @@ func (a *Adapter) providerFor() (core.Provider, error) {
 		return anthropic.New(anthropic.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional, RequestHeaders: headers})
 	case a.ProviderKind == domain.ProviderResponses:
 		return openai.New(openai.Config{API: openai.APIResponses, APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional, RequestHeaders: headers})
+	case a.ProviderKind == domain.ProviderGemini:
+		return gemini.New(gemini.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional, RequestHeaders: headers})
 	case a.ProviderKind == domain.ProviderChat && a.OpenRouter:
 		return openrouter.New(openrouter.Config{APIKey: a.APIKey, BaseURL: a.BaseURL, HTTPClient: a.Client, APIKeyOptional: optional, RequestHeaders: headers})
 	case a.ProviderKind == domain.ProviderChat:
@@ -166,6 +169,12 @@ func (a *Adapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model
 		return codex.ListModelsViaSubprocess(ctx, a.APIKey, a.AccountID)
 	case a.ProviderKind == domain.ProviderMessages && a.Driver != domain.ProviderDriverOpenRouter:
 		return listAnthropicModels(ctx, a.BaseURL, a.APIKey, a.Client)
+	case a.ProviderKind == domain.ProviderGemini:
+		// Generative Language wire: GET {base}/v1beta/models authenticated
+		// with x-goog-api-key. The API root does not serve the OpenAI-shaped
+		// /models path the default branch builds, so gemini must not fall
+		// through to it.
+		return listGeminiModels(ctx, a.BaseURL, a.APIKey, a.Client)
 	default:
 		headers := map[string]string{}
 		if apiKey != "" {

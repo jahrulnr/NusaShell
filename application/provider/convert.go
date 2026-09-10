@@ -141,11 +141,17 @@ func FromCoreResponse(resp *core.Response) ChatResponse {
 		out.ReasoningExtra = extra
 	}
 	for _, call := range resp.ToolCalls() {
-		out.ToolCalls = append(out.ToolCalls, domain.ToolCall{
+		toolCall := domain.ToolCall{
 			ID:   call.ID,
 			Name: call.Name,
 			Args: domain.RepairToolCallArguments(string(call.Arguments)),
-		})
+		}
+		// Gemini thought signatures must be replayed with the tool call on the
+		// next turn; every other provider leaves Opaque nil.
+		if call.Signature != "" {
+			toolCall.Opaque = map[string]any{domain.ToolCallOpaqueThoughtSignature: call.Signature}
+		}
+		out.ToolCalls = append(out.ToolCalls, toolCall)
 	}
 	out.Usage = ChatUsage{
 		InputTokens:  resp.Usage.InputTokens,
@@ -218,6 +224,10 @@ func applyPromptCache(out *core.Request, req ChatRequest, kind domain.ProviderKi
 		if req.PromptCache.TTL == "30m" {
 			setProviderOption(out, "prompt_cache_options", map[string]any{"ttl": "30m"})
 		}
+	case domain.ProviderGemini:
+		// Gemini caching is implicit server-side: there is no cache key,
+		// block, or TTL to send, and cachedContentTokenCount is still
+		// reported in usage.
 	}
 }
 
@@ -248,6 +258,10 @@ func reasoningExtraForKind(extra json.RawMessage, kind domain.ProviderKind, open
 	}
 	switch kind {
 	case domain.ProviderResponses, domain.ProviderCodex:
+		return extra
+	case domain.ProviderGemini:
+		// Gemini replays opaque thought-signature state as ReasoningBlock.Extra
+		// so a signature returned on a text part survives the round trip.
 		return extra
 	case domain.ProviderChat:
 		if !openRouter {
@@ -309,11 +323,18 @@ func chatMessageToCore(m ChatMessage, req ChatRequest, kind domain.ProviderKind,
 			blocks = append(blocks, core.TextBlock{Text: m.Content})
 		}
 		for _, tc := range m.ToolCalls {
-			blocks = append(blocks, core.ToolUseBlock{
+			toolUse := core.ToolUseBlock{
 				ID:        tc.ID,
 				Name:      domain.SanitizeToolName(tc.Name),
 				Arguments: jsonRaw(tc.Args),
-			})
+			}
+			// Gemini thought signatures ride along with the tool call they
+			// were returned on; a replayed call without its signature is
+			// rejected by Gemini 3.
+			if signature, ok := tc.Opaque[domain.ToolCallOpaqueThoughtSignature].(string); ok {
+				toolUse.Signature = signature
+			}
+			blocks = append(blocks, toolUse)
 		}
 		return core.Message{Role: core.RoleAssistant, Blocks: blocks}
 	case "tool":

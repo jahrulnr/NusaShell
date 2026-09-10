@@ -14,7 +14,13 @@ func BuildPromptCachePolicy(settings domain.Settings, p *domain.Provider, model,
 	if !settings.PromptCaching || p == nil {
 		return nil
 	}
-	ttl := domain.NormalizeCacheTTL(p.Kind, domain.WireCacheDriver(p.Kind, p.EffectiveDriver(), p.BaseURL), p.CacheTTL)
+	driver := domain.WireCacheDriver(p.Kind, p.EffectiveDriver(), p.BaseURL)
+	if len(domain.CacheTTLsFor(p.Kind, driver)) == 0 {
+		// Kinds without a wire-level cache control (Gemini implicit caching)
+		// need no key, TTL, or block markers.
+		return nil
+	}
+	ttl := domain.NormalizeCacheTTL(p.Kind, driver, p.CacheTTL)
 	if ttl == domain.CacheTTLOff {
 		return nil
 	}

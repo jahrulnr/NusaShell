@@ -76,6 +76,11 @@ type ToolCall struct {
 	Opaque map[string]any `json:"opaque,omitempty"`
 }
 
+// ToolCallOpaqueThoughtSignature is the ToolCall.Opaque key holding a Gemini
+// thought signature. Gemini signs each tool call (and sometimes a text part)
+// and rejects a replayed functionCall part that lost its signature.
+const ToolCallOpaqueThoughtSignature = "thought_signature"
+
 // StepType identifies a temporal segment within a multi-round assistant turn.
 type StepType string
 

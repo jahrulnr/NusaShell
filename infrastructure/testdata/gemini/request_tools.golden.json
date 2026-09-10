@@ -1,0 +1,43 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Use the tool"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "text": "I will look it up.",
+          "thought": true,
+          "thoughtSignature": "sig-thought"
+        },
+        {
+          "functionCall": {
+            "args": {
+              "q": "x"
+            },
+            "name": "lookup"
+          }
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "functionResponse": {
+            "name": "lookup",
+            "response": {
+              "result": "ok"
+            }
+          }
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

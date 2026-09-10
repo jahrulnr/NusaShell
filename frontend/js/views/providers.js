@@ -10,14 +10,16 @@ const KIND_META = {
   messages: { label: 'Messages', mark: 'MS', cls: 'accent-anthropic', desc: 'Messages API format' },
   responses: { label: 'Responses', mark: 'RS', cls: 'accent-openai', desc: 'Responses API format' },
   chat: { label: 'Chat', mark: 'CH', cls: 'accent-compatible', desc: 'Chat Completions API format (custom providers use the OpenRouter profile)' },
+  gemini: { label: 'Gemini', mark: 'GM', cls: 'accent-gemini', desc: 'Google Gemini generateContent API (AI Studio keys)' },
   codex: { label: 'Codex', mark: 'CX', cls: 'accent-codex', desc: 'ChatGPT Codex backend (OAuth, remote v2 compaction)' },
 };
-const KIND_META_FALLBACK = { label: 'Unknown', mark: '?', cls: 'accent-compatible', desc: 'Unsupported provider kind — delete and re-add as messages, responses, chat, or codex.' };
+const KIND_META_FALLBACK = { label: 'Unknown', mark: '?', cls: 'accent-compatible', desc: 'Unsupported provider kind — delete and re-add as messages, responses, chat, gemini, or codex.' };
 
 const DRIVER_META = {
   anthropic: { label: 'Anthropic', mark: 'AN', cls: 'accent-anthropic', desc: 'Anthropic Messages API' },
   openai: { label: 'OpenAI', mark: 'OA', cls: 'accent-openai', desc: 'OpenAI Responses API' },
   openrouter: { label: 'OpenRouter', mark: 'OR', cls: 'accent-compatible', desc: 'OpenRouter-compatible API' },
+  gemini: { label: 'Gemini', mark: 'GM', cls: 'accent-gemini', desc: 'Google Gemini generateContent API' },
   codex: { label: 'Codex', mark: 'CX', cls: 'accent-codex', desc: 'ChatGPT Codex backend (OAuth, no API key needed)' },
 };
 
@@ -25,6 +27,7 @@ const API_KIND_OPTIONS = [
   { value: 'responses', label: 'Responses' },
   { value: 'chat', label: 'Chat' },
   { value: 'messages', label: 'Messages' },
+  { value: 'gemini', label: 'Gemini' },
   { value: 'codex', label: 'Codex' },
 ];
 
@@ -71,6 +74,18 @@ export const BUILTIN_PROVIDERS = [
     kind: 'codex',
     name: 'Codex',
     base_url: 'https://chatgpt.com/backend-api/codex',
+    enabled: true,
+    configured: false,
+    has_api_key: false,
+    models: [],
+    builtin: true,
+  },
+  {
+    id: 'gemini',
+    driver: 'gemini',
+    kind: 'gemini',
+    name: 'Gemini',
+    base_url: 'https://generativelanguage.googleapis.com',
     enabled: true,
     configured: false,
     has_api_key: false,
@@ -751,13 +766,14 @@ const KIND_DEFAULTS = {
   messages: 'https://api.anthropic.com',
   responses: 'https://api.openai.com/v1',
   chat: 'https://api.openai.com/v1',
+  gemini: 'https://generativelanguage.googleapis.com',
   codex: 'https://chatgpt.com/backend-api/codex',
 };
 
 async function addProvider(provider = null) {
   const driver = provider?.driver || 'openrouter';
   const selectableKind = !provider?.builtin || driver === 'openrouter';
-  const defaultKinds = { anthropic: 'messages', openai: 'responses', openrouter: 'chat', codex: 'codex' };
+  const defaultKinds = { anthropic: 'messages', openai: 'responses', openrouter: 'chat', gemini: 'gemini', codex: 'codex' };
   const initialKind = provider?.kind ?? defaultKinds[driver] ?? 'chat';
   const isCodex = initialKind === 'codex' || provider?.kind === 'codex';
   let initialBaseURL = provider?.base_url;
@@ -767,7 +783,7 @@ async function addProvider(provider = null) {
   if (isCodex && provider?.builtin) {
     message = 'Prefer Sign in with ChatGPT or Import from Codex CLI on the Codex detail page. Pasting an OAuth access token here is an optional fallback only.';
   } else if (!provider) {
-    message = 'Custom Chat, Responses, and Messages providers use the OpenRouter compatibility/profile parent by default. For Codex, prefer Sign in / Import from CLI on the detail page; pasting a token is optional. Credentials are stored in the local SQLite credential store.';
+    message = 'Custom Chat, Responses, and Messages providers use the OpenRouter compatibility/profile parent by default; Gemini kind uses the native generateContent wire. For Codex, prefer Sign in / Import from CLI on the detail page; pasting a token is optional. Credentials are stored in the local SQLite credential store.';
   } else if (provider.builtin) {
     message = 'Update this built-in provider. OpenRouter-compatible cards can use any supported API kind. API keys are optional.';
   } else if (isCodex) {
@@ -824,7 +840,7 @@ async function addProvider(provider = null) {
   });
   if (res.value !== 'save') return;
   const kind = selectableKind ? res.fields.kind : initialKind;
-  const selectedDriver = kind === 'codex' ? 'codex' : driver;
+  const selectedDriver = kind === 'codex' ? 'codex' : kind === 'gemini' ? 'gemini' : driver;
   const { name, base_url, api_key } = res.fields;
   if (!name.trim()) { toast('Provider name is required', 'error'); return; }
   if (!base_url.trim()) { toast('Base URL is required', 'error'); return; }

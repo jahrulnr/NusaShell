@@ -496,6 +496,15 @@ func (s *Store) migrateProviderKinds() {
 				p.Kind = domain.ProviderChat
 				changed = true
 			}
+		case "gemini":
+			if p.Driver != domain.ProviderDriverGemini {
+				p.Driver = domain.ProviderDriverGemini
+				changed = true
+			}
+			if p.Kind != domain.ProviderGemini {
+				p.Kind = domain.ProviderGemini
+				changed = true
+			}
 		}
 	}
 	if changed {

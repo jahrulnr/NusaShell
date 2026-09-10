@@ -576,6 +576,53 @@ func TestListModelsRoutesAnthropicAndOpenAI(t *testing.T) {
 	}
 }
 
+// Gemini speaks the Generative Language wire: model discovery is
+// GET {base}/v1beta/models authenticated with x-goog-api-key. Google's API
+// root does not serve the OpenAI-shaped /models path, so the gemini kind must
+// never fall through to the OpenAI-compatible lister.
+func TestListModelsRoutesGemini(t *testing.T) {
+	var gotPath, gotKey string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotKey = r.Header.Get("x-goog-api-key")
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1beta/models":
+			_, _ = w.Write([]byte(`{"models":[
+				{"name":"models/gemini-2.5-flash","displayName":"Gemini 2.5 Flash","description":"fast","inputTokenLimit":1048576,"outputTokenLimit":65536,"supportedGenerationMethods":["generateContent","countTokens"]},
+				{"name":"models/gemini-embedding-001","displayName":"Embedding","supportedGenerationMethods":["embedContent"]}
+			]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	ad := &Adapter{
+		ProviderKind: domain.ProviderGemini,
+		Driver:       domain.ProviderDriverGemini,
+		BaseURL:      srv.URL,
+		APIKey:       "gemini-key",
+		Client:       srv.Client(),
+	}
+	models, err := ad.ListModels(context.Background(), "gemini-key")
+	if err != nil {
+		t.Fatalf("gemini ListModels: %v", err)
+	}
+	if gotPath != "/v1beta/models" {
+		t.Fatalf("request path = %q, want /v1beta/models", gotPath)
+	}
+	if gotKey != "gemini-key" {
+		t.Fatalf("x-goog-api-key = %q, want gemini-key", gotKey)
+	}
+	if len(models) != 1 || models[0].ID != "gemini-2.5-flash" || models[0].Context != 1048576 {
+		t.Fatalf("gemini models = %+v", models)
+	}
+	if models[0].DisplayName != "Gemini 2.5 Flash" || models[0].MaxOutput != 65536 {
+		t.Fatalf("gemini model metadata = %+v", models[0])
+	}
+}
+
 func TestListModelsParsesCanonicalSlug(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -115,6 +115,15 @@ func builtInProvider(id string) (*domain.Provider, bool) {
 			BaseURL: "https://openrouter.ai/api/v1",
 			Enabled: true,
 		}, true
+	case "gemini":
+		return &domain.Provider{
+			ID:      id,
+			Driver:  domain.ProviderDriverGemini,
+			Kind:    domain.ProviderGemini,
+			Name:    "Gemini",
+			BaseURL: "https://generativelanguage.googleapis.com",
+			Enabled: true,
+		}, true
 	case "codex":
 		return &domain.Provider{
 			ID:      id,
@@ -141,6 +150,14 @@ func validateProviderDriver(driver domain.ProviderDriver, kind domain.ProviderKi
 	case domain.ProviderDriverOpenAI:
 		if kind != domain.ProviderResponses {
 			return fmt.Errorf("openai driver only supports responses kind")
+		}
+	case domain.ProviderDriverGemini:
+		if kind != domain.ProviderGemini {
+			return fmt.Errorf("gemini driver only supports gemini kind")
+		}
+	case domain.ProviderDriverOpenRouter:
+		if kind == domain.ProviderGemini {
+			return fmt.Errorf("openrouter driver does not support gemini kind; use the gemini driver")
 		}
 	case domain.ProviderDriverCodex:
 		if kind != domain.ProviderCodex {
@@ -169,7 +186,7 @@ func (s *Service) HandleSave(req contracts.ProviderSaveRequest) (any, *contracts
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind is required"}
 	}
 	if !domain.ValidKind(kind) {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses, chat, or codex"}
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses, chat, gemini, or codex"}
 	}
 	baseURL := strings.TrimSpace(req.BaseURL)
 	driver := domain.ProviderDriver(strings.ToLower(strings.TrimSpace(req.Driver)))
@@ -311,8 +328,11 @@ func (s *Service) HandleTest(req contracts.ProviderIDRequest) (any, *contracts.R
 	models, err := lister.ListModels(ctx, key)
 	if err != nil {
 		probe := "GET /models"
-		if p.Kind == domain.ProviderCodex {
+		switch p.Kind {
+		case domain.ProviderCodex:
 			probe = "codex model/list"
+		case domain.ProviderGemini:
+			probe = "GET /v1beta/models"
 		}
 		s.warn("provider test failed: %s [%s, probe %s]: %v", p.Name, p.Kind, probe, err)
 		return nil, &contracts.RPCError{

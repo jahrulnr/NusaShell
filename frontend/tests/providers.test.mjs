@@ -18,7 +18,7 @@ const providersSource = await readFile(new URL('../js/views/providers.js', impor
 test('provider registry keeps the four built-in provider cards visible', () => {
   const providers = mergeProviderRegistry([]);
 
-  assert.deepEqual(providers.map((provider) => provider.id), ['anthropic', 'openai', 'openrouter', 'codex']);
+  assert.deepEqual(providers.map((provider) => provider.id), ['anthropic', 'openai', 'openrouter', 'codex', 'gemini']);
   assert.equal(providers.find((provider) => provider.id === 'anthropic').driver, 'anthropic');
   assert.equal(providers.find((provider) => provider.id === 'anthropic').kind, 'messages');
   assert.equal(providers.find((provider) => provider.id === 'openai').driver, 'openai');
@@ -27,7 +27,7 @@ test('provider registry keeps the four built-in provider cards visible', () => {
   assert.equal(providers.find((provider) => provider.id === 'openrouter').kind, 'chat');
   assert.equal(providers.find((provider) => provider.id === 'codex').driver, 'codex');
   assert.equal(providers.find((provider) => provider.id === 'codex').kind, 'codex');
-  assert.equal(BUILTIN_PROVIDERS.length, 4);
+  assert.equal(BUILTIN_PROVIDERS.length, 5);
 });
 
 test('provider registry preserves custom providers and selected API kinds', () => {
@@ -49,13 +49,22 @@ test('provider registry preserves custom providers and selected API kinds', () =
     },
   ]);
 
-  assert.equal(providers.length, 5);
+  assert.equal(providers.length, 6);
   assert.equal(providers[2].id, 'openrouter');
   assert.equal(providers[2].kind, 'responses');
   assert.equal(providers[2].configured, true);
-  assert.equal(providers[4].id, 'custom_1');
-  assert.equal(providers[4].kind, 'messages');
-  assert.equal(providers[4].driver, 'openrouter');
+  assert.equal(providers[5].id, 'custom_1');
+  assert.equal(providers[5].kind, 'messages');
+  assert.equal(providers[5].driver, 'openrouter');
+});
+
+test('gemini built-in and kind expose no cache TTL chips', () => {
+  const gemini = BUILTIN_PROVIDERS.find((provider) => provider.id === 'gemini');
+  assert.ok(gemini, 'gemini built-in card exists');
+  assert.equal(gemini.kind, 'gemini');
+  assert.equal(gemini.driver, 'gemini');
+  assert.deepEqual(cacheTTLsFor({ kind: 'gemini', driver: 'gemini' }), []);
+  assert.equal(effectiveCacheTTL({ kind: 'gemini', driver: 'gemini', cache_ttl: '30m' }), '');
 });
 
 test('cache TTL chips use sendable values and keep a selected default', () => {
