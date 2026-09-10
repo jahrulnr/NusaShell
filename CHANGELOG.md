@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-09-11
+
+### Added
+
+- **Gemini provider kind and `gemini` driver.** A new native provider speaks
+  Google's `generateContent` / `streamGenerateContent` wire with `x-goog-api-key`
+  auth, lists models via `GET /v1beta/models`, applies implicit prompt caching,
+  supports per-model thinking levels, and replays thought signatures across
+  turns. It is a distinct driver because the wire format, auth header, and
+  thinking/tool-call semantics differ from every OpenAI- or Anthropic-shaped
+  API.
+
+- **Local file preview viewer.** Opening a local file shows a magic /
+  Content-Type-aware preview: markdown renders, code and text open in a
+  vendored read-only CodeMirror 5 editor with a highlight.js fallback, image /
+  audio / video / PDF preview natively, and unknown binaries fall back to a
+  download-first card. The viewer classifies from response headers first and
+  aborts the fetch when the popup closes.
+
+- **Vector SVG zoom in the media popup.** Zooming a vector SVG resizes the
+  SVG layout box instead of rasterizing a transform, so the graphic stays
+  crisp at every zoom level.
+
+### Fixed
+
+- **Parallel same-path `file_patch` / `file_write` serialize under a path
+  lock.** Same-path calls serialize their read-modify-write under an
+  in-process path lock, so each patch re-reads the latest content (disjoint
+  hunks compose; overlapping `old_string` still fails cleanly) instead of
+  last-writer-wins.
+
+- **Gemini thinking levels are clamped to the model's supported set.** A
+  requested level outside the model's supported thinking levels is clamped to
+  the nearest supported level with a warning instead of sending an
+  unsupported level to the API.
+
+- **Local file preview classifies from response headers first and aborts on
+  close.** The viewer reads Content-Type from response headers before
+  falling back to magic-byte sniffing, and aborts the in-flight fetch when
+  the popup closes so a closed preview no longer keeps downloading.
+
+- **Image / TTS / embedding models are no longer listed in the Gemini chat
+  model picker.** The Gemini model list filters out image-generation, TTS,
+  and embedding models so only chat-capable models appear in the picker.
+
 ## [0.7.0] - 2026-09-09
 
 ### Added

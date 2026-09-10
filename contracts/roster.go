@@ -804,8 +804,8 @@ type ModelDTO struct {
 
 type ProviderDTO struct {
 	ID         string     `json:"id"`
-	Driver     string     `json:"driver,omitempty"` // auto | anthropic | openai | openrouter
-	Kind       string     `json:"kind"`             // messages | responses | chat | codex
+	Driver     string     `json:"driver,omitempty"` // auto | anthropic | openai | openrouter | gemini | codex
+	Kind       string     `json:"kind"`             // messages | responses | chat | gemini | codex
 	Name       string     `json:"name"`
 	BaseURL    string     `json:"base_url,omitempty"`
 	Enabled    bool       `json:"enabled"`
@@ -833,8 +833,8 @@ type ProvidersListResult struct {
 
 type ProviderSaveRequest struct {
 	ID      string `json:"id,omitempty"`
-	Driver  string `json:"driver,omitempty"` // auto | anthropic | openai | openrouter
-	Kind    string `json:"kind"`
+	Driver  string `json:"driver,omitempty"` // auto | anthropic | openai | openrouter | gemini | codex
+	Kind    string `json:"kind"`             // messages | responses | chat | gemini | codex
 	Name    string `json:"name"`
 	BaseURL string `json:"base_url,omitempty"`
 	APIKey  string `json:"api_key,omitempty"`
