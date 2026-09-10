@@ -11,11 +11,14 @@ does not evaluate expressions or shell variables.
 | `${event.source}` | host-assigned event source/server identifier | every event |
 | `${event.subject}` | display subject, sender, or chat label | every event |
 | `${event.event_id}` | publisher event identity; the host namespaces it for scheduler deduplication | generic MCP events |
-| `${event.chat_id}` | destination/chat identifier | deprecated Telegram message events |
-| `${event.message_id}` | source message identifier | deprecated Telegram message events |
-| `${event.chat_type}` | `dm`, `group`, `channel`, or empty when unknown | deprecated Telegram message events |
-| `${event.text}` | truncated inbound message text | deprecated Telegram message events |
-| `${event.from_me}` | whether the message came from the bot | deprecated Telegram message events |
+| `${event.chat_id}` | destination/chat identifier | Telegram `telegram.message` events |
+| `${event.message_id}` | source message identifier | Telegram `telegram.message` events |
+| `${event.chat_type}` | `dm`, `group`, `channel`, or empty when unknown | Telegram `telegram.message` events |
+| `${event.sender_id}` | sender user id | Telegram `telegram.message` events |
+| `${event.sender_username}` | sender @username when known | Telegram `telegram.message` events |
+| `${event.sender_name}` | sender display name | Telegram `telegram.message` events |
+| `${event.text}` | inbound message text, bounded to 200 characters — read the full message via the plugin's read tools before acting on it | Telegram `telegram.message` events |
+| `${event.from_me}` | whether the message came from the bot; always `false` on published events because bot-originated updates are never emitted | Telegram `telegram.message` events |
 | `${event.action}` | publisher action, such as `opened` or `synchronize` | publisher when supplied |
 | `${event.repository}` | repository identity or URL | publisher when supplied |
 | `${event.pull_request_number}` | pull request number | publisher when supplied |

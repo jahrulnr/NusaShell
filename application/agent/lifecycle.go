@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"nusashell/application/tools"
-	"nusashell/pkg/text"
 )
 
 // Agent lifecycle event kinds (observer registry). Side-effect observers only —
@@ -31,10 +30,10 @@ const (
 	AgentStatusError   = "error"
 )
 
-const lifecycleDetailCap = 200
-
 // AgentLifecycleEvent is one headless automation turn lifecycle signal
-// dispatched to registered AgentObservers in FIFO order.
+// dispatched to registered AgentObservers in FIFO order. Detail and Error
+// carry the full payload: the lifecycle channel is a data feed (notify sinks,
+// telemetry, logging), so each observer bounds its own presentation.
 type AgentLifecycleEvent struct {
 	Kind           string // run|step|tool_call|reasoning|text
 	Phase          string // pre|post (reasoning/text are post-only)
@@ -44,7 +43,7 @@ type AgentLifecycleEvent struct {
 	CallID         string // domain tool call ID; required to pair parallel tool_call events
 	ToolName       string
 	Status         string // running|ok|error
-	Detail         string // truncated ≤200
+	Detail         string // full payload; observers own presentation bounds
 	Error          string
 }
 
@@ -115,10 +114,6 @@ func (a *Service) emitHeadlessEvent(run *TurnRun, ev AgentLifecycleEvent) {
 	a.dispatchObservers(ctx, ev)
 }
 
-func truncateLifecycle(s string) string {
-	return text.Truncate(strings.TrimSpace(s), lifecycleDetailCap)
-}
-
 // emitRunStepPre fires run+step pre at the headless turn boundary.
 func (a *Service) emitRunStepPre(run *TurnRun) {
 	a.emitHeadlessEvent(run, AgentLifecycleEvent{
@@ -135,10 +130,10 @@ func (a *Service) emitRunStepPost(run *TurnRun, status, errMsg, finalDetail stri
 	if status == "error" || status == AgentStatusError {
 		st = AgentStatusError
 	}
-	errDetail := truncateLifecycle(errMsg)
+	errDetail := strings.TrimSpace(errMsg)
 	a.emitHeadlessEvent(run, AgentLifecycleEvent{
 		Kind: AgentEventStep, Phase: AgentPhasePost, Status: st, Error: errDetail,
-		Detail: truncateLifecycle(finalDetail),
+		Detail: strings.TrimSpace(finalDetail),
 	})
 	a.emitHeadlessEvent(run, AgentLifecycleEvent{
 		Kind: AgentEventRun, Phase: AgentPhasePost, Status: st, Error: errDetail,
@@ -154,7 +149,7 @@ func (a *Service) emitToolCallPre(run *TurnRun, round int, call domainToolCallRe
 		CallID:   call.ID,
 		ToolName: call.Name,
 		Status:   AgentStatusRunning,
-		Detail:   truncateLifecycle(call.Args),
+		Detail:   strings.TrimSpace(call.Args),
 	})
 }
 
@@ -167,7 +162,7 @@ func (a *Service) emitToolCallPost(run *TurnRun, round int, call domainToolCallR
 		CallID:   call.ID,
 		ToolName: call.Name,
 		Status:   status,
-		Detail:   truncateLifecycle(output),
+		Detail:   strings.TrimSpace(output),
 	})
 }
 
@@ -180,13 +175,13 @@ func (a *Service) emitRoundContentObservers(run *TurnRun, round int, reasoning, 
 	if r := strings.TrimSpace(reasoning); r != "" {
 		a.emitHeadlessEvent(run, AgentLifecycleEvent{
 			Kind: AgentEventReasoning, Phase: AgentPhasePost, Round: round,
-			Detail: truncateLifecycle(r),
+			Detail: r,
 		})
 	}
 	if t := strings.TrimSpace(content); t != "" {
 		a.emitHeadlessEvent(run, AgentLifecycleEvent{
 			Kind: AgentEventText, Phase: AgentPhasePost, Round: round,
-			Detail: truncateLifecycle(t),
+			Detail: t,
 		})
 	}
 }

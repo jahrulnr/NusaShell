@@ -299,3 +299,67 @@ func TestLifecycleEmitsReasoningAndTextPerRound(t *testing.T) {
 		t.Fatalf("text event missing/wrong: %+v", text)
 	}
 }
+
+// Lifecycle events are a data feed, not a preview channel: Detail and Error
+// must carry the full payload so non-chat observers (telemetry/logging) and
+// chat delivery see the complete content.
+func TestLifecycleDetailIsNotTruncated(t *testing.T) {
+	svc := New(Deps{})
+	obs := &recordingObserver{}
+	svc.RegisterAgentObserver(obs)
+
+	run := &TurnRun{
+		ID: "run_full", ConversationID: "conv_full",
+		Headless: true, ToolKind: tools.AgentAutomation,
+		Ctx: context.Background(),
+	}
+	finalOut := strings.TrimSpace(strings.Repeat("jawaban final panjang. ", 30)) // well past the old cap
+	toolArgs := `{"path":"/tmp/` + strings.Repeat("a", 300) + `"}`
+	toolOut := strings.TrimSpace(strings.Repeat("baris keluaran tool. ", 50))
+	reasoning := strings.TrimSpace(strings.Repeat("langkah berpikir. ", 40))
+	errMsg := strings.TrimSpace(strings.Repeat("kesalahan panjang ", 30))
+
+	svc.emitToolCallPre(run, 1, domainToolCallRef{ID: "c1", Name: "exec", Args: toolArgs})
+	svc.emitToolCallPost(run, 1, domainToolCallRef{ID: "c1", Name: "exec"}, AgentStatusOK, toolOut)
+	svc.emitRoundContentObservers(run, 1, reasoning, finalOut)
+	svc.emitRunStepPost(run, AgentStatusError, errMsg, finalOut)
+
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+
+	var sawFinal bool
+	for _, e := range obs.events {
+		switch {
+		case e.Kind == AgentEventToolCall && e.Phase == AgentPhasePre && e.CallID == "c1":
+			if e.Detail != toolArgs {
+				t.Fatalf("tool args truncated: len=%d want=%d", len(e.Detail), len(toolArgs))
+			}
+		case e.Kind == AgentEventToolCall && e.Phase == AgentPhasePost && e.CallID == "c1":
+			if e.Detail != toolOut {
+				t.Fatalf("tool output truncated: len=%d want=%d", len(e.Detail), len(toolOut))
+			}
+		case e.Kind == AgentEventReasoning:
+			if e.Detail != reasoning {
+				t.Fatalf("reasoning truncated: len=%d want=%d", len(e.Detail), len(reasoning))
+			}
+		case e.Kind == AgentEventText:
+			if e.Detail != finalOut {
+				t.Fatalf("text detail truncated: len=%d want=%d", len(e.Detail), len(finalOut))
+			}
+		case e.Kind == AgentEventStep && e.Phase == AgentPhasePost:
+			sawFinal = true
+			if e.Detail != finalOut {
+				t.Fatalf("final detail truncated: len=%d want=%d", len(e.Detail), len(finalOut))
+			}
+			if e.Error != errMsg {
+				t.Fatalf("step error truncated: len=%d want=%d", len(e.Error), len(errMsg))
+			}
+			if e.Status != AgentStatusError {
+				t.Fatalf("step status = %q, want error", e.Status)
+			}
+		}
+	}
+	if !sawFinal {
+		t.Fatal("no step post event observed")
+	}
+}

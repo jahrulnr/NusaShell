@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -302,5 +303,38 @@ func TestExtractReplyTextToleratesAnyModelOutput(t *testing.T) {
 		if got := extractReplyText(tc.in); got != tc.want {
 			t.Fatalf("extractReplyText(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// The step's final output is a data payload, not a preview: the sink must
+// hand the full text to the progress tool even when it exceeds the old
+// 200-byte lifecycle cap.
+func TestNotifyProgressSinkDeliversFullFinalDetail(t *testing.T) {
+	caller := &recordingMCPCaller{}
+	sink := NewNotifyProgressSink(caller, &recordingBus{})
+	notify := &domain.NotifyConfig{Plugin: "nusashell.telegram", Detail: domain.NotifyDetailText, ChatID: "520213916"}
+	long := strings.TrimSpace(strings.Repeat("jawaban final yang panjang ", 120)) // > 200 bytes
+	ev := StepLifecycleEvent{
+		Kind: StepKindStep, Phase: StepPhasePost, Status: StepStatusOK,
+		AgentRunID: "agent_full", RunID: "run1", StepID: "s1",
+		Notify: notify, ConversationID: "conv1",
+		Detail: long,
+	}
+	if err := sink.OnStepEvent(context.Background(), ev); err != nil {
+		t.Fatalf("OnStepEvent: %v", err)
+	}
+
+	caller.mu.Lock()
+	defer caller.mu.Unlock()
+	if len(caller.calls) == 0 {
+		t.Fatal("expected a final delivery call")
+	}
+	last := caller.calls[len(caller.calls)-1]
+	if last.args["event_type"] != "step_ended" {
+		t.Fatalf("last call event_type = %v, want step_ended", last.args["event_type"])
+	}
+	got, _ := last.args["detail"].(string)
+	if got != long {
+		t.Fatalf("final detail was truncated: got %d bytes, want %d", len(got), len(long))
 	}
 }

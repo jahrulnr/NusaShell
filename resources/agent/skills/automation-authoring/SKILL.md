@@ -244,6 +244,11 @@ notify:
 - The observer calls `internal_send_progress` (fallback `admin.send_progress`)
   on the plugin: tool pre opens a placeholder message, tool post edits it,
   step post finalizes — at most one MCP call per tool round, best-effort.
+  The step's final output is delivered in full (the plugin splits long text
+  into multiple messages); tool/reasoning lines stay short previews.
+- For chat-delivered replies, state a character budget in the prompt (e.g.
+  "under 3000 characters"): models cannot count characters reliably, and the
+  budget keeps the reply inside one message.
 - Do not rely on a notification in workflow logic; it is observability only.
 
 **Internal MCP tools**: plugin tools named `internal_*` or `admin.*` are

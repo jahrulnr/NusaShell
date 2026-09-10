@@ -28,6 +28,8 @@ const (
 )
 
 const (
+	// notifyDetailCap bounds chat progress previews only (tool args/results
+	// and reasoning lines). The step's final output is delivered in full.
 	notifyDetailCap        = 200
 	notifyMsgMapCap        = 64 // bound callID→message_id entries per agent run
 	notifyProgressTool     = "internal_send_progress"
@@ -177,8 +179,8 @@ func (n *NotifyProgressSink) OnStepEvent(ctx context.Context, ev StepLifecycleEv
 		}
 		if ev.Phase == StepPhasePost {
 			// Deliver exactly ONE final message: the agent's final output
-			// (or a bounded error note). Intermediate per-round text events
-			// are never forwarded — they leak working-note narration.
+			// (or the error note) in full. Intermediate per-round text
+			// events are never forwarded — they leak working-note narration.
 			detail := ev.Detail
 			eventType := "step_ended"
 			if status := ev.Status; status == StepStatusError || ev.Error != "" {
@@ -453,6 +455,8 @@ func parseProgressMessageID(raw string) string {
 	return ""
 }
 
+// truncateNotify bounds chat progress previews (tool/reasoning lines); the
+// step's final output is not routed through this helper.
 func truncateNotify(s string) string {
 	return text.Truncate(strings.TrimSpace(s), notifyDetailCap)
 }

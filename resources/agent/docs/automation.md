@@ -668,6 +668,11 @@ An agent prompt should state:
 - exact MCP discovery sequence when a plugin is needed;
 - output format and honest failure behavior.
 
+Default agent step output is chat-ready plain text for logs and messaging
+sinks (WhatsApp/Telegram-style markers like *bold* / _italic_ are fine). Do
+not ask the agent for Markdown tables, headings, fenced code, or Mermaid
+unless the step itself consumes structured JSON via `output_schema`.
+
 `agent.output_schema` is compiled and validated by the headless runner against
 the final assistant content. Valid JSON is checked as its decoded value;
 non-JSON content is checked as a string. A mismatch or invalid schema fails
@@ -880,8 +885,10 @@ best-effort).
 
 - Allowed only when `trust` is `trusted` or `privileged`.
 - The host calls `internal_send_progress` (fallback `admin.send_progress`) on
-  the plugin with a bounded payload `{chat_id, event_type, status, title,
-  detail?, message_id?}`.
+  the plugin with `{chat_id, event_type, status, title, detail?, message_id?}`
+  and no payload caps: the step's final output is delivered in full (the
+  plugin splits long text into multiple messages); tool/reasoning progress
+  lines stay short previews.
 - `tool_call` **pre** opens a progress message and stores the returned
   `message_id` keyed by tool CallID; **post** edits that same message (edit
   failure opens a new message). Reasoning is at most one message per round;
@@ -889,7 +896,9 @@ best-effort).
 - Missing `chat_id` emits `automation.notify.skipped` and does not fail the run.
 - Observer / MCP errors emit `automation.notify.failed` and never block or fail
   the workflow run.
-- Unknown YAML keys under `notify:` are rejected.
+- Unknown YAML keys under `notify:` are rejected. State a character budget in
+  chat-reply prompts (e.g. "under 3000 characters") — models cannot count
+  characters reliably, and the budget keeps one reply in one message.
 
 When a run fails:
 

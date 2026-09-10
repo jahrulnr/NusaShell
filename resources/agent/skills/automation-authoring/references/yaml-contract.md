@@ -37,7 +37,12 @@ progress tool (`internal_send_progress`, fallback `admin.send_progress`).
 Sinks are side-effect only, async best-effort, and never block or fail the
 run; unresolved `chat_id` skips with `automation.notify.skipped`. Plugin
 tools named `internal_*` or `admin.*` are hidden from all agent tool
-listings and cannot be invoked by agents.
+listings and cannot be invoked by agents. The step's final output is
+delivered in full (the plugin splits long text into multiple messages);
+tool/reasoning progress lines stay short previews. When the sink posts a chat
+reply, state a character budget in the prompt (e.g. "under 3000 characters")
+— models cannot count characters reliably, and the budget keeps the reply to
+one message.
 
 `name`, `jobs`, and a valid trigger/step shape are required by syntax
 validation. Each trigger item must choose exactly one of `once`, `every`,
@@ -191,12 +196,15 @@ notifications/nusashell/event {
 }
 ```
 
-For Telegram, use `telegram.message` only through the deprecated legacy message
-bridge and preserve `chat_id` plus `message_id`. That bridge admits only a
-matching plugin/server identity, nonempty IDs, and an explicit boolean
-`from_me: false`; missing or malformed provenance is ignored. Bot-originated
-messages are ignored to prevent recursive triggers. New publishers must use the
-generic envelope even when their event happens to contain chat-like fields.
+The installed Telegram bridge publishes `telegram.message` through the
+generic envelope (host-assigned source `plugin:nusashell.telegram`) with
+`chat_id`, `message_id`, `chat_type`, `sender_id`, `sender_username`,
+`sender_name`, `text` (bounded to 200 characters), and `from_me` attributes.
+Bot-originated and duplicate updates are never emitted, so `from_me` is
+always `false` on published events; read the full message through the
+plugin's read tools when `text` may be truncated. New publishers must use
+the generic envelope even when their event happens to contain chat-like
+fields.
 For GitHub, trading, or kanban, use the exact event type and attributes
 published by the installed provider. Event admission requires a nonempty type
 and durable event storage before matching; a template cannot create an event
