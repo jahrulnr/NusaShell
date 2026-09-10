@@ -186,7 +186,17 @@ func TestConcurrencyQueueWaitTimeoutFinalizes(t *testing.T) {
 		Triggers:    []domain.Trigger{{ID: "t1", Kind: domain.TriggerEvent, Event: "tick"}},
 		Jobs:        []domain.Job{{ID: "j", Timeout: 50 * time.Millisecond, Steps: []domain.Step{{ID: "s", Run: "echo"}}}},
 	}
-	if err := svc.Workflows.Put(context.Background(), w); err != nil {
+	// The queue wait timeout is the workflow's largest job timeout, so a single
+	// short timeout drives both timers: the holder's own job timeout and the
+	// waiter's queue wait timeout. That is a photo finish — on a slow runner
+	// (Windows CI) the holder's job timeout fires first, its key frees, and the
+	// waiter starts and fails on its own timeout instead of being finalized as
+	// a timed-out queue entry. Snapshot a long-timeout definition for the
+	// holder, then swap the short-timeout definition back in before the waiter
+	// is ingested, so the queue wait timeout is the only timer that can fire.
+	holder := *w
+	holder.Jobs = []domain.Job{{ID: "j", Timeout: 10 * time.Second, Steps: []domain.Step{{ID: "s", Run: "echo"}}}}
+	if err := svc.Workflows.Put(context.Background(), &holder); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Sched.IngestEvent(context.Background(), domain.Event{ID: "hold", Type: "tick"}); err != nil {
@@ -196,6 +206,9 @@ func TestConcurrencyQueueWaitTimeoutFinalizes(t *testing.T) {
 	case <-started:
 	case <-time.After(3 * time.Second):
 		t.Fatal("holder never started")
+	}
+	if err := svc.Workflows.Put(context.Background(), w); err != nil {
+		t.Fatal(err)
 	}
 	if err := svc.Sched.IngestEvent(context.Background(), domain.Event{ID: "waiter", Type: "tick"}); err != nil {
 		t.Fatal(err)
