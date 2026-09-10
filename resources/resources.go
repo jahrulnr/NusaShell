@@ -109,14 +109,16 @@ func joinPromptSections(parts ...string) string {
 }
 
 // SystemPrompt is the interactive conversation system prompt: identity and
-// operating rules from system.md plus the Primary Memory Writing Rules.
+// operating rules from system.md, including Primary Memory Writing Rules
+// (conversation agent may edit profile docs only on an explicit user ask;
+// the learner is the primary profile curator).
 func SystemPrompt() string {
 	return Prompt("system")
 }
 
-// LearnerPrompt loads the unified learner system prompt plus the same
-// Primary Memory Writing Rules the conversation agent sees (the learner
-// does not receive system.md).
+// LearnerPrompt loads the unified learner system prompt, including Primary
+// Memory Writing Rules for catalog + primary profile-document curation (the
+// learner does not receive system.md).
 func LearnerPrompt() string {
 	return Prompt("learner")
 }

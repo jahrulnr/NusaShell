@@ -5,8 +5,8 @@ profile documents.
 
 | Surface | Storage | Who writes | Injected |
 |---|---|---|---|
-| **About You** | `memory/user.md` | Agents via `file_patch`/`file_write`; humans via Learning UI | Every turn via `file_read` when the body is non-empty |
-| **About Agent** | `memory/soul.md` | Agents via `file_patch`/`file_write`; humans via Learning UI | Every turn via `file_read` when the body is non-empty |
+| **About You** | `memory/user.md` | **Learner** (primary) via `file_patch`/`file_write`; conversation agent only when the user explicitly asks; humans via Learning UI | Every turn via `file_read` when the body is non-empty |
+| **About Agent** | `memory/soul.md` | **Learner** (primary) via `file_patch`/`file_write`; conversation agent only when the user explicitly asks; humans via Learning UI | Every turn via `file_read` when the body is non-empty |
 | **Records** | `growth/memories.jsonl` | Learner `learn()` tool | Compact APPLY block (top-K, scoped) |
 | **Experiences** | `growth/experiences.jsonl` | Runtime at `finishTurn` | Not injected; Learning UI list. Hidden hydration checkpoint tools (`hydrate-*` call ids) plus harness-injected calls (`runtime_context`, `announcement`, `mcp_list`, `tool_list`) are omitted from actions, fingerprints, and review-progress counting; each experience records at most 120 actions from the current user turn (not the first 120 of the whole conversation). |
 
@@ -156,11 +156,15 @@ not the source conversation's workspace: the checkpoint carries
 (the skill-authoring reference for Stages 2-3, resolved from the live skill
 store with the embedded bundle as the guaranteed fallback), and a
 data-directory listing. The learner consolidates into the typed memory catalog
-and learned skills through `learn()`; it does not silently rewrite the
-human/interactive-agent managed user.md or soul.md documents. The user
-project's AGENTS.md and file tree are not injected into learning jobs. The
-learner is never expected to discover any of this on its own: instruction is
-context, not a scavenger hunt.
+and learned skills through `learn()`, and is the **primary** curator of
+`user.md` / `soul.md` via `file_patch` / `file_write` when profile-shaped
+facts pass the Primary Memory Writing Rules. The conversation agent may edit
+those profile documents only when the user explicitly asks; it must not
+infer a profile write from ordinary preferences or corrections in chat.
+Typed `learn()` never writes the profile documents. The user project's
+AGENTS.md and file tree are not injected into learning jobs. The learner is
+never expected to discover any of this on its own: instruction is context,
+not a scavenger hunt.
 
 ## Agent tools
 
@@ -177,8 +181,10 @@ There is no `save`, `replace`, or `delete`. Standing preferences and
 corrections in any language are recorded as experiences; the learner
 commits typed records by calling `learn()` after a semantic review. Profile-shaped facts
 (identity, interaction style, named projects) are written to
-`{dataDir}/memory/user.md` with `file_patch` / `file_write`, not through
-this dispatcher or `learn()`.
+`{dataDir}/memory/user.md` (and agent conventions to `soul.md`) with
+`file_patch` / `file_write` — primarily by the learner, not through this
+dispatcher or `learn()`. The conversation agent patches profile docs only
+on an explicit user request to update the profile.
 
 Good examples:
 
@@ -186,7 +192,7 @@ Good examples:
     memory(op="search", query="phantom patch rollback")
     memory(op="get", id="mem_01J…")
     memory(op="list", type="preference", limit=10)
-    file_patch(path="{dataDir}/memory/user.md", old_string="…", new_string="…")
+    file_patch(path="{dataDir}/memory/user.md", old_string="…", new_string="…")  # learner; or conversation agent after explicit user ask
 
 Bad examples:
 
@@ -194,9 +200,11 @@ Bad examples:
     memory(op="replace", target="user", content="…")
     memory(op="delete", id="mem_01J…")
     file_delete(path="{dataDir}/memory/user.md")
+    file_patch(path="{dataDir}/memory/user.md", ...)  # conversation agent inferring a preference without an explicit profile-write ask
 
 When the user states a standing preference or correction, continue the
-task and patch `user.md` when the fact belongs in the narrative profile.
+task and follow it for this turn. Leave profile curation to the learner
+unless the user explicitly asked you to update `user.md` / `soul.md`.
 
 Background learning agents receive a pruned toolbox. They can inspect source
 rooms with `conversation`, read `memory`/`docs`, inspect skills with

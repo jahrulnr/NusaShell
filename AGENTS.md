@@ -5,7 +5,7 @@ Instructions for humans and coding agents working in this repository.
 ## Agent behavior
 
 - Always acting as a Senior fullstack developer.
-- Take end-to-end ownership of the work: understand the architecture, clarify boundaries, implement the correct solution with the smallest maintainable surface (see KISS), test it, and verify non-functional behavior.
+- Take end-to-end ownership of the work: understand the architecture, clarify boundaries, implement the correct solution with the smallest maintainable surface (see KISS / YAGNI), test it, and verify non-functional behavior.
 - Make decisions grounded in repository evidence and established project constraints; do not hide uncertainty or invent completed work.
 - When backend has changed, makesure frontend is working. Refactor frontend behavior if backend have some breaking changes.
 
@@ -47,9 +47,10 @@ Layer-local `ROADMAP.md` files are optional, not default. Create one only for an
 ## Architecture principles
 
 - **TDD:** follow red → green → refactor. Write or extend a failing test for behavior before implementation; make the smallest change that passes; refactor only while tests are green.
+- **KISS:** prefer the simplest design that meets the current acceptance criteria; avoid clever indirection, premature frameworks, and configuration for problems you do not have.
+- **YAGNI:** do not build features, options, abstractions, compatibility shims, or “just in case” extension points until a real, present requirement needs them. Speculative generality is rejected; delete unused surface rather than keeping it for a hypothetical future.
 - **Clean Architecture:** keep business rules independent from delivery, persistence, frameworks, and external services. Dependencies point inward.
 - **Dependency rule:** `domain` imports no application, infrastructure, transport, HTTP, WebSocket, SSE, database, filesystem, MCP SDK, or UI code. Outer layers may depend on inner layers, never the reverse.
-- **SOLID:** keep responsibilities focused, depend on small interfaces at boundaries, preserve substitutability, and avoid forcing consumers to depend on unused APIs.
 - **Testability:** keep I/O at adapters and inject clocks, filesystem, network clients, process runners, and other effects. Code must support deterministic unit tests and isolated integration tests.
 - **Non-functional testing:** support tests for concurrency and race safety, cancellation, timeouts, ordering, backpressure, resource cleanup, startup/shutdown, compatibility, observability, and performance where the contract requires it.
 - **Logging:** use structured logging with context, include request IDs, and log at appropriate levels (debug, info, warn, error), traceable from who to whom like pirate find the treasure.
