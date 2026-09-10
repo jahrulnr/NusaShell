@@ -67,6 +67,26 @@ test('renderMermaidDiagrams renders valid diagrams once and dedups on repeat', a
   }
 });
 
+test('renderMermaidDiagrams gives compact SVGs a readable inline width', async () => {
+  const dom = makeDom();
+  dom.window.mermaid = {
+    initialize() {},
+    async parse() { return true; },
+    async render() { return { svg: '<svg viewBox="0 0 120 60"><g>compact</g></svg>' }; },
+  };
+  try {
+    const c = document.createElement('div');
+    c.innerHTML = '<div class="mermaid-block"><pre class="mermaid-src">flowchart TD\n A--&gt;B</pre></div>';
+    await renderMermaidDiagrams(c);
+    const svg = c.querySelector('.mermaid-block svg');
+    assert.equal(svg.style.width, '420px', 'small Mermaid viewBoxes are expanded to a readable inline baseline');
+    assert.equal(svg.style.height, 'auto');
+  } finally {
+    delete global.window;
+    delete global.document;
+  }
+});
+
 test('renderMermaidDiagrams falls back to source for invalid mermaid without throwing', async () => {
   const dom = makeDom();
   let renderCalled = false;

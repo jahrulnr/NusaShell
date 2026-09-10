@@ -26,6 +26,7 @@ function mermaidBlocksIn(container) {
 // Mermaid is lazy-loaded (a ~3MB UMD bundle) the first time a diagram appears.
 
 let mermaidPromise = null;
+const MIN_INLINE_MERMAID_WIDTH = 420;
 
 function loadMermaid() {
   if (typeof window !== 'undefined' && window.mermaid) return Promise.resolve(window.mermaid);
@@ -130,17 +131,23 @@ export async function renderMermaidDiagrams(container) {
       block.classList.remove('mermaid-error');
       block.innerHTML = svg;
       block.dataset.rendered = hash;
-      // Mermaid 10.x emits explicit width/height in px on the <svg>. When
-      // the container is narrower than the diagram, max-width:100% scales
-      // the width but the fixed px height clips text. Replace the px
-      // dimensions with viewBox-driven sizing so the SVG scales
-      // proportionally and never clips.
+      // Mermaid 10.x emits explicit width/height in px on the <svg>. Replace
+      // those dimensions with a viewBox-driven inline baseline: compact
+      // diagrams no longer collapse to the browser's 300px SVG default, while
+      // max-width keeps the result inside a narrow conversation card.
       const svgEl = block.querySelector('svg');
       if (svgEl) {
         const vb = svgEl.getAttribute('viewBox');
         if (vb) {
+          const parts = vb.split(/[\s,]+/).map(Number);
+          const width = parts[2];
+          const height = parts[3];
           svgEl.removeAttribute('width');
           svgEl.removeAttribute('height');
+          if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+            svgEl.style.width = `${Math.max(MIN_INLINE_MERMAID_WIDTH, width)}px`;
+            svgEl.style.aspectRatio = `${width} / ${height}`;
+          }
           svgEl.style.maxWidth = '100%';
           svgEl.style.height = 'auto';
         }

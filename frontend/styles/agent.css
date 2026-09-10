@@ -2103,7 +2103,7 @@
 }
 .mermaid-block svg {
   max-width: 100%;
-  max-height: 50vh;
+  max-height: 62vh;
   height: auto;
   display: inline-block;
 }
@@ -3004,6 +3004,11 @@
   justify-content: center;
   will-change: transform;
 }
+.media-zoom-stage.is-vector {
+  flex: none;
+  width: max-content;
+  height: max-content;
+}
 .media-zoom-stage img {
   max-width: 90vw;
   max-height: calc(100vh - 120px);
@@ -3018,6 +3023,12 @@
   max-height: calc(100vh - 120px);
   user-select: none;
   display: block;
+}
+.media-zoom-stage.is-vector svg {
+  max-width: none;
+  max-height: none;
+  shape-rendering: geometricPrecision;
+  text-rendering: geometricPrecision;
 }
 
 /* ── Zoom trigger buttons (on mermaid blocks and inline images) ── */
@@ -3080,58 +3091,227 @@ a.agent-local-link {
 }
 a.agent-local-link:hover { text-decoration-style: solid; }
 
-.agent-text-preview-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: min(880px, 100%);
-  gap: 12px;
+.agent-text-preview-overlay {
+  padding: clamp(20px, 5vh, 56px) clamp(16px, 6vw, 96px);
 }
+
+/* A local file should read like a deliberate surface, not a browser <pre> in
+   a dialog. The header holds only identity and actions; the document canvas
+   gets the remaining height and remains the sole scroll container. */
+.agent-text-preview-frame {
+  position: relative;
+  isolation: isolate;
+  flex: 1;
+  width: min(1024px, 100%);
+  min-height: 0;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent-border) 42%, var(--border));
+  border-radius: 16px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--panel) 94%, #0d2d38), var(--panel));
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(211, 255, 249, .045);
+  display: flex;
+  flex-direction: column;
+}
+.agent-text-preview-frame::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  content: '';
+  opacity: .35;
+  background-image: linear-gradient(90deg, transparent 0, transparent 31px, rgba(108, 230, 211, .026) 32px);
+  background-size: 32px 100%;
+}
+
+.agent-text-preview-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 62px;
+  padding: 10px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-soft) 88%, transparent);
+  background: linear-gradient(90deg, rgba(60, 200, 190, .075), transparent 38%), color-mix(in srgb, var(--panel-alt) 72%, transparent);
+}
+.agent-text-preview-file-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: 9px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  font: 700 19px/1 var(--font-mono);
+}
+.agent-text-preview-file {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.agent-text-preview-name {
+  overflow: hidden;
+  color: var(--text);
+  font: 600 13px/1.2 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-text-preview-path {
+  overflow: hidden;
+  color: var(--text-faint);
+  font: 10px/1.25 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-text-preview-kind {
+  align-self: center;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 90%, transparent);
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--bg) 54%, transparent);
+  font: 10px/1 var(--font-mono);
+  white-space: nowrap;
+}
+.agent-text-preview-kind[data-preview-kind='markdown'] { color: color-mix(in srgb, var(--accent) 88%, white); border-color: color-mix(in srgb, var(--accent) 42%, var(--border)); }
+.agent-text-preview-kind[data-preview-kind='binary'] { color: var(--text-faint); }
+.agent-text-preview-download {
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-border) 70%, var(--border));
+  border-radius: 8px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  font: 600 11px/1 var(--font-ui);
+  text-decoration: none;
+}
+.agent-text-preview-download:hover { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.agent-text-preview-download:focus-visible,
+.agent-text-preview-media-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .agent-text-preview-content {
   flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: 18px 22px;
+  overscroll-behavior: contain;
+  padding: clamp(18px, 3vw, 34px);
+  scrollbar-gutter: stable;
 }
 .agent-text-preview-content pre {
+  box-sizing: border-box;
+  max-width: 100%;
   margin: 0;
-  padding: 0;
-  background: transparent;
+  padding: 18px 20px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 86%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 83%, #061821);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 52%, transparent);
 }
 .agent-text-preview-content pre code {
   font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
+  line-height: 1.62;
+  white-space: pre;
+  word-break: normal;
+}
+
+/* CodeMirror editor surface for local text/code file previews.
+   The vendored CodeMirror 5 base + Dracula theme CSS provide the editor
+   chrome; these rules fit the editor inside the preview content area. */
+.agent-text-preview-content.is-code-editor { padding: 0; }
+.agent-text-preview-codemirror {
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 320px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.agent-text-preview-codemirror .CodeMirror {
+  height: 100%;
+  min-height: 320px;
+  border-radius: 0;
+  background: transparent;
 }
 
 .agent-text-preview-error {
-  color: var(--red);
-  font: 12px var(--font-mono);
-  padding: 20px;
-}
-
-.agent-text-preview-frame {
-  flex: 1;
-  width: min(880px, 100%);
-  margin: 0 auto;
-  border: 1px solid var(--border);
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--red) 45%, var(--border));
   border-radius: 10px;
-  overflow: hidden;
-  background: var(--panel);
-  display: flex;
-  flex-direction: column;
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 7%, transparent);
+  font: 12px/1.55 var(--font-mono);
 }
 
 .agent-text-preview-loading {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
   color: var(--text-faint);
   font: 12px var(--font-mono);
   text-align: center;
-  padding: 40px;
 }
+
+.agent-text-preview-binary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  max-width: 560px;
+  min-height: 110px;
+  margin: min(18vh, 150px) auto;
+  padding: 18px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 50%, transparent);
+}
+.agent-text-preview-binary-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text-dim);
+  font: 700 19px/1 var(--font-mono);
+}
+.agent-text-preview-binary-copy { display: grid; gap: 4px; min-width: 0; }
+.agent-text-preview-binary-copy strong { overflow: hidden; color: var(--text); font: 600 13px/1.2 var(--font-ui); text-overflow: ellipsis; white-space: nowrap; }
+.agent-text-preview-binary-copy span { color: var(--text-faint); font: 11px/1.45 var(--font-body); }
+.agent-text-preview-binary-kind { color: var(--text-faint); font: 10px var(--font-mono); }
+
+.agent-text-preview-media {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+}
+.agent-text-preview-image-stage { position: relative; }
+.agent-text-preview-image {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 210px);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  object-fit: contain;
+  box-shadow: 0 18px 52px rgba(0, 0, 0, .28);
+}
+.agent-text-preview-media-action {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-border) 72%, var(--border));
+  border-radius: 7px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  cursor: pointer;
+  font: 600 11px/1 var(--font-ui);
+}
+.agent-text-preview-media-action:hover { color: var(--accent); border-color: var(--accent); }
+.agent-text-preview-audio-stage audio { width: min(460px, 100%); }
+.agent-text-preview-video-stage video { display: block; width: min(820px, 100%); max-height: calc(100vh - 230px); border-radius: 10px; background: #000; }
+.agent-text-preview-pdf { display: block; width: 100%; height: 100%; min-height: 520px; border: 0; border-radius: 8px; background: #fff; }
 
 .agent-text-preview-md {
   min-width: 0;
@@ -3230,5 +3410,21 @@ a.agent-local-link:hover { text-decoration-style: solid; }
   max-width: 100%;
 }
 
-/* ── Local file text / markdown preview popup ── */
-.agent-text-preview-overlay { padding: 4vh 6vw; }
+@media (max-width: 640px) {
+  .agent-text-preview-overlay { padding: 54px 10px 10px; }
+  .agent-text-preview-frame { border-radius: 12px; }
+  .agent-text-preview-bar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
+    min-height: 56px;
+    padding: 8px 10px;
+  }
+  .agent-text-preview-kind { display: none; }
+  .agent-text-preview-download { padding: 7px 8px; }
+  .agent-text-preview-content { padding: 14px; }
+  .agent-text-preview-content pre { padding: 14px; border-radius: 8px; }
+  .agent-text-preview-content pre code { font-size: 11px; }
+  .agent-text-preview-pdf { min-height: 420px; }
+  .agent-text-preview-binary { grid-template-columns: auto minmax(0, 1fr); margin: 64px auto; }
+  .agent-text-preview-binary-kind { display: none; }
+}
