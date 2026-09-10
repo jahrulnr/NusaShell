@@ -37,7 +37,7 @@ func fileToolInfos() []application.ToolInfo {
 	return []application.ToolInfo{
 		{Name: "file_read", Description: "Read a text file from disk. Returns up to max_bytes (default 32768); continue with offset_bytes when truncated. Read by line numbers instead with start_line/end_line (1-based, inclusive; either one switches to line mode and offset_bytes is ignored) — the result echoes start_line/end_line and reports next_start_line when truncated. total_lines always reports the complete file's line count, so grep line numbers map directly. Metadata reports the complete file's line ending, tab count, carriage-return count, and trailing-whitespace lines. Set show_whitespace=true for a copy-safe inspection view with invisible whitespace rendered visibly. Binary files are reported, not dumped.", InputSchema: obj("object", props("path", str("Absolute file path"), "offset_bytes", intSchema("Byte offset to start reading from (default 0)"), "start_line", intSchema("1-based first line to read (line mode; offset_bytes ignored)"), "end_line", intSchema("1-based last line to read, inclusive (line mode; default last line)"), "max_bytes", intSchema("Maximum bytes returned (default 32768)"), "show_whitespace", obj("boolean", nil)), "path")},
 		{Name: "file_write", Description: "Create or overwrite a text file atomically (temp file in the same directory, then rename). Parent directories are created automatically. encoding=escaped decodes visible whitespace markers such as \\t, \\r, \\n, and \\\\ without normalizing line endings.", InputSchema: obj("object", props("path", str("Absolute file path"), "content", str("File content (UTF-8, max 10 MB)"), "encoding", strEnum("Content encoding: utf8 (default), escaped visible-whitespace text, or base64", "utf8", "escaped", "base64")), "path", "content")},
-		{Name: "file_patch", Description: "Replace an exact substring in a file. Fails unless old_string matches exactly once; disambiguate multiple matches with occurrence (1-based). After an exact miss, auto-heal defaults to one unique whitespace-equivalent match; set auto_heal=false for exact-only behavior. Use encoding=escaped when copying visible \\t/\\r/\\n markers from file_read(show_whitespace=true), so CRLF and tabs are matched exactly without normalization. Success returns the new sha256 and reports healed=true when whitespace recovery was used; ambiguous whitespace matches never write and report the current version, while no-match failures include whitespace statistics and a nearby excerpt with invisible characters rendered visibly. Use preview=true to see the result without writing.", InputSchema: obj("object", props("path", str("Absolute file path"), "old_string", str("Exact text to replace"), "new_string", str("Replacement text (may be empty to delete)"), "encoding", strEnum("String encoding: utf8 (default) or escaped visible-whitespace text", "utf8", "escaped"), "auto_heal", obj("boolean", nil), "occurrence", intSchema("1-based occurrence to replace when old_string appears multiple times"), "preview", obj("boolean", nil)), "path", "old_string", "new_string")},
+		{Name: "file_patch", Description: "Replace an exact substring in a file. Fails unless old_string matches exactly once; disambiguate multiple matches with occurrence (1-based). After an exact miss, auto-heal defaults to one unique whitespace-equivalent match; set auto_heal=false for exact-only behavior. Use encoding=escaped when copying markers from file_read(show_whitespace=true), so CRLF and tabs are matched exactly without normalization. Parallel calls on the same path are serialized in-process so each patch reads the latest content (incremental apply; disjoint hunks compose, overlapping old_string still fails). Success returns the new sha256 and reports healed=true when whitespace recovery was used; ambiguous whitespace matches never write and report the current version plus candidate line numbers; no-match failures include whitespace statistics and a nearby excerpt with invisible characters rendered visibly. Use preview=true to see the result without writing.", InputSchema: obj("object", props("path", str("Absolute file path"), "old_string", str("Exact text to replace"), "new_string", str("Replacement text (may be empty to delete)"), "encoding", strEnum("String encoding: utf8 (default) or escaped visible-whitespace text", "utf8", "escaped"), "auto_heal", obj("boolean", nil), "occurrence", intSchema("1-based occurrence to replace when old_string appears multiple times"), "preview", obj("boolean", nil)), "path", "old_string", "new_string")},
 		{Name: "file_list", Description: "List a directory's entries with type, size, and modified time.", InputSchema: obj("object", props("path", str("Absolute directory path")))},
 		{Name: "file_mkdir", Description: "Create a directory including any missing parents.", InputSchema: obj("object", props("path", str("Absolute directory path")), "path")},
 		{Name: "file_delete", Description: "Delete a file or directory. Directories require recursive=true when not empty. Irreversible.", InputSchema: obj("object", props("path", str("Absolute path to delete"), "recursive", obj("boolean", nil)), "path")},
@@ -209,6 +209,10 @@ func executeFileToolCtx(ctx context.Context, name string, argsJSON []byte) (bool
 		if len(data) > fileContentMaxBytes {
 			return true, "", fmt.Errorf("content exceeds %d bytes", fileContentMaxBytes)
 		}
+		// Share the path lock with file_patch so a parallel overwrite cannot
+		// interleave with an in-flight same-path patch RMW.
+		unlock := lockFilePath(path)
+		defer unlock()
 		pre := readPathText(path)
 		if err := writeFileAtomic(path, data, 0o644); err != nil {
 			recordInexact(ctx)
@@ -244,6 +248,10 @@ func executeFileToolCtx(ctx context.Context, name string, argsJSON []byte) (bool
 		if oldStr == "" {
 			return true, "", fmt.Errorf("old_string is required")
 		}
+		// Serialize same-path RMW so parallel tool calls apply incrementally
+		// against the latest content instead of racing last-writer-wins.
+		unlock := lockFilePath(path)
+		defer unlock()
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return true, "", err
@@ -378,6 +386,11 @@ func executeFileToolCtx(ctx context.Context, name string, argsJSON []byte) (bool
 				return true, "", fmt.Errorf("%s is a non-empty directory; pass recursive=true to delete it", path)
 			}
 		}
+		// Serialize the read-then-mutate section with other same-path file
+		// ops (write/patch/move/copy) so a concurrent patch cannot resurrect
+		// a file this delete already removed.
+		unlock := lockFilePaths(path)
+		defer unlock()
 		pre := readPathText(path)
 		if err := os.RemoveAll(path); err != nil {
 			recordInexact(ctx)
@@ -396,6 +409,12 @@ func executeFileToolCtx(ctx context.Context, name string, argsJSON []byte) (bool
 		if src == "" || dst == "" {
 			return true, "", fmt.Errorf("source and destination are required")
 		}
+		// Lock both source and destination (sorted acquisition order, so
+		// file_move(a,b) and file_move(b,a) cannot deadlock) and keep the
+		// read-then-mutate section inside the lock so a concurrent same-path
+		// patch/delete cannot race the rename.
+		unlock := lockFilePaths(src, dst)
+		defer unlock()
 		srcPre := readPathText(src)
 		dstPre := readPathText(dst)
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -429,6 +448,10 @@ func executeFileToolCtx(ctx context.Context, name string, argsJSON []byte) (bool
 		if src == "" || dst == "" {
 			return true, "", fmt.Errorf("source and destination are required")
 		}
+		// Lock both source and destination so a concurrent same-path
+		// patch/delete/move cannot race the read-then-copy section.
+		unlock := lockFilePaths(src, dst)
+		defer unlock()
 		srcPre := readPathText(src)
 		dstPre := readPathText(dst)
 		if err := copyTree(src, dst); err != nil {

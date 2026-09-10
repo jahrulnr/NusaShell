@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -646,5 +647,250 @@ func TestWriteFileAtomicRetryIsBounded(t *testing.T) {
 	}
 	if attempts != renameMaxAttempts {
 		t.Fatalf("rename attempts = %d, want bounded %d", attempts, renameMaxAttempts)
+	}
+}
+
+// Parallel file_patch calls on the same path must apply incrementally
+// (serialize RMW) so disjoint hunks all land — not last-writer-wins lost updates.
+func TestFilePatchConcurrentSameFileAppliesIncrementally(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "parallel.txt")
+	initial := "AAA\nBBB\nCCC\nDDD\nEEE\nFFF\nGGG\nHHH\n"
+	if _, err := testTB.Execute(context.Background(), "file_write", fileJSON(map[string]any{
+		"path": path, "content": initial,
+	})); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	patches := []struct{ old, new string }{
+		{"AAA", "aaa"},
+		{"BBB", "bbb"},
+		{"CCC", "ccc"},
+		{"DDD", "ddd"},
+		{"EEE", "eee"},
+		{"FFF", "fff"},
+		{"GGG", "ggg"},
+		{"HHH", "hhh"},
+	}
+	errs := make([]error, len(patches))
+	var ready, done sync.WaitGroup
+	ready.Add(1)
+	done.Add(len(patches))
+	for i, p := range patches {
+		i, p := i, p
+		go func() {
+			defer done.Done()
+			ready.Wait()
+			_, errs[i] = testTB.Execute(context.Background(), "file_patch", fileJSON(map[string]any{
+				"path": path, "old_string": p.old, "new_string": p.new,
+			}))
+		}()
+	}
+	ready.Done()
+	done.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("patch %d (%s→%s): %v", i, patches[i].old, patches[i].new, err)
+		}
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "aaa\nbbb\nccc\nddd\neee\nfff\nggg\nhhh\n"
+	if string(got) != want {
+		t.Fatalf("lost update under concurrent same-file patch:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// TestFileMoveAndPatchConcurrentNoDeadlock runs file_move(src,dst) and
+// file_patch(src) concurrently on the same paths. The multi-path lock must
+// serialize them so neither deadlocks and the end state is consistent.
+//
+// The lock guarantees mutual exclusion but not which goroutine acquires
+// first, so the exact dst content is non-deterministic:
+//   - move wins: src is moved to dst, then the patch reads a missing src and
+//     fails without writing → dst holds the original content.
+//   - patch wins: src is patched, then moved to dst → dst holds the patched
+//     content.
+//
+// The invariants we can pin deterministically: no deadlock (completes under a
+// bounded timeout), src is always removed, dst always exists, and dst content
+// is one of the two valid serialized outcomes (never corrupted).
+func TestFileMoveAndPatchConcurrentNoDeadlock(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dst := filepath.Join(dir, "dst.txt")
+	if _, err := testTB.Execute(context.Background(), "file_write", fileJSON(map[string]any{
+		"path": src, "content": "AAA\nBBB\n",
+	})); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	var ready, done sync.WaitGroup
+	ready.Add(1)
+	done.Add(2)
+	var moveErr, patchErr error
+	go func() {
+		defer done.Done()
+		ready.Wait()
+		_, moveErr = testTB.Execute(context.Background(), "file_move", fileJSON(map[string]any{
+			"source": src, "destination": dst,
+		}))
+	}()
+	go func() {
+		defer done.Done()
+		ready.Wait()
+		_, patchErr = testTB.Execute(context.Background(), "file_patch", fileJSON(map[string]any{
+			"path": src, "old_string": "AAA", "new_string": "aaa",
+		}))
+	}()
+
+	doneCh := make(chan struct{})
+	go func() { done.Wait(); close(doneCh) }()
+	ready.Done() // release both goroutines simultaneously
+	select {
+	case <-doneCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("deadlock: concurrent file_move + file_patch did not complete")
+	}
+
+	// move always succeeds: it removes src regardless of lock order.
+	if moveErr != nil {
+		t.Fatalf("file_move failed: %v", moveErr)
+	}
+	// patch may fail if the move already removed src before the patch read —
+	// that is a valid serialized outcome, not a corruption.
+	if patchErr != nil && !strings.Contains(patchErr.Error(), "no such file") {
+		t.Fatalf("unexpected patch error: %v", patchErr)
+	}
+
+	// Structural invariants: src is gone, dst exists.
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("src must be removed after move, got err=%v", err)
+	}
+	dstData, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("dst must exist after move: %v", err)
+	}
+	// dst content is one of the valid serialized outcomes above.
+	switch string(dstData) {
+	case "AAA\nBBB\n", "aaa\nBBB\n":
+	default:
+		t.Fatalf("corrupted dst content: %q", dstData)
+	}
+}
+
+// TestFileDeleteAndPatchConcurrentNoResurrection runs file_delete and
+// file_patch concurrently on the same path. The lock serializes them, so
+// whichever wins, the file is never resurrected:
+//   - delete wins: the file is removed, then the patch reads a missing file
+//     and fails without writing.
+//   - patch wins: the patch writes new content, then the delete removes the
+//     result.
+//
+// The deterministic invariant is that the file does not exist at the end. A
+// lost delete (the old race: patch reads, delete removes, patch's atomic
+// write recreates the file) would leave it present.
+func TestFileDeleteAndPatchConcurrentNoResurrection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "victim.txt")
+	if _, err := testTB.Execute(context.Background(), "file_write", fileJSON(map[string]any{
+		"path": path, "content": "AAA\nBBB\n",
+	})); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	var ready, done sync.WaitGroup
+	ready.Add(1)
+	done.Add(2)
+	var delErr, patchErr error
+	go func() {
+		defer done.Done()
+		ready.Wait()
+		_, delErr = testTB.Execute(context.Background(), "file_delete", fileJSON(map[string]any{
+			"path": path,
+		}))
+	}()
+	go func() {
+		defer done.Done()
+		ready.Wait()
+		_, patchErr = testTB.Execute(context.Background(), "file_patch", fileJSON(map[string]any{
+			"path": path, "old_string": "AAA", "new_string": "aaa",
+		}))
+	}()
+
+	doneCh := make(chan struct{})
+	go func() { done.Wait(); close(doneCh) }()
+	ready.Done() // release both goroutines simultaneously
+	select {
+	case <-doneCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("deadlock: concurrent file_delete + file_patch did not complete")
+	}
+
+	if delErr != nil {
+		t.Fatalf("file_delete failed: %v", delErr)
+	}
+	// patch may fail if delete already removed the file — valid serialized
+	// outcome, not a corruption.
+	if patchErr != nil && !strings.Contains(patchErr.Error(), "no such file") {
+		t.Fatalf("unexpected patch error: %v", patchErr)
+	}
+
+	// Deterministic invariant: the file is gone regardless of lock order.
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("file must not be resurrected after concurrent delete + patch: err=%v", err)
+	}
+}
+
+// TestLockFilePathsDedupesAndOrders verifies the multi-path lock helper
+// dedupes keys (filepath.Clean) and acquires them in sorted order, so two
+// callers passing the same paths in different argument orders cannot
+// deadlock. It also confirms the lock actually serializes: a second caller
+// blocks until the first releases.
+func TestLockFilePathsDedupesAndOrders(t *testing.T) {
+	dir := t.TempDir()
+	// Unique per-test keys avoid interference with the global filePathLocks
+	// map; no files need to exist — the lock keys are just filepath.Clean strings.
+	a := filepath.Join(dir, "a")
+	b := filepath.Join(dir, "b")
+
+	acquired := make(chan struct{})
+	release := make(chan struct{})
+	contended := make(chan struct{})
+
+	// Holder: lockFilePaths(b,a,b) dedupes to sorted [a,b].
+	go func() {
+		unlock := lockFilePaths(b, a, b)
+		close(acquired)
+		<-release
+		unlock()
+	}()
+
+	<-acquired // holder has the lock
+
+	// Contender: lockFilePaths(a,b) sorts to the same [a,b]. It must
+	// block until the holder releases.
+	go func() {
+		unlock := lockFilePaths(a, b)
+		close(contended)
+		unlock()
+	}()
+
+	select {
+	case <-contended:
+		t.Fatal("contender acquired while holder still held the lock (no serialization)")
+	case <-time.After(20 * time.Millisecond):
+		// contender correctly blocked — release the holder.
+	}
+
+	close(release)
+
+	select {
+	case <-contended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("deadlock: contender never acquired after holder released")
 	}
 }

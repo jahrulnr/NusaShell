@@ -18,12 +18,12 @@ execute arbitrary side effects.
 | `exec` | run a shell command as a child process; combined stdout/stderr streamed live to the tool terminal as it is produced plus an optional per-call Stop button while running; default shell is POSIX `sh` on Unix/macOS, on Windows `auto` resolves Git Bash first (POSIX syntax works best) then PowerShell — `cmd` only via explicit `shell="cmd"`, plus optional kinds `bash`/`powershell`/`pwsh`/`wsl` (wsl maps cwd under /mnt); no absolute wall-clock limit — running commands keep producing, but silence longer than `idle_timeout_ms` (default 180000) fails the run; optional explicit `timeout_ms`; optional absolute `cwd`; the whole child tree dies on cancel/timeout (Stop button or composer Stop); on Windows select shells via `shell=` instead of invoking cmd.exe/powershell.exe inside a bash command line (MSYS path conversion mangles drive-letter paths like `Z:/x`). In-band stdout/stderr is capped at 20000 characters as a 50/50 head+tail sample with `... (output truncated) ...` in the middle (the middle is dropped, not rejected). When the full log is larger, YAML includes `overflow_path` (absolute file under the platform temp dir `nusashell/`) with the complete stdout/stderr — `file_read` it from offset 0 |
 | `file_read` | read a text file by absolute path (up to `max_bytes`, default 32768; byte mode: continue with `offset_bytes` when truncated — the result echoes `offset_bytes`/`next_offset_bytes`, always byte counts, never line numbers; line mode: pass `start_line`/`end_line` (1-based, inclusive; either one switches to line mode and `offset_bytes` is ignored) to read by line numbers as grep reports them — the result echoes `start_line`/`end_line` and continues with `next_start_line` when truncated; `total_lines` always reports the complete file's line count so grep line numbers map directly; `sha256` is the version of the complete file, including bytes outside the returned page; metadata also reports `line_ending`, `tabs`, `carriage_returns`, and `trailing_whitespace_lines`; use `show_whitespace=true` to render invisible whitespace as visible markers; binary files are reported, not dumped) |
 | `file_write` | create or overwrite a text file atomically (temp file + rename); parent directories created automatically; `encoding` is utf8, escaped visible-whitespace text, or base64; escaped text understands `\t`, `\r`, `\n`, and `\\` and preserves the resulting bytes; transient Windows file-lock errors during the rename are retried briefly; the result includes the written file's `sha256` and whitespace metadata |
-| `file_patch` | exact substring replace; after an exact miss, safely auto-heals one unique whitespace-equivalent match by default and reports `healed: true`; set `auto_heal=false` for exact-only behavior; repeated exact matches still require 1-based `occurrence`, while ambiguous whitespace matches never write and report the current version plus candidate line numbers (`candidate_lines=[...]`); use `encoding=escaped` when copying markers from `file_read(show_whitespace=true)`; success returns the new `sha256` and whitespace metadata; a no-match context failure returns the current version, whitespace statistics, and a nearby excerpt with invisible characters rendered visibly; `preview=true` returns the result without writing |
+| `file_patch` | exact substring replace; after an exact miss, safely auto-heals one unique whitespace-equivalent match by default and reports `healed: true`; set `auto_heal=false` for exact-only behavior; repeated exact matches still require 1-based `occurrence`, while ambiguous whitespace matches never write and report the current version plus candidate line numbers (`candidate_lines=[...]`); use `encoding=escaped` when copying markers from `file_read(show_whitespace=true)`; same-path file operations (write, patch, delete, move, copy) are serialized in-process so each reads the latest content (incremental apply — disjoint hunks compose; overlapping `old_string` still fails); success returns the new `sha256` and whitespace metadata; a no-match context failure returns the current version, whitespace statistics, and a nearby excerpt with invisible characters rendered visibly; `preview=true` returns the result without writing |
 | `file_list` | list directory entries with name, type, size, modified time |
 | `file_mkdir` | create a directory including any missing parents |
-| `file_delete` | delete a file or directory (non-empty directories require `recursive=true`); irreversible |
-| `file_move` | move/rename a path; overwrites an existing destination; falls back to copy+delete across filesystems (transient Windows rename locks are retried briefly first) |
-| `file_copy` | copy a file or directory recursively |
+| `file_delete` | delete a file or directory (non-empty directories require `recursive=true`); irreversible; serialized in-process with other same-path file ops (write/patch/move/copy) so a concurrent patch cannot resurrect a deleted file |
+| `file_move` | move/rename a path; overwrites an existing destination; falls back to copy+delete across filesystems (transient Windows rename locks are retried briefly first); source and destination are locked in-process against concurrent same-path file ops (acquired in sorted order, so swapped src/dst cannot deadlock) |
+| `file_copy` | copy a file or directory recursively; source and destination are locked in-process against concurrent same-path file ops (acquired in sorted order) |
 | `file_info` | metadata for a path: `exists`, size, mode, type, modified time. Does NOT error on missing paths — returns `exists: false` (use it for existence checks too) |
 | `grep` | search file contents with regex (RE2 syntax); filters by `glob_pattern`, returns matching lines with optional `context_lines`; `output_mode`: content (default), files_with_matches, count; case-insensitive via `case_insensitive=true`; set `show_whitespace=true` in content mode to render tabs and carriage returns visibly; content rows are `path:LINE:text` where LINE is a 1-based line number (context rows use `path-LINE-text`), and the header tallies them as `line_matches` (when `max_results` caps the result, the header also reports `total_line_matches` from the search totals; count mode: `file:N` = match count, `total_line_matches`); skips `.git`, `node_modules`, `vendor`, and `*.min.js`/`*.min.css`/`*.map`; each content line is clipped at 200 bytes; in-band body caps at ~32KiB with `overflow_path` / `next_offset_bytes` so `file_read` can page the rest from the platform temp dir; prefer this over exec+shell grep — structured output, no process spawn, works without rg installed |
 | `find_file` | find files by glob pattern with `**` recursive matching (e.g. `**/*.go`) and brace expansion (e.g. `*.{go,ts}`); skips .git/node_modules/vendor; returns matching paths sorted alphabetically |
@@ -127,6 +127,17 @@ mental math lands hundreds of lines off. Anchor on **content** instead:
 numbers are for orientation, content is the only anchor all three tools
 share.
 
+Same-path file operations — `file_write`, `file_patch`, `file_delete`,
+`file_move`, and `file_copy` — are serialized in-process: each re-reads under
+a per-path lock (move/copy lock both source and destination, acquired in
+sorted order so swapped src/dst cannot deadlock), so disjoint patches compose
+instead of last-writer-wins and a concurrent patch cannot resurrect a deleted
+file. Overlapping `old_string` still fails after the earlier patch lands —
+re-read and retry. Prefer one patch per file when hunks share context. This
+is in-process only: it does not coordinate with external processes, and
+distinct strings that resolve to the same inode (symlinks, relative vs
+absolute) do not share a lock.
+
 ```text
 # GOOD — grep locates, content anchors the edit
 grep(pattern="version=1\\.2\\.3", path="deploy.yaml")
@@ -134,6 +145,10 @@ grep(pattern="version=1\\.2\\.3", path="deploy.yaml")
 file_patch(path="deploy.yaml",
   old_string="deploy: version=1.2.3 env=prod",   # verbatim from the grep row
   new_string="deploy: version=2.0.0 env=prod")
+
+# GOOD — parallel disjoint hunks on one file (serialized; both land)
+file_patch(path="cfg.yaml", old_string="host: a", new_string="host: b")
+file_patch(path="cfg.yaml", old_string="port: 1", new_string="port: 2")
 
 # GOOD — truncated read continues with its own byte coordinate
 file_read(path="big.log")            → next_offset_bytes: 32768
