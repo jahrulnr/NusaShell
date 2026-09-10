@@ -6,7 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -761,8 +763,9 @@ func TestFileMoveAndPatchConcurrentNoDeadlock(t *testing.T) {
 		t.Fatalf("file_move failed: %v", moveErr)
 	}
 	// patch may fail if the move already removed src before the patch read —
-	// that is a valid serialized outcome, not a corruption.
-	if patchErr != nil && !strings.Contains(patchErr.Error(), "no such file") {
+	// that is a valid serialized outcome, not a corruption. Check the error
+	// semantically (fs.ErrNotExist) so the same assertion holds on every OS.
+	if patchErr != nil && !errors.Is(patchErr, fs.ErrNotExist) {
 		t.Fatalf("unexpected patch error: %v", patchErr)
 	}
 
@@ -834,8 +837,9 @@ func TestFileDeleteAndPatchConcurrentNoResurrection(t *testing.T) {
 		t.Fatalf("file_delete failed: %v", delErr)
 	}
 	// patch may fail if delete already removed the file — valid serialized
-	// outcome, not a corruption.
-	if patchErr != nil && !strings.Contains(patchErr.Error(), "no such file") {
+	// outcome, not a corruption. Check the error semantically (fs.ErrNotExist)
+	// so the same assertion holds on every OS.
+	if patchErr != nil && !errors.Is(patchErr, fs.ErrNotExist) {
 		t.Fatalf("unexpected patch error: %v", patchErr)
 	}
 
