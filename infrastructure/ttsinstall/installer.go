@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"nusashell/infrastructure/nusatemp"
+	"nusashell/pkg/httpclient"
 )
 
 // Progress phases reported by Install.
@@ -118,7 +119,7 @@ func New(dataDir, baseURL string) *Installer {
 	return &Installer{
 		dataDir: dataDir,
 		base:    strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Timeout: downloadTimeout},
+		client:  httpclient.NewWithTimeout(downloadTimeout),
 	}
 }
 

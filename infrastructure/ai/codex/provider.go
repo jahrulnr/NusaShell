@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"nusashell/infrastructure/ai/core"
+	"nusashell/pkg/httpclient"
 )
 
 const (
@@ -60,11 +61,11 @@ func New(cfg Config) (*Provider, error) {
 		cfg.BaseURL = DefaultBaseURL
 	}
 	if cfg.HTTPClient == nil {
-		transport := cfg.Transport
-		if transport == nil {
-			transport = http.DefaultTransport
+		if cfg.Transport != nil {
+			cfg.HTTPClient = &http.Client{Transport: cfg.Transport}
+		} else {
+			cfg.HTTPClient = httpclient.New()
 		}
-		cfg.HTTPClient = &http.Client{Transport: transport}
 	}
 	return &Provider{cfg: cfg}, nil
 }
@@ -602,6 +603,12 @@ func coreTools(tools []core.Tool) []json.RawMessage {
 		}
 		if tool.Description != "" {
 			wire["description"] = json.RawMessage(mustJSON(tool.Description))
+		}
+		switch tool.Strict {
+		case core.StrictDisabled:
+			wire["strict"] = json.RawMessage(`false`)
+		case core.StrictEnabled:
+			wire["strict"] = json.RawMessage(`true`)
 		}
 		raw, err := json.Marshal(wire)
 		if err == nil {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"nusashell/domain"
+	"nusashell/pkg/httpclient"
 	clock "nusashell/pkg/time"
 )
 
@@ -19,7 +20,7 @@ type HTTPNotifier struct {
 }
 
 func NewHTTPNotifier() *HTTPNotifier {
-	return &HTTPNotifier{Client: &http.Client{Timeout: 300 * time.Second}}
+	return &HTTPNotifier{Client: httpclient.NewWithTimeout(httpclient.DefaultRequestTimeout)}
 }
 
 type webhookPayload struct {

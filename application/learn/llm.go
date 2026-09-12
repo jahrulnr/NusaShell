@@ -81,14 +81,23 @@ type learnerEvolve struct {
 	DiffSummary string `json:"diff_summary"`
 }
 
-// learningModelID returns the configured learning-job model override. An
-// empty string means "let the headless turn resolve the first enabled
-// provider", which is also the behavior when no override is set.
-func (s *Service) learningModelID() string {
-	if s.deps.Settings == nil {
-		return ""
+// learningModelID returns the model a background learning job should run
+// on. An explicitly configured review_model wins unconditionally. When it
+// is empty, the ResolveLearnerModel seam resolves the cascade the UI
+// promises (source conversation → newest conversation → first enabled
+// provider) so the learner never silently inherits DelegateModel via
+// ResolveHeadlessModel. Returns "" when no resolver is wired or nothing
+// resolves, keeping today's failure path for partial wiring.
+func (s *Service) learningModelID(sourceConversationID string) string {
+	if s.deps.Settings != nil {
+		if configured := strings.TrimSpace(s.deps.Settings.Get().ReviewModel); configured != "" {
+			return configured
+		}
 	}
-	return strings.TrimSpace(s.deps.Settings.Get().ReviewModel)
+	if s.deps.ResolveLearnerModel != nil {
+		return s.deps.ResolveLearnerModel(sourceConversationID)
+	}
+	return ""
 }
 
 // runLearningTurn executes one learning-job LLM call as a headless agent turn

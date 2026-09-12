@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,6 +19,7 @@ import (
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/codex"
 	aiutil "nusashell/infrastructure/ai/internal"
+	"nusashell/pkg/httpclient"
 )
 
 const (
@@ -41,13 +41,19 @@ type Client struct {
 	HTTP      *http.Client
 }
 
-// NewFactory returns an ImageGeneratorFactory that routes OpenRouter hosts
-// to POST /images, OpenAI-compatible chat/responses providers to
-// /images/generations (or /images/edits when reference images are present),
-// and Codex providers (constructed by the composition root) to the
-// ChatGPT Codex images endpoints.
+// NewFactory returns an ImageGeneratorFactory that uses the central HTTP
+// transport when no client is supplied by the composition root.
 func NewFactory() application.ImageGeneratorFactory {
-	client := newImageHTTPClient()
+	return NewFactoryWithClient(nil)
+}
+
+// NewFactoryWithClient returns an ImageGeneratorFactory using client for all
+// generated image requests and signed-URL downloads. A nil client uses a
+// central client from pkg/httpclient.
+func NewFactoryWithClient(client *http.Client) application.ImageGeneratorFactory {
+	if client == nil {
+		client = httpclient.New()
+	}
 	return func(_ context.Context, p *domain.Provider, apiKey string) (application.ImageGenerator, error) {
 		if p == nil {
 			return nil, fmt.Errorf("image provider is required")
@@ -62,26 +68,14 @@ func NewFactory() application.ImageGeneratorFactory {
 	}
 }
 
-func newImageHTTPClient() *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout:   300 * time.Second,
-				KeepAlive: 300 * time.Second,
-			}).DialContext,
-			ForceAttemptHTTP2:     true,
-			TLSHandshakeTimeout:   300 * time.Second,
-			ResponseHeaderTimeout: 300 * time.Second,
-			IdleConnTimeout:       300 * time.Second,
-		},
+func (c *Client) httpClient() *http.Client {
+	if c != nil && c.HTTP != nil {
+		return c.HTTP
 	}
+	return httpclient.New()
 }
 
 func (c *Client) Generate(ctx context.Context, req application.ImageGenRequest) (*application.ImageGenResult, error) {
-	if c.HTTP == nil {
-		c.HTTP = newImageHTTPClient()
-	}
 	if req.N <= 0 {
 		req.N = 1
 	}
@@ -139,7 +133,7 @@ type imagesResponse struct {
 	} `json:"error"`
 }
 
-func decodeImages(resp imagesResponse, provider, model string) (*application.ImageGenResult, error) {
+func decodeImages(ctx context.Context, client *http.Client, resp imagesResponse, provider, model string) (*application.ImageGenResult, error) {
 	if resp.Error != nil && strings.TrimSpace(resp.Error.Message) != "" {
 		return nil, fmt.Errorf("%s", strings.TrimSpace(resp.Error.Message))
 	}
@@ -164,7 +158,7 @@ func decodeImages(resp imagesResponse, provider, model string) (*application.Ima
 			// Download the signed URL. Most image routers return URLs
 			// (the default response_format); we always fetch the bytes
 			// so the rest of the pipeline has image data to persist.
-			data, media, err := fetchImageURL(context.Background(), item.URL)
+			data, media, err := fetchImageURL(ctx, client, item.URL)
 			if err != nil {
 				return nil, fmt.Errorf("download image url (item %d): %w", i, err)
 			}
@@ -185,7 +179,7 @@ func decodeImages(resp imagesResponse, provider, model string) (*application.Ima
 // image provider. The media type is derived from the Content-Type header
 // (falling back to image/png). A 30s timeout bounds the download so a
 // slow CDN cannot stall the agent turn indefinitely.
-func fetchImageURL(ctx context.Context, url string) ([]byte, string, error) {
+func fetchImageURL(ctx context.Context, client *http.Client, url string) ([]byte, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -193,7 +187,10 @@ func fetchImageURL(ctx context.Context, url string) ([]byte, string, error) {
 		return nil, "", err
 	}
 	req.Header.Set("User-Agent", aiutil.NusaShellUserAgent)
-	resp, err := http.DefaultClient.Do(req)
+	if client == nil {
+		client = httpclient.Shared()
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, "", err
 	}
@@ -232,10 +229,10 @@ func (c *Client) generateOpenAI(ctx context.Context, req application.ImageGenReq
 	}
 	url := aiutil.JoinEndpoint(c.BaseURL, "/images/generations")
 	var decoded imagesResponse
-	if err := aiutil.DoJSON(ctx, c.HTTP, http.MethodPost, url, c.headers(), body, &decoded); err != nil {
+	if err := aiutil.DoJSON(ctx, c.httpClient(), http.MethodPost, url, c.headers(), body, &decoded); err != nil {
 		return nil, err
 	}
-	return decodeImages(decoded, backendOpenAI, req.Model)
+	return decodeImages(ctx, c.httpClient(), decoded, backendOpenAI, req.Model)
 }
 
 func (c *Client) openaiEdits(ctx context.Context, req application.ImageGenRequest) (*application.ImageGenResult, error) {
@@ -285,7 +282,7 @@ func (c *Client) openaiEdits(ctx context.Context, req application.ImageGenReques
 	for k, v := range c.headers() {
 		httpReq.Header.Set(k, v)
 	}
-	resp, err := c.HTTP.Do(httpReq)
+	resp, err := c.httpClient().Do(httpReq)
 	if err != nil {
 		return nil, &domain.ProviderError{Kind: domain.KindConnect, Temporary: true, Err: err}
 	}
@@ -307,7 +304,7 @@ func (c *Client) openaiEdits(ctx context.Context, req application.ImageGenReques
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		return nil, err
 	}
-	return decodeImages(decoded, backendOpenAI, req.Model)
+	return decodeImages(ctx, c.httpClient(), decoded, backendOpenAI, req.Model)
 }
 
 func (c *Client) generateOpenRouter(ctx context.Context, req application.ImageGenRequest) (*application.ImageGenResult, error) {
@@ -342,10 +339,10 @@ func (c *Client) generateOpenRouter(ctx context.Context, req application.ImageGe
 	}
 	url := aiutil.JoinEndpoint(c.BaseURL, "/images")
 	var decoded imagesResponse
-	if err := aiutil.DoJSON(ctx, c.HTTP, http.MethodPost, url, c.headers(), body, &decoded); err != nil {
+	if err := aiutil.DoJSON(ctx, c.httpClient(), http.MethodPost, url, c.headers(), body, &decoded); err != nil {
 		return nil, err
 	}
-	return decodeImages(decoded, backendOpenRouter, req.Model)
+	return decodeImages(ctx, c.httpClient(), decoded, backendOpenRouter, req.Model)
 }
 
 // maxCodexImageB64 is the base64 length of 32 MiB — the Codex executor's
@@ -400,7 +397,7 @@ func (c *Client) generateCodex(ctx context.Context, req application.ImageGenRequ
 	for k, v := range headers {
 		httpReq.Header.Set(k, v)
 	}
-	resp, err := c.HTTP.Do(httpReq)
+	resp, err := c.httpClient().Do(httpReq)
 	if err != nil {
 		return nil, &domain.ProviderError{Kind: domain.KindConnect, Temporary: true, Err: err}
 	}
@@ -429,7 +426,7 @@ func (c *Client) generateCodex(ctx context.Context, req application.ImageGenRequ
 			return nil, fmt.Errorf("generated image %d exceeds the 32 MiB executor limit", i+1)
 		}
 	}
-	return decodeImages(decoded, BackendCodex, req.Model)
+	return decodeImages(ctx, c.httpClient(), decoded, BackendCodex, req.Model)
 }
 
 func defaultOr(value, def string) string {

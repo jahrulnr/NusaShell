@@ -40,11 +40,11 @@ func New(cfg Config, spec Spec) (*Provider, error) {
 		return nil, fmt.Errorf("%s: Retry cannot be used with a custom HTTPClient; use Transport or configure retry on the client", spec.providerName())
 	}
 	if cfg.HTTPClient == nil {
-		base := cfg.Transport
-		if base == nil {
-			base = http.DefaultTransport
+		if cfg.Transport != nil {
+			cfg.HTTPClient = retry.NewHTTPClient(&http.Client{Transport: cfg.Transport}, cfg.Retry)
+		} else {
+			cfg.HTTPClient = retry.NewHTTPClient(nil, cfg.Retry)
 		}
-		cfg.HTTPClient = &http.Client{Transport: retry.NewTransport(base, cfg.Retry)}
 	}
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = defaultUserAgent

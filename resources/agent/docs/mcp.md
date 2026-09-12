@@ -54,6 +54,31 @@ MCP servers. Both `mcp_search` and `tool_list` return compact refs and omit
 input schemas. Use `tool_schema` for the exact argument shape when needed,
 then call the returned ref with `mcp_call`.
 
+Discovery output is size-bounded. `tool_list`, `mcp_search`, and `tool_schema`
+cap the in-band payload at ~32KiB; an oversized catalog or schema spills the
+complete JSONL to the platform temp dir (`nusashell/`) and the result carries
+`truncated: true`, `overflow_path`, `overflow_bytes`, and `next_offset_bytes` —
+continue with `file_read` from that offset instead of re-running the discovery
+call. Spill files are swept after 24 hours.
+
+`mcp_search` also reports `count` (matches returned), `total` (every match
+before the limit), and `limit`. When `count < total` the list was cut by the
+default limit (20) or by an explicit one — raise `limit` or narrow the query
+instead of concluding the catalog only holds those matches.
+
+Good example — an MCP-heavy catalog cut by the limit and by the byte budget:
+
+    mcp_search(query="issue")                    # count: 20 · total: 137 · limit: 20 → 117 matches cut
+    mcp_search(query="issue", limit=137)         # raise the limit to reach them all
+      → truncated: true, overflow_path: /tmp/nusashell/mcp_search-ab12.txt, next_offset_bytes: 32768
+    file_read(path="/tmp/nusashell/mcp_search-ab12.txt", offset_bytes=32768)
+
+Bad example — treating a limit cut as the whole catalog:
+
+    mcp_search(query="issue")   # count: 20 · total: 137 · limit: 20
+    # WRONG: "this server only has 20 issue tools" — the limit hid 117 matches.
+    # RIGHT: re-query with limit=137, or search per server with a narrower query.
+
 ### Server→client notifications
 
 Plugins that publish business facts must use the NusaShell-specific notification
@@ -140,6 +165,15 @@ form from older versions is still accepted for compatibility. If a tool
 declares required fields and the call arrives with empty arguments, the
 runtime rejects it with `MISSING_ARGS: <ref> requires [<fields>]; load
 tool_schema and retry with arguments_json as a JSON object`.
+
+On Responses and Codex, supply the same tool-specific object fields returned
+by `tool_schema`; an empty object is only appropriate when the tool needs no
+arguments.
+
+    # GOOD — include the discovered tool's required field:
+    mcp_call(ref="nusashell.files:read", arguments_json={"path": "/home/user/a.txt"})
+    # BAD — the read tool requires path:
+    mcp_call(ref="nusashell.files:read", arguments_json={})
 
 `mcp_enable` returns only status + tool count — it does NOT dump tool
 definitions. After `mcp_enable`, call `mcp_search` or `tool_list` to discover

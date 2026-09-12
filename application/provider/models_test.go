@@ -5,6 +5,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/modelcatalog"
 )
 
 type modelListStore struct {
@@ -22,6 +23,37 @@ func (s modelListStore) Get(id string) (*domain.Provider, error) {
 }
 func (s modelListStore) Save(*domain.Provider) error { return nil }
 func (s modelListStore) Delete(string) error         { return nil }
+
+func TestHandleModelsListUsesCodexCatalogContextOverDiscoveryValue(t *testing.T) {
+	svc := New(Deps{
+		Store: modelListStore{providers: []*domain.Provider{{
+			ID: "codex", Name: "Codex", Kind: domain.ProviderCodex, Enabled: true,
+			Models: []domain.Model{{ID: "gpt-5.6-luna", Context: 272_000}},
+		}}},
+		Catalog: contextCatalogStub{models: map[string]*modelcatalog.ModelMetadata{
+			"gpt-5.6-luna": {ID: "openai/gpt-5.6-luna", Context: 1_050_000},
+		}},
+	})
+
+	result, rpcErr := svc.HandleModelsList()
+	if rpcErr != nil {
+		t.Fatalf("HandleModelsList: %v", rpcErr.Message)
+	}
+	models := result.(contracts.ModelsListResult).Models
+	var luna *contracts.ModelDTO
+	for i := range models {
+		if models[i].ID == "gpt-5.6-luna" {
+			luna = &models[i]
+			break
+		}
+	}
+	if luna == nil {
+		t.Fatalf("models = %+v, want Luna model", models)
+	}
+	if luna.Context != 1_050_000 {
+		t.Fatalf("Codex model context = %d, want catalog value 1050000", luna.Context)
+	}
+}
 
 func TestHandleModelsListUsesRuntimeAdjustedContextWindow(t *testing.T) {
 	svc := New(Deps{

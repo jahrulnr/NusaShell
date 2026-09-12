@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"net/http"
 	"testing"
 
 	"nusashell/domain"
+	"nusashell/pkg/httpclient"
 
 	"github.com/jahrulnr/searchwire"
 )
@@ -140,6 +142,26 @@ func TestSearchwireSearchConfigNilCreds(t *testing.T) {
 	cfg := SearchwireSearchConfig(nil)
 	if cfg.Brave.APIKey != "" || cfg.Serper.APIKey != "" || cfg.Tavily.APIKey != "" {
 		t.Errorf("nil creds must yield empty keys, got %#v", cfg)
+	}
+}
+
+func TestSearchwireConfigsUseNusaShellHTTPClient(t *testing.T) {
+	publicTransport := httpclient.NewPublic().Transport
+	configs := []searchwire.Config{
+		SearchwireConfigFromProviders(nil, nil),
+		SearchwireSearchConfig(nil),
+	}
+	for i, cfg := range configs {
+		client, ok := cfg.HTTPClient.(*http.Client)
+		if !ok || client == nil {
+			t.Fatalf("config %d HTTPClient = %T, want *http.Client", i, cfg.HTTPClient)
+		}
+		if client.Transport != publicTransport {
+			t.Fatalf("config %d HTTPClient does not use the public-web transport", i)
+		}
+		if client.Transport == httpclient.Shared().Transport {
+			t.Fatalf("config %d HTTPClient unexpectedly uses the unrestricted transport", i)
+		}
 	}
 }
 

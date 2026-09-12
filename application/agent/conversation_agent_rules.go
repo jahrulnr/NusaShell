@@ -42,6 +42,7 @@ type conversationRules struct {
 	totalUsage             ChatUsage
 	lastUsage              ChatUsage
 	lastRound              streamedTurnRound
+	lastRequestEstimate    int64
 	repeatedGuard          *repeatedToolGuard
 	turnEnded              bool // interrupt/fail already emitted by a hook
 }
@@ -77,6 +78,7 @@ func (p *conversationRules) Rules() AgentRules {
 				p.lastUsage = rr.Response.Usage
 			}
 			p.lastRound = rr
+			p.lastRequestEstimate = rr.RequestTokens
 			// One final provider response after the last tool result: the
 			// model answers without being able to start another tool round.
 			if p.toolRounds >= p.settings.MaxToolRounds && len(resp.ToolCalls) > 0 {
@@ -110,13 +112,14 @@ func (p *conversationRules) Rules() AgentRules {
 			if p.settings.CompactionEnabled && p.round > 1 && p.compactionAttempts < 3 {
 				cw := p.svc.ResolveContextWindow(p.provider, p.model, p.settings)
 				trigger := domain.CompactionTriggerTokens(cw, domain.ResolveMaxOutput(p.provider, p.model, p.settings), p.settings)
-				if est := p.conv.EstimateTokens(); est > trigger {
+				if est := p.requestEstimate(nil); est > int64(trigger) {
 					p.compactionAttempts++
 					p.svc.log("info", "agent", "mid-turn compaction for %s round %d: est=%d trigger=%d window=%d",
 						p.run.ID, p.round, est, trigger, cw)
 					compAdapter, compModel, compWindow := p.svc.ResolveCompactionAdapter(p.run.Ctx, p.adapter, p.model, cw, p.settings)
 					p.svc.EmitCompactionStarted(p.run, p.conv.ID)
-					summary, compErr := p.svc.CompactConversation(p.run.Ctx, compAdapter, p.conv, compModel, compWindow, p.settings, domain.CompactionTriggerProactive)
+					compactionCache := p.svc.compactionPromptCache(p.settings, compAdapter, p.conv, compModel)
+					summary, compErr := p.svc.compactConversationWithCache(p.run.Ctx, compAdapter, p.conv, compModel, compWindow, p.settings, domain.CompactionTriggerProactive, compactionCache, p.caps)
 					if compErr == nil {
 						p.svc.EmitInteractiveTurnEvent(p.run, contracts.EventCompacted, contracts.CompactedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Summary: summary})
 						refreshed, getErr := p.svc.Conversations.Get(p.run.ConversationID)
@@ -204,8 +207,11 @@ func (p *conversationRules) Rules() AgentRules {
 			if p.compactionAttempts < 3 && (isContextOverflowError(rawStreamErr) || isTPMDominatedRequest(rawStreamErr)) {
 				cw := p.svc.ResolveContextWindow(p.provider, p.model, p.settings)
 				trigger := domain.CompactionTriggerTokens(cw, domain.ResolveMaxOutput(p.provider, p.model, p.settings), p.settings)
-				preEmg := p.conv.EstimateTokens()
-				if !shouldEmergencyCompact(rawStreamErr, preEmg, trigger) {
+				preEmg := p.lastRequestEstimate
+				if preEmg <= 0 {
+					preEmg = p.requestEstimate(nil)
+				}
+				if !shouldEmergencyCompact(rawStreamErr, int(preEmg), trigger) {
 					p.svc.log("warn", "agent", "overflow-like 400 for turn %s but est=%d <= trigger=%d; skipping emergency compaction", p.run.ID, preEmg, trigger)
 					p.svc.FailStreamTurn(p.run, p.currentMsgID, p.model, p.lastRound, err)
 					p.turnEnded = true
@@ -215,7 +221,8 @@ func (p *conversationRules) Rules() AgentRules {
 				p.svc.log("warn", "agent", "request too large for turn %s (est=%d trigger=%d), forcing emergency compaction", p.run.ID, preEmg, trigger)
 				compAdapter, compModel, compWindow := p.svc.ResolveCompactionAdapter(p.run.Ctx, p.adapter, p.model, cw, p.settings)
 				p.svc.EmitCompactionStarted(p.run, p.conv.ID)
-				summary, compErr := p.svc.CompactConversation(p.run.Ctx, compAdapter, p.conv, compModel, compWindow, p.settings, domain.CompactionTriggerEmergency)
+				compactionCache := p.svc.compactionPromptCache(p.settings, compAdapter, p.conv, compModel)
+				summary, compErr := p.svc.compactConversationWithCache(p.run.Ctx, compAdapter, p.conv, compModel, compWindow, p.settings, domain.CompactionTriggerEmergency, compactionCache, p.caps)
 				if compErr == nil {
 					p.svc.EmitInteractiveTurnEvent(p.run, contracts.EventCompacted, contracts.CompactedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Summary: summary})
 					refreshed, getErr := p.svc.Conversations.Get(p.run.ConversationID)
@@ -335,6 +342,22 @@ func (p *conversationRules) toolsForRound() []ToolDef {
 	return p.toolDefs
 }
 
+// requestEstimate builds the next normal provider request without sending it
+// and estimates the model-visible shape after provider conversion. A partial
+// stream is accepted for continuation preflight, but normal round-boundary
+// checks pass nil because the next request has no streamed partial yet.
+func (p *conversationRules) requestEstimate(partial *StreamedTurnRound) int64 {
+	if p == nil || p.svc == nil {
+		return 0
+	}
+	request := p.svc.buildTurnRequest(
+		p.run, p.adapter, p.conv, p.currentMsgID, p.model, p.effort,
+		p.toolsForRound(), p.settings, p.continuation, partial, p.maxTokens,
+		p.promptCache, p.caps,
+	)
+	return p.svc.estimateTurnRequest(request, p.conv, p.adapter)
+}
+
 // totalUsageTokens is the sum of per-round usage (↑/↓ display tags).
 func (p *conversationRules) totalUsageTokens() ChatUsage { return p.totalUsage }
 
@@ -362,8 +385,8 @@ func (p *conversationRules) tryMidToolCompaction() (bool, error) {
 	}
 	cw := p.svc.ResolveContextWindow(p.provider, p.model, p.settings)
 	trigger := domain.CompactionTriggerTokens(cw, domain.ResolveMaxOutput(p.provider, p.model, p.settings), p.settings)
-	est := p.conv.EstimateTokens()
-	if est <= trigger {
+	est := p.requestEstimate(nil)
+	if est <= int64(trigger) {
 		return false, nil
 	}
 	p.compactionAttempts++
@@ -371,7 +394,8 @@ func (p *conversationRules) tryMidToolCompaction() (bool, error) {
 		p.run.ID, p.round, est, trigger, cw)
 	compAdapter, compModel, compWindow := p.svc.ResolveCompactionAdapter(p.run.Ctx, p.adapter, p.model, cw, p.settings)
 	p.svc.EmitCompactionStarted(p.run, p.conv.ID)
-	summary, compErr := p.svc.CompactConversation(p.run.Ctx, compAdapter, p.conv, compModel, compWindow, p.settings, domain.CompactionTriggerMidTool)
+	compactionCache := p.svc.compactionPromptCache(p.settings, compAdapter, p.conv, compModel)
+	summary, compErr := p.svc.compactConversationWithCache(p.run.Ctx, compAdapter, p.conv, compModel, compWindow, p.settings, domain.CompactionTriggerMidTool, compactionCache, p.caps)
 	if compErr != nil {
 		p.svc.log("warn", "agent", "mid-tool compaction failed for %s round %d: %v", p.run.ID, p.round, compErr)
 		p.svc.EmitInteractiveTurnEvent(p.run, contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: p.run.ID, ConversationID: p.conv.ID, Error: compErr.Error()})

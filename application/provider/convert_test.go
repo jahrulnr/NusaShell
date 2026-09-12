@@ -822,3 +822,34 @@ func TestToCoreRequestOpenRouterDelegatedKindsCarrySessionID(t *testing.T) {
 		})
 	}
 }
+
+func TestMCPCallDisablesResponsesStrictMode(t *testing.T) {
+	for _, kind := range []domain.ProviderKind{domain.ProviderResponses, domain.ProviderCodex} {
+		t.Run(string(kind), func(t *testing.T) {
+			schema := map[string]any{"type": "object", "properties": map[string]any{"arguments_json": map[string]any{"type": "object", "properties": map[string]any{}}}}
+			req := ToCoreRequest(ChatRequest{Tools: []ToolDef{{Name: "mcp_call", InputSchema: schema}, {Name: "file_read", InputSchema: schema}}}, kind, false)
+			if req.Tools[0].Strict != core.StrictDisabled {
+				t.Fatalf("mcp_call strict = %v, want disabled", req.Tools[0].Strict)
+			}
+			if req.Tools[1].Strict != core.StrictDefault {
+				t.Fatal("unrelated tool strict changed")
+			}
+			want, _ := json.Marshal(schema)
+			if string(req.Tools[0].Parameters) != string(want) {
+				t.Fatal("MCP schema changed during conversion")
+			}
+		})
+	}
+}
+
+func TestMCPCallKeepsDefaultStrictModeOnOtherProviderKinds(t *testing.T) {
+	schema := map[string]any{"type": "object", "properties": map[string]any{}}
+	for _, kind := range []domain.ProviderKind{domain.ProviderMessages, domain.ProviderChat, domain.ProviderGemini} {
+		t.Run(string(kind), func(t *testing.T) {
+			req := ToCoreRequest(ChatRequest{Tools: []ToolDef{{Name: "mcp_call", InputSchema: schema}}}, kind, false)
+			if req.Tools[0].Strict != core.StrictDefault {
+				t.Fatalf("mcp_call strict = %v, want default for %s", req.Tools[0].Strict, kind)
+			}
+		})
+	}
+}

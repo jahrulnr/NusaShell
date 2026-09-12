@@ -36,3 +36,18 @@ func TestRunHeadlessTurnRecoversProviderResolutionPanic(t *testing.T) {
 		t.Fatalf("RunHeadlessTurn error = %v, want recovered panic diagnostic", runErr)
 	}
 }
+
+type learnerHeadlessSettings struct{ settings domain.Settings }
+
+func (s learnerHeadlessSettings) Get() domain.Settings { return s.settings }
+
+func TestLearnerHeadlessResolutionDoesNotUseDelegateModel(t *testing.T) {
+	svc := &Service{Settings: learnerHeadlessSettings{
+		settings: domain.Settings{DelegateModel: "delegate:model"},
+	}}
+
+	_, _, _, err := svc.resolveHeadlessModelForKind("", AgentLearner)
+	if err == nil || !strings.Contains(err.Error(), "learner model") {
+		t.Fatalf("learner empty-model resolution error = %v, want explicit learner-model failure", err)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/embeddings"
 	"nusashell/infrastructure/ai/imagegen"
+	"nusashell/pkg/httpclient"
 )
 
 type stubCreds struct {
@@ -21,8 +22,8 @@ func (s *stubCreds) Set(_, v string) error                 { s.val = v; s.ok = t
 func (s *stubCreds) Delete(string) error                   { s.ok = false; return nil }
 func (s *stubCreds) ListByPrefix(string) ([]string, error) { return nil, nil }
 
-func TestNewProviderHTTPClientHasNoBodyTimeout(t *testing.T) {
-	client := newProviderHTTPClient()
+func TestCentralHTTPClientHasNoBodyTimeout(t *testing.T) {
+	client := httpclient.New()
 	if client.Timeout != 0 {
 		t.Fatalf("client timeout = %s, want 0 so SSE bodies can outlive 60s", client.Timeout)
 	}
@@ -42,6 +43,46 @@ func TestNewFactoryBuildsAdapterForSupportedKinds(t *testing.T) {
 		if got.ProviderKind != kind {
 			t.Fatalf("adapter kind = %s, want %s", got.ProviderKind, kind)
 		}
+	}
+}
+
+func TestNewFactoryReusesTransportAcrossAdapters(t *testing.T) {
+	f := NewFactory(&stubCreds{})
+	first, err := f(nil, &domain.Provider{Kind: domain.ProviderChat, BaseURL: "https://first.example/v1"}, "key-1")
+	if err != nil {
+		t.Fatalf("first factory call: %v", err)
+	}
+	second, err := f(nil, &domain.Provider{Kind: domain.ProviderResponses, BaseURL: "https://second.example/v1"}, "key-2")
+	if err != nil {
+		t.Fatalf("second factory call: %v", err)
+	}
+	firstAdapter := first.(*Adapter)
+	secondAdapter := second.(*Adapter)
+	if firstAdapter.Client.Transport != secondAdapter.Client.Transport {
+		t.Fatal("factory calls do not share the central HTTP transport")
+	}
+}
+
+func TestNewFactoryScopesCodexCookieJarToCodexAdapter(t *testing.T) {
+	f := NewFactory(&stubCreds{})
+	codexProvider, err := f(nil, &domain.Provider{Kind: domain.ProviderCodex, BaseURL: "https://chatgpt.com/backend-api/codex"}, "plain-token")
+	if err != nil {
+		t.Fatalf("codex factory call: %v", err)
+	}
+	chatProvider, err := f(nil, &domain.Provider{Kind: domain.ProviderChat, BaseURL: "https://example.test/v1"}, "key")
+	if err != nil {
+		t.Fatalf("chat factory call: %v", err)
+	}
+	codexAdapter := codexProvider.(*Adapter)
+	chatAdapter := chatProvider.(*Adapter)
+	if codexAdapter.Client.Jar == nil {
+		t.Fatal("Codex adapter must have the shared Cloudflare cookie jar")
+	}
+	if chatAdapter.Client.Jar != nil {
+		t.Fatal("Codex cookie jar leaked into a non-Codex adapter")
+	}
+	if codexAdapter.Client.Transport != chatAdapter.Client.Transport {
+		t.Fatal("Codex and non-Codex adapters should still share transport")
 	}
 }
 

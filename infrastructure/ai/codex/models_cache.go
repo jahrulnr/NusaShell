@@ -7,10 +7,9 @@ import (
 )
 
 // codexModelsCache is the on-disk shape of ~/.codex/models_cache.json.
-// The Codex CLI caches the full model catalog (including context_window
-// and max_context_window) here. We parse this file to get the real context
-// window that Codex enforces — which is often smaller than the model's
-// documented ceiling (e.g. luna: 272k cache vs 1.05M models.dev).
+// The Codex CLI caches account-specific discovery metadata here. It is used
+// only to fill gaps in the app-server model/list response; direct NusaShell
+// chat turns use the ChatGPT Responses API and do not consult this file.
 type codexModelsCache struct {
 	Models []struct {
 		Slug                      string `json:"slug"`
@@ -21,8 +20,9 @@ type codexModelsCache struct {
 }
 
 // loadCodexModelsCache reads ~/.codex/models_cache.json and returns a
-// slug → context window map. Returns nil if the file is missing or
-// cannot be parsed — callers fall back to other catalog sources.
+// slug → context window map for app-server discovery enrichment. Returns nil
+// if the file is missing or cannot be parsed — callers fall back to the
+// public models.dev catalog for direct-API context metadata.
 func loadCodexModelsCache() map[string]int {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -42,11 +42,9 @@ func loadCodexModelsCache() map[string]int {
 		if m.Slug == "" {
 			continue
 		}
-		// Codex resolves the active runtime window as
-		// context_window.or(max_context_window). The max field only bounds
-		// an explicit Codex configuration override, so treating it as the
-		// active default delays compaction far beyond the window enforced by
-		// the upstream model.
+		// For discovery metadata, prefer context_window and only use
+		// max_context_window when the CLI omitted the former. The application
+		// layer does not use this value as the direct ChatGPT API limit.
 		cw := m.ContextWindow
 		if cw <= 0 {
 			cw = m.MaxContextWindow

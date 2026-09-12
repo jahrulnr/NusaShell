@@ -6,13 +6,21 @@ import (
 	"fmt"
 	"strings"
 
+	"nusashell/application/provider"
 	"nusashell/application/service/tooloutput"
+	"nusashell/application/tools"
 	"nusashell/domain"
 	"nusashell/pkg/text"
 	"nusashell/resources"
 )
 
 func (a *Service) ResolveCompactionAdapter(ctx context.Context, defaultAdapter ProviderContext, defaultModel string, defaultWindow int, settings domain.Settings) (ProviderContext, string, int) {
+	if settings.CompactionWorkflow == domain.CompactionWorkflowReuse {
+		// Reuse mode is intentionally tied to the active conversation model:
+		// changing provider/model would invalidate the normal prompt/tool
+		// prefix and the shared prompt-cache key.
+		return defaultAdapter, defaultModel, defaultWindow
+	}
 	compModel := strings.TrimSpace(settings.CompactionModel)
 	if compModel == "" {
 		return defaultAdapter, defaultModel, defaultWindow
@@ -40,14 +48,36 @@ func (a *Service) ResolveCompactionAdapter(ctx context.Context, defaultAdapter P
 	return pc, bareModel, window
 }
 
-// resolveContextWindow picks the effective context window for compaction
-// decisions: min(model context, max_input_tokens) when both are known, or the
-// configured max_input_tokens fallback when the model does not advertise one.
-// A learned cap from a provider 400 overflow error overrides the catalog value
-// for the provider+model so future turns do not overestimate the window.
-// A manual context override (set via the review agent) wins over the learned
-// cap — the provider clone already carries it, so we skip the learned cap
-// when one is present to avoid clobbering the operator's correction.
+func (a *Service) compactionPromptCache(settings domain.Settings, adapter ProviderContext, c *domain.Conversation, model string) *PromptCachePolicy {
+	if c == nil {
+		return nil
+	}
+	prefix := promptCacheConversationPrefix
+	if c.EffectiveType() != domain.ConversationTypeConversation {
+		prefix = promptCacheBackgroundPrefix
+	}
+	return buildPromptCachePolicyForContext(settings, adapter, model, c.ID, prefix)
+}
+
+func (a *Service) compactionModelCapabilities(adapter ProviderContext, model string) ModelCapabilities {
+	if a == nil || strings.TrimSpace(model) == "" || a.Providers == nil || a.Credentials == nil {
+		return ModelCapabilities{}
+	}
+	lookup := model
+	if adapter.ProviderID != "" {
+		lookup = adapter.ProviderID + ":" + model
+	}
+	provider, bare, _, rpcErr := a.resolveModel(lookup)
+	if rpcErr != nil || provider == nil {
+		return ModelCapabilities{}
+	}
+	return modelCapabilitiesWithLearned(provider, bare, a.learnedParams, a.modelOverrides)
+}
+
+// ResolveContextWindow returns the effective context window for compaction
+// decisions. The provider/model metadata supplies the baseline. A learned
+// cap from a provider 400 overflow error then restricts that baseline, while
+// a manual context override wins last.
 func (a *Service) ResolveContextWindow(provider *domain.Provider, model string, settings domain.Settings) int {
 	cw := domain.ResolveContextWindow(provider, model, settings)
 	if a.learnedParams != nil {
@@ -149,7 +179,45 @@ func compactionSummaryEchoesAssistant(summary string, msgs []ChatMessage) bool {
 	return false
 }
 
-// compactConversation summarizes the conversation history via multi-pass
+func compactionToolDefs(a *Service, workflow domain.CompactionWorkflow, c *domain.Conversation) []ToolDef {
+	if workflow != domain.CompactionWorkflowReuse {
+		return toToolDefs(a.toolFactory().Get(AgentCompaction, ""))
+	}
+	kind := AgentConversation
+	if c != nil {
+		switch c.EffectiveType() {
+		case domain.ConversationTypeAutomation:
+			kind = AgentAutomation
+		case domain.ConversationTypeBackground:
+			kind = AgentLearner
+		}
+	}
+	workspace := ""
+	if c != nil {
+		workspace = a.effectiveWorkspace(c.Workspace)
+	}
+	defs := toToolDefs(a.toolFactory().Get(kind, workspace))
+	for _, def := range defs {
+		if def.Name == compactionSummaryToolName {
+			return defs
+		}
+	}
+	return append(defs, toToolDef(tools.CompactionSummaryTool))
+}
+
+func compactionReuseSystemPrompt(c *domain.Conversation, userPrompt string) string {
+	var run *TurnRun
+	if c != nil {
+		switch c.EffectiveType() {
+		case domain.ConversationTypeAutomation:
+			run = &TurnRun{Headless: true, ToolKind: AgentAutomation}
+		case domain.ConversationTypeBackground:
+			run = &TurnRun{Headless: true, ToolKind: AgentLearner}
+		}
+	}
+	return buildSystemPromptForRun(run, c, userPrompt)
+}
+
 // rolling compaction so that conversations larger than the model's context
 // window are still fully summarized without dropping any messages.
 //
@@ -162,7 +230,24 @@ func compactionSummaryEchoesAssistant(summary string, msgs []ChatMessage) bool {
 // It is selected by provider kind, not by the model ID: Codex model IDs
 // also appear in the OpenAI server-compaction table.
 
+// CompactConversation keeps the existing call seam for tests and other
+// callers. Production turn paths pass the normal turn's already-built cache
+// policy through CompactConversationWithCache so the key is byte-for-byte the
+// same as the interactive request.
 func (a *Service) CompactConversation(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, contextWindow int, settings domain.Settings, trigger domain.CompactionTrigger) (string, error) {
+	cache := a.compactionPromptCache(settings, adapter, c, model)
+	return a.compactConversationWithCache(ctx, adapter, c, model, contextWindow, settings, trigger, cache, a.compactionModelCapabilities(adapter, model))
+}
+
+// CompactConversationWithCache keeps the original public call seam while
+// resolving model capabilities for callers that do not already have them.
+// Turn paths use compactConversationWithCache below so their active-turn
+// capabilities are reused exactly.
+func (a *Service) CompactConversationWithCache(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, contextWindow int, settings domain.Settings, trigger domain.CompactionTrigger, promptCache *PromptCachePolicy) (string, error) {
+	return a.compactConversationWithCache(ctx, adapter, c, model, contextWindow, settings, trigger, promptCache, a.compactionModelCapabilities(adapter, model))
+}
+
+func (a *Service) compactConversationWithCache(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, contextWindow int, settings domain.Settings, trigger domain.CompactionTrigger, promptCache *PromptCachePolicy, caps ModelCapabilities) (string, error) {
 	if len(c.Messages) <= 1 {
 		return "", nil
 	}
@@ -210,7 +295,35 @@ func (a *Service) CompactConversation(ctx context.Context, adapter ProviderConte
 		return "", nil
 	}
 
+	if promptCache == nil {
+		promptCache = a.compactionPromptCache(settings, adapter, c, model)
+	}
+
+	workflow := settings.CompactionWorkflow
 	systemPrompt := compactionPrompt
+	if workflow == domain.CompactionWorkflowReuse {
+		systemPrompt = compactionReuseSystemPrompt(c, settings.UserPrompt)
+	}
+	compactionTools := compactionToolDefs(a, workflow, c)
+	requestReserve := compactionSystemReserve
+	if workflow == domain.CompactionWorkflowReuse {
+		// The normal system prompt and toolbox are part of the reusable prefix;
+		// account for their provider-shaped token estimate before allocating
+		// room for the transcript chunk and summary output.
+		overhead := provider.EstimateRequestTokens(ChatRequest{
+			System: systemPrompt,
+			Tools:  compactionTools,
+		}, adapter.Kind, adapter.OpenRouter)
+		if overhead > int64(requestReserve) {
+			requestReserve = int(overhead)
+		}
+	}
+	providerRoute := ""
+	compactionEffort := ""
+	if workflow == domain.CompactionWorkflowReuse || strings.TrimSpace(settings.CompactionModel) == "" {
+		providerRoute = c.ProviderRoute
+		compactionEffort = requestEffort(c.Effort, caps)
+	}
 	summaryMaxOut := compactionSummaryMaxOut
 	if settings.CompactionSummaryMaxTokens > 0 {
 		summaryMaxOut = settings.CompactionSummaryMaxTokens
@@ -222,13 +335,13 @@ func (a *Service) CompactConversation(ctx context.Context, adapter ProviderConte
 	// Clamp the summary budget to the context window so the doubled retry
 	// budget never exceeds what the model can accept. Reserve system overhead
 	// and a minimum input floor so the model still has room for the chunk.
-	maxBudget := contextWindow - compactionSystemReserve
+	maxBudget := contextWindow - requestReserve
 	if maxBudget < 1000 {
 		maxBudget = 1000
 	}
 
 	for len(remainingMsgs) > 0 {
-		available := compactionPassAvailable(contextWindow, runningSummary, summaryMaxOut)
+		available := compactionPassAvailableWithReserve(contextWindow, runningSummary, summaryMaxOut, requestReserve)
 		chunk, rest := domain.TakeCompactionChunk(remainingMsgs, available)
 		remainingMsgs = rest
 		if len(chunk) == 0 {
@@ -304,7 +417,9 @@ func (a *Service) CompactConversation(ctx context.Context, adapter ProviderConte
 		// compaction).
 		pass := &compactionPass{
 			svc: a, adapter: adapter, model: model,
-			system: systemPrompt, msgs: msgs,
+			system: systemPrompt, msgs: msgs, tools: compactionTools,
+			promptCaching: settings.PromptCaching, promptCache: promptCache,
+			conversationID: c.ID, providerRoute: providerRoute, effort: compactionEffort,
 			budget: passBudget, maxBudget: maxBudget, minChars: summaryMinChars,
 			convID: c.ID,
 		}
@@ -452,12 +567,16 @@ func capCompactionToolCalls(calls []domain.ToolCall, capChars int) []domain.Tool
 // The running summary grows across passes, so later chunks shrink to leave
 // room for it instead of using a one-shot 2000-token reserve.
 func compactionPassAvailable(contextWindow int, runningSummary string, summaryMaxOut int) int {
+	return compactionPassAvailableWithReserve(contextWindow, runningSummary, summaryMaxOut, compactionSystemReserve)
+}
+
+func compactionPassAvailableWithReserve(contextWindow int, runningSummary string, summaryMaxOut, requestReserve int) int {
 	summaryTokens := domain.EstimateTokens(runningSummary)
 	if runningSummary != "" {
 		summaryTokens += domain.EstimateTokens(resources.CompactedUserPrompt(""))
 	}
 	handoffTokens := domain.EstimateTokens(strings.TrimSpace(compactionHandoffUserPrompt))
-	available := contextWindow - compactionSystemReserve - summaryTokens - summaryMaxOut - handoffTokens
+	available := contextWindow - requestReserve - summaryTokens - summaryMaxOut - handoffTokens
 	if available < 1000 {
 		return 1000
 	}

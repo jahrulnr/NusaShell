@@ -484,6 +484,52 @@ func TestToolListNotRunning(t *testing.T) {
 	}
 }
 
+func TestToolListSpillsOversizedCatalog(t *testing.T) {
+	// An MCP-heavy install (hundreds of tools behind one server) must not
+	// hand the model an unbounded discovery payload: oversized catalogs
+	// spill to the platform temp dir with the same overflow contract as
+	// grep/docs/web_search, so the model can file_read the rest.
+	catalog := make([]contracts.MCPToolDTO, 0, 400)
+	for i := 0; i < 400; i++ {
+		catalog = append(catalog, contracts.MCPToolDTO{
+			Name:        fmt.Sprintf("tool_%03d", i),
+			Description: strings.Repeat("d", 120),
+		})
+	}
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "huge", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		&stubMCP{tools: map[string][]contracts.MCPToolDTO{"plugin:srv1": catalog}},
+	)
+	out, err := tb.Execute(context.Background(), "tool_list", []byte(`{"server":"srv1"}`))
+	if err != nil {
+		t.Fatalf("tool_list: %v", err)
+	}
+	// The header still reports the full catalog size; only the body is capped.
+	if !strings.Contains(out, "count: 400") {
+		t.Errorf("expected the full catalog count in the header, got: %s", out[:min(len(out), 200)])
+	}
+	if !strings.Contains(out, "truncated: true") || !strings.Contains(out, "overflow_path:") {
+		t.Fatalf("oversized tool_list must spill: %s", out[:min(len(out), 400)])
+	}
+	if !strings.Contains(out, "next_offset_bytes:") {
+		t.Errorf("expected next_offset_bytes so file_read can page the rest: %s", out[:min(len(out), 400)])
+	}
+	if len(out) > toolInlineMaxBytes+2048 {
+		t.Errorf("in-band tool_list still too large: %d bytes", len(out))
+	}
+	path := overflowPathFrom(t, out)
+	t.Cleanup(func() { _ = os.Remove(path) })
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(saved), `"name":"tool_399"`) {
+		t.Error("spill file must hold the complete catalog")
+	}
+}
+
 func TestMcpSearch(t *testing.T) {
 	tb := testToolbox(nil,
 		[]*domain.Plugin{
@@ -584,6 +630,93 @@ func TestMcpSearchBoundedByLimit(t *testing.T) {
 	}
 }
 
+func TestMcpSearchReportsTotalBeforeLimit(t *testing.T) {
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv2", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		&stubMCP{tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv2": {
+				{Name: "read_file", Description: "Read a file"},
+				{Name: "write_file", Description: "Write a file"},
+				{Name: "list_files", Description: "List files"},
+			},
+		}},
+	)
+	out, err := tb.Execute(context.Background(), "mcp_search", []byte(`{"query":"file","limit":2}`))
+	if err != nil {
+		t.Fatalf("mcp_search: %v", err)
+	}
+	if !strings.Contains(out, "count: 2") {
+		t.Errorf("mcp_search must honor the limit, got: %s", out)
+	}
+	// The cut must be visible: total counts every match before the slice so
+	// the model can raise limit instead of assuming two tools exist.
+	if !strings.Contains(out, "total: 3") {
+		t.Errorf("expected total: 3 (pre-limit match count), got: %s", out)
+	}
+	if !strings.Contains(out, "limit: 2") {
+		t.Errorf("expected the applied limit in the header, got: %s", out)
+	}
+}
+
+func TestMcpSearchDefaultLimitReportsTotal(t *testing.T) {
+	catalog := make([]contracts.MCPToolDTO, 0, 30)
+	for i := 0; i < 30; i++ {
+		catalog = append(catalog, contracts.MCPToolDTO{Name: fmt.Sprintf("tool_%02d", i), Description: "file helper"})
+	}
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv2", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		&stubMCP{tools: map[string][]contracts.MCPToolDTO{"plugin:srv2": catalog}},
+	)
+	out, err := tb.Execute(context.Background(), "mcp_search", []byte(`{"query":"file"}`))
+	if err != nil {
+		t.Fatalf("mcp_search: %v", err)
+	}
+	// Default limit 20 of 30 matches: the header must say 20 of 30 so the
+	// default cut is never silent.
+	if !strings.Contains(out, "count: 20") || !strings.Contains(out, "total: 30") || !strings.Contains(out, "limit: 20") {
+		t.Errorf("expected count: 20 / total: 30 / limit: 20, got: %s", out[:min(len(out), 200)])
+	}
+}
+
+func TestMcpSearchSpillsOversizedMatches(t *testing.T) {
+	catalog := make([]contracts.MCPToolDTO, 0, 400)
+	for i := 0; i < 400; i++ {
+		catalog = append(catalog, contracts.MCPToolDTO{
+			Name:        fmt.Sprintf("tool_%03d", i),
+			Description: strings.Repeat("d", 120) + " file",
+		})
+	}
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv2", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		&stubMCP{tools: map[string][]contracts.MCPToolDTO{"plugin:srv2": catalog}},
+	)
+	out, err := tb.Execute(context.Background(), "mcp_search", []byte(`{"query":"file","limit":400}`))
+	if err != nil {
+		t.Fatalf("mcp_search: %v", err)
+	}
+	if !strings.Contains(out, "count: 400") || !strings.Contains(out, "total: 400") {
+		t.Errorf("expected the full match set in the header, got: %s", out[:min(len(out), 200)])
+	}
+	if !strings.Contains(out, "truncated: true") || !strings.Contains(out, "overflow_path:") {
+		t.Fatalf("oversized mcp_search must spill: %s", out[:min(len(out), 400)])
+	}
+	path := overflowPathFrom(t, out)
+	t.Cleanup(func() { _ = os.Remove(path) })
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(saved), `"name":"tool_399"`) {
+		t.Error("spill file must hold every returned match")
+	}
+}
+
 func TestToolSchema(t *testing.T) {
 	tb := testToolbox(nil,
 		[]*domain.Plugin{
@@ -612,6 +745,36 @@ func TestToolSchema(t *testing.T) {
 	}
 	if !strings.Contains(out, `"required":["title"]`) {
 		t.Errorf("expected required array in JSONL, got: %s", out)
+	}
+}
+
+func TestToolSchemaSpillsOversizedSchema(t *testing.T) {
+	// A single tool can still carry a monster schema; the discovery family
+	// shares one overflow contract so the model can page the remainder.
+	bigSchema := json.RawMessage(`{"type":"object","description":"` + strings.Repeat("s", 40000) + `","required":["title"]}`)
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		&stubMCP{tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv1": {{Name: "create_issue", Description: "Create issue", InputSchema: bigSchema}},
+		}},
+	)
+	out, err := tb.Execute(context.Background(), "tool_schema", []byte(`{"server":"srv1","tool":"create_issue"}`))
+	if err != nil {
+		t.Fatalf("tool_schema: %v", err)
+	}
+	if !strings.Contains(out, "truncated: true") || !strings.Contains(out, "overflow_path:") {
+		t.Fatalf("oversized tool_schema must spill: %s", out[:min(len(out), 400)])
+	}
+	path := overflowPathFrom(t, out)
+	t.Cleanup(func() { _ = os.Remove(path) })
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(saved), `"required"`) {
+		t.Error("spill file must hold the complete schema")
 	}
 }
 

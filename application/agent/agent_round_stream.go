@@ -21,6 +21,7 @@ type StreamedTurnRound struct {
 	Reasoning        string
 	Response         ChatResponse
 	ToolCallsStarted bool
+	RequestTokens    int64
 }
 
 func (a *Service) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, model string) (ProviderContext, *domain.Conversation, domain.Settings, error) {
@@ -34,36 +35,7 @@ func (a *Service) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey
 	if err != nil {
 		return ProviderContext{}, nil, domain.Settings{}, err
 	}
-	settings := a.Settings.Get()
-	contextWindow := a.ResolveContextWindow(provider, model, settings)
-	maxOutput := domain.ResolveMaxOutput(provider, model, settings)
-	compactionTrigger := domain.CompactionTriggerTokens(contextWindow, maxOutput, settings)
-	beforeTokens := conversation.EstimateTokens()
-	if !settings.CompactionEnabled || beforeTokens <= compactionTrigger {
-		return pc, conversation, settings, nil
-	}
-
-	a.log("info", "agent", "compaction triggered for %s: est=%d trigger=%d window=%d maxOut=%d",
-		conversation.ID, beforeTokens, compactionTrigger, contextWindow, maxOutput)
-	compAdapter, compModel, compWindow := a.ResolveCompactionAdapter(run.Ctx, pc, model, contextWindow, settings)
-	a.EmitCompactionStarted(run, conversation.ID)
-	summary, err := a.CompactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings, domain.CompactionTriggerInitial)
-	if err != nil {
-		a.log("warn", "agent", "compaction failed for %s: %v", conversation.ID, err)
-		a.EmitInteractiveTurnEvent(run, contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: run.ID, ConversationID: conversation.ID, Error: err.Error()})
-	} else {
-		a.EmitInteractiveTurnEvent(run, contracts.EventCompacted, contracts.CompactedEvent{RunID: run.ID, ConversationID: conversation.ID, Summary: summary})
-		a.log("info", "agent", "compacted conversation %s", conversation.ID)
-	}
-	refreshed, getErr := a.Conversations.Get(run.ConversationID)
-	if getErr != nil {
-		return pc, nil, settings, getErr
-	}
-	conversation = refreshed
-	afterTokens := conversation.EstimateTokens()
-	a.log("info", "agent", "compaction result for %s: before=%d after=%d (msgs=%d)",
-		conversation.ID, beforeTokens, afterTokens, len(conversation.Messages))
-	return pc, conversation, settings, err
+	return pc, conversation, a.Settings.Get(), nil
 }
 
 func (a *Service) StreamTurnRound(run *TurnRun, adapter ProviderContext, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, promptCache *PromptCachePolicy, caps ModelCapabilities, round int) (StreamedTurnRound, error) {
@@ -204,87 +176,20 @@ func (a *Service) StreamTurnRoundOnce(run *TurnRun, adapter ProviderContext, con
 	var content strings.Builder
 	var reasoning strings.Builder
 	// Guard: strip effort for models that do not support reasoning. Sending
-	// "low"/"medium"/"high" to a non-reasoning model pushes a thinking field
-	// the upstream rejects or silently ignores. "auto" (omit) and "none"
-	// (explicit disable) are safe to keep — they do not request thinking.
-	if !caps.Reasoning && effort != "" && effort != "auto" && effort != "none" {
+	// a level to a non-reasoning model would make the preflight differ from
+	// the request that is actually sent.
+	if normalized := requestEffort(effort, caps); normalized != effort {
 		a.log("warn", "ai", "stripping effort %q for non-reasoning model %s", effort, model)
-		effort = "auto"
 	}
-	// The system prompt is deliberately cache-stable: identity, user
-	// instructions, system-level skill messages, and workspace only. No
-	// runtime state (delegation config, continuation instructions, async
-	// results) is appended here — those travel as tool hydration or tool
-	// descriptions so the system prefix keeps its prompt-cache hits.
-	system := buildSystemPromptForRun(run, conversation, settings.UserPrompt)
-	// The hydration checkpoint is persisted once per history epoch (fresh
-	// room at turn start, and inside persistCompactedConversation after
-	// compaction) — never inside the turn loop. The first Stream reads the
-	// already-persisted transcript, so the provider prefix up to and
-	// including the checkpoint is frozen across rounds and follow-up user
-	// messages. Re-injecting mid-loop relocated the checkpoint after
-	// whatever user was last (the cache-poison dump) and invalidated the
-	// prompt-cache prefix from the hydration byte onward. The checkpoint
-	// messages carry the "hydrate-" tool call ID prefix so the UI can hide
-	// them and compaction can strip them before summarization.
-	messages := a.chatMessagesForProvider(conversation, messageID, caps)
-	// Continuation rounds (partial-stream recovery, failed-message retry)
-	// inject the "continue from where you stopped" instruction as an
-	// ephemeral synthetic tool call + result instead of a system prompt
-	// mutation. The model processes it like any tool output and continues
-	// the interrupted response; nothing is persisted, so later rounds keep
-	// the cache-stable system prefix.
-	if continuation {
-		if partial != nil && (text.Visible(partial.Content) != "" || text.Visible(partial.Reasoning) != "") {
-			messages = appendContinuationFromPartial(messages, *partial)
-		} else {
-			messages = appendContinuationTool(messages)
-		}
-	}
-	// Some providers/models reject assistant prefilling and require the
-	// request to end in a user message. When 400-learning has recorded this
-	// for the current provider+model, repair an assistant-ended request with a
-	// minimal user message ("."). A tool result is left untouched because it
-	// is the active continuation turn. This is ephemeral — not persisted to
-	// the conversation store — so later turns keep the real transcript intact.
-	if a.learnedParams != nil && a.learnedParams.NeedsUserNudge(run.ProviderID, model) && needsUserMessageAtEnd(messages) {
-		messages = append(messages, ChatMessage{Role: "user", Content: userNudgeText})
-	}
-	request := ChatRequest{
-		Model:                    model,
-		System:                   system,
-		Messages:                 messages,
-		Tools:                    tools,
-		PromptCaching:            settings.PromptCaching,
-		PromptCache:              promptCache,
-		MaxTokens:                maxTokens,
-		Effort:                   effort,
-		ReasoningSummary:         adapter.ReasoningSummary,
-		ProviderRoute:            conversation.ProviderRoute,
-		Temperature:              settings.Temperature,
-		TopP:                     settings.TopP,
-		TopK:                     settings.TopK,
-		FrequencyPenalty:         settings.FrequencyPenalty,
-		PresencePenalty:          settings.PresencePenalty,
-		ConversationID:           run.ConversationID,
-		ReasoningReplay:          caps.ReasoningReplay,
-		StripParams:              a.learnedParams.StripParams(run.ProviderID, model),
-		CompactionBlob:           conversation.CompactionBlob,
-		CompactionPrefixMessages: a.compactionPrefixMessageCount(conversation, caps),
-		ContextManagement:        serverCompactionContextManagementForKind(model, adapter.Kind),
-	}
-	// Publish a provisional server-side preflight estimate. It is calculated
-	// from the exact ChatRequest below, after provider-specific conversion, so
-	// internal application fields and inline media base64 do not inflate it.
-	// Provider-measured context usage is emitted only when the round completes.
+	request := a.buildTurnRequest(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, partial, maxTokens, promptCache, caps)
+	requestTokens := provider.EstimateRequestTokens(request, adapter.Kind, adapter.OpenRouter)
 	if a.Bus != nil {
-		est := provider.EstimateRequestTokens(request, adapter.Kind, adapter.OpenRouter)
 		a.emitBus(contracts.EventContextEstimate, contracts.ContextEstimateEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID,
-			EstimatedTokens: est,
+			EstimatedTokens: requestTokens,
 		})
-		if conversation.EstimatedTokens != est {
-			conversation.EstimatedTokens = est
+		if conversation.EstimatedTokens != requestTokens {
+			conversation.EstimatedTokens = requestTokens
 			if repo := bindConversation(a.Conversations, conversation); repo != nil {
 				_ = repo.Save()
 			}
@@ -347,7 +252,7 @@ func (a *Service) StreamTurnRoundOnce(run *TurnRun, adapter ProviderContext, con
 			a.log("info", "agent", "server-side compaction captured for %s (%d items)", run.ConversationID, len(response.CompactionItems))
 		}
 	}
-	return StreamedTurnRound{Content: content.String(), Reasoning: reasoning.String(), Response: response, ToolCallsStarted: len(announcedToolCalls) > 0}, err
+	return StreamedTurnRound{Content: content.String(), Reasoning: reasoning.String(), Response: response, ToolCallsStarted: len(announcedToolCalls) > 0, RequestTokens: requestTokens}, err
 }
 
 // reasoningDeltaVisible is true once accumulated reasoning has something the

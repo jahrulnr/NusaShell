@@ -119,9 +119,10 @@ func ListModelsViaSubprocess(ctx context.Context, accessToken, accountID string)
 		return nil, fmt.Errorf("codex model list: parse response: %w", err)
 	}
 
-	// Convert to domain.Model, enriching with context window from
-	// ~/.codex/models_cache.json (the JSON-RPC model/list does not expose
-	// context_window, but the cache file does).
+	// Convert to domain.Model. The app-server model/list response does not
+	// expose context_window, so the CLI cache is retained only as a discovery
+	// hint. The application layer replaces Codex context metadata with the
+	// public models.dev value before a direct chat turn when available.
 	cacheCtx := loadCodexModelsCache()
 	models := make([]domain.Model, 0, len(resp.Result.Data))
 	for _, m := range resp.Result.Data {

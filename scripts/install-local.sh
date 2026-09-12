@@ -236,8 +236,8 @@ install_electron_from_build() {
   cat > "$home_dir/.local/share/applications/nusashell-desktop.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=NusaShell Desktop
-Comment=NusaShell - local AI shell
+Name=NusaShell
+Comment=NusaShell
 Exec=$bin_dir/nusashell-desktop
 Icon=$current/resources/nusashell.png
 Terminal=false

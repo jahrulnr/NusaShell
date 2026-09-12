@@ -227,6 +227,20 @@ func TestCompactionTriggerSubtractsMaxOutput(t *testing.T) {
 	}
 }
 
+func TestResolveCompactionAdapterReuseRequiresActiveModel(t *testing.T) {
+	defaultProvider := &fakeVisionAdapter{description: "default"}
+	defaultAdapter := ProviderContext{Provider: defaultProvider, Kind: domain.ProviderChat}
+	app := &App{}
+	settings := domain.Settings{
+		CompactionWorkflow: domain.CompactionWorkflowReuse,
+		CompactionModel:    "other-provider:cheap-model",
+	}
+	gotAdapter, gotModel, gotWindow := app.resolveCompactionAdapter(context.Background(), defaultAdapter, "active-model", 200000, settings)
+	if gotAdapter.Provider != defaultProvider || gotModel != "active-model" || gotWindow != 200000 {
+		t.Fatalf("reuse compaction route = adapter=%v model=%q window=%d, want active route", gotAdapter.Provider, gotModel, gotWindow)
+	}
+}
+
 func TestResolveCompactionAdapter_defaultUsesCurrentModel(t *testing.T) {
 	// When CompactionModel is empty, the current adapter+model are used as-is.
 	app := &App{
@@ -1522,12 +1536,94 @@ func TestCompactionUsesSummaryTool(t *testing.T) {
 	assertCompactionRequestEndsWithUserHandoff(t, req)
 }
 
+func TestCompactionStripsEffortForNonReasoningModel(t *testing.T) {
+	msgs := make([]domain.Message, 0, 12)
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("u%d", i), Role: domain.RoleUser,
+			Content: strings.Repeat("conversation detail ", 120), Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c-effort", Effort: "high", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c-effort": conv}}
+	adapter := &recordingCompleteAdapter{toolCallSummaries: []string{validTestSummary}}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	settings := domain.DefaultSettings()
+	settings.CompactionSummaryMaxTokens = 800
+	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial); err != nil {
+		t.Fatal(err)
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.requests) == 0 {
+		t.Fatal("no compaction requests recorded")
+	}
+	if adapter.requests[0].Thinking != nil {
+		t.Fatalf("non-reasoning compaction request received Thinking=%+v, want nil", adapter.requests[0].Thinking)
+	}
+}
+
 // TestCompactionRequestEndsWithUserHandoffAfterToolRound: a compaction
 // chunk that ends on an open agent tool round (assistant + tool result)
 // must still close the provider request with a user-role handoff command.
 // Leaving tool as the last role makes reasoning models continue the task
 // instead of calling summary() — the Nemotron 3 Ultra failure on
 // conv_e27858651cd4e5ee.
+
+func TestCompactionReuseUsesAgentPromptToolboxAndSharedCacheKey(t *testing.T) {
+	body := strings.Repeat("conversation detail ", 400)
+	conv := &domain.Conversation{ID: "c-reuse", Workspace: "/workspace", Messages: []domain.Message{
+		{ID: "u1", Role: domain.RoleUser, Content: body, Status: domain.StatusDone},
+		{ID: "a1", Role: domain.RoleAssistant, Content: "completed work", Status: domain.StatusDone},
+	}}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c-reuse": conv}}
+	adapter := &recordingCompleteAdapter{toolCallSummaries: []string{validTestSummary}}
+	app := &App{
+		Conversations: store,
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		Toolbox: &factoryStubToolbox{tools: []ToolInfo{{
+			Name: "file_read", Description: "read files", InputSchema: map[string]any{"type": "object"},
+		}}},
+	}
+	settings := domain.DefaultSettings()
+	settings.CompactionWorkflow = domain.CompactionWorkflowReuse
+	settings.CompactionSummaryMaxTokens = 800
+	settings.PromptCaching = true
+	pc := ProviderContext{Provider: adapter, ProviderID: "prov1", Kind: domain.ProviderChat,
+		Driver: domain.ProviderDriverOpenRouter, BaseURL: "https://openrouter.ai/api/v1", OpenRouter: true}
+	provider := &domain.Provider{ID: "prov1", Kind: domain.ProviderChat, Driver: domain.ProviderDriverOpenRouter, BaseURL: "https://openrouter.ai/api/v1"}
+	cache := buildPromptCachePolicy(settings, provider, "model", conv.ID, promptCacheConversationPrefix)
+	if cache == nil {
+		t.Fatal("expected shared prompt cache policy")
+	}
+	if _, err := app.compactConversationWithCache(context.Background(), pc, conv, "model", 4000, settings, domain.CompactionTriggerInitial, cache); err != nil {
+		t.Fatal(err)
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.requests) == 0 {
+		t.Fatal("no Complete calls")
+	}
+	req := adapter.requests[0]
+	if system := coreMessageText(req.Messages[0]); req.Messages[0].Role != core.RoleSystem || !strings.Contains(system, "You are a NusaShell agent") {
+		t.Fatalf("reuse system prompt = %q, want normal agent prompt", system)
+	}
+	tools := map[string]bool{}
+	for _, tool := range req.Tools {
+		tools[tool.Name] = true
+	}
+	if !tools["file_read"] || !tools[compactionSummaryToolName] {
+		t.Fatalf("reuse tools = %v, want full toolbox plus summary", tools)
+	}
+	if got, _ := req.ProviderOptions["prompt_cache_key"].(string); got != cache.Key {
+		t.Fatalf("compaction prompt cache key = %q, want shared key %q", got, cache.Key)
+	}
+	if !strings.Contains(coreMessageText(req.Messages[len(req.Messages)-1]), "Call the summary tool exactly once") {
+		t.Fatal("reuse request missing compaction handoff instruction")
+	}
+}
+
 func TestCompactionRequestEndsWithUserHandoffAfterToolRound(t *testing.T) {
 	toolOut := strings.Repeat("tool-output-line\n", 80)
 	keepFiller := strings.Repeat("keep-me-recent-user-message-", 40)
@@ -2942,7 +3038,10 @@ func TestMidToolCompactionSkipsBelowTrigger(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionEnabled = true
-	p := app.conversationRulesForTest(&TurnRun{ID: "run2", ConversationID: "c2", Ctx: context.Background()}, ProviderContext{}, conv, settings, &domain.Provider{Models: []domain.Model{{ID: "model", Context: 4000}}}, "model", "", 2)
+	// The request estimate includes the provider-visible system prompt, so use
+	// a window large enough for this intentionally tiny transcript to remain
+	// below the compaction watermark.
+	p := app.conversationRulesForTest(&TurnRun{ID: "run2", ConversationID: "c2", Ctx: context.Background()}, ProviderContext{}, conv, settings, &domain.Provider{Models: []domain.Model{{ID: "model", Context: 200000}}}, "model", "", 2)
 	if p.TryMidToolCompaction() {
 		t.Fatal("mid-tool compaction ran below the trigger")
 	}

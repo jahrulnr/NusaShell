@@ -56,6 +56,27 @@ Bad examples:
     skill(op="delete", id="user-skill")
     follow search snippets without file_read of SKILL.md
 
+## Authoring and structural validation
+
+Repository builtin packages can be checked with the bundled portable validator:
+
+    python3 resources/agent/skills/skill-creator/scripts/quick_validate.py --check-links resources/agent/skills/<skill-id>
+    python3 resources/agent/skills/skill-creator/scripts/quick_validate.py --strict resources/agent/skills/<skill-id>
+
+The normal gate fails on package/metadata errors; `--strict` also fails on
+warnings. The validator checks names, frontmatter, body placeholders, allowed
+support roots, symlinks, and optional relative Markdown links. It does not
+prove trigger quality or runtime behavior, so complex skills still need a
+forward-test.
+
+Good:
+
+    exec(command="python3 resources/agent/skills/skill-creator/scripts/quick_validate.py --check-links <skill-dir>")
+
+Bad:
+
+    report the skill as valid because SKILL.md looks plausible without running the validator
+
 ## Human promote
 
 The Skills workspace shows status, version, **Promote** (experimental or

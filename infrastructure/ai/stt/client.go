@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"nusashell/application"
+	"nusashell/pkg/httpclient"
 )
 
 // Client posts audio to an OpenAI-compatible POST /audio/transcriptions
@@ -30,7 +31,7 @@ func (c *Client) Transcribe(ctx context.Context, req application.STTRequest) (st
 	}
 	httpClient := c.HTTP
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = httpclient.NewWithTimeout(httpclient.DefaultRequestTimeout)
 	}
 
 	body := &strings.Builder{}

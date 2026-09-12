@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	aiutil "nusashell/infrastructure/ai/internal"
+	"nusashell/infrastructure/ai/internal"
+	"nusashell/pkg/httpclient"
 )
 
 // ModelLister fetches image-generation model IDs from a provider's
@@ -21,7 +22,7 @@ type ModelLister struct {
 // HTTP client is used.
 func NewModelLister(baseURL string, client *http.Client) *ModelLister {
 	if client == nil {
-		client = &http.Client{}
+		client = httpclient.New()
 	}
 	return &ModelLister{BaseURL: strings.TrimRight(baseURL, "/"), Client: client}
 }

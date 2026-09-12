@@ -369,19 +369,6 @@ type CodexUsage interface {
 	FetchUsage(ctx context.Context, tokenJSON string) (CodexUsageResult, error)
 }
 
-// CodexContextWindowCache reads the Codex CLI's local model cache
-// (~/.codex/models_cache.json) to get the real context window that the
-// Codex app-server enforces at runtime. This is often smaller than the
-// model's documented ceiling (e.g. Luna: 272k cache vs 1.05M models.dev)
-// and smaller than the stale value stored in providers.json from a prior
-// catalog enrichment. Compaction uses this to avoid triggering too late.
-type CodexContextWindowCache interface {
-	// ContextWindow returns the Codex runtime context window for the
-	// given model ID (slug). Returns false if the cache is unavailable
-	// or the model is not listed.
-	ContextWindow(modelID string) (int, bool)
-}
-
 // CodexUsageResult is the parsed usage snapshot returned by the Codex
 // wham/usage endpoint.
 type CodexUsageResult struct {

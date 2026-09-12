@@ -426,7 +426,7 @@ func (s *Service) consolidateViaLLMAt(job *domain.LearningJob, exp *domain.Exper
 		return nil, "", false, nil
 	}
 	prompt := s.BuildLearnerPacketAt(exp, source, job.Reason, procedureCountForJob(s, exp, job))
-	text, convID, err := s.doLearningTurn(s.workspaceCtx(exp), s.learningModelID(), prompt)
+	text, convID, err := s.doLearningTurn(s.workspaceCtx(exp), s.learningModelID(source.ConversationID), prompt)
 	if err != nil {
 		s.log("debug", "learning", "learner LLM call failed: %v", err)
 		return nil, convID, false, err
@@ -949,7 +949,7 @@ func (s *Service) evolveSkillViaLLMAt(exp *domain.Experience, source LearningSou
 		return "", "", "", false
 	}
 	prompt := s.BuildLearnerPacketAt(exp, source, domain.TriggerRepeatedProcedure, 3)
-	text, convID, err := s.doLearningTurn(s.workspaceCtx(exp), s.learningModelID(), prompt)
+	text, convID, err := s.doLearningTurn(s.workspaceCtx(exp), s.learningModelID(source.ConversationID), prompt)
 	if err != nil {
 		s.log("debug", "learning", "skill evolver LLM call failed, using deterministic fallback: %v", err)
 		return "", "", convID, false

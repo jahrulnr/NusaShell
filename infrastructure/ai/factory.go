@@ -3,7 +3,6 @@ package ai
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"nusashell/infrastructure/ai/imagegen"
 	ttsclient "nusashell/infrastructure/ai/tts"
 	"nusashell/infrastructure/ai/videogen"
+	"nusashell/pkg/httpclient"
 )
 
 // codexInstallationID is a persistent UUID identifying this NusaShell
@@ -41,11 +41,12 @@ var codexRefreshMu = make(chan struct{}, 1)
 //     Stored OAuth JSON is refreshed when expired; AccountID and
 //     InstallationID headers are attached for ChatGPT multi-account routing.
 func NewFactory(creds application.CredentialStore) application.ProviderFactory {
+	client := httpclient.New()
 	return func(ctx context.Context, p *domain.Provider, apiKey string) (application.AIProvider, error) {
 		if !domain.ValidKind(p.Kind) {
 			return nil, &application.ErrUnsupportedProvider{Kind: string(p.Kind)}
 		}
-		client := newProviderHTTPClient()
+		requestClient := client
 		driver := p.EffectiveDriver()
 		resolvedKey := apiKey
 		accountID := ""
@@ -58,7 +59,7 @@ func NewFactory(creds application.CredentialStore) application.ProviderFactory {
 			resolvedKey = tok.AccessToken
 			accountID = tok.AccountID
 			installationID = codexInstallationID
-			client = withCodexCookieJar(client)
+			requestClient = withCodexCookieJar(requestClient)
 		}
 		return &Adapter{
 			ProviderKind:   p.Kind,
@@ -66,7 +67,7 @@ func NewFactory(creds application.CredentialStore) application.ProviderFactory {
 			OpenRouter:     domain.UsesOpenRouterWire(p.Kind, driver, p.BaseURL),
 			BaseURL:        p.BaseURL,
 			APIKey:         resolvedKey,
-			Client:         client,
+			Client:         requestClient,
 			AccountID:      accountID,
 			InstallationID: installationID,
 		}, nil
@@ -138,12 +139,9 @@ func withCodexCookieJar(client *http.Client) *http.Client {
 	if client == nil || client.Jar != nil {
 		return client
 	}
-	return &http.Client{
-		Transport:     client.Transport,
-		CheckRedirect: client.CheckRedirect,
-		Jar:           codex.SharedCloudflareCookieJar(),
-		Timeout:       client.Timeout,
-	}
+	clone := httpclient.Clone(client)
+	clone.Jar = codex.SharedCloudflareCookieJar()
+	return clone
 }
 
 // NewImageGeneratorFactory returns an ImageGeneratorFactory for the
@@ -153,8 +151,10 @@ func withCodexCookieJar(client *http.Client) *http.Client {
 // (default https://chatgpt.com/backend-api/codex). OpenAI/OpenRouter hosts
 // are served by imagegen.NewFactory.
 func NewImageGeneratorFactory(creds application.CredentialStore) application.ImageGeneratorFactory {
-	openai := imagegen.NewFactory()
+	client := httpclient.New()
+	openai := imagegen.NewFactoryWithClient(client)
 	return func(ctx context.Context, p *domain.Provider, apiKey string) (application.ImageGenerator, error) {
+		requestClient := client
 		if p != nil && p.Kind == domain.ProviderCodex {
 			tok, err := resolveCodexToken(ctx, p, apiKey, creds)
 			if err != nil {
@@ -169,7 +169,7 @@ func NewImageGeneratorFactory(creds application.CredentialStore) application.Ima
 				BaseURL:   base,
 				APIKey:    tok.AccessToken,
 				AccountID: tok.AccountID,
-				HTTP:      withCodexCookieJar(newProviderHTTPClient()),
+				HTTP:      withCodexCookieJar(requestClient),
 			}, nil
 		}
 		return openai(ctx, p, apiKey)
@@ -186,6 +186,7 @@ func NewImageGeneratorFactory(creds application.CredentialStore) application.Ima
 // model. If the provider has no embedding model in its Models slice, the
 // factory returns nil, nil.
 func NewEmbedderFactory() application.EmbedderFactory {
+	client := httpclient.NewWithTimeout(httpclient.DefaultRequestTimeout)
 	return func(p *domain.Provider, apiKey string) (application.Embedder, error) {
 		if !p.KindCapabilities().HasEmbeddings {
 			return nil, nil
@@ -208,7 +209,7 @@ func NewEmbedderFactory() application.EmbedderFactory {
 			maxTokens = m.Context
 		}
 		base := embeddingBaseURL(p.BaseURL)
-		return embeddings.NewEmbedder(base, apiKey, model, maxTokens), nil
+		return embeddings.NewEmbedderWithClient(base, apiKey, model, maxTokens, client), nil
 	}
 }
 
@@ -218,7 +219,7 @@ func NewEmbedderFactory() application.EmbedderFactory {
 // exposing embeddings on a single endpoint, so the same lister works
 // regardless of which chat API the provider is configured to use.
 func NewEmbeddingModelListerFactory() application.EmbeddingModelListerFactory {
-	client := newProviderHTTPClient()
+	client := httpclient.New()
 	return func(p *domain.Provider) application.EmbeddingModelLister {
 		base := embeddingBaseURL(p.BaseURL)
 		return embeddings.NewModelLister(base, client)
@@ -228,7 +229,7 @@ func NewEmbeddingModelListerFactory() application.EmbeddingModelListerFactory {
 // NewImageModelListerFactory returns a factory that builds an ImageModelLister
 // for OpenAI-compatible hosts. Anthropic Messages has no image catalog.
 func NewImageModelListerFactory() application.ImageModelListerFactory {
-	client := newProviderHTTPClient()
+	client := httpclient.New()
 	return func(p *domain.Provider) application.ImageModelLister {
 		if p == nil {
 			return nil
@@ -246,7 +247,7 @@ func NewImageModelListerFactory() application.ImageModelListerFactory {
 // catalog only through that filter); hosts that reject it yield an empty
 // list and the importer falls back to catalog tagging + allowlist.
 func NewSpeechModelListerFactory() application.SpeechModelListerFactory {
-	client := newProviderHTTPClient()
+	client := httpclient.New()
 	return func(p *domain.Provider) application.SpeechModelLister {
 		if p == nil {
 			return nil
@@ -262,7 +263,7 @@ func NewSpeechModelListerFactory() application.SpeechModelListerFactory {
 // OpenAI-compatible hosts serving the async /videos API (OpenRouter).
 // Other kinds fail fast so callers surface a clear unavailability message.
 func NewVideoGeneratorFactory() application.VideoGeneratorFactory {
-	client := newProviderHTTPClient()
+	client := httpclient.New()
 	return func(p *domain.Provider, apiKey string) (application.VideoGenerator, error) {
 		if p == nil {
 			return nil, fmt.Errorf("videogen: nil provider")
@@ -281,7 +282,7 @@ func NewVideoGeneratorFactory() application.VideoGeneratorFactory {
 // NewVideoModelListerFactory returns a factory that builds a
 // VideoModelLister via GET <base>/videos/models.
 func NewVideoModelListerFactory() application.VideoModelListerFactory {
-	client := newProviderHTTPClient()
+	client := httpclient.New()
 	return func(p *domain.Provider) application.VideoModelLister {
 		if p == nil {
 			return nil
@@ -290,24 +291,6 @@ func NewVideoModelListerFactory() application.VideoModelListerFactory {
 			return nil
 		}
 		return videogen.NewModelLister(embeddingBaseURL(p.BaseURL), client)
-	}
-}
-
-// newProviderHTTPClient bounds dial and response headers, but not the body
-// read, so long SSE generations are not killed at 300s.
-func newProviderHTTPClient() *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout:   300 * time.Second,
-				KeepAlive: 300 * time.Second,
-			}).DialContext,
-			ForceAttemptHTTP2:     true,
-			TLSHandshakeTimeout:   300 * time.Second,
-			ResponseHeaderTimeout: 300 * time.Second,
-			IdleConnTimeout:       300 * time.Second,
-		},
 	}
 }
 

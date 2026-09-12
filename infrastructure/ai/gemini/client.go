@@ -89,11 +89,11 @@ func New(cfg Config) (*Provider, error) {
 		cfg.BaseURL = defaultBaseURL
 	}
 	if cfg.HTTPClient == nil {
-		base := cfg.Transport
-		if base == nil {
-			base = http.DefaultTransport
+		if cfg.Transport != nil {
+			cfg.HTTPClient = retry.NewHTTPClient(&http.Client{Transport: cfg.Transport}, cfg.Retry)
+		} else {
+			cfg.HTTPClient = retry.NewHTTPClient(nil, cfg.Retry)
 		}
-		cfg.HTTPClient = &http.Client{Transport: retry.NewTransport(base, cfg.Retry)}
 	}
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = defaultUserAgent

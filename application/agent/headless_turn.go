@@ -86,7 +86,7 @@ func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model
 		}
 	}()
 
-	provider, bareModel, apiKey, err := a.ResolveHeadlessModel(model)
+	provider, bareModel, apiKey, err := a.resolveHeadlessModelForKind(model, kind)
 	if err != nil {
 		return nil, "", err
 	}
@@ -268,4 +268,15 @@ func (a *Service) ResolveHeadlessModel(modelID string) (*domain.Provider, string
 		return p, m.ID, key, nil
 	}
 	return nil, "", "", fmt.Errorf("no enabled provider with a model is available for headless agent steps")
+}
+
+// resolveHeadlessModelForKind keeps the learner's empty-model failure path
+// separate from the internal delegate fallback. An empty learner model means
+// its explicit cascade found no usable provider; it must never be reinterpreted
+// as the automation delegate model.
+func (a *Service) resolveHeadlessModelForKind(modelID string, kind AgentKind) (*domain.Provider, string, string, error) {
+	if isLearnerKind(kind) && strings.TrimSpace(modelID) == "" {
+		return nil, "", "", fmt.Errorf("no learner model is available")
+	}
+	return a.ResolveHeadlessModel(modelID)
 }

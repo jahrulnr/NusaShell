@@ -316,3 +316,28 @@ func TestProviderRetriesRetryableCompactionStream(t *testing.T) {
 		t.Fatalf("CompactionItems = %s, want retry result", response.CompactionItems)
 	}
 }
+
+func TestCoreToolsPreservesExplicitStrictMode(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode core.StrictMode
+		want string
+	}{
+		{"default", core.StrictDefault, ""}, {"disabled", core.StrictDisabled, "false"}, {"enabled", core.StrictEnabled, "true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := core.Schema(`{"type":"object","properties":{"arguments_json":{"type":"object","properties":{}}}}`)
+			wire := coreTools([]core.Tool{{Name: "mcp_call", Parameters: schema, Strict: tc.mode}})
+			var got map[string]json.RawMessage
+			if err := json.Unmarshal(wire[0], &got); err != nil {
+				t.Fatal(err)
+			}
+			if string(got["strict"]) != tc.want {
+				t.Fatalf("strict = %s, want %q", got["strict"], tc.want)
+			}
+			if string(got["parameters"]) != string(schema) {
+				t.Fatalf("schema changed: %s", got["parameters"])
+			}
+		})
+	}
+}

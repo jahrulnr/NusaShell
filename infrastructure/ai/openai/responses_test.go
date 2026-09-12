@@ -1464,3 +1464,30 @@ func TestResponsesInputAcceptsPlaceholderReasoningBlock(t *testing.T) {
 		t.Fatalf("items = %#v", items)
 	}
 }
+
+func TestResponsesToolsDisabledStrictPreservesFreeObject(t *testing.T) {
+	schema := core.Schema(`{"type":"object","properties":{"arguments_json":{"type":"object","properties":{}}}}`)
+	converted, err := responsesTools([]core.Tool{{Name: "mcp_call", Parameters: schema, Strict: core.StrictDisabled}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(converted[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if string(wire["strict"]) != "false" {
+		t.Fatalf("strict = %s, want explicit false", wire["strict"])
+	}
+	var got, want any
+	_ = json.Unmarshal(wire["parameters"], &got)
+	_ = json.Unmarshal(schema, &want)
+	gotJSON, _ := json.Marshal(got)
+	wantJSON, _ := json.Marshal(want)
+	if string(gotJSON) != string(wantJSON) {
+		t.Fatalf("schema changed: %s", gotJSON)
+	}
+}

@@ -93,9 +93,6 @@ type App struct {
 	CodexOAuth CodexOAuth
 	// CodexUsage fetches ChatGPT rate-limit usage for stored OAuth tokens.
 	CodexUsage CodexUsage
-	// CodexContextWindowCache reads ~/.codex/models_cache.json for the
-	// runtime context window Codex enforces (used by compaction later).
-	CodexContextWindowCache CodexContextWindowCache
 	// CodexCLIAuth imports tokens from the Codex CLI auth.json.
 	CodexCLIAuth CodexCLIAuthImporter
 	// CodexRouter owns sticky multi-account routing and circuit breakers.
@@ -489,7 +486,6 @@ type Deps struct {
 	CodexRuntime                CodexRuntime                // optional; nil = Codex runtime RPCs unavailable
 	CodexOAuth                  CodexOAuth                  // optional; nil = Codex OAuth login unavailable
 	CodexUsage                  CodexUsage                  // optional; nil = Codex usage/circuit RPCs unavailable
-	CodexContextWindowCache     CodexContextWindowCache     // optional; nil = skip Codex runtime context cache
 	CodexCLIAuth                CodexCLIAuthImporter        // optional; nil = Codex CLI import unavailable
 	CodexRouter                 *CodexAccountRouter         // optional; nil = no multi-account sticky/circuit state
 	RetrySleeper                RetrySleeper
@@ -563,7 +559,6 @@ func NewApp(deps Deps) *App {
 		CodexRuntime:                deps.CodexRuntime,
 		CodexOAuth:                  deps.CodexOAuth,
 		CodexUsage:                  deps.CodexUsage,
-		CodexContextWindowCache:     deps.CodexContextWindowCache,
 		CodexCLIAuth:                deps.CodexCLIAuth,
 		CodexRouter:                 deps.CodexRouter,
 		AcpAgents:                   deps.AcpAgents,
@@ -776,6 +771,7 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 				Message: fmt.Sprintf("model %q is not available on provider %q", modelID, p.Name),
 			}
 		}
+		a.refreshCodexContextWindow(p)
 		key, _, err := a.Credentials.Get(p.ID)
 		if err != nil {
 			return nil, nil, "", rpcInternal(err)
@@ -792,6 +788,7 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 		if err != nil {
 			return nil, nil, "", rpcInternal(err)
 		}
+		a.refreshCodexContextWindow(p)
 		m := p.FindModel(model)
 		a.applyModelOverrides(p, m)
 		return p, m, key, nil
@@ -799,6 +796,36 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 	return nil, nil, "", &contracts.RPCError{
 		Code:    contracts.CodeValidation,
 		Message: fmt.Sprintf("model %q is not available on any enabled provider", model),
+	}
+}
+
+// refreshCodexContextWindow updates the transient provider clone used for a
+// direct Codex chat turn. Codex's model/list app-server response is only a
+// discovery source and may carry the CLI cache's 272k value; the direct
+// ChatGPT Responses API uses the public model metadata instead. Import and
+// model-list paths apply the same policy, while learned/manual overrides are
+// applied afterward by applyModelOverrides.
+func (a *App) refreshCodexContextWindow(p *domain.Provider) {
+	if a == nil || p == nil || p.Kind != domain.ProviderCodex || a.ModelCatalog == nil {
+		return
+	}
+	if !a.ModelCatalog.Loaded() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := a.ModelCatalog.EnsureLoaded(ctx); err != nil {
+			a.log("warn", "models", "Codex catalog context refresh failed: %v", err)
+			return
+		}
+	}
+	if !a.ModelCatalog.Loaded() {
+		return
+	}
+	for i := range p.Models {
+		meta := a.ModelCatalog.Lookup(provider.CatalogHintFromModelID(p.Models[i].ID), p.Models[i].ID)
+		if meta == nil {
+			continue
+		}
+		p.Models[i].Context = provider.ContextWindowFromCatalog(p.Kind, p.Models[i].Context, meta.Context)
 	}
 }
 

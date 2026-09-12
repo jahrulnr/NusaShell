@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	aiutil "nusashell/infrastructure/ai/internal"
+	"nusashell/pkg/httpclient"
 )
 
 // ModelLister fetches the list of embedding model IDs from a provider's
@@ -32,7 +33,7 @@ type ModelLister struct {
 // default HTTP client is used.
 func NewModelLister(baseURL string, client *http.Client) *ModelLister {
 	if client == nil {
-		client = &http.Client{}
+		client = httpclient.New()
 	}
 	return &ModelLister{BaseURL: strings.TrimRight(baseURL, "/"), Client: client}
 }

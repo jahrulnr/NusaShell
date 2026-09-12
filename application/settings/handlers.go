@@ -33,6 +33,15 @@ func (svc *Service) HandleSet(req contracts.SettingsSetRequest) (any, *contracts
 		}
 		s.CompactionThreshold = *req.CompactionThreshold
 	}
+	if req.CompactionWorkflow != nil {
+		workflow := strings.ToLower(strings.TrimSpace(*req.CompactionWorkflow))
+		switch domain.CompactionWorkflow(workflow) {
+		case domain.CompactionWorkflowDedicated, domain.CompactionWorkflowReuse:
+			s.CompactionWorkflow = domain.CompactionWorkflow(workflow)
+		default:
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "compaction_workflow must be dedicated or reuse"}
+		}
+	}
 	if req.CompactionModel != nil {
 		s.CompactionModel = strings.TrimSpace(*req.CompactionModel)
 	}
@@ -281,6 +290,9 @@ func (svc *Service) HandleSet(req contracts.SettingsSetRequest) (any, *contracts
 			s.ProjectMemoryBase = expanded
 		}
 	}
+	if s.CompactionWorkflow == domain.CompactionWorkflowReuse {
+		s.CompactionModel = ""
+	}
 	if err := svc.store.Set(s); err != nil {
 		return nil, rpcdispatch.Internal(err)
 	}
@@ -305,10 +317,12 @@ func setWebSearchCredential(creds Credential, id, raw string) error {
 }
 
 func ToDTO(s domain.Settings) contracts.SettingsDTO {
+	compactionSettings := domain.NormalizeSettings(s)
 	return contracts.SettingsDTO{
 		CompactionEnabled:          s.CompactionEnabled,
 		CompactionThreshold:        s.CompactionThreshold,
-		CompactionModel:            s.CompactionModel,
+		CompactionWorkflow:         string(compactionSettings.CompactionWorkflow),
+		CompactionModel:            compactionSettings.CompactionModel,
 		CompactionSummaryMaxTokens: s.CompactionSummaryMaxTokens,
 		CompactionSummaryMinChars:  s.CompactionSummaryMinChars,
 		ReviewModel:                s.ReviewModel,

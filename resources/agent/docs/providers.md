@@ -482,7 +482,10 @@ served images). Manual overrides are stored per provider+model in
 `learning/model_overrides.json`, survive catalog re-imports and process
 restarts, and are applied at model resolution time **after** learned
 overrides — so a manual correction always wins over both the catalog and an
-auto-learned value. Precedence: catalog → learned → manual. Models tagged as
+auto-learned value. Precedence: catalog → learned → manual. For direct Codex
+chat, the public catalog context window supersedes the app-server discovery
+value; discovery is retained only when the catalog is unavailable, and
+learned/manual overrides still apply afterward. Models tagged as
 embedding-capable appear in the
 Embedding model setting for skill and memory search. Embedding requests use
 the same OpenRouter app attribution as chat when the selected provider points

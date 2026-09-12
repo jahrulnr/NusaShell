@@ -89,6 +89,13 @@ test('installers preserve the release manifest, checksum, and version activation
   assert.match(localWindowsInstaller, /apps\\electron\\VERSION/);
   assert.doesNotMatch(localWindowsInstaller, /release-versions\.json/);
 
+  for (const source of [releaseInstaller, localInstaller]) {
+    assert.match(source, /Comment=NusaShell\nExec=/,
+      'release and local desktop metadata should stay consistent');
+    assert.doesNotMatch(source, /Exec=.*nusashell-desktop --no-sandbox/,
+      'the desktop entry must leave sandbox selection to the wrapper');
+  }
+
   for (const source of [releaseInstaller, localInstaller, windowsInstaller, localWindowsInstaller]) {
     assert.doesNotMatch(source, /Application Support[\\/]nusashell-desktop/);
     assert.doesNotMatch(source, /\.config[\\/]nusashell-desktop/);

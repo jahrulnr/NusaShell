@@ -21,7 +21,7 @@ The vertical sidebar identifies NusaShell with its brand mark and wordmark, show
 - **Install NusaShell** (`#pwa-install-btn`):
   - Section: Sidebar
   - Type: button
-  - Notes: Visible only while the browser offers installation (beforeinstallprompt); triggers the native install flow and hides after install/dismissal.
+  - Notes: Visible only while an eligible browser offers installation (beforeinstallprompt); hidden in standalone/PWA and Electron runtimes; triggers the native install flow and hides after install/dismissal.
 
 - **Desktop pet** (`#pet-btn`):
   - Section: Sidebar

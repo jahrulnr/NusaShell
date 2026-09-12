@@ -63,8 +63,10 @@ the learner from meaning. If the spawn reason does not hold up, the learner
 calls `learn()` with `action: "no_op"` instead of fabricating a record.
 
 When a learning model is available (configured via `review_model` in
-Settings, or the first enabled provider), the learner calls the LLM with
-the learner system prompt and a short user instruction containing the source
+Settings, or — when empty — the model of the conversation being reviewed,
+then the newest conversation, then the first enabled provider with a
+credential and at least one model), the learner
+calls the LLM with the learner system prompt and a short user instruction containing the source
 conversation id, JSON file path, incremental message range, and
 `trigger_reason`. The background agent uses `file_read`, `grep`, and `exec`
 to inspect that source file, then retrieves relevant records with `memory`

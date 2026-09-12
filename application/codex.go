@@ -14,12 +14,12 @@ import (
 // accountKeyPrefix returns the CredentialStore key prefix for additional
 // accounts of a Codex provider: "{providerID}:account:".
 func accountKeyPrefix(providerID string) string {
-	return domain.AccountKeyPrefix(providerID)
+	return providerID + ":account:"
 }
 
 // accountKey returns the CredentialStore key for a specific account.
 func accountKey(providerID, accountID string) string {
-	return domain.AccountKey(providerID, accountID)
+	return accountKeyPrefix(providerID) + accountID
 }
 
 // PersistCodexToken writes token JSON under both the active provider key

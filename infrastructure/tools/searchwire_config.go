@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"nusashell/application"
+	"nusashell/pkg/httpclient"
 
 	"github.com/jahrulnr/searchwire"
 )
@@ -19,14 +20,19 @@ import (
 const webSearchRequestTimeout = 60 * time.Second
 
 // SearchwireConfigFromProviders builds a searchwire.Config using API keys
-// from NusaShell's configured providers. When a provider's BaseURL matches a
+// from NusaShell's configured providers. Web retrieval uses the public-web
+// HTTP client so hostname resolution bypasses the host's local resolver and
+// non-public destinations are rejected. When a provider's BaseURL matches a
 // known vendor (OpenRouter, OpenAI, Anthropic, Perplexity, xAI), its API key
 // is passed to searchwire so web_answer works without separate env vars.
 //
 // Brave is not a chat provider in NusaShell, so it still relies on the
 // BRAVE_SEARCH_API_KEY env var if the user wants the Brave answer provider.
 func SearchwireConfigFromProviders(providers application.ProviderStore, creds application.CredentialStore) searchwire.Config {
-	cfg := searchwire.Config{Timeout: webSearchRequestTimeout}
+	cfg := searchwire.Config{
+		HTTPClient: httpclient.NewPublic(),
+		Timeout:    webSearchRequestTimeout,
+	}
 	if providers == nil || creds == nil {
 		return cfg
 	}
@@ -67,14 +73,18 @@ const (
 )
 
 // SearchwireSearchConfig builds the searchwire.Config for the web_search
-// tool. Brave, Serper, and Tavily are always declared with the stored API
+// tool. Web retrieval uses the public-web HTTP client. Brave, Serper, and
+// Tavily are always declared with the stored API
 // key (possibly empty); searchwire falls back to the standard environment
 // variables (BRAVE_SEARCH_API_KEY, SERPER_API_KEY, TAVILY_API_KEY) for any
 // provider without a stored key. Serper and Tavily are only *registered*
 // when a key resolves (stored or env); Brave stays registered by default
 // (public HTML results), matching zero-config searchwire.
 func SearchwireSearchConfig(creds application.CredentialStore) searchwire.Config {
-	cfg := searchwire.Config{Timeout: webSearchRequestTimeout}
+	cfg := searchwire.Config{
+		HTTPClient: httpclient.NewPublic(),
+		Timeout:    webSearchRequestTimeout,
+	}
 	keyOf := func(id string) string {
 		if creds == nil {
 			return ""

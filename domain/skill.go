@@ -204,6 +204,10 @@ type LogEntry struct {
 type Settings struct {
 	CompactionEnabled   bool
 	CompactionThreshold int
+	// CompactionWorkflow selects the client-side text compaction request shape.
+	// Empty/legacy settings normalize to dedicated; reuse is opt-in and uses
+	// the conversation's active provider/model and full agent toolbox.
+	CompactionWorkflow CompactionWorkflow `json:"compaction_workflow,omitempty"`
 	// CompactionModel selects the model used for context compaction
 	// summarization. When empty, the conversation's active model is used.
 	// Format: "providerID:modelID" (same as VisionModelID etc). Useful for
@@ -397,6 +401,7 @@ type Settings struct {
 func DefaultSettings() Settings {
 	return Settings{
 		CompactionEnabled:          true,
+		CompactionWorkflow:         CompactionWorkflowDedicated,
 		CompactionThreshold:        0, // 0 = auto (80% of model context window)
 		CompactionSummaryMaxTokens: 0, // 0 = use built-in default (64000)
 		CompactionSummaryMinChars:  0, // 0 = use built-in default (200)
@@ -414,6 +419,20 @@ func DefaultSettings() Settings {
 // NormalizeSettings fills values introduced after an existing local settings
 // file was written. It preserves intentional false values for toggles.
 func NormalizeSettings(settings Settings) Settings {
+	// Empty is the legacy zero value; normalize it to the existing dedicated
+	// workflow so old settings files remain behaviorally unchanged. Unknown
+	// values fail closed to the same default. Reuse cannot combine with a
+	// separate compaction model because its cache/prompt contract requires the
+	// active conversation model.
+	switch settings.CompactionWorkflow {
+	case "":
+		settings.CompactionWorkflow = CompactionWorkflowDedicated
+	case CompactionWorkflowDedicated:
+	case CompactionWorkflowReuse:
+		settings.CompactionModel = ""
+	default:
+		settings.CompactionWorkflow = CompactionWorkflowDedicated
+	}
 	if settings.MaxToolRounds < 1 {
 		settings.MaxToolRounds = DefaultSettings().MaxToolRounds
 	}

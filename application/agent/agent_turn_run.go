@@ -133,6 +133,11 @@ func (a *Service) RunSingleTurn(run *TurnRun, provider *domain.Provider, apiKey,
 	toolDefs := a.TurnToolDefs(run)
 	maxTokens := domain.ResolveMaxOutput(provider, model, settings)
 	promptCache := buildPromptCachePolicy(settings, provider, model, run.ConversationID, promptCachePrefixForRun(run))
+	conversation, err = a.maybeCompactInitialTurn(run, adapter, conversation, provider, model, asstMsgID, effort, settings, caps, toolDefs, maxTokens, promptCache, initialContinuation)
+	if err != nil {
+		a.FailTurn(run, asstMsgID, err)
+		return false, ""
+	}
 
 	// The round loop (stream → persist → execute tools → drain at the
 	// boundary → repeat) is the AgentEngine with the AgentConversation

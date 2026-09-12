@@ -8,6 +8,7 @@ import (
 	"nusashell/application"
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/codex"
+	"nusashell/pkg/httpclient"
 )
 
 type codexSearchBackend struct {
@@ -19,6 +20,7 @@ type codexSearchBackend struct {
 // called; the adapter reuses the same Codex cookie jar and installation ID as
 // the chat provider.
 func NewCodexSearchFactory(creds application.CredentialStore) application.CodexSearchFactory {
+	client := httpclient.New()
 	return func(ctx context.Context, provider *domain.Provider, apiKey string) (application.CodexSearchBackend, error) {
 		if provider == nil || provider.Kind != domain.ProviderCodex {
 			return nil, fmt.Errorf("Codex web search requires a Codex provider")
@@ -31,17 +33,17 @@ func NewCodexSearchFactory(creds application.CredentialStore) application.CodexS
 		if baseURL == "" {
 			baseURL = codex.DefaultBaseURL
 		}
-		client, err := codex.NewSearchClient(codex.SearchConfig{
+		searchClient, err := codex.NewSearchClient(codex.SearchConfig{
 			APIKey:         tok.AccessToken,
 			BaseURL:        baseURL,
-			HTTPClient:     withCodexCookieJar(newProviderHTTPClient()),
+			HTTPClient:     withCodexCookieJar(client),
 			AccountID:      tok.AccountID,
 			InstallationID: codexInstallationID,
 		})
 		if err != nil {
 			return nil, err
 		}
-		return &codexSearchBackend{client: client}, nil
+		return &codexSearchBackend{client: searchClient}, nil
 	}
 }
 

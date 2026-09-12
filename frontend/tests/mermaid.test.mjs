@@ -80,7 +80,31 @@ test('renderMermaidDiagrams gives compact SVGs a readable inline width', async (
     await renderMermaidDiagrams(c);
     const svg = c.querySelector('.mermaid-block svg');
     assert.equal(svg.style.width, '420px', 'small Mermaid viewBoxes are expanded to a readable inline baseline');
+    assert.equal(svg.style.maxWidth, 'none', 'inline diagrams keep vector width for horizontal scrolling instead of shrinking labels');
     assert.equal(svg.style.height, 'auto');
+  } finally {
+    delete global.window;
+    delete global.document;
+  }
+});
+
+test('preloaded Mermaid instances receive the NusaShell dark theme', async () => {
+  const dom = makeDom();
+  let initializeOptions;
+  dom.window.mermaid = {
+    initialize(options) { initializeOptions = options; },
+    async parse() { return true; },
+    async render() { return { svg: '<svg viewBox="0 0 120 60"><g>themed</g></svg>' }; },
+  };
+  try {
+    const c = document.createElement('div');
+    c.innerHTML = '<div class="mermaid-block"><pre class="mermaid-src">flowchart TD\n A--&gt;B</pre></div>';
+    await renderMermaidDiagrams(c);
+    assert.equal(initializeOptions.theme, 'base');
+    assert.equal(initializeOptions.themeVariables.background, '#0a0f1d');
+    assert.equal(initializeOptions.themeVariables.primaryColor, '#121b2e');
+    assert.equal(initializeOptions.themeVariables.primaryBorderColor, '#58d1c3');
+    assert.equal(initializeOptions.themeVariables.lineColor, '#79aee8');
   } finally {
     delete global.window;
     delete global.document;

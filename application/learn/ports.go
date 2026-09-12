@@ -172,6 +172,15 @@ type ConversationPath func(id string) string
 // WithWorkspace annotates a context with the experience workspace.
 type WithWorkspace func(ctx context.Context, workspace string) context.Context
 
+// ResolveLearnerModel resolves the model for a background learning job
+// when review_model is empty. Returns the qualified "providerID:modelID"
+// form, or "" when no model resolves. The composition root wires this so
+// the learn package never imports providers or credentials. The cascade
+// follows the UI promise: the source conversation's model, then the
+// newest conversation's model, then the first enabled provider with a
+// credential and at least one model. It never consults DelegateModel.
+type ResolveLearnerModel func(sourceConversationID string) string
+
 // MemoryUpdatedHook notifies App after a job mutates memory records.
 type MemoryUpdatedHook func()
 
@@ -206,4 +215,5 @@ type Deps struct {
 	LockConversation    LockConversation
 	ConversationPath    ConversationPath
 	WithWorkspace       WithWorkspace
+	ResolveLearnerModel ResolveLearnerModel
 }

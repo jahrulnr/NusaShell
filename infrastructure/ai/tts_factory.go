@@ -7,6 +7,7 @@ import (
 	"nusashell/application"
 	"nusashell/domain"
 	ttsclient "nusashell/infrastructure/ai/tts"
+	"nusashell/pkg/httpclient"
 )
 
 // NewSpeechSynthesizerFactory builds online TTS clients for providers whose
@@ -15,6 +16,7 @@ import (
 // and Responses (same OpenAI platform host). Other kinds fail fast so the
 // caller can fall back to offline piper.
 func NewSpeechSynthesizerFactory() application.SpeechSynthesizerFactory {
+	client := httpclient.NewWithTimeout(httpclient.DefaultRequestTimeout)
 	return func(p *domain.Provider, apiKey string) (application.SpeechSynthesizer, error) {
 		if p == nil {
 			return nil, fmt.Errorf("tts: nil provider")
@@ -26,6 +28,6 @@ func NewSpeechSynthesizerFactory() application.SpeechSynthesizerFactory {
 		if base == "" {
 			return nil, fmt.Errorf("tts: provider %q has no base URL", p.ID)
 		}
-		return &ttsclient.Client{BaseURL: base, APIKey: apiKey}, nil
+		return &ttsclient.Client{BaseURL: base, APIKey: apiKey, HTTP: client}, nil
 	}
 }

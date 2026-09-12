@@ -12,6 +12,7 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"nusashell/domain"
+	"nusashell/pkg/httpclient"
 )
 
 // newTestServer builds an MCP server exposing a single "ping" tool and
@@ -82,6 +83,16 @@ func assertPingTool(t *testing.T, m *Manager, p *domain.Plugin) {
 		t.Fatalf("tools = %v, want ping", tools)
 	}
 	m.Drop(p.Manifest.MCPServerID())
+}
+
+func TestNewManagerUsesCentralHTTPTransport(t *testing.T) {
+	manager := NewManager()
+	if manager.httpClient == nil {
+		t.Fatal("manager HTTP client is nil")
+	}
+	if manager.httpClient.Transport != httpclient.Shared().Transport {
+		t.Fatal("manager does not use the central HTTP transport")
+	}
 }
 
 func TestConnectStreamableHTTP(t *testing.T) {

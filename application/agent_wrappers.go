@@ -316,6 +316,9 @@ func (a *App) runOneTool(run *TurnRun, messageID string, toolCall domain.ToolCal
 func (a *App) compactConversation(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, contextWindow int, settings domain.Settings, trigger domain.CompactionTrigger) (string, error) {
 	return a.agentService().CompactConversation(ctx, adapter, c, model, contextWindow, settings, trigger)
 }
+func (a *App) compactConversationWithCache(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, contextWindow int, settings domain.Settings, trigger domain.CompactionTrigger, promptCache *PromptCachePolicy) (string, error) {
+	return a.agentService().CompactConversationWithCache(ctx, adapter, c, model, contextWindow, settings, trigger, promptCache)
+}
 func (a *App) publishAnnouncement(convID string, ev Announcement) {
 	a.agentService().PublishAnnouncement(convID, ev)
 }

@@ -22,6 +22,7 @@ import (
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/jsonstore"
+	"nusashell/pkg/httpclient"
 	clock "nusashell/pkg/time"
 
 	"github.com/jahrulnr/searchwire"
@@ -106,7 +107,8 @@ func (t *Toolbox) webAnswerSearcher() *searchwire.Searcher {
 	model := strings.TrimSpace(s.WebAnswerModel)
 	disabled := false
 	cfg := searchwire.Config{
-		Timeout: 120 * time.Second,
+		HTTPClient: httpclient.NewPublic(),
+		Timeout:    120 * time.Second,
 		// Explicitly disable all answer providers so env var fallback
 		// (e.g. OPENROUTER_API_KEY) doesn't silently enable a provider
 		// the user didn't select in Settings.
@@ -225,9 +227,9 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "wait_until", Description: "Explain or create a durable wait_until step. Waiting never keeps a runner occupied.", InputSchema: obj("object", props("at", str("RFC3339 time")), "at")},
 		{Name: "sleep", Description: "Pause for the given number of seconds (max 300). Use for retry backoff or to wait between polls of an async automation(op=run). Does not consume a provider round — the turn resumes after the pause.", InputSchema: obj("object", props("seconds", intSchema("Seconds to sleep (1-300)")), "seconds")},
 		{Name: "mcp_list", Description: "List configured MCP servers with their enabled status and runtime state (running/stopped).", InputSchema: obj("object", nil)},
-		{Name: "tool_list", Description: "List tools from a running MCP server. Accepts the plugin id (e.g. \"nusashell.terminal\"). When omitted, lists tools across all running MCP servers. Returns compact entries (ref, name, server, description) without parameter schemas — load the exact schema with tool_schema before first use of an unfamiliar tool.", InputSchema: obj("object", props("server", str("Plugin id; when omitted, lists all running servers")))},
-		{Name: "tool_schema", Description: "Load one MCP tool's input schema by plugin id and tool name. The tool name is the bare tool name (e.g. \"exec\"). Returns the schema as readable JSON — the only place schemas are served; mcp_search and tool_list stay schema-free so large catalogs remain token-cheap.", InputSchema: obj("object", props("server", str("Plugin id (e.g. nusashell.terminal)"), "tool", str("Bare tool name within the server (e.g. \"exec\")")), "server", "tool")},
-		{Name: "mcp_search", Description: "Search running MCP servers' tools by name or description (case-insensitive token match — any term matches). When server is omitted, searches across ALL running servers. Returns compact matches (ref, name, description, ranked) without inlining parameter schemas — call tool_schema for exact argument fields when needed. This is the universal MCP discovery path on every provider — use mcp_search + mcp_call instead of guessing tool names.", InputSchema: obj("object", props("server", str("Optional: plugin id; when omitted, searches all running servers"), "query", str("Search query"), "limit", intSchema("Max results, default 20")), "query")},
+		{Name: "tool_list", Description: "List tools from a running MCP server. Accepts the plugin id (e.g. \"nusashell.terminal\"). When omitted, lists tools across all running MCP servers. Returns compact entries (ref, name, server, description) without parameter schemas — load the exact schema with tool_schema before first use of an unfamiliar tool. Oversized catalogs are truncated in-band (~32KiB) with overflow_path pointing at the full JSONL in the platform temp dir — continue with file_read.", InputSchema: obj("object", props("server", str("Plugin id; when omitted, lists all running servers")))},
+		{Name: "tool_schema", Description: "Load one MCP tool's input schema by plugin id and tool name. The tool name is the bare tool name (e.g. \"exec\"). Returns the schema as readable JSON — the only place schemas are served; mcp_search and tool_list stay schema-free so large catalogs remain token-cheap. Oversized schemas are truncated in-band (~32KiB) with overflow_path pointing at the full definition in the platform temp dir — continue with file_read.", InputSchema: obj("object", props("server", str("Plugin id (e.g. nusashell.terminal)"), "tool", str("Bare tool name within the server (e.g. \"exec\")")), "server", "tool")},
+		{Name: "mcp_search", Description: "Search running MCP servers' tools by name or description (case-insensitive token match — any term matches). When server is omitted, searches across ALL running servers. Returns compact matches (ref, name, description, ranked) without inlining parameter schemas — call tool_schema for exact argument fields when needed. The header reports count (matches returned), total (every match before the limit), and limit — when count < total the list was cut, so raise limit or narrow the query instead of assuming the catalog is exhausted. Oversized result sets are truncated in-band (~32KiB) with overflow_path pointing at the full JSONL in the platform temp dir — continue with file_read. This is the universal MCP discovery path on every provider — use mcp_search + mcp_call instead of guessing tool names.", InputSchema: obj("object", props("server", str("Optional: plugin id; when omitted, searches all running servers"), "query", str("Search query"), "limit", intSchema("Max results, default 20")), "query")},
 		{Name: "mcp_call", Description: "Execute an MCP tool by ref. Get the ref from mcp_search or tool_list (format <plugin-id>:<tool>, e.g. nusashell.files:read). Pass `arguments_json` as a JSON object matching the tool's parameters schema — the exact arguments the tool expects, e.g. {\"path\":\"/etc/hosts\"}. Omit `arguments_json` entirely for parameterless tools (defaults to {}). The ref binds to a specific running server + tool; if it was disabled or restarted since discovery, you get a STALE_TOOL_REF error — search again. Plugins that declare a usage contract (contract flag in mcp_list) must be read first via contract_read when required by the plugin_contract_mode setting. This is the only MCP execution path — mcp__<server>__<tool> names are not callable.", InputSchema: obj("object", props("ref", str("Tool ref from mcp_search / tool_list results (e.g. nusashell.files:read)"), "arguments_json", freeObj("Tool arguments as a JSON object matching the parameters schema (e.g. {\"path\":\"/etc/hosts\"}). Optional; defaults to {} — omit entirely for parameterless tools. Load the exact schema with tool_schema if unsure.")), "ref")},
 		{Name: "contract_read", Description: "Read a plugin's usage contract (best-practice rules plus state & side-effect disclosure) declared in its manifest before working with that plugin's tools. Pass id=<plugin-id>, or id=all to read every contract-declaring plugin at once. Advisory by default (plugin_contract_mode defaults to hint); enforcement is only active when the setting is set to require.", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files) or 'all'")), "id")},
 		{Name: "mcp_register", Description: "Copy a new MCP plugin from an absolute staging folder into the installed plugin store, or replace an existing plugin with the same id. The source must contain manifest.json and must stay outside the installed plugins root. Check mcp_list and ask the user before replacing an existing id; then call mcp_enable.", InputSchema: obj("object", props("source", str("Absolute staging path to the plugin folder containing manifest.json")), "source")},
@@ -238,7 +240,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "mcp_server_add", Description: "Register a manual MCP server (no manifest needed). Transports: stdio (command/args/env, e.g. npx servers), sse, or http (Streamable HTTP) with url and optional headers for remote servers. Use for generic MCP servers; use mcp_register for NusaShell plugin folders. After adding, call mcp_enable with the server id to connect and load its tools.", InputSchema: obj("object", props("name", str("Human-readable server name"), "transport", strEnum("Transport kind", "stdio", "sse", "http"), "command", str("Command to launch the server (stdio transport, e.g. npx, node, python)"), "url", str("Server URL (required for sse/http transports, e.g. https://host/mcp)"), "args", arr("Arguments for the stdio command (e.g. -y @modelcontextprotocol/server-github)"), "env", obj("object", props("additional", str("KEY=VALUE entries for the stdio process")), "additional"), "headers", obj("object", props("additional", str("HTTP headers for sse/http transports, e.g. Authorization: Bearer <token>")), "additional"), "id", str("Optional stable id (default auto-generated)")), "name")},
 		{Name: "read_media", Description: "Load a media file (image, audio, video, or PDF document) from disk into your context. The media type is auto-detected from binary magic bytes — no need to specify whether it is an image, audio, video, or PDF. When your active model supports the kind natively, the file attaches to your context directly. For non-capable models, a fallback model transcribes/describes the content and returns the text, or a placeholder note with the file path for documents.", InputSchema: obj("object", props("file_path", str("Absolute path of the media file on disk"), "question", str("Optional question about the media content")), "file_path")},
 		{Name: "web_search", Description: "Search the web for fresh information. With an active Codex chat provider, Codex search is tried first and searchwire is the fallback; other providers use searchwire across Brave, Serper, Tavily, Startpage, Wikipedia, and GitHub. Returns ranked results with title, URL, and snippet. Follow up with web_fetch on promising URLs for full page content. Oversized result lists are truncated in-band (~32KiB) with overflow_path pointing at the full JSONL in the platform temp dir; continue with file_read.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
-		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only. Extraction may read up to max_bytes (default 2MB); the in-band result is capped at ~32KiB. When truncated, overflow_path is an absolute temp file — continue with file_read using next_offset_bytes.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
+		{Name: "web_fetch", Description: "Fetch a public URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only. Hostnames resolve through Cloudflare/Google public DNS with A+AAAA support; private, loopback, link-local, ULA, multicast, unspecified, and redirect destinations are rejected. Extraction may read up to max_bytes (default 2MB); the in-band result is capped at ~32KiB. When truncated, overflow_path is an absolute temp file — continue with file_read using next_offset_bytes.", InputSchema: obj("object", props("url", str("Public http/https URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
 	}
 	if t.Acp != nil && (len(t.Acp.EnabledAcpAgents()) > 0 || t.Delegate != nil) {
 		subagentDesc := "Delegate subagent — one tool for the whole subagent family. op=spawn (default) starts async subagent runs and returns immediately; the result is injected later. op=steer redirects a live run (ACP: interrupt-and-replace on the same session; internal delegate: queued for the next tool-round boundary). op=stop cancels a live run. op=wait blocks this round until a run is terminal. agent_id (spawn) selects the target: an ACP agent id from Providers, or the built-in internal delegate."
@@ -1135,7 +1137,9 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			for _, tool := range tools {
 				// Schema is intentionally NOT inlined: discovery output stays
 				// compact so catalogs with hundreds of tools remain token-cheap.
-				// The full input schema is available via tool_schema.
+				// The full input schema is available via tool_schema. Oversized
+				// catalogs spill to the platform temp dir through capJSONL so the
+				// model can file_read the remainder instead of losing tools.
 				items = append(items, map[string]any{
 					"ref":         p.Manifest.ID + ":" + tool.Name,
 					"name":        tool.Name,
@@ -1144,7 +1148,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				})
 			}
 		}
-		return yamlJSONL(map[string]any{"count": len(items)}, items), nil
+		return capJSONL("tool_list", map[string]any{"count": len(items)}, items), nil
 
 	case name == "tool_schema":
 		var args struct {
@@ -1176,12 +1180,14 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				}
 				// Emit the full tool definition as a single JSONL line:
 				// name, description, and the complete input_schema object.
+				// Monster schemas spill through capJSONL under the same
+				// overflow contract as tool_list / mcp_search.
 				items := []any{map[string]any{
 					"name":        tool.Name,
 					"description": tool.Description,
 					"parameters":  schema,
 				}}
-				return yamlJSONL(map[string]any{}, items), nil
+				return capJSONL("tool_schema", map[string]any{}, items), nil
 			}
 			return "", fmt.Errorf("tool %q not found on plugin %q; use tool_list to see available tools", args.Tool, args.Server)
 		}
@@ -1205,10 +1211,17 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		items := t.collectMCPToolMatches(args.Server, args.Query)
 		items = rankMCPItems(items, args.Query)
+		matched := len(items)
 		if len(items) > limit {
 			items = items[:limit]
 		}
-		return yamlJSONL(map[string]any{"count": len(items)}, items), nil
+		// total counts every match before the limit slice, so a cut is never
+		// silent: the model sees count < total, knows the catalog continues,
+		// and re-queries with a larger limit (or a narrower query) instead of
+		// assuming the match list is exhausted. Oversized result sets spill
+		// through capJSONL with overflow_path / next_offset_bytes.
+		meta := map[string]any{"count": len(items), "total": matched, "limit": limit}
+		return capJSONL("mcp_search", meta, items), nil
 
 	case name == "mcp_call":
 		var args struct {

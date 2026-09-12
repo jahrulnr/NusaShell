@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"nusashell/infrastructure/nusatemp"
+	"nusashell/pkg/httpclient"
 )
 
 // launchSettle is how long Launch waits after Start before treating a dead
@@ -77,13 +78,13 @@ type Installer struct {
 
 // New builds a production installer rooted at the caller's home directory.
 func New(homeDir string) *Installer {
-	return NewWithOverrides(homeDir, defaultReleaseBase, defaultReleaseIndex, &http.Client{Timeout: 30 * time.Minute})
+	return NewWithOverrides(homeDir, defaultReleaseBase, defaultReleaseIndex, httpclient.NewWithTimeout(30*time.Minute))
 }
 
 // NewWithOverrides injects release coordinates + HTTP client. Used by tests.
 func NewWithOverrides(homeDir, releaseBase, releaseIndex string, client HTTPClient) *Installer {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Minute}
+		client = httpclient.NewWithTimeout(30 * time.Minute)
 	}
 	return &Installer{
 		resolver:     DefaultResolver(homeDir),
@@ -101,7 +102,7 @@ func NewWithResolver(resolver *Resolver, releaseBase, releaseIndex string, clien
 		resolver = DefaultResolver("")
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Minute}
+		client = httpclient.NewWithTimeout(30 * time.Minute)
 	}
 	return &Installer{
 		resolver:     resolver,

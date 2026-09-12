@@ -195,7 +195,7 @@ How agents treat MCP plugin usage contracts. Install and enable plugins on the P
 
 ## Context compaction
 
-Toggle compaction, set max input tokens (fallback context window, default 200000), compaction threshold and summary quality knobs, pick an optional compaction model, and enable provider prompt caching. Cache TTL (including off) is chosen per provider on the Providers detail pane. Completion limits and sampling are under Agent runtime.
+Toggle compaction, choose the dedicated summary-only or reuse agent-prompt workflow, set max input tokens (fallback context window, default 200000), compaction threshold and summary quality knobs, pick an optional compaction model, and enable provider prompt caching. Reuse keeps the conversation's active model and prompt-cache prefix. Cache TTL (including off) is chosen per provider on the Providers detail pane. Completion limits and sampling are under Agent runtime.
 
 - **Context compaction title** (`#settings-context-title`):
   - Section: Settings
@@ -204,6 +204,11 @@ Toggle compaction, set max input tokens (fallback context window, default 200000
 - **Compact long conversations** (`#settings-compaction-enabled`):
   - Section: Settings
   - Type: checkbox
+
+- **Compaction workflow** (`#settings-compaction-workflow`):
+  - Section: Settings
+  - Type: select
+  - Notes: Dedicated uses a summary-only request. Reuse sends the normal agent prompt and full toolbox so the provider prompt-cache prefix can be reused, and always uses the conversation's active model.
 
 - **Max input tokens** (`#settings-max-input-tokens`):
   - Section: Settings
@@ -237,7 +242,7 @@ Toggle compaction, set max input tokens (fallback context window, default 200000
 
 ## Learning
 
-Background jobs run a single learner that consolidates recorded experience into memory records and, for repeated procedures, may evaluate and evolve a skill. The review model routes those jobs to a cheaper or faster model (default uses the conversation's active model). The periodic review interval runs the learner after N unreviewed user turns or tool-loop iterations (default 10, 0 disables); steer, recovery, repeated failure, and repeated procedure still enqueue immediately.
+Background jobs run a single learner that consolidates recorded experience into memory records and, for repeated procedures, may evaluate and evolve a skill. The review model routes those jobs to a cheaper or faster model (default follows the conversation being reviewed, then the newest conversation, then the first enabled provider with a credential and at least one model). The periodic review interval runs the learner after N unreviewed user turns or tool-loop iterations (default 10, 0 disables); steer, recovery, repeated failure, and repeated procedure still enqueue immediately.
 
 - **Learning title** (`#settings-learning-title`):
   - Section: Settings
@@ -246,7 +251,7 @@ Background jobs run a single learner that consolidates recorded experience into 
 - **Review model** (`#settings-review-model`):
   - Section: Settings
   - Type: select
-  - Notes: Routes background learning jobs to a dedicated model; empty uses the conversation's active model.
+  - Notes: Routes background learning jobs to a dedicated model; empty follows the conversation being reviewed, then the newest conversation, then the first enabled provider with a credential and at least one model.
 
 - **Periodic review interval** (`#settings-learner-nudge-interval`):
   - Section: Settings

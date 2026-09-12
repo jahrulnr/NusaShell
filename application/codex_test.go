@@ -31,6 +31,31 @@ func TestPersistCodexTokenSkipsAccountKeyWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestCodexAccountKeyFormat asserts the CredentialStore key layout for
+// Codex multi-account storage: "{providerID}:account:" prefix and
+// "{providerID}:account:{id}" full key. Moved from domain/codex_keys_test.go
+// when the key scheme was relocated to the application layer.
+func TestCodexAccountKeyFormat(t *testing.T) {
+	cases := []struct {
+		providerID string
+		accountID  string
+		prefix     string
+		key        string
+	}{
+		{"codex", "", "codex:account:", "codex:account:"},
+		{"codex", "acc-1", "codex:account:", "codex:account:acc-1"},
+		{"openai", "org-123", "openai:account:", "openai:account:org-123"},
+	}
+	for _, c := range cases {
+		if got := accountKeyPrefix(c.providerID); got != c.prefix {
+			t.Errorf("accountKeyPrefix(%q) = %q, want %q", c.providerID, got, c.prefix)
+		}
+		if got := accountKey(c.providerID, c.accountID); got != c.key {
+			t.Errorf("accountKey(%q, %q) = %q, want %q", c.providerID, c.accountID, got, c.key)
+		}
+	}
+}
+
 func TestHandleCodexAccountsSwitchUpdatesRouterPreference(t *testing.T) {
 	providers := &fakeProviderStore{items: map[string]*domain.Provider{
 		"codex": {ID: "codex", Kind: domain.ProviderCodex, Name: "Codex"},

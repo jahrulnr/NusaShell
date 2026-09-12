@@ -61,9 +61,7 @@ func (s *Service) enrichProviderModelsAtRead(p *domain.Provider) {
 		meta := s.catalog.Lookup(catalogHintFromModelID(p.Models[i].ID), p.Models[i].ID)
 		if meta != nil {
 			isFreeVariant := isFreeTierModel(p.Models[i].ID)
-			if p.Models[i].Context == 0 {
-				p.Models[i].Context = meta.Context
-			}
+			p.Models[i].Context = contextWindowFromCatalog(p.Kind, p.Models[i].Context, meta.Context)
 			if p.Models[i].MaxOutput == 0 {
 				p.Models[i].MaxOutput = meta.Output
 			}

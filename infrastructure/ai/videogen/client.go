@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"nusashell/application"
+	"nusashell/pkg/httpclient"
 )
 
 const (
@@ -75,7 +76,7 @@ func (c *Client) Generate(ctx context.Context, req application.VideoGenRequest) 
 	}
 	httpClient := c.HTTP
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = httpclient.Shared()
 	}
 
 	jobID, err := c.submit(ctx, httpClient, req)

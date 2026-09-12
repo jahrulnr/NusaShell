@@ -8,6 +8,7 @@
 //   actually allows installation; after install (or dismissal) it hides.
 
 import { toast } from './ui.js';
+import { initInstallPrompt } from './pwa-install.js';
 
 function registerServiceWorker() {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
@@ -21,29 +22,9 @@ export function initInstallButton() {
   const btn = document.getElementById('pwa-install-btn');
   if (!btn) return;
 
-  let deferredPrompt = null;
-
-  window.addEventListener('beforeinstallprompt', (event) => {
-    event.preventDefault();
-    deferredPrompt = event;
-    btn.hidden = false;
-  });
-
-  btn.addEventListener('click', async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    try {
-      const choice = await deferredPrompt.userChoice;
-      if (choice?.outcome === 'accepted') toast('NusaShell installed.', 'success');
-    } catch { /* userChoice can reject on some engines; ignore */ }
-    deferredPrompt = null;
-    btn.hidden = true;
-  });
-
-  window.addEventListener('appinstalled', () => {
-    deferredPrompt = null;
-    btn.hidden = true;
-    toast('NusaShell installed.', 'success');
+  return initInstallPrompt(btn, {
+    onAccepted: () => toast('NusaShell installed.', 'success'),
+    onInstalled: () => toast('NusaShell installed.', 'success'),
   });
 }
 
@@ -92,7 +73,7 @@ function warmServiceWorkerCache() {
   if (!navigator.serviceWorker?.controller) return; // first load: SW not in control yet
   const fetcher = typeof fetch === 'function' ? fetch : undefined;
   Promise.all([extractFontUrls(fetcher, location.href)]).then(([fontUrls]) => {
-    const urls = [...collectAssetUrls(), ...fontUrls, './agent-offline-mascot.png', './nusashell-mark.png'];
+    const urls = [...collectAssetUrls(), './js/pwa-install.js', ...fontUrls, './agent-offline-mascot.png', './nusashell-mark.png'];
     navigator.serviceWorker.controller.postMessage({ precache: urls });
   });
 }

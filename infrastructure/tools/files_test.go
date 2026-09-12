@@ -427,6 +427,102 @@ func TestFileReadBinaryAndTruncation(t *testing.T) {
 // its unit in the field name, so an agent never has to remember whether a
 // bare integer is a byte offset or a line number (audit conv_c21e02199596a3cc:
 // offset/line confusion lands reads hundreds of lines off).
+// Graded read budget: a blind whole-file read of a large file must not park a
+// 32KiB head in the transcript. That head taxes the attention budget of every
+// later round (context rot) and can anchor the model on a partial prefix.
+// Explicit targeting (max_bytes, start_line/end_line, offset_bytes) opts out.
+func TestFileReadLargeFileGetsGradedHead(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "large.log")
+	content := strings.Repeat("log line\n", (fileReadLargeTierBytes/9)+2048)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	out, err := testTB.Execute(context.Background(), "file_read", fileJSON(map[string]any{"path": path}))
+	if err != nil {
+		t.Fatalf("file_read: %v", err)
+	}
+	head := out[:min(len(out), 400)]
+	if !strings.Contains(out, fmt.Sprintf("file_bytes: %d", len(content))) {
+		t.Errorf("large read must report the complete file size: %s", head)
+	}
+	if !strings.Contains(out, fmt.Sprintf("\nbytes: %d\n", fileReadLargeMaxBytes)) {
+		t.Errorf("large read head must shrink to the graded budget: %s", head)
+	}
+	if !strings.Contains(out, fmt.Sprintf("next_offset_bytes: %d", fileReadLargeMaxBytes)) {
+		t.Errorf("graded head must stay addressable: %s", head)
+	}
+	if !strings.Contains(out, "truncated: true") || !strings.Contains(out, "hint:") {
+		t.Errorf("graded head must carry truncation + a targeting hint: %s", head)
+	}
+	if len(out) > fileReadLargeMaxBytes+2048 {
+		t.Errorf("in-band payload still too large: %d bytes", len(out))
+	}
+}
+
+func TestFileReadHugeFileIsMetadataOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "huge.log")
+	content := strings.Repeat("log line\n", (fileReadHugeTierBytes/9)+1)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	out, err := testTB.Execute(context.Background(), "file_read", fileJSON(map[string]any{"path": path}))
+	if err != nil {
+		t.Fatalf("file_read: %v", err)
+	}
+	head := out[:min(len(out), 400)]
+	if !strings.Contains(out, "\nbytes: 0\n") {
+		t.Errorf("huge file should return metadata only: %s", head)
+	}
+	if !strings.Contains(out, fmt.Sprintf("file_bytes: %d", len(content))) || !strings.Contains(out, "truncated: true") {
+		t.Errorf("stub must report the complete size and truncation: %s", head)
+	}
+	if !strings.Contains(out, "hint:") {
+		t.Errorf("stub must explain how to read a slice: %s", head)
+	}
+	if strings.Contains(out, "log line") {
+		t.Errorf("stub must not carry file content: %s", head)
+	}
+	// Explicit line targeting opts out of grading.
+	out, err = testTB.Execute(context.Background(), "file_read", fileJSON(map[string]any{"path": path, "start_line": 1, "end_line": 2}))
+	if err != nil {
+		t.Fatalf("line read: %v", err)
+	}
+	if !strings.Contains(out, "log line") {
+		t.Errorf("line-targeted read must return content: %s", out[:min(len(out), 400)])
+	}
+	// An explicit byte budget is an opt-in too.
+	out, err = testTB.Execute(context.Background(), "file_read", fileJSON(map[string]any{"path": path, "max_bytes": 8192}))
+	if err != nil {
+		t.Fatalf("explicit max_bytes read: %v", err)
+	}
+	if !strings.Contains(out, "\nbytes: 8192\n") {
+		t.Errorf("explicit max_bytes must be honored: %s", out[:min(len(out), 400)])
+	}
+}
+
+func TestFileReadSmallFileKeepsFullBody(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "small.txt")
+	content := "alpha\nbeta\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	out, err := testTB.Execute(context.Background(), "file_read", fileJSON(map[string]any{"path": path}))
+	if err != nil {
+		t.Fatalf("file_read: %v", err)
+	}
+	for _, want := range []string{"alpha\nbeta", fmt.Sprintf("file_bytes: %d", len(content))} {
+		if !strings.Contains(out, want) {
+			t.Errorf("small read missing %q: %s", want, out)
+		}
+	}
+	if strings.Contains(out, "truncated") || strings.Contains(out, "hint:") {
+		t.Errorf("small read must not be graded or hinted: %s", out)
+	}
+}
+
 func TestFileReadSelfDescribingOffsets(t *testing.T) {
 	dir := t.TempDir()
 	big := filepath.Join(dir, "big.txt")

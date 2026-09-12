@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -18,12 +19,18 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/pkg/httpclient"
 )
 
 // Manager owns one stdio connection per server id, created lazily.
 type Manager struct {
 	mu    sync.Mutex
 	conns map[string]*conn
+
+	// httpClient is shared by all HTTP/SSE MCP connections. The MCP library
+	// still creates one protocol transport per plugin, but they use one
+	// process-wide TCP connection pool underneath.
+	httpClient *http.Client
 
 	// onNotification receives server→client notifications pushed by a plugin
 	// (e.g. "a message arrived"). Registered per connection at dial time.
@@ -37,7 +44,7 @@ type conn struct {
 }
 
 func NewManager() *Manager {
-	return &Manager{conns: map[string]*conn{}}
+	return &Manager{conns: map[string]*conn{}, httpClient: httpclient.New()}
 }
 
 // SetNotificationHandler registers the callback invoked for every MCP
@@ -59,7 +66,7 @@ func (m *Manager) Connect(ctx context.Context, p *domain.Plugin) ([]contracts.MC
 	if c, ok := m.conns[p.Manifest.MCPServerID()]; ok {
 		return c.tools, nil
 	}
-	c, err := dial(ctx, p, m.onNotification)
+	c, err := dial(ctx, p, m.onNotification, m.httpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -132,18 +139,24 @@ func contentText(result *mcp.CallToolResult) string {
 	return strings.TrimSpace(sb.String())
 }
 
-func dial(ctx context.Context, p *domain.Plugin, onNotification func(serverID string, n mcp.JSONRPCNotification)) (*conn, error) {
+func dial(ctx context.Context, p *domain.Plugin, onNotification func(serverID string, n mcp.JSONRPCNotification), httpClient *http.Client) (*conn, error) {
 	cfg := p.Manifest.MCP
 	var mcpClient *client.Client
 	switch cfg.Transport {
 	case domain.PluginTransportSSE:
-		c, err := client.NewSSEMCPClient(cfg.URL, transport.WithHeaders(cfg.Headers))
+		c, err := client.NewSSEMCPClient(cfg.URL,
+			transport.WithHeaders(cfg.Headers),
+			transport.WithHTTPClient(httpClient),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("connect %s: %w", cfg.URL, err)
 		}
 		mcpClient = c
 	case domain.PluginTransportHTTP:
-		c, err := client.NewStreamableHttpClient(cfg.URL, transport.WithHTTPHeaders(cfg.Headers))
+		c, err := client.NewStreamableHttpClient(cfg.URL,
+			transport.WithHTTPHeaders(cfg.Headers),
+			transport.WithHTTPBasicClient(httpClient),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("connect %s: %w", cfg.URL, err)
 		}

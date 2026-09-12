@@ -53,13 +53,25 @@ func TestNormalizeSettingsClampsSlowDown(t *testing.T) {
 
 // Explicit user intent persists verbatim; unrecognized values reset to empty
 // (not to a concrete default) for the same reason.
-func TestNormalizeSettingsKeepsExplicitContractMode(t *testing.T) {
-	for _, mode := range []string{PluginContractOff, PluginContractHint, PluginContractRequire} {
-		if got := NormalizeSettings(Settings{PluginContractMode: mode}).PluginContractMode; got != mode {
-			t.Fatalf("explicit %q rewritten to %q", mode, got)
-		}
+
+func TestNormalizeSettingsCompactionWorkflowDefaultsAndEnforcesReuseModel(t *testing.T) {
+	if got := DefaultSettings().CompactionWorkflow; got != CompactionWorkflowDedicated {
+		t.Fatalf("default compaction workflow = %q, want %q", got, CompactionWorkflowDedicated)
 	}
-	if got := NormalizeSettings(Settings{PluginContractMode: "yolo"}).PluginContractMode; got != "" {
-		t.Fatalf("unknown mode must reset to empty, got %q", got)
+	if got := NormalizeSettings(Settings{}).CompactionWorkflow; got != CompactionWorkflowDedicated {
+		t.Fatalf("unset compaction workflow = %q, want %q", got, CompactionWorkflowDedicated)
+	}
+	if got := NormalizeSettings(Settings{CompactionWorkflow: "unknown"}).CompactionWorkflow; got != CompactionWorkflowDedicated {
+		t.Fatalf("unknown compaction workflow = %q, want %q", got, CompactionWorkflowDedicated)
+	}
+	got := NormalizeSettings(Settings{
+		CompactionWorkflow: CompactionWorkflowReuse,
+		CompactionModel:    "other:model",
+	})
+	if got.CompactionWorkflow != CompactionWorkflowReuse {
+		t.Fatalf("reuse workflow normalized to %q", got.CompactionWorkflow)
+	}
+	if got.CompactionModel != "" {
+		t.Fatalf("reuse workflow kept compaction model override %q", got.CompactionModel)
 	}
 }

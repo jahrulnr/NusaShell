@@ -94,7 +94,7 @@ func contextLimitFromError(err error) (int, bool) {
 	if !errors.As(err, &upstream) || upstream.Err == nil {
 		return 0, false
 	}
-	n, _, ok := domain.ExtractContextLimit(upstream.Err.Error())
+	n, _, ok := ExtractContextLimit(upstream.Err.Error())
 	return n, ok
 }
 

@@ -27,6 +27,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"nusashell/pkg/httpclient"
 )
 
 // Default constants for runtime management.
@@ -61,7 +63,8 @@ type Manager struct {
 	// BaseDir is the root directory for runtimes, typically ~/.nusashell/runtimes/codex.
 	BaseDir string
 
-	// HTTPClient is used for downloads. Defaults to http.DefaultClient if nil.
+	// HTTPClient is used for downloads. Defaults to the central outbound
+	// client when nil.
 	HTTPClient *http.Client
 }
 
@@ -73,7 +76,7 @@ func NewManager() (*Manager, error) {
 	}
 	return &Manager{
 		BaseDir:    filepath.Join(home, ".nusashell", RuntimeDirName),
-		HTTPClient: &http.Client{Timeout: downloadTimeout},
+		HTTPClient: httpclient.NewWithTimeout(downloadTimeout),
 	}, nil
 }
 
@@ -282,7 +285,7 @@ func (m *Manager) DownloadLatest(ctx context.Context) (string, error) {
 func (m *Manager) fetchLatestRelease(ctx context.Context) (*githubRelease, error) {
 	client := m.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: httpTimeout}
+		client = httpclient.NewWithTimeout(httpTimeout)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", GitHubAPILatest, nil)
@@ -314,7 +317,7 @@ func (m *Manager) fetchLatestRelease(ctx context.Context) (*githubRelease, error
 func (m *Manager) downloadAndExtract(ctx context.Context, version, assetURL string) (string, error) {
 	client := m.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: downloadTimeout}
+		client = httpclient.NewWithTimeout(downloadTimeout)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", assetURL, nil)

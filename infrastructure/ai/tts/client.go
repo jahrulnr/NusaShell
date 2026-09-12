@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"nusashell/application"
+	"nusashell/pkg/httpclient"
 )
 
 // Client posts text to an OpenAI-compatible POST /audio/speech endpoint and
@@ -37,7 +38,7 @@ func (c *Client) Synthesize(ctx context.Context, req application.TTSRequest) (*a
 	}
 	httpClient := c.HTTP
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = httpclient.NewWithTimeout(httpclient.DefaultRequestTimeout)
 	}
 
 	body := speechRequest{

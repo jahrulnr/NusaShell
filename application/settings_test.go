@@ -152,6 +152,29 @@ func TestNormalizeSettingsPreservesUserPrompt(t *testing.T) {
 	}
 }
 
+func TestHandleSettingsSetCompactionWorkflow(t *testing.T) {
+	app := &App{Settings: &memSettingsStore{s: domain.DefaultSettings()}, Logs: &fakeLogStore{}}
+	model := "cheap:model"
+	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{CompactionModel: &model}); rpcErr != nil {
+		t.Fatalf("set compaction model: %v", rpcErr.Message)
+	}
+	reuse := string(domain.CompactionWorkflowReuse)
+	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{CompactionWorkflow: &reuse}); rpcErr != nil {
+		t.Fatalf("set reuse workflow: %v", rpcErr.Message)
+	}
+	got := app.Settings.Get()
+	if got.CompactionWorkflow != domain.CompactionWorkflowReuse || got.CompactionModel != "" {
+		t.Fatalf("reuse settings = %+v, want reuse with no model override", got)
+	}
+	if dto := settingsDTO(got); dto.CompactionWorkflow != reuse {
+		t.Fatalf("DTO compaction workflow = %q, want %q", dto.CompactionWorkflow, reuse)
+	}
+	bad := "not-a-workflow"
+	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{CompactionWorkflow: &bad}); rpcErr == nil {
+		t.Fatal("unknown compaction workflow must be rejected")
+	}
+}
+
 // TestHandleSettingsSetSlowDown: settings.set must persist a valid
 // slow_down, reject out-of-range values, and round-trip it through the DTO.
 func TestHandleSettingsSetSlowDown(t *testing.T) {

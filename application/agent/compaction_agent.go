@@ -13,18 +13,24 @@ import (
 // exhausted. The chunk loop (takeCompactionChunk) lives in the caller;
 // the engine runs one pass.
 type compactionPass struct {
-	svc       *Service
-	adapter   ProviderContext
-	model     string
-	system    string
-	msgs      []ChatMessage
-	budget    int
-	maxBudget int
-	minChars  int
-	convID    string
-	lastLen   int
-	lastErr   error
-	summary   string // valid summary from the terminal round
+	svc            *Service
+	adapter        ProviderContext
+	model          string
+	system         string
+	msgs           []ChatMessage
+	budget         int
+	maxBudget      int
+	minChars       int
+	convID         string
+	lastLen        int
+	lastErr        error
+	summary        string // valid summary from the terminal round
+	tools          []ToolDef
+	promptCaching  bool
+	promptCache    *PromptCachePolicy
+	conversationID string
+	providerRoute  string
+	effort         string
 }
 
 // run executes the pass through the AgentEngine and reports whether a
@@ -41,12 +47,18 @@ func (p *compactionPass) rules() AgentRules {
 		},
 		BuildRequest: func(st *RoundState) ChatRequest {
 			return ChatRequest{
-				Model:      p.model,
-				System:     p.system,
-				Messages:   p.msgs,
-				Tools:      toToolDefs(p.svc.toolFactory().Get(AgentCompaction, "")),
-				ToolChoice: compactionToolChoice(p.adapter.Kind),
-				MaxTokens:  p.budget,
+				Model:            p.model,
+				System:           p.system,
+				Messages:         p.msgs,
+				Tools:            p.tools,
+				PromptCaching:    p.promptCaching,
+				PromptCache:      p.promptCache,
+				ConversationID:   p.conversationID,
+				ProviderRoute:    p.providerRoute,
+				Effort:           p.effort,
+				ReasoningSummary: p.adapter.ReasoningSummary,
+				ToolChoice:       compactionToolChoice(p.adapter.Kind),
+				MaxTokens:        p.budget,
 			}
 		},
 		// Terminal: the summary() tool call (or content fallback) is

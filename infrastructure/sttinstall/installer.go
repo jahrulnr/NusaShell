@@ -20,6 +20,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/infrastructure/nusatemp"
+	"nusashell/pkg/httpclient"
 )
 
 // Progress rides the stt.install.* bus events. BytesFetched/BytesTotal are
@@ -49,7 +50,7 @@ func New(dataDir, releaseBase, modelsBase string) *Installer {
 		dataDir:     dataDir,
 		releaseBase: strings.TrimRight(releaseBase, "/"),
 		modelsBase:  strings.TrimRight(modelsBase, "/"),
-		client:      &http.Client{Timeout: downloadTimeout},
+		client:      httpclient.NewWithTimeout(downloadTimeout),
 	}
 	if in.releaseBase == "" {
 		in.releaseBase = whisperReleasesBase + "/" + releaseTag

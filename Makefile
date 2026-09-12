@@ -11,7 +11,7 @@ VERSION_FILE ?= VERSION
 NUSASHELL_VERSION := $(shell tr -d '\r\n' < "$(VERSION_FILE)")
 GO_LDFLAGS ?= -X main.version=$(NUSASHELL_VERSION)
 
-.PHONY: all build test race vet fmt check verify-local hooks run go-dev install install-bin install-release test-frontend test-frontend-e2e scan-ui-docs scan-ui-docs-check gen-catalog gen-catalog-check go-version installer-test go-release go-release-manifest release-index-check
+.PHONY: all build test race vet fmt check verify-local hooks run go-dev install install-bin install-release test-frontend test-frontend-e2e scan-ui-docs scan-ui-docs-check gen-catalog gen-catalog-check go-version installer-test go-release go-release-manifest release-index-check skill-check skill-validate
 
 all: check
 
@@ -67,7 +67,16 @@ fmt:
 	@echo "gofmt: done"
 
 ## check: full verification baseline (Go gates + frontend tests).
-check: fmt fmt-check test vet build test-frontend
+check: fmt fmt-check test vet build skill-check test-frontend
+
+## skill-check: validate builtin skill packages and routed skill references.
+skill-check: skill-validate
+	node --test scripts/skill-creator-validator.test.mjs
+	bash resources/agent/skills/llm-integration/scripts/check_references.sh
+
+## skill-validate: run the portable package validator against all builtins.
+skill-validate:
+	python3 resources/agent/skills/skill-creator/scripts/quick_validate.py --check-links $$(find resources/agent/skills -mindepth 1 -maxdepth 1 -type d -print)
 
 ## verify-local: run native repository gates plus Windows/macOS compile checks.
 verify-local:

@@ -87,6 +87,11 @@ func ToCoreRequest(req ChatRequest, kind domain.ProviderKind, openRouter bool) *
 		if err != nil {
 			continue
 		}
+		// Responses may implicitly close free-form objects when strict is
+		// omitted. MCP arguments must accept the discovered tool's fields.
+		if t.Name == "mcp_call" && (kind == domain.ProviderResponses || kind == domain.ProviderCodex) {
+			tool.Strict = core.StrictDisabled
+		}
 		out.Tools = append(out.Tools, tool)
 	}
 	out.ToolChoice = req.ToolChoice

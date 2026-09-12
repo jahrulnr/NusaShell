@@ -7,6 +7,7 @@ import (
 	"nusashell/application"
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/stt"
+	"nusashell/pkg/httpclient"
 )
 
 // NewSpeechTranscriberFactory builds SpeechTranscribers for providers with a
@@ -16,6 +17,7 @@ import (
 // provider kinds have no known transcription endpoint and fail fast so the
 // caller can fall back to the multimodal chat path.
 func NewSpeechTranscriberFactory() application.SpeechTranscriberFactory {
+	client := httpclient.NewWithTimeout(httpclient.DefaultRequestTimeout)
 	return func(p *domain.Provider, apiKey string) (application.SpeechTranscriber, error) {
 		if p == nil {
 			return nil, fmt.Errorf("stt: nil provider")
@@ -27,6 +29,6 @@ func NewSpeechTranscriberFactory() application.SpeechTranscriberFactory {
 		if base == "" {
 			return nil, fmt.Errorf("stt: provider %q has no base URL", p.ID)
 		}
-		return &stt.Client{BaseURL: base, APIKey: apiKey}, nil
+		return &stt.Client{BaseURL: base, APIKey: apiKey, HTTP: client}, nil
 	}
 }

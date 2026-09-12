@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark light">
+    <title>OpenAI Responses web chat</title>
+    <link rel="stylesheet" href="/style.css">
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">Go + raw Responses API</p>
+        <h1>A small, inspectable web chat.</h1>
+        <p class="lede">
+          The browser talks to a local Go server. The server owns the API key,
+          keeps the conversation in memory, and allowlists one safe demo tool.
+        </p>
+        <div class="status-card" role="status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>Local server ready when <code>OPENAI_API_KEY</code> is set</span>
+        </div>
+      </header>
+
+      <section class="chat-card" aria-labelledby="chat-title">
+        <div class="chat-toolbar">
+          <div>
+            <p class="section-label">Conversation</p>
+            <h2 id="chat-title">Responses playground</h2>
+          </div>
+          <div class="toolbar-actions">
+            <span id="session-label" class="session-label"></span>
+            <button id="reset-button" class="button button-secondary" type="button">
+              New chat
+            </button>
+          </div>
+        </div>
+
+        <ol id="messages" class="messages" aria-live="polite" aria-relevant="additions"></ol>
+
+        <form id="chat-form" class="composer">
+          <label for="message">Message</label>
+          <div class="composer-row">
+            <textarea id="message" name="message" rows="2" maxlength="4000"
+              placeholder="Ask a question, or try: What time is it?" required></textarea>
+            <button id="send-button" class="button button-primary" type="submit">
+              Send
+            </button>
+          </div>
+          <p class="composer-hint">Enter sends. Shift+Enter adds a new line.</p>
+        </form>
+
+        <p id="meta" class="meta" role="status">
+          Prompt cache key: generated per chat session; it is not a credential.
+        </p>
+      </section>
+
+      <footer class="footer">
+        <p>
+          Demo only: sessions disappear when the Go process restarts. Add
+          authentication and rate limits before exposing this server to others.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

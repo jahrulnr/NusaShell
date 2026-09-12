@@ -944,6 +944,60 @@ test('openTextPreviewPopup renders the <pre><code> fallback when the CodeMirror 
 
 // ---------- bounded stream read ----------
 
+test('openTextPreviewPopup preserves the response body after bounded text detection', async () => {
+  makeDom();
+  const origFetch = globalThis.fetch;
+  const source = 'package httpclient\n\nfunc Shared() {}\n';
+  let cloneCalls = 0;
+
+  function oneShotResponse() {
+    const bytes = new TextEncoder().encode(source);
+    let bodyUsed = false;
+    let read = false;
+    return {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: { get: (name) => name.toLowerCase() === 'content-type' ? 'text/plain; charset=utf-8' : null },
+      body: {
+        getReader: () => {
+          if (bodyUsed) throw new TypeError("Failed to execute 'getReader' on 'Response': body stream already read");
+          bodyUsed = true;
+          return {
+            read: async () => {
+              if (read) return { done: true };
+              read = true;
+              return { done: false, value: bytes };
+            },
+            cancel: async () => {},
+          };
+        },
+      },
+      text: async () => {
+        if (bodyUsed) throw new TypeError("Failed to execute 'text' on 'Response': body stream already read");
+        bodyUsed = true;
+        return source;
+      },
+      clone: () => {
+        cloneCalls++;
+        return oneShotResponse();
+      },
+    };
+  }
+
+  globalThis.fetch = async () => oneShotResponse();
+  try {
+    await openTextPreviewPopup('/path/to/httpclient.go');
+    const overlay = document.querySelector('.agent-text-preview-overlay');
+    assert.ok(overlay?.textContent.includes(source), 'text body remains readable after sampling');
+    assert.equal(cloneCalls, 1, 'classification samples a cloned response body');
+    overlay.remove();
+  } finally {
+    globalThis.fetch = origFetch;
+    cleanup();
+  }
+});
+
 test('openTextPreviewPopup reads at most 4 KiB of an uninformative body and cancels the stream reader', async () => {
   makeDom();
   const origFetch = globalThis.fetch;

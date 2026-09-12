@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync"
 
+	providerpkg "nusashell/application/provider"
 	"nusashell/domain"
 )
 
@@ -143,7 +144,7 @@ func (c *Cache) LearnFrom400(provider, model, errBody string) (domain.LearnedPar
 	if c == nil {
 		return "", ""
 	}
-	action, param := domain.Classify400Error(errBody)
+	action, param := providerpkg.Classify400Error(errBody)
 	if action == "" || param == "" {
 		return "", ""
 	}

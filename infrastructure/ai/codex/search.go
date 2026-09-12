@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"nusashell/pkg/httpclient"
 )
 
 const (
@@ -85,7 +87,7 @@ func NewSearchClient(cfg SearchConfig) (*SearchClient, error) {
 		cfg.BaseURL = DefaultBaseURL
 	}
 	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = &http.Client{}
+		cfg.HTTPClient = httpclient.New()
 	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = defaultSearchTimeout

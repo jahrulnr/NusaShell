@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { JSDOM } from 'jsdom';
+import { initInstallPrompt, isInstallableWindow } from '../js/pwa-install.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..', '..');
@@ -121,6 +122,22 @@ test('install button appears on beforeinstallprompt and hides after install flow
     window.dispatchEvent(new window.Event('appinstalled'));
     assert.equal(btn.hidden, true);
   }));
+
+test('install prompt stays hidden in standalone and Electron windows', () => {
+  const standalone = new JSDOM('<button id="install" hidden></button>', { url: 'http://127.0.0.1:10994/' });
+  standalone.window.matchMedia = () => ({ matches: true });
+  assert.equal(isInstallableWindow(standalone.window), false);
+  initInstallPrompt(standalone.window.document.getElementById('install'), { windowRef: standalone.window });
+  standalone.window.dispatchEvent(new standalone.window.Event('beforeinstallprompt'));
+  assert.equal(standalone.window.document.getElementById('install').hidden, true);
+
+  const electron = new JSDOM('<button id="install" hidden></button>', { url: 'http://127.0.0.1:10994/' });
+  Object.defineProperty(electron.window.navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 Electron/35.0' });
+  assert.equal(isInstallableWindow(electron.window), false);
+  initInstallPrompt(electron.window.document.getElementById('install'), { windowRef: electron.window });
+  electron.window.dispatchEvent(new electron.window.Event('beforeinstallprompt'));
+  assert.equal(electron.window.document.getElementById('install').hidden, true);
+});
 
 test('mini window falls back to a popup when Document PiP is unavailable', () =>
   withDom('<div id="agent-thread"></div>', async (window) => {

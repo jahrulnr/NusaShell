@@ -13,6 +13,7 @@ import (
 	"time"
 
 	aiutil "nusashell/infrastructure/ai/internal"
+	"nusashell/pkg/httpclient"
 )
 
 // EmbeddingMaxTokens is the default token cap applied to embedding inputs.
@@ -52,11 +53,22 @@ type Embedder struct {
 // (e.g. "text-embedding-3-small" or "openai/text-embedding-3-small").
 // maxTokens caps each input (0 = EmbeddingMaxTokens).
 func NewEmbedder(baseURL, apiKey, model string, maxTokens int) *Embedder {
+	return NewEmbedderWithClient(baseURL, apiKey, model, maxTokens, nil)
+}
+
+// NewEmbedderWithClient creates an embedding provider using the supplied
+// client. A nil client gets a central client with the finite-operation
+// timeout, while callers that already own a shared client can preserve its
+// transport and policy.
+func NewEmbedderWithClient(baseURL, apiKey, model string, maxTokens int, client *http.Client) *Embedder {
+	if client == nil {
+		client = httpclient.NewWithTimeout(httpclient.DefaultRequestTimeout)
+	}
 	return &Embedder{
 		BaseURL:   strings.TrimRight(baseURL, "/"),
 		APIKey:    apiKey,
 		Model:     model,
-		Client:    &http.Client{Timeout: 300 * time.Second},
+		Client:    client,
 		MaxTokens: maxTokens,
 	}
 }

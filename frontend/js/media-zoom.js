@@ -882,8 +882,11 @@ export async function openTextPreviewPopup(filePath) {
       preview = { kind: headerKind, source: 'content-type', contentType: cleanContentType(contentType) };
     } else {
       // Uninformative header: read a bounded 4 KiB sample for the magic
-      // and binary heuristic, then let classifyLocalPreview decide.
-      bytes = await readBoundedSample(res, 4096, controller.signal);
+      // and binary heuristic, then let classifyLocalPreview decide. Keep the
+      // original response unread because text/Markdown may need its full body
+      // below; a Response body cannot be consumed twice.
+      const sampleResponse = typeof res.clone === 'function' ? res.clone() : res;
+      bytes = await readBoundedSample(sampleResponse, 4096, controller.signal);
       if (closed) return;
       preview = classifyLocalPreview({ filePath: cleanPath, contentType, bytes });
     }

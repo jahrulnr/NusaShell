@@ -1,7 +1,16 @@
 package domain
 
-// Compaction budget policy constants.
-//
+// CompactionWorkflow selects the request shape used by client-side text
+// compaction. Dedicated preserves the summary-only system prompt; Reuse
+// carries the normal agent prompt and toolbox so the provider can reuse the
+// same long prompt-cache prefix.
+type CompactionWorkflow string
+
+const (
+	CompactionWorkflowDedicated CompactionWorkflow = "dedicated"
+	CompactionWorkflowReuse     CompactionWorkflow = "reuse"
+)
+
 // These are domain policy: they govern how the compaction summarization
 // pass allocates the model's context window across retained messages,
 // the summary output budget, system framing overhead, and the quality

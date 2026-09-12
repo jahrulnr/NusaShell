@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"nusashell/application/conversation"
 	"nusashell/application/learn"
@@ -370,6 +372,9 @@ func (a *App) learnDeps() learn.Deps {
 			d.ConversationPath = loc.ConversationPath
 		}
 	}
+	if a.Providers != nil && a.Credentials != nil {
+		d.ResolveLearnerModel = a.resolveLearnerModel
+	}
 	return d
 }
 
@@ -384,6 +389,112 @@ func (a *App) learnService() *learn.Service {
 	}
 	a.learnSvc = learn.New(a.learnDeps())
 	return a.learnSvc
+}
+
+// resolveLearnerModel resolves the model for a background learning job when
+// review_model is empty. The cascade follows the UI promise:
+//  1. the source conversation's model (last assistant message, then conv.Model);
+//  2. the newest other conversation's model (the list is sorted by UpdatedAt
+//     here so the cascade does not depend on adapter ordering);
+//  3. the first enabled provider that has a credential and at least one model;
+//  4. "" when nothing resolves (the headless turn surfaces the error).
+//
+// It never consults DelegateModel — that setting is for automation agent
+// steps, not learning. Each step validates the model resolves to an enabled
+// provider with a credential before returning, so a stale conversation model
+// falls through to the next step instead of producing a confusing error.
+func (a *App) resolveLearnerModel(sourceConversationID string) string {
+	if model := a.resolveConversationModelByID(sourceConversationID); model != "" {
+		return model
+	}
+	if a.Conversations != nil {
+		conversations := append([]*domain.Conversation(nil), a.Conversations.List()...)
+		sort.SliceStable(conversations, func(i, j int) bool {
+			return conversations[i] != nil && (conversations[j] == nil || conversations[i].UpdatedAt.After(conversations[j].UpdatedAt))
+		})
+		for _, conv := range conversations {
+			if conv == nil || conv.ID == sourceConversationID {
+				continue
+			}
+			if model := a.resolveConversationModel(conv); model != "" {
+				return model
+			}
+			break // only the newest (first in list) is a candidate
+		}
+	}
+	return a.firstEnabledProviderModel()
+}
+
+// resolveConversationModelByID resolves the model of a single conversation
+// by id. Returns the qualified "providerID:modelID" form, or "" when the
+// conversation is missing, has no model, or its model no longer resolves to
+// an enabled provider with a credential.
+func (a *App) resolveConversationModelByID(conversationID string) string {
+	if strings.TrimSpace(conversationID) == "" || a.Conversations == nil {
+		return ""
+	}
+	conv, err := a.Conversations.Get(conversationID)
+	if err != nil || conv == nil {
+		return ""
+	}
+	return a.resolveConversationModel(conv)
+}
+
+// resolveConversationModel extracts the effective model from a conversation
+// (last assistant message model, then conv.Model) and validates it resolves
+// to an enabled provider with a credential. Returns the qualified
+// "providerID:modelID" form, or "" when the model is absent or unresolvable.
+func (a *App) resolveConversationModel(conv *domain.Conversation) string {
+	model := ""
+	for i := len(conv.Messages) - 1; i >= 0; i-- {
+		m := conv.Messages[i]
+		if m.Role == domain.RoleAssistant && m.Model != "" && m.Status == domain.StatusDone {
+			model = m.Model
+			break
+		}
+	}
+	if model == "" {
+		model = conv.Model
+	}
+	return a.qualifiedModel(model)
+}
+
+// qualifiedModel resolves a model string to its "providerID:modelID" form,
+// validating that the provider is enabled and has a credential. Returns ""
+// when the model is empty or does not resolve to a usable provider.
+func (a *App) qualifiedModel(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ""
+	}
+	p, bare, key, rpcErr := a.resolveModel(model)
+	if rpcErr != nil || p == nil || !p.Enabled {
+		return ""
+	}
+	if key == "" {
+		return ""
+	}
+	return p.ID + ":" + bare
+}
+
+// firstEnabledProviderModel returns the first model of the first enabled
+// provider that has a credential and at least one model, in qualified
+// "providerID:modelID" form. Returns "" when no provider is usable.
+func (a *App) firstEnabledProviderModel() string {
+	if a.Providers == nil || a.Credentials == nil {
+		return ""
+	}
+	for _, p := range a.Providers.List() {
+		if p == nil || !p.Enabled || len(p.Models) == 0 {
+			continue
+		}
+		key, has, err := a.Credentials.Get(p.ID)
+		if err != nil || !has || key == "" {
+			continue
+		}
+		return p.ID + ":" + p.Models[0].ID
+	}
+	return ""
 }
 
 func (a *App) toolsDeps() tools.Deps {

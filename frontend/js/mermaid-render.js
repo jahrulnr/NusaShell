@@ -13,11 +13,9 @@ function mermaidBlocksIn(container) {
 // Mermaid diagram renderer for chat messages.
 //
 // Design constraints (from the chat streaming model):
-//   1. Live deltas must not re-render diagrams. renderMarkdown emits a cheap
-//      `.mermaid-block` placeholder (raw source only); this module renders it to
-//      SVG only when called at a settle point (renderThread / turn.done), never
-//      per delta. Each block is keyed by a content hash so repeated calls skip
-//      already-rendered diagrams.
+//   1. Live deltas keep Mermaid work cheap. renderMarkdown emits a placeholder
+//      (raw source only); callers may render a block immediately when its fence
+//      closes, while the content hash makes repeated enhancement passes free.
 //   2. Invalid Mermaid must not break the message. We validate with
 //      mermaid.parse({suppressErrors}) before rendering and fall back to the raw
 //      source + a note on any failure, catching errors so a bad diagram from the
@@ -26,28 +24,80 @@ function mermaidBlocksIn(container) {
 // Mermaid is lazy-loaded (a ~3MB UMD bundle) the first time a diagram appears.
 
 let mermaidPromise = null;
+let configuredMermaid = null;
 const MIN_INLINE_MERMAID_WIDTH = 420;
 
+// The prototype and the production frontend can preload Mermaid themselves.
+// Keep configuration idempotent so both paths get the same palette instead of
+// relying on which script happened to win the race.
+function configureMermaid(mermaid) {
+  if (!mermaid || configuredMermaid === mermaid) return;
+  if (typeof mermaid.initialize !== 'function') return;
+  try {
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: 'base',
+      fontFamily: 'IBM Plex Sans, sans-serif',
+      themeVariables: {
+        background: '#0a0f1d',
+        primaryColor: '#121b2e',
+        primaryTextColor: '#edf2f4',
+        primaryBorderColor: '#58d1c3',
+        lineColor: '#79aee8',
+        secondaryColor: '#0d1425',
+        secondaryTextColor: '#edf2f4',
+        secondaryBorderColor: '#344661',
+        tertiaryColor: '#18243a',
+        tertiaryTextColor: '#edf2f4',
+        tertiaryBorderColor: '#344661',
+        textColor: '#edf2f4',
+        nodeTextColor: '#edf2f4',
+        edgeLabelBackground: '#0a0f1d',
+        clusterBkg: '#0d1425',
+        clusterBorder: '#344661',
+        titleColor: '#edf2f4',
+        actorBkg: '#121b2e',
+        actorBorder: '#58d1c3',
+        actorTextColor: '#edf2f4',
+        signalColor: '#79aee8',
+        signalTextColor: '#b9c3cc',
+        labelBoxBkgColor: '#121b2e',
+        labelBoxBorderColor: '#344661',
+        labelTextColor: '#edf2f4',
+        noteBkgColor: '#18243a',
+        noteBorderColor: '#d1b77f',
+        noteTextColor: '#edf2f4',
+        activationBkgColor: '#18243a',
+        activationBorderColor: '#58d1c3',
+        sequenceNumberColor: '#050610',
+        fontFamily: 'IBM Plex Sans, sans-serif',
+        fontSize: '14px',
+      },
+      // Mermaid's foreignObject labels otherwise clip long node text. Keep
+      // the SVG layer transparent so the surrounding chat surface shows
+      // through without a bright rectangle during rendering.
+      themeCSS: '.label foreignObject { overflow: visible; } .nodeLabel, .edgeLabel, .label { overflow: visible; } svg { background: transparent; }',
+    });
+    configuredMermaid = mermaid;
+  } catch { /* initialize is best-effort; rendering still has a raw fallback */ }
+}
+
 function loadMermaid() {
-  if (typeof window !== 'undefined' && window.mermaid) return Promise.resolve(window.mermaid);
+  if (typeof window !== 'undefined' && window.mermaid) {
+    configureMermaid(window.mermaid);
+    return Promise.resolve(window.mermaid);
+  }
   if (mermaidPromise) return mermaidPromise;
   mermaidPromise = new Promise((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = '/vendor/mermaid/mermaid.min.js';
+    // Resolve from the module instead of assuming the host mounts `vendor/`
+    // at the document root. The native app serves this module from `/js/`,
+    // while the widget prototype imports it from `/frontend/js/`.
+    script.src = new URL('../vendor/mermaid/mermaid.min.js', import.meta.url).href;
     script.async = true;
     script.onload = () => {
-      try {
-        window.mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: 'strict',
-          theme: 'dark',
-          fontFamily: 'inherit',
-          // Workaround for mermaid-js/mermaid#790: foreignObject (HTML
-          // labels) has overflow:hidden by default, which clips long node
-          // text. Force overflow:visible so labels never get cut off.
-          themeCSS: '.label foreignObject { overflow: visible; } .nodeLabel, .edgeLabel, .label { overflow: visible; }',
-        });
-      } catch { /* initialize is best-effort */ }
+      configureMermaid(window.mermaid);
       resolve(window.mermaid);
     };
     script.onerror = () => {
@@ -133,8 +183,8 @@ export async function renderMermaidDiagrams(container) {
       block.dataset.rendered = hash;
       // Mermaid 10.x emits explicit width/height in px on the <svg>. Replace
       // those dimensions with a viewBox-driven inline baseline: compact
-      // diagrams no longer collapse to the browser's 300px SVG default, while
-      // max-width keeps the result inside a narrow conversation card.
+      // diagrams no longer collapse to the browser's 300px SVG default. The
+      // block itself owns the overflow viewport so the SVG can stay crisp.
       const svgEl = block.querySelector('svg');
       if (svgEl) {
         const vb = svgEl.getAttribute('viewBox');
@@ -148,7 +198,10 @@ export async function renderMermaidDiagrams(container) {
             svgEl.style.width = `${Math.max(MIN_INLINE_MERMAID_WIDTH, width)}px`;
             svgEl.style.aspectRatio = `${width} / ${height}`;
           }
-          svgEl.style.maxWidth = '100%';
+          // Keep the vector's intrinsic width so narrow cards can scroll
+          // horizontally instead of shrinking labels into unreadable pixels.
+          // The surrounding `.mermaid-block` owns the overflow viewport.
+          svgEl.style.maxWidth = 'none';
           svgEl.style.height = 'auto';
         }
       }

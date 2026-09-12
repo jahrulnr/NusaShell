@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"nusashell/application"
+	"nusashell/pkg/httpclient"
 )
 
 // whamUsageURL is the ChatGPT rate-limit usage endpoint.
@@ -60,7 +61,7 @@ func FetchUsage(ctx context.Context, tokenJSON string) (application.CodexUsageRe
 		req.Header.Set("ChatGPT-Account-ID", tok.AccountID)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpclient.Shared().Do(req)
 	if err != nil {
 		return application.CodexUsageResult{}, fmt.Errorf("codex usage: fetch: %w", err)
 	}

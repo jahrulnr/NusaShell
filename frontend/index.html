@@ -852,6 +852,13 @@
                 <input id="settings-compaction-enabled" type="checkbox">
                 <span class="toggle-slider" aria-hidden="true"></span>
               </label>
+              <label class="settings-field" for="settings-compaction-workflow">Compaction workflow
+                <select id="settings-compaction-workflow">
+                  <option value="dedicated">Dedicated summary-only (default)</option>
+                  <option value="reuse">Reuse agent prompt + full toolbox</option>
+                </select>
+                <small>Dedicated keeps the existing summary-only request. Reuse sends the normal agent prompt and toolbox to preserve the active model's prompt-cache prefix, and always uses the conversation's active model.</small>
+              </label>
               <label class="settings-field" for="settings-max-input-tokens">Max input tokens (fallback context window)
                 <input id="settings-max-input-tokens" type="number" min="1000" max="2000000" step="1000" inputmode="numeric" value="200000">
                 <small>Fallback context window when a provider does not advertise one (default 200,000). Models that report their own window use that value instead.</small>
@@ -889,9 +896,9 @@
               <p class="settings-card-copy">Background jobs run a single learner that consolidates recorded experience into memory records and, for repeated procedures, may evaluate and evolve a skill. Separate from project memory and from the embedding model used for search.</p>
               <label class="settings-field" for="settings-review-model">Review model
                 <select id="settings-review-model">
-                  <option value="">Default — use the conversation's active model</option>
+                  <option value="">Default — use the reviewed conversation or first credentialed provider</option>
                 </select>
-                <small>Route background learning jobs to a cheaper or faster model. Leave as default to use the active model.</small>
+                <small>Route background learning jobs to a cheaper or faster model. The default follows the conversation being reviewed, then the newest conversation, then the first enabled provider with a credential and at least one model.</small>
               </label>
               <label class="settings-field" for="settings-learner-nudge-interval">Periodic review interval
                 <input id="settings-learner-nudge-interval" type="number" min="0" max="100" step="1" inputmode="numeric" value="10">

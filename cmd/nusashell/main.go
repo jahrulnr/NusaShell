@@ -41,6 +41,7 @@ import (
 	"nusashell/infrastructure/sttinstall"
 	"nusashell/infrastructure/tools"
 	"nusashell/infrastructure/ttsinstall"
+	"nusashell/pkg/httpclient"
 	"nusashell/transport"
 
 	"github.com/jahrulnr/searchwire"
@@ -118,6 +119,7 @@ func seedProvidersCmd() error {
 }
 
 func run() error {
+	defer httpclient.CloseIdleConnections()
 	host := envOr("NUSASHELL_HOST", "127.0.0.1")
 	port := envOr("NUSASHELL_PORT", "10994")
 	dataDir := envOr("NUSASHELL_DATA_DIR", defaultDataDir())
@@ -382,7 +384,6 @@ func run() error {
 	}
 	app.CodexOAuth = codex.NewOAuthAdapter()
 	app.CodexUsage = codex.NewUsageAdapter()
-	app.CodexContextWindowCache = codex.NewContextWindowCacheAdapter()
 	app.CodexCLIAuth = codex.NewCLIAuthImporterAdapter()
 	app.CodexRouter = application.NewCodexAccountRouterWithState(filepath.Join(dataDir, "config", "codex-router.json"))
 

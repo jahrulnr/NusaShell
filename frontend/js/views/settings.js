@@ -5,12 +5,13 @@ import { bindTablistKeyboard, toast, createSelect, el } from '../ui.js';
 import { FONT_OPTIONS, readFontPreference, setFontPreference } from '../font-preferences.js';
 
 let bound = false;
-const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', imageProviderId: '', imageModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', videoGenProviderId: '', videoGenModelId: '', ttsProviderId: '', ttsModelId: '', webAnswerProvider: '', webAnswerModel: '', webSearchStrategy: '', compactionModel: '', reviewModel: '', delegateModel: '' };
+const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', imageProviderId: '', imageModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', videoGenProviderId: '', videoGenModelId: '', ttsProviderId: '', ttsModelId: '', webAnswerProvider: '', webAnswerModel: '', webSearchStrategy: '', compactionWorkflow: 'dedicated', compactionModel: '', reviewModel: '', delegateModel: '' };
 let preferredSelect;
 let embeddingSelect;
 let visionSelect;
 let imageSelect;
 let compactionSelect;
+let compactionWorkflowSelect;
 let reviewSelect;
 let delegateSelect;
 let audioSelect;
@@ -53,6 +54,7 @@ export async function initSettings() {
     document.getElementById('settings-save-btn').addEventListener('click', save);
     document.getElementById('settings-sidebar-compact').addEventListener('change', saveSidebarPreference);
     document.getElementById('settings-pets-auto-start').addEventListener('change', savePetsAutoStart);
+    document.getElementById('settings-compaction-workflow').addEventListener('change', syncCompactionWorkflowUI);
     document.getElementById('settings-pet-action-btn').addEventListener('click', triggerPetAction);
     fontSelect = createSelect(document.getElementById('settings-font-family'), {
       data: FONT_OPTIONS.map((option) => ({
@@ -99,8 +101,15 @@ export async function initSettings() {
       placeholder: 'Default — use the conversation\'s active model',
       search: true,
     });
+    compactionWorkflowSelect = createSelect(document.getElementById('settings-compaction-workflow'), {
+      data: [
+        { text: 'Dedicated summary-only (default)', value: 'dedicated' },
+        { text: 'Reuse agent prompt + full toolbox', value: 'reuse' },
+      ],
+      search: false,
+    });
     reviewSelect = createSelect(document.getElementById('settings-review-model'), {
-      placeholder: 'Default — use the conversation\'s active model',
+      placeholder: 'Default — use the reviewed conversation or first credentialed provider',
       search: true,
     });
     delegateSelect = createSelect(document.getElementById('settings-delegate-model'), {
@@ -200,6 +209,7 @@ export async function refresh() {
   if (settingsResult.status === 'fulfilled') {
     const { settings } = settingsResult.value;
     document.getElementById('settings-compaction-enabled').checked = settings.compaction_enabled !== false;
+    compactionWorkflowSelect.setSelected([settings.compaction_workflow === 'reuse' ? 'reuse' : 'dedicated']);
     document.getElementById('settings-prompt-caching').checked = settings.prompt_caching === true;
     document.getElementById('settings-sound-notifications').checked = settings.sound_notifications !== false;
     document.getElementById('settings-user-prompt').value = settings.user_prompt ?? '';
@@ -234,6 +244,7 @@ export async function refresh() {
     state.webAnswerProvider = settings.web_answer_provider ?? '';
     state.webAnswerModel = settings.web_answer_model ?? '';
     state.webSearchStrategy = settings.web_search_strategy ?? '';
+    state.compactionWorkflow = settings.compaction_workflow === 'reuse' ? 'reuse' : 'dedicated';
     state.compactionModel = settings.compaction_model ?? '';
     state.reviewModel = settings.review_model ?? '';
     state.delegateModel = settings.delegate_model ?? '';
@@ -265,6 +276,7 @@ export async function refresh() {
   renderVideoGenModelOptions(allModels);
   renderTTSModelOptions(allModels);
   renderCompactionModelOptions(allModels);
+  syncCompactionWorkflowUI();
   renderReviewModelOptions(allModels);
   renderDelegateModelOptions(allModels);
 
@@ -511,10 +523,22 @@ function renderCompactionModelOptions(models) {
   if (state.compactionModel) compactionSelect.setSelected([state.compactionModel]);
 }
 
+function syncCompactionWorkflowUI() {
+  const workflow = compactionWorkflowSelect?.getSelected()?.[0] === 'reuse' ? 'reuse' : 'dedicated';
+  state.compactionWorkflow = workflow;
+  if (workflow === 'reuse') {
+    // Reuse is tied to the active conversation model. Clear any stale
+    // separate-model selection immediately; the backend enforces the same
+    // invariant for direct RPC/config edits too.
+    state.compactionModel = '';
+    compactionSelect?.setSelected(['']);
+  }
+}
+
 function renderReviewModelOptions(models) {
   const chatModels = models.filter((m) => !m.kind || m.kind === 'chat');
   const data = [
-    { text: 'Default — use the conversation\'s active model', value: '', placeholder: true },
+    { text: 'Default — use the reviewed conversation or first credentialed provider', value: '', placeholder: true },
     ...chatModels.map((m) => {
       const label = m.id;
       const ctx = m.context ? ` ${Math.round(m.context / 1000)}K` : '';
@@ -826,7 +850,8 @@ async function save() {
     const { providerId: vidGenProviderId, modelId: vidGenModelId } = splitProviderModel(videoGenValue);
     const ttsValue = ttsSelect.getSelected()?.[0] ?? '';
     const { providerId: ttsProviderId, modelId: ttsModelId } = splitProviderModel(ttsValue);
-    const compactionValue = compactionSelect.getSelected()?.[0] ?? '';
+    const compactionWorkflow = compactionWorkflowSelect.getSelected()?.[0] === 'reuse' ? 'reuse' : 'dedicated';
+    const compactionValue = compactionWorkflow === 'reuse' ? '' : (compactionSelect.getSelected()?.[0] ?? '');
     const reviewValue = reviewSelect.getSelected()?.[0] ?? '';
     const delegateValue = delegateSelect.getSelected()?.[0] ?? '';
     const learnerNudgeInterval = Number(document.getElementById('settings-learner-nudge-interval').value);
@@ -862,6 +887,7 @@ async function save() {
       plugin_contract_mode: contractModeSelect.getSelected()?.[0] ?? '',
       max_input_tokens: maxInputTokens,
       compaction_threshold: compactionThreshold,
+      compaction_workflow: compactionWorkflow,
       compaction_summary_max_tokens: compactionSummaryMaxTokens || null,
       compaction_summary_min_chars: compactionSummaryMinChars || null,
       compaction_model: compactionValue || null,

@@ -174,9 +174,7 @@ func (s *Service) importModelsForProvider(ctx context.Context, p *domain.Provide
 					continue
 				}
 				isFreeVariant := isFreeTierModel(models[i].ID)
-				if models[i].Context == 0 {
-					models[i].Context = meta.Context
-				}
+				models[i].Context = contextWindowFromCatalog(p.Kind, models[i].Context, meta.Context)
 				if models[i].MaxOutput == 0 {
 					models[i].MaxOutput = meta.Output
 				}
@@ -324,5 +322,30 @@ func catalogHintFromModelID(modelID string) string {
 	return ""
 }
 
-// CatalogHintFromModelID is exported for root tests that pin prefix matching.
-func CatalogHintFromModelID(modelID string) string { return catalogHintFromModelID(modelID) }
+// CatalogHintFromModelID is exported for application-level catalog lookups.
+func CatalogHintFromModelID(modelID string) string {
+	return catalogHintFromModelID(modelID)
+}
+
+// contextWindowFromCatalog selects model context metadata without treating
+// the local Codex app-server cache as a direct-API limit. Codex chat turns
+// use the ChatGPT backend directly, so a catalog value supersedes the
+// discovery value (for example, 272000 -> 1050000 for GPT-5.6). Other
+// providers retain an already-advertised provider value and only use the
+// catalog when the provider did not advertise one.
+func contextWindowFromCatalog(kind domain.ProviderKind, current, catalog int) int {
+	if catalog <= 0 {
+		return current
+	}
+	if kind == domain.ProviderCodex || current == 0 {
+		return catalog
+	}
+	return current
+}
+
+// ContextWindowFromCatalog is exported for application-level model
+// resolution, which must apply the same Codex direct-API policy before an
+// agent turn starts.
+func ContextWindowFromCatalog(kind domain.ProviderKind, current, catalog int) int {
+	return contextWindowFromCatalog(kind, current, catalog)
+}

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"nusashell/infrastructure/config"
+	"nusashell/pkg/httpclient"
 	clock "nusashell/pkg/time"
 )
 
@@ -118,7 +119,7 @@ type Catalog struct {
 // if nil.
 func New(client *http.Client) *Catalog {
 	if client == nil {
-		client = &http.Client{Timeout: 300 * time.Second}
+		client = httpclient.NewWithTimeout(httpclient.DefaultRequestTimeout)
 	}
 	return &Catalog{
 		client:   client,

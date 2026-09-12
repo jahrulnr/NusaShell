@@ -44,15 +44,16 @@ const (
 )
 
 var (
-	NewProviderContext       = provider.NewProviderContext
-	isRetryableProviderError = provider.IsRetryableError
-	providerRetryDelay       = provider.RetryDelay
-	describeProviderError    = provider.DescribeError
-	isContextOverflowError   = provider.IsContextOverflow
-	contextLimitFromError    = provider.ContextLimit
-	shouldEmergencyCompact   = provider.ShouldEmergencyCompact
-	isPrematureStreamEnd     = provider.IsPrematureStreamEnd
-	buildPromptCachePolicy   = provider.BuildPromptCachePolicy
+	NewProviderContext               = provider.NewProviderContext
+	isRetryableProviderError         = provider.IsRetryableError
+	providerRetryDelay               = provider.RetryDelay
+	describeProviderError            = provider.DescribeError
+	isContextOverflowError           = provider.IsContextOverflow
+	contextLimitFromError            = provider.ContextLimit
+	shouldEmergencyCompact           = provider.ShouldEmergencyCompact
+	isPrematureStreamEnd             = provider.IsPrematureStreamEnd
+	buildPromptCachePolicy           = provider.BuildPromptCachePolicy
+	buildPromptCachePolicyForContext = provider.BuildPromptCachePolicyForContext
 	// Same functions application/context.go wraps; do not redeclare ctxKey.
 	WithConversationID   = tools.WithConversationID
 	WithWorkspace        = tools.WithWorkspace

@@ -22,6 +22,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"nusashell/pkg/httpclient"
 )
 
 // OAuth constants — match the official Codex CLI.
@@ -101,7 +103,7 @@ func Login(ctx context.Context, opts LoginOptions) (*TokenJSON, error) {
 		return nil, fmt.Errorf("creating token exchange request: %w", err)
 	}
 	tokensReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	tokensResp, err := http.DefaultClient.Do(tokensReq)
+	tokensResp, err := httpclient.Shared().Do(tokensReq)
 	if err != nil {
 		return nil, fmt.Errorf("exchanging code for tokens: %w", err)
 	}
@@ -145,7 +147,7 @@ func Refresh(ctx context.Context, old *TokenJSON) (*TokenJSON, error) {
 		return nil, fmt.Errorf("creating refresh request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpclient.Shared().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("refreshing token: %w", err)
 	}

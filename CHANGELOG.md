@@ -5,6 +5,82 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-09-13
+
+### Added
+
+- **Compaction workflow selection.** Settings now offers a dedicated
+  summary-only workflow and a reuse workflow that sends the normal agent
+  prompt and toolbox while keeping the conversation's active model and
+  prompt-cache prefix.
+- **Built-in `llm-integration` skill.** The skill provides progressive,
+  provider-specific references for OpenAI, OpenRouter, Gemini, Anthropic,
+  Bedrock, Azure, compatible vendors, local inference, gateways, MCP, and
+  integration verification.
+
+### Changed
+
+- **Browser install and preview improvements.** Eligible browsers expose the
+  PWA install flow, Mermaid diagrams keep a readable intrinsic width, and
+  text/JSON local files open in the media preview without consuming the
+  response body twice.
+- **`web_fetch` now accepts public destinations only.** Private, loopback,
+  link-local, multicast, unspecified, and IPv4-mapped private addresses are
+  rejected, including after redirects. This intentionally removes the old
+  ability to fetch local/private URLs; use an explicit local tool for local
+  data.
+- **Codex direct-chat context windows use public catalog metadata.** The
+  provider's discovery value is retained only as a fallback when catalog
+  metadata is unavailable, while learned and manual overrides still win.
+
+- **Large-file reads are graded, not head-dumped.** A blind `file_read` of a
+  big file used to park a 32KiB head in the transcript, where it stayed for
+  the rest of the turn — paying the attention budget of every later round
+  (context rot) and inviting the model to generalize from a partial prefix.
+  Whole-file reads now pick a default budget by size: ≤256KiB keeps the 32KiB
+  head, >256KiB drops to a 4KiB head, >10MiB returns metadata only
+  (`bytes: 0` plus a `hint` telling the model to target a slice). Every read
+  now reports `file_bytes` (the complete size) next to `bytes`, and a graded
+  head carries a `hint` steering the model to grep or read a line range
+  instead of paging. Explicit targeting — `max_bytes`, `start_line`/`end_line`,
+  `offset_bytes` — always overrides the grading, so deliberate reads keep
+  their full budget.
+
+### Fixed
+
+- Settings refresh now hydrates the compaction-enabled toggle before saving,
+  so saving an unrelated setting no longer disables compaction.
+- Compaction requests normalize reasoning effort for non-reasoning models,
+  avoiding unsupported thinking parameters during summary passes.
+
+- Explicitly disable strict mode for `mcp_call` on Responses and Codex,
+  preserving free-form object arguments instead of allowing implicit schema
+  normalization to restrict them to `{}`. Codex now forwards explicit tool
+  strict settings.
+- **Review-model default now follows the conversation being reviewed.**
+  Settings → Learning → Review model promised "use the conversation's active
+  model" when empty, but the learner silently inherited the Internal delegate
+  model (`delegate_model`) or fell back to the first enabled provider's first
+  model — neither of which the user chose for learning. When `review_model` is
+  now empty, the learner resolves the model through an explicit cascade: the
+  model of the conversation being reviewed, then the newest conversation, then
+  the first enabled provider with a credential. The learner never inherits
+  `delegate_model`. The UI label and helper text now describe the real cascade.
+  An explicitly configured `review_model` still wins unconditionally;
+  `delegate_model` and `compaction_model` behavior is unchanged.
+
+- **MCP discovery output is size-bounded and limit cuts are visible.**
+  `tool_list`, `mcp_search`, and `tool_schema` now share the ~32KiB inline
+  budget already used by grep / exec / web_fetch / web_search / docs: an
+  oversized catalog or schema spills the complete JSONL to the platform temp
+  dir and the result carries `truncated: true`, `overflow_path`,
+  `overflow_bytes`, and `next_offset_bytes`, so the agent can `file_read` the
+  remainder instead of silently losing tools. `mcp_search` additionally
+  reports `total` (every match before the limit) next to `count` and `limit`,
+  so the default or explicit limit cut is never silent — `count < total`
+  tells the model to raise `limit` or narrow the query. This mostly bit
+  MCP-heavy installs with hundreds of tools behind one server.
+
 ## [0.8.0] - 2026-09-11
 
 ### Added

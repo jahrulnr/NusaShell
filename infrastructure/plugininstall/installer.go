@@ -24,6 +24,7 @@ import (
 	"nusashell/domain"
 	"nusashell/infrastructure/nusatemp"
 	"nusashell/infrastructure/pluginicon"
+	"nusashell/pkg/httpclient"
 	clock "nusashell/pkg/time"
 )
 
@@ -55,11 +56,9 @@ func New(store pluginStore, logger *slog.Logger) *Installer {
 		logger = slog.Default()
 	}
 	return &Installer{
-		store:  store,
-		logger: logger,
-		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
-		},
+		store:       store,
+		logger:      logger,
+		httpClient:  httpclient.NewWithTimeout(120 * time.Second),
 		rawBaseURL:  "https://raw.githubusercontent.com/jahrulnr/NusaShell-mcp/master",
 		releaseBase: "https://github.com/jahrulnr/NusaShell-mcp/releases/download",
 		githubBase:  "https://github.com",

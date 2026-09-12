@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"time"
 
+	"nusashell/pkg/httpclient"
 	clock "nusashell/pkg/time"
 )
 
@@ -40,10 +41,10 @@ func DefaultPolicy() *Policy {
 }
 
 // NewTransport wraps base with retry behavior. A nil policy, MaxAttempts <= 1,
-// or nil base keeps behavior simple: no retry or http.DefaultTransport.
+// or nil base keeps behavior simple; a nil base uses the central transport.
 func NewTransport(base http.RoundTripper, policy *Policy) http.RoundTripper {
 	if base == nil {
-		base = http.DefaultTransport
+		base = httpclient.Shared().Transport
 	}
 	if policy == nil || policy.MaxAttempts <= 1 {
 		return base
@@ -56,7 +57,7 @@ func NewTransport(base http.RoundTripper, policy *Policy) http.RoundTripper {
 // NewTransport. Provider Config.Retry is the preferred user-facing API.
 func NewHTTPClient(base *http.Client, policy *Policy) *http.Client {
 	if base == nil {
-		base = http.DefaultClient
+		base = httpclient.Shared()
 	}
 	out := *base
 	out.Transport = NewTransport(base.Transport, policy)
@@ -74,7 +75,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	policy := normalizePolicy(t.Policy)
 	base := t.Base
 	if base == nil {
-		base = http.DefaultTransport
+		base = httpclient.Shared().Transport
 	}
 
 	for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {

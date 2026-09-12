@@ -40,6 +40,38 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
   assert.match(settingsView, /delegateSelect\.getSelected/);
 });
 
+
+test('Context compaction exposes the opt-in reuse workflow and sends it to settings.set', () => {
+  assert.match(html, /id="settings-compaction-workflow"/);
+  assert.match(html, /value="dedicated"/);
+  assert.match(html, /value="reuse"/);
+  assert.match(settingsView, /compaction_workflow/);
+  assert.match(settingsView, /settings-compaction-workflow/);
+  assert.match(settingsView, /CompactionWorkflowReuse|reuse/);
+});
+
+test('Settings refresh preserves the compaction enabled toggle before save', () => {
+  const refresh = settingsView.slice(
+    settingsView.indexOf('export async function refresh()'),
+    settingsView.indexOf('function setOptionalNumber'),
+  );
+  assert.match(
+    refresh,
+    /getElementById\('settings-compaction-enabled'\)\.checked = settings\.compaction_enabled !== false/,
+  );
+});
+
+
+test('Context fallback window keeps the full settings-field wrapper', () => {
+  const dom = new JSDOM(html);
+  const input = dom.window.document.querySelector('#settings-max-input-tokens');
+  const field = input?.closest('.settings-field');
+  assert.ok(field, 'fallback context window must stay inside a settings field');
+  assert.equal(field?.getAttribute('for'), 'settings-max-input-tokens');
+  assert.ok(field?.querySelector('small'), 'fallback context window needs its helper text inside the field');
+  dom.window.close();
+});
+
 test('Agent room model selection never overwrites the global Settings preference', () => {
   const selectModel = agentView.slice(
     agentView.indexOf('function selectModel(modelID)'),
