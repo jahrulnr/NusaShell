@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "go": {
-    "version": "0.8.1",
-    "tag": "go-v0.8.1",
+    "version": "0.8.2",
+    "tag": "go-v0.8.2",
     "manifest": "latest.json",
-    "releasedAt": "2026-09-12T19:26:33.257Z"
+    "releasedAt": "2026-09-15T17:26:02.693Z"
   },
   "electron": {
     "version": "0.2.0",
@@ -13,9 +13,9 @@
     "releasedAt": "2026-09-07T18:01:08.651Z"
   },
   "pets": {
-    "version": "0.2.2",
-    "tag": "pets-v0.2.2",
+    "version": "0.2.3",
+    "tag": "pets-v0.2.3",
     "manifest": "pets-latest.json",
-    "releasedAt": "2026-09-07T18:01:08.651Z"
+    "releasedAt": "2026-09-15T17:26:02.693Z"
   }
 }
