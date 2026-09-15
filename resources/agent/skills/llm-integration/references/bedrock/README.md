@@ -27,8 +27,8 @@ Read **only** the file for the API you need.
 
 Parent skill routing: `../../SKILL.md`.
 OpenAI / Anthropic counterparts: `../openai/`, `../anthropic/`.
-Provider matrix: `../_shared/provider-matrix.md`.
-Optional implementation cross-check: `../_shared/sample-implementations.md`
+Provider matrix: `../shared/provider-matrix.md`.
+Optional implementation cross-check: `../shared/sample-implementations.md`
 (LiteLLM `llms/bedrock/`).
 
 ## Endpoint + auth

@@ -29,7 +29,7 @@ func TestMaybeAnnounceTaskMemoryAnnouncesNewRecordOnce(t *testing.T) {
 	}}}
 	app := &App{Conversations: store, MemoryRecords: recs, Bus: NewBus(), Logs: &fakeLogStore{}}
 
-	app.maybeAnnounceTaskMemory("c1", conv)
+	app.maybeAnnounceTaskMemory(conv)
 
 	got, err := store.Get("c1")
 	if err != nil {
@@ -48,12 +48,12 @@ func TestMaybeAnnounceTaskMemoryAnnouncesNewRecordOnce(t *testing.T) {
 	if !strings.Contains(pa.Message, "task memory") {
 		t.Errorf("message = %q", pa.Message)
 	}
-	if len(got.LastAnnouncedRecords) != 1 || got.LastAnnouncedRecords[0] != "rec-new" {
+	if len(got.LastAnnouncedRecords) != 1 || got.LastAnnouncedRecords[0].ID != "rec-new" {
 		t.Fatalf("dedup marker = %+v, want rec-new", got.LastAnnouncedRecords)
 	}
 
 	again, _ := store.Get("c1")
-	app.maybeAnnounceTaskMemory("c1", again)
+	app.maybeAnnounceTaskMemory(again)
 	got2, _ := store.Get("c1")
 	if len(got2.PendingAnnouncements) != 1 {
 		t.Fatalf("record must be announced once, pending = %+v", got2.PendingAnnouncements)
@@ -77,7 +77,7 @@ func TestMaybeAnnounceTaskMemorySkipsOldRecords(t *testing.T) {
 	}}}
 	app := &App{Conversations: store, MemoryRecords: recs, Bus: NewBus(), Logs: &fakeLogStore{}}
 
-	app.maybeAnnounceTaskMemory("c1", conv)
+	app.maybeAnnounceTaskMemory(conv)
 	got, _ := store.Get("c1")
 	if len(got.PendingAnnouncements) != 0 {
 		t.Fatalf("old record must not be announced, pending = %+v", got.PendingAnnouncements)
@@ -88,7 +88,7 @@ func TestTaskMemorySkipsPipelineOrigin(t *testing.T) {
 	conv := &domain.Conversation{ID: "c1", Origin: domain.ConversationOriginPipeline, Title: "pipeline step"}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{Conversations: store, MemoryRecords: &fakeMemoryRecordStore{}, Bus: NewBus(), Logs: &fakeLogStore{}}
-	app.maybeAnnounceTaskMemory("c1", conv)
+	app.maybeAnnounceTaskMemory(conv)
 	got, _ := store.Get("c1")
 	if len(got.PendingAnnouncements) != 0 {
 		t.Fatalf("pipeline conversations must be skipped, pending = %+v", got.PendingAnnouncements)
@@ -118,29 +118,13 @@ func TestTruncateUTF8(t *testing.T) {
 	}
 }
 
-func TestTaskMemoryAlphaWords(t *testing.T) {
-	got := taskMemoryAlphaWords(`hey. gimana 🎉 nusashell saat ini? .tmpcQpqGO`)
-	want := map[string]bool{
-		"hey": true, "gimana": true, "nusashell": true, "saat": true, "ini": true, "tmpcqpqgo": true,
-	}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	for w := range want {
-		if !got[w] {
-			t.Errorf("missing %q in %v", w, got)
-		}
-	}
-	if len(taskMemoryAlphaWords("")) != 0 {
-		t.Fatal("empty input must yield no words")
-	}
-	if len(taskMemoryAlphaWords("... 🎉 123 !")) != 0 {
-		t.Fatal("punctuation, emoji, and digits must not yield words")
-	}
-	if len(taskMemoryAlphaWords(".")) != 0 {
-		t.Fatal("filepath.Base(\"\") token must not yield a word")
-	}
-}
+// TestTaskMemoryAlphaWords was removed: TaskMemoryAlphaWords (the old minLen 1
+// tokenizer) was deleted as dead code. The task-memory selection now uses
+// textsim.TokenizeForOverlap with domain.DefaultEdgeMinTokenLen (3) in the
+// fallback path, and the BM25 searcher in the primary path. The minLen 1
+// behavior must not remain (per P1 requirement). Tokenization correctness
+// is covered by the textsim package tests and the fallback tests in
+// application/memory/task_test.go.
 
 func TestMaybeAnnounceTaskMemoryIgnoresEmptyWorkspacePunctuation(t *testing.T) {
 	now := time.Now()
@@ -163,7 +147,7 @@ func TestMaybeAnnounceTaskMemoryIgnoresEmptyWorkspacePunctuation(t *testing.T) {
 	}}}
 	app := &App{Conversations: store, MemoryRecords: recs, Bus: NewBus(), Logs: &fakeLogStore{}}
 
-	app.maybeAnnounceTaskMemory("c1", conv)
+	app.maybeAnnounceTaskMemory(conv)
 	got, _ := store.Get("c1")
 	if len(got.PendingAnnouncements) != 0 {
 		t.Fatalf("period/punctuation must not match, pending = %+v", got.PendingAnnouncements)
@@ -187,7 +171,7 @@ func TestMaybeAnnounceTaskMemoryMatchesSharedAlphabeticWord(t *testing.T) {
 	}}}
 	app := &App{Conversations: store, MemoryRecords: recs, Bus: NewBus(), Logs: &fakeLogStore{}}
 
-	app.maybeAnnounceTaskMemory("c1", conv)
+	app.maybeAnnounceTaskMemory(conv)
 	got, _ := store.Get("c1")
 	if len(got.PendingAnnouncements) != 1 {
 		t.Fatalf("shared alphabetic word must match, pending = %+v", got.PendingAnnouncements)

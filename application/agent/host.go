@@ -201,12 +201,6 @@ func (a *Service) recordExperience(conv *domain.Conversation, headless bool) {
 	}
 }
 
-func (a *Service) maybeAnnounceTaskMemory(conversationID string, conversation *domain.Conversation) {
-	if a != nil && a.deps.MaybeAnnounceTaskMemory != nil {
-		a.deps.MaybeAnnounceTaskMemory(conversationID, conversation)
-	}
-}
-
 func (a *Service) ConversationRulesForTest(run *TurnRun, adapter ProviderContext, conv *domain.Conversation, settings domain.Settings, provider *domain.Provider, model, currentMsgID string, round int) *conversationRules {
 	p := a.NewConversationRules(run, adapter, conv, settings, provider, model, "", currentMsgID, ModelCapabilities{}, nil, 0, nil, false, "")
 	p.currentMsgID = currentMsgID

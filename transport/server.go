@@ -23,6 +23,10 @@ type Server struct {
 	Dev      bool
 	identity CoreIdentity
 	mux      *http.ServeMux
+
+	// Pairing is the device-pairing service. Nil = remote access disabled; the
+	// auth middleware rejects non-loopback protected requests explicitly.
+	Pairing PairingHandler
 }
 
 // CoreIdentity is the non-secret identity returned by the loopback health
@@ -51,6 +55,9 @@ func NewWithIdentity(app *application.App, logger *slog.Logger, static http.Hand
 	mux.HandleFunc("GET /ws", s.handleWS)
 	mux.HandleFunc("GET /stream", s.handleStream)
 	mux.HandleFunc("GET /local-file", s.handleLocalFile)
+	// Public pairing bootstrap routes (status poll + exchange). These
+	// bypass auth so an unauthenticated remote device can pair.
+	s.registerPairingRoutes(mux)
 	// Sound assets: serve embedded notification sounds (turn-complete,
 	// turn-error) from resources/sounds/. Registered before the catch-all
 	// so /sounds/* does not fall through to the frontend file server.
@@ -68,16 +75,30 @@ func NewWithIdentity(app *application.App, logger *slog.Logger, static http.Hand
 func (s *Server) RoutesMux() *http.ServeMux { return s.mux }
 
 func (s *Server) Routes() http.Handler {
+	handler := s.AuthMiddleware(s.mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := clock.NewTime().Time()
-		s.mux.ServeHTTP(w, r)
+		handler.ServeHTTP(w, r)
 		s.Logger.Debug("http", "method", r.Method, "path", r.URL.Path, "elapsed_ms", clock.NewTime().Since(start).Milliseconds())
 	})
 }
 
 // handleHealth returns a small identity response for local clients that need
 // to distinguish NusaShell from an unrelated process on the same port.
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+// Non-loopback callers get only a minimal {ok, service} response — the full
+// process identity (PID, port, version, owner, started-at) is loopback-only
+// so an unpaired remote learns nothing about the process.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if !IsLoopbackRequest(r) {
+		writeJSON(w, http.StatusOK, struct {
+			OK      bool   `json:"ok"`
+			Service string `json:"service"`
+		}{
+			OK:      true,
+			Service: "nusashell-core",
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, struct {
 		OK        bool      `json:"ok"`
 		Service   string    `json:"service"`
@@ -115,6 +136,32 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRPCBodyBytes)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, contracts.ErrResult(contracts.CodeValidation, "malformed request body"))
 		return
+	}
+	// Non-loopback callers must have a valid paired session to reach /rpc.
+	// Loopback bypasses auth; public paths are handled by the auth middleware.
+	if !IsLoopbackRequest(r) {
+		if s.Pairing == nil {
+			writeRemoteAccessDisabled(w)
+			return
+		}
+		if IsRemoteAccessSettingsChange(method, req.Payload) {
+			writeJSON(w, http.StatusForbidden, contracts.ErrResult(contracts.CodePairingUnauthorized, "remote access settings are host-only"))
+			return
+		}
+		// Pairing management methods are local-only: a paired remote session
+		// gets the normal API, not device-management authority. This check
+		// runs before the session check so an unauthenticated remote caller
+		// probing a management method gets 403 (not 401 pairing-required).
+		if IsPairingManagementMethod(method) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(contracts.ErrResult(contracts.CodePairingUnauthorized, "pairing management is local-only"))
+			return
+		}
+		if !s.HasValidSession(r) {
+			writePairingRequired(w)
+			return
+		}
 	}
 	start := clock.NewTime().Time()
 	result, rpcErr := s.App.Dispatch(r.Context(), method, req.Payload)

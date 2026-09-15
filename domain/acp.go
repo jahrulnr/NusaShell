@@ -230,6 +230,14 @@ type AcpTranscriptChunk struct {
 	ToolTitle  string
 	ToolKind   string
 	ToolStatus string
+	// ToolInput is the agent-reported tool arguments (rawInput) rendered for
+	// display: JSON strings unwrapped, structured JSON indented. "" when the
+	// agent never sent one.
+	ToolInput string
+	// ToolOutput is the agent-reported tool result (rawOutput, or the
+	// structured content blocks flattened to text). "" when the agent never
+	// sent one.
+	ToolOutput string
 	At         time.Time
 }
 
@@ -440,6 +448,12 @@ func mergeToolTranscript(existing *AcpTranscriptChunk, update AcpTranscriptChunk
 	if update.ToolStatus != "" {
 		existing.ToolStatus = update.ToolStatus
 	}
+	if update.ToolInput != "" {
+		existing.ToolInput = update.ToolInput
+	}
+	if update.ToolOutput != "" {
+		existing.ToolOutput = update.ToolOutput
+	}
 	if !update.At.IsZero() {
 		existing.At = update.At
 	}
@@ -461,17 +475,29 @@ func (r *AcpRun) trimTranscriptCap() {
 		return
 	}
 	chunk := &r.Transcript[0]
-	titleSize := utf8.RuneCountInString(chunk.ToolTitle)
-	if titleSize >= MaxAcpTranscriptBytes {
-		chunk.ToolTitle = runeTail(chunk.ToolTitle, MaxAcpTranscriptBytes)
-		chunk.Text = ""
-		return
+	// Trim the oldest chunk's bulk in order of least identity: streamed text
+	// first, then raw tool output and input; the title is the chunk's identity
+	// and is only trimmed when nothing else is left.
+	for _, bulk := range []*string{&chunk.Text, &chunk.ToolOutput, &chunk.ToolInput} {
+		if transcriptChunkSize(*chunk) <= MaxAcpTranscriptBytes {
+			return
+		}
+		bulkSize := utf8.RuneCountInString(*bulk)
+		remaining := transcriptChunkSize(*chunk) - bulkSize
+		if remaining >= MaxAcpTranscriptBytes {
+			*bulk = ""
+			continue
+		}
+		*bulk = runeTail(*bulk, MaxAcpTranscriptBytes-remaining)
 	}
-	chunk.Text = runeTail(chunk.Text, MaxAcpTranscriptBytes-titleSize)
+	if transcriptChunkSize(*chunk) > MaxAcpTranscriptBytes {
+		chunk.ToolTitle = runeTail(chunk.ToolTitle, MaxAcpTranscriptBytes)
+	}
 }
 
 func transcriptChunkSize(chunk AcpTranscriptChunk) int {
-	return utf8.RuneCountInString(chunk.Text) + utf8.RuneCountInString(chunk.ToolTitle)
+	return utf8.RuneCountInString(chunk.Text) + utf8.RuneCountInString(chunk.ToolTitle) +
+		utf8.RuneCountInString(chunk.ToolInput) + utf8.RuneCountInString(chunk.ToolOutput)
 }
 
 func runeTail(value string, limit int) string {

@@ -12,6 +12,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	"nusashell/infrastructure/acpclient"
 )
 
 var fakeBin string
@@ -648,5 +649,278 @@ func TestSpawnWithConfigOptionsAppliesPreferredMode(t *testing.T) {
 	}
 	if got := domain.InferRiskTier(run.CurrentModeID, agent.ModeRiskMappings); got != domain.RiskReadOnly {
 		t.Fatalf("risk tier for plan = %s", got)
+	}
+}
+
+// --- FS callback bypass tests ---
+//
+// These tests exercise the real pooledConn.ReadTextFile / WriteTextFile
+// methods (the Handler callbacks invoked when an ACP agent sends
+// fs/read_text_file or fs/write_text_file). They construct a pooledConn
+// and liveRun directly using the existing in-package seams, register the
+// run in the Runtime so runBySession can attribute the session, and use
+// real filesystem temp dirs. They do not fake or mock the path resolver.
+
+// fsTestConn builds a local stdio pooledConn rooted at workspace. The conn
+// field is nil because ReadTextFile/WriteTextFile never use it — they only
+// need cwd, agent, and runtime (for runBySession).
+func fsTestConn(rt *Runtime, workspace string) *pooledConn {
+	return &pooledConn{
+		agent:   &domain.AcpAgent{ID: "acp_test", Name: "Fake ACP"},
+		runtime: rt,
+		cwd:     workspace,
+	}
+}
+
+// fsTestRun registers a liveRun with the given sessionID and risk tier on
+// the pooledConn, so runBySession can attribute FS callbacks to it.
+func fsTestRun(rt *Runtime, pc *pooledConn, sessionID string, tier domain.RiskTier) *liveRun {
+	run := &domain.AcpRun{
+		TaskState: domain.TaskState[domain.AcpRunStatus]{
+			ID:     domain.NewID(domain.IDPrefixAcpRun),
+			Status: domain.AcpRunRunning,
+		},
+		SessionID: sessionID,
+		Workspace: pc.cwd,
+		RiskTier:  tier,
+	}
+	lr := &liveRun{
+		run:  run,
+		conn: pc,
+		done: make(chan struct{}),
+	}
+	rt.mu.Lock()
+	rt.runs[run.ID] = lr
+	rt.mu.Unlock()
+	return lr
+}
+
+func TestReadTextFileBypassReadsOutsideWorkspace(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc := fsTestConn(rt, ws)
+	fsTestRun(rt, pc, "sess_bypass", domain.RiskBypass)
+
+	res, err := pc.ReadTextFile(context.Background(), acpclient.ReadTextFileParams{
+		SessionID: "sess_bypass",
+		Path:      outsideFile,
+	})
+	if err != nil {
+		t.Fatalf("bypass ReadTextFile outside: %v", err)
+	}
+	if res.Content != "outside content" {
+		t.Fatalf("content = %q want %q", res.Content, "outside content")
+	}
+}
+
+func TestWriteTextFileBypassWritesOutsideWorkspace(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "written.txt")
+	pc := fsTestConn(rt, ws)
+	fsTestRun(rt, pc, "sess_bypass", domain.RiskBypass)
+
+	if err := pc.WriteTextFile(context.Background(), acpclient.WriteTextFileParams{
+		SessionID: "sess_bypass",
+		Path:      outsideFile,
+		Content:   "bypass write",
+	}); err != nil {
+		t.Fatalf("bypass WriteTextFile outside: %v", err)
+	}
+	b, err := os.ReadFile(outsideFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "bypass write" {
+		t.Fatalf("file content = %q want %q", string(b), "bypass write")
+	}
+}
+
+func TestReadTextFileEditConfirmedRejectedOutside(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc := fsTestConn(rt, ws)
+	fsTestRun(rt, pc, "sess_edit", domain.RiskEditConfirmed)
+
+	_, err := pc.ReadTextFile(context.Background(), acpclient.ReadTextFileParams{
+		SessionID: "sess_edit",
+		Path:      outsideFile,
+	})
+	if err == nil {
+		t.Fatal("edit_confirmed session must not read outside workspace")
+	}
+}
+
+func TestReadTextFileReadOnlyRejectedOutside(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc := fsTestConn(rt, ws)
+	fsTestRun(rt, pc, "sess_ro", domain.RiskReadOnly)
+
+	_, err := pc.ReadTextFile(context.Background(), acpclient.ReadTextFileParams{
+		SessionID: "sess_ro",
+		Path:      outsideFile,
+	})
+	if err == nil {
+		t.Fatal("read_only session must not read outside workspace")
+	}
+}
+
+func TestReadTextFileSymlinkEscapeRejectedBelowBypass(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ws, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	link := filepath.Join(ws, "sub", "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	pc := fsTestConn(rt, ws)
+	fsTestRun(rt, pc, "sess_ro", domain.RiskReadOnly)
+
+	_, err := pc.ReadTextFile(context.Background(), acpclient.ReadTextFileParams{
+		SessionID: "sess_ro",
+		Path:      filepath.Join(link, "secret.txt"),
+	})
+	if err == nil {
+		t.Fatal("symlink escape must be rejected below bypass")
+	}
+}
+
+func TestReadTextFileFailsClosedWhenSessionNotFound(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc := fsTestConn(rt, ws)
+	// No run registered for "sess_unknown" — must fail closed.
+
+	_, err := pc.ReadTextFile(context.Background(), acpclient.ReadTextFileParams{
+		SessionID: "sess_unknown",
+		Path:      outsideFile,
+	})
+	if err == nil {
+		t.Fatal("unknown session must fail closed (contained path rejection)")
+	}
+}
+
+// TestReadTextFileSessionIsolation verifies that a non-bypass run on the
+// same pooled connection cannot inherit bypass from another session. Run
+// under -race to catch data races in the session-attribution lookup.
+func TestReadTextFileSessionIsolation(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc := fsTestConn(rt, ws)
+	fsTestRun(rt, pc, "sess_bypass", domain.RiskBypass)
+	fsTestRun(rt, pc, "sess_readonly", domain.RiskReadOnly)
+
+	// The read_only session must NOT inherit bypass from sess_bypass on
+	// the same pooled connection.
+	_, err := pc.ReadTextFile(context.Background(), acpclient.ReadTextFileParams{
+		SessionID: "sess_readonly",
+		Path:      outsideFile,
+	})
+	if err == nil {
+		t.Fatal("non-bypass session must not read outside workspace even when a bypass session shares the pooled connection")
+	}
+
+	// The bypass session on the same connection CAN read outside.
+	res, err := pc.ReadTextFile(context.Background(), acpclient.ReadTextFileParams{
+		SessionID: "sess_bypass",
+		Path:      outsideFile,
+	})
+	if err != nil {
+		t.Fatalf("bypass session should read outside: %v", err)
+	}
+	if res.Content != "outside" {
+		t.Fatalf("content = %q want %q", res.Content, "outside")
+	}
+}
+
+// TestReadTextFileBypassTerminalRunFailsClosed verifies that a late FS
+// callback for a RiskBypass run that has already reached a terminal state
+// (completed/cancelled/failed) does NOT retain host-wide access. The runtime
+// retains settled runs in rt.runs, so runBySession still returns the run;
+// only an explicit live bypass session may escape containment.
+func TestReadTextFileBypassTerminalRunFailsClosed(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc := fsTestConn(rt, ws)
+	lr := fsTestRun(rt, pc, "sess_bypass_done", domain.RiskBypass)
+	// Mark the run terminal the way the runtime does on completion. The run
+	// remains registered in rt.runs (retention is unchanged), so runBySession
+	// still attributes the session — only the Live() gate must contain it.
+	lr.finish(domain.AcpRunCompleted, "", "")
+
+	_, err := pc.ReadTextFile(context.Background(), acpclient.ReadTextFileParams{
+		SessionID: "sess_bypass_done",
+		Path:      outsideFile,
+	})
+	if err == nil {
+		t.Fatal("terminal bypass run must not read outside workspace; only a live bypass session may escape containment")
+	}
+}
+
+// TestWriteTextFileBypassTerminalRunFailsClosed is the write-side counterpart:
+// a terminal RiskBypass run must not write outside the workspace either.
+func TestWriteTextFileBypassTerminalRunFailsClosed_Write(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "written.txt")
+	pc := fsTestConn(rt, ws)
+	lr := fsTestRun(rt, pc, "sess_bypass_done", domain.RiskBypass)
+	lr.finish(domain.AcpRunCompleted, "", "")
+
+	err := pc.WriteTextFile(context.Background(), acpclient.WriteTextFileParams{
+		SessionID: "sess_bypass_done",
+		Path:      outsideFile,
+		Content:   "should be contained",
+	})
+	if err == nil {
+		t.Fatal("terminal bypass run must not write outside workspace; only a live bypass session may escape containment")
+	}
+	if _, err := os.Stat(outsideFile); err == nil {
+		t.Fatal("terminal bypass run must not create files outside the workspace")
 	}
 }

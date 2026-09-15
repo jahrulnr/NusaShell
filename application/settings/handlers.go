@@ -23,7 +23,7 @@ func (svc *Service) HandleSet(req contracts.SettingsSetRequest) (any, *contracts
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "settings store not available"}
 	}
 	s := svc.store.Get()
-	oldUserPrompt := s.UserPrompt
+	old := s
 	if req.CompactionEnabled != nil {
 		s.CompactionEnabled = *req.CompactionEnabled
 	}
@@ -290,6 +290,18 @@ func (svc *Service) HandleSet(req contracts.SettingsSetRequest) (any, *contracts
 			s.ProjectMemoryBase = expanded
 		}
 	}
+	if req.RemoteAccessEnabled != nil {
+		s.RemoteAccessEnabled = *req.RemoteAccessEnabled
+	}
+	if req.RemoteAccessAddresses != nil {
+		addresses := domain.NormalizeRemoteAccessAddresses(*req.RemoteAccessAddresses)
+		for _, address := range addresses {
+			if err := domain.ValidateRemoteAccessAddress(address); err != nil {
+				return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
+			}
+		}
+		s.RemoteAccessAddresses = addresses
+	}
 	if s.CompactionWorkflow == domain.CompactionWorkflowReuse {
 		s.CompactionModel = ""
 	}
@@ -297,7 +309,7 @@ func (svc *Service) HandleSet(req contracts.SettingsSetRequest) (any, *contracts
 		return nil, rpcdispatch.Internal(err)
 	}
 	if svc.onApplied != nil {
-		svc.onApplied(oldUserPrompt, s)
+		svc.onApplied(old, s)
 	}
 	return contracts.SettingsGetResult{Settings: ToDTO(s)}, nil
 }
@@ -363,5 +375,7 @@ func ToDTO(s domain.Settings) contracts.SettingsDTO {
 		PetsAutoStart:              s.PetsAutoStart,
 		UserPrompt:                 s.UserPrompt,
 		ProjectMemoryBase:          s.ProjectMemoryBase,
+		RemoteAccessEnabled:        s.RemoteAccessEnabled,
+		RemoteAccessAddresses:      domain.NormalizeRemoteAccessAddresses(s.RemoteAccessAddresses),
 	}
 }

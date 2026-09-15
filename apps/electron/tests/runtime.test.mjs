@@ -68,14 +68,12 @@ test('backend environment forces a loopback listener and clears remote access', 
   const environment = buildBackendEnvironment({
     NUSASHELL_HOST: '0.0.0.0',
     NUSASHELL_PORT: '1',
-    NUSASHELL_ALLOW_REMOTE: '1',
     NUSASHELL_DEV: '1',
     KEEP_ME: 'yes',
   }, 43210, true);
 
   assert.equal(environment.NUSASHELL_HOST, '127.0.0.1');
   assert.equal(environment.NUSASHELL_PORT, '43210');
-  assert.equal(environment.NUSASHELL_ALLOW_REMOTE, undefined);
   assert.equal(environment.NUSASHELL_DEV, undefined);
   assert.equal(environment.NUSASHELL_SERVICE, undefined);
   assert.equal(environment.NUSASHELL_WS_URL, undefined);

@@ -33,8 +33,8 @@ Read **only** the file for the API you need.
 
 Parent skill routing: `../../SKILL.md`.
 OpenAI / OpenRouter / Gemini counterparts: `../openai/`, `../openrouter/`, `../gemini/`.
-Provider matrix: `../_shared/provider-matrix.md`.
-Optional implementation cross-check: `../_shared/sample-implementations.md`
+Provider matrix: `../shared/provider-matrix.md`.
+Optional implementation cross-check: `../shared/sample-implementations.md`
 (LiteLLM `llms/anthropic/chat/`).
 
 ## Anthropic ≠ OpenAI — the diffs that break ports

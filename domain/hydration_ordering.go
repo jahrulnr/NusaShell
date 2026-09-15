@@ -86,10 +86,10 @@ func IsFreshRoom(c *Conversation) bool {
 
 // IsHydrationMessage returns true when a message is a pure hydration
 // checkpoint — all tool calls have the "hydrate-" prefix and there is no
-// visible content or reasoning. These messages are hidden from the UI and
-// excluded from compaction summaries.
+// visible content. Synthetic reasoning is allowed and remains hidden with
+// the checkpoint; it is only provider-facing context for reasoning replay.
 func IsHydrationMessage(m Message) bool {
-	if len(m.ToolCalls) == 0 || strings.TrimSpace(m.Content) != "" || strings.TrimSpace(m.Reasoning) != "" {
+	if len(m.ToolCalls) == 0 || strings.TrimSpace(m.Content) != "" {
 		return false
 	}
 	for _, tc := range m.ToolCalls {

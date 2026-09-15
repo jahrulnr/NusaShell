@@ -8,6 +8,7 @@ import (
 	"nusashell/domain"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -269,6 +270,61 @@ func TestHandleSettingsSetPetsAutoStart(t *testing.T) {
 	if app.Settings.Get().PetsAutoStart {
 		t.Fatal("PetsAutoStart after clear = true, want false")
 	}
+}
+
+func TestHandleSettingsSetRemoteAccessPersistsAddressesAndRestartsOnToggle(t *testing.T) {
+	restarted := make(chan struct{}, 1)
+	app := &App{
+		Settings: &memSettingsStore{s: domain.DefaultSettings()},
+		Logs:     &fakeLogStore{},
+		Restart:  func() { restarted <- struct{}{} },
+	}
+	enabled := true
+	addresses := []string{" https://shell.example ", "https://shell.example", "http://192.168.1.5:10994"}
+	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{
+		RemoteAccessEnabled:   &enabled,
+		RemoteAccessAddresses: &addresses,
+	}); rpcErr != nil {
+		t.Fatalf("set remote access: %v", rpcErr.Message)
+	}
+	got := app.Settings.Get()
+	if !got.RemoteAccessEnabled {
+		t.Fatal("RemoteAccessEnabled = false, want true")
+	}
+	want := []string{"https://shell.example", "http://192.168.1.5:10994"}
+	if !reflect.DeepEqual(got.RemoteAccessAddresses, want) {
+		t.Fatalf("RemoteAccessAddresses = %v, want %v", got.RemoteAccessAddresses, want)
+	}
+	select {
+	case <-restarted:
+	case <-time.After(time.Second):
+		t.Fatal("remote access toggle did not request backend restart")
+	}
+	raw, rpcErr := app.handleSettingsGet()
+	res, ok := mustSettingsResult(t, raw, rpcErr)
+	if !ok || !res.Settings.RemoteAccessEnabled || !reflect.DeepEqual(res.Settings.RemoteAccessAddresses, want) {
+		t.Fatalf("settings DTO = %+v, want enabled addresses %v", res.Settings, want)
+	}
+}
+
+func TestHandleSettingsSetRemoteAccessRejectsInvalidAddress(t *testing.T) {
+	app := &App{Settings: &memSettingsStore{s: domain.DefaultSettings()}, Logs: &fakeLogStore{}}
+	addresses := []string{"https://user:pass@shell.example"}
+	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{RemoteAccessAddresses: &addresses}); rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
+		t.Fatalf("invalid remote address error = %+v, want validation", rpcErr)
+	}
+	if got := app.Settings.Get().RemoteAccessAddresses; len(got) != 0 {
+		t.Fatalf("invalid address changed settings: %v", got)
+	}
+}
+
+func mustSettingsResult(t *testing.T, value any, rpcErr *contracts.RPCError) (contracts.SettingsGetResult, bool) {
+	t.Helper()
+	if rpcErr != nil {
+		t.Fatalf("settings RPC: %s", rpcErr.Message)
+	}
+	result, ok := value.(contracts.SettingsGetResult)
+	return result, ok
 }
 
 func TestLearnerNudgeIntervalUsesSettings(t *testing.T) {

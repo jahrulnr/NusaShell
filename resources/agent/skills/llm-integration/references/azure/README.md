@@ -77,7 +77,7 @@ Read **only** the file for the API you need (split-read rule). New builds on
 Azure -> prefer the **Responses API** on the `/openai/v1/` path, mirroring the
 public OpenAI decision default.
 
-Optional implementation cross-check: `../_shared/sample-implementations.md`
+Optional implementation cross-check: `../shared/sample-implementations.md`
 (LiteLLM `llms/azure/`).
-Parent skill routing: `../../SKILL.md`. Provider matrix: `../_shared/provider-matrix.md`.
+Parent skill routing: `../../SKILL.md`. Provider matrix: `../shared/provider-matrix.md`.
 Public OpenAI counterpart (different host/auth): `../openai/`.

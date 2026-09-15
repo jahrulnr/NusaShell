@@ -198,28 +198,14 @@ func (a *Service) RunSingleTurn(run *TurnRun, provider *domain.Provider, apiKey,
 	// attribute synthetic user messages to the human regardless of prompt
 	// wording. The call is persisted with its result pre-filled, so the
 	// model sees it in this turn and in later turns, and the UI renders it
-	// as a normal tool card.
-	notice := a.autoContinueAnnouncement(decision)
-	conv, convErr := a.loadRepo(run.ConversationID)
-	if convErr != nil {
-		a.log("error", "agent", "auto-continue: failed to get conversation: %v", convErr)
-		return false, ""
-	}
-	if err := conv.Add(domain.RoleAssistant, notice); err != nil {
-		a.log("error", "agent", "auto-continue: failed to add announcement: %v", err)
-		return false, ""
-	}
-	if saveErr := conv.Save(); saveErr != nil {
-		a.log("error", "agent", "auto-continue: failed to save announcement: %v", saveErr)
-		return false, ""
-	}
-	// Append a fresh assistant message for the next turn.
-	nextConv, nextMsgID, err := a.AppendTurnAssistant(run.ConversationID)
+	// as a normal tool card. A hidden pure-hydration todo_list checkpoint
+	// is appended right after the announcement so the next provider round
+	// sees the current open checklist without a visible tool card.
+	nextMsgID, err := a.appendAutoContinueBoundary(run.ConversationID, decision)
 	if err != nil {
-		a.log("error", "agent", "auto-continue: failed to append assistant message: %v", err)
+		a.log("error", "agent", "auto-continue: failed to append boundary: %v", err)
 		return false, ""
 	}
-	_ = nextConv
 	run.SetMessageID(nextMsgID)
 	// Seal the final round of this turn, chaining to the first round of the
 	// auto-continue turn so SSE consumers keep streaming without waiting for

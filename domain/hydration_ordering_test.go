@@ -3,8 +3,9 @@ package domain
 import "testing"
 
 // hydrationOrderingCheckpoint returns a pure hydration checkpoint message:
-// assistant role, all tool calls carry the hydrate- prefix, no content or
-// reasoning. Mirrors the shape FilterHydrationDomainMessages strips.
+// assistant role, all tool calls carry the hydrate- prefix, and no visible
+// content. Synthetic reasoning may be present and remains hidden. Mirrors
+// the shape FilterHydrationDomainMessages strips.
 func hydrationOrderingCheckpoint(id string) Message {
 	return Message{
 		ID:   id,
@@ -131,6 +132,7 @@ func TestIsHydrationMessage(t *testing.T) {
 		{"real tool call", Message{ID: "a1", Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call_1", Name: "file_read"}}}, false},
 		{"hydration with content", Message{ID: "a1", Role: RoleAssistant, Content: "x", ToolCalls: []ToolCall{{ID: HydrateToolCallPrefix + "x", Name: "runtime_context"}}}, false},
 		{"pure hydration", hydrationOrderingCheckpoint("h1"), true},
+		{"hydration with synthetic reasoning", Message{ID: "a1", Role: RoleAssistant, Reasoning: "I need to know the current runtime context.", ToolCalls: []ToolCall{{ID: HydrateToolCallPrefix + "x", Name: "runtime_context"}}}, true},
 		{"mixed calls", Message{ID: "a1", Role: RoleAssistant, ToolCalls: []ToolCall{{ID: HydrateToolCallPrefix + "x", Name: "runtime_context"}, {ID: "call_1", Name: "file_read"}}}, false},
 	}
 	for _, tc := range cases {
@@ -178,4 +180,19 @@ func TestFilterHydrationToolCalls(t *testing.T) {
 			t.Fatalf("hydration not stripped from Steps: %+v", got.Steps)
 		}
 	})
+}
+
+func TestFilterHydrationDomainMessagesRemovesSyntheticReasoning(t *testing.T) {
+	m := Message{
+		ID:        "h1",
+		Role:      RoleAssistant,
+		Reasoning: "I need to brief the user before giving the answer.",
+		ToolCalls: []ToolCall{{ID: HydrateToolCallPrefix + "runtime_context", Name: "runtime_context"}},
+	}
+	if !IsHydrationMessage(m) {
+		t.Fatal("synthetic reasoning must not make a hydration checkpoint visible")
+	}
+	if got := FilterHydrationDomainMessages([]Message{m}); len(got) != 0 {
+		t.Fatalf("filtered hydration messages = %+v, want empty", got)
+	}
 }

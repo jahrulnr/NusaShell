@@ -7,7 +7,7 @@ import { renderMarkdown } from '../../markdown.js';
 import { incrementalRender } from '../../incremental-render.js';
 import { highlightCode } from '../../highlight-render.js';
 import { attachZoomButtons } from '../../media-zoom.js';
-import { renderToolJob, reasoningDisclosure, setReasoningSource, setToolTerminalOutput } from './render.js';
+import { renderToolJob, reasoningDisclosure, setReasoningSource, setToolTerminalOutput, toolEventRequestLine } from './render.js';
 
 const LIVE = new Set(['starting', 'running']);
 const RECENT_MS = 2 * 60 * 1000;
@@ -806,13 +806,33 @@ function updateTranscriptLine(line, chunk) {
     if (!card) return;
     const status = normalizeAcpToolStatus(chunk.tool_status);
     const name = chunk.tool_kind || chunk.tool_id || chunk.tool_title || 'tool';
-    const action = chunk.tool_title || chunk.tool_kind || chunk.tool_id || 'Tool';
+    const meta = acpToolMeta(chunk, status);
+    const input = acpToolInput(chunk);
+    const output = acpToolOutput(chunk);
     // setToolTerminalOutput repaints summary/result/raw; setToolTerminalStatus
-    // inside it recomputes the title from the tool name, so the ACP-provided
-    // title is applied after.
-    setToolTerminalOutput(card, chunk.text || '', status, acpToolMeta(chunk, status));
+    // inside it recomputes the head line from card._toolArgs/_toolOutput, so
+    // refresh those (and the presentation) before calling it. That keeps a
+    // status-only delta from leaving the previous "in progress" label visible
+    // and lets a late rawInput/rawOutput patch land on the same row.
+    const previousPresentation = card._toolPresentation || {};
+    card._toolArgs = input || card._toolArgs || {};
+    card._toolName = card._toolName || name;
+    card._toolPresentation = {
+      ...previousPresentation,
+      action: chunk.tool_title || previousPresentation.action || name,
+      request: chunk.tool_input || previousPresentation.request || '',
+      result: {
+        ...(previousPresentation.result || {}),
+        summary: meta,
+        text: output,
+      },
+    };
+    setToolTerminalOutput(card, output, status, meta);
+    if (!String(output).trim()) card.querySelector('.agent-tool-event-output')?.remove();
     const eventTitle = card.querySelector('.agent-tool-event-title');
     if (eventTitle) eventTitle.textContent = chunk.tool_title || name;
+    const pathLine = card.querySelector('.agent-tool-event-path');
+    if (pathLine) pathLine.textContent = toolEventRequestLine(card._toolName, card._toolArgs, card._toolPresentation);
     return;
   }
   if (chunk.kind === 'thought') {
@@ -839,26 +859,84 @@ function updateTranscriptLine(line, chunk) {
 function acpToolCard(chunk) {
   const status = normalizeAcpToolStatus(chunk.tool_status);
   const actionText = chunk.tool_title || chunk.tool_kind || chunk.tool_id || 'Tool';
+  const input = acpToolInput(chunk);
+  const output = acpToolOutput(chunk);
   const card = renderToolJob({
     name: chunk.tool_kind || chunk.tool_title || 'tool',
-    args: {},
+    args: input || {},
     status,
-    output: chunk.text || '',
+    output,
     presentation: {
       variant: 'terminal',
       action: actionText,
-      request: '',
+      request: chunk.tool_input || '',
       result: {
         format: 'terminal',
         summary: acpToolMeta(chunk, status),
-        text: chunk.text || '',
+        text: output,
       },
     },
   });
+  // ACP transcripts are a narrow live reader. Keep tool bodies closed until a
+  // reader explicitly opens one; lifecycle updates patch the same <details>
+  // node and therefore preserve that choice.
+  card.open = false;
+  card.classList.add('acp-terminal-card');
+  const head = card.querySelector('.agent-tool-event-head');
+  const headText = card.querySelector('.agent-tool-event-head-text');
+  if (head && headText && !head.querySelector('.acp-tool-kind')) {
+    const kind = document.createElement('span');
+    kind.className = 'acp-tool-kind';
+    kind.textContent = 'TERMINAL';
+    head.insertBefore(kind, headText);
+  }
+  const request = card.querySelector('.agent-tool-request');
+  if (request && request.tagName !== 'BUTTON') {
+    const control = document.createElement('button');
+    control.type = 'button';
+    control.className = request.className;
+    control.textContent = request.textContent;
+    control.setAttribute('aria-expanded', 'false');
+    control.setAttribute('aria-label', 'Show full tool input');
+    control.title = 'Show full tool input';
+    control.addEventListener('click', () => {
+      const expanded = control.classList.toggle('is-expanded');
+      control.setAttribute('aria-expanded', String(expanded));
+      control.setAttribute('aria-label', expanded ? 'Collapse tool input' : 'Show full tool input');
+      control.title = expanded ? 'Collapse tool input' : 'Show full tool input';
+    });
+    request.replaceWith(control);
+  }
   const title = card.querySelector('.agent-tool-event-title');
-  if (title) title.textContent = chunk.tool_title || chunk.tool_kind || chunk.tool_id || 'Tool';
+  if (title) title.textContent = actionText;
+  if (chunk.tool_kind) {
+    if (title) title.textContent = chunk.tool_kind;
+    const headSummary = card.querySelector('.agent-tool-event-head-summary');
+    if (headSummary) headSummary.textContent = actionText;
+  }
   if (chunk.tool_id) card.dataset.acpToolId = chunk.tool_id;
   return card;
+}
+
+// acpToolInput parses the agent-provided rawInput for the tool card. Returns
+// null when the agent never sent one, or sent a shape without scannable
+// arguments.
+function acpToolInput(chunk) {
+  const raw = typeof chunk?.tool_input === 'string' ? chunk.tool_input.trim() : '';
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+// acpToolOutput prefers the agent-provided output; legacy persisted records
+// (saved before tool IO capture) only carry text.
+function acpToolOutput(chunk) {
+  const output = typeof chunk?.tool_output === 'string' ? chunk.tool_output : '';
+  return output || (typeof chunk?.text === 'string' ? chunk.text : '');
 }
 
 function normalizeAcpToolStatus(status) {

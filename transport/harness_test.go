@@ -633,6 +633,7 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	app := application.NewApp(application.Deps{
 		Version:       "test",
 		DataDir:       dataDir,
+		ListenAddr:    "127.0.0.1:10994",
 		Conversations: store,
 		Providers:     &jsonstore.Providers{S: store},
 		Credentials:   creds,

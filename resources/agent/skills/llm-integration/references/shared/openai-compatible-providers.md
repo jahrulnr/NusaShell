@@ -176,9 +176,9 @@ documented, so verify live if you depend on them.
 
 ## Related
 
-- `../_shared/provider-matrix.md` (OpenAI vs OpenRouter vs Gemini vs Anthropic)
-- `../_shared/provider-template.md` (how to promote a vendor to its own tree)
-- `../_shared/sample-implementations.md` (optional LiteLLM implementation
+- `../shared/provider-matrix.md` (OpenAI vs OpenRouter vs Gemini vs Anthropic)
+- `../shared/provider-template.md` (how to promote a vendor to its own tree)
+- `../shared/sample-implementations.md` (optional LiteLLM implementation
   cross-check per vendor)
 - `../openai/chat-completions.md` (the baseline contract these vendors clone)
 - `../openrouter/README.md` (multi-provider router, also reaches these vendors)

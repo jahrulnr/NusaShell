@@ -284,6 +284,44 @@ func handlePrompt(req request) {
 			}
 		}
 	}
+	if strings.Contains(text, "TOOL_IO") {
+		// A tool round shaped like the ones real agents send: rawInput on the
+		// call, status-only updates, then a completed update carrying a
+		// structured content array and rawOutput. The array form is what
+		// used to fail unmarshal and drop the whole update client-side.
+		notify("session/update", map[string]any{
+			"sessionId": p.SessionID,
+			"update": map[string]any{
+				"sessionUpdate": "tool_call",
+				"toolCallId":    "call_read",
+				"title":         "Read SKILL.md",
+				"kind":          "read",
+				"status":        "pending",
+				"locations":     []any{map[string]any{"path": "/tmp/workspace/SKILL.md"}},
+				"rawInput":      map[string]any{"path": "/tmp/workspace/SKILL.md"},
+			},
+		})
+		notify("session/update", map[string]any{
+			"sessionId": p.SessionID,
+			"update": map[string]any{
+				"sessionUpdate": "tool_call_update",
+				"toolCallId":    "call_read",
+				"status":        "in_progress",
+			},
+		})
+		notify("session/update", map[string]any{
+			"sessionId": p.SessionID,
+			"update": map[string]any{
+				"sessionUpdate": "tool_call_update",
+				"toolCallId":    "call_read",
+				"status":        "completed",
+				"content": []any{
+					map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": "line one\nline two\n"}},
+				},
+				"rawOutput": "line one\nline two\n",
+			},
+		})
+	}
 	mu.Lock()
 	cancelCh := cancels[p.SessionID]
 	mu.Unlock()

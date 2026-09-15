@@ -3,6 +3,7 @@
 import { on, rpc } from '../rpc.js';
 import { bindTablistKeyboard, toast, createSelect, el } from '../ui.js';
 import { FONT_OPTIONS, readFontPreference, setFontPreference } from '../font-preferences.js';
+import { refreshPairingPanel, revokeAllSessions } from '../pairing.js';
 
 let bound = false;
 const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', imageProviderId: '', imageModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', videoGenProviderId: '', videoGenModelId: '', ttsProviderId: '', ttsModelId: '', webAnswerProvider: '', webAnswerModel: '', webSearchStrategy: '', compactionWorkflow: 'dedicated', compactionModel: '', reviewModel: '', delegateModel: '' };
@@ -54,6 +55,7 @@ export async function initSettings() {
     document.getElementById('settings-save-btn').addEventListener('click', save);
     document.getElementById('settings-sidebar-compact').addEventListener('change', saveSidebarPreference);
     document.getElementById('settings-pets-auto-start').addEventListener('change', savePetsAutoStart);
+    document.getElementById('settings-remote-access-enabled').addEventListener('change', saveRemoteAccess);
     document.getElementById('settings-compaction-workflow').addEventListener('change', syncCompactionWorkflowUI);
     document.getElementById('settings-pet-action-btn').addEventListener('click', triggerPetAction);
     fontSelect = createSelect(document.getElementById('settings-font-family'), {
@@ -253,6 +255,11 @@ export async function refresh() {
     document.getElementById('settings-project-memory-base').value = settings.project_memory_base ?? '';
     document.getElementById('settings-auto-continues').value = settings.max_auto_continues ?? 10;
     document.getElementById('settings-slow-down').value = settings.slow_down ?? 0;
+    const remoteAccessEnabled = settings.remote_access_enabled === true;
+    document.getElementById('settings-remote-access-enabled').checked = remoteAccessEnabled;
+    document.getElementById('pairing-remote-address').value = Array.isArray(settings.remote_access_addresses)
+      ? settings.remote_access_addresses.join('\n')
+      : '';
     // Web answer: set provider dropdown and model field. API key is write-only.
     webAnswerProviderSelect.setSelected([state.webAnswerProvider || '']);
     document.getElementById('settings-web-answer-model').value = state.webAnswerModel;
@@ -294,6 +301,17 @@ export async function refresh() {
 
   document.getElementById('settings-sidebar-compact').checked = localStorage.getItem('nusashell.sidebarMode') === 'icons';
   refreshPetCard();
+
+  // Remote access: populate the pairing panel (sessions, pending challenge)
+  // and wire the revoke-all control. Pairing RPCs are loopback-only — on a
+  // paired remote client the PAIRING_UNAUTHORIZED response makes
+  // refreshPairingPanel hide the whole section instead of dead controls.
+  const revokeAllBtn = document.getElementById('pairing-revoke-all-btn');
+  if (revokeAllBtn && !revokeAllBtn.dataset.wired) {
+    revokeAllBtn.dataset.wired = '1';
+    revokeAllBtn.addEventListener('click', () => { void revokeAllSessions(); });
+  }
+  void refreshPairingPanel({ enabled: settingsResult.status === 'fulfilled' ? settingsResult.value.settings.remote_access_enabled === true : false });
 
   if (infoResult.status === 'fulfilled') {
     renderAppInfo(infoResult.value);
@@ -403,7 +421,7 @@ function renderImageModelOptions(models) {
 function isImageGeneratorModel(model) {
   if (model?.kind === 'image') return true;
   const id = String(model?.id || '').toLowerCase();
-  return /gpt-image|dall-e|stable-diffusion|seedream|ideogram|recraft|imagen-|riverflow|flash-image/.test(id);
+  return /gpt-image|dall-e|stable-diffusion|seedream|ideogram|recraft|imagen-|riverflow|flash-image|gemini-.*-image$|nano-banana/.test(id);
 }
 
 // modelCapabilityBadges returns an HTML string of capability badges for a
@@ -919,6 +937,8 @@ async function save() {
       web_search_serper_api_key: webSearchSerperAPIKey || null,
       web_search_tavily_api_key: webSearchTavilyAPIKey || null,
       project_memory_base: document.getElementById('settings-project-memory-base').value.trim() || null,
+      remote_access_enabled: document.getElementById('settings-remote-access-enabled').checked,
+      remote_access_addresses: readRemoteAccessAddresses(),
       max_auto_continues: maxAutoContinues,
       slow_down: slowDown,
       temperature: optionalNumber('settings-temperature'),
@@ -937,6 +957,69 @@ async function save() {
     toast(err.message, 'error');
   } finally {
     button.disabled = false;
+  }
+}
+
+function readRemoteAccessAddresses() {
+  const input = document.getElementById('pairing-remote-address');
+  const seen = new Set();
+  const addresses = String(input?.value || '')
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter((value) => value && !seen.has(value) && seen.add(value));
+  return addresses;
+}
+
+function validateRemoteAccessAddresses(addresses) {
+  for (const address of addresses) {
+    let parsed;
+    try {
+      parsed = new URL(address);
+    } catch {
+      return `Enter a valid HTTP(S) address: ${address}`;
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.host) {
+      return `Address must be an absolute HTTP(S) URL: ${address}`;
+    }
+    if (parsed.username || parsed.password) {
+      return `Address must not contain credentials: ${address}`;
+    }
+  }
+  return '';
+}
+
+async function saveRemoteAccess(event) {
+  const toggle = event.currentTarget;
+  const desired = toggle.checked;
+  let addresses = readRemoteAccessAddresses();
+  if (desired && addresses.length === 0) {
+    addresses = [location.origin];
+    document.getElementById('pairing-remote-address').value = addresses[0];
+  }
+  const validationError = desired ? validateRemoteAccessAddresses(addresses) : '';
+  if (validationError) {
+    toggle.checked = !desired;
+    setStatus(validationError, true);
+    return;
+  }
+  toggle.disabled = true;
+  try {
+    const payload = { remote_access_enabled: desired };
+    if (desired) payload.remote_access_addresses = addresses;
+    await rpc('settings.set', payload);
+    diskSyncDirty = false;
+    setStatus(`${desired ? 'Remote access enabled' : 'Remote access disabled'}. Backend restarting…`);
+    // Do not query pairing management while the old process is still
+    // shutting down. The next settings refresh after reconnect will load the
+    // session list from the new runtime.
+    const panel = document.getElementById('pairing-panel');
+    if (panel) panel.hidden = !desired;
+  } catch (err) {
+    toggle.checked = !desired;
+    setStatus(err.message || 'Could not change remote access.', true);
+    toast(err.message || 'Could not change remote access.', 'error');
+  } finally {
+    toggle.disabled = false;
   }
 }
 

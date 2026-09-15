@@ -14,9 +14,6 @@ The interface follows the NusaShell Electron renderer closely, including the
 conversation rail, workspace picker, context counter, attachment affordance,
 streaming tool timeline, and expandable reasoning and tool output.
 
-> This application has no authentication or rate limiting by design. Bind it
-> to `127.0.0.1` or run it only on a trusted network.
-
 ## What it includes
 
 - **Agent conversations** — streaming turns, stop/interrupt, automatic context

@@ -40,17 +40,15 @@ func TestSystemdUnitGolden(t *testing.T) {
 
 func TestSystemdUnitPropagatesOverrides(t *testing.T) {
 	opts := Options{
-		BinaryPath:  "/opt/nusashell/current/nusashell",
-		DataDir:     "/srv/nusashell",
-		Host:        "0.0.0.0",
-		Port:        "7777",
-		AllowRemote: true,
+		BinaryPath: "/opt/nusashell/current/nusashell",
+		DataDir:    "/srv/nusashell",
+		Host:       "0.0.0.0",
+		Port:       "7777",
 	}
 	unit := SystemdUnit(opts, ServiceEnv(opts))
 	for _, want := range []string{
 		`Environment="NUSASHELL_HOST=0.0.0.0"`,
 		`Environment="NUSASHELL_PORT=7777"`,
-		`Environment="NUSASHELL_ALLOW_REMOTE=1"`,
 		"WorkingDirectory=/srv/nusashell",
 	} {
 		if !strings.Contains(unit, want) {
@@ -204,7 +202,7 @@ func TestServiceEnvList(t *testing.T) {
 }
 
 func TestServiceEnvCheckedPropagatesOverrides(t *testing.T) {
-	opts := Options{BinaryPath: "/x", DataDir: "/d", Host: "127.0.0.1", Port: "10994", AllowRemote: true}
+	opts := Options{BinaryPath: "/x", DataDir: "/d", Host: "127.0.0.1", Port: "10994"}
 	env, _ := ServiceEnvChecked(opts)
 	joined := strings.Join(env, "\n")
 	for _, want := range []string{
@@ -212,7 +210,6 @@ func TestServiceEnvCheckedPropagatesOverrides(t *testing.T) {
 		"NUSASHELL_DATA_DIR=/d",
 		"NUSASHELL_HOST=127.0.0.1",
 		"NUSASHELL_PORT=10994",
-		"NUSASHELL_ALLOW_REMOTE=1",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("env missing %q: %v", want, env)

@@ -41,6 +41,11 @@ func (p *Provider) buildRequest(req *core.Request, stream bool) ([]byte, []core.
 	if stream {
 		body["stream"] = true
 		if !p.spec.Stream.OmitStreamOptions {
+			// include_usage makes OpenAI-compatible providers emit a final
+			// usage-only chunk after the finish_reason chunk. Callers must
+			// treat it as accounting, never as a completion signal:
+			// completion is driven by finish_reason and must not depend on
+			// this chunk (or on the [DONE] trailer) arriving. See stream.go.
 			body["stream_options"] = map[string]any{"include_usage": true}
 		}
 	}

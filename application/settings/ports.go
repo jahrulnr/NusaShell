@@ -23,9 +23,10 @@ type Credential interface {
 }
 
 // AppliedHook runs after a successful settings.set. The root App uses it
-// to invalidate learning search and announce user-prompt changes without
-// this package importing those subsystems.
-type AppliedHook func(oldUserPrompt string, next domain.Settings)
+// to invalidate learning search, announce user-prompt changes, and request a
+// process restart for settings whose lifecycle requires it without this
+// package importing those subsystems.
+type AppliedHook func(old, next domain.Settings)
 
 // Logger records a structured application log line.
 type Logger func(level, source, format string, args ...any)

@@ -202,9 +202,6 @@ function buildBackendEnvironment(baseEnvironment, port, packaged) {
   // development switch inherited from a user's shell would make the child
   // depend on a source checkout that is not present beside the app.
   if (packaged) delete environment.NUSASHELL_DEV;
-  // The wrapper owns the loopback boundary; never allow a child started by it
-  // to widen the listener through an inherited remote-access override.
-  delete environment.NUSASHELL_ALLOW_REMOTE;
   // The child owns its lifecycle independently from the systemd service. Do
   // not inherit service/pet routing markers or point the child back to the
   // service's WebSocket endpoint.

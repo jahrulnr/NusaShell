@@ -1,6 +1,6 @@
 // NusaShell — application shell. Router + transport wiring.
 
-import { rpc, connectWS } from './rpc.js';
+import { rpc, connectWS, isPairingRequiredError, isRemoteAccessDisabledError } from './rpc.js';
 import { initHome, refresh as refreshHome } from './views/home.js';
 import { initAgent, refresh as refreshAgent } from './views/agent.js';
 import { initSkills, refresh as refreshSkills } from './views/skills.js';
@@ -18,6 +18,7 @@ import { toast, dismissOpenDialogs } from './ui.js';
 import { bindShellShortcuts } from './shell-shortcuts.js';
 import { initMobileNav } from './mobile-nav.js';
 import { initOfflineScreen } from './offline-screen.js';
+import { initPairingGate } from './pairing.js';
 import { applyFontPreference, readFontPreference } from './font-preferences.js';
 import { isElectronRuntime } from './desktop-file-path.js';
 
@@ -164,6 +165,10 @@ async function boot() {
   // before the first connection status events fire so a dead backend is
   // covered from the very start.
   initOfflineScreen();
+  // Pairing gate: when the backend requires device pairing (remote client),
+  // the gate is the dominant UI and suppresses the offline overlay via the
+  // shared pairing-required flag in rpc.js.
+  initPairingGate();
   const miniWindowButton = document.getElementById('mini-window-btn');
   if (isElectronRuntime()) {
     // Electron's renderer does not support the browser mini-window flow yet.
@@ -194,9 +199,11 @@ async function boot() {
     const info = await rpc('app.info', {}, { timeoutMs: 4000 });
     document.title = `NusaShell ${info.version ?? ''}`.trim();
   } catch (err) {
-    // Only mark offline if WS isn't already open — app.info uses HTTP,
-    // which can fail independently of the WS event stream.
-    if (document.documentElement.dataset.backendStatus !== 'open') {
+    // PAIRING_REQUIRED: the backend is reachable but requires pairing — the
+    // pairing gate owns the screen, so do not mark the backend offline.
+    // Otherwise, only mark offline if WS isn't already open — app.info uses
+    // HTTP, which can fail independently of the WS event stream.
+    if (!isPairingRequiredError(err) && !isRemoteAccessDisabledError(err) && document.documentElement.dataset.backendStatus !== 'open') {
       setConnection('offline');
     }
   }
@@ -218,6 +225,9 @@ async function boot() {
   for (const r of results) {
     if (r.status === 'rejected') {
       console.error('view init failed:', r.reason);
+      // PAIRING_REQUIRED rejections are expected while the pairing gate owns
+      // the screen — views fail quietly instead of stacking error toasts.
+      if (isPairingRequiredError(r.reason) || isRemoteAccessDisabledError(r.reason)) continue;
       const status = document.documentElement.dataset.backendStatus;
       if (status !== 'offline' && status !== 'closed' && status !== 'error') {
         toast(`View init failed: ${r.reason?.message ?? r.reason}`, 'error', 6000);

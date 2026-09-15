@@ -72,3 +72,67 @@ Full-window overlay shown whenever the backend is unreachable. It covers every v
   - Section: Navigation
   - Type: button
   - Notes: Reloads the shell; the service worker serves the cached app while the server is down.
+
+## Device pairing gate
+
+Full-window dialog shown when the backend requires device pairing (an unpaired non-loopback client). While the gate owns the screen, the offline overlay and view error toasts are suppressed so the pairing state is the single explanation. It renders pending/waiting, success, and terminal link states such as expired, rejected, already used, or invalid without offering a retry that cannot make the same link valid; transient backend/network failures can still be retried.
+
+- **Device pairing gate** (`#pairing-gate`):
+  - Section: Navigation — Overlays
+  - Type: dialog
+  - Notes: Full-window dialog shown when the backend requires device pairing; owns the screen while PAIRING_REQUIRED.
+
+- **Pairing gate title** (`#pairing-gate-title`):
+  - Section: Navigation — Overlays
+  - Type: heading
+  - Notes: Receives focus when the gate opens.
+
+- **Pairing gate explanation** (`#pairing-gate-intro`):
+  - Section: Navigation — Overlays
+  - Type: text
+  - Notes: Explains either the pairing requirement or that remote access is disabled on the host.
+
+- **Pairing pending** (`#pairing-pending`):
+  - Section: Navigation — Overlays
+  - Type: status
+  - Notes: Waiting-for-host-approval state.
+
+- **Pairing status text** (`#pairing-status`):
+  - Section: Navigation — Overlays
+  - Type: status
+
+- **Pairing success** (`#pairing-success`):
+  - Section: Navigation — Overlays
+  - Type: status
+
+- **Pairing error** (`#pairing-error`):
+  - Section: Navigation — Overlays
+  - Type: alert
+
+- **Pairing error message** (`#pairing-error-message`):
+  - Section: Navigation — Overlays
+  - Type: text
+
+- **Retry pairing** (`#pairing-retry-btn`):
+  - Section: Navigation — Overlays
+  - Type: button
+  - Action: Retries the pairing status/exchange flow.
+
+- **Pairing help** (`#pairing-help`):
+  - Section: Navigation — Overlays
+  - Type: panel
+  - Notes: Explains how to open the host QR and pair.
+
+- **Pairing help toggle** (`#pairing-help-btn`):
+  - Section: Navigation — Overlays
+  - Type: button
+  - Action: Shows or hides the pairing help panel.
+
+- **Close pairing help** (`#pairing-help-close`):
+  - Section: Navigation — Overlays
+  - Type: button
+
+- **Challenge countdown** (`#pairing-countdown`):
+  - Section: Navigation — Overlays
+  - Type: status
+  - Notes: Remaining challenge lifetime.

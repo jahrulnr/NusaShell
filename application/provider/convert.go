@@ -80,7 +80,23 @@ func ToCoreRequest(req ChatRequest, kind domain.ProviderKind, openRouter bool) *
 		out.Messages = append(out.Messages, core.Message{Role: core.RoleSystem, Blocks: []core.Block{systemBlock}})
 	}
 	for _, m := range req.Messages {
-		out.Messages = append(out.Messages, chatMessageToCore(m, req, kind, openRouter))
+		if emptyAssistantMessage(m) {
+			continue
+		}
+		converted := chatMessageToCore(m, req, kind, openRouter)
+		// An assistant entry must keep provider-visible payload after
+		// conversion. A provider-specific opaque reasoning payload may be
+		// stripped when switching API kinds, and an interrupted thinking
+		// stream persists a reasoning-only message: on message-shaped
+		// wires (Chat, Messages, Gemini) that serializes to a bare
+		// reasoning field, which strict gateways reject ("content or
+		// tool_calls must be set"). Item-based wires (Responses, Codex)
+		// carry reasoning as a first-class input item, so a
+		// reasoning-only entry stays legal there.
+		if converted.Role == core.RoleAssistant && !assistantWirePayload(converted.Blocks, kind) {
+			continue
+		}
+		out.Messages = append(out.Messages, converted)
 	}
 	for _, t := range req.Tools {
 		tool, err := core.NewTool(t.Name, t.Description, t.InputSchema)
@@ -252,6 +268,38 @@ func thinkingFromEffort(effort string) *core.Thinking {
 	default:
 		return &core.Thinking{Mode: core.ThinkingEnabled, Effort: effort}
 	}
+}
+
+func emptyAssistantMessage(m ChatMessage) bool {
+	return m.Role == "assistant" &&
+		strings.TrimSpace(m.Content) == "" &&
+		strings.TrimSpace(m.Reasoning) == "" &&
+		len(m.ToolCalls) == 0 &&
+		len(m.ReasoningExtra) == 0
+}
+
+// assistantWirePayload reports whether a converted assistant message still
+// carries content the target wire accepts on an assistant entry. Chat
+// Completions, Anthropic Messages, and Gemini require a text or tool-use
+// block — reasoning-only is invalid there (a reasoning field does not
+// satisfy "content or tool_calls must be set"). Responses and Codex model
+// reasoning as a first-class input item, so a reasoning-only entry is
+// legal and keeps encrypted replay state alive.
+func assistantWirePayload(blocks []core.Block, kind domain.ProviderKind) bool {
+	if len(blocks) == 0 {
+		return false
+	}
+	for _, b := range blocks {
+		switch v := b.(type) {
+		case core.TextBlock:
+			if strings.TrimSpace(v.Text) != "" {
+				return true
+			}
+		case core.ToolUseBlock:
+			return true
+		}
+	}
+	return kind == domain.ProviderResponses || kind == domain.ProviderCodex
 }
 
 // reasoningExtraForKind returns the opaque ReasoningExtra payload when the

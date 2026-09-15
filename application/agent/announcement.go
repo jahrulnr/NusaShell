@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"time"
 
 	"nusashell/domain"
 	"nusashell/pkg/nonce"
@@ -163,6 +164,80 @@ func (a *Service) PublishAnnouncement(convID string, ev Announcement) {
 	}
 	if err := repo.Save(); err != nil {
 		a.log("warn", "agent", "announcement: failed to persist pending for %s: %v", convID, err)
+	}
+}
+
+// PublishTaskMemoryAnnouncement queues a task_memory announcement AND
+// writes the dedup markers (LastAnnouncedRecords) for the published hits,
+// under the same announcementLock as PublishAnnouncement and
+// DrainAnnouncements. The conversation is loaded fresh inside the lock
+// (not the caller's snapshot) so markers written by a concurrent
+// turn-start scan are respected — a hit already covered is skipped,
+// preventing cross-turn duplicate tool cards.
+//
+// markers are the (ID, LastConfirmedAt) pairs for the hits the caller
+// wants to publish. Each marker is re-checked against the fresh
+// LastAnnouncedRecords: a marker is skipped when its ID already has an
+// entry whose LastConfirmedAt is not before the marker's (or the stored
+// entry is a legacy zero-time marker — permanent dedup). Only non-skipped
+// markers are appended; the announcement is queued only when at least
+// one marker is new. This mirrors the isAlreadyAnnounced logic in the
+// memory package without importing it (agent must not depend on
+// application/memory).
+func (a *Service) PublishTaskMemoryAnnouncement(convID, args, message string, markers []domain.AnnouncedRecord) {
+	if convID == "" || len(markers) == 0 {
+		return
+	}
+	lock := a.announcementLock(convID)
+	lock.Lock()
+	defer lock.Unlock()
+	repo, err := a.loadRepo(convID)
+	if err != nil {
+		a.log("warn", "agent", "task_memory announcement: conversation %s not found: %v", convID, err)
+		return
+	}
+	c := repo.Conversation()
+
+	// Build the fresh dedup map from the persisted conversation (not the
+	// caller's snapshot). A concurrent turn-start scan may have written
+	// markers between the lane's filter and this publish.
+	announcedAt := map[string]time.Time{}
+	for _, rec := range c.LastAnnouncedRecords {
+		announcedAt[rec.ID] = rec.LastConfirmedAt
+	}
+
+	var newMarkers []domain.AnnouncedRecord
+	for _, m := range markers {
+		stored, ok := announcedAt[m.ID]
+		if ok {
+			if stored.IsZero() {
+				continue // legacy permanent dedup
+			}
+			if !m.LastConfirmedAt.After(stored) {
+				continue // not re-confirmed since last announce
+			}
+		}
+		newMarkers = append(newMarkers, m)
+	}
+	if len(newMarkers) == 0 {
+		return // every marker already covered — nothing to publish
+	}
+
+	c.QueueAnnouncement(domain.PendingAnnouncement{
+		ID:        domain.AnnouncementToolCallPrefix + nonce.Random(),
+		Type:      "task_memory",
+		Args:      args,
+		Message:   message,
+		CreatedAt: clock.NewTime().Time(),
+	})
+	if n := len(c.PendingAnnouncements); n > maxPendingAnnouncements {
+		dropped := c.PendingAnnouncements[0]
+		c.PendingAnnouncements = append([]domain.PendingAnnouncement(nil), c.PendingAnnouncements[1:]...)
+		a.log("warn", "agent", "announcement: dropped oldest pending %s for %s (queue cap %d)", dropped.Type, convID, maxPendingAnnouncements)
+	}
+	c.LastAnnouncedRecords = append(c.LastAnnouncedRecords, newMarkers...)
+	if err := repo.Save(); err != nil {
+		a.log("warn", "agent", "task_memory announcement: failed to persist markers for %s: %v", convID, err)
 	}
 }
 

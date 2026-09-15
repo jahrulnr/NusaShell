@@ -37,4 +37,4 @@ Parent routing: `../../SKILL.md`. OpenAI public API: `../openai/`.
 OpenRouter: `../openrouter/`.
 Anthropic: `../anthropic/`.
 Optional implementation cross-check: LiteLLM `llms/chatgpt/`
-(authenticator + chat/responses) — see `../_shared/sample-implementations.md`.
+(authenticator + chat/responses) — see `../shared/sample-implementations.md`.

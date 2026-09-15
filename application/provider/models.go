@@ -103,6 +103,15 @@ func (s *Service) enrichProviderModelsAtRead(p *domain.Provider) {
 		if config.IsKnownImageModel(p.Models[i].ID) {
 			p.Models[i].Kind = domain.ModelKindImage
 		}
+		// Gemini image models (Nano Banana family) accept reference images
+		// for editing (image-to-image) by design, but the catalog may not
+		// flag every variant as Vision (e.g. nano-banana-pro-preview has no
+		// catalog entry). Tag them at read time so the media gate does not
+		// block edits. imagen-* is text-to-image only and is excluded by
+		// IsGeminiImageI2IModel.
+		if p.Models[i].Kind == domain.ModelKindImage && config.IsGeminiImageI2IModel(p.Models[i].ID) {
+			p.Models[i].Vision = true
+		}
 		// TTS/VIDEO/EMBEDDING tagging mirrors the import path: models.dev
 		// catalog first (documented carve-outs for speech/video kinds), then
 		// the allowlists. Embedding is mirrored here so embedding models
@@ -121,6 +130,9 @@ func (s *Service) enrichProviderModelsAtRead(p *domain.Provider) {
 		}
 		if config.IsKnownTTSModel(p.Models[i].ID) {
 			p.Models[i].Kind = domain.ModelKindTTS
+		}
+		if config.IsKnownVideoModel(p.Models[i].ID) {
+			p.Models[i].Kind = domain.ModelKindVideo
 		}
 		if p.Models[i].Kind != domain.ModelKindEmbedding && config.IsKnownEmbeddingModel(p.Models[i].ID) {
 			p.Models[i].Kind = domain.ModelKindEmbedding

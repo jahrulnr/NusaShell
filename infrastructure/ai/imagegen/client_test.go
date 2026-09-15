@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -452,4 +453,269 @@ func TestCodexEmptyDataFails(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no images") {
 		t.Fatalf("err = %v", err)
 	}
+}
+
+func TestGeminiGenerateSendsGenerateContentBody(t *testing.T) {
+	var gotPath, gotKey string
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotKey = r.Header.Get("x-goog-api-key")
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("Gemini must use x-goog-api-key, not Authorization; got %q", r.Header.Get("Authorization"))
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"candidates": []map[string]any{{
+				"content": map[string]any{
+					"parts": []map[string]any{{
+						"inlineData": map[string]any{"mimeType": "image/png", "data": png1x1B64},
+					}},
+				},
+				"finishReason": "STOP",
+			}},
+			"usageMetadata": map[string]any{
+				"promptTokenCount": 10, "candidatesTokenCount": 200, "totalTokenCount": 210,
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := &Client{Backend: BackendGemini, BaseURL: server.URL + "/v1beta", APIKey: "gem-key", HTTP: server.Client()}
+	res, err := client.Generate(context.Background(), application.ImageGenRequest{
+		Model: "gemini-3-pro-image", Prompt: "a watercolor otter", N: 1,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if gotPath != "/v1beta/models/gemini-3-pro-image:generateContent" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotKey != "gem-key" {
+		t.Fatalf("x-goog-api-key = %q", gotKey)
+	}
+	contents, _ := gotBody["contents"].([]any)
+	if len(contents) != 1 {
+		t.Fatalf("contents = %+v", gotBody["contents"])
+	}
+	first, _ := contents[0].(map[string]any)
+	parts, _ := first["parts"].([]any)
+	if len(parts) != 1 {
+		t.Fatalf("parts = %+v", parts)
+	}
+	textPart, _ := parts[0].(map[string]any)
+	if textPart["text"] != "a watercolor otter" {
+		t.Fatalf("text part = %+v", textPart)
+	}
+	genCfg, _ := gotBody["generationConfig"].(map[string]any)
+	if genCfg == nil {
+		t.Fatal("missing generationConfig")
+	}
+	mods, _ := genCfg["responseModalities"].([]any)
+	if len(mods) != 2 || mods[0] != "TEXT" || mods[1] != "IMAGE" {
+		t.Fatalf("responseModalities = %+v, want [TEXT IMAGE]", mods)
+	}
+	if res.Provider != BackendGemini || res.Model != "gemini-3-pro-image" {
+		t.Fatalf("result = %+v", res)
+	}
+	if res.UsageTokens != 210 {
+		t.Fatalf("usage tokens = %d, want 210", res.UsageTokens)
+	}
+	if len(res.Images) != 1 || res.Images[0].MediaType != "image/png" {
+		t.Fatalf("images = %+v", res.Images)
+	}
+}
+
+func TestGeminiEditSendsInlineDataReferences(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"candidates": []map[string]any{{
+				"content": map[string]any{
+					"parts": []map[string]any{{
+						"inlineData": map[string]any{"mimeType": "image/png", "data": png1x1B64},
+					}},
+				},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	client := &Client{Backend: BackendGemini, BaseURL: server.URL + "/v1beta", HTTP: server.Client()}
+	_, err := client.Generate(context.Background(), application.ImageGenRequest{
+		Model: "gemini-3.1-flash-image", Prompt: "make it night",
+		References: []application.ImageReference{{MediaType: "image/png", Data: []byte("PNGDATA")}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	contents, _ := gotBody["contents"].([]any)
+	first, _ := contents[0].(map[string]any)
+	parts, _ := first["parts"].([]any)
+	// First part is the inlineData reference, second is the text prompt.
+	if len(parts) != 2 {
+		t.Fatalf("parts = %+v, want 2 (inlineData + text)", parts)
+	}
+	inlinePart, _ := parts[0].(map[string]any)
+	inlineData, _ := inlinePart["inlineData"].(map[string]any)
+	if inlineData == nil {
+		t.Fatalf("first part should be inlineData, got %+v", inlinePart)
+	}
+	if inlineData["mimeType"] != "image/png" {
+		t.Errorf("mimeType = %v", inlineData["mimeType"])
+	}
+	wantData := base64.StdEncoding.EncodeToString([]byte("PNGDATA"))
+	if inlineData["data"] != wantData {
+		t.Errorf("data = %v, want %s", inlineData["data"], wantData)
+	}
+	textPart, _ := parts[1].(map[string]any)
+	if textPart["text"] != "make it night" {
+		t.Errorf("text part = %+v", textPart)
+	}
+}
+
+func TestGeminiErrorMapsToProviderError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":400,"message":"invalid model","status":"INVALID_ARGUMENT"}}`))
+	}))
+	defer server.Close()
+	client := &Client{Backend: BackendGemini, BaseURL: server.URL + "/v1beta", HTTP: server.Client()}
+	_, err := client.Generate(context.Background(), application.ImageGenRequest{Model: "bad", Prompt: "x", N: 1})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var perr *domain.ProviderError
+	if !errors.As(err, &perr) {
+		t.Fatalf("err = %v, want *ProviderError", err)
+	}
+	if perr.StatusCode != 400 {
+		t.Fatalf("status = %d, want 400", perr.StatusCode)
+	}
+	if !strings.Contains(perr.Error(), "invalid model") {
+		t.Fatalf("err = %v", perr)
+	}
+}
+
+func TestGeminiNoImageDataFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"candidates": []map[string]any{{
+				"content": map[string]any{
+					"parts": []map[string]any{{"text": "I can only generate text"}},
+				},
+			}},
+		})
+	}))
+	defer server.Close()
+	client := &Client{Backend: BackendGemini, BaseURL: server.URL + "/v1beta", HTTP: server.Client()}
+	_, err := client.Generate(context.Background(), application.ImageGenRequest{Model: "m", Prompt: "p", N: 1})
+	if err == nil || !strings.Contains(err.Error(), "no image") {
+		t.Fatalf("err = %v, want no-image error", err)
+	}
+}
+
+func TestGeminiMapsSizeToAspectRatio(t *testing.T) {
+	cases := []struct {
+		name        string
+		size        string
+		wantAspect  string
+		wantOmitted bool
+	}{
+		{"1024x1024 maps to 1:1", "1024x1024", "1:1", false},
+		{"1536x1024 maps to 3:2", "1536x1024", "3:2", false},
+		{"1024x1536 maps to 2:3", "1024x1536", "2:3", false},
+		{"auto omits imageConfig", "auto", "", true},
+		{"empty omits imageConfig", "", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+					t.Fatal(err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"candidates": []map[string]any{{
+						"content": map[string]any{
+							"parts": []map[string]any{{
+								"inlineData": map[string]any{"mimeType": "image/png", "data": png1x1B64},
+							}},
+						},
+					}},
+				})
+			}))
+			defer server.Close()
+
+			client := &Client{Backend: BackendGemini, BaseURL: server.URL + "/v1beta", HTTP: server.Client()}
+			_, err := client.Generate(context.Background(), application.ImageGenRequest{
+				Model: "gemini-3-pro-image", Prompt: "a boat", Size: tc.size, N: 1,
+			})
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			genCfg, _ := gotBody["generationConfig"].(map[string]any)
+			if genCfg == nil {
+				t.Fatal("missing generationConfig")
+			}
+			imgCfg, _ := genCfg["imageConfig"].(map[string]any)
+			if tc.wantOmitted {
+				if imgCfg != nil {
+					t.Fatalf("imageConfig = %+v, want omitted for %s", imgCfg, tc.size)
+				}
+				return
+			}
+			if imgCfg == nil {
+				t.Fatalf("imageConfig missing, want aspectRatio %s for %s", tc.wantAspect, tc.size)
+			}
+			if imgCfg["aspectRatio"] != tc.wantAspect {
+				t.Fatalf("aspectRatio = %v, want %s for %s", imgCfg["aspectRatio"], tc.wantAspect, tc.size)
+			}
+		})
+	}
+}
+
+// TestGeminiLiveImageGeneration is a key-gated live smoke test. It is skipped
+// when GEMINI_API_KEY is unset. Never prints the credential. A green test
+// always means a real image was produced: quota/permission rejections (429,
+// 403-quota/permission) are t.Skip with an explicit reason so they never
+// masquerade as a pass.
+func TestGeminiLiveImageGeneration(t *testing.T) {
+	key := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
+	if key == "" {
+		t.Skip("GEMINI_API_KEY not set; skipping live Gemini image generation smoke test")
+	}
+	const liveModel = "gemini-3-pro-image"
+	client := &Client{Backend: BackendGemini, BaseURL: "https://generativelanguage.googleapis.com/v1beta", APIKey: key}
+	res, err := client.Generate(context.Background(), application.ImageGenRequest{
+		Model:  liveModel,
+		Prompt: "A small red circle on a white background",
+		N:      1,
+	})
+	if err != nil {
+		var perr *domain.ProviderError
+		if errors.As(err, &perr) && (perr.StatusCode == 429 || perr.StatusCode == 403) {
+			t.Skipf("quota exhausted for this key/tier on %s (HTTP %d): %s", liveModel, perr.StatusCode, perr.Error())
+		}
+		t.Fatalf("live Gemini image generation failed: %v", err)
+	}
+	if len(res.Images) == 0 {
+		t.Fatal("live Gemini image generation returned no images")
+	}
+	if len(res.Images[0].Bytes) < 100 {
+		t.Fatalf("generated image too small: %d bytes", len(res.Images[0].Bytes))
+	}
+	if res.Images[0].MediaType == "" {
+		t.Fatal("missing media type on generated image")
+	}
+	t.Logf("live proof OK: generated %d-byte %s image", len(res.Images[0].Bytes), res.Images[0].MediaType)
 }

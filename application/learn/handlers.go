@@ -172,15 +172,19 @@ func (s *Service) HandleLearningSearch(req contracts.LearningSearchRequest) (any
 // fragment metadata); used_with edges come from successful tool usage.
 func (s *Service) HandleLearningGraph() (any, *contracts.RPCError) {
 	// Build edges if edge builder is configured (idempotent — strengthens
-	// existing edges, doesn't duplicate).
+	// existing edges, doesn't duplicate). The build is queued asynchronously
+	// via deps.Go so the RPC returns the current graph immediately without
+	// blocking on edge discovery (which may do embedding work).
 	if s.builder != nil {
 		// Resolve embedder lazily for embedding-based edges
 		if embedder, modelID := s.ResolveEmbedderPair(); embedder != nil {
 			s.builder.SetEmbedder(embedder, modelID)
 		}
-		if err := s.builder.Build(context.Background()); err != nil {
-			s.log("warn", "learning", "graph build: %v", err)
-		}
+		s.goSafe("learning", func() {
+			if err := s.builder.Build(context.Background()); err != nil {
+				s.log("warn", "learning", "graph build: %v", err)
+			}
+		})
 	}
 
 	// Collect nodes

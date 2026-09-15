@@ -172,6 +172,14 @@ func NewImageGeneratorFactory(creds application.CredentialStore) application.Ima
 				HTTP:      withCodexCookieJar(requestClient),
 			}, nil
 		}
+		if p != nil && p.Kind == domain.ProviderGemini {
+			return &imagegen.Client{
+				Backend: imagegen.BackendGemini,
+				BaseURL: geminiImageBaseURL(p.BaseURL),
+				APIKey:  apiKey,
+				HTTP:    requestClient,
+			}, nil
+		}
 		return openai(ctx, p, apiKey)
 	}
 }
@@ -228,6 +236,8 @@ func NewEmbeddingModelListerFactory() application.EmbeddingModelListerFactory {
 
 // NewImageModelListerFactory returns a factory that builds an ImageModelLister
 // for OpenAI-compatible hosts. Anthropic Messages has no image catalog.
+// Gemini returns nil: its image models are discovered through the standard
+// GET /v1beta/models chat lister and classified by kind downstream.
 func NewImageModelListerFactory() application.ImageModelListerFactory {
 	client := httpclient.New()
 	return func(p *domain.Provider) application.ImageModelLister {
@@ -235,6 +245,9 @@ func NewImageModelListerFactory() application.ImageModelListerFactory {
 			return nil
 		}
 		if !p.KindCapabilities().HasImageEndpoint {
+			return nil
+		}
+		if p.Kind == domain.ProviderGemini {
 			return nil
 		}
 		return imagegen.NewModelLister(embeddingBaseURL(p.BaseURL), client)
@@ -246,6 +259,9 @@ func NewImageModelListerFactory() application.ImageModelListerFactory {
 // GET <base>/models?output_modalities=speech (OpenRouter surfaces its TTS
 // catalog only through that filter); hosts that reject it yield an empty
 // list and the importer falls back to catalog tagging + allowlist.
+// Gemini returns nil: its TTS models are discovered through the standard
+// GET /v1beta/models chat lister and classified by kind downstream,
+// mirroring the image and video model lister decisions.
 func NewSpeechModelListerFactory() application.SpeechModelListerFactory {
 	client := httpclient.New()
 	return func(p *domain.Provider) application.SpeechModelLister {
@@ -255,13 +271,17 @@ func NewSpeechModelListerFactory() application.SpeechModelListerFactory {
 		if !p.KindCapabilities().HasSpeechEndpoint {
 			return nil
 		}
+		if p.Kind == domain.ProviderGemini {
+			return nil
+		}
 		return ttsclient.NewModelLister(embeddingBaseURL(p.BaseURL), client)
 	}
 }
 
 // NewVideoGeneratorFactory builds online video-generation clients for
-// OpenAI-compatible hosts serving the async /videos API (OpenRouter).
-// Other kinds fail fast so callers surface a clear unavailability message.
+// OpenAI-compatible hosts serving the async /videos API (OpenRouter) and
+// for the Gemini Veo :predictLongRunning surface. Other kinds fail fast
+// so callers surface a clear unavailability message.
 func NewVideoGeneratorFactory() application.VideoGeneratorFactory {
 	client := httpclient.New()
 	return func(p *domain.Provider, apiKey string) (application.VideoGenerator, error) {
@@ -269,7 +289,14 @@ func NewVideoGeneratorFactory() application.VideoGeneratorFactory {
 			return nil, fmt.Errorf("videogen: nil provider")
 		}
 		if !p.KindCapabilities().HasVideoEndpoint {
-			return nil, fmt.Errorf("videogen: provider kind %q has no /videos endpoint", p.Kind)
+			return nil, fmt.Errorf("videogen: provider kind %q has no video endpoint", p.Kind)
+		}
+		if p.Kind == domain.ProviderGemini {
+			return &videogen.GeminiClient{
+				BaseURL: geminiImageBaseURL(p.BaseURL),
+				APIKey:  apiKey,
+				HTTP:    client,
+			}, nil
 		}
 		base := strings.TrimRight(p.BaseURL, "/")
 		if base == "" {
@@ -280,7 +307,10 @@ func NewVideoGeneratorFactory() application.VideoGeneratorFactory {
 }
 
 // NewVideoModelListerFactory returns a factory that builds a
-// VideoModelLister via GET <base>/videos/models.
+// VideoModelLister via GET <base>/videos/models. Gemini returns nil:
+// its video models (veo-*) are discovered through the standard
+// GET /v1beta/models chat lister and classified by kind downstream,
+// mirroring the image model lister decision.
 func NewVideoModelListerFactory() application.VideoModelListerFactory {
 	client := httpclient.New()
 	return func(p *domain.Provider) application.VideoModelLister {
@@ -288,6 +318,9 @@ func NewVideoModelListerFactory() application.VideoModelListerFactory {
 			return nil
 		}
 		if !p.KindCapabilities().HasVideoEndpoint {
+			return nil
+		}
+		if p.Kind == domain.ProviderGemini {
 			return nil
 		}
 		return videogen.NewModelLister(embeddingBaseURL(p.BaseURL), client)
@@ -303,4 +336,27 @@ func embeddingBaseURL(baseURL string) string {
 		base += "/v1"
 	}
 	return base
+}
+
+// geminiImageBaseURL normalizes a Gemini provider BaseURL to the API root
+// (ending with /v1beta) for the generateContent image endpoint. A base URL
+// that already carries /v1beta is used verbatim so Gemini-compatible gateways
+// keep working, matching the gemini wire package's apiRoot() normalization.
+func geminiImageBaseURL(baseURL string) string {
+	base := strings.TrimRight(baseURL, "/")
+	if base == "" {
+		base = "https://generativelanguage.googleapis.com"
+	}
+	if strings.HasSuffix(base, "/v1beta") || strings.Contains(base, "/v1beta/") {
+		return base
+	}
+	return base + "/v1beta"
+}
+
+// geminiSpeechBaseURL normalizes a Gemini provider BaseURL to the /v1beta API
+// root for the generateContent TTS surface. The normalization is identical to
+// the image surface (both use :generateContent under /v1beta); the separate
+// name keeps the TTS routing readable.
+func geminiSpeechBaseURL(baseURL string) string {
+	return geminiImageBaseURL(baseURL)
 }

@@ -53,5 +53,5 @@ When using `provider` / `models[]` fallbacks:
 
 ## Related
 
-Agent loop patterns → `../references/_shared/usecase-patterns.md`.
+Agent loop patterns → `../references/shared/usecase-patterns.md`.
 Errors → `errors.md`.

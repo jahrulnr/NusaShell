@@ -3621,8 +3621,9 @@ func TestModelCapabilitiesReasoningReplayPatternFallback(t *testing.T) {
 // Zen/Go (generated provider IDs, empty InterleavedField on glm-5.3 /
 // deepseek-v4-flash) still requires reasoning_content replay. The static
 // "opencode-go" whitelist never matches NusaShell's prov_* IDs; the host
-// plus the model's Reasoning flag is the durable signal. Non-reasoning
-// models on the same host must not get a forced reasoning_content placeholder.
+// plus the model's reasoning metadata or known DeepSeek V4 model pattern is
+// the durable signal. Non-reasoning models on the same host must not get a
+// forced reasoning_content placeholder.
 func TestModelCapabilitiesReasoningReplayOpenCodeHost(t *testing.T) {
 	provider := &domain.Provider{
 		ID:      "prov_b9587aa5f937c4f2",
@@ -3630,10 +3631,13 @@ func TestModelCapabilitiesReasoningReplayOpenCodeHost(t *testing.T) {
 		Models: []domain.Model{
 			{ID: "glm-5.3-flash", Reasoning: true},
 			{ID: "deepseek-v4-flash", Reasoning: true},
+			// OpenCode's /models response does not always expose reasoning
+			// metadata, and this revision is not in the local catalog.
+			{ID: "deepseek-v4.1-flash"},
 			{ID: "omen-alpha", Reasoning: false},
 		},
 	}
-	for _, model := range []string{"glm-5.3-flash", "deepseek-v4-flash"} {
+	for _, model := range []string{"glm-5.3-flash", "deepseek-v4-flash", "deepseek-v4.1-flash"} {
 		caps := modelCapabilitiesWithLearned(provider, model, nil, nil)
 		if !caps.ReasoningReplay {
 			t.Errorf("%s on opencode.ai: ReasoningReplay = false, want true", model)
@@ -4488,23 +4492,6 @@ func TestAcpDelegationDescription(t *testing.T) {
 	}
 	if !strings.Contains(desc, "Default ACP agent: Cursor") {
 		t.Fatalf("description must name the default agent: %q", desc)
-	}
-}
-
-func TestHeadlessAgentKindsUseDistinctSystemPrompts(t *testing.T) {
-	conv := &domain.Conversation{}
-	delegate := buildSystemPromptForRun(&TurnRun{Headless: true, ToolKind: AgentDelegate}, conv, "")
-	automation := buildSystemPromptForRun(&TurnRun{Headless: true, ToolKind: AgentAutomation}, conv, "")
-	interactive := buildSystemPrompt(conv, "")
-
-	if delegate == "" || !strings.Contains(delegate, "internal delegate agent") {
-		t.Fatalf("delegate prompt must identify its internal delegate role: %q", delegate)
-	}
-	if delegate == interactive || delegate == automation {
-		t.Fatal("delegate prompt must be distinct from interactive and automation prompts")
-	}
-	if automation == interactive {
-		t.Fatal("automation prompt must remain distinct from interactive prompt")
 	}
 }
 

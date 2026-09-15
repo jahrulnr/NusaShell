@@ -29,7 +29,7 @@ var ReasoningReplayModelPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)deepseek-r1`),
 	regexp.MustCompile(`(?i)deepseek-reasoner`),
 	regexp.MustCompile(`(?i)deepseek-chat`),
-	regexp.MustCompile(`(?i)deepseek[-/]v4[-.](flash|pro)`),
+	regexp.MustCompile(`(?i)deepseek[-/]v4(?:[.-][0-9]+)?[-.](flash|pro)`),
 	regexp.MustCompile(`(?i)kimi[-/]k\d`),
 	regexp.MustCompile(`(?i)qwq`),
 	regexp.MustCompile(`(?i)qwen.*think`),

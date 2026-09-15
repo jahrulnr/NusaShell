@@ -20,8 +20,12 @@ references/<provider>/
 ```
 
 Add modality files only when the provider has a distinct contract
-(`images.md`, `tts.md`, `embeddings.md`, `realtime.md`, …). Gemini also
-keeps `thinking.md` because thought signatures are load-bearing for agents.
+(`images.md`, `tts.md`, `video.md`, `music.md`, `embeddings.md`,
+`realtime.md`, …). Gemini also keeps `thinking.md` because thought
+signatures are load-bearing for agents, and splits its media surfaces
+across two endpoints: `:predictLongRunning` for Veo video and the
+Interactions API for image/TTS/music — document both when a provider
+exposes more than one request surface for media.
 
 ## Required content for contract files
 
@@ -56,9 +60,9 @@ but must still link to the relevant contract details.
   possible; a temporary local clone is optional, never a prerequisite.
 - Never store API keys, account ids, or request logs with real payloads.
 - After writing the files, update the provider README and the relevant
-  `references/_shared/provider-matrix.md` row. The SKILL.md table only maps
+  `references/shared/provider-matrix.md` row. The SKILL.md table only maps
   broad surfaces to their router; do not duplicate per-provider workflows
   there.
-- Add a row to `references/_shared/sample-implementations.md` pointing at the
+- Add a row to `references/shared/sample-implementations.md` pointing at the
   best sample code for the new provider (upstream repo path or local sample).
 - Run the skill validator and an internal relative-link check after editing.

@@ -13,8 +13,9 @@ import (
 // NewSpeechSynthesizerFactory builds online TTS clients for providers whose
 // host serves the OpenAI-compatible POST /audio/speech endpoint: Chat
 // (any OpenAI-compatible gateway, including OpenRouter's /api/v1/audio/speech)
-// and Responses (same OpenAI platform host). Other kinds fail fast so the
-// caller can fall back to offline piper.
+// and Responses (same OpenAI platform host). Gemini is routed to its native
+// generateContent AUDIO surface (tts.GeminiClient). Other kinds fail fast so
+// the caller can fall back to offline piper.
 func NewSpeechSynthesizerFactory() application.SpeechSynthesizerFactory {
 	client := httpclient.NewWithTimeout(httpclient.DefaultRequestTimeout)
 	return func(p *domain.Provider, apiKey string) (application.SpeechSynthesizer, error) {
@@ -23,6 +24,13 @@ func NewSpeechSynthesizerFactory() application.SpeechSynthesizerFactory {
 		}
 		if !p.KindCapabilities().HasSpeechEndpoint {
 			return nil, fmt.Errorf("tts: provider kind %q has no /audio/speech endpoint", p.Kind)
+		}
+		if p.Kind == domain.ProviderGemini {
+			return &ttsclient.GeminiClient{
+				BaseURL: geminiSpeechBaseURL(p.BaseURL),
+				APIKey:  apiKey,
+				HTTP:    client,
+			}, nil
 		}
 		base := strings.TrimRight(p.BaseURL, "/")
 		if base == "" {

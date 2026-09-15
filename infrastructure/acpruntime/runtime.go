@@ -1,7 +1,9 @@
 package acpruntime
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -485,14 +487,12 @@ func (pc *pooledConn) SessionUpdate(params acpclient.SessionUpdateParams) {
 		if u.SessionUpdate == "agent_thought_chunk" {
 			kind = "thought"
 		}
-		text := ""
-		if u.Content != nil {
-			text = u.Content.Text
-		}
-		chunk = domain.AcpTranscriptChunk{Kind: kind, Text: text, At: now}
+		chunk = domain.AcpTranscriptChunk{Kind: kind, Text: u.Content.Text(), At: now}
 	case "tool_call", "tool_call_update":
 		chunk = domain.AcpTranscriptChunk{
-			Kind: "tool", ToolID: u.ToolCallID, ToolTitle: u.Title, ToolKind: u.Kind, ToolStatus: u.Status, At: now,
+			Kind: "tool", ToolID: u.ToolCallID, ToolTitle: u.Title, ToolKind: u.Kind, ToolStatus: u.Status,
+			ToolInput: acpDisplayText(u.RawInput), ToolOutput: acpToolOutputText(u.RawOutput, u.Content),
+			At: now,
 		}
 	case "plan":
 		var b strings.Builder
@@ -525,6 +525,73 @@ func (pc *pooledConn) SessionUpdate(params acpclient.SessionUpdateParams) {
 	run := cloneRun(lr.run)
 	lr.mu.Unlock()
 	pc.runtime.emitUpdate(run)
+}
+
+// acpDisplayText renders one raw ACP payload (rawInput/rawOutput) for the
+// transcript: a JSON string loses its quotes, structured JSON is indented,
+// anything else stays verbatim. Absent, null, or malformed payloads render
+// empty.
+func acpDisplayText(raw json.RawMessage) string {
+	text := strings.TrimSpace(string(raw))
+	if text == "" || text == "null" {
+		return ""
+	}
+	if text[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return s
+		}
+	}
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, raw, "", "  "); err == nil {
+		return buf.String()
+	}
+	return text
+}
+
+// acpToolOutputText renders a tool result for the transcript. rawOutput wins;
+// otherwise the structured content blocks are flattened to readable text —
+// text blocks verbatim, diffs as -/+ lines, terminals as a placeholder (the
+// terminal itself belongs to the client).
+func acpToolOutputText(rawOutput json.RawMessage, content *acpclient.UpdateContent) string {
+	if text := acpDisplayText(rawOutput); text != "" {
+		return text
+	}
+	if content == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(content.Blocks))
+	for _, block := range content.Blocks {
+		switch block.Type {
+		case "content":
+			if block.Content != nil && block.Content.Text != "" {
+				parts = append(parts, block.Content.Text)
+			}
+		case "diff":
+			parts = append(parts, acpDiffText(block))
+		case "terminal":
+			parts = append(parts, "[terminal output]")
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func acpDiffText(block acpclient.ToolCallContent) string {
+	var sb strings.Builder
+	if block.Path != "" {
+		sb.WriteString(block.Path)
+		sb.WriteString("\n")
+	}
+	if block.OldText != nil && *block.OldText != "" {
+		sb.WriteString("- ")
+		sb.WriteString(strings.ReplaceAll(*block.OldText, "\n", "\n- "))
+		sb.WriteString("\n")
+	}
+	if block.NewText != "" {
+		sb.WriteString("+ ")
+		sb.WriteString(strings.ReplaceAll(block.NewText, "\n", "\n+ "))
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func (pc *pooledConn) RequestPermission(ctx context.Context, params acpclient.RequestPermissionParams) (acpclient.RequestPermissionResult, error) {
@@ -594,8 +661,47 @@ func optionIDForKinds(opts []domain.AcpPermissionOption, kinds ...string) string
 	return ""
 }
 
+// resolveFSPath resolves a filesystem path for an fs/read_text_file or
+// fs/write_text_file callback. The risk tier is determined from the live
+// run associated with params.SessionID at callback time — never from the
+// agent config snapshot or caller input.
+//
+// Security boundary:
+//   - Only an explicit live RiskBypass session on a local stdio (subprocess)
+//     ACP connection may resolve a host absolute path outside pc.cwd via
+//     bypassPath. This matches the bypass/yolo posture where the user has
+//     explicitly granted the agent full filesystem access.
+//   - All other tiers (read_only, edit_confirmed) and remote (cloud) ACP
+//     transports always use containedPath, which rejects paths outside the
+//     workspace root and blocks symlink/relative escape.
+//   - Liveness is required: the runtime retains settled runs in rt.runs, so
+//     runBySession still returns a run after it reaches a terminal state
+//     (completed/cancelled/failed). A late FS callback for a terminal
+//     bypass run must NOT retain host-wide access — only a run that still
+//     occupies its process/session (Live()) may escape containment. Live()
+//     and RiskTier are read together under lr.mu so the snapshot is atomic
+//     with respect to finishLocked, which transitions the run to terminal
+//     under the same lock.
+//   - Session attribution is required: if no run is found for the given
+//     SessionID on this pooled connection, the path is resolved as
+//     contained (fail closed). An unrelated run on the same pooled
+//     connection cannot grant bypass to another session — runBySession
+//     matches both SessionID and the pooledConn pointer.
+func (pc *pooledConn) resolveFSPath(sessionID, path string) (string, error) {
+	if lr := pc.runBySession(sessionID); lr != nil {
+		lr.mu.Lock()
+		tier := lr.run.RiskTier
+		live := lr.run.Live()
+		lr.mu.Unlock()
+		if live && tier == domain.RiskBypass && pc.agent.EffectiveTransport() == domain.AcpTransportStdio {
+			return bypassPath(pc.cwd, path)
+		}
+	}
+	return containedPath(pc.cwd, path)
+}
+
 func (pc *pooledConn) ReadTextFile(ctx context.Context, params acpclient.ReadTextFileParams) (acpclient.ReadTextFileResult, error) {
-	path, err := containedPath(pc.cwd, params.Path)
+	path, err := pc.resolveFSPath(params.SessionID, params.Path)
 	if err != nil {
 		return acpclient.ReadTextFileResult{}, err
 	}
@@ -623,7 +729,7 @@ func (pc *pooledConn) ReadTextFile(ctx context.Context, params acpclient.ReadTex
 }
 
 func (pc *pooledConn) WriteTextFile(ctx context.Context, params acpclient.WriteTextFileParams) error {
-	path, err := containedPath(pc.cwd, params.Path)
+	path, err := pc.resolveFSPath(params.SessionID, params.Path)
 	if err != nil {
 		return err
 	}

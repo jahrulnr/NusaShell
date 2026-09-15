@@ -20,7 +20,7 @@ provider). Capability discovery lives in the docs, not the API:
   models — org-owned entries are your fine-tunes.
 - Fine-tuning limits are queryable: `GET /v1/fine_tuning/model_limits`.
 - For API-based model comparison (pricing/context/params), OpenRouter's
-  `/models` is richer — see `_shared/provider-matrix.md`.
+  `/models` is richer — see `shared/provider-matrix.md`.
 
 ## Model-type mapping (manual)
 
@@ -53,7 +53,7 @@ Mapping rules:
   a wrong-type model on the wrong endpoint fails fast (404/400), which is
   also the cheapest probe.
 - OpenRouter needs no such mapping (`architecture.output_modalities` in the
-  API) — see `_shared/provider-matrix.md`.
+  API) — see `shared/provider-matrix.md`.
 
 ## Catalog snapshot
 

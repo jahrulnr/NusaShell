@@ -110,10 +110,11 @@ func TestRPCAppInfo(t *testing.T) {
 	h := newHarness(t, nil)
 	res := h.rpcOK(t, "app.info", map[string]any{})
 	var info struct {
-		Name     string `json:"name"`
-		Version  string `json:"version"`
-		DataDir  string `json:"data_dir"`
-		Features struct {
+		Name       string `json:"name"`
+		Version    string `json:"version"`
+		DataDir    string `json:"data_dir"`
+		ListenAddr string `json:"listen_addr"`
+		Features   struct {
 			Tools         bool     `json:"tools"`
 			MCP           bool     `json:"mcp"`
 			Compaction    bool     `json:"compaction"`
@@ -127,8 +128,8 @@ func TestRPCAppInfo(t *testing.T) {
 	if info.Name != "NusaShell" || info.Version != "test" {
 		t.Fatalf("app info = %+v", info)
 	}
-	if info.Name != "NusaShell" || info.Version != "test" {
-		t.Fatalf("app info = %+v", info)
+	if info.ListenAddr != "127.0.0.1:10994" {
+		t.Fatalf("listen_addr = %q, want 127.0.0.1:10994 (drives pairing-link reachability warnings)", info.ListenAddr)
 	}
 	if !info.Features.Tools || !info.Features.MCP || !info.Features.Compaction || !info.Features.PromptCaching {
 		t.Fatalf("features = %+v", info.Features)

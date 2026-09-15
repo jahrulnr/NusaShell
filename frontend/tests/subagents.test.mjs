@@ -116,6 +116,38 @@ test('Subagent transcript merges legacy token fragments and tool updates', () =>
   }
 });
 
+test('Subagent tool rows carry agent-provided input and output', () => {
+  const { dom, panel } = makePanel();
+  try {
+    const input = '{\n  "path": "/home/u/.agents/skills/fullstack-guardian/SKILL.md"\n}';
+    syncTranscript(panel, [
+      {
+        kind: 'tool', tool_id: 'tool-io', tool_kind: 'read', tool_title: 'Read SKILL.md',
+        tool_status: 'in_progress', tool_input: input,
+      },
+    ]);
+    const rows = [...panel.querySelectorAll('.agent-round.is-tool')];
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].querySelector('.agent-tool-event-title')?.textContent, 'Read SKILL.md');
+    assert.match(rows[0].querySelector('.agent-tool-event-path')?.textContent || '', /fullstack-guardian\/SKILL\.md/);
+
+    syncTranscript(panel, [
+      {
+        kind: 'tool', tool_id: 'tool-io', tool_kind: 'read', tool_title: 'Read SKILL.md',
+        tool_status: 'completed', tool_input: input, tool_output: 'name: fullstack-guardian\n# Fullstack Guardian',
+      },
+    ]);
+    const updated = panel.querySelector('.agent-round.is-tool');
+    assert.strictEqual(updated, rows[0], 'same tool row patched in place');
+    assert.equal(updated.querySelector('.agent-tool-event-title')?.textContent, 'Read SKILL.md');
+    assert.match(updated.querySelector('.agent-tool-event-output')?.textContent || '', /Fullstack Guardian/);
+    assert.match(updated.textContent, /completed/);
+  } finally {
+    dom.window.close();
+    cleanup();
+  }
+});
+
 test('Subagent prompts render as isolated prompt events before and between assistant rounds', () => {
   const { dom, panel } = makePanel();
   try {

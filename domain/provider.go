@@ -96,7 +96,8 @@ type KindCapabilities struct {
 	// POST /audio/transcriptions (STT).
 	HasTranscriptionEndpoint bool
 	// HasVideoEndpoint is true when the provider kind may serve
-	// the async /videos API (OpenRouter).
+	// the async /videos API (OpenRouter) or the Veo
+	// :predictLongRunning surface (Gemini).
 	HasVideoEndpoint bool
 	// PromptCacheStyle describes how prompt caching is expressed on the
 	// wire: "anthropic" (cache_control blocks), "openai" (cached_tokens in
@@ -144,9 +145,12 @@ var kindCaps = map[ProviderKind]KindCapabilities{
 		CacheTTLs:                []string{"5m", "1h", "30m"},
 	},
 	ProviderGemini: {
-		RequiresKey:      true,
-		HasModelListing:  true,
-		PromptCacheStyle: "",
+		RequiresKey:       true,
+		HasModelListing:   true,
+		HasImageEndpoint:  true,
+		HasSpeechEndpoint: true,
+		HasVideoEndpoint:  true,
+		PromptCacheStyle:  "",
 		// Prompt caching on the Gemini API is implicit: Google caches repeated
 		// prefixes server-side without a request opt-in, and
 		// usageMetadata.cachedContentTokenCount reports the saving. There is

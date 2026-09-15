@@ -356,6 +356,47 @@ func TestAppendTranscriptUpdatesToolCallByID(t *testing.T) {
 	}
 }
 
+func TestAppendTranscriptMergesToolInputAndOutput(t *testing.T) {
+	r := &AcpRun{}
+	r.AppendTranscript(AcpTranscriptChunk{
+		Kind: "tool", ToolID: "tool-1", ToolTitle: "Read SKILL.md", ToolKind: "read",
+		ToolStatus: "pending", ToolInput: "{\n  \"path\": \"SKILL.md\"\n}",
+	})
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "tool", ToolID: "tool-1", ToolStatus: "in_progress"})
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "tool", ToolID: "tool-1", ToolStatus: "completed", ToolOutput: "file body"})
+
+	if len(r.Transcript) != 1 {
+		t.Fatalf("transcript len = %d, want one merged tool chunk: %+v", len(r.Transcript), r.Transcript)
+	}
+	got := r.Transcript[0]
+	if got.ToolTitle != "Read SKILL.md" || got.ToolInput == "" || got.ToolOutput != "file body" || got.ToolStatus != "completed" {
+		t.Fatalf("merged tool chunk = %+v", got)
+	}
+}
+
+func TestAppendTranscriptCapsToolPayloads(t *testing.T) {
+	r := &AcpRun{}
+	r.AppendTranscript(AcpTranscriptChunk{
+		Kind: "tool", ToolID: "tool-1", ToolTitle: "Read file", ToolInput: `{"path":"a.md"}`,
+		ToolOutput: strings.Repeat("y", MaxAcpTranscriptBytes+2048),
+	})
+
+	if len(r.Transcript) != 1 {
+		t.Fatalf("transcript len = %d, want 1", len(r.Transcript))
+	}
+	got := r.Transcript[0]
+	size := len(got.Text) + len(got.ToolTitle) + len(got.ToolInput) + len(got.ToolOutput)
+	if size > MaxAcpTranscriptBytes {
+		t.Fatalf("tool chunk not capped: %d > %d", size, MaxAcpTranscriptBytes)
+	}
+	if got.ToolTitle != "Read file" || got.ToolInput != `{"path":"a.md"}` {
+		t.Fatalf("cap must keep the identity and input: %+v", got)
+	}
+	if !strings.HasSuffix(got.ToolOutput, "yyyyyyyy") {
+		t.Fatalf("capped output keeps its tail: %q", got.ToolOutput[len(got.ToolOutput)-16:])
+	}
+}
+
 func TestValidateAcpAgentSave(t *testing.T) {
 	if ValidateAcpAgentSave("", "cursor") == "" {
 		t.Fatal("empty name")

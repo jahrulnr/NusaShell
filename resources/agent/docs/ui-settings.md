@@ -19,7 +19,9 @@ View title and a Save settings button with a live status indicator.
 
 ## Card groups
 
-A sticky Jump to rail moves directly between the seven settings groups and transfers keyboard focus to the destination heading. Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, periodic review interval, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system.
+A sticky Jump to rail moves directly between the eight settings groups and transfers keyboard focus to the destination heading. Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, periodic review interval, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system.
+
+Remote access: an opt-in toggle, persisted multi-address QR/link generation, challenge approve/reject, paired-session list, and revoke actions that remove devices from the list. Enabling or disabling remote access restarts the backend automatically.
 
 - **Settings section navigation** (`#settings-section-nav`):
   - Section: Settings
@@ -95,6 +97,21 @@ A sticky Jump to rail moves directly between the seven settings groups and trans
   - Section: Settings
   - Type: heading
   - Notes: Card group for appearance, connection, and system diagnostics.
+
+- **Jump to Remote access** (`#settings-jump-remote`):
+  - Section: Settings — Card groups
+  - Type: button
+  - Action: Moves focus to the Remote access group heading.
+
+- **Remote access** (`#settings-group-remote`):
+  - Section: Settings
+  - Type: group
+  - Notes: Groups device-pairing controls.
+
+- **Allow remote access** (`#settings-remote-access-enabled`):
+  - Section: Settings — Remote access
+  - Type: checkbox
+  - Action: Enables or disables non-loopback access; saving the toggle restarts the backend automatically.
 
 ## Agent runtime
 
@@ -625,3 +642,143 @@ Local diagnostics: version and data directory. This browser version does not man
 - **Data directory** (`#settings-data-dir`):
   - Section: Settings
   - Type: text
+
+## Remote access
+
+Remote access is off by default. The host can enable it, save one HTTP(S) address per line, and let the backend restart automatically. The host then generates a one-time challenge, which opens the pairing dialog: the QR code, pairing link, and manual code render inside that dialog (it covers the panel, so the scannable QR belongs there) together with the device label and the Approve/Reject decision. Closing the dialog leaves the challenge pending and the panel shows a state summary plus Show pairing QR to bring the same QR back without creating a new code. A remote device scans or opens a link, waits for host approval, then exchanges the challenge for a session cookie. Addresses only change the URL encoded in the QR/link — they do not change where the core listens — and warn when a resolved address is loopback or mismatched with listen_addr; a generated QR carries that caveat too. Paired devices are listed while active; revoking a device removes its session from storage and the list. Pairing management is host-only: on a paired remote client the whole Remote access section and its nav jump link are hidden.
+
+- **Remote access section** (`#settings-remote-group`):
+  - Section: Settings — Remote access
+  - Type: container
+  - Notes: Whole section; hidden together with its nav jump link on a paired remote client because pairing management is host-only.
+
+- **Device pairing** (`#pairing-panel`):
+  - Section: Settings — Remote access
+  - Type: container
+  - Notes: Host-side pairing management card.
+
+- **Generate pairing link** (`#pairing-create-btn`):
+  - Section: Settings — Remote access
+  - Type: button
+  - Action: Creates a one-time pairing challenge and opens the pairing dialog, which renders the QR, the pairing link, and the manual code.
+
+- **Pairing summary** (`#pairing-panel-status`):
+  - Section: Settings — Remote access
+  - Type: status
+  - Notes: Persistent state summary of the active challenge (waiting, approved, rejected, expired, paired). It is the live region while the dialog is closed and goes quiet (aria-live=off) while the dialog's own status announces.
+
+- **Show pairing QR** (`#pairing-show-qr-btn`):
+  - Section: Settings — Remote access
+  - Type: button
+  - Action: Reopens the pairing dialog for the active challenge. Hidden until a challenge exists and once it is no longer pending, so a dead link is never offered again.
+
+- **Approve pairing** (`#pairing-approve-btn`):
+  - Section: Settings — Remote access
+  - Type: button
+  - Action: Approves the pending pairing challenge so the remote device can exchange for a session.
+
+- **Reject pairing** (`#pairing-reject-btn`):
+  - Section: Settings — Remote access
+  - Type: button
+  - Action: Rejects the pending pairing challenge.
+
+- **Pairing actions** (`#pairing-host-actions`):
+  - Section: Settings — Remote access
+  - Type: container
+
+- **Device label** (`#pairing-device-label`):
+  - Section: Settings — Remote access
+  - Type: input
+  - Notes: Optional label attached to the approved challenge so the issued session row names the device.
+
+- **Pairing status (dialog)** (`#pairing-host-status`):
+  - Section: Settings — Remote access
+  - Type: status
+  - Notes: Live region announcing the challenge state inside the pairing dialog (waiting, approved, rejected, expired, paired). While the dialog is open it is the only live pairing status region.
+
+- **Pairing QR** (`#pairing-qr-display`):
+  - Section: Settings — Remote access
+  - Type: container
+  - Notes: QR encoding the pairing URL, rendered client-side. It lives inside the pairing dialog because the dialog's overlay covers the Settings panel; the panel only offers Show pairing QR to bring it back.
+
+- **Pairing QR image** (`#pairing-qr-img`):
+  - Section: Settings — Remote access
+  - Type: image
+  - Notes: Client-side rendered data-URL QR; its alt text names the encoded pairing URL. Reopening the dialog reuses the identical QR for the same challenge.
+
+- **QR status** (`#pairing-qr-status`):
+  - Section: Settings — Remote access
+  - Type: text
+  - Notes: Tells the host to scan or copy the link/code, flags a configured address that may be unreachable from the remote device, or reports that QR rendering failed and the manual link/code must be used. Static per challenge, so it is not a second live region next to the challenge status.
+
+- **Additional pairing QR links** (`#pairing-qr-alternatives`):
+  - Section: Settings — Remote access
+  - Type: container
+  - Notes: Renders one additional QR/link card inside the pairing dialog for each configured address after the first address.
+
+- **Remote address** (`#pairing-remote-address`):
+  - Section: Settings — Remote access
+  - Type: textarea
+  - Notes: One absolute HTTP(S) address per line. Persisted in settings and encoded into one QR/link per address; does not change where the core listens.
+
+- **Remote address error** (`#pairing-address-error`):
+  - Section: Settings — Remote access
+  - Type: alert
+  - Notes: Inline address feedback: a malformed URL is a blocking error, while a link that cannot be reachable (loopback address, or a non-loopback link while the core listens on loopback only, port/host mismatch vs listen_addr) is a non-blocking warning.
+
+- **Pairing link** (`#pairing-link-display`):
+  - Section: Settings — Remote access
+  - Type: text
+  - Notes: The one-time pairing URL for the first configured address, shown inside the pairing dialog next to Copy link.
+
+- **Copy pairing link** (`#pairing-copy-link-btn`):
+  - Section: Settings — Remote access
+  - Type: button
+  - Action: Copies the pairing URL to the clipboard.
+
+- **Pairing code** (`#pairing-code-display`):
+  - Section: Settings — Remote access
+  - Type: text
+  - Notes: The one-time manual code for the challenge, shown inside the pairing dialog next to Copy code.
+
+- **Copy pairing code** (`#pairing-copy-code-btn`):
+  - Section: Settings — Remote access
+  - Type: button
+  - Action: Copies the one-time code to the clipboard.
+
+- **Paired devices** (`#pairing-sessions-list`):
+  - Section: Settings — Remote access
+  - Type: list
+  - Notes: Active pairing sessions with per-device revoke; revoked sessions are omitted.
+
+- **No paired devices** (`#pairing-sessions-empty`):
+  - Section: Settings — Remote access
+  - Type: text
+
+- **Revoke all sessions** (`#pairing-revoke-all-btn`):
+  - Section: Settings — Remote access
+  - Type: button
+  - Action: Revokes every paired device session and removes them from the list.
+
+- **Session actions** (`#pairing-session-actions`):
+  - Section: Settings — Remote access
+  - Type: container
+
+- **Pairing dialog** (`#pairing-approval-overlay`):
+  - Section: Settings — Remote access
+  - Type: dialog
+  - Notes: Body-level host dialog that opens when a challenge is created. It owns the scan surface: QR, pairing link, manual code, the extra-address QR cards, the challenge status, the device label, and the Approve/Reject decision. Closing it leaves the challenge pending and returns the QR to the panel summary's Show pairing QR control.
+
+- **Pairing dialog title** (`#pairing-approval-title`):
+  - Section: Settings — Remote access
+  - Type: heading
+
+- **Pairing dialog message** (`#pairing-approval-message`):
+  - Section: Settings — Remote access
+  - Type: text
+  - Notes: Tells the host to scan the QR with the remote device (or open the link on it) and approve the request.
+
+- **Close pairing dialog** (`#pairing-approval-close`):
+  - Section: Settings — Remote access
+  - Type: button
+  - Action: Closes the dialog while the host continues polling the pending challenge; the panel summary then offers Show pairing QR.

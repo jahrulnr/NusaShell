@@ -145,7 +145,7 @@ client at a local `base_url` and it usually works.
 
 - [../openai/README.md](../openai/README.md) — OpenAI API contracts (the shape
   most local servers imitate; Chat Completions, streaming, tools).
-- [../_shared/sample-implementations.md](../_shared/sample-implementations.md) —
+- [../shared/sample-implementations.md](../shared/sample-implementations.md) —
   optional LiteLLM adapter cross-checks: `litellm/llms/ollama/`, `litellm/llms/vllm/`,
   `litellm/llms/lm_studio/`, `litellm/llms/llamafile/` for request/response
   transformation patterns to port.

@@ -1,6 +1,8 @@
 package memory
 
 import (
+	"context"
+
 	"nusashell/domain"
 )
 
@@ -37,21 +39,29 @@ type ChangedHook func(tier, op string)
 // DeletedHook runs after a memory record row is removed (learning graph, searcher).
 type DeletedHook func(id string)
 
-// Announcer publishes a harness announcement into one conversation.
-type Announcer func(conversationID, typ, args, msg string)
+// MemorySearchResult is a ranked memory hit from the Searcher port.
+type MemorySearchResult struct {
+	ID    string
+	Score float64
+}
 
-// PersistAnnounced writes LastAnnouncedRecords after a task-memory announcement.
-type PersistAnnounced func(conversationID string, ids []string) error
+// Searcher ranks memory records by relevance to a query. Implemented by a
+// thin wrapper around LearningSearcher.SearchMemoryWithOpts with embedding
+// disabled and graph expansion off (MaxHops 0) — BM25-only ranking for the
+// task-memory announcement path. When nil, MaybeAnnounceTaskMemory falls
+// back to a local token-overlap heuristic with minTokenLen 3.
+type Searcher interface {
+	SearchMemory(ctx context.Context, query string, topK int) ([]MemorySearchResult, error)
+}
 
 // Deps is the narrow wiring for New. Feature packages never receive *App.
 type Deps struct {
-	Records          RecordStore
-	Ops              OpStore
-	User             DocumentStore
-	Agent            DocumentStore
-	Bus              Emitter
-	OnChanged        ChangedHook
-	OnRecordDeleted  DeletedHook
-	Announce         Announcer
-	PersistAnnounced PersistAnnounced
+	Records         RecordStore
+	Ops             OpStore
+	User            DocumentStore
+	Agent           DocumentStore
+	Bus             Emitter
+	OnChanged       ChangedHook
+	OnRecordDeleted DeletedHook
+	Searcher        Searcher
 }

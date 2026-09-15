@@ -123,3 +123,41 @@ func containedPath(workspace, path string) (string, error) {
 	}
 	return clean, nil
 }
+
+// bypassPath resolves a filesystem path for an explicit live RiskBypass
+// session on a local stdio ACP connection. Unlike containedPath, the
+// resolved path may lie outside the workspace root.
+//
+// Security boundary:
+//   - Relative paths are joined onto the workspace root (same as
+//     containedPath) so a relative target stays anchored to pc.cwd.
+//   - Absolute host paths are resolved on the host filesystem, allowing
+//     read/write of existing outside files and creation of missing
+//     outside suffixes (write-before-exists), matching canonicalPath
+//     semantics.
+//   - Symlinks are resolved canonically: a symlink inside the workspace
+//     pointing outside is followed to its real target, never remapped
+//     back into the workspace.
+//   - This function does NOT enforce workspace containment. The caller
+//     (resolveFSPath) is responsible for ensuring only an explicit live
+//     RiskBypass session on a local stdio connection reaches this path.
+//     Lower tiers (read_only, edit_confirmed) and remote transports must
+//     always use containedPath.
+func bypassPath(workspace, path string) (string, error) {
+	root, err := canonicalWorkspace(workspace)
+	if err != nil {
+		return "", err
+	}
+	target := strings.TrimSpace(path)
+	if target == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+	if !domain.PathRooted(target) {
+		target = filepath.Join(root, target)
+	}
+	canonical, err := canonicalPath(target)
+	if err != nil {
+		return "", fmt.Errorf("resolve path %q: %w", path, err)
+	}
+	return canonical, nil
+}

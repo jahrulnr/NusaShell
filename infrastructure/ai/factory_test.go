@@ -9,6 +9,7 @@ import (
 	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/embeddings"
 	"nusashell/infrastructure/ai/imagegen"
+	"nusashell/infrastructure/ai/videogen"
 	"nusashell/pkg/httpclient"
 )
 
@@ -209,6 +210,104 @@ func TestNewImageGeneratorFactoryCodexDefaultsBaseURL(t *testing.T) {
 	}
 	if client.APIKey != "plain-token" {
 		t.Fatalf("api key = %q, want the plain pasted token", client.APIKey)
+	}
+}
+
+func TestNewImageGeneratorFactoryRoutesGemini(t *testing.T) {
+	f := NewImageGeneratorFactory(&stubCreds{})
+	gen, err := f(context.Background(), &domain.Provider{
+		Kind:    domain.ProviderGemini,
+		BaseURL: "https://generativelanguage.googleapis.com",
+	}, "gem-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, ok := gen.(*imagegen.Client)
+	if !ok {
+		t.Fatalf("generator = %T, want *imagegen.Client", gen)
+	}
+	if client.Backend != imagegen.BackendGemini {
+		t.Fatalf("backend = %q, want %q", client.Backend, imagegen.BackendGemini)
+	}
+	if client.APIKey != "gem-key" {
+		t.Fatalf("api key = %q", client.APIKey)
+	}
+	// The factory appends /v1beta when the base URL has no version segment.
+	if !strings.HasSuffix(client.BaseURL, "/v1beta") {
+		t.Fatalf("base url = %q, want /v1beta suffix", client.BaseURL)
+	}
+}
+
+func TestNewImageGeneratorFactoryGeminiPreservesExistingVersion(t *testing.T) {
+	f := NewImageGeneratorFactory(&stubCreds{})
+	gen, err := f(context.Background(), &domain.Provider{
+		Kind:    domain.ProviderGemini,
+		BaseURL: "https://gateway.example.test/v1beta",
+	}, "gem-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, ok := gen.(*imagegen.Client)
+	if !ok {
+		t.Fatalf("generator = %T, want *imagegen.Client", gen)
+	}
+	if client.BaseURL != "https://gateway.example.test/v1beta" {
+		t.Fatalf("base url = %q, want the gateway's existing /v1beta segment", client.BaseURL)
+	}
+}
+
+func TestNewImageModelListerFactoryReturnsNilForGemini(t *testing.T) {
+	f := NewImageModelListerFactory()
+	lister := f(&domain.Provider{Kind: domain.ProviderGemini, BaseURL: "https://generativelanguage.googleapis.com"})
+	if lister != nil {
+		t.Fatalf("lister = %T, want nil (Gemini image models come from the chat lister)", lister)
+	}
+}
+
+func TestNewVideoGeneratorFactoryRoutesGemini(t *testing.T) {
+	f := NewVideoGeneratorFactory()
+	gen, err := f(&domain.Provider{
+		Kind:    domain.ProviderGemini,
+		BaseURL: "https://generativelanguage.googleapis.com",
+	}, "gem-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, ok := gen.(*videogen.GeminiClient)
+	if !ok {
+		t.Fatalf("generator = %T, want *videogen.GeminiClient", gen)
+	}
+	if client.APIKey != "gem-key" {
+		t.Fatalf("api key = %q", client.APIKey)
+	}
+	if !strings.HasSuffix(client.BaseURL, "/v1beta") {
+		t.Fatalf("base url = %q, want /v1beta suffix", client.BaseURL)
+	}
+}
+
+func TestNewVideoGeneratorFactoryGeminiPreservesExistingVersion(t *testing.T) {
+	f := NewVideoGeneratorFactory()
+	gen, err := f(&domain.Provider{
+		Kind:    domain.ProviderGemini,
+		BaseURL: "https://gateway.example.test/v1beta",
+	}, "gem-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, ok := gen.(*videogen.GeminiClient)
+	if !ok {
+		t.Fatalf("generator = %T, want *videogen.GeminiClient", gen)
+	}
+	if client.BaseURL != "https://gateway.example.test/v1beta" {
+		t.Fatalf("base url = %q, want the gateway's existing /v1beta segment", client.BaseURL)
+	}
+}
+
+func TestNewVideoModelListerFactoryReturnsNilForGemini(t *testing.T) {
+	f := NewVideoModelListerFactory()
+	lister := f(&domain.Provider{Kind: domain.ProviderGemini, BaseURL: "https://generativelanguage.googleapis.com"})
+	if lister != nil {
+		t.Fatalf("lister = %T, want nil (Gemini video models come from the chat lister + classification)", lister)
 	}
 }
 

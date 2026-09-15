@@ -72,7 +72,7 @@ else: surface the error with type, code, param
 ## Edge cases
 
 - `context_length_exceeded` (400): trim history — never retry unchanged. See
-  `_shared/usecase-patterns.md` for trimming rules.
+  `shared/usecase-patterns.md` for trimming rules.
 - `insufficient_quota` vs `rate_limit_exceeded`: both arrive as 429 — check
   the `code`/message; one needs billing, the other pacing.
 - **`organization_usage_limit_exceeded`** (429): the org hit its approved

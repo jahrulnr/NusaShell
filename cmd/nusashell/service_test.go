@@ -8,7 +8,6 @@ func TestResolveServiceOptionsUsesFlagsAndEnv(t *testing.T) {
 	t.Setenv("NUSASHELL_DATA_DIR", "/tmp/nusashell-custom")
 	t.Setenv("NUSASHELL_HOST", "127.0.0.1")
 	t.Setenv("NUSASHELL_PORT", "8080")
-	t.Setenv("NUSASHELL_ALLOW_REMOTE", "1")
 	t.Setenv("PATH", "/home/test/.local/bin:/usr/local/bin")
 
 	opts, err := resolveServiceOptions("/opt/nusashell/current/nusashell")
@@ -21,7 +20,7 @@ func TestResolveServiceOptionsUsesFlagsAndEnv(t *testing.T) {
 	if opts.DataDir != "/tmp/nusashell-custom" {
 		t.Fatalf("DataDir = %q", opts.DataDir)
 	}
-	if opts.Host != "127.0.0.1" || opts.Port != "8080" || !opts.AllowRemote {
+	if opts.Host != "127.0.0.1" || opts.Port != "8080" {
 		t.Fatalf("overrides not propagated: %+v", opts)
 	}
 	if opts.Path != "/home/test/.local/bin:/usr/local/bin" {
@@ -44,7 +43,7 @@ func TestResolveServiceOptionsDefaults(t *testing.T) {
 	if opts.DataDir == "" {
 		t.Fatal("DataDir must default to the OS config dir")
 	}
-	if opts.Host != "" || opts.Port != "" || opts.AllowRemote {
+	if opts.Host != "" || opts.Port != "" {
 		t.Fatalf("defaults must stay empty: %+v", opts)
 	}
 }

@@ -213,6 +213,13 @@ func (s *Service) SpawnSubagents(ctx context.Context, conversationID, toolCallID
 // spawnInternal starts count internal delegate runs through the delegate
 // runtime. The model comes from ResolveDelegateModel; the run executes the
 // conversation rules headless in a hidden pipeline room.
+//
+// Unlike ACP spawn, the internal delegate gets a fresh hidden conversation,
+// so the parent's todo store is not present under the child ID. When the
+// parent conversation has a brief, a compact Objective + Done when summary
+// is inlined into the prompt so the delegate keeps the parent's planning
+// intent. The plan file lives outside the child workspace, so it is never
+// advertised as a readable path — the inline summary is the handoff.
 func (s *Service) spawnInternal(conversationID, toolCallID, prompt, title, workspace string, count int) (string, error) {
 	if s.delegates == nil {
 		return "", fmt.Errorf("internal delegation is not available in this build")
@@ -220,6 +227,11 @@ func (s *Service) spawnInternal(conversationID, toolCallID, prompt, title, works
 	modelID, err := s.ResolveDelegateModel(conversationID)
 	if err != nil {
 		return "", err
+	}
+	if s.deps.Todos != nil && conversationID != "" {
+		if brief := s.deps.Todos.GetBrief(conversationID); strings.TrimSpace(brief) != "" {
+			prompt = withInternalParentPlan(prompt, brief)
+		}
 	}
 	results := make([]domain.AcpSpawned, count)
 	for i := 0; i < count; i++ {
@@ -295,6 +307,25 @@ func withParentPlan(prompt, planPath, brief, workspace string) string {
 		sb.WriteString(summary)
 		sb.WriteString("\n")
 	}
+	return sb.String()
+}
+
+// withInternalParentPlan inlines a compact Objective + Done when summary of
+// the parent brief into an internal delegate prompt. The plan file lives
+// outside the child workspace (the delegate gets a fresh hidden
+// conversation), so it is never advertised as a readable path — the inline
+// summary is the handoff. The explicit parent prompt stays authoritative.
+// Returns the prompt unchanged when the brief has no summary sections.
+func withInternalParentPlan(prompt, brief string) string {
+	summary := domain.SummarizeBrief(brief)
+	if summary == "" {
+		return prompt
+	}
+	var sb strings.Builder
+	sb.WriteString(prompt)
+	sb.WriteString("\n\nParent plan summary:\n")
+	sb.WriteString(summary)
+	sb.WriteString("\n")
 	return sb.String()
 }
 

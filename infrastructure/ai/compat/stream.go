@@ -8,9 +8,18 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"nusashell/infrastructure/ai/core"
 )
+
+// defaultDrainWindow bounds how long the stream waits, after a finish_reason
+// has been observed, for the trailing accounting chunk that OpenAI-compatible
+// providers emit before [DONE]. The window only applies when the provider
+// neither sends more data nor ends the response: the stream itself never
+// requires [DONE] or the usage chunk to complete.
+const defaultDrainWindow = time.Second
 
 type stream struct {
 	resp          *http.Response
@@ -27,6 +36,18 @@ type stream struct {
 	toolIDs       map[toolKey]string
 	toolStarted   map[toolKey]bool
 	toolPending   map[toolKey]*pendingTool
+
+	// drainWindow is how long the stream waits after a finish_reason for the
+	// trailing accounting chunk (OpenAI-compatible providers emit a final
+	// usage-only chunk after the finish chunk) before completing on its own.
+	drainWindow time.Duration
+	// finished marks semantic completion: a valid finish_reason was observed.
+	// From here the stream completes from the transport continuing (usage
+	// chunk, sentinel, EOF, or any read error) instead of waiting for the
+	// [DONE] trailer.
+	finished     bool
+	drainTimer   *time.Timer
+	drainStopped atomic.Bool
 }
 
 // pendingTool tracks a tool call whose opening chunk did not carry a name.
@@ -54,6 +75,7 @@ func newStream(resp *http.Response, req *core.Request, spec Spec) *stream {
 		toolIDs:     make(map[toolKey]string),
 		toolStarted: make(map[toolKey]bool),
 		toolPending: make(map[toolKey]*pendingTool),
+		drainWindow: defaultDrainWindow,
 	}
 }
 
@@ -87,16 +109,37 @@ func (s *stream) Next() (core.Event, error) {
 			continue
 		}
 		if data == s.spec.doneSentinel() {
-			s.done = true
-			return core.DoneEvent{FinishReason: s.finish, Provider: s.spec.providerName(), Model: s.model}, nil
+			// Transport trailer. It completes a stream that has not already
+			// completed semantically, but is never required: with a
+			// finish_reason observed the stream is already done, and the
+			// sentinel must not produce a second DoneEvent.
+			return s.complete(), nil
 		}
 		var chunk streamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			if s.finished {
+				// Semantic completion already happened; trailing noise must
+				// not fail or stall a turn the model already finished.
+				continue
+			}
 			return nil, core.NewProviderErrorWithCause(s.spec.providerName(), core.ErrorTypeProvider, fmt.Sprintf("%s: parse stream chunk", s.spec.providerName()), err)
+		}
+		if err := streamPayloadError(s.spec.providerName(), chunk.Error); err != nil {
+			return nil, err
 		}
 		events, err := s.events(chunk)
 		if err != nil {
 			return nil, err
+		}
+		if s.finished {
+			if hasUsage(chunk.Usage) {
+				// Final accounting. The usage chunk is the end of the
+				// meaningful stream: the [DONE] that follows is only a
+				// trailer, so there is nothing left to wait for.
+				events = append(events, s.complete())
+			} else {
+				s.armDrain()
+			}
 		}
 		if len(events) == 0 {
 			continue
@@ -105,28 +148,105 @@ func (s *stream) Next() (core.Event, error) {
 		return events[0], nil
 	}
 	if err := s.scanner.Err(); err != nil {
+		if s.finished {
+			// Read errors after finish_reason (connection reset, or the
+			// drain window closing the body) are not partial turns: the
+			// model already reported completion.
+			return s.complete(), nil
+		}
 		return nil, core.NewNetworkError(s.spec.providerName(), "stream read error", err)
 	}
 	// Clean EOF without the [DONE] sentinel. Two cases:
 	//
 	// 1. The provider sent a finish_reason in the last chunk but omitted
 	//    the sentinel (OpenCode/Zen, TokenRouter, local gateways). This
-	//    is a normal end of stream — synthesize a DoneEvent from the
-	//    accumulated finish reason so core.Handle completes normally.
+	//    is a normal end of stream.
 	// 2. The connection was cut mid-stream (no finish_reason, no
 	//    sentinel). This is a transient failure — surface it so the
 	//    retry loop can reconnect and continue.
 	//
 	// Mid-stream cuts with a scanner error are handled above; idle
 	// stalls are handled by the watchdog.
-	s.done = true
-	if s.finish != "" {
-		return core.DoneEvent{FinishReason: s.finish, Provider: s.spec.providerName(), Model: s.model}, nil
+	if s.finished {
+		return s.complete(), nil
 	}
 	return nil, core.NewNetworkError(s.spec.providerName(), fmt.Sprintf("%s: stream ended before %s without finish_reason", s.spec.providerName(), s.spec.doneSentinel()), io.ErrUnexpectedEOF)
 }
 
+// complete marks the stream finished and returns the single DoneEvent. Every
+// terminal path routes through it, so a stream that already saw a
+// finish_reason can never emit a second DoneEvent when a [DONE] sentinel or a
+// repeated finish_reason (OpenRouter includes one on its usage chunk) arrives.
+func (s *stream) complete() core.Event {
+	s.stopDrain()
+	s.done = true
+	return core.DoneEvent{FinishReason: s.finish, Provider: s.spec.providerName(), Model: s.model}
+}
+
+// armDrain starts the post-finish drain window: after semantic completion the
+// stream keeps reading (for the accounting chunk / the sentinel / EOF) but
+// must not stall when the provider holds the connection open without sending
+// anything else.
+func (s *stream) armDrain() {
+	if s.drainTimer != nil || s.drainStopped.Load() {
+		return
+	}
+	s.drainTimer = time.AfterFunc(s.drainWindow, func() {
+		if s.drainStopped.Load() {
+			return
+		}
+		// Interrupt the blocked read: semantic completion already happened,
+		// but the provider is holding the connection open without ending the
+		// response. Closing the body unblocks the next read, which the
+		// post-finish path turns into a normal DoneEvent.
+		s.resp.Body.Close()
+	})
+}
+
+func (s *stream) stopDrain() {
+	if !s.drainStopped.CompareAndSwap(false, true) {
+		return
+	}
+	if s.drainTimer != nil {
+		s.drainTimer.Stop()
+	}
+}
+
+// hasUsage reports whether a stream chunk carries an accounting payload. A
+// JSON null (or an absent field) is not accounting.
+func hasUsage(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	return strings.TrimSpace(string(raw)) != "null"
+}
+
+// streamPayloadError converts an error reported inside an HTTP 200 SSE body
+// into a provider error. Providers use both the object form
+// {"error":{"message":...,"type":...}} and the string form {"error":"..."};
+// an empty payload is not an error.
+func streamPayloadError(provider string, raw json.RawMessage) error {
+	text := strings.TrimSpace(string(raw))
+	if len(raw) == 0 || text == "null" || text == `""` || text == "{}" {
+		return nil
+	}
+	message := text
+	var envelope struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err == nil && strings.TrimSpace(envelope.Message) != "" {
+		message = strings.TrimSpace(envelope.Message)
+	} else {
+		var textValue string
+		if err := json.Unmarshal(raw, &textValue); err == nil && strings.TrimSpace(textValue) != "" {
+			message = strings.TrimSpace(textValue)
+		}
+	}
+	return core.NewProviderError(provider, core.ErrorTypeProvider, fmt.Sprintf("%s: stream error: %s", provider, message))
+}
+
 func (s *stream) Close() error {
+	s.stopDrain()
 	return s.resp.Body.Close()
 }
 
@@ -201,7 +321,18 @@ func (s *stream) events(chunk streamChunk) ([]core.Event, error) {
 			}
 		}
 		if choice.FinishReason != "" {
-			s.finish = core.NormalizeFinishReason(choice.FinishReason)
+			reason := core.NormalizeFinishReason(choice.FinishReason)
+			if reason == core.FinishReasonError {
+				// The one finish_reason that is not a completion: the
+				// provider itself reported the turn failed. Surface it as an
+				// error instead of an empty successful response.
+				return nil, core.NewProviderError(s.spec.providerName(), core.ErrorTypeProvider, fmt.Sprintf("%s: stream reported finish_reason %q", s.spec.providerName(), choice.FinishReason))
+			}
+			s.finish = reason
+			// Semantic completion: from here the stream completes from the
+			// transport (usage chunk, [DONE], EOF, or an error) instead of
+			// waiting for the sentinel.
+			s.finished = true
 			// Compat providers signal tool-call completion via finish_reason
 			// rather than a per-call terminator. Emit ToolUseDone for every open
 			// call so consumers can finalize arguments — matching the native

@@ -116,6 +116,7 @@ func runDTO(run *domain.AcpRun) contracts.AcpRunDTO {
 		chunk := contracts.AcpTranscriptChunkDTO{
 			Kind: c.Kind, Text: c.Text, ToolID: c.ToolID, ToolTitle: c.ToolTitle,
 			ToolKind: c.ToolKind, ToolStatus: c.ToolStatus,
+			ToolInput: c.ToolInput, ToolOutput: c.ToolOutput,
 		}
 		if !c.At.IsZero() {
 			chunk.At = clock.NewTime(c.At).Format(timeRFC3339)

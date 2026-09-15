@@ -27,9 +27,11 @@ package transport
 // but has not produced a first delta yet); afterwards it gets 404, and the
 // frontend falls back to a snapshot refresh + agent.turns.active re-attach.
 //
-// No auth is required (loopback-only service, same as /ws); the route is not
-// origin-restricted because SSE cannot be used for cross-origin reads
-// without CORS headers, and no CORS headers are set here.
+// Loopback requests bypass pairing auth; non-loopback requests require a
+// valid paired session cookie (enforced by AuthMiddleware and re-checked here
+// before subscribe). The route is not origin-restricted because SSE cannot be
+// used for cross-origin reads without CORS headers, and no CORS headers are
+// set here.
 
 import (
 	"context"
@@ -44,6 +46,18 @@ import (
 const streamPingInterval = 15 * time.Second
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	// Non-loopback callers need a valid paired session before subscribing.
+	// (AuthMiddleware enforces this at the mux too; this re-check keeps the
+	// handler correct when the mux is exercised directly, e.g. in tests.)
+	remote := !IsLoopbackRequest(r)
+	if remote && s.Pairing == nil {
+		writeRemoteAccessDisabled(w)
+		return
+	}
+	if remote && !s.remoteSessionAlive(r) {
+		writePairingRequired(w)
+		return
+	}
 	q := r.URL.Query()
 	runID := q.Get("run_id")
 	messageID := q.Get("message_id")
@@ -106,6 +120,12 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ping.C:
+			// Re-validate a remote session on each ping tick so a revoked
+			// device loses the stream within one interval instead of keeping
+			// it until disconnect.
+			if remote && !s.remoteSessionAlive(r) {
+				return
+			}
 			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
 				return
 			}

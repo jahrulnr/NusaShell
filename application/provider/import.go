@@ -248,11 +248,25 @@ func (s *Service) importModelsForProvider(ctx context.Context, p *domain.Provide
 				models[i].Kind = domain.ModelKindImage
 			case config.IsKnownTTSModel(models[i].ID):
 				models[i].Kind = domain.ModelKindTTS
+			case config.IsKnownVideoModel(models[i].ID):
+				models[i].Kind = domain.ModelKindVideo
 			}
 		}
 	}
 	if p.Kind == domain.ProviderCodex {
 		models = seedCodexImageModels(models)
+	}
+	// Gemini image models (Nano Banana family) accept reference images for
+	// editing (image-to-image) by design, but the models.dev catalog has no
+	// entry for the AI Studio alias nano-banana-pro-preview and may not flag
+	// every gemini-*-image variant as Vision. Tag them here so the media
+	// gate (application/media/image_generate.go) does not block edits on
+	// i2i-capable models. imagen-* is text-to-image only and is excluded
+	// by IsGeminiImageI2IModel.
+	for i := range models {
+		if models[i].Kind == domain.ModelKindImage && config.IsGeminiImageI2IModel(models[i].ID) {
+			models[i].Vision = true
+		}
 	}
 	p.Models = models
 	p.UpdatedAt = clock.NewTime().Time()

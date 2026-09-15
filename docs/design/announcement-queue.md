@@ -36,10 +36,13 @@ no routing keys, no delivery metadata, no consumers. The persisted
 per-conversation pending queue IS the queue:
 
 1. **Publish = Send.** `publishAnnouncement` appends to
-   `Conversation.PendingAnnouncements` (coalesced by type — a burst of
-   changes collapses into one announcement) and saves. Fail-soft: a missing
-   conversation only logs; the change is self-healing at the next hydration
-   epoch.
+   `Conversation.PendingAnnouncements` via `QueueAnnouncement`, which
+   deduplicates exact-content duplicates (same `type`, `args`, and
+   `message`) and appends distinct notices in arrival order (cap 64;
+   oldest dropped on overflow). A burst publishing the same notice
+   collapses into one entry; distinct notices of the same type are kept.
+   Fail-soft: a missing conversation only logs; the change is
+   self-healing at the next hydration epoch.
 2. **Drain = Receive.** `drainAnnouncements` injects every pending entry as
    a persisted assistant message (pre-filled `announcement` tool result) and
    clears the queue. The turn lock guarantees a single consumer per
@@ -47,8 +50,9 @@ per-conversation pending queue IS the queue:
    load-modify-save against concurrent publishers, so entries are never lost
    or double-injected.
 3. **Delivery points.** Turn start (`addTurnMessages`, after the user
-   message) and tool-round boundary (`AfterRound`, alongside steer and
-   subagent results). Both are safe injection points; the model sees the
+   message — the task-memory scan runs here before the drain) and
+   tool-round boundary (`AfterRound`, alongside steer and subagent
+   results). Both are safe injection points; the model sees the
    announcement in the next provider round.
 4. **Durable.** The queue is persisted on the conversation — survives
    backend restarts and arbitrarily long idle periods. No TTL, no in-memory
@@ -86,8 +90,8 @@ func (a *App) drainAnnouncements(run *TurnRun) (bool, error)      // Receive
 ```
 
 - `publishAnnouncement` takes the per-conversation announcement lock around
-  load-modify-save, appends via `QueueAnnouncement` (coalescing by type,
-  latest wins), and saves.
+  load-modify-save, appends via `QueueAnnouncement` (exact-content dedup;
+  distinct notices append, cap 64), and saves.
 - `drainAnnouncements` takes the same lock, injects all pending entries as
   assistant messages, clears the queue, and saves. Returns true when
   something was injected, forcing the round to continue.
@@ -105,6 +109,7 @@ the self-describing args pattern of `AutoContinueAnnouncementArgs`:
 | `config_changed` | `acp.agents.save/delete`, `settings.save` (UserPrompt), `ai.providers.save` | `{type, changed: ["subagent","user_prompt"]}` | "Tool/system configuration changed since your last turn: subagent list, user instructions. Re-read the affected tool descriptions and instructions." |
 | `memory_changed` | `memory.user.update` / `memory.agent.update` RPC | `{type, tier: "user"\|"agent", op: "update"}` | "Memory was updated outside this conversation. Call `memory` op=list to refresh." |
 | `skills_changed` | `skills.save` / `install` / `delete` RPC, `skill` tool (`save`/`delete`) from other conversations | `{type, op}` | "The skill library changed. Call `skill` op=list to refresh." |
+| `task_memory` | turn-start scan (`addTurnMessages` → `MaybeAnnounceTaskMemory`); async semantic lane (`prefetchTaskMemorySemantic` → `PublishTaskMemoryAnnouncement`) | `{type, hits: [{id, type, project, content}]}` | "Relevant task memory for this conversation is new or updated. Read the snippets; retrieve full records with memory op=search or memory op=get." |
 
 Rules:
 
@@ -165,12 +170,15 @@ Rules:
 | `HandleUserUpdate` / `HandleAgentUpdate` (`application/memory/`) | `memory_changed` |
 | `handleSkillsSave` / `handleSkillsInstall` / `handleSkillsDelete` (`application/skills_handlers.go`) | `skills_changed` |
 | `skill` tool `save`/`delete` when the calling conversation differs from the affected one | `skills_changed` |
+| `MaybeAnnounceTaskMemory` (`application/memory/task.go`) at turn start | `task_memory` |
+| `prefetchTaskMemorySemantic` async lane (`application/task_memory_semantic.go`) → `PublishTaskMemoryAnnouncement` | `task_memory` |
 
 ## Test plan
 
-- Queue unit tests: publish appends + coalesces by type (latest wins);
-  drain injects all pending types in order and clears the queue; empty queue
-  is a no-op.
+- Queue unit tests: publish appends + deduplicates exact-content
+  duplicates (same `type`, `args`, and `message`), drops the oldest entry
+  past the cap; drain injects all pending types in order and clears the
+  queue; empty queue is a no-op.
 - Concurrency test: parallel publishers + drain never lose or double-inject
   (per-conversation lock).
 - Turn-start tests: `addTurnMessages` drains pending announcements in order

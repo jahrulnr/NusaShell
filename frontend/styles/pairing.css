@@ -1,0 +1,399 @@
+/* ============ Device pairing gate & remote access panel ============
+ *
+ * Layer: cross-cutting overlay + view — the pairing gate is a body-level
+ * overlay (like offline-screen) shown to unauthenticated remote clients;
+ * the remote access panel is scoped to [data-view="settings"].
+ */
+/* Full-window overlay shown to unauthenticated remote clients. Lives at
+ * body level (outside .window) so it covers every view. Driven by
+ * js/pairing.js, triggered by PAIRING_REQUIRED RPC errors. */
+.pairing-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  padding: 28px;
+  text-align: center;
+  background: var(--bg);
+}
+.pairing-gate[hidden] { display: none; }
+.pairing-gate-card {
+  max-width: 480px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  text-align: left;
+}
+.pairing-gate-card h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.35;
+  text-align: center;
+}
+.pairing-gate-card h2:focus,
+.pairing-gate-card h2:focus-visible {
+  outline: none;
+}
+.pairing-gate-intro {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+.pairing-code-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: 0;
+}
+.pairing-code {
+  font-family: var(--mono, monospace);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  color: var(--text);
+  padding: 8px 16px;
+  background: var(--bg);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  user-select: all;
+}
+.pairing-countdown {
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: bold;
+  text-align: center;
+  margin: 0;
+}
+.pairing-status {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 8px;
+}
+.pairing-status[data-state="approved"] { color: var(--success, #2e7d32); }
+.pairing-status[data-state="rejected"] { color: var(--danger, #c62828); }
+.pairing-status[data-state="expired"] { color: var(--danger, #c62828); }
+.pairing-success {
+  text-align: center;
+  color: var(--success, #2e7d32);
+  font-size: 13px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--success, #2e7d32) 8%, transparent);
+  border-radius: 8px;
+}
+.pairing-error {
+  text-align: center;
+  color: var(--danger, #c62828);
+  font-size: 12px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--danger, #c62828) 8%, transparent);
+  border-radius: 8px;
+}
+.pairing-error p { margin: 0 0 8px; }
+.pairing-error[data-terminal="true"] {
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+}
+.pairing-help {
+  text-align: left;
+  padding: 16px;
+  background: var(--surface);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+.pairing-help[hidden] { display: none; }
+.pairing-help h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+.pairing-help ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+.pairing-help li { margin-bottom: 4px; }
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent, var(--text-muted));
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 4px;
+}
+.link-btn:focus-visible {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ============ Host pairing dialog ============
+ *
+ * The dialog owns the scan surface: its overlay covers the Settings panel while
+ * it is open, so the scannable QR, pairing link, and manual code live here.
+ */
+.pairing-approval-overlay {
+  z-index: 220;
+}
+.pairing-approval-overlay[hidden] { display: none; }
+.pairing-approval-dialog {
+  /* Wider than the default dialog so the QR sits beside its link/code column
+   * and the scan target, state, and decision controls share one view. */
+  width: min(560px, 100%);
+  /* Cap only: the dialog still shrinks to its content, but a second configured
+   * address (one extra QR card) must not push Approve/Reject out of view. */
+  max-height: min(92vh, 780px);
+}
+.pairing-approval-dialog .ui-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* The dialog opens with focus on the title so the QR starts in view (same
+ * pattern as the remote pairing gate). The title is not Tab-reachable, so it
+ * needs no visible focus ring. */
+.pairing-approval-dialog .ui-dialog-header h2:focus,
+.pairing-approval-dialog .ui-dialog-header h2:focus-visible {
+  outline: none;
+}
+.pairing-approval-dialog .pairing-qr-display {
+  margin: 12px 0 0;
+}
+.pairing-approval-dialog .pairing-qr-alternatives {
+  margin: 4px 0 0;
+  /* Extra addresses scroll inside their own area so the primary QR, state, and
+   * Approve/Reject stay visible no matter how many addresses are configured. */
+  max-height: 220px;
+  overflow-y: auto;
+}
+.pairing-approval-dialog .pairing-host-status {
+  padding: 0;
+}
+.pairing-approval-dialog .pairing-host-actions {
+  margin-top: 4px;
+}
+.pairing-approval-dialog .pairing-host-actions .settings-field {
+  margin-bottom: 0;
+}
+
+/* ============ Settings: remote access panel ============ */
+.pairing-code-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* QR + manual link/code display. It lives inside the pairing dialog; the QR is
+ * rendered client-side from the trusted loopback response so the secret never
+ * appears in a server access log path. The link/code column wraps under the QR
+ * when the dialog is too narrow to show both side by side. */
+.pairing-qr-display {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 12px 0;
+  padding: 14px;
+  background: var(--surface);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.pairing-qr-display[hidden] { display: none; }
+.pairing-qr-alternatives {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.pairing-alternative {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.pairing-alternative img {
+  width: 96px;
+  height: 96px;
+  flex: 0 0 auto;
+  image-rendering: pixelated;
+  border-radius: 4px;
+  background: #fff;
+}
+.pairing-alternative .pairing-link {
+  min-width: 0;
+  max-height: 88px;
+  overflow: auto;
+}
+/* Inside the dialog the extra-address cards get one full-width row each: two
+ * cramped columns would squeeze the link text into a scroll strip. */
+.pairing-approval-dialog .pairing-qr-alternatives {
+  grid-template-columns: 1fr;
+}
+.pairing-qr-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.pairing-qr-wrap img {
+  display: block;
+  width: 200px;
+  height: 200px;
+  image-rendering: pixelated;
+  border-radius: 6px;
+  background: #fff;
+}
+.pairing-qr-status {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin: 0;
+  text-align: center;
+  /* Match the QR width so the QR column stays exactly as wide as its code and
+   * the link/code column can sit beside it at desktop dialog widths. */
+  max-width: 200px;
+}
+.pairing-link-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.pairing-link {
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  color: var(--text);
+  padding: 8px 10px;
+  background: var(--bg);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  word-break: break-all;
+  user-select: all;
+}
+.pairing-code-label-code {
+  margin-top: 8px;
+}
+.pairing-link-section .pairing-code {
+  font-size: 20px;
+}
+.settings-field-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.pairing-address-error {
+  color: var(--danger, #c62828);
+  font-size: 11px;
+  margin-top: 4px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+.pairing-address-error[data-severity="warning"] {
+  color: var(--amber, #b26a00);
+}
+
+.pairing-host-status {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 8px 0;
+}
+.pairing-host-status[hidden] { display: none; }
+/* Panel summary of the active challenge plus the control that brings its QR
+ * back into view. Both children stay hidden until a challenge exists, and a
+ * display:none child contributes no gap, so an idle panel shows nothing. */
+.pairing-panel-status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.pairing-panel-status-row .pairing-host-status {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 0;
+  margin-top: 8px;
+}
+.pairing-panel-status-row .mini-btn {
+  flex: 0 0 auto;
+  margin-top: 8px;
+}
+.pairing-host-actions {
+  margin-top: 12px;
+}
+.pairing-host-actions[hidden] { display: none; }
+.pairing-host-actions .settings-field {
+  margin-bottom: 12px;
+}
+.pairing-sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+.pairing-session-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.pairing-session-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.pairing-session-label {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pairing-session-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.pairing-sessions-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 12px 0;
+}
+.pairing-sessions-empty[hidden] { display: none; }
+
+/* Mobile: stack session rows vertically */
+@media (max-width: 680px) {
+  .pairing-session-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .pairing-session-actions {
+    align-self: flex-end;
+  }
+}
+
+/* Narrow screens: a smaller QR keeps the QR, status, and the Approve/Reject
+ * controls inside one dialog view instead of an inner scroll. */
+@media (max-width: 480px) {
+  .pairing-qr-wrap img {
+    width: 168px;
+    height: 168px;
+  }
+}

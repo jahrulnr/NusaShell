@@ -16,6 +16,7 @@
 .experimental/
 /.playwright-mcp/
 /docs/decisions
+/specs/
 *.swp
 # Local env
 .env

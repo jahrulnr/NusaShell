@@ -122,7 +122,7 @@ supported on that provider.
 ## Edge cases
 
 - OpenAI public `/v1/models` is **not** compatible — OpenRouter catalog is rich;
-  OpenAI’s is minimal (`id` only). See `../_shared/provider-matrix.md`.
+  OpenAI’s is minimal (`id` only). See `../shared/provider-matrix.md`.
 - Endpoint `supported_parameters` can be a subset of the model’s catalog list.
 - Pricing strings need parsing; never assume number type.
 - Some scripts reformat endpoints (`status: "operational"`) — raw API may use

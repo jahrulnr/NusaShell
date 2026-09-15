@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -219,13 +220,18 @@ func TestReasoningSentForRoutingModel(t *testing.T) {
 func TestAssistantBlockCombinations(t *testing.T) {
 	tests := []struct {
 		name      string
+		kind      domain.ProviderKind
 		content   string
 		reasoning string
 		toolCalls []domain.ToolCall
 		wantOrder []string // block type names in expected order
 	}{
 		{
+			// Reasoning-only is a legal standalone item on Responses;
+			// message-shaped wires (Chat/Messages/Gemini) drop it because
+			// they require content or tool calls on every assistant entry.
 			name:      "reasoning only",
+			kind:      domain.ProviderResponses,
 			reasoning: "I thought about it.",
 			wantOrder: []string{"ReasoningBlock"},
 		},
@@ -268,6 +274,10 @@ func TestAssistantBlockCombinations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			kind := tt.kind
+			if kind == "" {
+				kind = domain.ProviderChat
+			}
 			req := ChatRequest{
 				Model: "test/model",
 				Messages: []ChatMessage{
@@ -276,7 +286,7 @@ func TestAssistantBlockCombinations(t *testing.T) {
 				},
 				ReasoningReplay: false,
 			}
-			cr := ToCoreRequest(req, domain.ProviderChat, true)
+			cr := ToCoreRequest(req, kind, true)
 
 			var assistant *core.Message
 			for i := range cr.Messages {
@@ -354,6 +364,144 @@ func TestToCoreRequestCopiesToolChoice(t *testing.T) {
 	cr := ToCoreRequest(ChatRequest{Model: "m", ToolChoice: choice}, domain.ProviderChat, false)
 	if cr.ToolChoice == nil {
 		t.Fatal("ToolChoice dropped during conversion")
+	}
+}
+
+func TestToCoreRequestDropsEmptyAssistantPlaceholderAfterParallelTools(t *testing.T) {
+	calls := []domain.ToolCall{
+		{ID: "call_1", Name: "file_read", Args: `{}`},
+		{ID: "call_2", Name: "file_list", Args: `{}`},
+		{ID: "call_3", Name: "grep", Args: `{}`},
+		{ID: "call_4", Name: "exec", Args: `{}`},
+	}
+	messages := []ChatMessage{
+		{Role: "user", Content: "inspect the project"},
+		{Role: "assistant", ToolCalls: calls},
+		{Role: "tool", ToolResult: &ToolResult{ToolCallID: "call_1", Content: "file"}},
+		{Role: "tool", ToolResult: &ToolResult{ToolCallID: "call_2", Content: "listing"}},
+		{Role: "tool", ToolResult: &ToolResult{ToolCallID: "call_3", Content: "matches"}},
+		{Role: "tool", ToolResult: &ToolResult{ToolCallID: "call_4", Content: "done"}},
+		// A fresh assistant placeholder may be present while the next
+		// round is being prepared. It is not a provider-visible message.
+		{Role: "assistant"},
+	}
+
+	cr := ToCoreRequest(ChatRequest{
+		Model:           "deepseek-v4.1-flash",
+		Messages:        messages,
+		ReasoningReplay: true,
+	}, domain.ProviderChat, false)
+	assistantCount := 0
+	for _, message := range cr.Messages {
+		if message.Role == core.RoleAssistant {
+			assistantCount++
+		}
+	}
+	if assistantCount != 1 {
+		t.Fatalf("assistant messages = %d, want only the assistant tool-call batch; messages=%+v", assistantCount, cr.Messages)
+	}
+}
+
+func TestToCoreRequestDropsAssistantWhenChatReasoningExtraIsStripped(t *testing.T) {
+	cr := ToCoreRequest(ChatRequest{
+		Messages: []ChatMessage{{
+			Role:           "assistant",
+			ReasoningExtra: json.RawMessage(`{"type":"reasoning","encrypted_content":"opaque"}`),
+		}},
+	}, domain.ProviderChat, false)
+	if len(cr.Messages) != 0 {
+		t.Fatalf("messages = %+v, want provider-extra-only assistant to be omitted", cr.Messages)
+	}
+}
+
+// TestToCoreRequestDropsReasoningOnlyAssistantOnChat reproduces the
+// Console Go 400 "Invalid assistant message: content or tool_calls must be
+// set". An interrupted thinking stream persists an assistant message with
+// reasoning but no text and no tool calls; on message-shaped wires (Chat,
+// Messages, Gemini) it serializes to reasoning_content alone, which strict
+// gateways reject. The reasoning-only entry must be dropped while the
+// following real answer survives.
+func TestToCoreRequestDropsReasoningOnlyAssistantOnChat(t *testing.T) {
+	messages := []ChatMessage{
+		{Role: "user", Content: "fix the scroll bug"},
+		{Role: "assistant", Reasoning: "**Investigating scrollBy**\n\npartial thinking"},
+		{Role: "assistant", Content: "the real answer"},
+	}
+	for _, kind := range []domain.ProviderKind{domain.ProviderChat, domain.ProviderMessages, domain.ProviderGemini} {
+		cr := ToCoreRequest(ChatRequest{Model: "deepseek-flash", Messages: messages, ReasoningReplay: true}, kind, false)
+		assistants := 0
+		for _, m := range cr.Messages {
+			if m.Role == core.RoleAssistant {
+				assistants++
+				if len(m.Blocks) == 1 {
+					if _, ok := m.Blocks[0].(core.ReasoningBlock); ok {
+						t.Fatalf("kind %s kept a reasoning-only assistant message", kind)
+					}
+				}
+			}
+		}
+		if assistants != 1 {
+			t.Fatalf("kind %s assistant messages = %d, want only the real answer", kind, assistants)
+		}
+	}
+}
+
+// TestToCoreRequestKeepsReasoningOnlyAssistantOnItemWires proves the
+// drop above is kind-gated: on Responses/Codex a reasoning item is a
+// first-class input item, so a reasoning-only assistant entry remains
+// legal and keeps encrypted replay state alive.
+func TestToCoreRequestKeepsReasoningOnlyAssistantOnItemWires(t *testing.T) {
+	messages := []ChatMessage{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Reasoning: "thinking only"},
+	}
+	for _, kind := range []domain.ProviderKind{domain.ProviderResponses, domain.ProviderCodex} {
+		cr := ToCoreRequest(ChatRequest{Model: "gpt-5.6-luna", Messages: messages}, kind, false)
+		found := false
+		for _, m := range cr.Messages {
+			if m.Role != core.RoleAssistant {
+				continue
+			}
+			found = true
+			if _, ok := m.Blocks[0].(core.ReasoningBlock); !ok {
+				t.Fatalf("kind %s assistant blocks = %#v, want ReasoningBlock", kind, m.Blocks)
+			}
+		}
+		if !found {
+			t.Fatalf("kind %s dropped the reasoning-only assistant message", kind)
+		}
+	}
+}
+
+// TestToCoreRequestDropsWhitespaceContentAssistantOnChat covers the
+// companion edge: whitespace-only text survives emptyAssistantMessage when
+// reasoning is present, but the wire drops the empty text part and the
+// entry is left reasoning-only again.
+func TestToCoreRequestDropsWhitespaceContentAssistantOnChat(t *testing.T) {
+	cr := ToCoreRequest(ChatRequest{
+		Model: "deepseek-flash",
+		Messages: []ChatMessage{
+			{Role: "user", Content: "hi"},
+			{Role: "assistant", Reasoning: "partial thinking", Content: "   \n"},
+			{Role: "assistant", Content: "answer"},
+		},
+	}, domain.ProviderChat, false)
+	for _, m := range cr.Messages {
+		if m.Role != core.RoleAssistant {
+			continue
+		}
+		onlyReasoning := true
+		for _, b := range m.Blocks {
+			if tb, ok := b.(core.TextBlock); ok && strings.TrimSpace(tb.Text) != "" {
+				onlyReasoning = false
+			}
+			if _, ok := b.(core.ToolUseBlock); ok {
+				onlyReasoning = false
+			}
+		}
+		if onlyReasoning {
+			t.Fatalf("kept a reasoning-only assistant message: %#v", m.Blocks)
+		}
 	}
 }
 

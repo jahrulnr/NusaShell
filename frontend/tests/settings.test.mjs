@@ -22,6 +22,8 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
     'settings-sidebar-compact',
     'settings-image-model',
     'settings-delegate-model',
+    'settings-remote-access-enabled',
+    'pairing-remote-address',
   ]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
@@ -38,6 +40,8 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
   assert.match(settingsView, /plugin_contract_mode/);
   assert.match(settingsView, /delegate_model/);
   assert.match(settingsView, /delegateSelect\.getSelected/);
+  assert.match(settingsView, /remote_access_enabled/);
+  assert.match(settingsView, /remote_access_addresses/);
 });
 
 
@@ -159,6 +163,13 @@ test('Settings exposes a compact section rail for its long-form groups', () => {
     assert.match(html, new RegExp(`id="settings-jump-${section}"[^>]+data-settings-section="settings-group-${section}"`));
   }
   assert.match(settingsView, /bindSettingsSectionNavigation/);
+});
+
+test('Remote access settings are opt-in and explain the automatic backend restart', () => {
+  assert.match(html, /id="settings-remote-access-enabled"[^>]+type="checkbox"/);
+  assert.match(html, /<textarea[^>]+id="pairing-remote-address"/);
+  assert.match(html, /backend.*restart/i);
+  assert.match(settingsView, /saveRemoteAccess/);
 });
 
 test('Settings section rail marks the destination and transfers focus to its heading', () => {

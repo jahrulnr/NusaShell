@@ -500,3 +500,46 @@ func TestSeedBuiltinSkillsWritesTrustedMeta(t *testing.T) {
 		t.Fatal("builtin seed must be routable")
 	}
 }
+
+func TestParseSkillMarkdownFoldedScalarDescription(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		wantDesc string
+	}{
+		{
+			name:     "folded scalar >-",
+			raw:      "---\nname: my-skill\ndescription: >-\n  Line one.\n  Line two.\n---\n\n# Body\n",
+			wantDesc: "Line one. Line two.",
+		},
+		{
+			name:     "folded scalar >",
+			raw:      "---\nname: my-skill\ndescription: >\n  Line one.\n  Line two.\n---\n\n# Body\n",
+			wantDesc: "Line one. Line two.\n",
+		},
+		{
+			name:     "literal scalar |",
+			raw:      "---\nname: my-skill\ndescription: |\n  Line one.\n  Line two.\n---\n\n# Body\n",
+			wantDesc: "Line one.\nLine two.\n",
+		},
+		{
+			name:     "plain single-line",
+			raw:      "---\nname: my-skill\ndescription: A simple description.\n---\n\n# Body\n",
+			wantDesc: "A simple description.",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			name, desc, body := parseSkillMarkdown(tc.raw)
+			if name != "my-skill" {
+				t.Fatalf("name = %q, want my-skill", name)
+			}
+			if desc != tc.wantDesc {
+				t.Fatalf("description = %q, want %q", desc, tc.wantDesc)
+			}
+			if !strings.Contains(body, "# Body") {
+				t.Fatalf("body missing # Body: %q", body)
+			}
+		})
+	}
+}

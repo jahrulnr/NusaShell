@@ -20,15 +20,17 @@ the table.
 | System prompt | `instructions` / system message | system message | `systemInstruction` | Top-level `system` (canonical) + mid-conversation `role: "system"` on Fable/Mythos 5.x, Opus 5/4.8 |
 | Output cap | `max_output_tokens` optional | OpenAI-style | set `maxOutputTokens` explicitly | **`max_tokens` required** (0 = cache pre-warm) |
 | Chat video input | **Not supported** | `video_url` parts (provider-dependent) | `inlineData` / `fileData` video (limits apply) | Not supported (image/PDF input only) |
-| Model list API | Minimal name list | Rich pricing/modalities/endpoints | `GET /v1beta/models` with methods + limits | `GET /v1/models` with capabilities + cursor pagination |
+| Model list API | Minimal name list | Rich pricing/modalities/endpoints | `GET /v1beta/models` with methods + limits — **shared catalog across both the `generateContent` and Interactions surfaces** (Interactions-only models like Lyria appear here; agents such as `deep-research-*`/`antigravity-*` are a separate resource, not in the catalog). No Interactions-specific listing; the `/v1beta2/interactions` path in the migration guide is 404 live — see `../gemini/README.md` | `GET /v1/models` with capabilities + cursor pagination |
 | Provider routing / fallbacks | Single vendor | `models[]` + `provider` prefs | Single Google surface (or Vertex) | Single vendor (Bedrock/Vertex/Foundry are separate platforms) |
 | Rate limits | Tier TPM/RPM; `x-ratelimit-*` | Per-key dynamic; `:free` caps | RPM/TPM/RPD; `Retry-After` can be hours | Tiered RPM/TPM + spend caps; spend-cap 429 has **no** `retry-after` |
 | Streaming | SSE; Chat Completions `[DONE]`; Responses typed events | OpenAI-like SSE + usage quirk | SSE `?alt=sse`; **no** `[DONE]` | Named SSE events, **no** `[DONE]`, incremental deltas |
 | Tools | OpenAI function / Responses tools | OpenAI-shaped tools | `functionDeclarations` + `functionCall`/`functionResponse`; schema **subset** | `tools[]`/`tool_choice`; `tool_use` → `tool_result`; `strict` schemas |
 | Thinking / reasoning | Model-specific; Responses reasoning | Provider-dependent | `thinkingConfig` — 2.5=`thinkingBudget`, 3=`thinkingLevel`; **thought signatures** | `thinking` blocks + opaque `signature`; adaptive + `effort`; replay unmodified |
 | Prompt caching | Automatic prefix; `prompt_cache_key` | Provider-dependent caching | Implicit/explicit caching (2.5 vs 3 differ) | `cache_control` breakpoints; 5m/1h TTL; min-token floors |
-| Image generation | `/v1/images/*` GPT Image | `POST /api/v1/images` | generateContent + `responseModalities` (Nano Banana) | — |
-| TTS | `/v1/audio/speech` raw bytes | OpenAI-compatible speech | generateContent + `responseModalities: ["AUDIO"]` | — |
+| Image generation | `/v1/images/*` GPT Image | `POST /api/v1/images` | Interactions API (default) or `generateContent` + `responseModalities` (Nano Banana) | — |
+| TTS | `/v1/audio/speech` raw bytes | OpenAI-compatible speech | Interactions API (default) or `generateContent` + `responseModalities: ["AUDIO"]` | — |
+| Video generation | — | — | Veo `:predictLongRunning` (long-running op + polling) | — |
+| Music generation | — | — | Lyria via Interactions API only | — |
 | STT | multipart `/v1/audio/transcriptions` | JSON+base64 STT | multimodal input / Live | — |
 | Embeddings | `/v1/embeddings` | Routed OpenAI-shaped | `:embedContent` / `:batchEmbedContents` | — |
 | Realtime voice | OpenAI Realtime | Not first-class | Gemini Live WebSocket | — |

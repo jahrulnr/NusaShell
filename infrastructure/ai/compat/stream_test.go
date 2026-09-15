@@ -3,10 +3,12 @@ package compat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"nusashell/infrastructure/ai/core"
 	"nusashell/infrastructure/ai/internal/testgolden"
@@ -478,6 +480,220 @@ func TestStreamEmitsReasoningBeforeTextInCombinedDelta(t *testing.T) {
 	if resp.Text() != "Voy a explorar" {
 		t.Fatalf("text = %q, want %q", resp.Text(), "Voy a explorar")
 	}
+}
+
+// TestStreamCompletesWithoutDoneSentinelOnOpenConnection reproduces the
+// gateway behavior behind semantic-first completion: the server sends the
+// final chunk carrying finish_reason and then keeps the connection open
+// without ever writing the [DONE] trailer. The stream must complete from
+// finish_reason — not stall until the idle watchdog, and not fall into a
+// retry that would re-run a turn the model already finished.
+func TestStreamCompletesWithoutDoneSentinelOnOpenConnection(t *testing.T) {
+	stream, writer := pipeStream(t, Spec{Name: "compat"}, nil)
+	stream.drainWindow = 50 * time.Millisecond
+	go func() {
+		io.WriteString(writer, `data: {"choices":[{"index":0,"delta":{"content":"done"},"finish_reason":"stop"}]}`+"\n\n")
+	}()
+	safety := time.AfterFunc(5*time.Second, func() { writer.Close() })
+	defer safety.Stop()
+
+	start := time.Now()
+	resp, err := core.Collect(stream)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Collect returned error: %v", err)
+	}
+	if resp.Text() != "done" || resp.FinishReason != core.FinishReasonStop {
+		t.Fatalf("text/finish = %q/%q", resp.Text(), resp.FinishReason)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("stream took %v to complete without [DONE]; finish_reason must complete the stream", elapsed)
+	}
+}
+
+// TestStreamCapturesUsageAfterFinishWithoutDoneSentinel proves the final
+// accounting chunk that OpenAI-compatible providers emit after finish_reason
+// is still captured (usage must never be required for success, but it must
+// not be thrown away either) and that it terminates the stream on its own:
+// the [DONE] trailer is not required.
+func TestStreamCapturesUsageAfterFinishWithoutDoneSentinel(t *testing.T) {
+	stream, writer := pipeStream(t, Spec{Name: "compat"}, nil)
+	go func() {
+		io.WriteString(writer, `data: {"choices":[{"index":0,"delta":{"content":"done"},"finish_reason":"stop"}]}`+"\n\n")
+		io.WriteString(writer, `data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`+"\n\n")
+	}()
+	safety := time.AfterFunc(5*time.Second, func() { writer.Close() })
+	defer safety.Stop()
+
+	start := time.Now()
+	resp, err := core.Collect(stream)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Collect returned error: %v", err)
+	}
+	if resp.Usage.InputTokens != 3 || resp.Usage.OutputTokens != 4 {
+		t.Fatalf("usage = %+v, want 3/4", resp.Usage)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("stream waited %v after the accounting chunk; the usage chunk must complete it", elapsed)
+	}
+}
+
+// TestStreamPostFinishConnectionErrorCompletes covers a connection reset that
+// arrives after finish_reason: the model already reported completion, so the
+// turn is not partial and must not surface as a retryable stream error.
+func TestStreamPostFinishConnectionErrorCompletes(t *testing.T) {
+	stream, writer := pipeStream(t, Spec{Name: "compat"}, nil)
+	go func() {
+		io.WriteString(writer, `data: {"choices":[{"index":0,"delta":{"content":"done"},"finish_reason":"stop"}]}`+"\n\n")
+		writer.CloseWithError(errors.New("connection reset by peer"))
+	}()
+
+	resp, err := core.Collect(stream)
+	if err != nil {
+		t.Fatalf("post-finish connection error must not fail the turn: %v", err)
+	}
+	if resp.Text() != "done" || resp.FinishReason != core.FinishReasonStop {
+		t.Fatalf("text/finish = %q/%q", resp.Text(), resp.FinishReason)
+	}
+}
+
+// TestStreamPayloadErrorIsFailure guards streams that report an error inside
+// an HTTP 200 SSE body. Providers use both the object form
+// {"error":{"message":...}} and the string form {"error":"..."}; either way
+// the chunk is a failure, not an empty successful response.
+func TestStreamPayloadErrorIsFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "object",
+			body: `data: {"error":{"message":"boom","type":"server_error"}}`,
+		},
+		{
+			name: "string",
+			body: `data: {"error":"boom"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := streamFromSSE(t, strings.Join([]string{tt.body, `data: [DONE]`, ``}, "\n"), Spec{Name: "compat"}, nil)
+			_, err := core.Collect(stream)
+			if err == nil || !strings.Contains(err.Error(), "boom") || !core.IsProviderError(err) {
+				t.Fatalf("expected provider error mentioning boom, got %v", err)
+			}
+		})
+	}
+}
+
+// TestStreamFinishReasonErrorIsFailure guards the one finish_reason that is
+// not a successful completion: a provider reporting "error" (or any of its
+// aliases) must fail the turn instead of producing an empty successful
+// response.
+func TestStreamFinishReasonErrorIsFailure(t *testing.T) {
+	stream := streamFromSSE(t, strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":"error"}]}`,
+		`data: [DONE]`,
+		``,
+	}, "\n"), Spec{Name: "compat"}, nil)
+	_, err := core.Collect(stream)
+	if err == nil || !core.IsProviderError(err) {
+		t.Fatalf("finish_reason=error must fail, got %v", err)
+	}
+}
+
+// TestStreamIgnoresMalformedChunkAfterFinish keeps trailing noise from
+// failing a turn that already completed: after finish_reason the response is
+// complete, so a malformed trailing frame is skipped instead of surfacing as
+// a provider error.
+func TestStreamIgnoresMalformedChunkAfterFinish(t *testing.T) {
+	stream := streamFromSSE(t, strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"content":"done"},"finish_reason":"stop"}]}`,
+		`data: {not valid json`,
+		`data: [DONE]`,
+		``,
+	}, "\n"), Spec{Name: "compat"}, nil)
+	resp, err := core.Collect(stream)
+	if err != nil {
+		t.Fatalf("malformed trailing frame must not fail the stream: %v", err)
+	}
+	if resp.Text() != "done" {
+		t.Fatalf("text = %q, want done", resp.Text())
+	}
+}
+
+// TestStreamDoneSentinelWithoutFinishReasonCompletes characterizes the
+// [DONE]-only path: a provider may close out with the trailer without ever
+// sending finish_reason, and that still completes the stream.
+func TestStreamDoneSentinelWithoutFinishReasonCompletes(t *testing.T) {
+	stream := streamFromSSE(t, strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"content":"hi"}}]}`,
+		`data: [DONE]`,
+		``,
+	}, "\n"), Spec{Name: "compat"}, nil)
+	resp, err := core.Collect(stream)
+	if err != nil {
+		t.Fatalf("Collect returned error: %v", err)
+	}
+	if resp.Text() != "hi" {
+		t.Fatalf("text = %q, want hi", resp.Text())
+	}
+}
+
+// TestStreamRepeatedFinishReasonOnUsageChunkCompletesOnce covers OpenRouter's
+// accounting frame: it repeats finish_reason on the usage chunk and asks
+// clients to treat that as accounting, not as a second terminal. The stream
+// must complete exactly once, keep the usage, and not emit a second
+// DoneEvent.
+func TestStreamRepeatedFinishReasonOnUsageChunkCompletesOnce(t *testing.T) {
+	stream := streamFromSSE(t, strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"content":"hi"}}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n"), Spec{Name: "compat"}, nil)
+	var dones int
+	var usage core.Usage
+	for {
+		event, err := stream.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next returned error: %v", err)
+		}
+		switch e := event.(type) {
+		case core.DoneEvent:
+			dones++
+			if e.FinishReason != core.FinishReasonStop {
+				t.Fatalf("DoneEvent finish reason = %q", e.FinishReason)
+			}
+		case core.UsageEvent:
+			usage = e.Usage
+		}
+	}
+	if dones != 1 {
+		t.Fatalf("DoneEvent count = %d, want exactly 1", dones)
+	}
+	if usage.InputTokens != 1 || usage.OutputTokens != 2 {
+		t.Fatalf("usage = %+v, want 1/2", usage)
+	}
+}
+
+// pipeStream builds a stream whose body is fully test-controlled: the caller
+// writes SSE frames through the returned writer and decides when (or whether)
+// the connection ends.
+func pipeStream(t *testing.T, spec Spec, req *core.Request) (*stream, *io.PipeWriter) {
+	t.Helper()
+	reader, writer := io.Pipe()
+	if req == nil {
+		req = &core.Request{Model: "m", Messages: []core.Message{core.UserText("hi")}}
+	}
+	resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: reader}
+	resp.Header.Set("Content-Type", "text/event-stream")
+	return newStream(resp, req, spec), writer
 }
 
 func streamFromSSE(t *testing.T, body string, spec Spec, req *core.Request) core.Stream {

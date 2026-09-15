@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -53,6 +54,8 @@ import (
 // current baseline as the direct-build fallback for existing local workflows.
 var version = "0.1.0"
 
+var errBackendRestart = errors.New("backend restart requested")
+
 func main() {
 	// Explicit subcommands run and exit before the server starts. Keep this
 	// dispatch tiny; the default (no subcommand) is to run the server.
@@ -70,9 +73,16 @@ func main() {
 		}
 		return
 	}
-	if err := run(); err != nil {
-		slog.Error("nusashell exited with error", "error", err)
-		os.Exit(1)
+	for {
+		err := run()
+		if errors.Is(err, errBackendRestart) {
+			continue
+		}
+		if err != nil {
+			slog.Error("nusashell exited with error", "error", err)
+			os.Exit(1)
+		}
+		return
 	}
 }
 
@@ -120,6 +130,7 @@ func seedProvidersCmd() error {
 
 func run() error {
 	defer httpclient.CloseIdleConnections()
+	configuredHost := os.Getenv("NUSASHELL_HOST")
 	host := envOr("NUSASHELL_HOST", "127.0.0.1")
 	port := envOr("NUSASHELL_PORT", "10994")
 	dataDir := envOr("NUSASHELL_DATA_DIR", defaultDataDir())
@@ -130,17 +141,15 @@ func run() error {
 		level = slog.LevelDebug
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
-
-	// Security guard: the server has no auth and exposes MCP command
-	// execution (RCE via stdio MCP servers). Binding to a non-loopback
-	// address without explicit consent is a misconfiguration that can
-	// expose the shell to the local network. Require
-	// NUSASHELL_ALLOW_REMOTE=1 to proceed.
-	if !isLoopbackHost(host) && os.Getenv("NUSASHELL_ALLOW_REMOTE") != "1" {
-		return fmt.Errorf("refusing to bind to non-loopback address %q: set NUSASHELL_ALLOW_REMOTE=1 to explicitly allow remote access (WARNING: no auth, MCP command execution is exposed)", host)
-	}
-	if !isLoopbackHost(host) {
-		logger.Warn("remote access enabled — no auth, MCP command execution is exposed to the network", "host", host)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	var restartRequested atomic.Bool
+	requestRestart := func() {
+		if restartRequested.CompareAndSwap(false, true) {
+			// Let settings.set finish its response before the listener begins
+			// graceful shutdown; the frontend reconnects to the next loop.
+			time.AfterFunc(250*time.Millisecond, stop)
+		}
 	}
 
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
@@ -265,9 +274,25 @@ func run() error {
 	learningJobs := &jsonstore.LearningJobs{S: store}
 	learningOps := &jsonstore.LearningOps{S: store}
 	settingsPort := &jsonstore.Settings{S: store}
+	remoteAccessEnabled := settingsPort.Get().RemoteAccessEnabled
+	host = resolveListenHost(configuredHost, remoteAccessEnabled)
+	if remoteAccessEnabled {
+		logger.Info("remote access enabled — remote clients must pair", "host", host)
+	} else if !isLoopbackHost(host) {
+		logger.Warn("non-loopback listener configured — remote access stays disabled until enabled in Settings", "host", host)
+	}
 	projectMemoryStore := projectmemory.New(dataDir, func() string {
 		return settingsPort.Get().ProjectMemoryBase
 	})
+	// Device pairing is opt-in. A loopback-bound core may still be exposed
+	// through a trusted proxy or tunnel, so the persisted setting—not the bind
+	// host—selects whether the pairing service is created.
+	pairingSvc, pairingStore, err := newPairingForSettings(dataDir, remoteAccessEnabled)
+	if err != nil {
+		slog.Warn("pairing store init failed, pairing disabled", "error", err)
+	} else if pairingStore != nil {
+		defer pairingStore.Close()
+	}
 	tb := &tools.Toolbox{
 		Skills:                 skillStore,
 		MemoryRecords:          memoryRecords,
@@ -309,7 +334,7 @@ func run() error {
 		Plugins:                     pluginStore,
 		PluginInstaller:             pluginInstaller,
 		Logs:                        &jsonstore.Logs{S: store},
-		Settings:                    &jsonstore.Settings{S: store},
+		Settings:                    settingsPort,
 		Attachments:                 attachmentStore,
 		Docs:                        docSource,
 		Bus:                         bus,
@@ -338,6 +363,9 @@ func run() error {
 		AcpAgents:                   &jsonstore.AcpAgents{S: store},
 		Acp:                         acpRuntime,
 		AcpRunStorage:               jsonstore.NewAcpRunStore(dataDir),
+		Pairing:                     pairingSvc,
+		Restart:                     requestRestart,
+		ListenAddr:                  net.JoinHostPort(host, port),
 		Logger:                      logger,
 	})
 	tb.Acp = app
@@ -403,6 +431,10 @@ func run() error {
 		StartedAt: coreStartedAt,
 	}
 	srv := transport.NewWithIdentity(app, logger, transport.StaticHandler(frontend.FS, dev), dev, identity)
+	// The transport layer holds the same pairing service so the auth
+	// middleware and public pairing routes can validate sessions and the
+	// challenge lifecycle.
+	srv.Pairing = pairingSvc
 	// Register plugin routes: serve plugin UI static files and route
 	// tool calls from plugin UIs to the plugin's MCP server.
 	if pluginStore != nil {
@@ -415,7 +447,6 @@ func run() error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	// Request contexts derive from the signal context, so WebSocket
 	// handlers unblock as soon as shutdown begins.
 	httpServer.BaseContext = func(net.Listener) context.Context { return ctx }
@@ -474,7 +505,13 @@ func run() error {
 	stop() // cancel request contexts so streaming handlers exit promptly
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return httpServer.Shutdown(shutdownCtx)
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		return err
+	}
+	if restartRequested.Load() {
+		return errBackendRestart
+	}
+	return nil
 }
 
 func handleMCPNotification(app *application.App, autoSvc *application.Automation, serverID string, n mcp.JSONRPCNotification) {
@@ -525,13 +562,50 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// resolveListenHost keeps a fresh install loopback-only, but opts the listener
+// into all interfaces when the user explicitly enables remote access. An
+// explicit non-loopback NUSASHELL_HOST remains authoritative; loopback values
+// are promoted so an old loopback-only environment cannot defeat the Settings
+// toggle.
+func resolveListenHost(configuredHost string, remoteAccessEnabled bool) string {
+	if !remoteAccessEnabled {
+		if configuredHost != "" {
+			return configuredHost
+		}
+		return "127.0.0.1"
+	}
+	if configuredHost != "" && !isLoopbackHost(configuredHost) {
+		return configuredHost
+	}
+	return "0.0.0.0"
+}
+
 // isLoopbackHost returns true if the host is a loopback address
-// (127.0.0.1, ::1, localhost). Used to guard against accidental remote
-// binding when the server has no auth.
+// (127.0.0.1, ::1, localhost). It is used for diagnostics only; remote
+// access policy is controlled by the persisted Settings toggle.
 func isLoopbackHost(host string) bool {
 	if host == "localhost" || host == "::1" {
 		return true
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// newPairing opens the device-pairing persistence and service. It is bound
+// to the data directory, not the listen host, so an enabled loopback-bound
+// core can still serve trusted proxy/tunnel clients. The caller decides
+// whether the persisted remote-access setting enables it.
+func newPairing(dataDir string) (*application.PairingService, *sqlitestore.PairingStore, error) {
+	store, err := sqlitestore.NewPairingStore(filepath.Join(dataDir, "pairing.db"))
+	if err != nil {
+		return nil, nil, err
+	}
+	return application.NewPairingService(store), store, nil
+}
+
+func newPairingForSettings(dataDir string, enabled bool) (*application.PairingService, *sqlitestore.PairingStore, error) {
+	if !enabled {
+		return nil, nil, nil
+	}
+	return newPairing(dataDir)
 }

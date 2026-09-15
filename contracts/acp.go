@@ -120,6 +120,8 @@ type AcpTranscriptChunkDTO struct {
 	ToolTitle  string `json:"tool_title,omitempty"`
 	ToolKind   string `json:"tool_kind,omitempty"`
 	ToolStatus string `json:"tool_status,omitempty"`
+	ToolInput  string `json:"tool_input,omitempty"`
+	ToolOutput string `json:"tool_output,omitempty"`
 	At         string `json:"at,omitempty"`
 }
 

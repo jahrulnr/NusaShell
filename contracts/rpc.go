@@ -14,8 +14,9 @@ type Request struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
-// ErrorCode classifies RPC failures. There is deliberately no auth/ratelimit
-// code: NusaShell is a personal/community shell without a security layer.
+// ErrorCode classifies RPC failures. Pairing/session auth and rate-limit
+// codes live in pairing.go (CodePairingRequired, CodePairingUnauthorized,
+// CodePairingRateLimit, ...); the codes below cover general RPC failures.
 type ErrorCode string
 
 const (

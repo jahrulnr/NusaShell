@@ -38,6 +38,53 @@ function rpcUnavailableError(method, cause) {
   return err;
 }
 
+function signalBackendUnavailable(method) {
+  emit('rpc:error', { code: 'unavailable', method });
+}
+
+function proxyUnavailableError(method, error) {
+  const err = rpcUnavailableError(method, error);
+  if (error?.message) err.message = error.message;
+  signalBackendUnavailable(method);
+  return err;
+}
+
+// ---- Pairing-required shared state ----
+// When the backend rejects a remote client with PAIRING_REQUIRED, the
+// pairing gate must become the dominant user-facing state. This shared
+// flag lets the offline-screen suppress its overlay (the backend is
+// reachable, it just requires pairing) and lets the pairing gate show.
+let pairingRequired = false;
+let remoteAccessDisabled = false;
+
+export function isPairingRequired() {
+  return pairingRequired;
+}
+
+export function clearPairingRequired() {
+  pairingRequired = false;
+}
+
+export function isRemoteAccessDisabled() {
+  return remoteAccessDisabled;
+}
+
+export function clearRemoteAccessDisabled() {
+  remoteAccessDisabled = false;
+}
+
+// isPairingRequiredError reports whether an error is a PAIRING_REQUIRED
+// rejection from the backend. Used by view catches to suppress the expected
+// error toast while the pairing gate is the dominant UI, without hiding
+// genuine `unavailable` or unexpected errors.
+export function isPairingRequiredError(err) {
+	return err != null && err.code === 'PAIRING_REQUIRED';
+}
+
+export function isRemoteAccessDisabledError(err) {
+  return err != null && err.code === 'REMOTE_ACCESS_DISABLED';
+}
+
 export async function rpc(method, payload = {}, { timeoutMs = 60000 } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -51,7 +98,9 @@ export async function rpc(method, payload = {}, { timeoutMs = 60000 } = {}) {
     });
   } catch (err) {
     if (err?.name === 'AbortError') throw new Error(`RPC timed out: ${method}`);
-    throw rpcUnavailableError(method, err);
+    const unavailable = rpcUnavailableError(method, err);
+    signalBackendUnavailable(method);
+    throw unavailable;
   } finally {
     clearTimeout(timeout);
   }
@@ -59,10 +108,35 @@ export async function rpc(method, payload = {}, { timeoutMs = 60000 } = {}) {
   if (!res.ok) {
     const err = new Error(body.error?.message || `HTTP ${res.status}`);
     err.code = body.error?.code;
+    if (err.code === 'proxy_error') throw proxyUnavailableError(method, err);
+		if (err.code === 'PAIRING_REQUIRED') {
+			pairingRequired = true;
+			emit('rpc:error', { code: 'PAIRING_REQUIRED', method });
+		}
+		if (err.code === 'REMOTE_ACCESS_DISABLED') {
+			remoteAccessDisabled = true;
+			emit('rpc:error', { code: 'REMOTE_ACCESS_DISABLED', method });
+		}
     throw err;
   }
   const rpcErr = toError(body);
-  if (rpcErr) throw rpcErr;
+  if (rpcErr) {
+    if (rpcErr.code === 'proxy_error') throw proxyUnavailableError(method, rpcErr);
+		if (rpcErr.code === 'PAIRING_REQUIRED') {
+			pairingRequired = true;
+			emit('rpc:error', { code: 'PAIRING_REQUIRED', method });
+		}
+		if (rpcErr.code === 'REMOTE_ACCESS_DISABLED') {
+			remoteAccessDisabled = true;
+			emit('rpc:error', { code: 'REMOTE_ACCESS_DISABLED', method });
+		}
+    throw rpcErr;
+  }
+  // A successful response clears the pairing-required flag (e.g. after
+	// the user completed pairing and the session cookie is now valid).
+	pairingRequired = false;
+	remoteAccessDisabled = false;
+  emit('rpc:available', { method });
   return body.result ?? {};
 }
 

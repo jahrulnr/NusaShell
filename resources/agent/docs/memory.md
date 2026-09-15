@@ -279,3 +279,31 @@ The Learning graph links records and skills (`related` from overlap,
 `used_with` from successful tools in one turn). Search fuses BM25,
 optional embeddings, and graph expansion. Node colors: skills, records,
 user document entries.
+
+## Task-memory announcements
+
+Structured records relevant to a conversation surface as `task_memory`
+harness announcements (an `announcement` tool card), not as injected
+context. The scan runs at **turn start** (in `addTurnMessages`, before
+the pending-announcement drain) so the model sees the card in the same
+turn — no 1–2 turn lag. Selection uses a BM25 searcher (embedding off,
+graph expansion off); trivial prompts (greetings, ≤2 effective words)
+are skipped. Hits are filtered to a 72-hour recency window and capped at
+3 hits @1000 runes each.
+
+Dedup is **change-aware**, not once-per-conversation: each announced
+record stores a `(ID → last_confirmed)` marker
+(`Conversation.LastAnnouncedRecords`). A record is re-announced only
+when it is re-confirmed (its `last_confirmed` advances past the stored
+marker), so a stable record does not reappear, but an updated one does.
+Legacy `[]string` markers migrate to zero-time entries (permanent
+dedup) on read.
+
+An **async semantic lane** runs post-turn (when an embedder is
+configured) as a fire-and-forget `goSafe` job: it builds a query from the
+title + workspace + last user prompt, checks recall intent, and runs a
+paraphrase-aware embedding search with a content-addressed cache. A
+circuit breaker skips the lane after 3 consecutive embedding/search
+failures. The lane publishes through the same announcement queue and
+writes dedup markers atomically under the per-conversation announcement
+lock, so the next turn-start scan does not re-announce the same records.

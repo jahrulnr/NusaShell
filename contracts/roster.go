@@ -141,6 +141,19 @@ const (
 	MethodAcpRunsPromote          = "acp.runs.promote"
 	MethodAcpRunsSetMode          = "acp.runs.set-mode"
 	MethodAcpPermissionDecide     = "acp.permission.decide"
+
+	// Device pairing methods. Challenge create/approve/reject/exchange and
+	// session list/revoke are local-only (loopback); the public bootstrap
+	// runs over the /pairing/* HTTP routes. pairing.status is also exposed
+	// as a public route for remote polling.
+	MethodPairingChallengeCreate   = "pairing.challenge.create"
+	MethodPairingChallengeApprove  = "pairing.challenge.approve"
+	MethodPairingChallengeReject   = "pairing.challenge.reject"
+	MethodPairingChallengeExchange = "pairing.challenge.exchange"
+	MethodPairingStatus            = "pairing.status"
+	MethodPairingSessionsList      = "pairing.sessions.list"
+	MethodPairingSessionsRevoke    = "pairing.sessions.revoke"
+	MethodPairingSessionsRevokeAll = "pairing.sessions.revoke-all"
 )
 
 // Event types pushed over WebSocket (/ws).
@@ -209,6 +222,10 @@ type AppInfoResult struct {
 	Version  string   `json:"version"`
 	DataDir  string   `json:"data_dir"`
 	Features Features `json:"features"`
+	// ListenAddr is the host:port the core actually bound. The frontend uses
+	// it to warn when a pairing link's address cannot be reached (e.g. a LAN
+	// link while the listener is loopback-only).
+	ListenAddr string `json:"listen_addr,omitempty"`
 }
 
 type Features struct {
@@ -1478,6 +1495,8 @@ type SettingsDTO struct {
 	UserPrompt                 string   `json:"user_prompt,omitempty"`
 	PluginContractMode         string   `json:"plugin_contract_mode,omitempty"`
 	ProjectMemoryBase          string   `json:"project_memory_base,omitempty"`
+	RemoteAccessEnabled        bool     `json:"remote_access_enabled"`
+	RemoteAccessAddresses      []string `json:"remote_access_addresses,omitempty"`
 }
 
 type SettingsGetResult struct {
@@ -1545,6 +1564,8 @@ type SettingsSetRequest struct {
 	UserPrompt            *string         `json:"user_prompt,omitempty"`
 	PluginContractMode    *string         `json:"plugin_contract_mode,omitempty"`
 	ProjectMemoryBase     *string         `json:"project_memory_base,omitempty"`
+	RemoteAccessEnabled   *bool           `json:"remote_access_enabled,omitempty"`
+	RemoteAccessAddresses *[]string       `json:"remote_access_addresses,omitempty"`
 }
 
 // ---- offline TTS install ----

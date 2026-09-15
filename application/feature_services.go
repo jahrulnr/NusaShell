@@ -68,14 +68,17 @@ func (a *App) settingsService() *settings.Service {
 	})
 }
 
-func (a *App) onSettingsApplied(oldUserPrompt string, next domain.Settings) {
+func (a *App) onSettingsApplied(old, next domain.Settings) {
 	a.InvalidateLearningSearcher()
-	if next.UserPrompt != oldUserPrompt {
+	if next.UserPrompt != old.UserPrompt {
 		a.publishAnnouncementToAll(newAnnouncement(
 			"config_changed",
 			domain.AnnouncementConfigChangedArgs([]string{"user_prompt"}),
 			domain.AnnouncementConfigChangedMessage([]string{"user_prompt"}),
 		), "")
+	}
+	if a.Restart != nil && old.RemoteAccessEnabled != next.RemoteAccessEnabled {
+		a.Restart()
 	}
 }
 
@@ -284,21 +287,11 @@ func (a *App) memoryDeps() memory.Deps {
 			a.pruneLearningEdges(id)
 			a.InvalidateLearningSearcher()
 		},
-		Announce: func(conversationID, typ, args, msg string) {
-			a.publishAnnouncement(conversationID, newAnnouncement(typ, args, msg))
-		},
-		PersistAnnounced: func(conversationID string, ids []string) error {
-			repo, err := a.loadRepo(conversationID)
-			if err != nil {
-				return err
-			}
-			repo.Conversation().LastAnnouncedRecords = ids
-			return repo.Save()
-		},
 	}
 	if a.Bus != nil {
 		d.Bus = a.Bus
 	}
+	d.Searcher = taskMemorySearcher{resolve: a.learningSearch}
 	return d
 }
 

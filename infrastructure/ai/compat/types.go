@@ -64,6 +64,10 @@ type streamChunk struct {
 	Model   string          `json:"model"`
 	Choices []streamChoice  `json:"choices"`
 	Usage   json.RawMessage `json:"usage,omitempty"`
+	// Error carries an in-stream error payload. Providers report failures
+	// inside an HTTP 200 SSE body ("error" alongside or instead of a
+	// choice); see streamPayloadError in stream.go.
+	Error json.RawMessage `json:"error,omitempty"`
 }
 
 type streamChoice struct {

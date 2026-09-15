@@ -44,12 +44,11 @@ const (
 // be a stable path (survive version upgrades); DataDir is the NusaShell data
 // directory the server should use.
 type Options struct {
-	BinaryPath  string
-	DataDir     string
-	Path        string // captured user PATH for child command execution
-	Host        string // optional NUSASHELL_HOST override
-	Port        string // optional NUSASHELL_PORT override
-	AllowRemote bool   // propagate NUSASHELL_ALLOW_REMOTE=1 (explicit consent)
+	BinaryPath string
+	DataDir    string
+	Path       string // captured user PATH for child command execution
+	Host       string // optional NUSASHELL_HOST override
+	Port       string // optional NUSASHELL_PORT override
 }
 
 // Status snapshots the installed service for CLI output and drift checks.
@@ -121,7 +120,7 @@ func guardOutsideService(action string) error {
 
 // ServiceEnv builds the environment carried by every service definition:
 // the supervised marker and data directory are always present; captured PATH,
-// host, port, and remote consent are propagated only when explicitly set.
+// host, and port are propagated only when explicitly set.
 func ServiceEnv(opts Options) []string {
 	env, _ := ServiceEnvChecked(opts)
 	return env
@@ -142,9 +141,6 @@ func ServiceEnvChecked(opts Options) ([]string, error) {
 	}
 	if opts.Port != "" {
 		pairs = append(pairs, [2]string{"NUSASHELL_PORT", opts.Port})
-	}
-	if opts.AllowRemote {
-		pairs = append(pairs, [2]string{"NUSASHELL_ALLOW_REMOTE", "1"})
 	}
 	env := make([]string, 0, len(pairs))
 	for _, pair := range pairs {

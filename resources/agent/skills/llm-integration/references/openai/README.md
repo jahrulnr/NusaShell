@@ -35,10 +35,10 @@ This README indexes the tree; [multimodal.md](multimodal.md) owns chat-input
 modality rules and the classification cheat-sheet — read it before picking a
 dedicated API for a media task.
 
-Optional implementation cross-check: `../_shared/sample-implementations.md`
+Optional implementation cross-check: `../shared/sample-implementations.md`
 (LiteLLM `llms/openai/`).
 
 Parent skill routing: `../../SKILL.md`.
 OpenRouter / Gemini / Anthropic counterparts: `../openrouter/`, `../gemini/`, `../anthropic/`.
 Codex (ChatGPT token) surface: `../codex/`.
-Provider matrix: `../_shared/provider-matrix.md`.
+Provider matrix: `../shared/provider-matrix.md`.

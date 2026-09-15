@@ -47,7 +47,7 @@ execute arbitrary side effects.
 | `mcp_install` | install a plugin from the curated catalog or GitHub |
 | `mcp_server_add` | register a manual MCP server from command, arguments, and environment entries |
 | `read_media` | load any media file (image, audio, video, or PDF document) from disk by absolute path into the model's context — the media kind is auto-detected from binary magic bytes, no need to specify image/audio/video/pdf. Any path works, not just conversation attachments. Vision/audio/video-capable models see/hear it directly; document-capable models receive the PDF natively (Anthropic `document`, OpenAI `input_file`); non-capable models get a text description/transcript via the configured fallback (vision fallback, cloud STT + offline whisper for audio, video fallback) or a placeholder note with the file path (document) |
-| `generate_media` | generate media from a prompt and save it for the user: media_type=image (PNG/JPEG/WebP; referenced_image_paths enables image-to-image editing), speech (mp3/wav/opus via OpenAI-compatible /audio/speech or offline piper), or video (async /videos API; duration/resolution minimums reported verbatim on rejection; referenced_image_paths enables image-to-video — first image becomes the first frame, additional images are style references). Only listed when at least one mode is configured; unconfigured modes are rejected with guidance. Speech routing: an explicitly picked offline piper voice (Settings → Speech generation, provider "piper", appears once installed via one-click install under `<data>/models/tts/`) wins, then the configured online model, then offline piper as automatic fallback — the fallback is live as soon as the engine is installed, no enable/disable flag involved |
+| `generate_media` | generate media from a prompt and save it for the user: media_type=image (PNG/JPEG/WebP; referenced_image_paths enables image-to-image editing), speech (mp3/wav/opus via OpenAI-compatible /audio/speech, Gemini generateContent AUDIO surface, or offline piper), or video (async submit/poll/download — OpenRouter `/videos` API or Gemini Veo `:predictLongRunning`; duration/resolution minimums reported verbatim on rejection; referenced_image_paths enables image-to-video — first image becomes the first frame, additional images are style references). Only listed when at least one mode is configured; unconfigured modes are rejected with guidance. Speech routing: an explicitly picked offline piper voice (Settings → Speech generation, provider "piper", appears once installed via one-click install under `<data>/models/tts/`) wins, then the configured online model, then offline piper as automatic fallback — the fallback is live as soon as the engine is installed, no enable/disable flag involved. Gemini TTS returns raw PCM wrapped into WAV; mp3/opus are not produced by that surface (artifact is always WAV) and speed is ignored |
 | `web_search` | search the web; with an active Codex chat provider, Codex search is tried first and searchwire is the fallback; other providers use searchwire across Brave, Serper, Tavily, Startpage, Wikipedia, and GitHub. Returns ranked results with title, URL, and snippet. Oversized JSONL is truncated in-band (~32KiB) with `overflow_path` |
 | `web_fetch` | fetch a public URL and return readable text; resolves hostnames through Cloudflare/Google public DNS (A+AAAA), rejects private/loopback/link-local destinations including redirect targets, supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes` (extract cap, default 2MB); in-band body caps at ~32KiB with `overflow_path` / `next_offset_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
@@ -478,11 +478,19 @@ differentiated by their args `type` and result text:
 - `type: "peer_message"`: a message received from another conversation room via `conversation(op="send")`.
   Args carry `from` (sender conversation ID). Result text carries the quoted message and reply instructions.
 - `type: "task_memory"`: structured records relevant to this conversation are
-  new or updated. Relevance is alphabetic word overlap (`[a-zA-Z]+`) between
-  the room title/workspace name and the record — punctuation, digits, and
-  emoji are ignored. Args carry `hits` with snippet contents. Use them for
-  the current task; retrieve full records with `memory(op="search")` or
-  `memory(op="get")`. A record is announced once per conversation.
+  new or updated. Selection runs at turn start via a BM25 searcher
+  (embedding off, no graph expansion); trivial prompts (greetings, ≤2
+  effective words) are skipped. Hits are filtered to a 72-hour recency
+  window, capped at 3 hits @1000 runes each. A record is re-announced when
+  it is re-confirmed (its `last_confirmed` advances past the stored
+  marker), not once-per-conversation. An async semantic lane (post-turn,
+  when an embedder is configured) runs a paraphrase-aware embedding search
+  with a content-addressed cache and a circuit breaker that skips after 3
+  consecutive failures; recall-intent in the user prompt deepens the
+  search even when BM25 already found hits. Args carry `hits` with
+  snippet contents. Use them for the current task; retrieve full records
+  with `memory(op="search")` or `memory(op="get")`. Do not acknowledge
+  the card.
 
 Notices published while a conversation has no active turn queue on disk (the
 same queue later carries room-to-room peer messages). The queue deduplicates

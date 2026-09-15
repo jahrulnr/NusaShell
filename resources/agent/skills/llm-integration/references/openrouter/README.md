@@ -31,6 +31,6 @@ consuming a compliant endpoint.
 
 Parent skill routing: `../../SKILL.md`.
 OpenAI counterparts: `../openai/`.
-Provider matrix: `../_shared/provider-matrix.md`.
-Optional implementation cross-check: `../_shared/sample-implementations.md`
+Provider matrix: `../shared/provider-matrix.md`.
+Optional implementation cross-check: `../shared/sample-implementations.md`
 (LiteLLM `llms/openrouter/` + cookbook notebook).

@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"fmt"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -392,6 +394,13 @@ type Settings struct {
 	// ~/.memory (expanded on save) to share with other agents using the
 	// automation-learning on-disk format.
 	ProjectMemoryBase string `json:"project_memory_base,omitempty"`
+	// RemoteAccessEnabled enables non-loopback access through the pairing gate.
+	// It is deliberately false by default; loopback access remains available.
+	RemoteAccessEnabled bool `json:"remote_access_enabled,omitempty"`
+	// RemoteAccessAddresses are the absolute HTTP(S) base addresses remote
+	// devices can reach. They are link targets for QR generation and do not
+	// change the listener configured by NUSASHELL_HOST.
+	RemoteAccessAddresses []string `json:"remote_access_addresses,omitempty"`
 }
 
 // DefaultSettings returns the factory defaults. PluginContractMode is
@@ -419,6 +428,7 @@ func DefaultSettings() Settings {
 // NormalizeSettings fills values introduced after an existing local settings
 // file was written. It preserves intentional false values for toggles.
 func NormalizeSettings(settings Settings) Settings {
+	settings.RemoteAccessAddresses = NormalizeRemoteAccessAddresses(settings.RemoteAccessAddresses)
 	// Empty is the legacy zero value; normalize it to the existing dedicated
 	// workflow so old settings files remain behaviorally unchanged. Unknown
 	// values fail closed to the same default. Reuse cannot combine with a
@@ -503,4 +513,57 @@ func NormalizeSettings(settings Settings) Settings {
 		settings.PluginContractMode = ""
 	}
 	return settings
+}
+
+// NormalizeRemoteAccessAddresses trims entries, removes trailing slashes, and
+// keeps the first occurrence of each address. Order is user-visible because it
+// controls QR/link order in the Settings UI.
+func NormalizeRemoteAccessAddresses(addresses []string) []string {
+	if len(addresses) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(addresses))
+	out := make([]string, 0, len(addresses))
+	for _, raw := range addresses {
+		address := strings.TrimRight(strings.TrimSpace(raw), "/")
+		if address == "" {
+			continue
+		}
+		if _, ok := seen[address]; ok {
+			continue
+		}
+		seen[address] = struct{}{}
+		out = append(out, address)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// ValidateRemoteAccessAddress accepts an absolute HTTP(S) URL with a host.
+// The value is encoded into a QR/link and is never fetched by the backend, so
+// validation is intentionally syntactic rather than a reachability probe.
+func ValidateRemoteAccessAddress(raw string) error {
+	address := strings.TrimSpace(raw)
+	if address == "" {
+		return fmt.Errorf("remote access address must not be empty")
+	}
+	if strings.ContainsAny(address, "\r\n") {
+		return fmt.Errorf("remote access address must not contain newlines")
+	}
+	u, err := url.Parse(address)
+	if err != nil {
+		return fmt.Errorf("remote access address is invalid: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("remote access address must use http or https")
+	}
+	if u.Host == "" || u.Hostname() == "" {
+		return fmt.Errorf("remote access address must include a host")
+	}
+	if u.User != nil {
+		return fmt.Errorf("remote access address must not contain credentials")
+	}
+	return nil
 }

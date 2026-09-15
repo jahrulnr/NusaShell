@@ -1,18 +1,6 @@
 ---
 name: llm-integration
-description: >-
-  Build or debug application integrations with public LLM/provider APIs —
-  OpenAI, OpenRouter, Google Gemini / AI Studio / Vertex, Anthropic Claude,
-  Azure OpenAI, AWS Bedrock, OpenAI-compatible vendors, local inference, and
-  LLM gateways. Language/framework-agnostic guidance for requests, streaming,
-  tools, thinking, caching, models, errors, retries, capability negotiation,
-  compaction, MCP, lifecycle hooks, async jobs, verification, and
-  endpoint-specific edge cases. Use when the task explicitly integrates an
-  LLM API or protocol surface. Do not use for SDK setup/wrappers, framework
-  recipes, prompt design, RAG architecture, fine-tuning, ordinary use of the
-  Copilot/Codex products, or general AI work with no API integration. The
-  Copilot backend, ChatGPT/Codex backend, OpenCode internals, and
-  runtime-specific hook references are optional compatibility appendices.
+description: Build or debug application integrations with public LLM/provider APIs — OpenAI, OpenRouter, Google Gemini / AI Studio / Vertex, Anthropic Claude, Azure OpenAI, AWS Bedrock, OpenAI-compatible vendors, local inference, and LLM gateways. Language/framework-agnostic guidance for requests, streaming, tools, thinking, caching, models, errors, retries, capability negotiation, compaction, MCP, lifecycle hooks, async jobs, verification, and endpoint-specific edge cases. Use when the task explicitly integrates an LLM API or protocol surface. Do not use for SDK setup/wrappers, framework recipes, prompt design, RAG architecture, fine-tuning, ordinary use of the Copilot/Codex products, or general AI work with no API integration. The Copilot backend, ChatGPT/Codex backend, OpenCode internals, and runtime-specific hook references are optional compatibility appendices.
 ---
 
 # LLM Integration
@@ -35,7 +23,7 @@ or a raw HTTP client.
 ## Routing: use the smallest relevant reference set
 
 This table is an entry-point map, not a second provider contract. Provider
-README files own detailed routing; `references/_shared/provider-matrix.md`
+README files own detailed routing; `references/shared/provider-matrix.md`
 is the source for cross-provider selection and porting differences.
 
 | Surface or task | Start here |
@@ -46,19 +34,19 @@ is the source for cross-provider selection and porting differences.
 | Native Anthropic / Claude | `references/anthropic/README.md` |
 | AWS Bedrock Converse | `references/bedrock/README.md` |
 | Azure OpenAI / Microsoft Foundry | `references/azure/README.md` |
-| OpenAI-compatible vendors | `references/_shared/openai-compatible-providers.md` → OpenAI Chat baseline |
-| Local or self-hosted inference | `references/_shared/local-inference.md` |
-| LLM gateway or proxy | `references/_shared/gateways.md` |
+| OpenAI-compatible vendors | `references/shared/openai-compatible-providers.md` → OpenAI Chat baseline |
+| Local or self-hosted inference | `references/shared/local-inference.md` |
+| LLM gateway or proxy | `references/shared/gateways.md` |
 | Explicit ChatGPT/Codex backend compatibility | `references/codex/README.md` |
 | Explicit GitHub Copilot backend compatibility | `references/copilot/README.md` |
 | Explicit OpenCode client/runtime behavior | `references/opencode/README.md` |
 | Hook behavior and implementation | `references/agent-hooks/README.md` |
-| Context pressure or compaction | `references/_shared/context-management.md` |
-| Provider capability negotiation | `references/_shared/capability-contract.md` |
-| MCP integration | `references/_shared/mcp.md` |
-| Lifecycle hooks or webhooks | `references/_shared/hooks.md` |
-| Integration verification | `references/_shared/verification.md` |
-| Agent/tool-loop architecture | `references/_shared/usecase-patterns.md` |
+| Context pressure or compaction | `references/shared/context-management.md` |
+| Provider capability negotiation | `references/shared/capability-contract.md` |
+| MCP integration | `references/shared/mcp.md` |
+| Lifecycle hooks or webhooks | `references/shared/hooks.md` |
+| Integration verification | `references/shared/verification.md` |
+| Agent/tool-loop architecture | `references/shared/usecase-patterns.md` |
 | Runnable Go + web-chat example | `scripts/samples/README.md` |
 
 Read the shared technique reference only when the task uses it, then read the
@@ -68,7 +56,7 @@ tree for a narrow lookup.
 Good routing:
 
 ```text
-context pressure on Gemini → _shared/context-management.md → gemini/README.md → gemini/generate-content.md
+context pressure on Gemini → shared/context-management.md → gemini/README.md → gemini/generate-content.md
 ```
 
 Bad routing:
@@ -165,7 +153,7 @@ and test patterns.
 
 Support files are organized under `references/` only:
 
-- `_shared/` contains provider-neutral technique and selection contracts.
+- `shared/` contains provider-neutral technique and selection contracts.
 - Each provider directory contains a README router plus endpoint contracts,
   streaming, tools, model discovery, errors, and only the modality files that
   have a distinct wire.
@@ -178,7 +166,7 @@ Support files are organized under `references/` only:
   appendices. `agent-hooks/` is an implementation guide with companion
   runtime notes used as source material, not a set of separate workflows.
 
-When adding a provider, follow `references/_shared/provider-template.md`,
+When adding a provider, follow `references/shared/provider-template.md`,
 update its router and shared matrix, and keep volatile model data dated with
 an authoritative source. Do not add an IDE workspace, runtime manifest, or
 unsupported support root to the package.

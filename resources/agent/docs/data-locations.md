@@ -13,7 +13,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 
 | Path | Content | Format |
 | --- | --- | --- |
-| `config/settings.json` | compaction / compaction workflow / caching / sound / user prompt / learning-job model (`review_model`) / periodic learner interval (`learner_nudge_interval`) | JSON |
+| `config/settings.json` | agent runtime knobs plus remote-access enablement and persisted reachable HTTP(S) addresses | JSON |
 | `config/providers.json` | provider configs (no keys) | JSON |
 | `config/acp-agents.json` | ACP subagent configs (command/args/env; env values stored locally, keys only on the wire) | JSON |
 | `config/mcp-servers.json` | manual MCP server registry | JSON |
@@ -46,6 +46,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `logs.jsonl` | activity log (bounded ring) | JSONL |
 | `conversations/<conv_id>.acp/` | terminal ACP subagent and internal delegate run snapshots (one JSON file per run, linked to the parent conversation); legacy global `acp_runs.jsonl` migrates here automatically on first use | JSON |
 | `credentials.db` | API keys per provider | SQLite |
+| `pairing.db` | device pairing state: challenge/session SHA-256 hashes (plaintext codes/tokens are never persisted), device labels, expiry/revocation. Created on startup only when Settings → Remote access is enabled; loopback binds can still use it behind a trusted proxy/tunnel | SQLite |
 | `automation/workflows.db` | workflows, runs, schedules, events, waits, locks | SQLite |
 | `automation/pipelines/` | pipeline definition YAML files (one per workflow, auto-discovered on boot) | YAML |
 | `automation/runs/` | local executor scratch directories | files |

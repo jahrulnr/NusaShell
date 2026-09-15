@@ -1,6 +1,7 @@
 package acpclient
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -208,17 +209,79 @@ type SessionUpdateParams struct {
 }
 
 type SessionUpdate struct {
-	SessionUpdate string         `json:"sessionUpdate"`
-	Content       *ContentBlock  `json:"content,omitempty"`
-	ToolCallID    string         `json:"toolCallId,omitempty"`
-	Title         string         `json:"title,omitempty"`
-	Kind          string         `json:"kind,omitempty"`
-	Status        string         `json:"status,omitempty"`
-	Locations     []ToolLocation `json:"locations,omitempty"`
-	CurrentModeID string         `json:"currentModeId,omitempty"`
-	Entries       []PlanEntry    `json:"entries,omitempty"`
-	Used          int            `json:"used,omitempty"`
-	Size          int            `json:"size,omitempty"`
+	SessionUpdate string          `json:"sessionUpdate"`
+	Content       *UpdateContent  `json:"content,omitempty"`
+	ToolCallID    string          `json:"toolCallId,omitempty"`
+	Title         string          `json:"title,omitempty"`
+	Kind          string          `json:"kind,omitempty"`
+	Status        string          `json:"status,omitempty"`
+	Locations     []ToolLocation  `json:"locations,omitempty"`
+	RawInput      json.RawMessage `json:"rawInput,omitempty"`
+	RawOutput     json.RawMessage `json:"rawOutput,omitempty"`
+	CurrentModeID string          `json:"currentModeId,omitempty"`
+	Entries       []PlanEntry     `json:"entries,omitempty"`
+	Used          int             `json:"used,omitempty"`
+	Size          int             `json:"size,omitempty"`
+}
+
+// UpdateContent is the `content` field of one session/update entry. Message
+// chunks (agent_message_chunk etc.) carry a single ContentBlock; tool calls
+// carry an array of ToolCallContent. Both shapes must decode: a failed
+// unmarshal here used to drop the whole update, title and status included.
+type UpdateContent struct {
+	Block  *ContentBlock
+	Blocks []ToolCallContent
+}
+
+func (c *UpdateContent) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	if trimmed[0] == '[' {
+		return json.Unmarshal(trimmed, &c.Blocks)
+	}
+	if trimmed[0] == '{' {
+		var block ContentBlock
+		if err := json.Unmarshal(trimmed, &block); err != nil {
+			return err
+		}
+		c.Block = &block
+		return nil
+	}
+	// Unknown scalar shape: ignore the content rather than take the whole
+	// update down with it.
+	return nil
+}
+
+func (c UpdateContent) MarshalJSON() ([]byte, error) {
+	if c.Blocks != nil {
+		return json.Marshal(c.Blocks)
+	}
+	if c.Block != nil {
+		return json.Marshal(c.Block)
+	}
+	return []byte("null"), nil
+}
+
+// Text returns the message text of a single-block content field ("" for the
+// tool-call array shape, absent, or null content).
+func (c *UpdateContent) Text() string {
+	if c == nil || c.Block == nil {
+		return ""
+	}
+	return c.Block.Text
+}
+
+// ToolCallContent is one structured result entry of a tool call: a wrapped
+// ContentBlock ("content"), a file diff, or a client-owned terminal.
+type ToolCallContent struct {
+	Type       string        `json:"type"`
+	Content    *ContentBlock `json:"content,omitempty"`
+	Path       string        `json:"path,omitempty"`
+	OldText    *string       `json:"oldText,omitempty"`
+	NewText    string        `json:"newText,omitempty"`
+	TerminalID string        `json:"terminalId,omitempty"`
 }
 
 type ToolLocation struct {

@@ -623,6 +623,8 @@ func (s *Store) uniquifyLearnedID(id string) string {
 // parseSkillMarkdown extracts frontmatter (name, description) and the
 // body content from a SKILL.md file. If there is no frontmatter, the
 // entire content is returned as the body and name is the filename.
+// Supports YAML folded (>, >-) and literal (|, |-) scalar descriptions
+// in addition to plain single-line values.
 func parseSkillMarkdown(raw string) (name, description, content string) {
 	raw = strings.TrimSpace(raw)
 	if !strings.HasPrefix(raw, "---") {
@@ -634,21 +636,72 @@ func parseSkillMarkdown(raw string) (name, description, content string) {
 	if idx < 0 {
 		return "", "", raw
 	}
-	frontmatter := strings.TrimSpace(rest[:idx])
+	frontmatter := rest[:idx]
 	body := strings.TrimSpace(rest[idx+4:])
 	// Parse simple YAML-like frontmatter.
-	for _, line := range strings.Split(frontmatter, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "name:") {
-			name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+	lines := strings.Split(frontmatter, "\n")
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "name:") {
+			name = strings.TrimSpace(strings.TrimPrefix(trimmed, "name:"))
 			name = strings.Trim(name, "\"'")
 		}
-		if strings.HasPrefix(line, "description:") {
-			description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
-			description = strings.Trim(description, "\"'")
+		if strings.HasPrefix(trimmed, "description:") {
+			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "description:"))
+			if isYAMLScalarIndicator(value) {
+				// Collect indented continuation lines as the scalar body.
+				var blockLines []string
+				for j := i + 1; j < len(lines); j++ {
+					if strings.TrimSpace(lines[j]) == "" {
+						break
+					}
+					if !strings.HasPrefix(lines[j], " ") && !strings.HasPrefix(lines[j], "\t") {
+						break
+					}
+					blockLines = append(blockLines, strings.TrimSpace(lines[j]))
+				}
+				description = parseYAMLScalar(value, blockLines)
+			} else {
+				description = strings.Trim(value, "\"'")
+			}
 		}
 	}
 	return name, description, body
+}
+
+// isYAMLScalarIndicator reports whether value is a YAML block scalar
+// indicator (>, >-, >+, |, |-, |+).
+func isYAMLScalarIndicator(value string) bool {
+	switch value {
+	case ">", ">-", ">+", "|", "|-", "|+":
+		return true
+	}
+	return false
+}
+
+// parseYAMLScalar renders a YAML block scalar (folded or literal) from its
+// indicator and indented content lines. Folded scalars join lines with
+// spaces; literal scalars preserve newlines. The chomping indicator "-"
+// strips the trailing newline; default keeps one.
+func parseYAMLScalar(indicator string, lines []string) string {
+	isFolded := strings.HasPrefix(indicator, ">")
+	chompStrip := strings.HasSuffix(indicator, "-")
+	var result string
+	if isFolded {
+		parts := make([]string, 0, len(lines))
+		for _, l := range lines {
+			if l != "" {
+				parts = append(parts, l)
+			}
+		}
+		result = strings.Join(parts, " ")
+	} else {
+		result = strings.Join(lines, "\n")
+	}
+	if !chompStrip {
+		result += "\n"
+	}
+	return result
 }
 
 // formatSkillMarkdown produces a SKILL.md with frontmatter + body.

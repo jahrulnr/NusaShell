@@ -92,4 +92,4 @@ contract. Use recent values and verify live.
 Parent routing: `../../SKILL.md`. Public OpenAI: `../openai/`.
 ChatGPT/Codex backend: `../codex/`. Anthropic native: `../anthropic/`.
 Optional implementation cross-check: LiteLLM `litellm/llms/github_copilot/` — see
-`../_shared/sample-implementations.md`.
+`../shared/sample-implementations.md`.

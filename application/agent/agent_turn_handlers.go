@@ -255,6 +255,14 @@ func (a *Service) AddTurnMessages(c *domain.Conversation, userMsg, asstMsg domai
 	if announce {
 		c.AddMessage(a.restartAnnouncement())
 	}
+	// Scan task memory before draining pending announcements so newly
+	// confirmed records (written after the previous turn) are announced in
+	// THIS turn — no 1–2 turn lag. The scan queues directly onto
+	// c.PendingAnnouncements; the drain below picks it up immediately. The
+	// EffectiveType() gate inside the scan skips pipeline/automation rooms.
+	if a.deps.MaybeAnnounceTaskMemory != nil {
+		a.deps.MaybeAnnounceTaskMemory(c)
+	}
 	// Pending harness announcements (config/memory/skills changes published
 	// while idle) are injected after the user message and cleared in ONE
 	// merged notice — the same drain as the round-boundary path. An active
@@ -371,6 +379,74 @@ func (a *Service) autoContinueAnnouncement(decision domain.AutoContinueDecision)
 			Output: continuePrompt,
 		}},
 	}
+}
+
+// autoContinueTodoHydration builds a hidden pure-hydration message carrying
+// the current open TODO items + brief as a synthetic todo_list tool result,
+// so the next auto-followup provider round sees the current checklist
+// without a visible tool card. It reuses HydrationBuilder.readTodoList so the
+// formatting stays single-sourced. The call ID uses the hydrate- prefix so
+// domain.IsHydrationMessage stays true and the UI/compaction/experience
+// filters treat it as hidden context. Returns nil when there is no todo
+// content (no Todos port, no brief, or no open items), so the boundary
+// keeps the old one-announcement shape.
+func (a *Service) autoContinueTodoHydration(conversationID string) *domain.Message {
+	if a.Todos == nil {
+		return nil
+	}
+	slot := NewHydrationBuilder(HydrationSource{
+		Todos:  a.Todos,
+		ConvID: conversationID,
+	}).readTodoList()
+	if slot.content == "" {
+		return nil
+	}
+	args := slot.args
+	if args == "" {
+		args = "{}"
+	}
+	return &domain.Message{
+		ID:        domain.NewID(domain.IDPrefixMsg),
+		Role:      domain.RoleAssistant,
+		CreatedAt: clock.NewTime().Time(),
+		Status:    domain.StatusDone,
+		ToolCalls: []domain.ToolCall{{
+			ID:     domain.HydrateToolCallPrefix + nonce.Random(),
+			Name:   slot.name,
+			Args:   args,
+			Status: domain.ToolOK,
+			Output: slot.content,
+		}},
+	}
+}
+
+// appendAutoContinueBoundary persists the visible auto-continue
+// announcement, then a hidden pure-hydration todo_list checkpoint (when the
+// conversation has open todos), then appends the fresh assistant
+// placeholder for the next turn. Ordering is fixed: previous assistant
+// output → visible announcement → hidden todo_list → assistant
+// placeholder. The hidden hydration is a separate message so it never
+// leaks a hidden tool card into the visible announcement. Returns the new
+// assistant message ID.
+func (a *Service) appendAutoContinueBoundary(conversationID string, decision domain.AutoContinueDecision) (string, error) {
+	notice := a.autoContinueAnnouncement(decision)
+	conv, err := a.loadRepo(conversationID)
+	if err != nil {
+		return "", err
+	}
+	if err := conv.Add(domain.RoleAssistant, notice); err != nil {
+		return "", err
+	}
+	if hyd := a.autoContinueTodoHydration(conversationID); hyd != nil {
+		if err := conv.Add(domain.RoleAssistant, *hyd); err != nil {
+			return "", err
+		}
+	}
+	if err := conv.Save(); err != nil {
+		return "", err
+	}
+	_, nextMsgID, err := a.AppendTurnAssistant(conversationID)
+	return nextMsgID, err
 }
 
 func (a *Service) HandleTurnsStop(req contracts.TurnStopRequest) (any, *contracts.RPCError) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"nusashell/application/service/textsim"
 	"nusashell/domain"
@@ -82,7 +83,10 @@ func TestFuseRRF_TopK(t *testing.T) {
 	}
 }
 
-type countingEmbedder struct{ calls int }
+type countingEmbedder struct {
+	calls      int
+	batchCalls int
+}
 
 func (e *countingEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
 	e.calls++
@@ -90,6 +94,7 @@ func (e *countingEmbedder) Embed(_ context.Context, text string) ([]float32, err
 }
 func (e *countingEmbedder) EmbedBatch(_ context.Context, texts []string) ([][]float32, error) {
 	e.calls++
+	e.batchCalls++
 	out := make([][]float32, len(texts))
 	for i := range out {
 		out[i] = []float32{1, 0}
@@ -97,6 +102,34 @@ func (e *countingEmbedder) EmbedBatch(_ context.Context, texts []string) ([][]fl
 	return out, nil
 }
 func (e *countingEmbedder) Dim() int { return 2 }
+
+// fakeEmbedCache is a test double for learn.EmbeddingCache. It returns
+// pre-seeded vectors from the map; texts not in the map are misses.
+type fakeEmbedCache struct {
+	vectors  map[string][]float32
+	getCalls int
+	putCalls int
+}
+
+func (c *fakeEmbedCache) GetBatch(_ string, texts []string) ([][]float32, []int) {
+	c.getCalls++
+	out := make([][]float32, len(texts))
+	var misses []int
+	for i, text := range texts {
+		if v, ok := c.vectors[text]; ok {
+			out[i] = v
+		} else {
+			misses = append(misses, i)
+		}
+	}
+	return out, misses
+}
+
+func (c *fakeEmbedCache) Put(_ string, text string, vector []float32) error {
+	c.putCalls++
+	c.vectors[text] = vector
+	return nil
+}
 
 type listSkillCatalog struct{ skills []*domain.Skill }
 
@@ -160,5 +193,87 @@ func TestCosineSimilarity_MathSqrt(t *testing.T) {
 	got := textsim.CosineSimilarity(a, b)
 	if math.Abs(float64(got)-1.0) > 0.001 {
 		t.Errorf("expected 1.0, got %.4f", got)
+	}
+}
+
+// TestSearchMemoryCacheHitSkipsEmbedder proves that when an EmbeddingCache
+// is supplied via SearchOptions, doc vectors are read from the cache and
+// the embedder's EmbedBatch is NOT called for cache hits. The query is
+// still embedded (single Embed call) because it is unique per search.
+func TestSearchMemoryCacheHitSkipsEmbedder(t *testing.T) {
+	rec := &domain.MemoryRecord{
+		ID:            "m1",
+		Type:          domain.MemoryTypeFact,
+		Status:        domain.MemoryStatusLearned,
+		Body:          "gateway server configuration",
+		LastConfirmed: time.Now(),
+	}
+	docText := recordSearchText(rec)
+	cache := &fakeEmbedCache{vectors: map[string][]float32{
+		docText: {1, 0},
+	}}
+	embed := &countingEmbedder{}
+	s := NewLearningSearcher(nil, &scopeRecordStore{records: []*domain.MemoryRecord{rec}}, embed, nil, testKeywordIndex)
+
+	opts := SearchOptions{DisableEmbedding: false, EmbedCache: cache, ModelID: "test-model"}
+	if _, err := s.SearchMemoryWithOpts(context.Background(), "query", 5, opts); err != nil {
+		t.Fatal(err)
+	}
+	if embed.batchCalls != 0 {
+		t.Fatalf("EmbedBatch called %d times, expected 0 (all doc vectors from cache)", embed.batchCalls)
+	}
+	if cache.getCalls == 0 {
+		t.Fatal("cache GetBatch was never called")
+	}
+}
+
+// TestSearchMemoryCacheMissEmbedsAndStores proves that cache misses are
+// embedded via EmbedBatch and then stored in the cache via Put.
+func TestSearchMemoryCacheMissEmbedsAndStores(t *testing.T) {
+	rec := &domain.MemoryRecord{
+		ID:            "m1",
+		Type:          domain.MemoryTypeFact,
+		Status:        domain.MemoryStatusLearned,
+		Body:          "openclaw compatible server",
+		LastConfirmed: time.Now(),
+	}
+	docText := recordSearchText(rec)
+	cache := &fakeEmbedCache{vectors: map[string][]float32{}}
+	embed := &countingEmbedder{}
+	s := NewLearningSearcher(nil, &scopeRecordStore{records: []*domain.MemoryRecord{rec}}, embed, nil, testKeywordIndex)
+
+	opts := SearchOptions{DisableEmbedding: false, EmbedCache: cache, ModelID: "test-model"}
+	if _, err := s.SearchMemoryWithOpts(context.Background(), "query", 5, opts); err != nil {
+		t.Fatal(err)
+	}
+	if embed.batchCalls != 1 {
+		t.Fatalf("EmbedBatch called %d times, expected 1 (cache miss)", embed.batchCalls)
+	}
+	if cache.putCalls == 0 {
+		t.Fatal("cache Put was never called for the miss")
+	}
+	if _, ok := cache.vectors[docText]; !ok {
+		t.Fatal("doc vector was not stored in cache after embedding")
+	}
+}
+
+// TestSearchMemoryWithoutCacheEmbedsAll proves that without a cache the
+// embedder is called for all docs (the existing behavior, unchanged).
+func TestSearchMemoryWithoutCacheEmbedsAll(t *testing.T) {
+	embed := &countingEmbedder{}
+	s := NewLearningSearcher(nil, &scopeRecordStore{records: []*domain.MemoryRecord{{
+		ID:            "m1",
+		Type:          domain.MemoryTypeFact,
+		Status:        domain.MemoryStatusLearned,
+		Body:          "no cache here",
+		LastConfirmed: time.Now(),
+	}}}, embed, nil, testKeywordIndex)
+
+	opts := DefaultSearchOptions()
+	if _, err := s.SearchMemoryWithOpts(context.Background(), "query", 5, opts); err != nil {
+		t.Fatal(err)
+	}
+	if embed.batchCalls != 1 {
+		t.Fatalf("EmbedBatch called %d times, expected 1 (no cache)", embed.batchCalls)
 	}
 }

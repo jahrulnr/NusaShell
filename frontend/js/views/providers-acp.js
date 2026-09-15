@@ -1,6 +1,6 @@
 // ACP agent registry: spawn-only subprocess configs in the Providers view.
 
-import { rpc } from '../rpc.js';
+import { rpc, isPairingRequiredError } from '../rpc.js';
 import { el, toast, dialog, confirmDialog } from '../ui.js';
 
 let agents = [];
@@ -17,7 +17,9 @@ export async function refreshAcpProviders() {
     const res = await rpc('acp.agents.list');
     agents = res.agents ?? [];
   } catch (err) {
-    toast(err.message, 'error');
+    // PAIRING_REQUIRED must not toast behind the gate — the pairing gate is
+    // the dominant UI. Genuine unavailable/unexpected errors still toast.
+    if (!isPairingRequiredError(err)) toast(err.message, 'error');
     agents = [];
   }
   if (detailId && !agents.find((a) => a.id === detailId)) detailId = null;

@@ -10,7 +10,7 @@ API and not part of the default API integration path.
 For Google’s Generative Language contract, use `../gemini/`.
 For public OpenAI / OpenRouter APIs, use `../openai/` / `../openrouter/`.
 
-Read [the shared hook reference](../_shared/hooks.md) or
+Read [the shared hook reference](../shared/hooks.md) or
 the provider tree first when the task is about an API contract. Read **only**
 the file for the OpenCode concern you need. Do not open an OpenCode
 checkout to follow these guides — everything needed is in this tree (plus

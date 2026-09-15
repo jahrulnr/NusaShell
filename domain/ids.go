@@ -77,6 +77,8 @@ const (
 	IDPrefixMsg      = "msg"    // conversation messages
 	IDPrefixPlugin   = "plugin" // plugins
 	IDPrefixProv     = "prov"   // providers
+	IDPrefixPair     = "pair"   // pairing challenges
+	IDPrefixPairSess = "psess"  // pairing sessions
 	IDPrefixRun      = "run"    // agent turns and Automation runs
 	IDPrefixSkill    = "skill"  // skills (ULID)
 	IDPrefixSteer    = "steer"  // queued steers

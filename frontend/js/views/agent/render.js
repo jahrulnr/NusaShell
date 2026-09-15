@@ -1653,6 +1653,13 @@ function toolEventRequest(name, args, presentation) {
   return Object.keys(parsed).length ? (summarizeToolArgs(parsed) || `${name}()`) : `${name}()`;
 }
 
+// toolEventRequestLine exposes the human-scannable input line (path, command,
+// query) so callers that patch a mounted card — the ACP transcript — can
+// refresh it without rebuilding the event.
+export function toolEventRequestLine(name, args, presentation) {
+  return toolEventRequest(name, args, presentation);
+}
+
 function toolEventRawText(name, presentation, output) {
   const request = presentation?.request !== undefined && presentation?.request !== null
     ? String(presentation.request)

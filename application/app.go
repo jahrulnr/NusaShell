@@ -34,6 +34,10 @@ import (
 type App struct {
 	Version string
 	DataDir string
+	// ListenAddr is the host:port the process actually bound (wired from
+	// Deps); reported by app.info so the frontend can detect pairing links
+	// that cannot be reached from a remote device.
+	ListenAddr string
 	// learningTurn runs one learning-job LLM call and returns (text,
 	// conversation id, error). Nil means use the real headless turn; tests
 	// install a stub so job plumbing is testable without a provider.
@@ -134,6 +138,11 @@ type App struct {
 	lifecycleCancel context.CancelFunc
 	EmbeddingCache  *jsonstore.EmbeddingCache
 
+	// taskMemoryBreaker disables the async semantic lane after
+	// taskMemoryBreakerThreshold consecutive embed/search failures.
+	// In-memory only, per-process, single-user.
+	taskMemoryBreaker *taskMemoryBreaker
+
 	// announcementLocksMu guards lazy creation of per-conversation mutexes
 	// serializing pending-announcement load-modify-save between publishers
 	// (RPC handlers) and the turn worker's round-boundary drain, so entries
@@ -150,6 +159,11 @@ type App struct {
 	Trajectory *TrajectoryRecorder
 
 	Automation *Automation
+
+	// Pairing is the device-pairing service. It is wired only when persisted
+	// remote access is enabled; nil is the safe default and remains useful in
+	// tests.
+	Pairing *PairingService
 
 	pluginSvc    *plugins.Service
 	logsSvc      *logs.Service
@@ -194,6 +208,10 @@ type App struct {
 	// Logger is an optional structured logger used for crash recovery
 	// diagnostics from fire-and-forget goroutines. Nil = slog.Default().
 	Logger *slog.Logger
+	// Restart is an optional composition-root hook. Settings uses it only for
+	// the remote-access enable flag because transport policy is selected during
+	// startup. The hook owns the actual graceful restart lifecycle.
+	Restart func()
 }
 
 // goSafe runs fn in a new goroutine with panic recovery. A panic is logged
@@ -496,6 +514,16 @@ type Deps struct {
 	// fire-and-forget goroutines. Nil = slog.Default().
 	Logger     *slog.Logger
 	Automation *Automation
+	// Pairing is the device-pairing service. Nil means remote access is disabled
+	// for this process; loopback requests remain available.
+	Pairing *PairingService
+	// Restart is called after settings.set changes the remote-access enable
+	// flag. The composition root may leave it nil in tests.
+	Restart func()
+	// ListenAddr is the host:port the process actually bound (e.g.
+	// "127.0.0.1:10994"), surfaced via app.info so the pairing UI can warn
+	// when a remote-address field cannot be reached.
+	ListenAddr string
 }
 
 // App is the application core. It wires together all the stores and
@@ -510,6 +538,7 @@ func NewApp(deps Deps) *App {
 	app := &App{
 		Version:                     deps.Version,
 		DataDir:                     deps.DataDir,
+		ListenAddr:                  deps.ListenAddr,
 		Conversations:               deps.Conversations,
 		Providers:                   deps.Providers,
 		Credentials:                 deps.Credentials,
@@ -567,7 +596,9 @@ func NewApp(deps Deps) *App {
 		retrySleeper:                deps.RetrySleeper,
 		startedAt:                   clock.NewTime().Time(),
 		Logger:                      deps.Logger,
+		Restart:                     deps.Restart,
 		Automation:                  deps.Automation,
+		Pairing:                     deps.Pairing,
 		runs:                        map[string]*TurnRun{},
 		pendingRuns:                 map[string]map[string]string{},
 		rateLimiter:                 provider.NewRateLimiter(),
@@ -708,6 +739,11 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 		return a.telemetryService().Dispatch(method, payload)
 	case strings.HasPrefix(method, "automation."):
 		return a.handleAutomation(ctx, method, payload)
+	case strings.HasPrefix(method, "pairing."):
+		if a.Pairing == nil {
+			return nil, &contracts.RPCError{Code: contracts.CodeInternal, Message: "pairing not configured"}
+		}
+		return a.Pairing.Dispatch(method, payload)
 	}
 	switch method {
 	case contracts.MethodAppInfo:
@@ -720,9 +756,10 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 func (a *App) handleAppInfo() (any, *contracts.RPCError) {
 	settings := a.Settings.Get()
 	return contracts.AppInfoResult{
-		Name:    "NusaShell",
-		Version: a.Version,
-		DataDir: a.DataDir,
+		Name:       "NusaShell",
+		Version:    a.Version,
+		DataDir:    a.DataDir,
+		ListenAddr: a.ListenAddr,
 		Features: contracts.Features{
 			Tools:         true,
 			MCP:           true,

@@ -3,6 +3,9 @@ package tooloutput
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"nusashell/domain"
 )
 
 func TestWrapToolOutputMCP(t *testing.T) {
@@ -277,15 +280,39 @@ func TestProviderToolContentSubagentWaitFailedNoText(t *testing.T) {
 }
 
 // TestProviderToolContentSubagentWaitMalformedFallback verifies that malformed
-// output is bounded instead of injecting an arbitrarily large payload.
+// output is bounded instead of injecting an arbitrarily large payload. The
+// bound is the shared subagent result cap (domain.MaxSubagentResultRunes),
+// applied rune-safely as a tail slice so multibyte UTF-8 is never split.
 func TestProviderToolContentSubagentWaitMalformedFallback(t *testing.T) {
-	raw := "not yaml fenced output " + strings.Repeat("x", 10000)
+	raw := "not yaml fenced output " + strings.Repeat("x", domain.MaxSubagentResultRunes+4000)
 	out := ProviderToolContent("subagent_wait", raw)
 	if !strings.Contains(out, "bounded tail") {
 		t.Errorf("malformed subagent_wait output should explain the bounded fallback, got: %s", out)
 	}
-	if len(out) > 2300 {
-		t.Errorf("malformed subagent_wait output is still too large: %d", len(out))
+	// The bounded tail must not exceed the shared cap + the fixed header
+	// line + the omission marker + the untrusted envelope wrapper.
+	maxAllowed := domain.MaxSubagentResultRunes + 200
+	if len(out) > maxAllowed {
+		t.Errorf("malformed subagent_wait output is still too large: %d (cap %d)", len(out), domain.MaxSubagentResultRunes)
+	}
+	if !utf8.ValidString(out) {
+		t.Errorf("malformed subagent_wait bounded tail must be valid UTF-8, got invalid bytes")
+	}
+}
+
+// TestProviderToolContentSubagentWaitMalformedLegacyRuneSafe verifies the
+// malformed-legacy tail slice is rune-safe when the payload contains
+// multibyte characters: byte slicing would split a 3-byte "€" and
+// produce invalid UTF-8 (2000 is not divisible by 3, so a byte tail
+// misaligns).
+func TestProviderToolContentSubagentWaitMalformedLegacyRuneSafe(t *testing.T) {
+	raw := "not yaml fenced output " + strings.Repeat("€", domain.MaxSubagentResultRunes/3+1000)
+	out := ProviderToolContent("subagent_wait", raw)
+	if !utf8.ValidString(out) {
+		t.Fatalf("malformed subagent_wait tail must be rune-safe (valid UTF-8), got invalid bytes")
+	}
+	if !strings.Contains(out, "bounded tail") {
+		t.Errorf("malformed subagent_wait output should explain the bounded fallback, got: %s", out[:min(80, len(out))])
 	}
 }
 
@@ -366,5 +393,105 @@ func TestProviderToolContentSubagentStopStripsTranscript(t *testing.T) {
 	}
 	if !strings.Contains(out, "Halfway through.") {
 		t.Errorf("provider content missing text summary: %s", out)
+	}
+}
+
+// waitFrontmatter builds a minimal YAML-frontmattered subagent_wait payload
+// whose last transcript text chunk is body. Used by the cap/rune-safety
+// tests below so each case stays self-contained.
+func waitFrontmatter(body string) string {
+	return "---\n" +
+		"id: run_cap\n" +
+		"status: completed\n" +
+		"workspace: /tmp/proj\n" +
+		"transcript:\n" +
+		"    - kind: text\n" +
+		"      text: " + body + "\n" +
+		"---"
+}
+
+// TestProviderToolContentSubagentWaitBelowCapPreserved verifies that a
+// normal technical report (5000 chars) passes through to the provider in
+// full, without the omission marker. The previous 2000-byte cap truncated
+// such reports mid-sentence, forcing the parent to re-read output_path.
+func TestProviderToolContentSubagentWaitBelowCapPreserved(t *testing.T) {
+	fiveK := strings.Repeat("x", 5000)
+	out := ProviderToolContent("subagent_wait", waitFrontmatter(fiveK))
+	if !strings.Contains(out, fiveK) {
+		t.Fatalf("5000-char wait summary must be delivered in full, got truncated output (len %d)", len(out))
+	}
+	if strings.Contains(out, "…") {
+		t.Fatalf("below-cap wait summary must not carry an omission marker, got: %s", out[:min(80, len(out))])
+	}
+}
+
+// TestProviderToolContentSubagentWaitAboveCapBoundedRuneSafe verifies that a
+// wait summary above the shared cap is bounded with the omission marker and
+// stays valid UTF-8 (rune-safe, never a mid-character byte slice). Uses the
+// 3-byte "€" to catch byte-based slicing.
+func TestProviderToolContentSubagentWaitAboveCapBoundedRuneSafe(t *testing.T) {
+	overCap := strings.Repeat("€", domain.MaxSubagentResultRunes+4000)
+	out := ProviderToolContent("subagent_wait", waitFrontmatter(overCap))
+	if !utf8.ValidString(out) {
+		t.Fatalf("above-cap wait summary must be valid UTF-8 (rune-safe), got invalid bytes")
+	}
+	if !strings.Contains(out, "…") {
+		t.Fatalf("above-cap wait summary must carry the omission marker, got: %s", out[:min(80, len(out))])
+	}
+	// The bounded summary must not exceed the cap + marker + envelope/header overhead.
+	if len(out) > domain.MaxSubagentResultRunes*4+200 {
+		t.Fatalf("above-cap wait summary must be bounded, got %d bytes", len(out))
+	}
+}
+
+// TestProviderToolContentSubagentSteerAboveCapBoundedRuneSafe verifies the
+// steer path uses the same shared rune-safe cap.
+func TestProviderToolContentSubagentSteerAboveCapBoundedRuneSafe(t *testing.T) {
+	overCap := strings.Repeat("€", domain.MaxSubagentResultRunes+4000)
+	out := ProviderToolContent("subagent_steer", waitFrontmatter(overCap))
+	if !utf8.ValidString(out) {
+		t.Fatalf("above-cap steer summary must be valid UTF-8 (rune-safe), got invalid bytes")
+	}
+	if !strings.Contains(out, "…") {
+		t.Fatalf("above-cap steer summary must carry the omission marker, got: %s", out[:min(80, len(out))])
+	}
+}
+
+// TestProviderToolContentSubagentStopAboveCapBoundedRuneSafe verifies the
+// stop path uses the same shared rune-safe cap.
+func TestProviderToolContentSubagentStopAboveCapBoundedRuneSafe(t *testing.T) {
+	overCap := strings.Repeat("€", domain.MaxSubagentResultRunes+4000)
+	out := ProviderToolContent("subagent_stop", waitFrontmatter(overCap))
+	if !utf8.ValidString(out) {
+		t.Fatalf("above-cap stop summary must be valid UTF-8 (rune-safe), got invalid bytes")
+	}
+	if !strings.Contains(out, "…") {
+		t.Fatalf("above-cap stop summary must carry the omission marker, got: %s", out[:min(80, len(out))])
+	}
+}
+
+// TestProviderToolContentSubagentWaitThoughtFallbackAboveCapBounded verifies
+// the thought-only fallback (no text chunk) is bounded with the same
+// rune-safe cap and preserves the error suffix for a failed run.
+func TestProviderToolContentSubagentWaitThoughtFallbackAboveCapBounded(t *testing.T) {
+	overCap := strings.Repeat("€", domain.MaxSubagentResultRunes+4000)
+	output := "---\n" +
+		"id: run_thought\n" +
+		"status: failed\n" +
+		"stopreason: max_tokens\n" +
+		"error: timeout\n" +
+		"transcript:\n" +
+		"    - kind: thought\n" +
+		"      text: " + overCap + "\n" +
+		"---"
+	out := ProviderToolContent("subagent_wait", output)
+	if !utf8.ValidString(out) {
+		t.Fatalf("above-cap thought fallback must be valid UTF-8 (rune-safe), got invalid bytes")
+	}
+	if !strings.Contains(out, "…") {
+		t.Fatalf("above-cap thought fallback must carry the omission marker, got: %s", out[:min(80, len(out))])
+	}
+	if !strings.Contains(out, "Error: timeout") {
+		t.Fatalf("failed thought fallback must preserve the error suffix, got: %s", out[:min(120, len(out))])
 	}
 }

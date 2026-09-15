@@ -18,7 +18,7 @@ func TestKindCapabilities(t *testing.T) {
 		{ProviderMessages, false, true, true, false, false, false, false, "anthropic", []string{"5m", "1h"}},
 		{ProviderResponses, false, true, true, true, true, false, true, "openai", []string{"30m"}},
 		{ProviderChat, false, true, true, true, true, true, true, "openai", []string{"5m", "1h", "30m"}},
-		{ProviderGemini, true, true, false, false, false, false, false, "", nil},
+		{ProviderGemini, true, true, false, true, true, false, true, "", nil},
 		{ProviderCodex, true, true, false, false, false, false, false, "openai", []string{"30m"}},
 	}
 	for _, tc := range tests {

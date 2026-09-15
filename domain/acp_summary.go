@@ -2,13 +2,59 @@ package domain
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
 
+// MaxSubagentResultRunes bounds the inline subagent completion result (the
+// synthetic subagent_result tool call body and the FormatSpawnResult summary)
+// and the provider-facing wait/steer/stop summaries. The full transcript is
+// persisted separately to the run's output_path file; this cap only limits
+// how much of the last meaningful text turn is inlined into the parent
+// agent's context.
+//
+// 16000 runes (~4-6k tokens) is large enough for normal technical reports
+// (the previous 4000-char cap truncated ~11k-char reports mid-sentence,
+// forcing the parent to re-read output_path and waste input tokens) while
+// still bounding a malicious or runaway subagent from injecting unbounded
+// content into the parent conversation. Truncation is rune-based so
+// multibyte UTF-8 is never split mid-character.
+//
+// This is the single source of truth for the subagent result/summary cap;
+// application/service/tooloutput imports it instead of duplicating a
+// magic number.
+const MaxSubagentResultRunes = 16000
+
+// truncateRunes bounds s to the first max runes and appends the "…" omission
+// marker when content was dropped. Rune-safe: never slices mid-character.
+func truncateRunes(s string, max int) string {
+	if max < 0 {
+		max = 0
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
+// boundWithSuffix truncates text to leave room for suffix within cap runes
+// total, then appends suffix in full so the diagnostic (error/cancellation
+// reason) is never lost. If suffix alone meets or exceeds cap, text is
+// dropped entirely and only the suffix is returned.
+func boundWithSuffix(text, suffix string, cap int) string {
+	suffixRunes := utf8.RuneCountInString(suffix)
+	budget := cap - suffixRunes
+	if budget <= 0 {
+		return suffix
+	}
+	return truncateRunes(text, budget) + suffix
+}
+
 // TranscriptSummary extracts the concatenated text chunks from a run's
-// transcript, truncated to 4000 chars. Returns the error or stop_reason
-// when no text was produced. Pure function — no I/O.
+// transcript, truncated to MaxSubagentResultRunes runes. Returns the error
+// or stop_reason when no text was produced. Pure function — no I/O.
 func TranscriptSummary(run *AcpRun) string {
 	var b strings.Builder
 	for _, c := range run.Transcript {
@@ -23,10 +69,7 @@ func TranscriptSummary(run *AcpRun) string {
 		}
 		return run.StopReason
 	}
-	if len(s) > 4000 {
-		return s[:4000] + "…"
-	}
-	return s
+	return truncateRunes(s, MaxSubagentResultRunes)
 }
 
 // SubagentCompletionResult builds the tool result injected into the
@@ -70,8 +113,10 @@ func SubagentCompletionResult(run *AcpRun, outputPath string) string {
 //  2. Last `thought` chunk (reasoning — only when no text was produced)
 //  3. StructuredFallbackSummary (tool-only, empty, or cancelled runs)
 //
-// Handles: normal text, failed+text, tool-only/empty/thinking-only,
-// and cancelled.
+// All text/thought output is bounded to MaxSubagentResultRunes runes with
+// rune-safe truncation; error/cancellation suffixes are preserved within
+// the bound. Handles: normal text, failed+text, tool-only/empty/thinking-
+// only, and cancelled.
 func SubagentCompletionBody(run *AcpRun) string {
 	textOut := lastTranscriptText(run)
 
@@ -80,7 +125,7 @@ func SubagentCompletionBody(run *AcpRun) string {
 
 	if isCancelled {
 		if textOut != "" {
-			return textOut + "\n\n[Subagent was cancelled.]"
+			return boundWithSuffix(textOut, "\n\n[Subagent was cancelled.]", MaxSubagentResultRunes)
 		}
 		return "Subagent was cancelled."
 	}
@@ -91,18 +136,12 @@ func SubagentCompletionBody(run *AcpRun) string {
 			errPart = run.StopReason
 		}
 		if errPart != "" {
-			if len(textOut) > 3800 {
-				textOut = textOut[:3800] + "…"
-			}
-			return textOut + "\n\n[Subagent failed: " + errPart + "]"
+			return boundWithSuffix(textOut, "\n\n[Subagent failed: "+errPart+"]", MaxSubagentResultRunes)
 		}
 	}
 
 	if textOut != "" {
-		if len(textOut) > 4000 {
-			return textOut[:4000] + "…"
-		}
-		return textOut
+		return truncateRunes(textOut, MaxSubagentResultRunes)
 	}
 
 	// No text chunk — fall back to the last thought (reasoning) so the
@@ -110,19 +149,16 @@ func SubagentCompletionBody(run *AcpRun) string {
 	// message (e.g. stopped mid-reasoning, tool-only run that produced
 	// thinking but no final text).
 	if thought := lastThoughtText(run); thought != "" {
-		if len(thought) > 3800 {
-			thought = thought[:3800] + "…"
-		}
 		if isFailed {
 			errPart := run.Error
 			if errPart == "" {
 				errPart = run.StopReason
 			}
 			if errPart != "" {
-				return thought + "\n\n[Subagent failed: " + errPart + "]"
+				return boundWithSuffix(thought, "\n\n[Subagent failed: "+errPart+"]", MaxSubagentResultRunes)
 			}
 		}
-		return thought
+		return truncateRunes(thought, MaxSubagentResultRunes)
 	}
 
 	return StructuredFallbackSummary(run)

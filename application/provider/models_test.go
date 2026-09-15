@@ -78,3 +78,42 @@ func TestHandleModelsListUsesRuntimeAdjustedContextWindow(t *testing.T) {
 		t.Fatalf("model context = %d, want runtime-adjusted 272000", models[0].Context)
 	}
 }
+
+func TestHandleModelsListGeminiImageModelsTaggedVisionForI2I(t *testing.T) {
+	cases := []struct {
+		name       string
+		modelID    string
+		wantVision bool
+	}{
+		{"nano-banana alias without catalog entry", "nano-banana-pro-preview", true},
+		{"gemini-3-pro-image", "gemini-3-pro-image", true},
+		{"gemini-3.1-flash-image", "gemini-3.1-flash-image", true},
+		{"imagen-4 is text-to-image only", "imagen-4", false},
+		{"gemini chat model is not i2i image", "gemini-2.5-flash", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := New(Deps{
+				Store: modelListStore{providers: []*domain.Provider{{
+					ID: "gemini", Name: "Gemini", Kind: domain.ProviderGemini, Enabled: true,
+					Models: []domain.Model{{ID: tc.modelID, Kind: domain.ModelKindImage}},
+				}}},
+				Catalog: contextCatalogStub{models: map[string]*modelcatalog.ModelMetadata{}},
+			})
+			result, rpcErr := svc.HandleModelsList()
+			if rpcErr != nil {
+				t.Fatalf("HandleModelsList: %v", rpcErr.Message)
+			}
+			models := result.(contracts.ModelsListResult).Models
+			for _, m := range models {
+				if m.ID == tc.modelID {
+					if m.Vision != tc.wantVision {
+						t.Fatalf("Vision = %v, want %v", m.Vision, tc.wantVision)
+					}
+					return
+				}
+			}
+			t.Fatalf("model %q not found in listed models", tc.modelID)
+		})
+	}
+}

@@ -19,12 +19,12 @@
 
 let hljsPromise = null;
 
-function loadHljs() {
+export function loadHljs() {
   if (typeof window !== 'undefined' && window.hljs) return Promise.resolve(window.hljs);
   if (hljsPromise) return hljsPromise;
   hljsPromise = new Promise((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = '/vendor/highlightjs/highlight.min.js';
+    script.src = new URL('../vendor/highlightjs/highlight.min.js', import.meta.url).href;
     script.async = true;
     script.onload = () => {
       const hljs = window.hljs;

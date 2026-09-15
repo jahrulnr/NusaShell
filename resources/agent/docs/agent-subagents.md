@@ -23,6 +23,14 @@ delegate has its own system prompt in
 resources/agent/prompts/delegate-agent.md because its role is to execute to
 completion, not to behave like the interactive parent or an Automation step.
 
+The delegate prompt instructs it to use the `todo` tool for multi-step work:
+mark an item in-progress before working on it, complete it only after the
+work is verified, keep statuses current, and do not return a final response
+while assigned work remains incomplete. When a continuation notice appears
+(the harness is resuming the chain after an open checklist), the delegate
+resumes the open TODO items, reconciles them with verified prior work, and
+verifies before finishing.
+
 Internal delegate runs use the same ACP-shaped run events and DTOs as ACP
 runs. Therefore the Agent dock, run card, drawer, popup, transcript
 hydration, recent-run behavior, and scroll-follow behavior are identical for
@@ -67,6 +75,13 @@ because the plan file lives outside the subagent workspace. Keep your own
 prompt focused on the delegated slice; the plan file carries the shared
 context.
 
+For an internal delegate (`agent_id="internal"`), the plan file lives
+outside the child's hidden conversation workspace, so NusaShell inlines
+only the compact Objective + Done when summary into the spawn prompt and
+never advertises a plan file path the delegate cannot read. The explicit
+parent prompt stays authoritative; the inline summary carries the
+parent's planning intent so the delegate does not lose the task context.
+
 Good example:
 
     subagent(prompt="Refactor /home/user/proj/src/api/client.go: extract the
@@ -108,6 +123,13 @@ each steering prompt that reaches the ACP session (after an interrupt cancel)
 is recorded as another user bubble before the assistant rounds that follow it.
 Steering text is persisted with the terminal run, so it remains visible when
 the room is reopened after a backend restart.
+
+Tool rows carry the input and output the ACP agent reports. The action line
+shows the primary `rawInput` argument (path, command, query); the result box
+shows `rawOutput`, or the structured `content` blocks flattened to text
+(diffs render as `-`/`+` lines). Agents that never send these fields keep the
+earlier title/status-only row, and the raw fold still carries the
+unprocessed payloads.
 
 ## Async completion (tool injection)
 
@@ -153,6 +175,26 @@ so the handoff never loses the background-agent picture.
 While any subagent is running, the parent agent's auto-continue chain
 pauses with reason `awaiting-background-jobs` instead of ending the
 turn. When all subagents complete, the chain resumes.
+
+## Auto-continue TODO rehydration
+
+When the auto-continue chain starts the next turn (open TODOs remain and
+the chain budget is not exhausted), the harness appends a visible
+`announcement` tool card carrying the continuation guidance, then a
+hidden pure-hydration `todo_list` checkpoint with the current open TODO
+items + brief, then the fresh assistant placeholder. The next provider
+request sees: previous assistant output → visible announcement → hidden
+`todo_list` → new assistant placeholder.
+
+The hidden `todo_list` checkpoint uses the `hydrate-` call-ID namespace,
+so the UI, compaction summaries, and experience extraction treat it as
+hidden context (no visible tool card, stripped from compaction). It is a
+separate message from the announcement so a hidden tool card never leaks
+into the visible announcement. When the conversation has no open todos
+(or no todo store), the boundary keeps the old shape: announcement →
+assistant placeholder, with no hidden hydration in between. This applies
+to any conversation chain (interactive parent or internal delegate); the
+delegate's checklist is keyed by its own hidden conversation ID.
 
 ## Steering priority and timing
 
@@ -233,6 +275,18 @@ refer to the same physical workspace. A symlink that escapes the workspace
 is rejected. Existing runs keep the canonical workspace they bound at spawn;
 new spawns follow the current conversation workspace unless the tool
 overrides it.
+
+`bypass` (yolo) is never the default — promote it from the live subagent UI.
+For a live `bypass` session on a **local stdio** ACP run only, FS callbacks
+(`fs/read_text_file`, `fs/write_text_file`) may resolve absolute host paths
+outside the workspace, matching the explicit full-filesystem grant. The
+escape is attributed to the matching live run only: session attribution is
+required, so an unknown `SessionID` (or a session on a different pooled
+connection) resolves as contained and fails closed. Lower tiers
+(`read_only`, `edit_confirmed`) always use the contained resolver and reject
+outside paths. Remote (cloud) ACP transports cannot use the host callback
+escape at any tier — their filesystem is their own, and absolute paths stay
+contained on the NusaShell side.
 
 The configured preferred ACP mode is applied before the first prompt. If the
 ACP agent rejects that mode switch, spawning fails explicitly; the runtime

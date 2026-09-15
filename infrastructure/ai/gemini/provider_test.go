@@ -161,7 +161,7 @@ func TestListModelsError(t *testing.T) {
 	}
 }
 
-func TestListModelsFiltersImageAndSpecializedModels(t *testing.T) {
+func TestListModelsKeepsMediaModels(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"models":[
@@ -180,30 +180,26 @@ func TestListModelsFiltersImageAndSpecializedModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListModels: %v", err)
 	}
-	if len(models) != 1 {
-		t.Fatalf("models = %+v, want only gemini-3-flash (image and tts filtered by ID, embedding by method)", models)
+	// The lister keeps all generateContent models (chat + image + TTS);
+	// classification tags them downstream. Only embedding (embedContent
+	// only, no generateContent) is filtered by supportsGenerateContent.
+	if len(models) != 3 {
+		t.Fatalf("models = %+v, want 3 (chat + image + tts; embedding filtered by method)", models)
 	}
-	if models[0].ID != "gemini-3-flash" {
-		t.Fatalf("models[0] = %+v, want gemini-3-flash", models[0])
+	ids := make(map[string]bool, len(models))
+	for _, m := range models {
+		ids[m.ID] = true
 	}
-}
-
-func TestIsChatModelID(t *testing.T) {
-	cases := []struct {
-		id   string
-		want bool
-	}{
-		{"gemini-3-flash", true},
-		{"gemini-2.5-pro", true},
-		{"gemini-3.1-flash-lite-image", false},
-		{"gemini-2.5-flash-tts", false},
-		{"gemini-embedding-001", false},
-		{"models/gemini-3-flash", true},
-		{"models/gemini-3.1-flash-lite-image", false},
+	if !ids["gemini-3-flash"] {
+		t.Error("missing gemini-3-flash (chat)")
 	}
-	for _, tc := range cases {
-		if got := isChatModelID(tc.id); got != tc.want {
-			t.Fatalf("isChatModelID(%q) = %v, want %v", tc.id, got, tc.want)
-		}
+	if !ids["gemini-3.1-flash-lite-image"] {
+		t.Error("missing gemini-3.1-flash-lite-image (must be kept for classification)")
+	}
+	if !ids["gemini-2.5-flash-tts"] {
+		t.Error("missing gemini-2.5-flash-tts (must be kept for classification)")
+	}
+	if ids["gemini-embedding-001"] {
+		t.Error("embedding model must be filtered by supportsGenerateContent")
 	}
 }

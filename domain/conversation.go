@@ -169,9 +169,14 @@ type Conversation struct {
 	// the captured boundary when a review fails or newer messages arrive.
 	// Zero means "never reviewed" (review from the start).
 	LastReviewedMsgCount int `json:"last_reviewed_msg_count,omitempty"`
-	// LastAnnouncedRecords tracks memory record IDs already delivered as
-	// a task_memory announcement in this conversation.
-	LastAnnouncedRecords []string `json:"last_announced_records,omitempty"`
+	// LastAnnouncedRecords tracks memory records already delivered as
+	// a task_memory announcement in this conversation, together with the
+	// LastConfirmed timestamp at announce time. A record becomes eligible
+	// for re-announce when its LastConfirmed advances past the stored
+	// LastConfirmedAt — the announcement text says "new or updated".
+	// Backward compatible: legacy []string data is read as zero-
+	// LastConfirmedAt entries (announced-once).
+	LastAnnouncedRecords AnnouncedRecords `json:"last_announced_records,omitempty"`
 	// Type classifies why this conversation exists: an interactive Agent
 	// room, a background job transcript, or an automation agent-step
 	// transcript. Only "conversation" appears in agent.conversations.list;
@@ -213,6 +218,51 @@ type PendingAnnouncement struct {
 	Args      string    `json:"args"`
 	Message   string    `json:"message"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// AnnouncedRecord tracks one memory record already delivered as a
+// task_memory announcement, together with the LastConfirmed timestamp
+// captured at announce time. A record becomes eligible for re-announce
+// when its LastConfirmed advances past LastConfirmedAt — the announcement
+// text says "new or updated", so a re-confirmed record is "updated".
+// LastConfirmedAt is zero for records migrated from the legacy []string
+// format (announced-once, never re-announce unless re-confirmed).
+type AnnouncedRecord struct {
+	ID              string    `json:"id"`
+	LastConfirmedAt time.Time `json:"last_confirmed_at,omitempty"`
+}
+
+// AnnouncedRecords is the dedup ledger for task_memory announcements. It
+// has a custom UnmarshalJSON that accepts both the legacy []string format
+// (last_announced_records: ["id1","id2"]) and the new structured format
+// (last_announced_records: [{"id":"...","last_confirmed_at":"..."}]), so
+// existing persisted conversations migrate transparently on read.
+type AnnouncedRecords []AnnouncedRecord
+
+// UnmarshalJSON accepts both the legacy []string and the new
+// []AnnouncedRecord JSON formats. Legacy entries get a zero
+// LastConfirmedAt (treated as announced-once).
+func (a *AnnouncedRecords) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	// Try the new structured format first.
+	var records []AnnouncedRecord
+	if err := json.Unmarshal(data, &records); err == nil {
+		*a = AnnouncedRecords(records)
+		return nil
+	}
+	// Fall back to the legacy []string format.
+	var ids []string
+	if err := json.Unmarshal(data, &ids); err != nil {
+		return err
+	}
+	out := make(AnnouncedRecords, len(ids))
+	for i, id := range ids {
+		out[i] = AnnouncedRecord{ID: id}
+	}
+	*a = out
+	return nil
 }
 
 // QueueAnnouncement appends a pending announcement. An entry with

@@ -195,6 +195,53 @@ func TestHydrationBuildBasic(t *testing.T) {
 	}
 }
 
+func TestHydrationReasoningExplainsContextAndBriefsUser(t *testing.T) {
+	userPath := "/data/memory/user.md"
+	soulPath := "/data/memory/soul.md"
+	exec := &stubHydrationExecutor{fn: func(name string, args []byte) (string, error) {
+		switch name {
+		case "file_read":
+			var fileArgs struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(args, &fileArgs); err != nil {
+				return "", err
+			}
+			switch fileArgs.Path {
+			case userPath:
+				return "---\nbytes: 4\n---\n\nuser", nil
+			case soulPath:
+				return "---\nbytes: 4\n---\n\nsoul", nil
+			default:
+				return "", fmt.Errorf("unexpected file path %q", fileArgs.Path)
+			}
+		case "skill":
+			return "---\ncount: 1\n---\n{\"name\":\"prompt-engineer\"}", nil
+		case "mcp_list":
+			return emptyToolOutput, nil
+		default:
+			return "", fmt.Errorf("unexpected tool %q", name)
+		}
+	}}
+
+	result := NewHydrationBuilder(HydrationSource{
+		Executor:  exec,
+		UserPath:  userPath,
+		AgentPath: soulPath,
+	}).Build()
+
+	want := []string{
+		"I need to know the current runtime context.",
+		"I need to know who the user is.",
+		"I need to know who I am in NusaShell.",
+		"Let me see the available skills.",
+		"I need to brief the user before giving the answer.",
+	}
+	if got := result.Messages[0].Reasoning; got != strings.Join(want, "\n") {
+		t.Fatalf("hydration reasoning = %q, want %q", got, strings.Join(want, "\n"))
+	}
+}
+
 func TestHydrationRuntimeContext(t *testing.T) {
 	b := NewHydrationBuilder(HydrationSource{
 		RuntimeContext: RuntimeContextSnapshot{

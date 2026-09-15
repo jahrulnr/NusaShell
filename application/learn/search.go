@@ -29,6 +29,15 @@ type SearchOptions struct {
 	// configured. The agent-loop search tools set this to avoid per-call
 	// embedding cost; the Learning UI keeps the full hybrid path.
 	DisableEmbedding bool
+	// EmbedCache enables content-addressed caching of doc embedding
+	// vectors. When non-nil with a non-empty ModelID, the embedding
+	// channel reads vectors from the cache (GetBatch) and only embeds
+	// cache misses, storing them back via Put. This avoids re-embedding
+	// the same document corpus on every search call. The query vector
+	// is always embedded fresh (one Embed call) because it is unique
+	// per search.
+	EmbedCache EmbeddingCache
+	ModelID    string
 }
 
 // defaultSearchOptions returns sensible defaults.
@@ -92,7 +101,7 @@ func (s *LearningSearcher) searchSkillsWithOpts(ctx context.Context, query strin
 
 	// Channel 2: Embedding cosine similarity (if available and enabled).
 	if s.embed != nil && !opts.DisableEmbedding {
-		embIDs, err := s.embeddingSearch(ctx, query, docs, topK*2)
+		embIDs, err := s.embeddingSearch(ctx, query, docs, topK*2, opts)
 		if err == nil && len(embIDs) > 0 {
 			lists = append(lists, embIDs)
 		}
@@ -171,7 +180,7 @@ func (s *LearningSearcher) searchMemoryWithOpts(ctx context.Context, query strin
 
 	// Channel 2: Embedding cosine similarity (if available and enabled).
 	if s.embed != nil && !opts.DisableEmbedding {
-		embIDs, err := s.embeddingSearch(ctx, query, docs, topK*2)
+		embIDs, err := s.embeddingSearch(ctx, query, docs, topK*2, opts)
 		if err == nil && len(embIDs) > 0 {
 			lists = append(lists, embIDs)
 		}
@@ -284,8 +293,10 @@ func (s *LearningSearcher) ApplyTemporalDecay(fused []RRFResult, skills []*domai
 }
 
 // embeddingSearch embeds the query and all docs, computes cosine similarity,
-// and returns ranked doc IDs.
-func (s *LearningSearcher) embeddingSearch(ctx context.Context, query string, docs []KeywordDoc, topK int) ([]string, error) {
+// and returns ranked doc IDs. When opts.EmbedCache is non-nil with a non-empty
+// ModelID, doc vectors are read from the cache and only misses are embedded
+// (then stored back). The query is always embedded fresh.
+func (s *LearningSearcher) embeddingSearch(ctx context.Context, query string, docs []KeywordDoc, topK int, opts SearchOptions) ([]string, error) {
 	qVec, err := s.embed.Embed(ctx, query)
 	if err != nil {
 		return nil, err
@@ -294,7 +305,7 @@ func (s *LearningSearcher) embeddingSearch(ctx context.Context, query string, do
 	for i, d := range docs {
 		texts[i] = d.Text
 	}
-	docVecs, err := s.embed.EmbedBatch(ctx, texts)
+	docVecs, err := s.embedDocs(ctx, texts, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -315,6 +326,35 @@ func (s *LearningSearcher) embeddingSearch(ctx context.Context, query string, do
 		out[i] = r.id
 	}
 	return out, nil
+}
+
+// embedDocs returns embedding vectors for texts. When opts.EmbedCache is
+// non-nil with a non-empty ModelID, vectors are read from the cache and only
+// misses are embedded (then stored back). Without a cache, all texts are
+// embedded via EmbedBatch (the original behavior).
+func (s *LearningSearcher) embedDocs(ctx context.Context, texts []string, opts SearchOptions) ([][]float32, error) {
+	if opts.EmbedCache == nil || opts.ModelID == "" {
+		return s.embed.EmbedBatch(ctx, texts)
+	}
+	vectors, misses := opts.EmbedCache.GetBatch(opts.ModelID, texts)
+	if len(misses) == 0 {
+		return vectors, nil
+	}
+	missTexts := make([]string, len(misses))
+	for i, idx := range misses {
+		missTexts[i] = texts[idx]
+	}
+	newVecs, err := s.embed.EmbedBatch(ctx, missTexts)
+	if err != nil {
+		return nil, err
+	}
+	for i, idx := range misses {
+		if newVecs[i] != nil {
+			vectors[idx] = newVecs[i]
+			_ = opts.EmbedCache.Put(opts.ModelID, missTexts[i], newVecs[i])
+		}
+	}
+	return vectors, nil
 }
 
 // RRFResult is a fused search result from multiple channels.

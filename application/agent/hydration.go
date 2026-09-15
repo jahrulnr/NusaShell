@@ -76,11 +76,11 @@ type HydrationSource struct {
 }
 
 // HydrationBuilder produces an ephemeral synthetic tool transcript
-// (assistant toolCalls + matching tool results) representing a snapshot of
-// the shell runtime. Every tool-backed slot executes its REAL tool through
-// the Executor — the same implementation the agent calls — and attaches the
-// genuine output. The transcript is DYNAMIC: slots with empty content are
-// omitted entirely, so the call count varies per epoch.
+// (assistant reasoning + toolCalls + matching tool results) representing a
+// snapshot of the shell runtime. Every tool-backed slot executes its REAL
+// tool through the Executor — the same implementation the agent calls — and
+// attaches the genuine output. The transcript is DYNAMIC: slots with empty
+// content are omitted entirely, so the call count varies per epoch.
 //
 // The transcript is placed AFTER a real user message (or compaction summary)
 // and BEFORE the model's own output, so the model sees fresh runtime facts
@@ -148,6 +148,7 @@ func (b *HydrationBuilder) Build() HydrationResult {
 	messages := make([]ChatMessage, 0, len(slots)+1)
 	messages = append(messages, ChatMessage{
 		Role:      "assistant",
+		Reasoning: hydrationReasoning(slots),
 		ToolCalls: calls,
 	})
 	for i, slot := range slots {
@@ -161,6 +162,76 @@ func (b *HydrationBuilder) Build() HydrationResult {
 		})
 	}
 	return HydrationResult{Messages: messages, Nonce: nonce, CallCount: len(calls)}
+}
+
+const hydrationBriefingReason = "I need to brief the user before giving the answer."
+
+// hydrationReasoning gives each synthetic hydration call a concise purpose.
+// It is model-facing context, not a claim about hidden chain-of-thought. The
+// final briefing reminder keeps a fresh hydration checkpoint from making the
+// agent jump straight into work without orienting the user first.
+func hydrationReasoning(slots []hydrationSlot) string {
+	reasons := make([]string, 0, len(slots)+1)
+	for _, slot := range slots {
+		if reason := hydrationSlotReason(slot); reason != "" {
+			reasons = append(reasons, reason)
+		}
+	}
+	reasons = append(reasons, hydrationBriefingReason)
+	return strings.Join(reasons, "\n")
+}
+
+func hydrationSlotReason(slot hydrationSlot) string {
+	switch slot.name {
+	case "runtime_context":
+		return "I need to know the current runtime context."
+	case "file_list":
+		return "I need to understand the workspace structure."
+	case "file_read":
+		path := hydrationArg(slot.args, "path")
+		normalized := strings.ToLower(strings.ReplaceAll(path, "\\", "/"))
+		switch {
+		case strings.HasSuffix(normalized, "/user.md") || normalized == "user.md":
+			return "I need to know who the user is."
+		case strings.HasSuffix(normalized, "/soul.md") || normalized == "soul.md":
+			return "I need to know who I am in NusaShell."
+		case strings.HasSuffix(normalized, "/agents.md") || normalized == "agents.md":
+			return "I need to understand the project instructions."
+		case strings.Contains(normalized, "skill-creator") || strings.Contains(normalized, "skill_creator"):
+			return "I need to follow the skill authoring instructions."
+		default:
+			return "I need to read this context file."
+		}
+	case "memory_project":
+		return "I need to know the project's current context and constraints."
+	case "memory":
+		return "I need to recall relevant project memory."
+	case "skill":
+		return "Let me see the available skills."
+	case "mcp_list":
+		return "I need to see which MCP servers are available."
+	case "tool_list":
+		if server := hydrationArg(slot.args, "server"); server != "" {
+			return "I need to see the available tools for MCP server " + server + "."
+		}
+		return "I need to see the available MCP tools."
+	case "todo_list":
+		return "I need to review the current task brief and checklist."
+	default:
+		if name := strings.TrimSpace(slot.name); name != "" {
+			return "I need to inspect the " + name + " context."
+		}
+		return "I need to inspect this context before continuing."
+	}
+}
+
+func hydrationArg(args, name string) string {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(args), &payload); err != nil {
+		return ""
+	}
+	value, _ := payload[name].(string)
+	return strings.TrimSpace(value)
 }
 
 type hydrationSlot struct {

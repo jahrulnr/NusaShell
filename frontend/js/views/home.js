@@ -3,11 +3,15 @@
 
 import { openPluginWindow as launchPluginWindow } from '../plugin-window.js';
 import { toast } from '../ui.js';
+import { isPairingRequiredError } from '../rpc.js';
 
 let plugins = [];
 let launcherSearchQuery = '';
 let launcherCategory = 'All';
 let pluginLoadError = false;
+// When the backend requires device pairing, the launcher stays quiet (no
+// banner, no empty state) so the pairing gate is the dominant UI.
+let pairingQuiet = false;
 
 export async function initHome() {
   const searchInput = document.getElementById('search-input');
@@ -41,12 +45,35 @@ export async function initHome() {
 export async function refresh() {
   try {
     const response = await fetch('/plugins');
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      // PAIRING_REQUIRED: the backend is reachable but requires device
+      // pairing. Keep the launcher quiet (no banner, no empty state) so the
+      // pairing gate is the dominant UI. Genuine 5xx/network errors keep the
+      // banner + Retry.
+      const body = await response.json().catch(() => ({}));
+      if (body?.error?.code === 'PAIRING_REQUIRED') {
+        plugins = [];
+        pairingQuiet = true;
+        setPluginLoadError(false);
+        renderAppGrid();
+        return;
+      }
+      throw new Error(body?.error?.message || `HTTP ${response.status}`);
+    }
     const data = await response.json();
     plugins = Array.isArray(data.plugins) ? data.plugins : [];
+    pairingQuiet = false;
     setPluginLoadError(false);
   } catch (error) {
+    if (isPairingRequiredError(error)) {
+      plugins = [];
+      pairingQuiet = true;
+      setPluginLoadError(false);
+      renderAppGrid();
+      return;
+    }
     plugins = [];
+    pairingQuiet = false;
     setPluginLoadError(true, error);
   }
   renderAppGrid();
@@ -102,6 +129,10 @@ function renderAppGrid() {
   const grid = document.getElementById('app-grid');
   if (!grid) return;
   grid.replaceChildren();
+
+  // While the backend requires pairing, the launcher stays empty and quiet
+  // (no banner, no empty state) so the pairing gate is the dominant UI.
+  if (pairingQuiet) return;
 
   const uiPlugins = plugins.filter(hasPluginUI);
   if (plugins.length === 0) {

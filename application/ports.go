@@ -4,6 +4,7 @@ package application
 
 import (
 	"context"
+	"time"
 
 	"nusashell/application/conversation"
 	"nusashell/application/learn"
@@ -184,6 +185,25 @@ type LearningEdgeStore interface {
 	List() []*domain.LearningEdge
 	Save(e *domain.LearningEdge) error
 	Delete(id string) error
+}
+
+// PairingStore is the persistence port for device pairing challenges and
+// sessions. Only hashes of pairing codes and session tokens are stored;
+// plaintext values are never persisted. Implementations must be safe for
+// concurrent use.
+type PairingStore interface {
+	SaveChallenge(c *domain.PairingChallenge) error
+	GetChallenge(id string) (*domain.PairingChallenge, error)
+	SaveSession(sess *domain.PairingSession) error
+	GetSessionByTokenHash(hash string) (*domain.PairingSession, error)
+	ListSessions() ([]*domain.PairingSession, error)
+	// TouchSession updates only last_seen_at. A touch after revocation is a
+	// harmless no-op because revocation removes the session row.
+	TouchSession(id string, lastSeenAt time.Time) error
+	// RevokeSession removes a single session.
+	RevokeSession(id string) error
+	// RevokeAllSessions removes every session.
+	RevokeAllSessions() error
 }
 
 // LearnedParamStore persists the dynamic 400-learning registry (unsupported

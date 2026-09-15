@@ -1860,13 +1860,18 @@ func TestReasoningSentForRoutingModel(t *testing.T) {
 func TestAssistantBlockCombinations(t *testing.T) {
 	tests := []struct {
 		name      string
+		kind      domain.ProviderKind
 		content   string
 		reasoning string
 		toolCalls []domain.ToolCall
 		wantOrder []string // block type names in expected order
 	}{
 		{
+			// Reasoning-only is a legal standalone item on Responses;
+			// message-shaped wires (Chat/Messages/Gemini) drop it because
+			// they require content or tool calls on every assistant entry.
 			name:      "reasoning only",
+			kind:      domain.ProviderResponses,
 			reasoning: "I thought about it.",
 			wantOrder: []string{"ReasoningBlock"},
 		},
@@ -1909,6 +1914,10 @@ func TestAssistantBlockCombinations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			kind := tt.kind
+			if kind == "" {
+				kind = domain.ProviderChat
+			}
 			req := ChatRequest{
 				Model: "test/model",
 				Messages: []ChatMessage{
@@ -1917,7 +1926,7 @@ func TestAssistantBlockCombinations(t *testing.T) {
 				},
 				ReasoningReplay: false,
 			}
-			cr := ToCoreRequest(req, domain.ProviderChat, true)
+			cr := ToCoreRequest(req, kind, true)
 
 			var assistant *core.Message
 			for i := range cr.Messages {

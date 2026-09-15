@@ -25,6 +25,7 @@
 <link rel="stylesheet" href="styles/logs.css">
 <link rel="stylesheet" href="styles/telemetry.css">
 <link rel="stylesheet" href="styles/modals.css">
+<link rel="stylesheet" href="styles/pairing.css">
 <link rel="stylesheet" href="vendor/slim-select/slimselect.css">
 <link rel="stylesheet" href="vendor/slim-select/nusashell-override.css">
 <link rel="stylesheet" href="vendor/highlightjs/github-dark.min.css">
@@ -755,6 +756,7 @@
             <button class="settings-section-link" id="settings-jump-generate" type="button" data-settings-section="settings-group-generate" aria-controls="settings-group-generate">Generate media</button>
             <button class="settings-section-link" id="settings-jump-web" type="button" data-settings-section="settings-group-web" aria-controls="settings-group-web">Web</button>
             <button class="settings-section-link" id="settings-jump-workspace" type="button" data-settings-section="settings-group-workspace" aria-controls="settings-group-workspace">Workspace</button>
+            <button class="settings-section-link" id="settings-jump-remote" type="button" data-settings-section="settings-group-remote" aria-controls="settings-group-remote">Remote access</button>
           </nav>
           <div class="settings-group" role="group" aria-labelledby="settings-group-agent">
             <h2 class="settings-group-title" id="settings-group-agent" tabindex="-1">Agent</h2>
@@ -1152,6 +1154,37 @@
               </dl>
             </section>
           </div>
+          <div class="settings-group" id="settings-remote-group" role="group" aria-labelledby="settings-group-remote">
+            <h2 class="settings-group-title" id="settings-group-remote" tabindex="-1">Remote access</h2>
+            <section class="settings-card" aria-labelledby="settings-pairing-title">
+              <div class="settings-card-title">Device pairing</div>
+              <h2 id="settings-pairing-title" class="sr-only">Device pairing</h2>
+              <label class="settings-toggle" for="settings-remote-access-enabled">
+                <span><strong>Allow remote access</strong><small>Off by default. Turning this on enables QR pairing for non-loopback devices. Backend restart happens automatically.</small></span>
+                <input id="settings-remote-access-enabled" type="checkbox">
+                <span class="toggle-slider" aria-hidden="true"></span>
+              </label>
+              <div id="pairing-panel" class="pairing-panel" hidden>
+                <p class="settings-card-copy">Pair a remote device (phone, tablet, another laptop) so it can reach this NusaShell instance. Generate a one-time link, scan the QR shown in the pairing dialog from that device, then approve the request there to issue its session cookie.</p>
+                <button class="action-btn" id="pairing-create-btn" type="button">Generate pairing link</button>
+                <div class="pairing-panel-status-row">
+                  <div class="pairing-host-status" id="pairing-panel-status" role="status" aria-live="polite" hidden></div>
+                  <button class="mini-btn" id="pairing-show-qr-btn" type="button" hidden>Show pairing QR</button>
+                </div>
+                <label class="settings-field" for="pairing-remote-address">Address remote devices can reach
+                  <textarea id="pairing-remote-address" rows="3" placeholder="https://host.example:10994&#10;https://tunnel.example/nusashell" autocomplete="off"></textarea>
+                  <span class="pairing-address-error" id="pairing-address-error" role="alert" hidden></span>
+                  <small class="settings-field-hint">Use one absolute HTTP(S) address per line. The QR does not create reachability; these addresses only determine the URLs encoded in generated links. This does not change where NusaShell listens. When remote access is enabled, loopback binds are promoted automatically; an explicit non-loopback <code>NUSASHELL_HOST</code> remains authoritative.</small>
+                </label>
+                <div class="pairing-session-actions" id="pairing-session-actions">
+                  <h3 class="pairing-sessions-title">Paired devices</h3>
+                  <div class="pairing-sessions-list" id="pairing-sessions-list"></div>
+                  <div class="pairing-sessions-empty" id="pairing-sessions-empty">No paired devices.</div>
+                  <button class="mini-btn" id="pairing-revoke-all-btn" type="button" hidden>Revoke all sessions</button>
+                </div>
+              </div>
+            </section>
+          </div>
         </div>
       </section>
 
@@ -1160,6 +1193,75 @@
 </div>
 
 <div class="toast-container" id="toast-container"></div>
+
+<!-- ===== Pairing dialog (host) =====
+     The dialog owns the scan surface: it covers the Settings panel while it is
+     open, so the QR, pairing link, and manual code live here instead of behind
+     the overlay. Approve/Reject act on the challenge shown above them. -->
+<div class="ui-dialog-overlay pairing-approval-overlay" id="pairing-approval-overlay" aria-hidden="true" hidden>
+  <div class="ui-dialog pairing-approval-dialog" role="dialog" aria-modal="true" aria-labelledby="pairing-approval-title" aria-describedby="pairing-approval-message">
+    <div class="ui-dialog-header">
+      <h2 id="pairing-approval-title" tabindex="-1">Approve device pairing</h2>
+      <button class="ui-dialog-close" id="pairing-approval-close" type="button" aria-label="Close pairing dialog">×</button>
+    </div>
+    <div class="ui-dialog-body">
+      <p class="ui-dialog-message" id="pairing-approval-message">Scan this code with the remote device, then approve the request to pair it.</p>
+      <div class="pairing-qr-display" id="pairing-qr-display" hidden>
+        <div class="pairing-qr-wrap">
+          <img id="pairing-qr-img" alt="QR code encoding the pairing URL for a remote device to scan" />
+          <p class="pairing-qr-status" id="pairing-qr-status"></p>
+        </div>
+        <div class="pairing-link-section">
+          <span class="pairing-code-label">Pairing link</span>
+          <code id="pairing-link-display" class="pairing-link"></code>
+          <button class="mini-btn" id="pairing-copy-link-btn" type="button">Copy link</button>
+          <span class="pairing-code-label pairing-code-label-code">Manual code</span>
+          <code id="pairing-code-display" class="pairing-code"></code>
+          <button class="mini-btn" id="pairing-copy-code-btn" type="button">Copy code</button>
+        </div>
+      </div>
+      <div id="pairing-qr-alternatives" class="pairing-qr-alternatives"></div>
+      <div class="pairing-host-status" id="pairing-host-status" role="status" aria-live="polite"></div>
+      <div class="pairing-host-actions" id="pairing-host-actions">
+        <label class="settings-field" for="pairing-device-label">Device label (optional)
+          <input type="text" id="pairing-device-label" placeholder="e.g. Phone" autocomplete="off" />
+        </label>
+      </div>
+    </div>
+    <div class="ui-dialog-actions">
+      <button class="action-btn" id="pairing-approve-btn" type="button">Approve device</button>
+      <button class="mini-btn danger" id="pairing-reject-btn" type="button">Reject</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Pairing Gate (remote device pairing) ===== -->
+<div class="pairing-gate" id="pairing-gate" role="dialog" aria-modal="true" aria-labelledby="pairing-gate-title" hidden>
+  <div class="pairing-gate-card">
+    <h2 id="pairing-gate-title" tabindex="-1">Device pairing required</h2>
+    <p class="pairing-gate-intro" id="pairing-gate-intro">This NusaShell instance only allows paired remote devices. Open the pairing link shown on the host (Settings → Remote access) to continue.</p>
+    <div id="pairing-pending" hidden>
+      <div class="pairing-status" id="pairing-status" data-state="pending" role="status" aria-live="polite">Waiting</div>
+      <p class="pairing-countdown" id="pairing-countdown" aria-live="polite"></p>
+    </div>
+    <div id="pairing-success" class="pairing-success" hidden><p>Paired</p></div>
+    <div id="pairing-error" class="pairing-error" role="alert" hidden>
+      <p id="pairing-error-message"></p>
+      <button class="action-btn" id="pairing-retry-btn" type="button">Try again</button>
+    </div>
+    <button class="link-btn" id="pairing-help-btn" type="button" aria-expanded="false" aria-controls="pairing-help">Need help?</button>
+    <div id="pairing-help" class="pairing-help" hidden>
+      <h3>How to pair this device</h3>
+      <ol>
+        <li>On the NusaShell host, open <strong>Settings → Remote access</strong>.</li>
+        <li>Click <strong>Generate pairing link</strong> — a QR code and link appear.</li>
+        <li>Scan the QR with this device's camera, or open the link manually.</li>
+        <li>Approve the request on the host — this device connects automatically.</li>
+      </ol>
+      <button class="link-btn" id="pairing-help-close" type="button">Close help</button>
+    </div>
+  </div>
+</div>
 
 <!-- ===== Plugin Install Dialog ===== -->
 <div class="ui-dialog-overlay" id="plugin-install-overlay" aria-hidden="true" hidden>

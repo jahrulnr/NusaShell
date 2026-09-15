@@ -28,6 +28,9 @@ const (
 	// BackendCodex is the ChatGPT Codex image backend (POST
 	// images/generations and images/edits on the resolved provider base URL).
 	BackendCodex = "codex"
+	// BackendGemini is the Google Gemini image backend (generateContent with
+	// responseModalities TEXT+IMAGE). It is the Nano Banana family surface.
+	BackendGemini = "gemini"
 )
 
 // Client talks to one image-generation HTTP backend.
@@ -87,6 +90,8 @@ func (c *Client) Generate(ctx context.Context, req application.ImageGenRequest) 
 		return c.generateOpenRouter(ctx, req)
 	case BackendCodex:
 		return c.generateCodex(ctx, req)
+	case BackendGemini:
+		return c.generateGemini(ctx, req)
 	default:
 		return c.generateOpenAI(ctx, req)
 	}
@@ -516,4 +521,235 @@ func codexResetsAtTime(sec json.Number) time.Time {
 		return time.Time{}
 	}
 	return time.Unix(n, 0)
+}
+
+// ---- Gemini generateContent image backend ----
+
+// geminiPart is one part in a generateContent contents array.
+type geminiPart struct {
+	Text       string      `json:"text,omitempty"`
+	InlineData *geminiBlob `json:"inlineData,omitempty"`
+}
+
+type geminiBlob struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
+}
+
+type geminiContent struct {
+	Role  string       `json:"role,omitempty"`
+	Parts []geminiPart `json:"parts"`
+}
+
+type geminiImageConfig struct {
+	AspectRatio string `json:"aspectRatio,omitempty"`
+}
+
+type geminiGenerationConfig struct {
+	ResponseModalities []string           `json:"responseModalities,omitempty"`
+	ImageConfig        *geminiImageConfig `json:"imageConfig,omitempty"`
+}
+
+type geminiRequest struct {
+	Contents         []geminiContent         `json:"contents"`
+	GenerationConfig *geminiGenerationConfig `json:"generationConfig,omitempty"`
+}
+
+type geminiResponsePart struct {
+	Text       string      `json:"text,omitempty"`
+	InlineData *geminiBlob `json:"inlineData,omitempty"`
+}
+
+type geminiResponseContent struct {
+	Parts []geminiResponsePart `json:"parts,omitempty"`
+}
+
+type geminiCandidate struct {
+	Content      *geminiResponseContent `json:"content,omitempty"`
+	FinishReason string                 `json:"finishReason,omitempty"`
+}
+
+type geminiUsageMetadata struct {
+	PromptTokenCount     int `json:"promptTokenCount"`
+	CandidatesTokenCount int `json:"candidatesTokenCount"`
+	TotalTokenCount      int `json:"totalTokenCount"`
+}
+
+type geminiImageResponse struct {
+	Candidates    []geminiCandidate    `json:"candidates"`
+	UsageMetadata *geminiUsageMetadata `json:"usageMetadata,omitempty"`
+	Error         *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Status  string `json:"status"`
+	} `json:"error,omitempty"`
+}
+
+// generateGemini posts a generateContent request with
+// responseModalities [TEXT, IMAGE] and decodes inlineData parts. Reference
+// images are sent as inlineData parts in the same user turn (image-to-image).
+func (c *Client) generateGemini(ctx context.Context, req application.ImageGenRequest) (*application.ImageGenResult, error) {
+	model := normalizeGeminiModelID(req.Model)
+	parts := make([]geminiPart, 0, len(req.References)+1)
+	for _, ref := range req.References {
+		media := strings.TrimSpace(ref.MediaType)
+		if media == "" {
+			media = "image/png"
+		}
+		parts = append(parts, geminiPart{
+			InlineData: &geminiBlob{
+				MimeType: media,
+				Data:     base64.StdEncoding.EncodeToString(ref.Data),
+			},
+		})
+	}
+	parts = append(parts, geminiPart{Text: req.Prompt})
+
+	body := geminiRequest{
+		Contents: []geminiContent{{
+			Role:  "user",
+			Parts: parts,
+		}},
+		GenerationConfig: &geminiGenerationConfig{
+			ResponseModalities: []string{"TEXT", "IMAGE"},
+		},
+	}
+	if aspect := geminiAspectRatio(req.Size); aspect != "" {
+		body.GenerationConfig.ImageConfig = &geminiImageConfig{AspectRatio: aspect}
+	}
+	url := strings.TrimRight(c.BaseURL, "/") + "/models/" + model + ":generateContent"
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(body); err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &buf)
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("User-Agent", aiutil.NusaShellUserAgent)
+	if c.APIKey != "" {
+		// Gemini authenticates with x-goog-api-key, not Authorization: Bearer.
+		httpReq.Header.Set("x-goog-api-key", c.APIKey)
+	}
+
+	resp, err := c.httpClient().Do(httpReq)
+	if err != nil {
+		return nil, &domain.ProviderError{Kind: domain.KindConnect, Temporary: true, Err: err}
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, mapGeminiImageError(resp.StatusCode, raw)
+	}
+	var decoded geminiImageResponse
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil, fmt.Errorf("gemini: decode image response: %w", err)
+	}
+	if decoded.Error != nil && strings.TrimSpace(decoded.Error.Message) != "" {
+		return nil, &domain.ProviderError{
+			StatusCode: decoded.Error.Code,
+			Err:        fmt.Errorf("%s", strings.TrimSpace(decoded.Error.Message)),
+		}
+	}
+	result := &application.ImageGenResult{
+		Provider: BackendGemini,
+		Model:    req.Model,
+	}
+	if decoded.UsageMetadata != nil {
+		result.UsageTokens = decoded.UsageMetadata.TotalTokenCount
+	}
+	for _, cand := range decoded.Candidates {
+		if cand.Content == nil {
+			continue
+		}
+		for _, p := range cand.Content.Parts {
+			if p.InlineData == nil || p.InlineData.Data == "" {
+				continue
+			}
+			data, err := base64.StdEncoding.DecodeString(p.InlineData.Data)
+			if err != nil {
+				return nil, fmt.Errorf("gemini: decode inline image: %w", err)
+			}
+			media := strings.TrimSpace(p.InlineData.MimeType)
+			if media == "" {
+				media = "image/png"
+			}
+			result.Images = append(result.Images, application.GeneratedImage{
+				Bytes:     data,
+				MediaType: media,
+			})
+		}
+	}
+	if len(result.Images) == 0 {
+		return nil, fmt.Errorf("gemini: generateContent returned no image data (model may not support image output)")
+	}
+	return result, nil
+}
+
+// normalizeGeminiModelID strips "models/" and "<provider>/" prefixes so the
+// operation path carries only the bare model id the API expects.
+func normalizeGeminiModelID(model string) string {
+	name := strings.TrimSpace(model)
+	segments := strings.Split(name, "/")
+	if len(segments) > 1 {
+		name = segments[len(segments)-1]
+	}
+	return name
+}
+
+// geminiAspectRatio maps the tool's size enum to the Gemini
+// generationConfig.imageConfig.aspectRatio value. "auto" and empty omit the
+// field so the model picks its default. Pixel size (1K/2K) is intentionally
+// left to the model default — this surface does not support explicit pixel
+// size, quality, or background.
+func geminiAspectRatio(size string) string {
+	switch strings.TrimSpace(strings.ToLower(size)) {
+	case "1024x1024":
+		return "1:1"
+	case "1536x1024":
+		return "3:2"
+	case "1024x1536":
+		return "2:3"
+	default:
+		return ""
+	}
+}
+
+// mapGeminiImageError converts a non-2xx Gemini response into a
+// domain.ProviderError. 4xx are hard failures (validation/auth/billing);
+// 5xx stay retriable for the caller's shared policy.
+func mapGeminiImageError(status int, raw []byte) error {
+	var parsed struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(raw, &parsed)
+	detail := strings.TrimSpace(parsed.Error.Message)
+	if detail == "" {
+		detail = strings.TrimSpace(string(raw))
+		if len(detail) > 800 {
+			detail = detail[:800]
+		}
+	}
+	if status >= 500 {
+		return &domain.ProviderError{
+			Kind:       domain.KindHTTPStatus,
+			StatusCode: status,
+			Temporary:  true,
+			Err:        fmt.Errorf("gemini image generation failed (HTTP %d): %s", status, detail),
+		}
+	}
+	return &domain.ProviderError{
+		StatusCode: status,
+		Err:        fmt.Errorf("gemini image generation failed (HTTP %d): %s", status, detail),
+	}
 }

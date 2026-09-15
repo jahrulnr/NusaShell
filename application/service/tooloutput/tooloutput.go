@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"nusashell/domain"
 )
 
 // delimiterVariantRe matches any spelling of "untrusted_tool_result" or
@@ -194,9 +196,7 @@ func summarizeSubagentWaitOutput(rawOutput string) (string, bool) {
 		}
 	}
 	if text != "" {
-		if len(text) > 2000 {
-			text = text[:2000] + "…"
-		}
+		text = truncateRunes(text, domain.MaxSubagentResultRunes)
 		sb.WriteString("\n\nSummary: ")
 		sb.WriteString(text)
 	} else {
@@ -210,9 +210,7 @@ func summarizeSubagentWaitOutput(rawOutput string) (string, bool) {
 			}
 		}
 		if thought != "" {
-			if len(thought) > 2000 {
-				thought = thought[:2000] + "…"
-			}
+			thought = truncateRunes(thought, domain.MaxSubagentResultRunes)
 			sb.WriteString("\n\nLast reasoning: ")
 			sb.WriteString(thought)
 			if run.Status == "failed" {
@@ -276,10 +274,38 @@ func splitYAMLFrontmatter(raw string) (header, body string, ok bool) {
 }
 
 func boundedSubagentOutput(raw string) string {
-	const maxChars = 2000
 	raw = strings.TrimSpace(raw)
-	if len(raw) > maxChars {
-		raw = "…" + raw[len(raw)-maxChars:]
-	}
+	raw = truncateRunesTail(raw, domain.MaxSubagentResultRunes)
 	return "Subagent tool output could not be parsed; showing a bounded tail:\n\n" + raw
+}
+
+// truncateRunes bounds s to the first max runes and appends the "…" omission
+// marker when content was dropped. Rune-safe: never slices mid-character.
+// Mirrors domain.truncateRunes so the provider-facing wait/steer/stop summary
+// uses the same bound and marker as the domain SubagentCompletionResult.
+func truncateRunes(s string, max int) string {
+	if max < 0 {
+		max = 0
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
+// truncateRunesTail bounds s to the LAST max runes and prepends the "…"
+// omission marker when content was dropped. Rune-safe: never slices
+// mid-character. Used by boundedSubagentOutput to preserve the tail of an
+// unparsable legacy payload (the most recent output is usually the most
+// useful when the structure cannot be parsed).
+func truncateRunesTail(s string, max int) string {
+	if max < 0 {
+		max = 0
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return "…" + string(r[len(r)-max:])
 }

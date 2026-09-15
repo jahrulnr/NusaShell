@@ -3,9 +3,12 @@
 NusaShell is a local, personal AI shell: a Go binary that serves an
 embedded vanilla JS/HTML/CSS frontend and brokers conversations with
 Messages / Responses / Chat format providers, skills, memory, docs and MCP
-plugins. There is no security layer by design (no auth, no rate limiting);
-the process listens on `127.0.0.1` by default. Bind it to another address
-only on a trusted network (`NUSASHELL_HOST`).
+plugins. The process listens on `127.0.0.1` by default; loopback clients
+bypass authentication. Remote access is disabled by default and is enabled
+from Settings, where non-loopback clients are gated by device pairing — see
+"Pairing and access control" below. `NUSASHELL_HOST` controls only the bind
+host. When Remote access is enabled, an unset or loopback host changes to
+`0.0.0.0`; an explicit non-loopback `NUSASHELL_HOST` remains authoritative.
 
 ## Layers
 
@@ -51,7 +54,61 @@ embedded ES module with no build step.
 | `POST /rpc/{method...}` | request/response commands and queries — the method is encoded in the URL path (dots → slashes, e.g. `/rpc/agent/conversations/list`), body is `{method, payload}` → `{ok, result|error}` |
 | `GET /ws` | bidirectional: `{id, method, payload}` requests with `{id, ok, ...}` replies plus the event stream as `{type, payload}` |
 | `GET /stream?run_id=&message_id=&after=` | per-round SSE stream of live agent deltas (see below) |
+| `GET /pairing/status` + `POST /pairing/exchange` | public pairing bootstrap routes (remote device poll + one-time challenge exchange); all other `pairing.*` methods are loopback-only RPC |
 | `GET /` + assets | embedded frontend (disk in `NUSASHELL_DEV=1` mode) |
+
+### Pairing and access control
+
+`transport.AuthMiddleware` wraps the mux on every startup. Loopback requests
+(`127.0.0.1`, `::1`, `localhost` — derived proxy-aware via `ClientIP`, which
+honors `X-Forwarded-For`/`X-Forwarded-Proto` only when the immediate peer is
+loopback) bypass auth. Non-loopback requests to protected paths (`/rpc/`,
+`/ws`, `/stream`, `/local-file`, `/plugins`) require a valid session cookie;
+`/healthz` stays public but returns only a minimal `{ok, service}` identity
+to remote callers. Public bootstrap routes (`/pairing/status`,
+`/pairing/exchange`) plus static assets and `/sounds/` are always allowed so
+the pairing page can load.
+
+When remote access is disabled, non-loopback protected requests return
+`REMOTE_ACCESS_DISABLED`; the frontend explains that the host must enable
+Settings → Remote access. When the setting is enabled and a loopback reverse
+proxy or tunnel fronts the core, `ClientIP` trusts
+the **rightmost** `X-Forwarded-For` entry — the address the trusted proxy
+appended for its own TCP peer. Earlier entries are client-supplied and can
+be spoofed (a remote client sending `X-Forwarded-For: 127.0.0.1` must not
+become loopback). The deployment requirement: the loopback proxy MUST append
+or overwrite `X-Forwarded-For` — the nginx
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` / Caddy default
+behavior. A proxy that passes the client header through verbatim breaks the
+trust rule and must not be used.
+
+The host-driven flow: Settings → Remote access enables the feature, persists
+one or more HTTP(S) addresses remote devices can reach, and creates a one-time challenge
+(`pairing.challenge.create`, loopback-only), renders a QR/link client-side,
+and the remote device opens the URL, polls `/pairing/status`, and — after
+host approval — exchanges the challenge at `/pairing/exchange` for a 30-day
+`HttpOnly` `nusashell_session` cookie (Secure over HTTPS, SameSite=Lax;
+MaxAge tracks the session TTL). Codes and tokens are stored only as SHA-256
+hashes in `pairing.db` (created when remote access is enabled, including for
+loopback-bound instances behind a trusted proxy/tunnel).
+Failed exchanges are rate-limited per source and the claim is serialized so
+a challenge can be consumed exactly once. Paired devices are
+listed/revocable via the loopback-only `pairing.sessions.*` RPCs; pairing
+management methods are denied to non-loopback callers (a paired remote gets
+the normal API, not device-management authority), including over WebSocket
+frames, and remote WS upgrades must present a same-origin `Origin`.
+Revocation is atomic and cuts live access: remote WS sessions are
+re-validated per frame plus a periodic watchdog closes idle-listener
+sockets, and remote SSE streams re-check on each ping tick — a revoked
+device loses access within seconds, not just on reconnect. The addresses
+encoded into QR/links are persisted host-typed configuration — they do not
+change where the core listens. One challenge produces one link/QR per
+configured address. Changing the enable toggle restarts the backend
+automatically so startup wiring and transport policy match the persisted
+setting. `app.info` reports the bound `listen_addr` so the Settings UI can
+warn (not block — tunnels/proxies are legitimate) when a link cannot be
+reached, e.g. a LAN address while the listener is loopback-only, or a
+host/port mismatch.
 
 Events are published to an in-memory `application.Bus`; each WS
 connection subscribes. High-volume events may be dropped for a slow

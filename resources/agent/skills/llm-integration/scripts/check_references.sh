@@ -51,6 +51,10 @@ fi
 while IFS= read -r -d '' file; do
   relative="${file#"$skill_dir/"}"
   case "$relative" in
+    # NusaShell-generated skill manifest, written into seeded/installed
+    # copies. Not part of the portable skill contract but tolerated so a
+    # seeded copy validates cleanly. Do not author content here.
+    meta.json) ;;
     SKILL.md|references/*|templates/*|scripts/*|assets/*) ;;
     *)
       printf 'Unsupported skill support path: %s\n' "$relative"

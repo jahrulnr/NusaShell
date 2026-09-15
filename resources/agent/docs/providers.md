@@ -117,12 +117,24 @@ Messages.
 
 ## Streaming completion and request-shape recovery
 
-OpenAI-compatible SSE providers do not all emit the `[DONE]` sentinel. A clean
-EOF after a final choice with `finish_reason` is treated as a completed
-response; the sentinel is a transport convention, not the completion signal.
-A clean EOF without a semantic finish reason remains an incomplete stream and
-is sent through the shared retry policy. Network cuts and idle timeouts follow
-the same policy.
+OpenAI-compatible SSE providers do not all emit the `[DONE]` sentinel, and
+some hold the connection open after the last chunk. NusaShell treats
+`finish_reason` as the completion signal, not the sentinel:
+
+- A final choice with `finish_reason` completes the stream. The `[DONE]`
+  trailer is optional; a clean EOF after it is a normal end of stream.
+- After `finish_reason`, the trailing usage-only chunk (requested via
+  `stream_options.include_usage`) is read as accounting before the stream
+  completes, but it is never required: token accounting is best-effort and
+  is not a condition for the turn to succeed.
+- A provider that holds the connection open without ending the response is
+  disconnected after a bounded drain window (one second) instead of waiting
+  for the idle watchdog, so a completed turn never stalls or retries.
+- Connection errors and resets after `finish_reason` are still completions;
+  only a cut before any `finish_reason` is an incomplete stream and goes
+  through the shared retry policy.
+- `finish_reason: "error"` and provider error payloads inside the SSE body
+  are failures, not empty successful responses.
 
 Some Claude 4.6-compatible gateways reject an assistant prefill when the last
 request message has role `assistant`, returning a 400 that says the
@@ -317,10 +329,11 @@ Model IDs may be written as `gemini-2.5-flash`, `models/gemini-2.5-flash`, or
 `gemini/gemini-2.5-flash`; the prefix is stripped because the operation path
 already carries the `models` collection. **Import models** lists
 `GET /v1beta/models` (paginated through `nextPageToken`, capped at ten pages)
-and keeps only entries whose `supportedGenerationMethods` include
-`generateContent` **and** whose model ID is not an image, TTS, or embedding
-variant (e.g. `gemini-3.1-flash-lite-image`), so embedding, image, TTS, and
-media-only models never reach the chat picker.
+and keeps every entry whose `supportedGenerationMethods` includes
+`generateContent`. Image and TTS models that also advertise `generateContent`
+(e.g. `gemini-3.1-flash-lite-image`, `gemini-2.5-flash-tts`) are kept and
+tagged by kind downstream — the chat picker filters by kind, so they never
+appear as chat models.
 
 **Thinking.** `thinkingConfig` is filled from the composer's effort control:
 
@@ -375,10 +388,172 @@ as `inlineData`; Files API URIs, `gs://` URIs, and public media URLs pass
 through as `fileData`. Audio input uses `inlineData` with the normalized
 `audio/*` type.
 
-The `gemini` kind intentionally has **no** chat TTL chip, embedding endpoint,
-image endpoint, TTS, or video endpoint: those capabilities come from the
-OpenAI-compatible kinds. `Test connection` on a Gemini card lists
-`GET /v1beta/models`, so the probe costs nothing.
+**Image generation.** Gemini image models (the Nano Banana family:
+`gemini-3-pro-image`, `gemini-3.1-flash-image`, `gemini-3.1-flash-lite-image`,
+legacy `gemini-2.5-flash-image`, and the preview alias
+`nano-banana-pro-preview`) generate images through `generateContent` with
+`responseModalities: ["TEXT", "IMAGE"]` — not an OpenAI `/images` endpoint.
+`generate_image` and `generate_media(media_type=image)` route to this surface
+when the configured image model belongs to a `gemini` kind provider. Image
+bytes are decoded from `candidates[].content.parts[].inlineData` (base64
+`data` + `mimeType`).
+
+```text
+# GOOD — generateContent with responseModalities
+POST {base}/v1beta/models/gemini-3-pro-image:generateContent
+{
+  "contents": [{"role": "user", "parts": [{"text": "a watercolor otter"}]}],
+  "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}
+}
+
+# GOOD — image-to-image edit: inlineData reference + text prompt in one turn
+{
+  "contents": [{"role": "user", "parts": [
+    {"inlineData": {"mimeType": "image/png", "data": "<base64>"}},
+    {"text": "make it night"}
+  ]}],
+  "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}
+}
+
+# BAD — the Gemini wire is not the OpenAI Images shape
+POST {base}/v1beta/images/generations   (use a chat/responses kind provider instead)
+
+# BAD — v1beta2 is 404 live on generateContent; use v1beta
+POST {base}/v1beta2/models/gemini-3-pro-image:generateContent   (404)
+```
+
+The Nano Banana family accepts reference images for editing
+(image-to-image): pass `referenced_image_paths` to `generate_image` and the
+images are sent as `inlineData` parts in the same user turn. These models are
+tagged `Vision: true` at import and read time so the image-to-image media
+gate does not block edits. `imagen-*` is text-to-image only and is not
+tagged i2i.
+
+The `size` option from `generate_image` (`1024x1024`, `1536x1024`,
+`1024x1536`) is mapped to `generationConfig.imageConfig.aspectRatio`
+(`1:1`, `3:2`, `2:3` respectively); `auto` omits the field so the model
+picks the default. Explicit pixel size (`1K`/`2K`), `quality`, and
+`background` are not supported on this `generateContent` surface — they are
+accepted by the tool but ignored by the Gemini backend.
+
+`gemini-*-image-preview`-style ids (e.g. `gemini-3.0-pro-image-preview`) are
+not classified as image models by the name allowlist — the canonical ids are
+`gemini-3-pro-image` etc. and the AI Studio alias `nano-banana-pro-preview`.
+If a future key lists a `-image-preview` id it will surface as a chat model
+until the pattern is widened.
+
+The `gemini` kind has **no** chat TTL chip or embedding endpoint. It does
+have an image endpoint (the generateContent surface above), a video endpoint
+(the Veo `:predictLongRunning` surface below), and a TTS endpoint (the
+generateContent AUDIO surface below). `Test connection` on a Gemini card
+lists `GET /v1beta/models`, so the probe costs nothing.
+
+**Video generation (Veo).** Gemini video models (the Veo family:
+`veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview`,
+`veo-3.1-lite-generate-preview`, `veo-3.0-generate-001`,
+`veo-3.0-fast-generate-001`) generate videos through the
+`:predictLongRunning` long-running operation surface — not an OpenAI
+`/videos` endpoint and not the Interactions API. `generate_video` and
+`generate_media(media_type=video)` route to this surface when the
+configured video model belongs to a `gemini` kind provider.
+
+```text
+# GOOD — :predictLongRunning submit, poll, download
+POST {base}/v1beta/models/veo-3.1-generate-preview:predictLongRunning
+{
+  "instances": [{"prompt": "A cinematic shot of a lion in the savannah."}],
+  "parameters": {"durationSeconds": "8", "resolution": "720p"}
+}
+# Response: {"name": "operations/..."}  ← capture .name as the poll handle
+
+GET  {base}/{operation_name}           ← poll until "done": true
+# Success: .response.generateVideoResponse.generatedSamples[0].video.uri
+
+GET  {video_uri}                        ← download with x-goog-api-key, follow redirects
+
+# BAD — the Veo wire is not the OpenAI /videos shape
+POST {base}/v1beta/videos              (use a chat/responses kind provider instead)
+
+# BAD — v1beta2 is 404 live on Veo; use v1beta
+POST {base}/v1beta2/models/veo-3.1-generate-preview:predictLongRunning   (404)
+```
+
+`durationSeconds` accepts `"4"`, `"6"`, `"8"` and **must** be `"8"` for
+1080p/4K, reference images, or video extension. `resolution` accepts
+`"720p"` (default), `"1080p"`, `"4k"` (4K is not on Lite). The tool's
+`480p` has no Veo equivalent — it is omitted so Veo defaults to 720p
+rather than rejecting the request. Image-to-video sends the first
+reference as `instances[0].image` (inlineData starting frame); additional
+references become `referenceImages` with `referenceType: "asset"` (Veo
+3.1 only). Provider minimums (e.g. "durationSeconds must be 8 for 1080p")
+are surfaced verbatim on rejection.
+
+Generated videos are stored on the server for **2 days** only — download
+within that window or lose the artifact. All Veo videos carry a SynthID
+watermark. EU/UK/CH/MENA regions force `personGeneration: allow_adult`
+(not exposed by this tool). The operation may return `done: true` with an
+`error` block instead of a `response` — both are inspected before
+assuming success.
+
+`gemini-omni-*` ids appear in the Gemini model list but are **not**
+classified as video models: the `:predictLongRunning` surface is
+documented for `veo-*` only, and the omni family is not confirmed to be
+served by that endpoint. They surface as chat models until the wire
+contract is verified.
+
+**Speech generation (TTS).** Gemini TTS models (`gemini-3.1-flash-tts-preview`,
+`gemini-2.5-flash-preview-tts`, `gemini-2.5-pro-preview-tts`) synthesize
+speech through `generateContent` with `responseModalities: ["AUDIO"]` +
+`speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName` (single-speaker) —
+not an OpenAI `/audio/speech` endpoint. `generate_speech` and
+`generate_media(media_type=speech)` route to this surface when the
+configured TTS model belongs to a `gemini` kind provider. Audio is decoded
+from `candidates[].content.parts[].inlineData` (base64 `data` + `mimeType`).
+
+```text
+# GOOD — generateContent with responseModalities AUDIO + speechConfig
+POST {base}/v1beta/models/gemini-3.1-flash-tts-preview:generateContent
+{
+  "contents": [{"role": "user", "parts": [{"text": "Say cheerfully: hello."}]}],
+  "generationConfig": {
+    "responseModalities": ["AUDIO"],
+    "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Kore"}}}
+  }
+}
+
+# GOOD — decode inlineData (base64 PCM) → wrap into WAV
+# candidates[0].content.parts[0].inlineData.mimeType = "audio/L16;rate=24000"
+# candidates[0].content.parts[0].inlineData.data = "<base64 PCM>"
+
+# BAD — the Gemini TTS wire is not the OpenAI /audio/speech shape
+POST {base}/v1beta/audio/speech   (use a chat/responses kind provider instead)
+
+# BAD — v1beta2 is 404 live on generateContent; use v1beta
+POST {base}/v1beta2/models/gemini-3.1-flash-tts-preview:generateContent   (404)
+
+# BAD — using a text (non-TTS) model with responseModalities ["AUDIO"] → 400
+POST {base}/v1beta/models/gemini-2.5-flash:generateContent   (400 Invalid value)
+```
+
+The inlineData MIME is PCM-family (`audio/L16;rate=24000`, 16-bit, mono by
+default). The raw PCM is wrapped into a WAV container so the persisted
+artifact is playable. The tool's `mp3` and `opus` formats are **not**
+produced by this surface — the artifact is always WAV regardless of the
+requested format (documented deviation; never label PCM as mp3). `speed`
+has no Gemini TTS equivalent and is ignored on this surface (mirroring how
+the image run documented size limitations).
+
+The default voice when none is specified is **`Kore`** (the documented
+runtime default). Gemini TTS exposes 30 prebuilt voices; the full table is
+in the bundled skill reference (`resources/agent/skills/llm-integration/references/gemini/tts.md`).
+
+Multi-speaker (a `speechConfig` voice array, up to 2 speakers) is not wired
+in this run — only single-speaker `prebuiltVoiceConfig` is supported.
+
+Streaming TTS (3.1+) requires `"stream": true` + the
+`Api-Revision: 2026-05-20` header; this surface uses the non-streaming
+`generateContent` path. TTS may be billable, so 429 responses are surfaced
+as hard failures (not retried); 5xx stay retriable for the caller's policy.
 
 ## API keys
 
@@ -543,6 +718,8 @@ URL and Args/Env are ignored.
   never the default — promote it from the live subagent UI.
   `edit_confirmed` auto-allows workspace-contained edits; slash-rooted
   paths are absolute (even on Windows) and prompt instead of auto-allow.
+  `bypass` on a live local-stdio run may read/write absolute host paths via
+  FS callbacks; remote ACP cannot use that escape at any tier.
 - Env values stay in `config/acp-agents.json`. List/get RPC returns **keys only**.
 
 The parent agent spawns these binaries with `subagent` (optional `count` for

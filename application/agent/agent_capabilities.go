@@ -191,7 +191,14 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 			if content == "" && m.Reasoning == "" && len(m.ToolCalls) == 0 && len(m.ReasoningExtra) == 0 {
 				continue
 			}
-			cm := ChatMessage{Role: "assistant", Content: content, Reasoning: m.Reasoning, ToolCalls: m.ToolCalls}
+			reasoning := m.Reasoning
+			// Hydration reasoning is synthetic context for providers that
+			// require reasoning replay. Keep it out of ordinary Chat/Anthropic
+			// requests, where it would be mistaken for model-generated thinking.
+			if domain.IsHydrationMessage(m) && !caps.ReasoningReplay {
+				reasoning = ""
+			}
+			cm := ChatMessage{Role: "assistant", Content: content, Reasoning: reasoning, ToolCalls: m.ToolCalls}
 			if len(m.ReasoningExtra) > 0 {
 				cm.ReasoningExtra = append(json.RawMessage(nil), m.ReasoningExtra...)
 			}

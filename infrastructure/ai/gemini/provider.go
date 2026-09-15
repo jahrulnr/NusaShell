@@ -85,8 +85,10 @@ func (p *Provider) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 	return newStream(resp, req, warnings), nil
 }
 
-// ListModels returns the models the API exposes for generateContent, dropping
-// embedding, image, and video-only entries so the chat picker stays clean.
+// ListModels returns the models the API exposes for generateContent. Media
+// models (image, TTS) that also advertise generateContent are kept so the
+// import path can classify them by kind; the chat picker filters by kind
+// downstream, so they never appear as chat models.
 func (p *Provider) ListModels(ctx context.Context) ([]core.ModelInfo, error) {
 	var out []core.ModelInfo
 	pageToken := ""
@@ -119,7 +121,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]core.ModelInfo, error) {
 			if id == "" {
 				continue
 			}
-			if !supportsGenerateContent(item.SupportedGenerationMethods) || !isChatModelID(id) {
+			if !supportsGenerateContent(item.SupportedGenerationMethods) {
 				continue
 			}
 			out = append(out, core.ModelInfo{
@@ -151,24 +153,6 @@ func supportsGenerateContent(methods []string) bool {
 		}
 	}
 	return false
-}
-
-// isChatModelID excludes model IDs that are not chat models even though they
-// expose generateContent. Image generation, TTS, and embedding variants
-// advertise generateContent but serve media or embeddings, not chat, so they
-// are filtered from the chat picker by their final path segment.
-func isChatModelID(id string) bool {
-	segment := id
-	if idx := strings.LastIndexByte(segment, '/'); idx >= 0 {
-		segment = segment[idx+1:]
-	}
-	segment = strings.ToLower(segment)
-	for _, keyword := range []string{"image", "tts", "embedding"} {
-		if strings.Contains(segment, keyword) {
-			return false
-		}
-	}
-	return true
 }
 
 func firstNonEmpty(values ...string) string {

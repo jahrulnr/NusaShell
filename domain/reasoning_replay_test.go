@@ -26,6 +26,7 @@ func TestRequiresReasoningReplay(t *testing.T) {
 		{"deepseek-r1 pattern", "openrouter", "deepseek-r1", "", true},
 		{"deepseek-reasoner pattern", "openrouter", "deepseek-reasoner", "", true},
 		{"deepseek-v4-flash pattern", "openrouter", "deepseek-v4-flash", "", true},
+		{"deepseek-v4.1-flash pattern", "prov_opencode", "deepseek-v4.1-flash", "", true},
 		{"kimi pattern", "openrouter", "kimi/k2.6", "", true},
 		{"qwq pattern", "openrouter", "qwq-32b", "", true},
 		{"qwen think pattern", "openrouter", "qwen3-think-30b", "", true},

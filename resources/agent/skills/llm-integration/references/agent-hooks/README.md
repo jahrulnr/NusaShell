@@ -288,4 +288,4 @@ Official references:
   trustworthy even when it is fetched successfully.
 
 For the concise API-level hook contract and cross-provider checklist, read
-[the shared hooks reference](../_shared/hooks.md).
+[the shared hooks reference](../shared/hooks.md).

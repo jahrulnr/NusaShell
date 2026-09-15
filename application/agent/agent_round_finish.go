@@ -167,7 +167,13 @@ func (a *Service) finishTurn(run *TurnRun, messageID, model string, usage ChatUs
 	// Pipeline agent steps are unattended automation, not user rooms.
 	if !run.Headless {
 		a.recordExperience(conversation, false)
-		a.maybeAnnounceTaskMemory(run.ConversationID, conversation)
+		// Kick the async semantic lane for task-memory announcement. The
+		// lane resolves the embedder, checks the breaker, and runs a
+		// cache-aware embedding search. Results are published to the
+		// conversation's pending queue (idle-tolerant, safe to be late).
+		if a.deps.PrefetchTaskMemorySemantic != nil {
+			a.deps.PrefetchTaskMemorySemantic(conversation)
+		}
 	}
 
 	return nil

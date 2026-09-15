@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-09-15
+
+### Fixed
+
+- **ACP bypass outside-workspace access.** Explicitly promoted `bypass`/`yolo`
+  sessions on local stdio ACP agents can now read and write absolute host
+  paths through filesystem callbacks. Lower permission tiers, remote agents,
+  unknown sessions, and terminal runs remain contained and fail closed; path
+  resolution stays canonical and symlink-aware.
+- **Subagent summary truncation.** Increased the shared bounded inline result
+  limit to 16,000 runes with UTF-8-safe truncation across asynchronous
+  completion and `subagent_wait`/`subagent_stop`/`subagent_steer` paths. Full
+  transcripts and raw tool output remain available from the persisted output
+  path.
+- **Internal delegate TODO continuity.** Internal delegates now receive
+  actionable TODO guidance and a compact parent-plan handoff. Auto-followup
+  turns also receive the current open checklist through a hidden `todo_list`
+  hydration state after the continuation announcement.
+
 ## [0.8.1] - 2026-09-13
 
 ### Added

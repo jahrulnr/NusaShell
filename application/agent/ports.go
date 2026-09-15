@@ -205,7 +205,12 @@ type Deps struct {
 	DelegateSnapshot        DelegateSnapshot
 	DecorateRateLimit       func(providerID string, err error) error
 	RecordExperience        func(conv *domain.Conversation, headless bool)
-	MaybeAnnounceTaskMemory func(conversationID string, conversation *domain.Conversation)
+	MaybeAnnounceTaskMemory func(conversation *domain.Conversation)
+	// PrefetchTaskMemorySemantic kicks an async background job that runs
+	// the embedding-based semantic channel for task-memory announcement.
+	// Called from finishTurn on the interactive (non-headless) path. The
+	// queue is idle-tolerant, so a late publish is safe.
+	PrefetchTaskMemorySemantic func(conversation *domain.Conversation)
 
 	// PrepareTurnAPIKey optionally remaps the credential used for this turn
 	// (e.g. sticky multi-account selection). A non-nil error fails the turn

@@ -166,3 +166,8 @@ Path layout:
 
 Each directory contains `SKILL.md`, `meta.json`, `versions/<n>/SKILL.md`,
 and optional `references/`, `scripts/`, `templates/`, `examples/`.
+Support path components must never start with `.` or `_` (write
+`references/shared/`, not `references/_shared/`): Go's `//go:embed` silently
+drops those paths, so the file exists in the repo but never reaches the
+binary or the seeded copy. `make skill-check` and
+`resources/builtin_skills_embed_test.go` enforce this.

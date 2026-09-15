@@ -42,5 +42,5 @@ Same as the skill's cross-provider rules: retry 408/429/5xx/network only; cap
 
 ## Related
 
-Provider differences → `../references/_shared/provider-matrix.md`.
+Provider differences → `../references/shared/provider-matrix.md`.
 OpenAI tier limits → `../references/openai/errors.md`.

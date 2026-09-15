@@ -1,6 +1,6 @@
 // Automation workspace: workflows, runs, schedules, events.
 
-import { rpc, on } from '../rpc.js';
+import { rpc, on, isPairingRequiredError } from '../rpc.js';
 import { bindTablistKeyboard, el, toast, dialog, confirmDialog } from '../ui.js';
 
 const state = {
@@ -45,7 +45,9 @@ export async function refresh() {
     state.schedules = schedules || [];
     state.events = events || [];
   } catch (err) {
-    toast(err.message || 'Automation RPC failed', 'error');
+    // PAIRING_REQUIRED is an expected state while the pairing gate owns the
+    // screen — do not stack a toast behind it. Genuine errors still toast.
+    if (!isPairingRequiredError(err)) toast(err.message || 'Automation RPC failed', 'error');
     return;
   }
   renderStats();

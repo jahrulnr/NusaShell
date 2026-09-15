@@ -20,6 +20,7 @@ func TestHealthzReturnsCoreIdentity(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.RemoteAddr = "127.0.0.1:4321"
 	res := httptest.NewRecorder()
 	srv.Routes().ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
@@ -40,5 +41,41 @@ func TestHealthzReturnsCoreIdentity(t *testing.T) {
 	}
 	if !got.OK || got.Service != "nusashell-core" || got.PID != 123 || got.Port != 10994 || got.Version != "test" || got.Owner != "systemd" || !got.StartedAt.Equal(started) {
 		t.Fatalf("health = %+v", got)
+	}
+}
+
+// TestHealthz_RemoteMinimalIdentity verifies that a non-loopback caller gets
+// only the minimal {ok, service} identity — the full process identity (PID,
+// port, version, owner, started-at) must not leak to unpaired remotes even
+// though /healthz is a public path.
+func TestHealthz_RemoteMinimalIdentity(t *testing.T) {
+	started := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	srv := NewWithIdentity(nil, slog.Default(), http.NotFoundHandler(), false, CoreIdentity{
+		PID:       123,
+		Port:      10994,
+		Version:   "test",
+		Owner:     "systemd",
+		StartedAt: started,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.RemoteAddr = "203.0.113.7:4321"
+	res := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.Code)
+	}
+
+	var got map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["ok"] != true || got["service"] != "nusashell-core" {
+		t.Fatalf("minimal health = %+v", got)
+	}
+	for _, k := range []string{"pid", "port", "version", "owner", "started_at"} {
+		if _, present := got[k]; present {
+			t.Fatalf("remote health leaked %q: %+v", k, got)
+		}
 	}
 }

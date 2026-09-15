@@ -273,12 +273,13 @@ func (a *App) agentDeps() agent.Deps {
 		SkillCreatorRef: func() (string, string) {
 			return a.learnService().LearnerSkillCreatorReference()
 		},
-		DelegateSnapshot:        a.delegateRunSnapshot,
-		DecorateRateLimit:       a.decorateRateLimitError,
-		RecordExperience:        a.recordExperience,
-		MaybeAnnounceTaskMemory: a.maybeAnnounceTaskMemory,
-		PrepareTurnAPIKey:       a.prepareCodexTurnAPIKey,
-		FailoverOnStreamError:   a.failoverCodexOnStreamError,
+		DelegateSnapshot:           a.delegateRunSnapshot,
+		DecorateRateLimit:          a.decorateRateLimitError,
+		RecordExperience:           a.recordExperience,
+		MaybeAnnounceTaskMemory:    a.maybeAnnounceTaskMemory,
+		PrefetchTaskMemorySemantic: a.prefetchTaskMemorySemantic,
+		PrepareTurnAPIKey:          a.prepareCodexTurnAPIKey,
+		FailoverOnStreamError:      a.failoverCodexOnStreamError,
 	}
 }
 

@@ -138,7 +138,8 @@ func promptCachePrefixForRun(run *TurnRun) string {
 }
 
 // buildHydrationDomainMessages converts synthetic hydration ChatMessages
-// into a single persisted assistant message with tool outputs attached.
+// into a single persisted assistant message with reasoning and tool outputs
+// attached.
 func buildHydrationDomainMessages(msgs []ChatMessage) []domain.Message {
 	built := make([]domain.Message, 0, len(msgs))
 	var hyd *domain.Message
@@ -147,6 +148,7 @@ func buildHydrationDomainMessages(msgs []ChatMessage) []domain.Message {
 			hyd = &domain.Message{
 				ID:        domain.NewID(domain.IDPrefixMsg),
 				Role:      domain.RoleAssistant,
+				Reasoning: m.Reasoning,
 				ToolCalls: m.ToolCalls,
 				Status:    domain.StatusDone,
 				CreatedAt: clock.NewTime().Time(),
