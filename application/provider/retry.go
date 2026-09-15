@@ -72,22 +72,19 @@ func isContextOverflowError(err error) bool {
 	if !errors.As(err, &upstream) {
 		return false
 	}
-	if upstream.StatusCode != 400 {
+	// Responses-style providers may deliver a request-shape rejection as an
+	// SSE `error` event, so the mapped ProviderError has no HTTP status. Keep
+	// rejecting unrelated non-400 HTTP failures while allowing that transport
+	// form through the same overflow classifier.
+	if upstream.StatusCode != 0 && upstream.StatusCode != 400 {
 		return false
 	}
 	body := ""
 	if upstream.Err != nil {
 		body = strings.ToLower(upstream.Err.Error())
 	}
-	for _, phrase := range contextOverflowPhrases {
-		if strings.Contains(body, phrase) {
-			return true
-		}
-	}
-	return false
+	return domain.IsContextOverflowFailure(body)
 }
-
-var contextOverflowPhrases = domain.ContextOverflowPhrases
 
 func contextLimitFromError(err error) (int, bool) {
 	var upstream *domain.ProviderError

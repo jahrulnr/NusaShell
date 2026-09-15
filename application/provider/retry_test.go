@@ -236,6 +236,24 @@ func TestShouldEmergencyCompact(t *testing.T) {
 	}
 }
 
+func TestShouldEmergencyCompactCodexSSEContextOverflow(t *testing.T) {
+	err := &domain.ProviderError{
+		Kind:      domain.KindSSETransport,
+		Temporary: true,
+		Err:       errors.New("codex: stream error: Your input exceeds the context window of this model. Please adjust your input and try again."),
+	}
+
+	if !isContextOverflowError(err) {
+		t.Fatal("Codex SSE context-window error must be classified as overflow")
+	}
+	if isRetryableProviderError(err) {
+		t.Fatal("Codex SSE context-window error must not burn the normal retry budget")
+	}
+	if !shouldEmergencyCompact(err, 900_000, 700_000) {
+		t.Fatal("Codex SSE context-window error must trigger emergency compaction")
+	}
+}
+
 func TestContextLimitFromError(t *testing.T) {
 	overflow := &domain.ProviderError{
 		Kind:       domain.KindHTTPStatus,

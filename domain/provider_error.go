@@ -76,6 +76,9 @@ func (e *ProviderError) CanAutoRetry() bool {
 	if IsStructuralTPMFailure(body) || IsPermanentProviderFailure(e.StatusCode, body) {
 		return false
 	}
+	if IsContextOverflowFailure(body) {
+		return false
+	}
 	if e.RetryAfter > RetryAfterCutoff {
 		return false
 	}

@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-//go:embed agent/prompts/*.md agent/prompts/user/*.md
+//go:embed agent/prompts/*.md agent/prompts/user/*.md agent/prompts/tool/*.md
 var PromptsFS embed.FS
 
 //go:embed agent/docs/*.md
@@ -135,6 +135,17 @@ func UserPrompt(name string) string {
 		name += ".md"
 	}
 	data, err := PromptsFS.ReadFile("agent/prompts/user/" + name)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func ToolPrompt(name string) string {
+	if len(name) < 3 || name[len(name)-3:] != ".md" {
+		name += ".md"
+	}
+	data, err := PromptsFS.ReadFile("agent/prompts/tool/" + name)
 	if err != nil {
 		return ""
 	}

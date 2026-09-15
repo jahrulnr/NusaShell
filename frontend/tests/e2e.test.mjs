@@ -60,8 +60,7 @@ test('compaction triggers and renders a marker when conversation exceeds thresho
   });
 
   try {
-    // Seed history with compaction disabled, then enable with small context.
-    await rpcModule.rpc('settings.set', { compaction_enabled: false });
+    // Seed history, then set a small context window.
 
     // Create a conversation.
     window.location.hash = '#agent';
@@ -87,9 +86,9 @@ test('compaction triggers and renders a marker when conversation exceeds thresho
       }, `turn ${i + 1} done`, 15000);
     }
 
-    // Enable compaction with a small context window (trigger = 800 tokens).
+    // Set a small context window (trigger = 800 tokens).
     // The seeded history (~4000 tokens) is well above the trigger.
-    await rpcModule.rpc('settings.set', { max_input_tokens: 1000, compaction_enabled: true });
+    await rpcModule.rpc('settings.set', { max_input_tokens: 1000 });
 
     // Set the compaction summary response.
     llm.setComplete(LONG_COMPACTION_SUMMARY);
@@ -443,8 +442,6 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     await writeFile(join(dataDir, 'memory', 'user.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [frag_test] User is testing compaction hydration.\n');
     await writeFile(join(dataDir, 'memory', 'soul.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [soul_test] Soul survives compaction hydration.\n');
 
-    // Disable compaction while seeding history.
-    await rpcModule.rpc('settings.set', { compaction_enabled: false });
 
     // Create a conversation.
     window.location.hash = '#agent';
@@ -474,9 +471,9 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     // Clear captured requests so we only inspect the post-compaction turn.
     llm.requests().length = 0;
 
-    // Enable compaction with a small context window (trigger = 800 tokens).
+    // Set a small context window (trigger = 800 tokens).
     // The seeded history (~4000 tokens) is well above the trigger.
-    await rpcModule.rpc('settings.set', { max_input_tokens: 1000, compaction_enabled: true });
+    await rpcModule.rpc('settings.set', { max_input_tokens: 1000 });
 
     // Set the compaction summary response (non-streaming).
     llm.setComplete(LONG_COMPACTION_SUMMARY);

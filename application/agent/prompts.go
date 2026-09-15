@@ -101,7 +101,7 @@ func buildSystemPromptForRun(run *TurnRun, c *domain.Conversation, userPrompt st
 	return sb.String()
 }
 
-var subagentDelegationPrompt = resources.Prompt("subagent-delegation")
+var subagentDelegationPrompt = resources.ToolPrompt("subagent-delegation")
 
 // AcpDelegationDescription renders the subagent delegation guidance with
 // the enabled agent list filled in. It is attached to the `subagent` tool

@@ -97,6 +97,24 @@ func TestPrepareCodexTurnAPIKeyHonorsConversationAccountPin(t *testing.T) {
 	}
 }
 
+func TestPrepareCodexTurnAPIKeyDoesNotDropConversationPinWithoutRouter(t *testing.T) {
+	conversation := &domain.Conversation{ID: "room-plus", ProviderRoute: "plus"}
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{conversation.ID: conversation}},
+		Credentials: &fakeVisionCredStore{creds: map[string]string{
+			accountKey("codex", "plus"): "plus-token",
+		}},
+	}
+
+	got, err := app.prepareCodexTurnAPIKey(conversation.ID, &domain.Provider{ID: "codex", Kind: domain.ProviderCodex}, "active-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "plus-token" {
+		t.Fatalf("token = %q, want selected Plus account even without router", got)
+	}
+}
+
 func TestHandleProvidersDeleteRemovesAccountCredentials(t *testing.T) {
 	provs := &fakeProviderStore{items: map[string]*domain.Provider{
 		"prov": {ID: "prov", Kind: domain.ProviderCodex, Name: "Codex"},

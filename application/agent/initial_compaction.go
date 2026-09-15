@@ -17,7 +17,7 @@ func (a *Service) maybeCompactInitialTurn(run *TurnRun, adapter ProviderContext,
 	trigger := domain.CompactionTriggerTokens(contextWindow, maxTokens, settings)
 	request := a.buildTurnRequest(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, nil, maxTokens, promptCache, caps)
 	beforeTokens := a.estimateTurnRequest(request, conversation, adapter)
-	if !settings.CompactionEnabled || beforeTokens <= int64(trigger) {
+	if beforeTokens <= int64(trigger) {
 		return conversation, nil
 	}
 

@@ -233,6 +233,15 @@ test('Thinking and tool markers stay quiet without a continuous transcript rail'
   assert.match(agentCSS, /\.agent-tool-event-head \{[^}]*display: flex;/s);
 });
 
+test('ACP terminal cards give tool input disclosure a deliberate inspector treatment', () => {
+  assert.match(subagentsView, /aria-label', 'Show full tool input'/);
+  assert.match(agentRender, /text: 'Show request & raw output'/);
+  assert.match(agentToolsCSS, /\.acp-tool-kind\s*\{/);
+  assert.match(agentToolsCSS, /\.acp-terminal-card \.agent-tool-request\[aria-expanded="false"\]/);
+  assert.match(agentToolsCSS, /\.acp-terminal-card \.agent-tool-request\[aria-expanded="true"\]\s*\{/);
+  assert.match(agentToolsCSS, /\.acp-terminal-card \.agent-tool-request:focus-visible/);
+});
+
 test('Expanded Thinking is capped to twenty lines and scrolls internally', () => {
   const reasoningBody = agentCSS.slice(
     agentCSS.indexOf('.agent-reasoning-content {'),

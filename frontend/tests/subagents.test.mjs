@@ -10,6 +10,7 @@ import {
   getSubagentFollow,
   applySubagentFollowIntent,
   resetSubagentFollowForTests,
+  renderRunSidebar,
 } from '../js/views/agent/subagents.js';
 
 const acpCSS = await readFile(new URL('../styles/acp.css', import.meta.url), 'utf8');
@@ -45,6 +46,26 @@ test('ACP runs are ordered newest first, including legacy records without timest
     ordered.map((run) => run.id),
     ['new', 'old', 'legacy-b', 'legacy-a'],
   );
+});
+
+test('ACP run sidebar removes the empty marker when a room gains runs', () => {
+  const dom = new JSDOM('<!doctype html><html><body><aside class="acp-run-sidebar"><span class="acp-run-count"></span><div class="acp-run-list"></div></aside></body></html>');
+  global.window = dom.window;
+  global.document = dom.window.document;
+  try {
+    const list = document.querySelector('.acp-run-list');
+    renderRunSidebar(list, [], '');
+    assert.ok(list.querySelector('.agent-conversation-empty'));
+
+    renderRunSidebar(list, [{ id: 'run-1', title: 'Research', status: 'completed', workspace: '/tmp/project' }], 'run-1');
+
+    assert.equal(list.querySelector('.agent-conversation-empty'), null);
+    assert.equal(list.querySelectorAll('[data-run-id]').length, 1);
+    assert.equal(document.querySelector('.acp-run-count').textContent, '1 run');
+  } finally {
+    dom.window.close();
+    cleanup();
+  }
 });
 
 test('Subagent transcript updates a growing chunk in place', () => {

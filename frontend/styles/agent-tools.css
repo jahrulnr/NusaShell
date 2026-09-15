@@ -124,6 +124,129 @@ details.agent-tool-event[data-tool].is-error {
   white-space: nowrap;
 }
 
+/* ---- ACP transcript inspector ----
+ * ACP tool rows are dense execution history, not full-size tool cards. Keep
+ * the chrome quiet, give the terminal kind a real badge, and make the raw
+ * input control behave like a disclosure instead of a disabled text field.
+ */
+.acp-terminal-card .agent-tool-event-head {
+  min-height: 30px;
+  padding: 4px 9px 4px 4px;
+}
+.acp-terminal-card .agent-tool-event-node {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+.acp-terminal-card .acp-tool-kind {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-height: 16px;
+  padding: 2px 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: rgba(102, 169, 207, .08);
+  color: var(--text-faint);
+  font: 8px/1 var(--font-mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.acp-terminal-card .agent-tool-event-title {
+  max-width: 11rem;
+  font-size: 11px;
+}
+.acp-terminal-card .agent-tool-event-head-summary {
+  color: var(--text-faint);
+  font-size: 9px;
+}
+.acp-terminal-card .agent-tool-event-body {
+  gap: 6px;
+  padding: 6px 10px 10px 34px;
+}
+.acp-terminal-card .agent-tool-request[aria-expanded="false"] {
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 28px;
+  padding: 6px 28px 6px 9px;
+  border: 1px solid var(--border-soft);
+  border-inline-start: 2px solid var(--agent-tool-accent-border);
+  border-radius: 6px;
+  background: rgba(7, 16, 21, .62);
+  color: var(--text-dim);
+  cursor: pointer;
+  font: 9.5px/1.35 var(--font-mono);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  appearance: none;
+}
+.acp-terminal-card .agent-tool-request[aria-expanded="false"]::after,
+.acp-terminal-card .agent-tool-request[aria-expanded="true"]::after {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  color: var(--text-faint);
+  content: "⌄";
+  font: 11px/1 var(--font-body);
+  transform: translateY(-50%);
+  transition: transform .15s ease, color .15s ease;
+}
+.acp-terminal-card .agent-tool-request[aria-expanded="true"] {
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 190px;
+  padding: 7px 28px 8px 9px;
+  border: 1px solid var(--accent-border);
+  border-inline-start: 2px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(7, 16, 21, .82);
+  color: var(--text);
+  cursor: pointer;
+  font: 9.5px/1.45 var(--font-mono);
+  text-align: left;
+  white-space: pre-wrap;
+  overflow: auto;
+  appearance: none;
+}
+.acp-terminal-card .agent-tool-request[aria-expanded="true"]::after {
+  color: var(--accent);
+  transform: translateY(-50%) rotate(180deg);
+}
+.acp-terminal-card .agent-tool-request:hover,
+.acp-terminal-card .agent-tool-request:hover::after {
+  color: var(--text);
+}
+.acp-terminal-card .agent-tool-request:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.acp-terminal-card .agent-tool-event-result {
+  border-radius: 6px;
+  background: rgba(8, 16, 19, .58);
+}
+.acp-terminal-card .agent-tool-event-summary-text {
+  padding: 5px 8px;
+  color: var(--text-faint);
+  font-size: 9px;
+}
+.acp-terminal-card .agent-tool-raw {
+  border-color: rgba(38, 59, 66, .72);
+  background: rgba(8, 12, 14, .34);
+}
+.acp-terminal-card .agent-tool-raw summary {
+  padding: 5px 8px;
+  color: var(--text-faint);
+}
+@media (max-width: 600px) {
+  .acp-terminal-card .agent-tool-event-title { max-width: 8rem; }
+  .acp-terminal-card .agent-tool-event-body { padding-left: 30px; }
+}
+
 /* ---- canonical result hook ---- */
 .agent-tool-event .agent-tool-result {
   min-width: 0;

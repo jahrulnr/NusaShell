@@ -66,7 +66,6 @@ func TestResolveMaxOutputCapsAtSettings(t *testing.T) {
 // max_input_tokens/max_output_tokens existed get the factory defaults.
 func TestNormalizeSettingsFillsMaxTokenDefaults(t *testing.T) {
 	old := domain.Settings{
-		CompactionEnabled:   true,
 		CompactionThreshold: 40000,
 		PromptCaching:       true,
 		MaxToolRounds:       8,

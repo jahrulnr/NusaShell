@@ -210,7 +210,6 @@ export async function refresh() {
 
   if (settingsResult.status === 'fulfilled') {
     const { settings } = settingsResult.value;
-    document.getElementById('settings-compaction-enabled').checked = settings.compaction_enabled !== false;
     compactionWorkflowSelect.setSelected([settings.compaction_workflow === 'reuse' ? 'reuse' : 'dedicated']);
     document.getElementById('settings-prompt-caching').checked = settings.prompt_caching === true;
     document.getElementById('settings-sound-notifications').checked = settings.sound_notifications !== false;
@@ -895,7 +894,6 @@ async function save() {
     const webSearchSerperAPIKey = document.getElementById('settings-web-search-serper-api-key')?.value?.trim() ?? '';
     const webSearchTavilyAPIKey = document.getElementById('settings-web-search-tavily-api-key')?.value?.trim() ?? '';
     await rpc('settings.set', {
-      compaction_enabled: document.getElementById('settings-compaction-enabled').checked,
       prompt_caching: document.getElementById('settings-prompt-caching').checked,
       sound_notifications: document.getElementById('settings-sound-notifications').checked,
       user_prompt: document.getElementById('settings-user-prompt').value.trim() || null,

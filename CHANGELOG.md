@@ -7,8 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.2] - 2026-09-15
 
+### Changed
+
+- **Compaction is always active.** Removed the persisted compaction-enabled
+  toggle while keeping the dedicated summary-only and reuse workflows
+  selectable.
+- **ACP inspection is clearer.** Terminal tool cards expose compact,
+  expandable command input, and the subagent drawer now follows the active
+  room when conversations are switched.
+
 ### Fixed
 
+- **Codex account routing stays pinned.** Conversation-selected accounts remain
+  enforced across normal, background, and compaction requests instead of
+  silently falling back to another account.
+- **Codex context overflow handling.** SSE context-window failures now trigger
+  emergency compaction instead of consuming the normal retry budget.
+- **Desktop pet Electron launch.** The pets stream (`0.2.3`) adds
+  `--no-sandbox` when an older launcher shim is paired with a payload marked
+  `chrome-sandbox.disabled`.
 - **ACP bypass outside-workspace access.** Explicitly promoted `bypass`/`yolo`
   sessions on local stdio ACP agents can now read and write absolute host
   paths through filesystem callbacks. Lower permission tiers, remote agents,

@@ -45,24 +45,15 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
 });
 
 
-test('Context compaction exposes the opt-in reuse workflow and sends it to settings.set', () => {
+test('Context compaction is always active and exposes the reuse workflow', () => {
+  assert.doesNotMatch(html, /settings-compaction-enabled/);
+  assert.doesNotMatch(settingsView, /compaction_enabled/);
   assert.match(html, /id="settings-compaction-workflow"/);
   assert.match(html, /value="dedicated"/);
   assert.match(html, /value="reuse"/);
   assert.match(settingsView, /compaction_workflow/);
   assert.match(settingsView, /settings-compaction-workflow/);
   assert.match(settingsView, /CompactionWorkflowReuse|reuse/);
-});
-
-test('Settings refresh preserves the compaction enabled toggle before save', () => {
-  const refresh = settingsView.slice(
-    settingsView.indexOf('export async function refresh()'),
-    settingsView.indexOf('function setOptionalNumber'),
-  );
-  assert.match(
-    refresh,
-    /getElementById\('settings-compaction-enabled'\)\.checked = settings\.compaction_enabled !== false/,
-  );
 });
 
 

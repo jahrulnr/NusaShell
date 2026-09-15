@@ -1372,7 +1372,6 @@ func TestFreshTurnHydrationSitsBetweenUserAndAssistant(t *testing.T) {
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c_fresh": conv}}
 	adapter := &freshTurnStreamAdapter{}
 	settings := domain.DefaultSettings()
-	settings.CompactionEnabled = false
 	app := &App{
 		Conversations: store,
 		Logs:          &fakeLogStore{},
@@ -1554,7 +1553,6 @@ func TestFollowUpUserTurnDoesNotRelocateHydration(t *testing.T) {
 	}
 	adapter := &freshTurnStreamAdapter{}
 	settings := domain.DefaultSettings()
-	settings.CompactionEnabled = false
 	app := &App{
 		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c_followup": conv}},
 		Logs:          &fakeLogStore{},
@@ -1607,7 +1605,6 @@ func TestFreshTurnRepairsHydrationLeadingTheUser(t *testing.T) {
 	}
 	adapter := &freshTurnStreamAdapter{}
 	settings := domain.DefaultSettings()
-	settings.CompactionEnabled = false
 	app := &App{
 		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c_lead_turn": conv}},
 		Logs:          &fakeLogStore{},

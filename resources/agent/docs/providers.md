@@ -590,7 +590,9 @@ On the Codex provider detail page:
   does not fail over to a different plan behind the user's choice. The
   selection is persisted in the conversation backend, so room switches and
   reloads cannot inherit another room's account. The provider detail page's
-  **Switch** action remains the default preference used by Auto.
+  **Switch** action remains the default preference used by Auto. Completion
+  turns triggered after delegated work finishes reuse the conversation's
+  qualified model and account pin, so they stay on the same Codex credential.
 
 ```text
 # GOOD — primary auth paths on the Codex detail card
@@ -774,7 +776,8 @@ Structural and dominant rejections are handled identically: the agent does
 **not** burn provider attempts on them — it bails to an **emergency
 compaction** (the transcript is summarized down to the compaction budget)
 and retries the round with the smaller context, the same safety net that
-fires on a context-window overflow 400. The live context badge uses a
+fires on a context-window overflow returned as HTTP 400 or a Codex SSE
+error event. The live context badge uses a
 provider-visible preflight estimate: text is approximated by character
 density, provider replay items are adjusted for opaque encrypted content, and
 image, audio, and video data URLs are charged as modality units rather than

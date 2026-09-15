@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Resolver collects the environment-dependent probes used by detection.
@@ -110,8 +111,10 @@ func (r *Resolver) ElectronSpawn(configured string) (ElectronSpawnSpec, bool) {
 	}
 	launcher := filepath.Join(r.Home, ".local/bin/nusashell-desktop")
 	if r.executable(launcher) {
-		// Launcher already carries any --no-sandbox decision from install.
-		return ElectronSpawnSpec{Path: launcher}, true
+		// Older launcher shims may predate the sandbox decision. Inspect the
+		// payload marker too, so an installed Electron without chrome-sandbox
+		// still starts when the pet is clicked.
+		return r.electronSpec(launcher, true), true
 	}
 	roots := []string{
 		r.Env("NUSASHELL_ELECTRON_INSTALL_ROOT"),
@@ -142,10 +145,40 @@ func (r *Resolver) electronSpec(bin string, allowNoSandbox bool) ElectronSpawnSp
 }
 
 func (r *Resolver) electronNeedsNoSandbox(bin string) bool {
-	if bin == "" {
+	if bin == "" || r.Stat == nil {
 		return false
 	}
-	disabled := filepath.Join(filepath.Dir(bin), "chrome-sandbox.disabled")
-	_, err := r.Stat(disabled)
-	return err == nil
+	if r.isElectronLauncher(bin) && r.launcherHasNoSandbox(bin) {
+		return false
+	}
+	candidates := []string{filepath.Join(filepath.Dir(bin), "chrome-sandbox.disabled")}
+	if r.isElectronLauncher(bin) {
+		for _, root := range []string{
+			r.Env("NUSASHELL_ELECTRON_INSTALL_ROOT"),
+			filepath.Join(r.Home, ".local/share/nusashell-electron"),
+		} {
+			if root == "" {
+				continue
+			}
+			candidates = append(candidates,
+				filepath.Join(root, "current/chrome-sandbox.disabled"),
+				filepath.Join(root, "chrome-sandbox.disabled"),
+			)
+		}
+	}
+	for _, candidate := range candidates {
+		if _, err := r.Stat(candidate); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Resolver) isElectronLauncher(bin string) bool {
+	return r != nil && filepath.Clean(bin) == filepath.Clean(filepath.Join(r.Home, ".local/bin/nusashell-desktop"))
+}
+
+func (r *Resolver) launcherHasNoSandbox(bin string) bool {
+	data, err := os.ReadFile(bin)
+	return err == nil && strings.Contains(string(data), "--no-sandbox")
 }

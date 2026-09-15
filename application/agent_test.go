@@ -1082,7 +1082,6 @@ func TestEmergencyCompactionReinjectsHydration(t *testing.T) {
 	adapter := &overflowThenOKAdapter{}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	settings := domain.DefaultSettings()
-	settings.CompactionEnabled = false
 	settings.CompactionThreshold = 1
 	settings.MaxInputTokens = 8000
 	settings.MaxOutputTokens = 256
@@ -1125,7 +1124,6 @@ func TestEmergencyCompactionSkippedWhenEstimateBelowTrigger(t *testing.T) {
 	}
 	adapter := &overflowThenOKAdapter{}
 	settings := domain.DefaultSettings()
-	settings.CompactionEnabled = false
 	app := &App{
 		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
 		Logs:          &fakeLogStore{},
@@ -1248,7 +1246,6 @@ func TestMidTurnProactiveCompaction(t *testing.T) {
 	// past the 1395-token trigger (80% of (2000-256)).
 	toolbox := &largeOutputToolbox{output: strings.Repeat("tool result line of content. ", 500)}
 	settings := domain.DefaultSettings()
-	settings.CompactionEnabled = true
 	settings.CompactionThreshold = 0 // auto = 80% of (window - maxOutput)
 	settings.MaxInputTokens = 2000
 	settings.MaxOutputTokens = 256
@@ -1288,7 +1285,6 @@ func TestMidTurnCompactionFailureStopsBeforeNextRound(t *testing.T) {
 	adapter := &midTurnCompactionAdapter{compactionErr: errors.New("read udp 127.0.0.1:51574->127.0.0.53:53: i/o timeout")}
 	toolbox := &largeOutputToolbox{output: strings.Repeat("tool result line of content. ", 500)}
 	settings := domain.DefaultSettings()
-	settings.CompactionEnabled = true
 	settings.CompactionThreshold = 0
 	settings.MaxInputTokens = 2000
 	settings.MaxOutputTokens = 256
@@ -2920,7 +2916,6 @@ func TestMidToolCompactionFailureSkipsToolExecution(t *testing.T) {
 	compactionErr := errors.New("read udp 127.0.0.1:51574->127.0.0.53:53: i/o timeout")
 	adapter := &recordingCompleteAdapter{err: compactionErr}
 	settings := domain.DefaultSettings()
-	settings.CompactionEnabled = true
 	app := &App{
 		Conversations: store,
 		Logs:          &fakeLogStore{},
@@ -2968,7 +2963,6 @@ func TestMidToolCompactionRunsAtToolRequestBoundary(t *testing.T) {
 	defer unsubscribe()
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: bus}
 	settings := domain.DefaultSettings()
-	settings.CompactionEnabled = true
 	provider := &domain.Provider{Models: []domain.Model{{ID: "model", Context: 4000}}}
 	run := &TurnRun{ID: "run1", ConversationID: "c1", Ctx: context.Background()}
 	p := app.conversationRulesForTest(run, stubProviderContext(adapter), conv, settings, provider, "model", inFlightID, 2)
@@ -3037,7 +3031,6 @@ func TestMidToolCompactionSkipsBelowTrigger(t *testing.T) {
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c2": conv}}
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
-	settings.CompactionEnabled = true
 	// The request estimate includes the provider-visible system prompt, so use
 	// a window large enough for this intentionally tiny transcript to remain
 	// below the compaction watermark.
@@ -3061,7 +3054,6 @@ func TestMidToolCompactionSkipsFirstRound(t *testing.T) {
 	conv := &domain.Conversation{ID: "c3", Messages: msgs}
 	app := &App{Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c3": conv}}, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
-	settings.CompactionEnabled = true
 	p := app.conversationRulesForTest(&TurnRun{ID: "run3", ConversationID: "c3", Ctx: context.Background()}, ProviderContext{}, conv, settings, &domain.Provider{Models: []domain.Model{{ID: "model", Context: 4000}}}, "model", "", 1)
 	if p.TryMidToolCompaction() {
 		t.Fatal("mid-tool compaction ran on the first round")

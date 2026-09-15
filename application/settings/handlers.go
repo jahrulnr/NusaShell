@@ -24,9 +24,6 @@ func (svc *Service) HandleSet(req contracts.SettingsSetRequest) (any, *contracts
 	}
 	s := svc.store.Get()
 	old := s
-	if req.CompactionEnabled != nil {
-		s.CompactionEnabled = *req.CompactionEnabled
-	}
 	if req.CompactionThreshold != nil {
 		if *req.CompactionThreshold < 0 || *req.CompactionThreshold > 2000000 {
 			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "compaction threshold must be between 0 and 2,000,000 (0 = auto)"}
@@ -331,7 +328,6 @@ func setWebSearchCredential(creds Credential, id, raw string) error {
 func ToDTO(s domain.Settings) contracts.SettingsDTO {
 	compactionSettings := domain.NormalizeSettings(s)
 	return contracts.SettingsDTO{
-		CompactionEnabled:          s.CompactionEnabled,
 		CompactionThreshold:        s.CompactionThreshold,
 		CompactionWorkflow:         string(compactionSettings.CompactionWorkflow),
 		CompactionModel:            compactionSettings.CompactionModel,

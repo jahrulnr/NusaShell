@@ -1610,7 +1610,7 @@ export function renderToolJob(toolCall) {
 // its head row carries a status node, the action title,
 // and elapsed time (never a duplicated tool-name label), and the body leads
 // with the primary argument as a single legible path line. The result is
-// visible without any extra toggle — one folded "show request and raw
+// visible without any extra toggle — one folded "Show request & raw
 // output" details stays at the bottom for debugging, mirroring production
 // tools (IDE call inspectors, automation logs) that never surface raw payloads by
 // default. exec and MCP calls use the same event with a terminal output
@@ -1799,7 +1799,7 @@ function renderToolEvent(toolCall, { terminalOutput = false, mcp = false } = {})
     if (resultContent) result.append(resultContent);
     body.append(result);
     const raw = el('details', { class: `${toolPartClass(name, 'details')} agent-tool-raw` },
-      el('summary', { text: 'show request and raw output' }),
+      el('summary', { text: 'Show request & raw output' }),
       el('pre', { text: toolEventRawText(name, presentation, toolCall.output) }),
     );
     body.append(raw);

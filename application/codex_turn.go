@@ -13,13 +13,12 @@ import (
 // conversation before the first provider request. Non-Codex providers and
 // nil routers leave apiKey unchanged.
 func (a *App) prepareCodexTurnAPIKey(conversationID string, provider *domain.Provider, apiKey string) (string, error) {
-	if a == nil || provider == nil || provider.Kind != domain.ProviderCodex || a.CodexRouter == nil {
+	if a == nil || provider == nil || provider.Kind != domain.ProviderCodex {
 		return apiKey, nil
 	}
-	accounts := a.listCodexAccountIDs(provider.ID)
-	if len(accounts) == 0 {
-		return apiKey, nil
-	}
+	// A conversation-level selection is strict even when the account router
+	// or account-list lookup is unavailable. Falling back to the provider's
+	// active token here would silently send the room through another account.
 	if accountID := a.selectedCodexAccount(conversationID); accountID != "" {
 		if token, has, err := a.Credentials.Get(accountKey(provider.ID, accountID)); err != nil {
 			return "", err
@@ -27,6 +26,13 @@ func (a *App) prepareCodexTurnAPIKey(conversationID string, provider *domain.Pro
 			return token, nil
 		}
 		return "", fmt.Errorf("selected Codex account %q is no longer available", accountID)
+	}
+	if a.CodexRouter == nil {
+		return apiKey, nil
+	}
+	accounts := a.listCodexAccountIDs(provider.ID)
+	if len(accounts) == 0 {
+		return apiKey, nil
 	}
 	pick := a.CodexRouter.PickAccountDetailed(conversationID, provider.ID, accounts)
 	if pick.AccountID != "" {

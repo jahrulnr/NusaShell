@@ -189,7 +189,7 @@ func TestElectronSpawnAddsNoSandboxWhenHelperDisabled(t *testing.T) {
 	}
 }
 
-func TestElectronSpawnLauncherHasNoExtraArgs(t *testing.T) {
+func TestElectronSpawnLauncherAddsNoSandboxWhenPayloadHelperDisabled(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	r := testResolver(home, nil)
@@ -203,8 +203,48 @@ func TestElectronSpawnLauncherHasNoExtraArgs(t *testing.T) {
 	if !ok || spec.Path != launcher {
 		t.Fatalf("got path=%q ok=%v, want launcher", spec.Path, ok)
 	}
+	if len(spec.Args) != 1 || spec.Args[0] != "--no-sandbox" {
+		t.Fatalf("args = %#v, want [--no-sandbox]", spec.Args)
+	}
+}
+
+func TestElectronSpawnLauncherHasNoExtraArgsWhenSandboxIsAvailable(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	r := testResolver(home, nil)
+	launcher := filepath.Join(home, ".local/bin/nusashell-desktop")
+	writeExec(t, launcher)
+	spec, ok := r.ElectronSpawn("")
+	if !ok || spec.Path != launcher {
+		t.Fatalf("got path=%q ok=%v, want launcher", spec.Path, ok)
+	}
 	if len(spec.Args) != 0 {
-		t.Fatalf("launcher must not receive extra args, got %#v", spec.Args)
+		t.Fatalf("sandbox-capable launcher must not receive extra args, got %#v", spec.Args)
+	}
+}
+
+func TestElectronSpawnLauncherDoesNotDuplicateExistingNoSandbox(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	r := testResolver(home, nil)
+	launcher := filepath.Join(home, ".local/bin/nusashell-desktop")
+	writeExec(t, launcher)
+	if err := os.WriteFile(launcher, []byte("#!/bin/sh\nexec electron --no-sandbox \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(home, ".local/share/nusashell-electron/current/chrome-sandbox.disabled")
+	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(marker, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := r.ElectronSpawn("")
+	if !ok || spec.Path != launcher {
+		t.Fatalf("got path=%q ok=%v, want launcher", spec.Path, ok)
+	}
+	if len(spec.Args) != 0 {
+		t.Fatalf("launcher already carrying flag must not receive a duplicate, got %#v", spec.Args)
 	}
 }
 

@@ -179,9 +179,9 @@ dan PATH); `--electron-path` hanya menambahkan path eksplisit yang menang.
 Saat membuka Electron, pet **lebih memilih** launcher
 `~/.local/bin/nusashell-desktop` (shim yang membawa `--no-sandbox` bila
 install mendeteksi sandbox Chromium tidak usable) daripada binary di
-`…/current/nusashell-desktop`. Jika hanya binary versi yang ada dan
-`chrome-sandbox.disabled` ada di folder yang sama, pet menambahkan
-`--no-sandbox` sendiri. Status "running" diambil fresh saat klik: backend
+`…/current/nusashell-desktop`. Saat marker `chrome-sandbox.disabled` ada di
+payload Electron, pet juga menambahkan `--no-sandbox` ke launcher lama yang
+belum membawa flag tersebut. Status "running" diambil fresh saat klik: backend
 golang dicek lewat koneksi
 TCP ke host WebSocket (`ws_url`), electron dicek lewat proses
 `nusashell-desktop` di procfs. Perilaku klik:

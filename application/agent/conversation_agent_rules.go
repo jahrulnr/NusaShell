@@ -109,7 +109,7 @@ func (p *conversationRules) Rules() AgentRules {
 			// Pre-API proactive compaction check (see the pre-engine
 			// comment in runSingleTurn): between rounds, tool results
 			// grow the context.
-			if p.settings.CompactionEnabled && p.round > 1 && p.compactionAttempts < 3 {
+			if p.round > 1 && p.compactionAttempts < 3 {
 				cw := p.svc.ResolveContextWindow(p.provider, p.model, p.settings)
 				trigger := domain.CompactionTriggerTokens(cw, domain.ResolveMaxOutput(p.provider, p.model, p.settings), p.settings)
 				if est := p.requestEstimate(nil); est > int64(trigger) {
@@ -380,7 +380,7 @@ func (p *conversationRules) TryMidToolCompaction() bool {
 }
 
 func (p *conversationRules) tryMidToolCompaction() (bool, error) {
-	if !p.settings.CompactionEnabled || p.round <= 1 || p.compactionAttempts >= 3 {
+	if p.round <= 1 || p.compactionAttempts >= 3 {
 		return false, nil
 	}
 	cw := p.svc.ResolveContextWindow(p.provider, p.model, p.settings)

@@ -763,7 +763,7 @@ func (a *App) handleAppInfo() (any, *contracts.RPCError) {
 		Features: contracts.Features{
 			Tools:         true,
 			MCP:           true,
-			Compaction:    settings.CompactionEnabled,
+			Compaction:    true,
 			PromptCaching: settings.PromptCaching,
 			Automation:    a.Automation != nil,
 			Providers:     []string{"messages", "responses", "chat", "codex"},

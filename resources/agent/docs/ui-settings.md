@@ -212,15 +212,11 @@ How agents treat MCP plugin usage contracts. Install and enable plugins on the P
 
 ## Context compaction
 
-Toggle compaction, choose the dedicated summary-only or reuse agent-prompt workflow, set max input tokens (fallback context window, default 200000), compaction threshold and summary quality knobs, pick an optional compaction model, and enable provider prompt caching. Reuse keeps the conversation's active model and prompt-cache prefix. Cache TTL (including off) is chosen per provider on the Providers detail pane. Completion limits and sampling are under Agent runtime.
+Compaction is always active. Choose the dedicated summary-only or reuse agent-prompt workflow, set max input tokens (fallback context window, default 200000), compaction threshold and summary quality knobs, pick an optional compaction model, and enable provider prompt caching. Reuse keeps the conversation's active model and prompt-cache prefix. Cache TTL (including off) is chosen per provider on the Providers detail pane. Completion limits and sampling are under Agent runtime.
 
 - **Context compaction title** (`#settings-context-title`):
   - Section: Settings
   - Type: text
-
-- **Compact long conversations** (`#settings-compaction-enabled`):
-  - Section: Settings
-  - Type: checkbox
 
 - **Compaction workflow** (`#settings-compaction-workflow`):
   - Section: Settings

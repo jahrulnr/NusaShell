@@ -52,9 +52,24 @@ var PermanentFailurePhrases = []string{
 var ContextOverflowPhrases = []string{
 	"maximum context length",
 	"context_length_exceeded",
+	"exceeds the context window",
 	"reduce the length of the input prompt",
 	"too many input tokens",
 	"prompt is too long",
+}
+
+// IsContextOverflowFailure reports whether provider prose identifies a
+// request that cannot succeed by retrying the same prompt. It is shared by
+// retry policy and emergency-compaction classification because Codex may
+// deliver the failure as an SSE event without an HTTP status.
+func IsContextOverflowFailure(body string) bool {
+	normalized := strings.ToLower(body)
+	for _, phrase := range ContextOverflowPhrases {
+		if strings.Contains(normalized, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsPermanentProviderFailure reports whether the HTTP status + body

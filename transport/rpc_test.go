@@ -1165,9 +1165,11 @@ func TestSettingsHandlers(t *testing.T) {
 	h := newHarness(t, nil)
 
 	gotten := h.rpcOK(t, "settings.get", map[string]any{})
+	if strings.Contains(string(gotten.Result), `"compaction_enabled"`) {
+		t.Fatal("settings must not expose a compaction_enabled toggle")
+	}
 	var out struct {
 		Settings struct {
-			CompactionEnabled   bool `json:"compaction_enabled"`
 			CompactionThreshold int  `json:"compaction_threshold"`
 			PromptCaching       bool `json:"prompt_caching"`
 			MaxToolRounds       int  `json:"max_tool_rounds"`
@@ -1177,7 +1179,7 @@ func TestSettingsHandlers(t *testing.T) {
 	if err := json.Unmarshal(gotten.Result, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !out.Settings.CompactionEnabled || out.Settings.CompactionThreshold != 0 || !out.Settings.PromptCaching || out.Settings.MaxToolRounds != 8 || out.Settings.PetsAutoStart {
+	if out.Settings.CompactionThreshold != 0 || !out.Settings.PromptCaching || out.Settings.MaxToolRounds != 8 || out.Settings.PetsAutoStart {
 		t.Fatalf("defaults = %+v", out.Settings)
 	}
 

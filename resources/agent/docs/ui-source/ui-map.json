@@ -167,7 +167,7 @@
         {
           "heading": "ACP live views",
           "paragraphs": [
-            "The drawer reuses the conversation-pane layout: subagent runs are listed newest first in a left sidebar and the selected transcript fills the right pane. The delegation prompt and each persisted steering prompt appear as isolated Markdown-rendered prompt events, not main-conversation user bubbles, and long prompts scroll inside a bounded panel. Assistant text, reasoning, and tools reuse the normal Agent conversation structure. Growing text and reasoning chunks update in place, tool updates stay on one row, and token usage appears as run metadata instead of transcript noise. Completed cards retain their run ID and fetch the persisted transcript when the backend cache is empty or has restarted. On phones, the run picker becomes a compact horizontal strip and the transcript owns the vertical scroll, so the selected run gets most of the drawer. The peek popup focuses one run."
+            "The drawer reuses the conversation-pane layout: subagent runs are listed newest first in a left sidebar and the selected transcript fills the right pane. The delegation prompt and each persisted steering prompt appear as isolated Markdown-rendered prompt events, not main-conversation user bubbles, and long prompts scroll inside a bounded panel. Assistant text, reasoning, and tools reuse the normal Agent conversation structure. ACP terminal rows stay compact and expose their full command through an accessible `Show full tool input` disclosure, with a scrollable monospace expanded state and a quieter raw-output fold below. Switching the parent Agent room while the drawer is open rebinds the sidebar to that room; its empty marker appears only when the new room has no runs. Growing text and reasoning chunks update in place, tool updates stay on one row, and token usage appears as run metadata instead of transcript noise. Completed cards retain their run ID and fetch the persisted transcript when the backend cache is empty or has restarted. On phones, the run picker becomes a compact horizontal strip and the transcript owns the vertical scroll, so the selected run gets most of the drawer. The peek popup focuses one run."
           ],
           "controls": [
             "acp-drawer-overlay",
@@ -721,11 +721,10 @@
         {
           "heading": "Context compaction",
           "paragraphs": [
-            "Toggle compaction, choose the dedicated summary-only or reuse agent-prompt workflow, set max input tokens (fallback context window, default 200000), compaction threshold and summary quality knobs, pick an optional compaction model, and enable provider prompt caching. Reuse keeps the conversation's active model and prompt-cache prefix. Cache TTL (including off) is chosen per provider on the Providers detail pane. Completion limits and sampling are under Agent runtime."
+            "Compaction is always active. Choose the dedicated summary-only or reuse agent-prompt workflow, set max input tokens (fallback context window, default 200000), compaction threshold and summary quality knobs, pick an optional compaction model, and enable provider prompt caching. Reuse keeps the conversation's active model and prompt-cache prefix. Cache TTL (including off) is chosen per provider on the Providers detail pane. Completion limits and sampling are under Agent runtime."
           ],
           "controls": [
             "settings-context-title",
-            "settings-compaction-enabled",
             "settings-compaction-workflow",
             "settings-max-input-tokens",
             "settings-compaction-threshold",
@@ -2019,11 +2018,6 @@
       "label": "Context compaction title",
       "section": "Settings",
       "type": "text"
-    },
-    "settings-compaction-enabled": {
-      "label": "Compact long conversations",
-      "section": "Settings",
-      "type": "checkbox"
     },
     "settings-compaction-workflow": {
       "label": "Compaction workflow",

@@ -166,16 +166,29 @@ func (a *Service) TriggerBackgroundCompletionTurn(conversationID string) {
 }
 
 func (a *Service) ResolveConversationProvider(conv *domain.Conversation) (*domain.Provider, string, string, string, error) {
+	// Conversation.Model is the canonical, qualified provider/model pair.
+	// Assistant messages intentionally store the bare model for provider wire
+	// requests, so resolving from the last message alone can silently route a
+	// Codex room to the first enabled provider with the same model ID (for
+	// example OpenAI API). That is especially visible on background completion
+	// turns started after a subagent finishes.
+	conversationModel := strings.TrimSpace(conv.Model)
+	if _, _, qualified := domain.SplitQualifiedModel(conversationModel); qualified {
+		p, bare, key, rpcErr := a.resolveModel(conversationModel)
+		if rpcErr == nil && p != nil && p.Enabled {
+			return p, bare, key, conv.Effort, nil
+		}
+	}
 	model := ""
 	for i := len(conv.Messages) - 1; i >= 0; i-- {
 		m := conv.Messages[i]
-		if m.Role == domain.RoleAssistant && m.Model != "" && m.Status == domain.StatusDone {
-			model = m.Model
+		if m.Role == domain.RoleAssistant && strings.TrimSpace(m.Model) != "" && m.Status == domain.StatusDone {
+			model = strings.TrimSpace(m.Model)
 			break
 		}
 	}
 	if model == "" {
-		model = conv.Model
+		model = conversationModel
 	}
 	if model != "" {
 		p, bare, key, rpcErr := a.resolveModel(model)

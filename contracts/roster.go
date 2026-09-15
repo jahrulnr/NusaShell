@@ -1449,7 +1449,6 @@ type LogAppendEvent struct {
 // ---- settings ----
 
 type SettingsDTO struct {
-	CompactionEnabled          bool     `json:"compaction_enabled"`
 	CompactionThreshold        int      `json:"compaction_threshold"`
 	CompactionWorkflow         string   `json:"compaction_workflow"`
 	CompactionModel            string   `json:"compaction_model,omitempty"`
@@ -1504,7 +1503,6 @@ type SettingsGetResult struct {
 }
 
 type SettingsSetRequest struct {
-	CompactionEnabled          *bool   `json:"compaction_enabled,omitempty"`
 	CompactionThreshold        *int    `json:"compaction_threshold,omitempty"`
 	CompactionWorkflow         *string `json:"compaction_workflow,omitempty"`
 	CompactionModel            *string `json:"compaction_model,omitempty"`

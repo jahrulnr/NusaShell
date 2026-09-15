@@ -86,7 +86,6 @@ func TestLifecycleHeadlessMidToolCompactionObserverCoherent(t *testing.T) {
 	store := &lifecycleConvStore{byID: map[string]*domain.Conversation{convID: conv}}
 
 	settings := domain.DefaultSettings()
-	settings.CompactionEnabled = true
 	settings.MaxParallelTools = 2
 
 	box := &stubToolbox{}

@@ -204,7 +204,6 @@ type LogEntry struct {
 }
 
 type Settings struct {
-	CompactionEnabled   bool
 	CompactionThreshold int
 	// CompactionWorkflow selects the client-side text compaction request shape.
 	// Empty/legacy settings normalize to dedicated; reuse is opt-in and uses
@@ -409,7 +408,6 @@ type Settings struct {
 // every config that never chose explicitly.
 func DefaultSettings() Settings {
 	return Settings{
-		CompactionEnabled:          true,
 		CompactionWorkflow:         CompactionWorkflowDedicated,
 		CompactionThreshold:        0, // 0 = auto (80% of model context window)
 		CompactionSummaryMaxTokens: 0, // 0 = use built-in default (64000)
@@ -426,7 +424,8 @@ func DefaultSettings() Settings {
 }
 
 // NormalizeSettings fills values introduced after an existing local settings
-// file was written. It preserves intentional false values for toggles.
+// file was written. Context compaction is always active; unknown legacy JSON
+// fields are ignored by decoding.
 func NormalizeSettings(settings Settings) Settings {
 	settings.RemoteAccessAddresses = NormalizeRemoteAccessAddresses(settings.RemoteAccessAddresses)
 	// Empty is the legacy zero value; normalize it to the existing dedicated

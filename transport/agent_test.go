@@ -419,9 +419,8 @@ func TestAgentTurnCompaction(t *testing.T) {
 	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
 	convID := h.newConversation(t)
 
-	// Seed history with compaction disabled, then enable it with a small
-	// context window so the next turn triggers compaction.
-	h.rpcOK(t, "settings.set", map[string]any{"compaction_enabled": false})
+	// Seed history, then set a small context window so the next turn triggers
+	// compaction.
 	h.llm.setComplete(llmStep{Text: "SUMMARY: the user likes Go and wants to build a local AI shell with embedded frontend. Completed: research phase, architecture design, provider selection. Remaining: implement agent turn loop, wire up transports, write tests. Key decision: use Clean Architecture with domain/application/infrastructure layers. Path: /home/user/project/nusashell."})
 
 	// seed a long conversation; each message is large enough to exceed the
@@ -434,9 +433,9 @@ func TestAgentTurnCompaction(t *testing.T) {
 		waitTurnDone(t, h, convID)
 	}
 
-	// Enable compaction with a small context window (trigger = 800 tokens).
+	// Set a small context window (trigger = 800 tokens).
 	// The seeded history (~16000 tokens) is well above the trigger.
-	h.rpcOK(t, "settings.set", map[string]any{"compaction_enabled": true, "max_input_tokens": 1000})
+	h.rpcOK(t, "settings.set", map[string]any{"max_input_tokens": 1000})
 
 	// capture the compaction event on the next turn
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -533,11 +532,10 @@ func TestAgentTurnMultiPassCompaction(t *testing.T) {
 	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
 	convID := h.newConversation(t)
 
-	// Seed history with compaction disabled so Complete is only used on the
-	// triggering turn. A small context window then forces multi-pass summary.
+	// Seed history below the default context window. A small context window then
+	// forces multi-pass summary on the triggering turn.
 	h.rpcOK(t, "settings.set", map[string]any{
-		"compaction_enabled": false,
-		"max_input_tokens":   5000,
+		"max_input_tokens": 5000,
 	})
 
 	// Seed 4 turns with large messages: 8 messages × ~2000 tokens = ~16000 tokens.
@@ -552,8 +550,6 @@ func TestAgentTurnMultiPassCompaction(t *testing.T) {
 		})
 		waitTurnDone(t, h, convID)
 	}
-
-	h.rpcOK(t, "settings.set", map[string]any{"compaction_enabled": true})
 
 	// Set up the compaction summary response and the final turn response.
 	h.llm.setComplete(llmStep{Text: "SUMMARY: compacted pass with enough detail to pass the quality guard. Goal: build local AI shell. Completed: research, architecture design, provider selection. Remaining: implement agent turn loop, wire transports, write tests. Key decision: Clean Architecture with domain/application/infrastructure layers. Path: /home/user/project/nusashell."})
@@ -1297,13 +1293,12 @@ func TestAgentTurnRetriesTransientCompactionFailure(t *testing.T) {
 
 	// Seed enough history while compaction is disabled, then enable it with
 	// a small context window so the next turn must call Complete for a summary.
-	h.rpcOK(t, "settings.set", map[string]any{"compaction_enabled": false})
 	h.llm.setScript([]llmStep{{Text: strings.Repeat("x", 2000)}})
 	h.rpcOK(t, "agent.turns.start", map[string]any{
 		"conversation_id": convID, "text": strings.Repeat("y", 2000), "model": "fake-model-1",
 	})
 	waitTurnDone(t, h, convID)
-	h.rpcOK(t, "settings.set", map[string]any{"compaction_enabled": true, "max_input_tokens": 1000})
+	h.rpcOK(t, "settings.set", map[string]any{"max_input_tokens": 1000})
 	h.llm.failOnce(http.StatusServiceUnavailable, nil)
 	h.llm.setComplete(llmStep{Text: "Recovered compaction summary with enough detail to pass the quality guard. Goal: test retry after transient failure. Completed: setup, seed history. Remaining: verify retry behavior, check request count. Key decision: compaction must retry on 503. Path: /home/user/project/nusashell."})
 	h.llm.setScript([]llmStep{{Text: "Turn completed after compaction retry."}})

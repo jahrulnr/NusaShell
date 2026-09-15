@@ -400,13 +400,14 @@ function renderDrawer() {
   }
 }
 
-function renderRunSidebar(list, runs, selectedId) {
+export function renderRunSidebar(list, runs, selectedId) {
   const count = list.closest('.acp-run-sidebar')?.querySelector('.acp-run-count');
   if (count) count.textContent = `${runs.length} run${runs.length === 1 ? '' : 's'}`;
   if (!runs.length) {
     list.replaceChildren(el('div', { class: 'agent-conversation-empty', text: 'No subagent runs yet.' }));
     return;
   }
+  list.querySelector('.agent-conversation-empty')?.remove();
   const existing = new Map(
     [...list.querySelectorAll('[data-run-id]')].map((node) => [node.dataset.runId, node]),
   );

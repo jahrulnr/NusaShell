@@ -125,7 +125,6 @@ func TestIdleSubagentCompletionStartsTurnAndResumesAutoContinue(t *testing.T) {
 
 	adapter := &freshTurnStreamAdapter{}
 	settings := domain.DefaultSettings()
-	settings.CompactionEnabled = false
 	settings.MaxAutoContinues = 1
 	todos := &fakeTodoPort{
 		items: map[string][]domain.TodoItem{
