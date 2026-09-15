@@ -238,7 +238,7 @@ install_electron_from_build() {
 Type=Application
 Name=NusaShell
 Comment=NusaShell
-Exec=$bin_dir/nusashell-desktop --no-sandbox
+Exec=$bin_dir/nusashell-desktop
 Icon=$current/resources/nusashell.png
 Terminal=false
 Categories=Utility;Development;

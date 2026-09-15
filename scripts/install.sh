@@ -512,7 +512,7 @@ install_electron_unix() {
 Type=Application
 Name=NusaShell
 Comment=NusaShell
-Exec=$home_dir/.local/bin/nusashell-desktop --no-sandbox
+Exec=$home_dir/.local/bin/nusashell-desktop
 Icon=$current/resources/nusashell.png
 Terminal=false
 Categories=Utility;Development;
