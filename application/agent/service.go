@@ -46,6 +46,8 @@ type Service struct {
 	pendingRuns         map[string]map[string]string
 	announcementLocksMu sync.Mutex
 	announcementLocks   map[string]*sync.Mutex
+	lazyTurnsMu         sync.Mutex
+	lazyTurns           map[string]lazyTurnRecord
 
 	lifecycleMu sync.Mutex
 	observers   []AgentObserver
@@ -93,6 +95,7 @@ func New(d Deps) *Service {
 		conversationTurns: map[string]*sync.Mutex{},
 		pendingRuns:       pending,
 		announcementLocks: map[string]*sync.Mutex{},
+		lazyTurns:         map[string]lazyTurnRecord{},
 	}
 	return s
 }

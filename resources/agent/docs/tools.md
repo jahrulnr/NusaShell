@@ -284,7 +284,12 @@ Ops per family:
   {id,chunk?,start?,end?}` visible user/assistant/tool messages by inclusive
   0-based turn index (omit `start` and `end` for the last 5 turns; `start=0
   end=0` is turn 0 only; long output uses `overflow_path`); `send {id,content}`
-  peer message to another visible room.
+  peer message to another visible room. A successful send acknowledges queue
+  persistence, not that the target has already read or acted on it. An active
+  target receives it at the next safe round boundary; an idle target with a
+  real user history is woken for one agent turn without a synthetic user
+  message. Empty drafts and unknown/non-visible conversation IDs are rejected;
+  only rooms with a real user message are valid peer targets.
 
 Good conversation examples:
 
@@ -301,6 +306,7 @@ Bad conversation examples:
     conversation(op="search")  # query required
     conversation(op="read")  # id required
     conversation(op="info", chunk=0)  # id required even when reading a chunk
+    conversation(op="send", id="draft-or-missing", content="hello")  # target is not a durable room
     conversation_list()  # retired per-op name; unknown tool
 
 ## Workflow routing
@@ -466,15 +472,18 @@ differentiated by their args `type` and result text:
   injected in the same synthetic turn when that file exists — use it as
   project instructions for subsequent file tools. Do not re-read AGENTS.md
   unless it changes.
-- `type: "config_changed"`: tool/system configuration changed since your last
-  turn (subagent list, user instructions, providers). Args carry `changed`.
+- `type: "config_changed"`: a named runtime configuration changed since your
+  last turn. Args carry concrete `changed` entries such as
+  `"subagent codex has disabled"` or `"subagent devin has enabled"`.
   The new system prompt and tool descriptions are already in this request —
   re-read the affected surfaces instead of relying on stale assumptions.
-- `type: "memory_changed"`: About You / About Agent documents changed in
-  Learning, or a structured record was announced from another room. Call
-  `memory` op=search or op=list before relying on remembered facts.
-- `type: "skills_changed"`: the skill library changed. Call `skill` op=list
-  to refresh before relying on a previously known skill.
+- `type: "memory_changed"`: `user.md` or `soul.md` changed. The result names
+  the absolute primary-document path, for example
+  `user.md has changed, read /data/memory/user.md to see primary memory`;
+  read that path before relying on the profile document.
+- `type: "skills_changed"`: a named skill changed. The result identifies the
+  skill, for example `skill tool-mapping has changed, re-read if you are using
+  this skill`; re-read that skill's `SKILL.md` when it is relevant.
 - `type: "peer_message"`: a message received from another conversation room via `conversation(op="send")`.
   Args carry `from` (sender conversation ID). Result text carries the quoted message and reply instructions.
 - `type: "task_memory"`: structured records relevant to this conversation are
@@ -503,13 +512,28 @@ own args and result text unchanged, several arrive with args
 `---` lines. Read every notice in a merged card — each item is a separate
 runtime fact, never a replacement of the others.
 
+For `peer_message`, the harness wakes an idle room after the queue write when
+the room already has a real user turn. The first request receives the merged
+announcement as runtime context; no user placeholder is added. A room already
+in a turn keeps the message queued until its next safe boundary.
+
 Good: on an `auto_continue` announcement, reconcile the latest task checklist,
 mark the next item in-progress, and continue working without acknowledging the
 notice.
 
+Good: `conversation(op="send", id="conv_abc", content="Please review the test result")`
+means the peer message is queued for the target; continue your own work after
+the queue acknowledgement.
+
 Good: on a `workspace_changed` announcement, treat the new path as the
 active workspace, follow the accompanying AGENTS.md `file_read` if present,
 and continue the user's latest message without acknowledging the notice.
+
+Good: on a `memory_changed` announcement, `file_read` the named absolute
+`user.md` or `soul.md` path before relying on that primary memory.
+
+Good: on a `skills_changed` announcement, re-read the named skill's
+`SKILL.md` only when the current task uses that skill.
 
 Bad: replying "Thanks for the announcement!" or attributing it to the user
 ("as you asked, I continued...") — the user never wrote it. A newer real user

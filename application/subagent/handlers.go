@@ -32,15 +32,19 @@ func (s *Service) HandleAgentsSave(req contracts.AcpAgentSaveRequest) (any, *con
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: msg}
 	}
 	var agent *domain.AcpAgent
+	wasEnabled := false
+	hasExisting := false
 	if req.ID != "" {
-		existing, err := s.deps.Agents.Get(req.ID)
+		stored, err := s.deps.Agents.Get(req.ID)
 		if err != nil {
 			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 		}
-		if existing.Command != "" && existing.Command != strings.TrimSpace(req.Command) {
+		if stored.Command != "" && stored.Command != strings.TrimSpace(req.Command) {
 			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "command is immutable after registration; delete and recreate the agent to change it"}
 		}
-		agent = existing
+		agent = stored
+		wasEnabled = stored.Enabled
+		hasExisting = true
 	} else {
 		agent = &domain.AcpAgent{ID: domain.NewID(domain.IDPrefixAcpAgent), Enabled: true}
 	}
@@ -78,7 +82,15 @@ func (s *Service) HandleAgentsSave(req contracts.AcpAgentSaveRequest) (any, *con
 	s.log("info", "acp", "acp agent saved: %s", agent.Name)
 	// The subagent tool description is global: every conversation's cached
 	// tool block is invalidated, so every active agent is told.
-	s.notifyAgentsChanged()
+	action := "changed"
+	if !hasExisting || agent.Enabled != wasEnabled {
+		if agent.Enabled {
+			action = "enabled"
+		} else {
+			action = "disabled"
+		}
+	}
+	s.notifyAgentsChanged(agent.Name, action)
 	return contracts.AcpAgentsListResult{Agents: []contracts.AcpAgentDTO{agentDTO(agent)}}, nil
 }
 
@@ -86,14 +98,15 @@ func (s *Service) HandleAgentsDelete(req contracts.AcpAgentIDRequest) (any, *con
 	if s.deps.Agents == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "ACP agent store is not available"}
 	}
-	if _, err := s.deps.Agents.Get(req.ID); err != nil {
+	agent, err := s.deps.Agents.Get(req.ID)
+	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
 	if err := s.deps.Agents.Delete(req.ID); err != nil {
 		return nil, rpcdispatch.Internal(err)
 	}
 	s.log("info", "acp", "acp agent deleted: %s", req.ID)
-	s.notifyAgentsChanged()
+	s.notifyAgentsChanged(agent.Name, "deleted")
 	return map[string]bool{"ok": true}, nil
 }
 

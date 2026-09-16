@@ -36,7 +36,7 @@ func (s *Service) HandleList() (any, *contracts.RPCError) {
 	list := s.store.List()
 	out := make([]contracts.ConversationDTO, 0, len(list))
 	for _, c := range list {
-		if c.HiddenFromRoomList() {
+		if !c.HasUserMessage() || c.HiddenFromRoomList() {
 			continue
 		}
 		out = append(out, ConvDTO(c))
@@ -44,18 +44,13 @@ func (s *Service) HandleList() (any, *contracts.RPCError) {
 	return contracts.ConversationsListResult{Conversations: out}, nil
 }
 
-// HandleCreate persists a new untitled-or-titled room.
+// HandleCreate no longer persists empty rooms. A conversation is allocated
+// and saved atomically with its first real user turn by agent.turns.start.
 func (s *Service) HandleCreate(req contracts.ConversationCreateRequest) (any, *contracts.RPCError) {
-	repo := NewConversation(s.store, strings.TrimSpace(req.Title))
-	if err := repo.Save(); err != nil {
-		return nil, rpcdispatch.Internal(err)
+	return nil, &contracts.RPCError{
+		Code:    contracts.CodeValidation,
+		Message: "conversation is created when the first user message is sent",
 	}
-	c, err := s.store.Get(repo.ID())
-	if err != nil {
-		return nil, rpcdispatch.Internal(err)
-	}
-	s.info("conversation created: %s", c.ID)
-	return contracts.ConversationGetResult{Conversation: ConvDTO(c)}, nil
 }
 
 // HandleGet returns a room and its visible messages.
@@ -99,6 +94,9 @@ func (s *Service) HandleRename(req contracts.ConversationRenameRequest) (any, *c
 		return nil, rpcErr
 	}
 	c := repo.Conversation()
+	if !c.HasUserMessage() {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "conversation is created when the first user message is sent"}
+	}
 	title := strings.TrimSpace(req.Title)
 	if title == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "title is required"}
@@ -162,6 +160,9 @@ func (s *Service) HandleSetProvider(req contracts.ConversationSetProviderRequest
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
+	if !c.HasUserMessage() {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "conversation is created when the first user message is sent"}
+	}
 	c.ProviderRoute = strings.TrimSpace(req.ProviderRoute)
 	c.Touch()
 	if err := Bind(s.store, c).Save(); err != nil {
@@ -209,6 +210,9 @@ func (s *Service) HandleSetWorkspace(req contracts.ConversationSetWorkspaceReque
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
+	if !c.HasUserMessage() {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "conversation is created when the first user message is sent"}
+	}
 	repo := Bind(s.store, c)
 	oldWorkspace := strings.TrimSpace(c.Workspace)
 	changed := filepath.Clean(oldWorkspace) != filepath.Clean(workspace)
@@ -219,7 +223,7 @@ func (s *Service) HandleSetWorkspace(req contracts.ConversationSetWorkspaceReque
 	// Empty rooms skip it: there is no "after my chat" slot yet.
 	// Stale hidden hydration stays in formed history (append-only); the
 	// visible notice carries the new AGENTS.md on the next user turn.
-	if changed && conversationHasUser(c) {
+	if changed && c.HasUserMessage() {
 		c.PendingWorkspaceAnnouncement = true
 		c.WorkspaceSwitchFrom = oldWorkspace
 	}
@@ -228,16 +232,4 @@ func (s *Service) HandleSetWorkspace(req contracts.ConversationSetWorkspaceReque
 	}
 	s.info("workspace selected for conversation %s", c.ID)
 	return contracts.ConversationGetResult{Conversation: ConvDTO(c)}, nil
-}
-
-func conversationHasUser(c *domain.Conversation) bool {
-	if c == nil {
-		return false
-	}
-	for _, m := range c.Messages {
-		if m.Role == domain.RoleUser {
-			return true
-		}
-	}
-	return false
 }

@@ -1137,7 +1137,7 @@
       "label": "New conversation",
       "section": "Agent",
       "type": "button",
-      "action": "Creates a new conversation and focuses the composer.",
+      "action": "Starts a temporary local draft and focuses the composer; the durable conversation is created when the first user message is sent.",
       "shortcut": "Ctrl+N / ⌘N on the Agent view"
     },
     "conversation-search": {

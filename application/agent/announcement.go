@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -116,6 +117,9 @@ func (a *Service) DrainAnnouncements(run *TurnRun) (bool, error) {
 		return false, err
 	}
 	c := repo.Conversation()
+	if !c.HasUserMessage() {
+		return false, nil
+	}
 	items := c.DrainPendingAnnouncements()
 	if len(items) == 0 {
 		return false, nil
@@ -138,15 +142,30 @@ func (a *Service) PublishAnnouncement(convID string, ev Announcement) {
 	if convID == "" || ev.Type == "" {
 		return
 	}
+	if err := a.queueAnnouncement(convID, ev); err != nil {
+		a.log("warn", "agent", "announcement: failed to persist pending for %s: %v", convID, err)
+	}
+}
+
+// queueAnnouncement persists one pending announcement and returns storage
+// errors to callers that need an acknowledgement stronger than best effort
+// (for example, conversation_send). The normal harness publishers continue to
+// use PublishAnnouncement, which remains fail-soft.
+func (a *Service) queueAnnouncement(convID string, ev Announcement) error {
+	if convID == "" || ev.Type == "" {
+		return nil
+	}
 	lock := a.announcementLock(convID)
 	lock.Lock()
 	defer lock.Unlock()
 	repo, err := a.loadRepo(convID)
 	if err != nil {
-		a.log("warn", "agent", "announcement: conversation %s not found: %v", convID, err)
-		return
+		return fmt.Errorf("conversation %s: %w", convID, err)
 	}
 	c := repo.Conversation()
+	if !c.HasUserMessage() {
+		return fmt.Errorf("conversation %s is not a durable agent room", convID)
+	}
 	c.QueueAnnouncement(domain.PendingAnnouncement{
 		ID:        domain.AnnouncementToolCallPrefix + nonce.Random(),
 		Type:      ev.Type,
@@ -163,8 +182,9 @@ func (a *Service) PublishAnnouncement(convID string, ev Announcement) {
 		a.log("warn", "agent", "announcement: dropped oldest pending %s for %s (queue cap %d)", dropped.Type, convID, maxPendingAnnouncements)
 	}
 	if err := repo.Save(); err != nil {
-		a.log("warn", "agent", "announcement: failed to persist pending for %s: %v", convID, err)
+		return err
 	}
+	return nil
 }
 
 // PublishTaskMemoryAnnouncement queues a task_memory announcement AND
@@ -197,6 +217,10 @@ func (a *Service) PublishTaskMemoryAnnouncement(convID, args, message string, ma
 		return
 	}
 	c := repo.Conversation()
+	if !c.HasUserMessage() {
+		a.log("debug", "agent", "task_memory announcement skipped for non-durable conversation %s", convID)
+		return
+	}
 
 	// Build the fresh dedup map from the persisted conversation (not the
 	// caller's snapshot). A concurrent turn-start scan may have written
@@ -250,7 +274,7 @@ func (a *Service) PublishAnnouncementToAll(ev Announcement, skipConvID string) {
 		return
 	}
 	for _, c := range a.Conversations.List() {
-		if c == nil || c.HiddenFromRoomList() {
+		if c == nil || !c.HasUserMessage() || c.HiddenFromRoomList() {
 			continue
 		}
 		if skipConvID != "" && c.ID == skipConvID {

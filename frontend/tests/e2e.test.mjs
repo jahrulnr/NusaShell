@@ -9,6 +9,29 @@ import {
   waitFor,
 } from './e2e-harness.mjs';
 
+async function createConversationFromFirstTurn(rpc, key, text = 'seed', model = 'tiny-model', { open = true, emit = null } = {}) {
+  const started = await startTurn(rpc, {
+    conversation_key: key,
+    text,
+    model,
+  });
+  if (!started?.conversation_id) throw new Error(`first turn did not return conversation_id: ${JSON.stringify(started)}`);
+  if (!open) return started.conversation_id;
+  await waitFor(async () => (await rpc('agent.conversations.list')).conversations
+    .some((conversation) => conversation.id === started.conversation_id),
+  'new durable conversation in the backend list');
+  emit?.('agent.turn.done', { conversation_id: started.conversation_id, conversation_key: key, run_id: started.run_id });
+  await waitFor(
+    () => [...document.querySelectorAll('#conversation-list .agent-conversation-item')]
+      .some((node) => node.dataset.conversationId === started.conversation_id),
+    'new durable conversation through the UI',
+  );
+  const row = [...document.querySelectorAll('#conversation-list .agent-conversation-item')]
+    .find((node) => node.dataset.conversationId === started.conversation_id);
+  row?.querySelector('.agent-conversation-open')?.click();
+  return started.conversation_id;
+}
+
 test('embedded frontend completes one representative flow through the Go backend', async (t) => {
   const { rpcModule, server } = await startE2EHarness(t, { prefix: 'nusashell-e2e' });
 
@@ -29,11 +52,11 @@ test('embedded frontend completes one representative flow through the Go backend
     window.location.hash = '#agent';
     window.dispatchEvent(new window.Event('hashchange'));
     document.getElementById('new-conversation-btn').click();
-    await waitFor(() => [...document.querySelectorAll('#conversation-list .agent-conversation-title')].some((node) => node.textContent === 'Untitled'), 'new conversation through the UI');
+    await createConversationFromFirstTurn(rpcModule.rpc, 'draft-e2e-representative', 'Create the first durable room', 'tiny-model', { open: false });
 
     window.location.hash = '#logs';
     window.dispatchEvent(new window.Event('hashchange'));
-    await waitFor(() => [...document.querySelectorAll('#log-tail .log-line .log-msg')].some((el) => el.textContent.includes('conversation created')), 'live log event in the UI');
+    await waitFor(() => [...document.querySelectorAll('#log-tail .log-line .log-msg')].some((el) => el.textContent.includes('turn started')), 'live turn event in the UI');
 
     window.location.hash = '#agent';
     window.dispatchEvent(new window.Event('hashchange'));
@@ -66,12 +89,7 @@ test('compaction triggers and renders a marker when conversation exceeds thresho
     window.location.hash = '#agent';
     window.dispatchEvent(new window.Event('hashchange'));
     document.getElementById('new-conversation-btn').click();
-    await waitFor(
-      () => [...document.querySelectorAll('#conversation-list .agent-conversation-title')].some((n) => n.textContent === 'Untitled'),
-      'new conversation through the UI',
-    );
-    const conversations = await rpcModule.rpc('agent.conversations.list');
-    const convID = conversations.conversations[0].id;
+    const convID = await createConversationFromFirstTurn(rpcModule.rpc, 'draft-e2e-compaction', 'seed compaction room', 'tiny-model', { emit: rpcModule.emit });
 
     // Seed 4 turns with large messages (~4000 tokens total).
     const bigMsg = 'x'.repeat(2000);
@@ -161,12 +179,7 @@ test('BH-AI-01: incomplete stream with tool-call deltas must not silently fall b
     window.location.hash = '#agent';
     window.dispatchEvent(new window.Event('hashchange'));
     document.getElementById('new-conversation-btn').click();
-    await waitFor(
-      () => [...document.querySelectorAll('#conversation-list .agent-conversation-title')].some((n) => n.textContent === 'Untitled'),
-      'new conversation through the UI',
-    );
-    const conversations = await rpcModule.rpc('agent.conversations.list');
-    const convID = conversations.conversations[0].id;
+    const convID = await createConversationFromFirstTurn(rpcModule.rpc, 'draft-e2e-bh-ai-01', 'seed streaming room', 'tiny-model', { emit: rpcModule.emit });
 
     // Script: stream a tool-call delta for the built-in "skill" family tool,
     // then cut the connection mid-stream: no finish_reason chunk and no
@@ -341,20 +354,16 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
     window.location.hash = '#agent';
     window.dispatchEvent(new window.Event('hashchange'));
     document.getElementById('new-conversation-btn').click();
-    await waitFor(
-      () => [...document.querySelectorAll('#conversation-list .agent-conversation-title')].some((n) => n.textContent === 'Untitled'),
-      'new conversation through the UI',
-    );
-    const conversations = await rpcModule.rpc('agent.conversations.list');
-    const convID = conversations.conversations[0].id;
+    const convKey = 'draft-e2e-hydr-new';
 
     // Script: a single short reply so the turn finishes quickly.
     llm.setScripts([[{ text: 'Hello from the assistant.' }]]);
 
     // Start the first turn.
-    await startTurn(rpcModule.rpc, {
-      conversation_id: convID, text: 'hi', model: 'tiny-model',
+    const started = await startTurn(rpcModule.rpc, {
+      conversation_key: convKey, text: 'hi', model: 'tiny-model',
     });
+    const convID = started.conversation_id;
 
     // Wait for the turn to finish.
     await waitFor(async () => {
@@ -447,12 +456,7 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     window.location.hash = '#agent';
     window.dispatchEvent(new window.Event('hashchange'));
     document.getElementById('new-conversation-btn').click();
-    await waitFor(
-      () => [...document.querySelectorAll('#conversation-list .agent-conversation-title')].some((n) => n.textContent === 'Untitled'),
-      'new conversation through the UI',
-    );
-    const conversations = await rpcModule.rpc('agent.conversations.list');
-    const convID = conversations.conversations[0].id;
+    const convID = await createConversationFromFirstTurn(rpcModule.rpc, 'draft-e2e-hydr-post', 'seed hydration room', 'tiny-model', { emit: rpcModule.emit });
 
     // Seed 4 turns with large messages (~4000 tokens total) to exceed the
     // compaction trigger once it is enabled.

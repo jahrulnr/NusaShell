@@ -18,8 +18,8 @@ const (
 	// stall a headless run).
 	AgentAutomation AgentKind = "automation"
 	// AgentCompaction is the context-compaction summarizer: exactly one
-	// local tool, summary(), forced via ToolChoice. It never touches the
-	// toolbox or dispatchers.
+	// local tool, summary(), advertised without tool_choice. It never
+	// touches the toolbox or dispatchers.
 	AgentCompaction AgentKind = "compaction"
 	// AgentDelegate is the internal delegation agent (the `delegate`
 	// tool): a headless run of the conversation rules in a hidden

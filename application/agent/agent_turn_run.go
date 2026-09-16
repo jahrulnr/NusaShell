@@ -23,6 +23,7 @@ func (a *Service) RunTurn(run *TurnRun, provider *domain.Provider, apiKey, model
 			if flushed {
 				a.TriggerBackgroundCompletionTurn(convID)
 			}
+			a.WakePendingPeerMessage(convID)
 		}()
 		run.Cancel()
 		// Reject any pending ask_question calls for this run so the

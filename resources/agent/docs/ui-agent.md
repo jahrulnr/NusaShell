@@ -24,7 +24,7 @@ Lists conversations with a search filter and a New conversation button. The coun
 - **New conversation** (`#new-conversation-btn`):
   - Section: Agent
   - Type: button
-  - Action: Creates a new conversation and focuses the composer.
+  - Action: Starts a temporary local draft and focuses the composer; the durable conversation is created when the first user message is sent.
   - Shortcut: Ctrl+N / ⌘N on the Agent view
 
 - **Conversation search** (`#conversation-search`):

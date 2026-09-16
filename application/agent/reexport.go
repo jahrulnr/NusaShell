@@ -22,10 +22,6 @@ func AppendCompactionHandoffUser(msgs []ChatMessage) []ChatMessage {
 	return appendCompactionHandoffUser(msgs)
 }
 
-func CompactionToolChoice(kind domain.ProviderKind) any {
-	return compactionToolChoice(kind)
-}
-
 func CompactionSummaryEchoesAssistant(summary string, msgs []ChatMessage) bool {
 	return compactionSummaryEchoesAssistant(summary, msgs)
 }

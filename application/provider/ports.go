@@ -69,6 +69,9 @@ type Logger func(level, source, format string, args ...any)
 // the window used by the agent runtime.
 type ModelAdjuster func(*domain.Provider, *domain.Model)
 
+// ConfigChanged reports the named provider configuration change to the host.
+type ConfigChanged func(name, action string)
+
 // Deps is the narrow wiring for New. Feature packages never receive *App.
 type Deps struct {
 	Store                  Store
@@ -82,7 +85,7 @@ type Deps struct {
 	Log                    Logger
 	DataDir                string
 	AdjustModel            ModelAdjuster
-	OnConfigChanged        func()
+	OnConfigChanged        ConfigChanged
 	OfflineTTS             func() []contracts.ModelDTO
 }
 
@@ -99,7 +102,7 @@ type Service struct {
 	log                    Logger
 	dataDir                string
 	adjustModel            ModelAdjuster
-	onConfigChanged        func()
+	onConfigChanged        ConfigChanged
 	offlineTTS             func() []contracts.ModelDTO
 }
 
@@ -136,9 +139,9 @@ func (s *Service) write(level, format string, args ...any) {
 	}
 }
 
-func (s *Service) configChanged() {
+func (s *Service) configChanged(name, action string) {
 	if s.onConfigChanged != nil {
-		s.onConfigChanged()
+		s.onConfigChanged(name, action)
 	}
 }
 

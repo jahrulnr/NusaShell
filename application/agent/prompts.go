@@ -45,6 +45,13 @@ var learnerPrompt = resources.LearnerPrompt()
 // Complete request. System-prompt instructions are not enough: if the
 // transcript ends on assistant/tool, reasoning models continue the agent
 // turn. This closer makes the current instruction a user turn.
+//
+// It is also the only place the guardrails can live for every workflow: the
+// dedicated workflow sends the compaction system prompt, but the reuse workflow
+// keeps the agent system prompt and the full toolbox, so the handoff message is
+// what must stop the model, forbid task work and reasoning-only output, and fix
+// the checkpoint structure. TestCompactionHandoffGuardReachesEveryWorkflow pins
+// those clauses for both workflows.
 var compactionHandoffUserPrompt = resources.UserPrompt("compaction")
 
 // buildSystemPrompt composes the agent identity + tool protocol (single

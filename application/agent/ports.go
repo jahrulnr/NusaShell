@@ -154,6 +154,10 @@ type AcknowledgeLearner func(args string) (string, error)
 // SkillCreatorReference returns the skill-creator SKILL.md path and body.
 type SkillCreatorReference func() (path, content string)
 
+// ResolveSkillName resolves a skill id to the name shown in cross-room
+// skills_changed announcements. Implementations may fall back to the id.
+type ResolveSkillName func(id, ownedBy string) string
+
 // DelegateSnapshot looks up an in-flight internal delegate run.
 type DelegateSnapshot func(runID string) (*domain.AcpRun, bool)
 
@@ -184,11 +188,15 @@ type Deps struct {
 	DefaultWorkspace string
 	StartedAt        time.Time
 
-	ResolveModel            ResolveModel
-	WaitRetry               WaitRetry
-	WaitSlowDown            func(ctx context.Context)
-	ProviderName            func(providerID string) string
-	EffectiveWorkspace      func(workspace string) string
+	ResolveModel       ResolveModel
+	WaitRetry          WaitRetry
+	WaitSlowDown       func(ctx context.Context)
+	ProviderName       func(providerID string) string
+	EffectiveWorkspace func(workspace string) string
+	// ValidateWorkspace confirms a selected workspace exists and is a
+	// directory. It is optional so the agent package remains usable in
+	// isolated tests and compositions without a host filesystem browser.
+	ValidateWorkspace       func(ctx context.Context, workspace string) error
 	ChatMessages            ChatMessagesForProvider
 	EnrichVision            EnrichConversation
 	EnrichAudio             EnrichConversation
@@ -202,6 +210,7 @@ type Deps struct {
 	RecordTurnPairs         RecordTurnPairs
 	AcknowledgeLearner      AcknowledgeLearner
 	SkillCreatorRef         SkillCreatorReference
+	ResolveSkillName        ResolveSkillName
 	DelegateSnapshot        DelegateSnapshot
 	DecorateRateLimit       func(providerID string, err error) error
 	RecordExperience        func(conv *domain.Conversation, headless bool)

@@ -66,7 +66,7 @@ func TestAgentTurnStreamsOverSSE(t *testing.T) {
 	h := newHarness(t, nil)
 	pid := h.addOpenAIProvider(t, "Fake")
 	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
-	convID := h.newConversation(t)
+	convKey := "draft-sse-lazy"
 
 	// script: round 1 makes a tool call, round 2 streams the final text
 	h.llm.setRounds([][]llmStep{
@@ -91,16 +91,22 @@ func TestAgentTurnStreamsOverSSE(t *testing.T) {
 	// give the subscriber a moment to attach
 	time.Sleep(100 * time.Millisecond)
 	started := h.rpcOK(t, "agent.turns.start", map[string]any{
-		"conversation_id": convID,
-		"text":            "what is mcp?",
-		"model":           "fake-model-1",
+		"conversation_key": convKey,
+		"text":             "what is mcp?",
+		"model":            "fake-model-1",
 	})
 	var run struct {
-		RunID string `json:"run_id"`
+		RunID           string `json:"run_id"`
+		ConversationID  string `json:"conversation_id"`
+		ConversationKey string `json:"conversation_key"`
 	}
 	if err := json.Unmarshal(started.Result, &run); err != nil || run.RunID == "" {
 		t.Fatalf("turns.start = %s", started.Result)
 	}
+	if run.ConversationID == "" || run.ConversationKey != convKey {
+		t.Fatalf("lazy turn mapping = %+v", run)
+	}
+	convID := run.ConversationID
 
 	var doneMessageID string
 	select {

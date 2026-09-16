@@ -61,6 +61,9 @@ func TestNewConversationStartsEmpty(t *testing.T) {
 func TestNewConversationEmptyTitleIsUntitled(t *testing.T) {
 	store := &fakeStore{}
 	repo := NewConversation(store, "  ")
+	if err := repo.Add(domain.RoleUser, "first message"); err != nil {
+		t.Fatal(err)
+	}
 	if err := repo.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -70,6 +73,17 @@ func TestNewConversationEmptyTitleIsUntitled(t *testing.T) {
 	}
 	if c.Title != "Untitled" {
 		t.Fatalf("title = %q, want Untitled", c.Title)
+	}
+}
+
+func TestSaveRejectsEmptyConversation(t *testing.T) {
+	store := &fakeStore{}
+	repo := NewConversation(store, "Draft")
+	if err := repo.Save(); !errors.Is(err, ErrEmptyConversation) {
+		t.Fatalf("Save() err = %v, want ErrEmptyConversation", err)
+	}
+	if _, err := store.Get(repo.ID()); err == nil {
+		t.Fatal("empty conversation must not reach storage")
 	}
 }
 
@@ -197,13 +211,16 @@ func TestSaveAllowsAppend(t *testing.T) {
 func TestSaveAllowsUpdatingExistingMessageBody(t *testing.T) {
 	store := &fakeStore{}
 	repo := NewConversation(store, "Chat")
+	if err := repo.Add(domain.RoleUser, "hello"); err != nil {
+		t.Fatal(err)
+	}
 	if err := repo.Add(domain.RoleAssistant, domain.Message{ID: "a1", Status: ""}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.Save(); err != nil {
 		t.Fatal(err)
 	}
-	repo.inner.Messages[0].Content = "streaming"
+	repo.inner.Messages[1].Content = "streaming"
 	if err := repo.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -211,8 +228,8 @@ func TestSaveAllowsUpdatingExistingMessageBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Messages[0].Content != "streaming" {
-		t.Fatalf("content = %q, want streaming", c.Messages[0].Content)
+	if c.Messages[1].Content != "streaming" {
+		t.Fatalf("content = %q, want streaming", c.Messages[1].Content)
 	}
 }
 

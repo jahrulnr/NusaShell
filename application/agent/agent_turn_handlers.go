@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,9 +14,23 @@ import (
 )
 
 func (a *Service) HandleTurnsStart(ctx context.Context, req contracts.TurnStartRequest) (any, *contracts.RPCError) {
-	// Existence check before any side effects (attachment writes, model
-	// resolution); the conversation is re-fetched under startMu below.
-	if _, rpcErr := a.getConversation(req.ConversationID); rpcErr != nil {
+	conversationID := strings.TrimSpace(req.ConversationID)
+	conversationKey := strings.TrimSpace(req.ConversationKey)
+	isNewConversation := conversationID == ""
+	if isNewConversation {
+		if err := validateConversationKey(conversationKey); err != nil {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
+		}
+		if record, ok := a.lazyTurnForKey(conversationKey); ok {
+			return contracts.TurnStartResult{
+				RunID:           record.RunID,
+				ConversationID:  record.ConversationID,
+				ConversationKey: conversationKey,
+			}, nil
+		}
+	} else if _, rpcErr := a.getConversation(conversationID); rpcErr != nil {
+		// Existence check before any side effects (attachment writes, model
+		// resolution); the conversation is re-fetched under startMu below.
 		return nil, rpcErr
 	}
 	text := strings.TrimSpace(req.Text)
@@ -23,12 +38,17 @@ func (a *Service) HandleTurnsStart(ctx context.Context, req contracts.TurnStartR
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
-	// Save image/file attachments to disk so file-based tools can access
-	// them by absolute path. The path is stored on the attachment and
-	// surfaced to the model in the placeholder and read_media result.
-	a.SaveAttachmentsToDisk(req.ConversationID, attachments)
 	if text == "" && len(attachments) == 0 {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "message text is required"}
+	}
+	workspace := strings.TrimSpace(req.Workspace)
+	if workspace != "" && !filepath.IsAbs(workspace) {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "workspace path must be absolute"}
+	}
+	if workspace != "" && a.deps.ValidateWorkspace != nil {
+		if err := a.deps.ValidateWorkspace(ctx, workspace); err != nil {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "workspace directory is invalid"}
+		}
 	}
 	model := strings.TrimSpace(req.Model)
 	if model == "" {
@@ -45,23 +65,49 @@ func (a *Service) HandleTurnsStart(ctx context.Context, req contracts.TurnStartR
 
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
-	if a.ActiveRunForConversation(req.ConversationID) != nil {
+	if isNewConversation {
+		if record, ok := a.lazyTurnForKey(conversationKey); ok {
+			return contracts.TurnStartResult{
+				RunID:           record.RunID,
+				ConversationID:  record.ConversationID,
+				ConversationKey: conversationKey,
+			}, nil
+		}
+	} else if a.ActiveRunForConversation(conversationID) != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
 	}
-	turnLock := a.ConversationTurnLock(req.ConversationID)
-	turnLock.Lock()
-	defer turnLock.Unlock()
-	repo, rpcErr := a.loadRepoRPC(req.ConversationID)
-	if rpcErr != nil {
-		return nil, rpcErr
+	unlockTurn := func() {}
+	if !isNewConversation {
+		turnLock := a.ConversationTurnLock(conversationID)
+		turnLock.Lock()
+		unlockTurn = turnLock.Unlock
+	}
+	defer unlockTurn()
+
+	var repo *ConversationRepository
+	if isNewConversation {
+		repo = NewConversation(a.Conversations, "")
+	} else {
+		var loadErr *contracts.RPCError
+		repo, loadErr = a.loadRepoRPC(conversationID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
 	}
 	c := repo.Conversation()
-	if c.Status == "running" {
+	if isNewConversation {
+		c.Workspace = workspace
+	} else if c.Status == "running" {
 		if a.ActiveRunForConversation(c.ID) != nil {
 			return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
 		}
 		a.HealOrphanedRunningConversation(c)
 	}
+	// Save image/file attachments to disk so file-based tools can access
+	// them by absolute path. New conversations have an ID by this point, but
+	// they are still persisted only by the Save below together with the first
+	// user message.
+	a.SaveAttachmentsToDisk(c.ID, attachments)
 
 	now := clock.NewTime().Time()
 	userMsg := domain.Message{
@@ -93,16 +139,19 @@ func (a *Service) HandleTurnsStart(ctx context.Context, req contracts.TurnStartR
 	// is not killed when the HTTP response is sent. The turn is cancelled
 	// explicitly via handleTurnsStop or server shutdown.
 	turnCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	run := &TurnRun{ID: domain.NewID(domain.IDPrefixRun), ConversationID: c.ID, MessageID: asstMsg.ID, Ctx: turnCtx, Cancel: cancel, ProviderID: provider.ID, Workspace: a.effectiveWorkspace(c.Workspace)}
+	run := &TurnRun{ID: domain.NewID(domain.IDPrefixRun), ConversationID: c.ID, ConversationKey: conversationKey, MessageID: asstMsg.ID, Ctx: turnCtx, Cancel: cancel, ProviderID: provider.ID, Workspace: a.effectiveWorkspace(c.Workspace)}
 	a.runsMu.Lock()
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
+	if isNewConversation {
+		a.rememberLazyTurn(conversationKey, lazyTurnRecord{ConversationID: c.ID, RunID: run.ID, CreatedAt: time.Now()})
+	}
 
 	a.goSafe("agent", func() {
 		a.RunTurn(run, provider, apiKey, bareModel, req.Effort, asstMsg.ID, false, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides))
 	})
 	a.log("info", "agent", "turn started: %s (model %s)", run.ID, bareModel)
-	return contracts.TurnStartResult{RunID: run.ID}, nil
+	return contracts.TurnStartResult{RunID: run.ID, ConversationID: c.ID, ConversationKey: conversationKey}, nil
 }
 
 // handleTurnsRetry re-runs the last failed assistant message with a different

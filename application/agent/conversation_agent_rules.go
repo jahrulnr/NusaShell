@@ -148,7 +148,8 @@ func (p *conversationRules) Rules() AgentRules {
 			}
 			p.prevMsgID, p.prevRound, p.prevState = p.currentMsgID, p.round, "done"
 			p.svc.EmitInteractiveTurnEvent(p.run, contracts.EventTurnStarted, contracts.TurnStartedEvent{
-				RunID: p.run.ID, ConversationID: p.run.ConversationID, MessageID: p.currentMsgID, Round: p.round,
+				RunID: p.run.ID, ConversationID: p.run.ConversationID, ConversationKey: p.run.ConversationKey,
+				MessageID: p.currentMsgID, Round: p.round,
 			})
 			return nil
 		},

@@ -88,6 +88,18 @@ plugin skills. Agents never promote. The learner cannot mark trusted.
 learning job, `promote` from this UI) so telemetry can tell queued
 evolution from a human promotion.
 
+When a skill changes, visible rooms receive a `skills_changed` announcement
+that names the affected skill. Re-read that skill's `SKILL.md` only when the
+current task uses it; the announcement does not include the skill body.
+
+Good:
+
+    file_read(path="<named-skill-path>/SKILL.md")
+
+Bad:
+
+    assume the previously read skill body is still current after `skills_changed`
+
 ## Learner skill stages
 
 The learner evolves a skill only as Stage 2/3 of the same background spawn

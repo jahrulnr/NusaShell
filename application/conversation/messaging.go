@@ -28,7 +28,7 @@ func (s *Service) ListRooms(currentConvID string, limit, offset int) (int, []Sum
 	all := s.store.List()
 	visible := make([]*domain.Conversation, 0, len(all))
 	for _, c := range all {
-		if c == nil || c.HiddenFromRoomList() {
+		if c == nil || !c.HasUserMessage() || c.HiddenFromRoomList() {
 			continue
 		}
 		if currentConvID != "" && c.ID == currentConvID {
@@ -89,7 +89,7 @@ func (s *Service) SearchRooms(currentConvID, query string, limit, offset int) (i
 	}
 	matched := make([]hit, 0, len(all))
 	for _, c := range all {
-		if c == nil || c.HiddenFromRoomList() {
+		if c == nil || !c.HasUserMessage() || c.HiddenFromRoomList() {
 			continue
 		}
 		if currentConvID != "" && c.ID == currentConvID {
@@ -173,10 +173,15 @@ func (s *Service) SendPeer(currentConvID, targetConvID, content string) error {
 	if target.HiddenFromRoomList() {
 		return fmt.Errorf("conversation %q is not a visible agent room", targetConvID)
 	}
+	if !target.HasUserMessage() {
+		return fmt.Errorf("conversation %q is not a durable agent room", targetConvID)
+	}
 
 	if s.announce == nil {
 		return fmt.Errorf("conversation announcer not available")
 	}
-	s.announce(targetConvID, currentConvID, content)
+	if err := s.announce(targetConvID, currentConvID, content); err != nil {
+		return err
+	}
 	return nil
 }

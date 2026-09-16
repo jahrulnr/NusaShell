@@ -415,12 +415,14 @@ type ConversationRenameRequest struct {
 // ---- turns ----
 
 type TurnStartRequest struct {
-	ConversationID string          `json:"conversation_id"`
-	Text           string          `json:"text"`
-	Model          string          `json:"model"`
-	Effort         string          `json:"effort,omitempty"`
-	ProviderRoute  string          `json:"provider_route,omitempty"` // OpenRouter upstream or Codex account; empty = auto
-	Attachments    []AttachmentDTO `json:"attachments,omitempty"`
+	ConversationID  string          `json:"conversation_id,omitempty"`
+	ConversationKey string          `json:"conversation_key,omitempty"`
+	Text            string          `json:"text"`
+	Model           string          `json:"model"`
+	Effort          string          `json:"effort,omitempty"`
+	ProviderRoute   string          `json:"provider_route,omitempty"` // OpenRouter upstream or Codex account; empty = auto
+	Workspace       string          `json:"workspace,omitempty"`
+	Attachments     []AttachmentDTO `json:"attachments,omitempty"`
 }
 
 // TurnRetryRequest re-runs the last failed assistant message in a conversation
@@ -436,7 +438,9 @@ type TurnRetryRequest struct {
 }
 
 type TurnStartResult struct {
-	RunID string `json:"run_id"`
+	RunID           string `json:"run_id"`
+	ConversationID  string `json:"conversation_id,omitempty"`
+	ConversationKey string `json:"conversation_key,omitempty"`
 }
 
 type TurnStopRequest struct {
@@ -474,10 +478,11 @@ type TurnActiveResult struct {
 }
 
 type TurnStartedEvent struct {
-	RunID          string `json:"run_id"`
-	ConversationID string `json:"conversation_id"`
-	MessageID      string `json:"message_id"`
-	Round          int    `json:"round"`
+	RunID           string `json:"run_id"`
+	ConversationID  string `json:"conversation_id"`
+	ConversationKey string `json:"conversation_key,omitempty"`
+	MessageID       string `json:"message_id"`
+	Round           int    `json:"round"`
 }
 
 // ---- round stream (SSE /stream) ----

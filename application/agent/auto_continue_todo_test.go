@@ -107,6 +107,7 @@ func TestAppendAutoContinueBoundaryOrdering(t *testing.T) {
 			Status:    "running",
 			UpdatedAt: now,
 			Messages: []domain.Message{
+				{ID: "u_prev", Role: domain.RoleUser, Content: "previous task", Status: domain.StatusDone},
 				{ID: "m_prev", Role: domain.RoleAssistant, Content: "previous output", Status: domain.StatusDone},
 			},
 		},
@@ -132,14 +133,14 @@ func TestAppendAutoContinueBoundaryOrdering(t *testing.T) {
 	}
 
 	conv, _ := store.Get("conv_order")
-	// Expect: m_prev (assistant output) → announcement → hidden hydration → assistant placeholder.
-	if len(conv.Messages) != 4 {
-		t.Fatalf("messages = %d, want 4 (prev + announcement + hydration + placeholder):\n%+v", len(conv.Messages), conv.Messages)
+	// Expect: user → m_prev (assistant output) → announcement → hidden hydration → assistant placeholder.
+	if len(conv.Messages) != 5 {
+		t.Fatalf("messages = %d, want 5 (user + prev + announcement + hydration + placeholder):\n%+v", len(conv.Messages), conv.Messages)
 	}
-	if conv.Messages[0].ID != "m_prev" {
-		t.Fatalf("message[0] must be the previous assistant output: %+v", conv.Messages[0])
+	if conv.Messages[1].ID != "m_prev" {
+		t.Fatalf("message[1] must be the previous assistant output: %+v", conv.Messages[1])
 	}
-	announcement := conv.Messages[1]
+	announcement := conv.Messages[2]
 	if announcement.Role != domain.RoleAssistant || len(announcement.ToolCalls) != 1 {
 		t.Fatalf("message[1] must be the visible announcement: %+v", announcement)
 	}
@@ -149,15 +150,15 @@ func TestAppendAutoContinueBoundaryOrdering(t *testing.T) {
 	if domain.IsHydrationMessage(announcement) {
 		t.Fatalf("announcement must NOT be hidden hydration (it would leak a hidden tool card): %+v", announcement)
 	}
-	hydration := conv.Messages[2]
+	hydration := conv.Messages[3]
 	if !domain.IsHydrationMessage(hydration) {
 		t.Fatalf("message[2] must be the hidden todo_list hydration: %+v", hydration)
 	}
 	if len(hydration.ToolCalls) != 1 || hydration.ToolCalls[0].Name != "todo_list" {
 		t.Fatalf("hydration must carry a single todo_list tool call: %+v", hydration)
 	}
-	if conv.Messages[3].Role != domain.RoleAssistant || conv.Messages[3].ID != nextMsgID {
-		t.Fatalf("message[3] must be the fresh assistant placeholder: %+v", conv.Messages[3])
+	if conv.Messages[4].Role != domain.RoleAssistant || conv.Messages[4].ID != nextMsgID {
+		t.Fatalf("message[4] must be the fresh assistant placeholder: %+v", conv.Messages[4])
 	}
 }
 
@@ -173,6 +174,7 @@ func TestAppendAutoContinueBoundaryNoTodosPreservesOldShape(t *testing.T) {
 			Status:    "running",
 			UpdatedAt: now,
 			Messages: []domain.Message{
+				{ID: "u_prev", Role: domain.RoleUser, Content: "previous task", Status: domain.StatusDone},
 				{ID: "m_prev", Role: domain.RoleAssistant, Content: "previous output", Status: domain.StatusDone},
 			},
 		},
@@ -187,17 +189,17 @@ func TestAppendAutoContinueBoundaryNoTodosPreservesOldShape(t *testing.T) {
 	}
 
 	conv, _ := store.Get("conv_notodos")
-	if len(conv.Messages) != 3 {
-		t.Fatalf("messages = %d, want 3 (prev + announcement + placeholder) when no todos:\n%+v", len(conv.Messages), conv.Messages)
+	if len(conv.Messages) != 4 {
+		t.Fatalf("messages = %d, want 4 (user + prev + announcement + placeholder) when no todos:\n%+v", len(conv.Messages), conv.Messages)
 	}
-	if conv.Messages[1].ToolCalls[0].Name != domain.AnnouncementToolName {
-		t.Fatalf("message[1] must be the announcement: %+v", conv.Messages[1])
+	if conv.Messages[2].ToolCalls[0].Name != domain.AnnouncementToolName {
+		t.Fatalf("message[2] must be the announcement: %+v", conv.Messages[2])
 	}
-	if domain.IsHydrationMessage(conv.Messages[1]) {
-		t.Fatalf("announcement must not be hidden hydration: %+v", conv.Messages[1])
+	if domain.IsHydrationMessage(conv.Messages[2]) {
+		t.Fatalf("announcement must not be hidden hydration: %+v", conv.Messages[2])
 	}
-	if conv.Messages[2].Role != domain.RoleAssistant || conv.Messages[2].ID != nextMsgID {
-		t.Fatalf("message[2] must be the fresh assistant placeholder: %+v", conv.Messages[2])
+	if conv.Messages[3].Role != domain.RoleAssistant || conv.Messages[3].ID != nextMsgID {
+		t.Fatalf("message[3] must be the fresh assistant placeholder: %+v", conv.Messages[3])
 	}
 }
 

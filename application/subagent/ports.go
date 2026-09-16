@@ -102,8 +102,9 @@ type SteerHeadless func(conversationID, text string) error
 // tools or automation.
 type ObservedHeadlessTurn func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(conversationID string)) (map[string]any, string, error)
 
-// OnAgentsChanged invalidates cached subagent tool descriptions in every room.
-type OnAgentsChanged func()
+// OnAgentsChanged invalidates cached subagent tool descriptions in every room
+// and carries the concrete named change for the announcement card.
+type OnAgentsChanged func(name, action string)
 
 // Deps is the narrow wiring for New. Feature packages never receive *App.
 type Deps struct {

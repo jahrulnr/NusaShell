@@ -1,11 +1,120 @@
 package agent
 
 import (
+	"context"
+	"errors"
 	"testing"
 
+	"nusashell/contracts"
 	"nusashell/domain"
 	clock "nusashell/pkg/time"
 )
+
+func TestHandleTurnsStartCreatesConversationOnFirstUserMessage(t *testing.T) {
+	store := &lifecycleConvStore{byID: map[string]*domain.Conversation{}}
+	provider := &domain.Provider{ID: "provider", Kind: domain.ProviderChat, Enabled: true}
+	var launched func()
+	service := New(Deps{
+		Conversations: store,
+		ResolveModel: func(model string) (*domain.Provider, string, string, *contracts.RPCError) {
+			if model != "provider:model" {
+				return nil, "", "", &contracts.RPCError{Code: contracts.CodeValidation, Message: "unexpected model"}
+			}
+			return provider, "model", "key", nil
+		},
+		Go: func(_ string, fn func()) { launched = fn },
+	})
+
+	result, rpcErr := service.HandleTurnsStart(context.Background(), contracts.TurnStartRequest{
+		ConversationKey: "draft-123",
+		Text:            "first message",
+		Model:           "provider:model",
+		Workspace:       "/tmp/workspace",
+	})
+	if rpcErr != nil {
+		t.Fatalf("HandleTurnsStart: %s", rpcErr.Message)
+	}
+	started, ok := result.(contracts.TurnStartResult)
+	if !ok {
+		t.Fatalf("result = %#v, want TurnStartResult", result)
+	}
+	if started.ConversationID == "" || started.ConversationKey != "draft-123" || started.RunID == "" {
+		t.Fatalf("start result = %+v", started)
+	}
+	if launched == nil {
+		t.Fatal("first user message must launch the turn")
+	}
+	saved, err := store.Get(started.ConversationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Workspace != "/tmp/workspace" || saved.Status != "running" {
+		t.Fatalf("saved conversation = %+v", saved)
+	}
+	if len(saved.Messages) < 2 || saved.Messages[0].Role != domain.RoleUser {
+		t.Fatalf("saved messages = %+v, want user message before assistant placeholder", saved.Messages)
+	}
+}
+
+func TestHandleTurnsStartDeduplicatesSameConversationKey(t *testing.T) {
+	store := &lifecycleConvStore{byID: map[string]*domain.Conversation{}}
+	provider := &domain.Provider{ID: "provider", Kind: domain.ProviderChat, Enabled: true}
+	launches := 0
+	service := New(Deps{
+		Conversations: store,
+		ResolveModel: func(string) (*domain.Provider, string, string, *contracts.RPCError) {
+			return provider, "model", "key", nil
+		},
+		Go: func(_ string, _ func()) { launches++ },
+	})
+	req := contracts.TurnStartRequest{ConversationKey: "draft-dedupe", Text: "hello", Model: "provider:model"}
+	first, firstErr := service.HandleTurnsStart(context.Background(), req)
+	if firstErr != nil {
+		t.Fatalf("first start: %s", firstErr.Message)
+	}
+	second, secondErr := service.HandleTurnsStart(context.Background(), req)
+	if secondErr != nil {
+		t.Fatalf("second start: %s", secondErr.Message)
+	}
+	firstResult := first.(contracts.TurnStartResult)
+	secondResult := second.(contracts.TurnStartResult)
+	if firstResult.ConversationID != secondResult.ConversationID || firstResult.RunID != secondResult.RunID {
+		t.Fatalf("dedupe results differ: first=%+v second=%+v", firstResult, secondResult)
+	}
+	if launches != 1 {
+		t.Fatalf("launches = %d, want exactly one", launches)
+	}
+	if got := len(store.byID); got != 1 {
+		t.Fatalf("stored conversations = %d, want 1", got)
+	}
+}
+
+func TestHandleTurnsStartRejectsInvalidDraftWorkspace(t *testing.T) {
+	store := &lifecycleConvStore{byID: map[string]*domain.Conversation{}}
+	provider := &domain.Provider{ID: "provider", Kind: domain.ProviderChat, Enabled: true}
+	service := New(Deps{
+		Conversations: store,
+		ResolveModel: func(string) (*domain.Provider, string, string, *contracts.RPCError) {
+			return provider, "model", "key", nil
+		},
+		ValidateWorkspace: func(context.Context, string) error {
+			return errors.New("not a directory")
+		},
+	})
+
+	_, rpcErr := service.HandleTurnsStart(context.Background(), contracts.TurnStartRequest{
+		ConversationKey: "draft-invalid-workspace",
+		Text:            "hello",
+		Model:           "provider:model",
+		Workspace:       "/tmp/not-a-directory",
+	})
+	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
+		t.Fatalf("start error = %+v, want validation error", rpcErr)
+	}
+	if len(store.byID) != 0 {
+		t.Fatalf("invalid draft workspace created storage entries: %v", store.byID)
+	}
+}
 
 // TestAddTurnMessagesScansTaskMemoryBeforeDrain proves the task-memory scan
 // runs inside AddTurnMessages BEFORE the pending-announcement drain, so a

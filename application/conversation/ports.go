@@ -61,7 +61,9 @@ type TurnLocker func(conversationID string) (unlock func())
 type RunCanceller func(conversationID string)
 
 // PeerAnnouncer delivers an inter-room peer_message announcement.
-type PeerAnnouncer func(targetID, fromID, content string)
+// The error reports queue persistence, not whether the target agent has
+// already read or acted on the message.
+type PeerAnnouncer func(targetID, fromID, content string) error
 
 // Deps is the narrow wiring for New. Feature packages never receive *App.
 type Deps struct {

@@ -99,6 +99,21 @@ func (a *Service) subagentResultMessage(run *domain.AcpRun, outputPath string, s
 }
 
 func (a *Service) TriggerBackgroundCompletionTurn(conversationID string) {
+	a.startIdleConversationTurn(conversationID, false)
+}
+
+// WakePendingPeerMessage starts one turn when a peer message is waiting and
+// the target conversation is idle. It is also called after every run cleanup
+// so a message that arrived during the terminal boundary cannot be stranded
+// merely because it observed the previous run as still active.
+func (a *Service) WakePendingPeerMessage(conversationID string) {
+	a.startIdleConversationTurn(conversationID, true)
+}
+
+func (a *Service) startIdleConversationTurn(conversationID string, requirePeerMessage bool) {
+	if conversationID == "" {
+		return
+	}
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
 	turnLock := a.ConversationTurnLock(conversationID)
@@ -108,21 +123,41 @@ func (a *Service) TriggerBackgroundCompletionTurn(conversationID string) {
 	if a.ActiveRunForConversation(conversationID) != nil {
 		return
 	}
+	announcementLock := a.announcementLock(conversationID)
+	announcementLock.Lock()
+	defer announcementLock.Unlock()
 
 	repo, err := a.loadRepo(conversationID)
 	if err != nil {
-		a.log("error", "acp", "triggerBackgroundCompletionTurn: conversation %s not found: %v", conversationID, err)
+		a.log("error", "agent", "trigger idle conversation turn: conversation %s not found: %v", conversationID, err)
 		return
 	}
 	conv := repo.Conversation()
+	if conv.Status == "running" && requirePeerMessage {
+		if !a.HealOrphanedRunningConversation(conv) {
+			return
+		}
+	}
 	if conv.Status != "idle" {
+		return
+	}
+	if !conv.HasUserMessage() {
+		return
+	}
+	if requirePeerMessage && !hasPendingAnnouncementType(conv.PendingAnnouncements, "peer_message") {
 		return
 	}
 
 	provider, model, apiKey, effort, err := a.ResolveConversationProvider(conv)
 	if err != nil {
-		a.log("error", "acp", "triggerBackgroundCompletionTurn: no provider: %v", err)
+		a.log("warn", "agent", "trigger idle conversation turn: no provider for %s: %v", conversationID, err)
 		return
+	}
+	if items := conv.DrainPendingAnnouncements(); len(items) > 0 {
+		if err := repo.Add(domain.RoleAssistant, a.PendingAnnouncementsMessage(items)); err != nil {
+			a.log("error", "agent", "trigger idle conversation turn: announcement add failed: %v", err)
+			return
+		}
 	}
 
 	now := clock.NewTime().Time()
@@ -133,12 +168,12 @@ func (a *Service) TriggerBackgroundCompletionTurn(conversationID string) {
 		ProviderID: provider.ID,
 	}
 	if err := repo.Add(domain.RoleAssistant, asstMsg); err != nil {
-		a.log("error", "acp", "triggerBackgroundCompletionTurn: add failed: %v", err)
+		a.log("error", "agent", "trigger idle conversation turn: assistant add failed: %v", err)
 		return
 	}
 	conv.Status = "running"
 	if err := repo.Save(); err != nil {
-		a.log("error", "acp", "triggerBackgroundCompletionTurn: save failed: %v", err)
+		a.log("error", "agent", "trigger idle conversation turn: save failed: %v", err)
 		return
 	}
 
@@ -162,7 +197,20 @@ func (a *Service) TriggerBackgroundCompletionTurn(conversationID string) {
 	a.goSafe("agent", func() {
 		a.RunTurn(run, provider, apiKey, bareModel, effort, asstMsg.ID, false, caps)
 	})
-	a.log("info", "acp", "subagent completion turn triggered for %s (model %s)", conv.ID, bareModel)
+	if requirePeerMessage {
+		a.log("info", "agent", "peer message turn triggered for %s (model %s)", conv.ID, bareModel)
+	} else {
+		a.log("info", "acp", "subagent completion turn triggered for %s (model %s)", conv.ID, bareModel)
+	}
+}
+
+func hasPendingAnnouncementType(items []domain.PendingAnnouncement, typ string) bool {
+	for _, item := range items {
+		if item.Type == typ {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Service) ResolveConversationProvider(conv *domain.Conversation) (*domain.Provider, string, string, string, error) {

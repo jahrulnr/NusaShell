@@ -462,6 +462,21 @@ func (c *Conversation) AddMessage(m Message) {
 	c.Touch()
 }
 
+// HasUserMessage reports whether the conversation has a real user anchor.
+// Hydration and harness-only assistant messages do not make an empty draft
+// durable or eligible for inter-conversation delivery.
+func (c *Conversation) HasUserMessage() bool {
+	if c == nil {
+		return false
+	}
+	for _, message := range c.Messages {
+		if message.Role == RoleUser {
+			return true
+		}
+	}
+	return false
+}
+
 // EstimateTokens sums the message content, tool args and outputs. The
 // compaction blob (opaque server-side compaction payload) is included so the
 // 80% trigger stays correct after a native compaction: the blob replaces the

@@ -1444,6 +1444,7 @@ func TestExecuteTurnToolsKeepsHydrationOnBriefChange(t *testing.T) {
 	conv := &domain.Conversation{
 		ID: "c1",
 		Messages: []domain.Message{
+			{ID: "u0", Role: domain.RoleUser, Content: "seed", Status: domain.StatusDone},
 			hydrationCheckpointMessage(),
 			{ID: "m1", Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "t1", Name: "todo", Args: `{}`}}},
 		},
@@ -1457,7 +1458,7 @@ func TestExecuteTurnToolsKeepsHydrationOnBriefChange(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: WithConversationID(context.Background(), "c1"), Cancel: func() {}}
 
-	if err := app.executeTurnTools(run, "m1", conv.Messages[1].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err != nil {
+	if err := app.executeTurnTools(run, "m1", conv.Messages[2].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err != nil {
 		t.Fatalf("executeTurnTools: %v", err)
 	}
 	// The hydration checkpoint must still be present.

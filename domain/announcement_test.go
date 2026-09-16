@@ -69,3 +69,60 @@ func TestWorkspaceChangedAnnouncementArgs(t *testing.T) {
 		t.Fatalf("empty from must be a set-to notice: %q", got)
 	}
 }
+
+func TestConfigChangedAnnouncementIncludesConcreteChanges(t *testing.T) {
+	changed := []string{
+		AnnouncementConfigChangedDetail("subagent", "codex", "disabled"),
+		AnnouncementConfigChangedDetail("subagent", "devin", "enabled"),
+	}
+	args := AnnouncementConfigChangedArgs(changed)
+	var parsed struct {
+		Type    string   `json:"type"`
+		Changed []string `json:"changed"`
+	}
+	if err := json.Unmarshal([]byte(args), &parsed); err != nil {
+		t.Fatalf("config args must be valid JSON: %v (%s)", err, args)
+	}
+	if parsed.Type != "config_changed" || strings.Join(parsed.Changed, "|") != strings.Join(changed, "|") {
+		t.Fatalf("config args = %+v, want concrete changes %v", parsed, changed)
+	}
+	message := AnnouncementConfigChangedMessage(changed)
+	if message != "subagent codex has disabled; subagent devin has enabled. Re-read the affected tool descriptions and instructions." {
+		t.Fatalf("config message = %q", message)
+	}
+}
+
+func TestMemoryChangedAnnouncementNamesDocumentAndPath(t *testing.T) {
+	cases := []struct {
+		tier string
+		path string
+		want string
+	}{
+		{"user", "/data/memory/user.md", "user.md has changed, read /data/memory/user.md to see primary memory"},
+		{"agent", "/data/memory/soul.md", "soul.md has changed, read /data/memory/soul.md to see primary memory"},
+	}
+	for _, tc := range cases {
+		if got := AnnouncementMemoryChangedMessage(tc.tier, tc.path); got != tc.want {
+			t.Errorf("tier %q message = %q, want %q", tc.tier, got, tc.want)
+		}
+	}
+}
+
+func TestSkillsChangedAnnouncementNamesSkill(t *testing.T) {
+	args := AnnouncementSkillsChangedArgs("save", "tool-mapping")
+	var parsed struct {
+		Type string `json:"type"`
+		Op   string `json:"op"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(args), &parsed); err != nil {
+		t.Fatalf("skill args must be valid JSON: %v (%s)", err, args)
+	}
+	if parsed.Type != "skills_changed" || parsed.Op != "save" || parsed.Name != "tool-mapping" {
+		t.Fatalf("skill args = %+v", parsed)
+	}
+	want := "skill tool-mapping has changed, re-read if you are using this skill"
+	if got := AnnouncementSkillsChangedMessage("tool-mapping"); got != want {
+		t.Fatalf("skill message = %q, want %q", got, want)
+	}
+}

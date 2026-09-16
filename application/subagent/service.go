@@ -41,9 +41,9 @@ func (s *Service) goSafe(name string, fn func()) {
 	s.deps.Go(name, fn)
 }
 
-func (s *Service) notifyAgentsChanged() {
+func (s *Service) notifyAgentsChanged(name, action string) {
 	if s != nil && s.deps.OnAgentsChanged != nil {
-		s.deps.OnAgentsChanged()
+		s.deps.OnAgentsChanged(name, action)
 	}
 }
 

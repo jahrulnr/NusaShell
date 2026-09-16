@@ -527,7 +527,7 @@ func TestAdvanceLearningCursorClampsInvalidPersistedMarker(t *testing.T) {
 			source := &domain.Conversation{
 				ID:                   "conv_cursor_clamp",
 				LastReviewedMsgCount: marker,
-				Messages:             []domain.Message{{ID: "m1"}, {ID: "m2"}, {ID: "m3"}},
+				Messages:             []domain.Message{{ID: "m1", Role: domain.RoleUser, Content: "seed"}, {ID: "m2"}, {ID: "m3"}},
 			}
 			conversations := &cloningConvStore{conv: source}
 			app := &App{Conversations: conversations}
@@ -680,7 +680,7 @@ func TestAdvanceLearningCursorIsMonotonicForConcurrentCompletion(t *testing.T) {
 	source := &domain.Conversation{
 		ID: "conv_cursor_monotonic",
 		Messages: []domain.Message{
-			{ID: "m1"}, {ID: "m2"}, {ID: "m3"}, {ID: "m4"},
+			{ID: "m1", Role: domain.RoleUser, Content: "seed"}, {ID: "m2"}, {ID: "m3"}, {ID: "m4"},
 			{ID: "m5"}, {ID: "m6"}, {ID: "m7"}, {ID: "m8"},
 		},
 	}
@@ -714,7 +714,7 @@ func TestRunLearningJobAdvancesCursorAfterSuccessfulEvolution(t *testing.T) {
 	source := &domain.Conversation{
 		ID: "conv_cursor_evolve",
 		Messages: []domain.Message{
-			{ID: "m1"}, {ID: "m2"}, {ID: "m3"},
+			{ID: "m1", Role: domain.RoleUser, Content: "seed"}, {ID: "m2"}, {ID: "m3"},
 		},
 	}
 	conversations := &cloningConvStore{conv: source}

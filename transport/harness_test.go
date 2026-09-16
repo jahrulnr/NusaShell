@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"nusashell/application"
+	"nusashell/domain"
 	"nusashell/frontend"
 	"nusashell/infrastructure/acpruntime"
 	"nusashell/infrastructure/ai"
@@ -747,16 +748,27 @@ func (h *harness) addAnthropicProvider(t *testing.T, name string) string {
 
 func (h *harness) newConversation(t *testing.T) string {
 	t.Helper()
-	res := h.rpcOK(t, "agent.conversations.create", map[string]any{})
-	var out struct {
-		Conversation struct {
-			ID string `json:"id"`
-		} `json:"conversation"`
+	repo := application.NewConversation(h.app.Conversations, "")
+	// This helper intentionally seeds a legacy empty JSON fixture for tests
+	// that exercise metadata/repair paths. Production writes go through the
+	// repository and reject empty drafts; the first-user helper below models
+	// the durable path.
+	if err := h.app.Conversations.Save(repo.Conversation()); err != nil {
+		t.Fatalf("create legacy test conversation: %v", err)
 	}
-	if err := json.Unmarshal(res.Result, &out); err != nil || out.Conversation.ID == "" {
-		t.Fatalf("create conversation malformed: %s", res.Result)
+	return repo.ID()
+}
+
+func (h *harness) newUserConversation(t *testing.T, title, content string) string {
+	t.Helper()
+	repo := application.NewConversation(h.app.Conversations, title)
+	if err := repo.Add(domain.RoleUser, content); err != nil {
+		t.Fatalf("seed conversation user message: %v", err)
 	}
-	return out.Conversation.ID
+	if err := repo.Save(); err != nil {
+		t.Fatalf("save seeded conversation: %v", err)
+	}
+	return repo.ID()
 }
 
 // readWSUntil connects to the /ws endpoint, subscribes, and reads frames

@@ -13,6 +13,7 @@ import (
 type lifecycleConvStore struct {
 	mu   sync.Mutex
 	byID map[string]*domain.Conversation
+	err  error
 }
 
 func (s *lifecycleConvStore) List() []*domain.Conversation { return nil }
@@ -29,6 +30,9 @@ func (s *lifecycleConvStore) Get(id string) (*domain.Conversation, error) {
 func (s *lifecycleConvStore) Save(c *domain.Conversation) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.err != nil {
+		return s.err
+	}
 	if s.byID == nil {
 		s.byID = map[string]*domain.Conversation{}
 	}
@@ -209,6 +213,8 @@ func TestExecuteTurnToolsEmitsToolCallPairsWithCallIDs(t *testing.T) {
 		"conv_tools": {
 			ID: "conv_tools", Status: "running",
 			Messages: []domain.Message{{
+				ID: "user1", Role: domain.RoleUser, Content: "run tools", Status: domain.StatusDone,
+			}, {
 				ID: "msg1", Role: domain.RoleAssistant,
 				ToolCalls: []domain.ToolCall{
 					{ID: "c1", Name: "alpha"},

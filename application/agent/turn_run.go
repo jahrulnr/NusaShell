@@ -11,11 +11,12 @@ import (
 
 // TurnRun tracks one streaming agent turn.
 type TurnRun struct {
-	ID             string
-	ConversationID string
-	MessageID      string
-	Ctx            context.Context
-	Cancel         context.CancelFunc
+	ID              string
+	ConversationID  string
+	ConversationKey string
+	MessageID       string
+	Ctx             context.Context
+	Cancel          context.CancelFunc
 	// ProviderID is the resolved provider for this turn, used by the
 	// dynamic 400-learning classifier to key learned param rules.
 	ProviderID string

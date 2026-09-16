@@ -247,6 +247,33 @@ func TestDecodePayload(t *testing.T) {
 	}
 }
 
+func TestLazyTurnStartContractCarriesConversationKeyAndWorkspace(t *testing.T) {
+	var req TurnStartRequest
+	if err := DecodePayload(json.RawMessage(`{"conversation_key":"draft-abc","workspace":"/tmp/work","text":"hello","model":"provider:model"}`), &req); err != nil {
+		t.Fatalf("decode lazy turn request: %v", err)
+	}
+	if req.ConversationID != "" || req.ConversationKey != "draft-abc" || req.Workspace != "/tmp/work" {
+		t.Fatalf("request = %+v", req)
+	}
+	payload, err := json.Marshal(TurnStartResult{
+		RunID: "run-1", ConversationID: "conv-1", ConversationKey: "draft-abc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{
+		"run_id": "run-1", "conversation_id": "conv-1", "conversation_key": "draft-abc",
+	} {
+		if got[key] != want {
+			t.Fatalf("%s = %q, want %q", key, got[key], want)
+		}
+	}
+}
+
 func TestResponseHelpers(t *testing.T) {
 	ok := OKResult(map[string]string{"a": "b"})
 	if !ok.OK || ok.Error != nil {

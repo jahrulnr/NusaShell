@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -138,10 +139,11 @@ func (a *Service) ExecuteTurnTools(run *TurnRun, messageID string, toolCalls []d
 		case "skill":
 			op := OpArg([]byte(toolCalls[i].Args))
 			if op == "save" || op == "delete" {
+				name := a.skillAnnouncementName(toolCalls[i].Args)
 				a.PublishAnnouncementToAll(newAnnouncement(
 					"skills_changed",
-					domain.AnnouncementSkillsChangedArgs(op),
-					domain.AnnouncementSkillsChangedMessage(),
+					domain.AnnouncementSkillsChangedArgs(op, name),
+					domain.AnnouncementSkillsChangedMessage(name),
 				), run.ConversationID)
 			}
 		}
@@ -150,6 +152,25 @@ func (a *Service) ExecuteTurnTools(run *TurnRun, messageID string, toolCalls []d
 		return err
 	}
 	return nil
+}
+
+func (a *Service) skillAnnouncementName(argsJSON string) string {
+	var args struct {
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		OwnedBy string `json:"owned_by"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return ""
+	}
+	name := strings.TrimSpace(args.Name)
+	if name == "" && a != nil && a.deps.ResolveSkillName != nil {
+		name = a.deps.ResolveSkillName(strings.TrimSpace(args.ID), strings.TrimSpace(args.OwnedBy))
+	}
+	if name == "" {
+		name = strings.TrimSpace(args.ID)
+	}
+	return name
 }
 
 // runOneTool executes a single tool call and returns its result. It emits the

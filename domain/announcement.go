@@ -16,6 +16,11 @@ import (
 //   - auto_continue:      the todo-driven chain continues into a new turn
 //   - interrupted:        a transient upstream failure cut the response; continue it
 //   - workspace_changed:  the user picked a new workspace; file tools now run there
+//   - config_changed:     a named runtime configuration changed
+//   - memory_changed:     user.md or soul.md changed
+//   - skills_changed:     a named skill changed
+//   - peer_message:       another conversation sent a message
+//   - task_memory:        relevant structured memory was found
 //
 // The model processes an announcement like any tool output — as runtime
 // state, never as user speech. This is the deliberate alternative to
@@ -86,10 +91,10 @@ func WorkspaceChangedAnnouncementMessage(from, to string) string {
 }
 
 // AnnouncementConfigChangedArgs builds the self-describing args payload for
-// a config-change announcement: the notice type plus the changed surfaces
-// (e.g. "subagent", "user_prompt", "provider"). The model reads the change
-// from the data itself; the new system prompt / tool descriptions already
-// travel in the same request, so the announcement stays implicit.
+// a config-change announcement: the notice type plus concrete changed
+// surfaces, names, and actions (for example "subagent codex has disabled").
+// The new system prompt / tool descriptions already travel in the same
+// request, so the announcement does not duplicate their full contents.
 func AnnouncementConfigChangedArgs(changed []string) string {
 	if changed == nil {
 		changed = []string{}
@@ -104,15 +109,42 @@ func AnnouncementConfigChangedArgs(changed []string) string {
 	return string(b)
 }
 
+// AnnouncementConfigChangedDetail formats one concrete runtime configuration
+// change for both the announcement args and its result text. Enabled and
+// disabled changes intentionally use the terse wording shown to the model,
+// while deletion keeps the grammar explicit.
+func AnnouncementConfigChangedDetail(scope, name, action string) string {
+	scope = strings.TrimSpace(scope)
+	name = strings.TrimSpace(name)
+	action = strings.TrimSpace(strings.ToLower(action))
+	subject := scope
+	if name != "" {
+		if subject != "" {
+			subject += " "
+		}
+		subject += name
+	}
+	if subject == "" {
+		subject = "configuration"
+	}
+	if action == "" {
+		action = "changed"
+	}
+	if action == "deleted" {
+		return fmt.Sprintf("%s has been deleted", subject)
+	}
+	return fmt.Sprintf("%s has %s", subject, action)
+}
+
 // AnnouncementConfigChangedMessage is the announcement tool result text for
-// a config change. It flags the change and points at the refresh path
-// without dumping content — the model re-reads the affected surfaces from
-// the request itself.
+// a config change. The changed entries are concrete enough to tell the model
+// which named surface changed, while the new system prompt/tool descriptions
+// travel in the same request.
 func AnnouncementConfigChangedMessage(changed []string) string {
 	if len(changed) == 0 {
-		return "Tool/system configuration changed since your last turn. Re-read the affected tool descriptions and instructions."
+		return "Configuration has changed. Re-read the affected tool descriptions and instructions."
 	}
-	return fmt.Sprintf("Tool/system configuration changed since your last turn: %s. Re-read the affected tool descriptions and instructions.", strings.Join(changed, ", "))
+	return fmt.Sprintf("%s. Re-read the affected tool descriptions and instructions.", strings.Join(changed, "; "))
 }
 
 // AnnouncementMemoryChangedArgs builds the self-describing args payload for
@@ -131,20 +163,29 @@ func AnnouncementMemoryChangedArgs(tier, op string) string {
 }
 
 // AnnouncementMemoryChangedMessage is the announcement tool result text for
-// a memory change. The model refreshes via the real `memory` tool instead of
-// waiting for the next hydration epoch.
-func AnnouncementMemoryChangedMessage() string {
-	return "Memory was updated outside this conversation. Call `memory` op=list to refresh."
+// a user.md or soul.md change. The absolute path points the model at the
+// primary document instead of making it guess which memory surface changed.
+func AnnouncementMemoryChangedMessage(tier, path string) string {
+	filename := "user.md"
+	if strings.EqualFold(strings.TrimSpace(tier), "agent") || strings.EqualFold(strings.TrimSpace(tier), "soul") {
+		filename = "soul.md"
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		path = filename
+	}
+	return fmt.Sprintf("%s has changed, read %s to see primary memory", filename, path)
 }
 
 // AnnouncementSkillsChangedArgs builds the self-describing args payload for
-// a skill-library change: the notice type plus the mutation op
-// (save|delete|install).
-func AnnouncementSkillsChangedArgs(op string) string {
+// a skill-library change: the notice type, mutation op (save|delete|install),
+// and affected skill name.
+func AnnouncementSkillsChangedArgs(op, name string) string {
 	b, err := json.Marshal(struct {
 		Type string `json:"type"`
 		Op   string `json:"op"`
-	}{Type: "skills_changed", Op: op})
+		Name string `json:"name,omitempty"`
+	}{Type: "skills_changed", Op: op, Name: strings.TrimSpace(name)})
 	if err != nil {
 		return "{}"
 	}
@@ -152,9 +193,15 @@ func AnnouncementSkillsChangedArgs(op string) string {
 }
 
 // AnnouncementSkillsChangedMessage is the announcement tool result text for
-// a skill-library change. The model refreshes via the real `skill` tool.
-func AnnouncementSkillsChangedMessage() string {
-	return "The skill library changed. Call `skill` op=list to refresh."
+// a named skill-library change. The model can avoid rereading unrelated
+// skills, while the skill body remains available through the real `skill` /
+// `file_read` path.
+func AnnouncementSkillsChangedMessage(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "skill has changed, re-read if you are using this skill"
+	}
+	return fmt.Sprintf("skill %s has changed, re-read if you are using this skill", name)
 }
 
 // AnnouncementPeerMessageArgs builds the self-describing args payload for a

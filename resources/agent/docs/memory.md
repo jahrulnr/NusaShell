@@ -262,6 +262,20 @@ capacity. Retired/superseded rows remain available for a 30-day audit window,
 then are physically deleted so the catalog stays bounded. A user delete is
 immediate.
 
+An editor update sends a `memory_changed` announcement to visible rooms. Its
+result names the primary file and absolute path, such as
+`user.md has changed, read /data/memory/user.md to see primary memory` (or the
+corresponding `soul.md` path). Read that file with `file_read`; the
+announcement does not contain the document body.
+
+Good:
+
+    file_read(path="/data/memory/user.md")  # use the path from memory_changed
+
+Bad:
+
+    memory(op="list")  # structured records are not the user.md/soul.md body
+
 ## Balanced housekeeping
 
 At startup and on the daily prune tick, NusaShell also removes auxiliary

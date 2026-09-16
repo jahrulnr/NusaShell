@@ -262,6 +262,29 @@ cannot exceed the compaction model's context window. After a failed turn the
 provider-measured `context_tokens` is cleared so the UI badge cannot display a
 stale undercount of the real conversation size.
 
+The summarizer advertises exactly one tool, `summary()`, and carries the
+contract in its prompt ("output only the handoff checkpoint via the summary
+tool", "call the summary tool exactly once") rather than forcing the tool
+through `tool_choice`. Forcing a named tool choice is what used to make
+compaction fail outright on reasoning providers: with thinking mode enabled the
+provider answers HTTP 400 (`Thinking mode does not support this tool_choice`)
+before the model is asked, so every pass failed and the turn ended with
+`compaction failed: summary too short`. The summary is read from the tool-call
+arguments when the model calls the tool, and from the assistant text when it
+answers in prose; a pass counts only when the text clears the minimum length
+and does not echo the live assistant turn, and a too-short pass is retried with
+a doubled token budget.
+
+`settings.compaction_workflow` picks the request shape: `dedicated` (default)
+sends a summary-only system prompt and only the `summary()` tool, while `reuse`
+keeps the conversation's agent system prompt, its full toolbox, and its prompt
+cache prefix. Because the reuse workflow never receives the compaction system
+prompt, the **last user message** — the handoff prompt — is the only place the
+guardrails can live for both workflows: stop, no task work, no reasoning-only
+output, conversation language, tool results treated as data, and the checkpoint
+structure. `TestCompactionHandoffGuardReachesEveryWorkflow` fails if a clause or
+a workflow loses them.
+
 ### Upstream recovery
 
 Before a provider stream has emitted content or reasoning, transient upstream
@@ -327,8 +350,14 @@ Credentials never touch the JSON/JSONL files. All writes are atomic
 (temp + rename). The log file is a bounded ring (2000 entries).
 
 Conversation transcripts are owned by `application.ConversationRepository`.
-`NewConversation` is the only constructor for a new room. Compaction keeps
-the same conversation ID and starts a new epoch with `ResetTranscript`.
+New rooms are frontend drafts only. The first real user turn allocates the
+conversation ID and persists the room, user message, and assistant placeholder
+as one start transaction; the request's temporary `conversation_key` is an
+in-process correlation/idempotency marker and is not persisted. Repository
+`Save()` rejects conversations without a real user message, so empty drafts
+remain temporary and cannot be made durable through metadata or announcement
+paths. Compaction keeps the same conversation ID and starts a new epoch with
+`ResetTranscript`.
 `GetAll` / `GetFrom(start, end)` / `GetById(id)` read the current room;
 `Add(role, args...)` is the only way to grow the transcript; `Save()`
 persists and rejects any rewrite, reorder, or shrink of formed message IDs.

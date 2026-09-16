@@ -141,18 +141,42 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
   }
 
   async function startNewTurn(text) {
-    if (!state.activeId) await createConversation(text.slice(0, 48));
+    // New conversation drafts already have a browser-only key. Do not reset
+    // that draft here: doing so would discard a workspace or attachments
+    // selected before the first message was sent.
+    if (!state.activeId && !state.conversationKey) await createConversation(text.slice(0, 48));
+    const draftKey = state.activeId ? '' : state.conversationKey;
+    const draftWorkspace = state.activeId ? '' : (state.draftWorkspace || state.conversation?.workspace || '');
     const attachments = [...state.attachments];
     state.localTurnPending = true;
     try {
-      const { run_id: runID } = await rpc('agent.turns.start', {
-        conversation_id: state.activeId,
+      const started = await rpc('agent.turns.start', {
+        conversation_id: state.activeId || undefined,
+        conversation_key: draftKey || undefined,
         text,
         model: state.model,
         effort: state.effort && state.effort !== 'auto' ? state.effort : undefined,
         provider_route: state.providerRoute || undefined,
+        workspace: draftWorkspace || undefined,
         attachments,
       });
+      const runID = started?.run_id;
+      if (!runID) throw new Error('Turn start did not return a run id');
+      if (draftKey) {
+        if (started.conversation_key !== draftKey || !started.conversation_id) {
+          throw new Error('Turn start returned an invalid conversation mapping');
+        }
+        state.activeId = started.conversation_id;
+        state.conversationKey = null;
+        state.draftWorkspace = '';
+        state.conversation = {
+          ...(state.conversation || {}),
+          id: started.conversation_id,
+          status: 'running',
+          workspace: draftWorkspace,
+        };
+        await refreshConversations();
+      }
       input.value = '';
       autosize();
       state.attachments = [];
@@ -330,9 +354,14 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
   }
 
   async function chooseWorkspace() {
-    if (!state.activeId) await createConversation();
-    const path = await openWorkspacePicker({ initial: state.conversation?.workspace || '' });
+    const path = await openWorkspacePicker({ initial: state.activeId ? (state.conversation?.workspace || '') : (state.draftWorkspace || '') });
     if (path == null) return; // Cancelled: the conversation stays unchanged.
+    if (!state.activeId) {
+      state.draftWorkspace = path;
+      state.conversation = { ...(state.conversation || {}), id: '', workspace: path };
+      updateComposerStatus();
+      return;
+    }
     try {
       const { conversation } = await rpc('agent.conversations.set-workspace', { id: state.activeId, path });
       state.conversation = conversation;

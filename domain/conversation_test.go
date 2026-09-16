@@ -652,6 +652,18 @@ func TestHiddenFromRoomList(t *testing.T) {
 	}
 }
 
+func TestHasUserMessageRequiresRealUserAnchor(t *testing.T) {
+	if (&Conversation{}).HasUserMessage() {
+		t.Fatal("empty conversation must not have a user anchor")
+	}
+	if (&Conversation{Messages: []Message{{Role: RoleAssistant}}}).HasUserMessage() {
+		t.Fatal("assistant-only conversation must not have a user anchor")
+	}
+	if !(&Conversation{Messages: []Message{{Role: RoleUser, Content: "hello"}}}).HasUserMessage() {
+		t.Fatal("conversation with a user message must have a user anchor")
+	}
+}
+
 func TestEffectiveTypeMigratesLegacyOrigin(t *testing.T) {
 	if (*Conversation)(nil).EffectiveType() != ConversationTypeConversation {
 		t.Fatal("nil conversation must read as an interactive room")

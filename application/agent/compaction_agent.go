@@ -7,11 +7,12 @@ import (
 )
 
 // compactionPass is the AgentCompaction rule set for ONE chunk pass: the
-// summary() tool is forced via ToolChoice, the tool call is never
-// executed (its args ARE the output), and failed attempts double the
-// token budget until the summary is long enough or the budget is
-// exhausted. The chunk loop (takeCompactionChunk) lives in the caller;
-// the engine runs one pass.
+// summary() tool is advertised — never forced through tool_choice, because
+// reasoning providers reject a named choice while thinking mode is on and the
+// whole pass then fails — the tool call is never executed (its args ARE the
+// output), and failed attempts double the token budget until the summary is
+// long enough or the budget is exhausted. The chunk loop
+// (takeCompactionChunk) lives in the caller; the engine runs one pass.
 type compactionPass struct {
 	svc            *Service
 	adapter        ProviderContext
@@ -57,7 +58,6 @@ func (p *compactionPass) rules() AgentRules {
 				ProviderRoute:    p.providerRoute,
 				Effort:           p.effort,
 				ReasoningSummary: p.adapter.ReasoningSummary,
-				ToolChoice:       compactionToolChoice(p.adapter.Kind),
 				MaxTokens:        p.budget,
 			}
 		},

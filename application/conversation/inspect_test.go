@@ -182,6 +182,7 @@ func TestSearchRoomsMatchesMessageAndID(t *testing.T) {
 		},
 		"conv_xyz": {
 			ID: "conv_xyz", Title: "Backend", Summary: "auth", UpdatedAt: now.Add(-time.Minute),
+			Messages: []domain.Message{{ID: "u2", Role: domain.RoleUser, Content: "backend seed"}},
 		},
 	}}
 	svc := newInspectService(store)

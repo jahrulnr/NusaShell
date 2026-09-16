@@ -223,23 +223,28 @@ func TestRoutesNoSSEEndpoint(t *testing.T) {
 
 func TestConversationLifecycle(t *testing.T) {
 	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
 
-	// create
-	created := h.rpcOK(t, "agent.conversations.create", map[string]any{"title": "Hello"})
-	var conv struct {
-		Conversation struct {
-			ID        string `json:"id"`
-			Title     string `json:"title"`
-			CreatedAt string `json:"created_at"`
-		} `json:"conversation"`
+	// A room is allocated and persisted by its first user turn.
+	started := h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_key": "draft-lifecycle",
+		"text":             "Hello",
+		"model":            "fake-model-1",
+	})
+	var start struct {
+		RunID           string `json:"run_id"`
+		ConversationID  string `json:"conversation_id"`
+		ConversationKey string `json:"conversation_key"`
 	}
-	if err := json.Unmarshal(created.Result, &conv); err != nil {
+	if err := json.Unmarshal(started.Result, &start); err != nil {
 		t.Fatal(err)
 	}
-	id := conv.Conversation.ID
-	if id == "" || conv.Conversation.Title != "Hello" || conv.Conversation.CreatedAt == "" {
-		t.Fatalf("created conversation = %+v", conv)
+	if start.RunID == "" || start.ConversationID == "" || start.ConversationKey != "draft-lifecycle" {
+		t.Fatalf("start result = %+v", start)
 	}
+	waitTurnDone(t, h, start.ConversationID)
+	id := start.ConversationID
 
 	// list
 	listed := h.rpcOK(t, "agent.conversations.list", map[string]any{})
@@ -264,8 +269,8 @@ func TestConversationLifecycle(t *testing.T) {
 	if err := json.Unmarshal(gotten.Result, &get); err != nil {
 		t.Fatal(err)
 	}
-	if len(get.Messages) != 0 {
-		t.Fatalf("new conversation has %d messages", len(get.Messages))
+	if len(get.Messages) == 0 {
+		t.Fatal("first user turn must be persisted in the new conversation")
 	}
 
 	// rename
@@ -295,8 +300,8 @@ func TestConversationLifecycle(t *testing.T) {
 
 func TestConversationProviderSetPersistsPerConversation(t *testing.T) {
 	h := newHarness(t, nil)
-	firstID := h.newConversation(t)
-	secondID := h.newConversation(t)
+	firstID := h.newUserConversation(t, "first", "first conversation")
+	secondID := h.newUserConversation(t, "second", "second conversation")
 
 	set := h.rpcOK(t, "agent.conversations.set-provider", map[string]any{"id": firstID, "provider_route": "account-plus"})
 	var result struct {
@@ -328,8 +333,8 @@ func TestConversationProviderSetPersistsPerConversation(t *testing.T) {
 
 func TestConversationWorkspaceSetPersistsPerConversation(t *testing.T) {
 	h := newHarness(t, nil)
-	firstID := h.newConversation(t)
-	secondID := h.newConversation(t)
+	firstID := h.newUserConversation(t, "first", "first conversation")
+	secondID := h.newUserConversation(t, "second", "second conversation")
 	workspace := t.TempDir()
 	h.app.DirectoryBrowser = dirBrowserStubForTest{dir: workspace}
 
@@ -480,10 +485,17 @@ func TestTurnPersistsValidatedAttachments(t *testing.T) {
 
 func TestLogsArePublishedToLiveSubscribers(t *testing.T) {
 	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
 	_, events, unsubscribe := h.app.Bus.Subscribe()
 	defer unsubscribe()
 
-	h.rpcOK(t, "agent.conversations.create", map[string]any{"title": "Live log"})
+	h.llm.setScript([]llmStep{{Text: "log activity"}})
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_key": "draft-live-log",
+		"text":             "Live log",
+		"model":            "fake-model-1",
+	})
 
 	select {
 	case ev := <-events:
@@ -515,7 +527,7 @@ func TestConversationValidation(t *testing.T) {
 		t.Fatalf("missing conversation must be NOT_FOUND, got %+v", res)
 	}
 
-	id := h.newConversation(t)
+	id := h.newUserConversation(t, "validation", "validate this room")
 	res = h.rpc(t, "agent.conversations.rename", map[string]any{"id": id, "title": "  "})
 	if res.OK || res.Error == nil || res.Error.Code != "VALIDATION_ERROR" {
 		t.Fatalf("blank title must be a validation error, got %+v", res)
@@ -1179,8 +1191,15 @@ func TestDocsHandlers(t *testing.T) {
 
 func TestLogsHandlers(t *testing.T) {
 	h := newHarness(t, nil)
-	// generate some activity
-	h.newConversation(t)
+	// Generate some activity through a real first turn.
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	h.llm.setRounds([][]llmStep{{{Text: "log activity"}}})
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_key": "draft-log-list",
+		"text":             "Generate logs",
+		"model":            "fake-model-1",
+	})
 
 	listed := h.rpcOK(t, "logs.list", map[string]any{"limit": 50})
 	var out struct {

@@ -119,7 +119,7 @@ func (svc *Service) HandleInstall(req contracts.SkillInstallRequest) (any, *cont
 		name = skill.Name
 	}
 	svc.write("skill installed: %s", id)
-	svc.changed("install")
+	svc.changed("install", name)
 	return contracts.SkillInstallResult{ID: id, Name: name}, nil
 }
 
@@ -144,7 +144,7 @@ func (svc *Service) HandleSave(req contracts.SkillSaveRequest) (any, *contracts.
 			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 		}
 		svc.write("skill file saved: %s/%s", lookup, rel)
-		svc.changed("save")
+		svc.changed("save", name)
 		return contracts.SkillReadResult{Skill: contracts.SkillFull{SkillDTO: contracts.SkillDTO{ID: lookup, Name: name}}}, nil
 	}
 	var s *domain.Skill
@@ -169,19 +169,24 @@ func (svc *Service) HandleSave(req contracts.SkillSaveRequest) (any, *contracts.
 		return nil, rpcdispatch.Internal(err)
 	}
 	svc.write("skill saved: %s", s.Name)
-	svc.changed("save")
+	svc.changed("save", s.Name)
 	return contracts.SkillReadResult{Skill: contracts.SkillFull{SkillDTO: toDTO(s), Content: s.Content}}, nil
 }
 
 func (svc *Service) HandleDelete(req contracts.SkillIDRequest) (any, *contracts.RPCError) {
-	if _, err := svc.store.Get(req.ID, req.OwnedBy); err != nil {
+	s, err := svc.store.Get(req.ID, req.OwnedBy)
+	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+	}
+	name := req.ID
+	if s != nil && strings.TrimSpace(s.Name) != "" {
+		name = s.Name
 	}
 	if err := svc.store.Delete(req.ID, req.OwnedBy); err != nil {
 		return nil, rpcdispatch.Internal(err)
 	}
 	svc.write("skill deleted: %s", req.ID)
-	svc.changed("delete")
+	svc.changed("delete", name)
 	return map[string]bool{"ok": true}, nil
 }
 

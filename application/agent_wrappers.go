@@ -136,10 +136,6 @@ func appendCompactionHandoffUser(msgs []ChatMessage) []ChatMessage {
 	return agent.AppendCompactionHandoffUser(msgs)
 }
 
-func compactionToolChoice(kind domain.ProviderKind) any {
-	return agent.CompactionToolChoice(kind)
-}
-
 func compactionSummaryEchoesAssistant(summary string, msgs []ChatMessage) bool {
 	return agent.CompactionSummaryEchoesAssistant(summary, msgs)
 }
@@ -225,35 +221,42 @@ func (a *App) agentDeps() agent.Deps {
 		a.pendingRuns = map[string]map[string]string{}
 	}
 	return agent.Deps{
-		Conversations:        a.Conversations,
-		Providers:            a.Providers,
-		Credentials:          a.Credentials,
-		Settings:             a.Settings,
-		Factory:              a.Factory,
-		Toolbox:              a.Toolbox,
-		Attachments:          a.Attachments,
-		Todos:                a.Todos,
-		User:                 a.User,
-		Agent:                a.Agent,
-		ProjectMemory:        a.ProjectMemory,
-		MemoryRecords:        a.MemoryRecords,
-		Bus:                  a.Bus,
-		Log:                  a.log,
-		Go:                   func(name string, fn func()) { a.goSafe(name, fn) },
-		AskQuestions:         a.AskQuestions,
-		RoundStreams:         a.RoundStreams,
-		LearnedParams:        a.learnedParams,
-		ModelOverrides:       a.modelOverrides,
-		Runs:                 a.runs,
-		PendingRuns:          a.pendingRuns,
-		DataDir:              a.DataDir,
-		DefaultWorkspace:     a.defaultWorkspace,
-		StartedAt:            a.startedAt,
-		ResolveModel:         a.resolveModel,
-		WaitRetry:            a.waitForRetry,
-		WaitSlowDown:         a.waitSlowDown,
-		ProviderName:         a.providerNameByID,
-		EffectiveWorkspace:   a.effectiveWorkspace,
+		Conversations:      a.Conversations,
+		Providers:          a.Providers,
+		Credentials:        a.Credentials,
+		Settings:           a.Settings,
+		Factory:            a.Factory,
+		Toolbox:            a.Toolbox,
+		Attachments:        a.Attachments,
+		Todos:              a.Todos,
+		User:               a.User,
+		Agent:              a.Agent,
+		ProjectMemory:      a.ProjectMemory,
+		MemoryRecords:      a.MemoryRecords,
+		Bus:                a.Bus,
+		Log:                a.log,
+		Go:                 func(name string, fn func()) { a.goSafe(name, fn) },
+		AskQuestions:       a.AskQuestions,
+		RoundStreams:       a.RoundStreams,
+		LearnedParams:      a.learnedParams,
+		ModelOverrides:     a.modelOverrides,
+		Runs:               a.runs,
+		PendingRuns:        a.pendingRuns,
+		DataDir:            a.DataDir,
+		DefaultWorkspace:   a.defaultWorkspace,
+		StartedAt:          a.startedAt,
+		ResolveModel:       a.resolveModel,
+		WaitRetry:          a.waitForRetry,
+		WaitSlowDown:       a.waitSlowDown,
+		ProviderName:       a.providerNameByID,
+		ResolveSkillName:   a.skillName,
+		EffectiveWorkspace: a.effectiveWorkspace,
+		ValidateWorkspace: func(ctx context.Context, workspace string) error {
+			if a.DirectoryBrowser == nil {
+				return nil
+			}
+			return a.DirectoryBrowser.EnsureDir(ctx, workspace)
+		},
 		ChatMessages:         a.chatMessagesForProvider,
 		EnrichVision:         a.enrichWithVisionDescriptions,
 		EnrichAudio:          a.enrichWithAudioDescriptions,
@@ -343,6 +346,10 @@ func (a *App) runHeadlessTurnKindObserved(ctx context.Context, prompt, model str
 }
 func (a *App) SteerHeadlessTurn(conversationID, text string) error {
 	return a.agentService().SteerHeadlessTurn(conversationID, text)
+}
+
+func (a *App) deliverPeerMessage(targetID, fromID, content string) error {
+	return a.agentService().DeliverPeerMessage(targetID, fromID, content)
 }
 func (a *App) activeRunForConversation(convID string) *TurnRun {
 	return a.agentService().ActiveRunForConversation(convID)

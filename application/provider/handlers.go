@@ -192,8 +192,10 @@ func (s *Service) HandleSave(req contracts.ProviderSaveRequest) (any, *contracts
 	driver := domain.ProviderDriver(strings.ToLower(strings.TrimSpace(req.Driver)))
 
 	var p *domain.Provider
+	wasEnabled := false
+	hasExisting := false
 	if req.ID != "" {
-		existing, err := s.store.Get(req.ID)
+		stored, err := s.store.Get(req.ID)
 		if err != nil {
 			if defaults, ok := builtInProvider(req.ID); ok {
 				p = defaults
@@ -201,7 +203,9 @@ func (s *Service) HandleSave(req contracts.ProviderSaveRequest) (any, *contracts
 				return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 			}
 		} else {
-			p = existing
+			p = stored
+			wasEnabled = stored.Enabled
+			hasExisting = true
 		}
 	} else {
 		p = &domain.Provider{
@@ -262,7 +266,15 @@ func (s *Service) HandleSave(req contracts.ProviderSaveRequest) (any, *contracts
 	s.info("provider saved: %s (%s)", p.Name, p.Kind)
 	// Provider changes alter cache keys (provider+model+conversation) and
 	// can add/remove tools (web_answer, generate_media): announce globally.
-	s.configChanged()
+	action := "changed"
+	if !hasExisting || p.Enabled != wasEnabled {
+		if p.Enabled {
+			action = "enabled"
+		} else {
+			action = "disabled"
+		}
+	}
+	s.configChanged(p.Name, action)
 	return contracts.ProvidersListResult{Providers: []contracts.ProviderDTO{s.providerDTO(p)}}, nil
 }
 
@@ -279,7 +291,7 @@ func (s *Service) HandleDelete(req contracts.ProviderIDRequest) (any, *contracts
 		s.warn("failed to delete credential for %s: %v", name, err)
 	}
 	s.info("provider deleted: %s", name)
-	s.configChanged()
+	s.configChanged(name, "deleted")
 	return map[string]bool{"ok": true}, nil
 }
 

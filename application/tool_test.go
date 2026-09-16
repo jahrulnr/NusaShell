@@ -81,8 +81,11 @@ func TestHandleToolStopInterruptsOnlyTheSelectedTool(t *testing.T) {
 func TestExecuteTurnToolsContinuesAfterPerToolStop(t *testing.T) {
 	box := &cancellableStreamToolbox{started: make(chan struct{})}
 	conv := &domain.Conversation{
-		ID:       "conv-1",
-		Messages: []domain.Message{{ID: "msg-1", ToolCalls: []domain.ToolCall{{ID: "tool-1", Name: "exec", Args: `{}`}}}},
+		ID: "conv-1",
+		Messages: []domain.Message{
+			{ID: "user-1", Role: domain.RoleUser, Content: "run it"},
+			{ID: "msg-1", Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "tool-1", Name: "exec", Args: `{}`}}},
+		},
 	}
 	run := &TurnRun{ID: "run-1", ConversationID: conv.ID, Ctx: context.Background()}
 	app := &App{
@@ -94,7 +97,7 @@ func TestExecuteTurnToolsContinuesAfterPerToolStop(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- app.executeTurnTools(run, "msg-1", conv.Messages[0].ToolCalls, ModelCapabilities{}, domain.Settings{}, 1)
+		done <- app.executeTurnTools(run, "msg-1", conv.Messages[1].ToolCalls, ModelCapabilities{}, domain.Settings{}, 1)
 	}()
 	select {
 	case <-box.started:
@@ -112,10 +115,10 @@ func TestExecuteTurnToolsContinuesAfterPerToolStop(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("tool round did not continue after per-tool stop")
 	}
-	if got := conv.Messages[0].ToolCalls[0].Status; got != domain.ToolInterrupted {
+	if got := conv.Messages[1].ToolCalls[0].Status; got != domain.ToolInterrupted {
 		t.Fatalf("persisted tool status = %q, want %q", got, domain.ToolInterrupted)
 	}
-	if got := conv.Messages[0].ToolCalls[0].Output; !strings.Contains(got, "interrupted by user") {
+	if got := conv.Messages[1].ToolCalls[0].Output; !strings.Contains(got, "interrupted by user") {
 		t.Fatalf("persisted tool output = %q, want an explicit user interruption marker", got)
 	}
 	if err := run.Ctx.Err(); err != nil {
@@ -416,8 +419,11 @@ func (b *barrierToolbox) Execute(ctx context.Context, name string, argsJSON []by
 func newBarrierApp(t *testing.T, toolCalls []domain.ToolCall, box ToolExecutor) (*App, *domain.Conversation, *TurnRun) {
 	t.Helper()
 	conv := &domain.Conversation{
-		ID:       "c1",
-		Messages: []domain.Message{{ID: "m1", ToolCalls: toolCalls}},
+		ID: "c1",
+		Messages: []domain.Message{
+			{ID: "user-1", Role: domain.RoleUser, Content: "run it"},
+			{ID: "m1", Role: domain.RoleAssistant, ToolCalls: toolCalls},
+		},
 	}
 	app := &App{
 		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
@@ -454,7 +460,7 @@ func TestExecuteTurnToolsRunsConcurrently(t *testing.T) {
 	if box.maxActive < want {
 		t.Fatalf("max concurrent tools = %d, want >= %d (parallel execution)", box.maxActive, want)
 	}
-	for i, tc := range conv.Messages[0].ToolCalls {
+	for i, tc := range conv.Messages[1].ToolCalls {
 		if tc.Status != domain.ToolOK {
 			t.Fatalf("tool %d status = %v, want ok", i, tc.Status)
 		}
@@ -496,7 +502,7 @@ func TestExecuteTurnToolsRespectsMaxParallelTools(t *testing.T) {
 	if box.maxActive < cap {
 		t.Fatalf("max concurrent tools = %d, want exactly %d (cap should allow this many)", box.maxActive, cap)
 	}
-	for i, toolCall := range conv.Messages[0].ToolCalls {
+	for i, toolCall := range conv.Messages[1].ToolCalls {
 		if toolCall.Status != domain.ToolOK {
 			t.Fatalf("tool %d (%s) status = %q, want ok; calls above the cap must be queued, not dropped", i, toolCall.Name, toolCall.Status)
 		}
@@ -531,7 +537,7 @@ func TestExecuteTurnToolsPersistsResultsInOrder(t *testing.T) {
 	if err := app.executeTurnTools(run, "m1", toolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err != nil {
 		t.Fatalf("executeTurnTools: %v", err)
 	}
-	got := conv.Messages[0].ToolCalls
+	got := conv.Messages[1].ToolCalls
 	for i, name := range []string{"first", "second", "third"} {
 		want := fmt.Sprintf("out:%s", name)
 		if got[i].ID != toolCalls[i].ID || got[i].Output != want {

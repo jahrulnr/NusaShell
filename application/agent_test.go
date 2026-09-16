@@ -11,6 +11,7 @@ import (
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/core"
+	"nusashell/resources"
 	"strings"
 	"sync"
 	"syscall"
@@ -432,10 +433,10 @@ func TestExecuteTurnToolsStopsOnCancel(t *testing.T) {
 	box := &recordingToolbox{}
 	conv := &domain.Conversation{
 		ID: "c1",
-		Messages: []domain.Message{{
-			ID:        "m1",
-			ToolCalls: []domain.ToolCall{{ID: "t1", Name: "web_fetch"}, {ID: "t2", Name: "mcp_list"}},
-		}},
+		Messages: []domain.Message{
+			{ID: "u0", Role: domain.RoleUser, Content: "run the tools", Status: domain.StatusDone},
+			{ID: "m1", Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "t1", Name: "web_fetch"}, {ID: "t2", Name: "mcp_list"}}},
+		},
 	}
 	app := &App{
 		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
@@ -444,14 +445,14 @@ func TestExecuteTurnToolsStopsOnCancel(t *testing.T) {
 		Toolbox:       box,
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	if err := app.executeTurnTools(run, "m1", conv.Messages[0].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err == nil {
+	if err := app.executeTurnTools(run, "m1", conv.Messages[1].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err == nil {
 		t.Fatal("want context error")
 	}
 	if len(box.names) != 0 {
 		t.Fatalf("executed tools %v, want none after cancel", box.names)
 	}
-	if conv.Messages[0].ToolCalls[0].Status != domain.ToolInterrupted || conv.Messages[0].ToolCalls[1].Status != domain.ToolInterrupted {
-		t.Fatalf("tool statuses = %+v", conv.Messages[0].ToolCalls)
+	if conv.Messages[1].ToolCalls[0].Status != domain.ToolInterrupted || conv.Messages[1].ToolCalls[1].Status != domain.ToolInterrupted {
+		t.Fatalf("tool statuses = %+v", conv.Messages[1].ToolCalls)
 	}
 }
 
@@ -506,6 +507,7 @@ func TestExecuteTurnToolsKeepsHydrationOnItemOnlyPatch(t *testing.T) {
 	conv := &domain.Conversation{
 		ID: "c1",
 		Messages: []domain.Message{
+			{ID: "u0", Role: domain.RoleUser, Content: "run the task", Status: domain.StatusDone},
 			hydrationCheckpointMessage(),
 			{ID: "m1", Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "t1", Name: "todo", Args: `{}`}}},
 		},
@@ -519,7 +521,7 @@ func TestExecuteTurnToolsKeepsHydrationOnItemOnlyPatch(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: WithConversationID(context.Background(), "c1"), Cancel: func() {}}
 
-	if err := app.executeTurnTools(run, "m1", conv.Messages[1].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err != nil {
+	if err := app.executeTurnTools(run, "m1", conv.Messages[2].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err != nil {
 		t.Fatalf("executeTurnTools: %v", err)
 	}
 	// The hydration checkpoint must still be present.
@@ -1486,8 +1488,9 @@ func TestExtractCompactionSummaryIgnoresEmptyToolText(t *testing.T) {
 }
 
 func TestCompactionUsesSummaryTool(t *testing.T) {
-	// Verify that compactConversation advertises the summary() tool and
-	// extracts the summary from the tool call args, not resp.Content.
+	// Verify that compactConversation advertises the summary() tool, does NOT
+	// force it through tool_choice, and extracts the summary from the tool call
+	// args, not resp.Content, when the model calls it.
 	var msgs []domain.Message
 	body := strings.Repeat("abcdefghij", 80) // 800 chars ≈ 200 tokens
 	for i := 0; i < 10; i++ {
@@ -1526,10 +1529,93 @@ func TestCompactionUsesSummaryTool(t *testing.T) {
 	if !found {
 		t.Fatalf("compaction request did not advertise %s tool", compactionSummaryToolName)
 	}
-	if req.ToolChoice == nil {
-		t.Fatal("compaction request did not force tool_choice onto summary()")
+	if req.ToolChoice != nil {
+		t.Fatalf("compaction request must not force tool_choice (%#v): reasoning providers reject a named tool_choice while thinking mode is on and the whole pass then fails, so the summary tool is advertised and the model is instructed to call it instead", req.ToolChoice)
 	}
 	assertCompactionRequestEndsWithUserHandoff(t, req)
+}
+
+// thinkingToolChoiceRejectingAdapter reproduces the provider behavior behind the
+// 2026-09-16 incident: while thinking mode is on it answers HTTP 400
+// ("Thinking mode does not support this tool_choice") for any request that
+// carries a named tool_choice, and answers normally otherwise. It records every
+// request so a test can assert what compaction actually sent.
+type thinkingToolChoiceRejectingAdapter struct {
+	mu       sync.Mutex
+	requests []*core.Request
+}
+
+func (a *thinkingToolChoiceRejectingAdapter) Name() string { return "thinking-tool-choice-rejecting" }
+func (a *thinkingToolChoiceRejectingAdapter) Stream(context.Context, *core.Request) (core.Stream, error) {
+	return nil, errors.New("stream not used")
+}
+func (a *thinkingToolChoiceRejectingAdapter) Chat(_ context.Context, req *core.Request) (*core.Response, error) {
+	a.mu.Lock()
+	a.requests = append(a.requests, req)
+	count := len(a.requests)
+	a.mu.Unlock()
+	if req.ToolChoice != nil {
+		return nil, &domain.ProviderError{
+			Kind:       domain.KindHTTPStatus,
+			StatusCode: 400,
+			Err:        errors.New("provider returned HTTP 400: invalid_request_error: Error from provider (Console Go): Upstream request failed: [invalid_request_error] Thinking mode does not support this tool_choice"),
+		}
+	}
+	tcSummary := "short fallback"
+	if count >= 2 {
+		// The quality guard must still work without a forced tool choice:
+		// the too-short first answer is retried with a doubled budget.
+		tcSummary = validTestSummary
+	}
+	return &core.Response{
+		Blocks: []core.Block{core.ToolUseBlock{
+			ID:        fmt.Sprintf("call_%d", count),
+			Name:      compactionSummaryToolName,
+			Arguments: jsonRaw(fmt.Sprintf(`{"text":%q}`, tcSummary)),
+		}},
+		FinishReason: core.FinishReasonToolCall,
+	}, nil
+}
+
+// TestCompactionSurvivesThinkingProviderThatRejectsForcedToolChoice pins the
+// 2026-09-16 incident: the provider rejected every request that forced
+// summary() through a named tool_choice, so all passes failed and the turn died
+// with "compaction failed: summary too short" (provider "Console Go", thinking
+// mode). Because the adapter above fails only on forced tool_choice, this test
+// breaks the moment compaction starts forcing the tool again.
+func TestCompactionSurvivesThinkingProviderThatRejectsForcedToolChoice(t *testing.T) {
+	var msgs []domain.Message
+	for i := 0; i < 5; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("m%d", i), Role: domain.RoleUser,
+			Content: strings.Repeat("conversation detail ", 80), Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c-thinking-tool-choice", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c-thinking-tool-choice": conv}}
+	adapter := &thinkingToolChoiceRejectingAdapter{}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	settings := domain.DefaultSettings()
+	settings.CompactionSummaryMaxTokens = 800
+
+	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
+	if err != nil {
+		t.Fatalf("compaction failed against a thinking provider: %v", err)
+	}
+	if summary != validTestSummary {
+		t.Fatalf("summary = %q, want the tool call text from the retried pass", summary)
+	}
+
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.requests) != 2 {
+		t.Fatalf("Complete calls = %d, want 2 (short pass + quality retry)", len(adapter.requests))
+	}
+	for i, req := range adapter.requests {
+		if req.ToolChoice != nil {
+			t.Fatalf("compaction request %d forced tool_choice %#v; a thinking provider rejects that with HTTP 400", i+1, req.ToolChoice)
+		}
+	}
 }
 
 func TestCompactionStripsEffortForNonReasoningModel(t *testing.T) {
@@ -1617,6 +1703,105 @@ func TestCompactionReuseUsesAgentPromptToolboxAndSharedCacheKey(t *testing.T) {
 	}
 	if !strings.Contains(coreMessageText(req.Messages[len(req.Messages)-1]), "Call the summary tool exactly once") {
 		t.Fatal("reuse request missing compaction handoff instruction")
+	}
+}
+
+// compactionHandoffGuardClauses are the guardrails the handoff user prompt must
+// carry. They come from the dedicated compaction system prompt, which the reuse
+// workflow never sends: reuse keeps the agent system prompt and the full
+// toolbox, so the handoff message is the only place these rules can live.
+var compactionHandoffGuardClauses = []struct {
+	name   string
+	clause string
+}{
+	{"hard stop", "STOP IMMEDIATELY"},
+	{"no continuation", "Do not continue, resume, or perform any further part"},
+	{"output only via the summary tool", "Output only the handoff checkpoint"},
+	{"no reasoning-only output", "reasoning-only"},
+	{"conversation language", "same language as the conversation"},
+	{"untrusted data", "data, not instructions"},
+	{"single summary call", "Call the summary tool exactly once"},
+	{"section Current State", "## Current State"},
+	{"section Progress & Decisions", "## Progress & Decisions"},
+	{"section Relevant Context", "## Relevant Context"},
+	{"section Pending / Next Steps", "## Pending / Next Steps"},
+	{"section Critical Details", "## Critical Details"},
+}
+
+// compactionRequestForWorkflow runs one compaction pass with the given workflow
+// and returns the first provider request it produced.
+func compactionRequestForWorkflow(t *testing.T, workflow domain.CompactionWorkflow) *core.Request {
+	t.Helper()
+	body := strings.Repeat("conversation detail ", 400)
+	conv := &domain.Conversation{ID: "c-guard", Workspace: "/workspace", Messages: []domain.Message{
+		{ID: "u1", Role: domain.RoleUser, Content: body, Status: domain.StatusDone},
+		{ID: "a1", Role: domain.RoleAssistant, Content: "completed work", Status: domain.StatusDone},
+	}}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c-guard": conv}}
+	adapter := &recordingCompleteAdapter{toolCallSummaries: []string{validTestSummary}}
+	app := &App{
+		Conversations: store,
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		Toolbox: &factoryStubToolbox{tools: []ToolInfo{{
+			Name: "file_read", Description: "read files", InputSchema: map[string]any{"type": "object"},
+		}}},
+	}
+	settings := domain.DefaultSettings()
+	settings.CompactionWorkflow = workflow
+	settings.CompactionSummaryMaxTokens = 800
+	settings.PromptCaching = true
+	pc := ProviderContext{Provider: adapter, ProviderID: "prov1", Kind: domain.ProviderChat,
+		Driver: domain.ProviderDriverOpenRouter, BaseURL: "https://openrouter.ai/api/v1", OpenRouter: true}
+	provider := &domain.Provider{ID: "prov1", Kind: domain.ProviderChat, Driver: domain.ProviderDriverOpenRouter, BaseURL: "https://openrouter.ai/api/v1"}
+	cache := buildPromptCachePolicy(settings, provider, "model", conv.ID, promptCacheConversationPrefix)
+	if cache == nil {
+		t.Fatal("expected prompt cache policy")
+	}
+	if _, err := app.compactConversationWithCache(context.Background(), pc, conv, "model", 4000, settings, domain.CompactionTriggerInitial, cache); err != nil {
+		t.Fatalf("compaction (%s) failed: %v", workflow, err)
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.requests) == 0 {
+		t.Fatalf("compaction (%s) made no provider call", workflow)
+	}
+	return adapter.requests[0]
+}
+
+// TestCompactionHandoffGuardReachesEveryWorkflow pins the shared handoff
+// guardrails twice: the prompt file must carry them, and every compaction
+// workflow must actually send them as its last user message. The prompt is the
+// only guardrail the reuse workflow gets, so a new workflow added without it
+// (or a prompt edit that drops a clause) has to fail here.
+func TestCompactionHandoffGuardReachesEveryWorkflow(t *testing.T) {
+	prompt := resources.UserPrompt("compaction")
+	if strings.TrimSpace(prompt) == "" {
+		t.Fatal("compaction handoff prompt is empty")
+	}
+	for _, want := range compactionHandoffGuardClauses {
+		if !strings.Contains(prompt, want.clause) {
+			t.Fatalf("compaction handoff prompt lost the %s clause %q", want.name, want.clause)
+		}
+	}
+
+	for _, workflow := range []domain.CompactionWorkflow{
+		domain.CompactionWorkflowDedicated,
+		domain.CompactionWorkflowReuse,
+	} {
+		t.Run(string(workflow), func(t *testing.T) {
+			req := compactionRequestForWorkflow(t, workflow)
+			last := req.Messages[len(req.Messages)-1]
+			if last.Role != core.RoleUser {
+				t.Fatalf("last message role = %s, want user", last.Role)
+			}
+			text := coreMessageText(last)
+			for _, want := range compactionHandoffGuardClauses {
+				if !strings.Contains(text, want.clause) {
+					t.Fatalf("workflow %s did not send the %s clause in its handoff message", workflow, want.name)
+				}
+			}
+		})
 	}
 }
 
@@ -1747,45 +1932,6 @@ func assertCompactionRequestEndsWithUserHandoff(t *testing.T, req *core.Request)
 	text := coreMessageText(last)
 	if !strings.Contains(text, "Call the summary tool exactly once") {
 		t.Fatalf("last user message is not the handoff command: %q", text)
-	}
-}
-
-func TestCompactionToolChoiceForChatKind(t *testing.T) {
-	got := compactionToolChoice(domain.ProviderChat)
-	m, ok := got.(map[string]any)
-	if !ok {
-		t.Fatalf("chat tool_choice = %#v", got)
-	}
-	fn, _ := m["function"].(map[string]any)
-	if m["type"] != "function" || fn["name"] != compactionSummaryToolName {
-		t.Fatalf("chat tool_choice = %#v", got)
-	}
-	got = compactionToolChoice(domain.ProviderMessages)
-	m, ok = got.(map[string]any)
-	if !ok || m["type"] != "tool" || m["name"] != compactionSummaryToolName {
-		t.Fatalf("messages tool_choice = %#v", got)
-	}
-}
-
-// TestCompactionToolChoiceForResponsesKind: the OpenAI Responses API uses the
-// flat tool_choice shape {"type":"function","name":"summary"} (no nested
-// "function" object). The nested Chat shape triggers
-// "missing_required_parameter: 'tool_choice.name'" on gpt-5 responses models,
-// which silently kills every client-side compaction pass.
-func TestCompactionToolChoiceForResponsesKind(t *testing.T) {
-	got := compactionToolChoice(domain.ProviderResponses)
-	m, ok := got.(map[string]any)
-	if !ok {
-		t.Fatalf("responses tool_choice = %#v", got)
-	}
-	if m["type"] != "function" {
-		t.Fatalf("responses tool_choice type = %#v, want \"function\"", m["type"])
-	}
-	if name, _ := m["name"].(string); name != compactionSummaryToolName {
-		t.Fatalf("responses tool_choice name = %#v, want %q", m["name"], compactionSummaryToolName)
-	}
-	if _, hasNested := m["function"]; hasNested {
-		t.Fatalf("responses tool_choice must not nest \"function\" (Chat shape); got %#v", got)
 	}
 }
 
@@ -3799,8 +3945,15 @@ func TestChatMessagesToolResultNoteInsideUntrustedEnvelope(t *testing.T) {
 
 // --- from announcement_test.go ---
 
+func durableAnnouncementConversation() *domain.Conversation {
+	return &domain.Conversation{
+		ID:       "c1",
+		Messages: []domain.Message{{ID: "u0", Role: domain.RoleUser, Content: "seed", Status: domain.StatusDone}},
+	}
+}
+
 func TestDrainAnnouncementsInjectsPendingAtRoundBoundary(t *testing.T) {
-	conv := &domain.Conversation{ID: "c1"}
+	conv := durableAnnouncementConversation()
 	conv.QueueAnnouncement(domain.PendingAnnouncement{
 		ID: "announce-1", Type: "config_changed", Args: `{"type":"config_changed"}`, Message: "config changed", CreatedAt: time.Now(),
 	})
@@ -3829,7 +3982,7 @@ func TestDrainAnnouncementsInjectsPendingAtRoundBoundary(t *testing.T) {
 }
 
 func TestDrainAnnouncementsMergesAllPendingTypesIntoOne(t *testing.T) {
-	conv := &domain.Conversation{ID: "c1"}
+	conv := durableAnnouncementConversation()
 	conv.QueueAnnouncement(domain.PendingAnnouncement{
 		ID: "announce-1", Type: "config_changed", Args: `{"type":"config_changed"}`, Message: "config changed", CreatedAt: time.Now(),
 	})
@@ -3851,10 +4004,10 @@ func TestDrainAnnouncementsMergesAllPendingTypesIntoOne(t *testing.T) {
 		t.Fatal("expected announcements to be injected")
 	}
 	// All pending notices merge into ONE synthetic announcement tool call.
-	if len(conv.Messages) != 1 {
-		t.Fatalf("messages = %d, want 1 merged announcement message", len(conv.Messages))
+	if len(conv.Messages) != 2 {
+		t.Fatalf("messages = %d, want user plus 1 merged announcement message", len(conv.Messages))
 	}
-	tc := conv.Messages[0].ToolCalls
+	tc := conv.Messages[1].ToolCalls
 	if len(tc) != 1 || tc[0].Name != domain.AnnouncementToolName {
 		t.Fatalf("injected message = %+v, want a single announcement tool call", conv.Messages[0])
 	}
@@ -3873,7 +4026,7 @@ func TestDrainAnnouncementsMergesAllPendingTypesIntoOne(t *testing.T) {
 }
 
 func TestPublishAnnouncementCapDropsOldest(t *testing.T) {
-	conv := &domain.Conversation{ID: "c1"}
+	conv := durableAnnouncementConversation()
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
 
@@ -3920,7 +4073,7 @@ func TestDrainAnnouncementsEmptyQueueIsNoop(t *testing.T) {
 }
 
 func TestPublishAnnouncementPersistsPending(t *testing.T) {
-	conv := &domain.Conversation{ID: "c1"}
+	conv := durableAnnouncementConversation()
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
 
@@ -3936,7 +4089,7 @@ func TestPublishAnnouncementPersistsPending(t *testing.T) {
 }
 
 func TestPublishAnnouncementDedupsIdenticalAppendsDistinct(t *testing.T) {
-	conv := &domain.Conversation{ID: "c1"}
+	conv := durableAnnouncementConversation()
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
 
@@ -3963,9 +4116,9 @@ func TestPublishAnnouncementDedupsIdenticalAppendsDistinct(t *testing.T) {
 }
 
 func TestPublishAnnouncementToAllSkipsHiddenAndSelf(t *testing.T) {
-	visible := &domain.Conversation{ID: "c1"}
+	visible := durableAnnouncementConversation()
 	hidden := &domain.Conversation{ID: "c2", Origin: domain.ConversationOriginPipeline}
-	self := &domain.Conversation{ID: "c3"}
+	self := &domain.Conversation{ID: "c3", Messages: []domain.Message{{ID: "u0", Role: domain.RoleUser, Content: "seed", Status: domain.StatusDone}}}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": visible, "c2": hidden, "c3": self}}
 	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
 
@@ -3988,7 +4141,7 @@ func TestPublishDrainConcurrentNoLostOrDoubleInjection(t *testing.T) {
 	// is injected exactly once, and the queue is never left behind or
 	// double-injected. All publishes here are byte-identical, so the
 	// exact-duplicate dedup collapses them into a single pending entry.
-	conv := &domain.Conversation{ID: "c1"}
+	conv := durableAnnouncementConversation()
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
 	run := &TurnRun{ID: "r1", ConversationID: "c1"}
@@ -4030,8 +4183,8 @@ func TestPublishDrainConcurrentNoLostOrDoubleInjection(t *testing.T) {
 	}
 	// Save persists a clone, so re-fetch from the store.
 	got, _ = store.Get("c1")
-	if len(got.Messages) != 1 {
-		t.Fatalf("messages = %d, want exactly 1 injected announcement", len(got.Messages))
+	if len(got.Messages) != 2 {
+		t.Fatalf("messages = %d, want the user plus exactly 1 injected announcement", len(got.Messages))
 	}
 	if len(got.PendingAnnouncements) != 0 {
 		t.Fatalf("pending queue not cleared after drain: %+v", got.PendingAnnouncements)
@@ -4098,7 +4251,7 @@ func (m *memSettingsStore) Set(s domain.Settings) error {
 }
 
 func TestHandleSettingsSetPublishesOnlyOnUserPromptChange(t *testing.T) {
-	conv := &domain.Conversation{ID: "c1"}
+	conv := durableAnnouncementConversation()
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{
 		Conversations: store,

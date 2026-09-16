@@ -110,30 +110,18 @@ const (
 // compactionSummaryToolName / CompactionSummaryTool live in application/tools
 // and are re-exported from tools_wrappers.go. The model calls summary(text="...")
 // so the summary is extracted from tool-call arguments, not assistant text.
-
-// compactionToolChoice forces the compaction model to call summary() instead
-// of continuing the agent turn as free-text (the failure mode that produced
-// one-sentence "handovers" from reasoning models).
 //
-// The wire shape differs by provider kind:
-//   - Anthropic Messages: {"type":"tool","name":"summary"}
-//   - OpenAI Responses:   {"type":"function","name":"summary"} (flat — the
-//     Responses API rejects the nested Chat shape with
-//     "missing_required_parameter: 'tool_choice.name'")
-//   - OpenAI Chat / OpenRouter chat: {"type":"function","function":{"name":"summary"}}
-func compactionToolChoice(kind domain.ProviderKind) any {
-	switch kind {
-	case domain.ProviderMessages:
-		return map[string]any{"type": "tool", "name": compactionSummaryToolName}
-	case domain.ProviderResponses:
-		return map[string]any{"type": "function", "name": compactionSummaryToolName}
-	default:
-		return map[string]any{
-			"type":     "function",
-			"function": map[string]any{"name": compactionSummaryToolName},
-		}
-	}
-}
+// The summary tool is advertised but deliberately NOT forced through
+// tool_choice. Forcing a named tool is what used to kill compaction outright on
+// reasoning providers: with thinking mode enabled the provider answers HTTP 400
+// ("Thinking mode does not support this tool_choice") before the model is asked,
+// so every pass failed and the turn ended with "compaction failed: summary too
+// short". The compaction prompt carries the contract instead — one advertised
+// tool, "output only the handoff checkpoint via the summary tool" and "call the
+// summary tool exactly once" — and a model that replies in prose is still
+// usable: extractCompactionSummary falls back to resp.Content, while the
+// terminal rule (minimum length + compactionSummaryEchoesAssistant) rejects an
+// answer that just continues the live conversation.
 
 // extractCompactionSummary extracts the summary from the model response. It
 // prefers the summary() tool call (which carries the text in args, separate
@@ -409,12 +397,12 @@ func (a *Service) compactConversationWithCache(ctx context.Context, adapter Prov
 		if passBudget > maxBudget {
 			passBudget = maxBudget
 		}
-		// One pass = one AgentEngine run: summary() is forced via
-		// ToolChoice, retries double the token budget until the summary
-		// is long enough or the budget is exhausted. On failure, return
-		// an error so the caller emits EventCompactionFailed and the user
-		// cannot continue until compaction succeeds (retry re-enters
-		// compaction).
+		// One pass = one AgentEngine run: the summary() tool is advertised
+		// (never forced via tool_choice), retries double the token budget
+		// until the summary is long enough or the budget is exhausted. On
+		// failure, return an error so the caller emits EventCompactionFailed
+		// and the user cannot continue until compaction succeeds (retry
+		// re-enters compaction).
 		pass := &compactionPass{
 			svc: a, adapter: adapter, model: model,
 			system: systemPrompt, msgs: msgs, tools: compactionTools,

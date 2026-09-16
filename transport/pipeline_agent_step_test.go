@@ -77,19 +77,7 @@ func TestPipelineAgentStepDoesNotAppearInRoomList(t *testing.T) {
 	pid := h.addOpenAIProvider(t, "Fake")
 	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
 
-	created := h.rpcOK(t, "agent.conversations.create", map[string]any{"title": "User room"})
-	var createdConv struct {
-		Conversation struct {
-			ID string `json:"id"`
-		} `json:"conversation"`
-	}
-	if err := json.Unmarshal(created.Result, &createdConv); err != nil {
-		t.Fatal(err)
-	}
-	userID := createdConv.Conversation.ID
-	if userID == "" {
-		t.Fatal("expected user conversation id")
-	}
+	userID := h.newUserConversation(t, "User room", "seed user room")
 
 	h.llm.setRounds([][]llmStep{
 		{{Text: "lint ok"}},
@@ -199,21 +187,13 @@ func TestLegacyPipelineTitleRoomsAreHiddenFromList(t *testing.T) {
 	if err := h.app.Conversations.Save(legacy); err != nil {
 		t.Fatal(err)
 	}
-	created := h.rpcOK(t, "agent.conversations.create", map[string]any{"title": "Keep me"})
-	var createdConv struct {
-		Conversation struct {
-			ID string `json:"id"`
-		} `json:"conversation"`
-	}
-	if err := json.Unmarshal(created.Result, &createdConv); err != nil {
-		t.Fatal(err)
-	}
+	createdID := h.newUserConversation(t, "Keep me", "seed keep-me room")
 
 	ids := listedConversationIDs(t, h)
 	if containsID(ids, "conv_legacy_pipe") {
 		t.Fatalf("legacy [pipeline] room leaked into list: %v", ids)
 	}
-	if !containsID(ids, createdConv.Conversation.ID) {
+	if !containsID(ids, createdID) {
 		t.Fatalf("interactive room missing from list: %v", ids)
 	}
 	h.rpcOK(t, "agent.conversations.get", map[string]any{"id": "conv_legacy_pipe"})

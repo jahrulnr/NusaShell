@@ -446,8 +446,8 @@ func TestHandleConversationsSetWorkspaceRejectsRelativePath(t *testing.T) {
 
 func TestHandleConversationsSetProviderPersistsPerConversation(t *testing.T) {
 	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
-		"codex-room": {ID: "codex-room", Title: "Codex", ProviderRoute: "old"},
-		"other-room": {ID: "other-room", Title: "Other", ProviderRoute: "keep"},
+		"codex-room": {ID: "codex-room", Title: "Codex", ProviderRoute: "old", Messages: []domain.Message{{Role: domain.RoleUser, Content: "seed"}}},
+		"other-room": {ID: "other-room", Title: "Other", ProviderRoute: "keep", Messages: []domain.Message{{Role: domain.RoleUser, Content: "seed"}}},
 	}}
 	app := &App{Conversations: convStore, Logs: &fakeLogStore{}, Bus: NewBus()}
 
@@ -481,7 +481,7 @@ func TestHandleConversationsSetProviderPersistsPerConversation(t *testing.T) {
 
 func TestHandleConversationsSetWorkspaceAcceptsAbsolutePath(t *testing.T) {
 	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
-		"conv_1": {ID: "conv_1", Title: "Test"},
+		"conv_1": {ID: "conv_1", Title: "Test", Messages: []domain.Message{{Role: domain.RoleUser, Content: "seed"}}},
 	}}
 	workspace := t.TempDir()
 	app := &App{
@@ -609,11 +609,10 @@ func TestHandleConversationsSetWorkspaceSerializesTurnSave(t *testing.T) {
 	}
 }
 
-// TestHandleConversationsSetWorkspaceEmptyRoomDoesNotInsertHydration pins
-// that setting a workspace before the first user must not persist a
-// checkpoint at index 0. The first turn's addTurnMessages parks it after
-// the user so OpenAI/Claude see system → user → hydration.
-func TestHandleConversationsSetWorkspaceEmptyRoomDoesNotInsertHydration(t *testing.T) {
+// TestHandleConversationsSetWorkspaceEmptyRoomRejectsDraft pins that an
+// empty draft cannot be persisted through the conversation RPC. The new UI
+// keeps this workspace selection in memory and sends it with the first turn.
+func TestHandleConversationsSetWorkspaceEmptyRoomRejectsDraft(t *testing.T) {
 	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
 		"conv_1": {ID: "conv_1", Title: "Test"},
 	}}
@@ -628,10 +627,13 @@ func TestHandleConversationsSetWorkspaceEmptyRoomDoesNotInsertHydration(t *testi
 	if _, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{
 		ID:   "conv_1",
 		Path: workspace,
-	}); rpcErr != nil {
-		t.Fatalf("set workspace: %v", rpcErr)
+	}); rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
+		t.Fatalf("set workspace = %+v, want validation error for empty draft", rpcErr)
 	}
 	saved := convStore.convs["conv_1"]
+	if saved.Workspace != "" {
+		t.Fatalf("empty draft workspace persisted: %q", saved.Workspace)
+	}
 	for _, m := range saved.Messages {
 		if domain.IsHydrationMessage(m) {
 			t.Fatalf("empty room persisted hydration before any user: %+v", m)
@@ -758,9 +760,9 @@ func TestMsgDTOSeparatesRawToolOutputFromFrontendPresentation(t *testing.T) {
 
 func TestConversationMessagingListAndSearch(t *testing.T) {
 	now := time.Now()
-	c1 := &domain.Conversation{ID: "conv_1", Title: "Backend Project", Summary: "Refactoring auth middleware", UpdatedAt: now.Add(-10 * time.Minute)}
-	c2 := &domain.Conversation{ID: "conv_2", Title: "Frontend UI", Summary: "Building user profile page", UpdatedAt: now.Add(-5 * time.Minute)}
-	c3 := &domain.Conversation{ID: "conv_3", Title: "Database Migration", Summary: "Postgres schema updates", UpdatedAt: now}
+	c1 := &domain.Conversation{ID: "conv_1", Title: "Backend Project", Summary: "Refactoring auth middleware", UpdatedAt: now.Add(-10 * time.Minute), Messages: []domain.Message{{Role: domain.RoleUser, Content: "backend"}}}
+	c2 := &domain.Conversation{ID: "conv_2", Title: "Frontend UI", Summary: "Building user profile page", UpdatedAt: now.Add(-5 * time.Minute), Messages: []domain.Message{{Role: domain.RoleUser, Content: "profile"}}}
+	c3 := &domain.Conversation{ID: "conv_3", Title: "Database Migration", Summary: "Postgres schema updates", UpdatedAt: now, Messages: []domain.Message{{Role: domain.RoleUser, Content: "migration"}}}
 	hidden := &domain.Conversation{ID: "conv_pipe", Title: "[pipeline] step", Origin: domain.ConversationOriginPipeline, UpdatedAt: now}
 
 	store := &fakeConvStore{
@@ -826,8 +828,8 @@ func TestConversationMessagingListAndSearch(t *testing.T) {
 }
 
 func TestConversationMessagingSend(t *testing.T) {
-	c1 := &domain.Conversation{ID: "conv_1", Title: "Sender"}
-	c2 := &domain.Conversation{ID: "conv_2", Title: "Receiver"}
+	c1 := &domain.Conversation{ID: "conv_1", Title: "Sender", Messages: []domain.Message{{Role: domain.RoleUser, Content: "seed"}}}
+	c2 := &domain.Conversation{ID: "conv_2", Title: "Receiver", Messages: []domain.Message{{Role: domain.RoleUser, Content: "seed"}}}
 	hidden := &domain.Conversation{ID: "conv_pipe", Title: "[pipeline] step", Origin: domain.ConversationOriginPipeline}
 
 	store := &fakeConvStore{
@@ -1121,7 +1123,7 @@ func TestHandleConversationsPickWorkspaceQueuesNoticeWithoutInserting(t *testing
 	}
 }
 
-func TestHandleConversationsPickWorkspaceEmptyRoomDoesNotQueueNotice(t *testing.T) {
+func TestHandleConversationsPickWorkspaceEmptyRoomRejectsDraft(t *testing.T) {
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{
 		"conv_1": {ID: "conv_1", Title: "Empty"},
 	}}
@@ -1131,9 +1133,8 @@ func TestHandleConversationsPickWorkspaceEmptyRoomDoesNotQueueNotice(t *testing.
 		Bus:              NewBus(),
 		DirectoryBrowser: fakeDirBrowser{},
 	}
-	saved := setWorkspace(t, app, "conv_1", t.TempDir())
-	if saved.PendingWorkspaceAnnouncement {
-		t.Fatal("empty room must not queue a workspace-switch notice")
+	if _, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{ID: "conv_1", Path: t.TempDir()}); rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
+		t.Fatalf("empty room workspace set = %+v, want validation error", rpcErr)
 	}
 }
 

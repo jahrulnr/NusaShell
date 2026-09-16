@@ -74,7 +74,7 @@ func (a *App) onSettingsApplied(old, next domain.Settings) {
 		a.publishAnnouncementToAll(newAnnouncement(
 			"config_changed",
 			domain.AnnouncementConfigChangedArgs([]string{"user_prompt"}),
-			domain.AnnouncementConfigChangedMessage([]string{"user_prompt"}),
+			domain.AnnouncementConfigChangedMessage([]string{"user instructions have changed"}),
 		), "")
 	}
 	if a.Restart != nil && old.RemoteAccessEnabled != next.RemoteAccessEnabled {
@@ -99,17 +99,29 @@ func (a *App) skillsService() *skills.Service {
 		Store: a.Skills,
 		Log:   a.log,
 		Bus:   a.Bus,
-		OnChanged: func(op string) {
+		OnChanged: func(op, name string) {
 			a.publishAnnouncementToAll(newAnnouncement(
 				"skills_changed",
-				domain.AnnouncementSkillsChangedArgs(op),
-				domain.AnnouncementSkillsChangedMessage(),
+				domain.AnnouncementSkillsChangedArgs(op, name),
+				domain.AnnouncementSkillsChangedMessage(name),
 			), "")
 		},
 		OnLife: func(op, id, status string) {
 			a.emitSkillLifecycle(op, id, status, "")
 		},
 	})
+}
+
+func (a *App) skillName(id, ownedBy string) string {
+	id = strings.TrimSpace(id)
+	if a == nil || a.Skills == nil {
+		return id
+	}
+	s, err := a.Skills.Get(id, strings.TrimSpace(ownedBy))
+	if err != nil || s == nil || strings.TrimSpace(s.Name) == "" {
+		return id
+	}
+	return strings.TrimSpace(s.Name)
 }
 
 func (a *App) handleSkillsList() (any, *contracts.RPCError) {
@@ -202,12 +214,8 @@ func (a *App) conversationDeps() conversation.Deps {
 				run.Cancel()
 			}
 		},
-		Announce: func(targetID, fromID, content string) {
-			a.publishAnnouncement(targetID, newAnnouncement(
-				"peer_message",
-				domain.AnnouncementPeerMessageArgs(fromID),
-				domain.AnnouncementPeerMessageMessage(fromID, content),
-			))
+		Announce: func(targetID, fromID, content string) error {
+			return a.deliverPeerMessage(targetID, fromID, content)
 		},
 	}
 	if a.DirectoryBrowser != nil {
@@ -277,10 +285,18 @@ func (a *App) memoryDeps() memory.Deps {
 		User:    a.User,
 		Agent:   a.Agent,
 		OnChanged: func(tier, op string) {
+			path := ""
+			if tier == domain.MemoryTierAgent {
+				if a.Agent != nil {
+					path = a.Agent.Path()
+				}
+			} else if a.User != nil {
+				path = a.User.Path()
+			}
 			a.publishAnnouncementToAll(newAnnouncement(
 				"memory_changed",
 				domain.AnnouncementMemoryChangedArgs(tier, op),
-				domain.AnnouncementMemoryChangedMessage(),
+				domain.AnnouncementMemoryChangedMessage(tier, path),
 			), "")
 		},
 		OnRecordDeleted: func(id string) {
@@ -326,10 +342,11 @@ func (a *App) learnDeps() learn.Deps {
 		WithWorkspace:   WithWorkspace,
 		OnMemoryUpdated: a.emitMemoryUpdated,
 		OnSkillChanged: func(op, id, status, conversationID string) {
+			name := a.skillName(id, string(domain.SkillOriginLearned))
 			a.publishAnnouncementToAll(newAnnouncement(
 				"skills_changed",
-				domain.AnnouncementSkillsChangedArgs(op),
-				domain.AnnouncementSkillsChangedMessage(),
+				domain.AnnouncementSkillsChangedArgs(op, name),
+				domain.AnnouncementSkillsChangedMessage(name),
 			), "")
 		},
 	}
@@ -512,11 +529,12 @@ func (a *App) subagentDeps() subagent.Deps {
 		Settings:      a.Settings,
 		Log:           a.log,
 		Go:            func(name string, fn func()) { a.goSafe(name, fn) },
-		OnAgentsChanged: func() {
+		OnAgentsChanged: func(name, action string) {
+			change := domain.AnnouncementConfigChangedDetail("subagent", name, action)
 			a.publishAnnouncementToAll(newAnnouncement(
 				"config_changed",
-				domain.AnnouncementConfigChangedArgs([]string{"subagent"}),
-				domain.AnnouncementConfigChangedMessage([]string{"subagent"}),
+				domain.AnnouncementConfigChangedArgs([]string{change}),
+				domain.AnnouncementConfigChangedMessage([]string{change}),
 			), "")
 		},
 		TrackPending: a.trackPendingRun,
@@ -563,11 +581,12 @@ func (a *App) providerDeps() provider.Deps {
 		Log:         a.log,
 		DataDir:     a.DataDir,
 		AdjustModel: a.applyModelOverrides,
-		OnConfigChanged: func() {
+		OnConfigChanged: func(name, action string) {
+			change := domain.AnnouncementConfigChangedDetail("provider", name, action)
 			a.publishAnnouncementToAll(newAnnouncement(
 				"config_changed",
-				domain.AnnouncementConfigChangedArgs([]string{"provider"}),
-				domain.AnnouncementConfigChangedMessage([]string{"provider"}),
+				domain.AnnouncementConfigChangedArgs([]string{change}),
+				domain.AnnouncementConfigChangedMessage([]string{change}),
 			), "")
 		},
 		OfflineTTS: func() []contracts.ModelDTO {

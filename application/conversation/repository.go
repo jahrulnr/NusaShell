@@ -15,6 +15,11 @@ import (
 // with ResetTranscript (compaction) / NewConversation.
 var ErrImmutable = errors.New("conversation transcript is immutable")
 
+// ErrEmptyConversation is returned when a draft without a real user message
+// is sent to durable storage. Empty drafts are browser/in-memory state only;
+// the first user turn creates the conversation and persists it atomically.
+var ErrEmptyConversation = errors.New("conversation must contain a user message before persistence")
+
 // Repository is the sanctioned write path for one conversation.
 // NewConversation is the only constructor. GetById loads an existing room.
 // Transcript growth is Add-only; Save persists without taking a payload.
@@ -187,6 +192,9 @@ func (r *Repository) Save() error {
 	}
 	if r.store == nil {
 		return fmt.Errorf("conversation store is required")
+	}
+	if !r.inner.HasUserMessage() {
+		return ErrEmptyConversation
 	}
 	if !r.epochReset && !transcriptIDsAppendOnly(r.persistedIDs, r.inner.Messages) {
 		return ErrImmutable

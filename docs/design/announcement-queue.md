@@ -50,10 +50,12 @@ per-conversation pending queue IS the queue:
    load-modify-save against concurrent publishers, so entries are never lost
    or double-injected.
 3. **Delivery points.** Turn start (`addTurnMessages`, after the user
-   message — the task-memory scan runs here before the drain) and
-   tool-round boundary (`AfterRound`, alongside steer and subagent
-   results). Both are safe injection points; the model sees the
-   announcement in the next provider round.
+   message — the task-memory scan runs here before the drain), tool-round
+   boundary (`AfterRound`, alongside steer and subagent results), and an
+   event-driven idle wake for `peer_message`. Active turns never have their
+   provider request or tool call cancelled. An idle conversation with real
+   user history gets one new `TurnRun` after the announcement is materialized;
+   an empty draft is not a durable target and peer delivery is rejected.
 4. **Durable.** The queue is persisted on the conversation — survives
    backend restarts and arbitrarily long idle periods. No TTL, no in-memory
    retention, no sweeper: the queue is drained or it stays.
@@ -65,7 +67,7 @@ publisher (RPC handler / Skills UI / About You·Agent save / cross-conversation 
    │  publishAnnouncement(convID, ev): lock → append (coalesce) → save
    ▼
 Conversation.PendingAnnouncements (persisted, per-conversation queue)
-   │  drained at turn start (addTurnMessages) and round boundary (AfterRound)
+   │  drained at turn start, round boundary, or idle peer-message wake
    ▼
 persist announcement message (assistant + pre-filled tool result)
    │  clear the queue
@@ -75,11 +77,11 @@ next provider round reads it from the transcript
 
 ## Queue API
 
-`application/announcement.go` (stdlib only):
+`application/agent/announcement.go` (stdlib only):
 
 ```go
 type Announcement struct {
-    Type    string // "config_changed" | "memory_changed" | "skills_changed"
+    Type    string // config_changed | memory_changed | skills_changed | peer_message | task_memory
     Args    string // self-describing JSON args (announcement tool args)
     Message string // announcement tool result text
 }
@@ -106,18 +108,19 @@ the self-describing args pattern of `AutoContinueAnnouncementArgs`:
 
 | Type | Publishers | Args | Result text (implicit, model re-reads details) |
 |------|-----------|------|------------------------------------------------|
-| `config_changed` | `acp.agents.save/delete`, `settings.save` (UserPrompt), `ai.providers.save` | `{type, changed: ["subagent","user_prompt"]}` | "Tool/system configuration changed since your last turn: subagent list, user instructions. Re-read the affected tool descriptions and instructions." |
-| `memory_changed` | `memory.user.update` / `memory.agent.update` RPC | `{type, tier: "user"\|"agent", op: "update"}` | "Memory was updated outside this conversation. Call `memory` op=list to refresh." |
-| `skills_changed` | `skills.save` / `install` / `delete` RPC, `skill` tool (`save`/`delete`) from other conversations | `{type, op}` | "The skill library changed. Call `skill` op=list to refresh." |
+| `config_changed` | `acp.agents.save/delete`, `settings.save` (UserPrompt), `ai.providers.save/delete` | `{type, changed: ["subagent codex has disabled"]}` | concrete named status/change, e.g. `subagent codex has disabled; subagent devin has enabled. Re-read the affected tool descriptions and instructions.` |
+| `memory_changed` | `memory.user.update` / `memory.agent.update` RPC | `{type, tier: "user"\|"agent", op: "update"}` | `user.md has changed, read /absolute/path/memory/user.md to see primary memory` (or `soul.md`) |
+| `skills_changed` | `skills.save` / `install` / `delete` RPC, `skill` tool (`save`/`delete`) from other conversations | `{type, op, name}` | `skill <name> has changed, re-read if you are using this skill` |
+| `peer_message` | `conversation(op="send")` | `{type, from}` | quoted inter-room message plus reply guidance |
 | `task_memory` | turn-start scan (`addTurnMessages` → `MaybeAnnounceTaskMemory`); async semantic lane (`prefetchTaskMemorySemantic` → `PublishTaskMemoryAnnouncement`) | `{type, hits: [{id, type, project, content}]}` | "Relevant task memory for this conversation is new or updated. Read the snippets; retrieve full records with memory op=search or memory op=get." |
 
 Rules:
 
-- **Implicit content.** The announcement never dumps the new content — the
-  model already receives the new system prompt / tool descriptions in the
-  request. It only flags the change and points at the refresh tool. Example
-  (settings): "User instruction from system prompt has changed: ..." — the
-  model sees the new instruction in the same request.
+- **Targeted content.** Configuration announcements include the changed
+  surface/name/status, memory announcements include the primary document path,
+  and skill announcements include the changed skill name. None of them dumps
+  the full configuration, memory body, or skill body; the model re-reads those
+  details from the live surfaces.
 - **No self-announcement.** When the agent itself calls `skill` tools in
   this conversation, no event is published — the model already knows
   (it made the call). Only external mutations announce: UI RPC, other
@@ -127,14 +130,19 @@ Rules:
   to every visible conversation. Idle conversations get the pending entry
   too (drained at next turn start). Consolidator jobs emit `memory.updated`
   for the Learning UI; they do not enqueue `memory_changed` announcements.
+- **Peer delivery.** `conversation(op="send")` acknowledges only after the
+  target queue is persisted. If the target is active, the existing round
+  boundary consumes it. If the target is idle and has real user history, the
+  harness starts one turn; this wake path does not add a synthetic user
+  message. Provider resolution failure leaves the queue durable.
 
 ## Worker lifecycle
 
-- **No subscription.** The worker is the turn's round loop; it drains the
-  persisted queue at round boundaries — no channels, no unsubscribe, no
-  in-memory state to leak.
+- **No subscription.** Active delivery is the turn's round loop; idle peer
+  delivery is an explicit wake call from the publisher. There are no polling
+  channels, unsubscribe paths, or mailbox goroutines.
 - **Drain**: `drainAnnouncements` in `AfterRound`
-  (`application/conversation_agent_rules.go`), alongside `applyQueuedSteer` /
+  (`application/agent/conversation_agent_rules.go`), alongside `applyQueuedSteer` /
   `applyQueuedRunResults`. Injected announcements append a persisted
   assistant message (pattern: `autoContinueAnnouncement` in
   `agent_turn_run.go`) and force the round to continue so the model sees
@@ -142,9 +150,15 @@ Rules:
 - **Turn start**: `addTurnMessages` drains `Conversation.PendingAnnouncements`
   after the user message (and after the workspace notice / restart
   announcement). This is the "every user message" delivery point.
+- **Idle peer wake**: `conversation(op="send")` persists the queue, then the
+  agent service checks the target lifecycle. When idle with user history it
+  appends the announcement and assistant placeholder, marks the conversation
+  running, registers one `TurnRun`, and launches it. Cleanup re-checks the
+  queue to close the race where a peer message arrives while the previous
+  turn is sealing.
 - **Concurrency**: the turn lock guarantees one consumer per conversation.
   The per-conversation announcement lock (`announcementLock` in
-  `application/announcement.go`) serializes publisher load-modify-save
+  `application/agent/announcement.go`) serializes publisher load-modify-save
   against the worker drain, so a publish racing a drain is never lost and
   never double-injected.
 
@@ -164,12 +178,12 @@ Rules:
 
 | Site | Event |
 |------|-------|
-| `handleAcpAgentsSave` / `handleAcpAgentsDelete` (`application/acp_handlers.go`) | `config_changed` (subagent) |
-| `handleSettingsSave` (`application/settings_handlers.go`) when `UserPrompt` changed | `config_changed` (user_prompt) |
-| `handleProvidersSave` / `handleProvidersDelete` (`application/providers.go`) | `config_changed` (provider) |
-| `HandleUserUpdate` / `HandleAgentUpdate` (`application/memory/`) | `memory_changed` |
-| `handleSkillsSave` / `handleSkillsInstall` / `handleSkillsDelete` (`application/skills_handlers.go`) | `skills_changed` |
-| `skill` tool `save`/`delete` when the calling conversation differs from the affected one | `skills_changed` |
+| `HandleAgentsSave` / `HandleAgentsDelete` (`application/subagent/handlers.go`) | `config_changed` with subagent name + enabled/disabled/deleted/changed action |
+| `onSettingsApplied` (`application/feature_services.go`) when `UserPrompt` changed | `config_changed` (user instructions) |
+| `HandleSave` / `HandleDelete` (`application/provider/handlers.go`) | `config_changed` with provider name + action |
+| `HandleUserUpdate` / `HandleAgentUpdate` (`application/memory/handlers.go`) | `memory_changed` with `user.md`/`soul.md` path |
+| `HandleSave` / `HandleInstall` / `HandleDelete` (`application/skills/handlers.go`) | `skills_changed` with skill name |
+| `skill` tool `save`/`delete` when the calling conversation differs from the affected one | `skills_changed` with skill name |
 | `MaybeAnnounceTaskMemory` (`application/memory/task.go`) at turn start | `task_memory` |
 | `prefetchTaskMemorySemantic` async lane (`application/task_memory_semantic.go`) → `PublishTaskMemoryAnnouncement` | `task_memory` |
 

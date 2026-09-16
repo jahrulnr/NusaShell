@@ -26,8 +26,9 @@ type Emitter interface {
 	Emit(typ string, v any)
 }
 
-// ChangedHook announces a catalog mutation (install/save/delete) to rooms.
-type ChangedHook func(op string)
+// ChangedHook announces a named catalog mutation (install/save/delete) to
+// rooms.
+type ChangedHook func(op, name string)
 
 // LifecycleHook records a promote (or similar) lifecycle event.
 type LifecycleHook func(op, id, status string)
@@ -67,8 +68,8 @@ func (s *Service) write(format string, args ...any) {
 	}
 }
 
-func (s *Service) changed(op string) {
+func (s *Service) changed(op, name string) {
 	if s.onChanged != nil {
-		s.onChanged(op)
+		s.onChanged(op, name)
 	}
 }

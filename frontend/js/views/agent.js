@@ -102,6 +102,8 @@ function swapToolCard(oldCard, newCard, bubble, strip) {
 const state = {
   conversations: [],
   activeId: null,
+  conversationKey: null, // temporary FE marker until the first turn returns conv_*
+  draftWorkspace: '', // browser-only workspace for the unsaved draft
   conversation: null,
   messages: [],
   attachments: [],
@@ -911,6 +913,12 @@ function applyConversationTail() {
 const savedRooms = new Map(); // conversationId -> { pinned, steerDraft, attachments, model }
 const providerRouteWrites = new Map(); // conversationId -> serialized backend write
 
+function newConversationKey() {
+  const random = globalThis.crypto?.randomUUID?.()
+    || Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  return `draft-${Date.now().toString(36)}-${random.replace(/[^a-z0-9]/gi, '').slice(0, 8)}`;
+}
+
 function scheduleFrame(thread, callback) {
   const view = thread?.ownerDocument?.defaultView;
   const raf = view?.requestAnimationFrame || globalThis.requestAnimationFrame;
@@ -1066,7 +1074,7 @@ async function loadAgentData() {
     const active = state.conversations.find((conversation) => conversation.id === state.activeId);
     const first = active ?? state.conversations[0];
     if (first) await openConversation(first.id);
-    else updateComposerStatus();
+    else await createConversation();
   } catch (err) {
     if (err?.code !== 'unavailable') {
       console.error('agent data load failed:', err);
@@ -1183,9 +1191,17 @@ function bindConversations() {
 async function createConversation(title = '') {
   try {
     saveRoomState(state.activeId);
-    const { conversation } = await rpc('agent.conversations.create', title ? { title } : {});
-    state.activeId = conversation.id;
-    state.conversation = conversation;
+    state.activeId = null;
+    state.conversationKey = newConversationKey();
+    state.draftWorkspace = '';
+    state.conversation = {
+      id: '',
+      title: title || 'Untitled',
+      status: 'idle',
+      workspace: '',
+      model: state.model,
+      effort: state.effort,
+    };
     state.messages = [];
     state.contextEstimate = 0;
     state.contextMeasured = 0;
@@ -1201,7 +1217,6 @@ async function createConversation(title = '') {
     state.attachments = [];
     state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, brief: '' };
     state.todoRenderToken++;
-    await refreshConversations();
     renderEmptyThread();
     renderAttachments();
     renderTodoStrip();
@@ -1302,6 +1317,8 @@ async function deleteConversation(id) {
     clearCompactionStatus(id);
     if (state.activeId === id) {
       state.activeId = null;
+      state.conversationKey = null;
+      state.draftWorkspace = '';
       state.conversation = null;
       state.messages = [];
       state.attachments = [];
@@ -1341,6 +1358,8 @@ async function openConversation(id) {
   }
   const token = ++state.conversationLoadToken;
   state.activeId = id;
+  state.conversationKey = null;
+  state.draftWorkspace = '';
   setSubagentConversation(id);
   // the backend returns messages as a sibling of conversation
   const { conversation, messages } = await rpc('agent.conversations.get', { id });
@@ -2801,7 +2820,21 @@ async function loadOlderChunk() {
 
 function bindEvents() {
   on('agent.turn.started', (payload) => {
-    const { run_id, message_id, round, conversation_id } = payload;
+    const { run_id, message_id, round, conversation_id, conversation_key } = payload;
+    if (conversation_key && conversation_id
+      && state.conversationKey === conversation_key
+      && !state.activeId) {
+      state.activeId = conversation_id;
+      state.conversationKey = null;
+      state.draftWorkspace = '';
+      state.conversation = {
+        ...(state.conversation || {}),
+        id: conversation_id,
+        status: 'running',
+      };
+      void refreshConversations().catch(() => {});
+      renderConversationList();
+    }
     let run = state.runs.get(run_id);
     if (!run) {
       // Safety net: the run entry was deleted (endTurn on a turn.done
@@ -2814,6 +2847,7 @@ function bindEvents() {
       // painting a placeholder here, then beginTurn appending another,
       // produced two "..." rows around the user bubble.
       if (conversation_id !== state.activeId || state.localTurnPending) {
+        if (payload.conversation_key) void refreshConversations().catch(() => {});
         getRunOrQueue('agent.turn.started', payload);
         return;
       }
@@ -3267,6 +3301,7 @@ function bindEvents() {
       });
     }
     const isAgentRoom = conversation_id === state.activeId
+      || Boolean(payload.conversation_key)
       || state.conversations.some((c) => c.id === conversation_id);
     void maybeAutoTitleConversation(conversation_id).finally(() => {
       if (!isAgentRoom) return;

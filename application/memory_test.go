@@ -183,6 +183,7 @@ func TestMaybeAnnounceTaskMemoryMatchesSharedAlphabeticWord(t *testing.T) {
 type userUpdateStore struct {
 	entry   domain.DocumentEntry
 	updates int
+	path    string
 }
 
 func (s *userUpdateStore) Load() *domain.MemoryDocument {
@@ -200,7 +201,7 @@ func (s *userUpdateStore) Update(entries []domain.DocumentEntry) error {
 }
 
 func (s *userUpdateStore) Replace(string, string) error { return nil }
-func (s *userUpdateStore) Path() string                 { return "" }
+func (s *userUpdateStore) Path() string                 { return s.path }
 
 func TestMemoryUserUpdateReplacesOnlyUserDocument(t *testing.T) {
 	user := &userUpdateStore{entry: domain.DocumentEntry{Content: "old", Source: "agent"}}
