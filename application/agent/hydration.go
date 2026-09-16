@@ -418,7 +418,11 @@ func (b *HydrationBuilder) readSkills() hydrationSlot {
 	if b.source.Executor == nil {
 		return hydrationSlot{name: "skill", content: ""}
 	}
-	out, err := b.source.Executor.Execute(context.Background(), "skill", []byte(`{"op":"list"}`))
+	execCtx := context.Background()
+	if workspace := strings.TrimSpace(b.source.RuntimeContext.Workspace); workspace != "" {
+		execCtx = WithWorkspace(execCtx, workspace)
+	}
+	out, err := b.source.Executor.Execute(execCtx, "skill", []byte(`{"op":"list"}`))
 	if err != nil || !hasJSONLLines(out) {
 		return hydrationSlot{name: "skill", content: ""}
 	}

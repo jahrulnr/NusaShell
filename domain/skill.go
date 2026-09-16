@@ -39,10 +39,12 @@ const (
 type SkillOrigin string
 
 const (
-	SkillOriginUser    SkillOrigin = "user"
-	SkillOriginLearned SkillOrigin = "learned"
-	SkillOriginBuiltin SkillOrigin = "builtin"
-	SkillOriginPlugin  SkillOrigin = "plugin"
+	SkillOriginUser      SkillOrigin = "user"
+	SkillOriginLearned   SkillOrigin = "learned"
+	SkillOriginBuiltin   SkillOrigin = "builtin"
+	SkillOriginPlugin    SkillOrigin = "plugin"
+	SkillOriginWorkspace SkillOrigin = "workspace"
+	SkillOriginGlobal    SkillOrigin = "global"
 )
 
 type Skill struct {
@@ -54,9 +56,9 @@ type Skill struct {
 	Status        SkillStatus // candidate → … → trusted → deprecated → retired
 	Version       int         // immutable snapshot number currently checked out
 	ActiveVersion int         // pointer used for rollback; equals Version when live
-	Origin        SkillOrigin // user | learned | builtin | plugin
-	OwnedBy       string      // "user", "builtin", "plugin:<plugin-id>" — secondary key for disambiguation; "" defaults to Origin
-	PluginDir     string      // mount source directory for plugin-owned skills (read-only); empty for user/builtin
+	Origin        SkillOrigin // user | learned | builtin | plugin | workspace | global
+	OwnedBy       string      // "user", "builtin", "workspace", "global", "plugin:<plugin-id>" — secondary key for disambiguation; "" defaults to Origin
+	PluginDir     string      // mount source directory for plugin-owned skills (read-only); empty for non-plugin skills
 	Path          string      // absolute path to the skill directory on disk; empty for embedded/in-memory skills
 	Bundled       bool        // true when the skill directory has support files beyond SKILL.md (references/, templates/, scripts/, examples/)
 	UsageCount    int         // incremented each time the skill is used in a turn
@@ -93,7 +95,8 @@ func (s *Skill) SetOwner(ownedBy, pluginDir string) {
 }
 
 // EnsureStatusDefault fills Status and Version when empty. Learned skills
-// default to experimental; curated (user/builtin/plugin) default to trusted.
+// default to experimental; curated (user/builtin/plugin/workspace/global)
+// default to trusted.
 func (s *Skill) EnsureStatusDefault() {
 	if s == nil {
 		return

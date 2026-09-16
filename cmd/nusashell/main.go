@@ -229,6 +229,11 @@ func run() error {
 		slog.Warn("skill store init failed, using empty store", "error", err)
 		skillStore, _ = skillfs.New(skillsRoot)
 	}
+	globalSkillsRoot := ""
+	if home := hostHomeDir(); home != "" {
+		globalSkillsRoot = filepath.Join(home, ".agents", "skills")
+	}
+	runtimeSkillCatalog := skillfs.NewRuntimeCatalog(skillStore, globalSkillsRoot)
 	// Plugin store: installed plugins live under <datadir>/plugins/<id>/.
 	// Each plugin has manifest.json + mcp/ (stdio server) + ui/ (static
 	// HTML/CSS/JS). The runtime manager wraps the MCP manager to start
@@ -295,6 +300,7 @@ func run() error {
 	}
 	tb := &tools.Toolbox{
 		Skills:                 skillStore,
+		RuntimeSkills:          runtimeSkillCatalog,
 		MemoryRecords:          memoryRecords,
 		Experiences:            experiences,
 		User:                   userStore,

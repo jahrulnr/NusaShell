@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"nusashell/application"
+	toolcontext "nusashell/application/tools"
 	"nusashell/contracts"
 	"nusashell/domain"
 	docsinfra "nusashell/infrastructure/docs"
@@ -258,6 +259,71 @@ func (s *stubSkillSearcher) SearchSkills(_ context.Context, _ string, topK int) 
 		out = append(out, application.SearchResult{ID: id})
 	}
 	return out, nil
+}
+
+type stubRuntimeSkillCatalog struct {
+	byWorkspace map[string][]*domain.Skill
+}
+
+func (s *stubRuntimeSkillCatalog) List(workspace string) []*domain.Skill {
+	return s.byWorkspace[workspace]
+}
+
+func (s *stubRuntimeSkillCatalog) Get(workspace, id, ownedBy string) (*domain.Skill, error) {
+	for _, skill := range s.List(workspace) {
+		if skill.ID == id && (ownedBy == "" || skill.EffectiveOwnedBy() == ownedBy) {
+			return skill, nil
+		}
+	}
+	return nil, fmt.Errorf("not found")
+}
+
+func TestSkillDiscoveryUsesWorkspaceRuntimeCatalog(t *testing.T) {
+	tb := testToolbox(
+		[]*domain.Skill{{ID: "managed", Name: "managed", Description: "managed", Status: domain.SkillStatusTrusted}},
+		nil,
+		&stubMCP{},
+	)
+	workspace := "/tmp/project"
+	tb.RuntimeSkills = &stubRuntimeSkillCatalog{byWorkspace: map[string][]*domain.Skill{
+		workspace: {{ID: "workspace-skill", Name: "workspace-skill", Description: "workspace release workflow", Origin: domain.SkillOriginWorkspace, Status: domain.SkillStatusTrusted}},
+	}}
+	ctx := toolcontext.WithWorkspace(context.Background(), workspace)
+
+	listed, err := tb.Execute(ctx, "skill", []byte(`{"op":"list"}`))
+	if err != nil {
+		t.Fatalf("skill list: %v", err)
+	}
+	if !strings.Contains(listed, "workspace-skill") || strings.Contains(listed, "managed") {
+		t.Fatalf("skill list did not use workspace catalog: %s", listed)
+	}
+
+	searched, err := tb.Execute(ctx, "skill", []byte(`{"op":"search","query":"release"}`))
+	if err != nil {
+		t.Fatalf("skill search: %v", err)
+	}
+	if !strings.Contains(searched, "workspace-skill") {
+		t.Fatalf("skill search did not use workspace catalog: %s", searched)
+	}
+}
+
+func TestSkillMutationRejectsExternalRuntimeSkill(t *testing.T) {
+	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{skills: []*domain.Skill{{
+		ID: "managed", Name: "managed", Origin: domain.SkillOriginLearned, Status: domain.SkillStatusExperimental,
+	}}}}
+	tb := &Toolbox{
+		Skills: store,
+		RuntimeSkills: &stubRuntimeSkillCatalog{byWorkspace: map[string][]*domain.Skill{
+			"/tmp/project": {{ID: "external", Name: "external", Origin: domain.SkillOriginWorkspace, Status: domain.SkillStatusTrusted}},
+		}},
+		Plugins: &stubPluginStore{},
+		MCP:     &stubMCP{},
+	}
+	ctx := toolcontext.WithWorkspace(context.Background(), "/tmp/project")
+	_, err := tb.Execute(ctx, "skill", []byte(`{"op":"save","id":"external","name":"external","content":"# changed\n"}`))
+	if err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Fatalf("external skill mutation error = %v, want read-only", err)
+	}
 }
 
 func TestSkillSearchUsesRankedSearcher(t *testing.T) {

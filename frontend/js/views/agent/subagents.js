@@ -288,27 +288,58 @@ function renderDock() {
   const meta = document.getElementById('acp-dock-meta');
   if (!dock || !list) return;
   const runs = visibleRuns();
-  dock.hidden = runs.length === 0;
+  const hidden = runs.length === 0;
+  if (dock.hidden !== hidden) dock.hidden = hidden;
   const live = runs.filter((r) => LIVE.has(r.status)).length;
-  title.textContent = `${runs.length} subagent${runs.length === 1 ? '' : 's'}`;
-  meta.textContent = live ? `${live} live` : 'settled';
-  // Patch in place: existing chips keep their DOM node (hover/focus and
-  // listeners), while append() moves each node into the requested
-  // newest-first position. This matters when a newly-started run arrives
-  // after older chips already exist.
-  const seen = new Set();
-  for (const run of runs) {
-    seen.add(run.id);
-    let chip = list.querySelector(`[data-run-id="${run.id}"]`);
-    if (!chip) {
-      chip = buildDockChip(run);
-    } else {
-      updateDockChip(chip, run);
+  const nextTitle = `${runs.length} subagent${runs.length === 1 ? '' : 's'}`;
+  const nextMeta = live ? `${live} live` : 'settled';
+  if (title && title.textContent !== nextTitle) title.textContent = nextTitle;
+  if (meta && meta.textContent !== nextMeta) meta.textContent = nextMeta;
+  renderDockList(list, runs);
+}
+
+export function renderDockList(list, runs) {
+  if (!list) return;
+  patchKeyedRunChildren(list, runs, buildDockChip, updateDockChip);
+}
+
+// Reconcile keyed run children without touching nodes that are already in the
+// right position. Stream snapshots arrive frequently; moving every existing
+// child with append() makes the browser redo layout while the user is trying
+// to click a chip or drawer item.
+function patchKeyedRunChildren(list, runs, build, update) {
+  const existing = new Map();
+  for (const child of [...list.children]) {
+    const id = child.dataset?.runId;
+    if (!id) continue;
+    if (existing.has(id)) {
+      child.remove();
+      continue;
     }
-    list.append(chip);
+    existing.set(id, child);
   }
-  for (const chip of [...list.querySelectorAll('[data-run-id]')]) {
-    if (!seen.has(chip.dataset.runId)) chip.remove();
+
+  const next = [];
+  const seen = new Set();
+  for (const run of runs || []) {
+    if (!run?.id || seen.has(run.id)) continue;
+    seen.add(run.id);
+    const child = existing.get(run.id);
+    if (child) {
+      update(child, run);
+      next.push(child);
+    } else {
+      next.push(build(run));
+    }
+  }
+
+  for (const [id, child] of existing) {
+    if (!seen.has(id)) child.remove();
+  }
+  for (let index = 0; index < next.length; index++) {
+    if (list.children[index] !== next[index]) {
+      list.insertBefore(next[index], list.children[index] || null);
+    }
   }
 }
 
@@ -322,16 +353,17 @@ export { runDisplayName };
 
 function buildDockChip(run) {
   const name = runDisplayName(run);
+  const status = runStatusText(run);
   const chip = el('button', {
     class: `acp-dock-chip is-${run.status}`,
     type: 'button',
     role: 'listitem',
     'data-run-id': run.id,
-    title: `${name} · ${runStatusText(run)}`,
+    title: `${name} · ${status}`,
   },
     el('span', { class: 'acp-dock-chip-pulse', 'aria-hidden': 'true' }),
     el('span', { class: 'acp-dock-chip-name', text: name }),
-    el('span', { class: 'acp-dock-chip-status', text: runStatusText(run) }),
+    el('span', { class: 'acp-dock-chip-status', text: status }),
   );
   chip.addEventListener('click', () => openDrawer(run.id));
   const peek = el('button', { class: 'acp-dock-chip-peek', type: 'button', title: 'Peek in popup', 'aria-label': 'Peek', text: '↗' });
@@ -345,13 +377,16 @@ function buildDockChip(run) {
 
 function updateDockChip(chip, run) {
   const name = runDisplayName(run);
-  chip.className = `acp-dock-chip is-${run.status}`;
-  chip.title = `${name} · ${runStatusText(run)}`;
+  const statusText = runStatusText(run);
+  const nextClass = `acp-dock-chip is-${run.status}`;
+  const nextTitle = `${name} · ${statusText}`;
+  if (chip.className !== nextClass) chip.className = nextClass;
+  if (chip.title !== nextTitle) chip.title = nextTitle;
   const nameEl = chip.querySelector('.acp-dock-chip-name');
   if (nameEl && nameEl.textContent !== name) nameEl.textContent = name;
-  const status = chip.querySelector('.acp-dock-chip-status');
-  if (status && status.textContent !== runStatusText(run)) {
-    status.textContent = runStatusText(run);
+  const statusEl = chip.querySelector('.acp-dock-chip-status');
+  if (statusEl && statusEl.textContent !== statusText) {
+    statusEl.textContent = statusText;
   }
 }
 
@@ -456,25 +491,18 @@ export function renderRunSidebar(list, runs, selectedId) {
   const count = list.closest('.acp-run-sidebar')?.querySelector('.acp-run-count');
   if (count) count.textContent = `${runs.length} run${runs.length === 1 ? '' : 's'}`;
   if (!runs.length) {
-    list.replaceChildren(el('div', { class: 'agent-conversation-empty', text: 'No subagent runs yet.' }));
+    if (!list.querySelector('.agent-conversation-empty')) {
+      list.replaceChildren(el('div', { class: 'agent-conversation-empty', text: 'No subagent runs yet.' }));
+    }
     return;
   }
   list.querySelector('.agent-conversation-empty')?.remove();
-  const existing = new Map(
-    [...list.querySelectorAll('[data-run-id]')].map((node) => [node.dataset.runId, node]),
+  patchKeyedRunChildren(
+    list,
+    runs,
+    buildRunSidebarItem,
+    (item, run) => updateRunSidebarItem(item, run, selectedId),
   );
-  const seen = new Set();
-  for (const run of runs) {
-    seen.add(run.id);
-    const item = existing.get(run.id) || buildRunSidebarItem(run);
-    updateRunSidebarItem(item, run, selectedId);
-    // append() preserves the item and its focus/listener state while moving
-    // it into the newest-first order on every refresh.
-    list.append(item);
-  }
-  for (const [id, item] of existing) {
-    if (!seen.has(id)) item.remove();
-  }
 }
 
 function buildRunSidebarItem(run) {
@@ -492,13 +520,17 @@ function buildRunSidebarItem(run) {
 
 function updateRunSidebarItem(item, run, selectedId) {
   const live = LIVE.has(run.status);
-  item.className = `agent-conversation-item is-${run.status}${run.id === selectedId ? ' is-active' : ''}${live ? ' is-running' : ''}`;
-  item.querySelector('.agent-conversation-title').textContent = runDisplayName(run);
+  const nextClass = `agent-conversation-item is-${run.status}${run.id === selectedId ? ' is-active' : ''}${live ? ' is-running' : ''}`;
+  if (item.className !== nextClass) item.className = nextClass;
+  const title = item.querySelector('.agent-conversation-title');
+  const nextTitle = runDisplayName(run);
+  if (title && title.textContent !== nextTitle) title.textContent = nextTitle;
   const time = item.querySelector('.agent-conversation-time');
-  time.textContent = `${runStatusText(run)} · ${shortPath(run.workspace)}`;
-  if (live) {
-    time.append(el('span', { class: 'agent-conversation-dot', 'aria-hidden': 'true' }));
-  }
+  const nextTime = `${runStatusText(run)} · ${shortPath(run.workspace)}`;
+  if (time && time.textContent !== nextTime) time.textContent = nextTime;
+  const dot = time?.querySelector('.agent-conversation-dot');
+  if (live && !dot) time?.append(el('span', { class: 'agent-conversation-dot', 'aria-hidden': 'true' }));
+  if (!live) dot?.remove();
 }
 
 function renderPopup() {

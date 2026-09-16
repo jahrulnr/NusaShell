@@ -33,7 +33,11 @@ func ptrBool(v bool) *bool { return &v }
 type searchwireSearchFunc func(context.Context, *searchwire.Searcher, string, searchwire.SearchOptions) (*searchwire.Response, error)
 
 type Toolbox struct {
-	Skills          application.SkillStore
+	Skills application.SkillStore
+	// RuntimeSkills is the read-only discovery view used by agent skill
+	// operations. It adds active-workspace and host-global packages without
+	// changing the managed store used by learning and UI persistence.
+	RuntimeSkills   application.RuntimeSkillCatalog
 	SkillSearcher   application.SkillSearcher // optional; nil = substring fallback
 	Experiences     application.ExperienceStore
 	MemoryRecords   application.MemoryRecordStore
@@ -541,7 +545,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		if limit <= 0 {
 			limit = 100
 		}
-		skills := filterSkills(t.Skills.List(), args.Status)
+		skills := filterSkills(t.skillsForContext(ctx), args.Status)
 		if limit < len(skills) {
 			skills = skills[:limit]
 		}
@@ -572,8 +576,8 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		}
 		q := strings.ToLower(args.Query)
 		var items []any
-		for _, s := range filterSkills(t.Skills.List(), args.Status) {
-			if !strings.Contains(strings.ToLower(s.Name+" "+s.Description), q) {
+		for _, s := range filterSkills(t.skillsForContext(ctx), args.Status) {
+			if !strings.Contains(strings.ToLower(s.Name+" "+s.Description+" "+s.Content), q) {
 				continue
 			}
 			items = append(items, formatSkillJSON(s))
@@ -610,12 +614,15 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			if id := strings.TrimSpace(args.ID); id != "" {
 				lookup = id
 			}
-			existing, err := t.Skills.Get(lookup, "")
+			existing, err := t.skillForContext(ctx, lookup, "")
 			if err != nil {
 				return "", fmt.Errorf("skill save: skill %q not found; omit path to create SKILL.md, or pass the existing skill id to write a support file", lookup)
 			}
 			if !existing.CanAgentMutate() {
-				return "", fmt.Errorf("cannot mutate trusted curated skill %q", lookup)
+				return "", skillMutationError(existing, lookup)
+			}
+			if t.Skills == nil {
+				return "", fmt.Errorf("skill store not configured")
 			}
 			if err := t.Skills.WriteFile(lookup, "", rel, args.Content); err != nil {
 				return "", fmt.Errorf("skill save: %w", err)
@@ -624,17 +631,17 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		}
 		var s *domain.Skill
 		if args.ID != "" {
-			existing, err := t.Skills.Get(args.ID, "")
+			existing, err := t.skillForContext(ctx, args.ID, "")
 			if err != nil {
 				return "", fmt.Errorf("skill %q not found: %w", args.ID, err)
 			}
 			if !existing.CanAgentMutate() {
-				return "", fmt.Errorf("cannot mutate trusted curated skill %q", args.ID)
+				return "", skillMutationError(existing, args.ID)
 			}
 			s = existing
-		} else if existing, err := t.Skills.Get(name, ""); err == nil {
+		} else if existing, err := t.skillForContext(ctx, name, ""); err == nil {
 			if !existing.CanAgentMutate() {
-				return "", fmt.Errorf("cannot mutate trusted curated skill %q", name)
+				return "", skillMutationError(existing, name)
 			}
 			s = existing
 		} else {
@@ -650,6 +657,9 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		s.Description = strings.TrimSpace(args.Description)
 		s.Content = args.Content
 		s.UpdatedAt = clock.NewTime().Time()
+		if t.Skills == nil {
+			return "", fmt.Errorf("skill store not configured")
+		}
 		if err := t.Skills.Save(s); err != nil {
 			return "", err
 		}
@@ -667,12 +677,18 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		if id == "" {
 			return "", fmt.Errorf("skill id is required")
 		}
-		skill, err := t.Skills.Get(id, args.OwnedBy)
+		skill, err := t.skillForContext(ctx, id, args.OwnedBy)
 		if err != nil {
 			return "", err
 		}
+		if isExternalSkill(skill) {
+			return "", skillMutationError(skill, id)
+		}
 		if skill.Origin != domain.SkillOriginLearned || (skill.Status != domain.SkillStatusCandidate && skill.Status != domain.SkillStatusExperimental) {
 			return "", fmt.Errorf("only learned candidate/experimental skills can be deleted")
+		}
+		if t.Skills == nil {
+			return "", fmt.Errorf("skill store not configured")
 		}
 		if err := t.Skills.Delete(id, args.OwnedBy); err != nil {
 			return "", err
@@ -1562,6 +1578,45 @@ func (t *Toolbox) executeWaitUntil(argsJSON []byte) (string, error) {
 	}), nil
 }
 
+func (t *Toolbox) skillsForContext(ctx context.Context) []*domain.Skill {
+	if t.RuntimeSkills != nil {
+		return t.RuntimeSkills.List(application.WorkspaceFromContext(ctx))
+	}
+	if t.Skills == nil {
+		return nil
+	}
+	return t.Skills.List()
+}
+
+func (t *Toolbox) skillForContext(ctx context.Context, id, ownedBy string) (*domain.Skill, error) {
+	if t.RuntimeSkills != nil {
+		return t.RuntimeSkills.Get(application.WorkspaceFromContext(ctx), id, ownedBy)
+	}
+	if t.Skills == nil {
+		return nil, fmt.Errorf("skill store not configured")
+	}
+	return t.Skills.Get(id, ownedBy)
+}
+
+func isExternalSkill(skill *domain.Skill) bool {
+	if skill == nil {
+		return false
+	}
+	switch skill.EffectiveOwnedBy() {
+	case string(domain.SkillOriginWorkspace), string(domain.SkillOriginGlobal):
+		return true
+	default:
+		return false
+	}
+}
+
+func skillMutationError(skill *domain.Skill, id string) error {
+	if isExternalSkill(skill) {
+		return fmt.Errorf("%s skill %q is read-only; edit its source SKILL.md", skill.EffectiveOwnedBy(), id)
+	}
+	return fmt.Errorf("cannot mutate trusted curated skill %q", id)
+}
+
 // searchSkillsRanked runs the ranked skill search (BM25 + graph + recency,
 // no embedding) and appends substring matches the ranker missed (plural or
 // inflected forms) so recall never regresses below the plain matcher.
@@ -1570,7 +1625,7 @@ func (t *Toolbox) searchSkillsRanked(ctx context.Context, query string, limit in
 	if err != nil {
 		return "", fmt.Errorf("skill search: %w", err)
 	}
-	skills := filterSkills(t.Skills.List(), status)
+	skills := filterSkills(t.skillsForContext(ctx), status)
 	byKey := make(map[string]*domain.Skill, len(skills))
 	for _, sk := range skills {
 		byKey[sk.ID] = sk
@@ -1600,7 +1655,7 @@ func (t *Toolbox) searchSkillsRanked(ctx context.Context, query string, limit in
 			if seen[sk.ID] {
 				continue
 			}
-			if strings.Contains(strings.ToLower(sk.Name+" "+sk.Description), q) {
+			if strings.Contains(strings.ToLower(sk.Name+" "+sk.Description+" "+sk.Content), q) {
 				seen[sk.ID] = true
 				items = append(items, formatSkillJSON(sk))
 			}

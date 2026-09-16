@@ -11,6 +11,7 @@ import {
   getSubagentFollow,
   applySubagentFollowIntent,
   resetSubagentFollowForTests,
+  renderDockList,
   renderRunSidebar,
 } from '../js/views/agent/subagents.js';
 
@@ -79,6 +80,68 @@ test('ACP run sidebar removes the empty marker when a room gains runs', () => {
     assert.equal(list.querySelector('.agent-conversation-empty'), null);
     assert.equal(list.querySelectorAll('[data-run-id]').length, 1);
     assert.equal(document.querySelector('.acp-run-count').textContent, '1 run');
+  } finally {
+    dom.window.close();
+    cleanup();
+  }
+});
+
+test('ACP run sidebar does not move unchanged items during a refresh', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><aside class="acp-run-sidebar"><span class="acp-run-count"></span><div class="acp-run-list"></div></aside></body></html>');
+  global.window = dom.window;
+  global.document = dom.window.document;
+  try {
+    const list = document.querySelector('.acp-run-list');
+    const runs = [
+      { id: 'run-1', title: 'Research', status: 'running', workspace: '/tmp/project' },
+      { id: 'run-2', title: 'Implement', status: 'running', workspace: '/tmp/project' },
+    ];
+    renderRunSidebar(list, runs, 'run-1');
+    const firstItem = list.children[0];
+    const mutations = [];
+    const observer = new dom.window.MutationObserver((records) => mutations.push(...records));
+    observer.observe(list, { childList: true });
+
+    renderRunSidebar(list, runs, 'run-1');
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+
+    observer.disconnect();
+    assert.strictEqual(list.children[0], firstItem, 'unchanged item keeps its DOM position');
+    assert.equal(mutations.length, 0, 'refresh does not move unchanged items');
+  } finally {
+    dom.window.close();
+    cleanup();
+  }
+});
+
+test('ACP dock keeps unchanged chips and patches changed child text in place', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div class="acp-dock-list"></div></body></html>');
+  global.window = dom.window;
+  global.document = dom.window.document;
+  try {
+    const list = document.querySelector('.acp-dock-list');
+    const runs = [
+      { id: 'run-1', title: 'Research', status: 'running', activity: 'thinking' },
+      { id: 'run-2', title: 'Implement', status: 'running', activity: 'thinking' },
+    ];
+    renderDockList(list, runs);
+    const firstChip = list.children[0];
+    const firstName = firstChip.querySelector('.acp-dock-chip-name');
+    const firstStatus = firstChip.querySelector('.acp-dock-chip-status');
+    const mutations = [];
+    const observer = new dom.window.MutationObserver((records) => mutations.push(...records));
+    observer.observe(list, { childList: true, attributes: true, characterData: true, subtree: true });
+
+    renderDockList(list, runs);
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+    assert.equal(mutations.length, 0, 'refresh does not mutate unchanged chips');
+
+    renderDockList(list, [{ ...runs[0], activity: 'tool call' }, runs[1]]);
+    assert.strictEqual(list.children[0], firstChip, 'changed run keeps its chip');
+    assert.strictEqual(firstChip.querySelector('.acp-dock-chip-name'), firstName, 'name child is retained');
+    assert.strictEqual(firstChip.querySelector('.acp-dock-chip-status'), firstStatus, 'status child is retained');
+    assert.match(firstStatus.textContent, /tool call/);
+    observer.disconnect();
   } finally {
     dom.window.close();
     cleanup();

@@ -1,9 +1,22 @@
 # Skills
 
-A skill is a markdown instruction pack. Each skill lives at
-`<datadir>/skills/<id>/SKILL.md` with git-style snapshots under
-`versions/<n>/` and `meta.json` as the source of truth for status, version,
-and origin.
+A skill is a markdown instruction pack. Managed skills live at
+`<datadir>/skills/<id>/SKILL.md` with git-style snapshots under `versions/<n>/`
+and `meta.json` as the source of truth for status, version, and origin.
+
+The agent `skill` tool discovers the managed catalog plus two read-only source
+roots for the active conversation workspace:
+
+- builtin: the seeded `<datadir>/skills/` packages
+- workspace: `<workspace>/skills/<id>/SKILL.md`
+- global: `~/.agents/skills/<id>/SKILL.md`
+
+When IDs collide in the runtime view, resolution is `builtin` → `workspace` →
+`global`; other managed user/learned/plugin rows remain available as lower-
+priority fallbacks. Workspace and global packages are never copied, versioned,
+or written by NusaShell. Hydration calls the same `skill(op="list")` tool, with
+the active workspace forwarded to it. The persisted `skills.*` API and Skills
+view continue to operate on the managed catalog only.
 
 ## Status and origin
 
@@ -13,11 +26,13 @@ Status: `candidate` → `experimental` → `validated` → `trusted` →
 Default hydration and `skill(op="list")` / `search` return **routable**
 skills (`trusted` and `validated`) unless you pass `status`.
 
-Origin: `user`, `builtin`, `plugin`, `learned`. Learned skills must not
-shadow curated ids; colliding ids are prefixed `learned-`.
+Origin: `user`, `builtin`, `plugin`, `learned`, `workspace`, `global`. Learned
+skills must not shadow curated ids; colliding ids are prefixed `learned-`.
 
-Priority when ids collide: `user` > `builtin` > `plugin:<id>`. Shadowed
-rows still appear in list (dimmed) but resolution uses the winner.
+The runtime source priority when IDs collide is `builtin` > `workspace` >
+`global`; the managed catalog's other rows are lower-priority fallbacks.
+Shadowed source rows do not appear in the runtime list, while exact source
+owners can still be resolved internally for read-only checks.
 
 ## Agent tools
 
@@ -38,8 +53,9 @@ The `skill` dispatcher:
     skill must already exist. Never pass `SKILL.md` or an absolute path.
 - `delete {id,owned_by?}` — learned `candidate` or `experimental` only
 
-There is no `skill_run`. After discovery, `file_read` the absolute
-`SKILL.md` before following it. List support files with `file_list`.
+There is no `skill_run`. After discovery, `file_read` the absolute `SKILL.md`
+before following it. This works for managed, workspace, and global paths. List
+support files with `file_list`.
 
 Good examples:
 
@@ -175,9 +191,13 @@ Path layout:
 | --- | --- |
 | `user` / `builtin` / `learned` | `<datadir>/skills/<id>/` |
 | `plugin:<plugin-id>` | `<datadir>/plugins/<plugin-id>/skills/<id>/` |
+| `workspace` | `<workspace>/skills/<id>/` (read-only) |
+| `global` | `~/.agents/skills/<id>/` (read-only) |
 
-Each directory contains `SKILL.md`, `meta.json`, `versions/<n>/SKILL.md`,
-and optional `references/`, `scripts/`, `templates/`, `examples/`.
+Managed directories contain `SKILL.md`, `meta.json`, `versions/<n>/SKILL.md`,
+and optional `references/`, `scripts/`, `templates/`, `examples/`. Workspace
+and global source directories contain their own `SKILL.md` and optional
+support files; NusaShell does not add managed metadata or snapshots there.
 Support path components must never start with `.` or `_` (write
 `references/shared/`, not `references/_shared/`): Go's `//go:embed` silently
 drops those paths, so the file exists in the repo but never reaches the

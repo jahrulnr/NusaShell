@@ -358,6 +358,10 @@ cache key is a routing hint, not a guarantee of a cache hit.
 | logs | JSONL | `{data}/logs.jsonl` |
 | API keys | SQLite | `{data}/credentials.db` |
 
+Agent skill discovery also reads `<workspace>/skills/` and `~/.agents/skills/`
+as read-only source roots; the runtime resolver applies `builtin > workspace >
+global` for colliding IDs without adding those packages to persistence.
+
 The full tree, including automation and attachments, is in
 `resources/agent/docs/data-locations.md`.
 

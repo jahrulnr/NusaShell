@@ -42,7 +42,7 @@ Skills is not cosmetic — they are functional guidelines that can help you comp
 
 When any relevant task match with a skill, use that skill instead of doing the work directly. The skills may have bundled scripts, tools or utilities that can help you complete the task.
 
-When you working with a workspace, the workspace may have skills at `<workspacePath>/.agents/skills/` directory. You should check if there are any skills in that directory and use them if they are relevant to the task.
+When you work with a workspace, the workspace may have skills at `<workspacePath>/skills/`. The `skill` tool checks that directory automatically; use a workspace skill only when it is relevant to the task.
 
 ## Final responses
 

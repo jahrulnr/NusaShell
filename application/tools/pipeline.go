@@ -81,7 +81,7 @@ func filterLearnerToolInfos(defs []ToolInfo) []ToolInfo {
 func learnerReadOnlySkillTool() ToolInfo {
 	return ToolInfo{
 		Name:        "skill",
-		Description: `Read the skill catalog only; "op" selects: list {limit?,status?} or search {query,limit?,status?}. Read the selected SKILL.md with file_read before applying it. Skill writes are committed by the learner runtime after the final learn() result, not by this dispatcher.`,
+		Description: `Read the skill catalog only; "op" selects: list {limit?,status?} or search {query,limit?,status?}. The catalog includes read-only workspace/global source packages with builtin > workspace > global collision priority. Read the selected SKILL.md with file_read before applying it. Skill writes are committed by the learner runtime after the final learn() result, not by this dispatcher.`,
 		InputSchema: objSchema(
 			pEnum("op", "Read-only operation", "list", "search"),
 			pStr("query", "Search query (op=search)"),

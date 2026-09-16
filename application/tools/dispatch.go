@@ -68,7 +68,7 @@ var dispatchFamilies = []dispatchFamily{
 		members: []string{"list", "search", "save", "delete"},
 		def: ToolInfo{
 			Name:        "skill",
-			Description: "Skill library; \"op\" selects: list {limit?,status?} returns routable (trusted|validated) skills by default; search {query,limit?,status?} returns discovery metadata only (id/name/description/owned_by/status), never SKILL.md content — after selecting a skill, MUST read its absolute SKILL.md with file_read before applying it; save creates a learned experimental SKILL.md with {name,content,description?} (omit id and omit path), versions an existing learned experimental SKILL.md with {id,name,content,description?} (omit path; id is the folder id, which may be learned-<name>), or writes a relative support file with {name or id, path, content} (skill must already exist and be agent-mutable; never pass an absolute SKILL.md path); delete {id,owned_by?} removes a learned candidate/experimental skill. Trusted curated skills cannot be mutated or deleted by the agent. See docs(op=\"read\", id=\"skills\") for the path layout.",
+			Description: "Skill library; \"op\" selects: list {limit?,status?} returns routable (trusted|validated) skills by default from the managed catalog plus read-only <workspace>/skills/ and ~/.agents/skills/ packages; ID collisions resolve builtin > workspace > global; search {query,limit?,status?} returns discovery metadata only (id/name/description/owned_by/status), never SKILL.md content — after selecting a skill, MUST read its absolute SKILL.md with file_read before applying it; workspace/global skills are read-only; save creates a learned experimental SKILL.md with {name,content,description?} (omit id and omit path), versions an existing learned experimental SKILL.md with {id,name,content,description?} (omit path; id is the folder id, which may be learned-<name>), or writes a relative support file with {name or id, path, content} (skill must already exist and be agent-mutable; never pass an absolute SKILL.md path); delete {id,owned_by?} removes a learned candidate/experimental skill. Trusted curated skills cannot be mutated or deleted by the agent. See docs(op=\"read\", id=\"skills\") for the path layout.",
 			InputSchema: objSchema(
 				pEnum("op", "Operation", "list", "search", "save", "delete"),
 				pStr("query", "Search query (op=search)"),
@@ -79,7 +79,7 @@ var dispatchFamilies = []dispatchFamily{
 				pStr("id", "Existing skill folder id for SKILL.md update (op=save). Omit id to create. Required when the folder id differs from name (for example learned-tool-mapping)."),
 				pStr("description", "Short description up to 1024 chars (op=save SKILL.md mode)"),
 				pStr("content", "SKILL.md body, or support-file bytes when path is set (op=save)"),
-				pStr("owned_by", "Skill owner for delete (optional; user/learned/builtin/plugin:<id>)"),
+				pStr("owned_by", "Skill owner for delete (optional; user/learned/builtin/plugin:<id>; workspace/global are read-only)"),
 			),
 		},
 	},

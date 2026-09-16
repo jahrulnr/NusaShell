@@ -106,6 +106,16 @@ type SkillStore interface {
 	UnmountPluginSkills(pluginID string) error
 }
 
+// RuntimeSkillCatalog is the read-only skill view used by the agent toolbox.
+// It combines the managed catalog with skills discovered from the active
+// workspace and the host-wide agent skills directory. The workspace is
+// explicit because one Toolbox can serve conversations rooted in different
+// workspaces concurrently.
+type RuntimeSkillCatalog interface {
+	List(workspace string) []*domain.Skill
+	Get(workspace, id, ownedBy string) (*domain.Skill, error)
+}
+
 // PluginStore is the single source of truth for plugins (MCP servers and
 // MCP + UI plugins). A plugin is installed from the catalog, a GitHub repo,
 // a ZIP archive, or created manually; its manifest carries the MCP server
