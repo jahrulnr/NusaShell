@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-09-16
+
+### Fixed
+
+- **Local access now requires a local Host.** A request counts as a direct local
+  call only when the effective client IP *and* the request `Host` are loopback.
+  A host-local tunnel or forwarder that forwarded a public `Host` while
+  injecting no `X-Forwarded-For` used to look like a local caller and bypassed
+  device pairing on every protected route; it is treated as remote now, so
+  pairing (or the remote-access-disabled gate) applies.
+- **RPC and pairing exchange are same-origin checked.** `POST /rpc/...` and the
+  public `POST /pairing/exchange` reject a browser request whose `Origin` names
+  another host or is opaque (`null`). Such a request needs no preflight, so
+  without this check any page open in the host's browser could drive RPC side
+  effects or plant a session cookie. Non-browser callers without an `Origin`
+  header keep working.
+- **`/local-file` re-checks the remote session** inside the handler, matching
+  `/ws` and `/stream`, instead of relying on the auth middleware alone.
+
 ## [0.8.2] - 2026-09-15
 
 ### Changed
