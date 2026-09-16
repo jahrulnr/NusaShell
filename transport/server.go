@@ -131,6 +131,16 @@ const maxRPCBodyBytes = 64 << 20
 // request body carries the payload (and optionally a redundant method
 // field for debug readability); the path is authoritative.
 func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
+	// A browser request from another origin is rejected before dispatch: this
+	// route has side effects, is reachable from any page open in a browser on
+	// this machine (loopback callers bypass pairing), and needs no preflight,
+	// so without this guard a third-party page could drive RPC calls. Callers
+	// without an Origin header (curl, MCP bridges, internal clients) are
+	// non-browser and stay allowed.
+	if !isSameOriginRequest(r) {
+		writeJSON(w, http.StatusForbidden, contracts.ErrResult(contracts.CodePairingUnauthorized, "cross-origin request denied"))
+		return
+	}
 	method := strings.ReplaceAll(r.PathValue("method"), "/", ".")
 	var req contracts.Request
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRPCBodyBytes)).Decode(&req); err != nil {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -30,6 +31,73 @@ func TestRPCUnknownMethod(t *testing.T) {
 	if res.Error == nil || res.Error.Code != "VALIDATION_ERROR" {
 		t.Fatalf("want VALIDATION_ERROR, got %+v", res.Error)
 	}
+}
+
+// TestRPC_OriginGuard verifies the CSRF guard on the RPC route: a browser
+// request whose Origin host differs from the request Host — including an
+// opaque "null" origin — is rejected before dispatch, while same-origin
+// browser calls and non-browser callers without an Origin header keep working.
+// Without this guard any web page open in the same machine's browser could
+// drive RPC side effects against the API (the request needs no preflight and
+// the handler never inspected Origin).
+func TestRPC_OriginGuard(t *testing.T) {
+	h := newHarness(t, nil)
+	post := func(t *testing.T, origin string) (*http.Response, contractsResult) {
+		t.Helper()
+		body := `{"method":"app.info","payload":{}}`
+		req, err := http.NewRequest(http.MethodPost, h.server.URL+"/rpc/app/info", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		var out contractsResult
+		if err := json.Unmarshal(b, &out); err != nil {
+			t.Fatalf("bad envelope %s: %v", b, err)
+		}
+		return resp, out
+	}
+
+	rejected := []struct {
+		name   string
+		origin string
+	}{
+		{"cross-origin page", "https://evil.example"},
+		{"opaque null origin", "null"},
+		{"same host different port", "http://127.0.0.1:1"},
+	}
+	for _, tc := range rejected {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, out := post(t, tc.origin)
+			if resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", resp.StatusCode)
+			}
+			if out.Error == nil || out.Error.Code != string(contracts.CodePairingUnauthorized) {
+				t.Fatalf("error = %+v, want PAIRING_UNAUTHORIZED", out.Error)
+			}
+		})
+	}
+
+	t.Run("same-origin browser allowed", func(t *testing.T) {
+		resp, out := post(t, h.server.URL)
+		if resp.StatusCode != http.StatusOK || !out.OK {
+			t.Fatalf("status = %d, ok = %v, want 200/true", resp.StatusCode, out.OK)
+		}
+	})
+	t.Run("non-browser without origin allowed", func(t *testing.T) {
+		resp, out := post(t, "")
+		if resp.StatusCode != http.StatusOK || !out.OK {
+			t.Fatalf("status = %d, ok = %v, want 200/true", resp.StatusCode, out.OK)
+		}
+	})
 }
 
 func TestRPCPathDerivesMethod(t *testing.T) {

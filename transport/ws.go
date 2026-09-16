@@ -29,12 +29,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Remote: require a valid paired session and a same-origin browser Origin.
-	if s.Pairing == nil {
-		writeRemoteAccessDisabled(w)
-		return
-	}
-	if !s.HasValidSession(r) {
-		writePairingRequired(w)
+	if !s.requireRemoteSession(w, r) {
 		return
 	}
 	if !remoteWSOriginAllowed(r) {
@@ -210,6 +205,11 @@ func (s *Server) serveWS(ctx context.Context, conn *websocket.Conn, r *http.Requ
 // scheme + host. Non-browser clients (no Origin) are always allowed.
 // Cross-origin and scheme-mismatched browser origins are rejected to prevent
 // CSRF (the server exposes MCP command execution).
+//
+// This keeps the stricter scheme+host rule it has always had; the HTTP routes
+// use isSameOriginRequest (host-only) because their scheme depends on
+// X-Forwarded-Proto trust, while a WS upgrade can only be forwarded by a
+// loopback peer here.
 func remoteWSOriginAllowed(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {

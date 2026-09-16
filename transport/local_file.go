@@ -21,6 +21,12 @@ import (
 // what the AI model references. This mirrors how desktop AI tools
 // (Cursor, VS Code extensions) handle local file access.
 func (s *Server) handleLocalFile(w http.ResponseWriter, r *http.Request) {
+	// Re-check the remote session here, not only in AuthMiddleware: this route
+	// serves any readable absolute path, so it must stay closed even when the
+	// handler is reached without the middleware (parity with /ws and /stream).
+	if !s.requireRemoteSession(w, r) {
+		return
+	}
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		http.Error(w, "path parameter required", http.StatusBadRequest)

@@ -109,6 +109,11 @@ func TestIsLoopbackRequest_ProxyAware(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/", nil)
 			req.RemoteAddr = tc.remoteAddr
+			// This table is about the client-IP rule only, so every case
+			// carries a local Host; the Host requirement itself is covered by
+			// TestIsLoopbackRequest (pairing_test.go) and
+			// TestAuthMiddleware_AlienHostOnLoopbackPeerRequiresPairing.
+			req.Host = "127.0.0.1:10994"
 			if tc.xff != "" {
 				req.Header.Set("X-Forwarded-For", tc.xff)
 			}
@@ -117,6 +122,65 @@ func TestIsLoopbackRequest_ProxyAware(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAuthMiddleware_AlienHostOnLoopbackPeerRequiresPairing verifies the
+// fail-closed rule for host-local tunnels and proxies: when the TCP peer is
+// loopback but the request carries a non-loopback Host, the caller is treated
+// as remote, so the pairing gate still applies. Without this rule a local L4
+// forwarder that forwards the public Host and injects no X-Forwarded-For made
+// every remote client look like a local caller, which bypassed pairing for all
+// protected routes.
+func TestAuthMiddleware_AlienHostOnLoopbackPeerRequiresPairing(t *testing.T) {
+	t.Run("pairing required", func(t *testing.T) {
+		srv, _ := newPairingServer(t)
+		called := false
+		srv.mux.HandleFunc("POST /rpc/test", func(w http.ResponseWriter, r *http.Request) {
+			called = true
+			w.WriteHeader(http.StatusOK)
+		})
+		req := loopbackRequest("POST", "/rpc/test", nil)
+		req.Host = "nusashell.example.com"
+		res := httptest.NewRecorder()
+		srv.AuthMiddleware(srv.mux).ServeHTTP(res, req)
+		if called {
+			t.Fatal("a public Host on a loopback peer must not bypass pairing")
+		}
+		if res.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", res.Code)
+		}
+		var body contracts.Response
+		if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Error == nil || body.Error.Code != contracts.CodePairingRequired {
+			t.Fatalf("error = %+v, want PAIRING_REQUIRED", body.Error)
+		}
+	})
+	t.Run("remote access disabled stays closed", func(t *testing.T) {
+		srv := &Server{Logger: testLogger(), mux: http.NewServeMux()}
+		called := false
+		srv.mux.HandleFunc("POST /rpc/test", func(w http.ResponseWriter, r *http.Request) {
+			called = true
+		})
+		req := loopbackRequest("POST", "/rpc/test", nil)
+		req.Host = "nusashell.example.com"
+		res := httptest.NewRecorder()
+		srv.AuthMiddleware(srv.mux).ServeHTTP(res, req)
+		if called {
+			t.Fatal("a public Host on a loopback peer must not reach a protected handler")
+		}
+		if res.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", res.Code)
+		}
+		var body contracts.Response
+		if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Error == nil || body.Error.Code != contracts.CodeRemoteAccessDisabled {
+			t.Fatalf("error = %+v, want REMOTE_ACCESS_DISABLED", body.Error)
+		}
+	})
 }
 
 // TestSetSessionCookie_SecureBehavior verifies the Secure flag is set only

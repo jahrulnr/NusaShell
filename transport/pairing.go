@@ -64,6 +64,13 @@ func (s *Server) handlePairingStatus(w http.ResponseWriter, r *http.Request) {
 // the JSON response body, so it is not reachable from browser JavaScript.
 // Failed attempts are rate-limited per source IP.
 func (s *Server) handlePairingExchange(w http.ResponseWriter, r *http.Request) {
+	// The route is public by design, but a browser request from another origin
+	// is refused: the response plants a session cookie, so a third-party page
+	// must not be able to trigger the exchange on a victim's behalf.
+	if !isSameOriginRequest(r) {
+		writeJSON(w, http.StatusForbidden, contracts.ErrResult(contracts.CodePairingUnauthorized, "cross-origin request denied"))
+		return
+	}
 	if s.Pairing == nil {
 		writeRemoteAccessDisabled(w)
 		return

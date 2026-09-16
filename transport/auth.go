@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -113,13 +114,89 @@ func ClientIP(r *http.Request) string {
 	return peer
 }
 
-// IsLoopbackRequest reports whether the effective client (after the
-// proxy-aware derivation in ClientIP) is a loopback address. Direct loopback
-// access remains no-auth; a loopback proxy forwarding an external X-Forwarded-For
-// client is treated as non-loopback.
+// IsLoopbackRequest reports whether the request is a genuine direct local
+// call: the effective client (after the proxy-aware derivation in ClientIP)
+// must be a loopback address AND the request Host must name a loopback
+// authority.
+//
+// Both halves are required. A host-local tunnel or proxy that dials the core
+// over loopback but forwards a public Host and injects no X-Forwarded-For would
+// otherwise be indistinguishable from a local caller, which would hand every
+// remote client the loopback no-auth bypass. Requiring the local Host keeps the
+// bypass for direct access (a browser at http://127.0.0.1:PORT, the Electron
+// wrapper, an `ssh -L` forward to a local port) and treats a forwarded public
+// Host as remote, where pairing applies.
 func IsLoopbackRequest(r *http.Request) bool {
+	if !isLocalHost(r.Host) {
+		return false
+	}
 	ip := net.ParseIP(ClientIP(r))
 	return ip != nil && ip.IsLoopback()
+}
+
+// isLocalHost reports whether a request Host names a loopback authority
+// (localhost, 127.0.0.0/8, ::1), with or without a port. Everything else — a
+// public hostname, a LAN address, the wildcard address, or an empty Host — is
+// not local. The check is deliberately fail-closed: an unrecognized Host is
+// treated as remote.
+func isLocalHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	name := host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		name = h
+	}
+	name = strings.TrimSuffix(strings.Trim(name, "[]"), ".")
+	if strings.EqualFold(name, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(name)
+	return ip != nil && ip.IsLoopback()
+}
+
+// isSameOriginRequest reports whether a browser-supplied Origin header matches
+// the request host. Requests without an Origin (non-browser clients such as
+// curl, MCP bridges, and internal calls) are allowed; a malformed, opaque
+// ("null"), or foreign Origin is not.
+//
+// The comparison is host-only on purpose. The host is what a cross-site page
+// cannot forge, and it is where the attack lives: a page on another origin must
+// never be able to drive side effects. The scheme is not compared because
+// behind a TLS-terminating proxy it is derived from X-Forwarded-Proto, which is
+// only trusted for loopback peers; requiring a scheme match here would reject
+// legitimate requests through a trusted non-loopback proxy.
+func isSameOriginRequest(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return false
+	}
+	return u.Host == r.Host
+}
+
+// requireRemoteSession reports whether a non-loopback caller may proceed,
+// writing the matching rejection when it may not: remote access disabled when
+// no pairing service exists, pairing required when no valid session is
+// presented. Handlers that must hold even when the mux is exercised directly
+// (WebSocket upgrades, local file reads) call this instead of repeating the two
+// rejection paths.
+func (s *Server) requireRemoteSession(w http.ResponseWriter, r *http.Request) bool {
+	if IsLoopbackRequest(r) {
+		return true
+	}
+	if s.Pairing == nil {
+		writeRemoteAccessDisabled(w)
+		return false
+	}
+	if !s.HasValidSession(r) {
+		writePairingRequired(w)
+		return false
+	}
+	return true
 }
 
 // hashToken returns the SHA-256 hex hash of a session token.

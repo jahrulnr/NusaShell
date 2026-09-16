@@ -51,10 +51,14 @@ func remoteRequest(method, target string, body io.Reader) *http.Request {
 	return req
 }
 
-// loopbackRequest creates a request with a loopback RemoteAddr.
+// loopbackRequest creates a request with a loopback RemoteAddr and a loopback
+// Host, i.e. a genuine direct local call. Both halves matter: IsLoopbackRequest
+// requires a loopback client IP and a loopback Host, so httptest's default
+// "example.com" Host would represent a forwarded public request instead.
 func loopbackRequest(method, target string, body io.Reader) *http.Request {
 	req := httptest.NewRequest(method, target, body)
 	req.RemoteAddr = "127.0.0.1:54321"
+	req.Host = "127.0.0.1:10994"
 	return req
 }
 
@@ -463,6 +467,73 @@ func TestPairingExchange_NotFound(t *testing.T) {
 	}
 }
 
+// TestPairingExchange_OriginCheck verifies the public exchange route only
+// accepts browser requests whose Origin matches the request host. A
+// cross-origin page (or an opaque "null" origin from a sandboxed/file page)
+// must not be able to plant a session cookie in the victim's browser, while a
+// same-origin request still reaches the service and non-browser callers
+// without an Origin header keep working.
+func TestPairingExchange_OriginCheck(t *testing.T) {
+	exchangeBody, _ := json.Marshal(contracts.PairingChallengeExchangeRequest{
+		ChallengeID: "pair_nonexistent",
+		Code:        "ABCD1234",
+	})
+
+	rejected := []struct {
+		name   string
+		origin string
+	}{
+		{"cross-origin page", "https://evil.example"},
+		{"cross-origin with port on loopback", "http://127.0.0.1:3000"},
+		{"opaque null origin", "null"},
+	}
+	for _, tc := range rejected {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := newPairingServer(t)
+			req := httptest.NewRequest("POST", "/pairing/exchange", strings.NewReader(string(exchangeBody)))
+			req.Host = "127.0.0.1:10994"
+			req.Header.Set("Origin", tc.origin)
+			res := httptest.NewRecorder()
+			srv.mux.ServeHTTP(res, req)
+			if res.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", res.Code)
+			}
+		})
+	}
+
+	reached := []struct {
+		name   string
+		host   string
+		origin string
+	}{
+		{"same-origin browser", "127.0.0.1:10994", "http://127.0.0.1:10994"},
+		{"same-origin behind https tunnel", "nusashell.example.com", "https://nusashell.example.com"},
+		{"non-browser without origin", "127.0.0.1:10994", ""},
+	}
+	for _, tc := range reached {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := newPairingServer(t)
+			req := httptest.NewRequest("POST", "/pairing/exchange", strings.NewReader(string(exchangeBody)))
+			req.Host = tc.host
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			res := httptest.NewRecorder()
+			srv.mux.ServeHTTP(res, req)
+			if res.Code == http.StatusForbidden {
+				t.Fatalf("status = 403, want the request to reach the pairing service")
+			}
+			var resp contracts.Response
+			if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+				t.Fatal(err)
+			}
+			if resp.Error == nil || resp.Error.Code != contracts.CodePairingNotFound {
+				t.Fatalf("error = %+v, want PAIRING_NOT_FOUND from the service", resp.Error)
+			}
+		})
+	}
+}
+
 func TestPairingSessionRevoke(t *testing.T) {
 	_, svc := newPairingServer(t)
 	createRes, rpcErr := svc.CreateChallenge("")
@@ -584,22 +655,42 @@ func TestPairingStatus_MissingChallengeID(t *testing.T) {
 	}
 }
 
+// TestIsLoopbackRequest covers both halves of the trust rule: the effective
+// client IP must be loopback (proxy-aware, see TestIsLoopbackRequest_ProxyAware)
+// AND the request Host must be a loopback authority. The Host half is what
+// keeps a host-local tunnel or proxy from impersonating a local caller by
+// forwarding a public Host without X-Forwarded-For.
 func TestIsLoopbackRequest(t *testing.T) {
 	tests := []struct {
+		name string
 		addr string
+		host string
 		want bool
 	}{
-		{"127.0.0.1:8080", true},
-		{"[::1]:8080", true},
-		{"192.168.1.1:8080", false},
-		{"10.0.0.1:8080", false},
-		{"172.16.0.1:8080", false},
+		{"loopback peer with loopback host", "127.0.0.1:8080", "127.0.0.1:10994", true},
+		{"loopback peer with alternate 127/8 host", "127.0.0.1:8080", "127.5.6.7:10994", true},
+		{"loopback peer with ipv6 loopback host", "[::1]:8080", "[::1]:10994", true},
+		{"loopback peer with localhost host", "127.0.0.1:8080", "localhost:10994", true},
+		{"loopback peer with localhost host without port", "127.0.0.1:8080", "localhost", true},
+		{"loopback peer with public hostname", "127.0.0.1:8080", "nusashell.example.com", false},
+		{"loopback peer with public hostname and port", "127.0.0.1:8080", "nusashell.example.com:443", false},
+		{"loopback peer with tunnel hostname", "127.0.0.1:8080", "calm-words.trycloudflare.com", false},
+		{"loopback peer with lan host", "127.0.0.1:8080", "192.168.18.81:10994", false},
+		{"loopback peer with wildcard host", "127.0.0.1:8080", "0.0.0.0:10994", false},
+		{"loopback peer with empty host", "127.0.0.1:8080", "", false},
+		{"lan peer with lan host", "192.168.1.1:8080", "192.168.1.1:10994", false},
+		{"lan peer with loopback host", "10.0.0.1:8080", "127.0.0.1:10994", false},
+		{"private peer with private host", "172.16.0.1:8080", "172.16.0.1:10994", false},
 	}
 	for _, tt := range tests {
-		req := &http.Request{RemoteAddr: tt.addr}
-		if got := IsLoopbackRequest(req); got != tt.want {
-			t.Errorf("IsLoopbackRequest(%q) = %v, want %v", tt.addr, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/rpc/app/info", nil)
+			req.RemoteAddr = tt.addr
+			req.Host = tt.host
+			if got := IsLoopbackRequest(req); got != tt.want {
+				t.Errorf("IsLoopbackRequest(addr=%q, host=%q) = %v, want %v", tt.addr, tt.host, got, tt.want)
+			}
+		})
 	}
 }
 

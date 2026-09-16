@@ -59,10 +59,19 @@ embedded ES module with no build step.
 
 ### Pairing and access control
 
-`transport.AuthMiddleware` wraps the mux on every startup. Loopback requests
-(`127.0.0.1`, `::1`, `localhost` — derived proxy-aware via `ClientIP`, which
-honors `X-Forwarded-For`/`X-Forwarded-Proto` only when the immediate peer is
-loopback) bypass auth. Non-loopback requests to protected paths (`/rpc/`,
+`transport.AuthMiddleware` wraps the mux on every startup. A request counts as
+local only when **both** halves hold: the effective client IP is loopback and
+the request `Host` names a loopback authority (`localhost`, `127.0.0.0/8`,
+`::1`). `ClientIP` derives the client proxy-aware — it honors
+`X-Forwarded-For`/`X-Forwarded-Proto` only when the immediate peer is loopback,
+and takes the rightmost `X-Forwarded-For` entry. The `Host` half is deliberately
+fail-closed: a public hostname, a LAN address, the wildcard address, or an empty
+`Host` is remote even when the TCP peer is loopback, so a host-local forwarder
+that injects no `X-Forwarded-For` cannot impersonate a local caller. A local
+alias (a hosts-file name that resolves to a loopback address) counts as remote
+too: `Host` is the only signal available, and treating an unrecognized `Host` as
+local is exactly the hole this rule closes. Local
+requests bypass auth. Non-loopback requests to protected paths (`/rpc/`,
 `/ws`, `/stream`, `/local-file`, `/plugins`) require a valid session cookie;
 `/healthz` stays public but returns only a minimal `{ok, service}` identity
 to remote callers. Public bootstrap routes (`/pairing/status`,
@@ -80,7 +89,18 @@ become loopback). The deployment requirement: the loopback proxy MUST append
 or overwrite `X-Forwarded-For` — the nginx
 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` / Caddy default
 behavior. A proxy that passes the client header through verbatim breaks the
-trust rule and must not be used.
+trust rule and must not be used; a forwarder that omits `X-Forwarded-For`
+entirely is no longer mistaken for a local caller (the `Host` half of the local
+rule prevents that), but every client then appears as the forwarder's own peer
+address.
+
+Browser-originated calls are same-origin checked as well: `POST /rpc/...` and
+the public `POST /pairing/exchange` reject a request whose `Origin` names a
+different host or is opaque (`null`), because a local caller bypasses pairing
+and a third-party page needs no preflight to reach these routes. Requests
+without an `Origin` header are non-browser callers and stay allowed. `/ws`,
+`/stream`, and `/local-file` re-check the remote session inside the handler, so
+the gate still holds when a handler is exercised without the middleware.
 
 The host-driven flow: Settings → Remote access enables the feature, persists
 one or more HTTP(S) addresses remote devices can reach, and creates a one-time challenge
