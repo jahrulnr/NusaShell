@@ -192,6 +192,15 @@ the matching domain dispatcher, and add a handler-level test in
 2. A goroutine runs the turn: compaction check → tool list refresh → stream
    rounds. Each round streams into its own assistant message and executes
    any requested tool calls, capped by `settings.max_tool_rounds` (default 8).
+   The system prompt and top-level `tools[]` are built from the current Go
+   runtime for the new turn; they are not read from or persisted into the
+   conversation JSON. Therefore an existing room uses the current binary's
+   prompt and tool roster after a backend restart. Persisted hydration may
+   still contain older discovery results until the next compaction, but those
+   results are context state—not the authoritative top-level `tools[]`.
+   Internal delegates additionally project the same incremental transcript
+   chunks and terminal lifecycle events as external ACP runs, so the ACP UI
+   and a future ACP server can consume one agent-stream boundary.
 3. Deltas are staged per round in the in-memory round-stream registry and
    streamed over `GET /stream` as `round.delta` frames; the WebSocket carries
    the lifecycle signals (`agent.turn.started`, `agent.tool.started`,
@@ -325,6 +334,12 @@ Messages-format providers mark the system prompt and tool definitions with
 OpenAI Responses and Chat providers receive a stable `prompt_cache_key`; the
 key is 32 ASCII characters and is namespaced as `nusashell_cv_` for normal
 conversation turns or `nusashell_bg_` for headless/background learning-job turns.
+For a given provider/model/conversation, the key remains stable while the
+request contract is unchanged. Its digest also includes the current system
+prompt and top-level `tools[]`, so a new binary, changed user instructions,
+or an ACP enable/disable cannot reuse a cache/session shard built for the old
+contract. The key is recomputed from runtime values at the turn boundary; no
+system prompt or tool definition is persisted in the conversation.
 OpenRouter Chat receives that key plus `session_id` so its provider routing and
 Logs → Sessions grouping remain stable. OpenRouter Messages/Responses carry
 the same session value in the documented `x-session-id` header. A provider

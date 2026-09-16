@@ -549,8 +549,8 @@ func (a *App) subagentDeps() subagent.Deps {
 			}
 			return p.ID + ":" + bare, nil
 		},
-		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
-			return a.runHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, AgentDelegate, onUpdate)
+		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string), onTranscript func(domain.AcpTranscriptChunk)) (map[string]any, string, error) {
+			return a.runHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, AgentDelegate, onUpdate, onTranscript)
 		},
 		SteerHeadless: a.SteerHeadlessTurn,
 	}

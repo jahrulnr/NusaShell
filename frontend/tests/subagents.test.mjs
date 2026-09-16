@@ -7,6 +7,7 @@ import {
   sortRunsNewestFirst,
   syncTranscript,
   runDisplayName,
+  runStatusText,
   getSubagentFollow,
   applySubagentFollowIntent,
   resetSubagentFollowForTests,
@@ -21,6 +22,22 @@ test('runDisplayName prefers title over agent_name', () => {
   assert.equal(runDisplayName({ title: '  ', agent_name: 'Codex' }), 'Codex');
   assert.equal(runDisplayName({ agent_name: 'Codex' }), 'Codex');
   assert.equal(runDisplayName({}), 'ACP');
+});
+
+test('live subagent status shows activity and elapsed time', () => {
+  const started = Date.parse('2026-09-16T20:00:00Z');
+  assert.equal(
+    runStatusText({ status: 'running', activity: 'thinking', started_at: '2026-09-16T20:00:00Z' }, started + 65_000),
+    'running · thinking · 1m 5s',
+  );
+  assert.equal(
+    runStatusText({ status: 'completed', activity: 'thinking', started_at: '2026-09-16T20:00:00Z' }, started + 65_000),
+    'done',
+  );
+  assert.match(
+    runStatusText({ status: 'running', activity: 'thinking', started_at: '2026-09-16T20:00:00Z', updated_at: '2026-09-16T20:00:00Z' }, started + 65_000),
+    /last event 1m 5s ago/,
+  );
 });
 
 function makePanel() {

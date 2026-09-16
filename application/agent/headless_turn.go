@@ -68,17 +68,22 @@ func (a *Service) RunHeadlessTurn(ctx context.Context, prompt, model string, tru
 // existing automation conversation instead of starting a fresh transcript,
 // so a reused agent step keeps the memory of its earlier runs.
 func (a *Service) RunHeadlessTurnIn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error) {
-	return a.RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, AgentAutomation, conversationID, nil)
+	return a.RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, AgentAutomation, conversationID, nil, nil)
 }
 
 // runHeadlessTurnKind is RunHeadlessTurn parameterized by the agent kind:
 // pipeline steps use AgentAutomation, internal delegates use AgentDelegate
 // (which also removes the delegate tool itself to prevent recursion).
 func (a *Service) RunHeadlessTurnKind(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind) (map[string]any, string, error) {
-	return a.RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, kind, "", nil)
+	return a.RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, kind, "", nil, nil)
 }
 
-func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind, conversationID string, onUpdate func(conversationID string)) (out map[string]any, convID string, err error) {
+// RunHeadlessTurnKindObserved runs a headless turn and exposes its hidden
+// conversation plus optional live transcript chunks. The transcript callback
+// is side-effect-only; persistence still happens at the normal round
+// boundary. This is the reusable stream seam for internal UI projection and
+// future ACP server adapters.
+func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind, conversationID string, onUpdate func(conversationID string), onTranscript func(domain.AcpTranscriptChunk)) (out map[string]any, convID string, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			out = nil
@@ -146,6 +151,9 @@ func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model
 	}
 	if onUpdate != nil {
 		run.HeadlessUpdate = func() { onUpdate(convID) }
+	}
+	if onTranscript != nil {
+		run.HeadlessTranscript = onTranscript
 	}
 	a.runsMu.Lock()
 	a.runs[run.ID] = run

@@ -209,9 +209,13 @@ turn produces a summary.
 ## Prompt-cache keys and sessions
 
 When prompt caching is enabled and the provider Cache TTL is not `off`,
-NusaShell creates one stable 32-character ASCII key per
-provider/model/conversation. The visible prefix separates agent workloads
-without increasing the key length:
+NusaShell creates one stable 32-character ASCII key per unchanged
+provider/model/conversation request contract. The digest includes the current
+system prompt and top-level `tools[]`; a new binary, user instruction, or
+runtime tool enable/disable therefore gets a fresh cache/session shard. These
+values are built from Go runtime state at the turn boundary, not persisted in
+conversation JSON. The visible prefix separates agent workloads without
+increasing the key length:
 
 - `nusashell_cv_` + 19 hexadecimal characters — normal conversation turns.
 - `nusashell_bg_` + 19 hexadecimal characters — headless/background and

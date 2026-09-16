@@ -97,10 +97,11 @@ type ResolveModel func(parentConvID string) (string, error)
 type SteerHeadless func(conversationID, text string) error
 
 // ObservedHeadlessTurn runs one unattended agent step and reports the hidden
-// conversation id as it is created. App wires AgentDelegate via
-// runHeadlessTurnKindObserved. Duplicated so this package does not import
-// tools or automation.
-type ObservedHeadlessTurn func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(conversationID string)) (map[string]any, string, error)
+// conversation id as it is created plus incremental transcript chunks while
+// the provider stream progresses. App wires AgentDelegate via
+// runHeadlessTurnKindObserved. The chunk callback is the shared projection
+// seam for the internal ACP-shaped UI and a future ACP server adapter.
+type ObservedHeadlessTurn func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(conversationID string), onTranscript func(domain.AcpTranscriptChunk)) (map[string]any, string, error)
 
 // OnAgentsChanged invalidates cached subagent tool descriptions in every room
 // and carries the concrete named change for the announcement card.

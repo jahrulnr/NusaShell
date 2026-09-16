@@ -78,6 +78,9 @@ func TestExistingConversationAfterRestartUsesCurrentPromptAndTools(t *testing.T)
 	if !strings.Contains(systemText.String(), "fresh runtime instruction") {
 		t.Fatalf("provider system prompt = %q, want current UserPrompt", systemText.String())
 	}
+	if key, ok := adapter.first.ProviderOptions["prompt_cache_key"].(string); !ok || key == "" {
+		t.Fatalf("provider prompt_cache_key = %#v, want a runtime-contract cache key", adapter.first.ProviderOptions["prompt_cache_key"])
+	}
 
 	saved, err := store.Get(conv.ID)
 	if err != nil {

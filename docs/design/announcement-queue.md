@@ -3,25 +3,29 @@
 A per-conversation queue that delivers prompt-cache-breaking state changes
 (subagent config, memory, skills, settings, providers) to agent conversations
 as `announcement` tool calls. The goal is token efficiency: the change already
-breaks the prompt cache silently; the announcement makes the breakage visible
+changes the request/cache contract; the announcement makes the change visible
 to the model so it does not waste tokens re-discovering the change or acting
 on stale assumptions.
 
 ## Problem
 
 The system prompt prefix, tool definitions, and the hydration checkpoint are
-deliberately cache-stable. Several runtime changes invalidate that prefix
-without the model being told:
+reused while their contract is unchanged. The system prompt and top-level
+tool definitions are rebuilt from the current Go runtime for each new turn;
+they are not persisted in a conversation. Several runtime changes therefore
+need a fresh cache shard and an announcement so the model is told what
+changed:
 
 - **ACP subagent save/delete/enable** — rewrites the `subagent` tool
-  description (`AcpDelegationDescription`), breaking the cached tool block
-  for every conversation.
+  description (`AcpDelegationDescription`) and changes the request-contract
+  fingerprint, so the next turn uses a fresh cached tool block for every
+  conversation.
 - **Settings.UserPrompt** — appended to the system prompt as
-  `<user_instructions>`, breaking the cached system block globally.
+  `<user_instructions>`, changing the request-contract fingerprint globally.
 - **Memory / skills changes** — alter hydration slot content; mid-epoch
   changes would otherwise stay invisible to the model until compaction.
-- **Provider/model changes** — change the cache key (provider+model+conversation),
-  forcing a fresh shard.
+- **Provider/model changes** — change the cache key (provider+model+conversation
+  plus the current system/tools contract), forcing a fresh shard.
 
 Those surfaces now announce through the queue below (`config_changed`,
 `memory_changed`, `skills_changed`) in addition to `restart`,

@@ -359,6 +359,31 @@ func TestEventFieldNames(t *testing.T) {
 	}
 }
 
+func TestAcpRunActivityJSONFields(t *testing.T) {
+	payload, err := json.Marshal(AcpRunDTO{Status: "running", Activity: "thinking"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["activity"] != "thinking" {
+		t.Fatalf("activity = %#v, want thinking", got["activity"])
+	}
+	empty, err := json.Marshal(AcpRunDTO{Status: "completed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var emptyFields map[string]any
+	if err := json.Unmarshal(empty, &emptyFields); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := emptyFields["activity"]; ok {
+		t.Fatalf("empty activity must be omitted: %s", empty)
+	}
+}
+
 func TestToolCallPresentationRoundTripKeepsRawOutputSeparate(t *testing.T) {
 	in := ToolCallDTO{
 		ID: "tc_1", Name: "file_list", Args: json.RawMessage(`{"path":"/workspace"}`),

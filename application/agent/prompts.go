@@ -56,10 +56,11 @@ var compactionHandoffUserPrompt = resources.UserPrompt("compaction")
 
 // buildSystemPrompt composes the agent identity + tool protocol (single
 // system.md) with any system-level skill messages stored in the conversation.
-// The system.md prefix is cache-stable across turns; the user prompt (if set)
-// extends that prefix — changing it breaks the prompt cache for all subsequent
-// turns until a new cache shard stabilizes. Only the tail (system messages)
-// varies per conversation/turn.
+// It is rebuilt from the current Go runtime for each new turn; the resulting
+// system prompt is not persisted as conversation state. The request cache key
+// includes this prompt, so the prefix remains reusable only while the prompt
+// contract is unchanged. Only the tail (system messages) varies per
+// conversation/turn.
 //
 // The active workspace is NOT appended here — it travels in the
 // runtime_context hydration slot (see HydrationBuilder.readRuntimeContext).
@@ -112,8 +113,9 @@ var subagentDelegationPrompt = resources.ToolPrompt("subagent-delegation")
 
 // AcpDelegationDescription renders the subagent delegation guidance with
 // the enabled agent list filled in. It is attached to the `subagent` tool
-// description (never the system prompt) so the system prefix stays
-// cache-stable and runtime config lives with the tool it describes.
+// description (never the system prompt) so runtime config lives with the
+// tool it describes. The request-contract cache key includes the resulting
+// tool description and therefore selects a fresh shard when the list changes.
 // Returns "" when no agents are enabled or the template is empty.
 func AcpDelegationDescription(agents []*domain.AcpAgent) string {
 	if len(agents) == 0 || strings.TrimSpace(subagentDelegationPrompt) == "" {

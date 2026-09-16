@@ -952,7 +952,7 @@ func TestDelegateRunSurfaceUsesTheCompleteHeadlessTranscript(t *testing.T) {
 		Conversations: app.Conversations,
 		Settings:      app.Settings,
 		Bus:           app.Bus,
-		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
+		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string), _ func(domain.AcpTranscriptChunk)) (map[string]any, string, error) {
 			onUpdate("conv_delegate")
 			return map[string]any{"output": "The requested change is complete."}, "conv_delegate", nil
 		},
@@ -1108,7 +1108,7 @@ func TestDelegateRunCompletionInjectsSyntheticResult(t *testing.T) {
 	svc := subagent.New(subagent.Deps{
 		Bus:          app.Bus,
 		ResolveModel: func(string) (string, error) { return "cheap:model", nil },
-		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
+		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string), _ func(domain.AcpTranscriptChunk)) (map[string]any, string, error) {
 			return map[string]any{"output": "all done"}, "run_del_conv", nil
 		},
 		DeliverRunDone: func(conversationID, runID string, complete func(cid string) error) {
@@ -1194,7 +1194,7 @@ func TestDelegateRunFailureDeliversError(t *testing.T) {
 	svc := subagent.New(subagent.Deps{
 		Bus:          app.Bus,
 		ResolveModel: func(string) (string, error) { return "cheap:model", nil },
-		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
+		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string), _ func(domain.AcpTranscriptChunk)) (map[string]any, string, error) {
 			return nil, "", fmt.Errorf("boom")
 		},
 		DeliverRunDone: func(conversationID, runID string, complete func(cid string) error) {

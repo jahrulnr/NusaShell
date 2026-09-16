@@ -107,7 +107,14 @@
 .acp-dock-chip.is-waiting_permission .acp-dock-chip-pulse { background: var(--amber-bright); }
 .acp-dock-chip.is-failed .acp-dock-chip-pulse { background: var(--red); }
 .acp-dock-chip.is-completed .acp-dock-chip-pulse { background: var(--green); }
-.acp-dock-chip-status { color: var(--text-dim); font: 10px var(--font-mono); }
+.acp-dock-chip-status {
+  max-width: min(52vw, 18rem);
+  overflow: hidden;
+  color: var(--text-dim);
+  font: 10px var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .acp-dock-chip-peek {
   margin: 0;
   border: 0;

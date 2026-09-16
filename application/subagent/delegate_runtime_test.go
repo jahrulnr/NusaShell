@@ -39,7 +39,7 @@ func TestDispatchSubagentRoutesOps(t *testing.T) {
 	steered := make(chan string, 2)
 	svc := New(Deps{
 		ResolveModel: func(string) (string, error) { return "cheap:model", nil },
-		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
+		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string), _ func(domain.AcpTranscriptChunk)) (map[string]any, string, error) {
 			onUpdate("conv_delegate")
 			<-release
 			return map[string]any{"output": "done"}, "conv_delegate", nil
@@ -112,7 +112,7 @@ func TestDispatchSubagentRoutesOps(t *testing.T) {
 func TestDispatchSubagentStopOpCancels(t *testing.T) {
 	svc := New(Deps{
 		ResolveModel: func(string) (string, error) { return "cheap:model", nil },
-		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
+		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string), _ func(domain.AcpTranscriptChunk)) (map[string]any, string, error) {
 			<-ctx.Done()
 			return nil, "", ctx.Err()
 		},
@@ -156,7 +156,7 @@ func TestSpawnSubagentsDefaultsToInternalWithoutACPAgents(t *testing.T) {
 func TestDelegateRunWaitReturnsHeadlessOutput(t *testing.T) {
 	svc := New(Deps{
 		ResolveModel: func(string) (string, error) { return "cheap:model", nil },
-		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
+		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string), _ func(domain.AcpTranscriptChunk)) (map[string]any, string, error) {
 			return map[string]any{"output": "delegate finished the work"}, "conv_delegate", nil
 		},
 	})
@@ -178,7 +178,7 @@ func TestDelegateRunWaitReturnsHeadlessOutput(t *testing.T) {
 func TestDelegateStopCancelsTheHeadlessTurn(t *testing.T) {
 	svc := New(Deps{
 		ResolveModel: func(string) (string, error) { return "cheap:model", nil },
-		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
+		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string), _ func(domain.AcpTranscriptChunk)) (map[string]any, string, error) {
 			<-ctx.Done()
 			return nil, "", ctx.Err()
 		},
@@ -204,7 +204,7 @@ func TestDelegateRunSteerQueuesOnTheHeadlessTurn(t *testing.T) {
 	steered := make(chan string, 1)
 	svc := New(Deps{
 		ResolveModel: func(string) (string, error) { return "cheap:model", nil },
-		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
+		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string), _ func(domain.AcpTranscriptChunk)) (map[string]any, string, error) {
 			onUpdate("conv_delegate")
 			close(started)
 			<-release

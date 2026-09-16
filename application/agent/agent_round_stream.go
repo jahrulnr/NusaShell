@@ -220,12 +220,14 @@ func (a *Service) StreamTurnRoundOnce(run *TurnRun, adapter ProviderContext, con
 	}
 	response, err := adapter.StreamWithToolActivity(run.Ctx, request, func(delta string) {
 		content.WriteString(delta)
+		run.EmitHeadlessTranscript(domain.AcpTranscriptChunk{Kind: "text", Text: delta})
 		a.publishRoundDelta(run.ID, messageID, round, contracts.RoundDeltaText, "", "", delta)
 	}, func(delta string) {
 		reasoning.WriteString(delta)
 		if !reasoningDeltaVisible(reasoning.String()) {
 			return
 		}
+		run.EmitHeadlessTranscript(domain.AcpTranscriptChunk{Kind: "thought", Text: delta})
 		a.publishRoundDelta(run.ID, messageID, round, contracts.RoundDeltaReasoning, "", "", delta)
 	}, func(event provider.ToolUseStart) {
 		announceToolActivity(event.ID, event.Name, event.ItemID, event.Index, event.OutputIndex)

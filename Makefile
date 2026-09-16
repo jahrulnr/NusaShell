@@ -144,7 +144,7 @@ release-index-check:
 ## optionally build+install the login service, desktop pet (Linux), and Electron.
 ## Same prompt style as the curl release installer, but compiles from source
 ## instead of downloading GitHub releases. See scripts/install-local.sh / .ps1.
-install:
+install: build
 	@case "$$(uname -s)" in \
 	  MINGW*|MSYS*|CYGWIN*) powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-local.ps1 ;; \
 	  *) bash scripts/install-local.sh ;; \

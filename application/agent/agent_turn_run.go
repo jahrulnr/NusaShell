@@ -133,12 +133,18 @@ func (a *Service) RunSingleTurn(run *TurnRun, provider *domain.Provider, apiKey,
 	}
 	toolDefs := a.TurnToolDefs(run)
 	maxTokens := domain.ResolveMaxOutput(provider, model, settings)
-	promptCache := buildPromptCachePolicy(settings, provider, model, run.ConversationID, promptCachePrefixForRun(run))
+	turnSystemPrompt := buildSystemPromptForRun(run, conversation, settings.UserPrompt)
+	promptCache := buildPromptCachePolicyForRequest(settings, provider, model, run.ConversationID, promptCachePrefixForRun(run), turnSystemPrompt, toolDefs)
 	conversation, err = a.maybeCompactInitialTurn(run, adapter, conversation, provider, model, asstMsgID, effort, settings, caps, toolDefs, maxTokens, promptCache, initialContinuation)
 	if err != nil {
 		a.FailTurn(run, asstMsgID, err)
 		return false, ""
 	}
+	// Initial compaction can replace the transcript epoch. Recompute the
+	// cache policy from the post-compaction request contract so the first
+	// streamed request cannot carry a key derived from the old system tail.
+	turnSystemPrompt = buildSystemPromptForRun(run, conversation, settings.UserPrompt)
+	promptCache = buildPromptCachePolicyForRequest(settings, provider, model, run.ConversationID, promptCachePrefixForRun(run), turnSystemPrompt, toolDefs)
 
 	// The round loop (stream → persist → execute tools → drain at the
 	// boundary → repeat) is the AgentEngine with the AgentConversation
@@ -246,6 +252,7 @@ func (a *Service) ApplyQueuedSteer(run *TurnRun) (bool, error) {
 	a.EmitInteractiveTurnEvent(run, contracts.EventSteerApplied, contracts.SteerEvent{
 		ConversationID: run.ConversationID, SteerID: entry.ID, Text: entry.Text, Status: "applied",
 	})
+	run.EmitHeadlessTranscript(domain.AcpTranscriptChunk{Kind: "prompt", Text: entry.Text})
 	a.log("info", "agent", "steer applied for %s: %s", run.ConversationID, entry.ID)
 	return true, nil
 }

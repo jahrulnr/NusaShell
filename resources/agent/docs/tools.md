@@ -336,7 +336,12 @@ Bad examples:
 
 Use the skill catalog before repeating a `skill(op="list")` call. If the
 user says skills or plugin state changed, refresh with `skill(op="search")` or
-`mcp_list`. The built-in tool catalog always comes from `tools[]`. The MCP schemas and refs come from `mcp_search`.
+`mcp_list`. The built-in tool catalog always comes from the current turn's
+`tools[]`, which NusaShell rebuilds from the running Go binary and runtime
+configuration; conversation persistence is not the source of truth for that
+list. Internal delegate transcript chunks are projected through the same
+ACP-shaped run events as external ACP session updates, including live tool
+rows and terminal status; the MCP schemas and refs come from `mcp_search`.
 
 ## Todo modes
 
@@ -418,9 +423,10 @@ status: ok
 {"id":"frag_1","category":"user","content":"prefers Indonesian"}
 {"id":"frag_2","category":"project","content":"Go + Clean Architecture"}
 ```
-MCP plugin tools are NOT advertised in the tool list — the tool list must
-stay stable for the lifetime of a conversation so the provider prompt cache
-(OpenAI / Claude) is not invalidated. The agent discovers and calls MCP tools
+MCP plugin tools are NOT advertised in the top-level tool list — the built-in
+list stays stable with respect to plugin-specific tools so provider prompt
+cache prefixes are not invalidated by every plugin schema. The agent discovers
+and calls MCP tools
 via the universal `mcp_search` + `mcp_call` pair, which works on every
 provider; `mcp__<server>__<tool>` names are not callable:
 

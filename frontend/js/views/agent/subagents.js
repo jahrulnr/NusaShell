@@ -19,6 +19,7 @@ const state = {
   popupRunId: '',
   runLoads: new Map(),
   runLoadErrors: new Map(),
+  activityTimer: null,
   bound: false,
 };
 
@@ -227,6 +228,57 @@ function renderAll() {
   renderDock();
   if (!document.getElementById('acp-drawer')?.hidden) renderDrawer();
   if (!document.getElementById('acp-popup-overlay')?.hidden) renderPopup();
+  syncActivityTimer();
+}
+
+function hasLiveRuns() {
+  return [...state.runs.values()].some((run) => LIVE.has(run.status));
+}
+
+// Keep elapsed status useful during provider thinking gaps. The backend also
+// emits live snapshots, but this local ticker makes the UI continue to tell
+// the truth when no transcript delta arrives yet or a WebSocket update is
+// temporarily delayed.
+function syncActivityTimer() {
+  if (hasLiveRuns()) {
+    if (state.activityTimer) return;
+    state.activityTimer = setInterval(() => {
+      if (!hasLiveRuns()) {
+        clearInterval(state.activityTimer);
+        state.activityTimer = null;
+        return;
+      }
+      renderDock();
+      refreshLiveStatusText();
+    }, 1000);
+    state.activityTimer?.unref?.();
+    return;
+  }
+  if (state.activityTimer) {
+    clearInterval(state.activityTimer);
+    state.activityTimer = null;
+  }
+}
+
+function refreshLiveStatusText() {
+  const active = activeConversationId();
+  for (const item of document.querySelectorAll('.acp-run-sidebar .agent-conversation-item[data-run-id]')) {
+    const run = state.runs.get(item.dataset.runId);
+    if (run) updateRunSidebarItem(item, run, state.drawerRunId);
+  }
+  for (const panel of document.querySelectorAll('.acp-run-panel[data-run-id]')) {
+    const run = state.runs.get(panel.dataset.runId);
+    const pill = panel.querySelector('.acp-status-pill');
+    if (run && pill) {
+      pill.className = `acp-status-pill is-${run.status}`;
+      pill.textContent = runStatusText(run);
+    }
+  }
+  const selected = state.runs.get(state.drawerRunId);
+  const subtitle = document.getElementById('acp-drawer-subtitle');
+  if (subtitle && selected && (!active || selected.conversation_id === active)) {
+    subtitle.textContent = `${runStatusText(selected)} · ${shortPath(selected.workspace)}`;
+  }
 }
 
 function renderDock() {
@@ -275,11 +327,11 @@ function buildDockChip(run) {
     type: 'button',
     role: 'listitem',
     'data-run-id': run.id,
-    title: `${name} · ${statusLabel(run.status)}`,
+    title: `${name} · ${runStatusText(run)}`,
   },
     el('span', { class: 'acp-dock-chip-pulse', 'aria-hidden': 'true' }),
     el('span', { class: 'acp-dock-chip-name', text: name }),
-    el('span', { class: 'acp-dock-chip-status', text: statusLabel(run.status) }),
+    el('span', { class: 'acp-dock-chip-status', text: runStatusText(run) }),
   );
   chip.addEventListener('click', () => openDrawer(run.id));
   const peek = el('button', { class: 'acp-dock-chip-peek', type: 'button', title: 'Peek in popup', 'aria-label': 'Peek', text: '↗' });
@@ -294,12 +346,12 @@ function buildDockChip(run) {
 function updateDockChip(chip, run) {
   const name = runDisplayName(run);
   chip.className = `acp-dock-chip is-${run.status}`;
-  chip.title = `${name} · ${statusLabel(run.status)}`;
+  chip.title = `${name} · ${runStatusText(run)}`;
   const nameEl = chip.querySelector('.acp-dock-chip-name');
   if (nameEl && nameEl.textContent !== name) nameEl.textContent = name;
   const status = chip.querySelector('.acp-dock-chip-status');
-  if (status && status.textContent !== statusLabel(run.status)) {
-    status.textContent = statusLabel(run.status);
+  if (status && status.textContent !== runStatusText(run)) {
+    status.textContent = runStatusText(run);
   }
 }
 
@@ -354,7 +406,7 @@ function renderDrawer() {
   const selected = state.runs.get(state.drawerRunId) || (state.drawerRunId ? undefined : runs[0]);
   document.getElementById('acp-drawer-title').textContent = selected ? (runDisplayName(selected) || 'Subagent') : 'Subagents';
   document.getElementById('acp-drawer-subtitle').textContent = selected
-    ? `${statusLabel(selected.status)} · ${shortPath(selected.workspace)}`
+    ? `${runStatusText(selected)} · ${shortPath(selected.workspace)}`
     : 'No subagents in this conversation';
   const body = document.getElementById('acp-drawer-body');
   let shell = body.querySelector('.acp-drawer-shell');
@@ -443,7 +495,7 @@ function updateRunSidebarItem(item, run, selectedId) {
   item.className = `agent-conversation-item is-${run.status}${run.id === selectedId ? ' is-active' : ''}${live ? ' is-running' : ''}`;
   item.querySelector('.agent-conversation-title').textContent = runDisplayName(run);
   const time = item.querySelector('.agent-conversation-time');
-  time.textContent = `${statusLabel(run.status)} · ${shortPath(run.workspace)}`;
+  time.textContent = `${runStatusText(run)} · ${shortPath(run.workspace)}`;
   if (live) {
     time.append(el('span', { class: 'agent-conversation-dot', 'aria-hidden': 'true' }));
   }
@@ -478,7 +530,7 @@ function renderPopup() {
 function buildRunPanel(run) {
   const panel = el('div', { class: 'acp-run-panel', 'data-run-id': run.id },
     el('div', { class: 'acp-run-meta' },
-      el('span', { class: `acp-status-pill is-${run.status}`, text: statusLabel(run.status) }),
+      el('span', { class: `acp-status-pill is-${run.status}`, text: runStatusText(run) }),
       el('span', { class: `acp-risk-pill is-${run.risk_tier || 'read_only'}`, text: riskLabel(run.risk_tier) }),
       run.current_model_id ? el('span', { class: 'acp-model-pill', text: modelLabel(run) }) : null,
     ),
@@ -523,7 +575,7 @@ function patchRunPanel(panel, run) {
   const pill = panel.querySelector('.acp-status-pill');
   if (pill) {
     pill.className = `acp-status-pill is-${run.status}`;
-    pill.textContent = statusLabel(run.status);
+    pill.textContent = runStatusText(run);
   }
   const modelPill = panel.querySelector('.acp-model-pill');
   if (run.current_model_id) {
@@ -962,6 +1014,34 @@ function acpToolMeta(chunk, status) {
   if (status === 'running') return 'Running';
   if (status === 'fail') return 'Failed';
   return 'Completed';
+}
+
+export function runStatusText(run, now = Date.now()) {
+  const status = statusLabel(run?.status);
+  if (!LIVE.has(run?.status)) return status;
+  const activity = typeof run?.activity === 'string' && run.activity.trim()
+    ? run.activity.trim()
+    : 'working';
+  const started = startedAtMs(run);
+  const elapsed = started ? formatElapsed(Math.max(0, now - started)) : '';
+  const lastUpdate = Date.parse(run?.updated_at || '');
+  const stale = lastUpdate ? Math.max(0, now - lastUpdate) : 0;
+  const parts = [status, activity];
+  if (elapsed) parts.push(elapsed);
+  if (stale >= 15_000) parts.push(`last event ${formatElapsed(stale)} ago`);
+  return parts.join(' · ');
+}
+
+function formatElapsed(ms) {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${remainder}s`;
+  const hours = Math.floor(minutes / 60);
+  const minuteRemainder = minutes % 60;
+  if (hours < 24) return `${hours}h ${minuteRemainder}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
 function statusLabel(status) {

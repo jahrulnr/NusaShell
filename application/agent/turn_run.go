@@ -40,6 +40,11 @@ type TurnRun struct {
 	// headless run. Internal delegates use it to mirror their hidden
 	// conversation into the shared ACP-shaped transcript UI.
 	HeadlessUpdate func()
+	// HeadlessTranscript receives the same incremental transcript chunks that
+	// the provider stream produces. Internal delegates use it to project the
+	// agent turn onto the ACP-shaped run surface; a future ACP server can use
+	// the same stream adapter without duplicating the agent workflow.
+	HeadlessTranscript func(domain.AcpTranscriptChunk)
 	// Workspace is the absolute workspace root of the conversation, captured
 	// at turn start so tool execution can attribute mutations without
 	// re-reading the conversation.
@@ -129,6 +134,20 @@ func (r *TurnRun) CurrentMessageID() string {
 	r.messageMu.RLock()
 	defer r.messageMu.RUnlock()
 	return r.MessageID
+}
+
+// EmitHeadlessTranscript forwards one live transcript chunk to the optional
+// observer. The callback is side-effect-only and is intentionally not part of
+// conversation persistence; the normal round boundary remains the durable
+// source of truth.
+func (r *TurnRun) EmitHeadlessTranscript(chunk domain.AcpTranscriptChunk) {
+	if r == nil || r.HeadlessTranscript == nil || chunk.Kind == "" {
+		return
+	}
+	if chunk.At.IsZero() {
+		chunk.At = clock.NewTime().Time()
+	}
+	r.HeadlessTranscript(chunk)
 }
 
 func (r *TurnRun) SetMessageID(id string) {

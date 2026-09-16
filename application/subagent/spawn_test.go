@@ -126,7 +126,7 @@ func TestSpawnInternalAppendsParentPlanHandoff(t *testing.T) {
 	svc := New(Deps{
 		Todos:        fakeBriefs{brief: testBrief, path: "/outside/child/conv_parent.plan.md"},
 		ResolveModel: func(string) (string, error) { return "cheap:model", nil },
-		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
+		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string), _ func(domain.AcpTranscriptChunk)) (map[string]any, string, error) {
 			capturedPrompt = prompt
 			return map[string]any{"output": "done"}, "conv_delegate", nil
 		},
@@ -154,7 +154,7 @@ func TestSpawnInternalOmitsHandoffWhenParentHasNoBrief(t *testing.T) {
 	svc := New(Deps{
 		Todos:        fakeBriefs{},
 		ResolveModel: func(string) (string, error) { return "cheap:model", nil },
-		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string)) (map[string]any, string, error) {
+		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string), _ func(domain.AcpTranscriptChunk)) (map[string]any, string, error) {
 			capturedPrompt = prompt
 			return map[string]any{"output": "done"}, "conv_delegate", nil
 		},

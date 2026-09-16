@@ -69,6 +69,7 @@ func (r *DelegateRuntime) Spawn(_ context.Context, req SpawnRequest) (*domain.Ac
 			AgentID:          internalDelegateAgentID,
 			AgentName:        internalDelegateAgentName,
 			Title:            domain.NormalizeAcpRunTitle(req.Title),
+			Activity:         domain.AcpRunActivityStarting,
 			ConversationID:   req.ConversationID,
 			ParentToolCallID: req.ParentToolCallID,
 			Workspace:        req.Workspace,
@@ -220,7 +221,12 @@ var errUnsupportedDelegateOp = errors.New("not supported for internal delegate r
 
 // exec runs the headless turn to completion and seals the run.
 func (r *DelegateRuntime) exec(runID string, dr *delegateRun, req SpawnRequest) {
+	stopHeartbeat := r.startHeartbeat(runID, dr.ctx)
+	defer stopHeartbeat()
+	r.updateActivity(runID, domain.AcpRunActivityThinking)
 	out, runConvID, err := r.runHeadless(dr, req)
+	stopHeartbeat()
+	r.updateActivity(runID, domain.AcpRunActivityFinalizing)
 	text := ""
 	if out != nil {
 		if v, ok := out["output"].(string); ok {
@@ -237,7 +243,85 @@ func (r *DelegateRuntime) runHeadless(dr *delegateRun, req SpawnRequest) (output
 	}
 	return headless(dr.ctx, req.Prompt, req.ModelID, domain.TrustTrusted, nil, func(conversationID string) {
 		r.attachConversation(dr.run.ID, conversationID)
+	}, func(chunk domain.AcpTranscriptChunk) {
+		r.appendTranscript(dr.run.ID, chunk)
 	})
+}
+
+// startHeartbeat keeps the ACP-shaped UI informed during provider gaps where
+// no transcript chunk is available yet (long thinking, compaction, retry, or
+// a slow connection). It is event-based and tied to the delegate context; it
+// never polls the client and stops before the terminal event can be emitted.
+func (r *DelegateRuntime) startHeartbeat(runID string, ctx context.Context) func() {
+	stop := make(chan struct{})
+	var once sync.Once
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				r.updateActivity(runID, "")
+			case <-stop:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return func() { once.Do(func() { close(stop) }) }
+}
+
+func (r *DelegateRuntime) updateActivity(runID string, activity domain.AcpRunActivity) {
+	r.mu.Lock()
+	dr := r.runs[runID]
+	if dr == nil || !dr.run.Live() {
+		r.mu.Unlock()
+		return
+	}
+	if activity != "" {
+		dr.run.Activity = activity
+	} else if dr.run.Activity == "" {
+		dr.run.Activity = domain.AcpRunActivityThinking
+	}
+	dr.run.UpdatedAt = clock.NewTime().Time()
+	snapshot := cloneDelegateRun(dr.run)
+	r.svc.EmitRun(contracts.EventAcpRunUpdated, snapshot)
+	r.mu.Unlock()
+}
+
+// appendTranscript projects one live internal-agent stream chunk onto the
+// ACP-shaped run. The public run remains in memory until completion, just like
+// an external ACP live run; the hidden conversation is still the durable
+// source of truth at the round boundary and on finish.
+func (r *DelegateRuntime) appendTranscript(runID string, chunk domain.AcpTranscriptChunk) {
+	if chunk.Kind == "" {
+		return
+	}
+	r.mu.Lock()
+	dr := r.runs[runID]
+	if dr == nil || !dr.run.Live() {
+		r.mu.Unlock()
+		return
+	}
+	if chunk.At.IsZero() {
+		chunk.At = clock.NewTime().Time()
+	}
+	dr.run.AppendTranscript(chunk)
+	switch chunk.Kind {
+	case "thought", "text", "prompt":
+		dr.run.Activity = domain.AcpRunActivityThinking
+	case "tool":
+		if chunk.ToolStatus == "running" {
+			dr.run.Activity = domain.AcpRunActivityTool
+		} else {
+			dr.run.Activity = domain.AcpRunActivityThinking
+		}
+	}
+	dr.run.UpdatedAt = chunk.At
+	snapshot := cloneDelegateRun(dr.run)
+	r.svc.EmitRun(contracts.EventAcpRunUpdated, snapshot)
+	r.mu.Unlock()
 }
 
 // attachConversation records the hidden conversation id and refreshes the
@@ -264,7 +348,7 @@ func (r *DelegateRuntime) attachConversation(runID, conversationID string) {
 	if err != nil {
 		return
 	}
-	transcript := delegateTranscriptFromConversation(conversation)
+	transcript := delegateTranscriptFromConversation(conversation, dr.run.Prompt)
 	r.mu.Lock()
 	dr = r.runs[runID]
 	if dr == nil || !dr.run.Live() {
@@ -274,8 +358,8 @@ func (r *DelegateRuntime) attachConversation(runID, conversationID string) {
 	dr.run.Transcript = transcript
 	dr.run.UpdatedAt = clock.NewTime().Time()
 	snapshot := cloneDelegateRun(dr.run)
-	r.mu.Unlock()
 	r.svc.EmitRun(contracts.EventAcpRunUpdated, snapshot)
+	r.mu.Unlock()
 }
 
 // finish seals the public snapshot after the hidden headless conversation
@@ -287,7 +371,7 @@ func (r *DelegateRuntime) finish(runID string, dr *delegateRun, runConvID, outpu
 	run := dr.run
 	if runConvID != "" && r.svc.deps.Conversations != nil {
 		if conversation, err := r.svc.deps.Conversations.Get(runConvID); err == nil {
-			run.Transcript = delegateTranscriptFromConversation(conversation)
+			run.Transcript = delegateTranscriptFromConversation(conversation, run.Prompt)
 		}
 	}
 	if len(run.Transcript) == 0 && strings.TrimSpace(output) != "" {
@@ -307,6 +391,7 @@ func (r *DelegateRuntime) finish(runID string, dr *delegateRun, runConvID, outpu
 		stopReason = "error"
 		run.AppendTranscript(domain.AcpTranscriptChunk{Kind: "status", Text: "Delegate failed: " + errText, At: now})
 	}
+	run.Activity = ""
 	run.Finish(status, errText, stopReason, now)
 	snapshot := cloneDelegateRun(run)
 	r.mu.Unlock()
@@ -315,5 +400,10 @@ func (r *DelegateRuntime) finish(runID string, dr *delegateRun, runConvID, outpu
 	case dr.done <- snapshot:
 	default:
 	}
+	// Internal delegates do not pass through the external ACP runtime's
+	// onDone callback, so publish the terminal lifecycle event here. The
+	// parent transcript completion below is a separate concern; the dock
+	// relies on this event to replace its live running snapshot with DONE.
+	r.svc.EmitRun(contracts.EventAcpRunDone, snapshot)
 	r.svc.OnRunDone(snapshot)
 }

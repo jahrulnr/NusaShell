@@ -283,6 +283,7 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 		toolCtx = WithModel(toolCtx, run.Model)
 		toolCtx, deltaCap := turndiff.WithCapture(toolCtx)
 		toolPresentation := toolpresentation.BuildToolPresentation(toolCall.Name, toolCall.Args, domain.ToolRunning, "")
+		var streamedToolOutput strings.Builder
 		executeTool := func() error {
 			if s, ok := a.Toolbox.(interface {
 				ExecuteStreamed(ctx context.Context, name string, argsJSON []byte, onChunk func(string)) (string, error)
@@ -291,6 +292,11 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 				var e error
 				output, e = s.ExecuteStreamed(toolCtx, toolCall.Name, []byte(toolCall.Args), func(text string) {
 					if text != "" {
+						streamedToolOutput.WriteString(text)
+						run.EmitHeadlessTranscript(domain.AcpTranscriptChunk{
+							Kind: "tool", ToolID: toolCall.ID, ToolTitle: toolCall.Name, ToolKind: toolCall.Name,
+							ToolStatus: "running", Text: streamedToolOutput.String(), ToolOutput: streamedToolOutput.String(),
+						})
 						a.publishRoundDelta(run.ID, messageID, round, contracts.RoundDeltaTool, toolCall.ID, toolCall.Name, text)
 					}
 				})

@@ -66,6 +66,8 @@ type ChatRequest struct {
 	// ConversationID is the stable ID of the conversation this request
 	// belongs to. It is included in the application-generated PromptCache key
 	// so requests from separate conversations do not share a cache namespace.
+	// The key also includes the current system prompt and top-level tools, so
+	// runtime contract changes use a fresh provider cache/session shard.
 	ConversationID string
 	// ReasoningReplay is true when the target upstream requires
 	// reasoning_content (Chat Completions) or reasoning items (Responses
@@ -122,6 +124,8 @@ type PromptCachePolicy struct {
 	// wire supports it. NusaShell keeps it at 32 ASCII characters and uses a
 	// visible agent namespace: "nusashell_cv_<digest>" for normal conversation
 	// turns and "nusashell_bg_<digest>" for headless/background learning turns.
+	// Interactive turn keys also include the current system prompt and
+	// top-level tool definitions.
 	Key string
 }
 

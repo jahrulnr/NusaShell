@@ -264,8 +264,9 @@ func (s *Service) HandleSave(req contracts.ProviderSaveRequest) (any, *contracts
 		return nil, rpcdispatch.Internal(err)
 	}
 	s.info("provider saved: %s (%s)", p.Name, p.Kind)
-	// Provider changes alter cache keys (provider+model+conversation) and
-	// can add/remove tools (web_answer, generate_media): announce globally.
+	// Provider changes can alter the live request contract and can add/remove
+	// tools (web_answer, generate_media): announce globally. The next turn
+	// derives a cache/session key from that current contract.
 	action := "changed"
 	if !hasExisting || p.Enabled != wasEnabled {
 		if p.Enabled {

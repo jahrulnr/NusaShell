@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"nusashell/application/tools"
+	"nusashell/domain"
 )
 
 // Agent lifecycle event kinds (observer registry). Side-effect observers only —
@@ -142,6 +143,10 @@ func (a *Service) emitRunStepPost(run *TurnRun, status, errMsg, finalDetail stri
 
 // emitToolCallPre fires tool_call pre (placeholder open) for one call.
 func (a *Service) emitToolCallPre(run *TurnRun, round int, call domainToolCallRef) {
+	run.EmitHeadlessTranscript(domain.AcpTranscriptChunk{
+		Kind: "tool", ToolID: call.ID, ToolTitle: call.Name, ToolKind: call.Name,
+		ToolStatus: AgentStatusRunning, ToolInput: strings.TrimSpace(call.Args),
+	})
 	a.emitHeadlessEvent(run, AgentLifecycleEvent{
 		Kind:     AgentEventToolCall,
 		Phase:    AgentPhasePre,
@@ -155,6 +160,11 @@ func (a *Service) emitToolCallPre(run *TurnRun, round int, call domainToolCallRe
 
 // emitToolCallPost fires tool_call post with final status for one call.
 func (a *Service) emitToolCallPost(run *TurnRun, round int, call domainToolCallRef, status, output string) {
+	run.EmitHeadlessTranscript(domain.AcpTranscriptChunk{
+		Kind: "tool", ToolID: call.ID, ToolTitle: call.Name, ToolKind: call.Name,
+		ToolStatus: status, ToolInput: strings.TrimSpace(call.Args),
+		Text: output, ToolOutput: output,
+	})
 	a.emitHeadlessEvent(run, AgentLifecycleEvent{
 		Kind:     AgentEventToolCall,
 		Phase:    AgentPhasePost,

@@ -333,7 +333,7 @@ func (a *App) drainAnnouncements(run *TurnRun) (bool, error) {
 	return a.agentService().DrainAnnouncements(run)
 }
 func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string, onUpdate func(conversationID string)) (map[string]any, string, error) {
-	return a.agentService().RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, AgentAutomation, conversationID, onUpdate)
+	return a.agentService().RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, AgentAutomation, conversationID, onUpdate, nil)
 }
 func (a *App) RunHeadlessTurnIn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error) {
 	return a.agentService().RunHeadlessTurnIn(ctx, prompt, model, trust, schema, conversationID)
@@ -341,8 +341,8 @@ func (a *App) RunHeadlessTurnIn(ctx context.Context, prompt, model string, trust
 func (a *App) runHeadlessTurnKind(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind) (map[string]any, string, error) {
 	return a.agentService().RunHeadlessTurnKind(ctx, prompt, model, trust, schema, kind)
 }
-func (a *App) runHeadlessTurnKindObserved(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind, onUpdate func(conversationID string)) (map[string]any, string, error) {
-	return a.agentService().RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, kind, "", onUpdate)
+func (a *App) runHeadlessTurnKindObserved(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind, onUpdate func(conversationID string), onTranscript func(domain.AcpTranscriptChunk)) (map[string]any, string, error) {
+	return a.agentService().RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, kind, "", onUpdate, onTranscript)
 }
 func (a *App) SteerHeadlessTurn(conversationID, text string) error {
 	return a.agentService().SteerHeadlessTurn(conversationID, text)

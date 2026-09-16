@@ -98,6 +98,7 @@ type AcpRunDTO struct {
 	Workspace            string                  `json:"workspace,omitempty"`
 	Prompt               string                  `json:"prompt,omitempty"`
 	Status               string                  `json:"status"`
+	Activity             string                  `json:"activity,omitempty"`
 	CurrentModeID        string                  `json:"current_mode_id,omitempty"`
 	AvailableModes       []AcpModeDTO            `json:"available_modes,omitempty"`
 	CurrentModelID       string                  `json:"current_model_id,omitempty"`

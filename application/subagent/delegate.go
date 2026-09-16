@@ -30,11 +30,12 @@ func (s *Service) ResolveDelegateModel(parentConvID string) (string, error) {
 	return s.deps.ResolveModel(parentConvID)
 }
 
-func delegateTranscriptFromConversation(conversation *domain.Conversation) []domain.AcpTranscriptChunk {
+func delegateTranscriptFromConversation(conversation *domain.Conversation, _ string) []domain.AcpTranscriptChunk {
 	if conversation == nil {
 		return nil
 	}
 	builder := &domain.AcpRun{}
+	initialPromptSkipped := false
 	appendText := func(kind, value string, at time.Time) {
 		if value == "" {
 			return
@@ -55,7 +56,24 @@ func delegateTranscriptFromConversation(conversation *domain.Conversation) []dom
 		}
 	}
 	for _, message := range conversation.Messages {
-		if message.Role != domain.RoleAssistant || domain.IsHydrationMessage(message) {
+		if domain.IsHydrationMessage(message) {
+			continue
+		}
+		if message.Role == domain.RoleUser {
+			// The initial delegation is rendered from AcpRun.Prompt. Keep
+			// only later user messages here so steering prompts match the
+			// external ACP transcript without duplicating the initial brief.
+			content := strings.TrimSpace(message.Content)
+			if !initialPromptSkipped {
+				initialPromptSkipped = true
+				continue
+			}
+			if content != "" {
+				appendText("prompt", message.Content, message.CreatedAt)
+			}
+			continue
+		}
+		if message.Role != domain.RoleAssistant {
 			continue
 		}
 		if len(message.Steps) > 0 {

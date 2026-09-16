@@ -61,7 +61,9 @@ func (a *Service) NewConversationRules(run *TurnRun, adapter ProviderContext, co
 func (p *conversationRules) Rules() AgentRules {
 	return AgentRules{
 		Stream: func(ctx context.Context, req ChatRequest) (ChatResponse, error) {
-			rr, err := p.svc.StreamTurnRound(p.run, p.adapter, p.conv, p.currentMsgID, p.model, p.effort, p.toolsForRound(), p.settings, p.continuation, p.maxTokens, p.promptCache, p.caps, p.round)
+			roundTools := p.toolsForRound()
+			p.promptCache = p.promptCacheForTools(roundTools)
+			rr, err := p.svc.StreamTurnRound(p.run, p.adapter, p.conv, p.currentMsgID, p.model, p.effort, roundTools, p.settings, p.continuation, p.maxTokens, p.promptCache, p.caps, p.round)
 			p.continuation = false
 			resp := ChatResponse{
 				Content:         rr.Content,
@@ -106,6 +108,11 @@ func (p *conversationRules) Rules() AgentRules {
 			// conversation immediately.
 			p.svc.waitSlowDown(p.run.Ctx)
 			p.round++
+			// Keep the cache/session key aligned with the exact tool
+			// contract that the upcoming round will send. Runtime config is
+			// snapshotted for the turn; this only accounts for intentional
+			// per-round shaping such as the final no-tools response.
+			p.promptCache = p.promptCacheForTools(p.toolsForRound())
 			// Pre-API proactive compaction check (see the pre-engine
 			// comment in runSingleTurn): between rounds, tool results
 			// grow the context.
@@ -341,6 +348,33 @@ func (p *conversationRules) toolsForRound() []ToolDef {
 		return nil
 	}
 	return p.toolDefs
+}
+
+// promptCacheForTools derives the request cache/session policy from the
+// current turn's system prompt and the exact top-level tools for one round.
+// It does not reload settings or the toolbox: a running turn keeps its
+// snapshot, while a new turn obtains fresh runtime values in RunSingleTurn.
+func (p *conversationRules) promptCacheForTools(tools []ToolDef) *PromptCachePolicy {
+	if p == nil {
+		return nil
+	}
+	if p.provider == nil || p.run == nil || p.conv == nil {
+		return p.promptCache
+	}
+	conversationID := p.run.ConversationID
+	if conversationID == "" {
+		conversationID = p.conv.ID
+	}
+	system := buildSystemPromptForRun(p.run, p.conv, p.settings.UserPrompt)
+	return buildPromptCachePolicyForRequest(
+		p.settings,
+		p.provider,
+		p.model,
+		conversationID,
+		promptCachePrefixForRun(p.run),
+		system,
+		tools,
+	)
 }
 
 // requestEstimate builds the next normal provider request without sending it

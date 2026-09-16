@@ -405,6 +405,7 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 		CurrentModelID:       currentModel,
 		ModelSelectionStatus: modelStatus,
 		RiskTier:             domain.InferRiskTier(modeID, req.Agent.ModeRiskMappings),
+		Activity:             domain.AcpRunActivityThinking,
 		UpdatedAt:            now,
 	}
 	lr := &liveRun{
@@ -487,14 +488,21 @@ func (pc *pooledConn) SessionUpdate(params acpclient.SessionUpdateParams) {
 		if u.SessionUpdate == "agent_thought_chunk" {
 			kind = "thought"
 		}
+		lr.run.Activity = domain.AcpRunActivityThinking
 		chunk = domain.AcpTranscriptChunk{Kind: kind, Text: u.Content.Text(), At: now}
 	case "tool_call", "tool_call_update":
+		if u.Status == "in_progress" || u.Status == "running" || u.Status == "" {
+			lr.run.Activity = domain.AcpRunActivityTool
+		} else {
+			lr.run.Activity = domain.AcpRunActivityThinking
+		}
 		chunk = domain.AcpTranscriptChunk{
 			Kind: "tool", ToolID: u.ToolCallID, ToolTitle: u.Title, ToolKind: u.Kind, ToolStatus: u.Status,
 			ToolInput: acpDisplayText(u.RawInput), ToolOutput: acpToolOutputText(u.RawOutput, u.Content),
 			At: now,
 		}
 	case "plan":
+		lr.run.Activity = domain.AcpRunActivityThinking
 		var b strings.Builder
 		for _, e := range u.Entries {
 			b.WriteString(e.Status)
@@ -504,6 +512,7 @@ func (pc *pooledConn) SessionUpdate(params acpclient.SessionUpdateParams) {
 		}
 		chunk = domain.AcpTranscriptChunk{Kind: "plan", Text: strings.TrimSpace(b.String()), At: now}
 	case "usage_update":
+		lr.run.Activity = domain.AcpRunActivityThinking
 		chunk = domain.AcpTranscriptChunk{Kind: "usage", Text: fmt.Sprintf("%d/%d", u.Used, u.Size), At: now}
 	}
 	if chunk.Kind != "" {
@@ -757,6 +766,7 @@ func (lr *liveRun) drivePrompt(text string, recordPrompt bool) {
 			At:   clock.NewTime().Time(),
 		})
 	}
+	lr.run.Activity = domain.AcpRunActivityThinking
 	lr.prompting = true
 	sessionID := lr.run.SessionID
 	snap := cloneRun(lr.run)
@@ -831,6 +841,7 @@ func (lr *liveRun) finishLocked(status domain.AcpRunStatus, errMsg, stop string)
 		return
 	}
 	lr.closed = true
+	lr.run.Activity = ""
 	lr.run.Finish(status, errMsg, stop, clock.NewTime().Time())
 	if lr.permCh != nil {
 		select {

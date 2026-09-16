@@ -105,7 +105,10 @@ user can tell what each run is for. With `count` > 1, titles are auto-suffixed
 
 A dock appears above the composer: chips for every live run (and recent
 finishes in this room), newest first — live delta updates never
-reshuffle chips under the cursor. Click a chip for the right-hand drawer
+reshuffle chips under the cursor. Live chips show the phase (`thinking`,
+`tool`, or `finalizing`) and elapsed time; when no transcript delta arrives,
+the last-event age makes a stalled connection distinguishable from normal
+provider work. Click a chip for the right-hand drawer
 (all parallel spawns), or peek one run in a popup. Both surfaces stream
 the transcript live, patched in place like the conversation thread
 (auto-follows the bottom while you're at the bottom; your scroll

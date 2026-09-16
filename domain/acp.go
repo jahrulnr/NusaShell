@@ -52,6 +52,17 @@ const (
 	AcpRunCancelled         AcpRunStatus = "cancelled"
 )
 
+// AcpRunActivity describes the best-known live phase for the shared ACP run
+// surface. It is ephemeral UI state, not persisted transcript content.
+type AcpRunActivity string
+
+const (
+	AcpRunActivityStarting   AcpRunActivity = "starting"
+	AcpRunActivityThinking   AcpRunActivity = "thinking"
+	AcpRunActivityTool       AcpRunActivity = "tool"
+	AcpRunActivityFinalizing AcpRunActivity = "finalizing"
+)
+
 // ModelSelectionStatus records whether a preferred model was actually applied.
 type ModelSelectionStatus string
 
@@ -202,7 +213,8 @@ type AcpRun struct {
 	TaskState[AcpRunStatus]
 	AgentID              string
 	AgentName            string
-	Title                string // optional user-facing run label (dock/drawer)
+	Title                string         // optional user-facing run label (dock/drawer)
+	Activity             AcpRunActivity // ephemeral live phase for UI consumers
 	ConversationID       string
 	ParentToolCallID     string
 	SessionID            string

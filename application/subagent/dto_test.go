@@ -11,7 +11,7 @@ import (
 // runDTO must carry the agent-provided tool input/output to the UI drawer;
 // the wire keeps its snake_case field names.
 func TestRunDTOCarriesToolInputAndOutput(t *testing.T) {
-	run := &domain.AcpRun{Transcript: []domain.AcpTranscriptChunk{{
+	run := &domain.AcpRun{Activity: "thinking", Transcript: []domain.AcpTranscriptChunk{{
 		Kind:       "tool",
 		ToolID:     "call_1",
 		ToolTitle:  "Read SKILL.md",
@@ -22,6 +22,9 @@ func TestRunDTOCarriesToolInputAndOutput(t *testing.T) {
 	}}}
 
 	dto := runDTO(run)
+	if dto.Activity != "thinking" {
+		t.Fatalf("activity = %q, want thinking", dto.Activity)
+	}
 	if len(dto.Transcript) != 1 {
 		t.Fatalf("transcript = %+v", dto.Transcript)
 	}

@@ -89,6 +89,7 @@ func runDTO(run *domain.AcpRun) contracts.AcpRunDTO {
 		Workspace:            run.Workspace,
 		Prompt:               run.Prompt,
 		Status:               string(run.Status),
+		Activity:             string(run.Activity),
 		CurrentModeID:        run.CurrentModeID,
 		CurrentModelID:       run.CurrentModelID,
 		ModelSelectionStatus: string(run.ModelSelectionStatus),

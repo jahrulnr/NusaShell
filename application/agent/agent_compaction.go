@@ -56,7 +56,13 @@ func (a *Service) compactionPromptCache(settings domain.Settings, adapter Provid
 	if c.EffectiveType() != domain.ConversationTypeConversation {
 		prefix = promptCacheBackgroundPrefix
 	}
-	return buildPromptCachePolicyForContext(settings, adapter, model, c.ID, prefix)
+	workflow := settings.CompactionWorkflow
+	system := compactionPrompt
+	if workflow == domain.CompactionWorkflowReuse {
+		system = compactionReuseSystemPrompt(c, settings.UserPrompt)
+	}
+	tools := compactionToolDefs(a, workflow, c)
+	return buildPromptCachePolicyForContextWithContract(settings, adapter, model, c.ID, prefix, system, tools)
 }
 
 func (a *Service) compactionModelCapabilities(adapter ProviderContext, model string) ModelCapabilities {
