@@ -11,6 +11,7 @@ import (
 )
 
 func TestHandleTurnsStartCreatesConversationOnFirstUserMessage(t *testing.T) {
+	workspace := t.TempDir()
 	store := &lifecycleConvStore{byID: map[string]*domain.Conversation{}}
 	provider := &domain.Provider{ID: "provider", Kind: domain.ProviderChat, Enabled: true}
 	var launched func()
@@ -29,7 +30,7 @@ func TestHandleTurnsStartCreatesConversationOnFirstUserMessage(t *testing.T) {
 		ConversationKey: "draft-123",
 		Text:            "first message",
 		Model:           "provider:model",
-		Workspace:       "/tmp/workspace",
+		Workspace:       workspace,
 	})
 	if rpcErr != nil {
 		t.Fatalf("HandleTurnsStart: %s", rpcErr.Message)
@@ -48,7 +49,7 @@ func TestHandleTurnsStartCreatesConversationOnFirstUserMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.Workspace != "/tmp/workspace" || saved.Status != "running" {
+	if saved.Workspace != workspace || saved.Status != "running" {
 		t.Fatalf("saved conversation = %+v", saved)
 	}
 	if len(saved.Messages) < 2 || saved.Messages[0].Role != domain.RoleUser {
@@ -102,11 +103,14 @@ func TestHandleTurnsStartRejectsInvalidDraftWorkspace(t *testing.T) {
 		},
 	})
 
+	// The path is absolute on every platform, so the rejection below comes
+	// from ValidateWorkspace (a real-but-invalid directory), not from the
+	// platform-specific absolute-path check.
 	_, rpcErr := service.HandleTurnsStart(context.Background(), contracts.TurnStartRequest{
 		ConversationKey: "draft-invalid-workspace",
 		Text:            "hello",
 		Model:           "provider:model",
-		Workspace:       "/tmp/not-a-directory",
+		Workspace:       t.TempDir(),
 	})
 	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
 		t.Fatalf("start error = %+v, want validation error", rpcErr)
