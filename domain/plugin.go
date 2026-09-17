@@ -8,8 +8,8 @@ import (
 
 // ValidatePluginID reports whether id is a safe plugin identifier: non-empty,
 // no path separators (POSIX or Windows), no parent-traversal segments, and
-// not absolute. It guards pluginfs from path-traversal via a malicious
-// manifest ID (e.g. id: ".." or "/etc/passwd").
+// not absolute. It guards the plugin store from path-traversal via a
+// malicious manifest ID (e.g. id: ".." or "/etc/passwd").
 func ValidatePluginID(id string) bool {
 	t := strings.TrimSpace(id)
 	if t == "" || t == "." || t == ".." {

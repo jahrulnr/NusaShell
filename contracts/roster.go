@@ -1131,7 +1131,7 @@ type MCPToolDTO struct {
 
 // PluginUIEntryDTO is the wire shape for a plugin list entry served by
 // the plugin UI handler (/plugins). Kept in contracts so transport does
-// not need to import infrastructure/pluginfs. Distinct from PluginDTO
+// not need to import infrastructure/plugin. Distinct from PluginDTO
 // (which is the MCP drawer entry shape).
 type PluginUIEntryDTO struct {
 	ID          string                 `json:"id"`

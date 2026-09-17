@@ -12,21 +12,20 @@ import (
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/mcpclient"
-	"nusashell/infrastructure/pluginfs"
-	"nusashell/infrastructure/pluginruntime"
+	"nusashell/infrastructure/plugin"
 )
 
 func TestPluginHandlerListResolvesLocalIconForHomepage(t *testing.T) {
-	store, err := pluginfs.New(filepath.Join(t.TempDir(), "plugins"))
+	store, err := plugin.NewStore(filepath.Join(t.TempDir(), "plugins"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	plugin := &domain.Plugin{Manifest: domain.PluginManifest{
+	p := &domain.Plugin{Manifest: domain.PluginManifest{
 		ID: "test.icon", Name: "Icon plugin", Version: "1.0.0", Icon: "icon.png",
 		UI:  &domain.PluginUIConfig{Entry: "index.html"},
 		MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "icon-plugin"},
 	}}
-	if err := store.Save(plugin); err != nil {
+	if err := store.Save(p); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(store.Root(), "test.icon", "icon.png"), []byte{
@@ -66,12 +65,12 @@ func TestPluginHandlerCallToolForwardsStructuredContent(t *testing.T) {
 		t.Fatal("fakemcpBin not built")
 	}
 	storeDir := t.TempDir()
-	store, err := pluginfs.New(filepath.Join(storeDir, "plugins"))
+	store, err := plugin.NewStore(filepath.Join(storeDir, "plugins"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Register a plugin whose MCP server is the fakemcp test binary.
-	plugin := &domain.Plugin{
+	p := &domain.Plugin{
 		Manifest: domain.PluginManifest{
 			ID:      "test.fakemcp",
 			Name:    "Fake MCP",
@@ -84,12 +83,12 @@ func TestPluginHandlerCallToolForwardsStructuredContent(t *testing.T) {
 		},
 		InstallPath: filepath.Dir(fakemcpBin),
 	}
-	if err := store.Save(plugin); err != nil {
+	if err := store.Save(p); err != nil {
 		t.Fatal(err)
 	}
 
 	mcpManager := mcpclient.NewManager()
-	runtime := pluginruntime.New(store, mcpManager)
+	runtime := plugin.NewManager(store, mcpManager)
 	handler := NewPluginHandler(store, runtime)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -164,11 +163,11 @@ func TestPluginHandlerCallToolTextOnlyResult(t *testing.T) {
 		t.Fatal("fakemcpBin not built")
 	}
 	storeDir := t.TempDir()
-	store, err := pluginfs.New(filepath.Join(storeDir, "plugins"))
+	store, err := plugin.NewStore(filepath.Join(storeDir, "plugins"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	plugin := &domain.Plugin{
+	p := &domain.Plugin{
 		Manifest: domain.PluginManifest{
 			ID:      "test.fakemcp",
 			Name:    "Fake MCP",
@@ -181,12 +180,12 @@ func TestPluginHandlerCallToolTextOnlyResult(t *testing.T) {
 		},
 		InstallPath: filepath.Dir(fakemcpBin),
 	}
-	if err := store.Save(plugin); err != nil {
+	if err := store.Save(p); err != nil {
 		t.Fatal(err)
 	}
 
 	mcpManager := mcpclient.NewManager()
-	runtime := pluginruntime.New(store, mcpManager)
+	runtime := plugin.NewManager(store, mcpManager)
 	handler := NewPluginHandler(store, runtime)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -235,11 +234,11 @@ func TestPluginHandlerCallToolErrorForwarded(t *testing.T) {
 		t.Fatal("fakemcpBin not built")
 	}
 	storeDir := t.TempDir()
-	store, err := pluginfs.New(filepath.Join(storeDir, "plugins"))
+	store, err := plugin.NewStore(filepath.Join(storeDir, "plugins"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	plugin := &domain.Plugin{
+	p := &domain.Plugin{
 		Manifest: domain.PluginManifest{
 			ID:      "test.fakemcp",
 			Name:    "Fake MCP",
@@ -252,12 +251,12 @@ func TestPluginHandlerCallToolErrorForwarded(t *testing.T) {
 		},
 		InstallPath: filepath.Dir(fakemcpBin),
 	}
-	if err := store.Save(plugin); err != nil {
+	if err := store.Save(p); err != nil {
 		t.Fatal(err)
 	}
 
 	mcpManager := mcpclient.NewManager()
-	runtime := pluginruntime.New(store, mcpManager)
+	runtime := plugin.NewManager(store, mcpManager)
 	handler := NewPluginHandler(store, runtime)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)

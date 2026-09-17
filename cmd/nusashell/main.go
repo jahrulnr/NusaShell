@@ -19,7 +19,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/frontend"
-	"nusashell/infrastructure/acpruntime"
+	"nusashell/infrastructure/acp"
 	"nusashell/infrastructure/ai"
 	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/modelcatalog"
@@ -33,15 +33,13 @@ import (
 	"nusashell/infrastructure/mcpclient"
 	"nusashell/infrastructure/memorystore"
 	"nusashell/infrastructure/pet"
-	"nusashell/infrastructure/pluginfs"
-	"nusashell/infrastructure/plugininstall"
-	"nusashell/infrastructure/pluginruntime"
+	"nusashell/infrastructure/plugin"
 	"nusashell/infrastructure/projectmemory"
 	"nusashell/infrastructure/skillfs"
 	"nusashell/infrastructure/sqlitestore"
-	"nusashell/infrastructure/sttinstall"
+	sttinstall "nusashell/infrastructure/stt/install"
 	"nusashell/infrastructure/tools"
-	"nusashell/infrastructure/ttsinstall"
+	ttsinstall "nusashell/infrastructure/tts/install"
 	"nusashell/pkg/httpclient"
 	"nusashell/transport"
 
@@ -239,13 +237,13 @@ func run() error {
 	// HTML/CSS/JS). The runtime manager wraps the MCP manager to start
 	// plugin MCP servers and route tool calls from plugin UIs.
 	pluginsRoot := filepath.Join(dataDir, "plugins")
-	pluginStore, err := pluginfs.New(pluginsRoot)
+	pluginStore, err := plugin.NewStore(pluginsRoot)
 	if err != nil {
 		slog.Warn("plugin store init failed", "error", err)
 	}
-	pluginInstaller := plugininstall.New(pluginStore, logger)
-	pluginRuntime := pluginruntime.New(pluginStore, mcpManager)
-	acpRuntime := acpruntime.New()
+	pluginInstaller := plugin.NewInstaller(pluginStore, logger)
+	pluginRuntime := plugin.NewManager(pluginStore, mcpManager)
+	acpRuntime := acp.New()
 	// Mount skills from already-installed plugins (skills/ directory).
 	if pluginStore != nil && skillStore != nil {
 		plugins, _ := pluginStore.List()

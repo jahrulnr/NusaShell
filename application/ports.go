@@ -542,9 +542,9 @@ type ModelCataloger interface {
 }
 
 // PluginUIPort is the read-only plugin store surface needed by the plugin
-// UI HTTP handler. It decouples transport from infrastructure/pluginfs so
+// UI HTTP handler. It decouples transport from infrastructure/plugin so
 // transport only depends on application + contracts. Implemented by
-// *pluginfs.Store.
+// *plugin.Store.
 type PluginUIPort interface {
 	List() ([]*domain.Plugin, error)
 	Get(id string) (*domain.Plugin, error)
@@ -556,8 +556,8 @@ type PluginUIPort interface {
 }
 
 // PluginRuntimePort is the plugin runtime surface needed by the plugin UI
-// HTTP handler. It decouples transport from infrastructure/pluginruntime.
-// Implemented by *pluginruntime.Manager.
+// HTTP handler. It decouples transport from infrastructure/plugin.
+// Implemented by *plugin.Manager.
 type PluginRuntimePort interface {
 	EnsureStarted(ctx context.Context, pluginID string) ([]contracts.MCPToolDTO, error)
 	ListTools(pluginID string) []contracts.MCPToolDTO

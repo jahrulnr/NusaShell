@@ -18,7 +18,7 @@ import (
 	"nusashell/domain"
 	docsinfra "nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
-	"nusashell/infrastructure/pluginfs"
+	"nusashell/infrastructure/plugin"
 	clock "nusashell/pkg/time"
 	"nusashell/resources"
 )
@@ -2131,7 +2131,7 @@ func TestMcpRegisterRejectsSourcesInsideInstalledRoot(t *testing.T) {
 	for _, nested := range []bool{false, true} {
 		t.Run(fmt.Sprintf("nested=%t", nested), func(t *testing.T) {
 			root := t.TempDir()
-			store, err := pluginfs.New(root)
+			store, err := plugin.NewStore(root)
 			if err != nil {
 				t.Fatal(err)
 			}

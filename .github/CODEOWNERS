@@ -29,12 +29,7 @@
 /infrastructure/tts/         @jahrulnr
 /infrastructure/workspacepicker/ @jahrulnr
 /infrastructure/attachmentfs/    @jahrulnr
-/infrastructure/pluginfs/        @jahrulnr
-/infrastructure/pluginicon/      @jahrulnr
-/infrastructure/plugininstall/   @jahrulnr
-/infrastructure/pluginruntime/   @jahrulnr
-/infrastructure/sttinstall/      @jahrulnr
-/infrastructure/ttsinstall/      @jahrulnr
+/infrastructure/plugin/          @jahrulnr
 /infrastructure/config/          @jahrulnr
 /infrastructure/testdata/        @jahrulnr
 

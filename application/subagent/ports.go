@@ -32,7 +32,7 @@ type PermissionDecision struct {
 	Outcome  domain.PermissionOutcome
 }
 
-// Runtime is the ACP process/session surface. infrastructure/acpruntime implements this.
+// Runtime is the ACP process/session surface. infrastructure/acp implements this.
 type Runtime interface {
 	Probe(ctx context.Context, agent *domain.AcpAgent) (domain.AcpAgent, error)
 	Authenticate(ctx context.Context, agent *domain.AcpAgent, methodID string) error

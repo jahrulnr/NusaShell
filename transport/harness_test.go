@@ -20,13 +20,13 @@ import (
 	"nusashell/application"
 	"nusashell/domain"
 	"nusashell/frontend"
-	"nusashell/infrastructure/acpruntime"
+	"nusashell/infrastructure/acp"
 	"nusashell/infrastructure/ai"
 	"nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
 	"nusashell/infrastructure/mcpclient"
 	"nusashell/infrastructure/memorystore"
-	"nusashell/infrastructure/pluginfs"
+	"nusashell/infrastructure/plugin"
 	"nusashell/infrastructure/skillfs"
 	"nusashell/infrastructure/sqlitestore"
 	"nusashell/infrastructure/tools"
@@ -506,7 +506,7 @@ type harness struct {
 	creds   *sqlitestore.CredentialStore
 	llm     *fakeLLM
 	mcpBin  string
-	plugins *pluginfs.Store
+	plugins *plugin.Store
 }
 
 var fakemcpBin string
@@ -600,7 +600,7 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	}
 	mcpManager := mcpclient.NewManager()
 	bus := application.NewBus()
-	pluginStore, err := pluginfs.New(filepath.Join(dataDir, "plugins"))
+	pluginStore, err := plugin.NewStore(filepath.Join(dataDir, "plugins"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -612,7 +612,7 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	acpRuntime := acpruntime.New()
+	acpRuntime := acp.New()
 	skillStore, err := skillfs.New(filepath.Join(dataDir, "skills"))
 	if err != nil {
 		t.Fatal(err)
