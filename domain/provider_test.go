@@ -104,6 +104,19 @@ func TestCodexSupportsRemoteCompaction(t *testing.T) {
 	}
 }
 
+func TestReplaysCompactionBlob(t *testing.T) {
+	for _, kind := range []ProviderKind{ProviderResponses, ProviderCodex} {
+		if !ReplaysCompactionBlob(kind) {
+			t.Fatalf("provider kind %q must replay the opaque compaction blob", kind)
+		}
+	}
+	for _, kind := range []ProviderKind{ProviderMessages, ProviderChat, ProviderGemini} {
+		if ReplaysCompactionBlob(kind) {
+			t.Fatalf("provider kind %q cannot replay the opaque compaction blob", kind)
+		}
+	}
+}
+
 func TestRequiresKey(t *testing.T) {
 	if RequiresKey(ProviderMessages) {
 		t.Error("messages must not require a key")

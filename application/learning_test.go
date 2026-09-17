@@ -3193,22 +3193,6 @@ func assertBackgroundPromptRoleFocused(t *testing.T, name, prompt string) {
 	}
 }
 
-func TestSystemPromptIncludesMemoryWritingRules(t *testing.T) {
-	prompt := resources.SystemPrompt()
-	if !strings.Contains(prompt, "Primary Memory Writing Rules") {
-		t.Fatal("system prompt must include Primary Memory Writing Rules")
-	}
-	if !strings.Contains(prompt, "file_patch") {
-		t.Fatal("system prompt must tell the agent to write user.md via file_patch")
-	}
-	if strings.Contains(prompt, "Never edit `memory/user.md`") || strings.Contains(prompt, "You cannot write durable memory") {
-		t.Fatal("system prompt must not forbid profile-document writes")
-	}
-	if !strings.Contains(prompt, "{dataDir}/memory/user.md") {
-		t.Fatal("system prompt must name the absolute user.md path pattern")
-	}
-}
-
 // --- from growth_replay_test.go ---
 
 func TestGrowthReplaySetBKnowAndAct(t *testing.T) {

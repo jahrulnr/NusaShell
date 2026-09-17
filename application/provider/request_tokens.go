@@ -41,7 +41,7 @@ func EstimateRequestTokens(req ChatRequest, kind domain.ProviderKind, openRouter
 	}
 	// Compaction items are opaque provider-visible input for Responses and
 	// Codex. Other wire kinds intentionally ignore the option in ToCoreRequest.
-	if req.CompactionBlob != "" && (kind == domain.ProviderResponses || kind == domain.ProviderCodex) {
+	if req.CompactionBlob != "" && domain.ReplaysCompactionBlob(kind) {
 		tokens += estimateOpaqueJSONTokens([]byte(req.CompactionBlob))
 	}
 	if tokens <= 0 {

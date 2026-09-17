@@ -82,7 +82,7 @@ func RequiresReasoningReplay(provider, model, interleavedField string) bool {
 // unavailable (empty or stripped by the client). Models may echo it; the
 // response decoder strips it from user-visible output. Mirrors OmniRoute's
 // NON_ANTHROPIC_THINKING_PLACEHOLDER.
-const ReasoningPlaceholder = "(Continue from the current context.)"
+const ReasoningPlaceholder = "Continue from the current context."
 
 // minimaxModelPattern matches MiniMax Chat Completions model ids, including
 // gateway slugs (minimax-m3, MiniMax-M2.7, minimax/minimax-m3:free).

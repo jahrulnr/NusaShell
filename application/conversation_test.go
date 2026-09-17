@@ -1138,6 +1138,44 @@ func TestHandleConversationsPickWorkspaceEmptyRoomRejectsDraft(t *testing.T) {
 	}
 }
 
+// TestHandleConversationsBlobAnchoredEpochStaysOperable pins the compaction
+// anchor rule on the room RPCs: a room whose live epoch only holds the
+// post-checkpoint suffix (opaque CompactionBlob, no surviving user message)
+// must remain listed and keep accepting room-level updates.
+func TestHandleConversationsBlobAnchoredEpochStaysOperable(t *testing.T) {
+	epoch := &domain.Conversation{
+		ID:    "conv_blob",
+		Title: "Codex room",
+		Messages: []domain.Message{
+			{ID: "a1", Role: domain.RoleAssistant, Content: "post-checkpoint answer"},
+		},
+		CompactionBlob: `[{"type":"compaction","encrypted_content":"OPAQUE"}]`,
+	}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"conv_blob": epoch}}
+	app := &App{
+		Conversations:    store,
+		Logs:             &fakeLogStore{},
+		Bus:              NewBus(),
+		DirectoryBrowser: fakeDirBrowser{},
+	}
+
+	listed, rpcErr := app.handleConversationsList()
+	if rpcErr != nil {
+		t.Fatalf("conversations list: %+v", rpcErr)
+	}
+	result, ok := listed.(contracts.ConversationsListResult)
+	if !ok || len(result.Conversations) != 1 || result.Conversations[0].ID != "conv_blob" {
+		t.Fatalf("list = %+v, want the blob-anchored room", listed)
+	}
+
+	if _, rpcErr := app.handleConversationsRename(contracts.ConversationRenameRequest{ID: "conv_blob", Title: "Renamed"}); rpcErr != nil {
+		t.Fatalf("rename on a blob-anchored room = %+v, want success", rpcErr)
+	}
+	if store.convs["conv_blob"].Title != "Renamed" {
+		t.Fatalf("stored title = %q, want Renamed", store.convs["conv_blob"].Title)
+	}
+}
+
 func TestHandleConversationsPickWorkspaceSamePathDoesNotQueueNotice(t *testing.T) {
 	ws := t.TempDir()
 	conv := workspaceSwitchFixture(ws)

@@ -477,6 +477,26 @@ func (c *Conversation) HasUserMessage() bool {
 	return false
 }
 
+// HasDurableAnchor reports whether the transcript epoch carries an anchor that
+// makes it durable: a real user message, or an opaque compaction checkpoint
+// (CompactionBlob) captured from OpenAI Responses server-side compaction or
+// Codex remote v2 compaction.
+//
+// A blob-anchored epoch keeps only the post-checkpoint suffix, so it can
+// legitimately have no user message while remaining a real room: it must stay
+// persistable, listable, and reachable for peer/announcement delivery. Request
+// shaping replaces the checkpoint with a synthetic user nudge message when the
+// target provider kind cannot replay it (see ReplaysCompactionBlob).
+func (c *Conversation) HasDurableAnchor() bool {
+	if c == nil {
+		return false
+	}
+	if c.HasUserMessage() {
+		return true
+	}
+	return strings.TrimSpace(c.CompactionBlob) != ""
+}
+
 // EstimateTokens sums the message content, tool args and outputs. The
 // compaction blob (opaque server-side compaction payload) is included so the
 // 80% trigger stays correct after a native compaction: the blob replaces the

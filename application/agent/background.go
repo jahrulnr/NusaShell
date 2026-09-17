@@ -141,7 +141,7 @@ func (a *Service) startIdleConversationTurn(conversationID string, requirePeerMe
 	if conv.Status != "idle" {
 		return
 	}
-	if !conv.HasUserMessage() {
+	if !conv.HasDurableAnchor() {
 		return
 	}
 	if requirePeerMessage && !hasPendingAnnouncementType(conv.PendingAnnouncements, "peer_message") {

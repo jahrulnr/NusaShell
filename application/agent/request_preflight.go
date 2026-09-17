@@ -34,6 +34,7 @@ func (a *Service) buildTurnRequest(run *TurnRun, adapter ProviderContext, conver
 	}
 
 	messages := a.chatMessagesForProvider(conversation, messageID, caps)
+	messages = withCompactionAnchorNudge(messages, conversation, adapter.Kind)
 	if continuation {
 		if partial != nil && (visible(partial.Content) || visible(partial.Reasoning)) {
 			messages = appendContinuationFromPartial(messages, *partial)

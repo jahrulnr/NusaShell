@@ -664,6 +664,31 @@ func TestHasUserMessageRequiresRealUserAnchor(t *testing.T) {
 	}
 }
 
+func TestHasDurableAnchorAcceptsCompactionBlob(t *testing.T) {
+	if (*Conversation)(nil).HasDurableAnchor() {
+		t.Fatal("nil conversation must not have a durable anchor")
+	}
+	if (&Conversation{Messages: []Message{{Role: RoleAssistant}}}).HasDurableAnchor() {
+		t.Fatal("assistant-only epoch without a checkpoint must not be durable")
+	}
+	if (&Conversation{CompactionBlob: "   "}).HasDurableAnchor() {
+		t.Fatal("blank checkpoint must not anchor an epoch")
+	}
+	blobOnly := &Conversation{
+		Messages:       []Message{{Role: RoleAssistant, Content: "post-checkpoint"}},
+		CompactionBlob: `[{"type":"compaction","encrypted_content":"OPAQUE"}]`,
+	}
+	if !blobOnly.HasDurableAnchor() {
+		t.Fatal("opaque compaction checkpoint must anchor a user-less epoch")
+	}
+	if blobOnly.HasUserMessage() {
+		t.Fatal("the blob must not be mistaken for a real user message")
+	}
+	if !(&Conversation{Messages: []Message{{Role: RoleUser, Content: "hello"}}}).HasDurableAnchor() {
+		t.Fatal("a real user message must anchor an epoch without a blob")
+	}
+}
+
 func TestEffectiveTypeMigratesLegacyOrigin(t *testing.T) {
 	if (*Conversation)(nil).EffectiveType() != ConversationTypeConversation {
 		t.Fatal("nil conversation must read as an interactive room")

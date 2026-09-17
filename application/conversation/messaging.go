@@ -28,7 +28,7 @@ func (s *Service) ListRooms(currentConvID string, limit, offset int) (int, []Sum
 	all := s.store.List()
 	visible := make([]*domain.Conversation, 0, len(all))
 	for _, c := range all {
-		if c == nil || !c.HasUserMessage() || c.HiddenFromRoomList() {
+		if c == nil || !c.HasDurableAnchor() || c.HiddenFromRoomList() {
 			continue
 		}
 		if currentConvID != "" && c.ID == currentConvID {
@@ -89,7 +89,7 @@ func (s *Service) SearchRooms(currentConvID, query string, limit, offset int) (i
 	}
 	matched := make([]hit, 0, len(all))
 	for _, c := range all {
-		if c == nil || !c.HasUserMessage() || c.HiddenFromRoomList() {
+		if c == nil || !c.HasDurableAnchor() || c.HiddenFromRoomList() {
 			continue
 		}
 		if currentConvID != "" && c.ID == currentConvID {
@@ -173,7 +173,7 @@ func (s *Service) SendPeer(currentConvID, targetConvID, content string) error {
 	if target.HiddenFromRoomList() {
 		return fmt.Errorf("conversation %q is not a visible agent room", targetConvID)
 	}
-	if !target.HasUserMessage() {
+	if !target.HasDurableAnchor() {
 		return fmt.Errorf("conversation %q is not a durable agent room", targetConvID)
 	}
 

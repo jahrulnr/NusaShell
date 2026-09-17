@@ -261,6 +261,16 @@ retained user prefix, places the opaque checkpoint after it, and preserves
 every later user/assistant/tool item in order. OpenAI Responses may receive an
 opaque checkpoint during its normal stream.
 
+A natively compacted epoch can retain only the post-checkpoint suffix, so it
+may hold no user message at all. The opaque `CompactionBlob` is then the
+epoch's **durable anchor**: `Conversation.HasDurableAnchor` accepts a real
+user message or a non-empty checkpoint, and the repository, room list/search,
+rename/provider/workspace updates, peer delivery, and announcements all use
+that rule. When the room continues on a provider kind that cannot replay the
+checkpoint (Chat/Messages/Gemini), request shaping replaces the blob with a
+synthetic user nudge message (`domain.UserNudgeText`) so the provider request
+still carries a user anchor; the nudge is request-only and never persisted.
+
 The client-side summarization input is text-only and bounded: media/file attachments are
 replaced with a short note (compaction models are often not vision- or
 audio-capable, and providers reject media outright — e.g. OpenRouter HTTP 404

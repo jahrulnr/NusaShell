@@ -944,13 +944,13 @@ func TestBuildRequestAcceptsPlaceholderReasoningBlock(t *testing.T) {
 	wire, err := provider.buildRequest(&core.Request{
 		Model: "gpt-4.1",
 		Messages: []core.Message{
-			core.Assistant(core.ReasoningBlock{Text: "(Continue from the current context.)"}),
+			core.Assistant(core.ReasoningBlock{Text: "Continue from the current context."}),
 		},
 	}, false)
 	if err != nil {
 		t.Fatalf("placeholder reasoning must pass, got error: %v", err)
 	}
-	if wire.Messages[0].ReasoningContent != "(Continue from the current context.)" {
+	if wire.Messages[0].ReasoningContent != "Continue from the current context." {
 		t.Fatalf("reasoning_content = %q", wire.Messages[0].ReasoningContent)
 	}
 }

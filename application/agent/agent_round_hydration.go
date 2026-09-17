@@ -51,6 +51,23 @@ func needsUserMessageAtEnd(messages []ChatMessage) bool {
 	return messages[len(messages)-1].Role == "assistant"
 }
 
+// withCompactionAnchorNudge replaces an opaque compaction checkpoint that the
+// target provider kind cannot replay with a synthetic user nudge message, so
+// the request keeps a user anchor. Native compaction (Responses/Codex) starts
+// a new epoch that may retain only the post-checkpoint suffix, so the blob is
+// that epoch's anchor until the room continues on another kind; there the
+// checkpoint is invisible to the provider and the nudge takes its place.
+// Ephemeral: the nudge exists only in this request, never in the transcript.
+func withCompactionAnchorNudge(messages []ChatMessage, conversation *domain.Conversation, kind domain.ProviderKind) []ChatMessage {
+	if conversation == nil || strings.TrimSpace(conversation.CompactionBlob) == "" {
+		return messages
+	}
+	if domain.ReplaysCompactionBlob(kind) || hasUserMessage(messages) {
+		return messages
+	}
+	return append([]ChatMessage{{Role: "user", Content: userNudgeText}}, messages...)
+}
+
 // serverCompactionContextManagement returns the context_management directive
 // for server-side compaction when the model is eligible. Returns nil for
 // ineligible models (the client-side summarization path handles them).

@@ -289,9 +289,10 @@ Ops per family:
   peer message to another visible room. A successful send acknowledges queue
   persistence, not that the target has already read or acted on it. An active
   target receives it at the next safe round boundary; an idle target with a
-  real user history is woken for one agent turn without a synthetic user
+  durable history is woken for one agent turn without a synthetic user
   message. Empty drafts and unknown/non-visible conversation IDs are rejected;
-  only rooms with a real user message are valid peer targets.
+  only durable rooms are valid peer targets — a real user message or, after
+  native compaction, an opaque compaction checkpoint.
 
 Good conversation examples:
 

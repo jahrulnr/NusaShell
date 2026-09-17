@@ -838,7 +838,9 @@ strips `ReasoningExtra` from the assembled request and keeps plaintext
 `CompactionBlob` is already kind-gated the same way (Responses/Codex only).
 A Codex room continued on DeepSeek Chat therefore replays the post-
 compaction transcript with plaintext thinking and does not send the
-encrypted checkpoint or per-message Extra.
+encrypted checkpoint or per-message Extra. When that retained suffix holds
+no user message, the checkpoint is replaced by a synthetic user nudge
+message so the request still carries a user anchor.
 
 ## Server-side compaction (OpenAI Responses)
 
@@ -872,6 +874,13 @@ Key behaviors:
   of the request's `input` array via the `compaction_items` provider
   option. The server then truncates context before the last compaction
   item automatically.
+- **Epoch anchor:** a natively compacted epoch can legitimately hold no
+  user message, so `CompactionBlob` is also its persistence anchor: the
+  transcript still saves, stays in the Agent room list, and keeps accepting
+  peer messages/announcements. When the room continues on a provider kind
+  that cannot replay the checkpoint (Chat/Messages/Gemini), the request
+  replaces the blob with a synthetic user nudge (`.`) instead. The nudge is
+  request-only and is never persisted.
 - **No fallback:** server-side compaction runs in-stream; there is no
   separate endpoint call that can fail. If the server does not trigger
   compaction (context stays under threshold), the conversation continues
@@ -901,7 +910,9 @@ provider kind. It is not OpenAI `context_management`.
 - **Result:** the stream must contain exactly one `compaction` output item.
   Its encrypted content is stored unchanged in `CompactionBlob`, and the
   conversation starts a new transcript epoch without losing the boundary
-  needed by later turns, tool rounds, reloads, or another compaction.
+  needed by later turns, tool rounds, reloads, or another compaction. The
+  new epoch keeps only the retained suffix, so it may hold no user message;
+  the checkpoint then anchors the epoch for persistence and room surfaces.
 - **Model:** Codex compaction uses the same provider and model as the active
   turn. `settings.compaction_model` is not used for this path.
 - **Failure and account routing:** remote compaction has no fallback to the text

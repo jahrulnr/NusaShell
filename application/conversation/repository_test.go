@@ -87,6 +87,44 @@ func TestSaveRejectsEmptyConversation(t *testing.T) {
 	}
 }
 
+// TestSaveAllowsBlobAnchoredEpochWithoutUserMessage pins the compaction rule:
+// a new epoch written by native compaction only retains the post-checkpoint
+// suffix, so the opaque CompactionBlob is the epoch's anchor — the transcript
+// must persist even when no user message survived the checkpoint. An epoch
+// with neither anchor stays rejected.
+func TestSaveAllowsBlobAnchoredEpochWithoutUserMessage(t *testing.T) {
+	blob := `[{"type":"compaction","encrypted_content":"OPAQUE"}]`
+	store := &fakeStore{convs: map[string]*domain.Conversation{}}
+	epoch := &domain.Conversation{
+		ID:             "conv_blob",
+		Title:          "Codex room",
+		Messages:       []domain.Message{{ID: "m_a1", Role: domain.RoleAssistant, Content: "post-checkpoint"}},
+		CompactionBlob: blob,
+	}
+	if err := Bind(store, epoch).Save(); err != nil {
+		t.Fatalf("Save() err = %v, want the compaction checkpoint to anchor the epoch", err)
+	}
+	saved, err := store.Get("conv_blob")
+	if err != nil {
+		t.Fatalf("Get() err = %v", err)
+	}
+	if saved.CompactionBlob != blob {
+		t.Fatalf("saved blob = %q, want %q", saved.CompactionBlob, blob)
+	}
+	if len(saved.Messages) != 1 || saved.Messages[0].Role != domain.RoleAssistant {
+		t.Fatalf("saved messages = %+v, want the retained suffix", saved.Messages)
+	}
+
+	unanchored := &domain.Conversation{
+		ID:       "conv_no_anchor",
+		Title:    "Draft",
+		Messages: []domain.Message{{ID: "m_a1", Role: domain.RoleAssistant, Content: "assistant only"}},
+	}
+	if err := Bind(store, unanchored).Save(); !errors.Is(err, ErrEmptyConversation) {
+		t.Fatalf("Save() without user or checkpoint err = %v, want ErrEmptyConversation", err)
+	}
+}
+
 func TestAddAppendsByRole(t *testing.T) {
 	repo := NewConversation(&fakeStore{}, "Chat")
 	if err := repo.Add(domain.RoleUser, "hello"); err != nil {

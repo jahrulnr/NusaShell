@@ -221,3 +221,59 @@ func TestSearchMessagesScoped(t *testing.T) {
 		t.Fatalf("turn indexes = %d,%d", hits[0].Turn, hits[1].Turn)
 	}
 }
+
+// TestDurableRoomsIncludeBlobAnchoredEpochs pins the compaction anchor rule at
+// the room-surface level: after native compaction the live epoch may retain
+// only a post-checkpoint suffix, so the opaque blob is the room's anchor. Such
+// a room must stay listed, searchable, and reachable for peer delivery even
+// though no user message survived the checkpoint.
+func TestDurableRoomsIncludeBlobAnchoredEpochs(t *testing.T) {
+	now := time.Now()
+	store := &inspectStore{convs: map[string]*domain.Conversation{
+		"conv_blob": {
+			ID: "conv_blob", Title: "Codex room", UpdatedAt: now,
+			Messages: []domain.Message{
+				{ID: "a1", Role: domain.RoleAssistant, Content: "post-checkpoint answer"},
+			},
+			CompactionBlob: `[{"type":"compaction","encrypted_content":"OPAQUE"}]`,
+		},
+		"conv_draft": {
+			ID: "conv_draft", Title: "Draft", UpdatedAt: now.Add(-time.Minute),
+			Messages: []domain.Message{{ID: "a2", Role: domain.RoleAssistant, Content: "assistant only"}},
+		},
+	}}
+
+	total, rooms, err := newInspectService(store).ListRooms("", 10, 0)
+	if err != nil {
+		t.Fatalf("ListRooms: %v", err)
+	}
+	if total != 1 || rooms[0].ID != "conv_blob" {
+		t.Fatalf("ListRooms = total=%d rooms=%+v, want only the blob-anchored room", total, rooms)
+	}
+
+	total, hits, err := newInspectService(store).SearchRooms("", "post-checkpoint", 10, 0)
+	if err != nil {
+		t.Fatalf("SearchRooms: %v", err)
+	}
+	if total != 1 || hits[0].ID != "conv_blob" || hits[0].Match != "message" {
+		t.Fatalf("SearchRooms = total=%d hits=%+v, want the blob-anchored room", total, hits)
+	}
+
+	sent := ""
+	svc := conversation.New(conversation.Deps{
+		Store: store,
+		Announce: func(targetID, fromID, content string) error {
+			sent = targetID + "<-" + fromID + ":" + content
+			return nil
+		},
+	})
+	if err := svc.SendPeer("conv_peer", "conv_blob", "hello"); err != nil {
+		t.Fatalf("SendPeer to a blob-anchored room = %v, want delivery", err)
+	}
+	if sent != "conv_blob<-conv_peer:hello" {
+		t.Fatalf("announce call = %q", sent)
+	}
+	if err := svc.SendPeer("conv_peer", "conv_draft", "hello"); err == nil {
+		t.Fatal("SendPeer to an unanchored draft must stay rejected")
+	}
+}

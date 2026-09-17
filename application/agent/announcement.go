@@ -117,7 +117,7 @@ func (a *Service) DrainAnnouncements(run *TurnRun) (bool, error) {
 		return false, err
 	}
 	c := repo.Conversation()
-	if !c.HasUserMessage() {
+	if !c.HasDurableAnchor() {
 		return false, nil
 	}
 	items := c.DrainPendingAnnouncements()
@@ -163,7 +163,7 @@ func (a *Service) queueAnnouncement(convID string, ev Announcement) error {
 		return fmt.Errorf("conversation %s: %w", convID, err)
 	}
 	c := repo.Conversation()
-	if !c.HasUserMessage() {
+	if !c.HasDurableAnchor() {
 		return fmt.Errorf("conversation %s is not a durable agent room", convID)
 	}
 	c.QueueAnnouncement(domain.PendingAnnouncement{
@@ -217,7 +217,7 @@ func (a *Service) PublishTaskMemoryAnnouncement(convID, args, message string, ma
 		return
 	}
 	c := repo.Conversation()
-	if !c.HasUserMessage() {
+	if !c.HasDurableAnchor() {
 		a.log("debug", "agent", "task_memory announcement skipped for non-durable conversation %s", convID)
 		return
 	}
@@ -274,7 +274,7 @@ func (a *Service) PublishAnnouncementToAll(ev Announcement, skipConvID string) {
 		return
 	}
 	for _, c := range a.Conversations.List() {
-		if c == nil || !c.HasUserMessage() || c.HiddenFromRoomList() {
+		if c == nil || !c.HasDurableAnchor() || c.HiddenFromRoomList() {
 			continue
 		}
 		if skipConvID != "" && c.ID == skipConvID {

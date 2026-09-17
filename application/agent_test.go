@@ -1688,7 +1688,7 @@ func TestCompactionReuseUsesAgentPromptToolboxAndSharedCacheKey(t *testing.T) {
 		t.Fatal("no Complete calls")
 	}
 	req := adapter.requests[0]
-	if system := coreMessageText(req.Messages[0]); req.Messages[0].Role != core.RoleSystem || !strings.Contains(system, "You are a NusaShell agent") {
+	if system := coreMessageText(req.Messages[0]); req.Messages[0].Role != core.RoleSystem || !strings.Contains(system, "Working with the user") {
 		t.Fatalf("reuse system prompt = %q, want normal agent prompt", system)
 	}
 	tools := map[string]bool{}
@@ -2404,6 +2404,42 @@ func TestPersistCodexCompactedConversationPreservesTranscriptWhenArchiveFails(t 
 	}
 	if conv.CompactionBlob != "" || conv.CompactionPrefixMessages != 0 {
 		t.Fatalf("Codex compaction state changed after archive failure: blob=%q prefix=%d", conv.CompactionBlob, conv.CompactionPrefixMessages)
+	}
+}
+
+// TestPersistCodexCompactedConversationAllowsUserLessCheckpointEpoch pins the
+// user-reported failure: the Codex remote checkpoint can retain a suffix that
+// holds no user message (the trigger fires deep inside a tool-heavy turn), so
+// the new epoch is anchored by the opaque blob alone. Persisting it must
+// succeed and the pre-checkpoint prefix must move to the archived chunk.
+func TestPersistCodexCompactedConversationAllowsUserLessCheckpointEpoch(t *testing.T) {
+	conv := &domain.Conversation{
+		ID: "c-codex-user-less",
+		Messages: []domain.Message{
+			{ID: "u1", Role: domain.RoleUser, Content: strings.Repeat("old question ", 200), Status: domain.StatusDone},
+			{ID: "a1", Role: domain.RoleAssistant, Content: strings.Repeat("old answer ", 200), Status: domain.StatusDone},
+			{ID: "a2", Role: domain.RoleAssistant, Content: "latest tool answer", Status: domain.StatusDone},
+		},
+	}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{conv.ID: conv}}
+	app := &App{Conversations: store, Bus: NewBus()}
+
+	blob := `[{"type":"compaction","encrypted_content":"ENC-1"}]`
+	if err := app.agentService().PersistCodexCompactedConversation(conv, blob, 1); err != nil {
+		t.Fatalf("PersistCodexCompactedConversation err = %v, want the checkpoint to anchor the epoch", err)
+	}
+	saved := store.convs[conv.ID]
+	if saved.CompactionBlob != blob {
+		t.Fatalf("CompactionBlob = %q, want %q", saved.CompactionBlob, blob)
+	}
+	if saved.HasUserMessage() {
+		t.Fatalf("epoch messages = %+v, want a user-less retained suffix", saved.Messages)
+	}
+	if !saved.HasDurableAnchor() {
+		t.Fatal("blob-anchored epoch must stay durable")
+	}
+	if len(store.archived) != 2 || store.archived[0].ID != "u1" || store.archived[1].ID != "a1" {
+		t.Fatalf("archived = %+v, want the pre-checkpoint prefix in chunks", store.archived)
 	}
 }
 

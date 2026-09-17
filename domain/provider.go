@@ -191,6 +191,15 @@ func CodexSupportsRemoteCompaction(kind ProviderKind) bool {
 	return kind == ProviderCodex
 }
 
+// ReplaysCompactionBlob reports whether a provider kind accepts the opaque
+// conversation CompactionBlob in its request. OpenAI Responses and Codex
+// replay the checkpoint in the provider-required position; every other kind
+// drops it, so a blob-anchored epoch continued on those kinds needs a
+// synthetic user nudge message instead of the checkpoint.
+func ReplaysCompactionBlob(kind ProviderKind) bool {
+	return kind == ProviderResponses || kind == ProviderCodex
+}
+
 // KindCaps is a package-level helper for callers that have a
 // ProviderKind but not a *Provider (e.g. requiresKey checks).
 func KindCaps(kind ProviderKind) KindCapabilities {

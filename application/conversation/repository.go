@@ -15,10 +15,12 @@ import (
 // with ResetTranscript (compaction) / NewConversation.
 var ErrImmutable = errors.New("conversation transcript is immutable")
 
-// ErrEmptyConversation is returned when a draft without a real user message
-// is sent to durable storage. Empty drafts are browser/in-memory state only;
+// ErrEmptyConversation is returned when a transcript epoch with no durable
+// anchor is sent to durable storage. An epoch is anchored by a real user
+// message or by an opaque compaction checkpoint (Conversation.CompactionBlob)
+// written by native compaction. Empty drafts are browser/in-memory state only;
 // the first user turn creates the conversation and persists it atomically.
-var ErrEmptyConversation = errors.New("conversation must contain a user message before persistence")
+var ErrEmptyConversation = errors.New("conversation must contain a user message or compaction checkpoint before persistence")
 
 // Repository is the sanctioned write path for one conversation.
 // NewConversation is the only constructor. GetById loads an existing room.
@@ -193,7 +195,7 @@ func (r *Repository) Save() error {
 	if r.store == nil {
 		return fmt.Errorf("conversation store is required")
 	}
-	if !r.inner.HasUserMessage() {
+	if !r.inner.HasDurableAnchor() {
 		return ErrEmptyConversation
 	}
 	if !r.epochReset && !transcriptIDsAppendOnly(r.persistedIDs, r.inner.Messages) {

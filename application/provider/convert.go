@@ -122,7 +122,7 @@ func ToCoreRequest(req ChatRequest, kind domain.ProviderKind, openRouter bool) *
 			"allow_fallbacks": false,
 		})
 	}
-	if req.CompactionBlob != "" && (kind == domain.ProviderResponses || kind == domain.ProviderCodex) {
+	if req.CompactionBlob != "" && domain.ReplaysCompactionBlob(kind) {
 		setProviderOption(out, "compaction_items", req.CompactionBlob)
 		if kind == domain.ProviderCodex {
 			prefixMessages := req.CompactionPrefixMessages

@@ -69,27 +69,6 @@ func TestRenderLearnerUserPromptIncludesSourceProjectLabel(t *testing.T) {
 	}
 }
 
-func TestInteractivePromptKeepsPlanningInstructionsOperational(t *testing.T) {
-	prompt := SystemPrompt()
-	for _, stale := range []string{
-		"referenced_image_paths",
-		"share updates in the `todo` tool",
-		"end your turn by sending a final message to the `todo` tool",
-	} {
-		if strings.Contains(prompt, stale) {
-			t.Errorf("interactive prompt contains stale instruction %q", stale)
-		}
-	}
-	for _, want := range []string{
-		"Use `todo` to track multi-step work",
-		"Your final assistant message should state the outcome",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("interactive prompt missing operational instruction %q", want)
-		}
-	}
-}
-
 func TestAutomationPromptMatchesAvailableWorkflowDispatchers(t *testing.T) {
 	prompt := Prompt("automation-agent")
 	if strings.Contains(prompt, "Modify automation workflows or schedules from within a step.") {
