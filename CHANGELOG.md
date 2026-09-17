@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] - 2026-09-16
+
+### Fixed
+
+- **Compaction no longer forces the summary tool through `tool_choice`.** With
+  thinking mode enabled, reasoning providers answer HTTP 400 (`Thinking mode
+  does not support this tool_choice`) before the model is ever asked, so every
+  compaction pass failed and the turn ended with `compaction failed: summary too
+  short`. The `summary()` tool is still the only advertised tool and the
+  compaction prompt keeps the contract explicit, so the model is instructed
+  rather than coerced. A model that answers in prose is accepted through
+  `resp.Content`, and the terminal rule (minimum length plus the assistant-echo
+  guard) still rejects an answer that merely continues the live conversation.
+- **The compaction handoff prompt carries the guardrails for every workflow.**
+  The reuse workflow sends the agent system prompt and the full toolbox, so the
+  compaction system prompt never reaches it: the last user message is the only
+  place that can stop the model, forbid task work and reasoning-only output, fix
+  the checkpoint structure, ask for the conversation's language, and mark tool
+  results as data rather than instructions. Those clauses now live in the shared
+  handoff prompt (previously 4 loose bullets that also contradicted the
+  five-section structure used by the dedicated workflow), growth is accounted
+  for by the reserved handoff tokens, and
+  `TestCompactionHandoffGuardReachesEveryWorkflow` fails if a clause or a
+  workflow loses them.
+
 ## [0.8.3] - 2026-09-16
 
 ### Fixed
