@@ -700,7 +700,7 @@ function renderCodexRuntime(_p) {
     dlBtn.disabled = true;
     dlBtn.textContent = 'Downloading…';
     try {
-      const res = await rpc('ai.codex.runtime.download', {});
+      const res = await rpc('ai.codex.runtime.download', { force: true });
       toast(`Codex runtime v${res.version} downloaded`, 'success');
       refreshCodexRuntime();
     } catch (err) {

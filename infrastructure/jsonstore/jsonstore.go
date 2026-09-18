@@ -65,6 +65,10 @@ func New(dir string) (*Store, error) {
 			return nil, err
 		}
 	}
+	if report := migrateLegacyConversationLayout(filepath.Join(dir, conversationsDirName)); report.moved() {
+		slog.Info("migrated conversations to per-conversation folders",
+			"conversations", report.Conversations, "chunk_dirs", report.ChunkDirs, "acp_dirs", report.ACPDirs)
+	}
 	if err := s.load(); err != nil {
 		return nil, err
 	}
@@ -72,43 +76,45 @@ func New(dir string) (*Store, error) {
 }
 
 func (s *Store) load() error {
-	// conversations: one JSON file per conversation
-	convDir := filepath.Join(s.dir, "conversations")
+	// conversations: one folder per conversation, holding index.jsonl plus its
+	// chunk/, acp/, operation/ sidecars and the mirrored plan.md. Flat files in
+	// this directory belong to other stores (todos.json, artifacts.json,
+	// acp_runs.jsonl and its .imported copies) or are leftovers from the
+	// retired flat layout, so only conv_<id> directories are conversations.
+	convDir := filepath.Join(s.dir, conversationsDirName)
 	entries, err := os.ReadDir(convDir)
 	if err != nil {
 		return err
 	}
-	// Only plain conv_<id>.json files are conversations. This directory also
-	// holds files owned by other stores (todos.json, artifacts.json,
-	// acp_runs.jsonl) and legacy sidecars from the retired desktop app
-	// (conv_<id>.meta.json / .runtime.json, whose meta "model" is an
-	// object). Treating those as conversations produced unmarshal failures
-	// that killed startup, so anything that is not exactly conv_<id>.json —
-	// or that fails to parse — is skipped with a warning instead.
 	var recovered []string
 	for _, e := range entries {
 		name := e.Name()
-		base, ext := strings.CutSuffix(name, ".json")
-		if e.IsDir() || !ext || !strings.HasPrefix(base, "conv_") || strings.Contains(base, ".") {
+		if !e.IsDir() || !strings.HasPrefix(name, "conv_") || strings.Contains(name, ".") {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(convDir, name))
+		b, err := os.ReadFile(filepath.Join(convDir, name, conversationIndexName))
 		if err != nil {
-			slog.Warn("skipping unreadable conversation file", "file", name, "error", err)
+			if !errors.Is(err, os.ErrNotExist) {
+				slog.Warn("skipping unreadable conversation transcript", "id", name, "error", err)
+			}
 			continue
 		}
-		var c domain.Conversation
-		if err := json.Unmarshal(b, &c); err != nil {
-			slog.Warn("skipping unparsable conversation file", "file", name, "error", err)
+		c, skipped, err := decodeConversationJSONL(b)
+		if err != nil {
+			slog.Warn("skipping unparsable conversation transcript", "id", name, "error", err)
 			continue
 		}
-		if c.ID == "" {
-			continue // defensive: a conversation without an ID is unusable
+		if c.ID != name {
+			slog.Warn("skipping conversation whose id does not match its folder", "folder", name, "id", c.ID)
+			continue
+		}
+		if skipped > 0 {
+			slog.Warn("skipped unparsable transcript lines", "id", name, "lines", skipped)
 		}
 		if c.RecoverAbandonedTurn() {
 			recovered = append(recovered, c.ID)
 		}
-		s.conversations[c.ID] = &c
+		s.conversations[c.ID] = c
 	}
 	for _, id := range recovered {
 		if err := s.Save(s.conversations[id]); err != nil {
@@ -342,8 +348,8 @@ func (s *Store) Get(id string) (*domain.Conversation, error) {
 	return clone(c), nil
 }
 
-// ConversationPath returns the JSON file used by file_read for a stored
-// conversation. The application uses this only as a read-only learning
+// ConversationPath returns the JSONL transcript path used by file_read for a
+// stored conversation. The application uses this only as a read-only learning
 // handoff; conversation writes still go through Store.Save.
 func (s *Store) ConversationPath(id string) string {
 	if s == nil || safeSegment(id) != nil {
@@ -353,17 +359,26 @@ func (s *Store) ConversationPath(id string) string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "conversations", id+".json")
+	return filepath.Join(dir, conversationsDirName, id, conversationIndexName)
 }
 
 func (s *Store) Save(c *domain.Conversation) error {
-	stored := clone(c)
-	b, err := json.Marshal(stored)
+	if c == nil {
+		return errors.New("conversation is nil")
+	}
+	indexPath, err := conversationIndexPath(filepath.Join(s.dir, conversationsDirName), c.ID)
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(s.dir, "conversations", c.ID+".json")
-	if err := atomicWrite(path, b); err != nil {
+	stored := clone(c)
+	b, err := encodeConversationJSONL(stored)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
+		return err
+	}
+	if err := atomicWrite(indexPath, b); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -382,21 +397,13 @@ func (s *Store) Delete(id string) error {
 		return fmt.Errorf("%w: conversation %s", ErrNotFound, id)
 	}
 	delete(s.conversations, id)
-	convDir := filepath.Join(s.dir, "conversations")
-	// Cascade sidecars: JSON transcript, archived chunks, ACP run snapshots,
-	// and the plan directory used by the brief mirror. safeSegment above
-	// guarantees `id` cannot escape `convDir`, so RemoveAll on the plan
-	// directory (conversations/<id>/) cannot touch siblings.
-	sidecars := []string{
-		filepath.Join(convDir, id+".json"),
-		filepath.Join(convDir, id+".chunks"),
-		filepath.Join(convDir, id+".acp"),
-		filepath.Join(convDir, id),
-	}
-	for _, p := range sidecars {
-		if err := os.RemoveAll(p); err != nil && !os.IsNotExist(err) {
-			return err
-		}
+	// Cascade the conversation's whole folder: index.jsonl transcript,
+	// chunk/ archive, acp/ run snapshots, operation/ patches, and plan.md.
+	// safeSegment above guarantees `id` cannot escape the conversations
+	// directory, so this RemoveAll cannot touch siblings.
+	dir := filepath.Join(s.dir, conversationsDirName, id)
+	if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
+		return err
 	}
 	return nil
 }
@@ -407,7 +414,10 @@ func (s *Store) Delete(id string) error {
 func (s *Store) ArchiveChunk(id string, messages []domain.Message) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	chunkDir := filepath.Join(s.dir, "conversations", id+".chunks")
+	chunkDir, err := conversationChunkDir(filepath.Join(s.dir, conversationsDirName), id)
+	if err != nil {
+		return 0, err
+	}
 	if err := os.MkdirAll(chunkDir, 0o755); err != nil {
 		return 0, err
 	}
@@ -439,7 +449,11 @@ func (s *Store) ArchiveChunk(id string, messages []domain.Message) (int, error) 
 func (s *Store) GetChunk(id string, index int) ([]domain.Message, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	path := filepath.Join(s.dir, "conversations", id+".chunks", fmt.Sprintf("chunk-%d.json", index))
+	chunkDir, err := conversationChunkDir(filepath.Join(s.dir, conversationsDirName), id)
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(chunkDir, fmt.Sprintf("chunk-%d.json", index))
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

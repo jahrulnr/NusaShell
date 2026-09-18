@@ -21,15 +21,8 @@ func (s *Service) RecordExperience(conv *domain.Conversation, headless bool) {
 	if headless || s.deps.Jobs == nil {
 		return
 	}
-	var history []domain.Experience
-	for _, h := range s.deps.Experiences.ListByConversation(conv.ID) {
-		if h.ID == exp.ID {
-			continue
-		}
-		history = append(history, *h)
-	}
 	turns, iters := domain.CountUnreviewedLearningProgress(conv.Messages, conv.LastReviewedMsgCount)
-	trig := domain.DecideLearningTriggerWith(exp, history, domain.LearningReviewProgress{
+	trig := domain.DecideLearningTriggerWith(exp, nil, domain.LearningReviewProgress{
 		UnreviewedUserTurns: turns,
 		UnreviewedToolIters: iters,
 		Interval:            s.LearnerNudgeInterval(),

@@ -24,8 +24,10 @@
 // Token overlap uses tokens ≥3 characters and creates `related` edges for
 // pairs with overlap ≥ 0.3. It is free and works without an embedder.
 //
-// The builder is idempotent: running it again strengthens existing edges
-// via CombineWeights instead of creating duplicates.
+// The builder is idempotent: running it again reuses the existing derived
+// edge, only raising its weight when a newly computed signal is stronger.
+// Rebuilding is not another observation and does not combine the same weight
+// repeatedly.
 package learn
 
 import (
@@ -73,6 +75,7 @@ type EdgeBuilder struct {
 	cfg     EdgeBuilderConfig
 	modelID string
 	buildMu sync.Mutex
+	derived map[learningEdgeKey]float64
 }
 
 // NewEdgeBuilder creates an edge builder. embed and cache may be nil —
@@ -135,6 +138,7 @@ func (b *EdgeBuilder) Build(ctx context.Context) error {
 	}
 	b.buildMu.Lock()
 	defer b.buildMu.Unlock()
+	b.derived = make(map[learningEdgeKey]float64)
 
 	// A fragment or skill can be deleted without touching the edge log. Drop
 	// those records before building so the graph RPC does not keep filtering
@@ -148,10 +152,34 @@ func (b *EdgeBuilder) Build(ctx context.Context) error {
 	// configured.
 	if b.embed != nil && b.cache != nil {
 		if err := b.buildEmbeddingEdges(ctx); err != nil {
+			b.flushDerivedEdges()
 			return err
 		}
 	}
+	b.flushDerivedEdges()
 	return nil
+}
+
+// addDerivedEdge aggregates the independent signals found during one build.
+// The graph receives one write per pair, while a later build does not turn
+// the same signal into another observation.
+func (b *EdgeBuilder) addDerivedEdge(sourceID, targetID string, edgeType domain.LearningEdgeType, weight float64) {
+	if b.derived == nil {
+		b.derived = make(map[learningEdgeKey]float64)
+	}
+	key := learningEdgeKeyFor(sourceID, targetID, edgeType)
+	if current, ok := b.derived[key]; ok {
+		b.derived[key] = domain.CombineWeights(current, weight)
+		return
+	}
+	b.derived[key] = weight
+}
+
+func (b *EdgeBuilder) flushDerivedEdges() {
+	for key, weight := range b.derived {
+		_, _ = b.graph.EnsureDerivedEdge(key.sourceID, key.targetID, key.edgeType, weight)
+	}
+	b.derived = nil
 }
 
 // buildTokenOverlapEdges creates edges between memory fragments and
@@ -206,20 +234,20 @@ func (b *EdgeBuilder) buildTokenOverlapEdges() {
 			jaccard := textsim.JaccardSimilarity(mt.tokens, st.tokens)
 			if jaccard >= b.cfg.TokenOverlapThreshold {
 				weight := float64(jaccard) * 0.5 // cap at 0.5 for token overlap
-				_, _ = b.graph.AddEdge(mt.id, st.id, domain.EdgeRelated, weight)
+				b.addDerivedEdge(mt.id, st.id, domain.EdgeRelated, weight)
 			}
 		}
 	}
 
 	// Memory ↔ memory (neuron-like chains between related facts). Uses
-	// the same threshold; identical-fact fragments land on the same
-	// cluster and strengthen over time via CombineWeights.
+	// the same threshold; identical-fact fragments land on the same cluster
+	// and combine with any other derived signal found during this build.
 	for i := 0; i < len(memToks); i++ {
 		for j := i + 1; j < len(memToks); j++ {
 			jaccard := textsim.JaccardSimilarity(memToks[i].tokens, memToks[j].tokens)
 			if jaccard >= b.cfg.TokenOverlapThreshold {
 				weight := float64(jaccard) * 0.5
-				_, _ = b.graph.AddEdge(memToks[i].id, memToks[j].id, domain.EdgeRelated, weight)
+				b.addDerivedEdge(memToks[i].id, memToks[j].id, domain.EdgeRelated, weight)
 			}
 		}
 	}
@@ -235,7 +263,7 @@ func (b *EdgeBuilder) buildTokenOverlapEdges() {
 			jaccard := textsim.JaccardSimilarity(skillToks[i].tokens, skillToks[j].tokens)
 			if jaccard >= b.cfg.TokenOverlapThreshold {
 				weight := float64(jaccard) * 0.5
-				_, _ = b.graph.AddEdge(skillToks[i].id, skillToks[j].id, domain.EdgeRelated, weight)
+				b.addDerivedEdge(skillToks[i].id, skillToks[j].id, domain.EdgeRelated, weight)
 			}
 		}
 	}
@@ -280,7 +308,7 @@ func (b *EdgeBuilder) buildMetadataEdges(memories []*domain.MemoryRecord, skills
 			}
 			weight := recordMetadataWeight(left, right, tagFrequency)
 			if weight > 0 {
-				_, _ = b.graph.AddEdge(left.ID, right.ID, domain.EdgeRelated, weight)
+				b.addDerivedEdge(left.ID, right.ID, domain.EdgeRelated, weight)
 			}
 		}
 	}
@@ -293,7 +321,7 @@ func (b *EdgeBuilder) buildMetadataEdges(memories []*domain.MemoryRecord, skills
 				continue
 			}
 			if recordSkillMetadataMatch(memory, skill, tagFrequency) {
-				_, _ = b.graph.AddEdge(memory.ID, skill.ID, domain.EdgeRelated, 0.4)
+				b.addDerivedEdge(memory.ID, skill.ID, domain.EdgeRelated, 0.4)
 			}
 		}
 	}
@@ -495,7 +523,7 @@ func (b *EdgeBuilder) buildEmbeddingEdges(ctx context.Context) error {
 			sim := textsim.CosineSimilarity(vectors[i], vectors[j])
 			if sim >= threshold {
 				weight := float64(sim) * 0.8 // scale to [0, 0.8]
-				_, _ = b.graph.AddEdge(allEntries[i].id, allEntries[j].id, domain.EdgeRelated, weight)
+				b.addDerivedEdge(allEntries[i].id, allEntries[j].id, domain.EdgeRelated, weight)
 			}
 		}
 	}

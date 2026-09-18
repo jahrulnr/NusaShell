@@ -39,14 +39,10 @@ type LLMSkillProposal struct {
 }
 
 type LearnerResult struct {
-	StageReached string              `json:"stage_reached"`
-	Consolidate  *learnerConsolidate `json:"consolidate"`
-	Evaluate     *learnerEvaluate    `json:"evaluate"`
-	Evolve       *learnerEvolve      `json:"evolve"`
+	Consolidate *learnerConsolidate `json:"consolidate"`
 }
 
 type learnerConsolidate struct {
-	Stage         string        `json:"stage"`
 	Action        string        `json:"action"`
 	Entry         *learnerEntry `json:"entry"`
 	ReasonForNoOp string        `json:"reason_for_no_op,omitempty"`
@@ -59,26 +55,6 @@ type learnerEntry struct {
 	Supersedes string `json:"supersedes"`
 	Scope      string `json:"scope"`
 	Project    string `json:"project"`
-}
-
-type learnerEvaluate struct {
-	Stage              string             `json:"stage"`
-	Approved           bool               `json:"approved"`
-	Reason             string             `json:"reason"`
-	ProposedSkillShape *learnerSkillShape `json:"proposed_skill_shape"`
-}
-
-type learnerSkillShape struct {
-	Name               string `json:"name"`
-	TriggerDescription string `json:"trigger_description"`
-	StepsSummary       string `json:"steps_summary"`
-}
-
-type learnerEvolve struct {
-	Stage       string `json:"stage"`
-	Action      string `json:"action"`
-	SkillID     string `json:"skill_id"`
-	DiffSummary string `json:"diff_summary"`
 }
 
 // learningModelID returns the model a background learning job should run
@@ -367,7 +343,7 @@ func learningConversationFallbackPath(dataDir, conversationID string) string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(absolute, "conversations", conversationID+".json")
+	return filepath.Join(absolute, "conversations", conversationID, "index.jsonl")
 }
 
 func safeLearningConversationID(conversationID string) bool {
@@ -378,55 +354,21 @@ func safeLearningConversationID(conversationID string) bool {
 		!strings.ContainsRune(conversationID, 0)
 }
 
-// buildLearnerPacketAt builds the short user instruction for one unified
-// learner turn (Stage 1 always; Stage 2/3 only when trigger_reason is
-// repeated_procedure). Experience and memory bodies are not serialized
-// into role=user; the agent reads the source conversation through file_read.
-//
-// The skill-authoring reference for Stages 2-3 is NOT carried here: the
-// runtime attaches the skill-creator SKILL.md as a hydration file_read slot
-// (see learnerSkillCreatorReference), so the model receives it as a tool
-// result without having to search for it.
-func (s *Service) BuildLearnerPacketAt(exp *domain.Experience, source LearningSource, reason string, procedureCount int) string {
+// buildLearnerPacketAt builds the short user instruction for one periodic
+// memory-review turn. Experience and memory bodies are not serialized into
+// role=user; the agent reads the source conversation through file_read.
+func (s *Service) BuildLearnerPacketAt(exp *domain.Experience, source LearningSource) string {
 	project := strings.TrimSpace(source.Project)
 	if project == "" && exp != nil {
 		project = strings.TrimSpace(exp.Scope.Project)
 	}
 	return resources.RenderLearnerUserPromptForProject(
-		reason,
-		procedureCount,
 		source.ConversationID,
 		source.Path,
 		source.MessageStart,
 		source.MessageEnd,
 		project,
 	)
-}
-
-// learnerSkillCreatorReference resolves the skill-creator SKILL.md for the
-// learner hydration slot: the live skill store wins (the editable copy the
-// skill tools also serve), and the embedded bundle guarantees presence when
-// the live copy was deleted or not yet seeded. Returns ("", "") only when
-// neither source is available or the data directory is unknown.
-func (s *Service) LearnerSkillCreatorReference() (path, content string) {
-	if s == nil || strings.TrimSpace(s.deps.DataDir) == "" {
-		return "", ""
-	}
-	content = ""
-	if s.deps.Skills != nil {
-		if sk, err := s.deps.Skills.Get("skill-creator", ""); err == nil && sk != nil {
-			content = strings.TrimSpace(sk.Content)
-		}
-	}
-	if content == "" {
-		content = strings.TrimSpace(resources.BuiltinSkill("skill-creator"))
-	}
-	if content == "" {
-		return "", ""
-	}
-	// Forward slashes in the agent file_read path keep hydration / tool
-	// slots portable across Windows (filepath.Join would use backslashes).
-	return filepath.ToSlash(filepath.Join(strings.TrimRight(s.deps.DataDir, `/\`), "skills", "skill-creator", "SKILL.md")), content
 }
 
 // parseLLMSkillProposal parses an LLM JSON response into a skill proposal.

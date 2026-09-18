@@ -50,8 +50,6 @@ func TestBuildLearnerPacketFallsBackToExperienceProject(t *testing.T) {
 	packet := service.BuildLearnerPacketAt(
 		&domain.Experience{Scope: domain.ExperienceScope{Project: "NusaShell"}},
 		LearningSource{},
-		"periodic",
-		0,
 	)
 	if !strings.Contains(packet, "project_label: NusaShell") {
 		t.Fatalf("learner packet missing experience project label:\n%s", packet)

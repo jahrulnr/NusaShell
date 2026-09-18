@@ -302,9 +302,9 @@ const (
 	// the user, listed in agent.conversations.list.
 	ConversationTypeConversation ConversationType = "conversation"
 	// ConversationTypeBackground is a background job transcript. Learning
-	// jobs (memory consolidation, skill evolution) persist one so the
-	// Learning log can show the exact LLM transcript that produced a
-	// mutation. Addressable by id, never listed as a room.
+	// jobs persist one so the Learning log can show the exact LLM transcript
+	// that produced a memory mutation. Addressable by id, never listed as a
+	// room.
 	ConversationTypeBackground ConversationType = "background"
 	// ConversationTypeAutomation is a pipeline/automation agent-step
 	// transcript. It is persisted so the turn loop and

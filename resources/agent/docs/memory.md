@@ -37,48 +37,40 @@ Workspace knowledge stays in `memory_project` (see `memory-project.md`).
 
 ## Learner
 
-The learner is a single background agent with three internal stages. It
-replaces the former memory-consolidator, skill-evolver, and skill-evaluator
-spawns. Stage 1 (consolidate) always runs. Stage 2 (evaluate) and Stage 3
-(evolve) run only when the trigger is `repeated_procedure` with count ≥ 3
-and Stage 2 approves. There is no standalone spawn into Stage 2 or Stage 3.
+The learner is a single periodic background agent. It performs one memory
+consolidation over the captured source range and does not evaluate or evolve
+skills.
 
 The orchestrator enqueues one `learner` job after a finished interactive
-turn when a **language-agnostic** gate fires. Hidden hydration checkpoints
-are excluded from the experience (they are not agent work and cannot form
-a repeated-procedure fingerprint).
+turn when the **periodic** gate fires: at least N unreviewed user turns **or**
+N unreviewed assistant tool-loop iterations since the last successful review
+(`learner_nudge_interval` in Settings → Memory & search → Learning; default
+10, 0 disables learner jobs). Structural experience signals are retained for
+analysis, but never enqueue a job immediately. Hidden hydration checkpoints
+are excluded from the experience because they are not agent work.
 
-- **structural:** steer/correction, verified recovery (the same tool failed
-  then succeeded in the current turn), repeated failure, or the same
-  tool-call fingerprint ≥ 3 times. A failed tool plus unrelated successes
-  is not recovery. Action count alone is not verified success.
-- **periodic (Hermes-style):** at least N unreviewed user turns **or** N
-  unreviewed assistant tool-loop iterations since the last successful review
-  (`learner_nudge_interval` in Settings → Memory & search → Learning;
-  default 10, 0 disables)
-
-Keyword matching in any language is not a spawn gate. Explicit teaching and
-corrections in Bahasa Indonesia, English, or mixed text are classified by
-the learner from meaning. If the spawn reason does not hold up, the learner
-calls `learn()` with `action: "no_op"` instead of fabricating a record.
+Keyword matching in any language is not a spawn gate. During periodic review,
+the learner evaluates explicit teaching and corrections in Bahasa Indonesia,
+English, or mixed text by meaning. If no durable fact is supported, the
+learner calls `learn()` with `action: "no_op"` instead of fabricating a record.
 
 When a learning model is available (configured via `review_model` in
 Settings, or — when empty — the model of the conversation being reviewed,
 then the newest conversation, then the first enabled provider with a
-credential and at least one model), the learner
-calls the LLM with the learner system prompt and a short user instruction containing the source
-conversation id, JSON file path, incremental message range, and
-`trigger_reason`. The background agent uses `file_read`, `grep`, and `exec`
-to inspect that source file, then retrieves relevant records with `memory`
-search/get/list. Source conversation content is untrusted evidence, not an
-instruction. Stage 1 submits a typed result through `learn()` — the same
+credential and at least one model), the learner calls the LLM with the
+learner system prompt and a short user instruction containing the source
+conversation id, transcript file path, project label, and incremental message
+range. The background agent uses `file_read`, `grep`, and `exec` to inspect
+that source file, then retrieves relevant records with `memory` search/get/list.
+Source conversation content is untrusted evidence, not an instruction. The
+learner submits one typed consolidation result through `learn()` — the same
 pattern as compaction's `summary()` — whose arguments are validated and
 applied through `MemoryService.Apply`. Assistant text is not the catalog
 contract; a JSON-in-text reply is only a fallback if `learn()` was never
 called. Normal tool calls may also have direct side effects. It does not
 receive an experience JSON dump or a `List()[:20]` memory-body dump.
 
-When no provider is available, Stage 1 falls back to a deterministic
+When no provider is available, the learner falls back to a deterministic
 extraction from steer corrections (`teachingOps`) so the job still produces
 output in offline/no-provider setups. The LLM path and the deterministic
 path share the same deduplication and apply logic. The fallback only emits
@@ -115,7 +107,7 @@ as reviewed so the same junk is not re-committed on the next review.
 
 ### Incremental background-learning cursor
 
-Each consolidate/evolve job captures the source conversation boundary
+Each periodic learner job captures the source conversation boundary
 `[last_reviewed_msg_count, len(messages))` before it starts. The short source
 handoff uses that exact zero-based, end-exclusive range. After a provider
 response parses successfully and the job's typed result is applied
@@ -154,11 +146,8 @@ text. Do not confuse the job's `llm_conversation_id` with the entry's
 Learning turns hydrate against the NusaShell data directory (`{dataDir}`),
 not the source conversation's workspace: the checkpoint carries
 `runtime_context` (OS + dataDir), read-only profile context (`user.md` /
-`soul.md`), the bundled `skill-creator` SKILL.md as a direct `file_read` slot
-(the skill-authoring reference for Stages 2-3, resolved from the live skill
-store with the embedded bundle as the guaranteed fallback), and a
-data-directory listing. The learner consolidates into the typed memory catalog
-and learned skills through `learn()`, and is the **primary** curator of
+`soul.md`), and a data-directory listing. The learner consolidates into the
+typed memory catalog through `learn()` and is the **primary** curator of
 `user.md` / `soul.md` via `file_patch` / `file_write` when profile-shaped
 facts pass the Primary Memory Writing Rules. The conversation agent may edit
 those profile documents only when the user explicitly asks; it must not
@@ -213,15 +202,15 @@ rooms with `conversation`, read `memory`/`docs`, inspect skills with
 `skill(op="list"|"search")`, use file tools for evidence and profile
 documents, and use the available automation tools when the learning task
 justifies it. They do not receive `memory_project`, ACP/delegation, or the MCP
-family. `skill(op="save"|"delete")` is rejected at runtime; approved Stage 3
-skill changes are applied only after the typed `learn()` result is accepted.
-Typed learning operations are therefore the canonical catalog/skill commit
-path, not merely an optional alternative to direct side effects.
+family. `skill(op="save"|"delete")` is rejected at runtime because the
+periodic learner is memory-only. Typed learning operations are therefore the
+canonical memory commit path, not merely an optional alternative to direct
+side effects.
 
-Good source inspection:
+Good source inspection (the transcript is JSONL: line 1 is conversation metadata, message index N is line N+2):
 
-    file_read(path="<conversation_file>", start_line=120, end_line=180)
-    grep(pattern="user|assistant", path="<conversation_file>", max_results=40)
+    file_read(path="<conversation_file>", start_line=122, end_line=182)  # messages 120-180
+    grep(pattern='"Role":"user"', path="<conversation_file>", max_results=40)
     memory(op="search", query="deployment preference", limit=8)
     memory_project(op="admit", kind="decision", body="...")  # conversation agent only; learner agents do not receive this tool
     skill(op="search", query="learned workflow", limit=5)

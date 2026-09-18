@@ -13,12 +13,19 @@ import (
 // repeat observation via probability-union (CombineWeights), and answers
 // neighborhood queries for graph-augmented retrieval.
 //
-// The service is stateless beyond the EdgeStore — it does not cache
-// the graph in memory. The store keeps an in-memory index backed by JSONL,
-// so List() is fast and suitable for neighborhood queries.
+// The graph remains persisted in the EdgeStore. During derived-edge rebuilds,
+// a short-lived in-memory pair index avoids repeatedly deep-copying the full
+// JSONL-backed edge collection; other mutating graph operations invalidate it.
 type LearningGraphService struct {
-	edges EdgeStore
-	mu    sync.RWMutex
+	edges        EdgeStore
+	mu           sync.RWMutex
+	derivedIndex map[learningEdgeKey]*domain.LearningEdge
+}
+
+type learningEdgeKey struct {
+	sourceID string
+	targetID string
+	edgeType domain.LearningEdgeType
 }
 
 // NewLearningGraphService creates a graph service backed by the given store.
@@ -34,6 +41,7 @@ func NewLearningGraphService(edges EdgeStore) *LearningGraphService {
 func (g *LearningGraphService) AddEdge(sourceID, targetID string, edgeType domain.LearningEdgeType, weight float64) (*domain.LearningEdge, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.derivedIndex = nil
 	if sourceID == "" || targetID == "" {
 		return nil, fmt.Errorf("learning graph: source and target IDs are required")
 	}
@@ -88,11 +96,86 @@ func (g *LearningGraphService) AddEdge(sourceID, targetID string, edgeType domai
 	return edge, nil
 }
 
+// EnsureDerivedEdge creates or raises a relation discovered by a graph
+// rebuild without treating the rebuild as another observation. Derived edges
+// are recomputed from the current catalog, so combining their weight on every
+// request would rewrite the same JSONL record and make the weight saturate.
+// Usage-derived edges must continue to use AddEdge, which intentionally
+// strengthens an edge for each real observation.
+func (g *LearningGraphService) EnsureDerivedEdge(sourceID, targetID string, edgeType domain.LearningEdgeType, weight float64) (*domain.LearningEdge, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if sourceID == "" || targetID == "" {
+		return nil, fmt.Errorf("learning graph: source and target IDs are required")
+	}
+	if (edgeType == domain.EdgeRelated || edgeType == domain.EdgeUsedWith) && sourceID > targetID {
+		sourceID, targetID = targetID, sourceID
+	}
+	if sourceID == targetID {
+		return nil, fmt.Errorf("learning graph: self-loops are not allowed")
+	}
+	if weight < 0 {
+		weight = 0
+	} else if weight > 1 {
+		weight = 1
+	}
+
+	key := learningEdgeKeyFor(sourceID, targetID, edgeType)
+	if g.derivedIndex == nil {
+		g.derivedIndex = make(map[learningEdgeKey]*domain.LearningEdge)
+		for _, e := range g.edges.List() {
+			if e == nil || e.InvalidAt != nil {
+				continue
+			}
+			eKey := learningEdgeKeyFor(e.SourceID, e.TargetID, e.Type)
+			if current := g.derivedIndex[eKey]; current == nil || e.Weight > current.Weight {
+				g.derivedIndex[eKey] = e
+			}
+		}
+	}
+	if e := g.derivedIndex[key]; e != nil {
+		if e.Weight >= weight {
+			return e, nil
+		}
+		e.Weight = weight
+		e.SourceID = key.sourceID
+		e.TargetID = key.targetID
+		if err := g.replaceEdge(e); err != nil {
+			return nil, err
+		}
+		return e, nil
+	}
+
+	now := clock.NewTime().Time()
+	edge := &domain.LearningEdge{
+		ID:        domain.NewULID(domain.IDPrefixEdge),
+		SourceID:  key.sourceID,
+		TargetID:  key.targetID,
+		Type:      edgeType,
+		Weight:    weight,
+		ValidAt:   now,
+		CreatedAt: now,
+	}
+	if err := g.edges.Save(edge); err != nil {
+		return nil, fmt.Errorf("learning graph: save edge: %w", err)
+	}
+	g.derivedIndex[key] = edge
+	return edge, nil
+}
+
+func learningEdgeKeyFor(sourceID, targetID string, edgeType domain.LearningEdgeType) learningEdgeKey {
+	if (edgeType == domain.EdgeRelated || edgeType == domain.EdgeUsedWith) && sourceID > targetID {
+		sourceID, targetID = targetID, sourceID
+	}
+	return learningEdgeKey{sourceID: sourceID, targetID: targetID, edgeType: edgeType}
+}
+
 // InvalidateEdge marks an edge as no longer current by setting InvalidAt.
 // Returns ErrNotFound if the edge does not exist or is already invalidated.
 func (g *LearningGraphService) InvalidateEdge(id string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.derivedIndex = nil
 	for _, e := range g.edges.List() {
 		if e.ID == id {
 			if e.InvalidAt != nil {
@@ -202,6 +285,7 @@ func (g *LearningGraphService) AllEdges() []*domain.LearningEdge {
 func (g *LearningGraphService) DeleteEdge(id string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.derivedIndex = nil
 	return g.edges.Delete(id)
 }
 
@@ -210,6 +294,7 @@ func (g *LearningGraphService) DeleteEdge(id string) error {
 func (g *LearningGraphService) SaveEdge(e *domain.LearningEdge) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.derivedIndex = nil
 	return g.edges.Save(e)
 }
 

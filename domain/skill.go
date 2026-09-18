@@ -326,8 +326,8 @@ type Settings struct {
 	ReviewModel string `json:"review_model,omitempty"`
 	// LearnerNudgeInterval is the Hermes-style periodic spawn gate: how
 	// many unreviewed user turns or tool-loop iterations enqueue the
-	// learner without a structural signal. nil = product default (10).
-	// 0 = disabled (structural signals only). Pointer so a missing JSON
+	// learner. nil = product default (10).
+	// 0 = disabled. Pointer so a missing JSON
 	// field stays "use default" instead of collapsing to disabled.
 	LearnerNudgeInterval *int `json:"learner_nudge_interval,omitempty"`
 	// DelegateModel selects the model used by the internal delegate agent.

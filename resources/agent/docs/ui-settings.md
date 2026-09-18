@@ -255,7 +255,7 @@ Compaction is always active. Choose the dedicated summary-only or reuse agent-pr
 
 ## Learning
 
-Background jobs run a single learner that consolidates recorded experience into memory records and, for repeated procedures, may evaluate and evolve a skill. The review model routes those jobs to a cheaper or faster model (default follows the conversation being reviewed, then the newest conversation, then the first enabled provider with a credential and at least one model). The periodic review interval runs the learner after N unreviewed user turns or tool-loop iterations (default 10, 0 disables); steer, recovery, repeated failure, and repeated procedure still enqueue immediately.
+Background jobs run a single periodic learner that consolidates recorded experience into memory records. It does not change skills. The review model routes those jobs to a cheaper or faster model (default follows the conversation being reviewed, then the newest conversation, then the first enabled provider with a credential and at least one model). The periodic review interval runs the learner after N unreviewed user turns or tool-loop iterations (default 10, 0 disables).
 
 - **Learning title** (`#settings-learning-title`):
   - Section: Settings
@@ -269,7 +269,7 @@ Background jobs run a single learner that consolidates recorded experience into 
 - **Periodic review interval** (`#settings-learner-nudge-interval`):
   - Section: Settings
   - Type: number
-  - Notes: Unreviewed user turns or tool-loop iterations before the learner runs without a structural signal; default 10, 0 disables periodic review.
+  - Notes: Unreviewed user turns or tool-loop iterations before the periodic learner runs; default 10, 0 disables periodic review.
 
 ## Project memory
 

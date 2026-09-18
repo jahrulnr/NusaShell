@@ -162,7 +162,7 @@ Perform the task.
   }
 });
 
-test('fails the optional link check for a missing local target', async () => {
+test('warns about a missing local target without failing the normal gate', async () => {
   const { root, skillDir } = await makeSkill('broken-links', `---
 name: broken-links
 description: Check local links. Use when the user asks for a link check.
@@ -174,8 +174,54 @@ See [the missing guide](references/missing.md).
 `);
   try {
     const result = await runValidator(['--check-links', skillDir]);
-    assert.notEqual(result.status, 0);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stdout, /link-missing/);
+    assert.match(result.stdout, /1 warnings/);
+    const strictResult = await runValidator(['--strict', '--check-links', skillDir]);
+    assert.notEqual(strictResult.status, 0);
+    assert.match(strictResult.stdout, /link-missing/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('ignores link-like syntax in fenced and inline code', async () => {
+  const inlineExample = 'Use `[missing](references/missing.md)` as syntax.';
+  const { root, skillDir } = await makeSkill('code-examples', `---
+name: code-examples
+description: Explain code examples. Use when the user asks for this explanation.
+---
+
+# Code examples
+
+${['```go', 'func Max[T constraints.Ordered](a, b T) T {', '    return a', '}', '```'].join(String.fromCharCode(10))}
+
+${inlineExample}
+`);
+  try {
+    const result = await runValidator(['--check-links', skillDir]);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /link-(missing|escape)/);
+    assert.match(result.stdout, /0 errors/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('keeps package-escaping links as errors', async () => {
+  const { root, skillDir } = await makeSkill('escaping-links', `---
+name: escaping-links
+description: Check package links. Use when the user asks for a link check.
+---
+
+# Escaping links
+
+See [outside](../outside.md).
+`);
+  try {
+    const result = await runValidator(['--check-links', skillDir]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stdout, /link-escape/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

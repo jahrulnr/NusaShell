@@ -16,21 +16,24 @@ import (
 // AcpRunStore persists completed ACP runs as one JSON document per run,
 // linked to the parent conversation:
 //
-//	<dir>/conversations/<conversationID>.acp/<runID>.json
+//	<dir>/conversations/<conversationID>/acp/<runID>.json
 //
 // Each run owns its file, so concurrent completions of parallel subagent
 // spawns never rewrite shared state: there is no global append log to
 // interleave or lose updates in, and an atomic write (temp file + rename)
 // means a crash mid-write can only ever damage the run being written.
-// The layout mirrors the existing <conversationID>.chunks sidecar
-// convention; jsonstore's loader only treats conv_*.json as
-// conversations, so the .acp directories are invisible to it.
+// The layout mirrors the conversation folder's other sidecar directories
+// (chunk/, operation/); jsonstore's loader only treats conv_<id>
+// directories as conversations, so they are invisible to it.
 //
 // Stores created before this layout kept every run as JSONL lines in
 // conversations/acp_runs.jsonl, where every completion rewrote the whole
-// shared file. On first use the store migrates that legacy file into the
-// per-run layout and renames it to acp_runs.jsonl.imported so the
-// original bytes stay recoverable.
+// shared file; still older stores kept per-conversation <id>.acp/
+// directories. On first use the store migrates both: the legacy JSONL file
+// is imported into the per-run layout and renamed to
+// acp_runs.jsonl.imported so the original bytes stay recoverable, and the
+// legacy sidecar directories are folded into the conversation folders by
+// migrateLegacyConversationLayout.
 type AcpRunStore struct {
 	dir      string
 	mu       sync.Mutex
@@ -56,14 +59,15 @@ func safeSegment(id string) error {
 }
 
 func (s *AcpRunStore) conversationsDir() string {
-	return filepath.Join(s.dir, "conversations")
+	return filepath.Join(s.dir, conversationsDirName)
 }
 
 func (s *AcpRunStore) conversationDir(conversationID string) (string, error) {
-	if err := safeSegment(conversationID); err != nil {
-		return "", fmt.Errorf("acp run store: conversation %w", err)
+	dir, err := conversationACPDir(s.conversationsDir(), conversationID)
+	if err != nil {
+		return "", fmt.Errorf("acp run store: %w", err)
 	}
-	return filepath.Join(s.conversationsDir(), conversationID+".acp"), nil
+	return dir, nil
 }
 
 func (s *AcpRunStore) runPath(conversationID, runID string) (string, error) {
@@ -115,15 +119,12 @@ func (s *AcpRunStore) Load(runID string) (domain.AcpRunRecord, bool) {
 	if err := s.migrateLegacyLocked(); err != nil {
 		return domain.AcpRunRecord{}, false
 	}
-	entries, err := os.ReadDir(s.conversationsDir())
-	if err != nil {
+	if safeSegment(runID) != nil {
 		return domain.AcpRunRecord{}, false
 	}
-	for _, e := range entries {
-		if e.IsDir() && strings.HasSuffix(e.Name(), ".acp") {
-			if r, ok := readRun(filepath.Join(s.conversationsDir(), e.Name(), runID+".json")); ok {
-				return r, true
-			}
+	for _, name := range s.conversationFolders() {
+		if r, ok := readRun(filepath.Join(s.conversationsDir(), name, acpDirName, runID+".json")); ok {
+			return r, true
 		}
 	}
 	return domain.AcpRunRecord{}, false
@@ -141,14 +142,8 @@ func (s *AcpRunStore) List(conversationID string) []domain.AcpRunRecord {
 
 	var out []domain.AcpRunRecord
 	if conversationID == "" {
-		entries, err := os.ReadDir(s.conversationsDir())
-		if err != nil {
-			return nil
-		}
-		for _, e := range entries {
-			if e.IsDir() && strings.HasSuffix(e.Name(), ".acp") {
-				out = append(out, readConversationRuns(filepath.Join(s.conversationsDir(), e.Name()))...)
-			}
+		for _, name := range s.conversationFolders() {
+			out = append(out, readConversationRuns(filepath.Join(s.conversationsDir(), name, acpDirName))...)
 		}
 	} else {
 		dir, err := s.conversationDir(conversationID)
@@ -161,15 +156,36 @@ func (s *AcpRunStore) List(conversationID string) []domain.AcpRunRecord {
 	return out
 }
 
+// conversationFolders lists the per-conversation directories under the
+// conversations root. Only conv_<id> directories are conversation folders;
+// flat files (todos.json, acp_runs.jsonl.imported, ...) are not.
+func (s *AcpRunStore) conversationFolders() []string {
+	entries, err := os.ReadDir(s.conversationsDir())
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() && strings.HasPrefix(name, "conv_") && !strings.Contains(name, ".") {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // migrateLegacyLocked imports a pre-existing global acp_runs.jsonl into
-// the per-run layout, then renames it to acp_runs.jsonl.imported. It must
-// run under s.mu. Failures block further saves rather than letting new
-// writes fall back into the shared legacy file; malformed lines and lines
-// with unusable IDs are skipped (the .imported copy keeps the originals).
+// the per-run layout, then renames it to acp_runs.jsonl.imported. Legacy
+// per-conversation <id>.acp/ directories are folded into the conversation
+// folders by migrateLegacyConversationLayout. It must run under s.mu.
+// Failures block further saves rather than letting new writes fall back
+// into the shared legacy file; malformed lines and lines with unusable IDs
+// are skipped (the .imported copy keeps the originals).
 func (s *AcpRunStore) migrateLegacyLocked() error {
 	if s.migrated {
 		return nil
 	}
+	migrateLegacyConversationLayout(s.conversationsDir())
 	legacy := filepath.Join(s.conversationsDir(), "acp_runs.jsonl")
 	defer func() { s.migrated = true }()
 

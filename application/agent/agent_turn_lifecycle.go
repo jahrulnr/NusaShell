@@ -145,6 +145,7 @@ func (a *Service) InterruptTurn(run *TurnRun, msgID string, round StreamedTurnRo
 		ContextTokens: contextTokens,
 	})
 	a.EmitFinalTurnDiff(run)
+	a.PersistTurnDiff(run)
 }
 
 func (a *Service) discardQueuedSteer(run *TurnRun) {

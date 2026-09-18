@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] - 2026-09-18
+
+### Fixed
+
+- **Learning graph refreshes stay responsive at thousands of edges.**
+  Unchanged graph requests now coalesce background rebuilds, derived-edge
+  signals are aggregated once per build, and edge lookup uses an in-memory
+  pair index instead of deep-copying the full JSONL collection for every
+  candidate. The browser renders a deterministic budget of the strongest
+  relationships while keeping the complete graph in the backend.
+
 ## [0.8.4] - 2026-09-16
 
 ### Fixed

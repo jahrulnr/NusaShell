@@ -162,6 +162,7 @@ func (a *Service) finishTurn(run *TurnRun, messageID, model string, usage ChatUs
 		AutoContinue:  autoContinue,
 	})
 	a.EmitFinalTurnDiff(run)
+	a.PersistTurnDiff(run)
 	a.log("info", "agent", "turn finished: %s (in %d / out %d)", run.ID, usage.InputTokens, usage.OutputTokens)
 
 	// Pipeline agent steps are unattended automation, not user rooms.

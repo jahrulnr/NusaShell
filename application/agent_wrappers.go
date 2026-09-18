@@ -245,6 +245,7 @@ func (a *App) agentDeps() agent.Deps {
 		DataDir:            a.DataDir,
 		DefaultWorkspace:   a.defaultWorkspace,
 		StartedAt:          a.startedAt,
+		TurnPatches:        a.TurnPatches,
 		ResolveModel:       a.resolveModel,
 		WaitRetry:          a.waitForRetry,
 		WaitSlowDown:       a.waitSlowDown,
@@ -272,10 +273,7 @@ func (a *App) agentDeps() agent.Deps {
 		RecordTurnPairs: func(allIDs, newIDs []string) {
 			a.learnService().RecordTurnPairs(allIDs, newIDs)
 		},
-		AcknowledgeLearner: acknowledgeLearnerResult,
-		SkillCreatorRef: func() (string, string) {
-			return a.learnService().LearnerSkillCreatorReference()
-		},
+		AcknowledgeLearner:         acknowledgeLearnerResult,
 		DelegateSnapshot:           a.delegateRunSnapshot,
 		DecorateRateLimit:          a.decorateRateLimitError,
 		RecordExperience:           a.recordExperience,

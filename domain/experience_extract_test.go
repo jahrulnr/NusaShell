@@ -26,8 +26,8 @@ func TestExtractExperienceIncludesCorrections(t *testing.T) {
 		t.Fatalf("correction=%q", exp.Corrections[0].UserSaid)
 	}
 	trig := DecideLearningTrigger(exp, nil)
-	if !trig.Enqueue {
-		t.Fatal("correction should enqueue")
+	if trig.Enqueue {
+		t.Fatalf("correction must wait for periodic review: %+v", trig)
 	}
 }
 
@@ -233,8 +233,8 @@ func TestExtractExperienceRootCauseRecoveredRequiresSameToolFailThenSuccess(t *t
 	if !exp.Signals.RootCauseRecovered {
 		t.Fatalf("same tool fail then success must be recovery: %+v", exp.Signals)
 	}
-	if DecideLearningTrigger(exp, nil).Reason != TriggerRecovery {
-		t.Fatalf("recovery should enqueue: %+v", DecideLearningTrigger(exp, nil))
+	if got := DecideLearningTrigger(exp, nil); got.Enqueue {
+		t.Fatalf("recovery must wait for periodic review: %+v", got)
 	}
 }
 

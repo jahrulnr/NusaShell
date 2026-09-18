@@ -160,3 +160,127 @@ func TestEnsureBinaryReturnsErrorForUnsupportedPlatform(t *testing.T) {
 		t.Fatal("expected error for unsupported platform")
 	}
 }
+
+func TestDeleteRemovesVersionDir(t *testing.T) {
+	dir := t.TempDir()
+	m := &Manager{BaseDir: dir}
+
+	// Set up an install
+	version := "0.147.0"
+	versionDir := filepath.Join(dir, version)
+	os.MkdirAll(versionDir, 0o755)
+	binName := BinaryName
+	if runtime.GOOS == "windows" {
+		binName = BinaryNameWindows
+	}
+	os.WriteFile(filepath.Join(versionDir, binName), []byte("fake binary"), 0o755)
+
+	man := &Manifest{
+		ActiveVersion: version,
+		Installed: map[string]InstalledVer{
+			version: {Path: filepath.Join(versionDir, binName), Source: "test"},
+		},
+	}
+	m.SaveManifest(man)
+
+	if err := m.Delete(version); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	// Version dir should be gone
+	if _, err := os.Stat(versionDir); !os.IsNotExist(err) {
+		t.Errorf("version dir still exists after Delete")
+	}
+
+	// Manifest should have no active version and no installed entry
+	loaded, err := m.LoadManifest()
+	if err != nil {
+		t.Fatalf("LoadManifest: %v", err)
+	}
+	if loaded.ActiveVersion != "" {
+		t.Errorf("ActiveVersion = %q, want empty", loaded.ActiveVersion)
+	}
+	if _, ok := loaded.Installed[version]; ok {
+		t.Errorf("version %q still in Installed map", version)
+	}
+}
+
+func TestDeleteKeepsOtherVersions(t *testing.T) {
+	dir := t.TempDir()
+	m := &Manager{BaseDir: dir}
+
+	// Set up two versions
+	for _, version := range []string{"0.147.0", "0.148.0"} {
+		versionDir := filepath.Join(dir, version)
+		os.MkdirAll(versionDir, 0o755)
+		binName := BinaryName
+		if runtime.GOOS == "windows" {
+			binName = BinaryNameWindows
+		}
+		os.WriteFile(filepath.Join(versionDir, binName), []byte("fake binary"), 0o755)
+	}
+	man := &Manifest{
+		ActiveVersion: "0.147.0",
+		Installed: map[string]InstalledVer{
+			"0.147.0": {Path: filepath.Join(dir, "0.147.0", "codex"), Source: "test"},
+			"0.148.0": {Path: filepath.Join(dir, "0.148.0", "codex"), Source: "test"},
+		},
+	}
+	m.SaveManifest(man)
+
+	if err := m.Delete("0.147.0"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	loaded, err := m.LoadManifest()
+	if err != nil {
+		t.Fatalf("LoadManifest: %v", err)
+	}
+	if loaded.ActiveVersion != "" {
+		t.Errorf("ActiveVersion = %q, want empty (was deleted)", loaded.ActiveVersion)
+	}
+	if _, ok := loaded.Installed["0.148.0"]; !ok {
+		t.Error("0.148.0 should still be in Installed map")
+	}
+}
+
+func TestEnsureBinaryForceReDownload(t *testing.T) {
+	dir := t.TempDir()
+	m := &Manager{BaseDir: dir}
+
+	// Simulate an existing install at v0.147.0
+	version := "0.147.0"
+	versionDir := filepath.Join(dir, version)
+	os.MkdirAll(versionDir, 0o755)
+	binName := BinaryName
+	if runtime.GOOS == "windows" {
+		binName = BinaryNameWindows
+	}
+	os.WriteFile(filepath.Join(versionDir, binName), []byte("old binary"), 0o755)
+
+	man := &Manifest{
+		ActiveVersion: version,
+		Installed: map[string]InstalledVer{
+			version: {Path: filepath.Join(versionDir, binName), Source: "test"},
+		},
+	}
+	m.SaveManifest(man)
+
+	// Without force, returns the existing binary
+	got, err := m.EnsureBinary(t.Context())
+	if err != nil {
+		t.Fatalf("EnsureBinary: %v", err)
+	}
+	if got != filepath.Join(versionDir, binName) {
+		t.Errorf("EnsureBinary without force = %q, want existing binary", got)
+	}
+
+	// With force (Delete + re-download), the old dir should be gone
+	// and EnsureBinary should fail because we can't reach GitHub in tests
+	if err := m.Delete(version); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(versionDir, binName)); !os.IsNotExist(err) {
+		t.Error("old binary dir should be gone after Delete")
+	}
+}

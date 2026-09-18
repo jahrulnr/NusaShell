@@ -139,7 +139,7 @@ unprocessed payloads.
 When a subagent finishes (completed, failed, or cancelled):
 
 1. The full transcript is persisted to
-   `conversations/<conversation_id>.acp/<run_id>.json` under the data
+   `conversations/<conversation_id>/acp/<run_id>.json` under the data
    directory — one JSON file per run, linked to the parent conversation.
    Writes are atomic and per-run, so parallel spawns finishing at the
    same time never contend on a shared file.

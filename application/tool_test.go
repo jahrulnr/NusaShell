@@ -8,6 +8,7 @@ import (
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/domain/turndiff"
+	"nusashell/infrastructure/jsonstore"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -227,7 +228,7 @@ func TestLearningToolCallsRejectBannedTools(t *testing.T) {
 			learn := app.runOneTool(run, "", domain.ToolCall{
 				ID:   "call-learn",
 				Name: learnerResultToolName,
-				Args: `{"stage_reached":"consolidate","consolidate":{"action":"no_op","reason_for_no_op":"nothing durable"}}`,
+				Args: `{"consolidate":{"action":"no_op","reason_for_no_op":"nothing durable"}}`,
 			}, ModelCapabilities{}, domain.Settings{}, 1)
 			if learn.Status == domain.ToolFailed {
 				t.Fatalf("learn() was rejected: %s", learn.Output)
@@ -245,7 +246,7 @@ func TestLearnerResultToolRejectedForConversationAgent(t *testing.T) {
 	res := app.runOneTool(run, "", domain.ToolCall{
 		ID:   "call-learn",
 		Name: learnerResultToolName,
-		Args: `{"stage_reached":"consolidate","consolidate":{"action":"no_op","reason_for_no_op":"x"}}`,
+		Args: `{"consolidate":{"action":"no_op","reason_for_no_op":"x"}}`,
 	}, ModelCapabilities{}, domain.Settings{}, 1)
 	if res.Status != domain.ToolFailed {
 		t.Fatalf("conversation agent must not execute learn(), status=%s output=%s", res.Status, res.Output)
@@ -721,7 +722,7 @@ func TestRunOneToolFilePatchEmitsTurnDiff(t *testing.T) {
 	}
 }
 
-func TestRunOneToolExecDoesNotCreateJournal(t *testing.T) {
+func TestRunOneToolExecDoesNotProduceTurnDiff(t *testing.T) {
 	dataDir := t.TempDir()
 	ws := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(ws, 0o755); err != nil {
@@ -743,19 +744,46 @@ func TestRunOneToolExecDoesNotCreateJournal(t *testing.T) {
 	if res.Status != domain.ToolOK {
 		t.Fatalf("exec status = %v output=%q", res.Status, res.Output)
 	}
-	matches, err := filepath.Glob(filepath.Join(dataDir, "conversations", "*.journal"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matches) != 0 {
-		t.Fatalf("exec created journal sidecars: %v", matches)
-	}
 	var ok bool
 	run.WithTurnDiff(func() {
 		_, ok = run.TurnDiff.UnifiedDiff()
 	})
 	if ok {
 		t.Fatal("exec must not produce a turn diff")
+	}
+}
+
+// TestInterruptTurnPersistsOperationPatch proves the operation/ wiring end to
+// end: a turn interrupted after committing file mutations lands its net
+// unified diff in the conversation's operation/ directory.
+func TestInterruptTurnPersistsOperationPatch(t *testing.T) {
+	dir := t.TempDir()
+	conv := &domain.Conversation{
+		ID:       "c1",
+		Messages: []domain.Message{{ID: "m1", Role: domain.RoleAssistant}},
+	}
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		runs:          map[string]*TurnRun{},
+		TurnPatches:   jsonstore.NewOperationStore(dir),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &TurnRun{ID: "run_patch", ConversationID: "c1", Ctx: ctx, Cancel: cancel, Workspace: dir}
+	run.InitTurnDiff()
+	run.TurnDiff.TrackDelta(turndiff.AddFile("note.txt", "hello\n", nil))
+
+	app.interruptTurn(run, "m1", streamedTurnRound{Content: "halo"}, ChatUsage{}, 0, "model-x")
+
+	patchPath := filepath.Join(dir, "conversations", "c1", "operation", "run_patch.patch")
+	b, err := os.ReadFile(patchPath)
+	if err != nil {
+		t.Fatalf("turn patch missing at %s: %v", patchPath, err)
+	}
+	if !strings.Contains(string(b), "+hello") {
+		t.Fatalf("patch body = %q", b)
 	}
 }
 

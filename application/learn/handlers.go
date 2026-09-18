@@ -2,8 +2,11 @@ package learn
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"sort"
+	"strconv"
 	"strings"
 
 	"nusashell/contracts"
@@ -171,26 +174,15 @@ func (s *Service) HandleLearningSearch(req contracts.LearningSearchRequest) (any
 // are pre-computed by the EdgeBuilder (content/embedding similarity plus
 // fragment metadata); used_with edges come from successful tool usage.
 func (s *Service) HandleLearningGraph() (any, *contracts.RPCError) {
-	// Build edges if edge builder is configured (idempotent — strengthens
-	// existing edges, doesn't duplicate). The build is queued asynchronously
-	// via deps.Go so the RPC returns the current graph immediately without
-	// blocking on edge discovery (which may do embedding work).
-	if s.builder != nil {
-		// Resolve embedder lazily for embedding-based edges
-		if embedder, modelID := s.ResolveEmbedderPair(); embedder != nil {
-			s.builder.SetEmbedder(embedder, modelID)
-		}
-		s.goSafe("learning", func() {
-			if err := s.builder.Build(context.Background()); err != nil {
-				s.log("warn", "learning", "graph build: %v", err)
-			}
-		})
-	}
-
 	// Collect nodes
 	nodes := make([]contracts.LearningGraphNode, 0)
+	var skills []*domain.Skill
 	if s.deps.Skills != nil {
-		for _, sk := range s.deps.Skills.List() {
+		skills = s.deps.Skills.List()
+		for _, sk := range skills {
+			if sk == nil {
+				continue
+			}
 			nodes = append(nodes, contracts.LearningGraphNode{
 				ID:      sk.ID,
 				Kind:    "skill",
@@ -204,20 +196,26 @@ func (s *Service) HandleLearningGraph() (any, *contracts.RPCError) {
 	// per whole document), not per-fact entries — the node label is the
 	// first line so it reads as the document's subject, and the tier marks
 	// it as user memory in the UI (distinct shape/color from fragments).
+	var userMemory *domain.MemoryDocument
 	if s.deps.User != nil {
-		mem := s.deps.User.Load()
-		for i := range mem.Entries {
+		userMemory = s.deps.User.Load()
+		if userMemory == nil {
+			userMemory = &domain.MemoryDocument{}
+		}
+		for i := range userMemory.Entries {
 			nodes = append(nodes, contracts.LearningGraphNode{
-				ID:   mem.Entries[i].ID,
+				ID:   userMemory.Entries[i].ID,
 				Kind: "memory",
 				Tier: domain.MemoryTierUser,
-				Name: userNodeLabel(mem.Entries[i].Content),
+				Name: userNodeLabel(userMemory.Entries[i].Content),
 			})
 		}
 	}
 	// Fragment nodes (one node per fact).
+	var records []*domain.MemoryRecord
 	if s.deps.Records != nil {
-		for _, f := range s.deps.Records.List() {
+		records = s.deps.Records.List()
+		for _, f := range records {
 			if f == nil || !f.Retrievable() {
 				continue
 			}
@@ -260,6 +258,14 @@ func (s *Service) HandleLearningGraph() (any, *contracts.RPCError) {
 		}
 	}
 
+	// Rebuild derived edges only once per catalog/model snapshot. The first
+	// request returns the current graph immediately; the background build emits
+	// learning.graph.updated when its new edges are ready.
+	if s.builder != nil {
+		embedder, modelID := s.ResolveEmbedderPair()
+		s.scheduleGraphBuild(learningGraphFingerprint(skills, userMemory, records, modelID), embedder, modelID)
+	}
+
 	if s.deps.Trajectory != nil {
 		s.deps.Trajectory.Record("graph_load", map[string]interface{}{
 			"nodes": len(nodes),
@@ -267,6 +273,50 @@ func (s *Service) HandleLearningGraph() (any, *contracts.RPCError) {
 		})
 	}
 	return contracts.LearningGraphResult{Nodes: nodes, Edges: edges}, nil
+}
+
+// learningGraphFingerprint covers the source fields used by EdgeBuilder and
+// the node catalog. Sorting makes harmless store ordering differences avoid a
+// full rebuild while still invalidating the snapshot when content changes.
+func learningGraphFingerprint(skills []*domain.Skill, userMemory *domain.MemoryDocument, records []*domain.MemoryRecord, modelID string) string {
+	parts := []string{"model\x00" + modelID}
+	for _, skill := range skills {
+		if skill == nil {
+			continue
+		}
+		parts = append(parts, strings.Join([]string{
+			"skill", skill.ID, skill.Name, skill.Description, skill.Content,
+			skill.Category, string(skill.Status), string(skill.Origin), skill.OwnedBy,
+			strconv.Itoa(skill.Version), strconv.Itoa(skill.ActiveVersion),
+		}, "\x00"))
+	}
+	if userMemory != nil {
+		for _, entry := range userMemory.Entries {
+			parts = append(parts, strings.Join([]string{"user", entry.ID, entry.Content, entry.UpdatedAt.String()}, "\x00"))
+		}
+	}
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		validUntil := ""
+		if record.ValidUntil != nil {
+			validUntil = record.ValidUntil.String()
+		}
+		parts = append(parts, strings.Join([]string{
+			"record", record.ID, record.Type, record.Subject, record.Predicate, record.Object,
+			record.Body, record.Scope.Level, record.Scope.Domain, record.Scope.Project,
+			record.Scope.Repo, record.Scope.Task, record.Status, record.ValidFrom.String(),
+			validUntil, record.UpdatedAt.String(),
+		}, "\x00"))
+	}
+	sort.Strings(parts)
+	h := sha256.New()
+	for _, part := range parts {
+		_, _ = h.Write([]byte(part))
+		_, _ = h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // memoryNodeLabel shortens a fragment's content to a single-line node

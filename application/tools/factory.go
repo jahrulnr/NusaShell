@@ -26,10 +26,9 @@ const (
 	// pipeline room, with ACP tools AND the delegate tool itself removed
 	// so delegated agents cannot recurse.
 	AgentDelegate AgentKind = "delegate"
-	// AgentLearner is the unified background learning agent (memory
-	// consolidate + optional skill evaluate/evolve in one spawn). It
-	// receives the conversation toolbox minus project memory, ACP/
-	// delegate, and MCP families, plus learn() for typed catalog commits.
+	// AgentLearner is the periodic background memory reviewer. It receives the
+	// conversation toolbox minus project memory, ACP/delegate, and MCP
+	// families, plus learn() for typed catalog commits.
 	// Profile writes still use file_*. Cross-room inspection uses
 	// conversation(op=list|search|read|info).
 	AgentLearner AgentKind = "learner"

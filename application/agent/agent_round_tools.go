@@ -239,7 +239,7 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 	if isLearnerKind(run.ToolKind) && tools.IsLearnerSkillMutation(toolCall.Name, []byte(toolCall.Args)) {
 		res := ToolExecResult{
 			Status: domain.ToolFailed,
-			Output: "error: learner skill mutations are committed by learn() after Stage 3",
+			Output: "error: the periodic learner is memory-only; skill mutations are not available",
 		}
 		a.emitToolCompleted(run, toolCall, res)
 		return res

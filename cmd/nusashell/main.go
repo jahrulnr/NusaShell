@@ -185,10 +185,6 @@ func run() error {
 		_ = coreLock.Release()
 	}()
 
-	if n := application.RemoveOrphanJournalSidecars(dataDir); n > 0 {
-		logger.Info("removed leftover journal sidecars", "count", n)
-	}
-
 	store, err := jsonstore.New(dataDir)
 	if err != nil {
 		return err
@@ -367,6 +363,7 @@ func run() error {
 		AcpAgents:                   &jsonstore.AcpAgents{S: store},
 		Acp:                         acpRuntime,
 		AcpRunStorage:               jsonstore.NewAcpRunStore(dataDir),
+		TurnPatches:                 jsonstore.NewOperationStore(dataDir),
 		Pairing:                     pairingSvc,
 		Restart:                     requestRestart,
 		ListenAddr:                  net.JoinHostPort(host, port),

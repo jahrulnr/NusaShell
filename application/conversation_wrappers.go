@@ -128,12 +128,6 @@ func listInstructionFiles(workspace string) []string {
 	return conversation.ListInstructionFiles(workspace)
 }
 
-// RemoveOrphanJournalSidecars deletes leftover conversations/*.journal
-// directories from the retired ChangeJournal. Best-effort and non-fatal.
-func RemoveOrphanJournalSidecars(dataDir string) int {
-	return conversation.RemoveOrphanJournalSidecars(dataDir)
-}
-
 func (a *App) ListConversations(currentConvID string, limit, offset int) (int, []ConversationSummaryDTO, error) {
 	return a.conversationService().ListRooms(currentConvID, limit, offset)
 }

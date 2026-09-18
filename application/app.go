@@ -109,7 +109,10 @@ type App struct {
 	AcpAgents        AcpAgentStore
 	Acp              AcpRuntime
 	AcpRunStorage    domain.AcpRunStorage
-	retrySleeper     RetrySleeper
+	// TurnPatches persists the per-turn net unified diff under each
+	// conversation's operation/ directory. Nil disables the patch history.
+	TurnPatches  domain.TurnPatchStorage
+	retrySleeper RetrySleeper
 
 	// startedAt is the wall-clock time this process came up. Conversations
 	// whose last activity predates it were used before the restart; the
@@ -510,6 +513,9 @@ type Deps struct {
 	AcpAgents                   AcpAgentStore
 	Acp                         AcpRuntime
 	AcpRunStorage               domain.AcpRunStorage
+	// TurnPatches persists the per-turn net unified diff under each
+	// conversation's operation/ directory. Nil disables the patch history.
+	TurnPatches domain.TurnPatchStorage
 	// Logger is an optional structured logger for crash recovery from
 	// fire-and-forget goroutines. Nil = slog.Default().
 	Logger     *slog.Logger
@@ -593,6 +599,7 @@ func NewApp(deps Deps) *App {
 		AcpAgents:                   deps.AcpAgents,
 		Acp:                         deps.Acp,
 		AcpRunStorage:               deps.AcpRunStorage,
+		TurnPatches:                 deps.TurnPatches,
 		retrySleeper:                deps.RetrySleeper,
 		startedAt:                   clock.NewTime().Time(),
 		Logger:                      deps.Logger,

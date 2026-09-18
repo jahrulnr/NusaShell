@@ -32,8 +32,7 @@ Errors block the normal gate:
 - a second frontmatter block accidentally included in body-only content;
 - an unfinished [TODO: ...] placeholder outside a fenced code block;
 - symlinks in the package;
-- local Markdown links that escape the package or point to missing files when
-  --check-links is enabled.
+- local Markdown links that escape the package when --check-links is enabled.
 
 The parser covers the small frontmatter subset NusaShell needs. Keep metadata
 under the metadata map and requirements under requirements.mcp; unusual
@@ -50,7 +49,9 @@ Warnings do not fail the normal gate:
 - allowed-tools is present. It is accepted for Codex compatibility but is
   not enforced by NusaShell;
 - angle brackets appear in a description. NusaShell accepts them, but they
-  may indicate an unfinished placeholder.
+  may indicate an unfinished placeholder;
+- a prose Markdown link points to a missing local target when --check-links is
+  enabled. Use --strict when missing targets should fail the validation.
 
 Use --strict for a newly authored package when you want a clean package shape.
 Do not use strict mode as a blanket retroactive gate until existing package
@@ -77,8 +78,10 @@ tooling.
 
 The optional link check resolves only relative links within the package.
 External URLs, anchors, and root-relative site routes such as /docs are not
-resolved. A relative link must stay inside the skill directory and point to an
-existing file or directory.
+resolved. Fenced code blocks and inline-code spans are ignored. A relative
+link that leaves the package is an error; a missing target is a warning because
+skills commonly include illustrative links or placeholders. Use --strict to
+make that warning fail.
 
 ## What it cannot prove
 

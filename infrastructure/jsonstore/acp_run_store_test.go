@@ -106,7 +106,7 @@ func TestAcpRunStorePerConversationLayout(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	wantPath := filepath.Join(dir, "conversations", "conv_abc123.acp", "acprun_layout.json")
+	wantPath := filepath.Join(dir, "conversations", "conv_abc123", "acp", "acprun_layout.json")
 	b, err := os.ReadFile(wantPath)
 	if err != nil {
 		t.Fatalf("run file not at per-conversation path %s: %v", wantPath, err)
@@ -125,7 +125,7 @@ func TestAcpRunStorePath(t *testing.T) {
 	store := NewAcpRunStore(dir)
 
 	got := store.Path("conv_abc123", "acprun_path")
-	want := filepath.Join(dir, "conversations", "conv_abc123.acp", "acprun_path.json")
+	want := filepath.Join(dir, "conversations", "conv_abc123", "acp", "acprun_path.json")
 	if got != want {
 		t.Fatalf("Path = %q, want %q", got, want)
 	}
@@ -306,7 +306,7 @@ func TestAcpRunStoreMigratesLegacyJSONL(t *testing.T) {
 		t.Fatalf("migrated l2 missing/wrong: ok=%v %+v", ok, got2)
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, "conversations", "conv_old.acp", "acprun_l1.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "conversations", "conv_old", "acp", "acprun_l1.json")); err != nil {
 		t.Fatalf("legacy record not written to per-conversation layout: %v", err)
 	}
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {

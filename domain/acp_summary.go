@@ -106,7 +106,7 @@ func SubagentCompletionResult(run *AcpRun, outputPath string) string {
 // the human-readable summary the parent agent reads and acts on.
 //
 // The full transcript is persisted as JSON to the run's output_path
-// (conversations/<conv_id>.acp/acprun_<id>.json). The tool result only
+// (conversations/<conv_id>/acp/acprun_<id>.json). The tool result only
 // carries the LAST meaningful content so the parent agent sees the final
 // result, not intermediate progress. Selection order:
 //  1. Last `text` chunk (the agent's final message/summary)

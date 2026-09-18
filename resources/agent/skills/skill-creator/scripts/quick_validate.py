@@ -5,7 +5,8 @@ Usage:
     python3 quick_validate.py [--strict] [--check-links] [--json] <skill-dir>...
 
 The validator intentionally uses only the Python standard library.  It checks
-the package contract and catches unfinished scaffolding; it does not evaluate
+the package contract and catches unfinished scaffolding; advisory quality
+findings are warnings and do not fail the normal gate. It does not evaluate
 whether the instructions produce good agent behavior.
 """
 
@@ -558,10 +559,36 @@ def _validate_mcp_requirements(report: ValidationReport, parsed: ParsedFrontMatt
             )
 
 
-def _find_unfinished_todo(body: str, start_line: int) -> Iterable[Tuple[int, str]]:
+def _strip_inline_code(line: str) -> str:
+    """Replace closed inline-code spans with spaces before prose scanning."""
+
+    chars = list(line)
+    index = 0
+    while index < len(line):
+        if line[index] != "`":
+            index += 1
+            continue
+        start = index
+        while index < len(line) and line[index] == "`":
+            index += 1
+        marker = line[start:index]
+        closing = line.find(marker, index)
+        if closing < 0:
+            break
+        end = closing + len(marker)
+        chars[start:end] = [" "] * (end - start)
+        index = end
+    return "".join(chars)
+
+
+def _iter_markdown_prose_lines(
+    text: str, start_line: int = 1
+) -> Iterable[Tuple[int, str]]:
+    """Yield non-fenced Markdown lines with inline code masked out."""
+
     fence_marker: Optional[str] = None
     fence_length = 0
-    for offset, line in enumerate(body.splitlines()):
+    for offset, line in enumerate(text.splitlines()):
         fence = FENCE_RE.fullmatch(line)
         if fence:
             marker = fence.group(1)
@@ -576,8 +603,14 @@ def _find_unfinished_todo(body: str, start_line: int) -> Iterable[Tuple[int, str
                 fence_marker = None
                 fence_length = 0
             continue
-        if fence_marker is None and TODO_RE.fullmatch(line):
-            yield start_line + offset, line.strip()
+        if fence_marker is None:
+            yield start_line + offset, _strip_inline_code(line)
+
+
+def _find_unfinished_todo(body: str, start_line: int) -> Iterable[Tuple[int, str]]:
+    for line_number, line in _iter_markdown_prose_lines(body, start_line):
+        if TODO_RE.fullmatch(line):
+            yield line_number, line.strip()
 
 
 def _validate_body(report: ValidationReport, parsed: ParsedFrontMatter, raw_bytes: int) -> None:
@@ -667,7 +700,7 @@ def _validate_links(report: ValidationReport, skill_path: Path, markdown_files: 
             text = source.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        for offset, line in enumerate(text.splitlines(), start=1):
+        for offset, line in _iter_markdown_prose_lines(text):
             for match in MARKDOWN_LINK_RE.finditer(line):
                 target = match.group(1).strip()
                 if target.startswith("<") and target.endswith(">"):
@@ -688,7 +721,7 @@ def _validate_links(report: ValidationReport, skill_path: Path, markdown_files: 
                     _add(report, "error", "link-escape", f"markdown link escapes the skill package: {target}", offset)
                     continue
                 if not resolved.exists():
-                    _add(report, "error", "link-missing", f"markdown link target does not exist: {target}", offset)
+                    _add(report, "warning", "link-missing", f"markdown link target does not exist: {target}", offset)
 
 
 def validate_skill_result(
@@ -783,7 +816,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "--check-links",
         action="store_true",
-        help="verify relative Markdown links inside the package",
+        help="check prose relative Markdown links inside the package",
     )
     parser.add_argument(
         "--json",

@@ -60,24 +60,24 @@ execute arbitrary side effects.
 
 ### Learner `learn()` (background agent only)
 
-The conversation agent never sees this tool. The background learner advertises
-a pruned toolbox (no `memory_project`, subagent, or MCP family) plus
-`conversation(op=list|search|read|info)` for cross-room inspection, and
-commits catalog records with `learn()` the same way compaction commits a
+The conversation agent never sees this tool. The periodic background learner
+advertises a pruned toolbox (no `memory_project`, subagent, or MCP family)
+plus `conversation(op=list|search|read|info)` for cross-room inspection, and
+commits memory records with `learn()` the same way compaction commits a
 handoff with `summary()`. Its `skill` dispatcher is read-only (`list` and
-`search`); `save` and `delete` are rejected, and approved Stage 3 skill
-changes are applied after the typed learner result.
+`search`); `save` and `delete` are rejected because this learner does not
+change skills.
 
 Good examples:
 
-    learn(stage_reached="consolidate", consolidate={"action":"no_op","reason_for_no_op":"one-off factual question"})
-    learn(stage_reached="consolidate", consolidate={"action":"write","entry":{"type":"preference","content":"Prefers Go over Python for CLI tools because of static binaries","evidence":"pakai Go aja untuk CLI","scope":"user"}})
+    learn(consolidate={"action":"no_op","reason_for_no_op":"nothing durable in this periodic range"})
+    learn(consolidate={"action":"write","entry":{"type":"preference","content":"Prefers Go over Python for CLI tools because of static binaries","evidence":"pakai Go aja untuk CLI","scope":"user"}})
 
 Bad examples:
 
-    {"stage_reached":"consolidate","consolidate":{"action":"no_op"}}  # assistant text, not a tool call
+    {"consolidate":{"action":"no_op"}}  # assistant text, not a tool call
     memory(op="save", body="prefers Go")  # memory is read-only; catalog writes go through learn()
-    learn()  # missing stage_reached and consolidate
+    learn()  # missing consolidate
 
 ### Documentation discovery and search
 
@@ -586,7 +586,7 @@ user steer; the steer is last so the next provider request ends with the
 newest user instruction. While any subagent is running, the
 parent's auto-continue chain pauses with reason
 `awaiting-background-jobs`. Completed run transcripts are persisted per
-conversation under `conversations/<conversation_id>.acp/`. Permissions are auto-allowed
+conversation under `conversations/<conversation_id>/acp/`. Permissions are auto-allowed
 (orchestrator delegates authority). The user can peek the transcript
 from the Agent dock / drawer / popup. Unattended pipeline agents never
 see these tools.

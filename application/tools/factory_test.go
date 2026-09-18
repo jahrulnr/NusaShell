@@ -262,6 +262,11 @@ func TestLearnerResultToolAdvertisesMemoryScopeFields(t *testing.T) {
 			t.Fatalf("learner entry schema missing %q", field)
 		}
 	}
+	for _, field := range []string{"stage_reached", "evaluate", "evolve"} {
+		if _, ok := consolidate[field]; ok {
+			t.Fatalf("periodic learner schema must not expose staged field %q", field)
+		}
+	}
 }
 
 func TestToolFactoryCompactionAgentIsSummaryOnly(t *testing.T) {

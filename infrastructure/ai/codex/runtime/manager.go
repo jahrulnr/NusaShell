@@ -219,6 +219,32 @@ func (m *Manager) EnsureBinary(ctx context.Context) (string, error) {
 	return m.DownloadLatest(ctx)
 }
 
+// Delete removes an installed Codex runtime version from disk and
+// updates the manifest. If the deleted version was the active one,
+// ActiveVersion is cleared so the next EnsureBinary call downloads
+// the latest release.
+func (m *Manager) Delete(version string) error {
+	// Remove the version directory.
+	versionDir := m.versionDir(version)
+	if err := os.RemoveAll(versionDir); err != nil {
+		return fmt.Errorf("runtime: delete version dir %s: %w", versionDir, err)
+	}
+
+	// Update manifest.
+	man, err := m.LoadManifest()
+	if err != nil {
+		return fmt.Errorf("runtime: load manifest after delete: %w", err)
+	}
+	delete(man.Installed, version)
+	if man.ActiveVersion == version {
+		man.ActiveVersion = ""
+	}
+	if err := m.SaveManifest(man); err != nil {
+		return fmt.Errorf("runtime: save manifest after delete: %w", err)
+	}
+	return nil
+}
+
 // DownloadLatest fetches and installs the latest Codex release.
 // Returns the path to the installed binary.
 func (m *Manager) DownloadLatest(ctx context.Context) (string, error) {

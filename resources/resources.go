@@ -154,8 +154,6 @@ func ToolPrompt(name string) string {
 
 const (
 	compactedSummaries      = "{{compacted_summaries}}"
-	learnerTriggerReason    = "{{trigger_reason}}"
-	learnerProcedureCount   = "{{procedure_count}}"
 	learnerConversationID   = "{{conversation_id}}"
 	learnerConversationFile = "{{conversation_file}}"
 	learnerProjectLabel     = "{{project_label}}"
@@ -200,18 +198,17 @@ func LearnerUserPrompt() string {
 	return UserPrompt("learner")
 }
 
-// RenderLearnerUserPrompt fills user/learner.md placeholders for one learning turn.
-func RenderLearnerUserPrompt(triggerReason string, procedureCount int, conversationID, conversationFile string, messageStart, messageEnd int) string {
-	return RenderLearnerUserPromptForProject(triggerReason, procedureCount, conversationID, conversationFile, messageStart, messageEnd, "")
+// RenderLearnerUserPrompt fills the periodic learner user-role template for
+// one source range.
+func RenderLearnerUserPrompt(conversationID, conversationFile string, messageStart, messageEnd int) string {
+	return RenderLearnerUserPromptForProject(conversationID, conversationFile, messageStart, messageEnd, "")
 }
 
 // RenderLearnerUserPromptForProject fills the learner user-role template and
 // includes the source experience's authoritative project label. The label is
 // evidence for scope selection, not a value the model may invent.
-func RenderLearnerUserPromptForProject(triggerReason string, procedureCount int, conversationID, conversationFile string, messageStart, messageEnd int, projectLabel string) string {
+func RenderLearnerUserPromptForProject(conversationID, conversationFile string, messageStart, messageEnd int, projectLabel string) string {
 	return strings.NewReplacer(
-		learnerTriggerReason, triggerReason,
-		learnerProcedureCount, strconv.Itoa(procedureCount),
 		learnerConversationID, conversationID,
 		learnerConversationFile, conversationFile,
 		learnerProjectLabel, projectLabel,

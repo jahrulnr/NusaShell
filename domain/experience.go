@@ -78,9 +78,9 @@ const (
 	PriorityP4Inferred  LearningPriority = 4 // periodic review (Hermes-style nudge)
 )
 
-// Learning trigger reasons. Orchestrator spawn uses structural and periodic
-// reasons only. explicit_teaching is classified inside the learner, never by
-// matching words in any language.
+// Learning trigger reasons retained for persisted experience/job compatibility.
+// New learner jobs use only TriggerPeriodic; the learner no longer starts from
+// structural signals or keyword classification.
 const (
 	TriggerExplicitTeaching  = "explicit_teaching"
 	TriggerCorrection        = "correction"
@@ -117,8 +117,8 @@ type LearningTrigger struct {
 	Priority LearningPriority
 }
 
-// LearningReviewProgress is the cheap periodic spawn input. Interval 0
-// disables the periodic gate so only structural signals enqueue.
+// LearningReviewProgress is the periodic spawn input. Interval 0 disables the
+// only learner enqueue gate.
 type LearningReviewProgress struct {
 	UnreviewedUserTurns int
 	UnreviewedToolIters int
@@ -188,51 +188,23 @@ func hasRealToolIteration(toolCalls []ToolCall) bool {
 	return false
 }
 
-// DecideLearningTrigger applies language-agnostic spawn rules. Headless
-// episodes are recorded but never enqueue a learner. Factual Q&A and a
-// first-time successful multi-tool turn do not enqueue unless the periodic
-// nudge interval has elapsed.
+// DecideLearningTrigger applies the default periodic-only spawn rules.
 func DecideLearningTrigger(exp Experience, history []Experience) LearningTrigger {
 	return DecideLearningTriggerWith(exp, history, LearningReviewProgress{})
 }
 
-// DecideLearningTriggerWith is DecideLearningTrigger plus the Hermes periodic
-// gate (every N unreviewed user turns or tool iterations).
+// DecideLearningTriggerWith enqueues only when the Hermes periodic gate is
+// reached: every N unreviewed user turns or tool iterations. The experience
+// and history arguments remain part of the domain seam so persisted signal
+// extraction stays compatible, but structural signals no longer bypass the
+// periodic review.
 func DecideLearningTriggerWith(exp Experience, history []Experience, progress LearningReviewProgress) LearningTrigger {
-	if exp.Headless {
+	if exp.Headless || progress.Interval <= 0 {
 		return LearningTrigger{}
 	}
-	if exp.Signals.UserCorrections > 0 || len(exp.Corrections) > 0 {
-		return LearningTrigger{Enqueue: true, Reason: TriggerCorrection, Priority: PriorityP0Teaching}
-	}
-	if exp.Signals.RootCauseRecovered && exp.Outcome.Status == "success" {
-		return LearningTrigger{Enqueue: true, Reason: TriggerRecovery, Priority: PriorityP1Recovery}
-	}
-	if sig := strings.TrimSpace(exp.Signals.FailureSignature); sig != "" {
-		n := 1
-		for _, h := range history {
-			if h.Signals.FailureSignature == sig {
-				n++
-			}
-		}
-		if n >= 2 {
-			return LearningTrigger{Enqueue: true, Reason: TriggerRepeatedFailure, Priority: PriorityP1Recovery}
-		}
-	}
-	if fp := strings.TrimSpace(exp.Signals.ProcedureFingerprint); fp != "" && strings.Count(fp, ">") >= 2 {
-		n := 1
-		for _, h := range history {
-			if h.Signals.ProcedureFingerprint == fp {
-				n++
-			}
-		}
-		if n >= 3 {
-			return LearningTrigger{Enqueue: true, Reason: TriggerRepeatedProcedure, Priority: PriorityP2Recurring}
-		}
-	}
-	if progress.Interval > 0 &&
-		(progress.UnreviewedUserTurns >= progress.Interval ||
-			progress.UnreviewedToolIters >= progress.Interval) {
+	_ = history
+	if progress.UnreviewedUserTurns >= progress.Interval ||
+		progress.UnreviewedToolIters >= progress.Interval {
 		return LearningTrigger{Enqueue: true, Reason: TriggerPeriodic, Priority: PriorityP4Inferred}
 	}
 	return LearningTrigger{}

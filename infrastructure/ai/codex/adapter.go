@@ -71,23 +71,25 @@ func (r *RuntimeAdapter) EnsureBinary(ctx context.Context, force bool) (string, 
 		r.downloading = false
 		r.downloadMu.Unlock()
 	}()
+	if force {
+		// Force re-download: remove the installed binary so
+		// EnsureBinary falls through to DownloadLatest.
+		man, _ := r.mgr.LoadManifest()
+		if man.ActiveVersion != "" {
+			if err := r.mgr.Delete(man.ActiveVersion); err != nil {
+				r.downloadMu.Lock()
+				r.downloadError = err.Error()
+				r.downloadMu.Unlock()
+				return "", err
+			}
+		}
+	}
 	binPath, err := r.mgr.EnsureBinary(ctx)
 	if err != nil {
 		r.downloadMu.Lock()
 		r.downloadError = err.Error()
 		r.downloadMu.Unlock()
 		return "", err
-	}
-	if force {
-		// For force re-download, delete the manifest and re-download
-		man, _ := r.mgr.LoadManifest()
-		if man.ActiveVersion != "" {
-			// The runtime manager doesn't have a "remove" method, so
-			// we just re-download. In practice, EnsureBinary returns
-			// the cached binary. A true force re-download would need
-			// a Delete method on the manager. For now, force is a no-op
-			// if the binary is already installed.
-		}
 	}
 	return binPath, nil
 }

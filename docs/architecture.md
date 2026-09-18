@@ -330,9 +330,10 @@ message IDs are never deleted.
 `settings.get` and `settings.set` expose the persisted agent runtime knobs:
 compaction (enabled, threshold, optional dedicated model), prompt caching,
 `max_tool_rounds` (1–10000), parallel tool limits, an optional dedicated
-`review_model` for background learning jobs (consolidator / skill evolver /
-evaluator), and max input/output token ceilings. Learning jobs enqueue from
-experience signals, not a turn-count threshold. Browser-only preferences
+`review_model` for the periodic background learner, and max input/output token
+ceilings. Learning jobs enqueue from the periodic unreviewed-progress
+threshold; structural experience signals are retained for analysis but do not
+enqueue jobs. Browser-only preferences
 such as the default model, icon-only sidebar, and automatic WebSocket
 reconnect stay in local storage because they describe one browser client
 rather than the local agent process.
@@ -359,7 +360,7 @@ cache key is a routing hint, not a guarantee of a cache hit.
 
 | Store | Format | Location |
 | --- | --- | --- |
-| conversations | JSON | `{data}/conversations/<id>.json` |
+| conversations | JSONL + JSON sidecars | `{data}/conversations/<id>/` (`index.jsonl`, `chunk/`, `acp/`, `operation/`, `plan.md`) |
 | providers, plugins, settings | JSON | `{data}/config/*.json` + `{data}/plugins/` |
 | skills | markdown + JSON | `{data}/skills/<id>/` (`SKILL.md`, `meta.json`, `versions/<n>/`) |
 | profile documents | Markdown | `{data}/memory/user.md`, `{data}/memory/soul.md` (first boot copies embedded `resources/templates/` when missing) |

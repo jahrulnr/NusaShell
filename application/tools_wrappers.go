@@ -74,7 +74,7 @@ func isLearnerKind(kind AgentKind) bool {
 
 func acknowledgeLearnerResult(args string) (string, error) {
 	if !learn.ValidLearnerResult(args) {
-		return "", fmt.Errorf("invalid learner result: call learn() with stage_reached and consolidate")
+		return "", fmt.Errorf("invalid learner result: call learn() with consolidate")
 	}
 	return "recorded", nil
 }

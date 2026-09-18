@@ -46,8 +46,8 @@ func IsLearnerBannedTool(name string) bool {
 }
 
 // IsLearnerSkillMutation reports the skill operations that a learner must not
-// execute directly. Learned skill writes are committed by the typed learn()
-// result after Stage 3 has passed the runtime validation path.
+// execute directly. The periodic learner is memory-only; skill changes belong
+// to an explicit skill-authoring workflow.
 func IsLearnerSkillMutation(name string, argsJSON []byte) bool {
 	if name != "skill" {
 		return false

@@ -151,9 +151,6 @@ type RecordTurnPairs func(allIDs, newIDs []string)
 // AcknowledgeLearner validates a learn() tool payload.
 type AcknowledgeLearner func(args string) (string, error)
 
-// SkillCreatorReference returns the skill-creator SKILL.md path and body.
-type SkillCreatorReference func() (path, content string)
-
 // ResolveSkillName resolves a skill id to the name shown in cross-room
 // skills_changed announcements. Implementations may fall back to the id.
 type ResolveSkillName func(id, ownedBy string) string
@@ -188,6 +185,11 @@ type Deps struct {
 	DefaultWorkspace string
 	StartedAt        time.Time
 
+	// TurnPatches persists the net unified diff of a turn's committed file_*
+	// mutations under the conversation's data directory. Nil disables the
+	// patch history.
+	TurnPatches domain.TurnPatchStorage
+
 	ResolveModel       ResolveModel
 	WaitRetry          WaitRetry
 	WaitSlowDown       func(ctx context.Context)
@@ -209,7 +211,6 @@ type Deps struct {
 	LearningNodeIDs         LearningNodeIDs
 	RecordTurnPairs         RecordTurnPairs
 	AcknowledgeLearner      AcknowledgeLearner
-	SkillCreatorRef         SkillCreatorReference
 	ResolveSkillName        ResolveSkillName
 	DelegateSnapshot        DelegateSnapshot
 	DecorateRateLimit       func(providerID string, err error) error

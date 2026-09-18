@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"nusashell/contracts"
 	"nusashell/domain"
 )
 
@@ -19,6 +20,9 @@ type Service struct {
 	graphSvc  *LearningGraphService
 	builder   *EdgeBuilder
 	lifecycle *LifecycleManager
+
+	graphBuildFingerprint string
+	graphBuildRunning     bool
 }
 
 // New builds a learn Service from Deps.
@@ -142,6 +146,45 @@ func (s *Service) ResolveEmbedderPair() (Embedder, string) {
 		return nil, ""
 	}
 	return embed, modelID
+}
+
+// scheduleGraphBuild coalesces graph rebuilds until the learning catalog (or
+// embedding model) changes. A graph request only reads the current graph;
+// the rebuild is work for the background job and emits one refresh event when
+// the new derived edges are ready.
+func (s *Service) scheduleGraphBuild(fingerprint string, embedder Embedder, modelID string) {
+	if s == nil || s.builder == nil {
+		return
+	}
+	if embedder != nil {
+		s.builder.SetEmbedder(embedder, modelID)
+	}
+
+	s.mu.Lock()
+	if s.graphBuildRunning || s.graphBuildFingerprint == fingerprint {
+		s.mu.Unlock()
+		return
+	}
+	s.graphBuildRunning = true
+	builder := s.builder
+	s.mu.Unlock()
+
+	s.goSafe("learning", func() {
+		err := builder.Build(context.Background())
+
+		s.mu.Lock()
+		if err == nil {
+			s.graphBuildFingerprint = fingerprint
+		}
+		s.graphBuildRunning = false
+		s.mu.Unlock()
+
+		if err != nil {
+			s.log("warn", "learning", "graph build: %v", err)
+			return
+		}
+		s.emit(contracts.EventLearningGraphUpdated, nil)
+	})
 }
 
 // InvalidateSearcher forces the next LearningSearch call to rebuild.

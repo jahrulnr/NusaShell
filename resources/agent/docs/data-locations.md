@@ -17,9 +17,10 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `config/providers.json` | provider configs (no keys) | JSON |
 | `config/acp-agents.json` | ACP subagent configs (command/args/env; env values stored locally, keys only on the wire) | JSON |
 | `config/mcp-servers.json` | manual MCP server registry | JSON |
-| `conversations/*.json` | one file per agent conversation, including job transcripts. Each one carries a `type`: `conversation` (an interactive Agent room), `background` (a learning job's LLM run), or `automation` (a pipeline `agent:` step). Only `conversation` appears in `agent.conversations.list` and the Agent Rooms pane; the other two stay addressable by id through `agent.conversations.get` and the automation steer operation. Records written before `type` existed carry `Origin: pipeline`, which reads as `automation`. On load, a leftover `status: running` (process crash mid-turn) is converted to idle and in-flight assistant messages are marked interrupted. A turn that exits without a terminal state (panic recovered in-process) is also healed immediately: the `runTurn` defer resets the conversation to idle and emits a turn-error event, and `agent.turns.start` heals an orphaned running conversation with no active run before starting a new turn instead of returning 409. | JSON |
-| `conversations/*.chunks/` | archived conversation chunks (compaction). Hydration checkpoints (synthetic runtime snapshots) are stripped before archive and summarization; a fresh checkpoint is written in the same compaction Save (`ResetTranscript` then `Add`), including emergency overflow retries. The conversation ID stays the same so todos, attachments, chunks, and the open room stay attached. Text-summary compaction parks its checkpoint immediately after the epoch's first user message (never before it) so OpenAI and Claude see `system → user → hydration`. Codex remote-v2 compaction keeps its opaque server checkpoint and persisted prefix boundary in the conversation JSON, retains a chronological transcript suffix in the active epoch, filters that prefix to real user turns for the provider request, preserves later user/assistant/tool turns after it, and moves only replaced transcript items into this chunk directory. The new epoch may hold no user message at all; the opaque checkpoint then anchors it (persistable, listed, and reachable for peer/announcement delivery), and requests on provider kinds that cannot replay the checkpoint carry a request-only synthetic user nudge instead. | JSON |
+| `conversations/<conv_id>/index.jsonl` | the live (un-compacted) transcript epoch of one conversation, including job transcripts, as JSON Lines: the first line is the conversation metadata (the record without its transcript), every following line is one message. Each metadata record carries a `type`: `conversation` (an interactive Agent room), `background` (a learning job's LLM run), or `automation` (a pipeline `agent:` step). Only `conversation` appears in `agent.conversations.list` and the Agent Rooms pane; the other two stay addressable by id through `agent.conversations.get` and the automation steer operation. Records written before `type` existed carry `Origin: pipeline`, which reads as `automation`. On load, a leftover `status: running` (process crash mid-turn) is converted to idle and in-flight assistant messages are marked interrupted. A turn that exits without a terminal state (panic recovered in-process) is also healed immediately: the `runTurn` defer resets the conversation to idle and emits a turn-error event, and `agent.turns.start` heals an orphaned running conversation with no active run before starting a new turn instead of returning 409. A torn message line (crash mid-write) is skipped on load instead of dropping the conversation. | JSONL |
+| `conversations/<conv_id>/chunk/` | archived conversation chunks (compaction), `chunk-<n>.json`. Hydration checkpoints (synthetic runtime snapshots) are stripped before archive and summarization; a fresh checkpoint is written in the same compaction Save (`ResetTranscript` then `Add`), including emergency overflow retries. The conversation ID stays the same so todos, attachments, chunks, and the open room stay attached. Text-summary compaction parks its checkpoint immediately after the epoch's first user message (never before it) so OpenAI and Claude see `system → user → hydration`. Codex remote-v2 compaction keeps its opaque server checkpoint and persisted prefix boundary in the conversation record, retains a chronological transcript suffix in the active epoch, filters that prefix to real user turns for the provider request, preserves later user/assistant/tool turns after it, and moves only replaced transcript items into this chunk directory. The new epoch may hold no user message at all; the opaque checkpoint then anchors it (persistable, listed, and reachable for peer/announcement delivery), and requests on provider kinds that cannot replay the checkpoint carry a request-only synthetic user nudge instead. | JSON |
 | `conversations/todos.json` | per-conversation TODO checklists + planning briefs. Each non-empty brief is also mirrored to `conversations/<conv_id>/plan.md` (below) so the agent and ACP subagents can `file_read` it. | JSON |
+| `conversations/<conv_id>/operation/` | per-turn net unified diff of the committed `file_*` mutations, one git-appliable patch per turn (`<run_id>.patch`, written when the turn finishes or is interrupted). Turns without file mutations leave no file. | patch |
 | `conversations/<conv_id>/plan.md` | mirrored todo brief (generated runtime artifact under the data directory, never the user workspace). Deleting it does not lose data: the JSON store is the source of truth and the next brief update rewrites it. The `todo` result returns this path as `plan_path`. | Markdown |
 | `conversations/artifacts.json` | per-conversation interactive artifacts (HTML/CSS/JS) | JSON |
 | `skills/<id>/` | skill package: root `SKILL.md` (active checkout), `meta.json` (status/version/origin), `versions/<n>/` snapshots | markdown + JSON |
@@ -46,7 +47,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `piper/<goos>-<goarch>/` | managed piper engine installed by the one-click Settings installer (binary, `espeak-ng-data/`, shared libs); `PIPER_BIN`/PATH binaries still take precedence at runtime | files |
 | `docs/` | optional user-supplied docs that extend the embedded corpus | markdown |
 | `logs.jsonl` | activity log (bounded ring) | JSONL |
-| `conversations/<conv_id>.acp/` | terminal ACP subagent and internal delegate run snapshots (one JSON file per run, linked to the parent conversation); legacy global `acp_runs.jsonl` migrates here automatically on first use | JSON |
+| `conversations/<conv_id>/acp/` | terminal ACP subagent and internal delegate run snapshots (one JSON file per run, linked to the parent conversation); legacy global `acp_runs.jsonl` migrates here automatically on first use | JSON |
 | `credentials.db` | API keys per provider | SQLite |
 | `pairing.db` | device pairing state: challenge/session SHA-256 hashes (plaintext codes/tokens are never persisted), device labels, expiry/revocation. Created on startup only when Settings → Remote access is enabled; loopback binds can still use it behind a trusted proxy/tunnel | SQLite |
 | `automation/workflows.db` | workflows, runs, schedules, events, waits, locks | SQLite |
@@ -57,15 +58,24 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 Credentials never appear in the JSON/JSONL files. Deleting the data
 directory removes everything, including stored keys.
 
-Deleting a conversation via `agent.conversations.delete` cascades to its
-data-dir sidecars: `conversations/<id>.json`, the archived
-`conversations/<id>.chunks/` directory, the `conversations/<id>.acp/`
-subagent run snapshots, the `conversations/<id>/` plan directory, and
-`attachments/<id>/` (image/file attachments + generated images). Live ACP
+Deleting a conversation via `agent.conversations.delete` removes its whole
+folder under `conversations/`, including the `index.jsonl` transcript, the
+`chunk/` archive, the `acp/` subagent run snapshots, the `operation/` patches,
+and the `plan.md` brief mirror, plus `attachments/<id>/` (image/file
+attachments + generated images). Live ACP
 runs for the conversation are stopped first. Workspace files
 (`file_write` / `show` results) live under the user-selected workspace and
 are kept; growth experiences, learning jobs, and memory records are also
 unaffected by conversation delete.
+
+Installations from before the folder layout kept the same data as flat
+siblings: `conversations/<id>.json`, `conversations/<id>.chunks/`, and
+`conversations/<id>.acp/`. The first boot of this layout converts them in
+place (transcript → `index.jsonl`, sidecar directories moved under the
+conversation folder). The conversion is idempotent and never deletes data it
+cannot place: a legacy file whose folder record already exists, whose record
+id disagrees with its name, or a sidecar file that collides with an
+already-migrated file, is left in place and reported in the logs.
 
 The optional login service writes its platform definition outside the data
 directory: a systemd user unit at `~/.config/systemd/user/nusashell.service`

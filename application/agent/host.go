@@ -117,13 +117,6 @@ func (a *Service) executeGenerateMedia(run *TurnRun, toolCall domain.ToolCall, s
 	return "", nil, fmt.Errorf("generate_media is not configured")
 }
 
-func (a *Service) learnerSkillCreatorReference() (path, content string) {
-	if a != nil && a.deps.SkillCreatorRef != nil {
-		return a.deps.SkillCreatorRef()
-	}
-	return "", ""
-}
-
 func (a *Service) acknowledgeLearnerResult(args string) (string, error) {
 	if a != nil && a.deps.AcknowledgeLearner != nil {
 		return a.deps.AcknowledgeLearner(args)

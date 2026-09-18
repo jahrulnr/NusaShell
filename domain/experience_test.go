@@ -25,14 +25,62 @@ func TestDecideLearningTrigger_EnglishRememberIsNotASpawnGate(t *testing.T) {
 	}
 }
 
-func TestDecideLearningTrigger_CorrectionIsP0(t *testing.T) {
-	exp := Experience{
-		Corrections: []UserCorrection{{UserSaid: "Pakai Go", Explicit: true}},
-		Signals:     ExperienceSignals{UserCorrections: 1},
+func TestDecideLearningTrigger_StructuralSignalsWaitForPeriodicReview(t *testing.T) {
+	fp := "file_read>file_patch>exec"
+	cases := []struct {
+		name    string
+		exp     Experience
+		history []Experience
+	}{
+		{
+			name: "correction",
+			exp: Experience{
+				Corrections: []UserCorrection{{UserSaid: "Pakai Go", Explicit: true}},
+				Signals:     ExperienceSignals{UserCorrections: 1},
+			},
+		},
+		{
+			name: "recovery",
+			exp: Experience{
+				Outcome: ExperienceOutcome{Status: "success"},
+				Signals: ExperienceSignals{RootCauseRecovered: true},
+			},
+		},
+		{
+			name: "repeated failure",
+			exp: Experience{
+				Signals: ExperienceSignals{FailureSignature: "nginx-403"},
+				Outcome: ExperienceOutcome{Status: "fail"},
+			},
+			history: []Experience{{Signals: ExperienceSignals{FailureSignature: "nginx-403"}}},
+		},
+		{
+			name: "repeated procedure",
+			exp: Experience{
+				Signals: ExperienceSignals{ProcedureFingerprint: fp},
+				Actions: []ExperienceAction{{Name: "file_read"}, {Name: "file_patch"}, {Name: "exec"}},
+			},
+			history: []Experience{
+				{Signals: ExperienceSignals{ProcedureFingerprint: fp}},
+				{Signals: ExperienceSignals{ProcedureFingerprint: fp}},
+			},
+		},
 	}
-	got := DecideLearningTrigger(exp, nil)
-	if !got.Enqueue || got.Priority != PriorityP0Teaching || got.Reason != TriggerCorrection {
-		t.Fatalf("got %+v", got)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DecideLearningTrigger(tc.exp, tc.history)
+			if got.Enqueue {
+				t.Fatalf("structural signal enqueued immediately: %+v", got)
+			}
+			got = DecideLearningTriggerWith(tc.exp, tc.history, LearningReviewProgress{
+				UnreviewedUserTurns: 1,
+				Interval:            1,
+			})
+			if !got.Enqueue || got.Reason != TriggerPeriodic || got.Priority != PriorityP4Inferred {
+				t.Fatalf("periodic review got %+v", got)
+			}
+		})
 	}
 }
 
@@ -48,45 +96,6 @@ func TestDecideLearningTrigger_HeadlessNeverEnqueues(t *testing.T) {
 	})
 	if got.Enqueue {
 		t.Fatal("headless episode must not enqueue")
-	}
-}
-
-func TestDecideLearningTrigger_Recovery(t *testing.T) {
-	exp := Experience{
-		Outcome: ExperienceOutcome{Status: "success"},
-		Signals: ExperienceSignals{RootCauseRecovered: true},
-	}
-	got := DecideLearningTrigger(exp, nil)
-	if !got.Enqueue || got.Reason != TriggerRecovery || got.Priority != PriorityP1Recovery {
-		t.Fatalf("got %+v", got)
-	}
-}
-
-func TestDecideLearningTrigger_RepeatedFailure(t *testing.T) {
-	exp := Experience{
-		Signals: ExperienceSignals{FailureSignature: "nginx-403"},
-		Outcome: ExperienceOutcome{Status: "fail"},
-	}
-	history := []Experience{{Signals: ExperienceSignals{FailureSignature: "nginx-403"}}}
-	got := DecideLearningTrigger(exp, history)
-	if !got.Enqueue || got.Priority != PriorityP1Recovery || got.Reason != TriggerRepeatedFailure {
-		t.Fatalf("got %+v", got)
-	}
-}
-
-func TestDecideLearningTrigger_RepeatedProcedure(t *testing.T) {
-	fp := "file_read>file_patch>exec"
-	exp := Experience{
-		Signals: ExperienceSignals{ProcedureFingerprint: fp},
-		Actions: []ExperienceAction{{Name: "file_read"}, {Name: "file_patch"}, {Name: "exec"}},
-	}
-	history := []Experience{
-		{Signals: ExperienceSignals{ProcedureFingerprint: fp}},
-		{Signals: ExperienceSignals{ProcedureFingerprint: fp}},
-	}
-	got := DecideLearningTrigger(exp, history)
-	if !got.Enqueue || got.Reason != TriggerRepeatedProcedure {
-		t.Fatalf("got %+v", got)
 	}
 }
 
@@ -163,7 +172,7 @@ func TestDecideLearningTrigger_PeriodicDisabledWhenIntervalZero(t *testing.T) {
 	}
 }
 
-func TestDecideLearningTrigger_StructuralWinsOverPeriodic(t *testing.T) {
+func TestDecideLearningTrigger_PeriodicIsTheOnlyEnqueueReason(t *testing.T) {
 	fp := "file_read>file_patch>exec"
 	exp := Experience{
 		Signals: ExperienceSignals{ProcedureFingerprint: fp},
@@ -177,8 +186,8 @@ func TestDecideLearningTrigger_StructuralWinsOverPeriodic(t *testing.T) {
 		UnreviewedUserTurns: DefaultLearnerNudgeInterval,
 		Interval:            DefaultLearnerNudgeInterval,
 	})
-	if !got.Enqueue || got.Reason != TriggerRepeatedProcedure {
-		t.Fatalf("periodic must not replace structural reason: %+v", got)
+	if !got.Enqueue || got.Reason != TriggerPeriodic || got.Priority != PriorityP4Inferred {
+		t.Fatalf("periodic review must be the enqueue reason: %+v", got)
 	}
 }
 

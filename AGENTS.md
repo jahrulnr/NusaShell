@@ -144,6 +144,7 @@ When adding, renaming, removing, or changing:
 - **Data files, data directory layout, or persisted artifacts** → update `resources/agent/docs/data-locations.md`.
 - **Skills, memory, or learning subsystem behavior** → update the matching `resources/agent/docs/skills.md` / `resources/agent/docs/memory.md`.
 - **System prompt rules or identity** → update `application/prompts.go` and the matching `resources/agent/prompts/*.md` file.
+- **Changelog** → update `CHANGELOG.md`, use tag unrelease if user not asking to bump version.
 
 Docs under `resources/agent/docs/*.md` are **agent work guidance**: each workflow doc must include concrete good/bad tool-call examples so the agent uses tools precisely instead of guessing. Non-workflow facts (single tool use, UI mechanics that do not change tool-calling) belong in the system prompt, not in the docs corpus.
 

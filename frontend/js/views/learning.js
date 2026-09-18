@@ -224,6 +224,7 @@ function initLearningUpdateListeners() {
   on('learning.job.started', onJobStarted);
   on('learning.job.done', onJobDone);
   on('learning.job.error', onJobError);
+  on('learning.graph.updated', scheduleGraphRefresh);
   state.learningEventHandlers = [
     () => off('memory.updated', onMemoryUpdated),
     () => off('skill.updated', onSkillUpdated),
@@ -231,6 +232,7 @@ function initLearningUpdateListeners() {
     () => off('learning.job.started', onJobStarted),
     () => off('learning.job.done', onJobDone),
     () => off('learning.job.error', onJobError),
+    () => off('learning.graph.updated', scheduleGraphRefresh),
     () => { if (graphRefreshTimer) clearTimeout(graphRefreshTimer); },
   ];
 }
@@ -1075,6 +1077,11 @@ function renderResults() {
 // setOptions({ physics: { enabled: true, ... } }) would restart an UNBOUNDED
 // simulation that never fires that event — the "nodes jitter while idle" bug.)
 export const GRAPH_LAYOUT_ITERATIONS = 80;
+// The backend keeps the complete relationship set for search and persistence,
+// but a browser graph should not send thousands of low-value lines through
+// vis-network's physics engine. The strongest relationships are rendered;
+// the manual refresh still fetches the complete backend result.
+export const GRAPH_EDGE_LIMIT = 2000;
 export const GRAPH_NODE_GAP = 12;
 export const GRAPH_NODE_MIN_SIZE = 10;
 export const GRAPH_NODE_MAX_SIZE = 32;
@@ -1096,6 +1103,29 @@ const GRAPH_NODE_MIN_DETAIL_SCALE = 0.75;
 const GRAPH_PROJECTION_BUFFER = 2;
 export function relayoutGraph(network) {
   if (network) network.stabilize(GRAPH_LAYOUT_ITERATIONS);
+}
+
+// Select a deterministic, bounded representative set for rendering. Keep the
+// source order among selected edges so refreshes do not create needless edge
+// identity churn, while stronger relationships win when the graph is dense.
+export function selectGraphEdges(edges, limit = GRAPH_EDGE_LIMIT) {
+  const source = Array.isArray(edges) ? edges : [];
+  const max = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : GRAPH_EDGE_LIMIT;
+  if (source.length <= max) return source;
+  if (max === 0) return [];
+  return source
+    .map((edge, index) => ({ edge, index }))
+    .sort((left, right) => {
+      const leftWeight = Number.isFinite(Number(left.edge?.weight)) ? Number(left.edge.weight) : 0;
+      const rightWeight = Number.isFinite(Number(right.edge?.weight)) ? Number(right.edge.weight) : 0;
+      if (rightWeight !== leftWeight) return rightWeight - leftWeight;
+      const leftType = String(left.edge?.type || '');
+      const rightType = String(right.edge?.type || '');
+      return leftType === rightType ? left.index - right.index : leftType.localeCompare(rightType);
+    })
+    .slice(0, max)
+    .sort((left, right) => left.index - right.index)
+    .map(({ edge }) => edge);
 }
 
 // Scale every node against the most-connected node in the current graph.
@@ -1521,20 +1551,21 @@ async function loadGraph({ preservePositions = true } = {}) {
     // used-with edges come from learning nodes observed in one successful
     // agent or learning-job turn. Nothing is computed client-side.
     const { nodes, edges } = await rpc('learning.graph');
+    const renderedEdges = selectGraphEdges(edges);
 
     // Keep current positions (pinned for the layout) so unchanged nodes
     // stay exactly where they are across refreshes; only new nodes are
     // laid out by the bounded stabilize() below.
     const prevPositions = preservePositions && state.network ? state.network.getPositions() : {};
 
-    const newNodes = keepGraphPositions(sizeGraphNodesByRelations(nodes, edges).map(graphVisNodeFromDTO), prevPositions);
+    const newNodes = keepGraphPositions(sizeGraphNodesByRelations(nodes, renderedEdges).map(graphVisNodeFromDTO), prevPositions);
 
     const edgeColors = {
       related: GRAPH_PALETTE.deepOcean,
       used_with: GRAPH_PALETTE.mangrove,
       derived_from: GRAPH_PALETTE.sand,
     };
-    const newEdges = (edges || []).map((e, i) => ({
+    const newEdges = renderedEdges.map((e, i) => ({
       id: `edge_${i}`,
       from: e.from,
       to: e.to,
@@ -1549,7 +1580,9 @@ async function loadGraph({ preservePositions = true } = {}) {
     state.edges.add(newEdges);
     state.edgeCount = newEdges.length;
     document.getElementById('learning-stat-edges').textContent =
-      `${state.edgeCount} edge${state.edgeCount === 1 ? '' : 's'}`;
+      renderedEdges.length < (edges || []).length
+        ? `${state.edgeCount} of ${(edges || []).length} edges`
+        : `${state.edgeCount} edge${state.edgeCount === 1 ? '' : 's'}`;
     const memCount = newNodes.filter((n) => n.group === 'memory' || n.group === 'memory-user').length;
     document.getElementById('learning-stat-memory').textContent =
       `${memCount} record${memCount === 1 ? '' : 's'}`;

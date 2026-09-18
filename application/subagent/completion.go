@@ -44,7 +44,7 @@ func (s *Service) PersistRun(run *domain.AcpRun) string {
 	}
 	// Race guard: if the conversation was deleted between OnDone being
 	// scheduled and the deferred completion callback firing, skip the
-	// write so a late completion cannot recreate conversations/<id>.acp/
+	// write so a late completion cannot recreate conversations/<id>/acp/
 	// sidecars the cascade just removed.
 	if s.deps.Conversations != nil {
 		if _, err := s.deps.Conversations.Get(run.ConversationID); err != nil {

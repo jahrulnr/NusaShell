@@ -8,6 +8,7 @@ import { test } from 'node:test';
 
 import {
   GRAPH_LAYOUT_ITERATIONS,
+  GRAPH_EDGE_LIMIT,
   GRAPH_NODE_GAP,
   GRAPH_NODE_MAX_SIZE,
   GRAPH_NODE_MIN_SIZE,
@@ -24,6 +25,7 @@ import {
   fitGraphToView,
   graphNodeDeletable,
   graphVisNodeFromDTO,
+  selectGraphEdges,
 } from '../js/views/learning.js';
 
 function distance(a, b) {
@@ -54,6 +56,19 @@ test('graphEdgeWidth keeps dense graph lines thin while preserving weight order'
   assert.ok(graphEdgeWidth(0.5) < graphEdgeWidth(1));
   assert.equal(graphEdgeWidth(1), 1.1);
   assert.ok(graphEdgeWidth(1) < 1.5, 'even the strongest edge stays below the old minimum width');
+});
+
+test('selectGraphEdges caps dense rendering and keeps the strongest relations', () => {
+  const edges = Array.from({ length: 5 }, (_, index) => ({
+    from: `a${index}`,
+    to: `b${index}`,
+    type: 'related',
+    weight: index / 10,
+  }));
+
+  assert.deepEqual(selectGraphEdges(edges, 2).map((edge) => edge.from), ['a3', 'a4']);
+  assert.equal(selectGraphEdges(edges, GRAPH_EDGE_LIMIT), edges, 'small graphs keep their original edge array');
+  assert.deepEqual(selectGraphEdges(edges, 0), []);
 });
 
 test('positionGraphByRelations places hubs inward and isolates at the perimeter', () => {

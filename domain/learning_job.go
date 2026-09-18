@@ -2,8 +2,8 @@ package domain
 
 import "time"
 
-// Learning job kinds. New work uses LearningJobLearner (one spawn, internal
-// stages). Legacy kind strings remain so persisted jobs.jsonl still loads.
+// Learning job kinds. New work uses LearningJobLearner (one periodic memory
+// review). Legacy kind strings remain so persisted jobs.jsonl still loads.
 const (
 	LearningJobLearner     = "learner"
 	LearningJobConsolidate = "consolidate"
@@ -53,8 +53,8 @@ const (
 )
 
 // LearningJob is one queued background learning unit. Jobs are JSONL
-// upsert-by-id. Spawn is Hermes-style: structural signals or a periodic
-// unreviewed-turn / tool-iteration nudge, never keyword matching.
+// upsert-by-id. New learner jobs are spawned only by the periodic
+// unreviewed-turn / tool-iteration nudge.
 type LearningJob struct {
 	ID                string           `json:"id"`
 	Kind              string           `json:"kind"`

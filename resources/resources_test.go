@@ -16,26 +16,6 @@ func TestTemplatesEmbedUserAndSoul(t *testing.T) {
 	}
 }
 
-func TestRenderLearnerUserPromptFillsPlaceholders(t *testing.T) {
-	got := RenderLearnerUserPrompt("periodic", 0, "conv_source", "/tmp/conv.json", 2, 5)
-	for _, want := range []string{
-		"trigger_reason: periodic",
-		"procedure_count: 0",
-		"conversation_id: conv_source",
-		"conversation_file: /tmp/conv.json",
-		"message_range: [2,5)",
-		"learn(",
-		"SOURCE EVIDENCE",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("missing %q:\n%s", want, got)
-		}
-	}
-	if strings.Contains(got, "{{") {
-		t.Fatalf("unreplaced placeholder:\n%s", got)
-	}
-}
-
 func TestBuiltinSkillAccessor(t *testing.T) {
 	body := BuiltinSkill("skill-creator")
 	if body == "" || !strings.Contains(body, "Create an agent skill") {
@@ -49,10 +29,19 @@ func TestBuiltinSkillAccessor(t *testing.T) {
 	}
 }
 
-func TestRenderLearnerUserPromptRepeatedProcedureCount(t *testing.T) {
-	got := RenderLearnerUserPrompt("repeated_procedure", 3, "c", "/p", 0, 0)
-	if !strings.Contains(got, "procedure_count: 3") {
-		t.Fatalf("missing procedure_count:\n%s", got)
+func TestRenderLearnerUserPromptUsesPeriodicSourceRange(t *testing.T) {
+	got := RenderLearnerUserPrompt("c", "/p", 0, 2)
+	if !strings.Contains(got, "periodic review") {
+		t.Fatalf("missing periodic review instruction:\n%s", got)
+	}
+	if !strings.Contains(got, "conversation_file: /p") || !strings.Contains(got, "message_range: [0,2]") {
+		t.Fatalf("missing source range:\n%s", got)
+	}
+	if !strings.Contains(got, "JSON Lines") || !strings.Contains(got, "line N+2") {
+		t.Fatalf("learner prompt must explain the JSONL transcript layout:\n%s", got)
+	}
+	if strings.Contains(got, "trigger_reason") || strings.Contains(got, "procedure_count") || strings.Contains(got, "stage") {
+		t.Fatalf("periodic prompt still exposes staged trigger metadata:\n%s", got)
 	}
 	if strings.Contains(got, "{{") {
 		t.Fatalf("unreplaced placeholder:\n%s", got)
@@ -60,7 +49,7 @@ func TestRenderLearnerUserPromptRepeatedProcedureCount(t *testing.T) {
 }
 
 func TestRenderLearnerUserPromptIncludesSourceProjectLabel(t *testing.T) {
-	got := RenderLearnerUserPromptForProject("explicit_teaching", 0, "c", "/p", 0, 2, "NusaShell")
+	got := RenderLearnerUserPromptForProject("c", "/p", 0, 2, "NusaShell")
 	if !strings.Contains(got, "project_label: NusaShell") {
 		t.Fatalf("missing source project label:\n%s", got)
 	}
@@ -133,28 +122,6 @@ func TestLearnerPromptMatchesTypedResultAndProfileContracts(t *testing.T) {
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("learner prompt missing contract guidance %q", want)
-		}
-	}
-}
-
-func TestLearnerUserPromptUsesAvailableEvidenceAndSchemaFields(t *testing.T) {
-	prompt := UserPrompt("learner")
-	for _, stale := range []string{
-		"justification/notes field",
-	} {
-		if strings.Contains(prompt, stale) {
-			t.Errorf("learner user prompt names unavailable schema field %q", stale)
-		}
-	}
-	for _, want := range []string{
-		"file_read",
-		"entry.evidence",
-		"project_label: {{project_label}}",
-		"do not invent fields",
-		"narrow the wording or exclude it",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("learner user prompt missing evidence/schema guidance %q", want)
 		}
 	}
 }

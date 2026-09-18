@@ -12,9 +12,9 @@ Search and analyze your complete conversation history stored in session files. U
 
 ## Location
 
-NusaShell session logs live under the runtime data directory (platform-dependent — never hardcode one OS path). Verify with `file_list`: Linux: `~/.config/nusashell`; macOS: `~/Library/Application Support/nusashell`; Windows: `%APPDATA%\nusashell`. The layout can change between versions; typical pattern: one JSONL file per conversation (one JSON object per line) plus an index mapping conversation IDs to paths.
+NusaShell session logs live under the runtime data directory (platform-dependent — never hardcode one OS path). Verify with `file_list`: Linux: `~/.config/nusashell`; macOS: `~/Library/Application Support/nusashell`; Windows: `%APPDATA%\nusashell`. The layout can change between versions; the current one groups one folder per conversation: `<data-dir>/conversations/<conv_id>/index.jsonl` is the live transcript as JSONL (first line: conversation metadata, every following line: one message), `<conv_id>/chunk/chunk-<n>.json` holds archived compaction chunks (a JSON array of messages, not JSONL), and `<conv_id>/acp/*.json` holds subagent run records.
 
-**Step 0 — learn the structure first.** Before any query: `file_list` the data directory, read one line from a session file (`exec: head -1 <file>`), and note the fields. Do not assume the schema matches other ecosystems. Common fields: `role` (user/assistant/tool), `content` (string or blocks), `timestamp`, and usage metadata (`tokens`, `cost`, `model`).
+**Step 0 — learn the structure first.** Before any query: `file_list` the data directory, read one line from a session file (`exec: head -1 <file>`), and note the fields. Do not assume the schema matches other ecosystems. Common fields: `ID`, `Role` (user/assistant/system), `Content`, `Steps`/`ToolCalls`, `Usage`, and `CreatedAt` (`head -1` shows metadata fields such as `ID`, `Title`, `Model`).
 
 If fields differ, adapt the queries below (replace `.role`, `.content`, `.usage` with the actual paths).
 
@@ -62,10 +62,10 @@ jq -r 'select(.role == "tool") | (.name // .tool // "?")' <session>.jsonl | sort
 ### Search across ALL sessions
 
 ```bash
-rg -l "keyword" <data-dir>/*.jsonl 2>/dev/null
+rg -l "keyword" <data-dir>/conversations --glob 'index.jsonl' 2>/dev/null
 ```
 
-If archived/reset variants exist (e.g. files with suffixes like `.reset.*` or `.compacted.*`), include them too — they still contain real conversation content. Check the naming with `file_list` first.
+Compacted history is archived, not deleted: `<conv_id>/chunk/chunk-<n>.json` files hold the replaced messages of earlier epochs (a JSON array of message objects). Include them when a hit is missing from the live transcript; check the naming with `file_list` first.
 
 ## Tips
 

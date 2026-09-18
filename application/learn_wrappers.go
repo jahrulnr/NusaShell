@@ -130,10 +130,6 @@ func (a *App) RecoverStaleLearningJobs() {
 	a.learnService().RecoverStaleLearningJobs()
 }
 
-func (a *App) learnerSkillCreatorReference() (path, content string) {
-	return a.learnService().LearnerSkillCreatorReference()
-}
-
 func (a *App) recordLearningUsage(ids []string) {
 	a.learnService().RecordUsage(ids)
 }
@@ -200,8 +196,8 @@ func (a *App) learningSourceForExperience(exp *domain.Experience) learningSource
 	return a.learnService().LearningSourceForExperience(exp)
 }
 
-func (a *App) buildLearnerPacketAt(exp *domain.Experience, source learningSource, reason string, procedureCount int) string {
-	return a.learnService().BuildLearnerPacketAt(exp, source, reason, procedureCount)
+func (a *App) buildLearnerPacketAt(exp *domain.Experience, source learningSource) string {
+	return a.learnService().BuildLearnerPacketAt(exp, source)
 }
 
 func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *contracts.RPCError) {

@@ -182,11 +182,10 @@ func (s *Service) AdvanceLearningCursor(source *LearningSource) error {
 	return nil
 }
 
-// recordLearningJobTrajectory appends a finished job's outcome to the
-// learning trajectory so the Learning log feed shows it. Skill evolution
-// already records its own lifecycle event (with the transcript id) inside
-// evolveSkillJob, so only jobs that would otherwise be invisible in the feed
-// are recorded here.
+// recordLearningJobTrajectory appends a finished periodic learner outcome to
+// the learning trajectory so the Learning log feed shows it. Legacy skill
+// jobs record their own lifecycle event, so only jobs that would otherwise be
+// invisible in the feed are recorded here.
 func (s *Service) recordLearningJobTrajectory(job *domain.LearningJob, convID string, ops []domain.LearningOperation) {
 	if s.deps.Trajectory == nil || job == nil {
 		return
@@ -425,7 +424,7 @@ func (s *Service) consolidateViaLLMAt(job *domain.LearningJob, exp *domain.Exper
 	if strings.TrimSpace(resources.LearnerPrompt()) == "" || !s.learningTurnAvailable() {
 		return nil, "", false, nil
 	}
-	prompt := s.BuildLearnerPacketAt(exp, source, job.Reason, procedureCountForJob(s, exp, job))
+	prompt := s.BuildLearnerPacketAt(exp, source)
 	text, convID, err := s.doLearningTurn(s.workspaceCtx(exp), s.learningModelID(source.ConversationID), prompt)
 	if err != nil {
 		s.log("debug", "learning", "learner LLM call failed: %v", err)
@@ -433,9 +432,6 @@ func (s *Service) consolidateViaLLMAt(job *domain.LearningJob, exp *domain.Exper
 	}
 	if result := ParseLearnerResult(text); result != nil {
 		ops := opsFromLearnerConsolidate(result.Consolidate, job.ID, exp.ID, exp.Scope.Project)
-		if job.Reason == domain.TriggerRepeatedProcedure && result.Evaluate != nil && result.Evaluate.Approved {
-			s.applyLearnerEvolve(job, exp, result)
-		}
 		if len(ops) == 0 {
 			s.log("debug", "learning", "learner LLM returned no operations")
 			return nil, convID, true, nil
@@ -457,33 +453,13 @@ func (s *Service) consolidateViaLLMAt(job *domain.LearningJob, exp *domain.Exper
 	return nil, convID, false, nil
 }
 
-func procedureCountForJob(s *Service, exp *domain.Experience, job *domain.LearningJob) int {
-	if s == nil || exp == nil || job == nil || job.Reason != domain.TriggerRepeatedProcedure {
-		return 0
-	}
-	fp := strings.TrimSpace(exp.Signals.ProcedureFingerprint)
-	if fp == "" || s.deps.Experiences == nil {
-		return 0
-	}
-	n := 1
-	for _, h := range s.deps.Experiences.ListByConversation(exp.ConversationID) {
-		if h == nil || h.ID == exp.ID {
-			continue
-		}
-		if h.Signals.ProcedureFingerprint == fp {
-			n++
-		}
-	}
-	return n
-}
-
 func ParseLearnerResult(text string) *LearnerResult {
 	jsonText := ExtractJSONFromText(text)
 	var result LearnerResult
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 		return nil
 	}
-	if strings.TrimSpace(result.StageReached) == "" && result.Consolidate == nil {
+	if result.Consolidate == nil {
 		return nil
 	}
 	return &result
@@ -636,81 +612,6 @@ func memoryTypeFromLearner(t string) string {
 	}
 }
 
-func (s *Service) applyLearnerEvolve(job *domain.LearningJob, exp *domain.Experience, result *LearnerResult) {
-	if s == nil || s.deps.Skills == nil || exp == nil || result == nil || result.Evaluate == nil || !result.Evaluate.Approved {
-		return
-	}
-	name := LearnedSkillName(exp.Goal)
-	if result.Evolve != nil && strings.TrimSpace(result.Evolve.SkillID) != "" {
-		name = LearnedSkillName(result.Evolve.SkillID)
-	} else if result.Evaluate.ProposedSkillShape != nil && strings.TrimSpace(result.Evaluate.ProposedSkillShape.Name) != "" {
-		name = LearnedSkillName(result.Evaluate.ProposedSkillShape.Name)
-	}
-	body, description := learnerSkillBody(result, exp)
-	if !SkillMeetsMinimumBar(body) {
-		body, description = s.DeterministicSkillBody(exp)
-	}
-	if !SkillMeetsMinimumBar(body) {
-		return
-	}
-	skill := NewLearnedSkill(name, description, body)
-	if !s.ApplyLearnedSkillRevision(skill, name) {
-		return
-	}
-	skill.EnsureStatusDefault()
-	if domain.CreatorMayPromote(domain.ActorLearner) {
-		return
-	}
-	if err := s.deps.Skills.Save(skill); err != nil {
-		s.log("warn", "learning", "learner evolve save failed: %v", err)
-		return
-	}
-	s.EmitSkillLifecycle("evolve", skill.ID, string(skill.Status), "")
-}
-
-func learnerSkillBody(result *LearnerResult, exp *domain.Experience) (string, string) {
-	var name, trigger, steps string
-	if result != nil && result.Evaluate != nil && result.Evaluate.ProposedSkillShape != nil {
-		shape := result.Evaluate.ProposedSkillShape
-		name = strings.TrimSpace(shape.Name)
-		trigger = strings.TrimSpace(shape.TriggerDescription)
-		steps = strings.TrimSpace(shape.StepsSummary)
-	}
-	if name == "" {
-		name = "Learned Workflow"
-	}
-	if trigger == "" {
-		trigger = "When the same goal recurs and this procedure matches the task context."
-	}
-	if steps == "" && exp != nil {
-		var b strings.Builder
-		for i, act := range exp.Actions {
-			fmt.Fprintf(&b, "%d. `%s`\n", i+1, act.Name)
-		}
-		steps = strings.TrimSpace(b.String())
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "# %s\n\n", name)
-	b.WriteString("## Purpose\n")
-	if exp != nil {
-		b.WriteString("Repeat the verified workflow for: ")
-		b.WriteString(clip(exp.Goal, 180))
-		b.WriteString(".\n\n")
-	} else {
-		b.WriteString(name + "\n\n")
-	}
-	b.WriteString("## Trigger\n")
-	b.WriteString(trigger)
-	b.WriteString("\n\n## Steps\n")
-	b.WriteString(steps)
-	b.WriteString("\n")
-	desc := clip(name, 200)
-	if exp != nil && desc == name {
-		desc = clip(exp.Goal, 200)
-	}
-	return b.String(), desc
-}
-
 // teachingOps is the deterministic no-provider fallback. It may only emit
 // distilled corrections (Desired behavior), never raw user text: the
 // durability gate rejects anything that echoes the user's own words, so
@@ -793,7 +694,8 @@ func (s *Service) evolveSkillJobAt(job *domain.LearningJob, source *LearningSour
 	sourceValue := s.resolveLearningSource(exp, source)
 	name := LearnedSkillName(exp.Goal)
 
-	// Try the LLM-backed skill evolver first (RFC section 20-21). When a
+	// Legacy persisted skill jobs may still use the LLM-backed skill evolver
+	// (RFC section 20-21). When a
 	// learning model is available, the evolver receives a short source
 	// handoff and returns a skill proposal with the full RFC schema
 	// (purpose, trigger, preconditions, steps, verification, recovery,
@@ -935,10 +837,10 @@ func (s *Service) ApplyLearnedSkillRevision(skill *domain.Skill, name string) bo
 	return true
 }
 
-// evolveSkillViaLLM calls the LLM-backed skill evolver (RFC section 20-21)
-// and returns (body, description, conversationID). The conversation id comes
-// back even when the proposal is unusable, so the caller can still surface
-// the transcript that explains the empty result.
+// evolveSkillViaLLM handles a legacy persisted skill job. It returns (body,
+// description, conversationID). The conversation id comes back even when the
+// proposal is unusable, so the caller can still surface the transcript that
+// explains the empty result.
 func (s *Service) evolveSkillViaLLM(exp *domain.Experience) (string, string, string) {
 	body, description, convID, _ := s.evolveSkillViaLLMAt(exp, s.LearningSourceForExperience(exp))
 	return body, description, convID
@@ -948,7 +850,7 @@ func (s *Service) evolveSkillViaLLMAt(exp *domain.Experience, source LearningSou
 	if strings.TrimSpace(resources.LearnerPrompt()) == "" {
 		return "", "", "", false
 	}
-	prompt := s.BuildLearnerPacketAt(exp, source, domain.TriggerRepeatedProcedure, 3)
+	prompt := s.BuildLearnerPacketAt(exp, source)
 	text, convID, err := s.doLearningTurn(s.workspaceCtx(exp), s.learningModelID(source.ConversationID), prompt)
 	if err != nil {
 		s.log("debug", "learning", "skill evolver LLM call failed, using deterministic fallback: %v", err)
