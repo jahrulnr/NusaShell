@@ -48,12 +48,13 @@ type (
 )
 
 var (
-	ErrRoundStreamNotFound = agent.ErrRoundStreamNotFound
-	NewRoundStreamRegistry = agent.NewRoundStreamRegistry
-	NewAskQuestionService  = agent.NewAskQuestionService
-	NewCapabilityRegistry  = agent.NewCapabilityRegistry
-	NewHydrationBuilder    = agent.NewHydrationBuilder
-	DefaultRuntimeContext  = agent.DefaultRuntimeContext
+	ErrRoundStreamNotFound     = agent.ErrRoundStreamNotFound
+	NewRoundStreamRegistry     = agent.NewRoundStreamRegistry
+	NewAskQuestionService      = agent.NewAskQuestionService
+	NewCapabilityRegistry      = agent.NewCapabilityRegistry
+	NewHydrationBuilder        = agent.NewHydrationBuilder
+	DefaultRuntimeContext      = agent.DefaultRuntimeContext
+	ConversationWakeCapability = agent.ConversationWakeCapability
 )
 
 const userNudgeText = domain.UserNudgeText
@@ -348,6 +349,13 @@ func (a *App) SteerHeadlessTurn(conversationID, text string) error {
 
 func (a *App) deliverPeerMessage(targetID, fromID, content string) error {
 	return a.agentService().DeliverPeerMessage(targetID, fromID, content)
+}
+
+// DeliverAutomationWake queues an automation_event announcement for one
+// conversation and wakes the room when it is idle. Wired into the
+// `conversation.wake` builtin capability at the composition root.
+func (a *App) DeliverAutomationWake(targetID, source, content string) error {
+	return a.agentService().DeliverAutomationWake(targetID, source, content)
 }
 func (a *App) activeRunForConversation(convID string) *TurnRun {
 	return a.agentService().ActiveRunForConversation(convID)

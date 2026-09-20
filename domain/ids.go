@@ -67,6 +67,7 @@ const (
 	IDPrefixConv     = "conv"   // conversations
 	IDPrefixEdge     = "edge"   // learning graph edges (ULID)
 	IDPrefixEvt      = "evt"    // automation events
+	IDPrefixExec     = "exec"   // detached background exec processes
 	IDPrefixExp      = "exp"    // experience events (ULID)
 	IDPrefixLearnJob = "ljob"   // growth learning jobs (ULID)
 	IDPrefixLearnOp  = "lop"    // typed learning operations (ULID)

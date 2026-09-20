@@ -119,3 +119,53 @@ func ResolveConcurrencyKey(keyTemplate, workflowID string, ev *Event) string {
 func ConversationTemplateIsPerResource(template string) bool {
 	return strings.Contains(template, "${event.")
 }
+
+// RenderWithParams resolves ${event.<key>} placeholders inside a `uses:`
+// step's `with:` parameter map — the same syntax and missing-value semantics
+// as RenderAgentPrompt — so capabilities receive the triggering event's data.
+// Strings are rendered at any nesting depth (maps and slices); non-string
+// values pass through untouched. The input is never mutated: when at least
+// one value rendered, a fresh map is returned; placeholder-free input comes
+// back unchanged.
+func RenderWithParams(with map[string]any, ev *Event) map[string]any {
+	rendered, changed := renderWithValue(with, ev)
+	if !changed {
+		return with
+	}
+	out, _ := rendered.(map[string]any)
+	return out
+}
+
+func renderWithValue(v any, ev *Event) (any, bool) {
+	switch t := v.(type) {
+	case string:
+		rendered := RenderAgentPrompt(t, ev)
+		return rendered, rendered != t
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		changed := false
+		for k, val := range t {
+			rv, c := renderWithValue(val, ev)
+			out[k] = rv
+			changed = changed || c
+		}
+		if !changed {
+			return v, false
+		}
+		return out, true
+	case []any:
+		out := make([]any, len(t))
+		changed := false
+		for i, val := range t {
+			rv, c := renderWithValue(val, ev)
+			out[i] = rv
+			changed = changed || c
+		}
+		if !changed {
+			return v, false
+		}
+		return out, true
+	default:
+		return v, false
+	}
+}

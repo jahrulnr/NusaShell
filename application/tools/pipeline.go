@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -45,6 +46,69 @@ func IsLearnerBannedTool(name string) bool {
 	return strings.HasPrefix(name, "mcp_")
 }
 
+// ExecAsyncAllowed reports whether the agent kind may use exec's detached
+// process surface (background spawn plus the status/wait/kill/list ops).
+// Only the interactive conversation agent owns background processes;
+// headless kinds (pipeline steps, internal delegates, learners, compaction)
+// get the sync-only exec schema and are also rejected here so a stale or
+// hallucinated call cannot bypass the advertised contract. Interactive runs
+// carry the zero-value kind, so "" is allowed.
+func ExecAsyncAllowed(kind AgentKind) bool {
+	return kind == "" || kind == AgentConversation
+}
+
+// IsAsyncExecCall reports whether an exec call touches the detached process
+// surface: background=true on run, or any of the status/wait/kill/list ops.
+// Unknown/malformed args are not async — the sync path fails them loud on
+// its own validation.
+func IsAsyncExecCall(name string, argsJSON []byte) bool {
+	if name != "exec" {
+		return false
+	}
+	var args struct {
+		Background bool `json:"background"`
+	}
+	if err := json.Unmarshal(argsJSON, &args); err != nil {
+		return false
+	}
+	if args.Background {
+		return true
+	}
+	switch OpArg(argsJSON) {
+	case "status", "wait", "kill", "list":
+		return true
+	}
+	return false
+}
+
+// syncOnlyExecTool rewrites the exec definition for agent kinds that may not
+// own detached processes: the async properties (op, background, id) are
+// stripped and the description advertises only the foreground contract.
+func syncOnlyExecTool(d ToolInfo) ToolInfo {
+	schema := make(map[string]any, len(d.InputSchema))
+	for k, v := range d.InputSchema {
+		schema[k] = v
+	}
+	if p, ok := d.InputSchema["properties"].(map[string]any); ok {
+		cp := make(map[string]any, len(p))
+		for k, v := range p {
+			cp[k] = v
+		}
+		delete(cp, "op")
+		delete(cp, "background")
+		delete(cp, "id")
+		schema["properties"] = cp
+	}
+	schema["required"] = []string{"command"}
+	d.InputSchema = schema
+	d.Description = syncExecDescription
+	return d
+}
+
+// syncExecDescription mirrors the foreground-only exec contract for agent
+// kinds without the detached process surface.
+const syncExecDescription = `Run a shell command as a child process and return combined stdout/stderr. Default shell: POSIX sh on Unix/macOS; on Windows auto-resolves Git Bash then PowerShell (cmd only via shell="cmd"). Optional shell kind: bash, powershell, pwsh, cmd, wsl. No absolute wall-clock limit: a running command that keeps producing output keeps running. Silence longer than idle_timeout_ms (default 180000) cancels the run as failed. Optional timeout_ms adds an explicit hard cap. Long-lived processes are killed together with their children. On Windows, select shells via the shell parameter rather than invoking cmd.exe or powershell.exe inside a bash command line — MSYS path conversion mangles drive-letter paths such as Z:/x. Combined output is streamed live. In-band stdout/stderr is capped at 20000 characters as a 50/50 head+tail sample with "... (output truncated) ..." in the middle. When the full log is larger, overflow_path is an absolute file under the platform temp dir (nusashell/); file_read it from offset 0 for the complete stdout/stderr.`
+
 // IsLearnerSkillMutation reports the skill operations that a learner must not
 // execute directly. The periodic learner is memory-only; skill changes belong
 // to an explicit skill-authoring workflow.
@@ -61,15 +125,21 @@ func IsLearnerSkillMutation(name string, argsJSON []byte) bool {
 }
 
 // filterLearnerToolInfos removes tools banned from learner agent kinds.
+// exec survives but loses its detached-process surface: the learner runs
+// unattended and must not orphan background processes.
 func filterLearnerToolInfos(defs []ToolInfo) []ToolInfo {
 	out := make([]ToolInfo, 0, len(defs))
 	for _, d := range defs {
-		if !IsLearnerBannedTool(d.Name) {
-			if d.Name == "skill" {
-				d = learnerReadOnlySkillTool()
-			}
-			out = append(out, d)
+		if IsLearnerBannedTool(d.Name) {
+			continue
 		}
+		switch d.Name {
+		case "skill":
+			d = learnerReadOnlySkillTool()
+		case "exec":
+			d = syncOnlyExecTool(d)
+		}
+		out = append(out, d)
 	}
 	return out
 }
@@ -195,14 +265,20 @@ func (r *PipelineAgentRunner) RunAgentStep(ctx context.Context, prompt, model st
 
 // filterHeadlessToolInfos removes pipeline-banned tools (ACP subagent tools
 // and human-in-the-loop barrier tools such as ask_question) from a ToolInfo
-// slice. Used by headless turns so unattended agents never see tools that
-// require an interactive operator at the dock.
+// slice and strips exec's detached-process surface: unattended agents may
+// run commands but never own background processes. Used by headless turns
+// so unattended agents never see tools that require an interactive operator
+// at the dock.
 func filterHeadlessToolInfos(defs []ToolInfo) []ToolInfo {
 	out := make([]ToolInfo, 0, len(defs))
 	for _, d := range defs {
-		if !IsPipelineBannedTool(d.Name) {
-			out = append(out, d)
+		if IsPipelineBannedTool(d.Name) {
+			continue
 		}
+		if d.Name == "exec" {
+			d = syncOnlyExecTool(d)
+		}
+		out = append(out, d)
 	}
 	return out
 }

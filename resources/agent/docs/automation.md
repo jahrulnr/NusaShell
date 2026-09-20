@@ -364,6 +364,35 @@ Each step should contain exactly one of:
 | `wait_until` | durable pause until RFC3339 time | use for long waits, never a long shell sleep |
 | `agent` | full headless NusaShell turn | bound role, untrusted-input rule, read/write scope, success output |
 
+`with:` values resolve `${event.<key>}` placeholders against the triggering
+event — the same syntax as agent-step prompts and `concurrency.key`, applied
+to string values at any nesting depth. A placeholder that resolves empty
+renders as the empty string.
+
+Builtin capabilities include `filesystem.read`, `filesystem.write`, and
+`conversation.wake`. `conversation.wake` queues a message for a
+**user-visible conversation room** (not a hidden pipeline room) and wakes it
+when it is idle — the room's own agent then handles the message. Input:
+`{"conversation": "<conversation id>", "message": "<text>", "source":
+"<optional label>"}`. A busy room still receives the message at its next
+round boundary, so nothing is lost; an identical repeated delivery is
+deduplicated.
+
+```yaml
+# forward a Minecraft chat event into a visible room's agent
+triggers:
+  - when:
+      event: minecraft.chat
+jobs:
+  forward:
+    steps:
+      - uses: conversation.wake
+        with:
+          conversation: conv_abc123   # room id from agent.conversations.list
+          source: minecraft
+          message: "[minecraft] ${event.player}: ${event.text}"
+```
+
 ### 5.2.1 Agent step conversation reuse
 
 An agent step normally starts a **fresh hidden conversation on every run**

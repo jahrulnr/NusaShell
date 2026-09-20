@@ -554,7 +554,7 @@ func (b *itemPatchToolbox) Execute(ctx context.Context, name string, argsJSON []
 
 // TestRunOneToolKeepsPartialOutputInError verifies that when a streaming
 // executor returns an error carrying the partial output received so far
-// (the same shape executeExecToolChunks produces on idle/timeout/cancel
+// (the same shape the exec sync path produces on idle/timeout/cancel
 // paths), the runOneTool layer preserves the error text in the persisted
 // tool call result rather than collapsing it to a generic prefix. The
 // end-to-end "exec actually killed mid-stream" case is covered by

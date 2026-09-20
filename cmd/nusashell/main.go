@@ -375,6 +375,8 @@ func run() error {
 	tb.Steerer = app
 	tb.SkillSearcher = app
 	tb.Conversations = app
+	// Detached exec processes (exec background=true) must not outlive the app.
+	defer tb.Close()
 	var autoSvc *application.Automation
 	if svc, autoDB, err := automation.BuildAutomation(dataDir, bus, pluginStore, agentMCP, mcpManager); err != nil {
 		slog.Warn("automation store init failed", "error", err)
@@ -383,6 +385,9 @@ func run() error {
 		app.Automation = svc
 		defer autoDB.Close()
 		tb.Automation = svc
+		if reg, ok := svc.Caps.(*application.CapabilityRegistry); ok {
+			reg.RegisterBuiltin(application.ConversationWakeCapability(app.DeliverAutomationWake))
+		}
 		svc.Exec.Go = func(source string, fn func()) { app.GoSafe(source, fn) }
 		svc.Exec.Agent = application.NewPipelineAgentRunner(tb, app)
 		notifySink := application.NewNotifyProgressSink(mcpManager, bus)

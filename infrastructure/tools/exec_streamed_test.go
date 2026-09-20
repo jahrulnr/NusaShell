@@ -19,7 +19,8 @@ func TestExecStreamedChunks(t *testing.T) {
 	var mu sync.Mutex
 	var chunks []string
 	start := time.Now()
-	handled, _, err := executeExecToolChunks(context.Background(), "exec", []byte(
+	tb := &Toolbox{}
+	handled, _, err := tb.dispatchExec(context.Background(), "exec", []byte(
 		`{"command":"echo first; sleep 0.4; echo second","idle_timeout_ms":5000}`),
 		func(text string) {
 			mu.Lock()
@@ -58,8 +59,9 @@ func TestExecStreamedCancellation(t *testing.T) {
 	var mu sync.Mutex
 	var chunks []string
 	done := make(chan error, 1)
+	tb := &Toolbox{}
 	go func() {
-		_, _, err := executeExecToolChunks(ctx, "exec", []byte(`{"command":"for i in $(seq 1 100); do echo n-$i; sleep 0.2; done"}`),
+		_, _, err := tb.dispatchExec(ctx, "exec", []byte(`{"command":"for i in $(seq 1 100); do echo n-$i; sleep 0.2; done"}`),
 			func(text string) {
 				mu.Lock()
 				chunks = append(chunks, text)

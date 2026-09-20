@@ -175,6 +175,13 @@ publisher attributes. Missing values become empty strings. This is prompt
 rendering, not shell expansion, and there is no generic `${jobs.*}` or
 `${steps.*}` interpolation.
 
+The same `${event.<key>}` syntax also resolves inside a `uses:` step's `with:`
+values (strings at any nesting depth), so capabilities can receive event data
+— e.g. `with: {message: "[chat] ${event.text}"}`. The builtin
+`conversation.wake` capability (`with: {conversation, message, source?}`)
+queues a message for a user-visible conversation room and wakes it when idle;
+unlike `agent:` steps, which run in hidden pipeline rooms.
+
 Generic MCP event publishers use `notifications/nusashell/event`, not
 `notifications/message`, with required `schema_version: 1`, `event_id`, and
 `type` fields. Optional fields are `occurred_at` (RFC3339), `subject`,

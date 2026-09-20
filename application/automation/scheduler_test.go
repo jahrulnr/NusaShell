@@ -563,3 +563,78 @@ func TestWaitRunTimeoutReturnsNonTerminal(t *testing.T) {
 		t.Fatalf("expected non-terminal status before slow job finishes, got %s", got.Status)
 	}
 }
+
+// recordingCaps resolves any capability as an available builtin and records
+// the exact JSON input handed to Execute, so tests can assert what a uses
+// step forwarded.
+type recordingCaps struct {
+	stubCaps
+	lastInput json.RawMessage
+}
+
+func (c *recordingCaps) Resolve(_ context.Context, name string, _ domain.AutoStartPolicy) (domain.CapabilityBinding, error) {
+	return domain.CapabilityBinding{Capability: name, Kind: domain.CapabilityBuiltin, Status: domain.CapAvailable}, nil
+}
+func (c *recordingCaps) Execute(_ context.Context, _ domain.CapabilityBinding, input json.RawMessage) (json.RawMessage, error) {
+	c.lastInput = append([]byte(nil), input...)
+	return json.RawMessage(`{"ok":true}`), nil
+}
+
+func TestRunUsesRendersEventPlaceholdersInWith(t *testing.T) {
+	caps := &recordingCaps{}
+	es := NewExecutionScheduler()
+	es.Caps = caps
+	w := &domain.WorkflowDefinition{
+		ID: "wf", Name: "wf",
+		Jobs: []domain.Job{{ID: "j", Steps: []domain.Step{{ID: "s", Uses: "conversation.wake"}}}},
+	}
+	run := NewWorkflowRun(*w, "test")
+	run.Event = &domain.Event{
+		Type:       "minecraft.chat",
+		Attributes: map[string]any{"player": "Steve", "text": "hello world"},
+	}
+	step := domain.Step{ID: "s", Uses: "conversation.wake", With: map[string]any{
+		"conversation": "conv_1",
+		"message":      "[${event.type}] ${event.player}: ${event.text}",
+		"verbatim":     "no placeholders",
+	}}
+	res, err := es.runUses(context.Background(), run, step)
+	if err != nil {
+		t.Fatalf("runUses: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("step error: %s", res.Error)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(caps.lastInput, &got); err != nil {
+		t.Fatalf("capability input must be JSON: %v (%s)", err, caps.lastInput)
+	}
+	if got["message"] != "[minecraft.chat] Steve: hello world" {
+		t.Fatalf("with.message = %v, want event-rendered", got["message"])
+	}
+	if got["verbatim"] != "no placeholders" || got["conversation"] != "conv_1" {
+		t.Fatalf("placeholder-free fields must pass through: %v", got)
+	}
+}
+
+func TestRunUsesKeepsWithUntouchedWithoutEvent(t *testing.T) {
+	caps := &recordingCaps{}
+	es := NewExecutionScheduler()
+	es.Caps = caps
+	w := &domain.WorkflowDefinition{
+		ID: "wf", Name: "wf",
+		Jobs: []domain.Job{{ID: "j", Steps: []domain.Step{{ID: "s", Uses: "x"}}}},
+	}
+	run := NewWorkflowRun(*w, "test") // no Event
+	step := domain.Step{ID: "s", Uses: "x", With: map[string]any{"message": "${event.text}"}}
+	if _, err := es.runUses(context.Background(), run, step); err != nil {
+		t.Fatalf("runUses: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(caps.lastInput, &got); err != nil {
+		t.Fatalf("capability input must be JSON: %v (%s)", err, caps.lastInput)
+	}
+	if got["message"] != "" {
+		t.Fatalf("missing event renders empty, got %v", got["message"])
+	}
+}

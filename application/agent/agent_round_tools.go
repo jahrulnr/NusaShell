@@ -244,6 +244,17 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 		a.emitToolCompleted(run, toolCall, res)
 		return res
 	}
+	// Detached exec is conversation-agent only: headless kinds (pipeline
+	// steps, internal delegates, learners) get the sync-only schema, and a
+	// hallucinated async call is rejected here as well.
+	if toolCall.Name == "exec" && !tools.ExecAsyncAllowed(run.ToolKind) && tools.IsAsyncExecCall(toolCall.Name, []byte(toolCall.Args)) {
+		res := ToolExecResult{
+			Status: domain.ToolFailed,
+			Output: "error: exec background ops are only available to the interactive agent",
+		}
+		a.emitToolCompleted(run, toolCall, res)
+		return res
+	}
 	switch toolCall.Name {
 	case learnerResultToolName:
 		if !isLearnerKind(run.ToolKind) {

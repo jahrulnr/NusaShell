@@ -629,7 +629,10 @@ func (s *ExecutionScheduler) runUses(ctx context.Context, run *domain.WorkflowRu
 		})
 		return StepResult{Error: run.BlockedReason}, fmt.Errorf("%s", run.BlockedReason)
 	}
-	raw, err := json.Marshal(step.With)
+	// ${event.*} placeholders inside with: values resolve against the
+	// triggering event so capabilities receive the event's data — the same
+	// contract as agent-step prompts, conversation keys, and notify targets.
+	raw, err := json.Marshal(domain.RenderWithParams(step.With, run.Event))
 	if err != nil {
 		return StepResult{Error: fmt.Sprintf("encode capability arguments: %v", err)}, err
 	}

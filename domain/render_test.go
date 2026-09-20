@@ -78,6 +78,54 @@ func TestRenderAgentPrompt_NilEventAndMissingKeys(t *testing.T) {
 	}
 }
 
+func TestRenderWithParams_RendersStringLeaves(t *testing.T) {
+	ev := &Event{
+		Type:       "minecraft.chat",
+		Attributes: map[string]any{"player": "Steve", "text": "hello world"},
+	}
+	with := map[string]any{
+		"conversation": "conv_1",
+		"message":      "[${event.type}] ${event.player}: ${event.text}",
+		"count":        float64(3),
+		"nested":       map[string]any{"who": "${event.player}"},
+		"list":         []any{"${event.player}", float64(1)},
+	}
+	out := RenderWithParams(with, ev)
+	if out["message"] != "[minecraft.chat] Steve: hello world" {
+		t.Errorf("message = %v", out["message"])
+	}
+	if out["count"] != float64(3) {
+		t.Errorf("count must pass through untouched, got %v", out["count"])
+	}
+	if got := out["nested"].(map[string]any)["who"]; got != "Steve" {
+		t.Errorf("nested.who = %v", got)
+	}
+	if got := out["list"].([]any)[0]; got != "Steve" {
+		t.Errorf("list[0] = %v", got)
+	}
+	if with["message"] != "[${event.type}] ${event.player}: ${event.text}" {
+		t.Error("input map must not be mutated")
+	}
+}
+
+func TestRenderWithParams_NoPlaceholdersPassesThrough(t *testing.T) {
+	with := map[string]any{"a": "plain", "n": float64(1)}
+	out := RenderWithParams(with, &Event{})
+	if out["a"] != "plain" || out["n"] != float64(1) {
+		t.Fatalf("placeholder-free input must pass through: %v", out)
+	}
+}
+
+func TestRenderWithParams_NilAndEmpty(t *testing.T) {
+	if got := RenderWithParams(nil, &Event{}); got != nil {
+		t.Fatalf("nil input must stay nil, got %v", got)
+	}
+	out := RenderWithParams(map[string]any{"msg": "x=${event.missing}"}, nil)
+	if out["msg"] != "x=" {
+		t.Fatalf("nil event renders empty, got %v", out["msg"])
+	}
+}
+
 func TestRenderAgentPrompt_NonStringValues(t *testing.T) {
 	ev := &Event{
 		Attributes: map[string]any{

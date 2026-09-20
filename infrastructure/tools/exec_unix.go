@@ -23,6 +23,16 @@ func killProcessTree(cmd *exec.Cmd) {
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }
 
+// termProcessTree asks the child's whole process group to exit gracefully
+// (SIGTERM). Managed background processes get this courtesy before the
+// SIGKILL escalation in bgExec.terminate.
+func termProcessTree(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+}
+
 // shellCommand resolves the requested shell kind into an executable plus
 // argument prefix. On Unix the default is POSIX sh; "bash" is honored when
 // installed. Other kinds fall back to sh.

@@ -223,6 +223,25 @@ func AnnouncementPeerMessageMessage(fromConvID, content string) string {
 	return fmt.Sprintf("You received message from conversation `%s`, use `conversation(op=\"send\", id=\"%s\", content=\"...\")` to reply:\n> %s", fromConvID, fromConvID, strings.ReplaceAll(content, "\n", "\n> "))
 }
 
+// AnnouncementAutomationEventArgs builds the self-describing args payload for
+// a message delivered by an automation workflow (`uses: conversation.wake`).
+func AnnouncementAutomationEventArgs(source string) string {
+	b, err := json.Marshal(struct {
+		Type   string `json:"type"`
+		Source string `json:"source"`
+	}{Type: "automation_event", Source: source})
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// AnnouncementAutomationEventMessage builds the user-visible announcement
+// result text for a workflow-delivered message.
+func AnnouncementAutomationEventMessage(source, content string) string {
+	return fmt.Sprintf("Automation `%s` delivered a message to this conversation:\n> %s", source, strings.ReplaceAll(content, "\n", "\n> "))
+}
+
 // IsAnnouncementCallID returns true when a tool call ID belongs to an
 // injected announcement (prefix "announce-").
 func IsAnnouncementCallID(id string) bool {

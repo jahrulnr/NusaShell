@@ -166,6 +166,17 @@ declares required fields and the call arrives with empty arguments, the
 runtime rejects it with `MISSING_ARGS: <ref> requires [<fields>]; load
 tool_schema and retry with arguments_json as a JSON object`.
 
+Each `mcp_call` is bounded by `timeout_ms` — default **30000** (30s),
+max **3600000** (1h). A stdio server that hangs holds the call only up to
+this bound; when it fires, the call fails with a timeout error even though
+the tool may still be running server-side. Raise `timeout_ms` only for
+operations that are legitimately slow (deploys, long renders, batch jobs).
+
+    # a quick lookup — the 30s default is fine:
+    mcp_call(ref="nusashell.files:read", arguments_json={"path": "/home/user/a.txt"})
+    # a known-slow operation — raise the bound explicitly:
+    mcp_call(ref="ci.server:deploy", arguments_json={"env": "prod"}, timeout_ms=600000)
+
 On Responses and Codex, supply the same tool-specific object fields returned
 by `tool_schema`; an empty object is only appropriate when the tool needs no
 arguments.

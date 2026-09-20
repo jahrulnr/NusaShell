@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-09-18
+
+### Added
+
+- **`exec` can run detached background processes, scoped per conversation.**
+  `op=run` with `background=true` returns an `exec_id`, `pid`, and `log_path`
+  immediately while the process keeps running and streams output live to
+  `nusashell/terminal/<exec_id>.log` under the platform temp dir. New ops
+  `status`, `wait`, `kill`, and `list` manage the process by id — an exact
+  process-tree kill that replaces fragile `pkill -f` patterns (which could
+  match the exec shell's own command line and kill it). At most 8 background
+  processes may run per conversation; killed or exited processes free their
+  slot, and all survivors die with the app. The async surface is reserved
+  for the interactive agent — pipeline steps, internal delegates, and
+  learners get a sync-only `exec` schema and hallucinated async calls are
+  rejected at runtime.
+- **`uses:` steps resolve `${event.*}` placeholders inside `with:` values.**
+  Capability arguments now receive the triggering event's data (same syntax
+  and empty-missing semantics as agent-step prompts and `concurrency.key`),
+  rendered recursively through nested maps and slices without mutating the
+  workflow definition.
+- **New builtin capability `conversation.wake` for automation workflows.**
+  A `uses: conversation.wake` step queues an `automation_event` announcement
+  for a user-visible conversation room and wakes it when idle — closing the
+  gap where automation `agent:` steps could only reach hidden pipeline rooms.
+  Busy rooms still receive the message at their next round boundary.
+
+### Fixed
+
+- **`mcp_call` is bounded by a `timeout_ms` argument (default 30s, max 1h).**
+  stdio MCP servers carry no protocol-level timeout and the turn context has
+  no deadline, so a hung server parked the tool call indefinitely — observed
+  as agent turns stuck on "Running" for 13+ minutes. Each call now wraps its
+  context in a deadline and fails with a timeout error naming the bound; the
+  agent can retry with a larger `timeout_ms` for legitimately slow tools.
+
 ## [0.8.5] - 2026-09-18
 
 ### Fixed

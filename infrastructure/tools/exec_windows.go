@@ -21,6 +21,12 @@ func killProcessTree(cmd *exec.Cmd) {
 	_ = cmd.Process.Kill()
 }
 
+// termProcessTree mirrors the Unix SIGTERM step; Windows has no terminate
+// signal for console processes, so the grace step is a direct Kill.
+func termProcessTree(cmd *exec.Cmd) {
+	killProcessTree(cmd)
+}
+
 const psEncodingPrefix = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
 
 func psArgs(command string) []string {

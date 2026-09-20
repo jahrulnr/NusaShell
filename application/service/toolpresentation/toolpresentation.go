@@ -528,6 +528,12 @@ func toolPresentationAction(name, args string, status domain.ToolCallStatus, raw
 		"subagent.steer":  {"Steering subagent", "Subagent steered", "Subagent steer failed"},
 		"subagent.stop":   {"Stopping subagent", "Subagent stopped", "Subagent stop failed"},
 		"subagent.wait":   {"Waiting for subagent", "Subagent result ready", "Subagent wait failed"},
+		"exec.run":        {"Running command", "Command completed", "Command failed"},
+		"exec.spawn":      {"Spawning background process", "Background process started", "Background spawn failed"},
+		"exec.status":     {"Checking process", "Process status ready", "Process status failed"},
+		"exec.wait":       {"Waiting for process", "Process finished", "Process wait failed"},
+		"exec.kill":       {"Killing process", "Process killed", "Process kill failed"},
+		"exec.list":       {"Listing processes", "Processes listed", "Process list failed"},
 		// Legacy per-verb names stay for old transcripts.
 		"subagent_steer":            {"Steering subagent", "Subagent steered", "Subagent steer failed"},
 		"subagent_stop":             {"Stopping subagent", "Subagent stopped", "Subagent stop failed"},
@@ -551,10 +557,13 @@ func toolPresentationAction(name, args string, status domain.ToolCallStatus, raw
 		"sleep":                     {"Pausing", "Pause finished", "Pause failed"},
 	}
 	key := name
-	if name == "automation" || name == "automation_schedule" || name == "subagent" {
+	if name == "automation" || name == "automation_schedule" || name == "subagent" || name == "exec" {
 		if op := toolPresentationArg(args, "op"); op != "" {
 			key = name + "." + op
 		}
+	}
+	if key == "exec" && toolPresentationBoolArg(args, "background") {
+		key = "exec.spawn"
 	}
 	if known, ok := labels[key]; ok {
 		switch {
@@ -588,7 +597,7 @@ func toolPresentationSummary(name, args string, status domain.ToolCallStatus, me
 		return "Failed"
 	}
 	key := name
-	if name == "automation" || name == "automation_schedule" || name == "subagent" {
+	if name == "automation" || name == "automation_schedule" || name == "subagent" || name == "exec" {
 		if op := toolPresentationArg(args, "op"); op != "" {
 			key = name + "." + op
 		}
@@ -728,6 +737,8 @@ func toolPresentationCountNoun(name string) string {
 		return "results"
 	case "automation.list":
 		return "automations"
+	case "exec.list":
+		return "processes"
 	case "automation.logs":
 		return "log entries"
 	default:
@@ -760,6 +771,15 @@ func toolPresentationArg(args, key string) string {
 	}
 	value, _ := payload[key].(string)
 	return strings.TrimSpace(value)
+}
+
+func toolPresentationBoolArg(args, key string) bool {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(args), &payload); err != nil || payload == nil {
+		return false
+	}
+	value, _ := payload[key].(bool)
+	return value
 }
 
 func formatToolPresentationRequest(name, args string) string {

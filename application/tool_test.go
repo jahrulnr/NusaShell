@@ -253,6 +253,57 @@ func TestLearnerResultToolRejectedForConversationAgent(t *testing.T) {
 	}
 }
 
+func TestExecAsyncRejectedForHeadlessKinds(t *testing.T) {
+	for _, kind := range []AgentKind{AgentAutomation, AgentDelegate, AgentLearner} {
+		t.Run(string(kind), func(t *testing.T) {
+			box := &countingToolbox{}
+			app := &App{Bus: NewBus(), Toolbox: box}
+			run := &TurnRun{ID: "headless-run", ToolKind: kind, Ctx: context.Background()}
+			for _, args := range []string{
+				`{"command":"sleep 5","background":true}`,
+				`{"op":"status","id":"exec_x"}`,
+				`{"op":"kill","id":"exec_x"}`,
+				`{"op":"list"}`,
+			} {
+				before := len(box.calls)
+				res := app.runOneTool(run, "", domain.ToolCall{
+					ID: "call-exec", Name: "exec", Args: args,
+				}, ModelCapabilities{}, domain.Settings{}, 1)
+				if res.Status != domain.ToolFailed {
+					t.Fatalf("%s exec %s must fail, got status=%s output=%s", kind, args, res.Status, res.Output)
+				}
+				if len(box.calls) != before {
+					t.Fatalf("%s async exec %s must not hit the toolbox", kind, args)
+				}
+			}
+			// Sync exec stays available to headless kinds.
+			res := app.runOneTool(run, "", domain.ToolCall{
+				ID: "call-exec-sync", Name: "exec", Args: `{"command":"echo ok"}`,
+			}, ModelCapabilities{}, domain.Settings{}, 1)
+			if res.Status == domain.ToolFailed {
+				t.Fatalf("%s sync exec must pass through: %s", kind, res.Output)
+			}
+		})
+	}
+}
+
+func TestExecAsyncAllowedForConversationAgent(t *testing.T) {
+	box := &countingToolbox{}
+	app := &App{Bus: NewBus(), Toolbox: box}
+	for _, kind := range []AgentKind{"", AgentConversation} {
+		run := &TurnRun{ID: "conv-run", ToolKind: kind, Ctx: context.Background()}
+		res := app.runOneTool(run, "", domain.ToolCall{
+			ID: "call-bg", Name: "exec", Args: `{"command":"sleep 5","background":true}`,
+		}, ModelCapabilities{}, domain.Settings{}, 1)
+		if res.Status == domain.ToolFailed {
+			t.Fatalf("kind %q async exec must reach the toolbox: %s", kind, res.Output)
+		}
+	}
+	if len(box.calls) != 2 {
+		t.Fatalf("expected both async exec calls to reach the toolbox, got %v", box.calls)
+	}
+}
+
 // --- from tool_contracts_test.go ---
 
 func TestToolContractsFollowExecutionRoster(t *testing.T) {

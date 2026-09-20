@@ -47,6 +47,15 @@ func sweepToolOverflowDir(dir string, now time.Time, maxAge time.Duration) (int,
 		path := filepath.Join(dir, e.Name())
 		var rm error
 		if info.IsDir() {
+			// The exec terminal/ dir holds live background logs: sweep aged
+			// files inside it, but never remove the directory itself — a
+			// quiet long-running process would lose its log_path.
+			if e.Name() == execLogDirName {
+				if n, serr := sweepToolOverflowDir(path, now, maxAge); serr == nil {
+					removed += n
+				}
+				continue
+			}
 			rm = os.RemoveAll(path)
 		} else if info.Mode().IsRegular() {
 			rm = os.Remove(path)

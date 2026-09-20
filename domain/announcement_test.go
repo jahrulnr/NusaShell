@@ -126,3 +126,21 @@ func TestSkillsChangedAnnouncementNamesSkill(t *testing.T) {
 		t.Fatalf("skill message = %q, want %q", got, want)
 	}
 }
+
+func TestAutomationEventAnnouncementSelfDescribes(t *testing.T) {
+	args := AnnouncementAutomationEventArgs("wf-minecraft")
+	var parsed struct {
+		Type   string `json:"type"`
+		Source string `json:"source"`
+	}
+	if err := json.Unmarshal([]byte(args), &parsed); err != nil {
+		t.Fatalf("automation args must be valid JSON: %v (%s)", err, args)
+	}
+	if parsed.Type != "automation_event" || parsed.Source != "wf-minecraft" {
+		t.Fatalf("automation args = %+v", parsed)
+	}
+	got := AnnouncementAutomationEventMessage("wf-minecraft", "Steve: hello")
+	if !strings.Contains(got, "wf-minecraft") || !strings.Contains(got, "Steve: hello") {
+		t.Fatalf("message must carry source and content: %q", got)
+	}
+}

@@ -93,6 +93,9 @@ type stubMCP struct {
 	lastServerID string
 	lastTool     string
 	lastArgs     map[string]any
+	lastDeadline time.Time
+	hasDeadline  bool
+	blockOnCtx   bool            // CallTool blocks until ctx is done, then returns ctx.Err()
 	connectCount int             // incremented on each Connect call
 	connected    map[string]bool // serverID -> connected (set by Connect)
 }
@@ -126,6 +129,11 @@ func (m *stubMCP) CallTool(ctx context.Context, serverID, toolName string, args 
 	m.lastServerID = serverID
 	m.lastTool = toolName
 	m.lastArgs = args
+	m.lastDeadline, m.hasDeadline = ctx.Deadline()
+	if m.blockOnCtx {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
 	return "ok", nil
 }
 
@@ -1020,6 +1028,93 @@ func TestMcpCallInvalidArgumentsJSON(t *testing.T) {
 	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:read","arguments_json":"not json"}`))
 	if err == nil {
 		t.Fatal("expected error for invalid arguments_json")
+	}
+}
+
+func mcpCallTimeoutToolbox(mcp *stubMCP) *Toolbox {
+	return testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "mc", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "srv"}}},
+		},
+		mcp,
+	)
+}
+
+func TestMcpCallAppliesDefaultTimeout(t *testing.T) {
+	mcp := &stubMCP{
+		tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv1": {{Name: "dig", Description: "Dig a block"}},
+		},
+	}
+	tb := mcpCallTimeoutToolbox(mcp)
+	before := time.Now()
+	if _, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:dig"}`)); err != nil {
+		t.Fatalf("mcp_call: %v", err)
+	}
+	if !mcp.hasDeadline {
+		t.Fatal("mcp_call must bound the call context with a deadline")
+	}
+	got := mcp.lastDeadline.Sub(before)
+	if got < 25*time.Second || got > 35*time.Second {
+		t.Fatalf("default deadline = %s after call start, want ~30s", got.Round(time.Second))
+	}
+}
+
+func TestMcpCallTimeoutMsOverridesDefault(t *testing.T) {
+	mcp := &stubMCP{
+		tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv1": {{Name: "dig"}},
+		},
+	}
+	tb := mcpCallTimeoutToolbox(mcp)
+	before := time.Now()
+	if _, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:dig","timeout_ms":5000}`)); err != nil {
+		t.Fatalf("mcp_call: %v", err)
+	}
+	if !mcp.hasDeadline {
+		t.Fatal("mcp_call must bound the call context with a deadline")
+	}
+	got := mcp.lastDeadline.Sub(before)
+	if got < 4*time.Second || got > 6*time.Second {
+		t.Fatalf("timeout_ms=5000 deadline = %s after call start, want ~5s", got.Round(time.Second))
+	}
+}
+
+func TestMcpCallTimeoutFires(t *testing.T) {
+	mcp := &stubMCP{
+		blockOnCtx: true,
+		tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv1": {{Name: "dig"}},
+		},
+	}
+	tb := mcpCallTimeoutToolbox(mcp)
+	start := time.Now()
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:dig","timeout_ms":50}`))
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("timeout took %s, want ~50ms", elapsed)
+	}
+	if !strings.Contains(err.Error(), "timed out") && !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("error must name the timeout, got: %v", err)
+	}
+}
+
+func TestMcpCallTimeoutCapped(t *testing.T) {
+	mcp := &stubMCP{
+		tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv1": {{Name: "dig"}},
+		},
+	}
+	tb := mcpCallTimeoutToolbox(mcp)
+	before := time.Now()
+	if _, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:dig","timeout_ms":86400000}`)); err != nil {
+		t.Fatalf("mcp_call: %v", err)
+	}
+	got := mcp.lastDeadline.Sub(before)
+	if got < 55*time.Minute || got > 65*time.Minute {
+		t.Fatalf("oversized timeout_ms must clamp to the 1h cap, got %s", got.Round(time.Second))
 	}
 }
 

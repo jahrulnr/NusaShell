@@ -298,6 +298,125 @@ func TestToolFactoryDelegateAgentOmitsACPToolsAndDelegate(t *testing.T) {
 	}
 }
 
+// execToolInfoWithAsync builds an exec ToolInfo carrying the full async
+// surface, mirroring the infrastructure schema shape.
+func execToolInfoWithAsync() ToolInfo {
+	return ToolInfo{
+		Name:        "exec",
+		Description: "full exec description",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"op":         map[string]any{"type": "string"},
+				"command":    map[string]any{"type": "string"},
+				"id":         map[string]any{"type": "string"},
+				"background": map[string]any{"type": "boolean"},
+				"cwd":        map[string]any{"type": "string"},
+			},
+		},
+	}
+}
+
+func execDef(t *testing.T, defs []ToolInfo) ToolInfo {
+	t.Helper()
+	for _, d := range defs {
+		if d.Name == "exec" {
+			return d
+		}
+	}
+	t.Fatalf("exec missing in %v", namesOf(defs))
+	return ToolInfo{}
+}
+
+func execSchemaProps(t *testing.T, d ToolInfo) map[string]any {
+	t.Helper()
+	p, ok := d.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("exec properties type = %T", d.InputSchema["properties"])
+	}
+	return p
+}
+
+func TestToolFactoryExecAsyncOnlyForConversation(t *testing.T) {
+	f := &ToolFactory{
+		Toolbox: func() []ToolInfo {
+			return []ToolInfo{execToolInfoWithAsync(), {Name: "file_read"}}
+		},
+		Dispatchers: FilterDispatcherToolInfos,
+	}
+	conv := execSchemaProps(t, execDef(t, f.Get(AgentConversation, "/ws")))
+	for _, prop := range []string{"op", "background", "id"} {
+		if _, ok := conv[prop]; !ok {
+			t.Fatalf("conversation exec schema missing async prop %q", prop)
+		}
+	}
+	for _, kind := range []AgentKind{
+		AgentAutomation, AgentDelegate,
+		AgentLearner, AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator,
+	} {
+		def := execDef(t, f.Get(kind, "/ws"))
+		props := execSchemaProps(t, def)
+		for _, prop := range []string{"op", "background", "id"} {
+			if _, ok := props[prop]; ok {
+				t.Fatalf("%s exec schema must strip async prop %q", kind, prop)
+			}
+		}
+		if _, ok := props["command"]; !ok {
+			t.Fatalf("%s exec schema lost command", kind)
+		}
+		if req, _ := def.InputSchema["required"].([]string); len(req) != 1 || req[0] != "command" {
+			t.Fatalf("%s sync exec required = %v, want [command]", kind, def.InputSchema["required"])
+		}
+		if def.Description == "full exec description" {
+			t.Fatalf("%s exec must not advertise the async description", kind)
+		}
+	}
+	// The conversation schema must not be mutated by the headless strip.
+	again := execSchemaProps(t, execDef(t, f.Get(AgentConversation, "/ws")))
+	if _, ok := again["background"]; !ok {
+		t.Fatal("sync-only rewrite leaked into the shared exec schema")
+	}
+}
+
+func TestIsAsyncExecCall(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args string
+		want bool
+	}{
+		{"exec", `{"command":"ls"}`, false},
+		{"exec", `{"op":"run","command":"ls"}`, false},
+		{"exec", `{"command":"ls","background":true}`, true},
+		{"exec", `{"op":"status","id":"exec_x"}`, true},
+		{"exec", `{"op":"wait","id":"exec_x"}`, true},
+		{"exec", `{"op":"kill","id":"exec_x"}`, true},
+		{"exec", `{"op":"list"}`, true},
+		{"exec", `{"op":"bogus"}`, false},
+		{"exec", `not json`, false},
+		{"file_read", `{"op":"list"}`, false},
+	} {
+		if got := IsAsyncExecCall(tc.name, []byte(tc.args)); got != tc.want {
+			t.Fatalf("IsAsyncExecCall(%q, %s) = %v, want %v", tc.name, tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestExecAsyncAllowed(t *testing.T) {
+	for _, kind := range []AgentKind{"", AgentConversation} {
+		if !ExecAsyncAllowed(kind) {
+			t.Fatalf("kind %q must be allowed async exec", kind)
+		}
+	}
+	for _, kind := range []AgentKind{
+		AgentAutomation, AgentDelegate, AgentCompaction,
+		AgentLearner, AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator,
+	} {
+		if ExecAsyncAllowed(kind) {
+			t.Fatalf("kind %q must not be allowed async exec", kind)
+		}
+	}
+}
+
 func TestToolFactoryNilToolbox(t *testing.T) {
 	f := &ToolFactory{Dispatchers: FilterDispatcherToolInfos}
 	if defs := f.Get(AgentConversation, "/ws"); defs != nil {

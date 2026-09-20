@@ -83,6 +83,11 @@ type Toolbox struct {
 	// Initialized lazily via gate(); safe on the zero value.
 	contractsGateOnce sync.Once
 	contractsGate     *contractGate
+	// execReg tracks detached background exec processes (exec
+	// background=true and the status/wait/kill/list ops). Initialized
+	// lazily via execRegistry(); terminated by Close at shutdown.
+	execRegOnce sync.Once
+	execReg     *execRegistry
 	// webSearchRR is the round-robin cursor for the web_search provider
 	// strategy (Settings → Web Search). Atomic so concurrent tool calls
 	// rotate without coordination.
@@ -234,7 +239,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "tool_list", Description: "List tools from a running MCP server. Accepts the plugin id (e.g. \"nusashell.terminal\"). When omitted, lists tools across all running MCP servers. Returns compact entries (ref, name, server, description) without parameter schemas — load the exact schema with tool_schema before first use of an unfamiliar tool. Oversized catalogs are truncated in-band (~32KiB) with overflow_path pointing at the full JSONL in the platform temp dir — continue with file_read.", InputSchema: obj("object", props("server", str("Plugin id; when omitted, lists all running servers")))},
 		{Name: "tool_schema", Description: "Load one MCP tool's input schema by plugin id and tool name. The tool name is the bare tool name (e.g. \"exec\"). Returns the schema as readable JSON — the only place schemas are served; mcp_search and tool_list stay schema-free so large catalogs remain token-cheap. Oversized schemas are truncated in-band (~32KiB) with overflow_path pointing at the full definition in the platform temp dir — continue with file_read.", InputSchema: obj("object", props("server", str("Plugin id (e.g. nusashell.terminal)"), "tool", str("Bare tool name within the server (e.g. \"exec\")")), "server", "tool")},
 		{Name: "mcp_search", Description: "Search running MCP servers' tools by name or description (case-insensitive token match — any term matches). When server is omitted, searches across ALL running servers. Returns compact matches (ref, name, description, ranked) without inlining parameter schemas — call tool_schema for exact argument fields when needed. The header reports count (matches returned), total (every match before the limit), and limit — when count < total the list was cut, so raise limit or narrow the query instead of assuming the catalog is exhausted. Oversized result sets are truncated in-band (~32KiB) with overflow_path pointing at the full JSONL in the platform temp dir — continue with file_read. This is the universal MCP discovery path on every provider — use mcp_search + mcp_call instead of guessing tool names.", InputSchema: obj("object", props("server", str("Optional: plugin id; when omitted, searches all running servers"), "query", str("Search query"), "limit", intSchema("Max results, default 20")), "query")},
-		{Name: "mcp_call", Description: "Execute an MCP tool by ref. Get the ref from mcp_search or tool_list (format <plugin-id>:<tool>, e.g. nusashell.files:read). Pass `arguments_json` as a JSON object matching the tool's parameters schema — the exact arguments the tool expects, e.g. {\"path\":\"/etc/hosts\"}. Omit `arguments_json` entirely for parameterless tools (defaults to {}). The ref binds to a specific running server + tool; if it was disabled or restarted since discovery, you get a STALE_TOOL_REF error — search again. Plugins that declare a usage contract (contract flag in mcp_list) must be read first via contract_read when required by the plugin_contract_mode setting. This is the only MCP execution path — mcp__<server>__<tool> names are not callable.", InputSchema: obj("object", props("ref", str("Tool ref from mcp_search / tool_list results (e.g. nusashell.files:read)"), "arguments_json", freeObj("Tool arguments as a JSON object matching the parameters schema (e.g. {\"path\":\"/etc/hosts\"}). Optional; defaults to {} — omit entirely for parameterless tools. Load the exact schema with tool_schema if unsure.")), "ref")},
+		{Name: "mcp_call", Description: "Execute an MCP tool by ref. Get the ref from mcp_search or tool_list (format <plugin-id>:<tool>, e.g. nusashell.files:read). Pass `arguments_json` as a JSON object matching the tool's parameters schema — the exact arguments the tool expects, e.g. {\"path\":\"/etc/hosts\"}. Omit `arguments_json` entirely for parameterless tools (defaults to {}). The call is bounded by `timeout_ms` (default 30000, max 3600000): when it fires the call fails with a timeout error — retry with a larger timeout_ms only for tools that are legitimately slow. The ref binds to a specific running server + tool; if it was disabled or restarted since discovery, you get a STALE_TOOL_REF error — search again. Plugins that declare a usage contract (contract flag in mcp_list) must be read first via contract_read when required by the plugin_contract_mode setting. This is the only MCP execution path — mcp__<server>__<tool> names are not callable.", InputSchema: obj("object", props("ref", str("Tool ref from mcp_search / tool_list results (e.g. nusashell.files:read)"), "arguments_json", freeObj("Tool arguments as a JSON object matching the parameters schema (e.g. {\"path\":\"/etc/hosts\"}). Optional; defaults to {} — omit entirely for parameterless tools. Load the exact schema with tool_schema if unsure."), "timeout_ms", intSchema("Optional call timeout in milliseconds (default 30000, max 3600000)")), "ref")},
 		{Name: "contract_read", Description: "Read a plugin's usage contract (best-practice rules plus state & side-effect disclosure) declared in its manifest before working with that plugin's tools. Pass id=<plugin-id>, or id=all to read every contract-declaring plugin at once. Advisory by default (plugin_contract_mode defaults to hint); enforcement is only active when the setting is set to require.", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files) or 'all'")), "id")},
 		{Name: "mcp_register", Description: "Copy a new MCP plugin from an absolute staging folder into the installed plugin store, or replace an existing plugin with the same id. The source must contain manifest.json and must stay outside the installed plugins root. Check mcp_list and ask the user before replacing an existing id; then call mcp_enable.", InputSchema: obj("object", props("source", str("Absolute staging path to the plugin folder containing manifest.json")), "source")},
 		{Name: "mcp_enable", Description: "Start/connect an MCP plugin so its tools become available. Returns only status + tool count — use tool_list or mcp_search to discover the tools. If already connected, returns already_enabled without reconnecting. The plugin must be registered first (mcp_register or the Plugins view).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files)")), "id")},
@@ -849,13 +854,36 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 	}
 }
 
+const (
+	// mcpCallDefaultTimeout bounds a single mcp_call when the caller passes
+	// no timeout_ms. stdio MCP servers carry no protocol-level timeout, so
+	// without a deadline a hung server parks the call forever.
+	mcpCallDefaultTimeout = 30 * time.Second
+	// mcpCallMaxTimeout caps an explicit timeout_ms, matching the exec
+	// tool's hard ceiling so a call cannot opt out of all bounds.
+	mcpCallMaxTimeout = time.Hour
+)
+
+// execRegistry lazily creates the background-process registry; safe on the
+// zero-value Toolbox used by tests.
+func (t *Toolbox) execRegistry() *execRegistry {
+	t.execRegOnce.Do(func() { t.execReg = newExecRegistry() })
+	return t.execReg
+}
+
+// Close terminates every managed background exec process. The composition
+// root defers it so detached children never outlive the app.
+func (t *Toolbox) Close() {
+	t.execRegistry().close()
+}
+
 // ExecuteStreamed runs a tool while forwarding live output chunks to onChunk.
 // Only tools that produce streaming output (exec) honor the callback today;
 // every other tool executes exactly like Execute and ignores it. Returns the
 // final combined output string and error, same contract as Execute.
 func (t *Toolbox) ExecuteStreamed(ctx context.Context, name string, argsJSON []byte, onChunk func(string)) (string, error) {
 	if name == "exec" {
-		_, out, err := executeExecToolChunks(ctx, name, argsJSON, onChunk)
+		_, out, err := t.dispatchExec(ctx, name, argsJSON, onChunk)
 		return out, err
 	}
 	return t.Execute(ctx, name, argsJSON)
@@ -864,7 +892,7 @@ func (t *Toolbox) ExecuteStreamed(ctx context.Context, name string, argsJSON []b
 func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {
 	// Native built-ins first: file CRUD and the exec island.
 	if name == "exec" {
-		_, out, err := executeExecTool(ctx, name, argsJSON)
+		_, out, err := t.dispatchExec(ctx, name, argsJSON, nil)
 		return out, err
 	}
 	if strings.HasPrefix(name, "file_") || name == "grep" || name == "find_file" || name == "show" {
@@ -1243,6 +1271,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		var args struct {
 			Ref           string          `json:"ref"`
 			ArgumentsJSON json.RawMessage `json:"arguments_json"`
+			TimeoutMs     int             `json:"timeout_ms"`
 		}
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
@@ -1324,8 +1353,22 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if err != nil {
 			return "", err
 		}
-		result, err := t.MCP.CallTool(ctx, plugin.Manifest.MCPServerID(), toolName, toolArgs)
+		// Bound the call: stdio MCP servers have no protocol-level timeout,
+		// so without a deadline a hung server parks the tool call forever.
+		timeout := mcpCallDefaultTimeout
+		if args.TimeoutMs > 0 {
+			timeout = time.Duration(args.TimeoutMs) * time.Millisecond
+		}
+		if timeout > mcpCallMaxTimeout {
+			timeout = mcpCallMaxTimeout
+		}
+		callCtx, cancelCall := context.WithTimeout(ctx, timeout)
+		defer cancelCall()
+		result, err := t.MCP.CallTool(callCtx, plugin.Manifest.MCPServerID(), toolName, toolArgs)
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+				return "", fmt.Errorf("mcp_call timed out after %s; the tool may still be running server-side — retry with a larger timeout_ms if the operation is legitimately slow", timeout)
+			}
 			return "", err
 		}
 		if advisory != "" {
