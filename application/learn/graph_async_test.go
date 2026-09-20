@@ -3,6 +3,7 @@ package learn
 import (
 	"context"
 	"testing"
+	"time"
 
 	"nusashell/contracts"
 	"nusashell/domain"
@@ -71,6 +72,61 @@ func TestHandleLearningGraphQueuesOneBuildForAnUnchangedCatalog(t *testing.T) {
 	}
 	if len(queued) != 2 {
 		t.Fatalf("queued builds after catalog change = %d, want two", len(queued))
+	}
+}
+
+// readStampDocStore mimics a document store whose Load stamps UpdatedAt with
+// the read time. The graph fingerprint must ignore such stamps: they are not
+// an EdgeBuilder input, and letting them invalidate the snapshot loops
+// learning.graph → build → learning.graph.updated → learning.graph forever.
+type readStampDocStore struct{}
+
+func (s *readStampDocStore) Load() *domain.MemoryDocument {
+	return &domain.MemoryDocument{Entries: []domain.DocumentEntry{{
+		ID:        "user_doc",
+		Content:   "stable document body",
+		UpdatedAt: time.Now(),
+	}}}
+}
+func (s *readStampDocStore) Update([]domain.DocumentEntry) error { return nil }
+func (s *readStampDocStore) Replace(string, string) error        { return nil }
+func (s *readStampDocStore) Path() string                        { return "" }
+
+func TestHandleLearningGraphDoesNotRebuildOnReadTimeStamps(t *testing.T) {
+	records := &scopeRecordStore{records: []*domain.MemoryRecord{
+		{ID: "memory-1", Body: "docker container workflow", Status: domain.MemoryStatusLearned},
+	}}
+	skills := &listSkillCatalog{skills: []*domain.Skill{
+		{ID: "skill-1", Name: "docker", Content: "docker container workflow", Status: domain.SkillStatusTrusted},
+	}}
+	edges := &graphEdgeStore{}
+	queued := make([]func(), 0, 2)
+	service := New(Deps{
+		Records: records,
+		Skills:  skills,
+		Edges:   edges,
+		User:    &readStampDocStore{},
+		Go: func(_ string, fn func()) {
+			queued = append(queued, fn)
+		},
+	})
+	service.InitEdgeBuilder()
+
+	if _, rpcErr := service.HandleLearningGraph(); rpcErr != nil {
+		t.Fatalf("first graph request: %v", rpcErr)
+	}
+	if len(queued) != 1 {
+		t.Fatalf("queued builds = %d, want one", len(queued))
+	}
+	queued[0]()
+	// The catalog did not change; only the read-time UpdatedAt did. A second
+	// request must reuse the stored fingerprint instead of queueing another
+	// build (which would emit learning.graph.updated and loop the refresh).
+	if _, rpcErr := service.HandleLearningGraph(); rpcErr != nil {
+		t.Fatalf("second graph request: %v", rpcErr)
+	}
+	if len(queued) != 1 {
+		t.Fatalf("queued builds after unchanged catalog = %d, want still one", len(queued))
 	}
 }
 

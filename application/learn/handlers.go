@@ -278,6 +278,10 @@ func (s *Service) HandleLearningGraph() (any, *contracts.RPCError) {
 // learningGraphFingerprint covers the source fields used by EdgeBuilder and
 // the node catalog. Sorting makes harmless store ordering differences avoid a
 // full rebuild while still invalidating the snapshot when content changes.
+// UpdatedAt stamps are deliberately excluded: they are write/read markers the
+// builder never consumes, so a store that bumps them without changing content
+// would otherwise invalidate the snapshot on every read and loop the
+// learning.graph → build → learning.graph.updated refresh cycle.
 func learningGraphFingerprint(skills []*domain.Skill, userMemory *domain.MemoryDocument, records []*domain.MemoryRecord, modelID string) string {
 	parts := []string{"model\x00" + modelID}
 	for _, skill := range skills {
@@ -292,7 +296,7 @@ func learningGraphFingerprint(skills []*domain.Skill, userMemory *domain.MemoryD
 	}
 	if userMemory != nil {
 		for _, entry := range userMemory.Entries {
-			parts = append(parts, strings.Join([]string{"user", entry.ID, entry.Content, entry.UpdatedAt.String()}, "\x00"))
+			parts = append(parts, strings.Join([]string{"user", entry.ID, entry.Content}, "\x00"))
 		}
 	}
 	for _, record := range records {
@@ -307,7 +311,7 @@ func learningGraphFingerprint(skills []*domain.Skill, userMemory *domain.MemoryD
 			"record", record.ID, record.Type, record.Subject, record.Predicate, record.Object,
 			record.Body, record.Scope.Level, record.Scope.Domain, record.Scope.Project,
 			record.Scope.Repo, record.Scope.Task, record.Status, record.ValidFrom.String(),
-			validUntil, record.UpdatedAt.String(),
+			validUntil,
 		}, "\x00"))
 	}
 	sort.Strings(parts)

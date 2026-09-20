@@ -5,6 +5,14 @@ import { resolveDroppedFilePath } from '../../desktop-file-path.js';
 import { agentForm, composerInput, composerStack, sendButton } from './domrefs.js';
 import { openWorkspacePicker } from './workspace-picker.js';
 
+export function resizeComposerInput(input, maxHeight = 180) {
+  input.style.height = 'auto';
+  const scrollHeight = input.scrollHeight;
+  input.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
+  // Show a scrollbar only when the content exceeds the cap.
+  input.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
+}
+
 export function bindComposer({ state, createConversation, beginTurn, refreshConversations, renderAttachments, updateComposerStatus, showSteerQueued, clearSteerQueue, promoteSteerToTranscript, stopActiveRun }) {
   const form = document.getElementById('agent-form');
   const input = document.getElementById('composer-input');
@@ -13,11 +21,20 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
   const fileInput = document.getElementById('agent-file-input');
   const workspaceButton = document.getElementById('agent-workspace-btn');
 
-              const autosize = () => {
-    input.style.height = 'auto';
-    input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
-    // Show a scrollbar only when the content exceeds the cap.
-    input.style.overflowY = input.scrollHeight > 180 ? 'auto' : 'hidden';
+  let autosizeScheduled = false;
+  const autosize = () => {
+    if (autosizeScheduled) return;
+    const view = input.ownerDocument?.defaultView;
+    const raf = view?.requestAnimationFrame || globalThis.requestAnimationFrame;
+    if (typeof raf !== 'function') {
+      resizeComposerInput(input);
+      return;
+    }
+    autosizeScheduled = true;
+    raf.call(view || globalThis, () => {
+      autosizeScheduled = false;
+      resizeComposerInput(input);
+    });
   };
   input.addEventListener('input', () => {
     autosize();

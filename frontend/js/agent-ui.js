@@ -11,6 +11,12 @@ export function formatContextUsage(usedTokens, contextWindow, estimated = false)
   return `${prefix}${formatTokenCount(used)} ctx`;
 }
 
+export function liveRenderDelay(lastRenderAt, now, minInterval = 50) {
+  const last = Number(lastRenderAt);
+  const elapsed = Number.isFinite(last) ? Number(now) - last : Infinity;
+  return Math.max(0, minInterval - elapsed);
+}
+
 /**
  * Resolve the effective context window denominator shown to the user.
  * The global max_input_tokens cap is only a FALLBACK for models that are

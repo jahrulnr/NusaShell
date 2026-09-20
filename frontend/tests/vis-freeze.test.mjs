@@ -74,7 +74,9 @@ const options = {
       iterations: 80,
       updateInterval: 25,
       onlyDynamicEdges: false,
-      fit: true,
+      // Mirrors initGraph(): stabilize() must not re-fit the camera, so a
+      // background refresh cannot reset the user's zoom.
+      fit: false,
     },
   },
   interaction: { hover: true, tooltipDelay: 200, navigationButtons: false, keyboard: false },
@@ -171,6 +173,48 @@ test('bounded layout leaves visible space between every node', async () => {
     minimumDistance >= 32 + GRAPH_NODE_GAP - 0.05,
     `16px-radius nodes must keep the configured visible surface gap (got ${minimumDistance.toFixed(1)}px center distance)`,
   );
+});
+
+test('stabilize() does not emit fit while stabilization.fit is disabled', async () => {
+  const nodes = new DataSet([]);
+  const edges = new DataSet([]);
+  const network = new Network(document.getElementById('graph'), { nodes, edges }, options);
+  installFreezeHandler(network, nodes);
+  let fits = 0;
+  network.on('fit', () => { fits += 1; });
+
+  const data = fixture(0);
+  nodes.add(data.nodes);
+  edges.add(data.edges);
+  network.stabilize(80);
+
+  const deadline = Date.now() + 3000;
+  let done = false;
+  network.on('stabilizationIterationsDone', () => { done = true; });
+  while (!done && Date.now() < deadline) await delay(50);
+  assert.ok(done, 'stabilize() must complete');
+  assert.equal(fits, 0, 'refresh stabilize must not move the camera — the user keeps their zoom');
+  network.destroy();
+});
+
+test('stabilization.fit:true still emits fit after stabilize (documents the flag)', async () => {
+  const nodes = new DataSet([]);
+  const edges = new DataSet([]);
+  const fitting = JSON.parse(JSON.stringify(options));
+  fitting.physics.stabilization.fit = true;
+  const network = new Network(document.getElementById('graph'), { nodes, edges }, fitting);
+  let fits = 0;
+  network.on('fit', () => { fits += 1; });
+
+  const data = fixture(0);
+  nodes.add(data.nodes);
+  edges.add(data.edges);
+  network.stabilize(80);
+
+  const deadline = Date.now() + 3000;
+  while (fits === 0 && Date.now() < deadline) await delay(50);
+  assert.ok(fits >= 1, 'stabilization.fit:true must emit fit — proving the flag gates the camera move');
+  network.destroy();
 });
 
 test('old setOptions physics re-enable never fires stabilizationIterationsDone and keeps nodes moving', async () => {

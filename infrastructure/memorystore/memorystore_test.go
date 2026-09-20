@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"nusashell/domain"
 )
@@ -269,6 +270,65 @@ func TestUserUpdateWritesFrontmatter(t *testing.T) {
 	}
 	if strings.Contains(s, "- [") {
 		t.Errorf("format should not contain bullet ID prefix, got:\n%s", s)
+	}
+}
+
+func TestUserLoadUpdatedAtIsStableAcrossReads(t *testing.T) {
+	dir := t.TempDir()
+	p, err := NewUser(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Update([]domain.DocumentEntry{{Content: "stable body"}}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	first := p.Load()
+	second := p.Load()
+	if len(first.Entries) != 1 || len(second.Entries) != 1 {
+		t.Fatalf("expected one document entry, got %+v / %+v", first.Entries, second.Entries)
+	}
+	if !first.Entries[0].UpdatedAt.Equal(second.Entries[0].UpdatedAt) {
+		t.Fatalf("UpdatedAt must not move on a read: %s vs %s",
+			first.Entries[0].UpdatedAt, second.Entries[0].UpdatedAt)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, UserFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stamped string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "last_updated:") {
+			stamped = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "last_updated:")), `"`)
+		}
+	}
+	if stamped == "" {
+		t.Fatal("frontmatter missing last_updated")
+	}
+	want, err := time.Parse(time.RFC3339, stamped)
+	if err != nil {
+		t.Fatalf("frontmatter last_updated %q is not RFC3339: %v", stamped, err)
+	}
+	if !first.Entries[0].UpdatedAt.Equal(want) {
+		t.Fatalf("UpdatedAt = %s, want frontmatter last_updated %s", first.Entries[0].UpdatedAt, want)
+	}
+}
+
+func TestParseDocFallsBackToFileModtime(t *testing.T) {
+	modTime := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	entry, err := parseDoc("hand written body without frontmatter", "user", modTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !entry.UpdatedAt.Equal(modTime) {
+		t.Fatalf("UpdatedAt = %s, want file modtime %s", entry.UpdatedAt, modTime)
+	}
+	entry, err = parseDoc("---\nlast_updated: \"2025-12-01T10:00:00Z\"\nversion: 2\n---\n\nbody", "user", modTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2025, 12, 1, 10, 0, 0, 0, time.UTC)
+	if !entry.UpdatedAt.Equal(want) {
+		t.Fatalf("UpdatedAt = %s, want frontmatter last_updated %s", entry.UpdatedAt, want)
 	}
 }
 

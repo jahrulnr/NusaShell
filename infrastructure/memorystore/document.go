@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -127,7 +128,11 @@ func (d *Document) load(create bool) error {
 			return err
 		}
 	}
-	entry, err := parseDoc(string(raw), d.kind)
+	var modTime time.Time
+	if info, statErr := os.Stat(d.path); statErr == nil {
+		modTime = info.ModTime()
+	}
+	entry, err := parseDoc(string(raw), d.kind, modTime)
 	if err != nil {
 		return err
 	}
@@ -261,10 +266,15 @@ func wrapFrontmatter(body string) string {
 
 // parseDoc splits the file into YAML frontmatter + body and returns the
 // entire body as a single entry. The ID is derived from a content hash so
-// it survives reload with a stable ID without being stored.
-func parseDoc(raw, kind string) (domain.DocumentEntry, error) {
+// it survives reload with a stable ID without being stored. UpdatedAt is the
+// persisted frontmatter last_updated stamp — a read must not move it, or
+// every Load looks like a document change (the learning graph fingerprint
+// then never coalesces and refreshes loop). Files without a parseable stamp
+// fall back to their modtime, which is equally stable.
+func parseDoc(raw, kind string, modTime time.Time) (domain.DocumentEntry, error) {
 	raw = strings.TrimSpace(raw)
 	body := raw
+	updatedAt := modTime
 	// Strip YAML frontmatter if present.
 	if strings.HasPrefix(raw, "---") {
 		rest := strings.TrimPrefix(raw, "---\n")
@@ -273,6 +283,12 @@ func parseDoc(raw, kind string) (domain.DocumentEntry, error) {
 		} else {
 			end := strings.Index(rest, "\n---")
 			if end >= 0 {
+				var fm docFrontmatter
+				if err := yaml.Unmarshal([]byte(rest[:end]), &fm); err == nil {
+					if ts, err := time.Parse(time.RFC3339, fm.LastUpdated); err == nil {
+						updatedAt = ts
+					}
+				}
 				body = strings.TrimSpace(rest[end+4:])
 			}
 		}
@@ -283,7 +299,7 @@ func parseDoc(raw, kind string) (domain.DocumentEntry, error) {
 	return domain.DocumentEntry{
 		ID:        docID(kind, body),
 		Content:   body,
-		UpdatedAt: clock.NewTime().Time(),
+		UpdatedAt: updatedAt,
 	}, nil
 }
 

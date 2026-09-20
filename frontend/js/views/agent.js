@@ -4,7 +4,7 @@ import { rpc, on, emit } from '../rpc.js';
 import { el, fmtTime, toast, confirmDialog, debounce } from '../ui.js';
 import { renderMarkdown } from '../markdown.js';
 import { incrementalRender } from '../incremental-render.js';
-import { formatContextUsage, effectiveContextWindow, previousWindowStart, conversationTail, isThreadAtBottom, updateScrollPin, shouldDetachFollow, isNestedScrollerEvent } from '../agent-ui.js';
+import { formatContextUsage, effectiveContextWindow, liveRenderDelay, previousWindowStart, conversationTail, isThreadAtBottom, updateScrollPin, shouldDetachFollow, isNestedScrollerEvent } from '../agent-ui.js';
 import { createThreadFollow, stickThreadToBottom } from '../thread-follow.js';
 import { bindComposer, updateSendAvailability } from './agent/composer.js';
 import { bindModelPicker } from './agent/model-picker.js';
@@ -171,6 +171,7 @@ const state = {
 
 const MAX_LIVE_TOOL_JOBS = 128;
 const ACTIVITY_ROTATE_MS = 5000;
+const LIVE_RENDER_MIN_INTERVAL_MS = 50;
 const SCROLL_TOLERANCE = 24;
 const INITIAL_SCROLL_SETTLE_FRAMES = 8;
 
@@ -2217,35 +2218,47 @@ function flushPendingToolDeltas(run) {
   return flushed;
 }
 
+function liveRenderClock() {
+  return globalThis.performance?.now?.() ?? Date.now();
+}
+
 function scheduleLiveRender(run) {
   if (!run || run.renderScheduled) return;
+  const delay = liveRenderDelay(run.lastRenderAt, liveRenderClock(), LIVE_RENDER_MIN_INTERVAL_MS);
   run.renderScheduled = true;
   const flush = () => {
     run.renderScheduled = false;
     run.renderFrame = 0;
+    run.renderCancel = null;
+    run.lastRenderAt = liveRenderClock();
     renderLiveRun(run);
   };
-  if (typeof requestAnimationFrame === 'function') {
-    run.renderFrame = requestAnimationFrame(flush);
-  } else {
-    run.renderFrame = setTimeout(flush, 0);
+  if (delay > 0 || typeof requestAnimationFrame !== 'function') {
+    const timer = setTimeout(flush, delay);
+    run.renderFrame = timer;
+    run.renderCancel = () => clearTimeout(timer);
+    return;
   }
+  const frame = requestAnimationFrame(flush);
+  run.renderFrame = frame;
+  run.renderCancel = () => {
+    const cancel = globalThis.cancelAnimationFrame;
+    if (typeof cancel === 'function') cancel(frame);
+  };
 }
 
 function cancelLiveRender(run) {
   if (!run?.renderScheduled) return;
-  if (typeof cancelAnimationFrame === 'function' && typeof run.renderFrame === 'number') {
-    cancelAnimationFrame(run.renderFrame);
-  } else {
-    clearTimeout(run.renderFrame);
-  }
+  run.renderCancel?.();
   run.renderScheduled = false;
   run.renderFrame = 0;
+  run.renderCancel = null;
 }
 
 function flushLiveRender(run) {
   if (!run || (!run.renderScheduled && !run.renderDirty)) return;
   cancelLiveRender(run);
+  run.lastRenderAt = liveRenderClock();
   renderLiveRun(run);
 }
 

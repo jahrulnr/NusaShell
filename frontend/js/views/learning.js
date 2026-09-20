@@ -159,11 +159,13 @@ function initTabs() {
       if (target === 'experience') {
         void loadCatalog();
       }
+      if (target === 'memory') {
+        // The graph canvas was hidden while another panel was active;
+        // re-fit once it is visible again and layout has settled.
+        setTimeout(() => { if (state.network) state.network.fit({ animation: { duration: 200 } }); }, 60);
+      }
       if (target === 'log') {
         loadLog();
-        // The graph canvas was possibly hidden while the other panel was
-        // active; re-fit after layout settles.
-        setTimeout(() => { if (state.network) state.network.fit({ animation: { duration: 200 } }); }, 60);
       }
     });
   }
@@ -675,7 +677,9 @@ function initSplitter() {
 export async function refresh() {
   await loadStats();
   await loadExperiences();
-  await loadGraph();
+  // View entry keeps node positions but re-fits the camera: the boot-time
+  // fit can run while this view is hidden and land on a degenerate scale.
+  await loadGraph({ fitView: true });
   // Refresh the log too — but only if it has been opened at least once
   // (lazy-loading keeps init light).
   if (state.logLoaded) loadLog();
@@ -1501,7 +1505,11 @@ function initGraph() {
         iterations: GRAPH_LAYOUT_ITERATIONS,
         updateInterval: 25,
         onlyDynamicEdges: false,
-        fit: true,
+        // fit:false — vis-network re-fits the camera after EVERY stabilize(),
+        // including the bounded refresh layouts, which would keep yanking the
+        // user's zoom back to fit. Camera moves only via explicit fits
+        // (initial load, Reload, Fit button, node delete).
+        fit: false,
       },
     },
     interaction: {
@@ -1543,7 +1551,7 @@ function initGraph() {
   });
 }
 
-async function loadGraph({ preservePositions = true } = {}) {
+async function loadGraph({ preservePositions = true, fitView = false } = {}) {
   if (!state.nodes) return;
   try {
     // Fetch pre-computed graph from backend (nodes + edges). Related edges
@@ -1588,15 +1596,20 @@ async function loadGraph({ preservePositions = true } = {}) {
       `${memCount} record${memCount === 1 ? '' : 's'}`;
     // Bounded re-layout for the new/changed nodes, then the
     // stabilizationIterationsDone handler freezes the graph again.
-    // Auto-fit after data load + render settled. Defer to next frame so
-    // the container has its final dimensions (view switch, CSS layout).
     if (state.network && newNodes.length > 0) {
       relayoutGraph(state.network);
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          fitGraphToView(state.network, state.nodes, 400);
-        }, 50);
-      });
+      // Auto-fit only on explicit re-layouts (initial load, Reload, node
+      // delete) and on view entry (a boot-time fit may have run against a
+      // hidden zero-size container). Background refreshes must leave the
+      // user's zoom and pan alone. Defer to next frame so the container has
+      // its final dimensions (view switch, CSS layout).
+      if (fitView || !preservePositions) {
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            fitGraphToView(state.network, state.nodes, 400);
+          }, 50);
+        });
+      }
     }
   } catch (e) {
     // Graph load failed — show empty state

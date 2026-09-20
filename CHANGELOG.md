@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-09-21
+
+### Fixed
+
+- **Learning graph no longer rebuild-refreshes in a loop, and background
+  refreshes keep the user's zoom.** The memory document parser stamped
+  `UpdatedAt` with the read time on every `Load`, so the `learning.graph`
+  fingerprint never matched the stored build snapshot — every fetch queued a
+  rebuild, emitted `learning.graph.updated`, and made the frontend fetch
+  again indefinitely. `UpdatedAt` now comes from the document's persisted
+  `last_updated` (file modtime as fallback), and the fingerprint only covers
+  fields the edge builder actually consumes. On the frontend, vis-network's
+  post-stabilize auto-fit is disabled and the camera is only re-fit on
+  explicit relayouts (initial load, Reload, Fit, node delete) and view
+  entry — a background refresh can no longer yank the user's zoom back to
+  fit.
+- **Mobile Agent composer stays responsive while typing and streaming.** Textarea
+  autosizing now coalesces layout work and reads its geometry once per frame;
+  live assistant Markdown updates are capped at 20 renders per second while
+  terminal completion still flushes immediately.
+
 ## [0.9.0] - 2026-09-18
 
 ### Added

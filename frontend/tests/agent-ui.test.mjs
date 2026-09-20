@@ -14,7 +14,32 @@ import {
   updateScrollPin,
   shouldDetachFollow,
   isNestedScrollerEvent,
+  liveRenderDelay,
 } from '../js/agent-ui.js';
+import { resizeComposerInput } from '../js/views/agent/composer.js';
+
+test('composer autosize reads layout once and caps the textarea', () => {
+  let scrollReads = 0;
+  const input = {
+    style: {},
+    get scrollHeight() {
+      scrollReads++;
+      return 240;
+    },
+  };
+
+  resizeComposerInput(input);
+
+  assert.equal(scrollReads, 1);
+  assert.equal(input.style.height, '180px');
+  assert.equal(input.style.overflowY, 'auto');
+});
+
+test('live render delay coalesces bursts without delaying the first paint', () => {
+  assert.equal(liveRenderDelay(undefined, 0), 0);
+  assert.equal(liveRenderDelay(100, 120), 30);
+  assert.equal(liveRenderDelay(100, 160), 0);
+});
 
 test('context usage uses the effective model window', () => {
   assert.equal(formatContextUsage(1234, 128000), '1k/128k context');
