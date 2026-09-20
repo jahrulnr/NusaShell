@@ -638,7 +638,13 @@ After saving a provider, use **Import models** to fetch its model list
 exposes `GET /images/models`; those ids
 are merged and tagged `kind: image`. The agent only offers imported models.
 Messages providers bundle Claude model metadata (context window, pricing);
-imported models keep the provider's own ids. If a chat request is rejected
+imported models keep the provider's own ids. Catalog lookup identity is
+**gateway/model**, not vendor/model: an OpenCode model imported as
+`deepseek-v4.1-flash` resolves as `opencode/deepseek-v4.1-flash`, while an
+OpenRouter model imported as `deepseek/deepseek-v4.1-flash` resolves as
+`openrouter/deepseek/deepseek-v4.1-flash`. The provider API always receives
+the imported model ID unchanged; the gateway namespace is only used to find
+catalog metadata. If a chat request is rejected
 with an explicit "maximum context length" or "context window" limit, NusaShell
 learns that limit for the provider+model and updates the model's effective
 context window, so the catalog does not overstate the actual window available

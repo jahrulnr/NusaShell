@@ -815,12 +815,12 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 				Message: fmt.Sprintf("model %q is not available on provider %q", modelID, p.Name),
 			}
 		}
-		a.refreshCodexContextWindow(p)
 		key, _, err := a.Credentials.Get(p.ID)
 		if err != nil {
 			return nil, nil, "", rpcInternal(err)
 		}
 		m := p.FindModel(modelID)
+		a.refreshModelCatalogMetadata(p, m)
 		a.applyModelOverrides(p, m)
 		return p, m, key, nil
 	}
@@ -832,8 +832,8 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 		if err != nil {
 			return nil, nil, "", rpcInternal(err)
 		}
-		a.refreshCodexContextWindow(p)
 		m := p.FindModel(model)
+		a.refreshModelCatalogMetadata(p, m)
 		a.applyModelOverrides(p, m)
 		return p, m, key, nil
 	}
@@ -843,34 +843,32 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 	}
 }
 
-// refreshCodexContextWindow updates the transient provider clone used for a
-// direct Codex chat turn. Codex's model/list app-server response is only a
-// discovery source and may carry the CLI cache's 272k value; the direct
-// ChatGPT Responses API uses the public model metadata instead. Import and
-// model-list paths apply the same policy, while learned/manual overrides are
-// applied afterward by applyModelOverrides.
-func (a *App) refreshCodexContextWindow(p *domain.Provider) {
-	if a == nil || p == nil || p.Kind != domain.ProviderCodex || a.ModelCatalog == nil {
+// refreshModelCatalogMetadata updates the transient provider clone used for
+// a chat turn before learned/manual overrides are applied. The lookup is
+// scoped by the configured gateway namespace, not by a vendor prefix embedded
+// in the model ID: OpenCode's "deepseek-v4.1-flash" resolves under
+// "opencode", while OpenRouter's "deepseek/deepseek-v4.1-flash" resolves
+// under "openrouter". The stored model ID itself is never rewritten.
+func (a *App) refreshModelCatalogMetadata(p *domain.Provider, m *domain.Model) {
+	if a == nil || p == nil || m == nil || a.ModelCatalog == nil {
 		return
 	}
 	if !a.ModelCatalog.Loaded() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		if err := a.ModelCatalog.EnsureLoaded(ctx); err != nil {
-			a.log("warn", "models", "Codex catalog context refresh failed: %v", err)
+			a.log("warn", "models", "catalog metadata refresh failed for %s: %v", p.Name, err)
 			return
 		}
 	}
 	if !a.ModelCatalog.Loaded() {
 		return
 	}
-	for i := range p.Models {
-		meta := a.ModelCatalog.Lookup(provider.CatalogHintFromModelID(p.Models[i].ID), p.Models[i].ID)
-		if meta == nil {
-			continue
-		}
-		p.Models[i].Context = provider.ContextWindowFromCatalog(p.Kind, p.Models[i].Context, meta.Context)
+	meta := a.ModelCatalog.Lookup(provider.CatalogProviderHint(p), m.ID)
+	if meta == nil {
+		return
 	}
+	provider.ApplyCatalogMetadata(p, m, meta)
 }
 
 // applyModelOverrides applies model-metadata corrections to a freshly

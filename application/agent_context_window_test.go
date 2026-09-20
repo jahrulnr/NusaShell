@@ -64,7 +64,7 @@ func TestRefreshCodexContextWindowKeepsDiscoveryValueWhenCatalogUnavailable(t *t
 	}
 	app := &App{ModelCatalog: failingCodexCatalogStub{}}
 
-	app.refreshCodexContextWindow(p)
+	app.refreshModelCatalogMetadata(p, p.FindModel("gpt-5.6-luna"))
 	if got := p.Models[0].Context; got != 272_000 {
 		t.Fatalf("Codex context after catalog failure = %d, want discovery value 272000", got)
 	}
@@ -79,7 +79,7 @@ func TestRefreshCodexContextWindowSkipsNonCodexProviders(t *testing.T) {
 		"gpt-5.6-luna": {ID: "openai/gpt-5.6-luna", Context: 1_050_000},
 	}}}
 
-	app.refreshCodexContextWindow(p)
+	app.refreshModelCatalogMetadata(p, p.FindModel("gpt-5.6-luna"))
 	if got := p.Models[0].Context; got != 272_000 {
 		t.Fatalf("non-Codex context after refresh = %d, want unchanged 272000", got)
 	}

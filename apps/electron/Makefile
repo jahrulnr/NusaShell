@@ -73,10 +73,15 @@ release-linux: package
 		Linux) ;; \
 		*) echo "release-linux must run on Linux" >&2; exit 1;; \
 	esac
-	@version="$(ELECTRON_VERSION)"; \
+	@case "$$(uname -m)" in \
+		x86_64|amd64) arch=x64; unpacked=linux-unpacked;; \
+		arm64|aarch64) arch=arm64; unpacked=linux-arm64-unpacked;; \
+		*) echo "Unsupported CPU architecture: $$(uname -m)" >&2; exit 1;; \
+	esac; \
+	version="$(ELECTRON_VERSION)"; \
 	mkdir -p dist/release; \
-	tar -C dist/linux-unpacked -czf "$$(pwd)/dist/release/nusashell-electron-$${version}-linux-x64.tar.gz" .; \
-	sha256sum "dist/release/nusashell-electron-$${version}-linux-x64.tar.gz" > "dist/release/nusashell-electron-$${version}-linux-x64.tar.gz.sha256"
+	tar -C "dist/$${unpacked}" -czf "$$(pwd)/dist/release/nusashell-electron-$${version}-linux-$${arch}.tar.gz" .; \
+	sha256sum "dist/release/nusashell-electron-$${version}-linux-$${arch}.tar.gz" > "dist/release/nusashell-electron-$${version}-linux-$${arch}.tar.gz.sha256"
 
 ## release-manifest: index locally produced Electron payloads.
 release-manifest: version-check

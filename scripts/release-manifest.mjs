@@ -12,16 +12,19 @@ function escapeRegExp(value) {
 function artifactKey(name, version, product) {
   const escapedVersion = escapeRegExp(version);
   if (product === 'go') {
-    if (name === `nusashell-${version}-linux-x64.tar.gz`) return 'linux-x64';
-    if (name === `nusashell-${version}-darwin-x64.tar.gz`) return 'darwin-x64';
-    if (name === `nusashell-${version}-darwin-arm64.tar.gz`) return 'darwin-arm64';
-    const windows = name.match(new RegExp(`^nusashell-${escapedVersion}-(?:win|win32)-(x64|x86_64)\\.zip$`));
-    return windows ? 'win32-x64' : null;
+    const linux = name.match(new RegExp(`^nusashell-${escapedVersion}-linux-(x64|arm64)\\.tar\\.gz$`));
+    if (linux) return `linux-${linux[1]}`;
+    const mac = name.match(new RegExp(`^nusashell-${escapedVersion}-darwin-(x64|arm64)\\.tar\\.gz$`));
+    if (mac) return `darwin-${mac[1]}`;
+    const windows = name.match(new RegExp(`^nusashell-${escapedVersion}-(?:win|win32)-(x64|x86_64|arm64)\\.zip$`));
+    if (!windows) return null;
+    return `win32-${windows[1] === 'x86_64' ? 'x64' : windows[1]}`;
   }
   if (product === 'electron') {
-    if (name === `nusashell-electron-${version}-linux-x64.tar.gz`) return 'linux-x64';
-    const windows = name.match(new RegExp(`^NusaShell-Electron-${escapedVersion}-(?:win|win32)-(x64|x86_64)\\.zip$`));
-    if (windows) return 'win32-x64';
+    const linux = name.match(new RegExp(`^nusashell-electron-${escapedVersion}-linux-(x64|arm64)\\.tar\\.gz$`));
+    if (linux) return `linux-${linux[1]}`;
+    const windows = name.match(new RegExp(`^NusaShell-Electron-${escapedVersion}-(?:win|win32)-(x64|x86_64|arm64)\\.zip$`));
+    if (windows) return `win32-${windows[1] === 'x86_64' ? 'x64' : windows[1]}`;
     const mac = name.match(new RegExp(`^NusaShell-Electron-${escapedVersion}-(?:darwin|mac)-(x64|arm64)\\.zip$`));
     return mac ? `darwin-${mac[1]}` : null;
   }

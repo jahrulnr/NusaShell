@@ -24,12 +24,21 @@ Linux and macOS:
 curl -fsSL https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.sh | bash
 ```
 
-The installer always installs the Go core, then asks:
+The installer always installs the matching Go core payload for the detected
+CPU architecture. Linux x64/ARM64, macOS x64/ARM64, and Windows x64/ARM64
+are supported. It then asks:
 
 1. whether to install the login service for the Go core (autostart);
 2. whether to install the Electron desktop wrapper;
 3. whether to install the desktop pet (Linux only);
 4. whether to install first-party plugins from `NusaShell-mcp`.
+
+Electron and desktop-pet prompts only appear when a desktop session is
+detected. On Linux this means `DISPLAY` or `WAYLAND_DISPLAY` is set; macOS
+is treated as a desktop OS; Windows checks for an interactive, non-Server
+Core/Nano session. Headless/proot/server installs therefore get only the
+core, service, and MCP choices. An explicit `--install-electron` or
+`--install-pets` still overrides the detector and attempts the install.
 
 The default answer is no for all optional components. Choices can be made
 without a prompt, which is useful for automation:
@@ -42,7 +51,9 @@ curl -fsSL https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/i
 Equivalent environment overrides are `NUSASHELL_INSTALL_SERVICE=1|0`,
 `NUSASHELL_INSTALL_ELECTRON=1|0`, `NUSASHELL_INSTALL_PETS=1|0`, and
 `NUSASHELL_INSTALL_MCP=1|0`. Set `NUSASHELL_NON_INTERACTIVE=1` to skip all
-of them unless an explicit `1` override or install flag is supplied.
+of them unless an explicit `1` override or install flag is supplied. If the
+desktop detector needs an explicit correction, `NUSASHELL_HEADLESS=1`
+suppresses desktop prompts and `NUSASHELL_DESKTOP=1` forces them.
 
 Windows PowerShell:
 
@@ -80,10 +91,14 @@ NUSASHELL_VERSION=1.2.3 NUSASHELL_ELECTRON_VERSION=2.0.0 NUSASHELL_PETS_VERSION=
 
 PowerShell uses `-ElectronVersion` for the optional wrapper; the desktop pet
 is Linux-only and is therefore never offered by the Windows installer. The
-equivalent environment variables are `NUSASHELL_ELECTRON_VERSION` and
-`NUSASHELL_PETS_VERSION`. When an optional component is selected without a
-pin, the installer gets that stream's latest release even if the Go core has
-a different version.
+installer chooses `win32-x64` or `win32-arm64` manifest entries from
+`RuntimeInformation.OSArchitecture`. On Server Core/Nano or another
+non-interactive session it skips the Electron prompt and shortcut creation;
+`-InstallElectron`/`NUSASHELL_INSTALL_ELECTRON=1` remains an explicit
+override. The equivalent version environment variables are
+`NUSASHELL_ELECTRON_VERSION` and `NUSASHELL_PETS_VERSION`. When an optional
+component is selected without a pin, the installer gets that stream's latest
+release even if the Go core has a different version.
 
 ## Installation layout
 
@@ -162,9 +177,9 @@ remove the data directory separately when a full wipe is intended.
 ## Desktop pet (Linux)
 
 The desktop pet is an opt-in component like Electron, but Linux-only for now:
-the Unix installer offers it only on Linux and the Windows installer does not
-install it at all. The payload contains the `nusashell-pets` binary and its
-`assets/` folder (the hatch-pet v2 WebP atlas and `config.json`); the
+the Unix installer offers it only on Linux desktop sessions and the Windows
+installer does not install it at all. The payload contains the
+`nusashell-pets` binary and its `assets/` folder (the hatch-pet v2 WebP atlas and `config.json`); the
 launcher always passes `--assets <current>/assets/pets`, so the pet finds its
 artwork regardless of the current working directory. Run it with:
 
@@ -236,7 +251,10 @@ changed, following the release-on-changes pattern used by NusaShell-mcp.
 Go changes build and publish only the Go matrix; `apps/electron/**` changes
 build and publish only the Electron matrix; `apps/pets/**` changes build and
 publish only the Linux pets matrix; shared icon changes run both Go and
-Electron. The release jobs also compare each VERSION value with its
+Electron. Go artifacts are produced for Linux x64/ARM64, Windows x64/ARM64,
+and macOS x64/ARM64 on native runners; Electron uses the same OS/architecture
+matrix for its installer-facing payloads, and pets publishes Linux x64/ARM64.
+The release jobs also compare each VERSION value with its
 corresponding `release-versions.json` pointer. A stream whose version is
 ahead of its pointer is retried even when the follow-up commit only fixes CI
 or tests. The Go, Electron, and pets gates are independent: a failed gate for
@@ -273,7 +291,12 @@ same versioned layout as the release installer, then prompts for:
 
 1. login service (autostart);
 2. Electron desktop wrapper (build via `apps/electron` package, then install);
-3. desktop pet on Linux (build via `apps/pets` with SDL2, then install).
+3. desktop pet on Linux desktop sessions (build via `apps/pets` with SDL2,
+   then install).
+
+The local installers use the same headless detection as the release
+installers, so Electron/pets questions are skipped on proot or server
+sessions unless explicitly requested.
 
 It does **not** download GitHub releases and does **not** install NusaShell-mcp
 (use `make install-release` / `scripts/install.sh` for that).

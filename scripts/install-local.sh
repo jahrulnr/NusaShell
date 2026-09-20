@@ -19,6 +19,8 @@ electron_only=0
 electron_override="${NUSASHELL_INSTALL_ELECTRON:-}"
 pets_override="${NUSASHELL_INSTALL_PETS:-}"
 service_override="${NUSASHELL_INSTALL_SERVICE:-}"
+desktop_override="${NUSASHELL_DESKTOP:-}"
+headless_override="${NUSASHELL_HEADLESS:-}"
 
 usage() {
   cat <<'EOF'
@@ -26,7 +28,8 @@ Usage: install-local.sh [options]
 
 Build and install NusaShell from this repository checkout (not GitHub releases).
 The Go core is always built and installed. Optional components are prompted
-when a terminal is available (default: no).
+when a terminal is available (default: no). Desktop-only components are
+skipped automatically on headless Linux hosts unless explicitly selected.
 
 Options:
   --electron-only         Install only a prebuilt Electron package (no Go/pets).
@@ -43,6 +46,8 @@ Environment:
   NUSASHELL_INSTALL_SERVICE    1/yes or 0/no; overrides the prompt.
   NUSASHELL_INSTALL_PETS       1/yes or 0/no; overrides the prompt (Linux only).
   NUSASHELL_NON_INTERACTIVE    1 skips optional components by default.
+  NUSASHELL_HEADLESS           1/yes suppresses desktop component prompts.
+  NUSASHELL_DESKTOP            1/yes forces desktop component prompts.
   NUSASHELL_GO_INSTALL_ROOT    Override the Go core installation root.
   NUSASHELL_ELECTRON_INSTALL_ROOT
                                Override the Linux Electron installation root.
@@ -91,13 +96,25 @@ validate_choice() {
   esac
 }
 
+choice_is_true() {
+  case "${1,,}" in
+    1|yes|y|true) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+choice_is_false() {
+  case "${1,,}" in
+    0|no|n|false) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 prompt_yes_no() {
   local override="$1" question="$2" answer=''
   validate_choice "$override" 'Installer choice'
-  case "${override,,}" in
-    1|yes|y|true) return 0 ;;
-    0|no|n|false) return 1 ;;
-  esac
+  if choice_is_true "$override"; then return 0; fi
+  if choice_is_false "$override"; then return 1; fi
   if [[ "${NUSASHELL_NON_INTERACTIVE:-}" == 1 ]]; then
     echo "$question skipped (NUSASHELL_NON_INTERACTIVE=1)." >&2
     return 1
@@ -117,6 +134,27 @@ prompt_yes_no() {
     y|yes) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+validate_choice "$desktop_override" 'NUSASHELL_DESKTOP'
+validate_choice "$headless_override" 'NUSASHELL_HEADLESS'
+desktop_available=0
+if choice_is_true "$headless_override"; then
+  desktop_available=0
+elif choice_is_true "$desktop_override" || [[ "$os" == darwin || -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
+  desktop_available=1
+fi
+
+prompt_desktop_yes_no() {
+  local override="$1" question="$2"
+  validate_choice "$override" 'Installer choice'
+  if choice_is_true "$override"; then return 0; fi
+  if choice_is_false "$override"; then return 1; fi
+  if [[ "$desktop_available" != 1 ]]; then
+    echo "$question skipped (no desktop session detected)." >&2
+    return 1
+  fi
+  prompt_yes_no '' "$question"
 }
 
 read_previous_version() {
@@ -259,11 +297,11 @@ go_current=''
 if prompt_yes_no "$service_override" 'Install nusashell as a login service (autostart)?'; then
   install_service=1
 fi
-if prompt_yes_no "$electron_override" 'Build and install Electron desktop wrapper?'; then
+if prompt_desktop_yes_no "$electron_override" 'Build and install Electron desktop wrapper?'; then
   install_electron=1
 fi
 if [[ "$os" == linux ]]; then
-  if prompt_yes_no "$pets_override" 'Build and install desktop pet (Linux only)?'; then
+  if prompt_desktop_yes_no "$pets_override" 'Build and install desktop pet (Linux only)?'; then
     install_pets=1
   fi
 else

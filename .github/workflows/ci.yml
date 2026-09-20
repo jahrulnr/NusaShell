@@ -251,9 +251,15 @@ jobs:
           - os: ubuntu-latest
             platform: linux
             arch: x64
+          - os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
           - os: windows-latest
             platform: win
             arch: x64
+          - os: windows-11-arm
+            platform: win
+            arch: arm64
           - os: macos-15-intel
             platform: darwin
             arch: x64
@@ -289,7 +295,7 @@ jobs:
           mkdir -p release/go/stage
           if [ "$RUNNER_OS" = "Windows" ]; then
             go build -buildvcs=false -ldflags "-X main.version=${version}" -o release/go/stage/nusashell.exe ./cmd/nusashell
-            powershell -NoProfile -Command "Compress-Archive -Path 'release/go/stage/nusashell.exe' -DestinationPath 'release/go/nusashell-${version}-win-x64.zip' -Force"
+            powershell -NoProfile -Command "Compress-Archive -Path 'release/go/stage/nusashell.exe' -DestinationPath 'release/go/nusashell-${version}-${{ matrix.platform }}-${{ matrix.arch }}.zip' -Force"
           else
             go build -buildvcs=false -ldflags "-X main.version=${version}" -o release/go/stage/nusashell ./cmd/nusashell
             tar -C release/go/stage -czf "release/go/nusashell-${version}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz" nusashell
@@ -321,9 +327,15 @@ jobs:
           - os: ubuntu-latest
             platform: linux
             arch: x64
+          - os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
           - os: windows-latest
             platform: win
             arch: x64
+          - os: windows-11-arm
+            platform: win
+            arch: arm64
           - os: macos-15-intel
             platform: mac
             arch: x64
@@ -347,17 +359,22 @@ jobs:
       - run: npm ci --prefix apps/electron
       - name: Build Electron wrapper artifacts
         shell: bash
-        run: npm --prefix apps/electron run dist -- --publish never
+        run: npm --prefix apps/electron run dist -- --publish never "--${{ matrix.arch }}"
       - name: Package Linux directory wrapper payload
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           version="$(tr -d '\r\n' < apps/electron/VERSION)"
-          npm --prefix apps/electron run package:dir
+          npm --prefix apps/electron run package:dir -- "--${{ matrix.arch }}"
+          unpacked_dir='linux-unpacked'
+          if [ "${{ matrix.arch }}" != "x64" ]; then
+            unpacked_dir="linux-${{ matrix.arch }}-unpacked"
+          fi
+          payload="nusashell-electron-${version}-linux-${{ matrix.arch }}.tar.gz"
           mkdir -p release/electron
-          tar -C apps/electron/dist/linux-unpacked -czf "$GITHUB_WORKSPACE/release/electron/nusashell-electron-${version}-linux-x64.tar.gz" .
-          sha256sum "release/electron/nusashell-electron-${version}-linux-x64.tar.gz" > "release/electron/nusashell-electron-${version}-linux-x64.tar.gz.sha256"
+          tar -C "apps/electron/dist/${unpacked_dir}" -czf "$GITHUB_WORKSPACE/release/electron/${payload}" .
+          sha256sum "release/electron/${payload}" > "release/electron/${payload}.sha256"
       - name: Collect native Electron artifacts
         shell: bash
         run: |

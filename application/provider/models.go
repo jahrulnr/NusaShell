@@ -6,6 +6,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/modelcatalog"
 	"nusashell/infrastructure/config"
 )
 
@@ -57,48 +58,11 @@ func (s *Service) HandleModelsList() (any, *contracts.RPCError) {
 // without persisting — it's a read-time enrichment so the UI always shows
 // current capabilities even for models imported before a catalog update.
 func (s *Service) enrichProviderModelsAtRead(p *domain.Provider) {
+	catalogHint := catalogProviderHint(p)
 	for i := range p.Models {
-		meta := s.catalog.Lookup(catalogHintFromModelID(p.Models[i].ID), p.Models[i].ID)
+		meta := s.catalog.Lookup(catalogHint, p.Models[i].ID)
 		if meta != nil {
-			isFreeVariant := isFreeTierModel(p.Models[i].ID)
-			p.Models[i].Context = contextWindowFromCatalog(p.Kind, p.Models[i].Context, meta.Context)
-			if p.Models[i].MaxOutput == 0 {
-				p.Models[i].MaxOutput = meta.Output
-			}
-			if !isFreeVariant {
-				if p.Models[i].InputCost == 0 {
-					p.Models[i].InputCost = meta.InputCost
-				}
-				if p.Models[i].OutputCost == 0 {
-					p.Models[i].OutputCost = meta.OutputCost
-				}
-				if p.Models[i].CacheReadCost == 0 {
-					p.Models[i].CacheReadCost = meta.CacheReadCost
-				}
-			}
-			if p.Models[i].Description == "" {
-				p.Models[i].Description = meta.Description
-			}
-			if p.Models[i].DisplayName == "" {
-				p.Models[i].DisplayName = meta.Name
-			}
-			if len(p.Models[i].SupportedEfforts) == 0 {
-				p.Models[i].SupportedEfforts = meta.SupportedEfforts
-			}
-			if p.Models[i].KnowledgeCutoff == "" {
-				p.Models[i].KnowledgeCutoff = meta.KnowledgeCutoff
-			}
-			// Capabilities are always overridden — the catalog is authoritative
-			// for reasoning, tool call, vision, etc.
-			p.Models[i].ToolCall = meta.ToolCall
-			p.Models[i].StructuredOutput = meta.StructuredOutput
-			p.Models[i].Reasoning = meta.Reasoning
-			p.Models[i].Vision = meta.Vision
-			p.Models[i].Audio = meta.Audio
-			p.Models[i].Video = meta.Video
-			p.Models[i].InterleavedField = meta.InterleavedField
-			// Capability-only: Kind stays with the lister source, never
-			// reclassified by the catalog (matches import path).
+			applyCatalogMetadata(p, &p.Models[i], meta)
 		}
 		if config.IsKnownImageModel(p.Models[i].ID) {
 			p.Models[i].Kind = domain.ModelKindImage
@@ -118,7 +82,7 @@ func (s *Service) enrichProviderModelsAtRead(p *domain.Provider) {
 		// imported before the catalog grew (or before Ollama native capability
 		// detection existed) surface in Settings → Embedding model without a
 		// manual re-import.
-		if meta := s.catalog.Lookup(catalogHintFromModelID(p.Models[i].ID), p.Models[i].ID); meta != nil {
+		if meta != nil {
 			switch meta.Kind {
 			case "tts":
 				p.Models[i].Kind = domain.ModelKindTTS
@@ -138,6 +102,59 @@ func (s *Service) enrichProviderModelsAtRead(p *domain.Provider) {
 			p.Models[i].Kind = domain.ModelKindEmbedding
 		}
 	}
+}
+
+func applyCatalogMetadata(p *domain.Provider, m *domain.Model, meta *modelcatalog.ModelMetadata) {
+	if p == nil || m == nil || meta == nil {
+		return
+	}
+	isFreeVariant := isFreeTierModel(m.ID)
+	m.Context = contextWindowFromCatalog(p.Kind, m.Context, meta.Context)
+	if m.MaxOutput == 0 {
+		m.MaxOutput = meta.Output
+	}
+	// Free-tier variants (e.g. "qwen/qwen3.8-max:free") have $0 pricing from
+	// the provider API. Don't override with the base model's real pricing.
+	if !isFreeVariant {
+		if m.InputCost == 0 {
+			m.InputCost = meta.InputCost
+		}
+		if m.OutputCost == 0 {
+			m.OutputCost = meta.OutputCost
+		}
+		if m.CacheReadCost == 0 {
+			m.CacheReadCost = meta.CacheReadCost
+		}
+	}
+	if m.Description == "" {
+		m.Description = meta.Description
+	}
+	if m.DisplayName == "" {
+		m.DisplayName = meta.Name
+	}
+	if len(m.SupportedEfforts) == 0 {
+		m.SupportedEfforts = meta.SupportedEfforts
+	}
+	if m.KnowledgeCutoff == "" {
+		m.KnowledgeCutoff = meta.KnowledgeCutoff
+	}
+	// Capabilities are always overridden — the catalog is authoritative
+	// for reasoning, tool call, vision, etc.
+	m.ToolCall = meta.ToolCall
+	m.StructuredOutput = meta.StructuredOutput
+	m.Reasoning = meta.Reasoning
+	m.Vision = meta.Vision
+	m.Audio = meta.Audio
+	m.Video = meta.Video
+	m.InterleavedField = meta.InterleavedField
+	// Capability-only: Kind stays with the lister source, never
+	// reclassified by the catalog (matches import path).
+}
+
+// ApplyCatalogMetadata is exported for application-level model resolution,
+// which must refresh capabilities before learned/manual overrides.
+func ApplyCatalogMetadata(p *domain.Provider, m *domain.Model, meta *modelcatalog.ModelMetadata) {
+	applyCatalogMetadata(p, m, meta)
 }
 
 func modelsDTO(p *domain.Provider) []contracts.ModelDTO {

@@ -56,6 +56,12 @@ test('installers preserve the release manifest, checksum, and version activation
   assert.match(releaseInstaller, /--install-service/);
   assert.match(releaseInstaller, /--no-service/);
   assert.match(releaseInstaller, /nusashell service status/);
+  assert.match(releaseInstaller, /arm64\|aarch64/);
+  assert.match(releaseInstaller, /desktop_available/);
+  assert.match(releaseInstaller, /prompt_desktop_yes_no/);
+  assert.match(releaseInstaller, /NUSASHELL_HEADLESS/);
+  assert.match(releaseInstaller, /NUSASHELL_DESKTOP/);
+  assert.match(releaseInstaller, /no desktop session detected/);
   assert.match(releaseInstaller, /pets-latest\.json/);
   assert.match(releaseInstaller, /NUSASHELL_INSTALL_PETS/);
   assert.match(releaseInstaller, /Install desktop pet \(Linux only\)/);
@@ -71,6 +77,13 @@ test('installers preserve the release manifest, checksum, and version activation
   assert.match(windowsInstaller, /GetFolderPath\('Desktop'\)/);
   assert.match(windowsInstaller, /NusaShell\.lnk/);
   assert.match(windowsInstaller, /Install nusashell as a login service/);
+  assert.match(windowsInstaller, /RuntimeInformation.*OSArchitecture/s);
+  assert.match(windowsInstaller, /Test-DesktopEnvironment/);
+  assert.match(windowsInstaller, /Get-DesktopChoice/);
+  assert.match(windowsInstaller, /win32-\$windowsArch/);
+  assert.match(windowsInstaller, /no desktop session detected/);
+  assert.match(windowsInstaller, /NUSASHELL_HEADLESS/);
+  assert.match(windowsInstaller, /NUSASHELL_DESKTOP/);
   assert.match(windowsInstaller, /if \(\(Test-Path -LiteralPath \$Target\) -and/);
 
   assert.match(localInstaller, /--electron-only/);
@@ -81,9 +94,16 @@ test('installers preserve the release manifest, checksum, and version activation
   assert.match(localInstaller, /apps\/electron\/VERSION/);
   assert.match(localInstaller, /NUSASHELL_LOCAL_GO_BINARY/);
   assert.match(localInstaller, /NUSASHELL_LOCAL_PETS_DIR/);
+  assert.match(localInstaller, /desktop_available/);
+  assert.match(localInstaller, /prompt_desktop_yes_no/);
+  assert.match(localInstaller, /NUSASHELL_HEADLESS/);
+  assert.match(localInstaller, /NUSASHELL_DESKTOP/);
   assert.doesNotMatch(localInstaller, /release-versions\.json/);
   assert.doesNotMatch(localInstaller, /pets-latest\.json/);
   assert.match(localWindowsInstaller, /ElectronOnly/);
+  assert.match(localWindowsInstaller, /Test-DesktopEnvironment/);
+  assert.match(localWindowsInstaller, /Get-DesktopChoice/);
+  assert.match(localWindowsInstaller, /no desktop session detected/);
   assert.match(localWindowsInstaller, /go build/);
   assert.match(localWindowsInstaller, /Build and install Electron desktop wrapper/);
   assert.match(localWindowsInstaller, /apps\\electron\\VERSION/);
@@ -253,6 +273,92 @@ esac
   const launcher = await readFile(join(home, '.local', 'bin', 'nusashell'), 'utf8');
   assert.match(launcher, /current\/nusashell/);
   assert.equal(await fileExists(join(home, '.config', 'nusashell-desktop')), false);
+});
+
+test('release Linux installer selects arm64 and skips desktop prompts on a headless host', async () => {
+  if (process.platform !== 'linux') return;
+  const root = await mkdtemp(join(tmpdir(), 'nusashell-release-arm64-'));
+  temporaryDirectories.push(root);
+  const home = join(root, 'home');
+  const fakeBin = join(root, 'bin');
+  const payloadRoot = join(root, 'payload');
+  const releaseRoot = join(root, 'release');
+  const installRoot = join(root, 'program');
+  const payloadName = 'nusashell-0.1.0-linux-arm64.tar.gz';
+  const archive = join(releaseRoot, payloadName);
+  await mkdir(home, { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  await mkdir(payloadRoot, { recursive: true });
+  await mkdir(releaseRoot, { recursive: true });
+  await writeFile(join(payloadRoot, 'nusashell'), '#!/usr/bin/env sh\necho arm64-core\n');
+  await chmod(join(payloadRoot, 'nusashell'), 0o755);
+  await execFileAsync('tar', ['-C', payloadRoot, '-czf', archive, 'nusashell']);
+  const sha256 = createHash('sha256').update(await readFile(archive)).digest('hex');
+  await writeFile(join(releaseRoot, 'latest.json'), `${JSON.stringify({
+    version: '0.1.0',
+    files: {
+      'linux-arm64': { name: payloadName, sha256 },
+    },
+  }, null, 2)}\n`);
+  await writeFile(join(releaseRoot, 'release-versions.json'), `${JSON.stringify({
+    schemaVersion: 1,
+    go: { version: '0.1.0', tag: 'go-v0.1.0', manifest: 'latest.json', releasedAt: '2026-01-01T00:00:00Z' },
+    electron: null,
+    pets: null,
+  }, null, 2)}\n`);
+  await writeFile(join(fakeBin, 'curl'), `#!/usr/bin/env sh
+set -eu
+url=''
+destination=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) destination="$2"; shift 2 ;;
+    https://*) url="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+case "$url" in
+  */release-versions.json) cp '${releaseRoot}/release-versions.json' "$destination" ;;
+  */latest.json) cp '${releaseRoot}/latest.json' "$destination" ;;
+  *) cp '${archive}' "$destination" ;;
+esac
+`);
+  await writeFile(join(fakeBin, 'uname'), `#!/usr/bin/env sh
+case "${'$'}1" in
+  -s) printf '%s\n' Linux ;;
+  -m) printf '%s\n' aarch64 ;;
+  *) printf '%s\n' Linux ;;
+esac
+`);
+  await chmod(join(fakeBin, 'curl'), 0o755);
+  await chmod(join(fakeBin, 'uname'), 0o755);
+
+  const env = { ...process.env };
+  delete env.DISPLAY;
+  delete env.WAYLAND_DISPLAY;
+  delete env.NUSASHELL_NON_INTERACTIVE;
+  delete env.NUSASHELL_INSTALL_SERVICE;
+  delete env.NUSASHELL_INSTALL_ELECTRON;
+  delete env.NUSASHELL_INSTALL_PETS;
+  delete env.NUSASHELL_INSTALL_MCP;
+  delete env.NUSASHELL_HEADLESS;
+  delete env.NUSASHELL_DESKTOP;
+  const { stderr } = await execFileAsync('bash', [script('install.sh').pathname], {
+    env: {
+      ...env,
+      HOME: home,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      NUSASHELL_RELEASE_BASE: 'https://fixture.invalid/releases',
+      NUSASHELL_RELEASE_INDEX: 'https://fixture.invalid/releases/release-versions.json',
+      NUSASHELL_GO_INSTALL_ROOT: installRoot,
+      NUSASHELL_VERSION: '',
+    },
+  });
+
+  assert.equal(await realpath(join(installRoot, 'current')), join(installRoot, 'versions', '0.1.0'));
+  assert.match(await readFile(join(installRoot, 'current', 'nusashell'), 'utf8'), /arm64-core/);
+  assert.match(stderr, /Install Electron desktop wrapper\? skipped \(no desktop session detected\)/);
+  assert.match(stderr, /Install desktop pet \(Linux only\)\? skipped \(no desktop session detected\)/);
 });
 
 test('release Linux installer can opt into Electron as a separate payload', async () => {

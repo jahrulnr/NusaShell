@@ -1,5 +1,6 @@
 # Install NusaShell from this checkout: build the Go core, then optionally
-# build+install the Electron desktop wrapper.
+# build+install the Electron desktop wrapper. Desktop prompts/shortcuts are
+# skipped on headless Windows sessions unless explicitly enabled.
 #
 # Local counterpart of scripts/install.ps1 (which downloads GitHub releases).
 # Full product install from a clone: make install / .\scripts\install-local.ps1
@@ -26,6 +27,24 @@ function Test-Choice([string]$Value, [string]$Name) {
   }
 }
 
+function Test-ChoiceEnabled([string]$Value) {
+  return $Value -and $Value.ToLowerInvariant() -in @('1', 'yes', 'y', 'true')
+}
+
+function Test-DesktopEnvironment {
+  Test-Choice $env:NUSASHELL_HEADLESS 'NUSASHELL_HEADLESS'
+  Test-Choice $env:NUSASHELL_DESKTOP 'NUSASHELL_DESKTOP'
+  if (Test-ChoiceEnabled $env:NUSASHELL_HEADLESS) { return $false }
+  if (Test-ChoiceEnabled $env:NUSASHELL_DESKTOP) { return $true }
+  if (-not [Environment]::UserInteractive) { return $false }
+  try {
+    $installationType = [string](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name InstallationType -ErrorAction Stop).InstallationType
+    if ($installationType -match 'Server Core|Nano Server') { return $false }
+  } catch {}
+  if ($env:SESSIONNAME -eq 'Services') { return $false }
+  return $true
+}
+
 function Get-OptionalChoice([string]$Override, [string]$Question, [string]$Name) {
   Test-Choice $Override $Name
   if ($Override) { return $Override.ToLowerInvariant() -in @('1', 'yes', 'y', 'true') }
@@ -36,6 +55,18 @@ function Get-OptionalChoice([string]$Override, [string]$Question, [string]$Name)
   $answer = Read-Host "$Question [y/N]"
   return $answer.ToLowerInvariant() -in @('y', 'yes')
 }
+
+function Get-DesktopChoice([string]$Override, [string]$Question, [string]$Name) {
+  Test-Choice $Override $Name
+  if ($Override) { return $Override.ToLowerInvariant() -in @('1', 'yes', 'y', 'true') }
+  if (-not $script:desktopAvailable) {
+    Write-Host "$Question skipped (no desktop session detected)."
+    return $false
+  }
+  return Get-OptionalChoice '' $Question $Name
+}
+
+$desktopAvailable = Test-DesktopEnvironment
 
 function Get-PreviousVersion([string]$Current) {
   if (-not (Test-Path -LiteralPath $Current)) { return '' }
@@ -103,18 +134,22 @@ function Install-ElectronFromBuild {
   Set-CurrentJunction $current $target
   Remove-OldVersions $versions $version $previous
 
-  $shell = New-Object -ComObject WScript.Shell
-  $shortcutPaths = @(
-    (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\NusaShell-Desktop.lnk'),
-    (Join-Path ([Environment]::GetFolderPath('Desktop')) 'NusaShell-Desktop.lnk')
-  )
-  foreach ($shortcutPath in $shortcutPaths) {
-    New-Item -ItemType Directory -Force -Path (Split-Path $shortcutPath) | Out-Null
-    $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = Join-Path $current 'nusashell-desktop.exe'
-    $shortcut.WorkingDirectory = $current
-    $shortcut.IconLocation = "$(Join-Path $current 'nusashell-desktop.exe'),0"
-    $shortcut.Save()
+  if ($desktopAvailable) {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcutPaths = @(
+      (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\NusaShell-Desktop.lnk'),
+      (Join-Path ([Environment]::GetFolderPath('Desktop')) 'NusaShell-Desktop.lnk')
+    )
+    foreach ($shortcutPath in $shortcutPaths) {
+      New-Item -ItemType Directory -Force -Path (Split-Path $shortcutPath) | Out-Null
+      $shortcut = $shell.CreateShortcut($shortcutPath)
+      $shortcut.TargetPath = Join-Path $current 'nusashell-desktop.exe'
+      $shortcut.WorkingDirectory = $current
+      $shortcut.IconLocation = "$(Join-Path $current 'nusashell-desktop.exe'),0"
+      $shortcut.Save()
+    }
+  } else {
+    Write-Host 'Skipping Electron shortcuts (no desktop session detected).'
   }
   Write-Host "Installed NusaShell Electron wrapper $version from checkout."
 }
@@ -125,7 +160,7 @@ if ($ElectronOnly) {
 }
 
 $installServiceSelected = Get-OptionalChoice $serviceOverride 'Install nusashell as a login service (autostart)?' 'NUSASHELL_INSTALL_SERVICE'
-$installElectronSelected = Get-OptionalChoice $electronOverride 'Build and install Electron desktop wrapper?' 'NUSASHELL_INSTALL_ELECTRON'
+$installElectronSelected = Get-DesktopChoice $electronOverride 'Build and install Electron desktop wrapper?' 'NUSASHELL_INSTALL_ELECTRON'
 
 $goVersion = (Get-Content -LiteralPath (Join-Path $repoRoot 'VERSION') -Raw).Trim()
 if ($goVersion -notmatch $semverPattern) { throw "Invalid VERSION: $goVersion" }
@@ -180,15 +215,19 @@ $launcher = Join-Path $goRoot 'nusashell.cmd'
 Set-Content -LiteralPath $launcher -Encoding ascii -Value @('@echo off', '"%~dp0current\nusashell.exe" %*')
 Write-Host "Installed NusaShell Go core $goVersion from checkout. Run: $launcher"
 
-$shell = New-Object -ComObject WScript.Shell
-$startMenuPrograms = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
-$coreShortcutPath = Join-Path $startMenuPrograms 'NusaShell.lnk'
-New-Item -ItemType Directory -Force -Path (Split-Path $coreShortcutPath) | Out-Null
-$coreShortcut = $shell.CreateShortcut($coreShortcutPath)
-$coreShortcut.TargetPath = $launcher
-$coreShortcut.WorkingDirectory = $goRoot
-$coreShortcut.IconLocation = "$(Join-Path $goCurrent 'nusashell.exe'),0"
-$coreShortcut.Save()
+if ($desktopAvailable) {
+  $shell = New-Object -ComObject WScript.Shell
+  $startMenuPrograms = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+  $coreShortcutPath = Join-Path $startMenuPrograms 'NusaShell.lnk'
+  New-Item -ItemType Directory -Force -Path (Split-Path $coreShortcutPath) | Out-Null
+  $coreShortcut = $shell.CreateShortcut($coreShortcutPath)
+  $coreShortcut.TargetPath = $launcher
+  $coreShortcut.WorkingDirectory = $goRoot
+  $coreShortcut.IconLocation = "$(Join-Path $goCurrent 'nusashell.exe'),0"
+  $coreShortcut.Save()
+} else {
+  Write-Host 'Skipping Start Menu shortcut (no desktop session detected).'
+}
 
 if ($installServiceSelected) {
   & (Join-Path $goCurrent 'nusashell.exe') service install

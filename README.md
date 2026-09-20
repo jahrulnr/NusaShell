@@ -66,7 +66,9 @@ active conversation.
 
 The release installer installs the Go core first and then asks whether the
 login service (autostart), the optional Electron desktop wrapper, the
-desktop pet (Linux only), and `NusaShell-mcp` plugins should be installed:
+desktop pet (Linux only), and `NusaShell-mcp` plugins should be installed.
+Release payloads cover Linux x64/ARM64, macOS x64/ARM64, and Windows
+x64/ARM64:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.sh | bash
@@ -76,14 +78,19 @@ Use `--install-service`/`--no-service`,
 `--install-electron`/`--no-electron`,
 `--install-pets`/`--no-pets`, and
 `--install-mcp`/`--no-mcp` to choose explicitly. The desktop pet is currently
-Linux-only; the installer on macOS ignores pets options. Set
+Linux-only; the installer on macOS ignores pets options. On Linux, Electron
+and pets prompts are skipped when no desktop session (`DISPLAY` or
+`WAYLAND_DISPLAY`) is detected, which keeps proot/server installs clean;
+explicit install flags still override that detection. Set
 `NUSASHELL_NON_INTERACTIVE=1` for unattended installs; optional components
 default to not installed. See [`docs/INSTALL.md`](docs/INSTALL.md) for
 Windows, layouts, version pinning, MCP details, and the
 `nusashell service` commands.
 
 Windows uses the equivalent PowerShell installer (pets is not offered there
-yet):
+yet). It selects the x64 or ARM64 payload automatically and skips Electron
+plus shortcuts on Server Core/headless sessions unless `-InstallElectron` is
+explicit:
 
 ```powershell
 irm https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.ps1 | iex

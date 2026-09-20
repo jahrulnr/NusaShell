@@ -98,8 +98,9 @@ go to the system browser.
 ## CI and release streams
 
 GitHub Actions tests the wrapper independently and packages it on native
-Linux, Windows, and macOS runners. A separate Go matrix builds the core. The
-two streams use independent version files and immutable tags, while keeping
+Linux, Windows, and macOS runners, including Linux ARM64 and Windows ARM64.
+A separate Go matrix builds the core for the same installer-facing platforms.
+The two streams use independent version files and immutable tags, while keeping
 different artifact names and manifests:
 
 - Go version: `VERSION`, tag `go-v<VERSION>`.

@@ -84,8 +84,8 @@ func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
 	a.providerService().EnrichModelsAtRead(p)
 }
 
-func catalogHintFromModelID(modelID string) string {
-	return provider.CatalogHintFromModelID(modelID)
+func catalogProviderHint(p *domain.Provider) string {
+	return provider.CatalogProviderHint(p)
 }
 
 func jsonRaw(s string) []byte {

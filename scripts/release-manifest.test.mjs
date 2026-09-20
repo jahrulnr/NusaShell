@@ -19,9 +19,11 @@ test('buildReleaseManifest indexes Go payloads and records SHA-256', async () =>
   temporaryDirectories.push(root);
   await mkdir(join(root, 'nested'), { recursive: true });
   const payloads = {
-    'nusashell-2.4.6-linux-x64.tar.gz': 'linux payload',
+    'nusashell-2.4.6-linux-x64.tar.gz': 'linux x64 payload',
+    'nusashell-2.4.6-linux-arm64.tar.gz': 'linux arm64 payload',
     'nusashell-2.4.6-darwin-arm64.tar.gz': 'mac payload',
-    'nusashell-2.4.6-win-x64.zip': 'windows payload',
+    'nusashell-2.4.6-win-x64.zip': 'windows x64 payload',
+    'nusashell-2.4.6-win-arm64.zip': 'windows arm64 payload',
     'NusaShell-2.4.6-linux-x64.AppImage': 'ignored linux appimage',
   };
   for (const [name, contents] of Object.entries(payloads)) {
@@ -30,24 +32,27 @@ test('buildReleaseManifest indexes Go payloads and records SHA-256', async () =>
 
   const manifest = await buildReleaseManifest('2.4.6', root, 'go');
 
-  assert.deepEqual(Object.keys(manifest.files).sort(), ['darwin-arm64', 'linux-x64', 'win32-x64']);
+  assert.deepEqual(Object.keys(manifest.files).sort(), ['darwin-arm64', 'linux-arm64', 'linux-x64', 'win32-arm64', 'win32-x64']);
   assert.equal(manifest.version, '2.4.6');
   assert.equal(manifest.product, 'go');
   assert.equal(manifest.files['linux-x64'].name, 'nusashell-2.4.6-linux-x64.tar.gz');
+  assert.equal(manifest.files['win32-arm64'].name, 'nusashell-2.4.6-win-arm64.zip');
   assert.match(manifest.files['linux-x64'].sha256, /^[a-f0-9]{64}$/);
 });
 
 test('buildReleaseManifest keeps Electron payloads in a separate manifest', async () => {
   const root = await mkdtemp(join(tmpdir(), 'nusashell-electron-release-'));
   temporaryDirectories.push(root);
-  await writeFile(join(root, 'nusashell-electron-2.4.6-linux-x64.tar.gz'), 'linux wrapper');
+  await writeFile(join(root, 'nusashell-electron-2.4.6-linux-x64.tar.gz'), 'linux x64 wrapper');
+  await writeFile(join(root, 'nusashell-electron-2.4.6-linux-arm64.tar.gz'), 'linux arm64 wrapper');
   await writeFile(join(root, 'NusaShell-Electron-2.4.6-mac-arm64.zip'), 'mac wrapper');
-  await writeFile(join(root, 'NusaShell-Electron-2.4.6-win-x64.zip'), 'windows wrapper');
+  await writeFile(join(root, 'NusaShell-Electron-2.4.6-win-x64.zip'), 'windows x64 wrapper');
+  await writeFile(join(root, 'NusaShell-Electron-2.4.6-win-arm64.zip'), 'windows arm64 wrapper');
 
   const manifest = await buildReleaseManifest('2.4.6', root, 'electron');
 
   assert.equal(manifest.product, 'electron');
-  assert.deepEqual(Object.keys(manifest.files).sort(), ['darwin-arm64', 'linux-x64', 'win32-x64']);
+  assert.deepEqual(Object.keys(manifest.files).sort(), ['darwin-arm64', 'linux-arm64', 'linux-x64', 'win32-arm64', 'win32-x64']);
   assert.equal(manifest.files['linux-x64'].name, 'nusashell-electron-2.4.6-linux-x64.tar.gz');
 });
 

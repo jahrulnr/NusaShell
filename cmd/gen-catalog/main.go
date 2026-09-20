@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"nusashell/infrastructure/ai/modelcatalog"
 	"nusashell/pkg/httpclient"
 	clock "nusashell/pkg/time"
 )
@@ -97,6 +98,7 @@ func main() {
 // catalogEntry is the merged, normalized metadata for one model.
 // This struct is serialized to JSON in the generated Go file.
 type catalogEntry struct {
+	Provider         string   `json:"provider,omitempty"` // models.dev/openrouter gateway namespace
 	ID               string   `json:"id"`
 	Name             string   `json:"name,omitempty"`
 	Description      string   `json:"description,omitempty"`
@@ -133,16 +135,19 @@ func fetchAndMerge(ctx context.Context) ([]catalogEntry, error) {
 
 	merged := make(map[string]*catalogEntry)
 
-	// models.dev first (richer capability data)
+	// models.dev first (richer capability data). Merge by gateway+model so
+	// two providers can expose the same local model ID without overwriting
+	// each other.
 	for _, e := range md {
-		merged[e.ID] = &e
+		merged[catalogMergeKey(e)] = &e
 	}
 
 	// openrouter fills gaps
-	for id, e := range or {
-		existing, ok := merged[id]
+	for _, e := range or {
+		key := catalogMergeKey(e)
+		existing, ok := merged[key]
 		if !ok {
-			merged[id] = &e
+			merged[key] = &e
 			continue
 		}
 		if existing.Context == 0 && e.Context != 0 {
@@ -172,8 +177,17 @@ func fetchAndMerge(ctx context.Context) ([]catalogEntry, error) {
 		}
 		out = append(out, *e)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Provider != out[j].Provider {
+			return out[i].Provider < out[j].Provider
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
+}
+
+func catalogMergeKey(e catalogEntry) string {
+	return strings.ToLower(e.Provider) + "\x00" + strings.ToLower(e.ID)
 }
 
 // ---- models.dev ----
@@ -226,9 +240,14 @@ func fetchModelsDev(ctx context.Context) ([]catalogEntry, error) {
 		return nil, fmt.Errorf("models.dev parse: %w", err)
 	}
 	var out []catalogEntry
-	for _, prov := range providers {
+	for providerKey, prov := range providers {
+		if prov.ID != "" {
+			providerKey = prov.ID
+		}
+		providerKey = modelcatalog.NormalizeProviderKey(providerKey)
 		for modelKey, m := range prov.Models {
 			e := catalogEntry{
+				Provider:         providerKey,
 				ID:               modelKey,
 				Name:             m.Name,
 				Description:      m.Description,
@@ -360,6 +379,7 @@ func fetchOpenRouter(ctx context.Context) (map[string]catalogEntry, error) {
 			continue
 		}
 		e := catalogEntry{
+			Provider:    "openrouter",
 			ID:          m.ID,
 			Name:        m.Name,
 			Description: m.Description,

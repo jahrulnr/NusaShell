@@ -76,6 +76,56 @@ func TestCatalogEnsureLoadedIndexesLiveCatalog(t *testing.T) {
 	}
 }
 
+func TestCatalogLookupPrefersConfiguredGatewayNamespace(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"opencode": {
+				"id": "opencode",
+				"name": "OpenCode",
+				"models": {
+					"deepseek-v4.1-flash": {
+						"name": "DeepSeek V4.1 Flash",
+						"modalities": {"input": ["text", "image"], "output": ["text"]},
+						"limit": {"context": 1000000, "output": 128000}
+					}
+				}
+			},
+			"openrouter": {
+				"id": "openrouter",
+				"name": "OpenRouter",
+				"models": {
+					"deepseek/deepseek-v4.1-flash": {
+						"name": "DeepSeek V4.1 Flash",
+						"modalities": {"input": ["text"], "output": ["text"]},
+						"limit": {"context": 200000, "output": 64000}
+					}
+				}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	catalog := New(server.Client())
+	catalog.SetURL(server.URL)
+	if err := catalog.EnsureLoaded(context.Background()); err != nil {
+		t.Fatalf("EnsureLoaded failed: %v", err)
+	}
+
+	opencode := catalog.Lookup("opencode", "deepseek-v4.1-flash")
+	if opencode == nil || opencode.Context != 1000000 || !opencode.Vision {
+		t.Fatalf("opencode bare lookup = %#v, want OpenCode vision model", opencode)
+	}
+	opencode = catalog.Lookup("opencode", "deepseek/deepseek-v4.1-flash")
+	if opencode == nil || opencode.Context != 1000000 || !opencode.Vision {
+		t.Fatalf("opencode vendor-prefixed lookup = %#v, want OpenCode vision model", opencode)
+	}
+	openrouter := catalog.Lookup("openrouter", "deepseek/deepseek-v4.1-flash")
+	if openrouter == nil || openrouter.Context != 200000 || openrouter.Vision {
+		t.Fatalf("openrouter lookup = %#v, want OpenRouter vendor-qualified model", openrouter)
+	}
+}
+
 func TestCatalogRefreshFetchesOnlyWhenStale(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -121,6 +171,14 @@ func TestCatalogFallsBackToEmbeddedCatalogWhenLiveFetchFails(t *testing.T) {
 	}
 	if !catalog.Loaded() || catalog.Stats() == 0 {
 		t.Fatalf("fallback state = loaded:%t stats:%d, want loaded catalog with entries", catalog.Loaded(), catalog.Stats())
+	}
+	opencode := catalog.Lookup("opencode", "deepseek/deepseek-v4.1-flash")
+	if opencode == nil || opencode.Context != 1_000_000 || !opencode.Vision {
+		t.Fatalf("embedded opencode lookup = %#v, want OpenCode DeepSeek vision entry", opencode)
+	}
+	openrouter := catalog.Lookup("openrouter", "deepseek/deepseek-v4.1-flash")
+	if openrouter == nil || openrouter.Context != 1_048_576 || !openrouter.Vision {
+		t.Fatalf("embedded openrouter lookup = %#v, want OpenRouter DeepSeek entry", openrouter)
 	}
 }
 

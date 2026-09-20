@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-09-21
+
+### Added
+
+- **Release installers and CI now cover Linux/Windows ARM64.** Go core and
+  Electron release matrices build native x64 and ARM64 artifacts, manifests
+  index `linux-arm64`/`win32-arm64`, and the Bash/PowerShell installers pick
+  the matching payload instead of assuming x64.
+- **Installers detect headless sessions before desktop prompts.** Linux
+  release/local installs use `DISPLAY`/`WAYLAND_DISPLAY` (with
+  `NUSASHELL_HEADLESS`/`NUSASHELL_DESKTOP` overrides), while Windows detects
+  Server Core/Nano or non-interactive sessions. Electron, pets, and desktop
+  shortcuts are skipped by default on headless hosts; explicit install flags
+  still override detection.
+
+### Fixed
+
+- **Gateway-scoped model capabilities no longer fall back incorrectly.**
+  Model catalog lookups now use the configured gateway namespace
+  (`opencode/deepseek-v4.1-flash`) instead of treating a vendor prefix inside
+  the model ID as the provider, and agent model resolution refreshes catalog
+  capabilities before learned/manual overrides. Vision-capable OpenCode
+  models therefore keep image input instead of entering non-vision fallback.
+
 ## [0.9.1] - 2026-09-21
 
 ### Fixed

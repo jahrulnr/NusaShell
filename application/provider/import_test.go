@@ -18,6 +18,18 @@ func (s contextCatalogStub) Lookup(_ string, modelID string) *modelcatalog.Model
 	return s.models[modelID]
 }
 
+type gatewayCatalogStub struct {
+	models map[string]*modelcatalog.ModelMetadata
+	calls  []string
+}
+
+func (s *gatewayCatalogStub) EnsureLoaded(context.Context) error { return nil }
+func (s *gatewayCatalogStub) Loaded() bool                       { return true }
+func (s *gatewayCatalogStub) Lookup(hint, modelID string) *modelcatalog.ModelMetadata {
+	s.calls = append(s.calls, hint+"\x00"+modelID)
+	return s.models[hint+"\x00"+modelID]
+}
+
 type codexImportAdapter struct {
 	AIProvider
 	models []domain.Model
@@ -39,6 +51,35 @@ func TestContextWindowFromCatalogUsesDirectCodexMetadata(t *testing.T) {
 	}
 	if got := contextWindowFromCatalog(domain.ProviderChat, 0, 128_000); got != 128_000 {
 		t.Fatalf("missing non-Codex context = %d, want catalog value 128000", got)
+	}
+}
+
+func TestImportUsesConfiguredGatewayCatalogNamespace(t *testing.T) {
+	store := &modelListStore{providers: []*domain.Provider{{
+		ID: "prov_opencode", Name: "OpenCode", Kind: domain.ProviderChat,
+		Driver: domain.ProviderDriverOpenRouter, Enabled: true,
+		BaseURL: "https://opencode.ai/zen/go/v1",
+	}}}
+	catalog := &gatewayCatalogStub{models: map[string]*modelcatalog.ModelMetadata{
+		"opencode\x00deepseek-v4.1-flash": {ID: "opencode/deepseek-v4.1-flash", Context: 1_000_000, Vision: true},
+	}}
+	svc := New(Deps{
+		Store: store,
+		Factory: func(context.Context, *domain.Provider, string) (AIProvider, error) {
+			return codexImportAdapter{models: []domain.Model{{ID: "deepseek-v4.1-flash", Vision: false}}}, nil
+		},
+		Catalog: catalog,
+	})
+
+	models, err := svc.importModelsForProvider(context.Background(), store.providers[0], "")
+	if err != nil {
+		t.Fatalf("importModelsForProvider: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "deepseek-v4.1-flash" || !models[0].Vision {
+		t.Fatalf("imported models = %+v, want unchanged OpenCode model ID with vision=true", models)
+	}
+	if len(catalog.calls) == 0 || catalog.calls[0] != "opencode\x00deepseek-v4.1-flash" {
+		t.Fatalf("catalog calls = %#v, want opencode/deepseek-v4.1-flash namespace", catalog.calls)
 	}
 }
 

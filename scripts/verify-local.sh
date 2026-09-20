@@ -115,7 +115,9 @@ run_release_contract_tests
 
 # These are the platforms used by the backend CI matrix. Cross-compilation
 # catches platform-specific build and _test.go errors, but not runtime behavior.
+compile_target linux arm64
 compile_target windows amd64
+compile_target windows arm64
 compile_target darwin amd64
 compile_target darwin arm64
 

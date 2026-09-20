@@ -1078,6 +1078,60 @@ func TestResolveModelQualifiedNotFound(t *testing.T) {
 	}
 }
 
+func TestResolveModelWithMetaRefreshesGatewayCatalogCapabilities(t *testing.T) {
+	catalog := &recordingCatalogStub{models: map[string]*modelcatalog.ModelMetadata{
+		"opencode\x00deepseek-v4.1-flash":            {ID: "opencode/deepseek-v4.1-flash", Context: 1_000_000, Vision: true},
+		"openrouter\x00deepseek/deepseek-v4.1-flash": {ID: "openrouter/deepseek/deepseek-v4.1-flash", Context: 200_000, Vision: false},
+	}}
+	providers := &fakeProviderStore{items: map[string]*domain.Provider{
+		"prov_oc": {
+			ID: "prov_oc", Name: "OpenCode", Enabled: true,
+			Kind: domain.ProviderChat, Driver: domain.ProviderDriverOpenRouter,
+			BaseURL: "https://opencode.ai/zen/go/v1",
+			Models:  []domain.Model{{ID: "deepseek-v4.1-flash", Vision: false}},
+		},
+		"openrouter": {
+			ID: "openrouter", Name: "OpenRouter", Enabled: true,
+			Kind: domain.ProviderChat, Driver: domain.ProviderDriverOpenRouter,
+			BaseURL: "https://openrouter.ai/api/v1",
+			Models:  []domain.Model{{ID: "deepseek/deepseek-v4.1-flash", Vision: true}},
+		},
+	}}
+	app := &App{Providers: providers, Credentials: &fakeCreds{keys: map[string]string{}}, ModelCatalog: catalog}
+
+	p, m, _, err := app.resolveModelWithMeta("prov_oc:deepseek-v4.1-flash")
+	if err != nil {
+		t.Fatalf("opencode resolve: %v", err)
+	}
+	if p.ID != "prov_oc" || m.ID != "deepseek-v4.1-flash" {
+		t.Fatalf("opencode resolution changed provider/model identity: provider=%q model=%q", p.ID, m.ID)
+	}
+	if !m.Vision || m.Context != 1_000_000 {
+		t.Fatalf("opencode catalog metadata not applied: %+v", m)
+	}
+
+	_, m, _, err = app.resolveModelWithMeta("openrouter:deepseek/deepseek-v4.1-flash")
+	if err != nil {
+		t.Fatalf("openrouter resolve: %v", err)
+	}
+	if m.ID != "deepseek/deepseek-v4.1-flash" || m.Vision || m.Context != 200_000 {
+		t.Fatalf("openrouter catalog metadata not applied: %+v", m)
+	}
+
+	wantCalls := []catalogLookupCall{
+		{providerHint: "opencode", modelID: "deepseek-v4.1-flash"},
+		{providerHint: "openrouter", modelID: "deepseek/deepseek-v4.1-flash"},
+	}
+	if len(catalog.calls) != len(wantCalls) {
+		t.Fatalf("catalog calls = %#v, want %#v", catalog.calls, wantCalls)
+	}
+	for i := range wantCalls {
+		if catalog.calls[i] != wantCalls[i] {
+			t.Fatalf("catalog call %d = %#v, want %#v", i, catalog.calls[i], wantCalls[i])
+		}
+	}
+}
+
 func TestResolveModelWithMetaAppliesLearnedOverrides(t *testing.T) {
 	providers := &fakeProviderStore{items: map[string]*domain.Provider{
 		"tokenrouter": {ID: "tokenrouter", Enabled: true, Kind: domain.ProviderChat, Models: []domain.Model{{
@@ -1094,7 +1148,10 @@ func TestResolveModelWithMetaAppliesLearnedOverrides(t *testing.T) {
 	cache.LearnFrom400("tokenrouter", "qwen/qwen3.8-max-free",
 		`Qwen3.8 open checkpoint is text-only; messages[131].content[1] must be a text part`)
 
-	app := &App{Providers: providers, Credentials: creds, learnedParams: cache}
+	catalog := &recordingCatalogStub{models: map[string]*modelcatalog.ModelMetadata{
+		"tokenrouter\x00qwen/qwen3.8-max-free": {Context: 1_000_000, Vision: true},
+	}}
+	app := &App{Providers: providers, Credentials: creds, ModelCatalog: catalog, learnedParams: cache}
 	_, m, _, err := app.resolveModelWithMeta("tokenrouter:qwen/qwen3.8-max-free")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1163,7 +1220,10 @@ func TestResolveModelWithMetaManualOverrideWins(t *testing.T) {
 		t.Fatalf("manual Set: %v", err)
 	}
 
-	app := &App{Providers: providers, Credentials: creds, learnedParams: learned, modelOverrides: manual}
+	catalog := &recordingCatalogStub{models: map[string]*modelcatalog.ModelMetadata{
+		"tokenrouter\x00qwen/qwen3.8-max-free": {Context: 500_000, Vision: false},
+	}}
+	app := &App{Providers: providers, Credentials: creds, ModelCatalog: catalog, learnedParams: learned, modelOverrides: manual}
 	_, m, _, err := app.resolveModelWithMeta("tokenrouter:qwen/qwen3.8-max-free")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1260,32 +1320,79 @@ func TestResolveContextWindowManualOverrideWins(t *testing.T) {
 
 // --- from catalog_invariant_test.go ---
 
-func TestCatalogHintIsNotVendorHardcoded(t *testing.T) {
-	// Any chat provider (TokenRouter, OpenRouter, a future gateway) must
-	// NOT be special-cased in code: the hint comes from the model ID
-	// prefix, which is output of the /models API. This is the regression
-	// test for the "every new provider needs a code edit" bug.
-	if got := catalogHintFromModelID("deepseek/deepseek-v4-flash"); got != "deepseek" {
-		t.Fatalf("dynamic hint = %q, want deepseek", got)
-	}
-}
-
-func TestCatalogHintFromModelIDIsDynamic(t *testing.T) {
-	cases := []struct {
-		id, want string
+func TestCatalogProviderHintUsesGatewayNamespace(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider *domain.Provider
+		want     string
 	}{
-		{"deepseek/deepseek-v4-flash", "deepseek"},
-		{"qwen/qwen3.8-max", "qwen"},
-		{"openai/gpt-5.5", "openai"},
-		{"anthropic/claude-sonnet-5", "anthropic"},
-		{"MiniMax-M3", ""},
-		{"grok-4.6", ""},
-		{"", ""},
+		{
+			name: "opencode generated provider id",
+			provider: &domain.Provider{
+				ID:      "prov_opencode",
+				Name:    "OpenCode",
+				Driver:  domain.ProviderDriverOpenRouter,
+				BaseURL: "https://opencode.ai/zen/go/v1",
+			},
+			want: "opencode",
+		},
+		{
+			name: "openrouter",
+			provider: &domain.Provider{
+				ID:      "openrouter",
+				Name:    "OpenRouter",
+				Driver:  domain.ProviderDriverOpenRouter,
+				BaseURL: "https://openrouter.ai/api/v1",
+			},
+			want: "openrouter",
+		},
+		{
+			name: "tokenrouter custom gateway",
+			provider: &domain.Provider{
+				ID:      "prov_tokenrouter",
+				Name:    "TokenRouter",
+				Driver:  domain.ProviderDriverOpenRouter,
+				BaseURL: "https://api.tokenrouter.ai/v1",
+			},
+			want: "tokenrouter",
+		},
+		{
+			name: "custom gateway name wins over wire driver",
+			provider: &domain.Provider{
+				ID:      "prov_tokenrouter_oai",
+				Name:    "TokenRouter",
+				Driver:  domain.ProviderDriverOpenAI,
+				BaseURL: "https://gateway.internal/v1",
+			},
+			want: "tokenrouter",
+		},
+		{
+			name: "gemini native provider",
+			provider: &domain.Provider{
+				ID:      "gemini",
+				Name:    "Gemini",
+				Driver:  domain.ProviderDriverGemini,
+				BaseURL: "https://generativelanguage.googleapis.com",
+			},
+			want: "google",
+		},
+		{
+			name: "codex maps to openai catalog",
+			provider: &domain.Provider{
+				ID:   "codex",
+				Name: "Codex",
+				Kind: domain.ProviderCodex,
+			},
+			want: "openai",
+		},
 	}
-	for _, c := range cases {
-		if got := catalogHintFromModelID(c.id); got != c.want {
-			t.Fatalf("catalogHintFromModelID(%q) = %q, want %q", c.id, got, c.want)
-		}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := catalogProviderHint(tt.provider); got != tt.want {
+				t.Fatalf("catalogProviderHint() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -1330,6 +1437,23 @@ func (s *modelCatalogStub) Lookup(providerHint, modelID string) *modelcatalog.Mo
 		return nil
 	}
 	return &modelcatalog.ModelMetadata{Context: 1000000, Kind: "image"} // wrong kind — must NOT propagate
+}
+
+type catalogLookupCall struct {
+	providerHint string
+	modelID      string
+}
+
+type recordingCatalogStub struct {
+	models map[string]*modelcatalog.ModelMetadata
+	calls  []catalogLookupCall
+}
+
+func (s *recordingCatalogStub) EnsureLoaded(ctx context.Context) error { return nil }
+func (s *recordingCatalogStub) Loaded() bool                           { return true }
+func (s *recordingCatalogStub) Lookup(providerHint, modelID string) *modelcatalog.ModelMetadata {
+	s.calls = append(s.calls, catalogLookupCall{providerHint: providerHint, modelID: modelID})
+	return s.models[providerHint+"\x00"+modelID]
 }
 
 // --- from provider_retry_test.go ---

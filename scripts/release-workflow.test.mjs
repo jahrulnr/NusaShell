@@ -43,3 +43,23 @@ test('release index only advances for publishers that created a release', () => 
   assert.match(section, /PETS_CHANGED: \$\{\{ needs\.publish-pets\.outputs\.published == 'true' \}\}/);
   assert.match(section, /PETS_VERSION="\$\{\{ needs\.publish-pets\.outputs\.version \}\}"/);
 });
+
+test('release matrices include native Linux and Windows ARM64 artifacts', () => {
+  const goSection = jobSection('build-go-release', 'build-electron');
+  assert.match(goSection, /os: ubuntu-24\.04-arm\s+platform: linux\s+arch: arm64/);
+  assert.match(goSection, /os: windows-11-arm\s+platform: win\s+arch: arm64/);
+  assert.match(goSection, /nusashell-\$\{version\}-\$\{\{ matrix\.platform \}\}-\$\{\{ matrix\.arch \}\}\.zip/);
+
+  const electronSection = jobSection('build-electron', 'build-pets-release');
+  assert.match(electronSection, /os: ubuntu-24\.04-arm\s+platform: linux\s+arch: arm64/);
+  assert.match(electronSection, /os: windows-11-arm\s+platform: win\s+arch: arm64/);
+  assert.match(electronSection, /linux-\$\{\{ matrix\.arch \}\}\.tar\.gz/);
+  assert.ok(
+    electronSection.includes('run dist -- --publish never "--${{ matrix.arch }}"'),
+    'Electron dist builds must stay on the matrix architecture'
+  );
+  assert.ok(
+    electronSection.includes('run package:dir -- "--${{ matrix.arch }}"'),
+    'Electron Linux payload builds must stay on the matrix architecture'
+  );
+});

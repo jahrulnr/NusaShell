@@ -11,7 +11,9 @@ param(
 )
 
 # Install the NusaShell Go core and optional Electron/MCP components for the
-# current Windows user. No administrator rights are required.
+# current Windows user. Selects the x64 or ARM64 payload and skips desktop
+# components/shortcuts on headless Windows sessions unless explicitly enabled.
+# No administrator rights are required.
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
@@ -34,6 +36,37 @@ function Test-Choice([string]$Value, [string]$Name) {
   }
 }
 
+function Test-ChoiceEnabled([string]$Value) {
+  return $Value -and $Value.ToLowerInvariant() -in @('1', 'yes', 'y', 'true')
+}
+
+function Get-WindowsArchitecture {
+  try {
+    $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+  } catch {
+    $architecture = [string]$env:PROCESSOR_ARCHITECTURE
+  }
+  switch -Regex ($architecture.ToLowerInvariant()) {
+    '^(x64|amd64)$' { return 'x64' }
+    '^(arm64|aarch64)$' { return 'arm64' }
+    default { throw "Unsupported Windows CPU architecture: $architecture" }
+  }
+}
+
+function Test-DesktopEnvironment {
+  Test-Choice $env:NUSASHELL_HEADLESS 'NUSASHELL_HEADLESS'
+  Test-Choice $env:NUSASHELL_DESKTOP 'NUSASHELL_DESKTOP'
+  if (Test-ChoiceEnabled $env:NUSASHELL_HEADLESS) { return $false }
+  if (Test-ChoiceEnabled $env:NUSASHELL_DESKTOP) { return $true }
+  if (-not [Environment]::UserInteractive) { return $false }
+  try {
+    $installationType = [string](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name InstallationType -ErrorAction Stop).InstallationType
+    if ($installationType -match 'Server Core|Nano Server') { return $false }
+  } catch {}
+  if ($env:SESSIONNAME -eq 'Services') { return $false }
+  return $true
+}
+
 function Get-OptionalChoice([string]$Override, [string]$Question, [string]$Name) {
   Test-Choice $Override $Name
   if ($Override) { return $Override.ToLowerInvariant() -in @('1', 'yes', 'y', 'true') }
@@ -45,8 +78,20 @@ function Get-OptionalChoice([string]$Override, [string]$Question, [string]$Name)
   return $answer.ToLowerInvariant() -in @('y', 'yes')
 }
 
+function Get-DesktopChoice([string]$Override, [string]$Question, [string]$Name) {
+  Test-Choice $Override $Name
+  if ($Override) { return $Override.ToLowerInvariant() -in @('1', 'yes', 'y', 'true') }
+  if (-not $script:desktopAvailable) {
+    Write-Host "$Question skipped (no desktop session detected)."
+    return $false
+  }
+  return Get-OptionalChoice '' $Question $Name
+}
+
+$windowsArch = Get-WindowsArchitecture
+$desktopAvailable = Test-DesktopEnvironment
 $installServiceSelected = Get-OptionalChoice $serviceOverride 'Install nusashell as a login service (autostart)?' 'NUSASHELL_INSTALL_SERVICE'
-$installElectronSelected = Get-OptionalChoice $electronOverride 'Install Electron desktop wrapper?' 'NUSASHELL_INSTALL_ELECTRON'
+$installElectronSelected = Get-DesktopChoice $electronOverride 'Install Electron desktop wrapper?' 'NUSASHELL_INSTALL_ELECTRON'
 $installMcpSelected = Get-OptionalChoice $mcpOverride 'Install MCP plugins from NusaShell-mcp?' 'NUSASHELL_INSTALL_MCP'
 
 $repo = if ($env:NUSASHELL_REPOSITORY) { $env:NUSASHELL_REPOSITORY } else { 'jahrulnr/NusaShell' }
@@ -184,8 +229,9 @@ try {
     throw "Go release manifest version $resolvedVersion does not match release index $($goRelease.Version)."
   }
 
-  $entry = $manifest.files.PSObject.Properties['win32-x64'].Value
-  if (-not $entry) { throw 'No Windows x64 Go payload is published for this release.' }
+  $platformKey = "win32-$windowsArch"
+  $entry = $manifest.files.PSObject.Properties[$platformKey].Value
+  if (-not $entry) { throw "No Windows $windowsArch Go payload is published for this release." }
   $fileName = [string]$entry.name
   $expectedSha = [string]$entry.sha256
   Assert-SafeFileName $fileName
@@ -211,15 +257,20 @@ try {
   Set-Content -LiteralPath $launcher -Encoding ascii -Value @('@echo off', '"%~dp0current\nusashell.exe" %*')
   Write-Host "Installed NusaShell Go core $resolvedVersion. Run: $launcher"
 
-  $shell = New-Object -ComObject WScript.Shell
-  $startMenuPrograms = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
-  $coreShortcutPath = Join-Path $startMenuPrograms 'NusaShell.lnk'
-  New-Item -ItemType Directory -Force -Path (Split-Path $coreShortcutPath) | Out-Null
-  $coreShortcut = $shell.CreateShortcut($coreShortcutPath)
-  $coreShortcut.TargetPath = $launcher
-  $coreShortcut.WorkingDirectory = $root
-  $coreShortcut.IconLocation = "$(Join-Path $current 'nusashell.exe'),0"
-  $coreShortcut.Save()
+  $shell = $null
+  if ($desktopAvailable) {
+    $shell = New-Object -ComObject WScript.Shell
+    $startMenuPrograms = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+    $coreShortcutPath = Join-Path $startMenuPrograms 'NusaShell.lnk'
+    New-Item -ItemType Directory -Force -Path (Split-Path $coreShortcutPath) | Out-Null
+    $coreShortcut = $shell.CreateShortcut($coreShortcutPath)
+    $coreShortcut.TargetPath = $launcher
+    $coreShortcut.WorkingDirectory = $root
+    $coreShortcut.IconLocation = "$(Join-Path $current 'nusashell.exe'),0"
+    $coreShortcut.Save()
+  } else {
+    Write-Host 'Skipping Start Menu shortcut (no desktop session detected).'
+  }
 
   if ($installServiceSelected) {
     & (Join-Path $current 'nusashell.exe') service install
@@ -236,8 +287,8 @@ try {
     $electronManifest = Get-Manifest $electronRelease.Manifest $electronManifestPath $electronRelease.Tag
     $electronVersion = [string]$electronManifest.version
     if ($electronVersion -ne $electronRelease.Version) { throw "Electron release manifest version $electronVersion does not match release index $($electronRelease.Version)." }
-    $electronEntry = $electronManifest.files.PSObject.Properties['win32-x64'].Value
-    if (-not $electronEntry) { throw 'No Windows x64 Electron payload is published for this release.' }
+    $electronEntry = $electronManifest.files.PSObject.Properties[$platformKey].Value
+    if (-not $electronEntry) { throw "No Windows $windowsArch Electron payload is published for this release." }
     $electronName = [string]$electronEntry.name
     $electronSha = [string]$electronEntry.sha256
     Assert-SafeFileName $electronName
@@ -260,17 +311,21 @@ try {
     Set-CurrentJunction $electronCurrent $electronTarget
     Remove-OldVersions $electronVersions $electronVersion $electronPrevious
 
-    $shortcutPaths = @(
-      (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\NusaShell-Desktop.lnk'),
-      (Join-Path ([Environment]::GetFolderPath('Desktop')) 'NusaShell-Desktop.lnk')
-    )
-    foreach ($shortcutPath in $shortcutPaths) {
-      New-Item -ItemType Directory -Force -Path (Split-Path $shortcutPath) | Out-Null
-      $shortcut = $shell.CreateShortcut($shortcutPath)
-      $shortcut.TargetPath = Join-Path $electronCurrent 'nusashell-desktop.exe'
-      $shortcut.WorkingDirectory = $electronCurrent
-      $shortcut.IconLocation = "$(Join-Path $electronCurrent 'nusashell-desktop.exe'),0"
-      $shortcut.Save()
+    if ($desktopAvailable) {
+      $shortcutPaths = @(
+        (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\NusaShell-Desktop.lnk'),
+        (Join-Path ([Environment]::GetFolderPath('Desktop')) 'NusaShell-Desktop.lnk')
+      )
+      foreach ($shortcutPath in $shortcutPaths) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $shortcutPath) | Out-Null
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = Join-Path $electronCurrent 'nusashell-desktop.exe'
+        $shortcut.WorkingDirectory = $electronCurrent
+        $shortcut.IconLocation = "$(Join-Path $electronCurrent 'nusashell-desktop.exe'),0"
+        $shortcut.Save()
+      }
+    } else {
+      Write-Host 'Skipping Electron shortcuts (no desktop session detected).'
     }
     Write-Host "Installed NusaShell Electron wrapper $electronVersion."
   }

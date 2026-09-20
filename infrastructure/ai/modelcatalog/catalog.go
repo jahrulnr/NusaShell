@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -103,16 +104,41 @@ type reasoningOption struct {
 	Values []string `json:"values"`
 }
 
+// NormalizeProviderKey converts a provider name, host-derived key, or
+// models.dev provider ID to the catalog's canonical namespace form
+// (lowercase, alphanumeric segments joined by dashes).
+func NormalizeProviderKey(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		ok := r >= 'a' && r <= 'z' || r >= '0' && r <= '9'
+		if !ok {
+			if b.Len() > 0 && !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+			continue
+		}
+		b.WriteRune(r)
+		lastDash = false
+	}
+	return strings.Trim(b.String(), "-")
+}
+
 // Catalog is a cached, queryable view of the models.dev catalog.
 type Catalog struct {
-	mu       sync.RWMutex
-	client   *http.Client
-	url      string
-	fetched  time.Time
-	byID     map[string]*ModelMetadata // keyed by full ID lowercased (e.g. "openai/gpt-5.5")
-	byBareID map[string]*ModelMetadata // keyed by bare ID lowercased (e.g. "gpt-5.5")
-	byName   map[string]*ModelMetadata // keyed by display name lowercased (e.g. "gpt-5.5")
-	loaded   bool
+	mu               sync.RWMutex
+	client           *http.Client
+	url              string
+	fetched          time.Time
+	byID             map[string]*ModelMetadata            // keyed by model ID lowercased (and gateway/model aliases)
+	byBareID         map[string]*ModelMetadata            // keyed by bare ID lowercased (e.g. "gpt-5.5")
+	byName           map[string]*ModelMetadata            // keyed by display name lowercased (e.g. "gpt-5.5")
+	byProviderID     map[string]map[string]*ModelMetadata // gateway key → exact model ID
+	byProviderBareID map[string]map[string]*ModelMetadata // gateway key → bare model ID
+	size             int
+	loaded           bool
 }
 
 // New creates a catalog fetcher. The HTTP client defaults to a 300s timeout
@@ -122,26 +148,32 @@ func New(client *http.Client) *Catalog {
 		client = httpclient.NewWithTimeout(httpclient.DefaultRequestTimeout)
 	}
 	return &Catalog{
-		client:   client,
-		url:      CatalogURL,
-		byID:     make(map[string]*ModelMetadata),
-		byBareID: make(map[string]*ModelMetadata),
-		byName:   make(map[string]*ModelMetadata),
+		client:           client,
+		url:              CatalogURL,
+		byID:             make(map[string]*ModelMetadata),
+		byBareID:         make(map[string]*ModelMetadata),
+		byName:           make(map[string]*ModelMetadata),
+		byProviderID:     make(map[string]map[string]*ModelMetadata),
+		byProviderBareID: make(map[string]map[string]*ModelMetadata),
 	}
 }
 
-// Lookup finds metadata for a model by its ID. Matching is universal —
-// it does not depend on the provider prefix matching models.dev's prefix.
-// Order:
-//  1. Exact full-ID match (case-insensitive)
-//  2. Provider-hint-prefixed match (e.g. hint="openai", id="gpt-5.5")
-//  3. Bare-ID match: strip any provider prefix from the query, then
-//     match against catalog bare IDs (e.g. "tokenrouter/gemini-3.7-flash"
-//     → "gemini-3.7-flash" → matches catalog's "google/gemini-3.7-flash")
-//  4. Display-name match (case-insensitive)
+// Lookup finds metadata for a model on a configured gateway. The provider
+// hint is the gateway namespace (for example "opencode" or "openrouter"),
+// not the vendor prefix that may appear inside a model ID. Provider-scoped
+// matches are tried first so a gateway that exposes "deepseek/foo" can still
+// resolve its own catalog entry for bare "foo".
 //
-// This ensures models from any gateway (OpenRouter, TokenRouter, OmniRoute,
-// etc.) get enriched as long as the model name itself exists in the catalog.
+// Order:
+//  1. Exact model ID inside the hinted gateway namespace
+//  2. Bare model ID inside the hinted gateway namespace
+//  3. Exact full-ID match (case-insensitive)
+//  4. Provider-hint-prefixed match (e.g. hint="openai", id="gpt-5.5")
+//  5. Bare-ID and display-name matches
+//  6. Provider-added suffix variants (:free, -free, :nitro, -nitro)
+//
+// The global bare/name fallbacks keep unknown gateways working when the
+// model name itself is unambiguous in the catalog.
 func (c *Catalog) Lookup(providerHint, modelID string) *ModelMetadata {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -149,18 +181,19 @@ func (c *Catalog) Lookup(providerHint, modelID string) *ModelMetadata {
 		return nil
 	}
 	lower := strings.ToLower(modelID)
-	// 1. Exact full-ID match
+	providerHint = NormalizeProviderKey(providerHint)
+	if m := c.lookupProviderScoped(providerHint, lower); m != nil {
+		return m
+	}
 	if m, ok := c.byID[lower]; ok {
 		return m
 	}
-	// 2. Provider hint prefix
 	if providerHint != "" {
-		prefixed := strings.ToLower(providerHint) + "/" + lower
+		prefixed := providerHint + "/" + lower
 		if m, ok := c.byID[prefixed]; ok {
 			return m
 		}
 	}
-	// 3. Bare-ID match — strip prefix from query side too
 	bare := lower
 	if idx := strings.Index(bare, "/"); idx >= 0 {
 		bare = bare[idx+1:]
@@ -177,14 +210,13 @@ func (c *Catalog) Lookup(providerHint, modelID string) *ModelMetadata {
 	if m, ok := c.byBareID[bare]; ok {
 		return m
 	}
-	// 4. Display-name match
 	if m, ok := c.byName[lower]; ok {
 		return m
 	}
 	if m, ok := c.byName[bare]; ok {
 		return m
 	}
-	// 5. Provider-suffix fallback — gateways like OpenRouter append ":free"
+	// Provider-suffix fallback — gateways like OpenRouter append ":free"
 	// or "-free" to model IDs to denote free-tier variants. The base model
 	// metadata (reasoning efforts, context, pricing) is the same, so strip
 	// the suffix and retry the full lookup chain.
@@ -196,16 +228,43 @@ func (c *Catalog) Lookup(providerHint, modelID string) *ModelMetadata {
 	return nil
 }
 
+// lookupProviderScoped resolves modelID only inside the hinted gateway's
+// catalog namespace. It accepts both the provider's native ID and a
+// vendor-qualified form of that same ID.
+func (c *Catalog) lookupProviderScoped(providerHint, lower string) *ModelMetadata {
+	if providerHint == "" {
+		return nil
+	}
+	if models := c.byProviderID[providerHint]; models != nil {
+		if m, ok := models[lower]; ok {
+			return m
+		}
+	}
+	bare := lower
+	if idx := strings.Index(bare, "/"); idx >= 0 {
+		bare = bare[idx+1:]
+	}
+	if models := c.byProviderBareID[providerHint]; models != nil {
+		if m, ok := models[bare]; ok {
+			return m
+		}
+	}
+	return nil
+}
+
 // lookupUnlocked performs the same lookup chain as Lookup without
 // re-acquiring the read lock. Used internally by Lookup after stripping
 // provider-added suffixes.
 func (c *Catalog) lookupUnlocked(providerHint, modelID string) *ModelMetadata {
 	lower := strings.ToLower(modelID)
+	if m := c.lookupProviderScoped(providerHint, lower); m != nil {
+		return m
+	}
 	if m, ok := c.byID[lower]; ok {
 		return m
 	}
 	if providerHint != "" {
-		prefixed := strings.ToLower(providerHint) + "/" + lower
+		prefixed := providerHint + "/" + lower
 		if m, ok := c.byID[prefixed]; ok {
 			return m
 		}
@@ -297,9 +356,14 @@ func (c *Catalog) fetchLive(ctx context.Context) ([]flatEntry, error) {
 		return nil, fmt.Errorf("parse failed: %w", err)
 	}
 	entries := make([]flatEntry, 0, 500)
-	for _, prov := range providers {
+	for providerKey, prov := range providers {
+		if prov.ID != "" {
+			providerKey = prov.ID
+		}
+		providerKey = NormalizeProviderKey(providerKey)
 		for modelKey, cm := range prov.Models {
 			entries = append(entries, flatEntry{
+				Provider: providerKey,
 				ID:       modelKey,
 				Metadata: convertModel(modelKey, cm),
 			})
@@ -308,9 +372,10 @@ func (c *Catalog) fetchLive(ctx context.Context) ([]flatEntry, error) {
 	return entries, nil
 }
 
-// flatEntry is a model ID + its metadata, used by both live and
+// flatEntry is a gateway/model ID + its metadata, used by both live and
 // embedded catalog paths to build the index.
 type flatEntry struct {
+	Provider string
 	ID       string
 	Metadata *ModelMetadata
 }
@@ -319,6 +384,7 @@ type flatEntry struct {
 // into flat entries.
 func parseEmbeddedCatalog() ([]flatEntry, error) {
 	var entries []struct {
+		Provider         string   `json:"provider"`
 		ID               string   `json:"id"`
 		Name             string   `json:"name"`
 		Description      string   `json:"description"`
@@ -346,7 +412,8 @@ func parseEmbeddedCatalog() ([]flatEntry, error) {
 			efforts = defaultReasoningEfforts
 		}
 		out[i] = flatEntry{
-			ID: e.ID,
+			Provider: NormalizeProviderKey(e.Provider),
+			ID:       e.ID,
 			Metadata: &ModelMetadata{
 				ID:               e.ID,
 				Name:             e.Name,
@@ -370,21 +437,55 @@ func parseEmbeddedCatalog() ([]flatEntry, error) {
 	return out, nil
 }
 
-// indexEntries builds the flat lookup index from a list of entries.
+// indexEntries builds the lookup indexes from a list of entries. The
+// provider field preserves the gateway namespace from models.dev; model IDs
+// stay exactly as that gateway exposes them.
 func (c *Catalog) indexEntries(entries []flatEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Provider != entries[j].Provider {
+			return entries[i].Provider < entries[j].Provider
+		}
+		return entries[i].ID < entries[j].ID
+	})
 	byID := make(map[string]*ModelMetadata, len(entries))
 	byBareID := make(map[string]*ModelMetadata, len(entries))
 	byName := make(map[string]*ModelMetadata, len(entries))
+	byProviderID := make(map[string]map[string]*ModelMetadata, len(entries))
+	byProviderBareID := make(map[string]map[string]*ModelMetadata, len(entries))
 	for _, e := range entries {
 		meta := e.Metadata
+		if meta == nil {
+			continue
+		}
+		providerKey := NormalizeProviderKey(e.Provider)
 		lowerKey := strings.ToLower(e.ID)
-		byID[lowerKey] = meta
+		if _, exists := byID[lowerKey]; !exists {
+			byID[lowerKey] = meta
+		}
 		bareID := lowerKey
 		if idx := strings.Index(bareID, "/"); idx >= 0 {
 			bareID = bareID[idx+1:]
 		}
 		if _, exists := byBareID[bareID]; !exists {
 			byBareID[bareID] = meta
+		}
+		if providerKey != "" {
+			qualified := providerKey + "/" + lowerKey
+			if _, exists := byID[qualified]; !exists {
+				byID[qualified] = meta
+			}
+			if byProviderID[providerKey] == nil {
+				byProviderID[providerKey] = make(map[string]*ModelMetadata)
+			}
+			if _, exists := byProviderID[providerKey][lowerKey]; !exists {
+				byProviderID[providerKey][lowerKey] = meta
+			}
+			if byProviderBareID[providerKey] == nil {
+				byProviderBareID[providerKey] = make(map[string]*ModelMetadata)
+			}
+			if _, exists := byProviderBareID[providerKey][bareID]; !exists {
+				byProviderBareID[providerKey][bareID] = meta
+			}
 		}
 		if meta.Name != "" {
 			lowerName := strings.ToLower(meta.Name)
@@ -397,6 +498,9 @@ func (c *Catalog) indexEntries(entries []flatEntry) {
 	c.byID = byID
 	c.byBareID = byBareID
 	c.byName = byName
+	c.byProviderID = byProviderID
+	c.byProviderBareID = byProviderBareID
+	c.size = len(entries)
 	c.fetched = clock.NewTime().Time()
 	c.loaded = true
 	c.mu.Unlock()
@@ -590,7 +694,7 @@ func (c *Catalog) SetURL(url string) {
 func (c *Catalog) Stats() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return len(c.byID)
+	return c.size
 }
 
 // EnsureLoaded is the public version for external callers.

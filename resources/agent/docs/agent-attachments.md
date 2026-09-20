@@ -2,7 +2,10 @@
 
 Users can attach images (PNG, JPEG, GIF, WebP) to a turn. The agent runtime
 checks whether the active chat model supports image input using the `Vision`
-capability flag from the model catalog (models.dev / OpenRouter).
+capability flag from the model catalog (models.dev / OpenRouter). Catalog
+identity is scoped by the configured gateway (`gateway/model`), so an
+OpenCode model such as `deepseek-v4.1-flash` uses OpenCode's catalog entry
+even when other gateways expose a vendor-qualified `deepseek/...` ID.
 
 - **Vision-capable model:** images are sent directly to the model as
   `image_url` (Chat Completions, including the OpenRouter profile) or `image`

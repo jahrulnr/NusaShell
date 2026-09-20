@@ -114,6 +114,20 @@ func modalityIO(in, out []string) struct {
 	}{Input: in, Output: out}
 }
 
+func TestNormalizeProviderKey(t *testing.T) {
+	tests := map[string]string{
+		" OpenCode ":   "opencode",
+		"Token_Router": "token-router",
+		"302.ai":       "302-ai",
+		"prov_abc123":  "prov-abc123",
+	}
+	for input, want := range tests {
+		if got := NormalizeProviderKey(input); got != want {
+			t.Errorf("NormalizeProviderKey(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestLookupStripsProviderPrefixFromQuery(t *testing.T) {
 	c := &Catalog{
 		loaded:   true,

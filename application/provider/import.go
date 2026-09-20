@@ -3,11 +3,13 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/modelcatalog"
 	"nusashell/infrastructure/config"
 	clock "nusashell/pkg/time"
 )
@@ -165,52 +167,16 @@ func (s *Service) importModelsForProvider(ctx context.Context, p *domain.Provide
 	// tool call, structured output, vision) that provider /models endpoints
 	// often don't return. Skipped if no catalog is configured or the catalog
 	// fetch fails — provider-imported data stays as-is.
+	catalogHint := catalogProviderHint(p)
 	if s.catalog != nil {
 		if err := s.catalog.EnsureLoaded(ctx); err == nil {
 			enriched := 0
 			for i := range models {
-				meta := s.catalog.Lookup(catalogHintFromModelID(models[i].ID), models[i].ID)
+				meta := s.catalog.Lookup(catalogHint, models[i].ID)
 				if meta == nil {
 					continue
 				}
-				isFreeVariant := isFreeTierModel(models[i].ID)
-				models[i].Context = contextWindowFromCatalog(p.Kind, models[i].Context, meta.Context)
-				if models[i].MaxOutput == 0 {
-					models[i].MaxOutput = meta.Output
-				}
-				// Free-tier variants (e.g. "qwen/qwen3.8-max:free") have $0
-				// pricing from the provider API. Don't override with the base
-				// model's real pricing from the catalog — $0 is correct.
-				if !isFreeVariant {
-					if models[i].InputCost == 0 {
-						models[i].InputCost = meta.InputCost
-					}
-					if models[i].OutputCost == 0 {
-						models[i].OutputCost = meta.OutputCost
-					}
-					if models[i].CacheReadCost == 0 {
-						models[i].CacheReadCost = meta.CacheReadCost
-					}
-				}
-				if models[i].Description == "" {
-					models[i].Description = meta.Description
-				}
-				if models[i].DisplayName == "" {
-					models[i].DisplayName = meta.Name
-				}
-				if len(models[i].SupportedEfforts) == 0 {
-					models[i].SupportedEfforts = meta.SupportedEfforts
-				}
-				if models[i].KnowledgeCutoff == "" {
-					models[i].KnowledgeCutoff = meta.KnowledgeCutoff
-				}
-				models[i].ToolCall = meta.ToolCall
-				models[i].StructuredOutput = meta.StructuredOutput
-				models[i].Reasoning = meta.Reasoning
-				models[i].Vision = meta.Vision
-				models[i].Audio = meta.Audio
-				models[i].Video = meta.Video
-				models[i].InterleavedField = meta.InterleavedField
+				applyCatalogMetadata(p, &models[i], meta)
 				enriched++
 			}
 			if enriched > 0 {
@@ -227,7 +193,7 @@ func (s *Service) importModelsForProvider(ctx context.Context, p *domain.Provide
 	// Unknown models keep Kind="" and appear in the chat picker.
 	for i := range models {
 		if s.catalog != nil {
-			if meta := s.catalog.Lookup(catalogHintFromModelID(models[i].ID), models[i].ID); meta != nil {
+			if meta := s.catalog.Lookup(catalogHint, models[i].ID); meta != nil {
 				switch meta.Kind {
 				case "tts":
 					models[i].Kind = domain.ModelKindTTS
@@ -323,22 +289,62 @@ func isFreeTierModel(id string) bool {
 	return false
 }
 
-// catalogHintFromModelID derives the catalog hint from a model ID prefix.
-// Catalog entries are keyed by vendor prefixes ("deepseek/...", "qwen/...",
-// "openai/..."), and the /models API usually emits those prefixes on the
-// model ID itself. When the model ID carries no prefix, the hint is empty
-// and Lookup falls back to its bare-ID and display-name matching.
-func catalogHintFromModelID(modelID string) string {
-	lower := strings.ToLower(modelID)
-	if idx := strings.Index(lower, "/"); idx > 0 {
-		return lower[:idx]
+// catalogProviderHint derives the models.dev namespace for the configured
+// gateway. This is intentionally provider-derived rather than model-ID
+// derived: some gateways expose vendor-qualified IDs ("deepseek/foo"),
+// while others expose local IDs ("foo"). In both cases the catalog identity
+// is "gateway/model".
+func catalogProviderHint(p *domain.Provider) string {
+	if p == nil {
+		return ""
+	}
+	if domain.IsOpenCodeHost(p.BaseURL) {
+		return "opencode"
+	}
+	if host := catalogProviderHost(p.BaseURL); host != "" {
+		switch {
+		case host == "openrouter.ai" || strings.HasSuffix(host, ".openrouter.ai"):
+			return "openrouter"
+		case host == "anthropic.com" || strings.HasSuffix(host, ".anthropic.com"):
+			return "anthropic"
+		case host == "openai.com" || strings.HasSuffix(host, ".openai.com"):
+			return "openai"
+		case host == "generativelanguage.googleapis.com" || host == "aiplatform.googleapis.com":
+			return "google"
+		}
+	}
+	switch {
+	case p.Kind == domain.ProviderCodex || p.EffectiveDriver() == domain.ProviderDriverCodex:
+		return "openai"
+	case p.Kind == domain.ProviderGemini || p.EffectiveDriver() == domain.ProviderDriverGemini:
+		return "google"
+	}
+	if id := modelcatalog.NormalizeProviderKey(p.ID); id != "" && !strings.HasPrefix(id, "prov-") {
+		return id
+	}
+	if name := modelcatalog.NormalizeProviderKey(p.Name); name != "" {
+		return name
+	}
+	if host := catalogProviderHost(p.BaseURL); host != "" {
+		parts := strings.Split(host, ".")
+		if len(parts) >= 2 {
+			return modelcatalog.NormalizeProviderKey(parts[len(parts)-2])
+		}
 	}
 	return ""
 }
 
-// CatalogHintFromModelID is exported for application-level catalog lookups.
-func CatalogHintFromModelID(modelID string) string {
-	return catalogHintFromModelID(modelID)
+func catalogProviderHost(baseURL string) string {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+// CatalogProviderHint is exported for application-level catalog lookups.
+func CatalogProviderHint(p *domain.Provider) string {
+	return catalogProviderHint(p)
 }
 
 // contextWindowFromCatalog selects model context metadata without treating
