@@ -668,6 +668,34 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 // rpc performs a POST /rpc/<dotted-method-as-path> call and decodes the
 // envelope. The method is encoded in the URL path (dots → slashes) so each
 // call is individually visible in the browser Network tab.
+// waitForTurnFinished blocks until an agent turn reports completion in the
+// log store. App.Close drains only the learning goroutines, so a turn started
+// by a test keeps running (and appending to logs.jsonl) after the test body
+// returns; the temp-dir cleanup then races it and fails with "directory is not
+// empty". Waiting on the turn's own completion entry removes the race without
+// changing shutdown semantics.
+func (h *harness) waitForTurnFinished(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		listed := h.rpcOK(t, "logs.list", map[string]any{"limit": 200})
+		var out struct {
+			Entries []struct {
+				Message string `json:"message"`
+			} `json:"entries"`
+		}
+		if err := json.Unmarshal(listed.Result, &out); err == nil {
+			for _, e := range out.Entries {
+				if strings.Contains(e.Message, "turn finished") {
+					return
+				}
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("turn did not report completion within 10s")
+}
+
 func (h *harness) rpc(t *testing.T, method string, payload any) contractsResult {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"method": method, "payload": payload})

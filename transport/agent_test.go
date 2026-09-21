@@ -1980,4 +1980,8 @@ func TestAgentTurnRetryAfterAutoContinueRateLimit(t *testing.T) {
 	if !res.OK {
 		t.Fatalf("retry after auto-continue rate-limit failure failed: %+v", res.Error)
 	}
+	// The retry starts another turn; let it finish (and flush its last log
+	// entry) before the test returns, or the temp-dir cleanup races it.
+	waitTurnDone(t, h, convID)
+	h.waitForTurnFinished(t)
 }

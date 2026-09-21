@@ -497,20 +497,29 @@ func TestLogsArePublishedToLiveSubscribers(t *testing.T) {
 		"model":            "fake-model-1",
 	})
 
-	select {
-	case ev := <-events:
-		if ev.Type != contracts.EventLogAppend {
-			t.Fatalf("event type = %q, want %q", ev.Type, contracts.EventLogAppend)
+	// The turn emits lifecycle events alongside the log appends, so wait for
+	// the logs.append one instead of assuming it arrives first.
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-events:
+			if ev.Type != contracts.EventLogAppend {
+				continue
+			}
+			var payload contracts.LogAppendEvent
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+				t.Fatalf("decode log event: %v", err)
+			}
+			if payload.Entry.Level != "info" || payload.Entry.Source != "agent" || payload.Entry.Message == "" {
+				t.Fatalf("log event payload = %+v", payload.Entry)
+			}
+			// The turn is still running; let it finish before the test returns
+			// so the temp-dir cleanup cannot race its log writes.
+			h.waitForTurnFinished(t)
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for live log event")
 		}
-		var payload contracts.LogAppendEvent
-		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
-			t.Fatalf("decode log event: %v", err)
-		}
-		if payload.Entry.Level != "info" || payload.Entry.Source != "agent" || payload.Entry.Message == "" {
-			t.Fatalf("log event payload = %+v", payload.Entry)
-		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timed out waiting for live log event")
 	}
 }
 
@@ -1200,6 +1209,7 @@ func TestLogsHandlers(t *testing.T) {
 		"text":             "Generate logs",
 		"model":            "fake-model-1",
 	})
+	h.waitForTurnFinished(t)
 
 	listed := h.rpcOK(t, "logs.list", map[string]any{"limit": 50})
 	var out struct {
