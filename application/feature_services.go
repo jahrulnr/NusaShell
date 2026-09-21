@@ -563,6 +563,9 @@ func (a *App) providerDeps() provider.Deps {
 		Log:         a.log,
 		DataDir:     a.DataDir,
 		AdjustModel: a.applyModelOverrides,
+		// Codex multi-account tokens live under "{providerID}:account:*"
+		// and must be removed with the provider.
+		OnProviderDeleted: a.deleteCodexAccountCredentials,
 		OnConfigChanged: func(name, action string) {
 			change := domain.AnnouncementConfigChangedDetail("provider", name, action)
 			a.publishAnnouncementToAll(newAnnouncement(

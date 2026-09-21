@@ -291,6 +291,10 @@ func (s *Service) HandleDelete(req contracts.ProviderIDRequest) (any, *contracts
 	if err := s.credentials.Delete(req.ID); err != nil {
 		s.warn("failed to delete credential for %s: %v", name, err)
 	}
+	// Derived credential keys (Codex multi-account tokens under
+	// "{providerID}:account:*") are the host's to remove, so a provider
+	// delete never leaves them orphaned behind the primary entry.
+	s.providerDeleted(req.ID, name)
 	s.info("provider deleted: %s", name)
 	s.configChanged(name, "deleted")
 	return map[string]bool{"ok": true}, nil

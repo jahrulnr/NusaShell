@@ -32,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Deleting a Codex provider no longer orphans its account credentials.**
+  The live `ai.providers.delete` route ran `Service.HandleDelete`, which
+  removed the provider row and its primary credential but not the derived
+  `{providerID}:account:*` entries used by multi-account routing; only an
+  unwired App-level wrapper performed that cleanup, so the codex account
+  tokens survived the delete. The provider service now reports the deletion
+  through an `OnProviderDeleted` hook that the composition root wires to the
+  account cleanup, and the regression test drives the real `App.Dispatch`
+  route instead of the wrapper.
 - **Skill and metadata writes are now crash-safe.** `infrastructure/skillfs`
   wrote `SKILL.md`, `meta.json`, `skills.json`, version snapshots and
   provenance sidecars with bare `os.WriteFile`; all data writes now go through

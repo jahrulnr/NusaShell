@@ -72,6 +72,13 @@ type ModelAdjuster func(*domain.Provider, *domain.Model)
 // ConfigChanged reports the named provider configuration change to the host.
 type ConfigChanged func(name, action string)
 
+// ProviderDeleted reports that a provider and its primary credential were
+// removed, so the host can clean up credential keys derived from the
+// provider ID. Codex multi-account tokens live under
+// "{providerID}:account:*" and are not covered by the provider's own
+// credential entry, so they are removed through this hook.
+type ProviderDeleted func(providerID, providerName string)
+
 // Deps is the narrow wiring for New. Feature packages never receive *App.
 type Deps struct {
 	Store                  Store
@@ -86,6 +93,7 @@ type Deps struct {
 	DataDir                string
 	AdjustModel            ModelAdjuster
 	OnConfigChanged        ConfigChanged
+	OnProviderDeleted      ProviderDeleted
 	OfflineTTS             func() []contracts.ModelDTO
 }
 
@@ -103,6 +111,7 @@ type Service struct {
 	dataDir                string
 	adjustModel            ModelAdjuster
 	onConfigChanged        ConfigChanged
+	onProviderDeleted      ProviderDeleted
 	offlineTTS             func() []contracts.ModelDTO
 }
 
@@ -121,6 +130,7 @@ func New(d Deps) *Service {
 		dataDir:                d.DataDir,
 		adjustModel:            d.AdjustModel,
 		onConfigChanged:        d.OnConfigChanged,
+		onProviderDeleted:      d.OnProviderDeleted,
 		offlineTTS:             d.OfflineTTS,
 	}
 }
@@ -142,6 +152,12 @@ func (s *Service) write(level, format string, args ...any) {
 func (s *Service) configChanged(name, action string) {
 	if s.onConfigChanged != nil {
 		s.onConfigChanged(name, action)
+	}
+}
+
+func (s *Service) providerDeleted(providerID, name string) {
+	if s.onProviderDeleted != nil {
+		s.onProviderDeleted(providerID, name)
 	}
 }
 

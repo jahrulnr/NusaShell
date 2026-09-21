@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -115,7 +116,7 @@ func TestPrepareCodexTurnAPIKeyDoesNotDropConversationPinWithoutRouter(t *testin
 	}
 }
 
-func TestHandleProvidersDeleteRemovesAccountCredentials(t *testing.T) {
+func TestDispatchProvidersDeleteRemovesAccountCredentials(t *testing.T) {
 	provs := &fakeProviderStore{items: map[string]*domain.Provider{
 		"prov": {ID: "prov", Kind: domain.ProviderCodex, Name: "Codex"},
 	}}
@@ -127,7 +128,12 @@ func TestHandleProvidersDeleteRemovesAccountCredentials(t *testing.T) {
 	}}
 	app := &App{Providers: provs, Credentials: creds, Logs: &fakeLogStore{}, Bus: NewBus()}
 
-	resp, rpcErr := app.handleProvidersDelete(contracts.ProviderIDRequest{ID: "prov"})
+	// Drive the production RPC path (ai.providers.delete): deleting a Codex
+	// provider must remove its derived "{id}:account:*" credentials, not
+	// only the primary entry. Routing this through App.Dispatch is the point
+	// of the test — the bug it guards against was a wrapper that cleaned up
+	// account keys while the live dispatch route did not.
+	resp, rpcErr := app.Dispatch(context.Background(), contracts.MethodProvidersDelete, []byte(`{"id":"prov"}`))
 	if rpcErr != nil {
 		t.Fatalf("unexpected rpc error: %v", rpcErr)
 	}

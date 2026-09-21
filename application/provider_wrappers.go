@@ -84,22 +84,6 @@ func providerRetryDelay(err error, retry int) (time.Duration, bool) {
 	return provider.RetryDelay(err, retry)
 }
 
-func (a *App) handleProvidersDelete(req contracts.ProviderIDRequest) (any, *contracts.RPCError) {
-	name := req.ID
-	if a.Providers != nil {
-		if p, err := a.Providers.Get(req.ID); err == nil {
-			name = p.Name
-		}
-	}
-	resp, rpcErr := a.providerService().HandleDelete(req)
-	if rpcErr != nil {
-		return nil, rpcErr
-	}
-	// Codex (and any future multi-account) credentials live under
-	// "{providerID}:account:*" and must be removed with the provider.
-	a.deleteCodexAccountCredentials(req.ID, name)
-	return resp, nil
-}
 func (a *App) SeedProvidersFromEnv(getenv func(string) string) []string {
 	return a.providerService().SeedFromEnv(getenv)
 }
