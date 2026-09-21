@@ -39,7 +39,7 @@ export const STARTER_PROMPTS = [
   },
 ];
 
-export function applyStarterPrompt(prompt) {
+function applyStarterPrompt(prompt) {
   const input = composerInput();
   if (!input || !prompt) return;
   input.value = prompt;
@@ -150,23 +150,6 @@ function reasoningPreview(raw) {
     .replace(/^continue from (?:the )?current context\.?\s*/i, '')
     .trim();
   return compactLine(text);
-}
-
-// reasoningHasVisibleContent returns true when a rendered reasoning block
-// actually contains something the user can see. It strips zero-width and
-// whitespace-only text, and counts visual elements (images, diagrams, tables,
-// horizontal rules, etc.) as visible content. A collapsed disclosure with
-// stored raw source also counts as visible so the Thinking row can appear
-// before markdown is parsed.
-export function reasoningHasVisibleContent(content) {
-  if (!content) return false;
-  const details = content.classList?.contains('agent-reasoning')
-    ? content
-    : content.closest?.('.agent-reasoning');
-  if (details && reasoningHasVisibleSource(details._reasoningRaw)) return true;
-  const text = (content.textContent || '').replace(/[\u200B-\u200D\uFEFF\u2060\u2063]/g, '').trim();
-  if (text.length > 0) return true;
-  return content.querySelector?.('img, svg, video, canvas, table, hr, .mermaid') !== null;
 }
 
 function materializeReasoning(details) {
@@ -1247,7 +1230,7 @@ function formatImageCost(value) {
   return `$${n.toFixed(2)}`;
 }
 
-export function renderGenerateImageCard(toolCall) {
+function renderGenerateImageCard(toolCall) {
   toolCall = normalizeToolCall(toolCall);
   const args = parseToolArgs(toolCall.args);
   const parsed = toolPresentationParts(toolCall);

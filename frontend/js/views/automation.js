@@ -255,10 +255,25 @@ function renderRunDetail(run, detail, actions) {
     if (hasAgentStep) {
       const steer = el('button', { class: 'mini-btn ghost', type: 'button', text: 'Steer' });
       steer.addEventListener('click', async () => {
-        const text = await dialog({ input: true, placeholder: 'Additional instructions for the running agent step…' });
-        if (text) {
-          await rpc('automation.runs.steer', { id: run.id, text });
+        const result = await dialog({
+          title: 'Steer run',
+          fields: [
+            {
+              name: 'text', label: 'Instructions', tag: 'textarea', rows: 3,
+              placeholder: 'Additional instructions for the running agent step…',
+            },
+          ],
+          actions: [
+            { label: 'Cancel', value: null },
+            { label: 'Send', value: 'send', primary: true },
+          ],
+        });
+        if (result.value !== 'send') return;
+        try {
+          await rpc('automation.runs.steer', { id: run.id, text: result.fields.text });
           await refresh();
+        } catch (err) {
+          toast(err.message || String(err), 'error');
         }
       });
       actions.append(steer);

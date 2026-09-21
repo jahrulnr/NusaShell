@@ -35,14 +35,6 @@ export function fmtClock(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-export function timeAgo(iso) {
-  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
-}
-
 const activeToasts = new Map();
 
 function toastKey(message, kind) {
@@ -338,24 +330,6 @@ export async function confirmDialog(title, message, confirmLabel = 'Delete', dan
     ],
   });
   return res.value === true;
-}
-
-export function icon(svg) {
-  const wrap = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  wrap.setAttribute('viewBox', svg.viewBox || '0 0 24 24');
-  wrap.setAttribute('width', String(svg.width || 14));
-  wrap.setAttribute('height', String(svg.height || 14));
-  wrap.setAttribute('fill', 'none');
-  if (svg.paths) for (const d of svg.paths) {
-    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    p.setAttribute('d', d);
-    p.setAttribute('stroke', 'currentColor');
-    p.setAttribute('stroke-width', svg.strokeWidth || '1.6');
-    p.setAttribute('stroke-linecap', 'round');
-    p.setAttribute('stroke-linejoin', 'round');
-    wrap.append(p);
-  }
-  return wrap;
 }
 
 export function debounce(fn, ms = 250) {

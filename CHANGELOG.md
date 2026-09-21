@@ -32,6 +32,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The automation Steer dialog works, and Cancel no longer sends a steer.**
+  The Steer button called `dialog({ input: true })`, an option the shared
+  dialog helper does not have, so it rendered an empty dialog with only a
+  Cancel button — and because `dialog()` resolves an object, the
+  `if (text)` guard was always true, meaning Cancel or Escape still fired
+  `automation.runs.steer` with a non-string `text` that the backend rejects.
+  The dialog now uses the same field-based contract as every other caller,
+  and a jsdom regression test drives both the send and the cancel path.
+- **Telemetry tables no longer interpolate provider-supplied text into
+  `innerHTML`.** The top-models and top-providers rows built markup by string
+  concatenation, including a `title` attribute, from `model_id` and
+  `provider_name`/`provider_id` — values that originate from upstream
+  provider APIs. Both rows now use the shared `el()` helper, which assigns
+  text through `textContent` and attributes through `setAttribute`.
+- **The Settings view refreshes once per visit instead of twice.**
+  `settings.js` registered its own `hashchange` listener while the router
+  already refreshes the active view on the same event, doubling the RPCs on
+  every navigation. The local listener is gone, and the `settings.applied`
+  disk-sync refresh is now gated on the view being active.
 - **Deleting a Codex provider no longer orphans its account credentials.**
   The live `ai.providers.delete` route ran `Service.HandleDelete`, which
   removed the provider row and its primary credential but not the derived
@@ -57,6 +76,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Dead frontend modules and exports.** `js/views/mcp.js` was a
+  compatibility shim whose comment claimed callers still imported the old MCP
+  view, but nothing did; `wsRpc`/`wsStatusNow`/`wsSeq` in `js/rpc.js`,
+  `timeAgo` and `icon` in `js/ui.js`, `acpDetailOpen`,
+  `toolContractVersion` (and the write-only `catalogVersion` it was the only
+  reader of), and `reasoningHasVisibleContent` in the agent renderer all had
+  zero callers. `applyStarterPrompt` and `renderGenerateImageCard` are still
+  used inside their module but no longer exported. In `learning.js`,
+  `state.graphRefreshTimer` was a dead field shadowing the real module-level
+  timer, and `state.learningEventHandlers` held eight cleanup closures that
+  nothing ever invoked — replaced by a plain one-time guard.
 - **Dead code removed across `application/`, `domain/`, `pkg/hash`, and
   `infrastructure/`.** Every deletion was verified unreachable by repo-wide
   reference count before removal: the superseded `application/rpc_dispatch.go`

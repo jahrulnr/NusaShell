@@ -2,7 +2,7 @@
 // Mirrors the OpenRouter Activity dashboard layout.
 
 import { rpc } from '../rpc.js';
-import { createSelect } from '../ui.js';
+import { createSelect, el } from '../ui.js';
 import { resolvedFontFamily } from '../font-preferences.js';
 
 let charts = {};
@@ -159,9 +159,12 @@ function renderTables(res) {
   if (modelsEl) {
     modelsEl.innerHTML = '';
     res.top_models.slice(0, 8).forEach((m, i) => {
-      const row = document.createElement('div');
-      row.className = 'telemetry-table-row';
-      row.innerHTML = `<span class="tm-rank">${i + 1}</span><span class="tm-name" title="${m.model_id}">${m.model_id}</span><span class="tm-value">${formatUSD(m.spend)}</span><span class="tm-sub">${formatNum(m.requests)} req · ${formatNum(m.tokens)} tok</span>`;
+      const row = el('div', { class: 'telemetry-table-row' },
+        el('span', { class: 'tm-rank', text: i + 1 }),
+        el('span', { class: 'tm-name', title: m.model_id, text: m.model_id }),
+        el('span', { class: 'tm-value', text: formatUSD(m.spend) }),
+        el('span', { class: 'tm-sub', text: `${formatNum(m.requests)} req · ${formatNum(m.tokens)} tok` }),
+      );
       modelsEl.appendChild(row);
     });
     if (res.top_models.length === 0) modelsEl.innerHTML = '<div class="telemetry-empty">No usage data yet.</div>';
@@ -170,9 +173,12 @@ function renderTables(res) {
   if (provEl) {
     provEl.innerHTML = '';
     res.top_providers.slice(0, 8).forEach((p, i) => {
-      const row = document.createElement('div');
-      row.className = 'telemetry-table-row';
-      row.innerHTML = `<span class="tm-rank">${i + 1}</span><span class="tm-name">${p.provider_name || p.provider_id}</span><span class="tm-value">${formatUSD(p.spend)}</span><span class="tm-sub">${formatNum(p.requests)} req</span>`;
+      const row = el('div', { class: 'telemetry-table-row' },
+        el('span', { class: 'tm-rank', text: i + 1 }),
+        el('span', { class: 'tm-name', text: p.provider_name || p.provider_id }),
+        el('span', { class: 'tm-value', text: formatUSD(p.spend) }),
+        el('span', { class: 'tm-sub', text: `${formatNum(p.requests)} req` }),
+      );
       provEl.appendChild(row);
     });
     if (res.top_providers.length === 0) provEl.innerHTML = '<div class="telemetry-empty">No provider data.</div>';

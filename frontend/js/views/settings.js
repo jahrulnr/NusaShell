@@ -165,9 +165,6 @@ export async function initSettings() {
         { text: 'GitHub only', value: 'github' },
       ],
     });
-    window.addEventListener('hashchange', () => {
-      if (location.hash === '#settings') void refresh();
-    });
     bindDiskSync();
     bindTTSInstall();
     bindSTTInstall();
@@ -190,6 +187,9 @@ function bindDiskSync() {
       setStatus('Runtime reloaded from disk. Unsaved form edits kept — reopen this view to resync.', true);
       return;
     }
+    // The router already refreshes on navigation, so a disk reload while the
+    // view is hidden needs no work now — the next visit picks it up.
+    if (!view?.classList.contains('active')) return;
     void refresh();
     setStatus('Settings reloaded from disk.');
   });

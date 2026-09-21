@@ -26,10 +26,6 @@ export async function refreshAcpProviders() {
   renderAcpRegistry();
 }
 
-export function acpDetailOpen() {
-  return Boolean(detailId);
-}
-
 function setPane() {
   const llm = document.getElementById('provider-llm-section');
   const addProvider = document.getElementById('add-provider-btn');

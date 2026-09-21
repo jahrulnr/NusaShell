@@ -1,7 +1,7 @@
 // Learning workspace: search + memory list + knowledge graph + autolearn log.
 // Uses vis-network for graph rendering (vendored ESM standalone build).
 
-import { rpc, on, off } from '../rpc.js';
+import { rpc, on } from '../rpc.js';
 import { bindTablistKeyboard, el, debounce, createSelect, toast, fmtTime, confirmDialog } from '../ui.js';
 import { resolvedFontFamily } from '../font-preferences.js';
 // A learning job's LLM run is persisted as a background conversation, so the
@@ -35,8 +35,7 @@ const state = {
   selectedRecordId: null,
   selectedExperienceId: null,
   selectedGraphNodeId: null,
-  learningEventHandlers: null, // cleanup funcs for memory/skill/job listeners
-  graphRefreshTimer: null, // debounce timer coalescing background graph refreshes
+  learningEventsBound: false, // one-time guard; view listeners are never torn down
   userMemory: null,
   userLoaded: false,
   agentMemory: null,
@@ -188,7 +187,7 @@ function scheduleGraphRefresh() {
 // graph. Experience recording only needs the experience list. Memory
 // updates refresh documents, records, search, and graph.
 function initLearningUpdateListeners() {
-  if (state.learningEventHandlers) return;
+  if (state.learningEventsBound) return;
   const onMemoryUpdated = () => {
     loadStats();
     scheduleGraphRefresh();
@@ -227,16 +226,7 @@ function initLearningUpdateListeners() {
   on('learning.job.done', onJobDone);
   on('learning.job.error', onJobError);
   on('learning.graph.updated', scheduleGraphRefresh);
-  state.learningEventHandlers = [
-    () => off('memory.updated', onMemoryUpdated),
-    () => off('skill.updated', onSkillUpdated),
-    () => off('experience.recorded', onExperienceRecorded),
-    () => off('learning.job.started', onJobStarted),
-    () => off('learning.job.done', onJobDone),
-    () => off('learning.job.error', onJobError),
-    () => off('learning.graph.updated', scheduleGraphRefresh),
-    () => { if (graphRefreshTimer) clearTimeout(graphRefreshTimer); },
-  ];
+  state.learningEventsBound = true;
 }
 
 function initMemoryDocumentEditor(config) {

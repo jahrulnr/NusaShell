@@ -4,7 +4,6 @@ import { rpc } from '../../rpc.js';
 // catalog request fails because persisted conversations may outlive the
 // backend version that produced them.
 const SUPPORTED_VERSION = 1;
-let catalogVersion = 0;
 let catalog = new Map();
 let catalogLoadGeneration = 0;
 
@@ -87,7 +86,6 @@ export function registerToolContracts(result) {
     const entry = normalizeCatalogEntry(raw);
     if (entry) next.set(entry.name, entry);
   }
-  catalogVersion = result.version;
   catalog = next;
   return [...catalog.values()];
 }
@@ -100,7 +98,6 @@ export async function loadToolContracts(workspace = '') {
     return registerToolContracts(result);
   } catch (error) {
     if (generation === catalogLoadGeneration) {
-      catalogVersion = 0;
       catalog = new Map();
     }
     throw error;
@@ -109,10 +106,6 @@ export async function loadToolContracts(workspace = '') {
 
 export function toolContractFor(name) {
   return catalog.get(String(name || '')) || null;
-}
-
-export function toolContractVersion() {
-  return catalogVersion;
 }
 
 export function toolContractRef(name, presentation = null) {

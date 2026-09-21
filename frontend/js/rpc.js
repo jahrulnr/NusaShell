@@ -143,7 +143,6 @@ export async function rpc(method, payload = {}, { timeoutMs = 60000 } = {}) {
 // ---- WebSocket (event stream: BE -> FE triggers) ----
 let ws = null;
 let wsStatus = 'idle';
-let wsSeq = 0;
 const wsPending = new Map();
 let wsOptions = {};
 let reconnectTimer = null;
@@ -243,35 +242,6 @@ export function setAutoReconnect(enabled) {
     reconnectTimer = null;
   }
   if (autoReconnect && !ws) connectWS();
-}
-
-export function wsRpc(method, payload = {}, timeoutMs = 30000) {
-  const wsConn = connectWS();
-  return new Promise((resolve, reject) => {
-    const id = ++wsSeq;
-    const timer = setTimeout(() => {
-      wsPending.delete(id);
-      reject(new Error('WS RPC timed out'));
-    }, timeoutMs);
-    wsPending.set(id, {
-      resolve: (v) => { clearTimeout(timer); resolve(v); },
-      reject: (e) => { clearTimeout(timer); reject(e); },
-    });
-    const send = () => {
-      if (wsConn.readyState !== WebSocket.OPEN) {
-        wsPending.delete(id);
-        reject(new Error('WebSocket is not connected'));
-        return;
-      }
-      wsConn.send(JSON.stringify({ id, method, payload }));
-    };
-    if (wsConn.readyState === WebSocket.OPEN) send();
-    else wsConn.addEventListener('open', send, { once: true });
-  });
-}
-
-export function wsStatusNow() {
-  return ws ? ws.readyState : (globalThis.WebSocket?.CLOSED ?? 3);
 }
 
 // Test/lifecycle hook: stop reconnect timers when the host is shutting down.

@@ -3200,7 +3200,9 @@ function bindEvents() {
     const job = run.toolJobs.get(tool_call_id);
     if (!job) {
       const toolCall = normalizeToolCall({ id: tool_call_id, name, args: args ?? run.toolArgs?.get?.(tool_call_id) ?? {}, output: output ?? '', status: status || 'ok', attachments, output_attachments: attachments, presentation });
-      const card = isMediaGenerationTool(name) ? renderToolCallCard(toolCall) : renderToolJob(toolCall);
+      // Media-generation tools can never reach here: the isMediaGenerationTool
+      // branch above always returns, so this is always the plain job card.
+      const card = renderToolJob(toolCall);
       if (isStreamingTool(name)) bindToolStop(card, () => ({ run_id: run.runId, tool_call_id }));
       setLiveToolJob(run.toolJobs, tool_call_id, card);
       if (run.strip) {
