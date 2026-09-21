@@ -49,6 +49,35 @@ func TruncateWithNote(s string, n int) string {
 	return s[:n] + "...[truncated: original was " + strconv.Itoa(len(s)) + " chars]"
 }
 
+// ClipRunes keeps the first n runes of s and appends marker when content
+// was dropped, so a downstream model or user can tell the payload was cut.
+// When n is zero or negative the input is returned unchanged. Pass an
+// empty marker to bound the length without annotating the cut.
+func ClipRunes(s string, n int, marker string) string {
+	if n <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + marker
+}
+
+// TailRunes keeps the last n runes of s with no omission marker. When n is
+// zero or negative the result is empty. Used where the most recent output
+// is the useful part of an oversized payload.
+func TailRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[len(r)-n:])
+}
+
 // Visible returns the assistant text worth persisting or sending. Models
 // such as Qwen3.8 emit a blank paragraph ("\n\n") as the first or last
 // content tokens after thinking; storing that makes empty rounds look

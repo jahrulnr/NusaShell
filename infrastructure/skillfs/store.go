@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	pathpkg "path"
@@ -33,6 +32,8 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	"nusashell/pkg/archive"
+	"nusashell/pkg/atomicfile"
 	clock "nusashell/pkg/time"
 	"nusashell/resources"
 )
@@ -386,7 +387,7 @@ func (s *Store) Save(skill *domain.Skill) error {
 	}
 	skill.Path = dir
 	content := formatSkillMarkdown(skill)
-	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+	if err := atomicfile.Write(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
 		return fmt.Errorf("skillfs: write SKILL.md: %w", err)
 	}
 	if err := snapshotVersion(dir, skill.Version, content); err != nil {
@@ -575,7 +576,7 @@ func (s *Store) Rollback(id, ownedBy string, version int) (*domain.Skill, error)
 	if err != nil {
 		return nil, fmt.Errorf("skill %q version %d not found", id, version)
 	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), data, 0o644); err != nil {
+	if err := atomicfile.Write(filepath.Join(skillDir, "SKILL.md"), data, 0o644); err != nil {
 		return nil, fmt.Errorf("skillfs: rollback SKILL.md: %w", err)
 	}
 	name, desc, content := parseSkillMarkdown(string(data))
@@ -813,7 +814,7 @@ func writeSkillMeta(skillDir string, s *domain.Skill) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(skillMetaPath(skillDir), data, 0o644)
+	return atomicfile.Write(skillMetaPath(skillDir), data, 0o644)
 }
 
 func writeBuiltinMetaIfMissing(skillDir string) error {
@@ -840,7 +841,7 @@ func snapshotVersion(skillDir string, version int, skillMD string) error {
 	if err := os.MkdirAll(verDir, 0o755); err != nil {
 		return fmt.Errorf("skillfs: mkdir %s: %w", verDir, err)
 	}
-	if err := os.WriteFile(filepath.Join(verDir, "SKILL.md"), []byte(skillMD), 0o644); err != nil {
+	if err := atomicfile.Write(filepath.Join(verDir, "SKILL.md"), []byte(skillMD), 0o644); err != nil {
 		return fmt.Errorf("skillfs: write version snapshot: %w", err)
 	}
 	return copySupportFiles(skillDir, verDir)
@@ -912,7 +913,7 @@ func (j *jsonMetaStore) save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(j.path, data, 0o644)
+	return atomicfile.Write(j.path, data, 0o644)
 }
 
 // --- Provenance / deleted-builtin sidecars ---
@@ -948,7 +949,7 @@ func saveProvenance(root string, prov map[string]provenanceEntry) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return atomicfile.Write(path, data, 0o644)
 }
 
 func loadDeletedBuiltin(root string) (map[string]deletedEntry, error) {
@@ -973,7 +974,7 @@ func saveDeletedBuiltin(root string, deleted map[string]deletedEntry) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return atomicfile.Write(path, data, 0o644)
 }
 
 // Compile-time interface check.
@@ -1148,7 +1149,7 @@ func (s *Store) WriteFile(id, ownedBy, path, content string) error {
 			return fmt.Errorf("skillfs: mkdir %s: %w", dir, err)
 		}
 	}
-	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+	if err := atomicfile.Write(target, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("skillfs: write %s: %w", rel, err)
 	}
 	// Touch skill metadata so UpdatedAt reflects the change.
@@ -1265,48 +1266,19 @@ func (s *Store) Install(zipData []byte) (string, error) {
 	}
 
 	// Extract into skill root, overwriting any existing skill with same ID.
+	// The shared extractor enforces the zip-slip guard, the top-level prefix
+	// scope, and the per-file/total size caps (zip-bomb limits).
 	destDir := filepath.Join(s.root, topLevel)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", fmt.Errorf("skillfs: mkdir %s: %w", destDir, err)
 	}
-	var totalUncompressed int64
-	for _, f := range r.File {
-		if f.FileInfo().IsDir() {
-			continue
-		}
-		// Path relative to the top-level directory. Zip entries always
-		// use forward slashes; convert to the native path separator so
-		// filepath.Join and os.MkdirAll work correctly on Windows.
-		rel := strings.TrimPrefix(f.Name, topLevel+"/")
-		if rel == f.Name {
-			// File at root without top-level prefix — skip (shouldn't happen).
-			continue
-		}
-		rel = filepath.FromSlash(rel)
-		dest := filepath.Join(destDir, rel)
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			return "", fmt.Errorf("skillfs: mkdir for %s: %w", dest, err)
-		}
-		rc, err := f.Open()
-		if err != nil {
-			return "", fmt.Errorf("skillfs: open %s: %w", f.Name, err)
-		}
-		var buf bytes.Buffer
-		n, err := io.Copy(&buf, io.LimitReader(rc, maxSkillZipFileBytes+1))
-		rc.Close()
-		if err != nil {
-			return "", fmt.Errorf("skillfs: read %s: %w", f.Name, err)
-		}
-		if n > maxSkillZipFileBytes {
-			return "", fmt.Errorf("skillfs: file %s expands past %d byte limit (zip bomb?)", f.Name, maxSkillZipFileBytes)
-		}
-		totalUncompressed += n
-		if totalUncompressed > maxSkillZipArchiveBytes {
-			return "", fmt.Errorf("skillfs: archive expands past %d byte total limit (zip bomb?)", maxSkillZipArchiveBytes)
-		}
-		if err := os.WriteFile(dest, buf.Bytes(), 0o644); err != nil {
-			return "", fmt.Errorf("skillfs: write %s: %w", dest, err)
-		}
+	if err := archive.Unzip(r, destDir, &archive.Options{
+		Prefix:        topLevel + "/",
+		FileMode:      0o644,
+		MaxFileBytes:  maxSkillZipFileBytes,
+		MaxTotalBytes: maxSkillZipArchiveBytes,
+	}); err != nil {
+		return "", fmt.Errorf("skillfs: extract %s: %w", topLevel, err)
 	}
 
 	// Parse SKILL.md frontmatter to get name + description.

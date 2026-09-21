@@ -39,10 +39,7 @@ type Toolbox struct {
 	// changing the managed store used by learning and UI persistence.
 	RuntimeSkills   application.RuntimeSkillCatalog
 	SkillSearcher   application.SkillSearcher // optional; nil = substring fallback
-	Experiences     application.ExperienceStore
 	MemoryRecords   application.MemoryRecordStore
-	User            application.MemoryDocumentStore
-	Agent           application.MemoryDocumentStore
 	ProjectMemory   application.ProjectMemoryStore
 	Docs            application.DocsSource
 	Plugins         application.PluginStore
@@ -194,6 +191,12 @@ func (t *Toolbox) webSearchSources(strategy string, searcher *searchwire.Searche
 		return []string{strategy}
 	}
 	return nil
+}
+
+// depMissing is the standard guard error for an optional tool dependency
+// that was not wired at startup; msg keeps each site's established wording.
+func depMissing(msg string) error {
+	return errors.New(msg)
 }
 
 // containsString reports whether s contains v.
@@ -383,7 +386,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 	switch {
 	case name == "conversation_list":
 		if t.Conversations == nil {
-			return "", fmt.Errorf("conversation service not available")
+			return "", depMissing("conversation service not available")
 		}
 		var args struct {
 			Limit  int `json:"limit"`
@@ -407,7 +410,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 
 	case name == "conversation_search":
 		if t.Conversations == nil {
-			return "", fmt.Errorf("conversation service not available")
+			return "", depMissing("conversation service not available")
 		}
 		var args struct {
 			Query  string `json:"query"`
@@ -463,7 +466,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 
 	case name == "conversation_info":
 		if t.Conversations == nil {
-			return "", fmt.Errorf("conversation service not available")
+			return "", depMissing("conversation service not available")
 		}
 		var args struct {
 			ID    string `json:"id"`
@@ -483,7 +486,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 
 	case name == "conversation_read":
 		if t.Conversations == nil {
-			return "", fmt.Errorf("conversation service not available")
+			return "", depMissing("conversation service not available")
 		}
 		var args struct {
 			ID    string `json:"id"`
@@ -519,7 +522,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 
 	case name == "conversation_send":
 		if t.Conversations == nil {
-			return "", fmt.Errorf("conversation service not available")
+			return "", depMissing("conversation service not available")
 		}
 		var args struct {
 			ID      string `json:"id"`
@@ -627,7 +630,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 				return "", skillMutationError(existing, lookup)
 			}
 			if t.Skills == nil {
-				return "", fmt.Errorf("skill store not configured")
+				return "", depMissing("skill store not configured")
 			}
 			if err := t.Skills.WriteFile(lookup, "", rel, args.Content); err != nil {
 				return "", fmt.Errorf("skill save: %w", err)
@@ -663,7 +666,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		s.Content = args.Content
 		s.UpdatedAt = clock.NewTime().Time()
 		if t.Skills == nil {
-			return "", fmt.Errorf("skill store not configured")
+			return "", depMissing("skill store not configured")
 		}
 		if err := t.Skills.Save(s); err != nil {
 			return "", err
@@ -693,7 +696,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			return "", fmt.Errorf("only learned candidate/experimental skills can be deleted")
 		}
 		if t.Skills == nil {
-			return "", fmt.Errorf("skill store not configured")
+			return "", depMissing("skill store not configured")
 		}
 		if err := t.Skills.Delete(id, args.OwnedBy); err != nil {
 			return "", err
@@ -702,7 +705,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 
 	case name == "memory_search":
 		if t.MemoryRecords == nil {
-			return "", fmt.Errorf("memory record store not configured")
+			return "", depMissing("memory record store not configured")
 		}
 		var args struct {
 			Query   string `json:"query"`
@@ -741,7 +744,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 
 	case name == "memory_get":
 		if t.MemoryRecords == nil {
-			return "", fmt.Errorf("memory record store not configured")
+			return "", depMissing("memory record store not configured")
 		}
 		var args struct {
 			ID string `json:"id"`
@@ -931,7 +934,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("invalid args: %w", err)
 		}
 		if t.PluginInstaller == nil {
-			return "", fmt.Errorf("plugin installer not available")
+			return "", depMissing("plugin installer not available")
 		}
 		var src domain.PluginInstallSource
 		switch args.Source {
@@ -983,7 +986,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("name is required")
 		}
 		if t.Plugins == nil {
-			return "", fmt.Errorf("plugin store not available")
+			return "", depMissing("plugin store not available")
 		}
 		transport := domain.PluginTransport(strings.TrimSpace(args.Transport))
 		if transport == "" {
@@ -1032,7 +1035,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("source is required: absolute path to a plugin folder containing manifest.json")
 		}
 		if t.Plugins == nil {
-			return "", fmt.Errorf("plugin store not available")
+			return "", depMissing("plugin store not available")
 		}
 		absSource, err := filepath.Abs(args.Source)
 		if err != nil {
@@ -1059,7 +1062,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("id is required (use mcp_list to see registered plugins)")
 		}
 		if t.Plugins == nil || t.MCP == nil {
-			return "", fmt.Errorf("plugin runtime not available")
+			return "", depMissing("plugin runtime not available")
 		}
 		p, err := t.Plugins.Get(args.ID)
 		if err != nil {
@@ -1098,7 +1101,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("id is required")
 		}
 		if t.MCP == nil {
-			return "", fmt.Errorf("plugin runtime not available")
+			return "", depMissing("plugin runtime not available")
 		}
 		dropper, ok := t.MCP.(interface{ Drop(string) })
 		if !ok {
@@ -1118,7 +1121,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("id is required")
 		}
 		if t.Plugins == nil {
-			return "", fmt.Errorf("plugin store not available")
+			return "", depMissing("plugin store not available")
 		}
 		if _, err := t.Plugins.Get(args.ID); err != nil {
 			return "", fmt.Errorf("plugin %q not found", args.ID)
@@ -1381,12 +1384,12 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 
 	case name == "delegate":
 		if t.Delegate == nil {
-			return "", fmt.Errorf("delegation is not available in this build")
+			return "", depMissing("delegation is not available in this build")
 		}
 		return t.Delegate.SpawnDelegate(ctx, argsJSON)
 	case name == "subagent":
 		if t.Acp == nil {
-			return "", fmt.Errorf("no subagent support configured")
+			return "", depMissing("no subagent support configured")
 		}
 		return t.Acp.Subagent(ctx, argsJSON)
 	// Legacy per-verb names route to the same dispatcher: steer/stop/wait
@@ -1394,17 +1397,17 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 	// agent_id=internal (SpawnDelegate forces it).
 	case name == "subagent_steer":
 		if t.Acp == nil {
-			return "", fmt.Errorf("no subagent support configured")
+			return "", depMissing("no subagent support configured")
 		}
 		return t.Acp.Subagent(ctx, mergeOp(argsJSON, "steer"))
 	case name == "subagent_stop":
 		if t.Acp == nil {
-			return "", fmt.Errorf("no subagent support configured")
+			return "", depMissing("no subagent support configured")
 		}
 		return t.Acp.Subagent(ctx, mergeOp(argsJSON, "stop"))
 	case name == "subagent_wait":
 		if t.Acp == nil {
-			return "", fmt.Errorf("no subagent support configured")
+			return "", depMissing("no subagent support configured")
 		}
 		return t.Acp.Subagent(ctx, mergeOp(argsJSON, "wait"))
 	case name == "web_search":
@@ -1443,7 +1446,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			searcher = t.Searcher
 		}
 		if searcher == nil {
-			return "", fmt.Errorf("search is not available")
+			return "", depMissing("search is not available")
 		}
 		strategy := ""
 		if t.Settings != nil {
@@ -1496,7 +1499,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		return capJSONL("web_search", meta, items), nil
 	case name == "web_fetch":
 		if t.Searcher == nil {
-			return "", fmt.Errorf("search is not available")
+			return "", depMissing("search is not available")
 		}
 		var args struct {
 			URL      string `json:"url"`
@@ -1560,7 +1563,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 	case name == "web_answer":
 		sw := t.webAnswerSearcher()
 		if sw == nil || !sw.CanAnswer() {
-			return "", fmt.Errorf("web_answer is not configured — set a provider and API key in Settings → Web Answer")
+			return "", depMissing("web_answer is not configured — set a provider and API key in Settings → Web Answer")
 		}
 		var args struct {
 			Question string `json:"question"`
@@ -1636,7 +1639,7 @@ func (t *Toolbox) skillForContext(ctx context.Context, id, ownedBy string) (*dom
 		return t.RuntimeSkills.Get(application.WorkspaceFromContext(ctx), id, ownedBy)
 	}
 	if t.Skills == nil {
-		return nil, fmt.Errorf("skill store not configured")
+		return nil, depMissing("skill store not configured")
 	}
 	return t.Skills.Get(id, ownedBy)
 }
@@ -1800,7 +1803,7 @@ const (
 
 func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error) {
 	if t.Todos == nil {
-		return "", fmt.Errorf("todo tracking is not available")
+		return "", depMissing("todo tracking is not available")
 	}
 	conversationID := application.ConversationIDFromContext(ctx)
 	if conversationID == "" {
@@ -1977,7 +1980,7 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 // the turn is cancelled. Requires a run id and conversation id in the context.
 func (t *Toolbox) execAskQuestion(ctx context.Context, argsJSON []byte) (string, error) {
 	if t.AskQuestions == nil {
-		return "", fmt.Errorf("ask_question is not available in this runtime")
+		return "", depMissing("ask_question is not available in this runtime")
 	}
 	runID := application.RunIDFromContext(ctx)
 	if runID == "" {
@@ -2136,7 +2139,7 @@ func automationRunYAML(run *domain.WorkflowRun, extra map[string]any) map[string
 
 func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON []byte) (string, bool, error) {
 	if t.Automation == nil {
-		return "", true, fmt.Errorf("automation is not configured")
+		return "", true, depMissing("automation is not configured")
 	}
 	a := t.Automation
 	var args map[string]any
@@ -2251,7 +2254,7 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 			return "", true, fmt.Errorf("no running agent step to steer")
 		}
 		if t.Steerer == nil {
-			return "", true, fmt.Errorf("steer is not configured")
+			return "", true, depMissing("steer is not configured")
 		}
 		if err := t.Steerer.SteerHeadlessTurn(convID, text); err != nil {
 			return "", true, err
@@ -2326,7 +2329,7 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 			return "", true, fmt.Errorf("workflow_id is required")
 		}
 		if a.Workflows == nil {
-			return "", true, fmt.Errorf("workflow store not configured")
+			return "", true, depMissing("workflow store not configured")
 		}
 		err := a.Workflows.Delete(ctx, workflowID)
 		return encode(map[string]any{"status": "deleted", "workflow_id": workflowID}, err)

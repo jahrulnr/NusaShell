@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"nusashell/domain"
+	"nusashell/pkg/atomicfile"
 	clock "nusashell/pkg/time"
 )
 
@@ -153,14 +154,7 @@ func (t *TodoStore) writePlanFile(path, conversationID, brief string) {
 	sb.WriteString("---\n\n")
 	sb.WriteString(strings.TrimRight(brief, "\n"))
 	sb.WriteString("\n")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(sb.String()), 0o600); err != nil {
-		return
-	}
-	_ = os.Rename(tmp, path)
+	_ = atomicfile.Write(path, []byte(sb.String()), 0o600)
 }
 
 // removePlanFile deletes the mirrored plan file. Missing files are fine.
@@ -250,10 +244,5 @@ func (t *TodoStore) persistLocked() {
 	if err != nil {
 		return
 	}
-	_ = os.MkdirAll(filepath.Dir(t.path), 0o755)
-	tmp := t.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return
-	}
-	_ = os.Rename(tmp, t.path)
+	_ = atomicfile.Write(t.path, b, 0o600)
 }

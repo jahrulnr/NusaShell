@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 
 	"nusashell/application/learn"
-	"nusashell/application/memory"
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/jsonstore"
@@ -27,7 +26,6 @@ type (
 	llmProposedOp        = learn.LLMProposedOp
 	llmSkillProposal     = learn.LLMSkillProposal
 	learnerResult        = learn.LearnerResult
-	learningSource       = learn.LearningSource
 	rrfResult            = learn.RRFResult
 )
 
@@ -98,10 +96,6 @@ func (a *App) SearchSkills(ctx context.Context, query string, topK int) ([]Searc
 	return a.learnService().SearchSkills(ctx, query, topK)
 }
 
-func (a *App) graph() *LearningGraphService {
-	return a.learnService().Graph()
-}
-
 func (a *App) InvalidateLearningSearcher() {
 	if a == nil {
 		return
@@ -122,16 +116,8 @@ func (a *App) recordExperience(conv *domain.Conversation, headless bool) {
 	a.learnService().RecordExperience(conv, headless)
 }
 
-func (a *App) runLearningJob(id string) {
-	a.learnService().RunLearningJob(id)
-}
-
 func (a *App) RecoverStaleLearningJobs() {
 	a.learnService().RecoverStaleLearningJobs()
-}
-
-func (a *App) recordLearningUsage(ids []string) {
-	a.learnService().RecordUsage(ids)
 }
 
 func learningNodeIDsFromTool(app *App, toolCall domain.ToolCall, output string) []string {
@@ -141,48 +127,8 @@ func learningNodeIDsFromTool(app *App, toolCall domain.ToolCall, output string) 
 	return learn.LearningNodeIDsFromTool(app.learnService(), toolCall, output)
 }
 
-func uniqueLearningIDs(ids []string) []string {
-	return learn.UniqueLearningIDs(ids)
-}
-
 func (a *App) emitSkillLifecycle(op, id, status, conversationID string) {
 	a.learnService().EmitSkillLifecycle(op, id, status, conversationID)
-}
-
-func (a *App) consolidateJob(job *domain.LearningJob) ([]domain.LearningOperation, string, error) {
-	return a.learnService().ConsolidateJob(job)
-}
-
-func (a *App) applyConsolidationOps(ops []domain.LearningOperation, convID string, sourceReviewed bool, _ *memory.Service, exp *domain.Experience) ([]domain.LearningOperation, string, error, bool) {
-	return a.learnService().ApplyConsolidationOps(ops, convID, sourceReviewed, exp)
-}
-
-func (a *App) prepareConsolidationOp(op *domain.LearningOperation) {
-	a.learnService().PrepareConsolidationOp(op)
-}
-
-func (a *App) evolveSkillJob(job *domain.LearningJob) (string, error) {
-	return a.learnService().EvolveSkillJob(job)
-}
-
-func (a *App) evaluateSkillJob(job *domain.LearningJob) error {
-	return a.learnService().EvaluateSkillJob(job)
-}
-
-func (a *App) applyLearnedSkillRevision(skill *domain.Skill, name string) bool {
-	return a.learnService().ApplyLearnedSkillRevision(skill, name)
-}
-
-func (a *App) deterministicSkillBody(exp *domain.Experience) (string, string) {
-	return a.learnService().DeterministicSkillBody(exp)
-}
-
-func (a *App) advanceLearningCursor(source *learn.LearningSource) error {
-	return a.learnService().AdvanceLearningCursor(source)
-}
-
-func (a *App) deleteLearningJob(jobID string) {
-	a.learnService().DeleteLearningJob(jobID)
 }
 
 func (a *App) learnerNudgeInterval() int {
@@ -190,42 +136,6 @@ func (a *App) learnerNudgeInterval() int {
 		return domain.DefaultLearnerNudgeInterval
 	}
 	return domain.EffectiveLearnerNudgeInterval(a.Settings.Get().LearnerNudgeInterval)
-}
-
-func (a *App) learningSourceForExperience(exp *domain.Experience) learningSource {
-	return a.learnService().LearningSourceForExperience(exp)
-}
-
-func (a *App) buildLearnerPacketAt(exp *domain.Experience, source learningSource) string {
-	return a.learnService().BuildLearnerPacketAt(exp, source)
-}
-
-func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *contracts.RPCError) {
-	return a.learnService().HandleLearningSearch(req)
-}
-func (a *App) handleLearningGraph() (any, *contracts.RPCError) {
-	return a.learnService().HandleLearningGraph()
-}
-func (a *App) handleLearningLog(req contracts.LearningLogRequest) (any, *contracts.RPCError) {
-	return a.learnService().HandleLearningLog(req)
-}
-func (a *App) handleLearningLogDelete(req contracts.LearningLogDeleteRequest) (any, *contracts.RPCError) {
-	return a.learnService().HandleLearningLogDelete(req)
-}
-func (a *App) handleLearningJobsList() (any, *contracts.RPCError) {
-	return a.learnService().HandleLearningJobsList()
-}
-func (a *App) handleLearningJobsStatus(req contracts.LearningJobStatusRequest) (any, *contracts.RPCError) {
-	return a.learnService().HandleLearningJobsStatus(req)
-}
-func (a *App) handleExperienceList(req contracts.ExperienceListRequest) (any, *contracts.RPCError) {
-	return a.learnService().HandleExperienceList(req)
-}
-func (a *App) handleExperienceGet(req contracts.ExperienceIDRequest) (any, *contracts.RPCError) {
-	return a.learnService().HandleExperienceGet(req)
-}
-func (a *App) handleExperienceDelete(req contracts.ExperienceIDRequest) (any, *contracts.RPCError) {
-	return a.learnService().HandleExperienceDelete(req)
 }
 
 func (a *App) dispatchLearning(method string, payload json.RawMessage) (any, *contracts.RPCError) {

@@ -53,25 +53,6 @@ var (
 	buildToolContract         = tools.BuildContract
 )
 
-func toToolDef(t tools.ToolInfo) ToolDef {
-	return ToolDef{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema}
-}
-
-func toToolDefs(infos []tools.ToolInfo) []ToolDef {
-	if infos == nil {
-		return nil
-	}
-	out := make([]ToolDef, len(infos))
-	for i, t := range infos {
-		out[i] = toToolDef(t)
-	}
-	return out
-}
-
-func isLearnerKind(kind AgentKind) bool {
-	return tools.IsLearnerKind(kind)
-}
-
 func acknowledgeLearnerResult(args string) (string, error) {
 	if !learn.ValidLearnerResult(args) {
 		return "", fmt.Errorf("invalid learner result: call learn() with consolidate")

@@ -14,10 +14,7 @@ package runtime
 
 import (
 	"archive/tar"
-	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,6 +25,8 @@ import (
 	"strings"
 	"time"
 
+	"nusashell/pkg/archive"
+	"nusashell/pkg/fetch"
 	"nusashell/pkg/httpclient"
 )
 
@@ -198,7 +197,7 @@ func (m *Manager) EnsureBinary(ctx context.Context) (string, error) {
 			if !ok {
 				return binPath, nil
 			}
-			actual, err := computeSHA256(binPath)
+			actual, err := fetch.FileSHA256(binPath)
 			if err != nil {
 				return "", fmt.Errorf("runtime: hash binary %s: %w", binPath, err)
 			}
@@ -283,7 +282,7 @@ func (m *Manager) DownloadLatest(ctx context.Context) (string, error) {
 	}
 
 	// 4. Compute SHA256 for tamper detection on subsequent loads.
-	hash, err := computeSHA256(binPath)
+	hash, err := fetch.FileSHA256(binPath)
 	if err != nil {
 		return "", fmt.Errorf("runtime: hash downloaded binary: %w", err)
 	}
@@ -346,20 +345,11 @@ func (m *Manager) downloadAndExtract(ctx context.Context, version, assetURL stri
 		client = httpclient.NewWithTimeout(downloadTimeout)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", assetURL, nil)
-	if err != nil {
-		return "", err
-	}
-
-	resp, err := client.Do(req)
+	body, err := fetch.Body(ctx, client, assetURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("download asset: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download returned %d", resp.StatusCode)
-	}
+	defer body.Close()
 
 	// Create version directory
 	versionDir := m.versionDir(version)
@@ -376,46 +366,37 @@ func (m *Manager) downloadAndExtract(ctx context.Context, version, assetURL stri
 	// Extract: the tar.gz contains the codex binary, named after the
 	// platform target (e.g. "codex-x86_64-unknown-linux-musl").
 	// We extract it and rename to "codex" / "codex.exe".
-	gz, err := gzip.NewReader(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("open gzip: %w", err)
-	}
-	defer gz.Close()
-
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return "", fmt.Errorf("read tar: %w", err)
-		}
-
+	var found bool
+	err = archive.WalkTarGz(body, func(hdr *tar.Header, r io.Reader) (bool, error) {
 		// The archive contains a single binary file. Accept any regular
 		// file that starts with "codex" and is executable.
 		name := filepath.Base(hdr.Name)
 		if !strings.HasPrefix(name, "codex") {
-			continue
+			return true, nil
 		}
 		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
-			continue
+			return true, nil
 		}
 
 		out, err := os.OpenFile(binPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 		if err != nil {
-			return "", fmt.Errorf("create binary: %w", err)
+			return false, fmt.Errorf("create binary: %w", err)
 		}
-		if _, err := io.Copy(out, tr); err != nil {
+		if _, err := io.Copy(out, r); err != nil {
 			out.Close()
-			return "", fmt.Errorf("write binary: %w", err)
+			return false, fmt.Errorf("write binary: %w", err)
 		}
 		out.Close()
-
-		return binPath, nil
+		found = true
+		return false, nil
+	})
+	if err != nil {
+		return "", err
 	}
-
-	return "", fmt.Errorf("no codex binary found in archive")
+	if !found {
+		return "", fmt.Errorf("no codex binary found in archive")
+	}
+	return binPath, nil
 }
 
 // parseVersionTag extracts the version string from a GitHub tag name.
@@ -426,20 +407,4 @@ func parseVersionTag(tag string) string {
 	s = strings.TrimPrefix(s, "rust-v")
 	s = strings.TrimPrefix(s, "v")
 	return s
-}
-
-// computeSHA256 returns the hex-encoded SHA256 hash of the file at path.
-// Used to verify downloaded binaries against the manifest and detect
-// tampering or corrupted downloads.
-func computeSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }

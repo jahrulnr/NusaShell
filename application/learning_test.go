@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"nusashell/application/learn"
+	"nusashell/application/memory"
 	"nusashell/application/service/textsim"
 	"nusashell/contracts"
 	"nusashell/domain"
@@ -186,7 +188,7 @@ func TestConsolidateJobDoesNotWriteProfileDocs(t *testing.T) {
 		User:          &panicDocStore{t: t},
 		Agent:         &panicDocStore{t: t},
 	}
-	if _, _, err := app.consolidateJob(&domain.LearningJob{ID: "job_1", ExperienceID: "exp_1", Kind: domain.LearningJobConsolidate}); err != nil {
+	if _, _, err := app.learnService().ConsolidateJob(&domain.LearningJob{ID: "job_1", ExperienceID: "exp_1", Kind: domain.LearningJobConsolidate}); err != nil {
 		t.Fatal(err)
 	}
 	if len(app.MemoryRecords.List()) != 1 {
@@ -208,7 +210,7 @@ func TestConsolidateJobSetARecall(t *testing.T) {
 		Experiences:   &fakeExperienceStore{items: []*domain.Experience{exp}},
 		MemoryRecords: records,
 	}
-	if _, _, err := app.consolidateJob(&domain.LearningJob{ID: "job_a", ExperienceID: "exp_a"}); err != nil {
+	if _, _, err := app.learnService().ConsolidateJob(&domain.LearningJob{ID: "job_a", ExperienceID: "exp_a"}); err != nil {
 		t.Fatal(err)
 	}
 	found := false
@@ -234,7 +236,7 @@ func TestConsolidateJobSetDOneOffPackageManagerStaysEpisode(t *testing.T) {
 		Experiences:   &fakeExperienceStore{items: []*domain.Experience{exp}},
 		MemoryRecords: records,
 	}
-	if _, _, err := app.consolidateJob(&domain.LearningJob{ID: "job_d", ExperienceID: "exp_d"}); err != nil {
+	if _, _, err := app.learnService().ConsolidateJob(&domain.LearningJob{ID: "job_d", ExperienceID: "exp_d"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, rec := range records.List() {
@@ -267,10 +269,10 @@ func TestConsolidateJobSetCStrengthensDuplicate(t *testing.T) {
 		Experiences:   &fakeExperienceStore{items: []*domain.Experience{exp1, exp2}},
 		MemoryRecords: records,
 	}
-	if _, _, err := app.consolidateJob(&domain.LearningJob{ID: "job_c1", ExperienceID: "exp_c1"}); err != nil {
+	if _, _, err := app.learnService().ConsolidateJob(&domain.LearningJob{ID: "job_c1", ExperienceID: "exp_c1"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := app.consolidateJob(&domain.LearningJob{ID: "job_c2", ExperienceID: "exp_c2"}); err != nil {
+	if _, _, err := app.learnService().ConsolidateJob(&domain.LearningJob{ID: "job_c2", ExperienceID: "exp_c2"}); err != nil {
 		t.Fatal(err)
 	}
 	live := 0
@@ -297,7 +299,7 @@ func TestEvaluateSkillJobNeverPromotes(t *testing.T) {
 		},
 	}}
 	app := &App{Skills: skills}
-	if err := app.evaluateSkillJob(&domain.LearningJob{SkillID: "learned-flow"}); err != nil {
+	if err := app.learnService().EvaluateSkillJob(&domain.LearningJob{SkillID: "learned-flow"}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := skills.Get("learned-flow", string(domain.SkillOriginLearned))
@@ -324,7 +326,7 @@ func TestEvolveSkillJobStaysExperimentalAndRespectsRevisionCap(t *testing.T) {
 	}
 	job := &domain.LearningJob{ExperienceID: "exp_e", Kind: domain.LearningJobEvolveSkill}
 	for i := 0; i < domain.MaxSkillRevisions+3; i++ {
-		if _, err := app.evolveSkillJob(job); err != nil {
+		if _, err := app.learnService().EvolveSkillJob(job); err != nil {
 			t.Fatalf("evolve %d: %v", i, err)
 		}
 	}
@@ -363,7 +365,7 @@ func TestEvolveSkillJobEmitsEvolveOp(t *testing.T) {
 		Trajectory:  NewTrajectoryRecorder(dir),
 	}
 	t.Cleanup(func() { _ = app.Trajectory.Close() })
-	if _, err := app.evolveSkillJob(&domain.LearningJob{ExperienceID: "exp_e2", Kind: domain.LearningJobEvolveSkill}); err != nil {
+	if _, err := app.learnService().EvolveSkillJob(&domain.LearningJob{ExperienceID: "exp_e2", Kind: domain.LearningJobEvolveSkill}); err != nil {
 		t.Fatal(err)
 	}
 	ev := waitBusEvent(t, ch, contracts.EventSkillUpdated)
@@ -472,7 +474,7 @@ func TestAdvanceLearningCursorClampsInvalidPersistedMarker(t *testing.T) {
 			}
 			conversations := &cloningConvStore{conv: source}
 			app := &App{Conversations: conversations}
-			if err := app.advanceLearningCursor(&learningSource{
+			if err := app.learnService().AdvanceLearningCursor(&learn.LearningSource{
 				ConversationID:   source.ID,
 				MessageEnd:       3,
 				BoundaryCaptured: true,
@@ -539,7 +541,7 @@ func TestRunLearningJobDoesNotAdvanceCursorOnLearningFailure(t *testing.T) {
 				},
 			}
 
-			app.runLearningJob("job_cursor_failure")
+			app.learnService().RunLearningJob("job_cursor_failure")
 
 			got, err := conversations.Get(source.ID)
 			if err != nil {
@@ -571,11 +573,12 @@ func TestAdvanceLearningCursorIsMonotonicForConcurrentCompletion(t *testing.T) {
 		wg.Add(1)
 		go func(end int) {
 			defer wg.Done()
-			app.advanceLearningCursor(&learningSource{
+			app.learnService().AdvanceLearningCursor(&learn.LearningSource{
 				ConversationID:   source.ID,
 				MessageEnd:       end,
 				BoundaryCaptured: true,
 			})
+
 		}(end)
 	}
 	wg.Wait()
@@ -619,7 +622,7 @@ func TestRunLearningJobAdvancesCursorAfterSuccessfulEvolution(t *testing.T) {
 		learningTurn: learningTurnStub(t, AgentLearner, `{"kind":"skill.create","name":"debug-nginx","purpose":"debug nginx","trigger":"nginx fails","steps":"1. inspect logs"}`, "conv_learning_evolve"),
 	}
 
-	app.runLearningJob("job_cursor_evolve")
+	app.learnService().RunLearningJob("job_cursor_evolve")
 
 	got, err := conversations.Get(source.ID)
 	if err != nil {
@@ -648,7 +651,7 @@ func TestExperienceListPaginatesNewestFirst(t *testing.T) {
 	}}
 	app := &App{Experiences: store}
 
-	res, rpcErr := app.handleExperienceList(contracts.ExperienceListRequest{Limit: 2})
+	res, rpcErr := app.learnService().HandleExperienceList(contracts.ExperienceListRequest{Limit: 2})
 	if rpcErr != nil {
 		t.Fatal(rpcErr)
 	}
@@ -663,7 +666,7 @@ func TestExperienceListPaginatesNewestFirst(t *testing.T) {
 		t.Fatalf("first page order = %s, %s; want exp_new, exp_mid", result.Experiences[0].ID, result.Experiences[1].ID)
 	}
 
-	res2, _ := app.handleExperienceList(contracts.ExperienceListRequest{Offset: 2, Limit: 2})
+	res2, _ := app.learnService().HandleExperienceList(contracts.ExperienceListRequest{Offset: 2, Limit: 2})
 	page2 := res2.(contracts.ExperienceListResult)
 	if len(page2.Experiences) != 1 || page2.Experiences[0].ID != "exp_old" {
 		t.Fatalf("second page = %+v, want [exp_old]", page2.Experiences)
@@ -686,7 +689,7 @@ func TestExperienceDeleteRemovesEpisodeAndJobs(t *testing.T) {
 	}
 	app.Trajectory.Record("consolidate", map[string]interface{}{"job_id": "job_for_x"})
 
-	if _, rpcErr := app.handleExperienceDelete(contracts.ExperienceIDRequest{ID: "exp_x"}); rpcErr != nil {
+	if _, rpcErr := app.learnService().HandleExperienceDelete(contracts.ExperienceIDRequest{ID: "exp_x"}); rpcErr != nil {
 		t.Fatal(rpcErr)
 	}
 	if len(store.items) != 0 {
@@ -698,7 +701,7 @@ func TestExperienceDeleteRemovesEpisodeAndJobs(t *testing.T) {
 	if _, ok := jobs.items["job_other"]; !ok {
 		t.Fatal("unrelated job must survive")
 	}
-	if _, rpcErr := app.handleExperienceDelete(contracts.ExperienceIDRequest{ID: "exp_missing"}); rpcErr == nil {
+	if _, rpcErr := app.learnService().HandleExperienceDelete(contracts.ExperienceIDRequest{ID: "exp_missing"}); rpcErr == nil {
 		t.Fatal("missing experience must not delete silently")
 	}
 }
@@ -717,7 +720,7 @@ func TestMemoryDeleteRemovesRecordAndEdges(t *testing.T) {
 		MemoryRecords: records,
 		LearningEdges: graph,
 	}
-	if _, rpcErr := app.handleMemoryDelete(contracts.MemoryIDRequest{ID: "mem_a"}); rpcErr != nil {
+	if _, rpcErr := app.memoryService().HandleDelete(contracts.MemoryIDRequest{ID: "mem_a"}); rpcErr != nil {
 		t.Fatal(rpcErr)
 	}
 	if len(records.items) != 1 || records.items[0].ID != "mem_b" {
@@ -726,7 +729,7 @@ func TestMemoryDeleteRemovesRecordAndEdges(t *testing.T) {
 	if len(graph.items) != 1 || graph.items[0].ID != "e2" {
 		t.Fatalf("edges after delete = %+v, want only e2 (mem_b only)", graph.items)
 	}
-	if _, rpcErr := app.handleMemoryDelete(contracts.MemoryIDRequest{ID: "mem_missing"}); rpcErr == nil {
+	if _, rpcErr := app.memoryService().HandleDelete(contracts.MemoryIDRequest{ID: "mem_missing"}); rpcErr == nil {
 		t.Fatal("missing memory must not delete silently")
 	}
 }
@@ -747,7 +750,7 @@ func TestLearningLogDeleteRemovesJobTrajectoryAndTranscript(t *testing.T) {
 	}}
 	app := &App{LearningJobs: jobs, Conversations: convs, Trajectory: rec, DataDir: dataDir}
 
-	if _, rpcErr := app.handleLearningLogDelete(contracts.LearningLogDeleteRequest{JobID: "job_a"}); rpcErr != nil {
+	if _, rpcErr := app.learnService().HandleLearningLogDelete(contracts.LearningLogDeleteRequest{JobID: "job_a"}); rpcErr != nil {
 		t.Fatal(rpcErr)
 	}
 	if _, ok := jobs.items["job_a"]; ok {
@@ -765,7 +768,7 @@ func TestLearningLogDeleteRemovesJobTrajectoryAndTranscript(t *testing.T) {
 			t.Fatalf("job_a trajectory event still present: %+v", ev)
 		}
 	}
-	if _, rpcErr := app.handleLearningLogDelete(contracts.LearningLogDeleteRequest{JobID: "job_ghost"}); rpcErr == nil {
+	if _, rpcErr := app.learnService().HandleLearningLogDelete(contracts.LearningLogDeleteRequest{JobID: "job_ghost"}); rpcErr == nil {
 		t.Fatal("unknown job must be rejected")
 	}
 }
@@ -914,7 +917,7 @@ func TestConsolidateJobReturnsLLMConversationID(t *testing.T) {
 		learningTurn: learningTurnStub(t, AgentLearner,
 			`[{"kind":"memory.upsert","payload":{"body":"prefers dark mode","type":"preference"}}]`, "conv_llm_1"),
 	}
-	_, convID, err := app.consolidateJob(&domain.LearningJob{ID: "job_llm_1", ExperienceID: "exp_llm_1", Kind: domain.LearningJobConsolidate})
+	_, convID, err := app.learnService().ConsolidateJob(&domain.LearningJob{ID: "job_llm_1", ExperienceID: "exp_llm_1", Kind: domain.LearningJobConsolidate})
 	if err != nil {
 		t.Fatalf("consolidateJob: %v", err)
 	}
@@ -938,7 +941,7 @@ func TestConsolidateJobKeepsConversationIDWhenTurnFails(t *testing.T) {
 			return "", "conv_llm_err", errStubLearningTurn
 		},
 	}
-	_, convID, err := app.consolidateJob(&domain.LearningJob{ID: "job_llm_x", ExperienceID: "exp_llm_x", Kind: domain.LearningJobConsolidate})
+	_, convID, err := app.learnService().ConsolidateJob(&domain.LearningJob{ID: "job_llm_x", ExperienceID: "exp_llm_x", Kind: domain.LearningJobConsolidate})
 	if err == nil {
 		t.Fatal("a failed turn must fail the job")
 	}
@@ -968,7 +971,7 @@ func TestRunLearningJobRecordsLLMConversationInTrajectory(t *testing.T) {
 		learningTurn: learningTurnStub(t, AgentLearner,
 			`[{"kind":"memory.upsert","payload":{"body":"run gofmt before commit","type":"constraint"}}]`, "conv_llm_2"),
 	}
-	app.runLearningJob("job_llm_2")
+	app.learnService().RunLearningJob("job_llm_2")
 	if err := app.Trajectory.Close(); err != nil {
 		t.Fatalf("close trajectory: %v", err)
 	}
@@ -1011,7 +1014,7 @@ func TestHandleLearningLogLiftsLLMConversationID(t *testing.T) {
 		`{"ts":"2026-08-19T10:00:00Z","type":"consolidate","detail":{"job_id":"job_1","llm_conversation_id":"conv_llm_3","status":"done","mutations":[{"kind":"memory.upsert","snippet":"prefers dark mode"}]}}`,
 	})
 	app := &App{DataDir: dir}
-	res, rpcErr := app.handleLearningLog(contracts.LearningLogRequest{Limit: 10})
+	res, rpcErr := app.learnService().HandleLearningLog(contracts.LearningLogRequest{Limit: 10})
 	if rpcErr != nil {
 		t.Fatalf("handleLearningLog: %v", rpcErr)
 	}
@@ -1077,7 +1080,7 @@ func TestPrepareConsolidationOpNearDuplicateMerges(t *testing.T) {
 		CreatedAt:             created,
 	}
 	store := &fakeMemoryRecordStore{items: []*domain.MemoryRecord{base}}
-	svc := NewMemoryService(store, nil)
+	svc := memory.NewMemoryService(store, nil)
 	app := &App{MemoryRecords: store}
 
 	op := &domain.LearningOperation{
@@ -1091,7 +1094,7 @@ func TestPrepareConsolidationOpNearDuplicateMerges(t *testing.T) {
 			"scope": domain.MemoryScopeUser,
 		},
 	}
-	app.prepareConsolidationOp(op)
+	app.learnService().PrepareConsolidationOp(op)
 	if op.Kind != domain.OpMemoryUpsert {
 		t.Fatalf("near-duplicate should stay upsert (merge by id), got kind=%s", op.Kind)
 	}
@@ -1134,7 +1137,7 @@ func TestPrepareConsolidationOpExactDuplicateStrengthens(t *testing.T) {
 		Evidence: []string{"exp_again"},
 		Payload:  map[string]any{"body": "User prefers Go for backend work", "type": domain.MemoryTypePreference},
 	}
-	app.prepareConsolidationOp(op)
+	app.learnService().PrepareConsolidationOp(op)
 	if op.Kind != domain.OpMemoryStrengthen {
 		t.Fatalf("identical body should strengthen, got kind=%s", op.Kind)
 	}
@@ -1170,7 +1173,6 @@ func TestTeachingOpsNeverEmitsRawUserText(t *testing.T) {
 
 func TestApplyConsolidationOpsRejectsNonDurable(t *testing.T) {
 	store := &fakeMemoryRecordStore{}
-	svc := NewMemoryService(store, nil)
 	exp := &domain.Experience{ID: "exp_gate", Goal: "sebelum push, perbaiki tab Experience ascending"}
 	op := domain.LearningOperation{
 		Kind:     domain.OpMemoryUpsert,
@@ -1180,7 +1182,7 @@ func TestApplyConsolidationOpsRejectsNonDurable(t *testing.T) {
 		Payload:  map[string]any{"body": "sebelum push, perbaiki tab Experience ascending", "type": domain.MemoryTypePreference},
 	}
 	app := &App{MemoryRecords: store}
-	ops, _, err, _ := app.applyConsolidationOps([]domain.LearningOperation{op}, "", true, svc, exp)
+	ops, _, err, _ := app.learnService().ApplyConsolidationOps([]domain.LearningOperation{op}, "", true, exp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1201,7 +1203,6 @@ func TestApplyConsolidationOpsSupersedeThenUpsert(t *testing.T) {
 		Scope:  domain.MemoryScope{Level: domain.MemoryScopeUser},
 	}
 	store := &fakeMemoryRecordStore{items: []*domain.MemoryRecord{old}}
-	svc := NewMemoryService(store, nil)
 	app := &App{MemoryRecords: store}
 	ops := []domain.LearningOperation{
 		{
@@ -1222,7 +1223,7 @@ func TestApplyConsolidationOpsSupersedeThenUpsert(t *testing.T) {
 			},
 		},
 	}
-	applied, _, err, _ := app.applyConsolidationOps(ops, "conv_learn", true, svc, &domain.Experience{ID: "exp_sup"})
+	applied, _, err, _ := app.learnService().ApplyConsolidationOps(ops, "conv_learn", true, &domain.Experience{ID: "exp_sup"})
 	if err != nil {
 		t.Fatalf("healthy upsert after supersede must not abort the batch: %v", err)
 	}
@@ -1255,7 +1256,6 @@ func TestApplyConsolidationOpsSupersedeThenUpsert(t *testing.T) {
 
 func TestApplyConsolidationOpsContinuesAfterFailedOp(t *testing.T) {
 	store := &fakeMemoryRecordStore{}
-	svc := NewMemoryService(store, nil)
 	app := &App{MemoryRecords: store}
 	ops := []domain.LearningOperation{
 		{
@@ -1274,7 +1274,7 @@ func TestApplyConsolidationOpsContinuesAfterFailedOp(t *testing.T) {
 			},
 		},
 	}
-	applied, _, err, reviewed := app.applyConsolidationOps(ops, "conv_learn", true, svc, &domain.Experience{ID: "exp_ok"})
+	applied, _, err, reviewed := app.learnService().ApplyConsolidationOps(ops, "conv_learn", true, &domain.Experience{ID: "exp_ok"})
 	if err != nil {
 		t.Fatalf("one bad op must not fail the batch: %v", err)
 	}
@@ -1338,7 +1338,7 @@ func TestApplyLearnedSkillRevisionAdoptsCanonical(t *testing.T) {
 	}}
 	app := &App{Skills: store}
 	proposed := newLearnedSkill("learned-tool-mapping-workflow", "desc", "# x\n\n## Purpose\ny\n\n## Trigger\nz\n\n## Steps\n1")
-	if !app.applyLearnedSkillRevision(proposed, "learned-tool-mapping-workflow") {
+	if !app.learnService().ApplyLearnedSkillRevision(proposed, "learned-tool-mapping-workflow") {
 		t.Fatal("revision should be accepted")
 	}
 	if proposed.ID != "learned-tool-mapping" || proposed.Name != "learned-tool-mapping" {
@@ -1685,7 +1685,7 @@ func TestDeterministicSkillBodyMeetsMinimumBar(t *testing.T) {
 			{Name: "file_read"}, {Name: "grep"}, {Name: "exec"},
 		},
 	}
-	body, desc := app.deterministicSkillBody(exp)
+	body, desc := app.learnService().DeterministicSkillBody(exp)
 	if !skillMeetsMinimumBar(body) {
 		t.Fatalf("deterministic skill body does not meet minimum bar:\n%s", body)
 	}
@@ -1749,7 +1749,7 @@ func TestConsolidateViaLLMWithProvider(t *testing.T) {
 		Settings:      &fakeSettings{},
 		learningTurn:  learningTurnStub(t, AgentLearner, llmResponse, "conv_llm_provider"),
 	}
-	ops, convID, err := app.consolidateJob(&domain.LearningJob{ID: "job_llm", ExperienceID: "exp_llm", Kind: domain.LearningJobConsolidate})
+	ops, convID, err := app.learnService().ConsolidateJob(&domain.LearningJob{ID: "job_llm", ExperienceID: "exp_llm", Kind: domain.LearningJobConsolidate})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1784,7 +1784,7 @@ func TestConsolidateViaLLMFallsBackWhenNoProvider(t *testing.T) {
 		Experiences:   &fakeExperienceStore{items: []*domain.Experience{exp}},
 		MemoryRecords: records,
 	}
-	if _, _, err := app.consolidateJob(&domain.LearningJob{ID: "job_fb", ExperienceID: "exp_fb"}); err != nil {
+	if _, _, err := app.learnService().ConsolidateJob(&domain.LearningJob{ID: "job_fb", ExperienceID: "exp_fb"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(records.List()) != 1 {
@@ -1808,7 +1808,7 @@ func TestEvolveSkillJobDeterministicBodyMeetsBar(t *testing.T) {
 		Skills:      skills,
 		Experiences: &fakeExperienceStore{items: []*domain.Experience{exp}},
 	}
-	if _, err := app.evolveSkillJob(&domain.LearningJob{ExperienceID: "exp_bar", Kind: domain.LearningJobEvolveSkill}); err != nil {
+	if _, err := app.learnService().EvolveSkillJob(&domain.LearningJob{ExperienceID: "exp_bar", Kind: domain.LearningJobEvolveSkill}); err != nil {
 		t.Fatal(err)
 	}
 	var got *domain.Skill
@@ -1838,7 +1838,7 @@ func TestEvolveSkillJobSkipsBelowBarBody(t *testing.T) {
 		Skills:      skills,
 		Experiences: &fakeExperienceStore{items: []*domain.Experience{exp}},
 	}
-	if _, err := app.evolveSkillJob(&domain.LearningJob{ExperienceID: "exp_skip", Kind: domain.LearningJobEvolveSkill}); err != nil {
+	if _, err := app.learnService().EvolveSkillJob(&domain.LearningJob{ExperienceID: "exp_skip", Kind: domain.LearningJobEvolveSkill}); err != nil {
 		t.Fatal(err)
 	}
 	if len(skills.List()) != 0 {
@@ -1888,7 +1888,7 @@ func TestHandleLearningLogReturnsCursorPages(t *testing.T) {
 		`{"ts":"2026-08-19T09:00:00Z","type":"job","detail":{"job_id":"job_2"}}`,
 	})
 	app := &App{DataDir: dir}
-	res, rpcErr := app.handleLearningLog(contracts.LearningLogRequest{Limit: 1})
+	res, rpcErr := app.learnService().HandleLearningLog(contracts.LearningLogRequest{Limit: 1})
 	if rpcErr != nil {
 		t.Fatalf("first page: %v", rpcErr)
 	}
@@ -1896,7 +1896,7 @@ func TestHandleLearningLogReturnsCursorPages(t *testing.T) {
 	if len(first.Entries) != 1 || !first.HasMore || first.NextCursor <= 0 {
 		t.Fatalf("first page = %+v", first)
 	}
-	res, rpcErr = app.handleLearningLog(contracts.LearningLogRequest{Limit: 1, Cursor: first.NextCursor})
+	res, rpcErr = app.learnService().HandleLearningLog(contracts.LearningLogRequest{Limit: 1, Cursor: first.NextCursor})
 	if rpcErr != nil {
 		t.Fatalf("second page: %v", rpcErr)
 	}
@@ -1965,7 +1965,7 @@ func TestHandleLearningLogEnrichesReviewEntries(t *testing.T) {
 			"conv_1": {ID: "conv_1", Title: "Memory research"},
 		}},
 	}
-	res, rpcErr := app.handleLearningLog(contracts.LearningLogRequest{Limit: 10})
+	res, rpcErr := app.learnService().HandleLearningLog(contracts.LearningLogRequest{Limit: 10})
 	if rpcErr != nil {
 		t.Fatalf("handleLearningLog: %v", rpcErr)
 	}
@@ -2018,7 +2018,7 @@ func TestHandleLearningLogParsesStatusAndKeepsErrorServerSide(t *testing.T) {
 		`{"ts":"2026-08-19T10:00:00Z","type":"consolidate","detail":{"job_id":"job_err","status":"error","error":"no model configured","mutations":[]}}`,
 	})
 	app := &App{DataDir: dir}
-	res, rpcErr := app.handleLearningLog(contracts.LearningLogRequest{Limit: 10})
+	res, rpcErr := app.learnService().HandleLearningLog(contracts.LearningLogRequest{Limit: 10})
 	if rpcErr != nil {
 		t.Fatalf("handleLearningLog: %v", rpcErr)
 	}
@@ -2103,11 +2103,12 @@ func TestHandleLearningSearchSkills(t *testing.T) {
 		MemoryRecords: &fakeMemoryRecordStore{},
 		Settings:      &fakeSettingsStore{settings: domain.Settings{}},
 	}
-	resp, rpcErr := app.handleLearningSearch(contracts.LearningSearchRequest{
+	resp, rpcErr := app.learnService().HandleLearningSearch(contracts.LearningSearchRequest{
 		Query: "git rebase",
 		Kind:  "skills",
 		Limit: 5,
 	})
+
 	if rpcErr != nil {
 		t.Fatalf("handleLearningSearch: %v", rpcErr)
 	}
@@ -2132,7 +2133,7 @@ func TestHandleLearningSearchBoth(t *testing.T) {
 		MemoryRecords: records,
 		Settings:      &fakeSettingsStore{settings: domain.Settings{}},
 	}
-	resp, _ := app.handleLearningSearch(contracts.LearningSearchRequest{Query: "rebase", Limit: 10})
+	resp, _ := app.learnService().HandleLearningSearch(contracts.LearningSearchRequest{Query: "rebase", Limit: 10})
 	result := resp.(contracts.LearningSearchResult)
 	kinds := map[string]bool{}
 	tiers := map[string]bool{}
@@ -2165,12 +2166,12 @@ func TestHandleLearningSearchEmptyQuery(t *testing.T) {
 		MemoryRecords: records,
 		Settings:      &fakeSettingsStore{settings: domain.Settings{}},
 	}
-	resp, _ := app.handleLearningSearch(contracts.LearningSearchRequest{Query: "", Kind: "skills"})
+	resp, _ := app.learnService().HandleLearningSearch(contracts.LearningSearchRequest{Query: "", Kind: "skills"})
 	result := resp.(contracts.LearningSearchResult)
 	if len(result.Items) != 1 || result.Items[0].ID != "skill_1" {
 		t.Fatalf("empty query + kind=skills: %+v", result.Items)
 	}
-	resp, _ = app.handleLearningSearch(contracts.LearningSearchRequest{Query: "", Kind: "memory"})
+	resp, _ = app.learnService().HandleLearningSearch(contracts.LearningSearchRequest{Query: "", Kind: "memory"})
 	result = resp.(contracts.LearningSearchResult)
 	if len(result.Items) != 1 || result.Items[0].ID != "mem_1" {
 		t.Fatalf("empty query + kind=memory: %+v", result.Items)
@@ -2189,7 +2190,7 @@ func TestHandleLearningSearchTierBadge(t *testing.T) {
 		User:          user,
 		Settings:      &fakeSettingsStore{settings: domain.Settings{}},
 	}
-	resp, _ := app.handleLearningSearch(contracts.LearningSearchRequest{Query: "", Kind: "memory"})
+	resp, _ := app.learnService().HandleLearningSearch(contracts.LearningSearchRequest{Query: "", Kind: "memory"})
 	result := resp.(contracts.LearningSearchResult)
 	tiers := map[string]string{}
 	for _, item := range result.Items {
@@ -2300,7 +2301,7 @@ func TestHandleLearningGraphUserNodeTierAndLabel(t *testing.T) {
 		MemoryRecords: records,
 		Settings:      &fakeSettingsStore{settings: domain.Settings{}},
 	}
-	resp, rpcErr := app.handleLearningGraph()
+	resp, rpcErr := app.learnService().HandleLearningGraph()
 	if rpcErr != nil {
 		t.Fatalf("handleLearningGraph: %v", rpcErr)
 	}
@@ -2345,7 +2346,7 @@ func TestHandleLearningGraphFiltersDanglingEdges(t *testing.T) {
 			{SourceID: "mem_gone", TargetID: "mem_1", Type: domain.EdgeRelated, Weight: 0.7},
 		}},
 	}
-	resp, rpcErr := app.handleLearningGraph()
+	resp, rpcErr := app.learnService().HandleLearningGraph()
 	if rpcErr != nil {
 		t.Fatalf("handleLearningGraph: %v", rpcErr)
 	}
@@ -2508,7 +2509,7 @@ func TestRecordLearningTurnNodesConnectsAcrossToolRounds(t *testing.T) {
 func TestRecordLearningUsageCreatesUsedWithEdges(t *testing.T) {
 	store := &fakeEdgeStore{}
 	app := &App{LearningEdges: store}
-	app.recordLearningUsage([]string{"frag_1", "skill_1", "frag_1"})
+	app.learnService().RecordUsage([]string{"frag_1", "skill_1", "frag_1"})
 
 	if !hasEdge(store.edges, "frag_1", "skill_1", domain.EdgeUsedWith) {
 		t.Fatalf("edges = %+v, want used_with edge", store.edges)

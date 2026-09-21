@@ -2,8 +2,8 @@ package domain
 
 import (
 	"strings"
-	"unicode/utf8"
 
+	"nusashell/pkg/text"
 	clock "nusashell/pkg/time"
 )
 
@@ -183,10 +183,5 @@ func workspaceProject(workspace string) string {
 }
 
 func clip(s string, max int) string {
-	s = strings.TrimSpace(s)
-	if max <= 0 || utf8.RuneCountInString(s) <= max {
-		return s
-	}
-	runes := []rune(s)
-	return string(runes[:max])
+	return text.ClipRunes(strings.TrimSpace(s), max, "")
 }

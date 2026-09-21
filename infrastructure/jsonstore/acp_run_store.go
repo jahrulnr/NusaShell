@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"nusashell/domain"
+	"nusashell/pkg/atomicfile"
 )
 
 // AcpRunStore persists completed ACP runs as one JSON document per run,
@@ -261,22 +262,5 @@ func writeJSONAtomic(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op after successful rename
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
+	return atomicfile.Write(path, b, 0o600)
 }

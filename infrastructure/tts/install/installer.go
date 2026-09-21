@@ -15,12 +15,8 @@
 package install
 
 import (
-	"archive/tar"
-	"archive/zip"
-	"compress/gzip"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -30,6 +26,8 @@ import (
 	"time"
 
 	"nusashell/infrastructure/nusatemp"
+	"nusashell/pkg/archive"
+	"nusashell/pkg/fetch"
 	"nusashell/pkg/httpclient"
 )
 
@@ -243,11 +241,22 @@ func (in *Installer) install(ctx context.Context, voiceID string, report func(Pr
 		}
 		url := fmt.Sprintf("%s/%s", in.binaryAssetBase(), asset)
 		report(Progress{Phase: PhaseBinary, Message: "Downloading piper engine"})
+		// The piper tree is extracted out of the archive's piper/ root and
+		// its .so symlinks are recreated (validated inside the platform dir).
+		extractOpts := &archive.Options{Prefix: "piper/", FileMode: 0o755, RecreateLinks: true}
 		var xerr error
 		if strings.HasSuffix(asset, ".zip") {
-			xerr = in.fetchArchive(ctx, url, func(f *os.File) error { return extractZipTree(f, in.platformDir(), "piper/") })
+			xerr = in.fetchArchive(ctx, url, func(f *os.File) error {
+				info, err := f.Stat()
+				if err != nil {
+					return err
+				}
+				return archive.UnzipAt(f, info.Size(), in.platformDir(), extractOpts)
+			})
 		} else {
-			xerr = in.fetchArchive(ctx, url, func(f *os.File) error { return extractTarGzTree(f, in.platformDir(), "piper/") })
+			xerr = in.fetchArchive(ctx, url, func(f *os.File) error {
+				return archive.UntarGz(f, in.platformDir(), extractOpts)
+			})
 		}
 		if xerr != nil {
 			return fmt.Errorf("ttsinstall: %w", xerr)
@@ -333,41 +342,25 @@ func (in *Installer) voicesBase() string {
 	return voicesBase
 }
 
+// fetchArchive downloads url into a temp file and hands it to use. The
+// archive mechanism (request, status gate, streaming, cleanup) lives in
+// pkg/fetch; the caller's extractor owns layout.
 func (in *Installer) fetchArchive(ctx context.Context, url string, use func(*os.File) error) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := in.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("download failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed: HTTP %d from %s", resp.StatusCode, url)
-	}
 	tmp, err := nusatemp.MkdirTemp("tts-*")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(tmp)
-	f, err := os.CreateTemp(tmp, "archive-*")
+	path := filepath.Join(tmp, "archive")
+	if err := fetch.File(ctx, in.client, url, path, nil); err != nil {
+		return err
+	}
+	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		f.Close()
-		return fmt.Errorf("download interrupted: %w", err)
-	}
-	if _, err := f.Seek(0, 0); err != nil {
-		f.Close()
-		return err
-	}
-	if err := use(f); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
+	defer f.Close()
+	return use(f)
 }
 
 // fetchToFile streams url to path with progress callbacks. Writes go to a
@@ -377,183 +370,26 @@ func (in *Installer) fetchToFile(ctx context.Context, url, path string, report f
 	if _, err := os.Stat(path); err == nil {
 		return nil // already there (resumable by re-run semantics)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := in.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("download failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed: HTTP %d from %s", resp.StatusCode, url)
-	}
-	total := resp.ContentLength
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".partial-*")
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
+	tmp.Close()
 	defer os.Remove(tmpName)
-	var fetched int64
-	buf := make([]byte, 256*1024)
-	for {
-		n, rerr := resp.Body.Read(buf)
-		if n > 0 {
-			if _, werr := tmp.Write(buf[:n]); werr != nil {
-				tmp.Close()
-				return werr
-			}
-			fetched += int64(n)
-			report(Progress{Phase: PhaseVoice, BytesFetched: fetched, BytesTotal: total})
-		}
-		if rerr == io.EOF {
-			break
-		}
-		if rerr != nil {
-			tmp.Close()
-			return fmt.Errorf("download interrupted: %w", rerr)
-		}
-	}
-	if err := tmp.Close(); err != nil {
+	var last fetch.Progress
+	err = fetch.File(ctx, in.client, url, tmpName, &fetch.Options{
+		Report: func(p fetch.Progress) {
+			last = p
+			report(Progress{Phase: PhaseVoice, BytesFetched: p.BytesFetched, BytesTotal: p.BytesTotal})
+		},
+	})
+	if err != nil {
 		return err
-	}
-	if total > 0 && fetched != total {
-		return fmt.Errorf("download truncated: got %d of %d bytes", fetched, total)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
 		return err
 	}
-	report(Progress{Phase: PhaseVoice, BytesFetched: total, BytesTotal: total})
+	report(Progress{Phase: PhaseVoice, BytesFetched: last.BytesFetched, BytesTotal: last.BytesTotal})
 	return nil
-}
-
-// extractTarGzTree unpacks entries rooted under prefix into dest,
-// preserving relative layout (piper/, piper/espeak-ng-data/...).
-func extractTarGzTree(f *os.File, dest, prefix string) error {
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return fmt.Errorf("bad archive: %w", err)
-	}
-	defer gz.Close()
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("bad archive: %w", err)
-		}
-		if err := writeArchiveEntry(dest, hdr.Name, hdr.Typeflag == tar.TypeDir, func(w io.Writer) error {
-			_, err := io.Copy(w, tr)
-			return err
-		}, prefix); err != nil {
-			return err
-		}
-		// Symlinks/hardlinks carry no regular-file payload; recreate them.
-		if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink {
-			if err := linkArchiveEntry(dest, hdr.Name, hdr.Linkname, hdr.Typeflag == tar.TypeLink, prefix); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// extractZipTree is the zip twin of extractTarGzTree (zip needs a
-// seekable reader, hence the *os.File).
-func extractZipTree(f *os.File, dest, prefix string) error {
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	zr, err := zip.NewReader(f, info.Size())
-	if err != nil {
-		return fmt.Errorf("bad archive: %w", err)
-	}
-	for _, zf := range zr.File {
-		zfName := filepath.ToSlash(zf.Name)
-		isDir := zf.FileInfo().IsDir()
-		if err := func() error {
-			rc, err := zf.Open()
-			if err != nil {
-				return fmt.Errorf("bad archive: %w", err)
-			}
-			defer rc.Close()
-			return writeArchiveEntry(dest, zfName, isDir, func(w io.Writer) error {
-				_, err := io.Copy(w, rc)
-				return err
-			}, prefix)
-		}(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// writeArchiveEntry maps one archive member under dest/prefix with a
-// zip-slip guard and writes it via the provided copier. Symlink members
-// (no payload) are skipped here and handled by linkArchiveEntry.
-func writeArchiveEntry(dest, name string, isDir bool, copy func(io.Writer) error, prefix string) error {
-	target, ok := safeArchiveTarget(dest, name, prefix)
-	if !ok {
-		return nil // skip stray entries outside the piper root
-	}
-	if isDir {
-		return os.MkdirAll(target, 0o755)
-	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
-	dst, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
-	if err != nil {
-		return err
-	}
-	if err := copy(dst); err != nil {
-		dst.Close()
-		return err
-	}
-	return dst.Close()
-}
-
-// linkArchiveEntry recreates a tar symlink/hardlink under dest/prefix.
-func linkArchiveEntry(dest, name, linkname string, hard bool, prefix string) error {
-	target, ok := safeArchiveTarget(dest, name, prefix)
-	if !ok {
-		return nil
-	}
-	_ = os.Remove(target) // a skipped placeholder may already exist
-	if hard {
-		source, ok := safeArchiveTarget(dest, filepath.Join(prefix, filepath.Clean(filepath.FromSlash(linkname))), prefix)
-		if !ok {
-			return fmt.Errorf("unsafe archive link target %q", linkname)
-		}
-		return os.Link(source, target)
-	}
-	return os.Symlink(filepath.FromSlash(linkname), target)
-}
-
-// safeArchiveTarget resolves one archive member to its destination path,
-// enforcing the prefix and guarding against path traversal. Returns ok=false
-// for entries outside the expected root.
-func safeArchiveTarget(dest, name, prefix string) (string, bool) {
-	clean := filepath.Clean(filepath.FromSlash(name))
-	// The prefix is slash-form ("piper/"); compare it in native form so
-	// Windows paths (piper\piper.exe) match — otherwise every entry is
-	// silently skipped and extraction produces nothing.
-	nativePrefix := filepath.FromSlash(prefix)
-	if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
-		return "", false // zip-slip guard
-	}
-	if !strings.HasPrefix(clean, nativePrefix) || clean == "." {
-		return "", false
-	}
-	rel := strings.TrimPrefix(clean, nativePrefix)
-	target := filepath.Join(dest, rel)
-	if !strings.HasPrefix(target, filepath.Clean(dest)+string(os.PathSeparator)) {
-		return "", false // zip-slip guard
-	}
-	return target, true
 }

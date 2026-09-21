@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"nusashell/pkg/atomicfile"
 )
 
 var ErrAlreadyHeld = errors.New("another NusaShell core already owns the data directory")
@@ -83,24 +85,7 @@ func WriteMetadata(path string, metadata Metadata) error {
 	if err != nil {
 		return fmt.Errorf("encode core metadata: %w", err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "core-*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("create core metadata temp file: %w", err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("chmod core metadata: %w", err)
-	}
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write core metadata: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close core metadata: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := atomicfile.Write(path, data, 0o600); err != nil {
 		return fmt.Errorf("install core metadata: %w", err)
 	}
 	return nil

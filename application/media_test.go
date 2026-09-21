@@ -417,7 +417,7 @@ func TestPersistGeneratedImagesRejectsOversize(t *testing.T) {
 
 func TestFormatImageGenFailureRateLimit(t *testing.T) {
 	err := &domain.ProviderError{StatusCode: 429, RetryAfter: 2 * time.Minute, Err: fmt.Errorf("429")}
-	msg := formatImageGenFailure(err, domain.ProviderChat)
+	msg := media.FormatImageGenFailure(err, domain.ProviderChat)
 	if !strings.Contains(msg, "rate-limited") || !strings.Contains(msg, "2m0s") {
 		t.Fatalf("msg = %q", msg)
 	}
@@ -428,7 +428,7 @@ func TestFormatImageGenFailureRateLimit(t *testing.T) {
 
 func TestFormatImageGenFailureUsageLimit(t *testing.T) {
 	err := &domain.ProviderError{StatusCode: 429, Err: fmt.Errorf("image generation usage limit reached (resets at 2026-09-08T01:00:00Z)")}
-	msg := formatImageGenFailure(err, domain.ProviderCodex)
+	msg := media.FormatImageGenFailure(err, domain.ProviderCodex)
 	if !strings.Contains(msg, "usage limit reached") || !strings.Contains(msg, "resets at") {
 		t.Fatalf("msg = %q", msg)
 	}
@@ -439,12 +439,12 @@ func TestFormatImageGenFailureUsageLimit(t *testing.T) {
 
 func TestFormatImageGenFailureCodex403ExplainsEntitlement(t *testing.T) {
 	err := &domain.ProviderError{StatusCode: 403, Err: fmt.Errorf("image generation failed (HTTP 403): {\"detail\":\"Forbidden\"}")}
-	msg := formatImageGenFailure(err, domain.ProviderCodex)
+	msg := media.FormatImageGenFailure(err, domain.ProviderCodex)
 	if !strings.Contains(msg, "HTTP 403") || !strings.Contains(msg, "Free") {
 		t.Fatalf("msg = %q", msg)
 	}
 	// Non-Codex providers keep the generic wording.
-	msgChat := formatImageGenFailure(err, domain.ProviderChat)
+	msgChat := media.FormatImageGenFailure(err, domain.ProviderChat)
 	if strings.Contains(msgChat, "Free") {
 		t.Fatalf("chat kind must not get Codex plan guidance: %q", msgChat)
 	}

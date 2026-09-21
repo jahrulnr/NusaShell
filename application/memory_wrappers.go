@@ -10,31 +10,8 @@ import (
 	clock "nusashell/pkg/time"
 )
 
-type MemoryService = memory.Service
-
-var NewMemoryService = memory.NewMemoryService
-
-const taskMemoryAnnounceType = memory.TaskMemoryAnnounceType
-
-var (
-	taskMemoryQuery = memory.TaskMemoryQuery
-	truncateUTF8    = memory.TruncateUTF8
-)
-
 var clockNow = func() time.Time {
 	return clock.NewTime().Time()
-}
-
-func (a *App) handleMemoryDelete(req contracts.MemoryIDRequest) (any, *contracts.RPCError) {
-	return a.memoryService().HandleDelete(req)
-}
-
-func (a *App) handleMemoryUserUpdate(req contracts.MemoryUserUpdateRequest) (any, *contracts.RPCError) {
-	return a.memoryService().HandleUserUpdate(req)
-}
-
-func (a *App) handleMemoryAgentUpdate(req contracts.MemoryAgentUpdateRequest) (any, *contracts.RPCError) {
-	return a.memoryService().HandleAgentUpdate(req)
 }
 
 func (a *App) emitMemoryUpdated() {

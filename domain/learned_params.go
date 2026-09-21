@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"nusashell/pkg/text"
 	clock "nusashell/pkg/time"
 )
 
@@ -348,11 +349,7 @@ func (r *LearnedParamRegistry) Len() int {
 }
 
 func truncateReason(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) > 200 {
-		return s[:200] + "…"
-	}
-	return s
+	return text.ClipRunes(strings.TrimSpace(s), 200, "…")
 }
 
 // paramStopwords are words that can occupy the capture slot of the

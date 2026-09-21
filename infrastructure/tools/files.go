@@ -24,6 +24,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain/turndiff"
+	"nusashell/pkg/atomicfile"
 	clock "nusashell/pkg/time"
 )
 
@@ -988,38 +989,11 @@ func isTransientRenameErr(err error) bool {
 }
 
 // writeFileAtomic writes data to a temp file in the target directory and
-// renames it into place, so a crash never leaves a partial file.
+// renames it into place, so a crash never leaves a partial file. The rename
+// goes through renameWithRetry so transient Windows sharing violations
+// (antivirus/indexer holds on the just-closed temp file) are absorbed.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".nusashell-tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpName)
-		}
-	}()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpName, perm); err != nil {
-		return err
-	}
-	if err := renameWithRetry(tmpName, path); err != nil {
-		return err
-	}
-	cleanup = false
-	return nil
+	return atomicfile.WriteWithRename(path, data, perm, renameWithRetry)
 }
 
 // copyTree copies a file or directory recursively (regular files only;

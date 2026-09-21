@@ -500,7 +500,7 @@ func TestHandleAcpRunsSteerStillReturnsFullDTOForUI(t *testing.T) {
 	run := bloatedSubagentRun("acprun_rpc", domain.AcpRunRunning)
 	app := &App{Acp: &steerStopAcpRuntime{run: run}}
 
-	res, rpcErr := app.handleAcpRunsSteer(contracts.AcpRunSteerRequest{ID: "acprun_rpc", Text: "keep going"})
+	res, rpcErr := app.subagentService().HandleRunsSteer(contracts.AcpRunSteerRequest{ID: "acprun_rpc", Text: "keep going"})
 	if rpcErr != nil {
 		t.Fatalf("handleAcpRunsSteer: %+v", rpcErr)
 	}
@@ -650,7 +650,7 @@ func TestWaitAcpRunReturnsParentCancellation(t *testing.T) {
 	parent, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, rpcErr := app.waitAcpRun(parent, contracts.AcpRunWaitRequest{ID: run.ID, TimeoutMS: 100})
+	_, rpcErr := app.subagentService().WaitRun(parent, contracts.AcpRunWaitRequest{ID: run.ID, TimeoutMS: 100})
 	if rpcErr == nil {
 		t.Fatal("parent cancellation must not return a successful running snapshot")
 	}
@@ -733,7 +733,7 @@ func TestHandleAcpRunsListMergesSettledStorageRecords(t *testing.T) {
 		}},
 	}
 
-	resp, rpcErr := app.handleAcpRunsList(contracts.AcpRunsListRequest{ConversationID: "conv_1"})
+	resp, rpcErr := app.subagentService().HandleRunsList(contracts.AcpRunsListRequest{ConversationID: "conv_1"})
 	if rpcErr != nil {
 		t.Fatalf("runs.list: %v", rpcErr)
 	}
@@ -764,7 +764,7 @@ func TestHandleAcpRunsListDedupesLiveAndStorage(t *testing.T) {
 		}},
 	}
 
-	resp, rpcErr := app.handleAcpRunsList(contracts.AcpRunsListRequest{ConversationID: "conv_1"})
+	resp, rpcErr := app.subagentService().HandleRunsList(contracts.AcpRunsListRequest{ConversationID: "conv_1"})
 	if rpcErr != nil {
 		t.Fatalf("runs.list: %v", rpcErr)
 	}
@@ -790,7 +790,7 @@ func TestHandleAcpRunsListScopesToConversation(t *testing.T) {
 		}},
 	}
 
-	resp, rpcErr := app.handleAcpRunsList(contracts.AcpRunsListRequest{ConversationID: "conv_a"})
+	resp, rpcErr := app.subagentService().HandleRunsList(contracts.AcpRunsListRequest{ConversationID: "conv_a"})
 	if rpcErr != nil {
 		t.Fatalf("runs.list: %v", rpcErr)
 	}
@@ -818,7 +818,7 @@ func TestHandleAcpRunsGetLoadsPersistedRecordAfterRuntimeRestart(t *testing.T) {
 		}},
 	}
 
-	result, rpcErr := app.handleAcpRunsGet(contracts.AcpRunIDRequest{ID: "acprun_historic"})
+	result, rpcErr := app.subagentService().HandleRunsGet(contracts.AcpRunIDRequest{ID: "acprun_historic"})
 	if rpcErr != nil {
 		t.Fatalf("runs.get: %v", rpcErr)
 	}
@@ -838,7 +838,7 @@ func TestHandleAcpRunsListLoadsPersistedRecordsWithoutRuntime(t *testing.T) {
 		}},
 	}
 
-	result, rpcErr := app.handleAcpRunsList(contracts.AcpRunsListRequest{ConversationID: "conv_1"})
+	result, rpcErr := app.subagentService().HandleRunsList(contracts.AcpRunsListRequest{ConversationID: "conv_1"})
 	if rpcErr != nil {
 		t.Fatalf("runs.list: %v", rpcErr)
 	}
@@ -990,7 +990,7 @@ func TestDelegateRunSurfaceUsesTheCompleteHeadlessTranscript(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	listed, rpcErr := app.handleAcpRunsList(contracts.AcpRunsListRequest{ConversationID: "conv_parent"})
+	listed, rpcErr := app.subagentService().HandleRunsList(contracts.AcpRunsListRequest{ConversationID: "conv_parent"})
 	if rpcErr != nil {
 		t.Fatalf("delegate run list: %v", rpcErr)
 	}
@@ -998,7 +998,7 @@ func TestDelegateRunSurfaceUsesTheCompleteHeadlessTranscript(t *testing.T) {
 	if len(runs) != 1 || runs[0].ID != runID || len(runs[0].Transcript) != 3 {
 		t.Fatalf("delegate run must be visible through ACP-shaped list: %+v", runs)
 	}
-	got, rpcErr := app.handleAcpRunsGet(contracts.AcpRunIDRequest{ID: runID})
+	got, rpcErr := app.subagentService().HandleRunsGet(contracts.AcpRunIDRequest{ID: runID})
 	if rpcErr != nil {
 		t.Fatalf("delegate run get: %v", rpcErr)
 	}

@@ -3,6 +3,7 @@ package text
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestTruncate_short(t *testing.T) {
@@ -56,6 +57,74 @@ func TestTruncateWithNote_long(t *testing.T) {
 	}
 	if !strings.Contains(got, "truncated") {
 		t.Fatalf("expected truncated note, got %q", got)
+	}
+}
+
+func TestClipRunes_short(t *testing.T) {
+	if got := ClipRunes("hello", 10, "…"); got != "hello" {
+		t.Fatalf("got %q want %q", got, "hello")
+	}
+}
+
+func TestClipRunes_exactLimit(t *testing.T) {
+	if got := ClipRunes("hello", 5, "…"); got != "hello" {
+		t.Fatalf("input exactly at limit must be unchanged, got %q", got)
+	}
+}
+
+func TestClipRunes_longMarker(t *testing.T) {
+	if got := ClipRunes("hello world", 5, "…"); got != "hello…" {
+		t.Fatalf("got %q want %q", got, "hello…")
+	}
+}
+
+func TestClipRunes_emptyMarker(t *testing.T) {
+	if got := ClipRunes("hello world", 5, ""); got != "hello" {
+		t.Fatalf("got %q want %q", got, "hello")
+	}
+}
+
+func TestClipRunes_zeroN(t *testing.T) {
+	if got := ClipRunes("hello", 0, "…"); got != "hello" {
+		t.Fatalf("n=0 should return input unchanged, got %q", got)
+	}
+}
+
+func TestClipRunes_runeSafe(t *testing.T) {
+	got := ClipRunes("héllo wörld", 4, "…")
+	if got != "héll…" {
+		t.Fatalf("got %q want %q", got, "héll…")
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("rune-safe clip must yield valid UTF-8, got %q", got)
+	}
+}
+
+func TestTailRunes_short(t *testing.T) {
+	if got := TailRunes("hello", 10); got != "hello" {
+		t.Fatalf("got %q want %q", got, "hello")
+	}
+}
+
+func TestTailRunes_long(t *testing.T) {
+	if got := TailRunes("hello world", 5); got != "world" {
+		t.Fatalf("got %q want %q", got, "world")
+	}
+}
+
+func TestTailRunes_zeroN(t *testing.T) {
+	if got := TailRunes("hello", 0); got != "" {
+		t.Fatalf("n=0 should return empty, got %q", got)
+	}
+}
+
+func TestTailRunes_runeSafe(t *testing.T) {
+	got := TailRunes("héllo wörld", 5)
+	if got != "wörld" {
+		t.Fatalf("got %q want %q", got, "wörld")
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("rune-safe tail must yield valid UTF-8, got %q", got)
 	}
 }
 

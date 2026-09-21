@@ -3,6 +3,8 @@ package service
 import (
 	"fmt"
 	"os"
+
+	"nusashell/pkg/atomicfile"
 )
 
 // assertNotSymlink refuses to rewrite a symlinked managed file: the link
@@ -36,15 +38,7 @@ func backupExisting(path string) error {
 // atomicWrite writes via a temp file in the same directory then renames, so
 // a crash never leaves a truncated definition behind.
 func atomicWrite(path string, content []byte, perm os.FileMode) error {
-	tmp := path + ".nusashell-tmp"
-	if err := os.WriteFile(tmp, content, perm); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
+	return atomicfile.Write(path, content, perm)
 }
 
 // readDefinition snapshots an existing file (nil when absent) so failed

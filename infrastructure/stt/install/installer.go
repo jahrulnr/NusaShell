@@ -3,10 +3,7 @@ package install
 import (
 	"archive/tar"
 	"archive/zip"
-	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +17,8 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/infrastructure/nusatemp"
+	"nusashell/pkg/archive"
+	"nusashell/pkg/fetch"
 	"nusashell/pkg/httpclient"
 )
 
@@ -265,49 +264,33 @@ func saveEngineFromArchive(archivePath, kind string, save func(name string, r io
 			return err
 		}
 		defer zr.Close()
-		for _, zf := range zr.File {
+		return archive.WalkZip(&zr.Reader, func(zf *zip.File) (bool, error) {
 			if zf.FileInfo().IsDir() {
-				continue
+				return true, nil
 			}
 			rc, err := zf.Open()
 			if err != nil {
-				return err
+				return false, err
 			}
 			err = save(zf.Name, rc)
 			_ = rc.Close()
 			if err != nil {
-				return err
+				return false, err
 			}
-		}
-		return nil
+			return true, nil
+		})
 	}
 	gz, err := os.Open(archivePath)
 	if err != nil {
 		return err
 	}
 	defer gz.Close()
-	tr, err := gzip.NewReader(gz)
-	if err != nil {
-		return err
-	}
-	defer tr.Close()
-	reader := tar.NewReader(tr)
-	for {
-		hdr, err := reader.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
+	return archive.WalkTarGz(gz, func(hdr *tar.Header, body io.Reader) (bool, error) {
 		if hdr.Typeflag != tar.TypeReg {
-			continue
+			return true, nil
 		}
-		if err := save(hdr.Name, reader); err != nil {
-			return err
-		}
-	}
-	return nil
+		return true, save(hdr.Name, body)
+	})
 }
 
 // installModel downloads one GGML model into a .download temp and then
@@ -351,62 +334,23 @@ func verifySHA256(path, want string) error {
 	if want == "" {
 		return nil
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return err
+	err := fetch.VerifyFile(path, want)
+	var mm *fetch.MismatchError
+	if errors.As(err, &mm) {
+		return fmt.Errorf("stt: sha256 mismatch: got %s want %s", mm.Got, mm.Want)
 	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return err
-	}
-	got := hex.EncodeToString(h.Sum(nil))
-	if !strings.EqualFold(got, want) {
-		return fmt.Errorf("stt: sha256 mismatch: got %s want %s", got, want)
-	}
-	return nil
+	return err
 }
 
 // downloadToFile streams url into dst, reporting per-chunk progress. The
 // caller owns cleanup and final size verification.
 func downloadToFile(ctx context.Context, client *http.Client, url, dst string, report func(Progress)) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("stt: download %s: HTTP %d", url, resp.StatusCode)
-	}
-	f, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	total := resp.ContentLength
-	buf := make([]byte, 128*1024)
-	var fetched int64
-	for {
-		n, rerr := resp.Body.Read(buf)
-		if n > 0 {
-			if _, werr := f.Write(buf[:n]); werr != nil {
-				return werr
-			}
-			fetched += int64(n)
+	return fetch.File(ctx, client, url, dst, &fetch.Options{
+		AcceptStatus: func(code int) bool { return code/100 == 2 },
+		Report: func(p fetch.Progress) {
 			if report != nil {
-				report(Progress{BytesFetched: fetched, BytesTotal: total})
+				report(Progress{BytesFetched: p.BytesFetched, BytesTotal: p.BytesTotal})
 			}
-		}
-		if rerr == io.EOF {
-			break
-		}
-		if rerr != nil {
-			return rerr
-		}
-	}
-	return nil
+		},
+	})
 }

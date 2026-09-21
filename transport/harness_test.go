@@ -624,9 +624,6 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	tb := &tools.Toolbox{
 		Skills:        skillStore,
 		MemoryRecords: memoryRecords,
-		Experiences:   experiences,
-		User:          userStore,
-		Agent:         agentStore,
 		Docs:          docSource,
 		Plugins:       pluginStore,
 		MCP:           mcpManager,

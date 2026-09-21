@@ -2,10 +2,8 @@ package application
 
 import (
 	"fmt"
-	"strings"
 
 	"nusashell/application/conversation"
-	"nusashell/contracts"
 	"nusashell/domain"
 )
 
@@ -30,10 +28,6 @@ func bindConversation(store ConversationStore, c *domain.Conversation) *Conversa
 	return conversation.Bind(store, c)
 }
 
-func cloneConversation(c *domain.Conversation) *domain.Conversation {
-	return conversation.Clone(c)
-}
-
 func (a *App) loadRepo(id string) (*ConversationRepository, error) {
 	if a == nil || a.Conversations == nil {
 		return nil, fmt.Errorf("conversation store is required")
@@ -43,53 +37,6 @@ func (a *App) loadRepo(id string) (*ConversationRepository, error) {
 		return nil, err
 	}
 	return bindConversation(a.Conversations, c), nil
-}
-
-func (a *App) loadRepoRPC(id string) (*ConversationRepository, *contracts.RPCError) {
-	c, rpcErr := a.getConversation(id)
-	if rpcErr != nil {
-		return nil, rpcErr
-	}
-	return bindConversation(a.Conversations, c), nil
-}
-
-func msgDTO(m domain.Message) contracts.MessageDTO {
-	return conversation.MsgDTO(m)
-}
-
-func (a *App) getConversation(id string) (*domain.Conversation, *contracts.RPCError) {
-	if strings.TrimSpace(id) == "" {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "conversation id is required"}
-	}
-	c, err := a.Conversations.Get(id)
-	if err != nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
-	}
-	return c, nil
-}
-
-func (a *App) handleConversationsList() (any, *contracts.RPCError) {
-	return a.conversationService().HandleList()
-}
-
-func (a *App) handleConversationsRename(req contracts.ConversationRenameRequest) (any, *contracts.RPCError) {
-	return a.conversationService().HandleRename(req)
-}
-
-func (a *App) handleConversationsDelete(req contracts.ConversationIDRequest) (any, *contracts.RPCError) {
-	return a.conversationService().HandleDelete(req)
-}
-
-func (a *App) handleConversationsSetWorkspace(req contracts.ConversationSetWorkspaceRequest) (any, *contracts.RPCError) {
-	return a.conversationService().HandleSetWorkspace(req)
-}
-
-func (a *App) handleConversationsSetProvider(req contracts.ConversationSetProviderRequest) (any, *contracts.RPCError) {
-	return a.conversationService().HandleSetProvider(req)
-}
-
-func (a *App) handleWorkspaceListDirs(req contracts.WorkspaceListDirsRequest) (any, *contracts.RPCError) {
-	return a.conversationService().HandleWorkspaceListDirs(req)
 }
 
 func (a *App) effectiveWorkspace(workspace string) string {

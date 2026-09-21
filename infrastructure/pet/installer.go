@@ -1,11 +1,7 @@
 package pet
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,6 +16,8 @@ import (
 	"time"
 
 	"nusashell/infrastructure/nusatemp"
+	"nusashell/pkg/archive"
+	"nusashell/pkg/fetch"
 	"nusashell/pkg/httpclient"
 )
 
@@ -354,19 +352,12 @@ func (in *Installer) resolveStream(ctx context.Context, version string) (*stream
 		}
 		return &stream{Version: version, Tag: "pets-v" + version, Manifest: "pets-latest.json"}, nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, in.releaseIndex, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := in.httpClient.Do(req)
+	rc, err := fetch.Body(ctx, in.httpClient, in.releaseIndex, nil)
 	if err != nil {
 		return nil, fmt.Errorf("fetch release index: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch release index: HTTP %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
+	defer rc.Close()
+	body, err := io.ReadAll(rc)
 	if err != nil {
 		return nil, fmt.Errorf("fetch release index: %w", err)
 	}
@@ -413,19 +404,12 @@ func (in *Installer) resolveAsset(ctx context.Context, s *stream) (*asset, error
 		return nil, fmt.Errorf("no pets release for %s/%s", runtime.GOOS, arch)
 	}
 	url := fmt.Sprintf("%s/download/%s/%s", in.releaseBase, s.Tag, s.Manifest)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := in.httpClient.Do(req)
+	rc, err := fetch.Body(ctx, in.httpClient, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s: %w", s.Manifest, err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch %s: HTTP %d", s.Manifest, resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
+	defer rc.Close()
+	body, err := io.ReadAll(rc)
 	if err != nil {
 		return nil, err
 	}
@@ -462,18 +446,6 @@ func (in *Installer) resolveAsset(ctx context.Context, s *stream) (*asset, error
 }
 
 func (in *Installer) download(ctx context.Context, a *asset) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := in.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("download: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download: HTTP %d from %s", resp.StatusCode, a.URL)
-	}
 	tmp, err := nusatemp.MkdirTemp("pets-*")
 	if err != nil {
 		return "", err
@@ -483,93 +455,36 @@ func (in *Installer) download(ctx context.Context, a *asset) (string, error) {
 		os.RemoveAll(tmp)
 		return "", err
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		f.Close()
-		os.RemoveAll(tmp)
-		return "", fmt.Errorf("download interrupted: %w", err)
-	}
+	path := f.Name()
 	if err := f.Close(); err != nil {
 		os.RemoveAll(tmp)
 		return "", err
 	}
-	return f.Name(), nil
+	if err := fetch.File(ctx, in.httpClient, a.URL, path, nil); err != nil {
+		os.RemoveAll(tmp)
+		return "", err
+	}
+	return path, nil
 }
 
 func verifySHA256(path, expected string) error {
 	if expected == "" {
 		return fmt.Errorf("manifest SHA-256 missing")
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return err
-	}
-	got := hex.EncodeToString(h.Sum(nil))
-	if !strings.EqualFold(got, expected) {
-		return fmt.Errorf("SHA-256 mismatch: got %s want %s", got, expected)
-	}
-	return nil
+	return fetch.VerifyFile(path, expected)
 }
 
-// extractTarGz unpacks every entry whose path passes the zip-slip guard.
-func extractTarGz(archive, dest string) error {
-	f, err := os.Open(archive)
+// extractTarGz unpacks every entry whose path passes the shared zip-slip
+// guard. Release payloads only contain dirs + regular files; link entries
+// are skipped and file modes are pinned to 0644 (activateVersion chmods
+// the binary).
+func extractTarGz(archivePath, dest string) error {
+	f, err := os.Open(archivePath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return fmt.Errorf("bad archive: %w", err)
-	}
-	defer gz.Close()
-	tr := tar.NewReader(gz)
-	cleanDest := filepath.Clean(dest) + string(os.PathSeparator)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("bad archive: %w", err)
-		}
-		name := filepath.FromSlash(hdr.Name)
-		if filepath.IsAbs(name) || strings.HasPrefix(name, "..") {
-			return fmt.Errorf("unsafe archive entry %q", hdr.Name)
-		}
-		target := filepath.Join(dest, name)
-		if !strings.HasPrefix(filepath.Clean(target)+string(os.PathSeparator), cleanDest) {
-			return fmt.Errorf("archive escapes dest: %q", hdr.Name)
-		}
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(out, tr); err != nil {
-				out.Close()
-				return err
-			}
-			if err := out.Close(); err != nil {
-				return err
-			}
-		default:
-			// Skip symlinks and other exotic entries; release payloads only
-			// contain dirs + regular files.
-		}
-	}
+	return archive.UntarGz(f, dest, &archive.Options{FileMode: 0o644})
 }
 
 func (in *Installer) versionReady(versionDir string) bool {

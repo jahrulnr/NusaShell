@@ -1,9 +1,7 @@
 package plugin
 
 import (
-	"archive/tar"
 	"archive/zip"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,6 +21,8 @@ import (
 
 	"nusashell/domain"
 	"nusashell/infrastructure/nusatemp"
+	"nusashell/pkg/archive"
+	"nusashell/pkg/fetch"
 	"nusashell/pkg/httpclient"
 	clock "nusashell/pkg/time"
 )
@@ -361,21 +361,9 @@ func (i *Installer) installFromZip(data []byte, stage string) (string, error) {
 }
 
 func (i *Installer) fetch(ctx context.Context, url string) (io.ReadCloser, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/octet-stream, application/json, */*")
-
-	resp, err := i.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, url)
-	}
-	return resp.Body, nil
+	return fetch.Body(ctx, i.httpClient, url, &fetch.Options{
+		Header: http.Header{"Accept": []string{"application/octet-stream, application/json, */*"}},
+	})
 }
 
 type catalogVersion struct {
@@ -425,129 +413,11 @@ func (i *Installer) resolveCatalogIcon(ctx context.Context, key, icon string) st
 }
 
 func extractTarGz(rc io.ReadCloser, dest string) error {
-	gr, err := gzip.NewReader(rc)
-	if err != nil {
-		return err
-	}
-	defer gr.Close()
-
-	tr := tar.NewReader(gr)
-	for {
-		h, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		if err := validateArchivePath(dest, h.Name); err != nil {
-			return err
-		}
-
-		target, err := secureJoin(dest, h.Name)
-		if err != nil {
-			return err
-		}
-
-		switch h.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(h.Mode).Perm())
-			if err != nil {
-				return err
-			}
-			_, err = io.Copy(f, tr)
-			f.Close()
-			if err != nil {
-				return err
-			}
-		case tar.TypeSymlink, tar.TypeLink:
-			// Skip hard/symlinks — release tarballs do not need them.
-		default:
-			// Ignore device nodes, etc.
-		}
-	}
-	return nil
+	return archive.UntarGz(rc, dest, nil)
 }
 
 func extractZip(zr *zip.Reader, dest string) error {
-	for _, f := range zr.File {
-		if err := validateArchivePath(dest, f.Name); err != nil {
-			return err
-		}
-		target, err := secureJoin(dest, f.Name)
-		if err != nil {
-			return err
-		}
-
-		if f.FileInfo().IsDir() {
-			if err := os.MkdirAll(target, f.Mode()); err != nil {
-				return err
-			}
-			continue
-		}
-
-		// Skip symlinks in uploaded zips.
-		if f.Mode()&os.ModeSymlink != 0 {
-			continue
-		}
-
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-
-		rc, err := f.Open()
-		if err != nil {
-			return err
-		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode())
-		if err != nil {
-			rc.Close()
-			return err
-		}
-		_, err = io.Copy(out, rc)
-		out.Close()
-		rc.Close()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateArchivePath(root, name string) error {
-	if name == "" {
-		return nil
-	}
-	if strings.Contains(name, "..") {
-		return fmt.Errorf("archive path contains parent traversal: %s", name)
-	}
-	if filepath.IsAbs(name) {
-		return fmt.Errorf("archive path is absolute: %s", name)
-	}
-	return nil
-}
-
-func secureJoin(root, name string) (string, error) {
-	joined := filepath.Join(root, filepath.FromSlash(name))
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	absJoined, err := filepath.Abs(joined)
-	if err != nil {
-		return "", err
-	}
-	if !strings.HasPrefix(absJoined, absRoot+string(filepath.Separator)) && absJoined != absRoot {
-		return "", fmt.Errorf("archive path escapes root: %s", name)
-	}
-	return absJoined, nil
+	return archive.Unzip(zr, dest, nil)
 }
 
 func findUniqueManifestDir(root string) (string, error) {

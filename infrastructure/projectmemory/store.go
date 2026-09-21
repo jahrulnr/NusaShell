@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"nusashell/domain"
+	"nusashell/pkg/atomicfile"
 	clock "nusashell/pkg/time"
 )
 
@@ -234,7 +235,7 @@ func (s *Store) Admit(workspace, kind, id, content string) (domain.ProjectMemory
 		return domain.ProjectMemoryAdmitResult{}, err
 	}
 	next := upsertEntry(prev, id, body)
-	if err := atomicWrite(path, []byte(next)); err != nil {
+	if err := atomicfile.Write(path, []byte(next), 0o644); err != nil {
 		return domain.ProjectMemoryAdmitResult{}, err
 	}
 	problems, err := s.lintLocked(workspace)
@@ -243,7 +244,7 @@ func (s *Store) Admit(workspace, kind, id, content string) (domain.ProjectMemory
 	}
 	if len(problems) > 0 {
 		if prevExists {
-			_ = atomicWrite(path, []byte(prev))
+			_ = atomicfile.Write(path, []byte(prev), 0o644)
 		} else {
 			_ = os.Remove(path)
 		}
@@ -304,11 +305,11 @@ func (s *Store) Archive(workspace, id string) error {
 		return err
 	}
 	nextArch := upsertEntry(prevArch, id, retired)
-	if err := atomicWrite(livePath, []byte(nextLive)); err != nil {
+	if err := atomicfile.Write(livePath, []byte(nextLive), 0o644); err != nil {
 		return err
 	}
-	if err := atomicWrite(archPath, []byte(nextArch)); err != nil {
-		_ = atomicWrite(livePath, live)
+	if err := atomicfile.Write(archPath, []byte(nextArch), 0o644); err != nil {
+		_ = atomicfile.Write(livePath, live, 0o644)
 		return err
 	}
 	return nil
@@ -756,7 +757,7 @@ func (s *Store) trackPatternsLocked(dir, sourceKind string) (string, error) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", err
 		}
-		if err := atomicWrite(path, []byte(ensureTrailingNewline(patterns))); err != nil {
+		if err := atomicfile.Write(path, []byte(ensureTrailingNewline(patterns)), 0o644); err != nil {
 			return "", err
 		}
 	}
@@ -948,39 +949,4 @@ func ensureTrailingNewline(s string) string {
 		return s
 	}
 	return s + "\n"
-}
-
-func atomicWrite(path string, b []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".nusashell-pm-*.tmp")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	cleanup := func() { _ = os.Remove(name) }
-	if _, err := tmp.Write(b); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return err
-	}
-	if err := os.Chmod(name, 0o644); err != nil {
-		cleanup()
-		return err
-	}
-	if err := os.Rename(name, path); err != nil {
-		cleanup()
-		return err
-	}
-	return nil
 }

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"nusashell/pkg/text"
 )
 
 // RiskTier is NusaShell's internal permission posture for an ACP session.
@@ -500,27 +502,16 @@ func (r *AcpRun) trimTranscriptCap() {
 			*bulk = ""
 			continue
 		}
-		*bulk = runeTail(*bulk, MaxAcpTranscriptBytes-remaining)
+		*bulk = text.TailRunes(*bulk, MaxAcpTranscriptBytes-remaining)
 	}
 	if transcriptChunkSize(*chunk) > MaxAcpTranscriptBytes {
-		chunk.ToolTitle = runeTail(chunk.ToolTitle, MaxAcpTranscriptBytes)
+		chunk.ToolTitle = text.TailRunes(chunk.ToolTitle, MaxAcpTranscriptBytes)
 	}
 }
 
 func transcriptChunkSize(chunk AcpTranscriptChunk) int {
 	return utf8.RuneCountInString(chunk.Text) + utf8.RuneCountInString(chunk.ToolTitle) +
 		utf8.RuneCountInString(chunk.ToolInput) + utf8.RuneCountInString(chunk.ToolOutput)
-}
-
-func runeTail(value string, limit int) string {
-	if limit <= 0 {
-		return ""
-	}
-	runes := []rune(value)
-	if len(runes) <= limit {
-		return value
-	}
-	return string(runes[len(runes)-limit:])
 }
 
 // Live reports whether the run still occupies a process/session.

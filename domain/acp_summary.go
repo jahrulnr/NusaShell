@@ -5,6 +5,8 @@ import (
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
+
+	"nusashell/pkg/text"
 )
 
 // MaxSubagentResultRunes bounds the inline subagent completion result (the
@@ -26,30 +28,17 @@ import (
 // magic number.
 const MaxSubagentResultRunes = 16000
 
-// truncateRunes bounds s to the first max runes and appends the "…" omission
-// marker when content was dropped. Rune-safe: never slices mid-character.
-func truncateRunes(s string, max int) string {
-	if max < 0 {
-		max = 0
-	}
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	return string(r[:max]) + "…"
-}
-
-// boundWithSuffix truncates text to leave room for suffix within cap runes
+// boundWithSuffix truncates body to leave room for suffix within cap runes
 // total, then appends suffix in full so the diagnostic (error/cancellation
-// reason) is never lost. If suffix alone meets or exceeds cap, text is
+// reason) is never lost. If suffix alone meets or exceeds cap, body is
 // dropped entirely and only the suffix is returned.
-func boundWithSuffix(text, suffix string, cap int) string {
+func boundWithSuffix(body, suffix string, cap int) string {
 	suffixRunes := utf8.RuneCountInString(suffix)
 	budget := cap - suffixRunes
 	if budget <= 0 {
 		return suffix
 	}
-	return truncateRunes(text, budget) + suffix
+	return text.ClipRunes(body, budget, "…") + suffix
 }
 
 // TranscriptSummary extracts the concatenated text chunks from a run's
@@ -69,7 +58,7 @@ func TranscriptSummary(run *AcpRun) string {
 		}
 		return run.StopReason
 	}
-	return truncateRunes(s, MaxSubagentResultRunes)
+	return text.ClipRunes(s, MaxSubagentResultRunes, "…")
 }
 
 // SubagentCompletionResult builds the tool result injected into the
@@ -141,7 +130,7 @@ func SubagentCompletionBody(run *AcpRun) string {
 	}
 
 	if textOut != "" {
-		return truncateRunes(textOut, MaxSubagentResultRunes)
+		return text.ClipRunes(textOut, MaxSubagentResultRunes, "…")
 	}
 
 	// No text chunk — fall back to the last thought (reasoning) so the
@@ -158,7 +147,7 @@ func SubagentCompletionBody(run *AcpRun) string {
 				return boundWithSuffix(thought, "\n\n[Subagent failed: "+errPart+"]", MaxSubagentResultRunes)
 			}
 		}
-		return truncateRunes(thought, MaxSubagentResultRunes)
+		return text.ClipRunes(thought, MaxSubagentResultRunes, "…")
 	}
 
 	return StructuredFallbackSummary(run)

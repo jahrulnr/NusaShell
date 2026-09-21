@@ -255,3 +255,10 @@ func coreResponseEvents(resp *core.Response) []core.Event {
 	events = append(events, core.DoneEvent{FinishReason: resp.FinishReason, Provider: "test-stub", Model: "test-model"})
 	return events
 }
+
+func jsonRaw(s string) []byte {
+	if s == "" {
+		return []byte("{}")
+	}
+	return []byte(s)
+}

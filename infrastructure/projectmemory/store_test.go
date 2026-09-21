@@ -385,6 +385,44 @@ func TestAuditMissingAndPresent(t *testing.T) {
 	}
 }
 
+// TestAdmitAtomicWriteLeavesNoTempFiles proves the shared atomic writer
+// cleans up after itself: no .nusashell-pm-*.tmp or other temp artifacts
+// remain after admit/archive/pattern-track writes, and files keep 0o644.
+func TestAdmitAtomicWriteLeavesNoTempFiles(t *testing.T) {
+	st, ws, data := testStore(t)
+	if _, err := st.Admit(ws, "debug", "BUG-a", debugContent("BUG-a", "k")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Admit(ws, "debug", "BUG-b", debugContent("BUG-b", "k")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Admit(ws, "debug", "BUG-c", debugContent("BUG-c", "k")); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Archive(ws, "BUG-a"); err != nil {
+		t.Fatal(err)
+	}
+	dir := memoryDir(data, ws)
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if strings.Contains(filepath.Base(path), ".tmp") {
+			t.Errorf("leftover temp file: %s", path)
+		}
+		if info.Mode().Perm() != 0o644 {
+			t.Errorf("%s mode = %o, want 644", path, info.Mode().Perm())
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func mustRead(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)

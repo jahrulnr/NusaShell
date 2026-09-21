@@ -501,6 +501,89 @@ func TestSeedBuiltinSkillsWritesTrustedMeta(t *testing.T) {
 	}
 }
 
+// TestStore_SaveLeavesNoTempOrPartialFiles proves the atomic-write path:
+// after Save/WriteFile/Rollback the skill dir and root must contain only
+// the final files — no temp files and no truncated JSON sidecars.
+func TestStore_SaveLeavesNoTempOrPartialFiles(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	skill := &domain.Skill{
+		Name:    "atomic-skill",
+		Content: "# v1\n",
+		Origin:  domain.SkillOriginUser,
+	}
+	if err := s.Save(skill); err != nil {
+		t.Fatalf("Save v1: %v", err)
+	}
+	skill.Content = "# v2\n"
+	if err := s.Save(skill); err != nil {
+		t.Fatalf("Save v2: %v", err)
+	}
+	if err := s.WriteFile("atomic-skill", "", "references/note.md", "ref"); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := s.Rollback("atomic-skill", "", 1); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+
+	// No temp artifacts anywhere under the store root.
+	err = filepath.Walk(s.root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.Contains(filepath.Base(path), ".tmp") {
+			t.Errorf("leftover temp file: %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Every JSON sidecar must still parse — a torn write would corrupt it.
+	for _, path := range []string{
+		filepath.Join(s.root, "skills.json"),
+		filepath.Join(s.root, ".provenance.json"),
+		filepath.Join(s.root, "atomic-skill", "meta.json"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		var v map[string]any
+		if err := json.Unmarshal(data, &v); err != nil {
+			t.Fatalf("%s is corrupt JSON: %v", path, err)
+		}
+	}
+}
+
+// TestStore_SaveFilePerm preserves the 0o644 permission contract on files
+// written through the atomic path.
+func TestStore_SaveFilePerm(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := s.Save(&domain.Skill{
+		Name:    "perm-skill",
+		Content: "# perm\n",
+		Origin:  domain.SkillOriginUser,
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	for _, rel := range []string{"SKILL.md", "meta.json", filepath.Join("versions", "1", "SKILL.md")} {
+		info, err := os.Stat(filepath.Join(s.root, "perm-skill", rel))
+		if err != nil {
+			t.Fatalf("stat %s: %v", rel, err)
+		}
+		if info.Mode().Perm() != 0o644 {
+			t.Fatalf("%s mode = %o, want 644", rel, info.Mode().Perm())
+		}
+	}
+}
+
 func TestParseSkillMarkdownFoldedScalarDescription(t *testing.T) {
 	tests := []struct {
 		name     string

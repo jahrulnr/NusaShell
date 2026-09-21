@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"nusashell/application/memory"
 	"nusashell/contracts"
 	"nusashell/domain"
 	"strings"
@@ -39,8 +40,8 @@ func TestMaybeAnnounceTaskMemoryAnnouncesNewRecordOnce(t *testing.T) {
 		t.Fatalf("pending = %+v, want 1 task_memory announcement", got.PendingAnnouncements)
 	}
 	pa := got.PendingAnnouncements[0]
-	if pa.Type != taskMemoryAnnounceType {
-		t.Fatalf("type = %q, want %q", pa.Type, taskMemoryAnnounceType)
+	if pa.Type != memory.TaskMemoryAnnounceType {
+		t.Fatalf("type = %q, want %q", pa.Type, memory.TaskMemoryAnnounceType)
 	}
 	if !strings.Contains(pa.Args, `"type":"task_memory"`) || !strings.Contains(pa.Args, "rec-new") {
 		t.Errorf("args missing type/hits: %s", pa.Args)
@@ -97,22 +98,22 @@ func TestTaskMemorySkipsPipelineOrigin(t *testing.T) {
 
 func TestTaskMemoryQuery(t *testing.T) {
 	conv := &domain.Conversation{Title: "Fix the room history window", Workspace: "/home/k/ns"}
-	q := taskMemoryQuery(conv)
+	q := memory.TaskMemoryQuery(conv)
 	if !strings.Contains(q, "Fix the room history window") || !strings.Contains(q, "ns") {
 		t.Errorf("query = %q", q)
 	}
-	empty := taskMemoryQuery(&domain.Conversation{})
+	empty := memory.TaskMemoryQuery(&domain.Conversation{})
 	if empty != "" {
 		t.Errorf("empty conversation query = %q, want empty", empty)
 	}
 }
 
 func TestTruncateUTF8(t *testing.T) {
-	if got := truncateUTF8("hello", 100); got != "hello" {
+	if got := memory.TruncateUTF8("hello", 100); got != "hello" {
 		t.Errorf("short string must pass through, got %q", got)
 	}
 	s := "héllo wörld"
-	got := truncateUTF8(s, 6)
+	got := memory.TruncateUTF8(s, 6)
 	if !strings.HasPrefix(got, "héllo") || !strings.HasSuffix(got, "…") {
 		t.Errorf("truncated %q from %q", got, s)
 	}
@@ -230,7 +231,7 @@ func TestMemoryUserUpdateAllowsClearingDocument(t *testing.T) {
 	user := &userUpdateStore{entry: domain.DocumentEntry{Content: "old"}}
 	app := &App{User: user}
 
-	if _, rpcErr := app.handleMemoryUserUpdate(contracts.MemoryUserUpdateRequest{}); rpcErr != nil {
+	if _, rpcErr := app.memoryService().HandleUserUpdate(contracts.MemoryUserUpdateRequest{}); rpcErr != nil {
 		t.Fatalf("clearing user document: %v", rpcErr)
 	}
 	if user.entry.Content != "" {
@@ -246,7 +247,7 @@ func TestMemoryUserUpdateRejectsOverCap(t *testing.T) {
 		content[i] = 'x'
 	}
 
-	_, rpcErr := app.handleMemoryUserUpdate(contracts.MemoryUserUpdateRequest{Content: string(content)})
+	_, rpcErr := app.memoryService().HandleUserUpdate(contracts.MemoryUserUpdateRequest{Content: string(content)})
 	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
 		t.Fatalf("over-cap error = %+v, want VALIDATION_ERROR", rpcErr)
 	}
@@ -286,7 +287,7 @@ func TestMemoryAgentUpdateRejectsOverCap(t *testing.T) {
 		content[i] = 'x'
 	}
 
-	_, rpcErr := app.handleMemoryAgentUpdate(contracts.MemoryAgentUpdateRequest{Content: string(content)})
+	_, rpcErr := app.memoryService().HandleAgentUpdate(contracts.MemoryAgentUpdateRequest{Content: string(content)})
 	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
 		t.Fatalf("over-cap error = %+v, want VALIDATION_ERROR", rpcErr)
 	}

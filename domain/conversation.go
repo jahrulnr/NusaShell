@@ -809,20 +809,6 @@ func (c *Conversation) compactionBlobRetention(keepTokenBudget int) (retained []
 	return c.compactionRetention(keepTokenBudget)
 }
 
-func truncateToTokenBudget(content string, tokens int) string {
-	if tokens <= 0 {
-		return ""
-	}
-	limit := tokens * 4
-	if len(content) <= limit {
-		return content
-	}
-	for limit > 0 && !utf8.RuneStart(content[limit]) {
-		limit--
-	}
-	return content[:limit] + "… [truncated]"
-}
-
 // ArchiveMessages returns the messages that would be dropped by a compaction
 // with the given keep-token budget. The returned slice preserves full message
 // content (tool calls, reasoning, steps) so it can be archived for later

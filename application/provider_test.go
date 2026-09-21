@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"nusashell/application/provider"
 	"nusashell/application/service/learnedparams"
 	"nusashell/application/service/modeloverrides"
 	"nusashell/contracts"
@@ -60,7 +61,7 @@ func TestHandleProvidersImportTagsEmbeddingsFromLister(t *testing.T) {
 		BaseURL: "https://gateway.example.com/v1", Enabled: true,
 	})
 
-	res, rpcErr := app.handleProvidersImport(contracts.ProviderIDRequest{ID: "emb"})
+	res, rpcErr := app.providerService().HandleImport(contracts.ProviderIDRequest{ID: "emb"})
 	if rpcErr != nil {
 		t.Fatalf("handleProvidersImport: %v", rpcErr.Message)
 	}
@@ -98,7 +99,7 @@ func TestHandleModelsListSurfacesLegacyEmbeddingModel(t *testing.T) {
 				Models: []domain.Model{{ID: "nomic-embed-text:latest"}, {ID: "gemma4:e2b"}}},
 		}},
 	}
-	res, rpcErr := app.handleModelsList()
+	res, rpcErr := app.providerService().HandleModelsList()
 	if rpcErr != nil {
 		t.Fatalf("handleModelsList: %v", rpcErr.Message)
 	}
@@ -180,7 +181,7 @@ func TestHandleModelEndpoints(t *testing.T) {
 	}, nil, providers)
 
 	// 1) Fetch miss → routes + cached=false; second call served from cache.
-	res, rpcErr := app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "meta-llama/llama-3.3-70b-instruct"})
+	res, rpcErr := app.providerService().HandleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "meta-llama/llama-3.3-70b-instruct"})
 	if rpcErr != nil {
 		t.Fatalf("handleModelEndpoints: %+v", rpcErr)
 	}
@@ -195,7 +196,7 @@ func TestHandleModelEndpoints(t *testing.T) {
 		t.Fatalf("lister calls = %d slug=%q", routeProvider.calls, routeProvider.slug)
 	}
 
-	res, rpcErr = app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "meta-llama/llama-3.3-70b-instruct"})
+	res, rpcErr = app.providerService().HandleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "meta-llama/llama-3.3-70b-instruct"})
 	if rpcErr != nil {
 		t.Fatalf("cached handleModelEndpoints: %+v", rpcErr)
 	}
@@ -208,7 +209,7 @@ func TestHandleModelEndpoints(t *testing.T) {
 	}
 
 	// 2) Model tanpa canonical slug → empty routes tanpa fetch.
-	res, rpcErr = app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p2", ModelID: "gpt-x"})
+	res, rpcErr = app.providerService().HandleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p2", ModelID: "gpt-x"})
 	if rpcErr != nil {
 		t.Fatalf("no-slug handleModelEndpoints: %+v", rpcErr)
 	}
@@ -217,10 +218,10 @@ func TestHandleModelEndpoints(t *testing.T) {
 	}
 
 	// 3) Validasi: id hilang / model tak dikenal.
-	if _, rpcErr := app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "", ModelID: "x"}); rpcErr == nil {
+	if _, rpcErr := app.providerService().HandleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "", ModelID: "x"}); rpcErr == nil {
 		t.Fatal("missing provider_id must fail")
 	}
-	if _, rpcErr := app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "unknown"}); rpcErr == nil {
+	if _, rpcErr := app.providerService().HandleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "unknown"}); rpcErr == nil {
 		t.Fatal("unknown model must fail")
 	}
 }
@@ -241,7 +242,7 @@ func TestHandleModelEndpointsPreservesFreeVariant(t *testing.T) {
 		return routeProvider, nil
 	}, nil, providers)
 
-	if _, rpcErr := app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "z-ai/glm-5.2:free"}); rpcErr != nil {
+	if _, rpcErr := app.providerService().HandleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "z-ai/glm-5.2:free"}); rpcErr != nil {
 		t.Fatalf("handleModelEndpoints: %+v", rpcErr)
 	}
 	if routeProvider.slug != "z-ai/glm-5.2-20260616:free" {
@@ -261,7 +262,7 @@ func TestHandleModelEndpointsFetchErrorSurfaces(t *testing.T) {
 	app := newEndpointsTestApp(t, func(_ context.Context, _ *domain.Provider, _ string) (AIProvider, error) {
 		return routeProvider, nil
 	}, nil, providers)
-	_, rpcErr := app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "m"})
+	_, rpcErr := app.providerService().HandleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "m"})
 	if rpcErr == nil || rpcErr.Code != contracts.CodeProvider {
 		t.Fatalf("rpcErr = %+v, want CodeProvider", rpcErr)
 	}
@@ -284,7 +285,7 @@ func TestHandleModelEndpointsSkipsHTTPClientError(t *testing.T) {
 		return routeProvider, nil
 	}, nil, providers)
 
-	res, rpcErr := app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "big-pickle"})
+	res, rpcErr := app.providerService().HandleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "big-pickle"})
 	if rpcErr != nil {
 		t.Fatalf("4xx handleModelEndpoints: %+v", rpcErr)
 	}
@@ -296,7 +297,7 @@ func TestHandleModelEndpointsSkipsHTTPClientError(t *testing.T) {
 		t.Fatalf("first 4xx result should not report cache hit")
 	}
 
-	res, rpcErr = app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "big-pickle"})
+	res, rpcErr = app.providerService().HandleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "big-pickle"})
 	if rpcErr != nil {
 		t.Fatalf("cached 4xx handleModelEndpoints: %+v", rpcErr)
 	}
@@ -325,7 +326,7 @@ func TestHandleModelEndpointsSkipsHTTPServerErrorWithoutCache(t *testing.T) {
 		return routeProvider, nil
 	}, nil, providers)
 
-	res, rpcErr := app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "m"})
+	res, rpcErr := app.providerService().HandleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "m"})
 	if rpcErr != nil {
 		t.Fatalf("5xx handleModelEndpoints: %+v", rpcErr)
 	}
@@ -333,7 +334,7 @@ func TestHandleModelEndpointsSkipsHTTPServerErrorWithoutCache(t *testing.T) {
 		t.Fatalf("5xx result = %+v, want empty", res)
 	}
 
-	_, rpcErr = app.handleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "m"})
+	_, rpcErr = app.providerService().HandleModelEndpoints(contracts.ModelEndpointsRequest{ProviderID: "p1", ModelID: "m"})
 	if rpcErr != nil {
 		t.Fatalf("second 5xx handleModelEndpoints: %+v", rpcErr)
 	}
@@ -349,13 +350,14 @@ func strPtr(s string) *string { return &s }
 func TestHandleProvidersSavePersistsCacheTTL(t *testing.T) {
 	app, providers, _ := newSeedTestApp()
 
-	res, rpcErr := app.handleProvidersSave(contracts.ProviderSaveRequest{
+	res, rpcErr := app.providerService().HandleSave(contracts.ProviderSaveRequest{
 		Kind:     "messages",
 		Name:     "Anthropic",
 		BaseURL:  "https://api.anthropic.com",
 		Enabled:  true,
 		CacheTTL: strPtr("1h"),
 	})
+
 	if rpcErr != nil {
 		t.Fatalf("save: %+v", rpcErr)
 	}
@@ -377,11 +379,12 @@ func TestHandleProvidersSavePersistsCacheTTL(t *testing.T) {
 
 func TestHandleProvidersSavePersistsCodexReasoningSummary(t *testing.T) {
 	app, providers, _ := newSeedTestApp()
-	res, rpcErr := app.handleProvidersSave(contracts.ProviderSaveRequest{
+	res, rpcErr := app.providerService().HandleSave(contracts.ProviderSaveRequest{
 		Driver: "codex", Kind: "codex", Name: "Codex",
 		BaseURL: "https://chatgpt.com/backend-api/codex", Enabled: true,
 		ReasoningSummary: strPtr("detailed"),
 	})
+
 	if rpcErr != nil {
 		t.Fatalf("save: %+v", rpcErr)
 	}
@@ -403,11 +406,12 @@ func TestHandleProvidersSavePersistsCodexReasoningSummary(t *testing.T) {
 
 func TestHandleProvidersSaveRejectsInvalidCodexReasoningSummary(t *testing.T) {
 	app, _, _ := newSeedTestApp()
-	_, rpcErr := app.handleProvidersSave(contracts.ProviderSaveRequest{
+	_, rpcErr := app.providerService().HandleSave(contracts.ProviderSaveRequest{
 		Driver: "codex", Kind: "codex", Name: "Codex",
 		BaseURL: "https://chatgpt.com/backend-api/codex", Enabled: true,
 		ReasoningSummary: strPtr("verbose"),
 	})
+
 	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
 		t.Fatalf("invalid reasoning summary error = %#v", rpcErr)
 	}
@@ -416,7 +420,7 @@ func TestHandleProvidersSaveRejectsInvalidCodexReasoningSummary(t *testing.T) {
 func TestHandleProvidersSaveAcceptsCodexDriver(t *testing.T) {
 	app, providers, credentials := newSeedTestApp()
 
-	res, rpcErr := app.handleProvidersSave(contracts.ProviderSaveRequest{
+	res, rpcErr := app.providerService().HandleSave(contracts.ProviderSaveRequest{
 		Driver:  "codex",
 		Kind:    "codex",
 		Name:    "Codex",
@@ -424,6 +428,7 @@ func TestHandleProvidersSaveAcceptsCodexDriver(t *testing.T) {
 		APIKey:  "oauth-access-token",
 		Enabled: true,
 	})
+
 	if rpcErr != nil {
 		t.Fatalf("save Codex: %+v", rpcErr)
 	}
@@ -445,13 +450,14 @@ func TestHandleProvidersSaveAcceptsCodexDriver(t *testing.T) {
 
 func TestHandleProvidersSaveRejectsInvalidCacheTTL(t *testing.T) {
 	app, _, _ := newSeedTestApp()
-	_, rpcErr := app.handleProvidersSave(contracts.ProviderSaveRequest{
+	_, rpcErr := app.providerService().HandleSave(contracts.ProviderSaveRequest{
 		Kind:     "messages",
 		Name:     "Anthropic",
 		BaseURL:  "https://api.anthropic.com",
 		Enabled:  true,
 		CacheTTL: strPtr("30m"),
 	})
+
 	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
 		t.Fatalf("30m on messages must be VALIDATION_ERROR, got %+v", rpcErr)
 	}
@@ -459,25 +465,27 @@ func TestHandleProvidersSaveRejectsInvalidCacheTTL(t *testing.T) {
 
 func TestHandleProvidersSavePreservesCacheTTLWhenOmitted(t *testing.T) {
 	app, providers, _ := newSeedTestApp()
-	created, rpcErr := app.handleProvidersSave(contracts.ProviderSaveRequest{
+	created, rpcErr := app.providerService().HandleSave(contracts.ProviderSaveRequest{
 		Kind:     "messages",
 		Name:     "Anthropic",
 		BaseURL:  "https://api.anthropic.com",
 		Enabled:  true,
 		CacheTTL: strPtr("1h"),
 	})
+
 	if rpcErr != nil {
 		t.Fatalf("create: %+v", rpcErr)
 	}
 	id := created.(contracts.ProvidersListResult).Providers[0].ID
 
-	_, rpcErr = app.handleProvidersSave(contracts.ProviderSaveRequest{
+	_, rpcErr = app.providerService().HandleSave(contracts.ProviderSaveRequest{
 		ID:      id,
 		Kind:    "messages",
 		Name:    "Anthropic",
 		BaseURL: "https://api.anthropic.com",
 		Enabled: true,
 	})
+
 	if rpcErr != nil {
 		t.Fatalf("update: %+v", rpcErr)
 	}
@@ -492,7 +500,7 @@ func TestHandleProvidersSavePreservesCacheTTLWhenOmitted(t *testing.T) {
 
 func TestHandleProvidersSaveClearsInvalidTTLOnKindChange(t *testing.T) {
 	app, providers, _ := newSeedTestApp()
-	created, rpcErr := app.handleProvidersSave(contracts.ProviderSaveRequest{
+	created, rpcErr := app.providerService().HandleSave(contracts.ProviderSaveRequest{
 		Driver:   "openrouter",
 		Kind:     "chat",
 		Name:     "Gateway",
@@ -500,12 +508,13 @@ func TestHandleProvidersSaveClearsInvalidTTLOnKindChange(t *testing.T) {
 		Enabled:  true,
 		CacheTTL: strPtr("1h"),
 	})
+
 	if rpcErr != nil {
 		t.Fatalf("create: %+v", rpcErr)
 	}
 	id := created.(contracts.ProvidersListResult).Providers[0].ID
 
-	_, rpcErr = app.handleProvidersSave(contracts.ProviderSaveRequest{
+	_, rpcErr = app.providerService().HandleSave(contracts.ProviderSaveRequest{
 		ID:      id,
 		Driver:  "openrouter",
 		Kind:    "responses",
@@ -513,6 +522,7 @@ func TestHandleProvidersSaveClearsInvalidTTLOnKindChange(t *testing.T) {
 		BaseURL: "https://openrouter.ai/api/v1",
 		Enabled: true,
 	})
+
 	if rpcErr != nil {
 		t.Fatalf("kind change: %+v", rpcErr)
 	}
@@ -523,7 +533,7 @@ func TestHandleProvidersSaveClearsInvalidTTLOnKindChange(t *testing.T) {
 	if stored.CacheTTL != "" {
 		t.Errorf("1h must be cleared when kind becomes responses, got %q", stored.CacheTTL)
 	}
-	dto := app.providerDTO(stored)
+	dto := app.providerService().ProviderDTO(stored)
 	if dto.CacheTTL != "30m" {
 		t.Errorf("effective dto cache_ttl = %q, want 30m", dto.CacheTTL)
 	}
@@ -535,7 +545,7 @@ func TestProviderDTOAdvertisesSendableCacheTTLs(t *testing.T) {
 		ID: "openrouter", Driver: domain.ProviderDriverOpenRouter, Kind: domain.ProviderChat,
 		Name: "OpenRouter", Enabled: true, BaseURL: "https://openrouter.ai/api/v1",
 	}
-	dto := app.providerDTO(or)
+	dto := app.providerService().ProviderDTO(or)
 	if got := dto.CacheTTLs; len(got) != 3 || got[0] != "5m" || got[1] != "1h" || got[2] != domain.CacheTTLOff {
 		t.Errorf("openrouter chat cache_ttls = %v, want [5m 1h off]", dto.CacheTTLs)
 	}
@@ -547,7 +557,7 @@ func TestProviderDTOAdvertisesSendableCacheTTLs(t *testing.T) {
 		ID: "openai", Driver: domain.ProviderDriverOpenAI, Kind: domain.ProviderResponses,
 		Name: "OpenAI", Enabled: true,
 	}
-	dto = app.providerDTO(oa)
+	dto = app.providerService().ProviderDTO(oa)
 	if got := dto.CacheTTLs; len(got) != 2 || got[0] != "30m" || got[1] != domain.CacheTTLOff {
 		t.Errorf("openai cache_ttls = %v, want [30m off]", dto.CacheTTLs)
 	}
@@ -559,7 +569,7 @@ func TestProviderDTOAdvertisesSendableCacheTTLs(t *testing.T) {
 		ID: "prov_oc", Driver: domain.ProviderDriverOpenRouter, Kind: domain.ProviderChat,
 		Name: "OpenCode", Enabled: true, BaseURL: "https://opencode.ai/zen/go/v1", CacheTTL: "1h",
 	}
-	dto = app.providerDTO(oc)
+	dto = app.providerService().ProviderDTO(oc)
 	if got := dto.CacheTTLs; len(got) != 3 || got[0] != "5m" || got[1] != "1h" || got[2] != domain.CacheTTLOff {
 		t.Errorf("opencode cache_ttls = %v, want [5m 1h off]", dto.CacheTTLs)
 	}
@@ -570,13 +580,14 @@ func TestProviderDTOAdvertisesSendableCacheTTLs(t *testing.T) {
 
 func TestHandleProvidersSavePersistsCacheTTLOff(t *testing.T) {
 	app, providers, _ := newSeedTestApp()
-	res, rpcErr := app.handleProvidersSave(contracts.ProviderSaveRequest{
+	res, rpcErr := app.providerService().HandleSave(contracts.ProviderSaveRequest{
 		Kind:     "messages",
 		Name:     "Anthropic",
 		BaseURL:  "https://api.anthropic.com",
 		Enabled:  true,
 		CacheTTL: strPtr(domain.CacheTTLOff),
 	})
+
 	if rpcErr != nil {
 		t.Fatalf("save: %+v", rpcErr)
 	}
@@ -602,25 +613,25 @@ const tpmOverflowBody = "openai: stream error: Request too large for gpt-5.6-lun
 
 func TestMarkProviderRateLimitedAndWait(t *testing.T) {
 	a := &App{}
-	if w := a.ProviderRateLimitWait("tok"); w != 0 {
+	if w := a.rateLimits().Wait("tok"); w != 0 {
 		t.Fatalf("fresh provider wait = %v, want 0", w)
 	}
-	a.MarkProviderRateLimited("tok", time.Now().Add(30*time.Second))
-	w := a.ProviderRateLimitWait("tok")
+	a.rateLimits().Mark("tok", time.Now().Add(30*time.Second))
+	w := a.rateLimits().Wait("tok")
 	if w <= 0 || w > 31*time.Second {
 		t.Fatalf("wait = %v, want ~30s", w)
 	}
 	// Expired window clears.
-	a.MarkProviderRateLimited("tok", time.Now().Add(-time.Second))
-	if w := a.ProviderRateLimitWait("tok"); w != 0 {
+	a.rateLimits().Mark("tok", time.Now().Add(-time.Second))
+	if w := a.rateLimits().Wait("tok"); w != 0 {
 		t.Fatalf("expired wait = %v, want 0", w)
 	}
 }
 
 func TestMarkProviderRateLimitedDefaultsToOneMinute(t *testing.T) {
 	a := &App{}
-	a.MarkProviderRateLimited("tok", time.Time{})
-	w := a.ProviderRateLimitWait("tok")
+	a.rateLimits().Mark("tok", time.Time{})
+	w := a.rateLimits().Wait("tok")
 	if w <= 55*time.Second || w > 61*time.Second {
 		t.Fatalf("default wait = %v, want ~1min", w)
 	}
@@ -636,7 +647,7 @@ func TestDecorateRateLimitError(t *testing.T) {
 	if !strings.Contains(err.Error(), "rate-limited") || !strings.Contains(err.Error(), "try again") {
 		t.Fatalf("friendly message missing: %q", err.Error())
 	}
-	if w := a.ProviderRateLimitWait("tok"); w <= 0 {
+	if w := a.rateLimits().Wait("tok"); w <= 0 {
 		t.Fatalf("rate-limit window not recorded, wait=%v", w)
 	}
 }
@@ -649,7 +660,7 @@ func TestDecorateRateLimitErrorNon429Untouched(t *testing.T) {
 	if !errors.Is(err, inner) {
 		t.Fatalf("non-429 error must pass through, got %v", err)
 	}
-	if w := a.ProviderRateLimitWait("tok"); w != 0 {
+	if w := a.rateLimits().Wait("tok"); w != 0 {
 		t.Fatalf("non-429 must not record window, wait=%v", w)
 	}
 }
@@ -672,7 +683,7 @@ func TestDecorateRateLimitErrorTPMMessage(t *testing.T) {
 	if !strings.Contains(msg, "tokens") || !strings.Contains(msg, "200000") || !strings.Contains(msg, "333331") {
 		t.Fatalf("TPM message must name the token numbers: %q", msg)
 	}
-	if w := a.ProviderRateLimitWait("tok"); w <= 0 {
+	if w := a.rateLimits().Wait("tok"); w <= 0 {
 		t.Fatalf("TPM 429 must still record the window, wait=%v", w)
 	}
 }
@@ -1389,7 +1400,7 @@ func TestCatalogProviderHintUsesGatewayNamespace(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := catalogProviderHint(tt.provider); got != tt.want {
+			if got := provider.CatalogProviderHint(tt.provider); got != tt.want {
 				t.Fatalf("catalogProviderHint() = %q, want %q", got, tt.want)
 			}
 		})
@@ -1416,7 +1427,7 @@ func TestEnrichDoesNotChangeKind(t *testing.T) {
 			{ID: "deepseek/deepseek-v4-flash", Kind: domain.ModelKindChat},
 		},
 	}
-	app.enrichProviderModelsAtRead(p)
+	app.providerService().EnrichModelsAtRead(p)
 	if p.Models[0].Kind != domain.ModelKindChat {
 		t.Fatalf("catalog must not reclassify: got kind %q", p.Models[0].Kind)
 	}
@@ -1459,11 +1470,12 @@ func (s *recordingCatalogStub) Lookup(providerHint, modelID string) *modelcatalo
 // --- from provider_retry_test.go ---
 
 func TestProviderRetryDelayHonorsRetryAfter(t *testing.T) {
-	delay, retryable := providerRetryDelay(&domain.ProviderError{
+	delay, retryable := provider.RetryDelay(&domain.ProviderError{
 		StatusCode: 429,
 		RetryAfter: 3 * time.Second,
 		Err:        errors.New("rate limited"),
 	}, 1)
+
 	if !retryable {
 		t.Fatal("rate limit must be retryable")
 	}
@@ -1494,7 +1506,7 @@ func TestIsRetryableProviderError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isRetryableProviderError(tt.err); got != tt.retryable {
+			if got := provider.IsRetryableError(tt.err); got != tt.retryable {
 				t.Fatalf("isRetryableProviderError(%v) = %t, want %t", tt.err, got, tt.retryable)
 			}
 		})
@@ -1506,11 +1518,12 @@ func TestIsRetryableProviderError(t *testing.T) {
 // an 81-hour rate-limit reset) is NOT retried — the turn should fail fast so
 // the user sees the error instead of waiting hours inside a retry sleep.
 func TestProviderRetryDelayRejectsLongRetryAfter(t *testing.T) {
-	delay, retryable := providerRetryDelay(&domain.ProviderError{
+	delay, retryable := provider.RetryDelay(&domain.ProviderError{
 		StatusCode: 429,
 		RetryAfter: 81 * time.Hour,
 		Err:        errors.New("rate limited (reset after 81h 38m 41s)"),
 	}, 1)
+
 	if retryable {
 		t.Fatalf("expected retryable=false for RetryAfter=81h, got delay=%s", delay)
 	}
@@ -1522,11 +1535,12 @@ func TestProviderRetryDelayRejectsLongRetryAfter(t *testing.T) {
 // TestProviderRetryDelayAcceptsShortRetryAfter verifies that a 429 with a
 // Retry-After within the cutoff is still retried with the provider's delay.
 func TestProviderRetryDelayAcceptsShortRetryAfter(t *testing.T) {
-	delay, retryable := providerRetryDelay(&domain.ProviderError{
+	delay, retryable := provider.RetryDelay(&domain.ProviderError{
 		StatusCode: 429,
 		RetryAfter: 30 * time.Second,
 		Err:        errors.New("rate limited"),
 	}, 1)
+
 	if !retryable {
 		t.Fatal("expected retryable=true for RetryAfter=30s (within cutoff)")
 	}
@@ -1539,21 +1553,23 @@ func TestProviderRetryDelayAcceptsShortRetryAfter(t *testing.T) {
 // exactly at the cutoff is retryable, just above is not.
 func TestProviderRetryDelayAtCutoffBoundary(t *testing.T) {
 	// Exactly at cutoff — retryable
-	_, retryable := providerRetryDelay(&domain.ProviderError{
+	_, retryable := provider.RetryDelay(&domain.ProviderError{
 		StatusCode: 429,
 		RetryAfter: domain.RetryAfterCutoff,
 		Err:        errors.New("rate limited"),
 	}, 1)
+
 	if !retryable {
 		t.Fatalf("expected retryable=true at cutoff (%s)", domain.RetryAfterCutoff)
 	}
 
 	// Just above cutoff — not retryable
-	_, retryable = providerRetryDelay(&domain.ProviderError{
+	_, retryable = provider.RetryDelay(&domain.ProviderError{
 		StatusCode: 429,
 		RetryAfter: domain.RetryAfterCutoff + 1*time.Second,
 		Err:        errors.New("rate limited"),
 	}, 1)
+
 	if retryable {
 		t.Fatalf("expected retryable=false just above cutoff (%s+1s)", domain.RetryAfterCutoff)
 	}
@@ -1567,14 +1583,14 @@ func TestProviderRetryDelayAtCutoffBoundary(t *testing.T) {
 func TestDescribeProviderError(t *testing.T) {
 	t.Run("non-upstream passthrough", func(t *testing.T) {
 		src := errors.New("boom")
-		if got := describeProviderError(src); got != "boom" {
+		if got := provider.DescribeError(src); got != "boom" {
 			t.Fatalf("describeProviderError(non-upstream) = %q, want %q", got, "boom")
 		}
 	})
 
 	t.Run("bare temporary EOF", func(t *testing.T) {
 		err := &domain.ProviderError{Kind: domain.KindSSETransport, Temporary: true, Err: io.ErrUnexpectedEOF}
-		got := describeProviderError(err)
+		got := provider.DescribeError(err)
 		if !strings.Contains(got, "unexpected EOF") {
 			t.Fatalf("describeProviderError must include underlying message, got %q", got)
 		}
@@ -1593,7 +1609,7 @@ func TestDescribeProviderError(t *testing.T) {
 			RetryAfter: 30 * time.Second,
 			Err:        errors.New("rate limited"),
 		}
-		got := describeProviderError(err)
+		got := provider.DescribeError(err)
 		for _, want := range []string{"rate limited", "kind=http_status", "status=429", "retry_after=30s"} {
 			if !strings.Contains(got, want) {
 				t.Fatalf("describeProviderError missing %q in %q", want, got)
@@ -1607,7 +1623,7 @@ func TestDescribeProviderError(t *testing.T) {
 			StatusCode: 503,
 			Err:        errors.New("upstream down"),
 		}
-		got := describeProviderError(err)
+		got := provider.DescribeError(err)
 		if !strings.Contains(got, "status=503") {
 			t.Fatalf("describeProviderError missing status=503 in %q", got)
 		}
@@ -1670,14 +1686,14 @@ func TestShouldEmergencyCompact(t *testing.T) {
 		Err:        errors.New("provider returned HTTP 400: unsupported parameter"),
 	}
 
-	if !shouldEmergencyCompact(overflow, 200_000, 150_000) {
+	if !provider.ShouldEmergencyCompact(overflow, 200_000, 150_000) {
 		t.Error("expected emergency compact when estimate exceeds trigger")
 	}
 	// Even with a low heuristic estimate, an explicit context limit forces compaction.
-	if !shouldEmergencyCompact(overflow, 100_000, 150_000) {
+	if !provider.ShouldEmergencyCompact(overflow, 100_000, 150_000) {
 		t.Error("expected emergency compact with explicit context limit despite low estimate")
 	}
-	if shouldEmergencyCompact(notOverflow, 200_000, 150_000) {
+	if provider.ShouldEmergencyCompact(notOverflow, 200_000, 150_000) {
 		t.Error("unexpected emergency compact for non-overflow 400")
 	}
 }
@@ -1688,10 +1704,10 @@ func TestContextLimitFromError(t *testing.T) {
 		StatusCode: 400,
 		Err:        errors.New(`provider returned HTTP 400: Requested token count exceeds the model's maximum context length of 262144 tokens.`),
 	}
-	if got, ok := contextLimitFromError(overflow); !ok || got != 262144 {
+	if got, ok := provider.ContextLimit(overflow); !ok || got != 262144 {
 		t.Fatalf("contextLimitFromError = (%d, %t), want (262144, true)", got, ok)
 	}
-	if _, ok := contextLimitFromError(errors.New("plain error")); ok {
+	if _, ok := provider.ContextLimit(errors.New("plain error")); ok {
 		t.Fatal("contextLimitFromError should not match non-ProviderError")
 	}
 }
@@ -1702,7 +1718,7 @@ func TestIsRetryableProviderErrorRejectsPermanentFailure(t *testing.T) {
 		StatusCode: 503,
 		Err:        errors.New("provider returned HTTP 503: insufficient balance"),
 	}
-	if isRetryableProviderError(err) {
+	if provider.IsRetryableError(err) {
 		t.Fatal("503 with billing body must NOT be retryable")
 	}
 }
@@ -1749,14 +1765,14 @@ func TestIsTPMDominatedRequestApp(t *testing.T) {
 // oversized request, which fails again in every window.
 func TestProviderRetryDelayRejectsStructuralTPM(t *testing.T) {
 	err := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second, Err: errors.New(tpmOverflowBody)}
-	delay, retryable := providerRetryDelay(err, 1)
+	delay, retryable := provider.RetryDelay(err, 1)
 	if retryable {
 		t.Fatalf("structural TPM must not be retryable, got delay=%s", delay)
 	}
 	// The transient variant with the same status stays retryable.
 	transient := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
 		Err: errors.New("Request too large on tokens per min (TPM): Limit 200000, Requested 150000.")}
-	if _, retryable := providerRetryDelay(transient, 1); !retryable {
+	if _, retryable := provider.RetryDelay(transient, 1); !retryable {
 		t.Fatal("transient TPM with Retry-After must stay retryable")
 	}
 }
@@ -1770,17 +1786,17 @@ func TestProviderRetryDelayRejectsStructuralTPM(t *testing.T) {
 // request is congestion and must not force compaction.
 func TestShouldEmergencyCompactTPM(t *testing.T) {
 	structural := &domain.ProviderError{Kind: domain.KindSSETransport, Temporary: true, Err: errors.New(tpmOverflowBody)}
-	if !shouldEmergencyCompact(structural, 50_000, 150_000) {
+	if !provider.ShouldEmergencyCompact(structural, 50_000, 150_000) {
 		t.Fatal("structural TPM must force emergency compaction despite low estimate")
 	}
 	dominant := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
 		Err: errors.New("Request too large on tokens per min (TPM): Limit 500000, Used 100000, Requested 300000.")}
-	if !shouldEmergencyCompact(dominant, 50_000, 150_000) {
+	if !provider.ShouldEmergencyCompact(dominant, 50_000, 150_000) {
 		t.Fatal("dominant TPM (request > half the budget) must force emergency compaction")
 	}
 	modest := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
 		Err: errors.New("Request too large on tokens per min (TPM): Limit 500000, Used 400000, Requested 40000.")}
-	if shouldEmergencyCompact(modest, 50_000, 150_000) {
+	if provider.ShouldEmergencyCompact(modest, 50_000, 150_000) {
 		t.Fatal("modest TPM (congestion) must not force compaction")
 	}
 }
@@ -1802,7 +1818,7 @@ func TestReasoningReplayInjectsPlaceholderWhenReasoningEmpty(t *testing.T) {
 		},
 		ReasoningReplay: true,
 	}
-	cr := ToCoreRequest(req, domain.ProviderChat, true)
+	cr := provider.ToCoreRequest(req, domain.ProviderChat, true)
 	var assistant *core.Message
 	for i := range cr.Messages {
 		if cr.Messages[i].Role == core.RoleAssistant {
@@ -1838,7 +1854,7 @@ func TestReasoningReplayKeepsActualReasoning(t *testing.T) {
 		},
 		ReasoningReplay: true,
 	}
-	cr := ToCoreRequest(req, domain.ProviderChat, true)
+	cr := provider.ToCoreRequest(req, domain.ProviderChat, true)
 	for _, msg := range cr.Messages {
 		if msg.Role != core.RoleAssistant {
 			continue
@@ -1867,7 +1883,7 @@ func TestReasoningReplayOffDoesNotInjectPlaceholder(t *testing.T) {
 		},
 		ReasoningReplay: false,
 	}
-	cr := ToCoreRequest(req, domain.ProviderResponses, false)
+	cr := provider.ToCoreRequest(req, domain.ProviderResponses, false)
 	for _, msg := range cr.Messages {
 		if msg.Role != core.RoleAssistant {
 			continue
@@ -1901,7 +1917,7 @@ func TestReasoningSentEvenWhenReplayOff(t *testing.T) {
 		},
 		ReasoningReplay: false, // not in catalog whitelist
 	}
-	cr := ToCoreRequest(req, domain.ProviderChat, true)
+	cr := provider.ToCoreRequest(req, domain.ProviderChat, true)
 	var assistant *core.Message
 	for i := range cr.Messages {
 		if cr.Messages[i].Role == core.RoleAssistant {
@@ -1943,7 +1959,7 @@ func TestReasoningSentForRoutingModel(t *testing.T) {
 		},
 		ReasoningReplay: false,
 	}
-	cr := ToCoreRequest(req, domain.ProviderChat, true)
+	cr := provider.ToCoreRequest(req, domain.ProviderChat, true)
 	var assistant *core.Message
 	for i := range cr.Messages {
 		if cr.Messages[i].Role == core.RoleAssistant {
@@ -2050,7 +2066,7 @@ func TestAssistantBlockCombinations(t *testing.T) {
 				},
 				ReasoningReplay: false,
 			}
-			cr := ToCoreRequest(req, kind, true)
+			cr := provider.ToCoreRequest(req, kind, true)
 
 			var assistant *core.Message
 			for i := range cr.Messages {
@@ -2090,7 +2106,7 @@ func TestReasoningBlockAlwaysFirstForAnthropic(t *testing.T) {
 			{Role: "user", Content: "Thanks!"},
 		},
 	}
-	cr := ToCoreRequest(req, domain.ProviderMessages, false)
+	cr := provider.ToCoreRequest(req, domain.ProviderMessages, false)
 
 	var assistant *core.Message
 	for i := range cr.Messages {
@@ -2125,21 +2141,21 @@ func blockTypeName(b core.Block) string {
 
 func TestToCoreRequestCopiesToolChoice(t *testing.T) {
 	choice := map[string]any{"type": "function", "function": map[string]any{"name": "summary"}}
-	cr := ToCoreRequest(ChatRequest{Model: "m", ToolChoice: choice}, domain.ProviderChat, false)
+	cr := provider.ToCoreRequest(ChatRequest{Model: "m", ToolChoice: choice}, domain.ProviderChat, false)
 	if cr.ToolChoice == nil {
 		t.Fatal("ToolChoice dropped during conversion")
 	}
 }
 
 func TestToCoreRequestSetsCompactionItemsForResponses(t *testing.T) {
-	cr := ToCoreRequest(ChatRequest{Model: "gpt-5.2", CompactionBlob: `[{"type":"compaction"}]`}, domain.ProviderResponses, false)
+	cr := provider.ToCoreRequest(ChatRequest{Model: "gpt-5.2", CompactionBlob: `[{"type":"compaction"}]`}, domain.ProviderResponses, false)
 	if got := cr.ProviderOptions["compaction_items"]; got != `[{"type":"compaction"}]` {
 		t.Fatalf("compaction_items = %#v, want the blob", got)
 	}
 }
 
 func TestToCoreRequestOmitsCompactionItemsForChatKind(t *testing.T) {
-	cr := ToCoreRequest(ChatRequest{Model: "gpt-4o", CompactionBlob: `[{"type":"compaction"}]`}, domain.ProviderChat, false)
+	cr := provider.ToCoreRequest(ChatRequest{Model: "gpt-4o", CompactionBlob: `[{"type":"compaction"}]`}, domain.ProviderChat, false)
 	if _, ok := cr.ProviderOptions["compaction_items"]; ok {
 		t.Fatal("compaction_items must not be set for chat kind")
 	}
@@ -2152,7 +2168,7 @@ func TestToCoreRequestMessagesCacheControlUsesTTL(t *testing.T) {
 		PromptCaching: true,
 		PromptCache:   &PromptCachePolicy{Mode: "auto", TTL: "1h", Key: "pc_unused"},
 	}
-	cr := ToCoreRequest(req, domain.ProviderMessages, false)
+	cr := provider.ToCoreRequest(req, domain.ProviderMessages, false)
 	if len(cr.Messages) == 0 {
 		t.Fatal("expected system message")
 	}
@@ -2175,7 +2191,7 @@ func TestToCoreRequestDirectVanillaChatNeverPutsTTLOnSystemBreakpoint(t *testing
 		PromptCaching: true,
 		PromptCache:   &PromptCachePolicy{Mode: "auto", TTL: "1h", Key: "pc_oc"},
 	}
-	cr := ToCoreRequest(req, domain.ProviderChat, false)
+	cr := provider.ToCoreRequest(req, domain.ProviderChat, false)
 	tb, ok := cr.Messages[0].Blocks[0].(core.TextBlock)
 	if !ok {
 		t.Fatalf("system block = %#v", cr.Messages[0].Blocks)
@@ -2219,7 +2235,7 @@ func TestBuildPromptCachePolicyForContextOpenCodeIgnoresOpenRouterFlag(t *testin
 		OpenRouter: false,
 		BaseURL:    "https://opencode.ai/zen/go/v1",
 	}
-	policy := buildPromptCachePolicyForContext(settings, adapter, "deepseek-v4-flash", "conv_abc", promptCacheConversationPrefix)
+	policy := provider.BuildPromptCachePolicyForContext(settings, adapter, "deepseek-v4-flash", "conv_abc", promptCacheConversationPrefix)
 	if policy == nil || policy.TTL != "5m" {
 		t.Fatalf("opencode context TTL = %+v, want 5m (5m/1h enum, not 30m)", policy)
 	}
@@ -2233,7 +2249,7 @@ func TestToCoreRequestResponsesSendsPromptCacheOptions(t *testing.T) {
 		PromptCache:    &PromptCachePolicy{Mode: "auto", TTL: "30m", Key: "pc_abc"},
 		CompactionBlob: `[{"type":"compaction"}]`,
 	}
-	cr := ToCoreRequest(req, domain.ProviderResponses, false)
+	cr := provider.ToCoreRequest(req, domain.ProviderResponses, false)
 	if got := cr.ProviderOptions["prompt_cache_key"]; got != "pc_abc" {
 		t.Fatalf("prompt_cache_key = %#v", got)
 	}
@@ -2247,38 +2263,39 @@ func TestToCoreRequestResponsesSendsPromptCacheOptions(t *testing.T) {
 }
 
 func TestToCoreRequestMiniMaxChatSendsReasoningSplit(t *testing.T) {
-	cr := ToCoreRequest(ChatRequest{Model: "minimax-m3"}, domain.ProviderChat, false)
+	cr := provider.ToCoreRequest(ChatRequest{Model: "minimax-m3"}, domain.ProviderChat, false)
 	if cr.ProviderOptions["reasoning_split"] != true {
 		t.Fatalf("MiniMax Chat reasoning_split = %#v, want true", cr.ProviderOptions["reasoning_split"])
 	}
 }
 
 func TestToCoreRequestNonMiniMaxChatOmitsReasoningSplit(t *testing.T) {
-	cr := ToCoreRequest(ChatRequest{Model: "glm-5.3-flash"}, domain.ProviderChat, false)
+	cr := provider.ToCoreRequest(ChatRequest{Model: "glm-5.3-flash"}, domain.ProviderChat, false)
 	if _, ok := cr.ProviderOptions["reasoning_split"]; ok {
 		t.Fatalf("GLM Chat must not send reasoning_split, got %#v", cr.ProviderOptions)
 	}
 }
 
 func TestToCoreRequestOpenRouterMiniMaxOmitsReasoningSplit(t *testing.T) {
-	cr := ToCoreRequest(ChatRequest{Model: "minimax/minimax-m3:free"}, domain.ProviderChat, true)
+	cr := provider.ToCoreRequest(ChatRequest{Model: "minimax/minimax-m3:free"}, domain.ProviderChat, true)
 	if _, ok := cr.ProviderOptions["reasoning_split"]; ok {
 		t.Fatalf("OpenRouter MiniMax uses reasoning object, must not send reasoning_split: %#v", cr.ProviderOptions)
 	}
 }
 
 func TestToCoreRequestMiniMaxMessagesOmitsReasoningSplit(t *testing.T) {
-	cr := ToCoreRequest(ChatRequest{Model: "minimax-m3"}, domain.ProviderMessages, false)
+	cr := provider.ToCoreRequest(ChatRequest{Model: "minimax-m3"}, domain.ProviderMessages, false)
 	if _, ok := cr.ProviderOptions["reasoning_split"]; ok {
 		t.Fatalf("Messages MiniMax uses thinking blocks, must not send reasoning_split: %#v", cr.ProviderOptions)
 	}
 }
 
 func TestToCoreRequestMiniMaxChatHonorsStripReasoningSplit(t *testing.T) {
-	cr := ToCoreRequest(ChatRequest{
+	cr := provider.ToCoreRequest(ChatRequest{
 		Model:       "minimax-m3",
 		StripParams: []string{"reasoning_split"},
 	}, domain.ProviderChat, false)
+
 	if _, ok := cr.ProviderOptions["reasoning_split"]; ok {
 		t.Fatalf("stripped MiniMax Chat must omit reasoning_split, got %#v", cr.ProviderOptions)
 	}
@@ -2291,7 +2308,7 @@ func TestToCoreRequestChatSendsPromptCacheKey(t *testing.T) {
 		PromptCaching: true,
 		PromptCache:   &PromptCachePolicy{Mode: "auto", TTL: "30m", Key: "pc_chat"},
 	}
-	cr := ToCoreRequest(req, domain.ProviderChat, false)
+	cr := provider.ToCoreRequest(req, domain.ProviderChat, false)
 	if got := cr.ProviderOptions["prompt_cache_key"]; got != "pc_chat" {
 		t.Fatalf("chat prompt_cache_key = %#v", got)
 	}
@@ -2308,7 +2325,7 @@ func TestToCoreRequestOpenRouterChatSendsPromptCacheKeyAndSessionID(t *testing.T
 		PromptCaching: true,
 		PromptCache:   &PromptCachePolicy{Mode: "auto", TTL: "1h", Key: "nusashell_cv_0123456789012345678"},
 	}
-	cr := ToCoreRequest(req, domain.ProviderChat, true)
+	cr := provider.ToCoreRequest(req, domain.ProviderChat, true)
 	if got := cr.ProviderOptions["prompt_cache_key"]; got != req.PromptCache.Key {
 		t.Fatalf("OpenRouter chat prompt_cache_key = %#v, want %q", got, req.PromptCache.Key)
 	}
@@ -2325,11 +2342,12 @@ func TestToCoreRequestOpenRouterDelegatedKindsCarrySessionID(t *testing.T) {
 	for _, kind := range []domain.ProviderKind{domain.ProviderMessages, domain.ProviderResponses} {
 		t.Run(string(kind), func(t *testing.T) {
 			key := "nusashell_bg_0123456789012345678"
-			cr := ToCoreRequest(ChatRequest{
+			cr := provider.ToCoreRequest(ChatRequest{
 				Model:         "model",
 				PromptCaching: true,
 				PromptCache:   &PromptCachePolicy{Mode: "auto", Key: key},
 			}, kind, true)
+
 			if got := cr.ProviderOptions["session_id"]; got != key {
 				t.Fatalf("session_id = %#v, want %q", got, key)
 			}
@@ -2351,7 +2369,7 @@ func TestToCoreRequestProviderRouteInjection(t *testing.T) {
 	}
 
 	// 1) OpenRouter chat + route → provider object with strict pinning.
-	cr := ToCoreRequest(base, domain.ProviderChat, true)
+	cr := provider.ToCoreRequest(base, domain.ProviderChat, true)
 	raw, ok := cr.ProviderOptions["provider"]
 	if !ok {
 		t.Fatal("provider option missing for openrouter+route")
@@ -2371,7 +2389,7 @@ func TestToCoreRequestProviderRouteInjection(t *testing.T) {
 	// 2) OpenRouter + empty route → no provider field (auto/load balance).
 	auto := base
 	auto.ProviderRoute = ""
-	cr = ToCoreRequest(auto, domain.ProviderChat, true)
+	cr = provider.ToCoreRequest(auto, domain.ProviderChat, true)
 	if _, ok := cr.ProviderOptions["provider"]; ok {
 		t.Fatal("provider option must be omitted for auto routing")
 	}
@@ -2379,20 +2397,20 @@ func TestToCoreRequestProviderRouteInjection(t *testing.T) {
 	// 3) OpenRouter + whitespace route → treated as auto.
 	ws := base
 	ws.ProviderRoute = "   "
-	cr = ToCoreRequest(ws, domain.ProviderChat, true)
+	cr = provider.ToCoreRequest(ws, domain.ProviderChat, true)
 	if _, ok := cr.ProviderOptions["provider"]; ok {
 		t.Fatal("provider option must be omitted for whitespace route")
 	}
 
 	// 4) Non-aggregator provider (Anthropic messages) + route → never sent.
-	cr = ToCoreRequest(base, domain.ProviderMessages, false)
+	cr = provider.ToCoreRequest(base, domain.ProviderMessages, false)
 	if _, ok := cr.ProviderOptions["provider"]; ok {
 		t.Fatal("provider option must not reach direct providers")
 	}
 
 	// 5) Aggregator but non-chat wire (messages via OpenRouter) → the
 	// provider object is a chat-completions extension; keep it clean.
-	cr = ToCoreRequest(base, domain.ProviderMessages, true)
+	cr = provider.ToCoreRequest(base, domain.ProviderMessages, true)
 	if _, ok := cr.ProviderOptions["provider"]; ok {
 		t.Fatal("provider option must not be injected for non-chat kinds")
 	}

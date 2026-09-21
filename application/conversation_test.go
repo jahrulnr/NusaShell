@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"nusashell/application/conversation"
 	"nusashell/contracts"
 	"nusashell/domain"
 	"os"
@@ -200,7 +201,7 @@ func TestHandleConversationsDeleteClearsTodos(t *testing.T) {
 
 	app := &App{Conversations: convStore, Todos: todoPort, Logs: &fakeLogStore{}, Bus: NewBus()}
 
-	resp, rpcErr := app.handleConversationsDelete(contracts.ConversationIDRequest{ID: "conv_1"})
+	resp, rpcErr := app.conversationService().HandleDelete(contracts.ConversationIDRequest{ID: "conv_1"})
 	if rpcErr != nil {
 		t.Fatalf("unexpected rpc error: %v", rpcErr)
 	}
@@ -223,7 +224,7 @@ func TestHandleConversationsDeleteMissingConversation(t *testing.T) {
 
 	app := &App{Conversations: convStore, Todos: todoPort, Logs: &fakeLogStore{}, Bus: NewBus()}
 
-	_, rpcErr := app.handleConversationsDelete(contracts.ConversationIDRequest{ID: "nope"})
+	_, rpcErr := app.conversationService().HandleDelete(contracts.ConversationIDRequest{ID: "nope"})
 	if rpcErr == nil {
 		t.Fatal("expected rpc error for missing conversation")
 	}
@@ -240,7 +241,7 @@ func TestHandleConversationsDeleteNilTodos(t *testing.T) {
 
 	app := &App{Conversations: convStore, Todos: nil, Logs: &fakeLogStore{}, Bus: NewBus()}
 
-	resp, rpcErr := app.handleConversationsDelete(contracts.ConversationIDRequest{ID: "conv_1"})
+	resp, rpcErr := app.conversationService().HandleDelete(contracts.ConversationIDRequest{ID: "conv_1"})
 	if rpcErr != nil {
 		t.Fatalf("unexpected rpc error with nil Todos: %v", rpcErr)
 	}
@@ -258,7 +259,7 @@ func TestHandleConversationsDeleteCancelsActiveRun(t *testing.T) {
 	app := NewApp(Deps{Conversations: convStore, Logs: &fakeLogStore{}, Bus: NewBus()})
 	app.runs["run_1"] = &TurnRun{ID: "run_1", ConversationID: "conv_1", Ctx: ctx, Cancel: cancel}
 
-	if _, rpcErr := app.handleConversationsDelete(contracts.ConversationIDRequest{ID: "conv_1"}); rpcErr != nil {
+	if _, rpcErr := app.conversationService().HandleDelete(contracts.ConversationIDRequest{ID: "conv_1"}); rpcErr != nil {
 		t.Fatalf("delete: %v", rpcErr)
 	}
 	if ctx.Err() == nil {
@@ -350,7 +351,7 @@ func TestHandleConversationsDeleteCascadesSidecars(t *testing.T) {
 		Bus:           NewBus(),
 	}
 
-	if _, rpcErr := app.handleConversationsDelete(contracts.ConversationIDRequest{ID: "conv_1"}); rpcErr != nil {
+	if _, rpcErr := app.conversationService().HandleDelete(contracts.ConversationIDRequest{ID: "conv_1"}); rpcErr != nil {
 		t.Fatalf("delete: %v", rpcErr)
 	}
 	if _, err := convStore.Get("conv_1"); err == nil {
@@ -369,7 +370,7 @@ func TestHandleConversationsDeleteNilPortsStillSucceeds(t *testing.T) {
 		"conv_1": {ID: "conv_1", Title: "Test"},
 	}}
 	app := &App{Conversations: convStore, Logs: &fakeLogStore{}, Bus: NewBus()}
-	if _, rpcErr := app.handleConversationsDelete(contracts.ConversationIDRequest{ID: "conv_1"}); rpcErr != nil {
+	if _, rpcErr := app.conversationService().HandleDelete(contracts.ConversationIDRequest{ID: "conv_1"}); rpcErr != nil {
 		t.Fatalf("delete: %v", rpcErr)
 	}
 	if _, err := convStore.Get("conv_1"); err == nil {
@@ -393,7 +394,7 @@ func TestPersistAcpRunSkipsWhenConversationGone(t *testing.T) {
 		TaskState:      domain.TaskState[domain.AcpRunStatus]{ID: "run_x", Status: domain.AcpRunCompleted},
 		ConversationID: "conv_gone",
 	}
-	if path := app.persistAcpRun(run); path != "" {
+	if path := app.subagentService().PersistRun(run); path != "" {
 		t.Errorf("persistAcpRun after delete must return empty path, got %q", path)
 	}
 	if len(storage.saved) != 0 {
@@ -416,7 +417,7 @@ func TestPersistAcpRunStillSavesWhenConversationExists(t *testing.T) {
 		TaskState:      domain.TaskState[domain.AcpRunStatus]{ID: "run_y", Status: domain.AcpRunCompleted},
 		ConversationID: "conv_live",
 	}
-	if path := app.persistAcpRun(run); path == "" {
+	if path := app.subagentService().PersistRun(run); path == "" {
 		t.Errorf("persistAcpRun must produce a path when conversation exists, got empty")
 	}
 	if len(storage.saved) != 1 {
@@ -435,10 +436,11 @@ func TestHandleConversationsSetWorkspaceRejectsRelativePath(t *testing.T) {
 		DirectoryBrowser: fakeDirBrowser{},
 	}
 
-	_, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{
+	_, rpcErr := app.conversationService().HandleSetWorkspace(contracts.ConversationSetWorkspaceRequest{
 		ID:   "conv_1",
 		Path: filepath.Join("rel", "workspace"),
 	})
+
 	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
 		t.Fatalf("want VALIDATION_ERROR for a relative workspace, got %+v", rpcErr)
 	}
@@ -451,9 +453,10 @@ func TestHandleConversationsSetProviderPersistsPerConversation(t *testing.T) {
 	}}
 	app := &App{Conversations: convStore, Logs: &fakeLogStore{}, Bus: NewBus()}
 
-	resp, rpcErr := app.handleConversationsSetProvider(contracts.ConversationSetProviderRequest{
+	resp, rpcErr := app.conversationService().HandleSetProvider(contracts.ConversationSetProviderRequest{
 		ID: "codex-room", ProviderRoute: "account-plus",
 	})
+
 	if rpcErr != nil {
 		t.Fatalf("set provider: %v", rpcErr)
 	}
@@ -470,7 +473,7 @@ func TestHandleConversationsSetProviderPersistsPerConversation(t *testing.T) {
 		t.Fatalf("other room route leaked: %q, err=%v", other.ProviderRoute, err)
 	}
 
-	if _, rpcErr := app.handleConversationsSetProvider(contracts.ConversationSetProviderRequest{ID: "codex-room"}); rpcErr != nil {
+	if _, rpcErr := app.conversationService().HandleSetProvider(contracts.ConversationSetProviderRequest{ID: "codex-room"}); rpcErr != nil {
 		t.Fatalf("clear provider: %v", rpcErr)
 	}
 	saved, _ = convStore.Get("codex-room")
@@ -491,10 +494,11 @@ func TestHandleConversationsSetWorkspaceAcceptsAbsolutePath(t *testing.T) {
 		DirectoryBrowser: fakeDirBrowser{},
 	}
 
-	resp, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{
+	resp, rpcErr := app.conversationService().HandleSetWorkspace(contracts.ConversationSetWorkspaceRequest{
 		ID:   "conv_1",
 		Path: workspace,
 	})
+
 	if rpcErr != nil {
 		t.Fatalf("absolute workspace rejected: %v", rpcErr)
 	}
@@ -541,10 +545,11 @@ func TestHandleConversationsSetWorkspaceSerializesTurnSave(t *testing.T) {
 
 	setDone := make(chan *contracts.RPCError, 1)
 	go func() {
-		_, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{
+		_, rpcErr := app.conversationService().HandleSetWorkspace(contracts.ConversationSetWorkspaceRequest{
 			ID:   "conv_1",
 			Path: workspace,
 		})
+
 		setDone <- rpcErr
 	}()
 	<-ensureStarted
@@ -624,7 +629,7 @@ func TestHandleConversationsSetWorkspaceEmptyRoomRejectsDraft(t *testing.T) {
 		Toolbox:          &recordingToolbox{},
 		DirectoryBrowser: fakeDirBrowser{},
 	}
-	if _, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{
+	if _, rpcErr := app.conversationService().HandleSetWorkspace(contracts.ConversationSetWorkspaceRequest{
 		ID:   "conv_1",
 		Path: workspace,
 	}); rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
@@ -668,7 +673,7 @@ func TestHandleConversationsSetWorkspaceKeepsFormedHydration(t *testing.T) {
 		Bus:              NewBus(),
 		DirectoryBrowser: fakeDirBrowser{},
 	}
-	if _, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{
+	if _, rpcErr := app.conversationService().HandleSetWorkspace(contracts.ConversationSetWorkspaceRequest{
 		ID:   "conv_1",
 		Path: newWS,
 	}); rpcErr != nil {
@@ -696,7 +701,7 @@ func TestHandleConversationsSetWorkspaceKeepsFormedHydration(t *testing.T) {
 }
 
 func TestMsgDTOIncludesToolOutputAttachmentsWithoutDataURL(t *testing.T) {
-	dto := msgDTO(domain.Message{
+	dto := conversation.MsgDTO(domain.Message{
 		ID:        "m1",
 		Role:      domain.RoleAssistant,
 		Content:   "done",
@@ -709,6 +714,7 @@ func TestMsgDTOIncludesToolOutputAttachmentsWithoutDataURL(t *testing.T) {
 			}},
 		}},
 	})
+
 	if len(dto.ToolCalls) != 1 || len(dto.ToolCalls[0].OutputAttachments) != 1 {
 		t.Fatalf("dto = %+v", dto.ToolCalls)
 	}
@@ -720,7 +726,7 @@ func TestMsgDTOIncludesToolOutputAttachmentsWithoutDataURL(t *testing.T) {
 
 func TestMsgDTOSeparatesRawToolOutputFromFrontendPresentation(t *testing.T) {
 	rawOutput := "---\ncount: 2\ntotal: 12K\n---\n-rw-r--r-- 4K Aug 30 15:36 file-a\n-rw-r--r-- 8K Aug 30 15:38 file with spaces-b"
-	dto := msgDTO(domain.Message{
+	dto := conversation.MsgDTO(domain.Message{
 		ID:        "m1",
 		Role:      domain.RoleAssistant,
 		CreatedAt: time.Time{},
@@ -729,6 +735,7 @@ func TestMsgDTOSeparatesRawToolOutputFromFrontendPresentation(t *testing.T) {
 			Status: domain.ToolOK, Output: rawOutput,
 		}},
 	})
+
 	if len(dto.ToolCalls) != 1 {
 		t.Fatalf("tool calls = %+v", dto.ToolCalls)
 	}
@@ -949,7 +956,7 @@ func TestHandleWorkspaceListDirsReturnsResolvedListing(t *testing.T) {
 		}},
 	}
 
-	resp, rpcErr := app.handleWorkspaceListDirs(contracts.WorkspaceListDirsRequest{Path: ""})
+	resp, rpcErr := app.conversationService().HandleWorkspaceListDirs(contracts.WorkspaceListDirsRequest{Path: ""})
 	if rpcErr != nil {
 		t.Fatalf("list dirs: %v", rpcErr)
 	}
@@ -971,7 +978,7 @@ func TestHandleWorkspaceListDirsReturnsResolvedListing(t *testing.T) {
 func TestHandleWorkspaceListDirsRejectsRelativePath(t *testing.T) {
 	app := &App{Logs: &fakeLogStore{}, Bus: NewBus(), DirectoryBrowser: fakeDirBrowser{}}
 
-	_, rpcErr := app.handleWorkspaceListDirs(contracts.WorkspaceListDirsRequest{Path: "relative/dir"})
+	_, rpcErr := app.conversationService().HandleWorkspaceListDirs(contracts.WorkspaceListDirsRequest{Path: "relative/dir"})
 	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
 		t.Fatalf("want VALIDATION_ERROR for relative path, got %+v", rpcErr)
 	}
@@ -986,7 +993,7 @@ func TestHandleWorkspaceListDirsMapsNotExistToValidation(t *testing.T) {
 		}},
 	}
 
-	_, rpcErr := app.handleWorkspaceListDirs(contracts.WorkspaceListDirsRequest{Path: "/gone"})
+	_, rpcErr := app.conversationService().HandleWorkspaceListDirs(contracts.WorkspaceListDirsRequest{Path: "/gone"})
 	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
 		t.Fatalf("want VALIDATION_ERROR for missing dir, got %+v", rpcErr)
 	}
@@ -1001,7 +1008,7 @@ func TestHandleWorkspaceListDirsMapsPermissionToValidation(t *testing.T) {
 		}},
 	}
 
-	_, rpcErr := app.handleWorkspaceListDirs(contracts.WorkspaceListDirsRequest{Path: "/root"})
+	_, rpcErr := app.conversationService().HandleWorkspaceListDirs(contracts.WorkspaceListDirsRequest{Path: "/root"})
 	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
 		t.Fatalf("want VALIDATION_ERROR for unreadable dir, got %+v", rpcErr)
 	}
@@ -1010,7 +1017,7 @@ func TestHandleWorkspaceListDirsMapsPermissionToValidation(t *testing.T) {
 func TestHandleWorkspaceListDirsNilBrowserUnavailable(t *testing.T) {
 	app := &App{Logs: &fakeLogStore{}, Bus: NewBus()}
 
-	_, rpcErr := app.handleWorkspaceListDirs(contracts.WorkspaceListDirsRequest{Path: "/x"})
+	_, rpcErr := app.conversationService().HandleWorkspaceListDirs(contracts.WorkspaceListDirsRequest{Path: "/x"})
 	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
 		t.Fatalf("want VALIDATION_ERROR when browser unavailable, got %+v", rpcErr)
 	}
@@ -1026,7 +1033,7 @@ func TestHandleWorkspaceListDirsCoercesNilEntriesToEmpty(t *testing.T) {
 		}},
 	}
 
-	resp, rpcErr := app.handleWorkspaceListDirs(contracts.WorkspaceListDirsRequest{Path: path})
+	resp, rpcErr := app.conversationService().HandleWorkspaceListDirs(contracts.WorkspaceListDirsRequest{Path: path})
 	if rpcErr != nil {
 		t.Fatalf("list dirs: %v", rpcErr)
 	}
@@ -1078,7 +1085,7 @@ func workspaceSwitchFixture(oldWS string) *domain.Conversation {
 
 func setWorkspace(t *testing.T, app *App, id, path string) *domain.Conversation {
 	t.Helper()
-	if _, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{ID: id, Path: path}); rpcErr != nil {
+	if _, rpcErr := app.conversationService().HandleSetWorkspace(contracts.ConversationSetWorkspaceRequest{ID: id, Path: path}); rpcErr != nil {
 		t.Fatalf("set workspace: %v", rpcErr)
 	}
 	saved, err := app.Conversations.Get(id)
@@ -1133,7 +1140,7 @@ func TestHandleConversationsPickWorkspaceEmptyRoomRejectsDraft(t *testing.T) {
 		Bus:              NewBus(),
 		DirectoryBrowser: fakeDirBrowser{},
 	}
-	if _, rpcErr := app.handleConversationsSetWorkspace(contracts.ConversationSetWorkspaceRequest{ID: "conv_1", Path: t.TempDir()}); rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
+	if _, rpcErr := app.conversationService().HandleSetWorkspace(contracts.ConversationSetWorkspaceRequest{ID: "conv_1", Path: t.TempDir()}); rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
 		t.Fatalf("empty room workspace set = %+v, want validation error", rpcErr)
 	}
 }
@@ -1159,7 +1166,7 @@ func TestHandleConversationsBlobAnchoredEpochStaysOperable(t *testing.T) {
 		DirectoryBrowser: fakeDirBrowser{},
 	}
 
-	listed, rpcErr := app.handleConversationsList()
+	listed, rpcErr := app.conversationService().HandleList()
 	if rpcErr != nil {
 		t.Fatalf("conversations list: %+v", rpcErr)
 	}
@@ -1168,7 +1175,7 @@ func TestHandleConversationsBlobAnchoredEpochStaysOperable(t *testing.T) {
 		t.Fatalf("list = %+v, want the blob-anchored room", listed)
 	}
 
-	if _, rpcErr := app.handleConversationsRename(contracts.ConversationRenameRequest{ID: "conv_blob", Title: "Renamed"}); rpcErr != nil {
+	if _, rpcErr := app.conversationService().HandleRename(contracts.ConversationRenameRequest{ID: "conv_blob", Title: "Renamed"}); rpcErr != nil {
 		t.Fatalf("rename on a blob-anchored room = %+v, want success", rpcErr)
 	}
 	if store.convs["conv_blob"].Title != "Renamed" {
@@ -1248,7 +1255,7 @@ func TestAddTurnMessagesInjectsWorkspaceSwitchNotice(t *testing.T) {
 	if notice.Role != domain.RoleAssistant {
 		t.Fatalf("notice role = %s, want assistant", notice.Role)
 	}
-	if dto := msgDTO(notice); dto.ID == "" || len(dto.ToolCalls) == 0 {
+	if dto := conversation.MsgDTO(notice); dto.ID == "" || len(dto.ToolCalls) == 0 {
 		t.Fatal("notice must survive msgDTO so the UI and JSON dump show it")
 	}
 	if saved.Messages[userIdx+2].ID != "m_asst" {

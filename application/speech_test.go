@@ -80,7 +80,7 @@ func TestTTSInstallStatusReturnsSnapshot(t *testing.T) {
 		BinaryInstalled: true,
 		Voices:          []contracts.TTSVoiceDTO{{ID: "id_ID-news_tts-medium", Installed: true}},
 	}}
-	out, rpcErr := ttsInstallApp(inst).handleTTSSettingsInstallStatus()
+	out, rpcErr := ttsInstallApp(inst).mediaService().HandleTTSInstallStatus()
 	if rpcErr != nil {
 		t.Fatalf("rpc error: %v", rpcErr)
 	}
@@ -93,7 +93,7 @@ func TestTTSInstallStatusReturnsSnapshot(t *testing.T) {
 func TestTTSInstallStartRejectsUnknownVoiceImmediately(t *testing.T) {
 	inst := &fakeTTSInstaller{}
 	app := ttsInstallApp(inst)
-	_, rpcErr := app.handleTTSSettingsInstallStart(contracts.TTSInstallStartRequest{VoiceID: "nope"})
+	_, rpcErr := app.mediaService().HandleTTSInstallStart(contracts.TTSInstallStartRequest{VoiceID: "nope"})
 	if rpcErr == nil || !strings.Contains(rpcErr.Message, "unknown voice") {
 		t.Fatalf("expected unknown-voice validation error, got %v", rpcErr)
 	}
@@ -135,7 +135,7 @@ func TestTTSInstallDoneEventCarriesVoiceID(t *testing.T) {
 	app := ttsInstallApp(inst)
 	events := collectEvents(t, app)
 
-	if _, rpcErr := app.handleTTSSettingsInstallStart(contracts.TTSInstallStartRequest{VoiceID: "id_ID-news_tts-medium"}); rpcErr != nil {
+	if _, rpcErr := app.mediaService().HandleTTSInstallStart(contracts.TTSInstallStartRequest{VoiceID: "id_ID-news_tts-medium"}); rpcErr != nil {
 		t.Fatalf("start: %v", rpcErr)
 	}
 	var done contracts.Event
@@ -148,7 +148,7 @@ func TestTTSInstallDoneEventCarriesVoiceID(t *testing.T) {
 	if err := json.Unmarshal(payload, &prog); err != nil || prog.VoiceID != "id_ID-news_tts-medium" {
 		t.Fatalf("done payload missing voice id: %s (%v)", payload, err)
 	}
-	waitForCondition(t, func() bool { return !app.ttsInstallRunning() }, "run flag never cleared")
+	waitForCondition(t, func() bool { return !app.mediaService().TTSInstallRunning() }, "run flag never cleared")
 }
 
 func TestTTSInstallErrorSurfacesOnBus(t *testing.T) {
@@ -156,7 +156,7 @@ func TestTTSInstallErrorSurfacesOnBus(t *testing.T) {
 	app := ttsInstallApp(inst)
 	events := collectEvents(t, app)
 
-	if _, rpcErr := app.handleTTSSettingsInstallStart(contracts.TTSInstallStartRequest{VoiceID: "id_ID-news_tts-medium"}); rpcErr != nil {
+	if _, rpcErr := app.mediaService().HandleTTSInstallStart(contracts.TTSInstallStartRequest{VoiceID: "id_ID-news_tts-medium"}); rpcErr != nil {
 		t.Fatalf("start: %v", rpcErr)
 	}
 	ev := waitForEvent(t, events, contracts.EventTTSInstallError)
@@ -169,19 +169,19 @@ func TestTTSInstallSingleFlight(t *testing.T) {
 	inst := &fakeTTSInstaller{block: make(chan struct{})}
 	app := ttsInstallApp(inst)
 
-	first, _ := app.handleTTSSettingsInstallStart(contracts.TTSInstallStartRequest{VoiceID: "en_US-lessac-high"})
+	first, _ := app.mediaService().HandleTTSInstallStart(contracts.TTSInstallStartRequest{VoiceID: "en_US-lessac-high"})
 	if !(first.(contracts.TTSInstallStartResult)).Started {
 		t.Fatal("first start must begin the install")
 	}
 	waitForCondition(t, func() bool { return inst.startedCount() == 1 }, "first install never started")
 
-	second, _ := app.handleTTSSettingsInstallStart(contracts.TTSInstallStartRequest{VoiceID: "en_US-lessac-high"})
+	second, _ := app.mediaService().HandleTTSInstallStart(contracts.TTSInstallStartRequest{VoiceID: "en_US-lessac-high"})
 	res := second.(contracts.TTSInstallStartResult)
 	if res.Started || !res.Running {
 		t.Errorf("second concurrent start must report running=true started=false, got %+v", res)
 	}
 	close(inst.block)
-	waitForCondition(t, func() bool { return !app.ttsInstallRunning() }, "install never finished")
+	waitForCondition(t, func() bool { return !app.mediaService().TTSInstallRunning() }, "install never finished")
 }
 
 // --- from stt_install_test.go ---
@@ -244,7 +244,7 @@ func TestSTTInstallStatusReturnsSnapshot(t *testing.T) {
 		EngineInstalled: true,
 		Models:          []contracts.STTModelDTO{{ID: "ggml-small", Installed: true, Default: true}},
 	}}
-	out, rpcErr := sttInstallApp(inst).handleSTTSettingsInstallStatus()
+	out, rpcErr := sttInstallApp(inst).mediaService().HandleSTTInstallStatus()
 	if rpcErr != nil {
 		t.Fatalf("rpc error: %v", rpcErr)
 	}
@@ -255,7 +255,7 @@ func TestSTTInstallStatusReturnsSnapshot(t *testing.T) {
 }
 
 func TestSTTInstallStatusNilInstallerFails(t *testing.T) {
-	_, rpcErr := (&App{Logs: &fakeLogStore{}}).handleSTTSettingsInstallStatus()
+	_, rpcErr := (&App{Logs: &fakeLogStore{}}).mediaService().HandleSTTInstallStatus()
 	if rpcErr == nil || !strings.Contains(rpcErr.Message, "unavailable") {
 		t.Fatalf("expected unavailable error, got %v", rpcErr)
 	}
@@ -265,11 +265,11 @@ func TestSTTInstallStartValidatesModel(t *testing.T) {
 	inst := &fakeSTTInstaller{}
 	app := sttInstallApp(inst)
 
-	if _, rpcErr := app.handleSTTSettingsInstallStart(contracts.STTInstallStartRequest{}); rpcErr == nil ||
+	if _, rpcErr := app.mediaService().HandleSTTInstallStart(contracts.STTInstallStartRequest{}); rpcErr == nil ||
 		!strings.Contains(rpcErr.Message, "model_id is required") {
 		t.Fatalf("expected empty-model validation, got %v", rpcErr)
 	}
-	if _, rpcErr := app.handleSTTSettingsInstallStart(contracts.STTInstallStartRequest{ModelID: "ggml-nope"}); rpcErr == nil ||
+	if _, rpcErr := app.mediaService().HandleSTTInstallStart(contracts.STTInstallStartRequest{ModelID: "ggml-nope"}); rpcErr == nil ||
 		!strings.Contains(rpcErr.Message, "unknown STT model") {
 		t.Fatalf("expected unknown-model validation, got %v", rpcErr)
 	}
@@ -283,7 +283,7 @@ func TestSTTInstallDoneEventCarriesModelID(t *testing.T) {
 	app := sttInstallApp(inst)
 	events := collectEvents(t, app)
 
-	if _, rpcErr := app.handleSTTSettingsInstallStart(contracts.STTInstallStartRequest{ModelID: "ggml-small"}); rpcErr != nil {
+	if _, rpcErr := app.mediaService().HandleSTTInstallStart(contracts.STTInstallStartRequest{ModelID: "ggml-small"}); rpcErr != nil {
 		t.Fatalf("start: %v", rpcErr)
 	}
 	done := waitForEvent(t, events, contracts.EventSTTInstallDone)
@@ -292,7 +292,7 @@ func TestSTTInstallDoneEventCarriesModelID(t *testing.T) {
 	if err := json.Unmarshal(raw, &prog); err != nil || prog.ModelID != "ggml-small" {
 		t.Fatalf("done payload missing model id: %s (%v)", raw, err)
 	}
-	waitForCondition(t, func() bool { return !app.sttInstallRunning() }, "install slot must release")
+	waitForCondition(t, func() bool { return !app.mediaService().STTInstallRunning() }, "install slot must release")
 }
 
 func TestSTTInstallErrorEventOnFailure(t *testing.T) {
@@ -300,7 +300,7 @@ func TestSTTInstallErrorEventOnFailure(t *testing.T) {
 	app := sttInstallApp(inst)
 	events := collectEvents(t, app)
 
-	if _, rpcErr := app.handleSTTSettingsInstallStart(contracts.STTInstallStartRequest{ModelID: "ggml-tiny"}); rpcErr != nil {
+	if _, rpcErr := app.mediaService().HandleSTTInstallStart(contracts.STTInstallStartRequest{ModelID: "ggml-tiny"}); rpcErr != nil {
 		t.Fatalf("start: %v", rpcErr)
 	}
 	errEv := waitForEvent(t, events, contracts.EventSTTInstallError)
@@ -312,54 +312,54 @@ func TestSTTInstallErrorEventOnFailure(t *testing.T) {
 	if !strings.Contains(prog.Message, "disk full") {
 		t.Errorf("error payload message = %q", prog.Message)
 	}
-	waitForCondition(t, func() bool { return !app.sttInstallRunning() }, "failed install must release the slot")
+	waitForCondition(t, func() bool { return !app.mediaService().STTInstallRunning() }, "failed install must release the slot")
 }
 
 func TestSTTInstallSingleFlight(t *testing.T) {
 	inst := &fakeSTTInstaller{block: make(chan struct{})}
 	app := sttInstallApp(inst)
 
-	res, rpcErr := app.handleSTTSettingsInstallStart(contracts.STTInstallStartRequest{ModelID: "ggml-small"})
+	res, rpcErr := app.mediaService().HandleSTTInstallStart(contracts.STTInstallStartRequest{ModelID: "ggml-small"})
 	if rpcErr != nil || !res.(contracts.STTInstallStartResult).Started {
 		t.Fatalf("first start: %v %v", res, rpcErr)
 	}
-	res2, _ := app.handleSTTSettingsInstallStart(contracts.STTInstallStartRequest{ModelID: "ggml-tiny"})
+	res2, _ := app.mediaService().HandleSTTInstallStart(contracts.STTInstallStartRequest{ModelID: "ggml-tiny"})
 	r2 := res2.(contracts.STTInstallStartResult)
 	if r2.Started || !r2.Running {
 		t.Errorf("second start during flight = %+v, want Started:false Running:true", r2)
 	}
 	close(inst.block)
-	waitForCondition(t, func() bool { return !app.sttInstallRunning() }, "slot release after unblock")
+	waitForCondition(t, func() bool { return !app.mediaService().STTInstallRunning() }, "slot release after unblock")
 }
 
 func TestSTTInstallCancelStopsAndReleases(t *testing.T) {
 	inst := &fakeSTTInstaller{block: make(chan struct{})}
 	app := sttInstallApp(inst)
 
-	if _, rpcErr := app.handleSTTSettingsInstallStart(contracts.STTInstallStartRequest{ModelID: "ggml-small"}); rpcErr != nil {
+	if _, rpcErr := app.mediaService().HandleSTTInstallStart(contracts.STTInstallStartRequest{ModelID: "ggml-small"}); rpcErr != nil {
 		t.Fatalf("start: %v", rpcErr)
 	}
-	out, rpcErr := app.handleSTTSettingsInstallCancel()
+	out, rpcErr := app.mediaService().HandleSTTInstallCancel()
 	if rpcErr != nil {
 		t.Fatalf("cancel: %v", rpcErr)
 	}
 	if res := out.(contracts.STTInstallStartResult); res.Running {
 		t.Errorf("cancel result = %+v, want Running:false", res)
 	}
-	waitForCondition(t, func() bool { return !app.sttInstallRunning() }, "cancel must release the slot")
+	waitForCondition(t, func() bool { return !app.mediaService().STTInstallRunning() }, "cancel must release the slot")
 
 	// Slot is free again: a fresh install can start and complete.
 	inst.block = nil
-	res, rpcErr := app.handleSTTSettingsInstallStart(contracts.STTInstallStartRequest{ModelID: "ggml-base"})
+	res, rpcErr := app.mediaService().HandleSTTInstallStart(contracts.STTInstallStartRequest{ModelID: "ggml-base"})
 	if rpcErr != nil || !res.(contracts.STTInstallStartResult).Started {
 		t.Fatalf("restart after cancel: %v %v", res, rpcErr)
 	}
-	waitForCondition(t, func() bool { return !app.sttInstallRunning() }, "second install must finish")
+	waitForCondition(t, func() bool { return !app.mediaService().STTInstallRunning() }, "second install must finish")
 }
 
 func TestSTTInstallCancelWithoutRunIsNoop(t *testing.T) {
 	app := sttInstallApp(&fakeSTTInstaller{})
-	out, rpcErr := app.handleSTTSettingsInstallCancel()
+	out, rpcErr := app.mediaService().HandleSTTInstallCancel()
 	if rpcErr != nil {
 		t.Fatalf("cancel noop: %v", rpcErr)
 	}
@@ -553,7 +553,7 @@ func TestHandleModelsListIncludesInstalledOfflineVoices(t *testing.T) {
 	}}
 	app := &App{Providers: &fakeProviderStore{items: map[string]*domain.Provider{}}, TTSInstaller: inst, Logs: &fakeLogStore{}}
 
-	res, rpcErr := app.handleModelsList()
+	res, rpcErr := app.providerService().HandleModelsList()
 	if rpcErr != nil {
 		t.Fatalf("handleModelsList: %v", rpcErr.Message)
 	}
@@ -585,7 +585,7 @@ func TestHandleModelsListIncludesInstalledOfflineVoices(t *testing.T) {
 // in this build) never breaks the models list.
 func TestHandleModelsListWithoutInstaller(t *testing.T) {
 	app := &App{Providers: &fakeProviderStore{items: map[string]*domain.Provider{}}, Logs: &fakeLogStore{}}
-	res, rpcErr := app.handleModelsList()
+	res, rpcErr := app.providerService().HandleModelsList()
 	if rpcErr != nil {
 		t.Fatalf("handleModelsList: %v", rpcErr.Message)
 	}

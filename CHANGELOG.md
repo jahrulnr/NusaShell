@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Three shared packages replace duplicated mechanisms.** `pkg/atomicfile`
+  is now the single atomic file replace (unique temp file, fsync, chmod,
+  rename, per-path serialization, cleanup on failure), replacing nine
+  hand-rolled copies that differed in safety. `pkg/archive` provides safe
+  tar.gz/zip extraction behind one traversal guard, and `pkg/fetch` the
+  download/verify half used by the installers.
+
+### Changed
+
+- **`automation.*` RPC now routes through the shared dispatch table.**
+  `application/automation` joined the other 13 service families on
+  `rpcdispatch.Table`: the 323-line switch with 17 inline `DecodePayload`
+  calls became a 90-line route table plus named handlers. Unknown-method
+  errors now follow the repo-wide `unknown automation method: <method>` shape.
+- **Domain truncation helpers collapsed onto `pkg/text`.** `ClipRunes` and
+  `TailRunes` cover the head/tail cases; marker text, suffix preservation and
+  word-boundary behavior were preserved verbatim where they stayed local.
+- **`tools.Toolbox` guard sites collapsed** onto one `depMissing` helper (28
+  sites, every error string byte-identical), and the write-only
+  `Experiences`/`User`/`Agent` fields are gone.
+
+### Fixed
+
+- **Skill and metadata writes are now crash-safe.** `infrastructure/skillfs`
+  wrote `SKILL.md`, `meta.json`, `skills.json`, version snapshots and
+  provenance sidecars with bare `os.WriteFile`; all data writes now go through
+  `pkg/atomicfile`. Project memory and attachment storage likewise moved to
+  the shared writer, and `tools`' file writes gained the missing fsync.
+- **Two archive-extraction gaps closed.** `skillfs`'s skill-zip install had no
+  traversal check at all, and the TTS installer recreated archive symlinks
+  with an unvalidated link target — both are now covered by the shared guard,
+  with regression tests for `../`, absolute paths, nested traversal, and
+  escaping symlinks/hardlinks.
+- **`truncateReason` no longer splits UTF-8 runes.** It sliced bytes
+  (`s[:200]`), which could emit invalid UTF-8 and truncate a short reason
+  measured in bytes rather than characters.
+
 ### Removed
 
 - **Dead code removed across `application/`, `domain/`, `pkg/hash`, and
@@ -14,15 +53,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference count before removal: the superseded `application/rpc_dispatch.go`
   (its live equivalent is `pkg/rpcdispatch`), ~45 zero-caller `handle*`/`App`
   forwarding methods and DTO helpers in the `application/*_wrappers.go` facade,
-  the unused in-memory automation store
+  ~86 further test-only seam wrappers, the unused in-memory automation store
   (`infrastructure/automation/memory_store.go`), the dead 15-name legacy guard
   list and dead `privateName` assignment in `tools.Toolbox`, four unused
-  `modelcatalog` exports, two dead `pkg/hash` functions, and the `PipelineRun`
-  / `PipelineDefinition` / `ApplyLine` domain leftovers. Candidate deletions
-  that still had a live or test caller (legacy `subagent_steer`/`stop`/`wait`
-  tool aliases, `Toolbox.Experiences`/`User`/`Agent`,
-  `embeddings.NewEmbedder`, `handleTurnsStart`) were kept and are tracked as
-  follow-ups.
+  `modelcatalog` exports, two dead `pkg/hash` functions, the dead
+  `truncateToTokenBudget`, and the `PipelineRun` / `PipelineDefinition` /
+  `ApplyLine` domain leftovers. Candidate deletions that still had a live or
+  test caller (legacy `subagent_steer`/`stop`/`wait` tool aliases,
+  `embeddings.NewEmbedder`, `handleTurnsStart`, and the `ToCoreRequest` /
+  `MapCoreError` bridges used by `infrastructure/ai` tests) were kept and are
+  tracked as follow-ups.
 
 ## [0.9.2] - 2026-09-21
 

@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"nusashell/application/media"
-	"nusashell/contracts"
 	"nusashell/domain"
 )
 
@@ -51,40 +50,6 @@ func mediaCall(run *TurnRun) media.Call {
 
 func mediaCaps(caps ModelCapabilities) media.Caps {
 	return media.Caps{Vision: caps.Vision, Audio: caps.Audio, Video: caps.Video, Document: caps.Document}
-}
-
-func (a *App) handleTTSSettingsInstallStatus() (any, *contracts.RPCError) {
-	return a.mediaService().HandleTTSInstallStatus()
-}
-
-func (a *App) handleTTSSettingsInstallStart(req contracts.TTSInstallStartRequest) (any, *contracts.RPCError) {
-	return a.mediaService().HandleTTSInstallStart(req)
-}
-
-func (a *App) ttsInstallRunning() bool {
-	if a.mediaSvc == nil {
-		return false
-	}
-	return a.mediaSvc.TTSInstallRunning()
-}
-
-func (a *App) handleSTTSettingsInstallStatus() (any, *contracts.RPCError) {
-	return a.mediaService().HandleSTTInstallStatus()
-}
-
-func (a *App) handleSTTSettingsInstallStart(req contracts.STTInstallStartRequest) (any, *contracts.RPCError) {
-	return a.mediaService().HandleSTTInstallStart(req)
-}
-
-func (a *App) handleSTTSettingsInstallCancel() (any, *contracts.RPCError) {
-	return a.mediaService().HandleSTTInstallCancel()
-}
-
-func (a *App) sttInstallRunning() bool {
-	if a.mediaSvc == nil {
-		return false
-	}
-	return a.mediaSvc.STTInstallRunning()
 }
 
 func (a *App) executeGenerateMedia(run *TurnRun, toolCall domain.ToolCall, settings domain.Settings) (string, []domain.Attachment, error) {
@@ -137,8 +102,4 @@ func (a *App) saveGeneratedMedia(conversationID, baseName, kind string, data []b
 
 func (a *App) persistGeneratedImages(conversationID, toolCallID string, result *ImageGenResult) ([]domain.Attachment, []string, error) {
 	return a.mediaService().PersistGeneratedImages(conversationID, toolCallID, result)
-}
-
-func formatImageGenFailure(err error, kind domain.ProviderKind) string {
-	return media.FormatImageGenFailure(err, kind)
 }

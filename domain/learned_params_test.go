@@ -3,6 +3,7 @@ package domain
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestLearnedParamRegistryRecordAndLookup(t *testing.T) {
@@ -200,6 +201,31 @@ func TestTruncateReason(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "…") {
 		t.Errorf("truncateReason long must end with ellipsis, got %q", got)
+	}
+}
+
+// TestTruncateReasonUTF8Safe covers the rune-safe fix: the cap is 200 runes,
+// and a byte slice at offset 200 must never split a multi-byte character.
+// The old s[:200] implementation failed this test by emitting invalid UTF-8.
+func TestTruncateReasonUTF8Safe(t *testing.T) {
+	// 199 ASCII bytes followed by 3-byte "€" runes: a byte cut at 200 lands
+	// mid-rune.
+	s := strings.Repeat("x", 199) + strings.Repeat("€", 10)
+	got := truncateReason(s)
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncateReason must not split a UTF-8 rune, got invalid bytes")
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("truncateReason must end with ellipsis, got %q", got)
+	}
+	if n := utf8.RuneCountInString(got); n != 201 {
+		t.Fatalf("truncateReason rune count = %d, want 201 (200 + ellipsis)", n)
+	}
+	// A reason under 200 runes passes through even when its byte length
+	// exceeds 200 — the documented cap counts characters, not bytes.
+	multi := strings.Repeat("€", 150) // 450 bytes, 150 runes
+	if got := truncateReason(multi); got != multi {
+		t.Fatalf("truncateReason must not truncate a 150-rune reason, got %q", got)
 	}
 }
 

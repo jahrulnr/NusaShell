@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"nusashell/domain"
+	"nusashell/pkg/atomicfile"
 )
 
 // Store implements application.AttachmentStore using the filesystem.
@@ -54,7 +55,7 @@ func (s *Store) Save(conversationID string, att domain.Attachment) (string, erro
 	}
 
 	path := filepath.Join(dir, att.Name)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := atomicfile.Write(path, data, 0o644); err != nil {
 		return "", fmt.Errorf("attachmentfs: write %s: %w", att.Name, err)
 	}
 	abs, err := filepath.Abs(path)
@@ -78,13 +79,8 @@ func (s *Store) WriteBytes(conversationID, name string, data []byte) (string, er
 		return "", fmt.Errorf("attachmentfs: create dir: %w", err)
 	}
 	path := filepath.Join(dir, name)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := atomicfile.Write(path, data, 0o644); err != nil {
 		return "", fmt.Errorf("attachmentfs: write %s: %w", name, err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return "", fmt.Errorf("attachmentfs: rename %s: %w", name, err)
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {

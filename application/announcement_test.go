@@ -49,7 +49,7 @@ func TestAcpConfigAnnouncementIncludesNameAndStatus(t *testing.T) {
 		Logs: &fakeLogStore{},
 	}
 	enabled := false
-	if _, rpcErr := app.handleAcpAgentsSave(contracts.AcpAgentSaveRequest{
+	if _, rpcErr := app.subagentService().HandleAgentsSave(contracts.AcpAgentSaveRequest{
 		ID: "a1", Name: "codex", Command: "codex", Enabled: &enabled,
 	}); rpcErr != nil {
 		t.Fatalf("handleAcpAgentsSave: %v", rpcErr)
@@ -68,7 +68,7 @@ func TestMemoryAnnouncementIncludesPrimaryDocumentPath(t *testing.T) {
 		Bus:           NewBus(),
 		Logs:          &fakeLogStore{},
 	}
-	if _, rpcErr := app.handleMemoryUserUpdate(contracts.MemoryUserUpdateRequest{Content: "new"}); rpcErr != nil {
+	if _, rpcErr := app.memoryService().HandleUserUpdate(contracts.MemoryUserUpdateRequest{Content: "new"}); rpcErr != nil {
 		t.Fatalf("handleMemoryUserUpdate: %v", rpcErr)
 	}
 	if got := conv.PendingAnnouncements[0].Message; got != "user.md has changed, read /data/memory/user.md to see primary memory" {
@@ -85,7 +85,7 @@ func TestAgentMemoryAnnouncementUsesSoulPath(t *testing.T) {
 		Bus:           NewBus(),
 		Logs:          &fakeLogStore{},
 	}
-	if _, rpcErr := app.handleMemoryAgentUpdate(contracts.MemoryAgentUpdateRequest{Content: "new conventions"}); rpcErr != nil {
+	if _, rpcErr := app.memoryService().HandleAgentUpdate(contracts.MemoryAgentUpdateRequest{Content: "new conventions"}); rpcErr != nil {
 		t.Fatalf("handleMemoryAgentUpdate: %v", rpcErr)
 	}
 	if got := conv.PendingAnnouncements[0].Message; got != "soul.md has changed, read /data/memory/soul.md to see primary memory" {

@@ -3,6 +3,8 @@ package attachmentfs
 import (
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"nusashell/domain"
@@ -185,6 +187,88 @@ func TestRemoveRejectsTraversalID(t *testing.T) {
 	}
 	if _, err := os.Stat(outside); err != nil {
 		t.Errorf("sentinel outside store was deleted: %v", err)
+	}
+}
+
+// TestWriteBytesConcurrentSameName proves the atomic write is
+// collision-safe: concurrent writes to the same name must not tear, and
+// no temp file may be left behind.
+func TestWriteBytesConcurrentSameName(t *testing.T) {
+	dir := t.TempDir()
+	store, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payloads := [][]byte{
+		[]byte("AAAAAAAA"),
+		[]byte("BBBBBBBB"),
+		[]byte("CCCCCCCC"),
+		[]byte("DDDDDDDD"),
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if _, err := store.WriteBytes("conv_race", "same.bin", payloads[i%len(payloads)]); err != nil {
+				t.Errorf("WriteBytes: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	got, err := os.ReadFile(filepath.Join(dir, "conv_race", "same.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := false
+	for _, p := range payloads {
+		if string(got) == string(p) {
+			valid = true
+		}
+	}
+	if !valid {
+		t.Fatalf("final content %q is torn (not one of the written payloads)", got)
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "conv_race"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp") {
+			t.Fatalf("leftover temp file: %s", e.Name())
+		}
+	}
+}
+
+// TestWriteBytesReplacesExistingFile proves a rewrite fully replaces the
+// old content rather than appending or leaving a partial file.
+func TestWriteBytesReplacesExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	store, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.WriteBytes("conv", "f.bin", []byte("long-original-content")); err != nil {
+		t.Fatal(err)
+	}
+	path, err := store.WriteBytes("conv", "f.bin", []byte("short"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "short" {
+		t.Fatalf("content = %q, want %q", got, "short")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("mode = %o, want 644", info.Mode().Perm())
 	}
 }
 

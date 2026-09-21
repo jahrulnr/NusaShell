@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"nusashell/domain"
+	"nusashell/pkg/atomicfile"
 )
 
 // clone deep-copies an entity so stored objects are private snapshots:
@@ -182,60 +183,11 @@ func (s *Store) writeJSON(name string, v any) error {
 	return atomicWrite(filepath.Join(s.dir, name), b)
 }
 
-type atomicWriter struct {
-	mu sync.Mutex
-}
-
-var (
-	atomicWritersMu sync.Mutex
-	atomicWriters   = make(map[string]*atomicWriter)
-)
-
 // atomicWrite writes via a unique temp file + rename so readers never see torn
 // files and concurrent writers of the same path cannot collide on a shared
 // temp name (which would race the rename and fail with "no such file").
 func atomicWrite(path string, b []byte) error {
-	atomicWritersMu.Lock()
-	w, ok := atomicWriters[path]
-	if !ok {
-		w = &atomicWriter{}
-		atomicWriters[path] = w
-	}
-	atomicWritersMu.Unlock()
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".nusashell-*.tmp")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	cleanup := func() {
-		_ = os.Remove(name)
-	}
-	if _, err := tmp.Write(b); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return err
-	}
-	if err := os.Chmod(name, 0o644); err != nil {
-		cleanup()
-		return err
-	}
-	if err := os.Rename(name, path); err != nil {
-		cleanup()
-		return err
-	}
-	return nil
+	return atomicfile.Write(path, b, 0o644)
 }
 
 // ---- generic ID-keyed collections ----

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"nusashell/application/provider"
 	"nusashell/application/service/learnedparams"
 	"nusashell/contracts"
 	"nusashell/domain"
@@ -1674,8 +1675,8 @@ func TestCompactionReuseUsesAgentPromptToolboxAndSharedCacheKey(t *testing.T) {
 	settings.PromptCaching = true
 	pc := ProviderContext{Provider: adapter, ProviderID: "prov1", Kind: domain.ProviderChat,
 		Driver: domain.ProviderDriverOpenRouter, BaseURL: "https://openrouter.ai/api/v1", OpenRouter: true}
-	provider := &domain.Provider{ID: "prov1", Kind: domain.ProviderChat, Driver: domain.ProviderDriverOpenRouter, BaseURL: "https://openrouter.ai/api/v1"}
-	cache := buildPromptCachePolicy(settings, provider, "model", conv.ID, promptCacheConversationPrefix)
+	prov := &domain.Provider{ID: "prov1", Kind: domain.ProviderChat, Driver: domain.ProviderDriverOpenRouter, BaseURL: "https://openrouter.ai/api/v1"}
+	cache := provider.BuildPromptCachePolicy(settings, prov, "model", conv.ID, promptCacheConversationPrefix)
 	if cache == nil {
 		t.Fatal("expected shared prompt cache policy")
 	}
@@ -1753,8 +1754,8 @@ func compactionRequestForWorkflow(t *testing.T, workflow domain.CompactionWorkfl
 	settings.PromptCaching = true
 	pc := ProviderContext{Provider: adapter, ProviderID: "prov1", Kind: domain.ProviderChat,
 		Driver: domain.ProviderDriverOpenRouter, BaseURL: "https://openrouter.ai/api/v1", OpenRouter: true}
-	provider := &domain.Provider{ID: "prov1", Kind: domain.ProviderChat, Driver: domain.ProviderDriverOpenRouter, BaseURL: "https://openrouter.ai/api/v1"}
-	cache := buildPromptCachePolicy(settings, provider, "model", conv.ID, promptCacheConversationPrefix)
+	prov := &domain.Provider{ID: "prov1", Kind: domain.ProviderChat, Driver: domain.ProviderDriverOpenRouter, BaseURL: "https://openrouter.ai/api/v1"}
+	cache := provider.BuildPromptCachePolicy(settings, prov, "model", conv.ID, promptCacheConversationPrefix)
 	if cache == nil {
 		t.Fatal("expected prompt cache policy")
 	}
@@ -3067,7 +3068,7 @@ func TestFriendlyRateLimitMessageShowsTPMAccounting(t *testing.T) {
 		StatusCode: 429,
 		Err:        errors.New(tpmRejectionBody),
 	}
-	err := app.friendlyRateLimitError("openai", upstream, 30*time.Second)
+	err := provider.FriendlyRateLimitError(app.providerNameByID("openai"), upstream, 30*time.Second)
 	msg := err.Error()
 	for _, want := range []string{"500000", "241004", "355391", "compacted"} {
 		if !strings.Contains(msg, want) {
@@ -3077,7 +3078,7 @@ func TestFriendlyRateLimitMessageShowsTPMAccounting(t *testing.T) {
 	// A request-count (RPM) limit without TPM numbers keeps the generic
 	// message with the window hint.
 	rpm := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, Err: errors.New("rate limited")}
-	if msg := app.friendlyRateLimitError("openai", rpm, 0).Error(); strings.Contains(msg, "500000") {
+	if msg := provider.FriendlyRateLimitError(app.providerNameByID("openai"), rpm, 0).Error(); strings.Contains(msg, "500000") {
 		t.Errorf("RPM message must not quote TPM numbers: %s", msg)
 	}
 }
@@ -3327,7 +3328,7 @@ func TestFromCoreResponseCarriesCompactionItems(t *testing.T) {
 		Blocks:          []core.Block{core.Text("answer")},
 		CompactionItems: items,
 	}
-	out := FromCoreResponse(resp)
+	out := provider.FromCoreResponse(resp)
 	if len(out.CompactionItems) != 2 {
 		t.Fatalf("CompactionItems len = %d, want 2", len(out.CompactionItems))
 	}
@@ -5595,7 +5596,7 @@ func TestEstimateRequestTokensIncludesSystemAndTools(t *testing.T) {
 
 func TestBuildPromptCachePolicyKeyLength(t *testing.T) {
 	settings := domain.Settings{PromptCaching: true}
-	policy := buildPromptCachePolicy(settings, &domain.Provider{ID: "prov1", Kind: domain.ProviderChat}, "gpt-5", "conv_abc", promptCacheConversationPrefix)
+	policy := provider.BuildPromptCachePolicy(settings, &domain.Provider{ID: "prov1", Kind: domain.ProviderChat}, "gpt-5", "conv_abc", promptCacheConversationPrefix)
 	if policy == nil {
 		t.Fatal("expected non-nil policy when PromptCaching is true")
 	}
@@ -5609,9 +5610,9 @@ func TestBuildPromptCachePolicyKeyLength(t *testing.T) {
 
 func TestBuildPromptCachePolicyUsesDistinctAgentPrefixes(t *testing.T) {
 	settings := domain.Settings{PromptCaching: true}
-	provider := &domain.Provider{ID: "prov1", Kind: domain.ProviderChat}
-	conversation := buildPromptCachePolicy(settings, provider, "gpt-5", "conv_abc", promptCacheConversationPrefix)
-	background := buildPromptCachePolicy(settings, provider, "gpt-5", "conv_abc", promptCacheBackgroundPrefix)
+	prov := &domain.Provider{ID: "prov1", Kind: domain.ProviderChat}
+	conversation := provider.BuildPromptCachePolicy(settings, prov, "gpt-5", "conv_abc", promptCacheConversationPrefix)
+	background := provider.BuildPromptCachePolicy(settings, prov, "gpt-5", "conv_abc", promptCacheBackgroundPrefix)
 	if conversation == nil || background == nil {
 		t.Fatal("expected cache policies for both agent namespaces")
 	}
@@ -5640,7 +5641,7 @@ func TestPromptCachePrefixForRunSeparatesHeadlessAgents(t *testing.T) {
 
 func TestBuildPromptCachePolicyNilWhenDisabled(t *testing.T) {
 	settings := domain.Settings{PromptCaching: false}
-	if p := buildPromptCachePolicy(settings, &domain.Provider{ID: "prov1"}, "gpt-5", "conv_abc", promptCacheConversationPrefix); p != nil {
+	if p := provider.BuildPromptCachePolicy(settings, &domain.Provider{ID: "prov1"}, "gpt-5", "conv_abc", promptCacheConversationPrefix); p != nil {
 		t.Errorf("expected nil policy when PromptCaching is false, got %+v", p)
 	}
 }
@@ -5648,12 +5649,12 @@ func TestBuildPromptCachePolicyNilWhenDisabled(t *testing.T) {
 func TestBuildPromptCachePolicyStableForSameInputs(t *testing.T) {
 	settings := domain.Settings{PromptCaching: true}
 	p := &domain.Provider{ID: "prov1", Kind: domain.ProviderChat}
-	a := buildPromptCachePolicy(settings, p, "gpt-5", "conv_abc", promptCacheConversationPrefix)
-	b := buildPromptCachePolicy(settings, p, "gpt-5", "conv_abc", promptCacheConversationPrefix)
+	a := provider.BuildPromptCachePolicy(settings, p, "gpt-5", "conv_abc", promptCacheConversationPrefix)
+	b := provider.BuildPromptCachePolicy(settings, p, "gpt-5", "conv_abc", promptCacheConversationPrefix)
 	if a.Key != b.Key {
 		t.Errorf("cache key should be stable for same inputs: %q vs %q", a.Key, b.Key)
 	}
-	c := buildPromptCachePolicy(settings, p, "gpt-5", "conv_xyz", promptCacheConversationPrefix)
+	c := provider.BuildPromptCachePolicy(settings, p, "gpt-5", "conv_xyz", promptCacheConversationPrefix)
 	if a.Key == c.Key {
 		t.Errorf("cache key should differ for different conversation: %q vs %q", a.Key, c.Key)
 	}
@@ -5662,25 +5663,25 @@ func TestBuildPromptCachePolicyStableForSameInputs(t *testing.T) {
 func TestBuildPromptCachePolicyTTLFromProvider(t *testing.T) {
 	settings := domain.Settings{PromptCaching: true}
 	anthropic := &domain.Provider{ID: "anthropic", Driver: domain.ProviderDriverAnthropic, Kind: domain.ProviderMessages, CacheTTL: "1h"}
-	policy := buildPromptCachePolicy(settings, anthropic, "claude-sonnet-4-6", "conv_abc", promptCacheConversationPrefix)
+	policy := provider.BuildPromptCachePolicy(settings, anthropic, "claude-sonnet-4-6", "conv_abc", promptCacheConversationPrefix)
 	if policy == nil || policy.TTL != "1h" {
 		t.Fatalf("anthropic TTL = %+v, want 1h", policy)
 	}
 
 	openai := &domain.Provider{ID: "openai", Driver: domain.ProviderDriverOpenAI, Kind: domain.ProviderResponses}
-	policy = buildPromptCachePolicy(settings, openai, "gpt-5", "conv_abc", promptCacheConversationPrefix)
+	policy = provider.BuildPromptCachePolicy(settings, openai, "gpt-5", "conv_abc", promptCacheConversationPrefix)
 	if policy == nil || policy.TTL != "30m" {
 		t.Fatalf("openai default TTL = %+v, want 30m", policy)
 	}
 
 	openrouter := &domain.Provider{ID: "openrouter", Driver: domain.ProviderDriverOpenRouter, Kind: domain.ProviderChat, CacheTTL: "1h", BaseURL: "https://openrouter.ai/api/v1"}
-	policy = buildPromptCachePolicy(settings, openrouter, "anthropic/claude-sonnet-4", "conv_abc", promptCacheConversationPrefix)
+	policy = provider.BuildPromptCachePolicy(settings, openrouter, "anthropic/claude-sonnet-4", "conv_abc", promptCacheConversationPrefix)
 	if policy == nil || policy.TTL != "1h" {
 		t.Fatalf("openrouter TTL = %+v, want 1h", policy)
 	}
 
 	off := &domain.Provider{ID: "anthropic", Driver: domain.ProviderDriverAnthropic, Kind: domain.ProviderMessages, CacheTTL: domain.CacheTTLOff}
-	if policy = buildPromptCachePolicy(settings, off, "claude-sonnet-4-6", "conv_abc", promptCacheConversationPrefix); policy != nil {
+	if policy = provider.BuildPromptCachePolicy(settings, off, "claude-sonnet-4-6", "conv_abc", promptCacheConversationPrefix); policy != nil {
 		t.Fatalf("off TTL must skip prompt cache, got %+v", policy)
 	}
 
@@ -5691,7 +5692,7 @@ func TestBuildPromptCachePolicyTTLFromProvider(t *testing.T) {
 		ID: "prov_oc", Driver: domain.ProviderDriverOpenRouter, Kind: domain.ProviderChat,
 		BaseURL: "https://opencode.ai/zen/go/v1", CacheTTL: "1h",
 	}
-	policy = buildPromptCachePolicy(settings, opencode, "deepseek-v4-flash", "conv_abc", promptCacheConversationPrefix)
+	policy = provider.BuildPromptCachePolicy(settings, opencode, "deepseek-v4-flash", "conv_abc", promptCacheConversationPrefix)
 	if policy == nil || policy.TTL != "1h" {
 		t.Fatalf("opencode TTL = %+v, want 1h", policy)
 	}
