@@ -1136,11 +1136,20 @@ async function maybeAutoTitleConversation(conversationId, snapshot = null) {
 }
 
 async function refreshConversations() {
-  const { conversations } = await rpc('agent.conversations.list');
-  state.conversations = (conversations ?? []).filter((c) => Boolean(c.id));
-  renderConversationList();
-  const count = conversations.length;
-  document.getElementById('conversation-count').textContent = `${count} thread${count === 1 ? '' : 's'}`;
+  try {
+    const { conversations } = await rpc('agent.conversations.list');
+    state.conversations = (conversations ?? []).filter((c) => Boolean(c.id));
+    renderConversationList();
+    const count = conversations.length;
+    document.getElementById('conversation-count').textContent = `${count} thread${count === 1 ? '' : 's'}`;
+  } catch (err) {
+    // A dead backend is covered by the offline screen — the same policy the
+    // router (app.js) and loadAgentData below apply. Swallowing it here keeps
+    // the WS event handlers that call this fire-and-forget from turning a
+    // dropped connection into an unhandled rejection; anything else is a real
+    // failure and still propagates.
+    if (err?.code !== 'unavailable') throw err;
+  }
 }
 
 function setRoomsOpen(open) {

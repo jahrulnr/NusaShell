@@ -66,6 +66,20 @@ test('embedded frontend completes one representative flow through the Go backend
     // Let the WS close naturally so the offline screen can assert; harness
     // teardown disables reconnect and closes the socket afterward.
     server.go.kill();
+    await new Promise((resolveExit) => {
+      if (server.go.exitCode !== null) resolveExit();
+      else server.go.once('exit', resolveExit);
+    });
+    // A WS event that lands as the backend dies must not surface as an
+    // unhandled rejection from the fire-and-forget refresh it triggers.
+    // refreshConversations tolerates an `unavailable` backend because the
+    // offline screen covers the UX; without that, this emit fails the run.
+    // No run_id, so the handler takes its refresh-and-return path.
+    rpcModule.emit('agent.tool.completed', {
+      tool_call_id: 'regression-dead-backend',
+      name: 'exec',
+      conversation_id: 'not-the-active-room',
+    });
     await waitFor(
       () => !document.getElementById('offline-screen')?.hidden,
       'full-window offline state after the local backend stops',
