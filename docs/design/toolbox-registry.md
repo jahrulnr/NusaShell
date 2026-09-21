@@ -1,8 +1,11 @@
 # Toolbox registry and family split
 
-Refactor plan for `infrastructure/tools/toolbox.go`. Status: proposed, not
-started. The dispatcher-family model in `tool-dispatchers.md` is unchanged by
-this plan — only how the toolbox is *organised internally* changes.
+Refactor plan for `infrastructure/tools/toolbox.go`. Status: **executed** —
+steps 1-4 landed in `171a01e` and the follow-up split commit; `toolbox.go`
+went from 2458 to 312 lines and no file in the package exceeds 638 lines.
+Step 5 was dropped after investigation (see below) and step 6 is deferred.
+The dispatcher-family model in `tool-dispatchers.md` is unchanged by this
+plan — only how the toolbox is *organised internally* changes.
 
 ## Problem
 
@@ -109,12 +112,18 @@ Each step is independently shippable and must leave the suite green.
 3. **Move `executeAutomation`** into `family_automation.go`. *(S)*
 4. **Split `files.go`** into per-tool functions (`file_read`, `file_patch`, …),
    mirroring `grep.go`/`show.go`/`find_file.go`. *(M)*
-5. **Unify the schema DSL.** Deliberately last: it rewrites every schema
-   literal, so doing it after the split lets each file be converted
-   independently. The shared builder must live in a leaf package both
-   `application/tools` and `infrastructure/tools` can import (the dependency
-   rule forbids `application` → `infrastructure`). Descriptions must stay
-   byte-identical — the step-0 golden is the guard. *(M)*
+5. **Schema DSL unification — dropped after investigation.** The two builder
+   sets are not stylistic duplicates: `objSchema`
+   (`application/tools/dispatch.go:203`) emits `additionalProperties: false`
+   and `required: ["op"]` itself, while the toolbox's `obj`
+   (`infrastructure/tools/toolbox.go:233`) deliberately emits neither and
+   relies on the OpenAI adapter's strict-mode normalisation
+   (`infrastructure/ai/openai/schema.go:25`) — and `freeObj` documents why it
+   sets no `additionalProperties` key at all. Merging the builders would
+   change the schema bytes some providers receive, which is a wire-contract
+   decision, not a refactor. The overlap is only the primitive builders
+   (`str`/`intSchema`/`strEnum` vs `pStr`/`pInt`/`pEnum`), too small to
+   justify a new cross-layer package.
 6. **Optional, last:** group the store ports on `Toolbox` into one named
    sub-struct. Deliberately deferred — it rewrites ~50 access sites plus the
    two construction sites (`cmd/nusashell/main.go`,
@@ -155,7 +164,19 @@ included because `transport/harness_test.go` constructs a `Toolbox` and
 ## Done when
 
 - `toolbox.go` holds no tool implementation beyond the router, registry
-  assembly, and shared helpers.
+  assembly, and shared helpers. **Met** — 312 lines.
 - Adding a typed tool touches exactly one file, and `ListTools` cannot
-  advertise a tool that `Execute` cannot run.
+  advertise a tool that `Execute` cannot run. **Met** — one `toolEntry` per
+  tool, with `read_media`/`generate_media` explicitly marked as executed by
+  the agent layer.
 - Roster golden, `TestAllAdvertisedFamilyOpsRoute`, and the full suite pass.
+  **Met** — and the full roster JSON was diffed byte-for-byte against the
+  pre-refactor build for all four configurations.
+
+## Remaining follow-ups
+
+- Step 6 (group `Toolbox` store ports) — deferred, cosmetic.
+- `containsString` in `toolbox.go:96` still hand-rolls what `slices.Contains`
+  does; left alone because the same helper in `ai/core` belongs to a ported
+  wire package that must stay close to upstream, and changing only the
+  toolbox copy splits the convention for no real gain.
