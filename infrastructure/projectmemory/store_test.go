@@ -3,6 +3,7 @@ package projectmemory
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -413,8 +414,13 @@ func TestAdmitAtomicWriteLeavesNoTempFiles(t *testing.T) {
 		if strings.Contains(filepath.Base(path), ".tmp") {
 			t.Errorf("leftover temp file: %s", path)
 		}
-		if info.Mode().Perm() != 0o644 {
-			t.Errorf("%s mode = %o, want 644", path, info.Mode().Perm())
+		if runtime.GOOS != "windows" {
+			// Windows has no POSIX permission bits: chmod(0o644) only maps to
+			// the read-only attribute, so os.Stat reports 0666 for a writable
+			// file.
+			if info.Mode().Perm() != 0o644 {
+				t.Errorf("%s mode = %o, want 644", path, info.Mode().Perm())
+			}
 		}
 		return nil
 	})

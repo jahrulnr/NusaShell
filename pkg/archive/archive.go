@@ -128,7 +128,7 @@ type extractor struct {
 // filtered out by Prefix; an error means the entry is unsafe.
 func (ex *extractor) resolve(name string) (target string, ok bool, err error) {
 	native := filepath.FromSlash(name)
-	if native == "" || filepath.IsAbs(native) || hasDotDotSegment(native) {
+	if native == "" || filepath.IsAbs(native) || isRootedEntry(name) || hasDotDotSegment(native) {
 		return "", false, fmt.Errorf("unsafe archive entry %q", name)
 	}
 	clean := filepath.Clean(native)
@@ -144,6 +144,15 @@ func (ex *extractor) resolve(name string) (target string, ok bool, err error) {
 		return "", false, fmt.Errorf("unsafe archive entry %q", name)
 	}
 	return target, true, nil
+}
+
+// isRootedEntry reports whether an archive entry name starts at a filesystem
+// root, in either slash direction. filepath.IsAbs is not enough on its own:
+// on Windows a name like `\evil` is rooted but not absolute because it has no
+// volume name, so it would otherwise slip through and be silently relocated
+// under the destination instead of being rejected.
+func isRootedEntry(name string) bool {
+	return strings.HasPrefix(name, "/") || strings.HasPrefix(name, "\\")
 }
 
 // hasDotDotSegment reports whether name contains a ".." path segment,

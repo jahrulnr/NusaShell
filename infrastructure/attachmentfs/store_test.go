@@ -3,6 +3,7 @@ package attachmentfs
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -267,8 +268,12 @@ func TestWriteBytesReplacesExistingFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o644 {
-		t.Fatalf("mode = %o, want 644", info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		// Windows has no POSIX permission bits: chmod(0o644) only maps to the
+		// read-only attribute, so os.Stat reports 0666 for a writable file.
+		if info.Mode().Perm() != 0o644 {
+			t.Fatalf("mode = %o, want 644", info.Mode().Perm())
+		}
 	}
 }
 

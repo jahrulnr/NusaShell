@@ -147,11 +147,12 @@ func TestUntarGzForcedFileMode(t *testing.T) {
 
 func TestUntarGzRejectsTraversal(t *testing.T) {
 	cases := map[string]string{
-		"parent":       "../evil.txt",
-		"absolute":     "/abs/evil.txt",
-		"nestedEscape": "a/../../b",
-		"midPath":      "ok/../evil.txt",
-		"backslash":    `..\evil.txt`,
+		"parent":          "../evil.txt",
+		"absolute":        "/abs/evil.txt",
+		"rootedBackslash": `\abs\evil.txt`,
+		"nestedEscape":    "a/../../b",
+		"midPath":         "ok/../evil.txt",
+		"backslash":       `..\evil.txt`,
 	}
 	for name, entry := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -304,7 +305,7 @@ func TestUnzipExtractsTree(t *testing.T) {
 }
 
 func TestUnzipRejectsTraversal(t *testing.T) {
-	for _, entry := range []string{"../evil", "/abs/evil", "a/../../b"} {
+	for _, entry := range []string{"../evil", "/abs/evil", `\abs\evil`, "a/../../b"} {
 		dest := t.TempDir()
 		zr := buildZip(t, map[string]string{entry: "boom"})
 		err := Unzip(zr, dest, nil)

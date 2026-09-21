@@ -68,8 +68,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Two archive-extraction gaps closed.** `skillfs`'s skill-zip install had no
   traversal check at all, and the TTS installer recreated archive symlinks
   with an unvalidated link target — both are now covered by the shared guard,
-  with regression tests for `../`, absolute paths, nested traversal, and
-  escaping symlinks/hardlinks.
+  with regression tests for `../`, absolute and rooted paths, nested
+  traversal, and escaping symlinks/hardlinks.
 - **`truncateReason` no longer splits UTF-8 runes.** It sliced bytes
   (`s[:200]`), which could emit invalid UTF-8 and truncate a short reason
   measured in bytes rather than characters.
