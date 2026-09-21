@@ -12,7 +12,6 @@ import (
 	"nusashell/application/service/modeloverrides"
 	"nusashell/contracts"
 	"nusashell/domain"
-	"nusashell/domain/turndiff"
 )
 
 type (
@@ -68,12 +67,6 @@ func tpmContextCap(limit, maxOutput int) int {
 }
 func extractErrBody(err error) string { return agent.ExtractErrBody(err) }
 func isLearnable400(err error) bool   { return agent.IsLearnable400(err) }
-func buildSystemPrompt(c *domain.Conversation, userPrompt string) string {
-	return agent.BuildSystemPrompt(c, userPrompt)
-}
-func buildSystemPromptForRun(run *TurnRun, c *domain.Conversation, userPrompt string) string {
-	return agent.BuildSystemPromptForRun(run, c, userPrompt)
-}
 func newAnnouncement(typ, args, message string) Announcement {
 	return agent.NewAnnouncement(typ, args, message)
 }
@@ -334,9 +327,6 @@ func (a *App) drainAnnouncements(run *TurnRun) (bool, error) {
 func (a *App) RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string, onUpdate func(conversationID string)) (map[string]any, string, error) {
 	return a.agentService().RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, AgentAutomation, conversationID, onUpdate, nil)
 }
-func (a *App) RunHeadlessTurnIn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error) {
-	return a.agentService().RunHeadlessTurnIn(ctx, prompt, model, trust, schema, conversationID)
-}
 func (a *App) runHeadlessTurnKind(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind) (map[string]any, string, error) {
 	return a.agentService().RunHeadlessTurnKind(ctx, prompt, model, trust, schema, kind)
 }
@@ -360,44 +350,20 @@ func (a *App) DeliverAutomationWake(targetID, source, content string) error {
 func (a *App) activeRunForConversation(convID string) *TurnRun {
 	return a.agentService().ActiveRunForConversation(convID)
 }
-func (a *App) activeRunForConversationLocked(convID string) *TurnRun {
-	return a.agentService().ActiveRunForConversationLocked(convID)
-}
 func (a *App) deliverRunDone(conversationID string, pending pendingRunDone) {
 	a.agentService().DeliverRunDone(conversationID, pending)
 }
 func (a *App) completeSubagentRunLocked(conversationID, toolCallID string, status domain.ToolCallStatus, run *domain.AcpRun, outputPath string) error {
 	return a.agentService().CompleteSubagentRunLocked(conversationID, toolCallID, status, run, outputPath)
 }
-func (a *App) triggerBackgroundCompletionTurn(conversationID string) {
-	a.agentService().TriggerBackgroundCompletionTurn(conversationID)
-}
-func (a *App) resolveConversationProvider(conv *domain.Conversation) (*domain.Provider, string, string, string, error) {
-	return a.agentService().ResolveConversationProvider(conv)
-}
 func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartRequest) (any, *contracts.RPCError) {
 	return a.agentService().HandleTurnsStart(ctx, req)
-}
-func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryRequest) (any, *contracts.RPCError) {
-	return a.agentService().HandleTurnsRetry(ctx, req)
-}
-func (a *App) handleTurnsStop(req contracts.TurnStopRequest) (any, *contracts.RPCError) {
-	return a.agentService().HandleTurnsStop(req)
 }
 func (a *App) handleToolStop(req contracts.ToolStopRequest) (any, *contracts.RPCError) {
 	return a.agentService().HandleToolStop(req)
 }
 func (a *App) handleTurnsActive(req contracts.ConversationIDRequest) (any, *contracts.RPCError) {
 	return a.agentService().HandleTurnsActive(req)
-}
-func (a *App) handleAskPendingList(req contracts.AskPendingListRequest) (any, *contracts.RPCError) {
-	return a.agentService().HandleAskPendingList(req)
-}
-func (a *App) handleAskAnswer(req contracts.AskAnswerRequest) (any, *contracts.RPCError) {
-	return a.agentService().HandleAskAnswer(req)
-}
-func (a *App) handleAskCancel(req contracts.AskCancelRequest) (any, *contracts.RPCError) {
-	return a.agentService().HandleAskCancel(req)
 }
 func (a *App) handleTurnsSteer(ctx context.Context, req contracts.TurnSteerRequest) (any, *contracts.RPCError) {
 	return a.agentService().HandleTurnsSteer(ctx, req)
@@ -408,29 +374,17 @@ func (a *App) handleTurnsCancelSteer(req contracts.TurnCancelSteerRequest) (any,
 func (a *App) addTurnMessages(c *domain.Conversation, userMsg, asstMsg domain.Message) {
 	a.agentService().AddTurnMessages(c, userMsg, asstMsg)
 }
-func (a *App) takeWorkspaceSwitchNotice(c *domain.Conversation) *domain.Message {
-	return a.agentService().TakeWorkspaceSwitchNotice(c)
-}
 func (a *App) conversationTurnLock(conversationID string) *sync.Mutex {
 	return a.agentService().ConversationTurnLock(conversationID)
 }
 func (a *App) trackPendingRun(conversationID, runID, tool string) {
 	a.agentService().TrackPendingRun(conversationID, runID, tool)
 }
-func (a *App) untrackPendingRun(conversationID, runID string) bool {
-	return a.agentService().UntrackPendingRun(conversationID, runID)
-}
 func (a *App) hasPendingRuns(conversationID string) bool {
 	return a.agentService().HasPendingRuns(conversationID)
 }
-func (a *App) pendingBackgroundRuns(conversationID string) []domain.BackgroundRunInfo {
-	return a.agentService().PendingBackgroundRuns(conversationID)
-}
 func (a *App) learnTPMContextCap(run *TurnRun, model string, err error, maxOutput int) bool {
 	return a.agentService().LearnTPMContextCap(run, model, err, maxOutput)
-}
-func (a *App) turnToolDefs(run *TurnRun) []ToolDef {
-	return a.agentService().TurnToolDefs(run)
 }
 func (a *App) recordLearningTurnNodes(run *TurnRun, ids []string) {
 	a.agentService().RecordLearningTurnNodes(run, ids)
@@ -447,19 +401,10 @@ func (a *App) conversationRulesForTest(run *TurnRun, adapter ProviderContext, co
 func (a *App) updateToolResult(c *domain.Conversation, msgID, callID string, status domain.ToolCallStatus, output string, outputAttachments []domain.Attachment) *domain.Conversation {
 	return a.agentService().UpdateToolResult(c, msgID, callID, status, output, outputAttachments)
 }
-func (a *App) saveAttachmentsToDisk(conversationID string, attachments []domain.Attachment) {
-	a.agentService().SaveAttachmentsToDisk(conversationID, attachments)
-}
 func (a *App) resolveHeadlessModel(modelID string) (*domain.Provider, string, string, error) {
 	return a.agentService().ResolveHeadlessModel(modelID)
 }
 
-func (a *App) trackTurnDiff(run *TurnRun, delta turndiff.Delta) {
-	a.agentService().TrackTurnDiff(run, delta)
-}
-func (a *App) emitFinalTurnDiff(run *TurnRun) {
-	a.agentService().EmitFinalTurnDiff(run)
-}
 func (a *App) failTurn(run *TurnRun, msgID string, err error) {
 	a.agentService().FailTurn(run, msgID, err)
 }

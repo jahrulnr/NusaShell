@@ -124,29 +124,11 @@ func (a *App) skillName(id, ownedBy string) string {
 	return strings.TrimSpace(s.Name)
 }
 
-func (a *App) handleSkillsList() (any, *contracts.RPCError) {
-	return a.skillsService().HandleList()
-}
-func (a *App) handleSkillsRead(req contracts.SkillIDRequest) (any, *contracts.RPCError) {
-	return a.skillsService().HandleRead(req)
-}
 func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.RPCError) {
 	return a.skillsService().HandleSave(req)
 }
-func (a *App) handleSkillsDelete(req contracts.SkillIDRequest) (any, *contracts.RPCError) {
-	return a.skillsService().HandleDelete(req)
-}
-func (a *App) handleSkillsFileRead(req contracts.SkillFileReadRequest) (any, *contracts.RPCError) {
-	return a.skillsService().HandleFileRead(req)
-}
-func (a *App) handleSkillsInstall(req contracts.SkillInstallRequest) (any, *contracts.RPCError) {
-	return a.skillsService().HandleInstall(req)
-}
 func (a *App) handleSkillsPromote(req contracts.SkillPromoteRequest) (any, *contracts.RPCError) {
 	return a.skillsService().HandlePromote(req)
-}
-func (a *App) handleSkillsRollback(req contracts.SkillRollbackRequest) (any, *contracts.RPCError) {
-	return a.skillsService().HandleRollback(req)
 }
 
 func (a *App) petsDeps() pets.Deps {

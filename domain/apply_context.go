@@ -20,15 +20,6 @@ const ApplyLineMaxBodyRunes = 180
 // budget on retellings.
 const ApplyDuplicateBodySimilarity = 0.85
 
-// ApplyLine is one instruction the context constructor injects so retrieval
-// becomes utilization (Know and Act).
-type ApplyLine struct {
-	Kind      string // preference | constraint | convention
-	Scope     string
-	Text      string
-	DoNotWhen string
-}
-
 // applyTypePriority orders record kinds for the APPLY block. Constraints
 // (how work must be done here) and preferences (how the user wants to work)
 // outrank facts and beliefs, which rarely change behavior in the next turn.

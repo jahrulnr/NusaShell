@@ -364,7 +364,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		return "", err
 	}
 	if name == "automation" || name == "automation_schedule" {
-		privateName := name + "_" + op
+		var privateName string
 		if name == "automation" {
 			privateName = "automation_" + op
 			if op == "status" {
@@ -2136,15 +2136,7 @@ func automationRunYAML(run *domain.WorkflowRun, extra map[string]any) map[string
 
 func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON []byte) (string, bool, error) {
 	if t.Automation == nil {
-		switch name {
-		case "automation_run", "automation_wait", "automation_run_status",
-			"automation_logs", "automation_cancel", "automation_steer", "automation_list", "automation_read", "automation_validate",
-			"automation_create", "automation_enable", "automation_disable", "automation_delete",
-			"automation_schedule_once", "automation_schedule_every":
-			return "", true, fmt.Errorf("automation is not configured")
-		default:
-			return "", false, nil
-		}
+		return "", true, fmt.Errorf("automation is not configured")
 	}
 	a := t.Automation
 	var args map[string]any

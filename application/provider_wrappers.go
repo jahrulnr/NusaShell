@@ -145,9 +145,6 @@ func shouldEmergencyCompact(err error, estimatedTokens, compactionTrigger int) b
 }
 func isPrematureStreamEnd(err error) bool { return provider.IsPrematureStreamEnd(err) }
 
-func (a *App) handleProvidersList() (any, *contracts.RPCError) {
-	return a.providerService().HandleList()
-}
 func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *contracts.RPCError) {
 	return a.providerService().HandleSave(req)
 }

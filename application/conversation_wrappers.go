@@ -53,16 +53,8 @@ func (a *App) loadRepoRPC(id string) (*ConversationRepository, *contracts.RPCErr
 	return bindConversation(a.Conversations, c), nil
 }
 
-func convDTO(c *domain.Conversation) contracts.ConversationDTO {
-	return conversation.ConvDTO(c)
-}
-
 func msgDTO(m domain.Message) contracts.MessageDTO {
 	return conversation.MsgDTO(m)
-}
-
-func toolCallDTO(tc domain.ToolCall) contracts.ToolCallDTO {
-	return conversation.ToolCallDTO(tc)
 }
 
 func (a *App) getConversation(id string) (*domain.Conversation, *contracts.RPCError) {
@@ -80,18 +72,6 @@ func (a *App) handleConversationsList() (any, *contracts.RPCError) {
 	return a.conversationService().HandleList()
 }
 
-func (a *App) handleConversationsCreate(req contracts.ConversationCreateRequest) (any, *contracts.RPCError) {
-	return a.conversationService().HandleCreate(req)
-}
-
-func (a *App) handleConversationsGet(req contracts.ConversationIDRequest) (any, *contracts.RPCError) {
-	return a.conversationService().HandleGet(req)
-}
-
-func (a *App) handleConversationsChunk(req contracts.ConversationChunkRequest) (any, *contracts.RPCError) {
-	return a.conversationService().HandleChunk(req)
-}
-
 func (a *App) handleConversationsRename(req contracts.ConversationRenameRequest) (any, *contracts.RPCError) {
 	return a.conversationService().HandleRename(req)
 }
@@ -106,14 +86,6 @@ func (a *App) handleConversationsSetWorkspace(req contracts.ConversationSetWorks
 
 func (a *App) handleConversationsSetProvider(req contracts.ConversationSetProviderRequest) (any, *contracts.RPCError) {
 	return a.conversationService().HandleSetProvider(req)
-}
-
-func (a *App) handleTodosGet(req contracts.TodosGetRequest) (any, *contracts.RPCError) {
-	return a.conversationService().HandleTodosGet(req)
-}
-
-func (a *App) handleTodosDelete(req contracts.TodosDeleteRequest) (any, *contracts.RPCError) {
-	return a.conversationService().HandleTodosDelete(req)
 }
 
 func (a *App) handleWorkspaceListDirs(req contracts.WorkspaceListDirsRequest) (any, *contracts.RPCError) {

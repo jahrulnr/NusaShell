@@ -349,9 +349,6 @@ type WorkflowRun struct {
 	RequestedBy  string // ui | agent | schedule | event | manual
 }
 
-// PipelineRun is the Automation-facing name for a workflow run.
-type PipelineRun = WorkflowRun
-
 // JobRun is the runtime state of one job in a run.
 type JobRun struct {
 	TaskState[RunStatus]

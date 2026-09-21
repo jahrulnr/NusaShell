@@ -404,7 +404,7 @@ func (s *Service) PrepareConsolidationOp(op *domain.LearningOperation) {
 	}
 }
 
-// consolidateViaLLM calls the LLM-backed memory consolidator and parses the
+// consolidateViaLLMAt calls the LLM-backed memory consolidator and parses the
 // typed operations from its response. It returns the parsed operations and
 // the id of the conversation holding the call's transcript.
 //
@@ -415,11 +415,6 @@ func (s *Service) PrepareConsolidationOp(op *domain.LearningOperation) {
 // callers may still use the deterministic fallback when no turn is wired or
 // the response cannot be parsed. Typed catalog results prefer the learn() tool-call
 // arguments; assistant text is a fallback.
-func (s *Service) ConsolidateViaLLM(job *domain.LearningJob, exp *domain.Experience) ([]domain.LearningOperation, string) {
-	ops, convID, _, _ := s.consolidateViaLLMAt(job, exp, s.LearningSourceForExperience(exp))
-	return ops, convID
-}
-
 func (s *Service) consolidateViaLLMAt(job *domain.LearningJob, exp *domain.Experience, source LearningSource) ([]domain.LearningOperation, string, bool, error) {
 	if strings.TrimSpace(resources.LearnerPrompt()) == "" || !s.learningTurnAvailable() {
 		return nil, "", false, nil

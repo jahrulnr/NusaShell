@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- **Dead code removed across `application/`, `domain/`, `pkg/hash`, and
+  `infrastructure/`.** Every deletion was verified unreachable by repo-wide
+  reference count before removal: the superseded `application/rpc_dispatch.go`
+  (its live equivalent is `pkg/rpcdispatch`), ~45 zero-caller `handle*`/`App`
+  forwarding methods and DTO helpers in the `application/*_wrappers.go` facade,
+  the unused in-memory automation store
+  (`infrastructure/automation/memory_store.go`), the dead 15-name legacy guard
+  list and dead `privateName` assignment in `tools.Toolbox`, four unused
+  `modelcatalog` exports, two dead `pkg/hash` functions, and the `PipelineRun`
+  / `PipelineDefinition` / `ApplyLine` domain leftovers. Candidate deletions
+  that still had a live or test caller (legacy `subagent_steer`/`stop`/`wait`
+  tool aliases, `Toolbox.Experiences`/`User`/`Agent`,
+  `embeddings.NewEmbedder`, `handleTurnsStart`) were kept and are tracked as
+  follow-ups.
+
 ## [0.9.2] - 2026-09-21
 
 ### Added

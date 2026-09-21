@@ -6,7 +6,6 @@ import (
 )
 
 // WorkflowDefinition is the canonical automation/pipeline document.
-// PipelineDefinition is a compatibility alias used by Automation-oriented APIs.
 type WorkflowDefinition struct {
 	ID          string
 	Name        string
@@ -74,9 +73,6 @@ func (n *NotifyConfig) NormalizedDetail() NotifyDetail {
 func (n *NotifyConfig) Enabled() bool {
 	return n != nil && strings.TrimSpace(n.Plugin) != ""
 }
-
-// PipelineDefinition is the Automation-facing name for a workflow.
-type PipelineDefinition = WorkflowDefinition
 
 // WorkflowSource records where a definition came from.
 type WorkflowSource struct {

@@ -67,8 +67,6 @@ func ContainsVisionImageNote(content string) bool {
 	return strings.Contains(content, "Image attached and visible")
 }
 
-// ImageOmittedPlaceholderFor is kept for backward compatibility with tests.
-
 // FolderPlaceholderFor builds a text placeholder that tells the agent the
 // absolute path of a dropped folder. The agent can use file tools
 // (list_dir, read_file, etc.) to explore the directory. Folder attachments

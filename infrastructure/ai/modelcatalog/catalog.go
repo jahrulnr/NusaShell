@@ -660,43 +660,6 @@ func contains(slice []string, s string) bool {
 	return false
 }
 
-// EnrichAll enriches a batch of model IDs with catalog metadata.
-// Call ensureLoaded first. Returns the metadata for each ID (nil if not found).
-func (c *Catalog) EnrichAll(providerHint string, modelIDs []string) []*ModelMetadata {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if !c.loaded {
-		return nil
-	}
-	out := make([]*ModelMetadata, len(modelIDs))
-	for i, id := range modelIDs {
-		out[i] = c.Lookup(providerHint, id)
-	}
-	return out
-}
-
-// Refresh forces a re-fetch on next Lookup.
-func (c *Catalog) Refresh() {
-	c.mu.Lock()
-	c.loaded = false
-	c.mu.Unlock()
-}
-
-// SetURL overrides the live catalog URL (for testing/simulation).
-func (c *Catalog) SetURL(url string) {
-	c.mu.Lock()
-	c.url = url
-	c.loaded = false
-	c.mu.Unlock()
-}
-
-// Stats returns the number of models indexed.
-func (c *Catalog) Stats() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.size
-}
-
 // EnsureLoaded is the public version for external callers.
 func (c *Catalog) EnsureLoaded(ctx context.Context) error {
 	return c.ensureLoaded(ctx)

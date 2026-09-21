@@ -42,12 +42,12 @@ func TestCatalogEnsureLoadedIndexesLiveCatalog(t *testing.T) {
 	defer server.Close()
 
 	catalog := New(server.Client())
-	catalog.SetURL(server.URL)
+	catalog.url = server.URL
 	if err := catalog.EnsureLoaded(context.Background()); err != nil {
 		t.Fatalf("EnsureLoaded failed: %v", err)
 	}
-	if !catalog.Loaded() || catalog.Stats() != 1 {
-		t.Fatalf("catalog state = loaded:%t stats:%d, want loaded:true stats:1", catalog.Loaded(), catalog.Stats())
+	if !catalog.Loaded() || catalog.size != 1 {
+		t.Fatalf("catalog state = loaded:%t stats:%d, want loaded:true stats:1", catalog.Loaded(), catalog.size)
 	}
 
 	meta := catalog.Lookup("openai", "gpt-test")
@@ -70,9 +70,11 @@ func TestCatalogEnsureLoadedIndexesLiveCatalog(t *testing.T) {
 	if got := catalog.Lookup("", "GPT Test"); got != meta {
 		t.Fatalf("display-name lookup = %#v, want same metadata pointer", got)
 	}
-	enriched := catalog.EnrichAll("", []string{"gpt-test", "missing"})
-	if len(enriched) != 2 || enriched[0] != meta || enriched[1] != nil {
-		t.Fatalf("EnrichAll = %#v, want [model nil]", enriched)
+	if got := catalog.Lookup("", "gpt-test"); got != meta {
+		t.Fatalf("loaded-model lookup = %#v, want same metadata pointer", got)
+	}
+	if got := catalog.Lookup("", "missing"); got != nil {
+		t.Fatalf("missing-model lookup = %#v, want nil", got)
 	}
 }
 
@@ -107,7 +109,7 @@ func TestCatalogLookupPrefersConfiguredGatewayNamespace(t *testing.T) {
 	defer server.Close()
 
 	catalog := New(server.Client())
-	catalog.SetURL(server.URL)
+	catalog.url = server.URL
 	if err := catalog.EnsureLoaded(context.Background()); err != nil {
 		t.Fatalf("EnsureLoaded failed: %v", err)
 	}
@@ -136,7 +138,7 @@ func TestCatalogRefreshFetchesOnlyWhenStale(t *testing.T) {
 	defer server.Close()
 
 	catalog := New(server.Client())
-	catalog.SetURL(server.URL)
+	catalog.url = server.URL
 	ctx := context.Background()
 	if err := catalog.EnsureLoaded(ctx); err != nil {
 		t.Fatalf("first EnsureLoaded failed: %v", err)
@@ -147,9 +149,9 @@ func TestCatalogRefreshFetchesOnlyWhenStale(t *testing.T) {
 	if requests != 1 {
 		t.Fatalf("fresh catalog requests = %d, want 1", requests)
 	}
-	catalog.Refresh()
+	catalog.loaded = false
 	if catalog.Loaded() {
-		t.Fatal("Refresh left catalog marked loaded")
+		t.Fatal("catalog still marked loaded after reset")
 	}
 	if err := catalog.EnsureLoaded(ctx); err != nil {
 		t.Fatalf("refreshed EnsureLoaded failed: %v", err)
@@ -164,13 +166,13 @@ func TestCatalogFallsBackToEmbeddedCatalogWhenLiveFetchFails(t *testing.T) {
 		return nil, errors.New("offline")
 	})}
 	catalog := New(client)
-	catalog.SetURL("https://catalog.invalid/api.json")
+	catalog.url = "https://catalog.invalid/api.json"
 
 	if err := catalog.EnsureLoaded(context.Background()); err != nil {
 		t.Fatalf("EnsureLoaded fallback failed: %v", err)
 	}
-	if !catalog.Loaded() || catalog.Stats() == 0 {
-		t.Fatalf("fallback state = loaded:%t stats:%d, want loaded catalog with entries", catalog.Loaded(), catalog.Stats())
+	if !catalog.Loaded() || catalog.size == 0 {
+		t.Fatalf("fallback state = loaded:%t stats:%d, want loaded catalog with entries", catalog.Loaded(), catalog.size)
 	}
 	opencode := catalog.Lookup("opencode", "deepseek/deepseek-v4.1-flash")
 	if opencode == nil || opencode.Context != 1_000_000 || !opencode.Vision {
@@ -186,9 +188,6 @@ func TestCatalogLookupReturnsNilUntilLoaded(t *testing.T) {
 	catalog := New(nil)
 	if got := catalog.Lookup("", "anything"); got != nil {
 		t.Fatalf("unloaded Lookup = %#v, want nil", got)
-	}
-	if got := catalog.EnrichAll("", []string{"anything"}); got != nil {
-		t.Fatalf("unloaded EnrichAll = %#v, want nil", got)
 	}
 }
 

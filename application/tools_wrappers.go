@@ -96,15 +96,3 @@ func (a *App) handleToolContracts(req contracts.ToolContractsRequest) (any, *con
 	result := tools.BuildContracts(defs)
 	return result, nil
 }
-
-func (a *App) handleDocsList() (any, *contracts.RPCError) {
-	return a.toolsService().HandleList()
-}
-
-func (a *App) handleDocsSearch(req contracts.DocsSearchRequest) (any, *contracts.RPCError) {
-	return a.toolsService().HandleSearch(req)
-}
-
-func (a *App) handleDocsRead(req contracts.DocReadRequest) (any, *contracts.RPCError) {
-	return a.toolsService().HandleRead(req)
-}

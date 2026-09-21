@@ -301,17 +301,6 @@ func (s *Service) LearningSourceForExperience(exp *domain.Experience) LearningSo
 	return source
 }
 
-func learningMessageRange(store ConversationStore, conversationID string) (int, int) {
-	if store == nil {
-		return 0, 0
-	}
-	conversation, err := store.Get(conversationID)
-	if err != nil || conversation == nil {
-		return 0, 0
-	}
-	return LearningMessageRangeForConversation(conversation)
-}
-
 func LearningMessageRangeForConversation(conversation *domain.Conversation) (int, int) {
 	if conversation == nil {
 		return 0, 0

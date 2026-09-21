@@ -25,22 +25,6 @@ var clockNow = func() time.Time {
 	return clock.NewTime().Time()
 }
 
-func (a *App) handleMemoryList() (any, *contracts.RPCError) {
-	return a.memoryService().HandleList()
-}
-
-func (a *App) handleMemorySearch(req contracts.MemorySearchRequest) (any, *contracts.RPCError) {
-	return a.memoryService().HandleSearch(req)
-}
-
-func (a *App) handleMemoryGet(req contracts.MemoryIDRequest) (any, *contracts.RPCError) {
-	return a.memoryService().HandleGet(req)
-}
-
-func (a *App) handleMemoryRetire(req contracts.MemoryIDRequest) (any, *contracts.RPCError) {
-	return a.memoryService().HandleRetire(req)
-}
-
 func (a *App) handleMemoryDelete(req contracts.MemoryIDRequest) (any, *contracts.RPCError) {
 	return a.memoryService().HandleDelete(req)
 }
