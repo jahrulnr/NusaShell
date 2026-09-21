@@ -41,3 +41,31 @@ func TestCompactionTriggerTokensExplicitThresholdWithinBudget(t *testing.T) {
 		t.Fatalf("threshold within budget: got %d, want 100000", trigger)
 	}
 }
+
+func TestShouldCompact(t *testing.T) {
+	tests := []struct {
+		name      string
+		estimated int
+		trigger   int
+		want      bool
+	}{
+		{"over watermark compacts", 157287, 157286, true},
+		{"at watermark does not compact", 157286, 157286, false},
+		{"under watermark does not compact", 100000, 157286, false},
+		{"zero estimate does not compact", 0, 157286, false},
+		{"any estimate compacts at zero trigger", 1, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ShouldCompact(tt.estimated, tt.trigger); got != tt.want {
+				t.Fatalf("ShouldCompact(%d, %d) = %v, want %v", tt.estimated, tt.trigger, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMaxCompactionAttempts(t *testing.T) {
+	if MaxCompactionAttempts != 3 {
+		t.Fatalf("MaxCompactionAttempts = %d, want 3", MaxCompactionAttempts)
+	}
+}

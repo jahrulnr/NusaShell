@@ -9,6 +9,7 @@ import (
 	"nusashell/application/provider"
 	"nusashell/application/service/tooloutput"
 	"nusashell/application/tools"
+	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/pkg/text"
 	"nusashell/resources"
@@ -428,6 +429,24 @@ func (a *Service) compactConversationWithCache(ctx context.Context, adapter Prov
 		return "", err
 	}
 	return runningSummary, nil
+}
+
+// runCompaction performs one compaction pass: resolve the compaction
+// adapter, announce the attempt, summarize through the cached path, and emit
+// the compacted/failed turn event. Callers own the trigger condition, the
+// attempt budget, and the failure policy — the event contract and adapter
+// resolution live here so the four turn paths cannot drift.
+func (a *Service) runCompaction(ctx context.Context, run *TurnRun, conv *domain.Conversation, adapter ProviderContext, model string, contextWindow int, settings domain.Settings, caps ModelCapabilities, trigger domain.CompactionTrigger) (string, error) {
+	compAdapter, compModel, compWindow := a.ResolveCompactionAdapter(ctx, adapter, model, contextWindow, settings)
+	a.EmitCompactionStarted(run, conv.ID)
+	compactionCache := a.compactionPromptCache(settings, compAdapter, conv, compModel)
+	summary, compErr := a.compactConversationWithCache(ctx, compAdapter, conv, compModel, compWindow, settings, trigger, compactionCache, caps)
+	if compErr != nil {
+		a.EmitInteractiveTurnEvent(run, contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: run.ID, ConversationID: conv.ID, Error: compErr.Error()})
+		return "", compErr
+	}
+	a.EmitInteractiveTurnEvent(run, contracts.EventCompacted, contracts.CompactedEvent{RunID: run.ID, ConversationID: conv.ID, Summary: summary})
+	return summary, nil
 }
 
 func (a *Service) compactCodexConversation(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, keepBudget int) (string, error) {

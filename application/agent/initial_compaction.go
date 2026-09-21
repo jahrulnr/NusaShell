@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"nusashell/contracts"
 	"nusashell/domain"
 )
 
@@ -17,21 +16,16 @@ func (a *Service) maybeCompactInitialTurn(run *TurnRun, adapter ProviderContext,
 	trigger := domain.CompactionTriggerTokens(contextWindow, maxTokens, settings)
 	request := a.buildTurnRequest(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, nil, maxTokens, promptCache, caps)
 	beforeTokens := a.estimateTurnRequest(request, conversation, adapter)
-	if beforeTokens <= int64(trigger) {
+	if !domain.ShouldCompact(int(beforeTokens), trigger) {
 		return conversation, nil
 	}
 
 	a.log("info", "agent", "compaction triggered for %s: est=%d trigger=%d window=%d maxOut=%d",
 		conversation.ID, beforeTokens, trigger, contextWindow, maxTokens)
-	compAdapter, compModel, compWindow := a.ResolveCompactionAdapter(run.Ctx, adapter, model, contextWindow, settings)
-	compactionCache := a.compactionPromptCache(settings, compAdapter, conversation, compModel)
-	a.EmitCompactionStarted(run, conversation.ID)
-	summary, compErr := a.compactConversationWithCache(run.Ctx, compAdapter, conversation, compModel, compWindow, settings, domain.CompactionTriggerInitial, compactionCache, caps)
+	_, compErr := a.runCompaction(run.Ctx, run, conversation, adapter, model, contextWindow, settings, caps, domain.CompactionTriggerInitial)
 	if compErr != nil {
 		a.log("warn", "agent", "compaction failed for %s: %v", conversation.ID, compErr)
-		a.EmitInteractiveTurnEvent(run, contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: run.ID, ConversationID: conversation.ID, Error: compErr.Error()})
 	} else {
-		a.EmitInteractiveTurnEvent(run, contracts.EventCompacted, contracts.CompactedEvent{RunID: run.ID, ConversationID: conversation.ID, Summary: summary})
 		a.log("info", "agent", "compacted conversation %s", conversation.ID)
 	}
 	refreshed, getErr := a.Conversations.Get(run.ConversationID)

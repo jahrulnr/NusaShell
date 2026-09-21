@@ -97,6 +97,16 @@ func CompactionTriggerTokens(contextWindow, maxOutput int, settings Settings) in
 	return trigger
 }
 
+// MaxCompactionAttempts bounds how many compaction passes one turn may make
+// across all triggers, so a pathological transcript cannot loop.
+const MaxCompactionAttempts = 3
+
+// ShouldCompact reports whether an estimated request size has crossed the
+// compaction watermark.
+func ShouldCompact(estimated, trigger int) bool {
+	return estimated > trigger
+}
+
 // TakeCompactionChunk takes the longest prefix of msgs whose token
 // estimate fits in available. A single oversized message is still taken
 // so compaction cannot stall. System markers should already have been
