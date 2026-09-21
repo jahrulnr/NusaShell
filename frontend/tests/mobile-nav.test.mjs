@@ -144,6 +144,16 @@ test('mobile drawer is bounded, scrollable, and non-interactive while closed', (
   assert.match(mobileRules, /pointer-events:\s*none/);
 });
 
+test('modal detail drawers hide the hamburger so it cannot collide with their close control', () => {
+  // plugin-drawer (z 51) and acp-drawer (z 52) sit below the toggle (z 80) and
+  // cover the shell bar; the hamburger would otherwise float next to the
+  // drawer's close button in the same corner. While a modal drawer is open the
+  // toggle is hidden — the drawer owns the only exit control.
+  const mobileRules = layoutCSS.slice(layoutCSS.indexOf('@media (max-width: 680px)'));
+  assert.match(mobileRules, /:has\(\.plugin-drawer\.active\)[^{]*\.mobile-nav-toggle[^{]*\{[^}]*visibility:\s*hidden/);
+  assert.match(mobileRules, /:has\(\.acp-drawer\.active\)[^{]*\.mobile-nav-toggle[^{]*\{[^}]*visibility:\s*hidden/);
+});
+
 test('mobile drawer gives the collapsed shell sidebar enough width for labels', () => {
   const mobileRules = layoutCSS.slice(layoutCSS.indexOf('@media (max-width: 680px)'));
   assert.match(

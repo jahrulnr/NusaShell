@@ -654,28 +654,68 @@ function runIdFromScroller(scroller) {
   return scroller?.querySelector?.('.acp-run-panel')?.dataset?.runId || '';
 }
 
-function bindTranscriptFollow(panel) {
+export function bindTranscriptFollow(panel) {
   const scroller = transcriptScroller(panel);
   if (!scroller || boundFollowScrollers.has(scroller)) return;
   boundFollowScrollers.add(scroller);
   // Resolve the active runId on each gesture so one drawer/popup scroller can
   // host many rooms without sharing a single pin object.
+  const applyIntent = (direction) => {
+    const runId = runIdFromScroller(scroller);
+    if (runId) applySubagentFollowIntent(runId, scroller, direction);
+  };
   scroller.addEventListener('wheel', (event) => {
     if (isNestedScrollerEvent(event.target, scroller)) return;
-    const runId = runIdFromScroller(scroller);
-    if (!runId) return;
     let dir = '';
     if (event.deltaY < 0) dir = 'up';
     else if (event.deltaY > 0) dir = 'down';
     if (!dir) return;
-    applySubagentFollowIntent(runId, scroller, dir);
+    applyIntent(dir);
   }, { passive: true });
+  // Touch scrolls never emit wheel events; track the finger so a downward
+  // drag (reading older output) releases the pin like a wheel scroll-up does.
+  let touchY = null;
+  scroller.addEventListener('touchstart', (event) => {
+    touchY = event.touches?.[0]?.clientY ?? null;
+  }, { passive: true });
+  scroller.addEventListener('touchmove', (event) => {
+    if (isNestedScrollerEvent(event.target, scroller)) return;
+    const y = event.touches?.[0]?.clientY;
+    if (!Number.isFinite(y) || !Number.isFinite(touchY)) return;
+    const delta = y - touchY;
+    touchY = y;
+    if (Math.abs(delta) >= 1) applyIntent(delta < 0 ? 'down' : 'up');
+  }, { passive: true });
+  const resetTouch = () => { touchY = null; };
+  scroller.addEventListener('touchend', resetTouch, { passive: true });
+  scroller.addEventListener('touchcancel', resetTouch, { passive: true });
+  scroller.addEventListener('keydown', (event) => {
+    if (event.target?.closest?.('input, textarea, [contenteditable="true"]')) return;
+    const up = event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home';
+    const down = event.key === 'ArrowDown' || event.key === 'PageDown' || event.key === 'End';
+    if (up) applyIntent('up');
+    else if (down) applyIntent('down');
+  });
+  // A scrollbar drag produces scroll events with no gesture signal, so
+  // geometry direction is trusted only while the pointer is on the gutter.
+  let scrollbarDragging = false;
+  let lastScrollTop = scroller.scrollTop;
+  scroller.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    const rect = scroller.getBoundingClientRect?.();
+    if (rect && event.clientX >= rect.right - 24) scrollbarDragging = true;
+  }, { passive: true });
+  scroller.ownerDocument?.defaultView?.addEventListener('pointerup', () => { scrollbarDragging = false; }, { passive: true });
   scroller.addEventListener('scroll', () => {
+    const geometryDirection = scroller.scrollTop < lastScrollTop ? 'up' : scroller.scrollTop > lastScrollTop ? 'down' : '';
+    lastScrollTop = scroller.scrollTop;
     const runId = runIdFromScroller(scroller);
     if (!runId) return;
     // No direction: only re-pin when geometry says we are at the bottom.
-    // Detach requires an explicit upward wheel intent above.
-    updateScrollPin(getSubagentFollow(runId), scroller);
+    // Detach requires an explicit upward wheel/touch/keyboard intent or an
+    // active scrollbar drag — content growth alone can clamp scrollTop and
+    // must not be mistaken for the user reading up.
+    updateScrollPin(getSubagentFollow(runId), scroller, 24, { direction: scrollbarDragging ? geometryDirection : '' });
   }, { passive: true });
 }
 

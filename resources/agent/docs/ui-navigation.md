@@ -36,7 +36,7 @@ The vertical sidebar identifies NusaShell with its brand mark and wordmark, show
 
 ## Mobile navigation bar
 
-Desktop has no separate titlebar. Below 680px, a compact bar remains only as the reliable home for the drawer toggle while the sidebar itself is off-canvas.
+Desktop has no separate titlebar. Below 680px, a compact bar remains only as the reliable home for the drawer toggle while the sidebar itself is off-canvas. While a modal detail drawer (plugin details, ACP subagents) is open, the hamburger hides so it cannot collide with the drawer's close button in the same corner; the drawer's own X is the only exit control until it closes.
 
 - **Open navigation menu** (`#mobile-nav-toggle`):
   - Section: Mobile navigation bar

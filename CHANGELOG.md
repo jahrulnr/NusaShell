@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.4] - 2026-09-21
+
+### Fixed
+
+- **Mobile: the hamburger no longer floats next to a modal drawer's close
+  button.** Below 680px the navigation toggle stayed above the plugin and
+  subagent detail drawers, so its icon landed in the same top-right corner as
+  the drawer's X. While one of those modal drawers is open the toggle is now
+  hidden, leaving the drawer's own close control as the single exit.
+- **Subagent transcripts stop yanking to the bottom while you read up.** The
+  drawer and peek-popup follow pin only released on mouse wheel input, so on
+  touch scrolling (and on scrollbar drags or PageUp-style keys) every incoming
+  delta forced the view back to the tail. Upward touch, keyboard, and
+  scrollbar movement now release the pin the same way a wheel does.
+
 ## [0.9.3] - 2026-09-21
 
 ### Added

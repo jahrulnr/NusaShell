@@ -490,6 +490,13 @@ body.mini-mode .agent-conversations { display: none; }
     position: relative;
     z-index: 80;
   }
+  /* Plugin/ACP detail drawers are modal dialogs that slide over the shell
+   * bar and own a close control in the same corner; hide the hamburger while
+   * one is open so the two buttons cannot collide. */
+  body:has(.plugin-drawer.active) .mobile-nav-toggle,
+  body:has(.acp-drawer.active) .mobile-nav-toggle {
+    visibility: hidden;
+  }
   .titlebar {
     min-height: 58px;
     height: 58px;

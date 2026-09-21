@@ -10,6 +10,7 @@ import {
   runStatusText,
   getSubagentFollow,
   applySubagentFollowIntent,
+  bindTranscriptFollow,
   resetSubagentFollowForTests,
   renderDockList,
   renderRunSidebar,
@@ -334,8 +335,44 @@ test('subagent follow store is keyed by run id, not a shared scroller WeakMap', 
   assert.doesNotMatch(subagentsView, /followStates\s*=\s*new WeakMap/);
   assert.match(subagentsView, /applySubagentFollowIntent\(/);
   assert.match(subagentsView, /getSubagentFollow\(runId\)/);
-  // Direction-aware unpin (wheel) — geometry-only scroll cannot detach.
+  // Direction-aware unpin — geometry-only scroll cannot detach, so every real
+  // input path must carry intent: wheel, touch drag (mobile has no wheel),
+  // keyboard, and an active scrollbar drag.
   assert.match(subagentsView, /addEventListener\('wheel'/);
-  assert.match(subagentsView, /applySubagentFollowIntent\(runId, scroller, dir\)/);
+  assert.match(subagentsView, /addEventListener\('touchmove'/);
+  assert.match(subagentsView, /addEventListener\('keydown'/);
+  assert.match(subagentsView, /pointerdown[\s\S]*?scrollbarDragging\s*=\s*true/);
+  assert.match(subagentsView, /applySubagentFollowIntent\(runId, scroller, direction\)/);
   assert.match(subagentsView, /updateScrollPin\(getSubagentFollow\(runId\), scroller, 24, \{ direction \}\)/);
+});
+
+test('subagent transcript releases the run pin on an upward touch scroll', () => {
+  resetSubagentFollowForTests();
+  const dom = new JSDOM(
+    '<!doctype html><html><body><div class="acp-run-content">' +
+    '<div class="acp-run-panel" data-run-id="run-a"><div class="agent-thread acp-transcript"></div></div>' +
+    '</div></body></html>',
+  );
+  global.window = dom.window;
+  global.document = dom.window.document;
+  try {
+    const scroller = document.querySelector('.acp-run-content');
+    bindTranscriptFollow(document.querySelector('.acp-run-panel'));
+    assert.equal(getSubagentFollow('run-a').pinned, true);
+    const touch = (type, y) => {
+      const event = new dom.window.Event(type, { bubbles: true });
+      event.touches = [{ clientY: y }];
+      scroller.dispatchEvent(event);
+    };
+    touch('touchstart', 200);
+    touch('touchmove', 320); // finger drags down = reading older output
+    assert.equal(getSubagentFollow('run-a').pinned, false, 'upward read must release the pin');
+    touch('touchend', 320);
+    touch('touchstart', 320);
+    touch('touchmove', 40); // swipe up = back toward the live tail
+    assert.equal(getSubagentFollow('run-a').pinned, true, 'returning to the bottom re-arms follow');
+  } finally {
+    cleanup();
+    resetSubagentFollowForTests();
+  }
 });

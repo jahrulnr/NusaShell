@@ -336,7 +336,6 @@ esac
   const env = { ...process.env };
   delete env.DISPLAY;
   delete env.WAYLAND_DISPLAY;
-  delete env.NUSASHELL_NON_INTERACTIVE;
   delete env.NUSASHELL_INSTALL_SERVICE;
   delete env.NUSASHELL_INSTALL_ELECTRON;
   delete env.NUSASHELL_INSTALL_PETS;
@@ -352,6 +351,7 @@ esac
       NUSASHELL_RELEASE_INDEX: 'https://fixture.invalid/releases/release-versions.json',
       NUSASHELL_GO_INSTALL_ROOT: installRoot,
       NUSASHELL_VERSION: '',
+      NUSASHELL_NON_INTERACTIVE: '1',
     },
   });
 
