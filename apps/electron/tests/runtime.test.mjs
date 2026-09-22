@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
+  bootstrapElectronRuntime,
   buildBackendEnvironment,
   defaultCoreURL,
   electronDevArgs,
@@ -188,6 +189,85 @@ test('resolveBackendPath finds the Windows user-local Go backend for packaged El
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('bootstrapElectronRuntime materializes a missing runtime after a transient download failure', async () => {
+  const calls = [];
+  const sleeps = [];
+  const result = await bootstrapElectronRuntime({
+    cliPath: '/repo/apps/electron/node_modules/.bin/electron',
+    args: ['--no-sandbox', '--version'],
+    environment: { CI: 'true' },
+    attempts: 3,
+    backoffMs: 25,
+    spawnSync: (cliPath, args, options) => {
+      calls.push({ cliPath, args, options });
+      // First call simulates the 504 that killed the renderer smoke test:
+      // the CLI reports a failed runtime download with a non-zero exit.
+      return calls.length < 3 ? { status: 1 } : { status: 0 };
+    },
+    sleep: (milliseconds) => sleeps.push(milliseconds),
+    log: () => {},
+  });
+
+  assert.deepEqual(result, { ok: true, attempts: 3 });
+  assert.equal(calls.length, 3);
+  assert.deepEqual(sleeps, [25, 50]);
+  assert.deepEqual(calls[0].args, ['--no-sandbox', '--version']);
+  assert.equal(calls[0].options.stdio, 'inherit');
+  assert.equal(calls[0].options.windowsHide, true);
+  assert.deepEqual(calls[0].options.env, { CI: 'true' });
+});
+
+test('bootstrapElectronRuntime keeps its first result when the runtime is already installed', async () => {
+  let spawns = 0;
+  const sleeps = [];
+  const result = await bootstrapElectronRuntime({
+    cliPath: '/repo/apps/electron/node_modules/.bin/electron',
+    spawnSync: () => {
+      spawns += 1;
+      return { status: 0 };
+    },
+    sleep: (milliseconds) => sleeps.push(milliseconds),
+    log: () => {},
+  });
+
+  assert.deepEqual(result, { ok: true, attempts: 1 });
+  assert.equal(spawns, 1);
+  assert.deepEqual(sleeps, []);
+});
+
+test('bootstrapElectronRuntime reports the last failure once the attempts are exhausted', async () => {
+  const messages = [];
+  const result = await bootstrapElectronRuntime({
+    cliPath: '/repo/apps/electron/node_modules/.bin/electron',
+    attempts: 2,
+    backoffMs: 25,
+    spawnSync: () => ({ status: 1, error: new Error('spawn ETXTBSY') }),
+    sleep: () => {},
+    log: (message) => messages.push(message),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.attempts, 2);
+  assert.equal(result.status, 1);
+  assert.match(result.error.message, /ETXTBSY/);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /attempt 1\/2/);
+});
+
+test('bootstrapElectronRuntime surfaces a signal-terminated bootstrap without an error object', async () => {
+  const result = await bootstrapElectronRuntime({
+    cliPath: '/repo/apps/electron/node_modules/.bin/electron',
+    attempts: 1,
+    spawnSync: () => ({ status: null, signal: 'SIGKILL' }),
+    sleep: () => {},
+    log: () => {},
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, null);
+  assert.equal(result.signal, 'SIGKILL');
 });
 
 test('Electron removes the application menu and does not embed the Go runtime', async () => {
