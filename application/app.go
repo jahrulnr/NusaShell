@@ -106,9 +106,12 @@ type App struct {
 	// workspace-gated tools such as memory_project usable before the user
 	// chooses a folder, instead of resolving relative paths against ".".
 	defaultWorkspace string
-	AcpAgents        AcpAgentStore
-	Acp              AcpRuntime
-	AcpRunStorage    domain.AcpRunStorage
+	// globalAgentsMDPath is the host-global ~/.agents/AGENTS.md file hydrated
+	// ahead of the workspace AGENTS.md (wired from os.UserHomeDir).
+	globalAgentsMDPath string
+	AcpAgents          AcpAgentStore
+	Acp                AcpRuntime
+	AcpRunStorage      domain.AcpRunStorage
 	// TurnPatches persists the per-turn net unified diff under each
 	// conversation's operation/ directory. Nil disables the patch history.
 	TurnPatches  domain.TurnPatchStorage
@@ -504,15 +507,19 @@ type Deps struct {
 	PetsInstaller               PetsInstaller               // optional; nil = desktop pet unavailable (macOS / Windows builds)
 	DirectoryBrowser            DirectoryBrowser            // optional; nil = in-app workspace browser unavailable
 	DefaultWorkspace            string                      // fallback workspace (host home dir) when a conversation has none
-	CodexRuntime                CodexRuntime                // optional; nil = Codex runtime RPCs unavailable
-	CodexOAuth                  CodexOAuth                  // optional; nil = Codex OAuth login unavailable
-	CodexUsage                  CodexUsage                  // optional; nil = Codex usage/circuit RPCs unavailable
-	CodexCLIAuth                CodexCLIAuthImporter        // optional; nil = Codex CLI import unavailable
-	CodexRouter                 *CodexAccountRouter         // optional; nil = no multi-account sticky/circuit state
-	RetrySleeper                RetrySleeper
-	AcpAgents                   AcpAgentStore
-	Acp                         AcpRuntime
-	AcpRunStorage               domain.AcpRunStorage
+	// GlobalAgentsMDPath is the host-global agent instructions file
+	// (~/.agents/AGENTS.md) hydrated ahead of the workspace AGENTS.md.
+	// Empty disables the slot.
+	GlobalAgentsMDPath string
+	CodexRuntime       CodexRuntime         // optional; nil = Codex runtime RPCs unavailable
+	CodexOAuth         CodexOAuth           // optional; nil = Codex OAuth login unavailable
+	CodexUsage         CodexUsage           // optional; nil = Codex usage/circuit RPCs unavailable
+	CodexCLIAuth       CodexCLIAuthImporter // optional; nil = Codex CLI import unavailable
+	CodexRouter        *CodexAccountRouter  // optional; nil = no multi-account sticky/circuit state
+	RetrySleeper       RetrySleeper
+	AcpAgents          AcpAgentStore
+	Acp                AcpRuntime
+	AcpRunStorage      domain.AcpRunStorage
 	// TurnPatches persists the per-turn net unified diff under each
 	// conversation's operation/ directory. Nil disables the patch history.
 	TurnPatches domain.TurnPatchStorage
@@ -587,6 +594,7 @@ func NewApp(deps Deps) *App {
 		EmbeddingModelListerFactory: deps.EmbeddingModelListerFactory,
 		DirectoryBrowser:            deps.DirectoryBrowser,
 		defaultWorkspace:            strings.TrimSpace(deps.DefaultWorkspace),
+		globalAgentsMDPath:          strings.TrimSpace(deps.GlobalAgentsMDPath),
 		ModelCatalog:                deps.ModelCatalog,
 		TTSInstaller:                deps.TTSInstaller,
 		STTInstaller:                deps.STTInstaller,

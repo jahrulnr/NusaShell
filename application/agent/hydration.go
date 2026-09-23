@@ -54,6 +54,12 @@ type HydrationSource struct {
 	// document (memory/soul.md). When set, hydration emits a separate direct
 	// file_read call for the document.
 	AgentPath string
+	// GlobalAgentsMDPath is the absolute filesystem path of the host-global
+	// agent instructions file (~/.agents/AGENTS.md, resolved from
+	// os.UserHomeDir by the composition root). When set, hydration emits a
+	// real file_read slot for it BEFORE the workspace AGENTS.md slot so
+	// project rules win on conflict. Empty hides the slot.
+	GlobalAgentsMDPath string
 	// Todos is the per-conversation todo checklist. When nil, no todo_list
 	// slot is injected.
 	Todos  ConversationTodoPort
@@ -110,6 +116,7 @@ func (b *HydrationBuilder) Build() HydrationResult {
 		}
 	}
 	appendSlot(b.readRuntimeContext())
+	appendSlot(b.readGlobalAgentsMD())
 	appendSlot(b.readAgentsMD())
 	appendSlot(b.readFileList())
 	for _, slot := range b.readMemory() {
@@ -185,6 +192,8 @@ func hydrationSlotReason(slot hydrationSlot) string {
 			return "I need to know who the user is."
 		case strings.HasSuffix(normalized, "/soul.md") || normalized == "soul.md":
 			return "I need to know who I am in NusaShell."
+		case strings.HasSuffix(normalized, "/.agents/agents.md") || normalized == ".agents/agents.md":
+			return "I need to load my global user instructions."
 		case strings.HasSuffix(normalized, "/agents.md") || normalized == "agents.md":
 			return "I need to understand the project instructions."
 		case strings.Contains(normalized, "skill-creator") || strings.Contains(normalized, "skill_creator"):
@@ -277,6 +286,36 @@ func (b *HydrationBuilder) readFileList() hydrationSlot {
 		return hydrationSlot{name: "file_list", content: ""}
 	}
 	return hydrationSlot{name: "file_list", args: args, content: out}
+}
+
+// readGlobalAgentsMD loads the host-global ~/.agents/AGENTS.md through the
+// REAL file_read tool, same pattern as readAgentsMD. It is emitted first so
+// the workspace file follows it in the transcript — project instructions
+// then read as the more specific, winning layer. Fail-soft: no executor, no
+// configured path, a read error, or an empty body hides the slot. When the
+// workspace IS the .agents directory the global path equals the project
+// path; the global slot stays hidden so the file is read once.
+func (b *HydrationBuilder) readGlobalAgentsMD() hydrationSlot {
+	if b.source.Executor == nil {
+		return hydrationSlot{name: "file_read", content: ""}
+	}
+	path := strings.TrimSpace(b.source.GlobalAgentsMDPath)
+	if path == "" {
+		return hydrationSlot{name: "file_read", content: ""}
+	}
+	if ws := strings.TrimSpace(b.source.RuntimeContext.Workspace); ws != "" &&
+		filepath.Clean(path) == filepath.Clean(filepath.Join(ws, "AGENTS.md")) {
+		return hydrationSlot{name: "file_read", content: ""}
+	}
+	args := fmt.Sprintf(`{"path":%q}`, path)
+	out, err := b.source.Executor.Execute(context.Background(), "file_read", []byte(args))
+	if err != nil {
+		return hydrationSlot{name: "file_read", content: ""}
+	}
+	if strings.TrimSpace(stripYAMLFrontmatter(out)) == "" {
+		return hydrationSlot{name: "file_read", content: ""}
+	}
+	return hydrationSlot{name: "file_read", args: args, content: out}
 }
 
 // readAgentsMD loads the active workspace's AGENTS.md through the REAL

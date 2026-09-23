@@ -488,6 +488,197 @@ func TestHydrationAgentsMDHidden(t *testing.T) {
 	}
 }
 
+// TestHydrationGlobalAgentsMD pins the ~/.agents/AGENTS.md injection: the
+// slot is a REAL file_read call against the host-global instructions file,
+// emitted BEFORE the workspace AGENTS.md slot so project rules win on
+// conflict (global base → project override ordering).
+func TestHydrationGlobalAgentsMD(t *testing.T) {
+	globalPath := filepath.Join("/home/user", ".agents", "AGENTS.md")
+	projectPath := filepath.Join("/ws/proj", "AGENTS.md")
+	globalOut := "---\nbytes: 30\n---\n\n# Global rules\nPrefer id-ID replies."
+	projectOut := "---\nbytes: 42\n---\n\n# Project rules\nUse Go, keep it simple."
+	exec := &stubHydrationExecutor{fn: func(name string, args []byte) (string, error) {
+		switch name {
+		case "file_read":
+			var fa struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(args, &fa); err != nil {
+				return "", err
+			}
+			switch fa.Path {
+			case globalPath:
+				return globalOut, nil
+			case projectPath:
+				return projectOut, nil
+			}
+			return "", fmt.Errorf("unexpected file_read args: %s", args)
+		case "skill", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	result := NewHydrationBuilder(HydrationSource{
+		Executor:           exec,
+		GlobalAgentsMDPath: globalPath,
+		RuntimeContext:     RuntimeContextSnapshot{Workspace: "/ws/proj"},
+	}).Build()
+
+	var fileReads []string
+	for i, c := range result.Messages[0].ToolCalls {
+		if c.Name != "file_read" {
+			continue
+		}
+		var fa struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(c.Args), &fa); err != nil {
+			t.Fatalf("file_read args invalid JSON: %v", err)
+		}
+		fileReads = append(fileReads, fa.Path)
+		out := result.Messages[i+1].ToolResult.Content
+		switch fa.Path {
+		case globalPath:
+			if out != globalOut {
+				t.Errorf("global slot output = %q, want verbatim %q", out, globalOut)
+			}
+		case projectPath:
+			if out != projectOut {
+				t.Errorf("project slot output = %q, want verbatim %q", out, projectOut)
+			}
+		}
+	}
+	if len(fileReads) != 2 || fileReads[0] != globalPath || fileReads[1] != projectPath {
+		t.Fatalf("file_read order = %v, want [global project]", fileReads)
+	}
+	// Global slot sits right after runtime_context.
+	if result.Messages[0].ToolCalls[0].Name != "runtime_context" {
+		t.Fatalf("first slot = %s, want runtime_context", result.Messages[0].ToolCalls[0].Name)
+	}
+	// The reasoning must label the global read as user-level instructions,
+	// not project instructions.
+	reason := result.Messages[0].Reasoning
+	if !strings.Contains(reason, "global user instructions") {
+		t.Errorf("hydration reasoning must label the global file, got %q", reason)
+	}
+}
+
+// TestHydrationGlobalAgentsMDHidden covers the fail-soft rules: empty path,
+// file_read error, empty body, and the workspace-is-.agents dedup all hide
+// the global slot without touching the project slot.
+func TestHydrationGlobalAgentsMDHidden(t *testing.T) {
+	projectPath := filepath.Join("/ws/proj", "AGENTS.md")
+	projectOut := "---\nbytes: 42\n---\n\n# Project rules\n"
+
+	countFileReads := func(result HydrationResult) []string {
+		var paths []string
+		for _, c := range result.Messages[0].ToolCalls {
+			if c.Name != "file_read" {
+				continue
+			}
+			var fa struct {
+				Path string `json:"path"`
+			}
+			_ = json.Unmarshal([]byte(c.Args), &fa)
+			paths = append(paths, fa.Path)
+		}
+		return paths
+	}
+
+	// No GlobalAgentsMDPath → no global slot, project slot still emitted.
+	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
+		switch name {
+		case "file_read":
+			return projectOut, nil
+		case "skill", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	result := NewHydrationBuilder(HydrationSource{
+		Executor:       exec,
+		RuntimeContext: RuntimeContextSnapshot{Workspace: "/ws/proj"},
+	}).Build()
+	if got := countFileReads(result); len(got) != 1 || got[0] != projectPath {
+		t.Fatalf("file_read slots = %v, want only the project AGENTS.md", got)
+	}
+
+	// file_read error on the global path → global hidden, project emitted.
+	globalPath := filepath.Join("/home/user", ".agents", "AGENTS.md")
+	exec = &stubHydrationExecutor{fn: func(name string, args []byte) (string, error) {
+		switch name {
+		case "file_read":
+			var fa struct {
+				Path string `json:"path"`
+			}
+			_ = json.Unmarshal(args, &fa)
+			if fa.Path == globalPath {
+				return "", fmt.Errorf("open %s: no such file or directory", globalPath)
+			}
+			return projectOut, nil
+		case "skill", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	result = NewHydrationBuilder(HydrationSource{
+		Executor:           exec,
+		GlobalAgentsMDPath: globalPath,
+		RuntimeContext:     RuntimeContextSnapshot{Workspace: "/ws/proj"},
+	}).Build()
+	if got := countFileReads(result); len(got) != 1 || got[0] != projectPath {
+		t.Fatalf("file_read slots = %v, want only the project AGENTS.md", got)
+	}
+
+	// Empty global body → hidden.
+	exec = &stubHydrationExecutor{fn: func(name string, args []byte) (string, error) {
+		switch name {
+		case "file_read":
+			var fa struct {
+				Path string `json:"path"`
+			}
+			_ = json.Unmarshal(args, &fa)
+			if fa.Path == globalPath {
+				return "---\nbytes: 0\n---\n", nil
+			}
+			return projectOut, nil
+		case "skill", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	result = NewHydrationBuilder(HydrationSource{
+		Executor:           exec,
+		GlobalAgentsMDPath: globalPath,
+		RuntimeContext:     RuntimeContextSnapshot{Workspace: "/ws/proj"},
+	}).Build()
+	if got := countFileReads(result); len(got) != 1 || got[0] != projectPath {
+		t.Fatalf("file_read slots = %v, want only the project AGENTS.md", got)
+	}
+
+	// Workspace IS the .agents directory: the global path equals the project
+	// path, so the file must be read once (as the project slot), not twice.
+	agentsDir := filepath.Join("/home/user", ".agents")
+	samePath := filepath.Join(agentsDir, "AGENTS.md")
+	exec = &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
+		switch name {
+		case "file_read":
+			return projectOut, nil
+		case "skill", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	result = NewHydrationBuilder(HydrationSource{
+		Executor:           exec,
+		GlobalAgentsMDPath: samePath,
+		RuntimeContext:     RuntimeContextSnapshot{Workspace: agentsDir},
+	}).Build()
+	if got := countFileReads(result); len(got) != 1 || got[0] != samePath {
+		t.Fatalf("file_read slots = %v, want a single deduplicated read of %q", got, samePath)
+	}
+}
+
 func TestHydrationMemoryHiddenWhenEmpty(t *testing.T) {
 	// No executor: memory file_read slots are hidden, not emitted as empty stubs.
 	b := NewHydrationBuilder(HydrationSource{})

@@ -183,7 +183,11 @@ type Deps struct {
 	PendingRuns      map[string]map[string]string
 	DataDir          string
 	DefaultWorkspace string
-	StartedAt        time.Time
+	// GlobalAgentsMDPath is the host-global agent instructions file
+	// (~/.agents/AGENTS.md) hydrated ahead of the workspace AGENTS.md.
+	// Empty disables the slot.
+	GlobalAgentsMDPath string
+	StartedAt          time.Time
 
 	// TurnPatches persists the net unified diff of a turn's committed file_*
 	// mutations under the conversation's data directory. Nil disables the

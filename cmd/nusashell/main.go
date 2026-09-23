@@ -224,8 +224,13 @@ func run() error {
 		skillStore, _ = skillfs.New(skillsRoot)
 	}
 	globalSkillsRoot := ""
+	globalAgentsMD := ""
 	if home := hostHomeDir(); home != "" {
+		// ~/.agents/ is the emerging cross-tool "agent home" convention:
+		// NusaShell reads skills/ from it and hydrates AGENTS.md as the
+		// global instruction layer ahead of the workspace file.
 		globalSkillsRoot = filepath.Join(home, ".agents", "skills")
+		globalAgentsMD = filepath.Join(home, ".agents", "AGENTS.md")
 	}
 	runtimeSkillCatalog := skillfs.NewRuntimeCatalog(skillStore, globalSkillsRoot)
 	// Plugin store: installed plugins live under <datadir>/plugins/<id>/.
@@ -357,6 +362,7 @@ func run() error {
 		ModelCatalog:                modelcatalog.New(nil),
 		DirectoryBrowser:            dirbrowser.OS{},
 		DefaultWorkspace:            hostHomeDir(),
+		GlobalAgentsMDPath:          globalAgentsMD,
 		AcpAgents:                   &jsonstore.AcpAgents{S: store},
 		Acp:                         acpRuntime,
 		AcpRunStorage:               jsonstore.NewAcpRunStore(dataDir),

@@ -26,6 +26,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `skills/<id>/` | skill package: root `SKILL.md` (active checkout), `meta.json` (status/version/origin), `versions/<n>/` snapshots | markdown + JSON |
 | `<workspace>/skills/<id>/` | workspace skill package discovered by the agent toolbox; read-only, no NusaShell metadata is added | Markdown + optional support files |
 | `~/.agents/skills/<id>/` | host-global skill package discovered by the agent toolbox; read-only, no NusaShell metadata is added | Markdown + optional support files |
+| `~/.agents/AGENTS.md` | host-global agent instructions hydrated as a real `file_read` slot ahead of the workspace `AGENTS.md`, so project rules win on conflict; user-managed and read-only — NusaShell never writes it | Markdown |
 | `skills/skills.json` | usage cache; status/version live in each skill's `meta.json` | JSON |
 | `skills/.provenance.json` | skill authorship log (createdBy, createdAt) | JSON |
 | `skills/.deleted-builtin.json` | builtin skills the user deleted (so they are not re-seeded) | JSON |

@@ -233,6 +233,7 @@ func (a *Service) BuildHydration(c *domain.Conversation) []ChatMessage {
 	if a.Agent != nil {
 		source.AgentPath = a.Agent.Path()
 	}
+	source.GlobalAgentsMDPath = a.globalAgentsMDPath
 	if a.Todos != nil {
 		source.Todos = a.Todos
 		source.ConvID = c.ID

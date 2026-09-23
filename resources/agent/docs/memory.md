@@ -25,7 +25,9 @@ listing fails, is empty, or exceeds ~2k tokens. The `memory`
 dispatcher stays read-only
 (`search`/`get`/`list`) over structured records. Typed learner `learn()`
 never writes the profile documents. A workspace `AGENTS.md` is repository
-guidance and is a separate `file_read`.
+guidance and is a separate `file_read`; a host-global `~/.agents/AGENTS.md`
+is hydrated the same way when it exists, emitted before the workspace file
+so project rules win on conflict.
 
 Durable catalog facts, preferences, and constraints live as structured
 **MemoryRecords** (`episode`, `fact`, `preference`, `constraint`,

@@ -372,6 +372,9 @@ cache key is a routing hint, not a guarantee of a cache hit.
 Agent skill discovery also reads `<workspace>/skills/` and `~/.agents/skills/`
 as read-only source roots; the runtime resolver applies `builtin > workspace >
 global` for colliding IDs without adding those packages to persistence.
+Conversation hydration likewise reads a host-global `~/.agents/AGENTS.md`
+(when present) as a `file_read` slot ahead of the workspace `AGENTS.md`, so
+project rules win on conflict.
 
 The full tree, including automation and attachments, is in
 `resources/agent/docs/data-locations.md`.

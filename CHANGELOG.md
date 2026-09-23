@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.6] - 2026-09-23
+
+### Added
+
+- **Global agent instructions from `~/.agents/AGENTS.md`.** Conversation
+  hydration now reads the host-global `AGENTS.md` under the emerging
+  `~/.agents/` agent-home convention (the same directory the skill catalog
+  already scans) as a real `file_read` slot ahead of the workspace
+  `AGENTS.md`, so project rules win on conflict. The file is user-managed
+  and read-only; a missing or empty file simply hides the slot.
+
 ## [0.9.5] - 2026-09-23
 
 ### Fixed

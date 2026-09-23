@@ -238,6 +238,7 @@ func (a *App) agentDeps() agent.Deps {
 		PendingRuns:        a.pendingRuns,
 		DataDir:            a.DataDir,
 		DefaultWorkspace:   a.defaultWorkspace,
+		GlobalAgentsMDPath: a.globalAgentsMDPath,
 		StartedAt:          a.startedAt,
 		TurnPatches:        a.TurnPatches,
 		ResolveModel:       a.resolveModel,

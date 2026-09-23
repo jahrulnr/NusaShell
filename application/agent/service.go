@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -35,7 +36,10 @@ type Service struct {
 	modelOverrides   *modeloverrides.Cache
 	DataDir          string
 	defaultWorkspace string
-	startedAt        time.Time
+	// globalAgentsMDPath is the host-global ~/.agents/AGENTS.md file hydrated
+	// ahead of the workspace AGENTS.md (wired from os.UserHomeDir).
+	globalAgentsMDPath string
+	startedAt          time.Time
 
 	runsMu              sync.Mutex
 	runs                map[string]*TurnRun
@@ -70,32 +74,33 @@ func New(d Deps) *Service {
 		pending = map[string]map[string]string{}
 	}
 	s := &Service{
-		deps:              d,
-		Conversations:     d.Conversations,
-		Providers:         d.Providers,
-		Credentials:       d.Credentials,
-		Settings:          d.Settings,
-		Factory:           d.Factory,
-		Toolbox:           d.Toolbox,
-		Attachments:       d.Attachments,
-		Todos:             d.Todos,
-		User:              d.User,
-		Agent:             d.Agent,
-		ProjectMemory:     d.ProjectMemory,
-		MemoryRecords:     d.MemoryRecords,
-		Bus:               d.Bus,
-		AskQuestions:      d.AskQuestions,
-		RoundStreams:      d.RoundStreams,
-		learnedParams:     d.LearnedParams,
-		modelOverrides:    d.ModelOverrides,
-		DataDir:           d.DataDir,
-		defaultWorkspace:  d.DefaultWorkspace,
-		startedAt:         d.StartedAt,
-		runs:              runs,
-		conversationTurns: map[string]*sync.Mutex{},
-		pendingRuns:       pending,
-		announcementLocks: map[string]*sync.Mutex{},
-		lazyTurns:         map[string]lazyTurnRecord{},
+		deps:               d,
+		Conversations:      d.Conversations,
+		Providers:          d.Providers,
+		Credentials:        d.Credentials,
+		Settings:           d.Settings,
+		Factory:            d.Factory,
+		Toolbox:            d.Toolbox,
+		Attachments:        d.Attachments,
+		Todos:              d.Todos,
+		User:               d.User,
+		Agent:              d.Agent,
+		ProjectMemory:      d.ProjectMemory,
+		MemoryRecords:      d.MemoryRecords,
+		Bus:                d.Bus,
+		AskQuestions:       d.AskQuestions,
+		RoundStreams:       d.RoundStreams,
+		learnedParams:      d.LearnedParams,
+		modelOverrides:     d.ModelOverrides,
+		DataDir:            d.DataDir,
+		defaultWorkspace:   d.DefaultWorkspace,
+		globalAgentsMDPath: strings.TrimSpace(d.GlobalAgentsMDPath),
+		startedAt:          d.StartedAt,
+		runs:               runs,
+		conversationTurns:  map[string]*sync.Mutex{},
+		pendingRuns:        pending,
+		announcementLocks:  map[string]*sync.Mutex{},
+		lazyTurns:          map[string]lazyTurnRecord{},
 	}
 	return s
 }
