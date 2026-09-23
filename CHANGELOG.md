@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.5] - 2026-09-23
+
+### Fixed
+
+- **The live Thinking row shows its preview while the turn streams.** A live
+  round mounts its reasoning disclosure before any reasoning exists, and the
+  collapsed row's preview was only ever computed at mount, so it stayed blank
+  for the whole round — `setReasoningSource` updated the stored reasoning and
+  the hidden state but never the preview. On a long task that left tool cards
+  sitting next to empty Thinking rows, while a reload rendered the persisted
+  message with its preview and looked correct; a turn whose live node was
+  preserved at completion showed the same blank row, which is why the last
+  reasoning only sometimes appeared. The preview now follows the stream, and
+  it is computed from a bounded head of the reasoning so the per-delta work
+  stays constant instead of growing with the turn.
+
 ## [0.9.4] - 2026-09-21
 
 ### Fixed

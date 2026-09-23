@@ -1,5 +1,6 @@
 'use strict';
 
+const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const http = require('node:http');
 const https = require('node:https');
@@ -89,6 +90,49 @@ function electronDevArgs({
     // A fresh npm install may not have materialized the helper yet.
   }
   return ['--no-sandbox'];
+}
+
+const ELECTRON_BOOTSTRAP_ATTEMPTS = 3;
+const ELECTRON_BOOTSTRAP_BACKOFF_MS = 2000;
+
+/**
+ * Materialize the pinned Electron runtime before a launcher or renderer test
+ * uses it. The Electron CLI downloads its runtime from the GitHub release CDN
+ * on first invocation, and that download can fail with a transient 5xx (a 504
+ * killed the renderer smoke test job). Retrying the bootstrap keeps a flaky
+ * CDN response from failing work that is unrelated to the code under test.
+ */
+async function bootstrapElectronRuntime({
+  cliPath,
+  args = [],
+  environment = process.env,
+  attempts = ELECTRON_BOOTSTRAP_ATTEMPTS,
+  backoffMs = ELECTRON_BOOTSTRAP_BACKOFF_MS,
+  spawnSync = childProcess.spawnSync,
+  sleep = delay,
+  log = (message) => console.error(message),
+} = {}) {
+  let failure = { error: null, status: null, signal: null };
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const result = spawnSync(cliPath, args, {
+      env: environment,
+      stdio: 'inherit',
+      windowsHide: true,
+    });
+    failure = {
+      error: result.error instanceof Error ? result.error : null,
+      status: result.status ?? null,
+      signal: result.signal ?? null,
+    };
+    if (!failure.error && failure.status === 0) return { ok: true, attempts: attempt };
+    if (attempt < attempts) {
+      const pauseMs = backoffMs * attempt;
+      const reason = failure.error?.message || `exit ${failure.status ?? failure.signal}`;
+      log(`Electron runtime bootstrap attempt ${attempt}/${attempts} failed (${reason}); retrying in ${pauseMs}ms`);
+      await sleep(pauseMs);
+    }
+  }
+  return { ok: false, attempts, ...failure };
 }
 
 function withWindowsExtension(candidate, platform = process.platform) {
@@ -370,6 +414,7 @@ async function waitForURL(rawURL, { timeoutMs = 30000, intervalMs = 100, probeTi
 }
 
 module.exports = {
+  bootstrapElectronRuntime,
   buildBackendEnvironment,
   defaultCoreURL,
   electronDevArgs,

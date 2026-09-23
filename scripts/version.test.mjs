@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { readVersion, syncElectronVersion } from './version.mjs';
 
@@ -78,4 +79,24 @@ test('syncElectronVersion check fails when package metadata drifts', async () =>
     packagePath: join(root, 'apps-electron-package.json'),
     lockPath: join(root, 'apps-electron-package-lock.json'),
   }), /version drift/);
+});
+
+// The 0.9.4 commit wrote its CHANGELOG section without bumping VERSION, so the
+// Go stream found its tag already published and skipped the release instead of
+// failing: users stayed on 0.9.3 while the changelog advertised the fix. A
+// release commit advances VERSION with its notes; docs/CI-only changes keep
+// their entry under [Unreleased].
+test('the newest CHANGELOG section is the current VERSION or Unreleased', async () => {
+  const repoRoot = fileURLToPath(new URL('..', import.meta.url));
+  const version = await readVersion(join(repoRoot, 'VERSION'));
+  const changelog = await readFile(join(repoRoot, 'CHANGELOG.md'), 'utf8');
+  const heading = changelog.replace(/\r\n/g, '\n').split('\n').find((line) => /^##\s+/.test(line)) ?? '';
+  const newest = /^##\s+\[([^\]]+)\]/.exec(heading)?.[1]?.trim();
+
+  assert.ok(newest, `CHANGELOG.md has no version heading, first heading: ${JSON.stringify(heading)}`);
+  assert.ok(
+    newest === 'Unreleased' || newest === version,
+    `CHANGELOG.md newest section [${newest}] must be [Unreleased] or the current VERSION ${version}`
+      + '; bump VERSION in the same commit that publishes the notes',
+  );
 });
