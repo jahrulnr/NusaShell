@@ -297,8 +297,10 @@ test('BH-SETTINGS-01: sampling parameters cannot be cleared to null once set', a
 // The transcript is DYNAMIC: slots whose real tool reports nothing (no
 // plugins, no todos, empty memory documents) are omitted entirely. In this
 // harness (fresh data dir, seeded user + soul documents, embedded skills, no
-// plugins) the visible slots are runtime_context, file_list, file_read,
-// file_read, skill.
+// plugins) the visible slots are runtime_context, [file_read for any seeded
+// global ~/.agents/AGENTS.md and workspace AGENTS.md], file_list, file_read,
+// file_read, skill. The server home is isolated to the temp data dir, so
+// instruction-file slots only appear when the test seeds them.
 function findHydration(messages) {
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
@@ -364,6 +366,14 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
     await writeFile(join(dataDir, 'memory', 'user.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [frag_test] User prefers concise answers.\n');
     await writeFile(join(dataDir, 'memory', 'soul.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [soul_test] Soul keeps the tool transcript explicit.\n');
 
+    // The harness isolates the user home to dataDir, so the host-global
+    // instructions file is dataDir/.agents/AGENTS.md and the workspace
+    // (default = home) instructions file is dataDir/AGENTS.md. Seeding both
+    // pins the layering order: global first, project after it.
+    await mkdir(join(dataDir, '.agents'), { recursive: true });
+    await writeFile(join(dataDir, '.agents', 'AGENTS.md'), '# Global rules\n\n- [frag_test] Always answer in the user language.\n');
+    await writeFile(join(dataDir, 'AGENTS.md'), '# Project rules\n\n- [frag_test] Keep the code stdlib-only.\n');
+
     // Create a new conversation.
     window.location.hash = '#agent';
     window.dispatchEvent(new window.Event('hashchange'));
@@ -394,13 +404,31 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
     assertUserBeforeHydration(lastStream.body.messages, 'HYDR-NEW-ROOM');
 
     // Dynamic transcript: this harness has no plugins and no todos, so the
-    // mcp_list / tool_list / todo_list slots are hidden. The seeded user
-    // document and embedded skill library keep file_read + skill alive.
+    // mcp_list / tool_list / todo_list slots are hidden. The seeded global
+    // + project AGENTS.md files, the user documents, and the embedded skill
+    // library keep file_read + skill alive — global instructions lead the
+    // project file so project rules win on conflict.
     const slots = hydrationSlotNames(hydration);
     assert.deepEqual(
       slots,
-      ['runtime_context', 'file_list', 'file_read', 'file_read', 'skill'],
+      ['runtime_context', 'file_read', 'file_read', 'file_list', 'file_read', 'file_read', 'skill'],
       `HYDR-NEW-ROOM: hydration slots must be the dynamic transcript in order, got ${JSON.stringify(slots)}`,
+    );
+
+    // The first two file_read slots are the instruction files in layering
+    // order: host-global ~/.agents/AGENTS.md, then workspace AGENTS.md.
+    const readPaths = hydration.calls
+      .filter((c) => c.function?.name === 'file_read')
+      .map((c) => { try { return JSON.parse(c.function.arguments || '{}').path; } catch { return ''; } });
+    assert.equal(readPaths[0], join(dataDir, '.agents', 'AGENTS.md'),
+      'HYDR-NEW-ROOM: first file_read must be the global AGENTS.md');
+    assert.equal(readPaths[1], join(dataDir, 'AGENTS.md'),
+      'HYDR-NEW-ROOM: second file_read must be the workspace AGENTS.md');
+    const globalResult = hydration.results.find((r) => r.tool_call_id === hydration.calls
+      .filter((c) => c.function?.name === 'file_read')[0]?.id);
+    assert.ok(
+      globalResult?.content.includes('Always answer in the user language.'),
+      `HYDR-NEW-ROOM: global AGENTS.md result must carry the seeded body, got: ${globalResult?.content}`,
     );
 
     // The user document must be represented by a direct file_read result.

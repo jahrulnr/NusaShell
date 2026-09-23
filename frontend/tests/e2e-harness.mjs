@@ -80,6 +80,12 @@ async function buildAndStartServer(port, dataDir) {
     cwd: repo,
     env: {
       ...process.env,
+      // Isolate the user home: the server resolves ~/.agents/ (global skill
+      // root and the host-global AGENTS.md instruction file) and the default
+      // workspace from it, so the host's real ~/.agents must not leak into
+      // assertions. USERPROFILE covers Windows runners.
+      HOME: dataDir,
+      USERPROFILE: dataDir,
       NUSASHELL_HOST: '127.0.0.1',
       NUSASHELL_PORT: String(port),
       NUSASHELL_DATA_DIR: dataDir,
