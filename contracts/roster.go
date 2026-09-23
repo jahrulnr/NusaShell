@@ -156,7 +156,7 @@ const (
 	MethodPairingSessionsRevokeAll = "pairing.sessions.revoke-all"
 )
 
-// Event types pushed over WebSocket (/ws).
+// Application event names. ACP run names are SSE frame types; other events are WebSocket notifications.
 const (
 	EventTurnStarted      = "agent.turn.started"
 	EventContextEstimate  = "agent.context.estimate"
@@ -208,6 +208,8 @@ const (
 	EventPetsInstallDone     = "pets.install.done"
 	EventPetsInstallError    = "pets.install.error"
 
+	EventAcpRunStream           = "acp.run"
+	EventAcpRunSnapshot         = "acp.run.snapshot"
 	EventAcpRunStarted          = "acp.run.started"
 	EventAcpRunUpdated          = "acp.run.updated"
 	EventAcpRunDone             = "acp.run.done"

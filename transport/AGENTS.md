@@ -4,8 +4,9 @@ Applies to `transport/` in addition to the repository root `AGENTS.md`.
 
 ## Boundary
 
-Transport maps HTTP RPC, WebSocket events, round SSE streams, local files,
-plugin routes, and static assets onto application use cases and contract DTOs.
+Transport maps HTTP RPC, WebSocket events, agent-round and ACP-run SSE
+streams, local files, plugin routes, and static assets onto application use
+cases and contract DTOs.
 It owns decoding, body limits, protocol status, connection lifecycle, and
 response encoding. It does not own business rules or persistence.
 
@@ -18,9 +19,10 @@ response encoding. It does not own business rules or persistence.
   commands or queries.
 - Reuse `writeJSON`, contract envelopes/errors, and existing body-limit and
   request-decoding patterns.
-- Reuse `ws.go` and the application `Bus` for lifecycle events. Reuse
-  `stream.go` and `RoundStreamRegistry` for live round deltas. Do not send the
-  same signal through a new side channel.
+- Reuse `ws.go` + application `Bus` for lifecycle/control notifications,
+  `stream.go` + `RoundStreamRegistry` for agent round deltas, and `/stream/acp`
+  + `App.AcpRunStreams` for ACP run snapshots. Do not duplicate a signal
+  across the WS bus and SSE stream.
 - Reuse `harness_test.go` and existing fake provider/MCP/ACP fixtures for
   cross-layer tests before creating another test server.
 

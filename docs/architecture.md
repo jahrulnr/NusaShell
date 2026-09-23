@@ -14,7 +14,7 @@ host. When Remote access is enabled, an unset or loopback host changes to
 
 ```text
 frontend/        native ES modules, no build step; embedded via go:embed
-transport/       HTTP /rpc/{method...}, WebSocket /ws, static assets
+transport/       HTTP /rpc/{method...}, WebSocket /ws, SSE /stream, static assets
 application/     use cases, ports, event bus (Bus); agent turn loop in application/agent
 domain/          pure entities and policies (no I/O imports)
 contracts/       wire types, method roster, golden JSON fixtures
@@ -54,6 +54,7 @@ embedded ES module with no build step.
 | `POST /rpc/{method...}` | request/response commands and queries — the method is encoded in the URL path (dots → slashes, e.g. `/rpc/agent/conversations/list`), body is `{method, payload}` → `{ok, result|error}` |
 | `GET /ws` | bidirectional: `{id, method, payload}` requests with `{id, ok, ...}` replies plus the event stream as `{type, payload}` |
 | `GET /stream?run_id=&message_id=&after=` | per-round SSE stream of live agent deltas (see below) |
+| `GET /stream/acp?conversation_id=` | per-conversation SSE snapshots and updates for ACP subagent runs |
 | `GET /pairing/status` + `POST /pairing/exchange` | public pairing bootstrap routes (remote device poll + one-time challenge exchange); all other `pairing.*` methods are loopback-only RPC |
 | `GET /` + assets | embedded frontend (disk in `NUSASHELL_DEV=1` mode) |
 
@@ -130,34 +131,50 @@ warn (not block — tunnels/proxies are legitimate) when a link cannot be
 reached, e.g. a LAN address while the listener is loopback-only, or a
 host/port mismatch.
 
-Events are published to an in-memory `application.Bus`; each WS
-connection subscribes. High-volume events may be dropped for a slow
-subscriber, while turn boundaries, compaction, steer, and auto-continue
-lifecycle events stay queued so a state transition cannot be lost behind
-deltas. Delivery is ordered per subscriber but has no replay cursor; the
-frontend reconciles room state through the conversation and active-turn RPCs
-after a race or reload.
+Most low-volume lifecycle notifications and non-agent events are published
+to the in-memory `application.Bus`; each WS connection subscribes.
+High-volume events may be dropped for a slow subscriber, while turn
+boundaries, compaction, steer, and auto-continue lifecycle events stay queued.
+Bus delivery is ordered per subscriber but has no replay cursor; the frontend
+reconciles room and active-turn state through RPC after reconnect.
 
-Since the round-stream refactor, **live agent deltas do not travel the
-WebSocket at all**. Each round (one assistant message, `(run_id,
-message_id)`) is staged in an in-memory `application/agent.RoundStreamRegistry`
-(aliased as `application.RoundStreamRegistry`)
-with a per-stream monotonic `seq`. The frontend opens `GET
-/stream?run_id=&message_id=` when `agent.turn.started` fires (or when
-re-attaching to a running turn after reload/room switch), receives
-`round.delta` frames (`seq`, `kind` = `text` | `reasoning` | `tool`, text),
-and closes on `round.done` (`state`, `usage`, `next`). A `kind: "tool"`
-start frame also carries the raw `args` and normalized `presentation`; later
-chunks for that tool carry only `text`. Re-opening with
-`after=<lastSeq>` replays exactly the missed frames (idempotent resume), so
-a dropped connection self-heals; `next` chaining carries tool-loop and
-auto-continue rounds forward without WebSocket round bookkeeping. The round
-is committed to the conversation store atomically when it seals, so a
-snapshot read mid-round can never see torn content. The WS keeps signaling:
-`agent.turn.started`, `agent.tool.started`, `agent.tool.completed`,
-`agent.turn.done`, `agent.turn.error`, steer, ask, compaction, and
-non-agent domains. The transports speak the same event vocabulary
-(`contracts`).
+Each interactive agent round (one assistant message, `(run_id, message_id)`)
+is staged in `application/agent.RoundStreamRegistry` with a per-stream
+monotonic `seq`. The registry begins the round before `agent.turn.started` is
+published, so the frontend can attach while the provider is still waiting for
+its first delta. `GET /stream` flushes an initial comment immediately; a
+registered round does not return 404 merely because the provider is slow.
+Unknown or expired round IDs can still return 404. The frontend receives
+`round.delta` frames (`seq`, `kind` = `text` | `reasoning` | `tool` | `activity`)
+and closes on `round.done` (`state`, `usage`, `next`). Tool start frames
+carry raw args and normalized presentation; later tool-output chunks carry
+text only. Reopening with `after=<lastSeq>` replays missed frames, and the
+frontend validates sequence gaps. The `round.done.next` reference advances
+the client to the next round without requiring delivery of another WS event;
+`agent.turn.started` remains an idempotent lifecycle notification and initial
+bootstrap signal. The round is committed to the conversation store atomically
+when it seals, so a snapshot read mid-round cannot see torn content.
+
+ACP subagent run updates (external ACP agents and internal delegates) use one
+`GET /stream/acp?conversation_id=` connection for the visible parent room,
+not the WebSocket bus. The SSE event name is `acp.run`; its JSON `type` is
+`acp.run.snapshot`, `acp.run.started`, `acp.run.updated`, or `acp.run.done`.
+Every frame carries a monotonic `seq` within the process-local conversation
+stream state and an SSE `id`. If an empty stream state expires or the server
+restarts, the next snapshot begins a new sequence epoch. A new connection or
+EventSource reconnect first receives the latest run snapshot, then ordered
+updates; the snapshot resets the client's cursor, so reconnect is state
+resynchronization rather than event-history replay. The registry admits at most 32 subscribers with four queued frames each; an
+over-cap request returns 503, and a full queue closes that SSE connection so
+EventSource reconnects for a fresh snapshot. Terminal snapshots expire after
+90 seconds, and the process-local latest-run cache is capped at 64 entries;
+under pressure, the least-recently-updated snapshot may be evicted. The
+frontend follows the initial snapshot with `acp.runs.list` hydration so the
+registry remains a live projection rather than durable run storage. Settled
+transcripts remain available through `acp.runs.list/get` and the per-run store.
+Pairing/session checks and SSE ping revalidation apply to both stream routes.
+The WS continues to carry agent lifecycle/control notifications, ACP
+permission and mode notifications, and non-agent domains.
 
 ### RPC dispatch
 
@@ -198,19 +215,20 @@ the matching domain dispatcher, and add a handler-level test in
    prompt and tool roster after a backend restart. Persisted hydration may
    still contain older discovery results until the next compaction, but those
    results are context state—not the authoritative top-level `tools[]`.
-   Internal delegates additionally project the same incremental transcript
-   chunks and terminal lifecycle events as external ACP runs, so the ACP UI
-   and a future ACP server can consume one agent-stream boundary.
-3. Deltas are staged per round in the in-memory round-stream registry and
-   streamed over `GET /stream` as `round.delta` frames; the WebSocket carries
-   the lifecycle signals (`agent.turn.started`, `agent.tool.started`,
-   `agent.tool.completed`, then `agent.turn.done` or `agent.turn.error` /
-   interrupted). The final `round.done` frame carries `next` (the following
-   round's `message_id`) for tool loops and auto-continue chains, so the
-   frontend chains streams without depending on additional WS delivery.
-   Turn terminal and compaction events carry the active run and assistant
-   message identity where applicable, so a refreshed client can reattach to
-   the current round instead of an earlier assistant message.
+   Internal delegates project the same ACP run snapshots as external ACP
+   sessions, so the dock, drawer, and popup share one live run contract.
+3. Each interactive round is registered in the in-memory round-stream registry
+   before `agent.turn.started` is emitted, then streamed over `GET /stream` as
+   `round.delta` frames (`text`, `reasoning`, `tool`, or `activity`). The SSE
+   route flushes immediately so a slow provider first token cannot turn a valid
+   round into a 404. The WebSocket carries low-volume lifecycle and control
+   signals (`agent.turn.started`, tool lifecycle, turn terminal, steer, ask, and
+   compaction). The final `round.done` frame carries `next`; the frontend
+   advances from it and treats a matching WS start as idempotent. After a WS
+   reconnect, the frontend refreshes the room and reconciles even an existing
+   local run with `agent.turns.active`, correcting a missed round transition.
+   The round is committed to the conversation store atomically when it seals,
+   so a snapshot read mid-round cannot see torn content.
 4. `agent.turns.stop` cancels the run context; partial output is kept and
    marked `interrupted`.
 

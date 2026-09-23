@@ -618,6 +618,9 @@ func (a *Service) HandleTurnsActive(req contracts.ConversationIDRequest) (any, *
 		MessageID:      run.CurrentMessageID(),
 		Active:         true,
 	}
+	if out.MessageID != "" && a.RoundStreams != nil {
+		a.RoundStreams.Begin(out.RunID, out.MessageID, 0)
+	}
 	if s := run.QueuedSteer(); s != nil {
 		out.QueuedSteer = s.Text
 		out.QueuedSteerID = s.ID

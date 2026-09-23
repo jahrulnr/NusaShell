@@ -148,6 +148,9 @@ func (p *conversationRules) Rules() AgentRules {
 			if p.prevMsgID != "" && p.prevMsgID != p.currentMsgID {
 				p.svc.SealRound(p.run, p.prevMsgID, p.prevRound, p.prevState, &contracts.RoundRef{RunID: p.run.ID, MessageID: p.currentMsgID, Round: p.round}, nil, "")
 			}
+			if !p.run.Headless && p.svc.RoundStreams != nil {
+				p.svc.RoundStreams.Begin(p.run.ID, p.currentMsgID, p.round)
+			}
 			p.prevMsgID, p.prevRound, p.prevState = p.currentMsgID, p.round, "done"
 			p.svc.EmitInteractiveTurnEvent(p.run, contracts.EventTurnStarted, contracts.TurnStartedEvent{
 				RunID: p.run.ID, ConversationID: p.run.ConversationID, ConversationKey: p.run.ConversationKey,

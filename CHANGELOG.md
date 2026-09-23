@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Slow first tokens no longer trigger a false round-stream 404.** The round
+  stream is registered before `agent.turn.started`, and the SSE response
+  flushes as soon as the subscription is ready. `round.done.next` advances the
+  UI without depending on a second WS delivery; reconnect also reconciles a
+  local run against `agent.turns.active`.
+
+### Changed
+
+- **ACP run updates now use per-conversation SSE.** `/stream/acp` sends a
+  current snapshot on connect/reconnect followed by sequence-numbered run
+  updates. ACP run snapshots are no longer pushed over WS; permission and mode
+  notifications remain there. WS consumers of `acp.run.*` must move to SSE.
+
 ## [0.9.6] - 2026-09-23
 
 ### Added

@@ -70,6 +70,7 @@ type App struct {
 	Docs                        DocsSource
 	Bus                         *Bus
 	RoundStreams                *RoundStreamRegistry
+	AcpRunStreams               *subagent.RunStreamRegistry
 	Toolbox                     ToolExecutor
 	MCPToolbox                  MCPToolbox
 	Factory                     ProviderFactory
@@ -575,6 +576,7 @@ func NewApp(deps Deps) *App {
 		Docs:                        deps.Docs,
 		Bus:                         deps.Bus,
 		RoundStreams:                NewRoundStreamRegistry(),
+		AcpRunStreams:               subagent.NewRunStreamRegistry(),
 		Toolbox:                     deps.Toolbox,
 		MCPToolbox:                  deps.MCPToolbox,
 		announcementLocks:           map[string]*sync.Mutex{},
@@ -628,9 +630,8 @@ func NewApp(deps Deps) *App {
 			app.Bus.Emit(contracts.EventAskPending, askPendingEvent(conversationID, runID, callID, req))
 		})
 	}
-	// Wire the ACP runtime callbacks so run updates, completion,
-	// permission requests, and session mode changes reach the bus and the
-	// async completion path.
+	// Wire ACP run snapshots, permission requests, and session mode changes to
+	// their event streams, and send completion to the async result path.
 	if sink, ok := app.Acp.(interface {
 		SetCallbacks(
 			onUpdate, onDone func(*domain.AcpRun),

@@ -1,5 +1,5 @@
-// Package transport maps wire traffic onto the application service:
-// HTTP POST /rpc, WebSocket /ws, and the embedded frontend.
+// Package transport maps HTTP RPC, WebSocket notifications, SSE streams, and
+// embedded frontend requests onto the application service.
 package transport
 
 import (
@@ -54,6 +54,7 @@ func NewWithIdentity(app *application.App, logger *slog.Logger, static http.Hand
 	mux.HandleFunc("POST /rpc/{method...}", s.handleRPC)
 	mux.HandleFunc("GET /ws", s.handleWS)
 	mux.HandleFunc("GET /stream", s.handleStream)
+	mux.HandleFunc("GET /stream/acp", s.handleAcpRunStream)
 	mux.HandleFunc("GET /local-file", s.handleLocalFile)
 	// Public pairing bootstrap routes (status poll + exchange). These
 	// bypass auth so an unauthenticated remote device can pair.

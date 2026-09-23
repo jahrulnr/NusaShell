@@ -511,6 +511,23 @@ test('SSE network retry budget survives each reconnect attempt', () => {
   assert.match(agentView, /closeRoundStream\(run, \{ resetRetries: false \}\)/);
 });
 
+test('A missing round stream reconciles the active run before resubscribing', () => {
+  const openFn = agentView.slice(
+    agentView.indexOf('async function openRoundStream'),
+    agentView.indexOf('// retryRoundStream'),
+  );
+  const missFn = agentView.slice(
+    agentView.indexOf('function handleStreamMiss'),
+    agentView.indexOf('function applyRoundDeltaFrame'),
+  );
+  assert.match(openFn, /handleStreamMiss\(run, resp\.status\)/);
+  assert.match(missFn, /status !== 404/);
+  assert.match(missFn, /reattachActiveRunFromBackend\(\)/);
+  assert.match(missFn, /const failedMessageID = run\.messageId/);
+  assert.match(missFn, /currentRun\.messageId !== failedMessageID/);
+  assert.match(missFn, /openRoundStream\(/);
+});
+
 test('Turn completion preserves a connected live node instead of rerendering the transcript', () => {
   const doneHandler = agentView.slice(
     agentView.indexOf("on('agent.turn.done'"),
@@ -538,7 +555,21 @@ test('SSE round.done does not release the run before the WebSocket terminal even
   assert.match(doneFrameHandler, /ROUND_DONE_FALLBACK_MS/);
   assert.match(doneFrameHandler, /run\.roundDone = true/);
   assert.match(doneFrameHandler, /if \(done\.next\)/);
+  assert.match(doneFrameHandler, /done\.next\.message_id/);
+  assert.match(doneFrameHandler, /emit\('agent\.turn\.started'/);
   assert.match(agentView, /roundDoneTimer/);
+});
+
+test('WS reconnect reconciles an existing local run against the active-turn snapshot', () => {
+  const reattach = agentView.slice(
+    agentView.indexOf('async function reattachActiveRunFromBackend'),
+    agentView.indexOf('// findMessageNode'),
+  );
+  assert.match(reattach, /const currentRun = runForConversation\(conversationId\)/);
+  assert.match(reattach, /rpc\('agent\.turns\.active'/);
+  assert.match(reattach, /if \(!active\?\.active \|\| !active\.run_id \|\| !active\.message_id\)/);
+  assert.match(reattach, /endTurn\(currentRun\.runId\)/);
+  assert.match(reattach, /active\.message_id/);
 });
 
 test('WebSocket completion waits for the ordered SSE tail before preserving a live node', () => {

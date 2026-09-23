@@ -50,9 +50,9 @@ const (
 	// roundStreamSealedTTL keeps sealed streams available for late joiners
 	// (new tab, room switch) before pruning.
 	roundStreamSealedTTL = 90 * time.Second
-	// roundStreamIdleTTL prunes live streams that have had no publish for a
-	// while (turn crashed without a seal; registry is process-local so the
-	// conversation store's healOrphanedRunningConversation handles recovery).
+	// roundStreamIdleTTL prunes unsubscribed live streams that have had no
+	// publish for a while (turn crashed without a seal; the conversation store's
+	// healOrphanedRunningConversation handles recovery after a process restart).
 	roundStreamIdleTTL = 10 * time.Minute
 	// roundStreamWaitTTL is how long a reader waits for a stream that has not
 	// published anything yet (opened between turn.started and the first delta,
@@ -268,6 +268,14 @@ func (r *RoundStreamRegistry) Reset(runID, messageID string) {
 	}
 }
 
+// Begin registers a round before its start notification reaches the frontend.
+func (r *RoundStreamRegistry) Begin(runID, messageID string, round int) {
+	if r == nil || runID == "" || messageID == "" {
+		return
+	}
+	r.streamFor(runID, messageID, round)
+}
+
 // Exists reports whether a stream for the round is currently registered.
 func (r *RoundStreamRegistry) Exists(runID, messageID string) bool {
 	r.mu.Lock()
@@ -440,12 +448,13 @@ func (r *RoundStreamRegistry) maybeGC() {
 		st.mu.Lock()
 		sealed := st.sealed
 		lastActive := st.lastActive
+		hasSubscribers := len(st.subs) > 0
 		st.mu.Unlock()
 		if sealed && now.Sub(lastActive) > roundStreamSealedTTL {
 			delete(r.streams, key)
 			continue
 		}
-		if !sealed && now.Sub(lastActive) > roundStreamIdleTTL {
+		if !sealed && !hasSubscribers && now.Sub(lastActive) > roundStreamIdleTTL {
 			delete(r.streams, key)
 		}
 	}

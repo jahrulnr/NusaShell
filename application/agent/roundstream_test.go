@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"nusashell/contracts"
+	"nusashell/domain"
 )
 
 // TestRoundStreamReplayCursor verifies the idempotent resume contract: a
@@ -386,5 +387,91 @@ func TestRoundStreamLargeReplayDoesNotBlockSubscription(t *testing.T) {
 		}
 	case <-time.After(300 * time.Millisecond):
 		t.Fatal("subscription blocked when replay exceeded the live subscriber queue")
+	}
+}
+
+func TestRoundStreamBeginAllowsSubscribeBeforeFirstDelta(t *testing.T) {
+	reg := NewRoundStreamRegistry()
+	reg.Begin("r", "m", 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	sub, err := reg.Subscribe(ctx, "r", "m", 0)
+	if err != nil {
+		t.Fatalf("subscribe before first delta: %v", err)
+	}
+	defer sub.Close()
+
+	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "first")
+	select {
+	case frame := <-sub.Frames():
+		if frame.Text != "first" {
+			t.Fatalf("first frame = %+v", frame)
+		}
+	case <-ctx.Done():
+		t.Fatal("begun stream did not deliver its first delta")
+	}
+}
+
+type roundStartOrderingEmitter struct {
+	streams *RoundStreamRegistry
+	started bool
+}
+
+func (e *roundStartOrderingEmitter) Emit(event string, payload any) {
+	if event != contracts.EventTurnStarted {
+		return
+	}
+	started := payload.(contracts.TurnStartedEvent)
+	e.started = e.streams.Exists(started.RunID, started.MessageID)
+}
+
+func TestBeforeRoundBeginsStreamBeforeStartEvent(t *testing.T) {
+	streams := NewRoundStreamRegistry()
+	emitter := &roundStartOrderingEmitter{streams: streams}
+	run := &TurnRun{ID: "run_1", ConversationID: "conv_1", Ctx: context.Background()}
+	rules := (&Service{Bus: emitter, RoundStreams: streams}).NewConversationRules(
+		run, ProviderContext{}, nil, domain.Settings{}, nil, "", "", "msg_1", ModelCapabilities{}, nil, 0, nil, false, "",
+	)
+	if err := rules.Rules().BeforeRound(&RoundState{}); err != nil {
+		t.Fatal(err)
+	}
+	if !emitter.started {
+		t.Fatal("agent.turn.started was emitted before its round stream was registered")
+	}
+}
+
+func TestTurnsActiveEnsuresCurrentRoundStream(t *testing.T) {
+	streams := NewRoundStreamRegistry()
+	run := &TurnRun{ID: "run_1", ConversationID: "conv_1", MessageID: "msg_1"}
+	svc := &Service{RoundStreams: streams, runs: map[string]*TurnRun{run.ID: run}}
+	result, rpcErr := svc.HandleTurnsActive(contracts.ConversationIDRequest{ID: run.ConversationID})
+	if rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	if !result.(contracts.TurnActiveResult).Active || !streams.Exists(run.ID, run.MessageID) {
+		t.Fatal("active-turn query did not restore the current round stream")
+	}
+}
+
+func TestRoundStreamWithSubscriberDoesNotExpireWhileIdle(t *testing.T) {
+	reg := NewRoundStreamRegistry()
+	reg.Begin("r", "m", 1)
+	sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	stream := reg.streams[keyFor("r", "m")]
+	stream.mu.Lock()
+	stream.lastActive = time.Now().Add(-roundStreamIdleTTL - time.Second)
+	stream.mu.Unlock()
+	reg.mu.Lock()
+	reg.publishesSinceGC = 255
+	reg.mu.Unlock()
+
+	reg.maybeGC()
+	if !reg.Exists("r", "m") {
+		t.Fatal("idle GC removed a round that still had an attached SSE subscriber")
 	}
 }

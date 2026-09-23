@@ -27,9 +27,10 @@ Start with these established seams before adding another service or runner:
 - `application/conversation` for transcript creation, append, compaction,
   and persistence (`NewConversation` / `Bind` re-exported from root).
   Do not mutate formed transcripts through a parallel path.
-- `bus.go` for shared lifecycle events and `application/agent` (round
-  streams, turn loop) for live round deltas. Do not invent a second event
-  channel.
+- `bus.go` for WebSocket lifecycle/control notifications, `application/agent`
+  for round deltas, and `application/subagent.RunStreamRegistry` for ACP run
+  snapshots. Keep each payload on its owning transport; do not republish ACP
+  run snapshots through the Bus.
 - `app_runtime.go` and `App.goSafe` for fire-and-forget work.
 - `service/` leaf packages for already-extracted pure helpers.
 - Existing handlers, policy functions, and their fakes in the nearest

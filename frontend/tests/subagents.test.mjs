@@ -4,6 +4,8 @@ import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
 import {
+  bindSubagents,
+  setSubagentConversation,
   sortRunsNewestFirst,
   syncTranscript,
   runDisplayName,
@@ -374,5 +376,84 @@ test('subagent transcript releases the run pin on an upward touch scroll', () =>
   } finally {
     cleanup();
     resetSubagentFollowForTests();
+  }
+});
+
+test('subagent run lifecycle uses a conversation SSE instead of WebSocket run events', () => {
+  assert.match(subagentsView, /new EventSource\(/);
+  assert.match(subagentsView, /\/stream\/acp\?conversation_id=/);
+  assert.match(subagentsView, /addEventListener\('acp\.run'/);
+  assert.match(subagentsView, /acp\.run\.snapshot/);
+  assert.doesNotMatch(subagentsView, /on\('acp\.run\.(started|updated|done)'/);
+  assert.match(subagentsView, /runStreamSeq/);
+});
+
+test('subagent SSE snapshots reconcile the active room and updates patch live state', () => {
+  const dom = new JSDOM(
+    '<!doctype html><html><body>' +
+    '<div id="acp-dock"><span id="acp-dock-title"></span><span id="acp-dock-meta"></span><div id="acp-dock-list"></div></div>' +
+    '<div id="acp-drawer" hidden></div><div id="acp-popup-overlay" hidden></div>' +
+    '</body></html>',
+  );
+  global.window = dom.window;
+  global.document = dom.window.document;
+  const previousEventSource = globalThis.EventSource;
+  const sources = [];
+  class FakeEventSource {
+    constructor(url) {
+      this.url = url;
+      this.listeners = new Map();
+      this.closed = false;
+      sources.push(this);
+    }
+    addEventListener(type, listener) {
+      const listeners = this.listeners.get(type) || [];
+      listeners.push(listener);
+      this.listeners.set(type, listeners);
+    }
+    close() { this.closed = true; }
+    emit(type, frame) {
+      for (const listener of this.listeners.get(type) || []) {
+        listener({ data: JSON.stringify(frame), lastEventId: String(frame.seq) });
+      }
+    }
+  }
+  globalThis.EventSource = FakeEventSource;
+  let activeConversationID = 'conv_1';
+  try {
+    bindSubagents({ getActiveConversationId: () => activeConversationID });
+    setSubagentConversation(activeConversationID);
+    assert.equal(sources.length, 1);
+    assert.equal(new URL(sources[0].url, 'http://localhost').searchParams.get('conversation_id'), 'conv_1');
+
+    const started = {
+      id: 'run_1', conversation_id: 'conv_1', agent_name: 'Helper', title: 'Inspect',
+      status: 'running', activity: 'thinking', started_at: new Date().toISOString(),
+    };
+    sources[0].emit('acp.run', { type: 'acp.run.snapshot', seq: 1, conversation_id: 'conv_1', runs: [started] });
+    assert.equal(document.getElementById('acp-dock-title').textContent, '1 subagent');
+
+    sources[0].emit('acp.run', {
+      type: 'acp.run.updated', seq: 2, run: { ...started, activity: 'tool' },
+    });
+    assert.match(document.querySelector('.acp-dock-chip-status').textContent, /tool/);
+
+    const completed = { ...started, status: 'completed', activity: '', ended_at: new Date().toISOString() };
+    sources[0].emit('acp.run', { type: 'acp.run.snapshot', seq: 3, conversation_id: 'conv_1', runs: [completed] });
+    sources[0].emit('acp.run', {
+      type: 'acp.run.updated', seq: 2, run: { ...started, activity: 'thinking' },
+    });
+    assert.equal(document.querySelector('.acp-dock-chip-status').textContent, 'done', 'snapshot resets the sequence and older frames are ignored');
+
+    activeConversationID = 'conv_2';
+    setSubagentConversation(activeConversationID);
+    assert.equal(sources[0].closed, true, 'leaving a room closes its run stream');
+    assert.equal(sources.length, 2);
+  } finally {
+    setSubagentConversation('');
+    if (previousEventSource === undefined) delete globalThis.EventSource;
+    else globalThis.EventSource = previousEventSource;
+    dom.window.close();
+    cleanup();
   }
 });

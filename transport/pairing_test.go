@@ -702,6 +702,7 @@ func TestIsProtectedPath(t *testing.T) {
 		{"/rpc/agent.conversations.list", true},
 		{"/ws", true},
 		{"/stream", true},
+		{"/stream/acp", true},
 		{"/local-file", true},
 		{"/plugins", true},
 		{"/plugins/foo", true},

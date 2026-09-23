@@ -22,10 +22,10 @@ package transport
 //     continues with another round (tool loop or auto-continue).
 //
 // The stream stays open until the round is sealed or the client disconnects.
-// A client that connects before the round has published anything waits up to
-// the registry's wait window (the round was signaled by agent.turn.started
-// but has not produced a first delta yet); afterwards it gets 404, and the
-// frontend falls back to a snapshot refresh + agent.turns.active re-attach.
+// Interactive rounds are registered before agent.turn.started and the response
+// flushes immediately, so a slow first provider delta does not produce a 404.
+// A 404 means the requested round was unknown or its process-local entry had
+// expired; the frontend reconciles against agent.turns.active and the snapshot.
 //
 // Loopback requests bypass pairing auth; non-loopback requests require a
 // valid paired session cookie (enforced by AuthMiddleware and re-checked here
@@ -40,7 +40,10 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+
+	"nusashell/contracts"
 )
 
 const streamPingInterval = 15 * time.Second
@@ -101,16 +104,12 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeFrame := func(name string, v any) error {
-		b, err := json.Marshal(v)
-		if err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, b); err != nil {
-			return err
-		}
-		flusher.Flush()
-		return nil
+		return writeSSEFrame(w, flusher, name, "", v)
 	}
+	if _, err := fmt.Fprint(w, ": connected\n\n"); err != nil {
+		return
+	}
+	flusher.Flush()
 
 	ping := time.NewTicker(streamPingInterval)
 	defer ping.Stop()
@@ -150,6 +149,91 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
+		}
+	}
+}
+
+func writeSSEFrame(w http.ResponseWriter, flusher http.Flusher, event, id string, value any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	if id != "" {
+		if _, err := fmt.Fprintf(w, "id: %s\n", id); err != nil {
+			return err
+		}
+	}
+	if event != "" {
+		if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
+}
+
+func (s *Server) handleAcpRunStream(w http.ResponseWriter, r *http.Request) {
+	remote := !IsLoopbackRequest(r)
+	if remote && s.Pairing == nil {
+		writeRemoteAccessDisabled(w)
+		return
+	}
+	if remote && !s.remoteSessionAlive(r) {
+		writePairingRequired(w)
+		return
+	}
+	conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
+	if conversationID == "" {
+		http.Error(w, "conversation_id is required", http.StatusBadRequest)
+		return
+	}
+	if s.App == nil || s.App.AcpRunStreams == nil {
+		http.Error(w, "ACP run streams unavailable", http.StatusInternalServerError)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	sub := s.App.AcpRunStreams.Subscribe(conversationID)
+	if sub == nil {
+		http.Error(w, "ACP run stream unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	defer sub.Close()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	snapshot := sub.Snapshot()
+	if err := writeSSEFrame(w, flusher, contracts.EventAcpRunStream, strconv.FormatInt(snapshot.Seq, 10), snapshot); err != nil {
+		return
+	}
+
+	ping := time.NewTicker(streamPingInterval)
+	defer ping.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ping.C:
+			if remote && !s.remoteSessionAlive(r) {
+				return
+			}
+			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case frame := <-sub.Frames():
+			if err := writeSSEFrame(w, flusher, contracts.EventAcpRunStream, strconv.FormatInt(frame.Seq, 10), frame); err != nil {
+				return
+			}
+		case <-sub.Done():
+			return
 		}
 	}
 }

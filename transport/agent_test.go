@@ -60,6 +60,25 @@ func readSSEUntilClosed(ctx context.Context, url string) ([]map[string]any, erro
 	return frames, scanner.Err()
 }
 
+func TestRoundStreamRespondsBeforeFirstDelta(t *testing.T) {
+	h := newHarness(t, nil)
+	h.app.RoundStreams.Begin("run_waiting", "msg_waiting", 1)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.server.URL+"/stream?run_id=run_waiting&message_id=msg_waiting", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := h.server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("stream did not open before the first delta: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("stream response = %d %q", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+}
+
 // TestAgentTurnStreamsOverSSE drives the full turn through the HTTP handler
 // and asserts the SSE round-stream sequence and persisted conversation.
 func TestAgentTurnStreamsOverSSE(t *testing.T) {

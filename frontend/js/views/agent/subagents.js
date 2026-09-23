@@ -20,6 +20,9 @@ const state = {
   runLoads: new Map(),
   runLoadErrors: new Map(),
   activityTimer: null,
+  runStream: null,
+  runStreamSeq: 0,
+  streamedRunIDs: new Set(),
   bound: false,
 };
 
@@ -81,9 +84,6 @@ export function bindSubagents({ getActiveConversationId } = {}) {
     if (!document.getElementById('acp-drawer')?.hidden) closeDrawer();
   });
 
-  on('acp.run.started', (payload) => upsertRun(payload?.run));
-  on('acp.run.updated', (payload) => upsertRun(payload?.run));
-  on('acp.run.done', (payload) => upsertRun(payload?.run));
   on('acp.session.mode_changed', (payload) => {
     const run = state.runs.get(payload?.run_id);
     if (run) {
@@ -97,14 +97,21 @@ export function bindSubagents({ getActiveConversationId } = {}) {
 }
 
 export function setSubagentConversation(id) {
-  state.conversationId = id || '';
-  void hydrate();
+  const conversationID = id || '';
+  if (state.conversationId !== conversationID) {
+    state.runStream?.close();
+    state.runStream = null;
+    state.runStreamSeq = 0;
+    state.conversationId = conversationID;
+    if (conversationID) openRunStream(conversationID);
+  }
+  void hydrate(conversationID);
   renderDock();
   if (!document.getElementById('acp-drawer')?.hidden) {
     // A drawer showing a run from the previous room must not follow the
     // user across rooms — reset to the new room's runs instead.
     const run = state.runs.get(state.drawerRunId);
-    if (!run || (id && run.conversation_id !== id)) state.drawerRunId = '';
+    if (!run || (conversationID && run.conversation_id !== conversationID)) state.drawerRunId = '';
     renderDrawer();
   }
 }
@@ -114,10 +121,57 @@ export function closeAcpOverlays() {
   closeDrawer();
 }
 
-async function hydrate() {
+function openRunStream(conversationID) {
+  if (!conversationID || typeof EventSource === 'undefined') return;
+  const source = new EventSource(`/stream/acp?conversation_id=${encodeURIComponent(conversationID)}`);
+  state.runStream = source;
+  let opened = false;
+  source.onopen = () => {
+    if (state.runStream !== source || state.conversationId !== conversationID) return;
+    if (opened) void hydrate(conversationID);
+    opened = true;
+  };
+  source.addEventListener('acp.run', (event) => {
+    if (state.runStream !== source || state.conversationId !== conversationID) return;
+    let frame;
+    try { frame = JSON.parse(event.data); } catch { return; }
+    if (frame?.type === 'acp.run.snapshot') {
+      state.runStreamSeq = Number.isSafeInteger(Number(frame.seq)) ? Number(frame.seq) : 0;
+      for (const runID of state.streamedRunIDs) {
+        if (state.runs.get(runID)?.conversation_id === conversationID) state.streamedRunIDs.delete(runID);
+      }
+      const seen = new Set();
+      for (const run of frame.runs || []) {
+        if (!run?.id || run.conversation_id !== conversationID) continue;
+        seen.add(run.id);
+        upsertRun(run, { silent: true, streamed: true });
+      }
+      for (const [runID, run] of state.runs) {
+        if (run.conversation_id === conversationID && LIVE.has(run.status) && !seen.has(runID)) {
+          state.runs.delete(runID);
+          followByRunId.delete(runID);
+        }
+      }
+      renderAll();
+      void hydrate(conversationID);
+      return;
+    }
+    if (!['acp.run.started', 'acp.run.updated', 'acp.run.done'].includes(frame?.type)) return;
+    const seq = Number(frame.seq);
+    if (!Number.isSafeInteger(seq) || seq <= state.runStreamSeq) return;
+    state.runStreamSeq = seq;
+    const run = frame.run;
+    if (run?.conversation_id === conversationID) upsertRun(run, { streamed: true });
+  });
+}
+
+async function hydrate(conversationID = state.conversationId) {
   try {
-    const res = await rpc('acp.runs.list', {});
-    for (const run of res.runs ?? []) upsertRun(run, { silent: true });
+    const res = await rpc('acp.runs.list', conversationID ? { conversation_id: conversationID } : {});
+    if (state.conversationId !== conversationID) return;
+    for (const run of res.runs ?? []) {
+      if (!conversationID || run.conversation_id === conversationID) upsertRun(run, { silent: true });
+    }
     renderAll();
   } catch {
     /* backend may not be ready */
@@ -125,7 +179,7 @@ async function hydrate() {
 }
 
 // A room can render a persisted subagent card before the global run list has
-// hydrated (for example while the backend WebSocket is reconnecting). Load the
+// hydrated (for example while the run SSE is reconnecting). Load the
 // exact run on demand instead of making a card depend on process-local cache.
 function ensureRun(runId) {
   if (!runId || state.runs.has(runId)) return Promise.resolve(state.runs.get(runId));
@@ -147,8 +201,10 @@ function ensureRun(runId) {
   return request;
 }
 
-function upsertRun(run, { silent } = {}) {
+function upsertRun(run, { silent, streamed = false } = {}) {
   if (!run?.id) return;
+  if (streamed) state.streamedRunIDs.add(run.id);
+  else if (state.streamedRunIDs.has(run.id)) return;
   state.runLoadErrors.delete(run.id);
   state.runs.set(run.id, run);
   pruneRuns();
@@ -168,6 +224,7 @@ function pruneRuns() {
     const ended = Date.parse(run.ended_at || run.updated_at || '') || 0;
     if (!ended || now - ended > RECENT_MS) {
       state.runs.delete(id);
+      state.streamedRunIDs.delete(id);
       followByRunId.delete(id);
     }
   }
@@ -237,7 +294,7 @@ function hasLiveRuns() {
 
 // Keep elapsed status useful during provider thinking gaps. The backend also
 // emits live snapshots, but this local ticker makes the UI continue to tell
-// the truth when no transcript delta arrives yet or a WebSocket update is
+// the truth when no transcript delta arrives yet or an SSE update is
 // temporarily delayed.
 function syncActivityTimer() {
   if (hasLiveRuns()) {

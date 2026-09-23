@@ -1,7 +1,6 @@
 // Smoke test for frontend/testdata/live-delta-server.mjs — the fake backend
-// used to watch the live-delta DOM in a real browser. Verifies the server
-// serves the frontend, answers boot RPCs, and streams a multi-round fake
-// turn (turn.started rounds + message/tool deltas) over the WebSocket.
+// serves the embedded frontend, boot RPCs, WebSocket lifecycle notifications,
+// and replayable per-round SSE data for a synthetic multi-round turn.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { startLiveDeltaServer } from '../testdata/live-delta-server.mjs';
@@ -29,26 +28,40 @@ function waitFor(events, predicate, timeoutMs = 25000) {
   });
 }
 
-test('live-delta-server serves the frontend, boot RPCs, and a multi-round stream', { skip: hasNativeWS ? false : 'needs a native WebSocket client (Node >= 22)' }, async () => {
+async function readRoundStream(base, runID, messageID) {
+  const url = new URL('/stream', base);
+  url.searchParams.set('run_id', runID);
+  url.searchParams.set('message_id', messageID);
+  const response = await fetch(url);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') || '', /^text\/event-stream/);
+  const blocks = (await response.text()).split(/\r?\n\r?\n/).filter((block) => block.trim() && !block.startsWith(':'));
+  return blocks.map((block) => {
+    let type = '';
+    let data = '';
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith('event:')) type = line.slice(6).trim();
+      else if (line.startsWith('data:')) data += line.slice(5).trimStart();
+    }
+    return { type, payload: JSON.parse(data) };
+  });
+}
+
+test('live-delta-server serves boot RPCs, WS lifecycle signals, and multi-round SSE', { skip: hasNativeWS ? false : 'needs a native WebSocket client (Node >= 22)' }, async () => {
   const { server, port, clients, close } = await startLiveDeltaServer({ port: 0, rounds: 3, speedMs: 1, chunkSize: 64 });
   const base = `http://127.0.0.1:${port}`;
 
   try {
-    // Frontend is served.
     const page = await fetch(`${base}/`);
     assert.equal(page.status, 200);
     assert.match(await page.text(), /<html/i);
 
-    // Boot RPCs answer.
     const { conversations } = await rpc(base, 'agent.conversations.list');
     assert.equal(conversations[0].id, 'conv_live_delta');
     const { models } = await rpc(base, 'ai.models.list');
     assert.equal(models.length, 1);
-
-    // Unknown RPCs degrade to an empty result (boot never hard-fails).
     assert.deepEqual(await rpc(base, 'agent.unknown.method'), {});
 
-    // WebSocket connects and receives the synthetic multi-round turn.
     const events = [];
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
     await new Promise((resolve, reject) => {
@@ -60,21 +73,30 @@ test('live-delta-server serves the frontend, boot RPCs, and a multi-round stream
     });
 
     await rpc(base, 'agent.turns.start', { conversation_id: 'conv_live_delta' });
+    await waitFor(events, () => events.some((event) => event.type === 'agent.turn.done'));
 
-    await waitFor(events, () => {
-      const types = new Set(events.map((e) => e.type));
-      return types.has('agent.message.delta') && types.has('agent.tool.delta')
-        && events.some((e) => e.type === 'agent.turn.started' && (e.payload?.round ?? 1) >= 2);
-    });
+    const starts = events.filter((event) => event.type === 'agent.turn.started').map((event) => event.payload);
+    assert.equal(starts.length, 3);
+    assert.ok(events.some((event) => event.type === 'agent.tool.started'));
+    assert.ok(!events.some((event) => ['agent.message.delta', 'agent.reasoning.delta', 'agent.tool.delta'].includes(event.type)));
 
-    // Every delta is bound to the conversation so the UI can route it.
-    const delta = events.find((e) => e.type === 'agent.message.delta');
-    assert.equal(delta.payload.conversation_id, 'conv_live_delta');
-    assert.ok(delta.payload.text.length > 0);
-
-    // The turn settles.
-    await waitFor(events, () => events.some((e) => e.type === 'agent.turn.done'));
-    assert.ok(events.some((e) => e.type === 'agent.turn.started' && e.payload.round === 3), 'third round announced');
+    for (let i = 0; i < starts.length; i++) {
+      const frames = await readRoundStream(base, starts[i].run_id, starts[i].message_id);
+      const deltas = frames.filter((frame) => frame.type === 'round.delta').map((frame) => frame.payload);
+      const done = frames.find((frame) => frame.type === 'round.done')?.payload;
+      assert.ok(deltas.some((frame) => frame.kind === 'reasoning' && frame.text), `round ${i + 1} reasoning comes from SSE`);
+      assert.ok(deltas.some((frame) => frame.kind === 'tool' && frame.tool_call_id), `round ${i + 1} tool frames come from SSE`);
+      assert.ok(deltas.some((frame) => frame.kind === 'text' && frame.text.includes(`Round ${i + 1}`)), `round ${i + 1} text comes from SSE`);
+      assert.ok(done, `round ${i + 1} has a terminal SSE frame`);
+      for (let j = 0; j < deltas.length; j++) {
+        assert.equal(deltas[j].seq, j + 1, `round ${i + 1} delta sequence is contiguous`);
+      }
+      if (i + 1 < starts.length) {
+        assert.equal(done.next?.message_id, starts[i + 1].message_id, `round ${i + 1} chains to the next SSE round`);
+      } else {
+        assert.equal(done.next, undefined, 'final round has no next reference');
+      }
+    }
 
     ws.close();
     await waitFor([], () => clients.size === 0, 2000);

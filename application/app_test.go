@@ -167,7 +167,6 @@ func TestBusPreservesBlockingLifecycleEventsBehindDeltaBurst(t *testing.T) {
 		contracts.EventAskAnswered,
 		contracts.EventAskCancelled,
 		contracts.EventCompacting,
-		contracts.EventAcpRunDone,
 		contracts.EventAcpPermissionRequested,
 		contracts.EventAcpPermissionDecided,
 	}

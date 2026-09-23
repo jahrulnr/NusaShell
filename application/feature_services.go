@@ -506,6 +506,7 @@ func (a *App) subagentDeps() subagent.Deps {
 		Agents:        a.AcpAgents,
 		Runtime:       a.Acp,
 		RunStorage:    a.AcpRunStorage,
+		RunStreams:    a.AcpRunStreams,
 		Conversations: a.Conversations,
 		Todos:         a.Todos,
 		Settings:      a.Settings,

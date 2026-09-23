@@ -65,7 +65,7 @@ type Settings interface {
 	Get() domain.Settings
 }
 
-// Emitter publishes ACP run and permission events. Root *Bus assigns.
+// Emitter publishes ACP permission and mode notifications through the application bus.
 type Emitter interface {
 	Emit(typ string, v any)
 }
@@ -117,6 +117,7 @@ type Deps struct {
 	Settings         Settings
 	Log              Logger
 	Bus              Emitter
+	RunStreams       *RunStreamRegistry
 	Go               GoFunc
 	OnAgentsChanged  OnAgentsChanged
 	TrackPending     TrackPending

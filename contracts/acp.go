@@ -182,10 +182,6 @@ type AcpPermissionDecideRequest struct {
 	Outcome  string `json:"outcome,omitempty"`
 }
 
-type AcpRunEvent struct {
-	Run AcpRunDTO `json:"run"`
-}
-
 type AcpPermissionEvent struct {
 	RunID      string           `json:"run_id"`
 	Permission AcpPermissionDTO `json:"permission"`
@@ -202,4 +198,12 @@ type AcpModeChangedEvent struct {
 	RunID  string `json:"run_id"`
 	ModeID string `json:"mode_id"`
 	Source string `json:"source,omitempty"` // user | agent
+}
+
+type AcpRunStreamFrame struct {
+	Type           string      `json:"type"`
+	ConversationID string      `json:"conversation_id,omitempty"`
+	Seq            int64       `json:"seq"`
+	Runs           []AcpRunDTO `json:"runs,omitempty"`
+	Run            *AcpRunDTO  `json:"run,omitempty"`
 }

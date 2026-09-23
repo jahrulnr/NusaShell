@@ -40,8 +40,10 @@ local-storage pattern, while server state must be refreshed through RPC.
 - Reuse styled selects and dialogs. Do not expose native `alert`, `confirm`,
   `prompt`, or visible native option menus.
 - Handle loading, empty, error, disabled, reconnect, and narrow-screen states.
-- Keep HTTP for browser commands/queries, WebSocket for lifecycle signals,
-  and per-round SSE for live agent deltas. Do not duplicate transport state.
+- Keep HTTP for commands/queries; WebSocket for remaining lifecycle/control
+  notifications; per-round SSE for agent deltas; and one conversation-scoped
+  SSE for ACP run snapshots. Reconcile each stream on reconnect; do not mirror
+  full ACP run snapshots over both transports.
 - If an RPC or event changes, update the canonical Go contract and backend
   tests, not only a JavaScript string.
 - Keep third-party code in `vendor/`; prefer existing browser APIs and vendored

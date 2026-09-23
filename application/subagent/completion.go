@@ -1,16 +1,15 @@
 package subagent
 
 import (
-	"nusashell/contracts"
 	"nusashell/domain"
 )
 
 // EmitRun publishes an ACP run lifecycle event.
 func (s *Service) EmitRun(event string, run *domain.AcpRun) {
-	if s == nil || run == nil || s.deps.Bus == nil {
+	if s == nil || run == nil || s.deps.RunStreams == nil {
 		return
 	}
-	s.deps.Bus.Emit(event, contracts.AcpRunEvent{Run: runDTO(run)})
+	s.deps.RunStreams.publish(event, runDTO(run), run.UpdatedAt)
 }
 
 // OnRunDone persists the transcript then delivers the result through the

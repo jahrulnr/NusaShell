@@ -112,7 +112,8 @@ provider work. Click a chip for the right-hand drawer
 (all parallel spawns), or peek one run in a popup. Both surfaces stream
 the transcript live, patched in place like the conversation thread
 (auto-follows the bottom while you're at the bottom; your scroll
-position is never reset by incoming updates). Completed runs stay
+position is never reset by incoming updates). After reconnect, a current run
+snapshot restores the dock before live updates resume. Completed runs stay
 reopenable from their delegation card or the drawer for as long as the
 conversation exists — the drawer lists every run of the room, settled
 included. The user is an observer: steer, stop, mode change, and risk
@@ -247,15 +248,16 @@ before returning. Its tool result contains only `status`, `id`, `workspace`,
 failure/cancellation fallback). If no text was produced, the last thought may
 be used as that bounded fallback. A timeout can return a still-running status
 without `output_path`. Read the path only when the full thought/tool
-transcript is needed. The Agent drawer receives live transcript events
-independently; the tool result never carries the full DTO.
+transcript is needed. The Agent dock and drawer resynchronize from a current
+run snapshot after reconnect, then continue live transcript updates; the tool
+result never carries the full DTO.
 
 The `steer` and `stop` ops persist compact tool results, not the
 full run DTO. Steer returns `status` / `id` / `workspace` plus
 `Steer accepted.` and does not include last-turn text. Stop returns the
 same bounded completion shape as `wait` (last meaningful turn,
 plus `output_path` when the cancelled run is persisted). The Agent drawer
-still receives live transcript events independently; read `output_path`
+resynchronizes from a current run snapshot after reconnect; read `output_path`
 only when the full thought/tool transcript is needed.
 
 Good example — wait with a bounded timeout:

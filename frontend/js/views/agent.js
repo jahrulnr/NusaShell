@@ -350,13 +350,14 @@ async function openRoundStream(run) {
     });
     if (streamToken !== run.streamToken) return;
     if (!resp.ok) {
-      handleStreamMiss(run);
+      handleStreamMiss(run, resp.status);
       return;
     }
     if (!resp.body) {
       handleStreamMiss(run);
       return;
     }
+    run.streamMissingReconciled = false;
     const reader = resp.body.getReader();
     if (streamToken !== run.streamToken) {
       try { reader.cancel(); } catch { /* already closed */ }
@@ -644,7 +645,7 @@ function finishRoundFromSSE(run) {
 // handleStreamMiss is the fallback when a round stream cannot be attached:
 // the backend restarted, the round was GC'd, or the run ended. Re-sync from
 // the authoritative snapshot.
-function handleStreamMiss(run) {
+function handleStreamMiss(run, status = 0) {
   if (!run) return;
   if (run.streamAbort) { run.streamAbort.abort(); run.streamAbort = null; }
   // Once the replay tail is exhausted, an intermediate snapshot can still
@@ -652,9 +653,37 @@ function handleStreamMiss(run) {
   // the terminal path perform the authoritative refresh instead of wiping
   // the response the user has already seen.
   if (run.streamNeedsSnapshot) return;
-  if (run.conversationId === state.activeId && runForConversation(run.conversationId) === run) {
+  if (run.conversationId !== state.activeId || runForConversation(run.conversationId) !== run) return;
+  if (status !== 404) {
     void refreshActiveConversation();
+    return;
   }
+  if (run.streamMissingReconciled) {
+    run.streamNeedsSnapshot = true;
+    void refreshActiveConversation();
+    return;
+  }
+  run.streamMissingReconciled = true;
+  const failedMessageID = run.messageId;
+  void reattachActiveRunFromBackend().then(() => {
+    if (state.activeId !== run.conversationId) return;
+    const currentRun = runForConversation(run.conversationId);
+    if (!currentRun) {
+      void refreshActiveConversation();
+      return;
+    }
+    if (currentRun !== run || currentRun.messageId !== failedMessageID) {
+      reattachActiveRun();
+      return;
+    }
+    closeRoundStream(currentRun);
+    currentRun.streamMessageId = null;
+    currentRun.lastSeq = 0;
+    currentRun.streamGap = null;
+    currentRun.streamGapAttempts = 0;
+    currentRun.streamNeedsSnapshot = false;
+    void openRoundStream(currentRun);
+  });
 }
 
 // applyRoundDeltaFrame routes one round.delta frame into the live run state.
@@ -749,7 +778,19 @@ function applyRoundDoneFrame(run, done) {
   // in either order. The WebSocket terminal normally wins; the bounded
   // fallback below handles a lost WebSocket without leaving the UI running.
   if (done.next) {
-    if (isLiveRun) endTurn(run.runId, true);
+    if (isLiveRun) {
+      endTurn(run.runId, true);
+      if (done.next.message_id) {
+        emit('agent.turn.started', {
+          run_id: done.next.run_id || run.runId,
+          conversation_id: run.conversationId,
+          message_id: done.next.message_id,
+          round: done.next.round || 1,
+        });
+      } else {
+        void reattachActiveRunFromBackend();
+      }
+    }
   } else if (isLiveRun) {
     run.roundDone = true;
     run.roundDoneState = done.state || '';
@@ -865,6 +906,7 @@ function resetLiveRoundText(run) {
   run.streamGapAttempts = 0;
   run.streamRetries = 0;
   run.streamNeedsSnapshot = false;
+  run.streamMissingReconciled = false;
   run.thinkingLive = false;
   run.toolsStarted = false;
   run.activityPhase = 'thinking';
@@ -1504,8 +1546,8 @@ async function restorePendingAsks(conversationId, token) {
 async function reattachActiveRunFromBackend() {
   const conversationId = state.activeId;
   if (!conversationId) return;
-  if (runForConversation(conversationId)) return; // already attached
-  if (state.conversation?.status !== 'running') return;
+  const currentRun = runForConversation(conversationId);
+  if (!currentRun && state.conversation?.status !== 'running') return;
   let active;
   try {
     active = await rpc('agent.turns.active', { id: conversationId });
@@ -1513,24 +1555,45 @@ async function reattachActiveRunFromBackend() {
     return; // backend may not support the method yet; fail silently
   }
   if (state.activeId !== conversationId) return;
-  if (!active?.active || !active.run_id) return;
-  // Register a run entry. reattachActiveRun will populate the DOM
-  // references by converting the message node; openRoundStream then pulls
-  // the accumulated deltas from the server-side round buffer (replay from
-  // seq 0), so a reload/switch-back never shows a blank tail.
-  state.runs.set(active.run_id, {
-    msgNode: null, bubble: null, strip: null, textBox: null, reasoningEl: null,
-    toolJobs: new Map(),
-    toolArgs: new Map(),
-    raw: '',
-    rawReasoning: '',
-    renderDirty: false,
-    round: 1,
-    conversationId: conversationId, runId: active.run_id,
-    messageId: active.message_id,
-    awaitingSteerRound: hasSteerAfterMessage(active.message_id),
-  });
-  mountCompactionStatus(conversationId, state.runs.get(active.run_id));
+  if (!active?.active || !active.run_id || !active.message_id) {
+    if (currentRun) endTurn(currentRun.runId);
+    else {
+      if (state.conversation) state.conversation.status = 'idle';
+      const conversation = state.conversations.find((item) => item.id === conversationId);
+      if (conversation) conversation.status = 'idle';
+      updateSendAvailability(state);
+      updateComposerStatus();
+    }
+    return;
+  }
+  if (currentRun && currentRun.runId !== active.run_id) endTurn(currentRun.runId);
+  let run = state.runs.get(active.run_id);
+  if (run && run.messageId !== active.message_id) {
+    closeRoundStream(run);
+    resetLiveRoundText(run);
+    run.messageId = active.message_id;
+    run.round = 1;
+    run.streamMessageId = null;
+  }
+  if (!run) {
+    run = {
+      msgNode: null, bubble: null, strip: null, textBox: null, reasoningEl: null,
+      toolJobs: new Map(),
+      toolArgs: new Map(),
+      raw: '',
+      rawReasoning: '',
+      renderDirty: false,
+      round: 1,
+      conversationId: conversationId, runId: active.run_id,
+      messageId: active.message_id,
+      awaitingSteerRound: hasSteerAfterMessage(active.message_id),
+    };
+    state.runs.set(active.run_id, run);
+  }
+  if (state.conversation) state.conversation.status = 'running';
+  const conversation = state.conversations.find((item) => item.id === conversationId);
+  if (conversation) conversation.status = 'running';
+  mountCompactionStatus(conversationId, run);
   if (active.queued_steer) {
     state.steerDraft = active.queued_steer;
     state.steerId = active.queued_steer_id ?? null;

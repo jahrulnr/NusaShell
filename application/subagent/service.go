@@ -16,6 +16,9 @@ func New(d Deps) *Service {
 		goFn = func(_ string, fn func()) { go fn() }
 	}
 	d.Go = goFn
+	if d.RunStreams == nil {
+		d.RunStreams = NewRunStreamRegistry()
+	}
 	svc := &Service{deps: d}
 	svc.delegates = newDelegateRuntime(svc)
 	return svc

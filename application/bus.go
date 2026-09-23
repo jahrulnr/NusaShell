@@ -129,7 +129,6 @@ func isCriticalBusEvent(typ string) bool {
 		contracts.EventCompacted,
 		contracts.EventCompactionFailed,
 		contracts.EventAutoContinue,
-		contracts.EventAcpRunDone,
 		contracts.EventAcpPermissionRequested,
 		contracts.EventAcpPermissionDecided:
 		return true

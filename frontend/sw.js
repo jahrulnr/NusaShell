@@ -6,7 +6,7 @@
 // an upgrade). When the server is down, every navigation and asset is served
 // from this cache so the app boots and shows the full-screen offline state.
 //
-// Never cached: /ws (WebSocket handshake), GET /stream (per-round SSE),
+// Never cached: /ws (WebSocket handshake), /stream (agent and ACP SSE),
 // POST /rpc/*, /local-file (large dynamic local files), /sounds
 // (notification blips), /plugins/* (plugin UIs come from the plugin store
 // and can be installed/uninstalled at runtime). Cloning an SSE body in

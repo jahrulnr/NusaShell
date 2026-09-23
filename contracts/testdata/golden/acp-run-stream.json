@@ -1,0 +1,39 @@
+{
+  "snapshot": {
+    "type": "acp.run.snapshot",
+    "conversation_id": "conv_1",
+    "seq": 1,
+    "runs": [
+      {
+        "id": "run_1",
+        "agent_id": "acp_1",
+        "agent_name": "Helper",
+        "conversation_id": "conv_1",
+        "status": "running",
+        "transcript": [
+          {
+            "kind": "text",
+            "text": "hello"
+          }
+        ]
+      }
+    ]
+  },
+  "update": {
+    "type": "acp.run.updated",
+    "seq": 2,
+    "run": {
+      "id": "run_1",
+      "agent_id": "acp_1",
+      "agent_name": "Helper",
+      "conversation_id": "conv_1",
+      "status": "completed",
+      "transcript": [
+        {
+          "kind": "text",
+          "text": "hello world"
+        }
+      ]
+    }
+  }
+}

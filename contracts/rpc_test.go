@@ -99,7 +99,7 @@ func TestRosterUniqueness(t *testing.T) {
 		EventAutomationJobCancelled, EventAutomationJobSkipped,
 		EventAutomationStepStarted, EventAutomationStepOutput, EventAutomationStepCompleted, EventAutomationStepFailed,
 		EventAutomationEvent,
-		EventAcpRunStarted, EventAcpRunUpdated, EventAcpRunDone,
+		EventAcpRunStream, EventAcpRunSnapshot, EventAcpRunStarted, EventAcpRunUpdated, EventAcpRunDone,
 		EventAcpPermissionRequested, EventAcpPermissionDecided, EventAcpSessionModeChanged,
 		EventExperienceRecorded, EventLearningJobStarted, EventLearningJobDone, EventLearningJobError,
 		EventSettingsApplied, EventSettingsRejected,
@@ -357,6 +357,28 @@ func TestEventFieldNames(t *testing.T) {
 			t.Errorf("missing field %q in activity RoundDeltaFrame JSON", k)
 		}
 	}
+}
+
+func TestAcpRunStreamFramesGolden(t *testing.T) {
+	assertGolden(t, "acp-run-stream.json", struct {
+		Snapshot AcpRunStreamFrame `json:"snapshot"`
+		Update   AcpRunStreamFrame `json:"update"`
+	}{
+		Snapshot: AcpRunStreamFrame{
+			Type: EventAcpRunSnapshot, ConversationID: "conv_1", Seq: 1,
+			Runs: []AcpRunDTO{{
+				ID: "run_1", AgentID: "acp_1", AgentName: "Helper", ConversationID: "conv_1", Status: "running",
+				Transcript: []AcpTranscriptChunkDTO{{Kind: "text", Text: "hello"}},
+			}},
+		},
+		Update: AcpRunStreamFrame{
+			Type: EventAcpRunUpdated, Seq: 2,
+			Run: &AcpRunDTO{
+				ID: "run_1", AgentID: "acp_1", AgentName: "Helper", ConversationID: "conv_1", Status: "completed",
+				Transcript: []AcpTranscriptChunkDTO{{Kind: "text", Text: "hello world"}},
+			},
+		},
+	})
 }
 
 func TestAcpRunActivityJSONFields(t *testing.T) {

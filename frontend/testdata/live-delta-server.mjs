@@ -1,16 +1,13 @@
-// Fake NusaShell backend for observing the live-delta DOM in a real browser.
+// Fake NusaShell backend for observing live agent rounds in a real browser.
 //
 //   node frontend/testdata/live-delta-server.mjs [--port 8787] [--rounds 10] [--speed 15]
 //
 // Serves frontend/ statically, answers the handful of RPC calls the UI makes
-// at boot, exposes a minimal WebSocket /ws endpoint, and — once the composer
-// sends a turn — streams a synthetic multi-round agent turn
-// (reasoning deltas → tool call with streamed output → message deltas,
-// repeated for --rounds rounds) so the conversation thread can be watched
-// live without a Go backend or a real provider. Built to prove that the live
-// thread keeps EVERY round mounted (no "earlier rounds trimmed" stub) while
-// staying smooth: open the page, send a message, scroll up mid-stream and
-// confirm the earlier rounds are still there.
+// at boot, exposes lifecycle notifications over WebSocket /ws, and serves
+// replayable per-round agent deltas over GET /stream. The synthetic turn
+// (reasoning → tool output → message text) lets a developer inspect the live
+// conversation without a Go backend or real provider. Open the page, send a
+// message, scroll up mid-stream, and confirm earlier rounds remain mounted.
 //
 // Zero dependencies: the WebSocket framing (RFC 6455) is implemented inline.
 
@@ -59,6 +56,7 @@ export function startLiveDeltaServer({
   };
   const nextRoundDelay = parseDelay(roundDelay);
   const clients = new Set();
+  const roundStreams = new Map();
   let activeStream = null; // { cancelled: boolean }
   let pendingSteer = null; // { id, conversationId, text }
   // Synthetic persisted transcript (mirrors what the real backend saves at
@@ -96,6 +94,41 @@ export function startLiveDeltaServer({
       if (socket.writable) socket.write(frame);
     }
     log(`→ ${type}`);
+  }
+
+  function beginRoundStream(runID, messageID, round) {
+    const key = `${runID}|${messageID}`;
+    const stream = { runID, messageID, round, seq: 0, frames: [], clients: new Set(), done: null };
+    roundStreams.set(key, stream);
+    return stream;
+  }
+
+  function writeSSE(res, event, payload, id = '') {
+    if (id) res.write(`id: ${id}\n`);
+    res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+  }
+
+  function publishRoundDelta(runID, messageID, kind, text, extra = {}) {
+    const stream = roundStreams.get(`${runID}|${messageID}`);
+    if (!stream || stream.done) return;
+    const frame = { seq: ++stream.seq, kind, ...extra };
+    if (text) frame.text = text;
+    stream.frames.push(frame);
+    for (const res of stream.clients) writeSSE(res, 'round.delta', frame, String(frame.seq));
+  }
+
+  function sealRoundStream(runID, messageID, { state = 'done', next = null, usage = null } = {}) {
+    const stream = roundStreams.get(`${runID}|${messageID}`);
+    if (!stream || stream.done) return;
+    stream.done = {
+      state, run_id: runID, message_id: messageID, round: stream.round,
+      last_seq: stream.seq, usage, ...(next ? { next } : {}),
+    };
+    for (const res of stream.clients) {
+      writeSSE(res, 'round.done', stream.done);
+      res.end();
+    }
+    stream.clients.clear();
   }
 
   // Parses masked client frames far enough to read text frames and answer
@@ -165,73 +198,78 @@ export function startLiveDeltaServer({
     activeStream = stream;
     const steps = [];
     let currentRound = 1;
+    let currentMessageID = '';
     try {
-    broadcast('agent.turn.started', { run_id: runId, conversation_id: conversationId, round: 1, message_id: 'msg_r1' });
-
-    for (let round = 1; round <= rounds; round++) {
-      if (stream.cancelled) return runId;
-      currentRound = round;
-      const messageId = `msg_r${round}`;
-      if (round > 1) {
-        const pause = nextRoundDelay();
+      for (let round = 1; round <= rounds; round++) {
+        if (stream.cancelled) return runId;
+        currentRound = round;
+        const messageId = `msg_r${round}`;
+        currentMessageID = messageId;
+        beginRoundStream(runId, messageId, round);
         broadcast('agent.turn.started', { run_id: runId, conversation_id: conversationId, round, message_id: messageId });
-        await sleep(pause);
-      }
-      if (pendingSteer && pendingSteer.conversationId === conversationId) {
-        broadcast('agent.steer.applied', { conversation_id: conversationId, steer_id: pendingSteer.id, text: pendingSteer.text });
-        pendingSteer = null;
+        if (round > 1) await sleep(nextRoundDelay());
+        if (pendingSteer && pendingSteer.conversationId === conversationId) {
+          broadcast('agent.steer.applied', { conversation_id: conversationId, steer_id: pendingSteer.id, text: pendingSteer.text });
+          pendingSteer = null;
+        }
+
+        const thought = `Round ${round}: I will demonstrate that every round stays mounted while deltas stream.`;
+        for (let i = 0; i < thought.length; i += chunkSize) {
+          if (stream.cancelled) return runId;
+          publishRoundDelta(runId, messageId, 'reasoning', thought.slice(i, i + chunkSize));
+          await sleep(speedMs);
+        }
+
+        const toolCallId = `tool_${round}_${randomUUID().slice(0, 6)}`;
+        const toolArgs = { command: 'echo "live delta smoke"' };
+        broadcast('agent.tool.started', { run_id: runId, conversation_id: conversationId, tool_call_id: toolCallId, name: 'exec', args: toolArgs });
+        publishRoundDelta(runId, messageId, 'tool', '', {
+          tool_call_id: toolCallId,
+          name: 'exec',
+          args: toolArgs,
+          presentation: { variant: 'terminal', action: 'Running command', request: 'exec(...)', result: { format: 'terminal' } },
+        });
+        const toolOut = [...Array(4).keys()].map((n) => `line ${n + 1}: streaming output lands in the tool terminal`).join('\n');
+        for (let i = 0; i < toolOut.length; i += chunkSize) {
+          if (stream.cancelled) return runId;
+          publishRoundDelta(runId, messageId, 'tool', toolOut.slice(i, i + chunkSize), { tool_call_id: toolCallId });
+          await sleep(speedMs);
+        }
+        broadcast('agent.tool.completed', { run_id: runId, conversation_id: conversationId, tool_call_id: toolCallId, name: 'exec', status: 'ok', output: `${toolOut}\nexit_code: 0` });
+        const roundSteps = [{ type: 'reasoning', content: thought }, { type: 'tool_calls', tool_calls: [{ id: toolCallId, name: 'exec', args: toolArgs, status: 'ok', output: `${toolOut}\nexit_code: 0` }] }];
+
+        const body = [
+          `**Round ${round}** — ${PARAGRAPHS[round % PARAGRAPHS.length]}`,
+          PARAGRAPHS[(round + 1) % PARAGRAPHS.length],
+          '```js',
+          `// round ${round}: fences close mid-stream, then lock`,
+          `console.log("round ${round} rendered while streaming");`,
+          '```',
+        ].join('\n\n');
+        for (let i = 0; i < body.length; i += chunkSize) {
+          if (stream.cancelled) return runId;
+          publishRoundDelta(runId, messageId, 'text', body.slice(i, i + chunkSize));
+          await sleep(speedMs);
+        }
+        roundSteps.push({ type: 'text', content: body });
+        transcript.push({ role: 'assistant', id: messageId, model: MODEL_ID, steps: roundSteps, created_at: new Date().toISOString() });
+        const next = round < rounds ? { run_id: runId, message_id: `msg_r${round + 1}`, round: round + 1 } : null;
+        sealRoundStream(runId, messageId, { next, usage: { input_tokens: 1024, output_tokens: 4096 } });
       }
 
-      // Reasoning stream
-      const thought = `Round ${round}: I will demonstrate that every round stays mounted while deltas stream.`;
-      for (let i = 0; i < thought.length; i += chunkSize) {
-        if (stream.cancelled) return runId;
-        broadcast('agent.reasoning.delta', { run_id: runId, conversation_id: conversationId, message_id: messageId, text: thought.slice(i, i + chunkSize) });
-        await sleep(speedMs);
-      }
-
-      // Tool call with streamed output
-      const toolCallId = `tool_${round}_${randomUUID().slice(0, 6)}`;
-      broadcast('agent.tool.started', { run_id: runId, conversation_id: conversationId, tool_call_id: toolCallId, name: 'exec', args: { command: 'echo "live delta smoke"' } });
-      const toolOut = [...Array(4).keys()].map((n) => `line ${n + 1}: streaming output lands in the tool terminal`).join('\n');
-      for (let i = 0; i < toolOut.length; i += chunkSize) {
-        if (stream.cancelled) return runId;
-        broadcast('agent.tool.delta', { run_id: runId, conversation_id: conversationId, tool_call_id: toolCallId, text: toolOut.slice(i, i + chunkSize) });
-        await sleep(speedMs);
-      }
-      broadcast('agent.tool.completed', { run_id: runId, conversation_id: conversationId, tool_call_id: toolCallId, name: 'exec', status: 'ok', output: `${toolOut}\nexit_code: 0` });
-      const roundSteps = [{ type: 'reasoning', content: thought }, { type: 'tool_calls', tool_calls: [{ id: toolCallId, name: 'exec', args: { command: 'echo "live delta smoke"' }, status: 'ok', output: `${toolOut}\nexit_code: 0` }] }];
-
-      // Message stream: two paragraphs + a code fence per round.
-      const body = [
-        `**Round ${round}** — ${PARAGRAPHS[round % PARAGRAPHS.length]}`,
-        PARAGRAPHS[(round + 1) % PARAGRAPHS.length],
-        '```js',
-        `// round ${round}: fences close mid-stream, then lock`,
-        `console.log("round ${round} rendered while streaming");`,
-        '```',
-      ].join('\n\n');
-      for (let i = 0; i < body.length; i += chunkSize) {
-        if (stream.cancelled) return runId;
-        broadcast('agent.message.delta', { run_id: runId, conversation_id: conversationId, message_id: messageId, text: body.slice(i, i + chunkSize) });
-        await sleep(speedMs);
-      }
-      roundSteps.push({ type: 'text', content: body });
-      transcript.push({ role: 'assistant', id: messageId, model: MODEL_ID, steps: roundSteps, created_at: new Date().toISOString() });
-    }
-
-    broadcast('agent.turn.done', {
-      run_id: runId,
-      conversation_id: conversationId,
-      model: MODEL_ID,
-      usage: { input_tokens: 1024, output_tokens: 4096 },
-    });
+      broadcast('agent.turn.done', {
+        run_id: runId,
+        conversation_id: conversationId,
+        model: MODEL_ID,
+        usage: { input_tokens: 1024, output_tokens: 4096 },
+      });
     } finally {
       if (activeStream === stream) activeStream = null;
       if (stream.cancelled) {
-        // Terminal event on cancel — without it the frontend keeps the room
-        // "running" and routes every later submit into steer forever.
-        broadcast('agent.turn.done', { run_id: runId, conversation_id: conversationId, message_id: `msg_r${currentRound}`, model: MODEL_ID, usage: { input_tokens: 0, output_tokens: 0 } });
+        if (currentMessageID) {
+          sealRoundStream(runId, currentMessageID, { state: 'interrupted', usage: { input_tokens: 0, output_tokens: 0 } });
+        }
+        broadcast('agent.turn.done', { run_id: runId, conversation_id: conversationId, message_id: currentMessageID, model: MODEL_ID, usage: { input_tokens: 0, output_tokens: 0 } });
       }
     }
     return runId;
@@ -289,10 +327,48 @@ export function startLiveDeltaServer({
     'skills.list': () => ({ skills: [] }),
   };
 
+  function serveRoundStream(req, res, url) {
+    const runID = url.searchParams.get('run_id') || '';
+    const messageID = url.searchParams.get('message_id') || '';
+    const after = Number(url.searchParams.get('after') || 0);
+    if (!runID || !messageID || !Number.isSafeInteger(after) || after < 0) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('invalid round stream request');
+      return;
+    }
+    const stream = roundStreams.get(`${runID}|${messageID}`);
+    if (!stream) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('round stream not found');
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'X-Accel-Buffering': 'no',
+    });
+    res.flushHeaders?.();
+    res.write(': connected\n\n');
+    for (const frame of stream.frames) {
+      if (frame.seq > after) writeSSE(res, 'round.delta', frame, String(frame.seq));
+    }
+    if (stream.done) {
+      writeSSE(res, 'round.done', stream.done);
+      res.end();
+      return;
+    }
+    stream.clients.add(res);
+    res.on('close', () => stream.clients.delete(res));
+  }
+
   // ---- HTTP ---------------------------------------------------------------
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
+    if (url.pathname === '/stream') {
+      serveRoundStream(req, res, url);
+      return;
+    }
     if (url.pathname.startsWith('/rpc/')) {
       const method = decodeURIComponent(url.pathname.slice('/rpc/'.length)).replace(/\//g, '.');
       let body = '';
