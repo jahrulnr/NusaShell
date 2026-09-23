@@ -131,11 +131,18 @@ function compactLine(value, limit = 64) {
   return `${text.slice(0, Math.max(1, limit - 1)).trimEnd()}…`;
 }
 
+// reasoningPreviewCap bounds how much of the reasoning the preview scans. The
+// preview is a single compacted line, so the head is representative; scanning
+// the whole string would make the live update path O(n) per delta, and on a
+// long turn reasoning reaches megabytes — the preview work would grow with the
+// turn and slow the UI down as it runs.
+const reasoningPreviewCap = 64 * 1024;
+
 // reasoningPreview gives the collapsed Thinking row enough context to scan
 // without parsing/rendering Markdown. Fenced code is omitted because it is
 // rarely useful as a preview and can make the header look like a tool output.
 function reasoningPreview(raw) {
-  const text = String(raw || '')
+  const text = String(raw || '').slice(0, reasoningPreviewCap)
     .replace(/[\u200B-\u200D\uFEFF\u2060\u2063]/g, '')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/^\s{0,3}#{1,6}\s*/gm, '')
@@ -167,11 +174,23 @@ function materializeReasoning(details) {
 }
 
 // setReasoningSource updates the stored raw reasoning on a disclosure without
-// parsing markdown. If the user already opened it, the body is refreshed.
+// parsing markdown. The collapsed preview is refreshed too: a live round mounts
+// its disclosure before any reasoning exists, and the preview is the only part
+// of the row the user sees while collapsed — leaving it stale made a long turn
+// render tool cards beside empty Thinking rows until a reload re-rendered the
+// persisted message. If the user already opened it, the body is refreshed.
 export function setReasoningSource(details, raw, options = {}) {
   if (!details) return;
   details._reasoningRaw = typeof raw === 'string' ? raw : '';
   details.hidden = !reasoningHasVisibleSource(details._reasoningRaw);
+  const previewEl = details.querySelector?.('.agent-reasoning-preview');
+  if (previewEl) {
+    const preview = reasoningPreview(details._reasoningRaw);
+    if (previewEl.textContent !== preview) {
+      previewEl.textContent = preview;
+      previewEl.title = preview;
+    }
+  }
   if (details.open && options.render !== false) materializeReasoning(details);
 }
 

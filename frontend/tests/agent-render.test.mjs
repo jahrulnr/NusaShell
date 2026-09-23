@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, decorateToolCard, setToolTerminalStatus, setToolTerminalPresentation, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, renderToolAttachments, parseShowAudioOutput, parseShowVideoOutput, parseShowPDFOutput, STARTER_PROMPTS, reasoningDisclosure, renderCompactionStatus, renderAgentActivityStatus, setAgentActivityStatus, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, setThinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming, captureDisclosureState, restoreDisclosureState } from '../js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, decorateToolCard, setToolTerminalStatus, setToolTerminalPresentation, appendToolJobDelta, applyQueuedToolDeltas, appendLiveError, bindToolStop, renderMessageAttachments, renderToolAttachments, parseShowAudioOutput, parseShowVideoOutput, parseShowPDFOutput, STARTER_PROMPTS, reasoningDisclosure, setReasoningSource, renderCompactionStatus, renderAgentActivityStatus, setAgentActivityStatus, mountLiveRound, sealLiveNodeBeforeSteer, insertAfterOrAppend, bindOptimisticTurn, thinkingDots, setThinkingDots, reasoningShouldStream, setReasoningStreaming, sealReasoningStreaming, captureDisclosureState, restoreDisclosureState } from '../js/views/agent/render.js';
 import { createAskCard } from '../js/views/ask-card.js';
 import { normalizeToolCall, registerToolContracts, toolContractFor, toolContractClass } from '../js/views/agent/tool-contracts.js';
 function renderTranscript(messages) {
@@ -1278,6 +1278,39 @@ test('reasoning preview stays plain and compact until the disclosure is opened',
     assert.doesNotMatch(details.innerHTML, /<strong>/, 'collapsed preview is not parsed as Markdown');
     openDetails(details);
     assert.match(content.innerHTML, /<strong>the workspace<\/strong>/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('live reasoning deltas update the collapsed preview', () => {
+  // A live round mounts its Thinking disclosure before any reasoning has
+  // arrived, so the preview starts empty. It must follow the stream: while
+  // the row is collapsed the preview is the only reasoning the user sees, and
+  // a long task otherwise shows tool cards next to blank Thinking rows until
+  // a reload re-renders the persisted message.
+  const dom = new JSDOM('<body></body>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const details = reasoningDisclosure('');
+    document.body.append(details);
+    assert.equal(details.hidden, true, 'an empty live reasoning row stays hidden');
+
+    setReasoningSource(details, 'I will inspect **the workspace**.');
+    assert.equal(details.hidden, false, 'the row appears once reasoning arrives');
+    assert.equal(
+      details.querySelector('.agent-reasoning-preview')?.textContent,
+      'I will inspect the workspace.',
+      'the collapsed preview follows the live reasoning',
+    );
+    assert.equal(details.querySelector('.agent-reasoning-content').innerHTML, '',
+      'the body still is not markdown-parsed while collapsed');
+
+    setReasoningSource(details, '');
+    assert.equal(details.hidden, true, 'clearing the reasoning hides the row again');
+    assert.equal(details.querySelector('.agent-reasoning-preview')?.textContent, '',
+      'and clears the preview');
   } finally {
     globalThis.document = previousDocument;
   }
