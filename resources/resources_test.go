@@ -58,6 +58,26 @@ func TestRenderLearnerUserPromptIncludesSourceProjectLabel(t *testing.T) {
 	}
 }
 
+func TestLearnerTaskPromptStaysWithinMemoryReview(t *testing.T) {
+	user := UserPrompt("learner")
+	for _, stale := range []string{"manage skills", "skill-creator", "public skills", "research relevant"} {
+		if strings.Contains(strings.ToLower(user), stale) {
+			t.Errorf("learner task prompt expands beyond memory review with %q", stale)
+		}
+	}
+	if !strings.Contains(user, "source conversation") || !strings.Contains(user, "learn()") {
+		t.Fatal("learner task must keep its evidence source and typed result")
+	}
+}
+
+func TestProfilePromptsKeepAgentVoiceUserDirected(t *testing.T) {
+	for _, prompt := range []string{LearnerPrompt(), SystemPrompt()} {
+		if !strings.Contains(prompt, "user-chosen voice") {
+			t.Error("profile guidance must preserve the user's chosen agent voice")
+		}
+	}
+}
+
 func TestAutomationPromptMatchesAvailableWorkflowDispatchers(t *testing.T) {
 	prompt := Prompt("automation-agent")
 	if strings.Contains(prompt, "Modify automation workflows or schedules from within a step.") {

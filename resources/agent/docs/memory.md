@@ -14,6 +14,11 @@ profile documents.
 paths (`{dataDir}/memory/user.md`, `{dataDir}/memory/soul.md`). On first
 boot, missing files are copied from the embedded scaffolds in
 `resources/templates/` (About You outline and About Agent working notes).
+The user chooses the agent's voice and personality. The learner can retain a
+supported working convention in `soul.md`, but must keep it contextual and
+must not infer a personality change from task difficulty or its own guesses.
+The conversation agent applies a working note only when its context fits the
+current task; the user's latest instruction takes precedence.
 Existing files are never overwritten. Hydration runs the real `file_read`
 tool for each non-empty document. Empty files are omitted; `runtime_context`
 still carries `dataDir` and, when a workspace is set, `instructionFiles` (a

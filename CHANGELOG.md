@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-09-26
+
+### Changed
+
+- **Learner prompt keeps periodic review focused on memory.** Its task message
+  no longer conflicts with the system prompt by asking for skill research or
+  skill changes. Profile guidance preserves user-chosen agent voice while
+  allowing evidence-backed, contextual working notes in `soul.md`.
+
 ### Fixed
 
 - **Slow first tokens no longer trigger a false round-stream 404.** The round
