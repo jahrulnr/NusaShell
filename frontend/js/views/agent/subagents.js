@@ -12,6 +12,14 @@ import { renderToolJob, reasoningDisclosure, setReasoningSource, setToolTerminal
 const LIVE = new Set(['starting', 'running']);
 const RECENT_MS = 2 * 60 * 1000;
 
+// The ACP SSE server emits a comment ping every 15s. Browsers dispatch no
+// event for comment frames, so stream health is inferred from run frames:
+// silence beyond ~3 ping intervals while a run is live means the connection
+// is dead or half-open — reopen it and resync from a fresh snapshot.
+const RUN_STREAM_WATCHDOG_MS = 15 * 1000;
+const RUN_STREAM_STALL_MS = 45 * 1000;
+const RUN_STREAM_REOPEN_MS = 5 * 1000;
+
 const state = {
   runs: new Map(),
   conversationId: '',
@@ -22,6 +30,9 @@ const state = {
   activityTimer: null,
   runStream: null,
   runStreamSeq: 0,
+  runStreamLastFrameAt: 0,
+  runStreamWatchdog: null,
+  runStreamReopenTimer: null,
   streamedRunIDs: new Set(),
   bound: false,
 };
@@ -102,6 +113,7 @@ export function setSubagentConversation(id) {
     state.runStream?.close();
     state.runStream = null;
     state.runStreamSeq = 0;
+    stopRunStreamTimers();
     state.conversationId = conversationID;
     if (conversationID) openRunStream(conversationID);
   }
@@ -125,14 +137,24 @@ function openRunStream(conversationID) {
   if (!conversationID || typeof EventSource === 'undefined') return;
   const source = new EventSource(`/stream/acp?conversation_id=${encodeURIComponent(conversationID)}`);
   state.runStream = source;
+  state.runStreamLastFrameAt = Date.now();
   let opened = false;
   source.onopen = () => {
     if (state.runStream !== source || state.conversationId !== conversationID) return;
+    state.runStreamLastFrameAt = Date.now();
     if (opened) void hydrate(conversationID);
     opened = true;
   };
+  source.onerror = () => {
+    if (state.runStream !== source || state.conversationId !== conversationID) return;
+    // EventSource retries network failures on its own (readyState CONNECTING).
+    // A non-2xx response — e.g. 503 at the subscriber cap — fails permanently
+    // (readyState CLOSED) with no retry, so the stream must be reopened here.
+    if (source.readyState === 2) scheduleRunStreamReopen(conversationID);
+  };
   source.addEventListener('acp.run', (event) => {
     if (state.runStream !== source || state.conversationId !== conversationID) return;
+    state.runStreamLastFrameAt = Date.now();
     let frame;
     try { frame = JSON.parse(event.data); } catch { return; }
     if (frame?.type === 'acp.run.snapshot') {
@@ -149,6 +171,7 @@ function openRunStream(conversationID) {
       for (const [runID, run] of state.runs) {
         if (run.conversation_id === conversationID && LIVE.has(run.status) && !seen.has(runID)) {
           state.runs.delete(runID);
+          state.streamedRunIDs.delete(runID);
           followByRunId.delete(runID);
         }
       }
@@ -163,6 +186,65 @@ function openRunStream(conversationID) {
     const run = frame.run;
     if (run?.conversation_id === conversationID) upsertRun(run, { streamed: true });
   });
+  startRunStreamWatchdog();
+}
+
+// startRunStreamWatchdog guards the conversation stream against the failure
+// modes EventSource cannot recover from itself: a silently dead connection
+// (half-open TCP after suspend/wake or a dropped NAT/proxy route) where no
+// frame ever arrives, and a permanently closed stream the browser will not
+// retry. Reopening resubscribes with a fresh snapshot, which also clears
+// streamed flags so hydration can apply state the dead stream missed.
+function startRunStreamWatchdog() {
+  if (state.runStreamWatchdog) return;
+  state.runStreamWatchdog = setInterval(() => {
+    const source = state.runStream;
+    const conversationID = state.conversationId;
+    if (!source || !conversationID) return;
+    if (source.readyState === 2) {
+      scheduleRunStreamReopen(conversationID);
+      return;
+    }
+    // Silence is only suspicious while a run is live — an idle room can go
+    // arbitrarily long without lifecycle frames.
+    if (!hasLiveRuns()) return;
+    if (Date.now() - state.runStreamLastFrameAt <= RUN_STREAM_STALL_MS) return;
+    reopenRunStream(conversationID);
+  }, RUN_STREAM_WATCHDOG_MS);
+  state.runStreamWatchdog.unref?.();
+}
+
+function stopRunStreamTimers() {
+  if (state.runStreamWatchdog) {
+    clearInterval(state.runStreamWatchdog);
+    state.runStreamWatchdog = null;
+  }
+  if (state.runStreamReopenTimer) {
+    clearTimeout(state.runStreamReopenTimer);
+    state.runStreamReopenTimer = null;
+  }
+}
+
+function reopenRunStream(conversationID) {
+  if (state.conversationId !== conversationID) return;
+  state.runStream?.close();
+  state.runStream = null;
+  state.runStreamSeq = 0;
+  openRunStream(conversationID);
+}
+
+// scheduleRunStreamReopen delays the reopen so a persistent failure (backend
+// down, subscriber cap saturated) cannot spin a tight reconnect loop.
+function scheduleRunStreamReopen(conversationID) {
+  if (state.runStreamReopenTimer || !conversationID) return;
+  state.runStreamReopenTimer = setTimeout(() => {
+    state.runStreamReopenTimer = null;
+    if (state.conversationId !== conversationID) return;
+    // Skip if a newer open/reconnecting stream already replaced the dead one.
+    if (state.runStream && state.runStream.readyState !== 2) return;
+    reopenRunStream(conversationID);
+  }, RUN_STREAM_REOPEN_MS);
+  state.runStreamReopenTimer.unref?.();
 }
 
 async function hydrate(conversationID = state.conversationId) {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
 import {
@@ -453,6 +453,172 @@ test('subagent SSE snapshots reconcile the active room and updates patch live st
     setSubagentConversation('');
     if (previousEventSource === undefined) delete globalThis.EventSource;
     else globalThis.EventSource = previousEventSource;
+    dom.window.close();
+    cleanup();
+  }
+});
+
+function makeAcpDom() {
+  const dom = new JSDOM(
+    '<!doctype html><html><body>' +
+    '<div id="acp-dock" hidden><span id="acp-dock-title"></span><span id="acp-dock-meta"></span><div id="acp-dock-list"></div></div>' +
+    '<div id="acp-drawer" hidden><div id="acp-drawer-body"></div><span id="acp-drawer-title"></span><span id="acp-drawer-subtitle"></span></div>' +
+    '<div id="acp-drawer-overlay"></div><div id="acp-popup-overlay" hidden></div>' +
+    '</body></html>',
+  );
+  global.window = dom.window;
+  global.document = dom.window.document;
+  return dom;
+}
+
+function stubEventSource(sources) {
+  const previous = globalThis.EventSource;
+  class FakeEventSource {
+    constructor(url) {
+      this.url = url;
+      this.readyState = 0;
+      this.listeners = new Map();
+      this.closed = false;
+      sources.push(this);
+    }
+    addEventListener(type, listener) {
+      const listeners = this.listeners.get(type) || [];
+      listeners.push(listener);
+      this.listeners.set(type, listeners);
+    }
+    close() { this.closed = true; this.readyState = 2; }
+    open() { this.readyState = 1; this.onopen?.({}); }
+    emit(type, frame) {
+      for (const listener of this.listeners.get(type) || []) {
+        listener({ data: JSON.stringify(frame), lastEventId: String(frame.seq) });
+      }
+    }
+  }
+  globalThis.EventSource = FakeEventSource;
+  return () => {
+    if (previous === undefined) delete globalThis.EventSource;
+    else globalThis.EventSource = previous;
+  };
+}
+
+function stubRunsList(listedRuns) {
+  const previous = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith('/rpc/acp/runs/list')) {
+      return { ok: true, json: async () => ({ ok: true, result: { runs: listedRuns() } }) };
+    }
+    return { ok: true, json: async () => ({ ok: true, result: {} }) };
+  };
+  return () => { globalThis.fetch = previous; };
+}
+
+async function flushAsync() {
+  // Drain the microtask queue only — fetch/rpc stubs resolve via promises.
+  // setTimeout would deadlock tests running under mock.timers.
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+}
+
+test('ACP stream watchdog reopens a silently dead stream so a missed done can heal', async () => {
+  const dom = makeAcpDom();
+  const sources = [];
+  const restoreES = stubEventSource(sources);
+  const liveRun = { id: 'run_w', conversation_id: 'conv_2', status: 'running', activity: 'thinking', started_at: new Date().toISOString() };
+  let runs = [liveRun];
+  const restoreFetch = stubRunsList(() => runs);
+  mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+  try {
+    bindSubagents({ getActiveConversationId: () => 'conv_2' });
+    setSubagentConversation('conv_2');
+    assert.equal(sources.length, 1);
+    const src = sources[0];
+    src.open();
+    src.emit('acp.run', { type: 'acp.run.snapshot', seq: 1, conversation_id: 'conv_2', runs: [liveRun] });
+    await flushAsync();
+    assert.equal(document.getElementById('acp-dock-title').textContent, '1 subagent');
+
+    // The connection dies silently: no frame ever reaches the client while
+    // the run settles server-side.
+    mock.timers.tick(20_000);
+    assert.equal(sources.length, 1, 'stream still fresh — no reopen');
+    mock.timers.tick(40_000);
+
+    assert.equal(sources.length, 2, 'watchdog reopened the stalled stream');
+    assert.equal(src.closed, true, 'dead stream is closed before reopening');
+
+    runs = [{ ...liveRun, status: 'completed', activity: '', ended_at: new Date().toISOString(), updated_at: new Date().toISOString() }];
+
+    sources[1].open();
+    sources[1].emit('acp.run', { type: 'acp.run.snapshot', seq: 1, conversation_id: 'conv_2', runs: [] });
+    await flushAsync();
+    assert.equal(document.querySelector('.acp-dock-chip-status').textContent, 'done', 'hydration heals the missed terminal state');
+  } finally {
+    setSubagentConversation('');
+    mock.timers.reset();
+    restoreFetch();
+    restoreES();
+    dom.window.close();
+    cleanup();
+  }
+});
+
+test('ACP run stream reopens itself after a permanently closed EventSource', async () => {
+  const dom = makeAcpDom();
+  const sources = [];
+  const restoreES = stubEventSource(sources);
+  const restoreFetch = stubRunsList(() => []);
+  mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+  try {
+    bindSubagents({ getActiveConversationId: () => 'conv_2' });
+    setSubagentConversation('conv_2');
+    assert.equal(sources.length, 1);
+    const src = sources[0];
+    src.open();
+
+    // A non-2xx response (e.g. 503 at the subscriber cap) fails the
+    // EventSource permanently: readyState CLOSED, no browser retry.
+    src.readyState = 2;
+    src.onerror?.({});
+    assert.equal(sources.length, 1);
+    mock.timers.tick(6000);
+    assert.equal(sources.length, 2, 'closed stream is reopened after a short delay');
+    assert.equal(new URL(sources[1].url, 'http://localhost').searchParams.get('conversation_id'), 'conv_2');
+  } finally {
+    setSubagentConversation('');
+    mock.timers.reset();
+    restoreFetch();
+    restoreES();
+    dom.window.close();
+    cleanup();
+  }
+});
+
+test('ACP snapshot cleanup releases a dropped run so hydration can re-add it', async () => {
+  const dom = makeAcpDom();
+  const sources = [];
+  const restoreES = stubEventSource(sources);
+  const liveRun = { id: 'run_s', conversation_id: 'conv_2', status: 'running', activity: 'thinking', started_at: new Date().toISOString() };
+  let runs = [liveRun];
+  const restoreFetch = stubRunsList(() => runs);
+  try {
+    bindSubagents({ getActiveConversationId: () => 'conv_2' });
+    setSubagentConversation('conv_2');
+    const src = sources[0];
+    src.open();
+    src.emit('acp.run', { type: 'acp.run.snapshot', seq: 1, conversation_id: 'conv_2', runs: [liveRun] });
+    await flushAsync();
+    assert.equal(document.getElementById('acp-dock-title').textContent, '1 subagent');
+
+    // A later snapshot drops the run; hydration must still be able to bring
+    // it back (e.g. a terminal record that the stream missed).
+    runs = [{ ...liveRun, status: 'completed', activity: '', ended_at: new Date().toISOString(), updated_at: new Date().toISOString() }];
+    src.emit('acp.run', { type: 'acp.run.snapshot', seq: 2, conversation_id: 'conv_2', runs: [] });
+    await flushAsync();
+    assert.equal(document.getElementById('acp-dock-title').textContent, '1 subagent', 'hydration re-adds the run dropped from the snapshot');
+    assert.equal(document.querySelector('.acp-dock-chip-status').textContent, 'done');
+  } finally {
+    setSubagentConversation('');
+    restoreFetch();
+    restoreES();
     dom.window.close();
     cleanup();
   }

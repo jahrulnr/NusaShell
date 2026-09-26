@@ -166,7 +166,12 @@ EventSource reconnect first receives the latest run snapshot, then ordered
 updates; the snapshot resets the client's cursor, so reconnect is state
 resynchronization rather than event-history replay. The registry admits at most 32 subscribers with four queued frames each; an
 over-cap request returns 503, and a full queue closes that SSE connection so
-EventSource reconnects for a fresh snapshot. Terminal snapshots expire after
+EventSource reconnects for a fresh snapshot. The client owns liveness of that
+connection: comment pings do not surface as EventSource events, so the
+frontend tracks the last frame time — a permanently closed stream (non-2xx,
+readyState CLOSED) is reopened after a short delay, and a stream silent
+beyond ~45s while a run is live is closed and resubscribed for a fresh
+snapshot plus `acp.runs.list` hydration. Terminal snapshots expire after
 90 seconds, and the process-local latest-run cache is capped at 64 entries;
 under pressure, the least-recently-updated snapshot may be evicted. The
 frontend follows the initial snapshot with `acp.runs.list` hydration so the

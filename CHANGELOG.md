@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-09-27
+
+### Fixed
+
+- **Subagent runs no longer freeze in the UI when their stream dies
+  silently.** The conversation ACP stream now reopens when its EventSource
+  closes permanently (e.g. 503 at the subscriber cap, which browsers never
+  retry) or goes silent beyond ~45s while a run is live, and a resubscribe
+  resyncs from a fresh snapshot plus `acp.runs.list`. A missed
+  `acp.run.done` now resolves to the real terminal state instead of leaving
+  a stuck "running" chip. Snapshot cleanup also releases a dropped run's
+  streamed flag so hydration can re-add it.
+
 ## [0.9.7] - 2026-09-26
 
 ### Changed
