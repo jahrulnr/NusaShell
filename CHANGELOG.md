@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **ACP run events no longer get dropped when the wall clock cannot
+  distinguish them.** `RunStreamRegistry` deduplicates a source version only
+  when the payload is identical; same-stamp events with different payloads
+  are accepted in arrival order. On Windows, where `time.Now()` granularity
+  collapses rapid `UpdatedAt` stamps onto one value, live transcript updates
+  and bounded-queue subscriber eviction now behave the same as on
+  Linux/macOS.
 - **Subagent runs no longer freeze in the UI when their stream dies
   silently.** The conversation ACP stream now reopens when its EventSource
   closes permanently (e.g. 503 at the subscriber cap, which browsers never

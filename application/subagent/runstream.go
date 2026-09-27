@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -72,11 +73,26 @@ func (r *RunStreamRegistry) publish(event string, run contracts.AcpRunDTO, sourc
 	defer r.mu.Unlock()
 	r.pruneLocked(now)
 	stream := r.conversationLocked(run.ConversationID)
-	if previous, ok := stream.runs[run.ID]; ok &&
-		(previous.frame.Type == contracts.EventAcpRunDone && event != contracts.EventAcpRunDone ||
-			sourceUpdated.Before(previous.sourceUpdated) ||
-			sourceUpdated.Equal(previous.sourceUpdated) && runStreamEventPriority(event) <= runStreamEventPriority(previous.frame.Type)) {
-		return
+	if previous, ok := stream.runs[run.ID]; ok {
+		switch {
+		case previous.frame.Type == contracts.EventAcpRunDone && event != contracts.EventAcpRunDone,
+			sourceUpdated.Before(previous.sourceUpdated):
+			return
+		case sourceUpdated.Equal(previous.sourceUpdated) &&
+			runStreamEventPriority(event) <= runStreamEventPriority(previous.frame.Type):
+			// Same source stamp, strictly lower priority: stale ordering.
+			if runStreamEventPriority(event) < runStreamEventPriority(previous.frame.Type) {
+				return
+			}
+			// Same stamp, same priority, identical payload: a retransmission.
+			if previous.frame.Run != nil && reflect.DeepEqual(*previous.frame.Run, runCopy) {
+				return
+			}
+			// Same stamp but a different payload means the producer's clock
+			// collapsed two distinct versions onto one value (coarse timer
+			// granularity, e.g. Windows). Arrival order is authoritative —
+			// accept it; the assigned seq still orders it after the previous.
+		}
 	}
 	stream.seq++
 	frame := contracts.AcpRunStreamFrame{Type: event, Seq: stream.seq, Run: &runCopy}

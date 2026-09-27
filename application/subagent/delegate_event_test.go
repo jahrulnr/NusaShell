@@ -303,6 +303,52 @@ func TestRunStreamDeduplicatesSameSourceVersion(t *testing.T) {
 	}
 }
 
+// Distinct payloads must survive even when the producer's wall clock cannot
+// tell two mutations apart (Windows timer granularity collapses rapid
+// UpdatedAt stamps onto one value). Dedup must only drop identical frames.
+func TestRunStreamPublishesDistinctPayloadsSharingASourceStamp(t *testing.T) {
+	streams := NewRunStreamRegistry()
+	sub := streams.Subscribe("conv_1")
+	defer sub.Close()
+	at := time.Now()
+	run := contracts.AcpRunDTO{ID: "run_1", ConversationID: "conv_1", Status: "running"}
+	for _, activity := range []string{"a", "b", "c"} {
+		run.Activity = activity
+		streams.publish(contracts.EventAcpRunUpdated, run, at)
+	}
+
+	for _, want := range []string{"a", "b", "c"} {
+		select {
+		case frame := <-sub.Frames():
+			if frame.Type != contracts.EventAcpRunUpdated || frame.Run == nil || frame.Run.Activity != want {
+				t.Fatalf("frame = %+v, want updated activity %q", frame, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("updated frame for activity %q was dropped", want)
+		}
+	}
+	snapshot := streams.Subscribe("conv_1").Snapshot()
+	if snapshot.Seq != 3 || len(snapshot.Runs) != 1 || snapshot.Runs[0].Activity != "c" {
+		t.Fatalf("snapshot = %+v, want seq 3 with the latest payload", snapshot)
+	}
+}
+
+// Same stamp + lower priority is still stale ordering, not a collapsed clock.
+func TestRunStreamStillDropsLowerPriorityAtSameSourceStamp(t *testing.T) {
+	streams := NewRunStreamRegistry()
+	at := time.Now()
+	updated := contracts.AcpRunDTO{ID: "run_1", ConversationID: "conv_1", Status: "running", Activity: "tool"}
+	streams.publish(contracts.EventAcpRunUpdated, updated, at)
+	started := updated
+	started.Activity = "starting"
+	streams.publish(contracts.EventAcpRunStarted, started, at)
+
+	snapshot := streams.Subscribe("conv_1").Snapshot()
+	if snapshot.Seq != 1 || snapshot.Runs[0].Activity != "tool" {
+		t.Fatalf("lower-priority same-stamp event regressed the run: %+v", snapshot)
+	}
+}
+
 func TestRunStreamRetainsAndExpiresTerminalSnapshots(t *testing.T) {
 	streams := NewRunStreamRegistry()
 	streams.Publish(contracts.EventAcpRunDone, contracts.AcpRunDTO{ID: "run_1", ConversationID: "conv_1", Status: "completed"})
