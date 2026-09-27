@@ -1,8 +1,11 @@
 package domain
 
 import (
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -319,12 +322,81 @@ func TestCompactDropsPrefixInsteadOfPullingAllUsers(t *testing.T) {
 	}
 }
 
+// retainedSuffixFixture returns an old prefix message that falls outside the
+// keep budget followed by a retained suffix carrying every field a completed
+// assistant round persists: tool calls with outputs, reasoning,
+// ReasoningExtra, steps, usage, and provider identity.
+func retainedSuffixFixture() []Message {
+	created := time.Date(2026, 9, 27, 22, 5, 0, 0, time.UTC)
+	calls := []ToolCall{{ID: "c-read", Name: "file_read", Args: `{"path":"/w/a.go"}`, Output: "package a", Status: ToolOK}}
+	return []Message{
+		{ID: "u-old", Role: RoleUser, Content: strings.Repeat("old-user-", 400), Status: StatusDone},
+		{ID: "u-new", Role: RoleUser, Content: "latest question", CreatedAt: created, Status: StatusDone, Steer: true},
+		{ID: "a-tools", Role: RoleAssistant, Content: "read it", Reasoning: "need the file",
+			ReasoningExtra: json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC"}`),
+			Steps: []MessageStep{
+				{Type: StepReasoning, Content: "need the file"},
+				{Type: StepToolCalls, ToolCalls: calls},
+				{Type: StepText, Content: "read it"},
+			},
+			ToolCalls:  calls,
+			Model:      "m1",
+			ProviderID: "prov_1",
+			Usage:      &Usage{InputTokens: 10, OutputTokens: 5},
+			CreatedAt:  created,
+			Status:     StatusDone,
+		},
+	}
+}
+
+// TestCompactRetainsSuffixMessagesVerbatim: the summarizer only sees the
+// prefix before CompactionSplitIndex and ArchiveMessages archives only that
+// prefix, so the retained suffix is the sole copy of its tool calls, tool
+// outputs, reasoning, and steps. Compact must keep it unchanged.
+func TestCompactRetainsSuffixMessagesVerbatim(t *testing.T) {
+	msgs := retainedSuffixFixture()
+	c := &Conversation{Messages: append([]Message(nil), msgs...)}
+
+	archived := c.ArchiveMessages(500)
+	c.Compact("summary", testHandover("summary"), 500)
+
+	if got, want := messageIDs(archived), []string{"u-old"}; !sameMessageIDs(got, want) {
+		t.Fatalf("archived ids = %v, want %v", got, want)
+	}
+	if !IsCompactionSummary(c.Messages[0].Content) {
+		t.Fatalf("first message = %q, want compaction handover", c.Messages[0].Content)
+	}
+	if !reflect.DeepEqual(c.Messages[1:], msgs[1:]) {
+		t.Fatalf("retained suffix changed by Compact:\n got  %+v\n want %+v", c.Messages[1:], msgs[1:])
+	}
+}
+
+// TestCompactWithBlobRetainsSuffixMessagesVerbatim: the Codex epoch archives
+// only the pre-boundary prefix too, so its retained suffix must stay
+// verbatim; the Codex adapter filters the wire prefix, not the transcript.
+func TestCompactWithBlobRetainsSuffixMessagesVerbatim(t *testing.T) {
+	msgs := retainedSuffixFixture()
+	c := &Conversation{Messages: append([]Message(nil), msgs...)}
+
+	archived := c.ArchiveBlobMessages(500)
+	c.CompactWithBlob(`[{"type":"compaction","encrypted_content":"NEW"}]`, 500)
+
+	if got, want := messageIDs(archived), []string{"u-old"}; !sameMessageIDs(got, want) {
+		t.Fatalf("archived ids = %v, want %v", got, want)
+	}
+	if !reflect.DeepEqual(c.Messages, msgs[1:]) {
+		t.Fatalf("retained suffix changed by CompactWithBlob:\n got  %+v\n want %+v", c.Messages, msgs[1:])
+	}
+	if c.CompactionPrefixMessages != len(msgs)-1 {
+		t.Fatalf("CompactionPrefixMessages = %d, want %d", c.CompactionPrefixMessages, len(msgs)-1)
+	}
+}
+
 func TestCompactPreservesInFlightToolMessageVerbatim(t *testing.T) {
 	// An assistant message whose tool round has not reached a terminal status
 	// (persisted before execution — status is empty) must survive compaction
 	// with its ToolCalls and Steps intact, so the pending outputs can be
-	// patched into the live tail afterwards. Completed rounds still get
-	// stripped (their outputs are already summarized/archived).
+	// patched into the live tail afterwards.
 	msgs := []Message{
 		{ID: "u-old", Role: RoleUser, Content: strings.Repeat("old-user-", 200)},
 		{ID: "a-done", Role: RoleAssistant, Content: "done turn",
@@ -354,26 +426,25 @@ func TestCompactPreservesInFlightToolMessageVerbatim(t *testing.T) {
 		t.Fatalf("in-flight Steps not preserved verbatim: %+v", kept.Steps)
 	}
 
-	// A completed round in the retained suffix is still stripped: its output
-	// is already captured and must not burn the keep budget twice.
+	// A completed round in the retained suffix is kept verbatim as well: it
+	// is neither summarized nor archived.
 	for i := range c.Messages {
 		if c.Messages[i].ID != "a-done" {
 			continue
 		}
-		if len(c.Messages[i].ToolCalls) != 0 {
-			t.Fatalf("completed round not stripped: %+v", c.Messages[i].ToolCalls)
+		if len(c.Messages[i].ToolCalls) != 1 || c.Messages[i].ToolCalls[0].Output != "old output" {
+			t.Fatalf("completed round lost its tool calls: %+v", c.Messages[i].ToolCalls)
 		}
 		return
 	}
-	t.Fatal("completed round disappeared entirely (expected retained but stripped)")
+	t.Fatal("completed round disappeared from the retained suffix")
 }
 
 // TestCompactPreservesBackgroundAgentMessagesVerbatim covers the async agent
 // handoff: spawn calls (subagent, delegate) and their synthetic results
 // (subagent_result, delegate_result) carry cross-turn continuity — the model
 // must keep knowing which background agents were spawned and returned — so
-// they survive compaction verbatim even with a completed (terminal) status,
-// which StripForRetention would otherwise drop from the context.
+// they survive compaction verbatim even with a completed (terminal) status.
 func TestCompactPreservesBackgroundAgentMessagesVerbatim(t *testing.T) {
 	msgs := []Message{
 		{ID: "u-old", Role: RoleUser, Content: strings.Repeat("old-user-", 200)},
@@ -400,8 +471,8 @@ func TestCompactPreservesBackgroundAgentMessagesVerbatim(t *testing.T) {
 		case "a-result":
 			result = &c.Messages[i]
 		case "a-plain":
-			if len(c.Messages[i].ToolCalls) != 0 {
-				t.Fatalf("plain completed round not stripped: %+v", c.Messages[i].ToolCalls)
+			if len(c.Messages[i].ToolCalls) != 1 || c.Messages[i].ToolCalls[0].Output != "old output" {
+				t.Fatalf("plain completed round lost its tool calls: %+v", c.Messages[i].ToolCalls)
 			}
 		}
 	}

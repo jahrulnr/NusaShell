@@ -11,9 +11,10 @@ import (
 )
 
 type lifecycleConvStore struct {
-	mu   sync.Mutex
-	byID map[string]*domain.Conversation
-	err  error
+	mu       sync.Mutex
+	byID     map[string]*domain.Conversation
+	err      error
+	archived [][]domain.Message
 }
 
 func (s *lifecycleConvStore) List() []*domain.Conversation { return nil }
@@ -41,8 +42,11 @@ func (s *lifecycleConvStore) Save(c *domain.Conversation) error {
 	return nil
 }
 func (s *lifecycleConvStore) Delete(string) error { return nil }
-func (s *lifecycleConvStore) ArchiveChunk(string, []domain.Message) (int, error) {
-	return 0, nil
+func (s *lifecycleConvStore) ArchiveChunk(_ string, msgs []domain.Message) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.archived = append(s.archived, msgs)
+	return len(s.archived) - 1, nil
 }
 func (s *lifecycleConvStore) GetChunk(string, int) ([]domain.Message, error) {
 	return nil, nil

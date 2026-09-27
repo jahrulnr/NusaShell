@@ -123,7 +123,7 @@ func (p *conversationRules) Rules() AgentRules {
 					p.compactionAttempts++
 					p.svc.log("info", "agent", "mid-turn compaction for %s round %d: est=%d trigger=%d window=%d",
 						p.run.ID, p.round, est, trigger, cw)
-					_, compErr := p.svc.runCompaction(p.run.Ctx, p.run, p.conv, p.adapter, p.model, cw, p.settings, p.caps, domain.CompactionTriggerProactive)
+					_, compErr := p.svc.runCompaction(p.run.Ctx, p.run, p.conv, p.adapter, p.model, cw, p.settings, p.caps, domain.CompactionTriggerProactive, p.compactionTurn())
 					if compErr == nil {
 						refreshed, getErr := p.svc.Conversations.Get(p.run.ConversationID)
 						if getErr != nil {
@@ -225,7 +225,7 @@ func (p *conversationRules) Rules() AgentRules {
 				}
 				p.compactionAttempts++
 				p.svc.log("warn", "agent", "request too large for turn %s (est=%d trigger=%d), forcing emergency compaction", p.run.ID, preEmg, trigger)
-				_, compErr := p.svc.runCompaction(p.run.Ctx, p.run, p.conv, p.adapter, p.model, cw, p.settings, p.caps, domain.CompactionTriggerEmergency)
+				_, compErr := p.svc.runCompaction(p.run.Ctx, p.run, p.conv, p.adapter, p.model, cw, p.settings, p.caps, domain.CompactionTriggerEmergency, p.compactionTurn())
 				if compErr == nil {
 					refreshed, getErr := p.svc.Conversations.Get(p.run.ConversationID)
 					if getErr != nil {
@@ -343,6 +343,13 @@ func (p *conversationRules) toolsForRound() []ToolDef {
 	return p.toolDefs
 }
 
+// compactionTurn is the request contract the next round would send, so the
+// reuse compaction request shares its prefix.
+func (p *conversationRules) compactionTurn() *compactionTurn {
+	roundTools := p.toolsForRound()
+	return &compactionTurn{run: p.run, tools: roundTools, effort: p.effort, promptCache: p.promptCacheForTools(roundTools)}
+}
+
 // promptCacheForTools derives the request cache/session policy from the
 // current turn's system prompt and the exact top-level tools for one round.
 // It does not reload settings or the toolbox: a running turn keeps its
@@ -394,9 +401,9 @@ func (p *conversationRules) totalUsageTokens() ChatUsage { return p.totalUsage }
 // estimated context (including the requested calls but before any tool
 // output) is already past the trigger. Compacting here — instead of waiting
 // for the next BeforeRound — means the summarizer never sees the tool-result
-// explosion, and the in-flight assistant message is preserved verbatim (see
-// domain.IsInFlightToolMessage) so the round's outputs are patched into the
-// live tail afterwards. A failure aborts the current run: executing tools
+// explosion, and the in-flight assistant message is retained verbatim with
+// the keep suffix so the round's outputs are patched into the live tail
+// afterwards. A failure aborts the current run: executing tools
 // against a transcript whose compaction was not applied would make a later
 // successful retry reorder or duplicate the active history.
 func (p *conversationRules) Conv() *domain.Conversation { return p.conv }
@@ -420,7 +427,7 @@ func (p *conversationRules) tryMidToolCompaction() (bool, error) {
 	p.compactionAttempts++
 	p.svc.log("info", "agent", "mid-tool compaction for %s round %d: est=%d trigger=%d window=%d",
 		p.run.ID, p.round, est, trigger, cw)
-	_, compErr := p.svc.runCompaction(p.run.Ctx, p.run, p.conv, p.adapter, p.model, cw, p.settings, p.caps, domain.CompactionTriggerMidTool)
+	_, compErr := p.svc.runCompaction(p.run.Ctx, p.run, p.conv, p.adapter, p.model, cw, p.settings, p.caps, domain.CompactionTriggerMidTool, p.compactionTurn())
 	if compErr != nil {
 		p.svc.log("warn", "agent", "mid-tool compaction failed for %s round %d: %v", p.run.ID, p.round, compErr)
 		return false, compErr

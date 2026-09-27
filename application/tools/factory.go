@@ -47,7 +47,7 @@ const CompactionSummaryToolName = "summary"
 // CompactionSummaryTool is the tool definition for summary().
 var CompactionSummaryTool = ToolInfo{
 	Name:        CompactionSummaryToolName,
-	Description: "Submit the conversation handoff summary. Call this exactly once with the complete checkpoint text.",
+	Description: "Submit the context checkpoint. Use only when the system requests a context checkpoint, then call it exactly once with the complete checkpoint text; calls at any other time are rejected.",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{

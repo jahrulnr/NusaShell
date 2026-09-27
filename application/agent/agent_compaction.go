@@ -8,7 +8,6 @@ import (
 
 	"nusashell/application/provider"
 	"nusashell/application/service/tooloutput"
-	"nusashell/application/tools"
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/pkg/text"
@@ -49,21 +48,46 @@ func (a *Service) ResolveCompactionAdapter(ctx context.Context, defaultAdapter P
 	return pc, bareModel, window
 }
 
+// compactionTurn is the request contract of the turn being compacted. The
+// reuse workflow shapes its request from it so the tools, system prompt,
+// cache policy, and rendered history are the live turn request's prefix.
+type compactionTurn struct {
+	run         *TurnRun
+	tools       []ToolDef
+	effort      string
+	promptCache *PromptCachePolicy
+}
+
+// conversationCompactionTurn reconstructs the turn contract for callers that
+// compact outside a running turn.
+func (a *Service) conversationCompactionTurn(c *domain.Conversation, settings domain.Settings, adapter ProviderContext, model string, promptCache *PromptCachePolicy) *compactionTurn {
+	run := &TurnRun{ConversationID: c.ID, Workspace: a.effectiveWorkspace(c.Workspace)}
+	switch c.EffectiveType() {
+	case domain.ConversationTypeAutomation:
+		run.Headless, run.ToolKind = true, AgentAutomation
+	case domain.ConversationTypeBackground:
+		run.Headless, run.ToolKind = true, AgentLearner
+	}
+	toolDefs := a.TurnToolDefs(run, settings)
+	if promptCache == nil {
+		system := buildSystemPromptForRun(run, c, settings.UserPrompt)
+		promptCache = buildPromptCachePolicyForContextWithContract(settings, adapter, model, c.ID, promptCachePrefixForRun(run), system, toolDefs)
+	}
+	return &compactionTurn{run: run, tools: toolDefs, effort: c.Effort, promptCache: promptCache}
+}
+
 func (a *Service) compactionPromptCache(settings domain.Settings, adapter ProviderContext, c *domain.Conversation, model string) *PromptCachePolicy {
 	if c == nil {
 		return nil
+	}
+	if settings.CompactionWorkflow == domain.CompactionWorkflowReuse {
+		return a.conversationCompactionTurn(c, settings, adapter, model, nil).promptCache
 	}
 	prefix := promptCacheConversationPrefix
 	if c.EffectiveType() != domain.ConversationTypeConversation {
 		prefix = promptCacheBackgroundPrefix
 	}
-	workflow := settings.CompactionWorkflow
-	system := compactionPrompt
-	if workflow == domain.CompactionWorkflowReuse {
-		system = compactionReuseSystemPrompt(c, settings.UserPrompt)
-	}
-	tools := compactionToolDefs(a, workflow, c)
-	return buildPromptCachePolicyForContextWithContract(settings, adapter, model, c.ID, prefix, system, tools)
+	return buildPromptCachePolicyForContextWithContract(settings, adapter, model, c.ID, prefix, compactionPrompt, dedicatedCompactionToolDefs(a))
 }
 
 func (a *Service) compactionModelCapabilities(adapter ProviderContext, model string) ModelCapabilities {
@@ -174,43 +198,23 @@ func compactionSummaryEchoesAssistant(summary string, msgs []ChatMessage) bool {
 	return false
 }
 
-func compactionToolDefs(a *Service, workflow domain.CompactionWorkflow, c *domain.Conversation) []ToolDef {
-	if workflow != domain.CompactionWorkflowReuse {
-		return toToolDefs(a.toolFactory().Get(AgentCompaction, ""))
-	}
-	kind := AgentConversation
-	if c != nil {
-		switch c.EffectiveType() {
-		case domain.ConversationTypeAutomation:
-			kind = AgentAutomation
-		case domain.ConversationTypeBackground:
-			kind = AgentLearner
-		}
-	}
-	workspace := ""
-	if c != nil {
-		workspace = a.effectiveWorkspace(c.Workspace)
-	}
-	defs := toToolDefs(a.toolFactory().Get(kind, workspace))
-	for _, def := range defs {
-		if def.Name == compactionSummaryToolName {
-			return defs
-		}
-	}
-	return append(defs, toToolDef(tools.CompactionSummaryTool))
+func dedicatedCompactionToolDefs(a *Service) []ToolDef {
+	return toToolDefs(a.toolFactory().Get(AgentCompaction, ""))
 }
 
-func compactionReuseSystemPrompt(c *domain.Conversation, userPrompt string) string {
-	var run *TurnRun
-	if c != nil {
-		switch c.EffectiveType() {
-		case domain.ConversationTypeAutomation:
-			run = &TurnRun{Headless: true, ToolKind: AgentAutomation}
-		case domain.ConversationTypeBackground:
-			run = &TurnRun{Headless: true, ToolKind: AgentLearner}
-		}
-	}
-	return buildSystemPromptForRun(run, c, userPrompt)
+// reuseCompactionRequest is the live turn request for the archived prefix
+// plus the handoff user message. The prefix is rendered by the same path as
+// the live request (hydration included, nothing re-shaped), so the provider
+// can serve it from the prompt cache. ok is false when the prefix and the
+// summary budget do not fit the context window.
+func (a *Service) reuseCompactionRequest(adapter ProviderContext, c *domain.Conversation, splitIdx int, model string, contextWindow, summaryBudget int, settings domain.Settings, caps ModelCapabilities, turn *compactionTurn) (ChatRequest, int, bool) {
+	prefix := cloneConversation(c)
+	prefix.Messages = append([]domain.Message(nil), c.Messages[:splitIdx]...)
+	req := a.buildTurnRequest(turn.run, adapter, prefix, "", model, turn.effort, turn.tools, settings, false, nil, 0, turn.promptCache, caps)
+	messages := withCompactionAnchorNudge(a.chatMessagesForProvider(prefix, "", caps), prefix, adapter.Kind)
+	req.Messages = appendCompactionHandoffUser(messages)
+	room := contextWindow - int(provider.EstimateRequestTokens(req, adapter.Kind, adapter.OpenRouter))
+	return req, room, room >= summaryBudget
 }
 
 // rolling compaction so that conversations larger than the model's context
@@ -231,7 +235,7 @@ func compactionReuseSystemPrompt(c *domain.Conversation, userPrompt string) stri
 // same as the interactive request.
 func (a *Service) CompactConversation(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, contextWindow int, settings domain.Settings, trigger domain.CompactionTrigger) (string, error) {
 	cache := a.compactionPromptCache(settings, adapter, c, model)
-	return a.compactConversationWithCache(ctx, adapter, c, model, contextWindow, settings, trigger, cache, a.compactionModelCapabilities(adapter, model))
+	return a.compactConversationWithCache(ctx, adapter, c, model, contextWindow, settings, trigger, cache, a.compactionModelCapabilities(adapter, model), nil)
 }
 
 // CompactConversationWithCache keeps the original public call seam while
@@ -239,10 +243,10 @@ func (a *Service) CompactConversation(ctx context.Context, adapter ProviderConte
 // Turn paths use compactConversationWithCache below so their active-turn
 // capabilities are reused exactly.
 func (a *Service) CompactConversationWithCache(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, contextWindow int, settings domain.Settings, trigger domain.CompactionTrigger, promptCache *PromptCachePolicy) (string, error) {
-	return a.compactConversationWithCache(ctx, adapter, c, model, contextWindow, settings, trigger, promptCache, a.compactionModelCapabilities(adapter, model))
+	return a.compactConversationWithCache(ctx, adapter, c, model, contextWindow, settings, trigger, promptCache, a.compactionModelCapabilities(adapter, model), nil)
 }
 
-func (a *Service) compactConversationWithCache(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, contextWindow int, settings domain.Settings, trigger domain.CompactionTrigger, promptCache *PromptCachePolicy, caps ModelCapabilities) (string, error) {
+func (a *Service) compactConversationWithCache(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, contextWindow int, settings domain.Settings, trigger domain.CompactionTrigger, promptCache *PromptCachePolicy, caps ModelCapabilities, turn *compactionTurn) (string, error) {
 	if len(c.Messages) <= 1 {
 		return "", nil
 	}
@@ -290,18 +294,22 @@ func (a *Service) compactConversationWithCache(ctx context.Context, adapter Prov
 		return "", nil
 	}
 
-	if promptCache == nil {
+	reuse := settings.CompactionWorkflow == domain.CompactionWorkflowReuse
+	if reuse {
+		if turn == nil {
+			turn = a.conversationCompactionTurn(c, settings, adapter, model, promptCache)
+		}
+		promptCache = turn.promptCache
+	} else if promptCache == nil {
 		promptCache = a.compactionPromptCache(settings, adapter, c, model)
 	}
 
-	workflow := settings.CompactionWorkflow
 	systemPrompt := compactionPrompt
-	if workflow == domain.CompactionWorkflowReuse {
-		systemPrompt = compactionReuseSystemPrompt(c, settings.UserPrompt)
-	}
-	compactionTools := compactionToolDefs(a, workflow, c)
+	compactionTools := dedicatedCompactionToolDefs(a)
 	requestReserve := compactionSystemReserve
-	if workflow == domain.CompactionWorkflowReuse {
+	if reuse {
+		systemPrompt = buildSystemPromptForRun(turn.run, c, settings.UserPrompt)
+		compactionTools = turn.tools
 		// The normal system prompt and toolbox are part of the reusable prefix;
 		// account for their provider-shaped token estimate before allocating
 		// room for the transcript chunk and summary output.
@@ -315,7 +323,10 @@ func (a *Service) compactConversationWithCache(ctx context.Context, adapter Prov
 	}
 	providerRoute := ""
 	compactionEffort := ""
-	if workflow == domain.CompactionWorkflowReuse || strings.TrimSpace(settings.CompactionModel) == "" {
+	if reuse {
+		providerRoute = c.ProviderRoute
+		compactionEffort = requestEffort(turn.effort, caps)
+	} else if strings.TrimSpace(settings.CompactionModel) == "" {
 		providerRoute = c.ProviderRoute
 		compactionEffort = requestEffort(c.Effort, caps)
 	}
@@ -333,6 +344,42 @@ func (a *Service) compactConversationWithCache(ctx context.Context, adapter Prov
 	maxBudget := contextWindow - requestReserve
 	if maxBudget < 1000 {
 		maxBudget = 1000
+	}
+	// One pass = one AgentEngine run: the summary() tool is advertised
+	// (never forced via tool_choice), retries double the token budget until
+	// the summary is long enough or the budget is exhausted. On failure,
+	// return an error so the caller emits EventCompactionFailed and the user
+	// cannot continue until compaction succeeds (retry re-enters compaction).
+	runPass := func(request ChatRequest, budget, maxBudget int) (string, error) {
+		if budget > maxBudget {
+			budget = maxBudget
+		}
+		pass := &compactionPass{
+			svc: a, adapter: adapter, request: request,
+			budget: budget, maxBudget: maxBudget, minChars: summaryMinChars, convID: c.ID,
+		}
+		if !pass.run(ctx) {
+			return "", fmt.Errorf("compaction failed: summary too short after %d retries (last=%d chars, min=%d): %w",
+				compactionSummaryMaxRetries, pass.lastLen, summaryMinChars, pass.lastErr)
+		}
+		return pass.summary, nil
+	}
+
+	if reuse {
+		passBudget := min(summaryMaxOut, maxBudget)
+		request, room, fits := a.reuseCompactionRequest(adapter, c, splitIdx, model, contextWindow, passBudget, settings, caps, turn)
+		if fits {
+			summary, err := runPass(request, passBudget, room)
+			if err != nil {
+				return "", err
+			}
+			if err := a.PersistCompactedConversation(c, summary, effectiveKeepBudget); err != nil {
+				return "", err
+			}
+			return summary, nil
+		}
+		a.log("info", "agent", "reuse compaction prefix for %s leaves %d tokens, below the %d-token summary budget; summarizing in chunks without prompt-cache reuse",
+			c.ID, room, passBudget)
 	}
 
 	for len(remainingMsgs) > 0 {
@@ -392,37 +439,22 @@ func (a *Service) compactConversationWithCache(ctx context.Context, adapter Prov
 				}
 			}
 		}
-		msgs = appendCompactionHandoffUser(msgs)
-		// Quality guard: retry up to compactionSummaryMaxRetries times when
-		// the summary is too short. Each retry doubles the max_output_tokens
-		// budget so a reasoning model has more room for content after
-		// reasoning. The budget is clamped to the context window so it never
-		// exceeds what the model can accept. If all retries fail, return an
-		// error so the caller emits EventCompactionFailed and the user cannot
-		// continue until compaction succeeds (retry re-enters compaction).
-		passBudget := summaryMaxOut
-		if passBudget > maxBudget {
-			passBudget = maxBudget
+		summary, err := runPass(ChatRequest{
+			Model:            model,
+			System:           systemPrompt,
+			Messages:         appendCompactionHandoffUser(msgs),
+			Tools:            compactionTools,
+			PromptCaching:    settings.PromptCaching,
+			PromptCache:      promptCache,
+			ConversationID:   c.ID,
+			ProviderRoute:    providerRoute,
+			Effort:           compactionEffort,
+			ReasoningSummary: adapter.ReasoningSummary,
+		}, summaryMaxOut, maxBudget)
+		if err != nil {
+			return "", err
 		}
-		// One pass = one AgentEngine run: the summary() tool is advertised
-		// (never forced via tool_choice), retries double the token budget
-		// until the summary is long enough or the budget is exhausted. On
-		// failure, return an error so the caller emits EventCompactionFailed
-		// and the user cannot continue until compaction succeeds (retry
-		// re-enters compaction).
-		pass := &compactionPass{
-			svc: a, adapter: adapter, model: model,
-			system: systemPrompt, msgs: msgs, tools: compactionTools,
-			promptCaching: settings.PromptCaching, promptCache: promptCache,
-			conversationID: c.ID, providerRoute: providerRoute, effort: compactionEffort,
-			budget: passBudget, maxBudget: maxBudget, minChars: summaryMinChars,
-			convID: c.ID,
-		}
-		if !pass.run(ctx) {
-			return "", fmt.Errorf("compaction failed: summary too short after %d retries (last=%d chars, min=%d): %w",
-				compactionSummaryMaxRetries, pass.lastLen, summaryMinChars, pass.lastErr)
-		}
-		runningSummary = pass.summary
+		runningSummary = summary
 	}
 
 	if err := a.PersistCompactedConversation(c, runningSummary, effectiveKeepBudget); err != nil {
@@ -436,11 +468,14 @@ func (a *Service) compactConversationWithCache(ctx context.Context, adapter Prov
 // the compacted/failed turn event. Callers own the trigger condition, the
 // attempt budget, and the failure policy — the event contract and adapter
 // resolution live here so the four turn paths cannot drift.
-func (a *Service) runCompaction(ctx context.Context, run *TurnRun, conv *domain.Conversation, adapter ProviderContext, model string, contextWindow int, settings domain.Settings, caps ModelCapabilities, trigger domain.CompactionTrigger) (string, error) {
+func (a *Service) runCompaction(ctx context.Context, run *TurnRun, conv *domain.Conversation, adapter ProviderContext, model string, contextWindow int, settings domain.Settings, caps ModelCapabilities, trigger domain.CompactionTrigger, turn *compactionTurn) (string, error) {
 	compAdapter, compModel, compWindow := a.ResolveCompactionAdapter(ctx, adapter, model, contextWindow, settings)
 	a.EmitCompactionStarted(run, conv.ID)
-	compactionCache := a.compactionPromptCache(settings, compAdapter, conv, compModel)
-	summary, compErr := a.compactConversationWithCache(ctx, compAdapter, conv, compModel, compWindow, settings, trigger, compactionCache, caps)
+	var compactionCache *PromptCachePolicy
+	if settings.CompactionWorkflow != domain.CompactionWorkflowReuse || turn == nil {
+		compactionCache = a.compactionPromptCache(settings, compAdapter, conv, compModel)
+	}
+	summary, compErr := a.compactConversationWithCache(ctx, compAdapter, conv, compModel, compWindow, settings, trigger, compactionCache, caps, turn)
 	if compErr != nil {
 		a.EmitInteractiveTurnEvent(run, contracts.EventCompactionFailed, contracts.CompactionFailedEvent{RunID: run.ID, ConversationID: conv.ID, Error: compErr.Error()})
 		return "", compErr

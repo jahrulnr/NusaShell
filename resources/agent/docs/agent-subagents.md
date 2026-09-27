@@ -173,8 +173,9 @@ slot lists every active subagent run (ID + spawning tool + worker
 detail), so after a compaction the continuation agent still knows which
 background agents were spawned and are pending — and can correlate each
 `subagent_result` by run ID. Spawn calls and synthetic
-result calls are also preserved verbatim through compaction (never stripped)
-so the handoff never loses the background-agent picture.
+result calls in the recent messages kept after compaction retain their full
+arguments and outputs, like every other kept tool round; older ones are
+covered by the compaction summary.
 
 While any subagent is running, the parent agent's auto-continue chain
 pauses with reason `awaiting-background-jobs` instead of ending the

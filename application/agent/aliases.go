@@ -129,7 +129,11 @@ func (a *Service) applyModelOverrides(p *domain.Provider, m *domain.Model) {
 	}
 }
 
-func (a *Service) TurnToolDefs(run *TurnRun) []ToolDef {
+// TurnToolDefs is the tool contract of a turn request. The reuse compaction
+// workflow sends this exact list, so summary() is part of every turn instead
+// of being appended only to the compaction request: a different tool list is
+// a different prompt-cache prefix.
+func (a *Service) TurnToolDefs(run *TurnRun, settings domain.Settings) []ToolDef {
 	if a == nil || a.Toolbox == nil {
 		return nil
 	}
@@ -140,7 +144,16 @@ func (a *Service) TurnToolDefs(run *TurnRun) []ToolDef {
 	if run.ToolKind != "" {
 		kind = run.ToolKind
 	}
-	return toToolDefs(a.toolFactory().Get(kind, run.Workspace))
+	defs := toToolDefs(a.toolFactory().Get(kind, run.Workspace))
+	if settings.CompactionWorkflow != domain.CompactionWorkflowReuse {
+		return defs
+	}
+	for _, def := range defs {
+		if def.Name == compactionSummaryToolName {
+			return defs
+		}
+	}
+	return append(defs, toToolDef(tools.CompactionSummaryTool))
 }
 
 func (a *Service) toolFactory() *tools.ToolFactory {

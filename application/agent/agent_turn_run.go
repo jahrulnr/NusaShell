@@ -131,7 +131,7 @@ func (a *Service) RunSingleTurn(run *TurnRun, provider *domain.Provider, apiKey,
 	if !caps.Video && settings.VideoProviderID != "" && settings.VideoModelID != "" {
 		conversation = a.enrichWithVideoDescriptions(run.Ctx, conversation, asstMsgID, settings)
 	}
-	toolDefs := a.TurnToolDefs(run)
+	toolDefs := a.TurnToolDefs(run, settings)
 	maxTokens := domain.ResolveMaxOutput(provider, model, settings)
 	turnSystemPrompt := buildSystemPromptForRun(run, conversation, settings.UserPrompt)
 	promptCache := buildPromptCachePolicyForRequest(settings, provider, model, run.ConversationID, promptCachePrefixForRun(run), turnSystemPrompt, toolDefs)

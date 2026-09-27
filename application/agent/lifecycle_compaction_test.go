@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"nusashell/application/tools"
 	"nusashell/domain"
@@ -204,6 +206,105 @@ func TestLifecycleHeadlessMidToolCompactionObserverCoherent(t *testing.T) {
 	if alpha != 1 {
 		t.Fatalf("alpha executions = %d in %v, want 1", alpha, box.calls)
 	}
+}
+
+// retentionFixture is an old prefix, a stale hydration checkpoint, and a
+// retained suffix whose assistant round carries tool calls with outputs,
+// reasoning, ReasoningExtra, and steps.
+func retentionFixture(convID string) (*domain.Conversation, domain.Message) {
+	created := time.Date(2026, 9, 27, 22, 5, 0, 0, time.UTC)
+	calls := []domain.ToolCall{{ID: "c-read", Name: "file_read", Args: `{"path":"/w/a.go"}`, Output: "package a", Status: domain.ToolOK}}
+	tools := domain.Message{
+		ID: "a-tools", Role: domain.RoleAssistant, Content: "read it", Reasoning: "need the file",
+		ReasoningExtra: json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC"}`),
+		Steps: []domain.MessageStep{
+			{Type: domain.StepReasoning, Content: "need the file"},
+			{Type: domain.StepToolCalls, ToolCalls: calls},
+			{Type: domain.StepText, Content: "read it"},
+		},
+		ToolCalls: calls, Model: "m1", ProviderID: "prov_1",
+		Usage:     &domain.Usage{InputTokens: 10, OutputTokens: 5},
+		CreatedAt: created, Status: domain.StatusDone,
+	}
+	conv := &domain.Conversation{ID: convID, Messages: []domain.Message{
+		{ID: "u-old", Role: domain.RoleUser, Content: strings.Repeat("old question ", 400), CreatedAt: created, Status: domain.StatusDone},
+		{ID: "hyd-old", Role: domain.RoleAssistant, CreatedAt: created, Status: domain.StatusDone,
+			ToolCalls: []domain.ToolCall{{ID: domain.HydrateToolCallPrefix + "old_0", Name: "runtime_context", Args: "{}", Output: `{"workspace":"/w"}`, Status: domain.ToolOK}}},
+		{ID: "u-new", Role: domain.RoleUser, Content: "latest question", CreatedAt: created, Status: domain.StatusDone},
+		tools,
+	}}
+	return conv, tools
+}
+
+func assertRetainedVerbatim(t *testing.T, saved *domain.Conversation, want domain.Message) {
+	t.Helper()
+	for _, m := range saved.Messages {
+		if m.ID == "hyd-old" {
+			t.Fatalf("stale hydration checkpoint survived compaction: %+v", m)
+		}
+		if m.ID == want.ID {
+			if !reflect.DeepEqual(m, want) {
+				t.Fatalf("retained message changed by compaction:\n got  %+v\n want %+v", m, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("retained message %s missing from %+v", want.ID, saved.Messages)
+}
+
+func assertArchivedIDs(t *testing.T, store *lifecycleConvStore, want ...string) {
+	t.Helper()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.archived) != 1 {
+		t.Fatalf("archived chunks = %d, want 1", len(store.archived))
+	}
+	var got []string
+	for _, m := range store.archived[0] {
+		got = append(got, m.ID)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("archived ids = %v, want %v (hydration filtered, retained suffix not duplicated)", got, want)
+	}
+}
+
+// TestPersistCompactedConversationRetainsSuffixVerbatim: the retained suffix
+// is neither summarized nor archived, so after the new epoch is persisted it
+// must still carry its tool calls, outputs, reasoning, and steps.
+func TestPersistCompactedConversationRetainsSuffixVerbatim(t *testing.T) {
+	conv, want := retentionFixture("conv-retain-text")
+	store := &lifecycleConvStore{byID: map[string]*domain.Conversation{conv.ID: conv}}
+	svc := New(Deps{Conversations: store})
+
+	if err := svc.PersistCompactedConversation(conv, compactionTestSummary, 500); err != nil {
+		t.Fatalf("PersistCompactedConversation: %v", err)
+	}
+	saved, _ := store.Get(conv.ID)
+	if !domain.IsCompactionSummary(saved.Messages[0].Content) {
+		t.Fatalf("first message = %q, want compaction handover", saved.Messages[0].Content)
+	}
+	assertRetainedVerbatim(t, saved, want)
+	assertArchivedIDs(t, store, "u-old")
+}
+
+// TestPersistCodexCompactedConversationRetainsSuffixVerbatim: the Codex epoch
+// keeps the same verbatim transcript suffix; only the provider request
+// filters the pre-checkpoint prefix down to user items.
+func TestPersistCodexCompactedConversationRetainsSuffixVerbatim(t *testing.T) {
+	conv, want := retentionFixture("conv-retain-codex")
+	store := &lifecycleConvStore{byID: map[string]*domain.Conversation{conv.ID: conv}}
+	svc := New(Deps{Conversations: store})
+
+	blob := `[{"type":"compaction","encrypted_content":"ENC-1"}]`
+	if err := svc.PersistCodexCompactedConversation(conv, blob, 500); err != nil {
+		t.Fatalf("PersistCodexCompactedConversation: %v", err)
+	}
+	saved, _ := store.Get(conv.ID)
+	if saved.CompactionBlob != blob || saved.CompactionPrefixMessages != 2 {
+		t.Fatalf("blob=%q prefix=%d, want checkpoint after u-new and a-tools", saved.CompactionBlob, saved.CompactionPrefixMessages)
+	}
+	assertRetainedVerbatim(t, saved, want)
+	assertArchivedIDs(t, store, "u-old")
 }
 
 // TestLifecycleThinkingFoldsIntoReasoningObserver pins the observer contract

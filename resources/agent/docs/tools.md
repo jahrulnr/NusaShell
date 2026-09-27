@@ -58,6 +58,22 @@ execute arbitrary side effects.
 | `sleep` | pause 1–300 seconds; use for retry backoff or between polls of an async `automation` run |
 | `subagent` | one tool for the whole subagent family (only listed when an ACP agent is enabled in Providers or internal delegation is available; never listed for pipeline `agent:` steps). `op` selects the action: `spawn` (default) starts 1–6 async subagent runs and returns run ids immediately; the tool call stays `running` until the run finishes, then a synthetic `subagent_result` call carries only the terminal assistant output after all tool rounds. `steer` redirects a live run (ACP: interrupt-and-replace on the same session; internal delegate: queued for the next tool-round boundary). `stop` cancels a live run (pending permissions fail closed). `wait` blocks this round until a run is terminal. For `spawn`, `agent_id` selects the target: an ACP agent id from Providers, or `internal` to run the task on NusaShell's own engine headless in a hidden pipeline room with the standard toolbox (no permission prompts; the model comes from Settings → Agent → Internal delegate model, empty inherits the parent conversation's active model). Omit `agent_id` to use the default enabled ACP agent, or the internal delegate when none is enabled. Optional `title` is the short label shown in the Agent dock/drawer so the user can tell what each run is for (falls back to the worker agent name). The same ACP-shaped dock/drawer/transcript UI is used for every run. Never listed for the delegate agent itself (no recursion) |
 
+### Context checkpoint `summary()`
+
+When Settings → Compaction workflow is "Reuse agent prompt + full toolbox",
+every turn advertises `summary(text=...)` so the compaction request keeps the
+same tool list (and prompt-cache prefix) as the live turn. It is valid only
+after the system asks for a context checkpoint; a call at any other time fails
+and the task continues.
+
+Good example (after the context-checkpoint request):
+
+    summary(text="## Current State\n...")
+
+Bad example (mid-task, no checkpoint requested — rejected):
+
+    summary(text="done so far: ...")
+
 ### Learner `learn()` (background agent only)
 
 The conversation agent never sees this tool. The periodic background learner

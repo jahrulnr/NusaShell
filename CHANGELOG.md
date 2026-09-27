@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-09-27
+
+### Fixed
+
+- **Reuse compaction now actually reuses the prompt cache.** The
+  "Reuse agent prompt + full toolbox" workflow used to append `summary()`
+  only to the compaction request and rebuild the history on its own path
+  that dropped the hydration checkpoint, so both the tool list and the
+  message prefix differed from the live turn (and the prompt-cache key with
+  them). Turns in this workflow now always advertise `summary()` (calls
+  outside a requested checkpoint are rejected), and compaction sends the
+  live turn request for the archived prefix plus the handoff message. When
+  that prefix plus the summary budget does not fit the context window,
+  compaction logs it and summarizes in chunks without cache reuse.
+- **Compaction no longer erases the retained messages' tool history.** The
+  recent messages kept after a compaction were stripped of tool calls, tool
+  outputs, reasoning, and steps on the false assumption that the summary had
+  captured them; the summarizer only sees the archived prefix, so that content
+  was lost from both the model context and disk. The retained suffix is now
+  kept verbatim (it was already budgeted at full size). The live transcript
+  right after compaction can therefore be larger than before. Content
+  stripped by earlier compactions cannot be recovered.
+- **Successful compaction passes no longer log a false "produced short
+  summary" warning.** The warning, budget doubling, and stale error now apply
+  only to rejected summaries.
+
 ## [0.9.8] - 2026-09-27
 
 ### Fixed

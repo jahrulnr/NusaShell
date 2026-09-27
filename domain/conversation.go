@@ -634,81 +634,12 @@ func (c *Conversation) CompactionSplitIndex(keepTokenBudget int) int {
 	return splitIdx
 }
 
-// IsInFlightToolMessage reports whether m is an assistant message with a tool
-// round that has not reached a terminal status (executed, failed, or
-// interrupted) — a call that is still running or about to run. The status is
-// empty until a tool round executes (`persistTurnRound` stores the calls
-// before `executeTurnTools` assigns ToolRunning / ToolOK / ToolFailed /
-// ToolInterrupted). Such messages must survive compaction verbatim so the
-// pending tool outputs can still be patched in and stay visible in the live
-// tail instead of being lost by StripForRetention.
-func IsInFlightToolMessage(m Message) bool {
-	if m.Role != RoleAssistant {
-		return false
-	}
-	for i := range m.ToolCalls {
-		if toolCallNotTerminal(m.ToolCalls[i]) {
-			return true
-		}
-	}
-	for i := range m.Steps {
-		for j := range m.Steps[i].ToolCalls {
-			if toolCallNotTerminal(m.Steps[i].ToolCalls[j]) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// toolCallNotTerminal reports whether a tool call has not reached a terminal
-// status. ToolRunning and the zero value (pre-execution) count as in-flight;
-// ToolOK, ToolFailed, and ToolInterrupted are terminal.
-func toolCallNotTerminal(tc ToolCall) bool {
-	return tc.Status != ToolOK && tc.Status != ToolFailed && tc.Status != ToolInterrupted
-}
-
-// IsBackgroundAgentMessage reports whether m is an assistant message that
-// participates in a background/async agent handoff: a spawn call (subagent,
-// delegate) whose result arrives later, or a synthetic result call
-// (subagent_result, delegate_result) injected when a background run
-// finishes. These messages carry cross-turn continuity — the model must know
-// which background agents were spawned and what they returned — so they
-// survive compaction verbatim instead of being stripped. The tools are
-// identified by name on both ToolCalls and Steps.
-func IsBackgroundAgentMessage(m Message) bool {
-	if m.Role != RoleAssistant {
-		return false
-	}
-	for i := range m.ToolCalls {
-		if isBackgroundAgentTool(m.ToolCalls[i].Name) {
-			return true
-		}
-	}
-	for i := range m.Steps {
-		for j := range m.Steps[i].ToolCalls {
-			if isBackgroundAgentTool(m.Steps[i].ToolCalls[j].Name) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// isBackgroundAgentTool reports whether a tool name belongs to the
-// background-agent handoff family: the async spawn tools and their synthetic
-// result calls.
-func isBackgroundAgentTool(name string) bool {
-	switch name {
-	case SubagentToolName, SubagentResultToolName, DelegateToolName, DelegateResultToolName:
-		return true
-	}
-	return false
-}
-
-// compactionRetention clones the contiguous keep suffix (and drops a prior
-// compaction summary if it sits inside that suffix). Used by Compact and
-// ArchiveMessages so the two stay consistent.
+// compactionRetention clones the contiguous keep suffix verbatim (and drops a
+// prior compaction summary if it sits inside that suffix). The suffix is
+// neither summarized nor archived, so its tool calls, outputs, reasoning, and
+// steps must stay intact: they exist nowhere else, and an in-flight tool round
+// still needs its calls so pending outputs can be patched into the live tail.
+// Used by Compact and ArchiveMessages so the two stay consistent.
 func (c *Conversation) compactionRetention(keepTokenBudget int) (retained []Message, retainedIndices map[int]bool) {
 	retainedIndices = make(map[int]bool)
 	split := c.CompactionSplitIndex(keepTokenBudget)
@@ -721,17 +652,7 @@ func (c *Conversation) compactionRetention(keepTokenBudget int) (retained []Mess
 			continue
 		}
 		retainedIndices[i] = true
-		if IsInFlightToolMessage(m) || IsBackgroundAgentMessage(m) {
-			// Preserve the in-flight round and background-agent handoffs
-			// (spawn calls + synthetic results) verbatim: pending tool
-			// outputs are patched into the live tail after compaction, and
-			// the model keeps knowing which background agents were spawned
-			// and what they returned (see IsInFlightToolMessage and
-			// IsBackgroundAgentMessage).
-			retained = append(retained, m)
-			continue
-		}
-		retained = append(retained, StripForRetention(m))
+		retained = append(retained, m)
 	}
 	return retained, retainedIndices
 }
@@ -832,19 +753,4 @@ func (c *Conversation) ArchiveMessages(keepTokenBudget int) []Message {
 		}
 	}
 	return archived
-}
-
-// StripForRetention returns a copy of the message with tool calls, reasoning,
-// and steps removed. These are already captured in the compaction summary, so
-// retaining them would duplicate context and waste the token budget.
-func StripForRetention(m Message) Message {
-	return Message{
-		ID:          m.ID,
-		Role:        m.Role,
-		Content:     m.Content,
-		Attachments: m.Attachments,
-		CreatedAt:   m.CreatedAt,
-		Status:      m.Status,
-		Model:       m.Model,
-	}
 }

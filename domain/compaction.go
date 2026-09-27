@@ -64,8 +64,8 @@ const (
 	// context (including the requested calls but before any tool output)
 	// already exceeds the trigger. Compact the prefix now — before the tool
 	// outputs exist — so the summarizer never sees the tool-result explosion.
-	// The in-flight assistant message is preserved verbatim (see
-	// IsInFlightToolMessage) so the round's outputs land in the live tail.
+	// The in-flight assistant message is retained verbatim with the rest of
+	// the keep suffix so the round's outputs land in the live tail.
 	CompactionTriggerMidTool CompactionTrigger = "mid_tool"
 )
 

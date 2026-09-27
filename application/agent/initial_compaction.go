@@ -22,7 +22,8 @@ func (a *Service) maybeCompactInitialTurn(run *TurnRun, adapter ProviderContext,
 
 	a.log("info", "agent", "compaction triggered for %s: est=%d trigger=%d window=%d maxOut=%d",
 		conversation.ID, beforeTokens, trigger, contextWindow, maxTokens)
-	_, compErr := a.runCompaction(run.Ctx, run, conversation, adapter, model, contextWindow, settings, caps, domain.CompactionTriggerInitial)
+	_, compErr := a.runCompaction(run.Ctx, run, conversation, adapter, model, contextWindow, settings, caps, domain.CompactionTriggerInitial,
+		&compactionTurn{run: run, tools: tools, effort: effort, promptCache: promptCache})
 	if compErr != nil {
 		a.log("warn", "agent", "compaction failed for %s: %v", conversation.ID, compErr)
 	} else {

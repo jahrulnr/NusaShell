@@ -95,6 +95,47 @@ func TestRequestInputSplitsToolResultMediaIntoUserMessage(t *testing.T) {
 	}
 }
 
+// TestBuildRequestDropsToolMediaFromCompactionPrefix: the pre-checkpoint
+// prefix keeps only real user/developer/system messages. Tool-result media is
+// reinjected as a synthetic user item, so it must not survive that filter,
+// while the same media after the checkpoint is still reinjected.
+func TestBuildRequestDropsToolMediaFromCompactionPrefix(t *testing.T) {
+	png := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}
+	toolRound := func(id string) []core.Message {
+		return []core.Message{
+			core.Assistant(core.ToolUseBlock{ID: id, Name: "read_media", Arguments: core.MustJSONRaw(map[string]any{"file_path": "/tmp/a.png"})}),
+			core.ToolResult(id, core.TextBlock{Text: "Image loaded"}, core.ImageBlock{Data: png, MIME: "image/png"}),
+		}
+	}
+	messages := []core.Message{core.User(core.TextBlock{Text: "retained question"})}
+	messages = append(messages, toolRound("call_pre")...)
+	messages = append(messages, core.User(core.TextBlock{Text: "after checkpoint"}))
+	messages = append(messages, toolRound("call_post")...)
+
+	p := &Provider{}
+	wire, _, err := p.buildRequest(t.Context(), &core.Request{
+		Model:    "gpt-5-codex",
+		Messages: messages,
+		ProviderOptions: core.ProviderOptions{
+			"compaction_items":           `[{"type":"compaction","encrypted_content":"ENC-1"}]`,
+			"compaction_prefix_messages": 3,
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildRequest: %v", err)
+	}
+	if len(wire.Input) != 6 {
+		t.Fatalf("input = %+v, want retained user, checkpoint, user, call, output, media", wire.Input)
+	}
+	if !wire.Input[0].IsUserMessage() || wire.Input[0].Content[0].Text != "retained question" || !wire.Input[1].IsCompaction() {
+		t.Fatalf("prefix = %+v, want only the real user message before the checkpoint", wire.Input[:2])
+	}
+	if !wire.Input[2].IsUserMessage() || wire.Input[3].Type != ItemTypeFunctionCall ||
+		wire.Input[4].Type != ItemTypeFunctionCallOutput || wire.Input[5].Content[0].Type != ContentInputImage {
+		t.Fatalf("suffix = %+v, want user -> call -> output -> reinjected media", wire.Input[2:])
+	}
+}
+
 func TestRequestInputToolResultWithoutTextKeepsEmptyOutput(t *testing.T) {
 	messages := []core.Message{
 		core.Assistant(core.ToolUseBlock{ID: "call_1", Name: "read_media", Arguments: core.MustJSONRaw(map[string]any{"file_path": "/tmp/a.png"})}),

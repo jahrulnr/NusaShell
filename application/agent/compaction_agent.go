@@ -14,24 +14,16 @@ import (
 // long enough or the budget is exhausted. The chunk loop
 // (takeCompactionChunk) lives in the caller; the engine runs one pass.
 type compactionPass struct {
-	svc            *Service
-	adapter        ProviderContext
-	model          string
-	system         string
-	msgs           []ChatMessage
-	budget         int
-	maxBudget      int
-	minChars       int
-	convID         string
-	lastLen        int
-	lastErr        error
-	summary        string // valid summary from the terminal round
-	tools          []ToolDef
-	promptCaching  bool
-	promptCache    *PromptCachePolicy
-	conversationID string
-	providerRoute  string
-	effort         string
+	svc       *Service
+	adapter   ProviderContext
+	request   ChatRequest // complete request; MaxTokens is set per attempt
+	budget    int
+	maxBudget int
+	minChars  int
+	convID    string
+	lastLen   int
+	lastErr   error
+	summary   string // valid summary from the terminal round
 }
 
 // run executes the pass through the AgentEngine and reports whether a
@@ -47,25 +39,15 @@ func (p *compactionPass) rules() AgentRules {
 			return p.svc.CompleteWithRetry(ctx, p.adapter, req)
 		},
 		BuildRequest: func(st *RoundState) ChatRequest {
-			return ChatRequest{
-				Model:            p.model,
-				System:           p.system,
-				Messages:         p.msgs,
-				Tools:            p.tools,
-				PromptCaching:    p.promptCaching,
-				PromptCache:      p.promptCache,
-				ConversationID:   p.conversationID,
-				ProviderRoute:    p.providerRoute,
-				Effort:           p.effort,
-				ReasoningSummary: p.adapter.ReasoningSummary,
-				MaxTokens:        p.budget,
-			}
+			req := p.request
+			req.MaxTokens = p.budget
+			return req
 		},
 		// Terminal: the summary() tool call (or content fallback) is
 		// valid when it is long enough and does not echo the assistant.
 		Terminal: func(st *RoundState, resp ChatResponse) bool {
 			summary := extractCompactionSummary(resp)
-			if compactionSummaryEchoesAssistant(summary, p.msgs) {
+			if compactionSummaryEchoesAssistant(summary, p.request.Messages) {
 				summary = ""
 			}
 			p.lastLen = len(strings.TrimSpace(summary))
@@ -83,9 +65,13 @@ func (p *compactionPass) rules() AgentRules {
 			p.svc.log("warn", "agent", "compaction pass %d failed for %s: %v", st.Round+1, p.convID, err)
 			return true
 		},
-		// Non-terminal round: double the budget for the retry, clamped to
-		// the context window.
+		// Rejected round: double the budget for the retry, clamped to the
+		// context window. The engine also calls OnRound on the terminal
+		// round, where the accepted summary needs no retry.
 		OnRound: func(st *RoundState, resp ChatResponse, outcomes []ToolOutcome) error {
+			if p.summary != "" {
+				return nil
+			}
 			next := p.budget * 2
 			if next > p.maxBudget {
 				next = p.maxBudget

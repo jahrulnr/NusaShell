@@ -256,6 +256,8 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 		return res
 	}
 	switch toolCall.Name {
+	case compactionSummaryToolName:
+		err = fmt.Errorf("summary is only accepted when the system requests a context checkpoint; continue the current task")
 	case learnerResultToolName:
 		if !isLearnerKind(run.ToolKind) {
 			output = "error: learn is only available to the learner agent"
