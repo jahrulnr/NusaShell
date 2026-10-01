@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.11] - 2026-10-01
+
+### Fixed
+
+- **`conversation send` to a busy room no longer deadlocks the sender.** The
+  wake path now skips the target's turn lock when the target already has an
+  active run — the queued peer message is drained at that turn's next round
+  boundary or by the run-cleanup wake. Previously the send parked on the
+  target's turn lock for the whole remote turn while holding the global
+  `startMu`: two rooms messaging each other deadlocked permanently
+  (`turnLock` ↔ `startMu` circular wait), every other room's turn start
+  stalled, and Stop only cancelled the context, which a parked mutex
+  acquisition cannot observe — so the turn never ended and no "interrupted
+  by user" was recorded.
+
 ## [0.9.10] - 2026-10-01
 
 ### Changed

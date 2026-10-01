@@ -24,7 +24,7 @@ type StreamedTurnRound struct {
 	RequestTokens    int64
 }
 
-func (a *Service) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, model string) (ProviderContext, *domain.Conversation, domain.Settings, error) {
+func (a *Service) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, _ string) (ProviderContext, *domain.Conversation, domain.Settings, error) {
 	adapter, err := a.Factory(run.Ctx, provider, apiKey)
 	if err != nil {
 		return ProviderContext{}, nil, domain.Settings{}, err

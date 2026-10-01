@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"nusashell/application/service/toolpresentation"
@@ -116,6 +117,17 @@ func (a *Service) startIdleConversationTurn(conversationID string, requirePeerMe
 	}
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
+	// A live run drains the persisted queue at its next round boundary
+	// (DrainAnnouncements), and run cleanup re-invokes this wake after
+	// releasing the turn lock, so a busy target only needs the queued
+	// announcement — never a wait on turnLock. Parking on turnLock while
+	// the target is mid-turn would block the caller for the whole remote
+	// turn: a peer `conversation send` tool call would hold startMu for
+	// that duration (stalling every other turn start), and two rooms
+	// sending each other deadlock on startMu ↔ turnLock.
+	if a.ActiveRunForConversation(conversationID) != nil {
+		return
+	}
 	turnLock := a.ConversationTurnLock(conversationID)
 	turnLock.Lock()
 	defer turnLock.Unlock()
@@ -228,8 +240,7 @@ func (a *Service) ResolveConversationProvider(conv *domain.Conversation) (*domai
 		}
 	}
 	model := ""
-	for i := len(conv.Messages) - 1; i >= 0; i-- {
-		m := conv.Messages[i]
+	for _, m := range slices.Backward(conv.Messages) {
 		if m.Role == domain.RoleAssistant && strings.TrimSpace(m.Model) != "" && m.Status == domain.StatusDone {
 			model = strings.TrimSpace(m.Model)
 			break

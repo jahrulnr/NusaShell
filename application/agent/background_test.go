@@ -3,6 +3,7 @@ package agent
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"nusashell/contracts"
 	"nusashell/domain"
@@ -90,6 +91,97 @@ func TestDeliverPeerMessageQueuesWhileConversationIsActive(t *testing.T) {
 	}
 	if launched() {
 		t.Fatal("active peer message must not launch a second run")
+	}
+}
+
+// Regression: RunTurn holds the conversation turn lock for the whole turn,
+// so a peer send that parks on the target's turn lock blocks for the entire
+// remote turn — while holding the global startMu. The send must only queue
+// the announcement and return; the running target drains it at the next
+// round boundary (or at run cleanup).
+func TestDeliverPeerMessageDoesNotBlockOnBusyTurnLock(t *testing.T) {
+	conv := &domain.Conversation{
+		ID: "conv_target", Model: "model", Status: "running",
+		Messages: []domain.Message{{ID: "u1", Role: domain.RoleUser, Content: "start", Status: domain.StatusDone}},
+	}
+	service, store, launched := peerWakeService(t, conv)
+	service.runsMu.Lock()
+	service.runs["run-existing"] = &TurnRun{ID: "run-existing", ConversationID: "conv_target"}
+	service.runsMu.Unlock()
+	turnLock := service.ConversationTurnLock("conv_target")
+	turnLock.Lock()
+	defer turnLock.Unlock()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- service.DeliverPeerMessage("conv_target", "conv_source", "queued for the next boundary")
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("DeliverPeerMessage: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("DeliverPeerMessage blocked on the busy conversation's turn lock")
+	}
+
+	saved, err := store.Get("conv_target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.PendingAnnouncements) != 1 || saved.PendingAnnouncements[0].Type != "peer_message" {
+		t.Fatalf("pending announcements = %+v, want one peer_message", saved.PendingAnnouncements)
+	}
+	if launched() {
+		t.Fatal("busy peer message must not launch a second run")
+	}
+}
+
+// Regression for the reported deadlock: two busy rooms send each other a
+// peer message. Each sender held the global startMu while parking on the
+// peer's turn lock — the first parked on turnLock(B) while the second
+// parked on startMu, a circular wait no context cancel could break.
+func TestPeerMessageExchangeBetweenBusyRoomsDoesNotDeadlock(t *testing.T) {
+	store := &lifecycleConvStore{byID: map[string]*domain.Conversation{
+		"conv_a": {ID: "conv_a", Model: "model", Status: "running",
+			Messages: []domain.Message{{ID: "ua", Role: domain.RoleUser, Content: "x", Status: domain.StatusDone}}},
+		"conv_b": {ID: "conv_b", Model: "model", Status: "running",
+			Messages: []domain.Message{{ID: "ub", Role: domain.RoleUser, Content: "x", Status: domain.StatusDone}}},
+	}}
+	service := New(Deps{Conversations: store})
+	service.runsMu.Lock()
+	service.runs["run-a"] = &TurnRun{ID: "run-a", ConversationID: "conv_a"}
+	service.runs["run-b"] = &TurnRun{ID: "run-b", ConversationID: "conv_b"}
+	service.runsMu.Unlock()
+	lockA := service.ConversationTurnLock("conv_a")
+	lockB := service.ConversationTurnLock("conv_b")
+	lockA.Lock()
+	lockB.Lock()
+	defer lockA.Unlock()
+	defer lockB.Unlock()
+
+	errs := make(chan error, 2)
+	go func() { errs <- service.DeliverPeerMessage("conv_b", "conv_a", "a to b") }()
+	go func() { errs <- service.DeliverPeerMessage("conv_a", "conv_b", "b to a") }()
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-errs:
+			if err != nil {
+				t.Fatalf("DeliverPeerMessage: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("cross-room peer sends deadlocked on each other's turn lock")
+		}
+	}
+
+	for _, id := range []string{"conv_a", "conv_b"} {
+		saved, err := store.Get(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(saved.PendingAnnouncements) != 1 || saved.PendingAnnouncements[0].Type != "peer_message" {
+			t.Fatalf("%s pending announcements = %+v, want one peer_message", id, saved.PendingAnnouncements)
+		}
 	}
 }
 

@@ -246,7 +246,7 @@ func (a *Service) CompactConversationWithCache(ctx context.Context, adapter Prov
 	return a.compactConversationWithCache(ctx, adapter, c, model, contextWindow, settings, trigger, promptCache, a.compactionModelCapabilities(adapter, model), nil)
 }
 
-func (a *Service) compactConversationWithCache(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, contextWindow int, settings domain.Settings, trigger domain.CompactionTrigger, promptCache *PromptCachePolicy, caps ModelCapabilities, turn *compactionTurn) (string, error) {
+func (a *Service) compactConversationWithCache(ctx context.Context, adapter ProviderContext, c *domain.Conversation, model string, contextWindow int, settings domain.Settings, _ domain.CompactionTrigger, promptCache *PromptCachePolicy, caps ModelCapabilities, turn *compactionTurn) (string, error) {
 	if len(c.Messages) <= 1 {
 		return "", nil
 	}
