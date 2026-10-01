@@ -57,6 +57,53 @@ type liveRun struct {
 	sessionAllow bool
 	done         chan struct{}
 	closed       bool
+	// emitDirty/emitTimer coalesce session/update emits: every notification
+	// marks the snapshot dirty and one lazy timer publishes the latest
+	// clone per sessionUpdateEmitInterval, instead of cloning the whole
+	// transcript per notification. Guarded by mu.
+	emitDirty bool
+	emitTimer *time.Timer
+}
+
+// sessionUpdateEmitInterval is the minimum spacing between OnUpdate
+// emissions for one live run. Session/update notifications arrive per
+// token-delta; each emit clones the full transcript, so publishing per
+// notification is O(transcript²) over a stream.
+const sessionUpdateEmitInterval = 100 * time.Millisecond
+
+// scheduleEmitLocked marks the run snapshot dirty and arms the coalesced
+// emit timer. Caller holds lr.mu.
+func (lr *liveRun) scheduleEmitLocked() {
+	lr.emitDirty = true
+	if lr.emitTimer == nil {
+		lr.emitTimer = time.AfterFunc(sessionUpdateEmitInterval, lr.flushEmit)
+	}
+}
+
+// disarmEmitLocked drops a pending coalesced emit: the caller is emitting a
+// snapshot that already carries the dirty state. Caller holds lr.mu.
+func (lr *liveRun) disarmEmitLocked() {
+	lr.emitDirty = false
+	if lr.emitTimer != nil {
+		lr.emitTimer.Stop()
+		lr.emitTimer = nil
+	}
+}
+
+// flushEmit publishes the latest coalesced snapshot once per interval while
+// session/update notifications stream in. Terminal runs never emit a
+// trailing update; emitDone already carries the final snapshot.
+func (lr *liveRun) flushEmit() {
+	lr.mu.Lock()
+	if lr.closed || !lr.emitDirty {
+		lr.mu.Unlock()
+		return
+	}
+	lr.emitDirty = false
+	lr.emitTimer = nil
+	run := cloneRun(lr.run)
+	lr.mu.Unlock()
+	lr.conn.runtime.emitUpdate(run)
 }
 
 func (rt *Runtime) SetCallbacks(
@@ -522,6 +569,7 @@ func (pc *pooledConn) SessionUpdate(params acpclient.SessionUpdateParams) {
 		lr.run.CurrentModeID = params.Update.CurrentModeID
 		lr.run.RiskTier = domain.InferRiskTier(params.Update.CurrentModeID, pc.agent.ModeRiskMappings)
 		lr.run.UpdatedAt = clock.NewTime().Time()
+		lr.disarmEmitLocked()
 		run := cloneRun(lr.run)
 		lr.mu.Unlock()
 		if pc.runtime.OnModeChange != nil {
@@ -531,9 +579,8 @@ func (pc *pooledConn) SessionUpdate(params acpclient.SessionUpdateParams) {
 		return
 	}
 	lr.run.UpdatedAt = clock.NewTime().Time()
-	run := cloneRun(lr.run)
+	lr.scheduleEmitLocked()
 	lr.mu.Unlock()
-	pc.runtime.emitUpdate(run)
 }
 
 // acpDisplayText renders one raw ACP payload (rawInput/rawOutput) for the
@@ -769,6 +816,7 @@ func (lr *liveRun) drivePrompt(text string, recordPrompt bool) {
 	lr.run.Activity = domain.AcpRunActivityThinking
 	lr.prompting = true
 	sessionID := lr.run.SessionID
+	lr.disarmEmitLocked()
 	snap := cloneRun(lr.run)
 	lr.mu.Unlock()
 	if recordPrompt {
@@ -804,8 +852,10 @@ func (lr *liveRun) drivePrompt(text string, recordPrompt bool) {
 	if res.StopReason == "cancelled" {
 		if replace != "" {
 			lr.run.BeginRunning(clock.NewTime().Time())
+			lr.disarmEmitLocked()
+			run := cloneRun(lr.run)
 			lr.mu.Unlock()
-			lr.conn.runtime.emitUpdate(cloneRun(lr.run))
+			lr.conn.runtime.emitUpdate(run)
 			lr.drivePrompt(replace, true)
 			return
 		}
@@ -819,8 +869,10 @@ func (lr *liveRun) drivePrompt(text string, recordPrompt bool) {
 	// turn): still deliver the steer as a follow-up prompt on the live session.
 	if replace != "" {
 		lr.run.BeginRunning(clock.NewTime().Time())
+		lr.disarmEmitLocked()
+		run := cloneRun(lr.run)
 		lr.mu.Unlock()
-		lr.conn.runtime.emitUpdate(cloneRun(lr.run))
+		lr.conn.runtime.emitUpdate(run)
 		lr.drivePrompt(replace, true)
 		return
 	}
@@ -841,6 +893,7 @@ func (lr *liveRun) finishLocked(status domain.AcpRunStatus, errMsg, stop string)
 		return
 	}
 	lr.closed = true
+	lr.disarmEmitLocked()
 	lr.run.Activity = ""
 	lr.run.Finish(status, errMsg, stop, clock.NewTime().Time())
 	if lr.permCh != nil {
@@ -879,6 +932,7 @@ func (rt *Runtime) Steer(runID, text string) error {
 	if !prompting {
 		lr.run.BeginRunning(clock.NewTime().Time())
 	}
+	lr.disarmEmitLocked()
 	snap := cloneRun(lr.run)
 	lr.mu.Unlock()
 	rt.emitUpdate(snap)
@@ -981,6 +1035,7 @@ func (rt *Runtime) DecidePermission(runID, requestID, optionID string, outcome d
 	lr.permCh = nil
 	lr.permID = ""
 	lr.run.ResolvePermission(clock.NewTime().Time())
+	lr.disarmEmitLocked()
 	rt.emitUpdate(cloneRun(lr.run))
 	return nil
 }
@@ -1000,6 +1055,7 @@ func (rt *Runtime) PromoteRisk(runID string, tier domain.RiskTier) error {
 	}
 	lr.run.RiskTier = tier
 	lr.run.UpdatedAt = clock.NewTime().Time()
+	lr.disarmEmitLocked()
 	rt.emitUpdate(cloneRun(lr.run))
 	return nil
 }
@@ -1016,6 +1072,7 @@ func (rt *Runtime) SetMode(ctx context.Context, runID, modeID string) error {
 	lr.run.CurrentModeID = modeID
 	lr.run.RiskTier = domain.InferRiskTier(modeID, lr.conn.agent.ModeRiskMappings)
 	lr.run.UpdatedAt = clock.NewTime().Time()
+	lr.disarmEmitLocked()
 	run := cloneRun(lr.run)
 	lr.mu.Unlock()
 	if rt.OnModeChange != nil {

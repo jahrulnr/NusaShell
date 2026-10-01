@@ -182,26 +182,24 @@ func TestInternalDelegateForwardsLiveTranscriptChunksToRunStream(t *testing.T) {
 	runID := firstSpawnedRunID(t, out)
 	waitForSettled(t, svc, runID)
 
-	var foundLiveUpdate bool
-drain:
+	// Live deltas are coalesced: the final update may be flushed together
+	// with the terminal frame, so read the stream with a deadline rather
+	// than draining only what is already buffered.
+	deadline := time.After(2 * time.Second)
 	for {
 		select {
 		case frame := <-sub.Frames():
-			if frame.Type != contracts.EventAcpRunUpdated || frame.Run == nil || frame.Run.ID != runID || frame.Run.Activity != string(domain.AcpRunActivityThinking) {
+			if frame.Type != contracts.EventAcpRunUpdated || frame.Run == nil || frame.Run.ID != runID {
 				continue
 			}
 			for _, chunk := range frame.Run.Transcript {
 				if chunk.Text == "thinking" || chunk.Text == "answer" {
-					foundLiveUpdate = true
-					break
+					return
 				}
 			}
-		default:
-			break drain
+		case <-deadline:
+			t.Fatal("internal delegate emitted no live transcript update to its run stream")
 		}
-	}
-	if !foundLiveUpdate {
-		t.Fatal("internal delegate emitted no live transcript update to its run stream")
 	}
 }
 
@@ -232,13 +230,17 @@ func TestSlowRunStreamSubscriberReconnectsFromCurrentSnapshot(t *testing.T) {
 	sub := streams.Subscribe("conv_1")
 	defer sub.Close()
 	run := contracts.AcpRunDTO{ID: "run_1", ConversationID: "conv_1", Status: "running"}
+	// Live updates coalesce per run to one emit per interval; pace the
+	// publishes beyond the interval so each one reaches the subscriber
+	// queue and can overflow it.
 	for i := 0; i <= runStreamSubscriberBuffer; i++ {
 		run.Activity = strconv.Itoa(i)
 		streams.Publish(contracts.EventAcpRunUpdated, run)
+		time.Sleep(runStreamCoalesceInterval + 40*time.Millisecond)
 	}
 	select {
 	case <-sub.Done():
-	case <-time.After(time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("slow subscriber was not disconnected after its bounded queue filled")
 	}
 
@@ -312,9 +314,12 @@ func TestRunStreamPublishesDistinctPayloadsSharingASourceStamp(t *testing.T) {
 	defer sub.Close()
 	at := time.Now()
 	run := contracts.AcpRunDTO{ID: "run_1", ConversationID: "conv_1", Status: "running"}
+	// Pace publishes beyond the coalescing interval so every distinct
+	// same-stamp payload reaches the stream uncoalesced.
 	for _, activity := range []string{"a", "b", "c"} {
 		run.Activity = activity
 		streams.publish(contracts.EventAcpRunUpdated, run, at)
+		time.Sleep(runStreamCoalesceInterval + 40*time.Millisecond)
 	}
 
 	for _, want := range []string{"a", "b", "c"} {
@@ -434,4 +439,164 @@ func TestRunStreamSubscriberCountIsBounded(t *testing.T) {
 		t.Fatal("closed subscriber did not release its registry slot")
 	}
 	subs = append(subs, replacement)
+}
+
+// A burst of live updates must coalesce to the latest snapshot per run —
+// one emitted frame carries the newest payload, not one frame per delta.
+func TestRunStreamCoalescesBurstUpdates(t *testing.T) {
+	streams := NewRunStreamRegistry()
+	sub := streams.Subscribe("conv_1")
+	defer sub.Close()
+	run := contracts.AcpRunDTO{ID: "run_1", ConversationID: "conv_1", Status: "running"}
+	streams.Publish(contracts.EventAcpRunStarted, run)
+	select {
+	case frame := <-sub.Frames():
+		if frame.Type != contracts.EventAcpRunStarted || frame.Seq != 1 {
+			t.Fatalf("started frame = %+v", frame)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("started frame never delivered")
+	}
+
+	for i := 0; i < 50; i++ {
+		run.Activity = "burst-" + strconv.Itoa(i)
+		run.Transcript = []contracts.AcpTranscriptChunkDTO{{Kind: "text", Text: "delta-" + strconv.Itoa(i)}}
+		streams.Publish(contracts.EventAcpRunUpdated, run)
+	}
+
+	var last contracts.AcpRunStreamFrame
+	updates := 0
+	deadline := time.After(2 * time.Second)
+	for updates == 0 {
+		select {
+		case frame := <-sub.Frames():
+			if frame.Type != contracts.EventAcpRunUpdated {
+				continue
+			}
+			updates++
+			last = frame
+		case <-deadline:
+			t.Fatal("coalesced update was never emitted")
+		}
+	}
+	if last.Seq != 2 || last.Run.Activity != "burst-49" || last.Run.Transcript[0].Text != "delta-49" {
+		t.Fatalf("coalesced update must carry the latest payload: %+v", last)
+	}
+	select {
+	case frame := <-sub.Frames():
+		t.Fatalf("burst produced an extra frame after the coalesced flush: %+v", frame)
+	case <-time.After(2 * runStreamCoalesceInterval):
+	}
+	snapshot := streams.Subscribe("conv_1").Snapshot()
+	if snapshot.Seq != 2 || snapshot.Runs[0].Activity != "burst-49" {
+		t.Fatalf("snapshot = %+v, want seq 2 with the latest payload", snapshot)
+	}
+}
+
+// Terminal events must flush a pending coalesced update first (order
+// preserved) and must never wait out the interval themselves.
+func TestRunStreamTerminalEventFlushesPendingUpdate(t *testing.T) {
+	streams := NewRunStreamRegistry()
+	sub := streams.Subscribe("conv_1")
+	defer sub.Close()
+	run := contracts.AcpRunDTO{ID: "run_1", ConversationID: "conv_1", Status: "running"}
+	streams.Publish(contracts.EventAcpRunStarted, run)
+	<-sub.Frames()
+
+	run.Activity = "pending-burst"
+	run.Transcript = []contracts.AcpTranscriptChunkDTO{{Kind: "text", Text: "streamed"}}
+	streams.Publish(contracts.EventAcpRunUpdated, run) // coalesced: inside the interval
+	done := run
+	done.Status = "completed"
+	done.Activity = ""
+	streams.Publish(contracts.EventAcpRunDone, done)
+
+	for i, want := range []struct {
+		typ      string
+		activity string
+		status   string
+	}{
+		{contracts.EventAcpRunUpdated, "pending-burst", "running"},
+		{contracts.EventAcpRunDone, "", "completed"},
+	} {
+		select {
+		case frame := <-sub.Frames():
+			if frame.Type != want.typ || frame.Run == nil || frame.Run.Activity != want.activity || frame.Run.Status != want.status {
+				t.Fatalf("frame %d = %+v, want %s %s/%s", i, frame, want.typ, want.activity, want.status)
+			}
+			if frame.Seq != int64(i+2) {
+				t.Fatalf("frame %d seq = %d, want %d", i, frame.Seq, i+2)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("frame %d (%s) never delivered", i, want.typ)
+		}
+	}
+}
+
+// A frame carrying a pending permission is user-blocking: it bypasses
+// coalescing and drains the pending snapshot first, preserving order.
+func TestRunStreamPendingPermissionBypassesCoalescing(t *testing.T) {
+	streams := NewRunStreamRegistry()
+	sub := streams.Subscribe("conv_1")
+	defer sub.Close()
+	run := contracts.AcpRunDTO{ID: "run_1", ConversationID: "conv_1", Status: "running"}
+	streams.Publish(contracts.EventAcpRunStarted, run)
+	<-sub.Frames()
+
+	run.Activity = "streamed"
+	streams.Publish(contracts.EventAcpRunUpdated, run) // coalesced pending
+	perm := run
+	perm.PendingPermission = &contracts.AcpPermissionDTO{
+		ID: "perm_1", ToolTitle: "Write file",
+		Options: []contracts.AcpPermissionOptionDTO{{ID: "o1", Name: "Allow", Kind: "allow_once"}},
+	}
+	streams.Publish(contracts.EventAcpRunUpdated, perm) // immediate
+
+	for i, want := range []struct {
+		activity   string
+		permission bool
+	}{
+		{"streamed", false},
+		{"streamed", true},
+	} {
+		select {
+		case frame := <-sub.Frames():
+			if frame.Type != contracts.EventAcpRunUpdated || frame.Run == nil {
+				t.Fatalf("frame %d = %+v, want updated", i, frame)
+			}
+			if (frame.Run.PendingPermission != nil) != want.permission || frame.Run.Activity != want.activity {
+				t.Fatalf("frame %d = %+v, want activity=%q permission=%v", i, frame, want.activity, want.permission)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("frame %d never delivered", i)
+		}
+	}
+}
+
+// A stale arrival must not displace a newer pending snapshot: the pending
+// payload is the latest by source stamp, not merely the latest arrival.
+func TestRunStreamCoalescedPendingKeepsNewestStamp(t *testing.T) {
+	streams := NewRunStreamRegistry()
+	sub := streams.Subscribe("conv_1")
+	defer sub.Close()
+	base := time.Now()
+	run := contracts.AcpRunDTO{ID: "run_1", ConversationID: "conv_1", Status: "running"}
+	streams.publish(contracts.EventAcpRunStarted, run, base)
+	<-sub.Frames()
+
+	newer := run
+	newer.Activity = "newer"
+	streams.publish(contracts.EventAcpRunUpdated, newer, base.Add(2*time.Second)) // pending
+	stale := run
+	stale.Activity = "stale"
+	streams.publish(contracts.EventAcpRunUpdated, stale, base.Add(time.Second)) // between emitted and pending
+
+	select {
+	case frame := <-sub.Frames():
+		if frame.Type != contracts.EventAcpRunUpdated || frame.Run == nil || frame.Run.Activity != "newer" {
+			t.Fatalf("coalesced flush = %+v, want the newest pending payload", frame)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pending update never flushed")
+	}
 }

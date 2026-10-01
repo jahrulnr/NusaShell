@@ -780,3 +780,104 @@ func TestEffectiveTypeMigratesLegacyOrigin(t *testing.T) {
 		t.Fatalf("typed conversation = %q, want %q", got, ConversationTypeBackground)
 	}
 }
+
+func TestUsageRows(t *testing.T) {
+	c := &Conversation{ID: "conv_usage", Messages: []Message{
+		{Role: RoleUser, Content: "hi"},
+		{Role: RoleAssistant, Model: "m1", ProviderID: "p1", Usage: &Usage{InputTokens: 10, OutputTokens: 5}},
+		{Role: RoleAssistant, Model: "m2"}, // no usage -> skipped
+		{Role: RoleAssistant, Model: "m3", Usage: &Usage{InputTokens: 1}},
+	}}
+	rows := c.UsageRows()
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	if rows[0].ConversationID != "conv_usage" || rows[0].Model != "m1" || rows[0].Usage.InputTokens != 10 {
+		t.Fatalf("row0 = %+v", rows[0])
+	}
+}
+
+func TestConversationCloneDeepCopy(t *testing.T) {
+	src := &Conversation{
+		ID:        "conv_clone",
+		Title:     "t",
+		Status:    "running",
+		Type:      ConversationTypeConversation,
+		Summary:   "sum",
+		Workspace: "/w",
+		Messages: []Message{
+			{
+				ID:             "m1",
+				Role:           RoleAssistant,
+				Content:        "text",
+				Reasoning:      "why",
+				ReasoningExtra: json.RawMessage(`{"enc":"x"}`),
+				Model:          "m",
+				ProviderID:     "p",
+				Usage:          &Usage{InputTokens: 3, OutputTokens: 4},
+				Steps: []MessageStep{
+					{Type: StepReasoning, Content: "r"},
+					{Type: StepToolCalls, ToolCalls: []ToolCall{
+						{ID: "tc1", Name: "n", Args: "{}", Output: "o",
+							OutputAttachments: []Attachment{{Type: "image", FilePath: "/a.png"}},
+							Opaque: map[string]any{
+								"k":      "v",
+								"nested": map[string]any{"deep": []any{1.0, "s"}},
+							}},
+					}},
+				},
+				ToolCalls:   []ToolCall{{ID: "tc1", Output: "o", Opaque: map[string]any{"k": "v"}}},
+				Attachments: []Attachment{{Type: "text", Content: "att"}},
+			},
+		},
+		LastAnnouncedRecords: AnnouncedRecords{{ID: "r1"}},
+		PendingAnnouncements: []PendingAnnouncement{{ID: "pa1", Type: "x"}},
+	}
+	dup := src.Clone()
+
+	// Completeness: the structural copy must serialize identically — a missed
+	// field shows up as a marshaling diff.
+	want, err := json.Marshal(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.Marshal(dup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(want) != string(got) {
+		t.Fatalf("clone JSON differs\n got %s\nwant %s", got, want)
+	}
+
+	// Isolation: mutating every reference field of the clone must not leak.
+	m := &dup.Messages[0]
+	m.Content = "changed"
+	m.ReasoningExtra[0] = 'X'
+	m.Usage.InputTokens = 99
+	m.Steps[0].Content = "changed"
+	m.Steps[1].ToolCalls[0].Output = "changed"
+	m.Steps[1].ToolCalls[0].OutputAttachments[0].FilePath = "changed"
+	m.Steps[1].ToolCalls[0].Opaque["k"] = "changed"
+	m.Steps[1].ToolCalls[0].Opaque["nested"].(map[string]any)["deep"].([]any)[0] = 2.0
+	m.ToolCalls[0].Opaque["k"] = "changed"
+	m.Attachments[0].Content = "changed"
+	dup.LastAnnouncedRecords[0].ID = "changed"
+	dup.PendingAnnouncements[0].ID = "changed"
+
+	s := src.Messages[0]
+	if s.Content != "text" || string(s.ReasoningExtra) != `{"enc":"x"}` || s.Usage.InputTokens != 3 ||
+		s.Steps[0].Content != "r" || s.Steps[1].ToolCalls[0].Output != "o" ||
+		s.Steps[1].ToolCalls[0].OutputAttachments[0].FilePath != "/a.png" ||
+		s.Steps[1].ToolCalls[0].Opaque["k"] != "v" ||
+		s.Steps[1].ToolCalls[0].Opaque["nested"].(map[string]any)["deep"].([]any)[0] != 1.0 ||
+		s.ToolCalls[0].Opaque["k"] != "v" ||
+		s.Attachments[0].Content != "att" ||
+		src.LastAnnouncedRecords[0].ID != "r1" ||
+		src.PendingAnnouncements[0].ID != "pa1" {
+		t.Fatal("clone mutation leaked into source")
+	}
+
+	if (*Conversation)(nil).Clone() != nil {
+		t.Fatal("Clone(nil) should return nil")
+	}
+}

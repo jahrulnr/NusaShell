@@ -23,6 +23,15 @@ import (
 // stay append-only. Compaction and new chats create a new conversation.
 type ConversationStore interface {
 	List() []*domain.Conversation
+	// ListMeta is the metadata-only variant of List for read models that
+	// never touch message payloads (room list). Results carry every scalar
+	// field plus a role-only Messages skeleton so len() and the durable
+	// anchor check stay truthful; content-bearing fields are empty. Stores
+	// without a cheap projection may delegate to List.
+	ListMeta() []*domain.Conversation
+	// ListUsage projects every assistant message's token usage into a flat
+	// row so telemetry aggregation never deep-clones transcripts.
+	ListUsage() []domain.UsageProjection
 	Get(id string) (*domain.Conversation, error)
 	Save(c *domain.Conversation) error
 	Delete(id string) error

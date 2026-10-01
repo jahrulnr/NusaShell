@@ -19,7 +19,9 @@ import (
 // One conversation owns one directory under <dir>/conversations:
 //
 //	conversations/<conversationID>/
-//	    index.jsonl   live (un-compacted) transcript epoch
+//	    index.jsonl   canonical compacted transcript epoch
+//	    meta.json     newest header record (rewritten every save)
+//	    pending.jsonl message-upsert log between index flushes
 //	    chunk/        archived pre-compaction chunks: chunk-<n>.json
 //	    acp/          terminal ACP / internal-delegate runs: <runID>.json
 //	    operation/    per-turn net unified diff patches: <runID>.patch
@@ -31,15 +33,26 @@ import (
 // append-shaped, greppable, and survives a torn tail: the loader skips an
 // unparsable message line instead of dropping the whole conversation.
 //
+// Saves no longer rewrite index.jsonl each time. meta.json carries the
+// latest header (a few KB, atomicWrite) and pending.jsonl receives one line
+// per changed/new message, upserted by Message.ID at load: a known ID
+// replaces that message's content but keeps its first-seen position, a new
+// ID appends at the tail. index.jsonl is only rewritten when an epoch is
+// reset (insert/delete/reorder) or pending.jsonl crosses a size bound, so an
+// older binary reading a new data dir sees a consistent, possibly slightly
+// stale transcript — never a corrupt or duplicated one.
+//
 // Legacy installs kept the same data as flat siblings of the directory
 // (conversations/<id>.json, <id>.chunks/, <id>.acp/). Those are converted once
 // at boot by migrateLegacyConversationLayout.
 const (
-	conversationsDirName  = "conversations"
-	conversationIndexName = "index.jsonl"
-	chunkDirName          = "chunk"
-	acpDirName            = "acp"
-	operationDirName      = "operation"
+	conversationsDirName    = "conversations"
+	conversationIndexName   = "index.jsonl"
+	conversationMetaName    = "meta.json"
+	conversationPendingName = "pending.jsonl"
+	chunkDirName            = "chunk"
+	acpDirName              = "acp"
+	operationDirName        = "operation"
 	// legacyChunkDirSuffix / legacyACPDirSuffix name the pre-migration
 	// sidecar directories: conversations/<id>.chunks and <id>.acp.
 	legacyChunkDirSuffix = ".chunks"
@@ -68,6 +81,18 @@ func conversationSubdirPath(conversationsDir, id, sub string) (string, error) {
 // conversationIndexPath resolves the JSONL transcript path for a conversation.
 func conversationIndexPath(conversationsDir, id string) (string, error) {
 	return conversationSubdirPath(conversationsDir, id, conversationIndexName)
+}
+
+// conversationMetaPath resolves the meta.json sidecar holding the newest
+// header record for a conversation.
+func conversationMetaPath(conversationsDir, id string) (string, error) {
+	return conversationSubdirPath(conversationsDir, id, conversationMetaName)
+}
+
+// conversationPendingPath resolves the pending.jsonl upsert log of a
+// conversation.
+func conversationPendingPath(conversationsDir, id string) (string, error) {
+	return conversationSubdirPath(conversationsDir, id, conversationPendingName)
 }
 
 // conversationChunkDir resolves the compaction-chunk directory of a conversation.
@@ -102,22 +127,82 @@ func encodeConversationJSONL(c *domain.Conversation) ([]byte, error) {
 	if c == nil {
 		return nil, errors.New("conversation is nil")
 	}
-	var sb bytes.Buffer
-	line, err := json.Marshal(conversationHeader{Conversation: *c})
+	header, err := json.Marshal(conversationHeader{Conversation: *c})
 	if err != nil {
 		return nil, err
 	}
-	sb.Write(line)
+	msgLines, err := marshalMessageLines(c)
+	if err != nil {
+		return nil, err
+	}
+	var sb bytes.Buffer
+	sb.Write(header)
 	sb.WriteByte('\n')
+	for _, line := range msgLines {
+		sb.Write(line)
+		sb.WriteByte('\n')
+	}
+	return sb.Bytes(), nil
+}
+
+// marshalMessageLines encodes every message exactly once. The result is
+// aligned with c.Messages and carries no trailing newlines, so the same
+// lines can feed the index writer, the pending append, and the write-state
+// diff without re-marshaling.
+func marshalMessageLines(c *domain.Conversation) ([][]byte, error) {
+	out := make([][]byte, len(c.Messages))
 	for i := range c.Messages {
 		line, err := json.Marshal(c.Messages[i])
 		if err != nil {
 			return nil, err
 		}
+		out[i] = line
+	}
+	return out, nil
+}
+
+// writeConversationIndex renders the canonical compacted transcript — the
+// header record plus one JSON line per message — and replaces index.jsonl
+// atomically. Callers supply already-encoded lines so a save never marshals
+// the transcript twice.
+func writeConversationIndex(indexPath string, headerLine []byte, msgLines [][]byte) error {
+	var sb bytes.Buffer
+	sb.Write(headerLine)
+	sb.WriteByte('\n')
+	for _, line := range msgLines {
 		sb.Write(line)
 		sb.WriteByte('\n')
 	}
-	return sb.Bytes(), nil
+	return atomicWrite(indexPath, sb.Bytes())
+}
+
+// appendPendingLines appends whole JSON lines to the pending upsert log in a
+// single O_APPEND write followed by fsync, matching atomicWrite durability:
+// a crash can only lose the appended batch, never leave a half-written line
+// interleaved with another save. Returns the number of bytes written.
+func appendPendingLines(path string, lines [][]byte) (int, error) {
+	var sb bytes.Buffer
+	for _, line := range lines {
+		sb.Write(line)
+		sb.WriteByte('\n')
+	}
+	b := sb.Bytes()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		return 0, err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return 0, err
+	}
+	if err := f.Close(); err != nil {
+		return 0, err
+	}
+	return len(b), nil
 }
 
 // decodeConversationJSONL parses an index.jsonl transcript. The first
@@ -144,7 +229,8 @@ func decodeConversationJSONL(b []byte) (*domain.Conversation, int, error) {
 	}
 	skipped := 0
 	for _, line := range lines[head+1:] {
-		if strings.TrimSpace(line) == "" {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
 		var m domain.Message
@@ -155,6 +241,43 @@ func decodeConversationJSONL(b []byte) (*domain.Conversation, int, error) {
 		c.Messages = append(c.Messages, m)
 	}
 	return &c, skipped, nil
+}
+
+// replayPendingJSONL applies a pending.jsonl upsert log to a decoded index
+// transcript. A line whose message ID is already known replaces that
+// message's content but keeps its first-seen position; a new ID appends at
+// the tail. Blank and unparsable lines (a torn tail) are counted as skipped,
+// like index message lines; lines whose message has no ID are skipped too —
+// pending only ever carries identified messages, so an ID-less line is
+// treated as damage rather than upserted onto an unrelated ID-less index
+// message.
+func replayPendingJSONL(c *domain.Conversation, pending []byte) (lines, skipped int) {
+	positions := make(map[string]int, len(c.Messages))
+	for i := range c.Messages {
+		id := c.Messages[i].ID
+		if _, ok := positions[id]; !ok {
+			positions[id] = i
+		}
+	}
+	for _, line := range strings.Split(string(pending), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lines++
+		var m domain.Message
+		if err := json.Unmarshal([]byte(line), &m); err != nil || m.ID == "" {
+			skipped++
+			continue
+		}
+		if at, ok := positions[m.ID]; ok {
+			c.Messages[at] = m
+			continue
+		}
+		positions[m.ID] = len(c.Messages)
+		c.Messages = append(c.Messages, m)
+	}
+	return lines, skipped
 }
 
 // layoutMigration reports what a legacy-layout conversion moved.

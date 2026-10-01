@@ -191,6 +191,34 @@ export function toDataURL(bytes, mediaType) {
   return `data:${mediaType};base64,${btoa(binary)}`;
 }
 
+// createCoalescedRefresh wraps an async refresh so overlapping triggers share
+// one in-flight run and queue at most one trailing pass. Every caller gets a
+// promise that settles only after the newest queued pass finishes, so a burst
+// of turn.done + tool.completed events collapses into one backend read plus a
+// single catch-up instead of one RPC per event. If the task rejects, every
+// caller that joined that pass sees the rejection and the wrapper recovers —
+// the next call starts a fresh pass.
+export function createCoalescedRefresh(run) {
+  let active = null;
+  let queued = false;
+  return function coalescedRefresh() {
+    if (active) {
+      queued = true;
+      return active;
+    }
+    const pass = (async () => {
+      do {
+        queued = false;
+        await run();
+      } while (queued);
+    })();
+    active = pass;
+    const clear = () => { if (active === pass) active = null; };
+    pass.then(clear, clear);
+    return pass;
+  };
+}
+
 function formatTokenCount(value) {
   if (!Number.isFinite(value) || value <= 0) return '0';
   if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(1))}M`;

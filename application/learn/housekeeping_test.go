@@ -70,21 +70,75 @@ func (s *retentionConversations) List() []*domain.Conversation             { ret
 func (s *retentionConversations) Get(string) (*domain.Conversation, error) { return nil, nil }
 func (s *retentionConversations) Delete(id string) error                   { s.deleted[id] = true; return nil }
 
+// TestActiveLearningJobIsCoalescedPerConversation pins the in-memory
+// tracking that replaced the hot-path Jobs.List + Experiences.Get scan:
+// only jobs this process queued block a new trigger, the mark clears when
+// the run exits, and stale persisted rows can never wedge a conversation.
 func TestActiveLearningJobIsCoalescedPerConversation(t *testing.T) {
-	experiences := &retentionExperiences{items: map[string]*domain.Experience{
-		"exp_a": {ID: "exp_a", ConversationID: "conv_a"},
-		"exp_b": {ID: "exp_b", ConversationID: "conv_b"},
-	}}
+	experiences := &retentionExperiences{items: map[string]*domain.Experience{}}
 	jobs := &retentionJobs{items: map[string]*domain.LearningJob{
-		"running_a": {ID: "running_a", Status: domain.LearningJobRunning, ExperienceID: "exp_a"},
-		"done_b":    {ID: "done_b", Status: domain.LearningJobDone, ExperienceID: "exp_b"},
+		// Leftover from a previous process: it can never run again (startup
+		// recovery expires it past the TTL), so it must not block.
+		"stale_a": {ID: "stale_a", Kind: domain.LearningJobLearner, Status: domain.LearningJobRunning, ExperienceID: "exp_gone"},
 	}}
-	s := New(Deps{Experiences: experiences, Jobs: jobs})
+	var run func()
+	s := New(Deps{
+		Experiences: experiences,
+		Jobs:        jobs,
+		Go:          func(_ string, fn func()) { run = fn },
+	})
+	if s.hasActiveLearningJob("conv_a") {
+		t.Fatal("a persisted job row from a previous process must not coalesce a new trigger")
+	}
+
+	conv := &domain.Conversation{ID: "conv_a"}
+	for i := 0; i < domain.DefaultLearnerNudgeInterval; i++ {
+		conv.Messages = append(conv.Messages, domain.Message{Role: domain.RoleUser, Content: fmt.Sprintf("turn %d", i)})
+	}
+	s.RecordExperience(conv, false)
+	if run == nil {
+		t.Fatal("learner trigger should have queued a job")
+	}
+	if len(jobs.items) != 2 {
+		t.Fatalf("queued jobs = %d, want 2 (stale row + new job)", len(jobs.items))
+	}
 	if !s.hasActiveLearningJob("conv_a") {
-		t.Fatal("running learner for the same conversation must coalesce a new trigger")
+		t.Fatal("a queued learner must mark its conversation active")
 	}
 	if s.hasActiveLearningJob("conv_b") {
-		t.Fatal("completed learner must not block a later trigger")
+		t.Fatal("an unrelated conversation must not be blocked")
+	}
+
+	// A second turn end while the first job is still queued coalesces —
+	// without touching the job store.
+	s.RecordExperience(conv, false)
+	if len(jobs.items) != 2 {
+		t.Fatalf("coalesced trigger queued a second job: %+v", jobs.items)
+	}
+
+	// The entry clears when the run exits — here the job fails (no records
+	// store), and the conversation must still unblock.
+	run()
+	if s.hasActiveLearningJob("conv_a") {
+		t.Fatal("an exited learner must unblock its conversation")
+	}
+}
+
+// TestActiveLearningJobClearsWhenJobVanishes covers a queued job that was
+// deleted before its goroutine ran: the tracked entry must still clear.
+func TestActiveLearningJobClearsWhenJobVanishes(t *testing.T) {
+	jobs := &retentionJobs{items: map[string]*domain.LearningJob{}}
+	s := New(Deps{Jobs: jobs})
+	s.recordMu.Lock()
+	s.activeJobs = map[string]string{"job_gone": "conv_a"}
+	s.recordMu.Unlock()
+
+	if !s.hasActiveLearningJob("conv_a") {
+		t.Fatal("tracked job must mark its conversation active")
+	}
+	s.RunLearningJob("job_gone") // not in the store -> exits immediately
+	if s.hasActiveLearningJob("conv_a") {
+		t.Fatal("a job that vanished before running must still unblock its conversation")
 	}
 }
 

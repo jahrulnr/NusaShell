@@ -4,9 +4,10 @@ import (
 	"nusashell/domain"
 )
 
-// ConversationSource lists conversations so usage can be aggregated.
+// ConversationSource projects per-message token usage so reports can
+// aggregate without cloning conversation transcripts.
 type ConversationSource interface {
-	List() []*domain.Conversation
+	ListUsage() []domain.UsageProjection
 }
 
 // ProviderSource lists providers so model pricing can be resolved.

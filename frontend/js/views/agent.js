@@ -4,7 +4,7 @@ import { rpc, on, emit } from '../rpc.js';
 import { el, fmtTime, toast, confirmDialog, debounce } from '../ui.js';
 import { renderMarkdown } from '../markdown.js';
 import { incrementalRender } from '../incremental-render.js';
-import { formatContextUsage, effectiveContextWindow, liveRenderDelay, previousWindowStart, conversationTail, isThreadAtBottom, updateScrollPin, shouldDetachFollow, isNestedScrollerEvent } from '../agent-ui.js';
+import { formatContextUsage, effectiveContextWindow, liveRenderDelay, previousWindowStart, conversationTail, isThreadAtBottom, updateScrollPin, shouldDetachFollow, isNestedScrollerEvent, createCoalescedRefresh } from '../agent-ui.js';
 import { createThreadFollow, stickThreadToBottom } from '../thread-follow.js';
 import { bindComposer, updateSendAvailability } from './agent/composer.js';
 import { bindModelPicker } from './agent/model-picker.js';
@@ -1141,6 +1141,23 @@ function deriveTitle(messages, fallback = 'Untitled') {
   return fallback;
 }
 
+// getConversationSnapshot shares one in-flight conversations.get per room.
+// turn.done, maybeAutoTitleConversation, refreshActiveConversation, and the
+// compaction apply path can all ask for the same transcript within the same
+// settle window; joining the request removes a full-transcript fetch per
+// overlapping caller without weakening the "server is authoritative" rule —
+// the join is only while the identical read is still on the wire.
+const conversationSnapshots = new Map();
+function getConversationSnapshot(id) {
+  const pending = conversationSnapshots.get(id);
+  if (pending) return pending;
+  const request = rpc('agent.conversations.get', { id }).finally(() => {
+    if (conversationSnapshots.get(id) === request) conversationSnapshots.delete(id);
+  });
+  conversationSnapshots.set(id, request);
+  return request;
+}
+
 async function maybeAutoTitleConversation(conversationId, snapshot = null) {
   if (!conversationId) return;
   const conv = state.conversations.find((c) => c.id === conversationId);
@@ -1151,7 +1168,10 @@ async function maybeAutoTitleConversation(conversationId, snapshot = null) {
     // Always read the authoritative snapshot. The active room may still have
     // a pre-refresh state.messages value when turn.done and this callback
     // race; deriving from it is why titles were intermittently empty/stale.
-    const gotten = snapshot || await rpc('agent.conversations.get', { id: conversationId });
+    // The conversations.list result cannot substitute — it carries no
+    // transcript — so the turn.done path still issues the get, but it joins
+    // refreshActiveConversation's identical in-flight read for the same room.
+    const gotten = snapshot || await getConversationSnapshot(conversationId);
     const authoritative = gotten?.conversation;
     const target = state.conversations.find((c) => c.id === conversationId);
     if (authoritative?.title && authoritative.title !== 'Untitled') {
@@ -1177,7 +1197,11 @@ async function maybeAutoTitleConversation(conversationId, snapshot = null) {
   }
 }
 
-async function refreshConversations() {
+// refreshConversations fires from every turn.done and from tool.completed on
+// non-active rooms, so bursts share one in-flight list RPC and queue at most
+// one trailing re-read (see createCoalescedRefresh). Callers keep the same
+// promise semantics: a joined caller resolves after the pass it triggered.
+const refreshConversations = createCoalescedRefresh(async () => {
   try {
     const { conversations } = await rpc('agent.conversations.list');
     state.conversations = (conversations ?? []).filter((c) => Boolean(c.id));
@@ -1192,7 +1216,7 @@ async function refreshConversations() {
     // failure and still propagates.
     if (err?.code !== 'unavailable') throw err;
   }
-}
+});
 
 function setRoomsOpen(open) {
   const shell = document.getElementById('agent-shell');
@@ -1414,7 +1438,7 @@ async function openConversation(id) {
   state.draftWorkspace = '';
   setSubagentConversation(id);
   // the backend returns messages as a sibling of conversation
-  const { conversation, messages } = await rpc('agent.conversations.get', { id });
+  const { conversation, messages } = await getConversationSnapshot(id);
   if (token !== state.conversationLoadToken) return;
   state.conversation = conversation;
   state.messages = messages ?? [];
@@ -3677,7 +3701,7 @@ function promoteSteerToTranscript(text) {
 async function applyLiveCompaction(conversationId, run, expectedRunId = '') {
   const token = state.conversationLoadToken;
   try {
-    const { conversation, messages } = await rpc('agent.conversations.get', { id: conversationId });
+    const { conversation, messages } = await getConversationSnapshot(conversationId);
     if (token !== state.conversationLoadToken || state.activeId !== conversationId) return;
     if (runForConversation(conversationId) !== run || (expectedRunId && run.runId !== expectedRunId)) return;
     state.conversation = conversation;
@@ -3726,7 +3750,7 @@ async function refreshActiveConversation({ preserveLiveNode = null } = {}) {
   const conversationId = state.activeId;
   const token = state.conversationLoadToken;
   try {
-    const { conversation, messages } = await rpc('agent.conversations.get', { id: conversationId });
+    const { conversation, messages } = await getConversationSnapshot(conversationId);
     if (token !== state.conversationLoadToken || state.activeId !== conversationId) return;
     const liveRun = runForConversation(conversationId);
     state.conversation = conversation;

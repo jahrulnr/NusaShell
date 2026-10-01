@@ -15,6 +15,7 @@ import {
   shouldDetachFollow,
   isNestedScrollerEvent,
   liveRenderDelay,
+  createCoalescedRefresh,
 } from '../js/agent-ui.js';
 import { resizeComposerInput } from '../js/views/agent/composer.js';
 
@@ -348,4 +349,61 @@ test('attachments are detected by bytes rather than their filename or MIME type'
     { type: 'text', mediaType: 'text/plain', content: 'hello from a text attachment' },
   );
   assert.equal(inspectAttachmentContent(Uint8Array.from([0, 159, 255, 1])), null);
+});
+
+test('coalesced refresh shares one in-flight run and queues one trailing pass', async () => {
+  let runs = 0;
+  const gates = [];
+  const refresh = createCoalescedRefresh(() => new Promise((resolve) => {
+    runs++;
+    gates.push(resolve);
+  }));
+
+  const first = refresh();
+  const second = refresh();
+  const third = refresh();
+  assert.equal(runs, 1);
+  assert.equal(first, second, 'overlapping callers join the same pass');
+  assert.equal(first, third, 'overlapping callers join the same pass');
+
+  gates[0]();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runs, 2, 'the burst collapses into a single queued pass');
+  gates[1]();
+  await first;
+  assert.equal(runs, 2, 'a single queued flag covers the whole burst');
+});
+
+test('coalesced refresh reruns when triggered during an in-flight pass', async () => {
+  let runs = 0;
+  const gates = [];
+  const refresh = createCoalescedRefresh(() => new Promise((resolve) => {
+    runs++;
+    gates.push(resolve);
+  }));
+
+  const pending = refresh();
+  const late = refresh(); // arrives while the first pass is in-flight
+  gates[0]();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runs, 2, 'the refresh requested mid-pass is not lost');
+  gates[1]();
+  await pending;
+  await late;
+});
+
+test('coalesced refresh propagates rejection to joined callers and recovers', async () => {
+  let runs = 0;
+  const refresh = createCoalescedRefresh(async () => {
+    runs++;
+    if (runs === 1) throw new Error('transient');
+  });
+
+  const a = refresh();
+  const b = refresh();
+  await assert.rejects(a, /transient/);
+  await assert.rejects(b, /transient/);
+
+  await refresh();
+  assert.equal(runs, 2, 'the next call starts a fresh pass after a failure');
 });

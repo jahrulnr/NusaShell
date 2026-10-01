@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-10-01
+
+### Changed
+
+- **Conversation saves are now incremental instead of rewriting the whole
+  transcript.** Each `conversations/<conv_id>/` folder gains two sidecars:
+  `meta.json` (the newest header, rewritten per save) and `pending.jsonl`
+  (per-message upsert lines). `index.jsonl` remains the canonical compacted
+  transcript and is only rewritten on epoch resets (compaction, reorder) or
+  when the pending log crosses a flush bound (~512KB / ~2048 lines), so an
+  older binary reading a new data dir sees a consistent, possibly slightly
+  stale transcript. Experience/memory/job upserts also append a single line
+  for inserts instead of rewriting the file.
+
+### Fixed
+
+- **Admitting an update to an existing project-memory entry no longer
+  rolls back when its SCOPE is unchanged.** The admit path now collapses
+  every block carrying the same ID into one fresh entry (a true upsert that
+  also heals a legacy duplicate pair), and the duplicate-SCOPE lint counts
+  distinct unresolved IDs instead of raw rows — two blocks with the same ID
+  are one logical entry, not two facts competing for the scope. Previously
+  the guard misread an in-place update as an unresolved duplicate and the
+  whole batch was rejected with `LINT FAIL [..]: unresolved duplicate SCOPE`
+  while the file kept its old content.
+
 ## [0.9.9] - 2026-09-27
 
 ### Fixed

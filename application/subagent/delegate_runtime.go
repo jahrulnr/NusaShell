@@ -22,6 +22,12 @@ type delegateRun struct {
 	cancel    context.CancelFunc
 	done      chan *domain.AcpRun
 	runConvID string
+	// emitDirty/emitTimer coalesce transcript-delta emits: each chunk marks
+	// the run dirty and one lazy timer publishes the latest snapshot per
+	// runStreamCoalesceInterval, instead of cloning the whole transcript per
+	// token. Guarded by DelegateRuntime.mu.
+	emitDirty bool
+	emitTimer *time.Timer
 }
 
 // DelegateRuntime executes internal NusaShell delegate runs on the shared
@@ -286,8 +292,37 @@ func (r *DelegateRuntime) updateActivity(runID string, activity domain.AcpRunAct
 	}
 	dr.run.UpdatedAt = clock.NewTime().Time()
 	snapshot := cloneDelegateRun(dr.run)
+	// The emitted snapshot already carries any coalesced transcript deltas.
+	disarmDelegateEmitLocked(dr)
 	r.svc.EmitRun(contracts.EventAcpRunUpdated, snapshot)
 	r.mu.Unlock()
+}
+
+// disarmDelegateEmitLocked cancels a pending coalesced emit: the caller is
+// emitting a snapshot that already contains the dirty state. Caller holds
+// r.mu.
+func disarmDelegateEmitLocked(dr *delegateRun) {
+	dr.emitDirty = false
+	if dr.emitTimer != nil {
+		dr.emitTimer.Stop()
+		dr.emitTimer = nil
+	}
+}
+
+// flushDelegateEmit publishes the latest snapshot for a run whose transcript
+// accumulated deltas during the coalescing window. This is the emit timer's
+// callback; a disarmed or absent dirty flag makes a late fire a no-op.
+func (r *DelegateRuntime) flushDelegateEmit(runID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	dr := r.runs[runID]
+	if dr == nil || !dr.emitDirty {
+		return
+	}
+	dr.emitDirty = false
+	dr.emitTimer = nil
+	snapshot := cloneDelegateRun(dr.run)
+	r.svc.EmitRun(contracts.EventAcpRunUpdated, snapshot)
 }
 
 // appendTranscript projects one live internal-agent stream chunk onto the
@@ -319,8 +354,16 @@ func (r *DelegateRuntime) appendTranscript(runID string, chunk domain.AcpTranscr
 		}
 	}
 	dr.run.UpdatedAt = chunk.At
-	snapshot := cloneDelegateRun(dr.run)
-	r.svc.EmitRun(contracts.EventAcpRunUpdated, snapshot)
+	// Cloning and publishing the whole transcript per token-delta is
+	// O(transcript) work each — O(n²) over a stream. Mark the run dirty and
+	// let one timer per run publish the latest snapshot at the coalescing
+	// cadence; terminal and permission paths emit immediately.
+	dr.emitDirty = true
+	if dr.emitTimer == nil {
+		dr.emitTimer = time.AfterFunc(runStreamCoalesceInterval, func() {
+			r.flushDelegateEmit(runID)
+		})
+	}
 	r.mu.Unlock()
 }
 
@@ -358,6 +401,7 @@ func (r *DelegateRuntime) attachConversation(runID, conversationID string) {
 	dr.run.Transcript = transcript
 	dr.run.UpdatedAt = clock.NewTime().Time()
 	snapshot := cloneDelegateRun(dr.run)
+	disarmDelegateEmitLocked(dr)
 	r.svc.EmitRun(contracts.EventAcpRunUpdated, snapshot)
 	r.mu.Unlock()
 }
@@ -394,6 +438,9 @@ func (r *DelegateRuntime) finish(runID string, dr *delegateRun, runConvID, outpu
 	run.Activity = ""
 	run.Finish(status, errText, stopReason, now)
 	snapshot := cloneDelegateRun(run)
+	// The terminal emit carries the full final snapshot; a pending coalesced
+	// update is subsumed and must not fire after done.
+	disarmDelegateEmitLocked(dr)
 	r.mu.Unlock()
 
 	select {

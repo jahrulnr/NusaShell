@@ -50,6 +50,8 @@ func (s *markerConvStore) List() []*domain.Conversation {
 	return []*domain.Conversation{s.conv}
 }
 
+func (s *markerConvStore) ListMeta() []*domain.Conversation { return s.List() }
+
 func (s *markerConvStore) Get(id string) (*domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

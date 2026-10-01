@@ -320,6 +320,28 @@ func TestAppendTranscriptMergesConsecutiveTextChunks(t *testing.T) {
 	}
 }
 
+// TestAppendTranscriptCapsStreamingMerge verifies that once a merged
+// streaming chunk exceeds MaxAcpStreamMergeBytes, further same-kind deltas
+// start a fresh chunk. The merge path reallocates the whole Text per delta,
+// so bounding one merge target keeps a long stream near-linear instead of
+// O(n²). Content order must be preserved across the split boundary.
+func TestAppendTranscriptCapsStreamingMerge(t *testing.T) {
+	r := &AcpRun{}
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "text", Text: strings.Repeat("a", MaxAcpStreamMergeBytes+1)})
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "text", Text: "bb"})
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "text", Text: "cc"})
+
+	if len(r.Transcript) != 2 {
+		t.Fatalf("transcript len = %d, want an over-cap chunk plus a fresh merge target: %+v", len(r.Transcript), r.Transcript)
+	}
+	if got := r.Transcript[0].Text; len(got) != MaxAcpStreamMergeBytes+1 {
+		t.Fatalf("first chunk grew past the merge cap: %d", len(got))
+	}
+	if got := r.Transcript[1]; got.Kind != "text" || got.Text != "bbcc" {
+		t.Fatalf("deltas after the cap must merge into a fresh chunk preserving order: %+v", got)
+	}
+}
+
 func TestAppendTranscriptUsageDoesNotSplitStreamingThought(t *testing.T) {
 	r := &AcpRun{}
 	r.AppendTranscript(AcpTranscriptChunk{Kind: "thought", Text: "The"})

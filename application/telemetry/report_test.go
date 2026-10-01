@@ -9,14 +9,17 @@ import (
 	clock "nusashell/pkg/time"
 )
 
+// fakeConvStore implements ConversationSource by projecting usage rows the
+// same way the production store does (domain.Conversation.UsageRows), so the
+// report handler never reads transcript fields.
 type fakeConvStore struct {
 	convs map[string]*domain.Conversation
 }
 
-func (f *fakeConvStore) List() []*domain.Conversation {
-	out := make([]*domain.Conversation, 0, len(f.convs))
+func (f *fakeConvStore) ListUsage() []domain.UsageProjection {
+	var out []domain.UsageProjection
 	for _, c := range f.convs {
-		out = append(out, c)
+		out = append(out, c.UsageRows()...)
 	}
 	return out
 }

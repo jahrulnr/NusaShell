@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -351,6 +352,39 @@ func (c *Conversation) HiddenFromRoomList() bool {
 	return strings.HasPrefix(c.Title, pipelineRoomTitlePrefix)
 }
 
+// UsageProjection is a flat per-message usage row so telemetry aggregation
+// can scan token/cost data without cloning transcripts.
+type UsageProjection struct {
+	ConversationID string
+	Role           MessageRole
+	Model          string
+	ProviderID     string
+	CreatedAt      time.Time
+	Usage          *Usage
+}
+
+// UsageRows returns one UsageProjection per assistant message that reported
+// provider usage. Usage points to a private copy so mutating a row can never
+// write back into the conversation.
+func (c *Conversation) UsageRows() []UsageProjection {
+	var out []UsageProjection
+	for _, m := range c.Messages {
+		if m.Role != RoleAssistant || m.Usage == nil {
+			continue
+		}
+		usage := *m.Usage
+		out = append(out, UsageProjection{
+			ConversationID: c.ID,
+			Role:           m.Role,
+			Model:          m.Model,
+			ProviderID:     m.ProviderID,
+			CreatedAt:      m.CreatedAt,
+			Usage:          &usage,
+		})
+	}
+	return out
+}
+
 // NewConversation creates an empty conversation.
 func NewConversation(id, title string) *Conversation {
 	now := clock.NewTime().Time()
@@ -360,6 +394,95 @@ func NewConversation(id, title string) *Conversation {
 		CreatedAt: now,
 		UpdatedAt: now,
 		Status:    "idle",
+	}
+}
+
+// Clone returns a deep copy of the conversation that shares no mutable
+// state with the original — message/step/tool-call slices, RawMessage
+// payloads, opaque tool metadata, and pointer fields are all copied. It is
+// a structural copy, not a JSON round-trip, so it costs O(field count)
+// rather than O(serialized bytes).
+func (c *Conversation) Clone() *Conversation {
+	if c == nil {
+		return nil
+	}
+	out := *c
+	out.Messages = cloneMessages(c.Messages)
+	out.LastAnnouncedRecords = slices.Clone(c.LastAnnouncedRecords)
+	out.PendingAnnouncements = slices.Clone(c.PendingAnnouncements)
+	return &out
+}
+
+func cloneMessages(msgs []Message) []Message {
+	if msgs == nil {
+		return nil
+	}
+	out := make([]Message, len(msgs))
+	for i := range msgs {
+		out[i] = msgs[i]
+		m := &out[i]
+		m.ReasoningExtra = slices.Clone(m.ReasoningExtra)
+		if m.Usage != nil {
+			u := *m.Usage
+			m.Usage = &u
+		}
+		m.Steps = cloneSteps(m.Steps)
+		m.ToolCalls = cloneToolCalls(m.ToolCalls)
+		m.Attachments = slices.Clone(m.Attachments)
+	}
+	return out
+}
+
+func cloneSteps(steps []MessageStep) []MessageStep {
+	if steps == nil {
+		return nil
+	}
+	out := make([]MessageStep, len(steps))
+	for i := range steps {
+		out[i] = steps[i]
+		out[i].ToolCalls = cloneToolCalls(steps[i].ToolCalls)
+	}
+	return out
+}
+
+func cloneToolCalls(calls []ToolCall) []ToolCall {
+	if calls == nil {
+		return nil
+	}
+	out := make([]ToolCall, len(calls))
+	for i := range calls {
+		out[i] = calls[i]
+		out[i].OutputAttachments = slices.Clone(calls[i].OutputAttachments)
+		out[i].Opaque = cloneOpaque(calls[i].Opaque)
+	}
+	return out
+}
+
+// cloneOpaque deep-copies provider-opaque tool-call data. Values arrive from
+// JSON decoding, so nested containers are map[string]any or []any.
+func cloneOpaque(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = cloneOpaqueValue(v)
+	}
+	return out
+}
+
+func cloneOpaqueValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		return cloneOpaque(t)
+	case []any:
+		out := make([]any, len(t))
+		for i := range t {
+			out[i] = cloneOpaqueValue(t[i])
+		}
+		return out
+	default:
+		return v
 	}
 }
 

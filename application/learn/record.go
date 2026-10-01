@@ -30,11 +30,25 @@ func (s *Service) RecordExperience(conv *domain.Conversation, headless bool) {
 	if !trig.Enqueue {
 		return
 	}
+	jobID := s.enqueueLearnerJob(conv, exp, trig)
+	if jobID == "" {
+		return
+	}
+	// The job leaves the active set when RunLearningJob exits, so launching
+	// outside recordMu keeps a synchronous Go func (tests) from deadlocking.
+	s.goSafe("learning", func() { s.RunLearningJob(jobID) })
+}
+
+// enqueueLearnerJob persists a queued learner job and marks the source
+// conversation active, or returns "" when a job for it is already queued or
+// running. The check, the persist, and the active mark share one recordMu
+// critical section so two simultaneous turn endings cannot both enqueue.
+func (s *Service) enqueueLearnerJob(conv *domain.Conversation, exp domain.Experience, trig domain.LearningTrigger) string {
 	s.recordMu.Lock()
 	defer s.recordMu.Unlock()
-	if s.hasActiveLearningJob(conv.ID) {
+	if s.hasActiveLearningJobLocked(conv.ID) {
 		s.log("debug", "learning", "learner trigger coalesced: reason=%s conv=%s", trig.Reason, conv.ID)
-		return
+		return ""
 	}
 	now := clock.NewTime().Time()
 	job := &domain.LearningJob{
@@ -48,23 +62,37 @@ func (s *Service) RecordExperience(conv *domain.Conversation, headless bool) {
 	}
 	if err := s.deps.Jobs.Save(job); err != nil {
 		s.log("warn", "learning", "learning job save failed: %v", err)
-		return
+		return ""
 	}
+	if s.activeJobs == nil {
+		s.activeJobs = map[string]string{}
+	}
+	s.activeJobs[job.ID] = conv.ID
 	s.log("info", "learning", "job queued: id=%s kind=%s reason=%s conv=%s", job.ID, job.Kind, job.Reason, conv.ID)
-	jobID := job.ID
-	s.goSafe("learning", func() { s.RunLearningJob(jobID) })
+	return job.ID
 }
 
+// hasActiveLearningJob reports whether this process has a learner job queued
+// or running for the conversation. The answer comes from the in-memory
+// activeJobs set — populated at enqueue and cleared when RunLearningJob
+// exits — so the turn-end hot path never reads the job or experience store.
+// Persisted queued/running rows from a previous process are deliberately
+// ignored: those jobs can never start again, and RecoverStaleLearningJobs
+// expires them past their TTL on startup.
 func (s *Service) hasActiveLearningJob(conversationID string) bool {
-	if s == nil || s.deps.Jobs == nil || s.deps.Experiences == nil {
+	if s == nil {
 		return false
 	}
-	for _, job := range s.deps.Jobs.List() {
-		if job == nil || (job.Status != domain.LearningJobQueued && job.Status != domain.LearningJobRunning) {
-			continue
-		}
-		experience, err := s.deps.Experiences.Get(job.ExperienceID)
-		if err == nil && experience != nil && experience.ConversationID == conversationID {
+	s.recordMu.Lock()
+	defer s.recordMu.Unlock()
+	return s.hasActiveLearningJobLocked(conversationID)
+}
+
+// hasActiveLearningJobLocked is hasActiveLearningJob for callers already
+// holding recordMu; the check-then-enqueue critical section must stay atomic.
+func (s *Service) hasActiveLearningJobLocked(conversationID string) bool {
+	for _, convID := range s.activeJobs {
+		if convID == conversationID {
 			return true
 		}
 	}

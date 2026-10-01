@@ -13,6 +13,10 @@ import (
 )
 
 func (s *Service) RunLearningJob(id string) {
+	// The job leaves the in-memory active set when its run exits for any
+	// reason — finished, failed, or deleted before it ever started — so a
+	// dead job cannot wedge coalescing for its conversation.
+	defer s.clearActiveLearningJob(id)
 	job := s.loadLearningJob(id)
 	if job == nil {
 		return
@@ -42,6 +46,17 @@ func (s *Service) loadLearningJob(id string) *domain.LearningJob {
 		return nil
 	}
 	return job
+}
+
+// clearActiveLearningJob drops a queued/running job from the in-memory active
+// set maintained by enqueueLearnerJob. Deleting an untracked id is a no-op.
+func (s *Service) clearActiveLearningJob(jobID string) {
+	if s == nil {
+		return
+	}
+	s.recordMu.Lock()
+	delete(s.activeJobs, jobID)
+	s.recordMu.Unlock()
 }
 
 func (s *Service) startLearningJob(job *domain.LearningJob) {

@@ -25,7 +25,10 @@ func (s *Service) ListRooms(currentConvID string, limit, offset int) (int, []Sum
 		return 0, nil, fmt.Errorf("conversation store not available")
 	}
 
-	all := s.store.List()
+	// ListRooms only needs scalars (title/summary/status/updated) plus the
+	// room-list predicates, so the metadata projection is enough — no
+	// transcript clones.
+	all := s.store.ListMeta()
 	visible := make([]*domain.Conversation, 0, len(all))
 	for _, c := range all {
 		if c == nil || !c.HasDurableAnchor() || c.HiddenFromRoomList() {

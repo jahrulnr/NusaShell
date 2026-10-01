@@ -61,6 +61,9 @@ func upsertJSONL[T any](s *Store, items *[]*T, v *T, idOf func(*T) string, path 
 	cur := *items
 	for i, existing := range cur {
 		if idOf(existing) == idOf(v) {
+			// An update must still rewrite the file: appending would leave a
+			// stale line with the same ID behind and loadJSONL reads every
+			// line, so the duplicate would resurface on reload.
 			cur[i] = stored
 			*items = cur
 			return s.writeJSONL(path, cur)
@@ -68,7 +71,9 @@ func upsertJSONL[T any](s *Store, items *[]*T, v *T, idOf func(*T) string, path 
 	}
 	cur = append(cur, stored)
 	*items = cur
-	return s.writeJSONL(path, cur)
+	// Inserts only need the one new line appended — the file already holds
+	// every previous item in order, so a full rewrite would be pure churn.
+	return s.appendJSONL(path, stored)
 }
 
 func deleteManyJSONL[T any](s *Store, items *[]*T, ids []string, idOf func(*T) string, path string) error {

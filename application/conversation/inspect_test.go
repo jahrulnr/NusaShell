@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"nusashell/application/conversation"
+	"nusashell/contracts"
 	"nusashell/domain"
 )
 
@@ -21,6 +22,7 @@ func (s *inspectStore) List() []*domain.Conversation {
 	}
 	return out
 }
+func (s *inspectStore) ListMeta() []*domain.Conversation { return s.List() }
 func (s *inspectStore) Get(id string) (*domain.Conversation, error) {
 	c, ok := s.convs[id]
 	if !ok {
@@ -48,6 +50,24 @@ func (s *inspectStore) GetChunk(id string, index int) ([]domain.Message, error) 
 		return nil, errNotFound
 	}
 	return msgs, nil
+}
+
+// listMetaCountingStore records which listing port the room-list handler
+// uses: HandleList must go through ListMeta so a list RPC never pays for
+// transcript clones.
+type listMetaCountingStore struct {
+	inspectStore
+	listCalls     int
+	listMetaCalls int
+}
+
+func (s *listMetaCountingStore) List() []*domain.Conversation {
+	s.listCalls++
+	return s.inspectStore.List()
+}
+func (s *listMetaCountingStore) ListMeta() []*domain.Conversation {
+	s.listMetaCalls++
+	return s.inspectStore.List()
 }
 
 var errNotFound = errString("not found")
@@ -138,6 +158,41 @@ func TestRoomInfoAndReadTurns(t *testing.T) {
 }
 
 func intPtr(v int) *int { return &v }
+
+// TestHandleListUsesMetaProjection proves the room list never asks the store
+// for transcript clones: the handler must go through ListMeta, which keeps
+// message count and the room predicates truthful without message payloads.
+func TestHandleListUsesMetaProjection(t *testing.T) {
+	now := time.Now()
+	store := &listMetaCountingStore{inspectStore: inspectStore{convs: map[string]*domain.Conversation{
+		"conv_room": {
+			ID: "conv_room", Title: "Room", UpdatedAt: now, Model: "prov:m",
+			Messages: []domain.Message{{Role: domain.RoleUser, Content: "hi"}},
+		},
+		"conv_hidden": {
+			ID: "conv_hidden", Title: "[pipeline] job", UpdatedAt: now.Add(-time.Minute),
+			Messages: []domain.Message{{Role: domain.RoleUser, Content: "x"}},
+		},
+	}}}
+
+	res, rpcErr := newInspectService(store).HandleList()
+	if rpcErr != nil {
+		t.Fatalf("HandleList: %v", rpcErr)
+	}
+	result, ok := res.(contracts.ConversationsListResult)
+	if !ok {
+		t.Fatalf("result type = %T", res)
+	}
+	if len(result.Conversations) != 1 || result.Conversations[0].ID != "conv_room" {
+		t.Fatalf("rooms = %+v, want only conv_room", result.Conversations)
+	}
+	if result.Conversations[0].MessageCount != 1 || result.Conversations[0].Model != "prov:m" {
+		t.Fatalf("room DTO lost metadata: %+v", result.Conversations[0])
+	}
+	if store.listMetaCalls != 1 || store.listCalls != 0 {
+		t.Fatalf("store calls meta=%d full=%d — the room list must use ListMeta only", store.listMetaCalls, store.listCalls)
+	}
+}
 
 func TestPartitionTurnsKeepsSteerInsideParentTurn(t *testing.T) {
 	msgs := []domain.Message{

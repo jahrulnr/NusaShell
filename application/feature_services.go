@@ -400,7 +400,9 @@ func (a *App) resolveLearnerModel(sourceConversationID string) string {
 		return model
 	}
 	if a.Conversations != nil {
-		conversations := append([]*domain.Conversation(nil), a.Conversations.List()...)
+		// Only the newest room's scalar Model field is consulted, so the
+		// metadata projection is enough — no transcript clones.
+		conversations := append([]*domain.Conversation(nil), a.Conversations.ListMeta()...)
 		sort.SliceStable(conversations, func(i, j int) bool {
 			return conversations[i] != nil && (conversations[j] == nil || conversations[i].UpdatedAt.After(conversations[j].UpdatedAt))
 		})

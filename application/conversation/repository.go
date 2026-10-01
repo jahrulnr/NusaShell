@@ -1,7 +1,6 @@
 package conversation
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -201,12 +200,28 @@ func (r *Repository) Save() error {
 	if !r.epochReset && !transcriptIDsAppendOnly(r.persistedIDs, r.inner.Messages) {
 		return ErrImmutable
 	}
-	if err := r.store.Save(Clone(r.inner)); err != nil {
+	// One clone per save: stores implementing SaveSnapshot take ownership of
+	// it and skip their own defensive copy; other stores clone inside Save.
+	snapshot := Clone(r.inner)
+	var err error
+	if ss, ok := r.store.(snapshotSaver); ok {
+		err = ss.SaveSnapshot(snapshot)
+	} else {
+		err = r.store.Save(snapshot)
+	}
+	if err != nil {
 		return err
 	}
 	r.epochReset = false
 	r.rememberPersistedIDs()
 	return nil
+}
+
+// snapshotSaver is implemented by stores that can persist an already-private
+// conversation copy without cloning it a second time. Save hands over
+// ownership: the caller must not mutate the snapshot afterwards.
+type snapshotSaver interface {
+	SaveSnapshot(c *domain.Conversation) error
 }
 
 func applyAddArg(msg *domain.Message, arg any) error {
@@ -252,20 +267,7 @@ func messageIDs(msgs []domain.Message) []string {
 	return out
 }
 
-// Clone returns a deep copy of a conversation (JSON round-trip).
+// Clone returns a deep copy of a conversation; see (*domain.Conversation).Clone.
 func Clone(c *domain.Conversation) *domain.Conversation {
-	if c == nil {
-		return nil
-	}
-	b, err := json.Marshal(c)
-	if err != nil {
-		cp := *c
-		return &cp
-	}
-	var out domain.Conversation
-	if err := json.Unmarshal(b, &out); err != nil {
-		cp := *c
-		return &cp
-	}
-	return &out
+	return c.Clone()
 }

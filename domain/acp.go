@@ -94,6 +94,11 @@ const (
 	DefaultAcpPermissionTimeout = 2 * time.Minute
 	// MaxAcpTranscriptBytes caps in-memory live transcript per run.
 	MaxAcpTranscriptBytes = 256 * 1024
+	// MaxAcpStreamMergeBytes caps how large one merged text/thought chunk
+	// may grow before a streaming delta starts a fresh chunk instead.
+	// Merging uses `Text += delta`, which reallocates the whole string per
+	// token; bounding one merge target keeps total copy near-linear.
+	MaxAcpStreamMergeBytes = 64 * 1024
 	// MaxAcpPermissionPaths is how many paths to keep on a permission event.
 	MaxAcpPermissionPaths = 12
 	// MaxAcpRunTitleLen bounds optional subagent/delegate display titles.
@@ -422,6 +427,11 @@ func (r *AcpRun) mergeStreamingChunk(chunk AcpTranscriptChunk) bool {
 		lastContent--
 	}
 	if lastContent < 0 || r.Transcript[lastContent].Kind != chunk.Kind {
+		return false
+	}
+	if len(r.Transcript[lastContent].Text) > MaxAcpStreamMergeBytes {
+		// The merge target already exceeds the bound: appending would
+		// reallocate >64KiB per delta. Start a fresh chunk of the same kind.
 		return false
 	}
 	r.Transcript[lastContent].Text += chunk.Text

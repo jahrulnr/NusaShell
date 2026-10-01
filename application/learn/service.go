@@ -21,6 +21,13 @@ type Service struct {
 	builder   *EdgeBuilder
 	lifecycle *LifecycleManager
 
+	// activeJobs maps each learner job queued by this process to the
+	// conversation that spawned it. hasActiveLearningJob reads it instead of
+	// scanning the job and experience stores on every turn end. Entries are
+	// added under recordMu when a job is queued and removed when
+	// RunLearningJob exits; guarded by recordMu.
+	activeJobs map[string]string
+
 	graphBuildFingerprint string
 	graphBuildRunning     bool
 }

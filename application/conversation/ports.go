@@ -10,6 +10,13 @@ import (
 // Store is the persistence port for conversation JSON files.
 type Store interface {
 	List() []*domain.Conversation
+	// ListMeta is the metadata-only variant of List for read models that
+	// never touch message payloads (the room list). Results keep every
+	// scalar field plus a role-only Messages skeleton so len(), the
+	// durable-anchor check, and HiddenFromRoomList stay truthful; content-
+	// bearing message fields are empty. Ordering matches List. Stores
+	// without a cheap projection may delegate to List.
+	ListMeta() []*domain.Conversation
 	Get(id string) (*domain.Conversation, error)
 	Save(c *domain.Conversation) error
 	Delete(id string) error

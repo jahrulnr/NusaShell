@@ -225,6 +225,146 @@ TOPICS: [Deploy, too-many, topics, here]
 	}
 }
 
+// TestAdmitExistingIDSameScopeUpserts covers the llm-base report: admitting
+// an EXISTING id whose SCOPE is unchanged must be an in-place upsert, not a
+// duplicate-SCOPE failure.
+func TestAdmitExistingIDSameScopeUpserts(t *testing.T) {
+	st, ws, data := testStore(t)
+	id := "BUG-repl-print-dropped-by-quit"
+	scope := "infrastructure/delivery/cli/tui — outbox/flush vs tea.Quit (bubbletea v1.3.10)"
+	if _, err := st.Admit(ws, "debug", id, debugContentScope(id, scope, "first")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Admit(ws, "debug", id, debugContentScope(id, scope, "updated")); err != nil {
+		t.Fatal(err)
+	}
+	raw := mustRead(t, filepath.Join(memoryDir(data, ws), "debug.md"))
+	if strings.Count(raw, "### BEGIN_ENTRY: "+id+" ###") != 1 {
+		t.Fatalf("same-id same-scope admit left duplicate blocks:\n%s", raw)
+	}
+	if strings.Count(raw, "SYMPTOM: updated") != 1 {
+		t.Fatalf("same-id same-scope admit did not replace content:\n%s", raw)
+	}
+	if problems := domain.LintProjectMemory([]domain.ProjectMemoryFileBlob{{Rel: "debug.md", Kind: "debug", Raw: raw}}, 3); len(problems) > 0 {
+		t.Fatalf("lint not clean after upsert: %s", domain.FormatLintReport(problems))
+	}
+}
+
+// TestAdmitCollapsesLegacyDuplicateID simulates a file that already holds a
+// duplicate pair (same ID, same SCOPE — e.g. from an earlier append-style
+// write). The next admit of that ID must collapse both blocks into one
+// updated entry instead of rolling back forever.
+func TestAdmitCollapsesLegacyDuplicateID(t *testing.T) {
+	st, ws, data := testStore(t)
+	id := "BUG-repl-print-dropped-by-quit"
+	scope := "infrastructure/delivery/cli/tui — outbox/flush vs tea.Quit (bubbletea v1.3.10)"
+	dir := memoryDir(data, ws)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	block := "### BEGIN_ENTRY: " + id + " ###\n" + debugContentScope(id, scope, "old") + "### END_ENTRY: " + id + " ###\n"
+	mustWrite(t, filepath.Join(dir, "debug.md"), block+"\n"+block)
+	if _, err := st.Admit(ws, "debug", id, debugContentScope(id, scope, "new")); err != nil {
+		t.Fatal(err)
+	}
+	raw := mustRead(t, filepath.Join(dir, "debug.md"))
+	if strings.Count(raw, "### BEGIN_ENTRY: "+id+" ###") != 1 {
+		t.Fatalf("duplicate pair not collapsed:\n%s", raw)
+	}
+	if !strings.Contains(raw, "SYMPTOM: new") {
+		t.Fatalf("collapsed entry did not carry the new content:\n%s", raw)
+	}
+	if problems := domain.LintProjectMemory([]domain.ProjectMemoryFileBlob{{Rel: "debug.md", Kind: "debug", Raw: raw}}, 3); len(problems) > 0 {
+		t.Fatalf("lint not clean after collapse: %s", domain.FormatLintReport(problems))
+	}
+}
+
+// TestAdmitCollapsesDuplicateSeparatedByOtherEntries proves that collapsing
+// duplicate blocks of the same ID preserves entries that sit between them:
+// [BUG-x][BUG-other][BUG-x] → after admit, two entries (BUG-x updated +
+// BUG-other intact), no silent data loss.
+func TestAdmitCollapsesDuplicateSeparatedByOtherEntries(t *testing.T) {
+	st, ws, data := testStore(t)
+	id := "BUG-repl-print-dropped-by-quit"
+	other := "BUG-queued-job-writes-after-caller-cancel"
+	scope := "infrastructure/delivery/cli/tui"
+	dir := memoryDir(data, ws)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	blk := func(id, scope, fill string) string {
+		return "### BEGIN_ENTRY: " + id + " ###\n" + debugContentScope(id, scope, fill) + "### END_ENTRY: " + id + " ###\n"
+	}
+	// BUG-other uses its own scope so it is a distinct fact, not a second
+	// occupant of BUG-x's scope.
+	mustWrite(t, filepath.Join(dir, "debug.md"),
+		blk(id, scope, "x-old")+"\n"+blk(other, other+" scope", "other")+"\n"+blk(id, scope, "x-legacy"))
+	if _, err := st.Admit(ws, "debug", id, debugContentScope(id, scope, "x-new")); err != nil {
+		t.Fatal(err)
+	}
+	raw := mustRead(t, filepath.Join(dir, "debug.md"))
+	if strings.Count(raw, "### BEGIN_ENTRY: "+id+" ###") != 1 {
+		t.Fatalf("duplicate pair not collapsed:\n%s", raw)
+	}
+	if strings.Count(raw, "### BEGIN_ENTRY: "+other+" ###") != 1 || !strings.Contains(raw, "SYMPTOM: other") {
+		t.Fatalf("interleaved entry was dropped:\n%s", raw)
+	}
+	// Order: BUG-x first (updated), BUG-other second.
+	xIdx := strings.Index(raw, "### BEGIN_ENTRY: "+id+" ###")
+	oIdx := strings.Index(raw, "### BEGIN_ENTRY: "+other+" ###")
+	if xIdx < 0 || oIdx < 0 || xIdx > oIdx {
+		t.Fatalf("unexpected entry order:\n%s", raw)
+	}
+	if problems := domain.LintProjectMemory([]domain.ProjectMemoryFileBlob{{Rel: "debug.md", Kind: "debug", Raw: raw}}, 3); len(problems) > 0 {
+		t.Fatalf("lint not clean after collapse: %s", domain.FormatLintReport(problems))
+	}
+}
+
+// TestAdmitCollapsesDuplicateAtFileEnd is the llm-base dup-at-end case:
+// [BUG-x][BUG-b][BUG-c][BUG-x] → after admit, three entries (BUG-x updated,
+// BUG-b and BUG-c intact), nothing silently deleted.
+func TestAdmitCollapsesDuplicateAtFileEnd(t *testing.T) {
+	st, ws, data := testStore(t)
+	id := "BUG-repl-print-dropped-by-quit"
+	bID, cID := "BUG-b", "BUG-c"
+	scope := "infrastructure/delivery/cli/tui"
+	dir := memoryDir(data, ws)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	blk := func(id, scope, fill string) string {
+		return "### BEGIN_ENTRY: " + id + " ###\n" + debugContentScope(id, scope, fill) + "### END_ENTRY: " + id + " ###\n"
+	}
+	// BUG-b and BUG-c are distinct facts (own scopes) that must not be lost.
+	mustWrite(t, filepath.Join(dir, "debug.md"),
+		blk(id, scope, "x-old")+"\n"+blk(bID, bID+" scope", "b")+"\n"+blk(cID, cID+" scope", "c")+"\n"+blk(id, scope, "x-legacy"))
+	if _, err := st.Admit(ws, "debug", id, debugContentScope(id, scope, "x-new")); err != nil {
+		t.Fatal(err)
+	}
+	raw := mustRead(t, filepath.Join(dir, "debug.md"))
+	if strings.Count(raw, "### BEGIN_ENTRY: "+id+" ###") != 1 {
+		t.Fatalf("duplicate pair not collapsed:\n%s", raw)
+	}
+	for _, keepID := range []string{bID, cID} {
+		if strings.Count(raw, "### BEGIN_ENTRY: "+keepID+" ###") != 1 {
+			t.Fatalf("entry %s was dropped after collapse:\n%s", keepID, raw)
+		}
+	}
+	if problems := domain.LintProjectMemory([]domain.ProjectMemoryFileBlob{{Rel: "debug.md", Kind: "debug", Raw: raw}}, 3); len(problems) > 0 {
+		t.Fatalf("lint not clean after collapse: %s", domain.FormatLintReport(problems))
+	}
+}
+
+func debugContentScope(id, scope, symptom string) string {
+	return "ID: " + id + "\n" +
+		"KIND: DEBUG\n" +
+		"SCOPE: " + scope + "\n" +
+		"SYMPTOM: " + symptom + "\n" +
+		"REUSE: avoids repeating the same diagnostic flow\n" +
+		"PROMOTED_TO: []\n" +
+		"SINCE: 2026-07-24\n"
+}
+
 func TestAdmitRejectsUserKindAndPrefixMismatch(t *testing.T) {
 	st, ws, _ := testStore(t)
 	if _, err := st.Admit(ws, "preferences", "P-x", "ID: P-x\nKIND: PATTERN\n"); err == nil {

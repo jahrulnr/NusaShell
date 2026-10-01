@@ -3,12 +3,14 @@
 package jsonstore
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -37,8 +39,12 @@ func clone[T any](v *T) *T {
 type Store struct {
 	dir string
 
-	mu             sync.RWMutex
-	conversations  map[string]*domain.Conversation
+	mu            sync.RWMutex
+	conversations map[string]*domain.Conversation
+	// written tracks the durably-written transcript of each conversation so
+	// Save can append changed message lines to pending.jsonl instead of
+	// re-encoding and rewriting the whole epoch.
+	written        map[string]*convWriteState
 	providers      []*domain.Provider
 	acpAgents      []*domain.AcpAgent
 	experiences    []*domain.Experience
@@ -59,6 +65,7 @@ func New(dir string) (*Store, error) {
 	s := &Store{
 		dir:           dir,
 		conversations: map[string]*domain.Conversation{},
+		written:       map[string]*convWriteState{},
 		settings:      domain.DefaultSettings(),
 	}
 	for _, sub := range []string{"conversations", "config", "memory", "learning", "growth"} {
@@ -78,14 +85,18 @@ func New(dir string) (*Store, error) {
 
 func (s *Store) load() error {
 	// conversations: one folder per conversation, holding index.jsonl plus its
-	// chunk/, acp/, operation/ sidecars and the mirrored plan.md. Flat files in
-	// this directory belong to other stores (todos.json, artifacts.json,
-	// acp_runs.jsonl and its .imported copies) or are leftovers from the
-	// retired flat layout, so only conv_<id> directories are conversations.
+	// meta.json/pending.jsonl sidecars, chunk/, acp/, operation/ subdirs and
+	// the mirrored plan.md. Flat files in this directory belong to other
+	// stores (todos.json, artifacts.json, acp_runs.jsonl and its .imported
+	// copies) or are leftovers from the retired flat layout, so only conv_<id>
+	// directories are conversations.
 	convDir := filepath.Join(s.dir, conversationsDirName)
 	entries, err := os.ReadDir(convDir)
 	if err != nil {
 		return err
+	}
+	if s.written == nil {
+		s.written = map[string]*convWriteState{}
 	}
 	var recovered []string
 	for _, e := range entries {
@@ -93,7 +104,8 @@ func (s *Store) load() error {
 		if !e.IsDir() || !strings.HasPrefix(name, "conv_") || strings.Contains(name, ".") {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(convDir, name, conversationIndexName))
+		folder := filepath.Join(convDir, name)
+		b, err := os.ReadFile(filepath.Join(folder, conversationIndexName))
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
 				slog.Warn("skipping unreadable conversation transcript", "id", name, "error", err)
@@ -105,22 +117,57 @@ func (s *Store) load() error {
 			slog.Warn("skipping unparsable conversation transcript", "id", name, "error", err)
 			continue
 		}
+		// meta.json holds the newest header: between flushes the index
+		// header line can lag, so prefer the sidecar when it parses and
+		// keep the index header otherwise.
+		if mb, err := os.ReadFile(filepath.Join(folder, conversationMetaName)); err == nil {
+			var meta domain.Conversation
+			if err := json.Unmarshal(mb, &meta); err == nil {
+				messages := c.Messages
+				*c = meta
+				c.Messages = messages
+			} else {
+				slog.Warn("skipping unparsable conversation meta", "id", name, "error", err)
+			}
+		}
 		if c.ID != name {
 			slog.Warn("skipping conversation whose id does not match its folder", "folder", name, "id", c.ID)
 			continue
 		}
+		// Replay the pending upsert log over the index: known IDs replace
+		// content in place, new IDs append at the tail.
+		pendingBytes, pendingLines := 0, 0
+		if pb, err := os.ReadFile(filepath.Join(folder, conversationPendingName)); err == nil && len(bytes.TrimSpace(pb)) > 0 {
+			var pSkipped int
+			pendingLines, pSkipped = replayPendingJSONL(c, pb)
+			pendingBytes, skipped = len(pb), skipped+pSkipped
+		}
 		if skipped > 0 {
 			slog.Warn("skipped unparsable transcript lines", "id", name, "lines", skipped)
 		}
-		if c.RecoverAbandonedTurn() {
-			recovered = append(recovered, c.ID)
-		}
 		s.conversations[c.ID] = c
+		st := newConvWriteState(c.Messages)
+		st.pendingBytes, st.pendingLines = pendingBytes, pendingLines
+		s.written[c.ID] = st
+		if c.Status == "running" {
+			// Eligibility check matching recoverRunningTurn's trigger. The
+			// recovery mutates the stored snapshot in place, so save a
+			// pre-recovery baseline as the diff reference — the recovery
+			// save then appends just the patched messages to pending.jsonl
+			// instead of rewriting index.jsonl on every crash-recovered
+			// boot.
+			baseline := c.Clone()
+			if c.RecoverAbandonedTurn() {
+				s.conversations[c.ID] = baseline
+				if err := s.SaveSnapshot(c); err != nil {
+					return fmt.Errorf("persist recovered conversation %s: %w", c.ID, err)
+				}
+				recovered = append(recovered, c.ID)
+			}
+		}
 	}
 	for _, id := range recovered {
-		if err := s.Save(s.conversations[id]); err != nil {
-			return fmt.Errorf("persist recovered conversation %s: %w", id, err)
-		}
+		slog.Info("recovered abandoned conversation turn", "id", id)
 	}
 
 	if err := s.loadJSON("config/providers.json", &s.providers); err != nil {
@@ -284,7 +331,7 @@ func (s *Store) List() []*domain.Conversation {
 	defer s.mu.RUnlock()
 	out := make([]*domain.Conversation, 0, len(s.conversations))
 	for _, c := range s.conversations {
-		out = append(out, clone(c))
+		out = append(out, c.Clone())
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
 	return out
@@ -297,12 +344,15 @@ func (s *Store) Get(id string) (*domain.Conversation, error) {
 	if !ok {
 		return nil, fmt.Errorf("%w: conversation %s", ErrNotFound, id)
 	}
-	return clone(c), nil
+	return c.Clone(), nil
 }
 
 // ConversationPath returns the JSONL transcript path used by file_read for a
 // stored conversation. The application uses this only as a read-only learning
 // handoff; conversation writes still go through Store.Save.
+//
+// Between flushes the tail of the transcript may live only in the sibling
+// pending.jsonl upsert log, so index.jsonl can lag the live conversation.
 func (s *Store) ConversationPath(id string) string {
 	if s == nil || safeSegment(id) != nil {
 		return ""
@@ -314,28 +364,220 @@ func (s *Store) ConversationPath(id string) string {
 	return filepath.Join(dir, conversationsDirName, id, conversationIndexName)
 }
 
+// convWriteState is the write-side mirror of one conversation's on-disk
+// transcript. order is the message-ID sequence of the index+pending view, so
+// Save can detect epoch resets (prefix mismatch) and route changed or new
+// messages to pending.jsonl instead of rewriting index.jsonl every time.
+// Content dirt is found by DeepEqual against the previous stored snapshot in
+// s.conversations — no per-message marshal is needed for unchanged lines.
+// pendingBytes/pendingLines measure the upsert log until it is folded back
+// into index.jsonl at a flush boundary.
+type convWriteState struct {
+	order        []string
+	pendingBytes int
+	pendingLines int
+	// dupIDs marks a transcript that carries a duplicated message ID: the
+	// upsert-by-ID log cannot represent that faithfully, so the conversation
+	// always takes the full-rewrite path.
+	dupIDs bool
+}
+
+// pending.jsonl flush bounds: the upsert log stays small and replays fast;
+// crossing either bound folds it back into index.jsonl. Variables (not
+// constants) so tests can lower them.
+var (
+	pendingFlushMaxBytes = 512 << 10
+	pendingFlushMaxLines = 2048
+)
+
+// newConvWriteState builds the tracked state from the canonical message
+// order.
+func newConvWriteState(msgs []domain.Message) *convWriteState {
+	st := &convWriteState{
+		order: make([]string, len(msgs)),
+	}
+	seen := make(map[string]struct{}, len(msgs))
+	for i := range msgs {
+		id := msgs[i].ID
+		st.order[i] = id
+		if _, dup := seen[id]; dup {
+			st.dupIDs = true
+		}
+		seen[id] = struct{}{}
+	}
+	return st
+}
+
+// convNeedsRewrite reports whether saving c requires a full index.jsonl
+// rewrite instead of pending appends: no tracked state (first save or
+// post-load flush), a truncated or reordered epoch (compaction reset), an
+// ID-less message (upsert needs IDs), or a tail message reusing a known ID
+// (an append-line upsert would overwrite the earlier position instead).
+func convNeedsRewrite(st *convWriteState, c *domain.Conversation) bool {
+	if st == nil || st.dupIDs {
+		return true
+	}
+	if len(c.Messages) < len(st.order) {
+		return true
+	}
+	for i, id := range st.order {
+		if c.Messages[i].ID != id {
+			return true
+		}
+	}
+	var known map[string]struct{}
+	for i := range c.Messages {
+		id := c.Messages[i].ID
+		if id == "" {
+			return true
+		}
+		// A new tail message reusing an ID — whether an already-written one
+		// or another tail message's — would upsert over the earlier position
+		// instead of appending — take the rewrite path.
+		if i >= len(st.order) {
+			if known == nil {
+				known = make(map[string]struct{}, len(st.order)+len(c.Messages))
+				for _, o := range st.order {
+					known[o] = struct{}{}
+				}
+			}
+			if _, dup := known[id]; dup {
+				return true
+			}
+			known[id] = struct{}{}
+		}
+	}
+	return false
+}
+
+// Save persists a private clone of c so the stored snapshot is never
+// aliased to the caller's object. Callers that already own a private copy
+// (e.g. conversation.Repository's snapshot) can use SaveSnapshot to skip
+// the extra marshal round-trip.
 func (s *Store) Save(c *domain.Conversation) error {
 	if c == nil {
 		return errors.New("conversation is nil")
 	}
-	indexPath, err := conversationIndexPath(filepath.Join(s.dir, conversationsDirName), c.ID)
+	return s.SaveSnapshot(c.Clone())
+}
+
+// SaveSnapshot persists c like Save but takes ownership of the object
+// instead of deep-cloning it first: the caller hands over a private copy and
+// must not mutate it afterwards. That skips one of the full JSON
+// round-trips a plain Save performs per call.
+//
+// The write itself is append-mostly: meta.json receives the newest header on
+// every save, changed or new message lines append to pending.jsonl (one
+// open/write/fsync pass), and index.jsonl is only rewritten when the epoch
+// resets or the pending log crosses a flush bound.
+func (s *Store) SaveSnapshot(c *domain.Conversation) error {
+	if c == nil {
+		return errors.New("conversation is nil")
+	}
+	conversationsDir := filepath.Join(s.dir, conversationsDirName)
+	indexPath, err := conversationIndexPath(conversationsDir, c.ID)
 	if err != nil {
 		return err
 	}
-	stored := clone(c)
-	b, err := encodeConversationJSONL(stored)
+	metaPath, err := conversationMetaPath(conversationsDir, c.ID)
+	if err != nil {
+		return err
+	}
+	pendingPath, err := conversationPendingPath(conversationsDir, c.ID)
+	if err != nil {
+		return err
+	}
+	// Marshal only the header up front: it is tiny. Message lines are encoded
+	// lazily — the whole point of the pending log is that most saves touch a
+	// handful of messages, so marshaling the whole transcript per save would
+	// keep the old O(transcript) cost alive.
+	headerLine, err := json.Marshal(conversationHeader{Conversation: *c})
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
 		return err
 	}
-	if err := atomicWrite(indexPath, b); err != nil {
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.conversations == nil {
+		s.conversations = map[string]*domain.Conversation{}
+	}
+	if s.written == nil {
+		s.written = map[string]*convWriteState{}
+	}
+	if err := atomicWrite(metaPath, headerLine); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	s.conversations[c.ID] = stored
-	s.mu.Unlock()
+
+	st := s.written[c.ID]
+	prev := s.conversations[c.ID]
+	if prev == nil || convNeedsRewrite(st, c) {
+		// Full rewrite: remove the stale upsert log before the new epoch
+		// lands so a crash can never replay old upserts over a redefined
+		// transcript; what a mid-write crash leaves is a consistent,
+		// slightly older index.
+		if err := os.Remove(pendingPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		msgLines, err := marshalMessageLines(c)
+		if err != nil {
+			return err
+		}
+		if err := writeConversationIndex(indexPath, headerLine, msgLines); err != nil {
+			return err
+		}
+		s.written[c.ID] = newConvWriteState(c.Messages)
+		s.conversations[c.ID] = c
+		return nil
+	}
+
+	// Incremental path: prev is the last snapshot this store committed, so a
+	// DeepEqual per message is the dirty check — content changes anywhere in
+	// the transcript are caught without marshaling unchanged lines.
+	var dirty [][]byte
+	for i := range c.Messages {
+		if i < len(st.order) && i < len(prev.Messages) &&
+			prev.Messages[i].ID == c.Messages[i].ID &&
+			reflect.DeepEqual(c.Messages[i], prev.Messages[i]) {
+			continue
+		}
+		line, err := json.Marshal(c.Messages[i])
+		if err != nil {
+			return err
+		}
+		dirty = append(dirty, line)
+	}
+	if len(dirty) > 0 {
+		n, err := appendPendingLines(pendingPath, dirty)
+		if err != nil {
+			return err
+		}
+		st.pendingBytes += n
+		st.pendingLines += len(dirty)
+		for i := len(st.order); i < len(c.Messages); i++ {
+			st.order = append(st.order, c.Messages[i].ID)
+		}
+		if st.pendingBytes >= pendingFlushMaxBytes || st.pendingLines >= pendingFlushMaxLines {
+			// Flush: fold pending back into the canonical index. Rewriting
+			// index.jsonl first keeps a mid-flush crash consistent — every
+			// pending upsert is already in the new index, so replaying the
+			// log over it is idempotent.
+			msgLines, merr := marshalMessageLines(c)
+			if merr != nil {
+				slog.Warn("conversation index flush could not encode transcript; pending log kept", "id", c.ID, "error", merr)
+			} else if err := writeConversationIndex(indexPath, headerLine, msgLines); err != nil {
+				slog.Warn("conversation index flush failed; pending log kept", "id", c.ID, "error", err)
+			} else if err := os.Remove(pendingPath); err != nil && !os.IsNotExist(err) {
+				slog.Warn("pending conversation log could not be removed after flush", "id", c.ID, "error", err)
+			} else {
+				st.pendingBytes = 0
+				st.pendingLines = 0
+			}
+		}
+	}
+	s.conversations[c.ID] = c
 	return nil
 }
 
@@ -349,8 +591,10 @@ func (s *Store) Delete(id string) error {
 		return fmt.Errorf("%w: conversation %s", ErrNotFound, id)
 	}
 	delete(s.conversations, id)
-	// Cascade the conversation's whole folder: index.jsonl transcript,
-	// chunk/ archive, acp/ run snapshots, operation/ patches, and plan.md.
+	delete(s.written, id)
+	// Cascade the conversation's whole folder: index.jsonl transcript, the
+	// meta.json/pending.jsonl sidecars, chunk/ archive, acp/ run snapshots,
+	// operation/ patches, and plan.md.
 	// safeSegment above guarantees `id` cannot escape the conversations
 	// directory, so this RemoveAll cannot touch siblings.
 	dir := filepath.Join(s.dir, conversationsDirName, id)
@@ -527,9 +771,17 @@ func (s *Store) appendJSONL(name string, v any) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = f.Write(append(b, '\n'))
-	return err
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		_ = f.Close()
+		return err
+	}
+	// fsync keeps insert-appends at the same durability level as the atomic
+	// whole-file rewrite they replaced.
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func (s *Store) writeJSONL(name string, v any) error {

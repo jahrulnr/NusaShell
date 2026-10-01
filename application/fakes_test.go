@@ -74,6 +74,15 @@ func (s *cloningConvStore) List() []*domain.Conversation {
 	defer s.mu.Unlock()
 	return []*domain.Conversation{s.conv}
 }
+func (s *cloningConvStore) ListMeta() []*domain.Conversation { return s.List() }
+func (s *cloningConvStore) ListUsage() []domain.UsageProjection {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.conv == nil {
+		return nil
+	}
+	return s.conv.UsageRows()
+}
 func (s *cloningConvStore) Get(id string) (*domain.Conversation, error) {
 	s.mu.Lock()
 	s.getCount++

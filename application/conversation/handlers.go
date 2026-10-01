@@ -31,9 +31,12 @@ func (s *Service) loadRepo(id string) (*Repository, *contracts.RPCError) {
 	return Bind(s.store, c), nil
 }
 
-// HandleList returns visible (non-pipeline) conversations.
+// HandleList returns visible (non-pipeline) conversations. The list RPC is
+// metadata-only: ConvDTO reads scalars plus len(Messages), so it runs on the
+// role-only skeletons from ListMeta instead of paying a full transcript
+// clone per room.
 func (s *Service) HandleList() (any, *contracts.RPCError) {
-	list := s.store.List()
+	list := s.store.ListMeta()
 	out := make([]contracts.ConversationDTO, 0, len(list))
 	for _, c := range list {
 		if !c.HasDurableAnchor() || c.HiddenFromRoomList() {

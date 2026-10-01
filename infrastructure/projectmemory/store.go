@@ -869,22 +869,44 @@ func upsertEntry(raw, id, body string) string {
 	return raw + "\n\n" + body
 }
 
+// replaceEntry is a true upsert: every block carrying id is collapsed into a
+// single fresh body at the position of the first block, while entries that
+// happen to sit between duplicate blocks are preserved verbatim. A legacy
+// duplicate pair (same ID, same SCOPE, from an earlier append-style write or
+// a manual edit) is healed on the next admit instead of surviving to trip
+// the duplicate-SCOPE lint — without it, an update of that ID would roll
+// back forever.
 func replaceEntry(raw, id, body string) (string, bool) {
 	begin := "### BEGIN_ENTRY: " + id + " ###"
 	end := "### END_ENTRY: " + id + " ###"
-	start := strings.Index(raw, begin)
-	if start < 0 {
+	first := strings.Index(raw, begin)
+	if first < 0 {
 		return raw, false
 	}
-	relEnd := strings.Index(raw[start:], end)
-	if relEnd < 0 {
-		return raw, false
+	var out strings.Builder
+	out.WriteString(raw[:first])
+	out.WriteString(body)
+	pos := first
+	for {
+		relEnd := strings.Index(raw[pos:], end)
+		if relEnd < 0 {
+			// Unterminated block: keep the file as-is instead of corrupting it.
+			return raw, false
+		}
+		pos += relEnd + len(end)
+		if pos < len(raw) && raw[pos] == '\n' {
+			pos++
+		}
+		// Skip every further block with the same id so duplicates collapse,
+		// but keep the text between blocks (other entries) intact.
+		next := strings.Index(raw[pos:], begin)
+		if next < 0 {
+			out.WriteString(raw[pos:])
+			return out.String(), true
+		}
+		out.WriteString(raw[pos : pos+next])
+		pos += next
 	}
-	stop := start + relEnd + len(end)
-	if stop < len(raw) && raw[stop] == '\n' {
-		stop++
-	}
-	return raw[:start] + body + raw[stop:], true
 }
 
 func removeEntry(raw, id string) (string, bool) {

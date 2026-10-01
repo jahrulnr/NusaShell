@@ -317,6 +317,93 @@ func TestAcpRunStoreMigratesLegacyJSONL(t *testing.T) {
 	}
 }
 
+// TestAcpRunStoreLoadWarmIndex pins the lazily-built runID→path index:
+// the first Load (or List/Save) walks the conversation folders once, later
+// Loads go straight to the indexed file, entries added out of band are found
+// by the fallback scan and healed into the index, and vanished files drop
+// their stale entry instead of poisoning lookups.
+func TestAcpRunStoreLoadWarmIndex(t *testing.T) {
+	dir := t.TempDir()
+	store := NewAcpRunStore(dir)
+
+	r1 := domain.AcpRunRecord{
+		ID:             "acprun_idx",
+		ConversationID: "conv_idx",
+		Status:         domain.AcpRunCompleted,
+		StartedAt:      time.Now().UTC(),
+	}
+	if err := store.Save(r1); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	wantPath := filepath.Join(dir, "conversations", "conv_idx", "acp", "acprun_idx.json")
+	if got := store.runIndex["acprun_idx"]; got != wantPath {
+		t.Fatalf("Save must maintain the index: got %q, want %q", got, wantPath)
+	}
+
+	// A hit serves from the index entry.
+	if _, ok := store.Load("acprun_idx"); !ok {
+		t.Fatal("Load: indexed run not found")
+	}
+	if _, ok := store.Load("acprun_missing"); ok {
+		t.Fatal("Load: unknown run must miss")
+	}
+	if _, ok := store.runIndex["acprun_missing"]; ok {
+		t.Fatal("a miss must not pollute the index")
+	}
+
+	// A file that appears out of band (e.g. written by another process) is
+	// found by the fallback scan and healed into the index.
+	foreign := filepath.Join(dir, "conversations", "conv_foreign", "acp", "acprun_foreign.json")
+	if err := os.MkdirAll(filepath.Dir(foreign), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := domain.AcpRunRecord{ID: "acprun_foreign", ConversationID: "conv_foreign", Status: domain.AcpRunCompleted}
+	if err := writeJSONAtomic(foreign, rec); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Load("acprun_foreign"); !ok {
+		t.Fatal("Load must fall back to a scan for out-of-band files")
+	}
+	if got := store.runIndex["acprun_foreign"]; got != foreign {
+		t.Fatalf("index not healed after scan hit: %q", got)
+	}
+
+	// A vanished file drops its stale entry before the scan.
+	if err := os.Remove(wantPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Load("acprun_idx"); ok {
+		t.Fatal("Load must miss after the file vanished")
+	}
+	if _, ok := store.runIndex["acprun_idx"]; ok {
+		t.Fatal("stale index entry must be dropped")
+	}
+}
+
+// TestAcpRunStorePathIndexesPredictedPath: Path records the would-be file so
+// a later Load goes through the index (and self-heals when the file was
+// never written).
+func TestAcpRunStorePathIndexesPredictedPath(t *testing.T) {
+	dir := t.TempDir()
+	store := NewAcpRunStore(dir)
+	// Build the index first so Path has something to maintain.
+	_ = store.List("")
+	p := store.Path("conv_pred", "acprun_pred")
+	if p == "" {
+		t.Fatal("Path returned empty")
+	}
+	if got := store.runIndex["acprun_pred"]; got != p {
+		t.Fatalf("Path must maintain the index: got %q, want %q", got, p)
+	}
+	// The file was never written: Load re-checks, misses, and drops it.
+	if _, ok := store.Load("acprun_pred"); ok {
+		t.Fatal("Load must miss for a path that was never saved")
+	}
+	if _, ok := store.runIndex["acprun_pred"]; ok {
+		t.Fatal("phantom index entry must be dropped")
+	}
+}
+
 func TestAcpRunRecordFilenameSanitization(t *testing.T) {
 	dir := t.TempDir()
 	store := NewAcpRunStore(dir)

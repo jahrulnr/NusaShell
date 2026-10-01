@@ -20,6 +20,8 @@ func (f *fakeStore) List() []*domain.Conversation {
 	return out
 }
 
+func (f *fakeStore) ListMeta() []*domain.Conversation { return f.List() }
+
 func (f *fakeStore) Get(id string) (*domain.Conversation, error) {
 	c, ok := f.convs[id]
 	if !ok {
@@ -46,6 +48,29 @@ func (f *fakeStore) Delete(id string) error {
 
 func (f *fakeStore) GetChunk(id string, index int) ([]domain.Message, error) {
 	return nil, errors.New("not found")
+}
+
+// snapshotStore implements the optional SaveSnapshot ownership contract: the
+// repository hands over its one clone and the store persists it directly,
+// skipping the defensive copy a plain Save performs.
+type snapshotStore struct {
+	fakeStore
+	saveCalls     int
+	snapshotCalls int
+	snapshotErr   error
+}
+
+func (s *snapshotStore) Save(c *domain.Conversation) error {
+	s.saveCalls++
+	return s.fakeStore.Save(c)
+}
+
+func (s *snapshotStore) SaveSnapshot(c *domain.Conversation) error {
+	s.snapshotCalls++
+	if s.snapshotErr != nil {
+		return s.snapshotErr
+	}
+	return s.fakeStore.Save(c)
 }
 
 func TestNewConversationStartsEmpty(t *testing.T) {
@@ -313,6 +338,80 @@ func TestResetTranscriptStartsNewEpoch(t *testing.T) {
 	got := repo.GetAll()
 	if len(got) != 1 || got[0].ID != "handover" {
 		t.Fatalf("epoch messages = %+v, want handover only", got)
+	}
+}
+
+// TestSaveUsesSnapshotOwnershipWhenSupported pins the one-clone contract:
+// a store that implements SaveSnapshot takes over the repository's clone
+// instead of receiving a pointer it has to defensively copy again.
+func TestSaveUsesSnapshotOwnershipWhenSupported(t *testing.T) {
+	store := &snapshotStore{}
+	repo := NewConversation(store, "Chat")
+	if err := repo.Add(domain.RoleUser, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if store.snapshotCalls != 1 || store.saveCalls != 0 {
+		t.Fatalf("snapshotCalls=%d saveCalls=%d — a snapshot-capable store must own the clone", store.snapshotCalls, store.saveCalls)
+	}
+	c, err := store.Get(repo.ID())
+	if err != nil || len(c.Messages) != 1 || c.Messages[0].Content != "hello" {
+		t.Fatalf("saved conversation = %+v, err=%v", c, err)
+	}
+}
+
+// TestSaveFallsBackToSaveWithoutSnapshotSupport keeps the generic contract:
+// a store without SaveSnapshot still receives one clone through Save.
+func TestSaveFallsBackToSaveWithoutSnapshotSupport(t *testing.T) {
+	store := &fakeStore{}
+	repo := NewConversation(store, "Chat")
+	if err := repo.Add(domain.RoleUser, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Get(repo.ID()); err != nil {
+		t.Fatalf("conversation must persist through plain Save: %v", err)
+	}
+}
+
+func TestSaveSnapshotErrorPropagates(t *testing.T) {
+	snapErr := errors.New("disk full")
+	store := &snapshotStore{snapshotErr: snapErr}
+	repo := NewConversation(store, "Chat")
+	if err := repo.Add(domain.RoleUser, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(); !errors.Is(err, snapErr) {
+		t.Fatalf("Save() err = %v, want %v", err, snapErr)
+	}
+}
+
+// TestSaveSnapshotKeepsAppendOnlyValidation proves the immutable-transcript
+// and anchor checks still run before the snapshot handoff, so a rejected
+// save never reaches the store.
+func TestSaveSnapshotKeepsAppendOnlyValidation(t *testing.T) {
+	store := &snapshotStore{}
+	repo := NewConversation(store, "Chat")
+	if err := repo.Add(domain.RoleUser, domain.Message{ID: "u1", Content: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Add(domain.RoleAssistant, domain.Message{ID: "a1", Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(); err != nil {
+		t.Fatal(err)
+	}
+	repo.inner.Messages = repo.inner.Messages[:1]
+	err := repo.Save()
+	if !errors.Is(err, ErrImmutable) {
+		t.Fatalf("Save() err = %v, want ErrImmutable", err)
+	}
+	if store.snapshotCalls != 1 {
+		t.Fatalf("snapshotCalls = %d, want 1 — a rejected save must not reach the store", store.snapshotCalls)
 	}
 }
 

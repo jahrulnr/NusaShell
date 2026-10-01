@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -922,5 +923,93 @@ func TestWriteTextFileBypassTerminalRunFailsClosed_Write(t *testing.T) {
 	}
 	if _, err := os.Stat(outsideFile); err == nil {
 		t.Fatal("terminal bypass run must not create files outside the workspace")
+	}
+}
+
+// TestSessionUpdateCoalescesEmits covers the emitter-side batching: a burst
+// of session/update notifications must produce one coalesced OnUpdate
+// carrying the merged transcript, and the terminal emit must be immediate
+// with no trailing update after it.
+func TestSessionUpdateCoalescesEmits(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	pc := fsTestConn(rt, t.TempDir())
+	lr := fsTestRun(rt, pc, "sess_stream", domain.RiskReadOnly)
+
+	var mu sync.Mutex
+	var updates []*domain.AcpRun
+	var dones []*domain.AcpRun
+	rt.SetCallbacks(
+		func(run *domain.AcpRun) { mu.Lock(); updates = append(updates, run); mu.Unlock() },
+		func(run *domain.AcpRun) { mu.Lock(); dones = append(dones, run); mu.Unlock() },
+		nil, nil,
+	)
+
+	for i := 0; i < 50; i++ {
+		pc.SessionUpdate(client.SessionUpdateParams{
+			SessionID: "sess_stream",
+			Update: client.SessionUpdate{
+				SessionUpdate: "agent_message_chunk",
+				Content:       &client.UpdateContent{Block: &client.ContentBlock{Type: "text", Text: "x"}},
+			},
+		})
+	}
+	// No synchronous emit per notification.
+	mu.Lock()
+	if len(updates) != 0 {
+		mu.Unlock()
+		t.Fatalf("notification burst emitted %d updates synchronously", len(updates))
+	}
+	mu.Unlock()
+
+	// Exactly one coalesced emit arrives carrying the fully merged stream.
+	deadline := time.After(2 * time.Second)
+	for {
+		mu.Lock()
+		n := len(updates)
+		mu.Unlock()
+		if n > 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("coalesced session/update emit never fired")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	mu.Lock()
+	got := updates[0]
+	mu.Unlock()
+	if len(got.Transcript) != 1 || got.Transcript[0].Kind != "text" || got.Transcript[0].Text != strings.Repeat("x", 50) {
+		t.Fatalf("coalesced update transcript = %+v, want one merged chunk of 50 deltas", got.Transcript)
+	}
+	// The burst must not produce further emits.
+	time.Sleep(2 * sessionUpdateEmitInterval)
+	mu.Lock()
+	if len(updates) != 1 {
+		mu.Unlock()
+		t.Fatalf("burst produced %d updates, want 1", len(updates))
+	}
+	mu.Unlock()
+
+	// Terminal emit is immediate and carries the complete snapshot; the
+	// pending coalesced timer must not fire a stale update after it.
+	lr.finish(domain.AcpRunCompleted, "", "end_turn")
+	rt.emitDone(lr.snapshot())
+	mu.Lock()
+	if len(dones) != 1 || dones[0].Status != domain.AcpRunCompleted {
+		mu.Unlock()
+		t.Fatalf("done emits = %d, want 1 completed", len(dones))
+	}
+	if len(dones[0].Transcript) != 1 || dones[0].Transcript[0].Text != strings.Repeat("x", 50) {
+		mu.Unlock()
+		t.Fatalf("done transcript = %+v, want the merged stream", dones[0].Transcript)
+	}
+	mu.Unlock()
+	time.Sleep(2 * sessionUpdateEmitInterval)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(updates) != 1 {
+		t.Fatalf("trailing update fired after terminal emit: %d updates", len(updates))
 	}
 }

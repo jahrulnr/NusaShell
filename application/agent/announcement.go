@@ -273,7 +273,9 @@ func (a *Service) PublishAnnouncementToAll(ev Announcement, skipConvID string) {
 	if a.Conversations == nil {
 		return
 	}
-	for _, c := range a.Conversations.List() {
+	// Only IDs plus the room-list predicates are needed — use the metadata
+	// projection instead of cloning every transcript.
+	for _, c := range a.Conversations.ListMeta() {
 		if c == nil || !c.HasDurableAnchor() || c.HiddenFromRoomList() {
 			continue
 		}

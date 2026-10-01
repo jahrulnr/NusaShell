@@ -37,6 +37,14 @@ func (s *learnerConvStore) List() []*domain.Conversation {
 	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
 	return out
 }
+func (s *learnerConvStore) ListMeta() []*domain.Conversation { return s.List() }
+func (s *learnerConvStore) ListUsage() []domain.UsageProjection {
+	var out []domain.UsageProjection
+	for _, c := range s.List() {
+		out = append(out, c.UsageRows()...)
+	}
+	return out
+}
 func (s *learnerConvStore) Get(id string) (*domain.Conversation, error) {
 	c, ok := s.convs[id]
 	if !ok {

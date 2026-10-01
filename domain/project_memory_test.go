@@ -223,6 +223,33 @@ LINKS: [related_to D-missing]
 	}
 }
 
+func TestLintDuplicateScopeIgnoresSameID(t *testing.T) {
+	// Two blocks carrying the SAME ID and the same SCOPE are one logical
+	// entry (a stale duplicate that admit collapses), not two facts that
+	// compete for the scope. The duplicate-SCOPE guard must not flag them —
+	// otherwise updating an existing entry with an unchanged SCOPE rolls
+	// back forever.
+	raw := `### BEGIN_ENTRY: BUG-repl-print-dropped-by-quit ###
+ID: BUG-repl-print-dropped-by-quit
+KIND: DEBUG
+SCOPE: infrastructure/delivery/cli/tui
+### END_ENTRY: BUG-repl-print-dropped-by-quit ###
+### BEGIN_ENTRY: BUG-repl-print-dropped-by-quit ###
+ID: BUG-repl-print-dropped-by-quit
+KIND: DEBUG
+SCOPE: infrastructure/delivery/cli/tui
+### END_ENTRY: BUG-repl-print-dropped-by-quit ###
+`
+	problems := LintProjectMemory([]ProjectMemoryFileBlob{{
+		Rel: "debug.md", Kind: "debug", Raw: raw,
+	}}, 3)
+	for _, p := range problems {
+		if strings.Contains(p.Message, "duplicate SCOPE") {
+			t.Fatalf("same-ID rows must not be flagged as duplicate SCOPE: %s", FormatLintReport(problems))
+		}
+	}
+}
+
 func TestLintOrphansAndDuplicateScopeMatchScript(t *testing.T) {
 	raw := `# heading allowed
 loose fact that is invisible to anchors

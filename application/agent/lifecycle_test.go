@@ -18,6 +18,9 @@ type lifecycleConvStore struct {
 }
 
 func (s *lifecycleConvStore) List() []*domain.Conversation { return nil }
+func (s *lifecycleConvStore) ListMeta() []*domain.Conversation {
+	return s.List()
+}
 func (s *lifecycleConvStore) Get(id string) (*domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

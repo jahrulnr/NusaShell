@@ -45,7 +45,7 @@ or profile facts here — those belong in `memory/user.md` or structured memory 
 | `query` | `topic?`, `kind?`, `related?`, `id?`, `archive?`, `full?`, `limit?` | `memory-query.sh`. AND selectors; at least one required. Compact TSV `id\tkind\tfile\tscope`; `full=true` returns anchored bodies. `--related` is inbound **or** outbound. |
 | `list` | | `memory-list.sh`. Absolute paths, guardrails first, then other live `*.md`, then `archive/`. |
 | `read` | `kind` or `id` | Full entry or whole kind file. |
-| `admit` | `kind`, `content`, `id?` | Upsert by ID, wrap `BEGIN_ENTRY`/`END_ENTRY`, lint, roll back on lint failure. Failure text is `memory-lint.sh` stdout (`LINT FAIL [...]` lines, then `memory-lint: N issue(s) found.`). Debug admits also pattern-track. |
+| `admit` | `kind`, `content`, `id?` | Upsert by ID, wrap `BEGIN_ENTRY`/`END_ENTRY`, lint, roll back on lint failure. Failure text is `memory-lint.sh` stdout (`LINT FAIL [...]` lines, then `memory-lint: N issue(s) found.`). Debug admits also pattern-track. Admitting an existing ID is a true upsert: every block carrying that ID is collapsed into one fresh entry, so legacy duplicate pairs (same ID + same SCOPE) heal on the next admit instead of rolling back; the duplicate-SCOPE lint counts distinct unresolved IDs, not raw rows. |
 | `skip` | `reason` | Negative admission. No disk write. |
 | `archive` | `id` | Move a live entry to `archive/{kind}.md`. |
 | `lint` | `kind?` | `memory-lint.sh [kind]`. Clean: `memory-lint: clean`. Issues: same stdout as the script (error). |

@@ -39,6 +39,13 @@ type AcpRunStore struct {
 	dir      string
 	mu       sync.Mutex
 	migrated bool
+	// runIndex maps run ID → record file path so Load is O(1) instead of
+	// scanning every conversation folder. It is built lazily on the first
+	// Load/List/Save after legacy migration (one walk of the conversation
+	// folders), then kept current by Save and Path. Entries are re-checked
+	// on read: a vanished file drops the stale entry and falls back to the
+	// authoritative scan before reporting a miss.
+	runIndex map[string]string
 }
 
 // NewAcpRunStore creates a per-conversation ACP run store rooted at dir.
@@ -89,7 +96,44 @@ func (s *AcpRunStore) Path(conversationID, runID string) string {
 	if err != nil {
 		return ""
 	}
+	s.mu.Lock()
+	// Recording the predicted path is safe: Load re-checks the file before
+	// trusting an index hit, so a Path call for a run that is never saved
+	// only costs one rescan.
+	s.indexRunLocked(runID, path)
+	s.mu.Unlock()
 	return path
+}
+
+// buildIndexLocked walks the conversation folders once and records each run
+// file's path. It must run under s.mu after migrateLegacyLocked so runs
+// imported by the migration are indexed too.
+func (s *AcpRunStore) buildIndexLocked() {
+	if s.runIndex != nil {
+		return
+	}
+	s.runIndex = make(map[string]string)
+	for _, name := range s.conversationFolders() {
+		dir := filepath.Join(s.conversationsDir(), name, acpDirName)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			s.runIndex[strings.TrimSuffix(e.Name(), ".json")] = filepath.Join(dir, e.Name())
+		}
+	}
+}
+
+// indexRunLocked records one run's path when the index is already built.
+// A nil index stays nil so the lazy build still covers pre-index writes.
+func (s *AcpRunStore) indexRunLocked(runID, path string) {
+	if s.runIndex != nil {
+		s.runIndex[runID] = path
+	}
 }
 
 // Save writes the record as its own JSON file, creating or replacing it
@@ -102,6 +146,7 @@ func (s *AcpRunStore) Save(record domain.AcpRunRecord) error {
 	if err := s.migrateLegacyLocked(); err != nil {
 		return err
 	}
+	s.buildIndexLocked()
 	path, err := s.runPath(record.ConversationID, record.ID)
 	if err != nil {
 		return err
@@ -109,7 +154,11 @@ func (s *AcpRunStore) Save(record domain.AcpRunRecord) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return writeJSONAtomic(path, record)
+	if err := writeJSONAtomic(path, record); err != nil {
+		return err
+	}
+	s.indexRunLocked(record.ID, path)
+	return nil
 }
 
 // Load returns the record for runID, or (zero, false) if not found.
@@ -123,8 +172,19 @@ func (s *AcpRunStore) Load(runID string) (domain.AcpRunRecord, bool) {
 	if safeSegment(runID) != nil {
 		return domain.AcpRunRecord{}, false
 	}
+	s.buildIndexLocked()
+	if path, ok := s.runIndex[runID]; ok {
+		if r, hit := readRun(path); hit {
+			return r, true
+		}
+		// Stale entry (file removed or moved out of band): drop it and fall
+		// back to one authoritative scan before reporting a miss.
+		delete(s.runIndex, runID)
+	}
 	for _, name := range s.conversationFolders() {
-		if r, ok := readRun(filepath.Join(s.conversationsDir(), name, acpDirName, runID+".json")); ok {
+		path := filepath.Join(s.conversationsDir(), name, acpDirName, runID+".json")
+		if r, ok := readRun(path); ok {
+			s.runIndex[runID] = path
 			return r, true
 		}
 	}
@@ -140,6 +200,9 @@ func (s *AcpRunStore) List(conversationID string) []domain.AcpRunRecord {
 	if err := s.migrateLegacyLocked(); err != nil {
 		return nil
 	}
+	// Warm the Load index while the folders are already being walked; the
+	// one-time cost is an extra directory listing per conversation.
+	s.buildIndexLocked()
 
 	var out []domain.AcpRunRecord
 	if conversationID == "" {

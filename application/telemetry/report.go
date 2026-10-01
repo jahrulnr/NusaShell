@@ -91,113 +91,110 @@ func (s *Service) handleReport(req contracts.TelemetryReportRequest) (any, *cont
 	var totalCacheHitPrompt int
 	var earliest, latest time.Time
 
-	var convs []*domain.Conversation
+	// ListUsage returns a flat per-assistant-message projection, so this
+	// aggregation never clones a single transcript.
+	var rows []domain.UsageProjection
 	if s.conversations != nil {
-		convs = s.conversations.List()
+		rows = s.conversations.ListUsage()
 	}
-	for _, conv := range convs {
-		for _, msg := range conv.Messages {
-			if msg.Role != domain.RoleAssistant || msg.Usage == nil {
-				continue
-			}
-			if msg.Model == "" {
-				continue
-			}
-			if req.ModelID != "" && msg.Model != req.ModelID {
-				continue
-			}
-			t := msg.CreatedAt
-			if !cutoff.IsZero() && t.Before(cutoff) {
-				continue
-			}
-			msgProvID := msg.ProviderID
-			if msgProvID == "" {
-				if mp, ok := priceLookup[msg.Model]; ok {
-					msgProvID = mp.providerID
-				} else {
-					msgProvID = "unknown"
-				}
-			}
-			if req.ProviderID != "" && msgProvID != req.ProviderID {
-				continue
-			}
-
-			u := msg.Usage
-			mp := priceLookup[msg.Model]
-			spend := float64(u.InputTokens)/1e6*mp.inputCost +
-				float64(u.OutputTokens)/1e6*mp.outputCost +
-				float64(u.CacheRead)/1e6*mp.cacheReadCost
-
-			totalSpend += spend
-			totalRequests++
-			totalInput += u.InputTokens
-			totalOutput += u.OutputTokens
-			totalCacheRead += u.CacheRead
-			totalCacheWrite += u.CacheWrite
-
-			switch {
-			case u.CacheWrite > 0, u.CacheRead > 0:
-				totalCacheHitPrompt += u.InputTokens + u.CacheWrite + u.CacheRead
-			}
-
-			if earliest.IsZero() || t.Before(earliest) {
-				earliest = t
-			}
-			if t.After(latest) {
-				latest = t
-			}
-
-			provName := providerNameLookup[msgProvID]
-			if provName == "" {
-				provName = "Unknown"
-			}
-
-			ma, ok := models[msg.Model]
-			if !ok {
-				ma = &modelAgg{modelID: msg.Model, providerID: msgProvID, providerName: provName}
-				models[msg.Model] = ma
-			}
-			ma.spend += spend
-			ma.requests++
-			ma.tokens += u.InputTokens + u.OutputTokens
-			ma.inputTokens += u.InputTokens
-			ma.outputTokens += u.OutputTokens
-			ma.cacheRead += u.CacheRead
-
-			pa, ok := providers[msgProvID]
-			if !ok {
-				pa = &providerAgg{providerID: msgProvID, providerName: provName}
-				providers[msgProvID] = pa
-			}
-			pa.spend += spend
-			pa.requests++
-			pa.tokens += u.InputTokens + u.OutputTokens
-
-			bucketStart := t.Truncate(bucketSize)
-			bk := bucketKey(clock.NewTime(bucketStart).Epoch())
-			da, ok := buckets[bk]
-			if !ok {
-				da = &dayAgg{
-					date:     formatBucketLabel(bucketStart, bucketSize),
-					perModel: make(map[string]*dayModelAgg),
-				}
-				buckets[bk] = da
-			}
-			da.spend += spend
-			da.requests++
-			da.inputTokens += u.InputTokens
-			da.outputTokens += u.OutputTokens
-			da.cacheRead += u.CacheRead
-			da.cacheWrite += u.CacheWrite
-			dm, ok := da.perModel[msg.Model]
-			if !ok {
-				dm = &dayModelAgg{modelID: msg.Model}
-				da.perModel[msg.Model] = dm
-			}
-			dm.spend += spend
-			dm.requests++
-			dm.tokens += u.InputTokens + u.OutputTokens
+	for _, row := range rows {
+		if row.Usage == nil || row.Model == "" {
+			continue
 		}
+		if req.ModelID != "" && row.Model != req.ModelID {
+			continue
+		}
+		t := row.CreatedAt
+		if !cutoff.IsZero() && t.Before(cutoff) {
+			continue
+		}
+		msgProvID := row.ProviderID
+		if msgProvID == "" {
+			if mp, ok := priceLookup[row.Model]; ok {
+				msgProvID = mp.providerID
+			} else {
+				msgProvID = "unknown"
+			}
+		}
+		if req.ProviderID != "" && msgProvID != req.ProviderID {
+			continue
+		}
+
+		u := row.Usage
+		mp := priceLookup[row.Model]
+		spend := float64(u.InputTokens)/1e6*mp.inputCost +
+			float64(u.OutputTokens)/1e6*mp.outputCost +
+			float64(u.CacheRead)/1e6*mp.cacheReadCost
+
+		totalSpend += spend
+		totalRequests++
+		totalInput += u.InputTokens
+		totalOutput += u.OutputTokens
+		totalCacheRead += u.CacheRead
+		totalCacheWrite += u.CacheWrite
+
+		switch {
+		case u.CacheWrite > 0, u.CacheRead > 0:
+			totalCacheHitPrompt += u.InputTokens + u.CacheWrite + u.CacheRead
+		}
+
+		if earliest.IsZero() || t.Before(earliest) {
+			earliest = t
+		}
+		if t.After(latest) {
+			latest = t
+		}
+
+		provName := providerNameLookup[msgProvID]
+		if provName == "" {
+			provName = "Unknown"
+		}
+
+		ma, ok := models[row.Model]
+		if !ok {
+			ma = &modelAgg{modelID: row.Model, providerID: msgProvID, providerName: provName}
+			models[row.Model] = ma
+		}
+		ma.spend += spend
+		ma.requests++
+		ma.tokens += u.InputTokens + u.OutputTokens
+		ma.inputTokens += u.InputTokens
+		ma.outputTokens += u.OutputTokens
+		ma.cacheRead += u.CacheRead
+
+		pa, ok := providers[msgProvID]
+		if !ok {
+			pa = &providerAgg{providerID: msgProvID, providerName: provName}
+			providers[msgProvID] = pa
+		}
+		pa.spend += spend
+		pa.requests++
+		pa.tokens += u.InputTokens + u.OutputTokens
+
+		bucketStart := t.Truncate(bucketSize)
+		bk := bucketKey(clock.NewTime(bucketStart).Epoch())
+		da, ok := buckets[bk]
+		if !ok {
+			da = &dayAgg{
+				date:     formatBucketLabel(bucketStart, bucketSize),
+				perModel: make(map[string]*dayModelAgg),
+			}
+			buckets[bk] = da
+		}
+		da.spend += spend
+		da.requests++
+		da.inputTokens += u.InputTokens
+		da.outputTokens += u.OutputTokens
+		da.cacheRead += u.CacheRead
+		da.cacheWrite += u.CacheWrite
+		dm, ok := da.perModel[row.Model]
+		if !ok {
+			dm = &dayModelAgg{modelID: row.Model}
+			da.perModel[row.Model] = dm
+		}
+		dm.spend += spend
+		dm.requests++
+		dm.tokens += u.InputTokens + u.OutputTokens
 	}
 
 	cacheHitPercent := 0.0

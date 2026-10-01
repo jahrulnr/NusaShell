@@ -65,6 +65,16 @@ func (f *fakeConvStore) List() []*domain.Conversation {
 	return out
 }
 
+func (f *fakeConvStore) ListMeta() []*domain.Conversation { return f.List() }
+
+func (f *fakeConvStore) ListUsage() []domain.UsageProjection {
+	var out []domain.UsageProjection
+	for _, c := range f.List() {
+		out = append(out, c.UsageRows()...)
+	}
+	return out
+}
+
 func (f *fakeConvStore) Get(id string) (*domain.Conversation, error) {
 	c, ok := f.convs[id]
 	if !ok {

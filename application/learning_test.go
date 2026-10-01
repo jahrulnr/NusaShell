@@ -1938,6 +1938,14 @@ func (s *titleConversationStore) List() []*domain.Conversation {
 	}
 	return out
 }
+func (s *titleConversationStore) ListMeta() []*domain.Conversation { return s.List() }
+func (s *titleConversationStore) ListUsage() []domain.UsageProjection {
+	var out []domain.UsageProjection
+	for _, c := range s.List() {
+		out = append(out, c.UsageRows()...)
+	}
+	return out
+}
 func (s *titleConversationStore) Get(id string) (*domain.Conversation, error) {
 	return s.convs[id], nil
 }

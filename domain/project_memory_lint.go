@@ -384,24 +384,33 @@ func lintDuplicateScope(file string, ents []ProjectMemoryEntry) []ProjectMemoryL
 		if len(rows) < 2 {
 			continue
 		}
-		unresolved := 0
+		// Count distinct unresolved IDs, not rows: two rows carrying the
+		// same ID are one logical entry (a stale duplicate that admit now
+		// collapses), not two facts competing for the scope. Dedupe the
+		// reported rows the same way so an update of an existing ID with an
+		// unchanged SCOPE does not roll back forever.
+		unresolved := map[string]bool{}
+		var details []string
+		seen := map[string]bool{}
 		for _, r := range rows {
-			if r.status != "SUPERSEDED" && r.status != "RETIRED" {
-				unresolved++
-			}
-		}
-		if unresolved > 1 {
-			details := make([]string, 0, len(rows))
-			for _, r := range rows {
+			key := r.id + "\x00" + r.status
+			if !seen[key] {
+				seen[key] = true
 				details = append(details, "ID="+r.id+" STATUS="+r.status)
 			}
-			problems = append(problems, ProjectMemoryLintProblem{
-				File:    file,
-				Message: fmt.Sprintf("unresolved duplicate SCOPE %q:", scope),
-				Details: details,
-				Hint:    "merge into one entry, mark the older one SUPERSEDED/RETIRED, set SUPERSEDES.",
-			})
+			if r.status != "SUPERSEDED" && r.status != "RETIRED" {
+				unresolved[r.id] = true
+			}
 		}
+		if len(unresolved) <= 1 {
+			continue
+		}
+		problems = append(problems, ProjectMemoryLintProblem{
+			File:    file,
+			Message: fmt.Sprintf("unresolved duplicate SCOPE %q:", scope),
+			Details: details,
+			Hint:    "merge into one entry, mark the older one SUPERSEDED/RETIRED, set SUPERSEDES.",
+		})
 	}
 	return problems
 }

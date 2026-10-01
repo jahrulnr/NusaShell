@@ -16,6 +16,11 @@ import (
 // writes through conversation.Bind / ArchiveChunk.
 type ConversationStore interface {
 	List() []*domain.Conversation
+	// ListMeta is the metadata-only variant of List used by the room list.
+	// Included because this port is also handed to conversation.Bind /
+	// conversation.NewConversation, which take conversation.Store. Stores
+	// without a cheap projection may delegate to List.
+	ListMeta() []*domain.Conversation
 	Get(id string) (*domain.Conversation, error)
 	Save(c *domain.Conversation) error
 	Delete(id string) error
