@@ -398,10 +398,15 @@ export function sealLiveNodeBeforeSteer(node) {
   node.querySelectorAll(':scope > .agent-bubble > .agent-round').forEach((round) => {
     const reasoning = round.querySelector(':scope > .agent-reasoning');
     const textBox = round.querySelector(':scope > .agent-bubble-text');
-    const strip = round.querySelector(':scope > .agent-tool-stack');
     const hasReasoning = reasoningHasVisibleSource(reasoning?._reasoningRaw);
     const hasText = Boolean(textBox?.textContent?.trim() || textBox?.querySelector('img, svg, video, canvas, table, hr, .mermaid'));
-    const hasTools = Boolean(strip?.children.length);
+    // Standalone cards sit directly in the round and split terminal stacks, so
+    // any direct card or non-empty stack keeps the round.
+    const hasTools = [...round.children].some((child) => (
+      child.classList.contains('agent-tool-stack')
+        ? child.children.length > 0
+        : child.dataset.standalone === 'true' || child.dataset.toolCallId != null
+    ));
     if (!hasReasoning && !hasText && !hasTools) round.remove();
   });
 }
@@ -574,24 +579,90 @@ function appendAssistantSteps(bubble, message) {
   if (round.children.length) bubble.append(round);
 }
 
-// appendToolCards splits rendered tool cards into standalone cards (ask,
-// show, generate_*, artifact, subagent — anything with its own frame) and
-// tool terminals (exec, grep, file_read — plain collapsible rows). Standalone
-// cards append directly to the bubble so they render without the
-// execution rail; terminals are grouped inside a stack so the rail applies
-// only to terminal-style output.
+// placeToolCard appends a tool card into its owning round, keeping the
+// transcript chronological. Standalone cards (ask, show, generate_*, artifact,
+// subagent — dataset.standalone="true") go directly after the round's content
+// without the execution rail. Terminals (exec, grep, file_read) group into the
+// round's trailing .agent-tool-stack; a terminal after a standalone card opens
+// a new stack after it. The owner is strip's round, or bubble when no strip is
+// given. Returns the stack that receives the next terminal; callers keep it as
+// their insertion cursor (standalone placement returns strip unchanged).
+export function placeToolCard(bubble, strip, card) {
+  const owner = strip?.parentElement || bubble;
+  if (card.dataset.standalone === 'true') {
+    owner.append(card);
+    return strip ?? null;
+  }
+  let stack = owner.lastElementChild;
+  if (!stack?.classList.contains('agent-tool-stack')) {
+    stack = el('div', { class: 'agent-tool-stack' });
+    owner.append(stack);
+  }
+  stack.append(card);
+  stack.hidden = false;
+  return stack;
+}
+
+// findToolCard returns the mounted card for a tool call anywhere in the thread,
+// including earlier rounds and steer-separated assistant nodes.
+export function findToolCard(thread, toolCallId) {
+  if (!thread || !toolCallId) return null;
+  return [...thread.querySelectorAll('[data-tool-call-id]')]
+    .find((node) => node.dataset.toolCallId === toolCallId) || null;
+}
+
+// swapToolCard replaces oldCard at its own position in its owning round, so a
+// late completion never moves a card to the live tail. A standalone card that
+// replaces a terminal splits that terminal's stack: earlier terminals stay in
+// place, the standalone card sits between the groups, and later terminals form
+// a new stack. When the old stack is the insertion cursor the cursor moves to
+// the trailing group; otherwise the cursor is returned unchanged.
+export function swapToolCard(oldCard, newCard, bubble, strip) {
+  // Replacements (show/media/subagent) can happen while the user is reading
+  // the request or raw output. Preserve disclosure when both sides are
+  // <details>; completion must not silently change the reader's viewport.
+  const disclosure = oldCard?.tagName === 'DETAILS' && newCard?.tagName === 'DETAILS'
+    ? oldCard.open
+    : null;
+  if (!oldCard?.parentNode) return placeToolCard(bubble, strip, newCard);
+  const stack = oldCard.parentElement;
+  let cursor = strip;
+  if (newCard.dataset.standalone === 'true' && stack?.classList.contains('agent-tool-stack')) {
+    cursor = splitToolStack(stack, oldCard, newCard, strip);
+  } else {
+    oldCard.replaceWith(newCard);
+  }
+  if (disclosure !== null) newCard.open = disclosure;
+  return cursor;
+}
+
+function splitToolStack(stack, oldCard, newCard, cursor) {
+  const isCursor = stack === cursor;
+  const trailing = [];
+  let afterOld = false;
+  for (const node of [...stack.children]) {
+    if (node === oldCard) afterOld = true;
+    else if (afterOld) trailing.push(node);
+  }
+  let tail = null;
+  if (trailing.length || isCursor) {
+    tail = el('div', { class: 'agent-tool-stack' }, trailing);
+    tail.hidden = trailing.length === 0;
+  }
+  oldCard.remove();
+  stack.after(newCard);
+  if (tail) newCard.after(tail);
+  if (!stack.children.length) stack.remove();
+  return isCursor ? tail : cursor;
+}
+
+// appendToolCards places a persisted round's tool cards through the same
+// placement as live events, so history and live render share one order.
 function appendToolCards(bubble, cards) {
-  const terminals = [];
+  let stack = null;
   for (const card of cards) {
     if (!card) continue;
-    if (card.dataset.standalone === 'true') {
-      bubble.append(card);
-    } else {
-      terminals.push(card);
-    }
-  }
-  if (terminals.length) {
-    bubble.append(el('div', { class: 'agent-tool-stack' }, terminals));
+    stack = placeToolCard(bubble, stack, card) ?? stack;
   }
 }
 
@@ -652,6 +723,8 @@ export function decorateToolCard(card, toolCall) {
   const normalized = normalizeToolCall(toolCall);
   const name = normalized.name || 'tool';
   const ref = toolContractRef(name, normalized.presentation);
+  if (normalized.id) card.dataset.toolCallId = String(normalized.id);
+  if (toolCall?.status) card.dataset.status = String(toolCall.status);
   card.classList.add('agent-tool-card', ref.css_class);
   card.dataset.tool = name;
   card.dataset.toolContract = ref.id;
@@ -1964,6 +2037,13 @@ export function toolTerminalOutput(toolCall) {
     return isStreamingTool(toolCall.name) ? '… waiting for output' : '…';
   }
   return toolCall.status === 'fail' ? 'Tool failed.' : 'ok';
+}
+
+// isSettledToolCard reports whether a rendered tool card has reached a terminal
+// status. Live events must not revive such a card.
+export function isSettledToolCard(card) {
+  const status = card?.dataset?.status;
+  return Boolean(status) && status !== 'running';
 }
 
 export function setToolTerminalStatus(card, status) {

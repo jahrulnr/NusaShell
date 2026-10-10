@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.12] - 2026-10-10
+
+### Fixed
+
+- **Tool cards keep their chronological position in the transcript.** Live and
+  persisted rounds place terminal stacks and standalone cards in the same
+  order, and a late completion for an earlier round's tool patches that card
+  where it sits instead of appending a copy at the current tail.
+- **Duplicate or stale round starts no longer rewind a running turn.** A
+  `turn.started` for a round the live run already applied, or for a persisted
+  historical message, is ignored before it changes round text, tool cards, or
+  steer state.
+- **ACP subagent run state no longer goes stale after missed stream events.** A
+  sequence gap in the run stream reopens it for a fresh snapshot instead of
+  applying the out-of-order frame. HTTP list and get responses that were
+  requested before a reconnect, room switch, or newer live update are ignored,
+  and a strictly older response can no longer settle a run the stream shows as
+  live. A newer terminal list response can settle a run the stream left live.
+  Equal-timestamp nonterminal changes are not recovered by HTTP; they rely on
+  the next snapshot. A transcript whose get was superseded reloads for the
+  current connection, and a genuine get failure shows the retry message without
+  automatic retry. Runs waiting for permission count as live.
+- **Settled tool cards are not revived by late events.** A delayed start event,
+  or an SSE tool frame that arrives after completion, no longer resets a
+  settled card's status, output, or elapsed timer. Trailing text still paints.
+- **A steer no longer drops a round that holds only a settled subagent or media
+  card.** Sealing before a steer keeps any round with a standalone card or a
+  non-empty terminal stack.
+- **Completed generic tool output paints in the live transcript.** The live
+  completion path called an unimported helper and threw before painting the
+  settled output.
+
 ## [0.9.11] - 2026-10-01
 
 ### Fixed

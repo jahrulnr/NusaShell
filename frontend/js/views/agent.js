@@ -27,6 +27,7 @@ import {
   renderTodoItem,
   setToolTerminalStatus,
   setToolTerminalPresentation,
+  setToolTerminalOutput,
   toolTerminalMeta,
   toolTerminalOutput,
   applyQueuedToolDeltas,
@@ -51,6 +52,10 @@ import {
   parseShowVideoOutput,
   parseShowPDFOutput,
   decorateToolCard,
+  placeToolCard,
+  swapToolCard,
+  findToolCard,
+  isSettledToolCard,
 } from './agent/render.js';
 import { bindSubagents, setSubagentConversation } from './agent/subagents.js';
 import { agentThread, composerInput, stopButton, attachmentsContainer, workspaceButton, workspaceLabel, providerStatus } from './agent/domrefs.js';
@@ -61,43 +66,6 @@ import { parseArtifactOutput } from '../artifact-render.js';
 import { createAskCard, sealAskCard, cancelAskCard } from './ask-card.js';
 import { playComplete, playError, playAsk, shouldPlayAgentTurnSound } from '../sounds.js';
 import { loadToolContracts, normalizeToolCall } from './agent/tool-contracts.js';
-
-// placeToolCard appends a tool card to the right container: standalone cards
-// (ask_question, show, generate_*, artifact, subagent — anything with
-// dataset.standalone="true") go directly into the bubble so they render
-// without the .agent-tool-stack lane; tool events go into
-// the strip so the rail groups them.
-function placeToolCard(bubble, strip, card) {
-  if (card.dataset.standalone === 'true') {
-    (strip?.parentElement || bubble).append(card);
-  } else {
-    strip.append(card);
-    strip.hidden = false;
-  }
-}
-
-// swapToolCard replaces an existing card with a new one. When the new card
-// is standalone but the old one was a terminal inside the strip, the new
-// card moves to the bubble (not stay in the strip with border-left).
-function swapToolCard(oldCard, newCard, bubble, strip) {
-  // Replacements (show/media/subagent) can happen while the user is reading
-  // the request or raw output. Preserve disclosure when both sides are
-  // <details>; completion must not silently change the reader's viewport.
-  const disclosure = oldCard?.tagName === 'DETAILS' && newCard?.tagName === 'DETAILS'
-    ? oldCard.open
-    : null;
-  if (oldCard) {
-    if (newCard.dataset.standalone === 'true' && oldCard.parentElement === strip) {
-      oldCard.replaceWith(newCard);
-      bubble.append(newCard); // move from strip to bubble
-    } else {
-      oldCard.replaceWith(newCard);
-    }
-    if (disclosure !== null) newCard.open = disclosure;
-  } else {
-    placeToolCard(bubble, strip, newCard);
-  }
-}
 
 const state = {
   conversations: [],
@@ -859,8 +827,12 @@ function ensureLiveToolJob(run, toolCallId, name, args, presentation) {
   // restorePendingAsks. Round-stream tool frames must not mount a terminal
   // or patch presentation.request onto the human question.
   if (name === 'ask_question') return null;
-  if (args != null) run.toolArgs.set(toolCallId, args);
+  // A settled card (or one mounted from history) is never revived by a late
+  // start, a stream frame, or its initial args/presentation.
   const existing = run.toolJobs.get(toolCallId);
+  const mounted = run.conversationId === state.activeId ? findToolCard(agentThread(), toolCallId) : null;
+  if (existing ? isSettledToolCard(existing) : mounted) return existing ?? null;
+  if (args != null) run.toolArgs.set(toolCallId, args);
   if (existing) {
     if (args != null) {
       existing._toolArgs = args;
@@ -881,7 +853,7 @@ function ensureLiveToolJob(run, toolCallId, name, args, presentation) {
     : renderToolJob({ id: toolCallId, name: toolName, args: resolvedArgs, status: 'running', presentation });
   if (isStreamingTool(toolName)) bindToolStop(job, () => ({ run_id: run.runId, tool_call_id: toolCallId }));
   setLiveToolJob(run.toolJobs, toolCallId, job);
-  placeToolCard(run.bubble, run.strip, job);
+  run.strip = placeToolCard(run.bubble, run.strip, job) ?? run.strip;
   startToolElapsed(job);
   updateRoomInfo(state.conversation, state.messages);
   scrollToBottom();
@@ -1548,11 +1520,11 @@ async function restorePendingAsks(conversationId, token) {
       onSubmit: (err) => toast(err instanceof Error ? err.message : 'Could not send answer', 'error'),
       onStop: () => rpc('agent.turns.stop', { run_id: runId }).catch(() => {}),
     });
-    decorateToolCard(card, { name: 'ask_question', args: card._toolArgs, status: 'running' });
+    decorateToolCard(card, { id: a.tool_call_id, name: 'ask_question', args: card._toolArgs, status: 'running' });
     const existing = cards.find((c) => c.dataset.callId === a.tool_call_id);
     if (existing) existing.replaceWith(card);
     else if (run.strip) {
-      placeToolCard(run.bubble, run.strip, card);
+      run.strip = placeToolCard(run.bubble, run.strip, card) ?? run.strip;
     }
     setLiveToolJob(run.toolJobs, a.tool_call_id, card);
     startToolElapsed(card);
@@ -1599,9 +1571,11 @@ async function reattachActiveRunFromBackend() {
     run.round = 1;
     run.streamMessageId = null;
   }
+  if (run) rememberRoundStart(run, active.message_id);
   if (!run) {
     run = {
       msgNode: null, bubble: null, strip: null, textBox: null, reasoningEl: null,
+      seenRoundStarts: new Set(active.message_id ? [active.message_id] : []),
       toolJobs: new Map(),
       toolArgs: new Map(),
       raw: '',
@@ -1655,6 +1629,23 @@ function roundAlreadyPersisted(messageId) {
     || message.tool_calls?.length
     || (typeof message.reasoning === 'string' && message.reasoning.trim()),
   );
+}
+
+// roundStartIsStale reports whether turn.started names a round this live run
+// already applied, or a persisted assistant message from history. Such a
+// duplicate or late start must not rewind round text, tool cards, or steer state.
+function roundStartIsStale(run, conversationId, messageId) {
+  if (!messageId) return false;
+  if (run?.seenRoundStarts?.has(messageId)) return true;
+  return conversationId === state.activeId && roundAlreadyPersisted(messageId);
+}
+
+// rememberRoundStart records a round's message ID on the live run. The set is
+// kept across auto-continue rounds for the run's lifetime.
+function rememberRoundStart(run, messageId) {
+  if (!run || !messageId) return;
+  if (!run.seenRoundStarts) run.seenRoundStarts = new Set();
+  run.seenRoundStarts.add(messageId);
 }
 
 function hasSteerAfterMessage(messageId) {
@@ -1755,13 +1746,14 @@ function reattachActiveRun() {
   // Render the tool jobs accumulated so far (in-flight while this room was
   // away). Standalone cards go to the bubble; terminals go to the strip.
   const toolJobs = run.toolJobs || new Map();
-  for (const job of toolJobs.values()) placeToolCard(bubble, strip, job);
+  let cursor = strip;
+  for (const job of toolJobs.values()) cursor = placeToolCard(bubble, cursor, job) ?? cursor;
   // Update the run entry with fresh DOM references.
   run.msgNode = msgNode;
   run.bubble = bubble;
   run.reasoningEl = reasoningEl;
   run.textBox = textBox;
-  run.strip = strip;
+  run.strip = cursor;
   syncRunLoadingIndicator(run);
   clearToolTimers(run);
   run.toolJobs = toolJobs;
@@ -2016,6 +2008,7 @@ function beginTurn(runId, userText, attachments = []) {
     round: existing?.round || 1,
     conversationId: state.activeId, runId,
     messageId: existing?.messageId,
+    seenRoundStarts: existing?.seenRoundStarts,
   });
   const liveRun = state.runs.get(runId);
   mountCompactionStatus(state.activeId, liveRun);
@@ -2906,7 +2899,7 @@ async function loadOlderChunk() {
           else {
             slot.textBox.append(thinkingDots());
           }
-          for (const job of prevRun.toolJobs.values()) placeToolCard(slot.bubble, slot.strip, job);
+          for (const job of prevRun.toolJobs.values()) slot.strip = placeToolCard(slot.bubble, slot.strip, job) ?? slot.strip;
           clearToolTimers(prevRun);
           prevRun.toolJobs = new Map();
         }
@@ -2945,6 +2938,7 @@ function bindEvents() {
       renderConversationList();
     }
     let run = state.runs.get(run_id);
+    if (roundStartIsStale(run, conversation_id, message_id)) return;
     if (!run) {
       // Safety net: the run entry was deleted (endTurn on a turn.done
       // whose auto_continue DTO was missing or false) but the backend
@@ -2982,6 +2976,7 @@ function bindEvents() {
       run.deferredRoundStart = payload;
       return;
     }
+    rememberRoundStart(run, message_id);
     // Auto-continue: the run entry was kept across turns (endTurn with
     // keepRun=true), but the new turn has a different assistant message
     // ID. Set up a fresh streaming slot for the new message instead of
@@ -3136,6 +3131,11 @@ function bindEvents() {
     const { tool_call_id, name, args, presentation, conversation_id } = payload;
     const run = getRunOrQueue('agent.tool.started', payload);
     if (!run) return;
+    // A started event for a card already mounted from history (or settled) is
+    // not a new tool of the current round: it must not reset round activity.
+    const mounted = run.toolJobs?.get(tool_call_id)
+      ?? (conversation_id === state.activeId ? findToolCard(agentThread(), tool_call_id) : null);
+    if (mounted && (!run.toolJobs?.has(tool_call_id) || isSettledToolCard(mounted))) return;
     // ask_question renders as an ask card (not a tool terminal). The card
     // is created when agent.ask.pending fires with the validated args.
     // Skip the tool terminal here to avoid a double card.
@@ -3183,6 +3183,13 @@ function bindEvents() {
     if (conversation_id !== state.activeId) return;
     const flushedToolDelta = flushPendingToolDeltas(run);
     if (flushedToolDelta) updateRoomInfo(state.conversation, state.messages);
+    // A completion for a card already in history patches that card where it
+    // sits; only the current round's own tools are registered in toolJobs.
+    const liveJob = run.toolJobs.get(tool_call_id);
+    const historicalJob = liveJob ? null : findToolCard(agentThread(), tool_call_id);
+    const trackCard = (card) => {
+      if (!historicalJob) setLiveToolJob(run.toolJobs, tool_call_id, card);
+    };
     // ask_question: the ask card is already sealed by agent.ask.answered
     // (or agent.ask.cancelled). Skip the tool terminal update — the ask
     // card IS the tool card, there's no terminal to update.
@@ -3208,7 +3215,7 @@ function bindEvents() {
     // (so they know something is running); after completion the terminal is
     // swapped for the clickable artifact card.
     if (name === 'show') {
-      const job = run.toolJobs.get(tool_call_id);
+      const job = liveJob ?? historicalJob;
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
       const toolCall = normalizeToolCall({ id: tool_call_id, name, args: args ?? job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok', attachments, output_attachments: attachments, presentation });
       const artifact = parseArtifactOutput(toolCall);
@@ -3216,8 +3223,8 @@ function bindEvents() {
         const card = renderToolCallCard(toolCall);
         card._toolArgs = toolCall.args;
         card.dataset.standalone = 'true';
-        swapToolCard(job, card, run.bubble, run.strip);
-        setLiveToolJob(run.toolJobs, tool_call_id, card);
+        run.strip = swapToolCard(job, card, run.bubble, run.strip) ?? run.strip;
+        trackCard(card);
       } else if (job) {
         // show(op=image|audio|video|pdf): swap terminal for inline media card.
         // renderToolCallCard dispatches to the correct card via the show
@@ -3232,8 +3239,8 @@ function bindEvents() {
         if (showImage || showAudio || showVideo || showPDF) {
           const card = renderToolCallCard(toolCall);
           card._toolArgs = toolCall.args;
-          swapToolCard(job, card, run.bubble, run.strip);
-          setLiveToolJob(run.toolJobs, tool_call_id, card);
+          run.strip = swapToolCard(job, card, run.bubble, run.strip) ?? run.strip;
+          trackCard(card);
         }
       }
       scrollToBottom();
@@ -3244,24 +3251,24 @@ function bindEvents() {
     // full conversation re-render (turn.done) — or forever if no turn
     // follows the async completion.
     if (name === 'subagent') {
-      const job = run.toolJobs.get(tool_call_id);
+      const job = liveJob ?? historicalJob;
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
       const toolCall = normalizeToolCall({ id: tool_call_id, name, args: args ?? job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok', attachments, output_attachments: attachments, presentation });
       const card = renderToolCallCard(toolCall);
       card.dataset.standalone = 'true';
       if (job) {
-        swapToolCard(job, card, run.bubble, run.strip);
-        setLiveToolJob(run.toolJobs, tool_call_id, card);
+        run.strip = swapToolCard(job, card, run.bubble, run.strip) ?? run.strip;
+        trackCard(card);
         card._toolArgs = toolCall.args;
       } else if (run.strip) {
-        placeToolCard(run.bubble, run.strip, card);
-        setLiveToolJob(run.toolJobs, tool_call_id, card);
+        run.strip = placeToolCard(run.bubble, run.strip, card) ?? run.strip;
+        trackCard(card);
       }
       scrollToBottom();
       return;
     }
     if (isMediaGenerationTool(name)) {
-      const job = run.toolJobs.get(tool_call_id);
+      const job = liveJob ?? historicalJob;
       const toolCall = normalizeToolCall({
         id: tool_call_id,
         name,
@@ -3280,11 +3287,11 @@ function bindEvents() {
           const elapsedNode = card.querySelector('.agent-tool-elapsed');
           if (elapsedNode) elapsedNode.textContent = elapsed;
         }
-        swapToolCard(job, card, run.bubble, run.strip);
+        run.strip = swapToolCard(job, card, run.bubble, run.strip) ?? run.strip;
       } else if (run.strip) {
-        placeToolCard(run.bubble, run.strip, card);
+        run.strip = placeToolCard(run.bubble, run.strip, card) ?? run.strip;
       }
-      setLiveToolJob(run.toolJobs, tool_call_id, card);
+      trackCard(card);
       scrollToBottom();
       return;
     }
@@ -3293,7 +3300,7 @@ function bindEvents() {
     // buffer — synthesize a card from the completion payload so the final
     // output still renders. The output here is the persisted snapshot, so
     // reload-after-complete works the same as the live delta stream.
-    const job = run.toolJobs.get(tool_call_id);
+    const job = liveJob ?? historicalJob;
     if (!job) {
       const toolCall = normalizeToolCall({ id: tool_call_id, name, args: args ?? run.toolArgs?.get?.(tool_call_id) ?? {}, output: output ?? '', status: status || 'ok', attachments, output_attachments: attachments, presentation });
       // Media-generation tools can never reach here: the isMediaGenerationTool
@@ -3302,7 +3309,7 @@ function bindEvents() {
       if (isStreamingTool(name)) bindToolStop(card, () => ({ run_id: run.runId, tool_call_id }));
       setLiveToolJob(run.toolJobs, tool_call_id, card);
       if (run.strip) {
-        placeToolCard(run.bubble, run.strip, card);
+        run.strip = placeToolCard(run.bubble, run.strip, card) ?? run.strip;
       }
       scrollToBottom();
       return;
@@ -3523,10 +3530,10 @@ function bindEvents() {
       onSubmit: (err) => toast(err instanceof Error ? err.message : 'Could not send answer', 'error'),
       onStop: () => rpc('agent.turns.stop', { run_id }).catch(() => {}),
     });
-    decorateToolCard(card, { name: 'ask_question', args: card._toolArgs, status: 'running' });
+    decorateToolCard(card, { id: tool_call_id, name: 'ask_question', args: card._toolArgs, status: 'running' });
     card.dataset.standalone = 'true';
     setLiveToolJob(run.toolJobs, tool_call_id, card);
-    placeToolCard(run.bubble, run.strip, card);
+    run.strip = placeToolCard(run.bubble, run.strip, card) ?? run.strip;
     startToolElapsed(card);
     run.waitingForAsk = true;
     syncRunLoadingIndicator(run);
@@ -3541,7 +3548,7 @@ function bindEvents() {
     const card = run.toolJobs.get(tool_call_id);
     if (!card || !card.classList?.contains('agent-ask-card')) return;
     sealAskCard(card, { ok: true, answer, via, optionIds: payload.option_ids || [], text: payload.text || '' });
-    decorateToolCard(card, { name: 'ask_question', args: card._toolArgs, status: 'ok' });
+    decorateToolCard(card, { id: tool_call_id, name: 'ask_question', args: card._toolArgs, status: 'ok' });
     run.waitingForAsk = false;
     run.activityPhase = 'thinking';
     syncRunLoadingIndicator(run);
@@ -3553,7 +3560,7 @@ function bindEvents() {
     const card = run.toolJobs.get(tool_call_id);
     if (!card || !card.classList?.contains('agent-ask-card')) return;
     cancelAskCard(card, reason);
-    decorateToolCard(card, { name: 'ask_question', args: card._toolArgs, status: 'interrupted' });
+    decorateToolCard(card, { id: tool_call_id, name: 'ask_question', args: card._toolArgs, status: 'interrupted' });
     run.waitingForAsk = false;
     run.activityPhase = 'thinking';
     syncRunLoadingIndicator(run);

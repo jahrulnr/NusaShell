@@ -171,7 +171,17 @@ connection: comment pings do not surface as EventSource events, so the
 frontend tracks the last frame time — a permanently closed stream (non-2xx,
 readyState CLOSED) is reopened after a short delay, and a stream silent
 beyond ~45s while a run is live is closed and resubscribed for a fresh
-snapshot plus `acp.runs.list` hydration. Terminal snapshots expire after
+snapshot plus `acp.runs.list` hydration. A frame whose `seq` skips past the
+last applied cursor is not applied: the client drops that connection and
+resubscribes for a fresh snapshot, and frames from a replaced connection are
+ignored. Each source replacement, room change, and `onopen` advances a
+connection epoch; an `acp.runs.list` or `acp.runs.get` response that started
+under an older epoch, or after a newer frame for the same run, is discarded.
+HTTP responses replace a stream-owned run only when strictly fresher, or when
+they explicitly advance it to a terminal status; a stream frame cannot revive a
+terminal run, and `waiting_permission` counts as live. Equal nonterminal
+timestamps keep the stream authoritative, so recovery from a missed nonterminal
+update relies on the fresh snapshot. Terminal snapshots expire after
 90 seconds, and the process-local latest-run cache is capped at 64 entries;
 under pressure, the least-recently-updated snapshot may be evicted. The
 frontend follows the initial snapshot with `acp.runs.list` hydration so the
@@ -180,6 +190,17 @@ transcripts remain available through `acp.runs.list/get` and the per-run store.
 Pairing/session checks and SSE ping revalidation apply to both stream routes.
 The WS continues to carry agent lifecycle/control notifications, ACP
 permission and mode notifications, and non-agent domains.
+
+Agent tool cards use one placement rule for live rounds and persisted history
+(`frontend/js/views/agent/render.js`). Each card belongs to the assistant round
+that issued it; terminal cards group into stacks, and a standalone card splits
+the stack so later terminals stay after it. A replacement takes the old card's
+position, never the live tail. A `tool.completed` for a call already mounted
+from history patches that card, including across a later round or a steer, and
+only calls of the current round enter the live tool map. A settled card is not
+revived by a late start, an SSE tool frame, or its initial presentation.
+Round starts are idempotent per run: a `turn.started` for a message the run has
+already applied, or for a persisted historical message, changes nothing.
 
 ### RPC dispatch
 

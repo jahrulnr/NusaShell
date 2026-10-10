@@ -113,7 +113,11 @@ provider work. Click a chip for the right-hand drawer
 the transcript live, patched in place like the conversation thread
 (auto-follows the bottom while you're at the bottom; your scroll
 position is never reset by incoming updates). After reconnect, a current run
-snapshot restores the dock before live updates resume. Completed runs stay
+snapshot restores the dock before live updates resume. A run list response
+that was requested before a reconnect or room switch, or that predates a newer
+live update for the same run, is ignored; a terminal status is never reverted
+to running by a stale response, and a run waiting for permission still counts
+as live. A missed live update is repaired by the next snapshot. Completed runs stay
 reopenable from their delegation card or the drawer for as long as the
 conversation exists — the drawer lists every run of the room, settled
 included. The user is an observer: steer, stop, mode change, and risk

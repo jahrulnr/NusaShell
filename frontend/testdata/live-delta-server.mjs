@@ -37,6 +37,26 @@ const MIME = {
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
+// One second of 8 kHz mono 8-bit silence: fixture sound requests resolve and
+// decode without the console noise of 404s or decode errors, and nothing plays.
+const SILENT_WAV = (() => {
+  const wav = Buffer.alloc(44 + 8000, 0x80);
+  wav.write('RIFF', 0);
+  wav.writeUInt32LE(36 + 8000, 4);
+  wav.write('WAVE', 8);
+  wav.write('fmt ', 12);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(8000, 24);
+  wav.writeUInt32LE(8000, 28);
+  wav.writeUInt16LE(1, 32);
+  wav.writeUInt16LE(8, 34);
+  wav.write('data', 36);
+  wav.writeUInt32LE(8000, 40);
+  return wav;
+})();
+
 export function startLiveDeltaServer({
   port = 8787,
   rounds = 10,
@@ -46,6 +66,10 @@ export function startLiveDeltaServer({
   // randomly per round (e.g. "1000-5000" reads like a ~10 tok/s agent).
   roundDelay = 120,
   frontendDir = REPO_FRONTEND,
+  // 'default' streams the single-tool demo turn. 'ordering' opt-in streams a
+  // three-round turn with a subagent card, a delayed completion after a steer,
+  // and an ACP run stream whose completion is sent with a sequence gap.
+  scenario = 'default',
   log = () => {},
 } = {}) {
   const parseDelay = (spec) => {
@@ -65,6 +89,31 @@ export function startLiveDeltaServer({
   const transcript = [];
   const CONV_ID = 'conv_live_delta';
   const MODEL_ID = 'fake-live-model';
+
+  // ---- ACP run stream (ordering scenario only) -------------------------
+  // Mirrors the conversation-scoped /stream/acp contract: each connection gets
+  // a snapshot first, then one monotonic seq per frame. A frame published with
+  // gap=true skips one seq, which the browser must treat as a missed event.
+  const acp = { seq: 0, runs: new Map(), clients: new Set() };
+
+  function writeACPFrame(res, frame) {
+    res.write(`id: ${frame.seq}\nevent: acp.run\ndata: ${JSON.stringify(frame)}\n\n`);
+  }
+
+  function publishACPRun(type, run, { gap = false } = {}) {
+    acp.seq += gap ? 2 : 1;
+    acp.runs.set(run.id, { ...run });
+    const frame = { type, seq: acp.seq, run: { ...run } };
+    for (const res of acp.clients) writeACPFrame(res, frame);
+  }
+
+  function serveACPStream(req, res) {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+    res.write(': connected\n\n');
+    writeACPFrame(res, { type: 'acp.run.snapshot', seq: acp.seq, runs: [...acp.runs.values()] });
+    acp.clients.add(res);
+    res.on('close', () => acp.clients.delete(res));
+  }
 
   // ---- WebSocket plumbing -------------------------------------------------
 
@@ -275,6 +324,85 @@ export function startLiveDeltaServer({
     return runId;
   }
 
+  // streamOrderingTurn: round 1 starts a subagent (tool only, card stays in
+  // round 1). A steer queued during round 1 applies at the round 2 boundary.
+  // The subagent completion arrives during round 2, after that steer, and the
+  // ACP completion frame is sent with a sequence gap.
+  const ACP_RUN_ID = 'acprun_fxrun1';
+  const SUBAGENT_CALL_ID = 'call_fx_subagent';
+  const SUBAGENT_ARGS = { prompt: 'Audit the frontend transcript ordering', agent_id: 'acp_dev' };
+  const SUBAGENT_OUTPUT = `Subagent run ${ACP_RUN_ID} completed. Full result delivered in the subagent_result tool call.`;
+
+  async function streamChunks(runId, messageId, kind, text) {
+    for (let i = 0; i < text.length; i += chunkSize) {
+      publishRoundDelta(runId, messageId, kind, text.slice(i, i + chunkSize));
+      await sleep(speedMs);
+    }
+  }
+
+  async function streamOrderingTurn(conversationId, runId = `run_${randomUUID().slice(0, 8)}`) {
+    const stream = { cancelled: false };
+    activeStream = stream;
+    try {
+      for (let round = 1; round <= 3; round++) {
+        if (stream.cancelled) return runId;
+        const messageId = `msg_r${round}`;
+        const steps = [];
+        beginRoundStream(runId, messageId, round);
+        broadcast('agent.turn.started', { run_id: runId, conversation_id: conversationId, round, message_id: messageId });
+        if (round > 1) await sleep(nextRoundDelay());
+        if (pendingSteer && pendingSteer.conversationId === conversationId) {
+          broadcast('agent.steer.applied', { conversation_id: conversationId, steer_id: pendingSteer.id, text: pendingSteer.text });
+          transcript.push({ role: 'user', content: pendingSteer.text, steer: true, created_at: new Date().toISOString() });
+          pendingSteer = null;
+        }
+
+        const thought = `Round ${round}: ordering scenario step ${round}.`;
+        await streamChunks(runId, messageId, 'reasoning', thought);
+        steps.push({ type: 'reasoning', content: thought });
+
+        if (round === 1) {
+          broadcast('agent.tool.started', { run_id: runId, conversation_id: conversationId, tool_call_id: SUBAGENT_CALL_ID, name: 'subagent', args: SUBAGENT_ARGS });
+          publishRoundDelta(runId, messageId, 'tool', '', { tool_call_id: SUBAGENT_CALL_ID, name: 'subagent', args: SUBAGENT_ARGS });
+          publishACPRun('acp.run.started', { id: ACP_RUN_ID, conversation_id: CONV_ID, agent_id: 'acp_dev', status: 'running', prompt: SUBAGENT_ARGS.prompt, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+          steps.push({ type: 'tool_calls', tool_calls: [{ id: SUBAGENT_CALL_ID, name: 'subagent', args: SUBAGENT_ARGS, status: 'running', output: '' }] });
+        } else {
+          const toolCallId = `tool_${round}_${randomUUID().slice(0, 6)}`;
+          const toolArgs = { command: `echo "ordering round ${round}"` };
+          const toolOut = `ordering round ${round} exec output`;
+          broadcast('agent.tool.started', { run_id: runId, conversation_id: conversationId, tool_call_id: toolCallId, name: 'exec', args: toolArgs });
+          publishRoundDelta(runId, messageId, 'tool', '', { tool_call_id: toolCallId, name: 'exec', args: toolArgs });
+          await streamChunks(runId, messageId, 'tool', toolOut);
+          broadcast('agent.tool.completed', { run_id: runId, conversation_id: conversationId, tool_call_id: toolCallId, name: 'exec', status: 'ok', output: toolOut });
+          steps.push({ type: 'tool_calls', tool_calls: [{ id: toolCallId, name: 'exec', args: toolArgs, status: 'ok', output: toolOut }] });
+        }
+
+        if (round === 2) {
+          // Delayed completion for the round-1 subagent call, sent after the round-2 steer applied.
+          broadcast('agent.tool.completed', { run_id: runId, conversation_id: conversationId, tool_call_id: SUBAGENT_CALL_ID, name: 'subagent', args: SUBAGENT_ARGS, status: 'ok', output: SUBAGENT_OUTPUT });
+          const settled = transcript.find((entry) => entry.id === 'msg_r1');
+          for (const step of settled?.steps || []) {
+            for (const call of step.tool_calls || []) {
+              if (call.id === SUBAGENT_CALL_ID) Object.assign(call, { status: 'ok', output: SUBAGENT_OUTPUT });
+            }
+          }
+          publishACPRun('acp.run.done', { id: ACP_RUN_ID, conversation_id: CONV_ID, agent_id: 'acp_dev', status: 'completed', prompt: SUBAGENT_ARGS.prompt, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { gap: true });
+        }
+
+        const body = `**Round ${round}** — ordering scenario text for round ${round}.`;
+        await streamChunks(runId, messageId, 'text', body);
+        steps.push({ type: 'text', content: body });
+        transcript.push({ id: messageId, role: 'assistant', model: MODEL_ID, steps, created_at: new Date().toISOString() });
+        const next = round < 3 ? { run_id: runId, message_id: `msg_r${round + 1}`, round: round + 1 } : null;
+        sealRoundStream(runId, messageId, { next, usage: { input_tokens: 512, output_tokens: 256 } });
+      }
+      broadcast('agent.turn.done', { run_id: runId, conversation_id: conversationId, model: MODEL_ID, usage: { input_tokens: 512, output_tokens: 256 } });
+    } finally {
+      if (activeStream === stream) activeStream = null;
+    }
+    return runId;
+  }
+
   // ---- RPC handlers -------------------------------------------------------
 
   const conversation = () => ({
@@ -309,12 +437,19 @@ export function startLiveDeltaServer({
       // MUST be the same one the event stream uses — the composer registers
       // its run entry from the response.
       const runId = `run_${randomUUID().slice(0, 8)}`;
-      void streamTurn(conversationId, runId);
+      if (scenario === 'ordering') void streamOrderingTurn(conversationId, runId);
+      else void streamTurn(conversationId, runId);
       return { run_id: runId };
     },
     'ai.models.list': () => ({ models: [{ id: MODEL_ID, name: 'Fake Live Model', provider: 'fake', context: 128000 }] }),
     'settings.get': () => ({ settings: {} }),
-    'acp.runs.list': () => ({ runs: [] }),
+    'acp.runs.list': (payload) => ({ runs: [...acp.runs.values()].filter((run) => !payload?.conversation_id || run.conversation_id === payload.conversation_id) }),
+    'acp.runs.get': (payload) => {
+      const run = acp.runs.get(payload?.id);
+      if (!run) throw new Error(`ACP run ${payload?.id} not found`);
+      return { run };
+    },
+    'agent.tools.contracts': () => ({ version: 1, tools: [] }),
     'acp.agents.list': () => ({ agents: [] }),
     // Views other than the agent view also boot-RPC; empty-but-shaped results
     // keep their init paths happy so the whole UI mounts cleanly.
@@ -367,6 +502,15 @@ export function startLiveDeltaServer({
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/stream') {
       serveRoundStream(req, res, url);
+      return;
+    }
+    if (url.pathname === '/stream/acp' && scenario === 'ordering') {
+      serveACPStream(req, res);
+      return;
+    }
+    if (url.pathname.startsWith('/sounds/') && url.pathname.endsWith('.wav')) {
+      res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
+      res.end(SILENT_WAV);
       return;
     }
     if (url.pathname.startsWith('/rpc/')) {
@@ -467,7 +611,8 @@ if (isMain) {
   const rounds = Number(flag('rounds', 10));
   const speedMs = Number(flag('speed', 15));
   const roundDelay = flag('round-delay', '120');
-  const { port: actualPort } = await startLiveDeltaServer({ port, rounds, speedMs, roundDelay, log: (line) => console.log(line) });
-  console.log(`live-delta-server ready → http://127.0.0.1:${actualPort}  (rounds=${rounds}, speed=${speedMs}ms/chunk, roundDelay=${roundDelay}ms)`);
+  const scenario = flag('scenario', 'default');
+  const { port: actualPort } = await startLiveDeltaServer({ port, rounds, speedMs, roundDelay, scenario, log: (line) => console.log(line) });
+  console.log(`live-delta-server ready → http://127.0.0.1:${actualPort}  (scenario=${scenario}, rounds=${rounds}, speed=${speedMs}ms/chunk, roundDelay=${roundDelay}ms)`);
   console.log('send a message in the UI to start the fake multi-round turn; Ctrl+C to stop');
 }

@@ -387,8 +387,8 @@ test('Transcript refresh restores user-controlled Thinking and tool disclosure s
 
 test('Completing a tool preserves its current disclosure instead of collapsing the card', () => {
   assert.doesNotMatch(agentView, /if \(job\.classList\.contains\('agent-tool-event'\)\) job\.open = false;/);
-  assert.match(agentView, /oldCard\?\.tagName === 'DETAILS'/);
-  assert.match(agentView, /newCard\?\.tagName === 'DETAILS'/);
+  assert.match(agentRender, /oldCard\?\.tagName === 'DETAILS'/);
+  assert.match(agentRender, /newCard\?\.tagName === 'DETAILS'/);
 });
 
 test('Live tool terminals carry their call ID into disclosure restoration', () => {

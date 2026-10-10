@@ -105,3 +105,41 @@ test('live-delta-server serves boot RPCs, WS lifecycle signals, and multi-round 
     await close();
   }
 });
+
+test('ordering scenario serves an ACP snapshot stream and a silent sound file', async () => {
+  const { port, close } = await startLiveDeltaServer({ port: 0, scenario: 'ordering', speedMs: 1, roundDelay: 1 });
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const controller = new AbortController();
+    const acp = await fetch(`${base}/stream/acp?conversation_id=conv_live_delta`, { signal: controller.signal });
+    assert.equal(acp.status, 200);
+    assert.match(acp.headers.get('content-type') || '', /^text\/event-stream/);
+    const reader = acp.body.getReader();
+    let text = '';
+    while (!text.includes('acp.run.snapshot')) {
+      const { value, done } = await reader.read();
+      assert.equal(done, false, 'stream stays open until the snapshot frame');
+      text += new TextDecoder().decode(value);
+    }
+    assert.match(text, /event: acp\.run\n/);
+    assert.match(text, /"seq":0/);
+    controller.abort();
+
+    const sound = await fetch(`${base}/sounds/notification.wav`);
+    assert.equal(sound.status, 200);
+    assert.equal(sound.headers.get('content-type'), 'audio/wav');
+    assert.equal((await sound.arrayBuffer()).byteLength, 44 + 8000);
+  } finally {
+    await close();
+  }
+});
+
+test('default scenario does not expose the ACP stream', async () => {
+  const { port, close } = await startLiveDeltaServer({ port: 0, speedMs: 1 });
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/stream/acp?conversation_id=conv_live_delta`);
+    assert.equal(res.status, 404);
+  } finally {
+    await close();
+  }
+});

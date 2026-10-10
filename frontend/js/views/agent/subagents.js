@@ -9,7 +9,8 @@ import { highlightCode } from '../../highlight-render.js';
 import { attachZoomButtons } from '../../media-zoom.js';
 import { renderToolJob, reasoningDisclosure, setReasoningSource, setToolTerminalOutput, toolEventRequestLine } from './render.js';
 
-const LIVE = new Set(['starting', 'running']);
+const LIVE = new Set(['starting', 'running', 'waiting_permission']);
+const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 const RECENT_MS = 2 * 60 * 1000;
 
 // The ACP SSE server emits a comment ping every 15s. Browsers dispatch no
@@ -34,6 +35,13 @@ const state = {
   runStreamWatchdog: null,
   runStreamReopenTimer: null,
   streamedRunIDs: new Set(),
+  // connectionEpoch advances on every stream source replacement, open, and
+  // snapshot; HTTP responses started under an older epoch are discarded.
+  connectionEpoch: 0,
+  // streamRevision orders stream frames; streamRevisions records the last
+  // frame revision per run so a response started earlier cannot overwrite it.
+  streamRevision: 0,
+  streamRevisions: new Map(),
   bound: false,
 };
 
@@ -138,11 +146,18 @@ function openRunStream(conversationID) {
   const source = new EventSource(`/stream/acp?conversation_id=${encodeURIComponent(conversationID)}`);
   state.runStream = source;
   state.runStreamLastFrameAt = Date.now();
+  state.connectionEpoch++;
   let opened = false;
   source.onopen = () => {
     if (state.runStream !== source || state.conversationId !== conversationID) return;
     state.runStreamLastFrameAt = Date.now();
-    if (opened) void hydrate(conversationID);
+    state.connectionEpoch++;
+    if (opened) {
+      // A native reconnect may have missed frames: stop trusting stream-owned
+      // runs until the fresh snapshot and hydrate below have replaced them.
+      releaseStreamedRuns(conversationID);
+      void hydrate(conversationID);
+    }
     opened = true;
   };
   source.onerror = () => {
@@ -159,19 +174,20 @@ function openRunStream(conversationID) {
     try { frame = JSON.parse(event.data); } catch { return; }
     if (frame?.type === 'acp.run.snapshot') {
       state.runStreamSeq = Number.isSafeInteger(Number(frame.seq)) ? Number(frame.seq) : 0;
-      for (const runID of state.streamedRunIDs) {
-        if (state.runs.get(runID)?.conversation_id === conversationID) state.streamedRunIDs.delete(runID);
-      }
+      state.connectionEpoch++;
+      releaseStreamedRuns(conversationID);
       const seen = new Set();
       for (const run of frame.runs || []) {
         if (!run?.id || run.conversation_id !== conversationID) continue;
         seen.add(run.id);
+        markStreamRevision(run.id);
         upsertRun(run, { silent: true, streamed: true });
       }
       for (const [runID, run] of state.runs) {
         if (run.conversation_id === conversationID && LIVE.has(run.status) && !seen.has(runID)) {
           state.runs.delete(runID);
           state.streamedRunIDs.delete(runID);
+          state.streamRevisions.delete(runID);
           followByRunId.delete(runID);
         }
       }
@@ -182,9 +198,19 @@ function openRunStream(conversationID) {
     if (!['acp.run.started', 'acp.run.updated', 'acp.run.done'].includes(frame?.type)) return;
     const seq = Number(frame.seq);
     if (!Number.isSafeInteger(seq) || seq <= state.runStreamSeq) return;
+    // A missed incremental frame leaves the run state unknowable from here on.
+    // Drop this source and resubscribe for a fresh snapshot; the gap frame is
+    // not applied.
+    if (seq > state.runStreamSeq + 1) {
+      reopenRunStream(conversationID);
+      return;
+    }
     state.runStreamSeq = seq;
     const run = frame.run;
-    if (run?.conversation_id === conversationID) upsertRun(run, { streamed: true });
+    if (run?.conversation_id === conversationID) {
+      markStreamRevision(run.id);
+      upsertRun(run, { streamed: true });
+    }
   });
   startRunStreamWatchdog();
 }
@@ -248,11 +274,15 @@ function scheduleRunStreamReopen(conversationID) {
 }
 
 async function hydrate(conversationID = state.conversationId) {
+  const epoch = state.connectionEpoch;
+  const startRevision = state.streamRevision;
   try {
     const res = await rpc('acp.runs.list', conversationID ? { conversation_id: conversationID } : {});
-    if (state.conversationId !== conversationID) return;
+    if (state.conversationId !== conversationID || state.connectionEpoch !== epoch) return;
     for (const run of res.runs ?? []) {
-      if (!conversationID || run.conversation_id === conversationID) upsertRun(run, { silent: true });
+      if ((!conversationID || run.conversation_id === conversationID) && !streamedSince(run.id, startRevision)) {
+        upsertRun(run, { silent: true });
+      }
     }
     renderAll();
   } catch {
@@ -263,34 +293,91 @@ async function hydrate(conversationID = state.conversationId) {
 // A room can render a persisted subagent card before the global run list has
 // hydrated (for example while the run SSE is reconnecting). Load the
 // exact run on demand instead of making a card depend on process-local cache.
+// ensureRun coalesces concurrent loads of one run within a single connection
+// generation (epoch + room). A load started under an older generation is never
+// shared: a new request is issued at once. A response or error is applied only
+// while its generation is still current and no newer stream frame has touched
+// the run; otherwise the cached run (or null) is returned and nothing is shown
+// as a failure. Invalidated loads re-render, which requests the run again only
+// if it is still selected, so a genuine failure is shown once and not retried.
 function ensureRun(runId) {
   if (!runId || state.runs.has(runId)) return Promise.resolve(state.runs.get(runId));
-  if (state.runLoads.has(runId)) return state.runLoads.get(runId);
-  const request = rpc('acp.runs.get', { id: runId })
+  const epoch = state.connectionEpoch;
+  const conversationID = state.conversationId;
+  const pending = state.runLoads.get(runId);
+  if (pending && pending.epoch === epoch && pending.conversationID === conversationID) return pending.promise;
+  const startRevision = state.streamRevision;
+  const invalidated = () => state.connectionEpoch !== epoch || state.conversationId !== conversationID;
+  const superseded = () => invalidated() || streamedSince(runId, startRevision);
+  const entry = { epoch, conversationID, promise: null };
+  entry.promise = rpc('acp.runs.get', { id: runId })
     .then((result) => {
       const run = result?.run || result;
       if (!run?.id) throw new Error('ACP run response did not include an id');
-      upsertRun(run);
-      return run;
+      if (!superseded()) upsertRun(run);
+      return state.runs.get(runId) ?? null;
     })
     .catch((error) => {
+      if (superseded()) return state.runs.get(runId) ?? null;
       state.runLoadErrors.set(runId, error);
       renderAll();
       return null;
     })
-    .finally(() => state.runLoads.delete(runId));
-  state.runLoads.set(runId, request);
-  return request;
+    .finally(() => {
+      if (state.runLoads.get(runId) !== entry) return;
+      state.runLoads.delete(runId);
+      if (!state.runs.has(runId) && superseded()) renderAll();
+    });
+  state.runLoads.set(runId, entry);
+  return entry.promise;
+}
+
+// runReplaces decides whether an incoming run may replace the stored one.
+// Terminal status is never reverted, a strictly older stamp never wins, and
+// an HTTP response can replace a stream-owned run only when it is strictly
+// fresher or explicitly advances it to a terminal status. Equal or unknown
+// stamps are ties: the stream remains authoritative for nonterminal state.
+function runReplaces(existing, incoming, { streamed, storedFromStream }) {
+  if (!existing) return true;
+  const incomingAt = runStamp(incoming);
+  const existingAt = runStamp(existing);
+  if (incomingAt && existingAt && incomingAt < existingAt) return false;
+  const incomingTerminal = TERMINAL.has(incoming.status);
+  if (TERMINAL.has(existing.status) && !incomingTerminal) return false;
+  if (streamed || !storedFromStream) return true;
+  if (incomingAt && existingAt && incomingAt > existingAt) return true;
+  return incomingTerminal && !TERMINAL.has(existing.status);
+}
+
+function runStamp(run) {
+  return Date.parse(run?.updated_at || '') || 0;
 }
 
 function upsertRun(run, { silent, streamed = false } = {}) {
   if (!run?.id) return;
+  const storedFromStream = state.streamedRunIDs.has(run.id);
+  if (!runReplaces(state.runs.get(run.id), run, { streamed, storedFromStream })) return;
   if (streamed) state.streamedRunIDs.add(run.id);
-  else if (state.streamedRunIDs.has(run.id)) return;
+  else state.streamedRunIDs.delete(run.id);
   state.runLoadErrors.delete(run.id);
   state.runs.set(run.id, run);
   pruneRuns();
   if (!silent) renderAll();
+}
+
+function markStreamRevision(runID) {
+  state.streamRevision++;
+  state.streamRevisions.set(runID, state.streamRevision);
+}
+
+function streamedSince(runID, startRevision) {
+  return (state.streamRevisions.get(runID) ?? 0) > startRevision;
+}
+
+function releaseStreamedRuns(conversationID) {
+  for (const runID of state.streamedRunIDs) {
+    if (state.runs.get(runID)?.conversation_id === conversationID) state.streamedRunIDs.delete(runID);
+  }
 }
 
 // pruneRuns drops terminal runs that fell out of the recent window and are
@@ -307,6 +394,7 @@ function pruneRuns() {
     if (!ended || now - ended > RECENT_MS) {
       state.runs.delete(id);
       state.streamedRunIDs.delete(id);
+      state.streamRevisions.delete(id);
       followByRunId.delete(id);
     }
   }
